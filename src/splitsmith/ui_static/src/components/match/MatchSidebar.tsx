@@ -87,6 +87,9 @@ interface MatchSidebarProps {
    *  with icon-only nav and the match card / stages list hidden. */
   collapsed?: boolean;
   onCollapseToggle?: () => void;
+  /** Server/app version from /api/health - rendered as a footer line so
+   *  the running version is always discoverable in the shell. */
+  version?: string;
   className?: string;
 }
 
@@ -107,6 +110,7 @@ export function MatchSidebar({
   matchId,
   collapsed = false,
   onCollapseToggle,
+  version,
   className,
 }: MatchSidebarProps) {
   // Footage-dependent rows share the same hint - centralised in
@@ -320,6 +324,11 @@ export function MatchSidebar({
         sidebarExpandedWidth={SIDEBAR_EXPANDED_WIDTH}
         sidebarCollapsedWidth={SIDEBAR_COLLAPSED_WIDTH}
       />
+      {!collapsed && version ? (
+        <div className="px-5 pb-3 pt-1 font-mono text-[0.5625rem] uppercase tracking-[0.14em] text-subtle">
+          Splitsmith v{version}
+        </div>
+      ) : null}
     </aside>
   );
 }

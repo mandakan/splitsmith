@@ -75,7 +75,23 @@ export function Pick() {
   const [importOverwrite, setImportOverwrite] = useState(false);
   const [importing, setImporting] = useState(false);
   const [identity, setIdentity] = useState<ScoreboardIdentity | null>(null);
+  const [serverVersion, setServerVersion] = useState<string | null>(null);
   const filterInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    api
+      .getHealth()
+      .then((h) => {
+        if (alive) setServerVersion(h.version ?? null);
+      })
+      .catch(() => {
+        if (alive) setServerVersion(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -355,6 +371,11 @@ export function Pick() {
               <b className="font-semibold text-ink-2">{pad2(counts.all)}</b>{" "}
               &middot; matches register
             </span>
+            {serverVersion ? (
+              <span className="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-subtle">
+                v{serverVersion}
+              </span>
+            ) : null}
           </div>
         </div>
       </header>
