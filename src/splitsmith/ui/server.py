@@ -94,6 +94,7 @@ if TYPE_CHECKING:
     # Hosted-only; imported lazily at runtime inside _apply_hosted_mode_wiring
     # so local mode stays free of the db (procrastinate/psycopg) dependency.
     from ..db import PostgresMatchStore, ProjectStateStore
+    from ..db.share_tokens import ResolvedShare, ShareTokenStore
 
 from fastapi import (
     Body,
@@ -734,6 +735,13 @@ class TenantContext:
     matches_store: PostgresMatchStore | None
     project_state: ProjectStateStore | None
     storage: Storage | None
+    # Per-user owner-scoped share-token store (public share links, issue #349).
+    # None in local mode; in hosted mode built per-request with the tenant
+    # factory so write operations filter on this user's rows. share_tokens is
+    # not under RLS - isolation is by explicit user_id predicates on every
+    # query - but the tenant factory is still correct here because the GUC is
+    # inert on a non-RLS table and the store filters by user_id explicitly.
+    share_tokens: ShareTokenStore | None
 
 
 # Per-request / per-job tenant resolved by the hosted-mode auth gate
@@ -857,6 +865,12 @@ class AppState:
     # as a FastAPI startup handler by create_app. Runs on every cold start
     # (incl. each wake from Railway app sleeping).
     boot_retrigger: Callable[[], Awaitable[None]] | None = None
+    # Anonymous share-token resolver (public share links, issue #349). Set
+    # only by hosted wiring; None in local mode. Built over the RAW
+    # session_factory (not a tenant factory) because share_tokens is not
+    # under RLS - anonymous resolution happens before any app.user_id GUC
+    # exists, and the unique-token lookup is itself the isolation boundary.
+    resolve_share_token: Callable[[str], Awaitable[ResolvedShare | None]] | None = None
 
     def __post_init__(self) -> None:
         # Point the backing local backend's body map at the shared
@@ -932,6 +946,13 @@ class AppState:
     @storage.setter
     def storage(self, value: Storage | None) -> None:
         self._storage = value
+
+    @property
+    def share_tokens(self) -> ShareTokenStore | None:
+        # Local mode has no per-user share-token store - share links are a
+        # hosted-only feature. Returns None when no tenant is pinned.
+        tenant = current_tenant.get()
+        return tenant.share_tokens if tenant is not None else None
 
     def build_tenant(self, user_id: str) -> TenantContext:
         """Build the :class:`TenantContext` for ``user_id`` (hosted mode).
@@ -4190,6 +4211,8 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         sessionmaker,
         tenant_session_factory,
     )
+    from ..db.share_tokens import ShareTokenStore
+    from ..db.share_tokens import resolve_share_token as _resolve_share_token_fn
     from ..queue import make_deferrer
     from ..worker_trigger import (
         build_worker_launcher,
@@ -4240,6 +4263,14 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     signup_policy = build_signup_policy()
     state.auth = MagicLinkAuth(session_factory, email_sender, signup_policy=signup_policy)
 
+    # Anonymous resolver for the share-token public path. Uses the RAW
+    # session_factory (same as auth above) - share_tokens is not RLS-scoped
+    # and the call arrives before any tenant GUC is set.
+    async def _resolve_share_token(token: str) -> ResolvedShare | None:
+        return await _resolve_share_token_fn(session_factory, token)
+
+    state.resolve_share_token = _resolve_share_token
+
     # Process-level, tenant-agnostic resources shared by every
     # ``TenantContext``. The deferrer routes per-user inside ``_defer``
     # (queue name from ``user_id``); the S3 client is stateless w.r.t. the
@@ -4286,6 +4317,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             matches_store=PostgresMatchStore(tenant_factory, user_id=user_id),
             project_state=ProjectStateStore(tenant_factory, user_id=user_id),
             storage=_tenant_s3_storage(s3_client, s3_bucket, user_id),
+            share_tokens=ShareTokenStore(tenant_factory, user_id=user_id),
         )
 
     state._build_tenant = _build_tenant
