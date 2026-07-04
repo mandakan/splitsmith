@@ -480,7 +480,7 @@ export function Pick() {
           </label>
 
           <div
-            className="inline-flex items-stretch overflow-hidden rounded-[10px] border border-rule bg-surface"
+            className="inline-flex max-w-full items-stretch overflow-x-auto md:overflow-hidden rounded-[10px] border border-rule bg-surface"
             role="tablist"
             aria-label="Filter matches by status"
           >
