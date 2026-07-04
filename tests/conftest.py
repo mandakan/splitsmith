@@ -4,6 +4,11 @@ from pathlib import Path
 
 import pytest
 
+# Re-export hosted-mode fixtures so pytest auto-discovers them without
+# needing per-test-file imports (which trigger ruff F811 redefinition
+# warnings when the fixture name also appears as a function parameter).
+from tests.hosted_helpers import hosted_app, hosted_env  # noqa: F401
+
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 

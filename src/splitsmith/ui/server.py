@@ -651,6 +651,25 @@ class AuthBeginRequest(BaseModel):
     email: str
 
 
+class ShareInfo(BaseModel):
+    """One share link as returned by the owner-management routes.
+
+    ``url`` embeds the raw token -- it does not appear anywhere else
+    in the API response. Module-level so FastAPI resolves it correctly
+    under ``from __future__ import annotations``."""
+
+    id: str
+    url: str
+    created_at: datetime
+    revoked_at: datetime | None
+
+
+class ShareListResponse(BaseModel):
+    """Response body for ``GET /api/match/shares``."""
+
+    shares: list[ShareInfo]
+
+
 # /api/* paths the auth gate lets through without resolving a user.
 # Anything else under /api/* requires ``state.auth.authenticate_request``
 # to return a non-None User -- see the ``_auth_gate`` middleware inside
@@ -4686,6 +4705,73 @@ def create_app(
             samesite="lax",
         )
         return response
+
+    # ----------------------------------------------------------------------
+    # Share-link management routes (issue #349)
+    # Hosted-only: raise 404 in local mode (same mechanism as auth routes).
+    # Reached via the /api/matches/{match_id}/match/shares alias prefix so
+    # current_match_id is already set by the alias middleware.
+    # ----------------------------------------------------------------------
+
+    @app.get("/api/match/shares", response_model=ShareListResponse)
+    async def _list_match_shares() -> ShareListResponse:
+        """List all share tokens (including revoked) for the current match."""
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        mid = current_match_id.get()
+        if mid is None:
+            raise _no_project_error()
+        store = state.share_tokens
+        if store is None:
+            raise HTTPException(status_code=500, detail="share store unavailable")
+        shares = await store.list_for_match(mid)
+        return ShareListResponse(
+            shares=[
+                ShareInfo(
+                    id=s.id,
+                    url=f"{state.public_base_url}/share/{s.token}",
+                    created_at=s.created_at,
+                    revoked_at=s.revoked_at,
+                )
+                for s in shares
+            ]
+        )
+
+    @app.post("/api/match/shares", response_model=ShareInfo, status_code=201)
+    async def _create_match_share() -> ShareInfo:
+        """Create a new share token for the current match. Returns 201."""
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        mid = current_match_id.get()
+        if mid is None:
+            raise _no_project_error()
+        store = state.share_tokens
+        if store is None:
+            raise HTTPException(status_code=500, detail="share store unavailable")
+        s = await store.create(mid)
+        return ShareInfo(
+            id=s.id,
+            url=f"{state.public_base_url}/share/{s.token}",
+            created_at=s.created_at,
+            revoked_at=s.revoked_at,
+        )
+
+    @app.delete("/api/match/shares/{share_id}", status_code=204)
+    async def _delete_match_share(share_id: str) -> Response:
+        """Revoke a share token. 204 on success (including already-revoked),
+        404 when the share_id is unknown or not owned by this user."""
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        mid = current_match_id.get()
+        if mid is None:
+            raise _no_project_error()
+        store = state.share_tokens
+        if store is None:
+            raise HTTPException(status_code=500, detail="share store unavailable")
+        ok = await store.revoke(share_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="not found")
+        return Response(status_code=204)
 
     @app.exception_handler(ShutdownInProgressError)
     async def _shutdown_in_progress_handler(request: Request, exc: ShutdownInProgressError) -> JSONResponse:
