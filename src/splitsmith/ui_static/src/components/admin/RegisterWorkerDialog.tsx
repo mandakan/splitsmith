@@ -167,7 +167,7 @@ export function RegisterWorkerDialog({ onClose }: RegisterWorkerDialogProps) {
                     aria-hidden="true"
                   />{" "}
                   This token is shown once. The agent keeps database credentials
-                  after registration, so deleting the worker does not revoke them.
+                  after registration - deleting the worker does not revoke them.
                 </div>
 
                 <div className="space-y-1">

@@ -248,7 +248,7 @@ export function AdminWorkers() {
   useEffect(() => {
     if (!user?.is_admin) return;
     void loadWorkers();
-  }, [user?.is_admin]); // loadWorkers is stable: defined once per mount
+  }, [user?.is_admin]); // loadWorkers closes over only stable refs (setters, refs, module api)
 
   if (!user?.is_admin) {
     return (
