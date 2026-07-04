@@ -789,13 +789,11 @@ function MatchRow({
       role="button"
       tabIndex={0}
       className={cn(
-        "group relative grid cursor-pointer items-center gap-6 border-b border-rule px-7 py-5 transition-colors last:border-b-0",
+        "group relative flex cursor-pointer flex-col gap-3 border-b border-rule px-4 py-4 transition-colors last:border-b-0",
+        "md:grid md:items-center md:gap-6 md:px-7 md:py-5 md:[grid-template-columns:56px_minmax(0,1fr)_180px_220px_160px_152px]",
         "hover:bg-surface-2 focus:outline-none focus:bg-surface-2",
         selected && "bg-surface-2",
       )}
-      style={{
-        gridTemplateColumns: "56px minmax(0,1fr) 180px 220px 160px 152px",
-      }}
       onMouseEnter={onHover}
       onClick={onOpen}
       onKeyDown={(e) => {
@@ -816,154 +814,160 @@ function MatchRow({
         )}
       />
 
-      {/* Index */}
-      <div className="font-mono text-[0.6875rem] uppercase tracking-[0.14em] text-subtle">
-        No.
-        <b className="mt-1 block font-display text-[1.5rem] font-bold leading-none text-ink">
-          {pad2(index)}
-        </b>
-      </div>
-
-      {/* Primary */}
-      <div className="min-w-0">
-        <h2 className="mb-2 truncate font-display text-2xl font-bold uppercase leading-tight text-ink">
-          {project.name}
-          {isManual && (
-            <span className="ml-2.5 inline-block translate-y-[-0.4em] rounded border border-rule-strong bg-surface-3 px-1.5 py-0.5 font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-ink-2">
-              Manual
-            </span>
-          )}
-        </h2>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.8125rem] text-muted">
-          {project.match_date ? (
-            <time
-              className="border-r border-rule pr-3 font-mono text-xs font-semibold uppercase tracking-[0.06em] text-ink-2"
-              dateTime={project.match_date}
-            >
-              {formatDate(project.match_date)}
-            </time>
-          ) : (
-            <span className="border-r border-rule pr-3 font-mono text-xs uppercase tracking-[0.06em] text-subtle">
-              No date
-            </span>
-          )}
-          <span className="truncate font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-subtle">
-            {project.path}
-          </span>
+      {/* Line 1 on mobile: index number + match name/date; at md+ these are separate grid columns */}
+      <div className="flex items-start gap-4 md:contents">
+        {/* Index */}
+        <div className="font-mono text-[0.6875rem] uppercase tracking-[0.14em] text-subtle">
+          No.
+          <b className="mt-1 block font-display text-[1.5rem] font-bold leading-none text-ink">
+            {pad2(index)}
+          </b>
         </div>
-      </div>
 
-      {/* Shooters */}
-      <div className="flex flex-col gap-2">
-        <div className="font-mono text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-subtle">
-          <b className="font-bold text-ink">{pad2(project.shooter_count)}</b>{" "}
-          {project.shooter_count === 1 ? "Shooter" : "Shooters"}
-          {project.shooter_count === 1 && (
-            <span className="ml-1 font-bold tracking-[0.12em] text-led">
-              SOLO
-            </span>
-          )}
-        </div>
-        <AvatarStack
-          size="sm"
-          avatars={project.shooter_names
-            .slice(0, 4)
-            .map((shooterName) => ({
-              initials: shooterInitials(shooterName),
-              name: shooterName,
-              seed: `${project.path}-${shooterName}`,
-            }))}
-          overflow={
-            project.shooter_count > 4 ? project.shooter_count - 4 : undefined
-          }
-        />
-      </div>
-
-      {/* Progress */}
-      <div className="flex flex-col gap-2.5">
-        <div className="flex items-baseline gap-2 font-mono text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-subtle">
-          <span className="font-bold tabular-nums text-ink">
-            {pad2(project.stages_audited)} / {pad2(project.stage_count)}
-          </span>
-          <span>stages</span>
-          {project.stage_count > 0 &&
-            project.stages_audited >= project.stage_count && (
-              <span className="font-bold text-done">complete</span>
-            )}
-        </div>
-        {ticks.length > 0 ? (
-          <TickStrip
-            states={ticks}
-            ariaLabel={`${project.stages_audited} of ${project.stage_count} stages audited`}
-          />
-        ) : (
-          <span className="font-mono text-[0.6875rem] uppercase text-subtle">
-            {isMissing ? "Folder not found" : "No stages yet"}
-          </span>
-        )}
-      </div>
-
-      {/* Status */}
-      <div className="flex flex-col gap-1.5">
-        {isMissing ? (
-          <StatusPill tone="led">Missing</StatusPill>
-        ) : project.status === "awaiting_footage" ? (
-          <StatusPill tone="awaiting">Awaiting Footage</StatusPill>
-        ) : project.status === "in_progress" ? (
-          <StatusPill tone="in-progress">In Progress</StatusPill>
-        ) : project.status === "exported" ? (
-          <StatusPill tone="exported">Exported</StatusPill>
-        ) : (
-          <StatusPill tone="archived">Archived</StatusPill>
-        )}
-        <span className="font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
-          {isMissing ? (
-            "path not on disk"
-          ) : (
-            <>
-              touched{" "}
-              <span className="font-bold text-ink-2">
-                {formatRelative(
-                  new Date(project.last_modified_at ?? project.last_opened_at),
-                )}
+        {/* Primary */}
+        <div className="min-w-0">
+          <h2 className="mb-2 truncate font-display text-2xl font-bold uppercase leading-tight text-ink">
+            {project.name}
+            {isManual && (
+              <span className="ml-2.5 inline-block translate-y-[-0.4em] rounded border border-rule-strong bg-surface-3 px-1.5 py-0.5 font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-ink-2">
+                Manual
               </span>
-            </>
-          )}
-        </span>
+            )}
+          </h2>
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.8125rem] text-muted">
+            {project.match_date ? (
+              <time
+                className="border-r border-rule pr-3 font-mono text-xs font-semibold uppercase tracking-[0.06em] text-ink-2"
+                dateTime={project.match_date}
+              >
+                {formatDate(project.match_date)}
+              </time>
+            ) : (
+              <span className="border-r border-rule pr-3 font-mono text-xs uppercase tracking-[0.06em] text-subtle">
+                No date
+              </span>
+            )}
+            <span className="truncate font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-subtle">
+              {project.path}
+            </span>
+          </div>
+        </div>
       </div>
 
-      {/* Actions */}
-      <div className="flex items-center justify-end gap-1.5">
-        <button
-          type="button"
-          className={cn(
-            "inline-flex min-h-[40px] items-center gap-2 rounded-lg border px-4 py-2.5 font-display text-xs font-bold uppercase tracking-[0.1em] leading-none transition-all",
-            archived
-              ? "border-rule-strong bg-transparent text-ink hover:border-led hover:bg-led-fill hover:text-ink"
-              : "border-ink bg-ink text-bg hover:border-led-deep hover:bg-led-fill hover:text-ink",
+      {/* Line 2 on mobile: shooters, progress, status, actions wrap together; at md+ these are separate grid columns */}
+      <div className="flex flex-wrap gap-x-4 gap-y-2 md:contents">
+        {/* Shooters */}
+        <div className="flex flex-col gap-2">
+          <div className="font-mono text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-subtle">
+            <b className="font-bold text-ink">{pad2(project.shooter_count)}</b>{" "}
+            {project.shooter_count === 1 ? "Shooter" : "Shooters"}
+            {project.shooter_count === 1 && (
+              <span className="ml-1 font-bold tracking-[0.12em] text-led">
+                SOLO
+              </span>
+            )}
+          </div>
+          <AvatarStack
+            size="sm"
+            avatars={project.shooter_names
+              .slice(0, 4)
+              .map((shooterName) => ({
+                initials: shooterInitials(shooterName),
+                name: shooterName,
+                seed: `${project.path}-${shooterName}`,
+              }))}
+            overflow={
+              project.shooter_count > 4 ? project.shooter_count - 4 : undefined
+            }
+          />
+        </div>
+
+        {/* Progress */}
+        <div className="flex flex-col gap-2.5">
+          <div className="flex items-baseline gap-2 font-mono text-[0.625rem] font-semibold uppercase tracking-[0.14em] text-subtle">
+            <span className="font-bold tabular-nums text-ink">
+              {pad2(project.stages_audited)} / {pad2(project.stage_count)}
+            </span>
+            <span>stages</span>
+            {project.stage_count > 0 &&
+              project.stages_audited >= project.stage_count && (
+                <span className="font-bold text-done">complete</span>
+              )}
+          </div>
+          {ticks.length > 0 ? (
+            <TickStrip
+              states={ticks}
+              ariaLabel={`${project.stages_audited} of ${project.stage_count} stages audited`}
+            />
+          ) : (
+            <span className="font-mono text-[0.6875rem] uppercase text-subtle">
+              {isMissing ? "Folder not found" : "No stages yet"}
+            </span>
           )}
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpen();
-          }}
-          aria-label={`Open ${project.name}`}
-          disabled={busy || isMissing}
-        >
-          {busy ? "Opening..." : archived ? "Restore" : "Open"}
-          <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
-        </button>
-        <button
-          type="button"
-          title="Delete this project"
-          className="inline-flex size-9 items-center justify-center rounded-md border border-transparent text-subtle transition-all hover:border-rule hover:bg-surface-3 hover:text-led"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
-          }}
-          aria-label={`Delete ${project.name}`}
-        >
-          <Trash2 className="size-4" />
-        </button>
+        </div>
+
+        {/* Status */}
+        <div className="flex flex-col gap-1.5">
+          {isMissing ? (
+            <StatusPill tone="led">Missing</StatusPill>
+          ) : project.status === "awaiting_footage" ? (
+            <StatusPill tone="awaiting">Awaiting Footage</StatusPill>
+          ) : project.status === "in_progress" ? (
+            <StatusPill tone="in-progress">In Progress</StatusPill>
+          ) : project.status === "exported" ? (
+            <StatusPill tone="exported">Exported</StatusPill>
+          ) : (
+            <StatusPill tone="archived">Archived</StatusPill>
+          )}
+          <span className="font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
+            {isMissing ? (
+              "path not on disk"
+            ) : (
+              <>
+                touched{" "}
+                <span className="font-bold text-ink-2">
+                  {formatRelative(
+                    new Date(project.last_modified_at ?? project.last_opened_at),
+                  )}
+                </span>
+              </>
+            )}
+          </span>
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center justify-end gap-1.5">
+          <button
+            type="button"
+            className={cn(
+              "inline-flex min-h-[40px] items-center gap-2 rounded-lg border px-4 py-2.5 font-display text-xs font-bold uppercase tracking-[0.1em] leading-none transition-all",
+              archived
+                ? "border-rule-strong bg-transparent text-ink hover:border-led hover:bg-led-fill hover:text-ink"
+                : "border-ink bg-ink text-bg hover:border-led-deep hover:bg-led-fill hover:text-ink",
+            )}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen();
+            }}
+            aria-label={`Open ${project.name}`}
+            disabled={busy || isMissing}
+          >
+            {busy ? "Opening..." : archived ? "Restore" : "Open"}
+            <ArrowRight className="size-3.5 transition-transform group-hover:translate-x-0.5" />
+          </button>
+          <button
+            type="button"
+            title="Delete this project"
+            className="inline-flex size-9 items-center justify-center rounded-md border border-transparent text-subtle transition-all hover:border-rule hover:bg-surface-3 hover:text-led"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            aria-label={`Delete ${project.name}`}
+          >
+            <Trash2 className="size-4" />
+          </button>
+        </div>
       </div>
     </article>
   );
