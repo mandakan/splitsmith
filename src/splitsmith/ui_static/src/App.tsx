@@ -38,6 +38,7 @@ import { Shooters } from "@/pages/Shooters";
 import { TakeOverview } from "@/pages/TakeOverview";
 import { PromoteReview } from "@/pages/PromoteReview";
 import { Results } from "@/pages/Results";
+import { ResultsStage } from "@/pages/ResultsStage";
 import { Review } from "@/pages/Review";
 import { api } from "@/lib/api";
 
@@ -182,6 +183,10 @@ export function App() {
               />
               <Route path="export" element={<DefaultShooterRedirect base="export" />} />
               <Route path="results" element={<Results />} />
+              <Route
+                path="results/:slug/:stage"
+                element={<ShooterScopedRoute element={<ResultsStage />} />}
+              />
             </Route>
           </Route>
           {/* Developer mode (#331). All four workflow steps + the
