@@ -1557,6 +1557,18 @@ export function currentMatchIdFromLocation(): string | null {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+/** Share token parsed from the current URL.
+ *
+ * Public share routes live under ``/share/:token/...``. When the viewer
+ * is on one of those URLs, match-scoped API traffic routes through
+ * ``/api/share/{token}/...`` - the anonymous, token-authorized read
+ * path - instead of the session-authorized match prefix. */
+export function currentShareTokenFromLocation(): string | null {
+  if (typeof window === "undefined") return null;
+  const m = window.location.pathname.match(/^\/share\/([^/]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
 /** Prefixes that ride on the per-request match scope. Other ``/api/`` paths
  *  (``/api/health``, ``/api/me/*``, ``/api/server/*``, ``/api/lab/*``,
  *  ``/api/files/*``, ``/api/fs/*``, ``/api/dev/*``, etc.) stay on their
@@ -1564,12 +1576,13 @@ export function currentMatchIdFromLocation(): string | null {
 const MATCH_SCOPED_PREFIXES = ["/api/shooters/", "/api/match/"];
 
 function scopeRequestPath(path: string): string {
+  if (!MATCH_SCOPED_PREFIXES.some((p) => path.startsWith(p))) return path;
+  const shareToken = currentShareTokenFromLocation();
+  if (shareToken) {
+    return `/api/share/${encodeURIComponent(shareToken)}${path.substring(4)}`;
+  }
   const matchId = currentMatchIdFromLocation();
   if (!matchId) return path;
-  if (!MATCH_SCOPED_PREFIXES.some((p) => path.startsWith(p))) return path;
-  // Rewrite ``/api/shooters/foo`` -> ``/api/matches/{id}/shooters/foo``
-  // (and same for ``/api/match/...``). Preserves the query string, since
-  // we splice into the path segment only.
   return `/api/matches/${encodeURIComponent(matchId)}${path.substring(4)}`;
 }
 

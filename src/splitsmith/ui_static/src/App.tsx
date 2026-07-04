@@ -97,6 +97,10 @@ function AuthGate({ children }: { children: ReactNode }) {
   const { status } = useAuth();
   const mode = useDeploymentMode();
   const location = useLocation();
+  // Public share views are token-authorized server-side; the session
+  // gate has no say there. Bypass before the loading branch so a share
+  // link renders without waiting on /api/me.
+  if (location.pathname.startsWith("/share/")) return <>{children}</>;
   if (status === "loading") {
     return (
       <div
