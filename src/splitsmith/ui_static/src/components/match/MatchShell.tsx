@@ -413,7 +413,7 @@ export function MatchShell() {
               /
             </span>
             <span className="text-ink-2">
-              {health?.project_name ?? "..."}
+              {project?.name ?? health?.project_name ?? "..."}
             </span>
             {viewLabel ? (
               <>

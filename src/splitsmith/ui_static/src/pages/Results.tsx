@@ -12,7 +12,7 @@ import { Link, useOutletContext } from "react-router-dom";
 
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { Kicker } from "@/components/ui";
-import { api } from "@/lib/api";
+import { api, type StageStatus } from "@/lib/api";
 import { buildStageMatrix, matchTotals } from "@/lib/stageMatrix";
 import { statusLabel } from "@/lib/stageStatus";
 import { useMatchHref } from "@/lib/matchHref";
@@ -33,7 +33,7 @@ const CHIP_TONE: Record<string, string> = {
   skipped: "border-rule bg-surface-2 text-muted",
 };
 
-function StatusChip({ tone, status }: { tone: string; status: string }) {
+function StatusChip({ tone, status }: { tone: string; status: StageStatus }) {
   return (
     <span
       className={cn(
@@ -41,7 +41,7 @@ function StatusChip({ tone, status }: { tone: string; status: string }) {
         CHIP_TONE[tone] ?? CHIP_TONE.todo,
       )}
     >
-      {statusLabel(status as Parameters<typeof statusLabel>[0])}
+      {statusLabel(status)}
     </span>
   );
 }

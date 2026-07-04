@@ -12,9 +12,9 @@
  * Slide-in transition is skipped under prefers-reduced-motion.
  */
 
-import { X } from "lucide-react";
+import { LayoutGrid, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { NavLink } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 
 import { Portal } from "@/components/ui/Portal";
 import { useDialogFocus } from "@/lib/dialogFocus";
@@ -33,6 +33,7 @@ export interface MobileNavProps {
 
 export function MobileNav({ open, onClose, items, header, extras }: MobileNavProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
+  const { pathname } = useLocation();
   useDialogFocus(open, panelRef, onClose);
 
   // Mount-time slide-in: the panel starts off-canvas and translates to
@@ -112,14 +113,24 @@ export function MobileNav({ open, onClose, items, header, extras }: MobileNavPro
                 to={item.to}
                 end={item.end}
                 onClick={onClose}
-                className={({ isActive }) =>
-                  cn(
+                className={() => {
+                  // Match SidebarLink active semantics: startsWith for most
+                  // items, exact for end=true (Overview), never for items
+                  // whose `to` contains a query string (?pick=...).
+                  const pathWithoutQuery = item.to.split("?")[0];
+                  const hasQuery = item.to.includes("?");
+                  const isActive = hasQuery
+                    ? false
+                    : item.end
+                      ? pathname === item.to
+                      : pathname.startsWith(pathWithoutQuery);
+                  return cn(
                     "flex min-h-11 items-center gap-3 rounded-md px-3 font-display text-sm font-bold uppercase tracking-wide transition-colors",
                     isActive
                       ? "bg-surface-2 text-led"
                       : "text-ink-2 hover:bg-surface-2 hover:text-ink",
-                  )
-                }
+                  );
+                }}
               >
                 <span className="inline-flex shrink-0">{item.icon}</span>
                 <span className="truncate">{item.label}</span>
@@ -138,9 +149,17 @@ export function MobileNav({ open, onClose, items, header, extras }: MobileNavPro
           })}
         </nav>
 
-        {extras ? (
-          <div className="mt-3 border-t border-rule pt-3">{extras}</div>
-        ) : null}
+        <div className="mt-3 border-t border-rule pt-3">
+          <Link
+            to="/pick"
+            onClick={onClose}
+            className="flex min-h-11 w-full items-center gap-3 rounded-md px-3 font-display text-sm font-bold uppercase tracking-wide text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+          >
+            <LayoutGrid className="size-[15px] shrink-0" aria-hidden />
+            <span className="truncate">Matches</span>
+          </Link>
+          {extras}
+        </div>
       </div>
     </Portal>
   );

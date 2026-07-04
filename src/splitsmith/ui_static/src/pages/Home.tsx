@@ -340,7 +340,7 @@ function ActiveVariant({
               style={{ width: `${totals.auditedPct}%` }}
             />
           </div>
-          <div className="inline-flex flex-wrap overflow-hidden rounded-[10px] border border-rule bg-surface-3">
+          <div className="inline-flex flex-wrap md:flex-nowrap overflow-hidden rounded-[10px] border border-rule bg-surface-3">
             <HeroStat
               label="Match audited"
               value={`${totals.auditedPct}%`}

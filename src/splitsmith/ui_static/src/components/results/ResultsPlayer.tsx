@@ -194,7 +194,9 @@ export function ResultsPlayer({
       void v.requestFullscreen().catch(() => {});
       return;
     }
-    (v as HTMLVideoElement & { webkitEnterFullscreen?: () => void }).webkitEnterFullscreen?.();
+    try {
+      (v as HTMLVideoElement & { webkitEnterFullscreen?: () => void }).webkitEnterFullscreen?.();
+    } catch { /* ignore */ }
   }, [videoRef]);
 
   return (

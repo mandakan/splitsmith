@@ -40,8 +40,8 @@ export function DesktopOnlyNotice({
           This screen needs a desktop
         </div>
         <p className="text-sm text-muted">
-          {screen} works with waveforms and dense controls that do not fit a
-          phone. Results and the match overview work great here.
+          {screen} is a desktop workflow - its layout and controls do not fit a
+          phone.{links ? " Results and the match overview work great here." : ""}
         </p>
         {links && (
           <div className="flex flex-wrap items-center justify-center gap-3">
