@@ -490,3 +490,48 @@ class ComputeJobRow(Base):
 
     def __repr__(self) -> str:
         return f"<ComputeJobRow id={self.id!r} kind={self.kind!r} status={self.status!r}>"
+
+
+class ShareTokenRow(Base):
+    """One row per share link (public read-only match access, #349).
+
+    The raw token IS the capability: 256 bits from ``secrets.token_urlsafe``,
+    stored raw (not hashed) so the owner's share dialog can re-display the
+    link. This is a deliberate departure from ``sessions`` /
+    ``magic_link_tokens``: a leaked share token yields read-only access to
+    one match and dies on revocation, not an account takeover.
+
+    Not under RLS, following the ``sessions`` precedent: anonymous
+    resolution runs before any ``app.user_id`` GUC exists. The unique-token
+    lookup bounds the anonymous path; owner-management queries filter by
+    ``user_id`` explicitly (see ``ShareTokenStore``).
+
+    Revoke sets ``revoked_at`` instead of deleting - the share dialog keeps
+    showing revoked links as an audit trail. ``expires_at`` is honored by
+    the resolver but always NULL from the MVP UI.
+    """
+
+    __tablename__ = "share_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    match_id: Mapped[str] = mapped_column(String, nullable=False)
+    token: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"<ShareTokenRow user_id={self.user_id!r} match_id={self.match_id!r} "
+            f"revoked={self.revoked_at is not None}>"
+        )
