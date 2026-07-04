@@ -4251,10 +4251,13 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     )
     from ..db.share_tokens import ShareTokenStore
     from ..db.share_tokens import resolve_share_token as _resolve_share_token_fn
+    from ..db.workers import WorkersStore
     from ..queue import make_deferrer
+    from ..worker_channel import WakeChannelRegistry
     from ..worker_trigger import (
-        build_worker_launcher,
+        build_worker_dispatcher,
         make_boot_retrigger,
+        make_pending_jobs_counter,
         make_worker_active_checker,
         wrap_deferrer,
     )
@@ -4320,13 +4323,19 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # today is only prevented by the env vars being absent on the worker service.
     # The guard below makes that invariant explicit in code.
     if not worker:
-        # Fires a one-shot worker run through the configured launcher after
-        # each defer, gated on the procrastinate_workers heartbeat so a live
-        # drain is never redeployed out from under its job, and re-checks for
-        # stranded jobs on every boot (see splitsmith.worker_trigger). No-op
-        # when the launcher env vars are unset - local / docker-compose runs
-        # an always-on worker instead.
-        worker_launcher = build_worker_launcher(worker_active=make_worker_active_checker(session_factory))
+        # Wakes a worker through the priority dispatcher after each defer,
+        # gated on the procrastinate_workers heartbeat so a live drain is
+        # never redeployed out from under its job, and re-checks for
+        # stranded jobs on every boot (see splitsmith.worker_trigger).
+        # Disabled via SPLITSMITH_WORKER_LAUNCHER=none - local /
+        # docker-compose runs an always-on worker instead.
+        wake_channels = WakeChannelRegistry()  # Task 6 moves this registry onto AppState
+        worker_launcher = build_worker_dispatcher(
+            WorkersStore(session_factory),
+            wake_channels,
+            worker_active=make_worker_active_checker(session_factory),
+            pending_jobs=make_pending_jobs_counter(session_factory),
+        )
         if worker_launcher is not None:
             deferrer = wrap_deferrer(deferrer, worker_launcher)
             state.boot_retrigger = make_boot_retrigger(session_factory, worker_launcher)
