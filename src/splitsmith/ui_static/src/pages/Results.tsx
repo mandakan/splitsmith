@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 /* -------------------------------------------------------------------------- */
 
 /** Per-tone Tailwind class string for the status chip. Color is always a
- *  redundant cue -- the chip carries a text label (accessibility requirement). */
+ *  redundant cue - the chip carries a text label (accessibility requirement). */
 const CHIP_TONE: Record<string, string> = {
   done: "border-led-deep bg-led/15 text-led",
   in_progress: "border-live/50 bg-live/10 text-live",
@@ -67,7 +67,7 @@ function formatDate(iso: string): string {
 
 /** Format a stage duration as "MM:SS.ss" (omit minutes if zero). */
 function formatTime(seconds: number): string {
-  if (!seconds || seconds <= 0) return "--";
+  if (!seconds || seconds <= 0) return "-";
   const mins = Math.floor(seconds / 60);
   const secs = seconds - mins * 60;
   const secsStr = secs.toFixed(2).padStart(5, "0");
@@ -176,24 +176,21 @@ export function Results() {
         </h1>
         <div className="flex flex-wrap items-center gap-3 font-mono text-xs uppercase tracking-[0.06em] text-muted">
           {project.match_date ? (
-            <time dateTime={project.match_date} className="font-bold text-ink-2">
+            <time
+              dateTime={project.match_date}
+              className="border-r border-rule pr-3 font-bold text-ink-2"
+            >
               {formatDate(project.match_date)}
             </time>
           ) : null}
           {totalTimeSecs > 0 ? (
-            <>
-              {project.match_date && (
-                <span aria-hidden className="text-whisper">&middot;</span>
-              )}
-              <span>
-                <span className="font-mono tabular-nums text-ink-2">
-                  {formatTime(totalTimeSecs)}
-                </span>
-                {" "}match total
+            <span className="border-r border-rule pr-3">
+              <span className="font-mono tabular-nums text-ink-2">
+                {formatTime(totalTimeSecs)}
               </span>
-            </>
+              {" "}match total
+            </span>
           ) : null}
-          <span aria-hidden className="text-whisper">&middot;</span>
           <span>
             <span className="font-bold text-ink-2">{totals.auditedShooterStages}</span>
             {" / "}
@@ -245,12 +242,16 @@ export function Results() {
                             isSingleShooter && "flex-1",
                           )}
                         >
-                          {time != null ? formatTime(time) : "--"}
+                          {time != null ? formatTime(time) : "-"}
                         </span>
                         <StatusChip tone={cell.tone} status={cell.status} />
                       </Link>
                     );
                   }
+                  // Skipped rows carry their state in the chip alone - a
+                  // "Not audited" label next to a "Skipped" chip contradicts
+                  // itself (skipping was a decision, not missing work).
+                  const skipped = cell.status === "skipped";
                   return (
                     <div
                       key={cell.shooter.slug}
@@ -261,14 +262,18 @@ export function Results() {
                           {cell.shooter.name}
                         </span>
                       )}
-                      <span
-                        className={cn(
-                          "font-mono text-xs uppercase tracking-[0.08em] text-subtle",
-                          isSingleShooter && "flex-1",
-                        )}
-                      >
-                        Not audited
-                      </span>
+                      {skipped ? (
+                        isSingleShooter && <span aria-hidden className="flex-1" />
+                      ) : (
+                        <span
+                          className={cn(
+                            "font-mono text-xs uppercase tracking-[0.08em] text-subtle",
+                            isSingleShooter && "flex-1",
+                          )}
+                        >
+                          Not audited
+                        </span>
+                      )}
                       <StatusChip tone={cell.tone} status={cell.status} />
                     </div>
                   );
@@ -338,20 +343,28 @@ export function Results() {
                         className="flex min-h-11 items-center justify-between gap-2 bg-surface-2 px-3 py-2 hover:bg-surface-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led focus-visible:ring-inset"
                       >
                         <span className="font-mono text-sm tabular-nums text-ink-2">
-                          {time != null ? formatTime(time) : "--"}
+                          {time != null ? formatTime(time) : "-"}
                         </span>
                         <StatusChip tone={cell.tone} status={cell.status} />
                       </Link>
                     );
                   }
+                  // Skipped cells: chip only (see the mobile rows note).
                   return (
                     <div
                       key={cell.shooter.slug}
-                      className="flex min-h-11 items-center justify-between gap-2 bg-surface-2 px-3 py-2"
+                      className={cn(
+                        "flex min-h-11 items-center gap-2 bg-surface-2 px-3 py-2",
+                        cell.status === "skipped"
+                          ? "justify-end"
+                          : "justify-between",
+                      )}
                     >
-                      <span className="font-mono text-xs uppercase tracking-[0.08em] text-subtle">
-                        --
-                      </span>
+                      {cell.status !== "skipped" && (
+                        <span className="font-mono text-xs uppercase tracking-[0.08em] text-subtle">
+                          -
+                        </span>
+                      )}
                       <StatusChip tone={cell.tone} status={cell.status} />
                     </div>
                   );
