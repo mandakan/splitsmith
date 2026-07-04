@@ -9,69 +9,10 @@ smoke proves the same dance cross-process against Postgres.
 
 from __future__ import annotations
 
-import asyncio
-import os
-from collections.abc import Iterator
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi.testclient import TestClient
-
-from splitsmith.db import Base, create_engine
-
-PUBLIC_URL = "http://localhost:5174"
-
-
-class _CapturingSender:
-    def __init__(self) -> None:
-        self.links: list[tuple[str, str]] = []
-
-    async def send_magic_link(self, *, to: str, link: str) -> None:
-        self.links.append((to, link))
-
-    def last_token(self) -> str:
-        return parse_qs(urlparse(self.links[-1][1]).query)["token"][0]
-
-
-@pytest.fixture
-def hosted_env(tmp_path: Path) -> Iterator[str]:
-    url = f"sqlite+aiosqlite:///{tmp_path / 'auth_routes.sqlite'}"
-    engine = create_engine(url)
-
-    async def _create_all() -> None:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
-    asyncio.run(_create_all())
-
-    prior = {
-        k: os.environ.get(k) for k in ("SPLITSMITH_DATABASE_URL", "SPLITSMITH_MODE", "SPLITSMITH_PUBLIC_URL")
-    }
-    os.environ["SPLITSMITH_DATABASE_URL"] = url
-    os.environ["SPLITSMITH_MODE"] = "hosted"
-    os.environ["SPLITSMITH_PUBLIC_URL"] = PUBLIC_URL
-    try:
-        yield url
-    finally:
-        for k, v in prior.items():
-            if v is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = v
-
-
-@pytest.fixture
-def hosted_app(hosted_env: str) -> Iterator[tuple[TestClient, _CapturingSender]]:
-    from splitsmith.ui.server import create_app
-
-    app = create_app()
-    sender = _CapturingSender()
-    # Swap the console transport for the capturing double so the test can
-    # read the emitted token.
-    app.state.splitsmith_state.auth._email = sender
-    with TestClient(app, follow_redirects=False) as client:
-        yield client, sender
 
 
 def test_full_login_logout_round_trip(hosted_app) -> None:

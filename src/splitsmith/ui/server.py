@@ -76,6 +76,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -94,6 +95,7 @@ if TYPE_CHECKING:
     # Hosted-only; imported lazily at runtime inside _apply_hosted_mode_wiring
     # so local mode stays free of the db (procrastinate/psycopg) dependency.
     from ..db import PostgresMatchStore, ProjectStateStore
+    from ..db.share_tokens import ResolvedShare, ShareTokenStore
 
 from fastapi import (
     Body,
@@ -650,6 +652,25 @@ class AuthBeginRequest(BaseModel):
     email: str
 
 
+class ShareInfo(BaseModel):
+    """One share link as returned by the owner-management routes.
+
+    ``url`` embeds the raw token - it does not appear anywhere else
+    in the API response. Module-level so FastAPI resolves it correctly
+    under ``from __future__ import annotations``."""
+
+    id: str
+    url: str
+    created_at: datetime
+    revoked_at: datetime | None
+
+
+class ShareListResponse(BaseModel):
+    """Response body for ``GET /api/match/shares``."""
+
+    shares: list[ShareInfo]
+
+
 # /api/* paths the auth gate lets through without resolving a user.
 # Anything else under /api/* requires ``state.auth.authenticate_request``
 # to return a non-None User -- see the ``_auth_gate`` middleware inside
@@ -665,6 +686,20 @@ _PUBLIC_API_PATHS: frozenset[str] = frozenset(
         # auth gate skips it by prefix.)
         "/api/v1/auth/begin",
     }
+)
+
+
+# GET-only path shapes reachable through /api/share/{token}/ - the entire
+# anonymous surface. Anything else under the prefix is a uniform 404. The
+# share middleware impersonates the owner's tenant for the request, so this
+# whitelist is the containment boundary: extend it only with read-only,
+# match-scoped routes, and never let the client supply the match id. The
+# pattern is anchored (fullmatch) and case-sensitive by design.
+_SHARE_PATH_RE = re.compile(
+    r"^(?:match/shooters"
+    r"|shooters/[^/]+/project"
+    r"|shooters/[^/]+/stages/\d+/coach"
+    r"|shooters/[^/]+/videos/stream)$"
 )
 
 
@@ -710,6 +745,10 @@ def _no_project_error() -> HTTPException:
 # go away entirely once every endpoint is exercised under the new prefix.
 current_match_root: ContextVar[Path | None] = ContextVar("splitsmith_current_match_root", default=None)
 current_match_id: ContextVar[str | None] = ContextVar("splitsmith_current_match_id", default=None)
+# Set True by _share_alias for anonymous read requests so handlers can
+# strip server-local fields (e.g. match_root, last_scanned_dir) from their
+# response payloads before returning them to anonymous viewers.
+current_share_request: ContextVar[bool] = ContextVar("splitsmith_current_share_request", default=False)
 
 
 @dataclass
@@ -734,6 +773,13 @@ class TenantContext:
     matches_store: PostgresMatchStore | None
     project_state: ProjectStateStore | None
     storage: Storage | None
+    # Per-user owner-scoped share-token store (public share links, issue #349).
+    # None in local mode; in hosted mode built per-request with the tenant
+    # factory so write operations filter on this user's rows. share_tokens is
+    # not under RLS - isolation is by explicit user_id predicates on every
+    # query - but the tenant factory is still correct here because the GUC is
+    # inert on a non-RLS table and the store filters by user_id explicitly.
+    share_tokens: ShareTokenStore | None
 
 
 # Per-request / per-job tenant resolved by the hosted-mode auth gate
@@ -857,6 +903,12 @@ class AppState:
     # as a FastAPI startup handler by create_app. Runs on every cold start
     # (incl. each wake from Railway app sleeping).
     boot_retrigger: Callable[[], Awaitable[None]] | None = None
+    # Anonymous share-token resolver (public share links, issue #349). Set
+    # only by hosted wiring; None in local mode. Built over the RAW
+    # session_factory (not a tenant factory) because share_tokens is not
+    # under RLS - anonymous resolution happens before any app.user_id GUC
+    # exists, and the unique-token lookup is itself the isolation boundary.
+    resolve_share_token: Callable[[str], Awaitable[ResolvedShare | None]] | None = None
 
     def __post_init__(self) -> None:
         # Point the backing local backend's body map at the shared
@@ -932,6 +984,13 @@ class AppState:
     @storage.setter
     def storage(self, value: Storage | None) -> None:
         self._storage = value
+
+    @property
+    def share_tokens(self) -> ShareTokenStore | None:
+        # Local mode has no per-user share-token store - share links are a
+        # hosted-only feature. Returns None when no tenant is pinned.
+        tenant = current_tenant.get()
+        return tenant.share_tokens if tenant is not None else None
 
     def build_tenant(self, user_id: str) -> TenantContext:
         """Build the :class:`TenantContext` for ``user_id`` (hosted mode).
@@ -4190,6 +4249,8 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         sessionmaker,
         tenant_session_factory,
     )
+    from ..db.share_tokens import ShareTokenStore
+    from ..db.share_tokens import resolve_share_token as _resolve_share_token_fn
     from ..queue import make_deferrer
     from ..worker_trigger import (
         build_worker_launcher,
@@ -4240,6 +4301,14 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     signup_policy = build_signup_policy()
     state.auth = MagicLinkAuth(session_factory, email_sender, signup_policy=signup_policy)
 
+    # Anonymous resolver for the share-token public path. Uses the RAW
+    # session_factory (same as auth above) - share_tokens is not RLS-scoped
+    # and the call arrives before any tenant GUC is set.
+    async def _resolve_share_token(token: str) -> ResolvedShare | None:
+        return await _resolve_share_token_fn(session_factory, token)
+
+    state.resolve_share_token = _resolve_share_token
+
     # Process-level, tenant-agnostic resources shared by every
     # ``TenantContext``. The deferrer routes per-user inside ``_defer``
     # (queue name from ``user_id``); the S3 client is stateless w.r.t. the
@@ -4286,6 +4355,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             matches_store=PostgresMatchStore(tenant_factory, user_id=user_id),
             project_state=ProjectStateStore(tenant_factory, user_id=user_id),
             storage=_tenant_s3_storage(s3_client, s3_bucket, user_id),
+            share_tokens=ShareTokenStore(tenant_factory, user_id=user_id),
         )
 
     state._build_tenant = _build_tenant
@@ -4655,6 +4725,73 @@ def create_app(
         )
         return response
 
+    # ----------------------------------------------------------------------
+    # Share-link management routes (issue #349)
+    # Hosted-only: raise 404 in local mode (same mechanism as auth routes).
+    # Reached via the /api/matches/{match_id}/match/shares alias prefix so
+    # current_match_id is already set by the alias middleware.
+    # ----------------------------------------------------------------------
+
+    @app.get("/api/match/shares", response_model=ShareListResponse)
+    async def _list_match_shares() -> ShareListResponse:
+        """List all share tokens (including revoked) for the current match."""
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        mid = current_match_id.get()
+        if mid is None:
+            raise _no_project_error()
+        store = state.share_tokens
+        if store is None:
+            raise HTTPException(status_code=500, detail="share store unavailable")
+        shares = await store.list_for_match(mid)
+        return ShareListResponse(
+            shares=[
+                ShareInfo(
+                    id=s.id,
+                    url=f"{state.public_base_url}/share/{s.token}",
+                    created_at=s.created_at,
+                    revoked_at=s.revoked_at,
+                )
+                for s in shares
+            ]
+        )
+
+    @app.post("/api/match/shares", response_model=ShareInfo, status_code=201)
+    async def _create_match_share() -> ShareInfo:
+        """Create a new share token for the current match. Returns 201."""
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        mid = current_match_id.get()
+        if mid is None:
+            raise _no_project_error()
+        store = state.share_tokens
+        if store is None:
+            raise HTTPException(status_code=500, detail="share store unavailable")
+        s = await store.create(mid)
+        return ShareInfo(
+            id=s.id,
+            url=f"{state.public_base_url}/share/{s.token}",
+            created_at=s.created_at,
+            revoked_at=s.revoked_at,
+        )
+
+    @app.delete("/api/match/shares/{share_id}", status_code=204)
+    async def _delete_match_share(share_id: str) -> Response:
+        """Revoke a share token. 204 on success (including already-revoked),
+        404 when the share_id is unknown or not owned by this user."""
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        mid = current_match_id.get()
+        if mid is None:
+            raise _no_project_error()
+        store = state.share_tokens
+        if store is None:
+            raise HTTPException(status_code=500, detail="share store unavailable")
+        ok = await store.revoke(share_id, match_id=mid)
+        if not ok:
+            raise HTTPException(status_code=404, detail="not found")
+        return Response(status_code=204)
+
     @app.exception_handler(ShutdownInProgressError)
     async def _shutdown_in_progress_handler(request: Request, exc: ShutdownInProgressError) -> JSONResponse:
         """Map ShutdownInProgressError to 503 across every submit() callsite."""
@@ -4795,6 +4932,64 @@ def create_app(
             current_match_id.reset(id_token)
 
     # ----------------------------------------------------------------------
+    # Share-link anonymous read middleware (issue #349)
+    # ----------------------------------------------------------------------
+    #
+    # Required execution order: ``_auth_gate`` (outer) -> ``_share_alias``
+    # (this) -> ``_match_id_alias`` (inner). Starlette runs later-registered
+    # ``@app.middleware("http")`` OUTER, so this must be *defined* between
+    # ``_match_id_alias`` (above) and ``_auth_gate`` (below). Rationale:
+    #   - It runs INSIDE the gate so the gate's ``/api/share/`` exemption
+    #     lets an anonymous request through, but a garbage token still 404s
+    #     here rather than 401ing at the gate.
+    #   - It runs OUTSIDE ``_match_id_alias`` so the path rewrite this
+    #     middleware performs (onto ``/api/matches/{match_id}/...``) is what
+    #     the alias then validates + strips, and the owner tenant pinned
+    #     here is in scope for the alias's RLS-scoped ownership check.
+    #
+    # Security invariants: the match id comes ONLY from the resolved token
+    # row (never the URL); every non-token / non-whitelisted / non-GET /
+    # local-mode case returns the same opaque 404 so unknown, revoked, and
+    # expired tokens are indistinguishable.
+    @app.middleware("http")
+    async def _share_alias(request, call_next):
+        path = request.url.path
+        prefix = "/api/share/"
+        if not path.startswith(prefix):
+            return await call_next(request)
+        not_found = JSONResponse(status_code=404, content={"detail": "not found"})
+        resolver = state.resolve_share_token
+        if resolver is None:
+            # Local mode: no share surface at all.
+            return not_found
+        token, sep, rest = path[len(prefix) :].partition("/")
+        if not sep or not token or request.method != "GET" or not _SHARE_PATH_RE.fullmatch(rest):
+            return not_found
+        resolved = await resolver(token)
+        if resolved is None:
+            return not_found
+        # Rewrite onto the match-alias prefix with the match id from the
+        # token row - never from the URL - and pin the owner's tenant so
+        # the downstream ownership check + stores resolve as the owner.
+        rewritten = f"/api/matches/{resolved.match_id}/{rest}"
+        request.scope["path"] = rewritten
+        request.scope["raw_path"] = rewritten.encode("utf-8")
+        tenant_token = current_tenant.set(state.build_tenant(resolved.owner_user_id))
+        share_token = current_share_request.set(True)
+        try:
+            response = await call_next(request)
+            # Uniform-404 seam: a live token whose underlying resource no
+            # longer exists (e.g. match row deleted) must return the same
+            # opaque 404 as an invalid token - not the downstream's own
+            # error body which may distinguish the cases.
+            if response.status_code == 404:
+                return not_found
+            return response
+        finally:
+            current_share_request.reset(share_token)
+            current_tenant.reset(tenant_token)
+
+    # ----------------------------------------------------------------------
     # Auth gate middleware (saas-readiness step)
     # ----------------------------------------------------------------------
     #
@@ -4825,6 +5020,13 @@ def create_app(
         if not path.startswith("/api/"):
             return await call_next(request)
         if path in _PUBLIC_API_PATHS:
+            return await call_next(request)
+        if path.startswith("/api/share/"):
+            # Anonymous share reads: authorization is the token itself,
+            # resolved by the _share_alias middleware inside this gate. No
+            # session is required (and none is consulted), so the gate hands
+            # off without pinning current_tenant - _share_alias pins the
+            # owner's tenant from the token row instead.
             return await call_next(request)
         user = await state.auth.authenticate_request(request)
         if user is None:
@@ -5027,6 +5229,11 @@ def create_app(
             status = statuses.get(int(n))
             if status is not None:
                 stage_dict["status"] = status.value
+        # Strip owner-local scan directory from anonymous share responses -
+        # it is a server path that serves no purpose for read-only viewers.
+        # Video/trim paths are load-bearing for streaming and are kept.
+        if current_share_request.get():
+            payload["last_scanned_dir"] = None
         return JSONResponse(payload)
 
     @app.get("/api/shooters/{slug}/project/export")
@@ -9988,7 +10195,7 @@ def create_app(
                 logger.warning("Skipping shooter %s: %s", slug, exc)
                 continue
         return ShooterListResponse(
-            match_root=str(match_root),
+            match_root="" if current_share_request.get() else str(match_root),
             match_name=match.name,
             shooters=entries,
         )

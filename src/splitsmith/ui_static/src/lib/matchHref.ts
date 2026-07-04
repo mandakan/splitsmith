@@ -18,24 +18,29 @@
  */
 
 import { useCallback } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 
 export type MatchHrefBuilder = (...segments: string[]) => string;
 
 export function useMatchHref(): MatchHrefBuilder {
-  const { matchId } = useParams<{ matchId?: string }>();
+  const { matchId, token } = useParams<{ matchId?: string; token?: string }>();
+  const { pathname } = useLocation();
+  const shareToken = pathname.startsWith("/share/") ? token : undefined;
   return useCallback(
     (...segments: string[]) => {
       const tail = segments
         .filter((s) => s != null && s !== "")
         .map((s) => encodeURIComponent(s))
         .join("/");
+      if (shareToken) {
+        return `/share/${encodeURIComponent(shareToken)}/${tail}`;
+      }
       if (matchId) {
         return `/match/${encodeURIComponent(matchId)}/${tail}`;
       }
       return `/${tail}`;
     },
-    [matchId],
+    [matchId, shareToken],
   );
 }
 
