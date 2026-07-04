@@ -109,7 +109,7 @@ export function MatchSidebar({
   onCollapseToggle,
   className,
 }: MatchSidebarProps) {
-  // Footage-dependent rows share the same hint -- centralised in
+  // Footage-dependent rows share the same hint - centralised in
   // navItems so the copy cannot drift between sidebar and drawer.
   const footageHint = FOOTAGE_HINT;
   // Prefix every nav row with /match/:matchId when one is in scope, so
