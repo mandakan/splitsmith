@@ -12,6 +12,7 @@ import { AppShell } from "@/components/AppShell";
 import { DesktopGate } from "@/components/DesktopOnlyNotice";
 import { DeveloperShell } from "@/components/developer/DeveloperShell";
 import { MatchShell } from "@/components/match/MatchShell";
+import { ShareShell } from "@/components/share/ShareShell";
 import { DefaultShooterRedirect } from "@/components/match/DefaultShooterRedirect";
 import { ModeProvider } from "@/lib/mode";
 import { ConfirmProvider } from "@/components/useConfirm";
@@ -193,6 +194,14 @@ export function App() {
                 element={<ShooterScopedRoute element={<ResultsStage />} />}
               />
             </Route>
+          </Route>
+          {/* Public share surface (#349): token-authorized, read-only,
+              mobile-friendly. Mirrors the match results subtree shape so
+              useMatchHref("results", ...) round-trips inside the share. */}
+          <Route path="share/:token" element={<ShareShell />}>
+            <Route index element={<Navigate to="results" replace />} />
+            <Route path="results" element={<Results />} />
+            <Route path="results/:slug/:stage" element={<ResultsStage />} />
           </Route>
           {/* Developer mode (#331). All four workflow steps + the
               retired Lab + fixture-editor surfaces sit under the
