@@ -8191,8 +8191,10 @@ def create_app(
             return min(video.beep_time, pre_buffer)
         # Hosted: the trim may exist only in the storage cache (worker-
         # cut, not yet mirrored); stream_video pulls it on demand, so the
-        # anchor must agree. New-keyed only - legacy trims predate the
-        # hosted cache.
+        # anchor must agree. New-keyed only by design: a storage-only
+        # legacy-keyed trim is missed by BOTH the pull and this check, so
+        # bytes and anchor degrade consistently to the source path, and
+        # the next worker trim job re-cuts under the new key.
         trimmed = audio_helpers.trimmed_video_path(
             state.shooter_root(slug), stage_number, video, project=project
         )
