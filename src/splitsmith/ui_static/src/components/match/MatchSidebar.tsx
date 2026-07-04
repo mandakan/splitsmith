@@ -22,7 +22,7 @@ import { JobsSurface } from "@/components/Jobs";
 import { type StageStatus } from "@/lib/api";
 import { StageDot } from "@/components/ui/StageDot";
 import { cn } from "@/lib/utils";
-import { matchNavItems } from "./navItems";
+import { FOOTAGE_HINT, matchNavItems } from "./navItems";
 
 // The sidebar consumes the canonical :type:`StageStatus` from the
 // backend. The previous local narrow union ("done" | "partial" |
@@ -109,9 +109,9 @@ export function MatchSidebar({
   onCollapseToggle,
   className,
 }: MatchSidebarProps) {
-  // Footage-dependent rows share the same hint -- centralised so the
-  // copy doesn't drift between Audit / Coach / Videos / Export.
-  const footageHint = "Attach footage to this match before this surface is usable";
+  // Footage-dependent rows share the same hint -- centralised in
+  // navItems so the copy cannot drift between sidebar and drawer.
+  const footageHint = FOOTAGE_HINT;
   // Prefix every nav row with /match/:matchId when one is in scope, so
   // clicks keep the user inside the match-scoped subtree (#353 Phase 3).
   // Without a match id we fall back to the bare paths -- legacy routes

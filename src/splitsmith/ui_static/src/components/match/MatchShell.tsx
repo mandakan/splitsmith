@@ -25,7 +25,7 @@ import { AccountChip } from "@/components/AccountChip";
 import { JobsSurface } from "@/components/Jobs";
 import { MobileNav } from "@/components/match/MobileNav";
 import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
-import { matchNavItems } from "@/components/match/navItems";
+import { FOOTAGE_HINT, matchNavItems } from "@/components/match/navItems";
 import { Brand, IconButton } from "@/components/ui";
 import {
   MatchSidebar,
@@ -127,6 +127,11 @@ export function MatchShell() {
   useEffect(() => {
     setNavOpen(false);
   }, [pathname]);
+  // Crossing to desktop discards drawer state, so shrinking back below
+  // md never re-opens the drawer unprompted.
+  useEffect(() => {
+    if (!isMobile) setNavOpen(false);
+  }, [isMobile]);
 
   // Shell geometry as CSS vars: measured header height (the header
   // wraps, so no constant is safe) + current sidebar width. The sidebar
@@ -475,8 +480,7 @@ export function MatchShell() {
             hasFootage: shooters.some((s) => s.video_count > 0),
             shooterCount,
             beepReviewPendingCount: beepReviewPending,
-            footageHint:
-              "Attach footage to this match before this surface is usable",
+            footageHint: FOOTAGE_HINT,
           })}
           header={{ matchName: project?.name ?? health?.project_name ?? "..." }}
           extras={

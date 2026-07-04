@@ -15,6 +15,11 @@ import {
   Volume2,
 } from "lucide-react";
 
+/** Shared disabled-row hint for footage-dependent surfaces. Single
+ *  definition so MatchSidebar and the MobileNav drawer cannot drift. */
+export const FOOTAGE_HINT =
+  "Attach footage to this match before this surface is usable";
+
 export interface MatchNavItem {
   key: string;
   to: string;
