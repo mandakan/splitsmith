@@ -408,6 +408,63 @@ def test_pull_trimmed_video_neither_file_returns_missing_path(tmp_path: Path) ->
     assert not got.exists()
 
 
+def test_resolve_trim_for_read_shared_resolver_and_sidecar_pre_buffer(tmp_path: Path) -> None:
+    """The resolver behind both stream_video and the beep anchor: None
+    when nothing exists, the unambiguous legacy trim next, the new-keyed
+    trim first once present. The pre-buffer comes from whichever file's
+    sidecar the resolver returned so anchor and bytes agree."""
+    root = tmp_path / "p"
+    source = _make_source(tmp_path)
+    project, video = _project_with_assigned_video(root, source)
+
+    assert audio_helpers.resolve_trim_for_read(root, STAGE, video, project=project) is None
+
+    legacy = _touch(_legacy_trim_path(root, project, video), b"LEGACY")
+    _touch(
+        legacy.with_name(f"{legacy.stem}.params.json"),
+        json.dumps({"pre_buffer_seconds": 3.0}).encode("utf-8"),
+    )
+    got = audio_helpers.resolve_trim_for_read(root, STAGE, video, project=project)
+    assert got == legacy
+    # Legacy trim was cut with pre_buffer 3.0, not the current 5.0.
+    assert audio_helpers.trim_pre_buffer_seconds_for(got, default=5.0) == pytest.approx(3.0)
+
+    new = _touch(trimmed_video_path(root, STAGE, video, project=project), b"NEW")
+    got = audio_helpers.resolve_trim_for_read(root, STAGE, video, project=project)
+    assert got == new
+    # No sidecar beside the new-keyed trim -> default.
+    assert audio_helpers.trim_pre_buffer_seconds_for(got, default=5.0) == pytest.approx(5.0)
+
+
+def test_resolve_trim_for_read_ambiguous_registration_returns_none(tmp_path: Path) -> None:
+    """Same path on two stages: the resolver refuses the legacy trim so
+    the beep anchor stays source-based, matching the source clip
+    stream_video will serve."""
+    root = tmp_path / "p"
+    source = _make_source(tmp_path)
+    project, video = _project_with_assigned_video(root, source, stage_numbers=(STAGE, STAGE + 1))
+    _touch(_legacy_trim_path(root, project, video), b"LEGACY")
+
+    assert audio_helpers.resolve_trim_for_read(root, STAGE, video, project=project) is None
+
+
+def test_invalidate_video_audit_trim_sweeps_legacy_files(tmp_path: Path) -> None:
+    """A beep/stage-time change must also drop the legacy-keyed trim +
+    sidecar, or the read fallback would keep serving a stale cut."""
+    root = tmp_path / "p"
+    source = _make_source(tmp_path)
+    project, video = _project_with_assigned_video(root, source)
+    new = _touch(trimmed_video_path(root, STAGE, video, project=project), b"NEW")
+    new_params = _touch(new.with_name(f"{new.stem}.params.json"))
+    legacy = _touch(_legacy_trim_path(root, project, video), b"LEGACY")
+    legacy_params = _touch(legacy.with_name(f"{legacy.stem}.params.json"))
+
+    audio_helpers.invalidate_video_audit_trim(root, STAGE, video, project=project)
+
+    for p in (new, new_params, legacy, legacy_params):
+        assert not p.exists(), p
+
+
 def test_ensure_video_audio_legacy_fallback_when_source_unplugged(tmp_path: Path) -> None:
     """WAV seam: only a legacy-keyed WAV exists and the source is gone
     (unplugged external storage) - the legacy WAV is served instead of

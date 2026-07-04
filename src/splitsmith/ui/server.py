@@ -8164,16 +8164,35 @@ def create_app(
         from ``/api/videos/stream`` for ``video``.
 
         When a per-video trimmed MP4 exists, the beep sits at
-        ``min(beep_time, trim_pre_buffer_seconds)`` inside it (the trim
-        starts at ``max(0, beep_time - pre_buffer)``). When there's no
-        trim we fall through to the source clip and the beep is at
-        ``beep_time`` directly. No ffmpeg / no audio extraction; in hosted
-        mode this pays only a cheap ``storage.exists`` HEAD so the reported
-        position agrees with the clip ``stream_video`` will actually serve
-        (which pulls the worker-cut trim on demand).
+        ``min(beep_time, pre_buffer)`` inside it (the trim starts at
+        ``max(0, beep_time - pre_buffer)``). When there's no trim we
+        fall through to the source clip and the beep is at ``beep_time``
+        directly. No ffmpeg / no audio extraction; in hosted mode this
+        pays only a cheap ``storage.exists`` HEAD so the reported
+        position agrees with the clip ``stream_video`` will actually
+        serve (which pulls the worker-cut trim on demand).
+
+        Uses the SAME fallback-aware resolver as ``stream_video``'s
+        ``pull_trimmed_video`` (``resolve_trim_for_read``) so a
+        pre-take-spec legacy-keyed trim counts here too, and reads the
+        pre_buffer from the resolved trim's params sidecar - otherwise
+        the anchor stays source-based while the served clip is
+        trim-based and every marker lands offset by beep - pre_buffer.
         """
         if video.beep_time is None:
             return None
+        resolved = audio_helpers.resolve_trim_for_read(
+            state.shooter_root(slug), stage_number, video, project=project
+        )
+        if resolved is not None:
+            pre_buffer = audio_helpers.trim_pre_buffer_seconds_for(
+                resolved, default=project.trim_pre_buffer_seconds
+            )
+            return min(video.beep_time, pre_buffer)
+        # Hosted: the trim may exist only in the storage cache (worker-
+        # cut, not yet mirrored); stream_video pulls it on demand, so the
+        # anchor must agree. New-keyed only - legacy trims predate the
+        # hosted cache.
         trimmed = audio_helpers.trimmed_video_path(
             state.shooter_root(slug), stage_number, video, project=project
         )

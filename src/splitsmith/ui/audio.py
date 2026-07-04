@@ -660,7 +660,14 @@ def invalidate_video_audit_trim(
     wav = video_audit_audio_path(project_root, stage_number, video, project=project)
     params = trim_params_path(output)
     partial = output.with_name(f"{output.stem}.partial{output.suffix}")
-    for p in (output, wav, params, partial):
+    targets = [output, wav, params, partial]
+    # Also sweep the pre-take-spec legacy-keyed trim + sidecar: the
+    # legacy read fallback (resolve_trim_for_read) would otherwise keep
+    # serving a cut for the OLD beep/stage time after this invalidation.
+    legacy_mp4 = output.with_name(f"stage{stage_number}_cam_{legacy_video_id(video)}_trimmed.mp4")
+    if legacy_mp4 != output:
+        targets += [legacy_mp4, trim_params_path(legacy_mp4)]
+    for p in targets:
         try:
             if p.exists() or p.is_symlink():
                 p.unlink()
@@ -776,6 +783,57 @@ def trim_available(project: MatchProject | None, local_mp4: Path) -> bool:
         return False
 
 
+def resolve_trim_for_read(
+    project_root: Path,
+    stage_number: int,
+    video: StageVideo,
+    *,
+    project: MatchProject,
+) -> Path | None:
+    """Resolve the local audit-trim file read paths should use, or None.
+
+    Returns the new-keyed trim when present (non-empty), else the
+    pre-take-spec legacy-keyed trim when the registration is unambiguous
+    (see _legacy_cache_fallback), else None. Legacy-id read fallback:
+    the take-spec video_id change orphaned trims cut under the old
+    path-only hash; without the fallback resolution misses a valid trim
+    on disk and falls back to the source, which 424s when the source
+    lives on unplugged external storage.
+
+    This is the ONE fallback-aware resolver shared by the byte server
+    (:func:`pull_trimmed_video` behind ``stream_video``) and the
+    beep-anchor metadata (the server's ``_video_beep_in_clip``). Both
+    must agree on which file backs the clip - if the anchor checks only
+    the new-keyed name while the bytes come from the legacy trim, every
+    coach/audit marker is offset by beep - pre_buffer (source-anchored
+    numbers over a trim-anchored clip). Read-only; writers stay on the
+    new-keyed names. Local files only - hosted storage probing stays
+    with the callers. Remove the legacy leg once a cache migration tool
+    exists.
+    """
+    output = trimmed_video_path(project_root, stage_number, video, project=project)
+    if output.exists() and output.stat().st_size > 0:
+        return output
+    legacy_mp4 = output.with_name(f"stage{stage_number}_cam_{legacy_video_id(video)}_trimmed.mp4")
+    return _legacy_cache_fallback(project, video, output, legacy_mp4)
+
+
+def trim_pre_buffer_seconds_for(trim_path: Path, *, default: float) -> float:
+    """Pre-buffer the trim at ``trim_path`` was actually cut with.
+
+    Reads the params sidecar beside the MP4 (written for new-keyed and
+    legacy-keyed trims alike); falls back to ``default`` (the project's
+    current setting) when the sidecar is missing or unreadable. The
+    beep anchor must match the served bytes, not the current knob - a
+    legacy trim may predate a buffer-setting change.
+    """
+    try:
+        params = json.loads(trim_params_path(trim_path).read_text(encoding="utf-8"))
+        return float(params["pre_buffer_seconds"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return default
+
+
 def pull_trimmed_video(
     project_root: Path,
     stage_number: int,
@@ -793,23 +851,16 @@ def pull_trimmed_video(
     trim, the returned path simply doesn't exist and the caller falls
     back to the source clip (or 404s for an explicit ``kind=trim``),
     exactly as before this seam. No-op in local mode.
+
+    Routes through :func:`resolve_trim_for_read` after the storage pull
+    so the served bytes and the beep-anchor metadata always name the
+    same file (new-keyed first, unambiguous legacy trim second).
     """
     output = trimmed_video_path(project_root, stage_number, video, project=project)
     if not (output.exists() and output.stat().st_size > 0):
         _try_pull_trim_from_storage(project, output)
-    if not (output.exists() and output.stat().st_size > 0):
-        # Legacy-id read fallback: the take-spec video_id change
-        # orphaned trims cut under the old path-only hash; without this
-        # the resolver misses a valid trim on disk and falls back to the
-        # source, which 424s when the source lives on unplugged external
-        # storage. Read-only and single-registration-gated (see
-        # _legacy_cache_fallback); new trims keep writing the new-keyed
-        # name. Remove once a cache migration tool exists.
-        legacy_mp4 = output.with_name(f"stage{stage_number}_cam_{legacy_video_id(video)}_trimmed.mp4")
-        legacy = _legacy_cache_fallback(project, video, output, legacy_mp4)
-        if legacy is not None:
-            return legacy
-    return output
+    resolved = resolve_trim_for_read(project_root, stage_number, video, project=project)
+    return resolved if resolved is not None else output
 
 
 def ensure_video_audit_trim(
