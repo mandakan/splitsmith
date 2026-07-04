@@ -692,6 +692,60 @@ class WorkerRegisterResponse(BaseModel):
     credentials: dict[str, Any]
 
 
+class WorkerView(BaseModel):
+    """One worker as returned by admin routes (Task 7).
+
+    ``status`` is derived at query time - not stored - so it reflects live
+    channel state and the Railway config presence without a separate field."""
+
+    id: str
+    name: str
+    kind: str
+    enabled: bool
+    priority: int
+    status: str  # "online" | "offline" | "pending" | "disabled"
+    registered: bool
+    last_seen_at: datetime | None
+    last_wake_at: datetime | None
+    info: dict[str, Any] | None
+
+
+class AdminWorkerListResponse(BaseModel):
+    """Response body for ``GET /api/admin/workers``."""
+
+    workers: list[WorkerView]
+
+
+class AdminCreateWorkerBody(BaseModel):
+    """Request body for ``POST /api/admin/workers``."""
+
+    name: str
+    priority: int = 10
+
+
+class AdminCreateWorkerResponse(BaseModel):
+    """Response body for ``POST /api/admin/workers``.
+
+    ``registration_token`` is the plaintext one-time token the operator
+    pastes into the worker box's bring-up command. It is shown exactly
+    once and not stored in plaintext anywhere."""
+
+    worker: WorkerView
+    registration_token: str
+    expires_at: str  # ISO-8601
+    docker_command: str
+
+
+class AdminPatchWorkerBody(BaseModel):
+    """Request body for ``PATCH /api/admin/workers/{worker_id}``.
+
+    All fields are optional; only supplied fields are updated."""
+
+    enabled: bool | None = None
+    priority: int | None = None
+    name: str | None = None
+
+
 # /api/* paths the auth gate lets through without resolving a user.
 # Anything else under /api/* requires ``state.auth.authenticate_request``
 # to return a non-None User -- see the ``_auth_gate`` middleware inside
@@ -4203,6 +4257,11 @@ SPLITSMITH_S3_SECRET_ACCESS_KEY_ENV = "SPLITSMITH_S3_SECRET_ACCESS_KEY"
 # prefix S3 storage uses.
 SPLITSMITH_PROJECTS_DIR_ENV = "SPLITSMITH_PROJECTS_DIR"
 SPLITSMITH_PROJECTS_DIR_DEFAULT = "/home/splitsmith/data"
+# Container image used in the docker_command hint returned by POST
+# /api/admin/workers.  Override via env to pin a specific tag or use a
+# private registry.
+SPLITSMITH_AGENT_IMAGE_ENV = "SPLITSMITH_AGENT_IMAGE"
+SPLITSMITH_AGENT_IMAGE_DEFAULT = "ghcr.io/mandakan/splitsmith:latest"
 
 
 class _HashingReader:
@@ -4614,6 +4673,47 @@ async def _worker_channel_events(
             # Best-effort goodbye stamp: the client is already gone and the
             # DB may be too.
             pass
+
+
+def _derive_worker_status(record: Any, connected_ids: frozenset[str]) -> str:
+    """Derive the display status for a WorkerRecord.
+
+    The disabled state is authoritative: a disabled worker that happens to
+    have a live channel still shows as 'disabled' so the admin cannot
+    accidentally treat it as active. Order:
+    1. disabled (not enabled)
+    2. railway: online iff load_railway_config() is present
+    3. self_hosted: online if id in connected_ids
+    4. self_hosted: pending if not yet registered
+    5. offline
+    """
+    if not record.enabled:
+        return "disabled"
+    if record.kind == "railway":
+        from ..worker_trigger import load_railway_config
+
+        return "online" if load_railway_config() is not None else "offline"
+    if record.id in connected_ids:
+        return "online"
+    if not record.registered:
+        return "pending"
+    return "offline"
+
+
+def _to_worker_view(record: Any, connected_ids: frozenset[str]) -> WorkerView:
+    """Convert a WorkerRecord to the admin-facing WorkerView shape."""
+    return WorkerView(
+        id=record.id,
+        name=record.name,
+        kind=record.kind,
+        enabled=record.enabled,
+        priority=record.priority,
+        status=_derive_worker_status(record, connected_ids),
+        registered=record.registered,
+        last_seen_at=record.last_seen_at,
+        last_wake_at=record.last_wake_at,
+        info=record.info,
+    )
 
 
 def _hosted_boot_lifespan(state: Any) -> Any | None:
@@ -7741,6 +7841,125 @@ def create_app(
         if job is None:
             raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
         return job
+
+    # ----------------------------------------------------------------------
+    # Admin workers API (Task 7)
+    #
+    # Operator CRUD for the self-hosted worker fleet. All routes require
+    # admin (403 non-admin). In local mode workers_store is None so the
+    # combined gate returns 404 before the admin check fires.
+    # ----------------------------------------------------------------------
+
+    async def _gate_admin_workers(user: User = Depends(get_current_user)) -> User:
+        """Combined gate: 404 in local mode (no workers surface), 403 for non-admin.
+
+        Checks workers_store first so local mode returns 404 before the admin
+        check has a chance to return 403. Hosted non-admins still see 403.
+        """
+        if state.workers_store is None:
+            raise HTTPException(status_code=404, detail="not found")
+        if user.email.lower() not in state.admin_emails:
+            raise HTTPException(status_code=403, detail="admin access required")
+        return user.model_copy(update={"is_admin": True})
+
+    @app.get("/api/admin/workers", response_model=AdminWorkerListResponse)
+    async def _admin_list_workers(
+        _admin: User = Depends(_gate_admin_workers),
+    ) -> AdminWorkerListResponse:
+        """List all workers ordered by priority asc, name asc."""
+        store = state.workers_store
+        assert store is not None  # gate guarantees this
+        registry = state.wake_channels
+        connected = registry.connected_ids() if registry is not None else frozenset()
+        records = await store.list()
+        return AdminWorkerListResponse(workers=[_to_worker_view(r, connected) for r in records])
+
+    @app.post("/api/admin/workers", response_model=AdminCreateWorkerResponse)
+    async def _admin_create_worker(
+        body: AdminCreateWorkerBody,
+        _admin: User = Depends(_gate_admin_workers),
+    ) -> AdminCreateWorkerResponse:
+        """Create a pending self-hosted worker row and return the one-time registration token.
+
+        409 when a worker with the same name already exists. The
+        ``docker_command`` field is a ready-to-paste ``docker run`` invocation
+        for the operator; the ``agent`` subcommand is implemented in Task 8.
+        """
+        from sqlalchemy.exc import IntegrityError
+
+        store = state.workers_store
+        assert store is not None
+        try:
+            record, reg_token = await store.create_self_hosted(body.name, priority=body.priority)
+        except IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="worker name already exists") from exc
+        registry = state.wake_channels
+        connected = registry.connected_ids() if registry is not None else frozenset()
+        image = os.environ.get(SPLITSMITH_AGENT_IMAGE_ENV, SPLITSMITH_AGENT_IMAGE_DEFAULT)
+        public_url = state.public_base_url or ""
+        docker_command = (
+            f"docker run -d --restart unless-stopped -v splitsmith-agent:/data "
+            f"{image} agent --server-url {public_url} --token {reg_token}"
+        )
+        expires_at = record.token_expires_at.isoformat() if record.token_expires_at is not None else ""
+        return AdminCreateWorkerResponse(
+            worker=_to_worker_view(record, connected),
+            registration_token=reg_token,
+            expires_at=expires_at,
+            docker_command=docker_command,
+        )
+
+    @app.patch("/api/admin/workers/{worker_id}", response_model=WorkerView)
+    async def _admin_patch_worker(
+        worker_id: str,
+        body: AdminPatchWorkerBody,
+        _admin: User = Depends(_gate_admin_workers),
+    ) -> WorkerView:
+        """Update mutable worker fields (enabled, priority, name).
+
+        When ``enabled`` changes value, pushes the corresponding event
+        (``"enabled"`` or ``"disabled"``) to a connected channel so the
+        worker daemon can react without waiting for the next keepalive.
+        """
+        store = state.workers_store
+        assert store is not None
+        current = await store.get(worker_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="not found")
+        updated = await store.update(worker_id, enabled=body.enabled, priority=body.priority, name=body.name)
+        if updated is None:
+            raise HTTPException(status_code=404, detail="not found")
+        registry = state.wake_channels
+        if registry is not None and body.enabled is not None and body.enabled != current.enabled:
+            event = "enabled" if body.enabled else "disabled"
+            registry.push(worker_id, event)  # best-effort; returns False if not connected
+        connected = registry.connected_ids() if registry is not None else frozenset()
+        return _to_worker_view(updated, connected)
+
+    @app.delete("/api/admin/workers/{worker_id}", status_code=204)
+    async def _admin_delete_worker(
+        worker_id: str,
+        _admin: User = Depends(_gate_admin_workers),
+    ) -> Response:
+        """Delete a self-hosted worker row.
+
+        Pushes ``"disabled"`` to a connected channel first (best-effort) so
+        the daemon parks before the row vanishes. Returns 400 for the
+        singleton railway row (cannot be deleted), 404 for an unknown id.
+        """
+        store = state.workers_store
+        assert store is not None
+        existing = await store.get(worker_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="not found")
+        registry = state.wake_channels
+        if registry is not None:
+            registry.push(worker_id, "disabled")  # best-effort
+        deleted = await store.delete(worker_id)
+        if not deleted:
+            # store.delete returns False only for railway rows
+            raise HTTPException(status_code=400, detail="cannot delete the railway worker")
+        return Response(status_code=204)
 
     def _apply_beep_override(
         slug: str,
