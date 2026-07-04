@@ -14,17 +14,7 @@
  * collapsed state.
  */
 
-import {
-  ArrowDownToLine,
-  ClipboardCheck,
-  Crosshair,
-  Film,
-  LayoutGrid,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Users,
-  Volume2,
-} from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 
@@ -32,6 +22,7 @@ import { JobsSurface } from "@/components/Jobs";
 import { type StageStatus } from "@/lib/api";
 import { StageDot } from "@/components/ui/StageDot";
 import { cn } from "@/lib/utils";
+import { matchNavItems } from "./navItems";
 
 // The sidebar consumes the canonical :type:`StageStatus` from the
 // backend. The previous local narrow union ("done" | "partial" |
@@ -194,66 +185,28 @@ export function MatchSidebar({
           collapsed ? "px-2" : "px-3",
         )}
       >
-        <SidebarLink
-          to={`${base}/`}
-          icon={<LayoutGrid className="size-[15px]" />}
-          end
-          collapsed={collapsed}
-        >
-          Overview
-        </SidebarLink>
-        <SidebarLink
-          to={shooterSlug ? `${base}/audit/${shooterSlug}` : `${base}/shooters?pick=audit`}
-          icon={<Crosshair className="size-[15px]" />}
-          collapsed={collapsed}
-          disabled={!hasFootage}
-          disabledHint={footageHint}
-        >
-          Audit
-        </SidebarLink>
-        <SidebarLink
-          to={shooterSlug ? `${base}/coach/${shooterSlug}` : `${base}/shooters?pick=coach`}
-          icon={<ClipboardCheck className="size-[15px]" />}
-          collapsed={collapsed}
-          disabled={!hasFootage}
-          disabledHint={footageHint}
-        >
-          Coach
-        </SidebarLink>
-        <SidebarLink
-          to={`${base}/shooters`}
-          icon={<Users className="size-[15px]" />}
-          count={shooterCount}
-          badgeKind="count"
-          collapsed={collapsed}
-        >
-          Shooters
-        </SidebarLink>
-        <SidebarLink
-          to={shooterSlug ? `${base}/ingest/${shooterSlug}` : `${base}/shooters?pick=videos`}
-          icon={<Film className="size-[15px]" />}
-          collapsed={collapsed}
-        >
-          Videos
-        </SidebarLink>
-        <SidebarLink
-          to={`${base}/beep-review`}
-          icon={<Volume2 className="size-[15px]" />}
-          count={beepReviewPendingCount}
-          badgeKind="pending"
-          collapsed={collapsed}
-        >
-          Beep review
-        </SidebarLink>
-        <SidebarLink
-          to={shooterSlug ? `${base}/export/${shooterSlug}` : `${base}/shooters?pick=export`}
-          icon={<ArrowDownToLine className="size-[15px]" />}
-          collapsed={collapsed}
-          disabled={!hasFootage}
-          disabledHint={footageHint}
-        >
-          Export
-        </SidebarLink>
+        {matchNavItems({
+          base,
+          shooterSlug,
+          hasFootage,
+          shooterCount,
+          beepReviewPendingCount: beepReviewPendingCount ?? 0,
+          footageHint,
+        }).map((item) => (
+          <SidebarLink
+            key={item.key}
+            to={item.to}
+            icon={item.icon}
+            end={item.end}
+            collapsed={collapsed}
+            disabled={item.disabled}
+            disabledHint={item.disabledHint}
+            count={item.count}
+            badgeKind={item.badgeKind}
+          >
+            {item.label}
+          </SidebarLink>
+        ))}
       </div>
 
       {/* Stages -- hidden while collapsed. */}
