@@ -19,10 +19,12 @@ warning instead of failing):
         --stage 3 \\
         --output docs/screenshots/
 
-The script starts ``splitsmith ui --no-browser`` on a free port, polls
-``/api/health`` for the bound ``match_id`` + ``default_shooter_slug``,
-walks the canonical path-scoped routes under ``/match/{match_id}/...``,
-and terminates the server on exit (or on Ctrl+C).
+The script starts ``splitsmith ui --no-browser`` on a free port, then polls
+``/api/health`` for any HTTP 200 (the server is URL-scoped since the state
+refactor -- match identity lives in the URL prefix, not in health). It reads
+the ``match_id`` directly from ``<project>/match.json``, walks the canonical
+path-scoped routes under ``/match/{match_id}/...``, and terminates the server
+on exit (or on Ctrl+C).
 """
 
 from __future__ import annotations
@@ -73,6 +75,13 @@ SCREENSHOTS: list[tuple[str, str, str, bool]] = [
         "Per-stage / match export panel",
         False,
     ),
+    ("/match/{match_id}/results", "results.png", "Results overview (read-only)", False),
+    (
+        "/match/{match_id}/results/{slug}/{stage}",
+        "results-stage.png",
+        "Results stage playback",
+        False,
+    ),
 ]
 
 
@@ -87,22 +96,29 @@ def http_get_json(url: str, timeout: float = 5.0) -> dict[str, object]:
         return json.loads(r.read().decode())
 
 
-def wait_for_health(base_url: str, timeout_s: float = 30.0) -> dict[str, object]:
+def wait_for_health(base_url: str, timeout_s: float = 30.0) -> None:
+    """Poll until the server returns any HTTP 200 on ``/api/health``.
+
+    Since the state refactor the server is URL-scoped: match identity lives in
+    the ``/api/matches/{match_id}/`` URL prefix, not in the process. Health
+    always returns ``bound: false``; this check only confirms the server is
+    accepting requests.
+    """
     deadline = time.monotonic() + timeout_s
     last_err: Exception | None = None
     while time.monotonic() < deadline:
         try:
-            payload = http_get_json(f"{base_url}/api/health", timeout=2)
-            if payload.get("bound"):
-                return payload
+            http_get_json(f"{base_url}/api/health", timeout=2)
+            return
         except (urllib.error.URLError, ConnectionError, TimeoutError) as e:
             last_err = e
         time.sleep(0.3)
-    raise TimeoutError(f"splitsmith ui never reported bound=true at {base_url} (last error: {last_err})")
+    raise TimeoutError(f"splitsmith ui never responded at {base_url} (last error: {last_err})")
 
 
 @contextmanager
-def boot_ui(project: Path, port: int) -> Iterator[subprocess.Popen[bytes]]:
+def boot_ui(project: Path, port: int, log_path: Path) -> Iterator[subprocess.Popen[bytes]]:
+    log_file = log_path.open("wb")
     proc = subprocess.Popen(
         [
             "uv",
@@ -117,7 +133,7 @@ def boot_ui(project: Path, port: int) -> Iterator[subprocess.Popen[bytes]]:
             "--port",
             str(port),
         ],
-        stdout=subprocess.PIPE,
+        stdout=log_file,
         stderr=subprocess.STDOUT,
     )
     try:
@@ -128,10 +144,28 @@ def boot_ui(project: Path, port: int) -> Iterator[subprocess.Popen[bytes]]:
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+        log_file.close()
 
 
-def pick_default_stage(base_url: str, slug: str) -> int:
-    project = http_get_json(f"{base_url}/api/shooters/{slug}/project")
+def pick_default_shooter(base_url: str, match_id: str) -> str:
+    """Return the first shooter with stages_audited > 0, or the first shooter."""
+    data = http_get_json(f"{base_url}/api/matches/{match_id}/match/shooters")
+    shooters = data.get("shooters", []) or []
+    if not shooters:
+        raise RuntimeError("match has no registered shooters -- ingest something first")
+    for s in shooters:
+        if int(s.get("stages_audited", 0)) > 0:
+            return str(s["slug"])
+    return str(shooters[0]["slug"])
+
+
+def pick_default_stage(base_url: str, match_id: str, slug: str) -> int:
+    """Return the best stage for audit/compare/export screenshots.
+
+    Prefers an audited stage so the views render populated. Falls back to any
+    stage with videos, then any stage. Calls the URL-scoped project endpoint.
+    """
+    project = http_get_json(f"{base_url}/api/matches/{match_id}/shooters/{slug}/project")
     stages = project.get("stages", []) or []
     # Prefer an audited stage so the audit/compare/export views render
     # populated. Fall back to any stage with videos, then any stage.
@@ -158,7 +192,7 @@ def main() -> int:
         "--slug",
         type=str,
         default=None,
-        help="Shooter slug to feature. Defaults to /api/health.default_shooter_slug.",
+        help="Shooter slug to feature. Defaults to the first audited shooter.",
     )
     parser.add_argument(
         "--stage",
@@ -204,29 +238,45 @@ def main() -> int:
         )
         return 2
 
+    project = args.project.expanduser().resolve()
+
+    # Read match_id from match.json -- the URL-scoped server does not expose it
+    # via /api/health. Legacy single-shooter projects lack match.json entirely.
+    match_json = project / "match.json"
+    if not match_json.exists():
+        print(
+            "[capture] /api/health did not return a match_id -- this script "
+            "requires a match-bound project (legacy single-shooter projects "
+            "are no longer supported by the path-scoped URL scheme).",
+            file=sys.stderr,
+        )
+        return 1
+    match_id = json.loads(match_json.read_text())["match_id"]
+
     args.output.mkdir(parents=True, exist_ok=True)
     port = args.port or find_free_port()
     base_url = f"http://127.0.0.1:{port}"
 
-    with boot_ui(args.project, port) as proc:
+    # Server stdout goes to a log file so uvicorn access logs don't fill the
+    # 64 KB pipe buffer and wedge the process.
+    log_path = args.output / "server.log"
+    print(f"[capture] server log -> {log_path}")
+
+    with boot_ui(project, port, log_path) as proc:
         print(f"[capture] starting splitsmith ui on {base_url} ...")
         try:
-            health = wait_for_health(base_url)
+            wait_for_health(base_url)
         except TimeoutError as e:
-            tail = (proc.stdout.read() if proc.stdout else b"").decode(errors="replace")
-            print(f"[capture] {e}\n--- server output tail ---\n{tail}", file=sys.stderr)
+            # Read the log file (never proc.stdout.read() -- blocks to EOF on
+            # a live process and hangs).
+            try:
+                tail = log_path.read_text(errors="replace")[-4000:]
+            except OSError:
+                tail = "(log file unreadable)"
+            print(f"[capture] {e}\n--- server log tail ---\n{tail}", file=sys.stderr)
             return 1
 
-        match_id = health.get("match_id")
-        if not match_id:
-            print(
-                "[capture] /api/health did not return a match_id -- this script "
-                "requires a match-bound project (legacy single-shooter projects "
-                "are no longer supported by the path-scoped URL scheme).",
-                file=sys.stderr,
-            )
-            return 1
-        slug = args.slug or health.get("default_shooter_slug")
+        slug = args.slug or pick_default_shooter(base_url, match_id)
         if not slug:
             print(
                 "[capture] no shooter slug available (project has no registered "
@@ -234,13 +284,12 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        print(
-            f"[capture] bound to project: {health.get('project_name')!r} "
-            f"(match_id={match_id}, slug={slug})"
-        )
+        print(f"[capture] match_id={match_id}, slug={slug}")
 
-        stage = args.stage if args.stage is not None else pick_default_stage(base_url, str(slug))
+        stage = args.stage if args.stage is not None else pick_default_stage(base_url, match_id, str(slug))
         print(f"[capture] feature stage: {stage}")
+
+        _ = proc  # server is still running; referenced to suppress unused-var lint
 
         with sync_playwright() as p:
             browser = p.chromium.launch()
@@ -253,10 +302,12 @@ def main() -> int:
                 path = route.format(match_id=match_id, slug=slug, stage=stage)
                 url = base_url + path
                 target = args.output / filename
-                print(f"[capture] {filename:18} <- {path}")
+                print(f"[capture] {filename:22} <- {path}")
                 try:
-                    page.goto(url, wait_until="networkidle", timeout=15_000)
-                    page.wait_for_timeout(500)
+                    # domcontentloaded instead of networkidle: the SPA keeps
+                    # SSE connections open forever so networkidle never fires.
+                    page.goto(url, wait_until="domcontentloaded", timeout=15_000)
+                    page.wait_for_timeout(1500)
                     page.screenshot(path=str(target), full_page=False)
                 except Exception as e:
                     msg = f"[capture] failed: {description}: {e}"
