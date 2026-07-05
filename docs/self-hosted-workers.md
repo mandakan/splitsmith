@@ -13,11 +13,26 @@ The server prefers the home worker over Railway when it is online.
 
 ## Getting the image
 
-There is no published container image yet. Railway builds the image from the repository
-Dockerfile on each deploy, but does not push it to a public registry. Until an image is
-published at `ghcr.io/mandakan/splitsmith`, the home box must build locally.
+The image is published to GitHub Container Registry by the `Publish image (GHCR)`
+workflow. Tags:
 
-**Option A - local build (works today):**
+- `:edge` - rebuilt on every push to `main`; matches what staging runs.
+- `:latest` and `:X.Y.Z` - published when a release is cut; `:latest` matches production.
+
+Images are multi-arch (linux/amd64 and linux/arm64), so they run natively on x86
+servers and ARM boxes.
+
+**Option A - pull from registry (recommended):**
+
+```bash
+docker pull ghcr.io/mandakan/splitsmith:latest   # or :edge to match staging
+```
+
+Use that reference wherever `<IMAGE>` appears below. (The package must be public
+for an unauthenticated pull; if the pull asks for credentials, the package is
+still private - make it public in the GitHub package settings, one-time.)
+
+**Option B - local build:**
 
 ```bash
 git clone https://github.com/mandakan/splitsmith.git
@@ -26,14 +41,6 @@ docker build -t splitsmith:local .
 ```
 
 Use `splitsmith:local` wherever `<IMAGE>` appears below.
-
-**Option B - pull from registry (once published):**
-
-```bash
-docker pull ghcr.io/mandakan/splitsmith:latest
-```
-
-Use `ghcr.io/mandakan/splitsmith:latest` wherever `<IMAGE>` appears below.
 
 The register dialog on the server shows a command with `SPLITSMITH_AGENT_IMAGE` as the
 image tag. If you built locally, replace that tag with `splitsmith:local` before running
