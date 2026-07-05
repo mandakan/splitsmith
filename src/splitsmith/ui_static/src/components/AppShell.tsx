@@ -36,6 +36,12 @@ export function AppShell() {
   // Hide the sidebar entirely so the screen reads as a single-purpose
   // tool instead of "audit screen with broken navigation".
   const fixtureMode = pathname.startsWith("/review");
+  // /admin/* surfaces (worker fleet, etc.) are project-agnostic: they
+  // manage server-wide state, not a bound project. In hosted mode the
+  // server boots unbound, so they must be exempt from the bind guard
+  // below or they flash and bounce to /pick. Unlike fixtureMode we keep
+  // the sidebar so the admin can navigate back out.
+  const bindExempt = fixtureMode || pathname.startsWith("/admin");
 
   // Sidebar collapse state. Persisted in localStorage so the user's
   // choice survives page reloads. Pages that benefit from the extra
@@ -70,7 +76,7 @@ export function AppShell() {
   // flicker through /pick on bound boots.
   const [health, setHealth] = useState<ServerHealth | null>(null);
   useEffect(() => {
-    if (fixtureMode) return;
+    if (bindExempt) return;
     let alive = true;
     api
       .getHealth()
@@ -85,9 +91,9 @@ export function AppShell() {
     return () => {
       alive = false;
     };
-  }, [fixtureMode]);
+  }, [bindExempt]);
 
-  if (!fixtureMode && health && !health.bound) {
+  if (!bindExempt && health && !health.bound) {
     return <Navigate to="/pick" replace />;
   }
 
