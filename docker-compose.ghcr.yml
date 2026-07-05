@@ -1,0 +1,30 @@
+# Overlay that runs the PUBLISHED image instead of building from source.
+#
+# The base docker-compose.yml builds the splitsmith + worker services from the
+# local Dockerfile (dev / the `pytest -m docker` smoke). This overlay swaps that
+# build for the image published to GHCR, so you can run the hosted stack without
+# a local build:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
+#
+# Pin a tag with SPLITSMITH_IMAGE_TAG (default `latest`; `edge` tracks main):
+#
+#   SPLITSMITH_IMAGE_TAG=edge docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
+#
+# It reuses everything else from the base (bundled Postgres + MinIO, the same
+# env), so this is "run the release image locally", not a production deployment.
+# Real production is Railway + Neon + R2; see docs/. For self-hosting the server
+# on your own box you would externalise Postgres/object storage/secrets, which
+# this overlay deliberately does not do.
+#
+# `build: !reset null` requires Docker Compose v2.24+ (it drops the base build
+# config so the image is used and pulled on `up`).
+
+services:
+  splitsmith:
+    build: !reset null
+    image: ghcr.io/mandakan/splitsmith:${SPLITSMITH_IMAGE_TAG:-latest}
+
+  worker:
+    build: !reset null
+    image: ghcr.io/mandakan/splitsmith:${SPLITSMITH_IMAGE_TAG:-latest}

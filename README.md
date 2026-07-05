@@ -116,6 +116,14 @@ cd splitsmith
 docker build -t splitsmith:local .
 ```
 
+To run the whole hosted stack (server, worker, and bundled Postgres + MinIO) from the published image, layer the GHCR overlay onto the base compose file:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d   # SPLITSMITH_IMAGE_TAG=edge tracks main
+```
+
+`docker-compose.yml` on its own builds from source (the dev / test stack); the overlay swaps that build for the released image. This runs the release locally with bundled dependencies - it is not a production deployment (production is Railway + Neon + R2).
+
 The container is for the server and worker roles, not the desktop `ui` workflow. For that, use the PyPI install above so the app has native access to your video files and Final Cut Pro.
 
 ### Option 3: from source (required for contributors)
