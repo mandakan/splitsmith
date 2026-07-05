@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/mandakan/splitsmith/compare/v0.8.3...v0.8.4) (2026-07-05)
+
+
+### Bug Fixes
+
+* hosted ingest shooter scoping and video counts ([#563](https://github.com/mandakan/splitsmith/issues/563)) ([53cf27c](https://github.com/mandakan/splitsmith/commit/53cf27c5f3f087e24d148ea61e512d7d28bfd73d))
+
 ## [0.8.3](https://github.com/mandakan/splitsmith/compare/v0.8.2...v0.8.3) (2026-07-05)
 
 
