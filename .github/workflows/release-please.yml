@@ -47,3 +47,30 @@ jobs:
       id-token: write
       contents: read
     secrets: inherit
+
+  publish-image:
+    # Same auto-publish path for the container image. Chained here rather than
+    # left to the `tags: v*` push event, which release-please's GITHUB_TOKEN
+    # tag does not trigger. release_tag drives the :X.Y.Z / :X.Y / :latest tags.
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/publish-image.yml
+    with:
+      release_tag: ${{ needs.release-please.outputs.tag_name }}
+    permissions:
+      contents: read
+      packages: write
+    secrets: inherit
+
+  deploy-prod:
+    # And the production Railway deploy. Same reason it is chained rather than
+    # left to the `release: published` event (GITHUB_TOKEN release does not
+    # trigger it). Runs after the image publishes so prod never leads the image.
+    needs: [release-please, publish-image]
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: ./.github/workflows/deploy-app.yml
+    with:
+      environment: production
+    permissions:
+      contents: read
+    secrets: inherit
