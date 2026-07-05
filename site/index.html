@@ -1206,6 +1206,19 @@ splitsmith ui"><span class="comment"># Install from PyPI and launch the UI</span
       </button>
     </div>
 
+    <p class="snippet-alt">Running a server, worker, or self-hosted agent? Pull the published image from GHCR - same image, the subcommand picks the role:</p>
+
+    <div class="snippet">
+<pre class="quickstart" data-copy="docker pull ghcr.io/mandakan/splitsmith:latest
+docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d"><span class="comment"># Server / worker roles - :edge tracks main, :X.Y.Z pins a release</span>
+<span class="prompt">$</span> <span class="kw">docker</span> pull ghcr.io/mandakan/splitsmith:latest
+<span class="comment"># Or run the whole stack (server, worker, Postgres, MinIO) from the release</span>
+<span class="prompt">$</span> <span class="kw">docker</span> compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d</pre>
+      <button class="copy-btn" type="button" aria-label="Copy commands">
+        <span class="copy-label">Copy</span>
+      </button>
+    </div>
+
     <p class="snippet-alt">Building from source instead? Clone, sync, and build the UI:</p>
 
     <div class="snippet">
