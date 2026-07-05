@@ -881,6 +881,26 @@ function HostedUploadBody({
   // User-selected coverage keyed by filename. Pre-filled from suggestion.
   const [coverageByFilename, setCoverageByFilename] = useState<Record<string, number[]>>({});
 
+  // Queue-pump plumbing. ``pumpingRef`` is a re-entrancy lock so the
+  // pump effect doesn't kick off the next file when the current one
+  // flips queued -> uploading (that mutates ``uploads``, which the
+  // effect depends on). ``pumpTick`` nudges the pump after a file
+  // finishes and the lock is released. ``activeControllerRef`` is
+  // aborted on unmount so an interrupted multipart upload best-effort
+  // aborts in R2 instead of stranding staged parts.
+  const pumpingRef = useRef(false);
+  const activeControllerRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+  const [pumpTick, setPumpTick] = useState(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      activeControllerRef.current?.abort();
+    };
+  }, []);
+
   // Initial list -- so the surface opens with a real "you've already
   // uploaded X" view instead of looking empty until the operator
   // touches something.
@@ -941,41 +961,37 @@ function HostedUploadBody({
     [],
   );
 
-  // Pump the queue: for every upload still in ``queued``, kick off the
-  // upload. Runs serially per file (one XHR at a time) so a slow uplink
-  // doesn't get starved by concurrent multi-hundred-MB transfers. The
-  // browser opens one TCP connection per upload anyway and S3
-  // backpressures the rest.
+  // Pump the queue one file at a time (one XHR active) so a slow uplink
+  // isn't starved by concurrent multi-hundred-MB transfers.
+  //
+  // The lock is load-bearing: starting a file flips it queued ->
+  // uploading, which mutates ``uploads`` and re-runs this effect.
+  // Without the lock the re-run kicks off the *next* file too, and an
+  // earlier version's cleanup then set a ``cancelled`` flag on the
+  // in-flight upload -- swallowing every progress and done update, so
+  // every bar sat at 0% and the button never left "Uploading..." even
+  // though the bytes were landing in R2. We now abort ONLY on a real
+  // unmount or the per-row Cancel button, never on a pump re-run.
   //
   // No client-side hashing: footage runs to many GB, and hashing the
   // whole file in the browser (one ``arrayBuffer`` + ``crypto.subtle``)
-  // blocks/OOMs the tab. The server computes its own digest on receipt,
-  // so the integrity check lives there.
+  // blocks/OOMs the tab. The server computes its own digest on receipt.
   useEffect(() => {
+    if (pumpingRef.current) return;
     const next = uploads.find((u) => u.status === "queued");
     if (!next) return;
-    let cancelled = false;
+    pumpingRef.current = true;
 
     void (async () => {
       const controller = new AbortController();
-      updateOne(next.id, {
-        status: "uploading",
-        bytesSent: 0,
-        controller,
-      });
+      activeControllerRef.current = controller;
+      updateOne(next.id, { status: "uploading", bytesSent: 0, controller });
       try {
         await api.uploadRawFile(next.file, {
           signal: controller.signal,
-          onProgress: (loaded) => {
-            if (cancelled) return;
-            updateOne(next.id, { bytesSent: loaded });
-          },
+          onProgress: (loaded) => updateOne(next.id, { bytesSent: loaded }),
         });
-        if (cancelled) return;
-        updateOne(next.id, {
-          status: "done",
-          bytesSent: next.file.size,
-        });
+        updateOne(next.id, { status: "done", bytesSent: next.file.size });
         await refreshExisting();
         // After upload completes, fetch a coverage suggestion using the
         // client-side probe data. Non-fatal: coverage stays empty if this
@@ -988,7 +1004,7 @@ function HostedUploadBody({
               duration_s: probe.duration_s,
             })
             .then((s) => {
-              if (cancelled || s.covers_stages.length === 0) return;
+              if (s.covers_stages.length === 0) return;
               const suggestion = s.covers_stages;
               setSuggestionByFilename((prev) => ({
                 ...prev,
@@ -1006,21 +1022,23 @@ function HostedUploadBody({
             });
         }
       } catch (err) {
-        if (cancelled) return;
         if (err instanceof ApiError && err.detail === "upload cancelled") {
           updateOne(next.id, { status: "cancelled" });
-          return;
+        } else {
+          const msg = err instanceof ApiError ? err.detail : String(err);
+          updateOne(next.id, { status: "error", errorMessage: msg });
         }
-        const msg = err instanceof ApiError ? err.detail : String(err);
-        updateOne(next.id, { status: "error", errorMessage: msg });
+      } finally {
+        activeControllerRef.current = null;
+        pumpingRef.current = false;
+        // The status writes above re-ran this effect while the lock was
+        // still held (early return), so nudge it once more to pick up
+        // the next queued file after the lock is released.
+        if (mountedRef.current) setPumpTick((t) => t + 1);
       }
     })();
-
-    return () => {
-      cancelled = true;
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uploads.length, uploads.find((u) => u.status === "queued")?.id]);
+  }, [uploads, pumpTick]);
 
   const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) enqueue(e.target.files);
@@ -1091,6 +1109,19 @@ function HostedUploadBody({
   const inFlight = uploads.some(
     (u) => u.status === "queued" || u.status === "uploading",
   );
+
+  // Warn before the tab is closed / reloaded / navigated away while
+  // uploads are still running. The queue lives only in memory with no
+  // resume, so a stray navigation loses in-flight and queued files.
+  useEffect(() => {
+    if (!inFlight) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [inFlight]);
 
   // Escape / focus trap / restore; Escape locked while uploads run.
   useDialogFocus(true, panelRef, onClose, { disableEscape: inFlight });
