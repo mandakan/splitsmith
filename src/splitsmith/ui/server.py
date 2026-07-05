@@ -5879,6 +5879,22 @@ def create_app(
                     "local mode keeps videos on disk under the project root"
                 ),
             )
+        # Map each already-attached storage path to the shooter that claims
+        # it, so the ingest "available uploads" list can hide/grey objects a
+        # shooter in this match already owns (#562). Best-effort: only under a
+        # match context (the SPA routes this through /api/matches/{id}/...);
+        # bare/legacy calls leave ``attached_to`` null. First claimant wins so
+        # the label is stable.
+        attached_by: dict[str, str] = {}
+        try:
+            _, match = _resolve_match_context()
+        except HTTPException:
+            match = None
+        if match is not None:
+            for sh_slug in match.shooters:
+                for rv in state.shooter_project(sh_slug).raw_videos:
+                    attached_by.setdefault(rv.storage_path, sh_slug)
+
         entries: list[dict[str, Any]] = []
         for obj in storage.list("raw/"):
             entries.append(
@@ -5890,6 +5906,7 @@ def create_app(
                         obj.last_modified.isoformat() if obj.last_modified is not None else None
                     ),
                     "etag": obj.etag,
+                    "attached_to": attached_by.get(obj.path),
                 }
             )
         # Newest first. ``last_modified`` is None on backends that don't
@@ -6165,6 +6182,31 @@ def create_app(
 
         project = state.shooter_project(slug)
         root = state.shooter_root(slug)
+
+        # A raw object is one shooter's footage. The hosted ``raw/`` pool is
+        # shared per-user with no filesystem-enforced owner (unlike the
+        # desktop layout), so guard here against attaching an object that
+        # another shooter in this match already claims, otherwise the same
+        # upload gets duplicated across shooters (#562). Legacy single-shooter
+        # layouts raise ``not_a_match`` and have no siblings, so treat the
+        # match lookup as best-effort.
+        try:
+            _, match = _resolve_match_context()
+        except HTTPException:
+            match = None
+        if match is not None:
+            for other_slug in match.shooters:
+                if other_slug == slug:
+                    continue
+                if state.shooter_project(other_slug).find_raw_video(storage_path) is not None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "error": "already_attached_to_shooter",
+                            "shooter": other_slug,
+                            "storage_path": storage_path,
+                        },
+                    )
 
         # Preserve the caller's declared order; remove duplicates but do not sort.
         covers = list(dict.fromkeys(body.covers_stages or []))
@@ -10489,6 +10531,18 @@ def create_app(
                 g["video_count"] += 1
                 g["stages"].add(stage.stage_number)
                 total_videos += 1
+        # Attached-but-unassigned footage counts too. A hosted upload that
+        # was attached without stage coverage (or any video the operator
+        # dropped before assigning it to a stage) lives in
+        # ``unassigned_videos``, disjoint from ``stages[].videos`` (see
+        # ``MatchProject.move_video``). Without this the overview reported
+        # "NO FOOTAGE YET" for a shooter that already had N videos attached.
+        # These carry no camera metadata yet, so they only bump the total,
+        # not the per-camera ``groups`` breakdown.
+        for video in legacy.unassigned_videos:
+            if video.role == "ignored":
+                continue
+            total_videos += 1
         cameras = [
             ShooterCameraInfo(
                 group_key=f"{k[0] or ''}|{k[1] or ''}|{k[2] or ''}",

@@ -1332,6 +1332,12 @@ export interface RawUploadEntry {
   size: number;
   last_modified: string | null;
   etag: string | null;
+  /** Slug of the shooter that has already attached this object in the
+   *  current match, or null if unattached. A raw object belongs to one
+   *  shooter, so the ingest UI hides uploads owned by a different shooter
+   *  (attach also rejects them server-side with 409). Null outside a match
+   *  context. (#562) */
+  attached_to?: string | null;
 }
 
 /** One ``raw_videos[]`` manifest entry on ``match.json`` (doc 05).
