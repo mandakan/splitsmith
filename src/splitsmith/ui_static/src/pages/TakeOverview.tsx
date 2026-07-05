@@ -728,7 +728,7 @@ function WindowHandle({
       className={cn(
         "group pointer-events-auto absolute inset-y-0 w-2.5 cursor-ew-resize touch-none outline-none",
         edge === "start" ? "left-0 -translate-x-1/2" : "right-0 translate-x-1/2",
-        "focus-visible:ring-2 focus-visible:ring-ring",
+        "focus-visible:ring-2 focus-visible:ring-led",
       )}
     >
       <span

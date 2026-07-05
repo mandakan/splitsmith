@@ -1554,7 +1554,7 @@ export function Audit() {
       <div className="space-y-4">
         <h1 className="text-2xl font-semibold tracking-tight">Audit</h1>
         <Card>
-          <CardContent className="flex items-center gap-2 py-6 text-muted-foreground">
+          <CardContent className="flex items-center gap-2 py-6 text-muted">
             <Loader2 className="size-4 animate-spin" /> Loading project...
           </CardContent>
         </Card>
@@ -2180,10 +2180,10 @@ function SaveToast({ status }: { status: SaveStatus }) {
   let tone = "";
   if (status.kind === "saving") {
     label = "Saving audit...";
-    tone = "bg-card text-foreground";
+    tone = "bg-surface text-ink";
   } else if (status.kind === "saved") {
     label = "Audit saved";
-    tone = "bg-status-complete/10 text-foreground border-status-complete/40";
+    tone = "bg-status-complete/10 text-ink border-status-complete/40";
   } else if (status.kind === "error") {
     label = `Save failed: ${status.message}`;
     tone = "bg-destructive/10 text-destructive border-destructive/40";

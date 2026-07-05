@@ -123,20 +123,20 @@ export function HelpOverlay({ open, onClose, mode }: HelpOverlayProps) {
     >
       <div
         aria-hidden
-        className="absolute inset-0 bg-foreground/40 backdrop-blur-sm"
+        className="absolute inset-0 bg-ink/40 backdrop-blur-sm"
         onClick={onClose}
       />
       <div
         ref={panelRef}
         className={cn(
-          "relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-border bg-card text-card-foreground shadow-xl",
+          "relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-rule bg-surface text-ink shadow-xl",
           "p-6",
         )}
       >
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             <h2 className="text-lg font-semibold tracking-tight">Keyboard shortcuts</h2>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted">
               Press <Kbd>?</Kbd> any time to toggle this help.
             </p>
           </div>
@@ -152,7 +152,7 @@ export function HelpOverlay({ open, onClose, mode }: HelpOverlayProps) {
         <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
           {grouped.map((section) => (
             <section key={section.title}>
-              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
                 {section.title}
               </h3>
               <dl className="space-y-1.5">
@@ -163,7 +163,7 @@ export function HelpOverlay({ open, onClose, mode }: HelpOverlayProps) {
                         <Kbd key={j}>{k}</Kbd>
                       ))}
                     </dt>
-                    <dd className="text-right text-sm text-muted-foreground">
+                    <dd className="text-right text-sm text-muted">
                       {row.desc}
                     </dd>
                   </div>
@@ -180,7 +180,7 @@ export function HelpOverlay({ open, onClose, mode }: HelpOverlayProps) {
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="inline-flex min-w-[1.5rem] items-center justify-center rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.7rem] font-medium leading-none">
+    <kbd className="inline-flex min-w-[1.5rem] items-center justify-center rounded border border-rule bg-muted px-1.5 py-0.5 font-mono text-[0.7rem] font-medium leading-none">
       {children}
     </kbd>
   );

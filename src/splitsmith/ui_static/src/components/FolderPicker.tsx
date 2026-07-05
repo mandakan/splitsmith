@@ -286,19 +286,19 @@ export function FolderPicker({
         "flex flex-col gap-3",
         shell === "modal"
           ? "min-h-0 flex-1"
-          : "rounded-lg border border-border bg-card",
+          : "rounded-lg border border-rule bg-surface",
         shell !== "modal" && (mode === "compact" ? "p-3" : "p-4"),
       )}
     >
       <PathBar path={path} onChange={(p) => void load(p)} disabled={busy} />
 
-      <div className="flex flex-wrap items-center gap-1 text-sm text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-1 text-sm text-muted">
         {breadcrumb.map((seg, i) => (
           <span key={`${seg.path}-${i}`} className="flex items-center gap-1">
             {i > 0 ? <ChevronRight className="size-3" /> : null}
             <button
               type="button"
-              className="rounded px-1.5 py-0.5 font-mono text-xs hover:bg-accent hover:text-accent-foreground"
+              className="rounded px-1.5 py-0.5 font-mono text-xs hover:bg-surface-3 hover:text-ink"
               onClick={() => void load(seg.path)}
               disabled={busy}
             >
@@ -318,7 +318,7 @@ export function FolderPicker({
           />
         </aside>
 
-        <div className="relative min-h-[12rem] rounded-md border border-border bg-background">
+        <div className="relative min-h-[12rem] rounded-md border border-rule bg-bg">
           {/* When ``busy && listing`` (we're navigating into a slow
               folder while an old listing is still on screen), overlay a
               translucent spinner instead of swapping the whole panel.
@@ -326,23 +326,23 @@ export function FolderPicker({
               is coming. The first-load spinner case below renders
               directly when there's no listing yet. */}
           {busy && listing ? (
-            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-background/70 backdrop-blur-[1px]">
-              <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-bg/70 backdrop-blur-[1px]">
+              <Loader2 className="size-5 animate-spin text-muted" />
             </div>
           ) : null}
           {busy && !listing ? (
-            <div className="flex h-full items-center justify-center gap-2 p-6 text-sm text-muted-foreground">
+            <div className="flex h-full items-center justify-center gap-2 p-6 text-sm text-muted">
               <Loader2 className="size-4 animate-spin" />
               <span>Reading folder...</span>
             </div>
           ) : error ? (
             <div className="p-4 text-sm text-destructive">{error}</div>
           ) : !listing ? null : dirEntries.length === 0 && videoEntries.length === 0 ? (
-            <div className="p-4 text-sm text-muted-foreground">Empty folder.</div>
+            <div className="p-4 text-sm text-muted">Empty folder.</div>
           ) : (
             <>
               <SortHeader mode={sortMode} onChange={setSortMode} />
-              <ul className="max-h-80 divide-y divide-border overflow-y-auto">
+              <ul className="max-h-80 divide-y divide-rule overflow-y-auto">
               {dirEntries.map((entry) => {
                 const childPath = path ? joinPath(path, entry.name) : entry.name;
                 const inWindow = isInMatchWindow(entry.mtime, matchWindow);
@@ -351,7 +351,7 @@ export function FolderPicker({
                     <button
                       type="button"
                       className={cn(
-                        "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground",
+                        "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-surface-3 hover:text-ink",
                         inWindow &&
                           "border-l-2 border-l-status-info bg-status-info/5",
                       )}
@@ -360,11 +360,11 @@ export function FolderPicker({
                       title={inWindow ? "Modified during the match window" : undefined}
                     >
                       <span className="flex min-w-0 items-center gap-2">
-                        <Folder className="size-4 shrink-0 text-muted-foreground" />
+                        <Folder className="size-4 shrink-0 text-muted" />
                         <span className="truncate">{entry.name}</span>
                       </span>
                       {entry.video_count ? (
-                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1 text-xs text-muted">
                           <Film className="size-3" />
                           {entry.video_count}
                         </span>
@@ -416,7 +416,7 @@ export function FolderPicker({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2 text-xs text-muted">
           {videosHere > 0 ? (
             <span className="inline-flex items-center gap-1">
               <Film className="size-3" />
@@ -454,7 +454,7 @@ export function FolderPicker({
             </button>
           ) : null}
           {filesDisabled && filesDisabledReason ? (
-            <span className="text-muted-foreground">{filesDisabledReason}</span>
+            <span className="text-muted">{filesDisabledReason}</span>
           ) : null}
         </div>
         <div className="flex gap-2">
@@ -575,7 +575,7 @@ function SuggestedStartsSidebar({
         if (items.length === 0) return null;
         return (
           <div key={g.title} className="space-y-1">
-            <div className="px-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70">
+            <div className="px-1 text-[10px] font-medium uppercase tracking-wider text-muted/70">
               {g.title}
             </div>
             {items.map((s) => (
@@ -583,8 +583,8 @@ function SuggestedStartsSidebar({
                 key={s.path}
                 type="button"
                 className={cn(
-                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent hover:text-accent-foreground",
-                  currentPath === s.path && "bg-accent text-accent-foreground",
+                  "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-surface-3 hover:text-ink",
+                  currentPath === s.path && "bg-surface-3 text-ink",
                 )}
                 onClick={() => onPick(s.path)}
                 disabled={disabled}
@@ -661,8 +661,8 @@ function VideoRowMulti({
     >
       <label
         className={cn(
-          "flex cursor-pointer items-center justify-between gap-2 border-l-2 border-l-transparent px-3 py-2 text-sm hover:bg-accent/40",
-          checked && "bg-accent/30",
+          "flex cursor-pointer items-center justify-between gap-2 border-l-2 border-l-transparent px-3 py-2 text-sm hover:bg-surface-3/40",
+          checked && "bg-surface-3/30",
           inMatchWindow && !checked && "border-l-status-info bg-status-info/5",
           inMatchWindow && checked && "border-l-status-info",
           disabledReason && "cursor-not-allowed opacity-50 hover:bg-transparent",
@@ -678,16 +678,16 @@ function VideoRowMulti({
         <span className="flex min-w-0 items-center gap-2">
           <input
             type="checkbox"
-            className="size-4 accent-primary"
+            className="size-4 accent-led"
             checked={checked}
             onChange={onToggle}
             disabled={busy}
             aria-label={`Select ${entry.name}`}
           />
-          <Film className="size-4 shrink-0 text-muted-foreground" />
+          <Film className="size-4 shrink-0 text-muted" />
           <span className="truncate font-mono text-xs">{entry.name}</span>
         </span>
-        <span className="flex shrink-0 items-center gap-3 text-xs text-muted-foreground tabular-nums">
+        <span className="flex shrink-0 items-center gap-3 text-xs text-muted tabular-nums">
           {entry.mtime != null ? <span>{formatMtime(entry.mtime)}</span> : null}
           {entry.duration != null ? <span>{formatDuration(entry.duration)}</span> : null}
           {entry.size_bytes != null ? <span>{formatBytes(entry.size_bytes)}</span> : null}
@@ -717,7 +717,7 @@ function ThumbnailFloat({ anchor, src, alt }: { anchor: DOMRect; src: string; al
     <div
       role="presentation"
       style={{ position: "fixed", top, left, width: W, zIndex: 50 }}
-      className="pointer-events-none rounded-md border border-border bg-popover p-1 shadow-xl"
+      className="pointer-events-none rounded-md border border-rule bg-surface-2 p-1 shadow-xl"
     >
       <img src={src} alt={`${alt} thumbnail`} className="w-full rounded" />
     </div>
@@ -777,11 +777,11 @@ function SortHeader({
     "date-asc": <ArrowUpNarrowWide className="size-3.5" />,
   };
   return (
-    <div className="flex items-center justify-end gap-2 border-b border-border px-2 py-1 text-[11px] text-muted-foreground">
+    <div className="flex items-center justify-end gap-2 border-b border-rule px-2 py-1 text-[11px] text-muted">
       <span>Sort:</span>
       <button
         type="button"
-        className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent hover:text-accent-foreground"
+        className="flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-surface-3 hover:text-ink"
         onClick={() => onChange(cycle[mode])}
         title="Click to cycle: Name -> Date (newest) -> Date (oldest)"
       >
@@ -863,7 +863,7 @@ function PathBar({
     >
       <input
         type="text"
-        className="flex h-9 flex-1 rounded-md border border-input bg-background px-3 py-1 font-mono text-xs shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+        className="flex h-9 flex-1 rounded-md border border-rule bg-bg px-3 py-1 font-mono text-xs shadow-sm transition-colors placeholder:text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led disabled:cursor-not-allowed disabled:opacity-50"
         placeholder="/path/to/folder"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}

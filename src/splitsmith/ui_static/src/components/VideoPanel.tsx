@@ -304,7 +304,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
 
     if (videos.length === 0) {
       return (
-        <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
+        <div className="rounded-md border border-dashed p-6 text-sm text-muted">
           No video assigned to this stage.
         </div>
       );
@@ -350,10 +350,10 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
                     }
                     className={cn(
                       "rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
                       selected
-                        ? "border-primary bg-primary text-primary-foreground"
-                        : "border-input bg-background hover:bg-accent",
+                        ? "border-led bg-led text-bg"
+                        : "border-rule bg-bg hover:bg-surface-3",
                       !usable && "cursor-not-allowed opacity-50",
                     )}
                   >
@@ -366,7 +366,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
               })}
             </div>
           ) : showGrid ? (
-            <span className="text-sm text-muted-foreground">
+            <span className="text-sm text-muted">
               Grid -- {syncableSecondaries.length + 1} cameras
             </span>
           ) : null}
@@ -382,10 +382,10 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
               }
               className={cn(
                 "ml-auto flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
                 gridMode
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-input bg-background hover:bg-accent",
+                  ? "border-led bg-led text-bg"
+                  : "border-rule bg-bg hover:bg-surface-3",
               )}
             >
               {gridMode ? (

@@ -79,13 +79,13 @@ export function RegisterWorkerDialog({ onClose }: RegisterWorkerDialogProps) {
     return (
       <div className="space-y-1">
         <div className="flex items-baseline gap-2">
-          <span className="font-mono text-xs text-muted-foreground">{index}.</span>
-          <span className="font-mono text-xs uppercase tracking-[0.08em] text-muted-foreground">
+          <span className="font-mono text-xs text-muted">{index}.</span>
+          <span className="font-mono text-xs uppercase tracking-[0.08em] text-muted">
             {title}
           </span>
         </div>
         <div className="flex items-start gap-2">
-          <pre className="min-w-0 flex-1 overflow-x-auto rounded border border-input bg-surface-2 px-3 py-2 font-mono text-xs whitespace-pre-wrap break-all">
+          <pre className="min-w-0 flex-1 overflow-x-auto rounded border border-rule bg-surface-2 px-3 py-2 font-mono text-xs whitespace-pre-wrap break-all">
             {command}
           </pre>
           <Button
@@ -102,7 +102,7 @@ export function RegisterWorkerDialog({ onClose }: RegisterWorkerDialogProps) {
             {copiedKey === key ? "Copied" : "Copy"}
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground">{note}</p>
+        <p className="text-xs text-muted">{note}</p>
       </div>
     );
   }
@@ -114,7 +114,7 @@ export function RegisterWorkerDialog({ onClose }: RegisterWorkerDialogProps) {
         aria-modal="true"
         aria-labelledby="register-worker-title"
         aria-describedby="register-worker-desc"
-        className="fixed inset-0 z-modal flex items-center justify-center bg-background/70 p-4"
+        className="fixed inset-0 z-modal flex items-center justify-center bg-bg/70 p-4"
         onClick={onClose}
       >
         <Card
@@ -152,7 +152,7 @@ export function RegisterWorkerDialog({ onClose }: RegisterWorkerDialogProps) {
                   <div className="flex flex-col gap-1">
                     <label
                       htmlFor="worker-name"
-                      className="font-mono text-xs uppercase tracking-[0.08em] text-muted-foreground"
+                      className="font-mono text-xs uppercase tracking-[0.08em] text-muted"
                     >
                       Name
                     </label>
@@ -163,7 +163,7 @@ export function RegisterWorkerDialog({ onClose }: RegisterWorkerDialogProps) {
                       onChange={(e) => setName(e.target.value)}
                       disabled={creating}
                       placeholder="my-worker-01"
-                      className="rounded border border-input bg-background px-3 py-1.5 text-sm disabled:opacity-50"
+                      className="rounded border border-rule bg-bg px-3 py-1.5 text-sm disabled:opacity-50"
                       aria-required="true"
                     />
                   </div>
@@ -171,7 +171,7 @@ export function RegisterWorkerDialog({ onClose }: RegisterWorkerDialogProps) {
                   <div className="flex flex-col gap-1">
                     <label
                       htmlFor="worker-priority"
-                      className="font-mono text-xs uppercase tracking-[0.08em] text-muted-foreground"
+                      className="font-mono text-xs uppercase tracking-[0.08em] text-muted"
                     >
                       Priority
                     </label>
@@ -181,10 +181,10 @@ export function RegisterWorkerDialog({ onClose }: RegisterWorkerDialogProps) {
                       value={priority}
                       onChange={(e) => setPriority(e.target.value)}
                       disabled={creating}
-                      className="w-24 rounded border border-input bg-background px-3 py-1.5 text-sm disabled:opacity-50"
+                      className="w-24 rounded border border-rule bg-bg px-3 py-1.5 text-sm disabled:opacity-50"
                       aria-required="true"
                     />
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-muted">
                       Higher priority workers are selected first.
                     </p>
                   </div>
@@ -213,16 +213,16 @@ export function RegisterWorkerDialog({ onClose }: RegisterWorkerDialogProps) {
                 </div>
 
                 <div className="space-y-1">
-                  <div className="font-mono text-xs uppercase tracking-[0.08em] text-muted-foreground">
+                  <div className="font-mono text-xs uppercase tracking-[0.08em] text-muted">
                     Registration token
                   </div>
-                  <div className="break-all rounded border border-input bg-surface-2 px-3 py-2 font-mono text-xs">
+                  <div className="break-all rounded border border-rule bg-surface-2 px-3 py-2 font-mono text-xs">
                     {result.registration_token}
                   </div>
                 </div>
 
                 <div className="space-y-3">
-                  <div className="font-mono text-xs uppercase tracking-[0.08em] text-muted-foreground">
+                  <div className="font-mono text-xs uppercase tracking-[0.08em] text-muted">
                     Run the worker on your host
                   </div>
                   {renderStep(
@@ -251,7 +251,7 @@ export function RegisterWorkerDialog({ onClose }: RegisterWorkerDialogProps) {
             ) : null}
           </CardContent>
 
-          <div className="flex justify-end border-t border-border p-4">
+          <div className="flex justify-end border-t border-rule p-4">
             <Button type="button" variant="ghost" onClick={onClose}>
               {step === "success" ? "Done" : "Cancel"}
             </Button>

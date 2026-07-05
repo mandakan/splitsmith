@@ -64,7 +64,7 @@ export function ConfirmDialog({
       aria-modal="true"
       aria-labelledby="confirm-dialog-title"
       aria-describedby={body ? "confirm-dialog-body" : undefined}
-      className="fixed inset-0 z-modal flex items-center justify-center bg-background/70 p-4"
+      className="fixed inset-0 z-modal flex items-center justify-center bg-bg/70 p-4"
       onClick={onCancel}
     >
       <Card
@@ -83,7 +83,7 @@ export function ConfirmDialog({
         </CardHeader>
         <CardContent className="space-y-4 text-sm">
           {body ? (
-            <div id="confirm-dialog-body" className="text-muted-foreground">
+            <div id="confirm-dialog-body" className="text-muted">
               {body}
             </div>
           ) : null}
@@ -93,7 +93,7 @@ export function ConfirmDialog({
               {checkboxes.map((cb) => (
                 <label
                   key={cb.key}
-                  className="flex cursor-pointer items-start gap-2 rounded-md border border-border p-2 hover:bg-muted/40"
+                  className="flex cursor-pointer items-start gap-2 rounded-md border border-rule p-2 hover:bg-muted/40"
                 >
                   <input
                     type="checkbox"
@@ -105,7 +105,7 @@ export function ConfirmDialog({
                   <div className="flex-1 space-y-0.5">
                     <span className="font-medium">{cb.label}</span>
                     {cb.help ? (
-                      <p className="text-xs text-muted-foreground">{cb.help}</p>
+                      <p className="text-xs text-muted">{cb.help}</p>
                     ) : null}
                   </div>
                 </label>
@@ -113,7 +113,7 @@ export function ConfirmDialog({
             </div>
           ) : null}
 
-          <div className="flex justify-end gap-2 border-t border-border pt-3">
+          <div className="flex justify-end gap-2 border-t border-rule pt-3">
             <Button variant="ghost" onClick={onCancel} disabled={busy}>
               {cancelLabel}
             </Button>

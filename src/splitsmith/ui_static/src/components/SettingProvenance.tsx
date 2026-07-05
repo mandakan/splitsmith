@@ -25,14 +25,14 @@ const SOURCE_LABEL: Record<AutomationProvenanceSource, string> = {
 const SOURCE_CLASSES: Record<AutomationProvenanceSource, string> = {
   // Project override -- the user actively chose this for the project.
   // Stand out a bit to make the override visible at a glance.
-  project: "border-primary/40 bg-primary/10 text-primary",
+  project: "border-led/40 bg-led/10 text-led",
   // CLI override -- transient and dev-only; same accent as project so
   // the pattern reads consistently.
-  cli: "border-primary/40 bg-primary/10 text-primary",
+  cli: "border-led/40 bg-led/10 text-led",
   // Global / default come from layers the user usually doesn't see.
   // Muted styling keeps them present-but-quiet.
-  global: "border-border bg-muted text-muted-foreground",
-  default: "border-border bg-muted text-muted-foreground",
+  global: "border-rule bg-muted text-muted",
+  default: "border-rule bg-muted text-muted",
 };
 
 function formatValue(value: boolean | number | null | undefined): string {

@@ -101,6 +101,13 @@
    * surfaces (low-confidence beep, prereq blocked) keep amber. */
   --color-led-text:     #FFB4B4;
 
+  /* Danger semantic. Distinct token from identity red (--color-led) so a
+   * future designer can differentiate error/"missing thing" surfaces from
+   * brand accents with one swap. Currently the same LED red; used by empty
+   * detection state, "no beep found", failed jobs, destructive buttons. */
+  --color-destructive:            #FF2D2D;
+  --color-destructive-foreground: #F4F4F5;
+
   /* Status */
   --color-live:         #FBBF24;
   --color-live-glow:    rgba(251, 191, 36, 0.30);
@@ -151,27 +158,13 @@
   --color-shooter-rj-glow:   rgba(96, 165, 250, 0.32);
   --color-shooter-rj-tint:   rgba(96, 165, 250, 0.10);
 
-  /* === Legacy aliases (deprecated; surfaces migrate under #321-#331) ==== */
-
-  /* Old shadcn semantic tokens -> Shot Timer equivalents */
-  --color-background:           #0A0B0D;        /* was light/dark; now bg */
-  --color-foreground:           #F4F4F5;        /* ink */
-  --color-card:                 #14171C;        /* surface */
-  --color-card-foreground:      #F4F4F5;
-  --color-popover:              #1A1E24;        /* surface-2 */
-  --color-popover-foreground:   #F4F4F5;
-  --color-primary:              #FF2D2D;        /* led */
-  --color-primary-foreground:   #0A0B0D;
-  --color-secondary:            #1A1E24;        /* surface-2 */
-  --color-secondary-foreground: #F4F4F5;
-  --color-muted-foreground:     #8E939B;        /* keep "muted" semantics for old code */
-  --color-accent:               #232831;        /* surface-3 */
-  --color-accent-foreground:    #F4F4F5;
-  --color-destructive:          #FF2D2D;        /* led; same red for danger */
-  --color-destructive-foreground: #F4F4F5;
-  --color-border:               #262B33;        /* rule */
-  --color-input:                #262B33;
-  --color-ring:                 #FF2D2D;        /* led, focus glow */
+  /* === Legacy aliases (deprecated; surfaces migrate under #321-#331) ====
+   * shadcn semantic aliases (bg/fg, card, popover, primary, secondary,
+   * the muted foreground, accent, border/input, ring) removed in
+   * #525 -- callers now use the canonical Shot Timer classes directly
+   * (bg, surface, surface-2/3, ink, muted, rule, led). destructive was
+   * promoted to a real danger-semantic token above. What remains below is
+   * the splitsmith legacy palette, still aliased pending its own migration. */
 
   /* Old splitsmith-specific tokens -> Shot Timer equivalents.
    * Foregrounds chosen for AA contrast on the new bg. */

@@ -71,7 +71,7 @@ function statusBadgeClass(status: LinkStatus): string {
     case "missing_link":
       return "border-status-warning/40 bg-status-warning/10 text-status-warning";
     case "not_a_symlink":
-      return "border-border bg-muted text-muted-foreground";
+      return "border-rule bg-muted text-muted";
   }
 }
 
@@ -198,7 +198,7 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
       role="dialog"
       aria-modal="true"
       aria-labelledby="relink-dialog-title"
-      className="fixed inset-0 z-modal flex items-center justify-center bg-background/70 p-4"
+      className="fixed inset-0 z-modal flex items-center justify-center bg-bg/70 p-4"
       onClick={onClose}
     >
       <Card
@@ -234,19 +234,19 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
               </span>
             ) : null}
             {counts.plain > 0 ? (
-              <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-muted-foreground">
+              <span className="rounded-full border border-rule bg-muted px-2 py-0.5 text-muted">
                 {counts.plain} plain
               </span>
             ) : null}
             {appliedCount > 0 ? (
-              <span className="ml-auto text-xs text-muted-foreground">
+              <span className="ml-auto text-xs text-muted">
                 Repointed {appliedCount} link{appliedCount === 1 ? "" : "s"} this session.
               </span>
             ) : null}
           </div>
 
           {pickerOpen ? (
-            <div className="rounded-md border border-border p-2">
+            <div className="rounded-md border border-rule p-2">
               <FolderPicker
                 slug={slug}
                 onSelect={async (path) => {
@@ -272,7 +272,7 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
                 {scannedRoots.length === 0 ? "Pick search folder..." : "Add another folder..."}
               </Button>
               {scannedRoots.length > 0 ? (
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs text-muted">
                   Scanned: {scannedRoots.join(" · ")}
                 </span>
               ) : null}
@@ -288,7 +288,7 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
 
           <div className="space-y-1">
             {rows.length === 0 ? (
-              <div className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
+              <div className="rounded-md border border-dashed border-rule p-3 text-xs text-muted">
                 No registered videos in this project.
               </div>
             ) : (
@@ -309,8 +309,8 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
             )}
           </div>
         </CardContent>
-        <div className="flex items-center justify-between gap-2 border-t border-border p-4">
-          <div className="text-xs text-muted-foreground">
+        <div className="flex items-center justify-between gap-2 border-t border-rule p-4">
+          <div className="text-xs text-muted">
             {eligibleForApply.length === 0
               ? searchRoot
                 ? "Pick a candidate per row to enable apply."
@@ -350,7 +350,7 @@ function RelinkRow({ row, onPick, disabled }: RelinkRowProps) {
   const isPlain = link.status === "not_a_symlink";
 
   return (
-    <div className="rounded-md border border-border p-2">
+    <div className="rounded-md border border-rule p-2">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-mono text-xs">{link.name}</span>
         <span
@@ -365,7 +365,7 @@ function RelinkRow({ row, onPick, disabled }: RelinkRowProps) {
           </span>
         ) : null}
       </div>
-      <div className="mt-1 break-all text-xs text-muted-foreground">
+      <div className="mt-1 break-all text-xs text-muted">
         {link.current_target ? (
           <>
             <Link2 className="mr-1 inline size-3" />
@@ -379,13 +379,13 @@ function RelinkRow({ row, onPick, disabled }: RelinkRowProps) {
         )}
       </div>
       {isPlain ? (
-        <div className="mt-2 text-xs text-muted-foreground">
+        <div className="mt-2 text-xs text-muted">
           Regular file -- not a symlink. Relink can't help here. (See the
           ingest copy-mode work in #245.)
         </div>
       ) : candidates.length === 0 ? (
         scan ? (
-          <div className="mt-2 text-xs text-muted-foreground">
+          <div className="mt-2 text-xs text-muted">
             Not found under the last search folder. Try another root.
           </div>
         ) : null
@@ -399,7 +399,7 @@ function RelinkRow({ row, onPick, disabled }: RelinkRowProps) {
             onChange={(e) => onPick(e.target.checked ? candidates[0] : null)}
           />
           <div className="flex-1 break-all text-xs">
-            <span className="text-muted-foreground">-&gt;</span> {candidates[0]}
+            <span className="text-muted">-&gt;</span> {candidates[0]}
           </div>
         </div>
       ) : (
@@ -411,7 +411,7 @@ function RelinkRow({ row, onPick, disabled }: RelinkRowProps) {
             {candidates.map((path) => (
               <label
                 key={path}
-                className="flex cursor-pointer items-start gap-2 rounded-md border border-border p-1 hover:bg-muted/40"
+                className="flex cursor-pointer items-start gap-2 rounded-md border border-rule p-1 hover:bg-muted/40"
               >
                 <input
                   type="radio"

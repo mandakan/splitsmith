@@ -64,10 +64,10 @@ function FilterChip({ label, glyph, active, count, onToggle }: FilterChipProps) 
         // The checkbox is sr-only so the label needs to surface its focus
         // ring for keyboard nav. ``has-[:focus-visible]`` keeps mouse
         // clicks (no :focus-visible) from showing a stray ring.
-        "has-[:focus-visible]:outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
+        "has-[:focus-visible]:outline-none has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-led",
         active
-          ? "border-input bg-accent text-foreground"
-          : "border-border/40 bg-background text-muted-foreground line-through",
+          ? "border-rule bg-surface-3 text-ink"
+          : "border-rule/40 bg-bg text-muted line-through",
       )}
     >
       <input
@@ -93,7 +93,7 @@ export interface FilterBarProps {
 export function FilterBar({ filters, counts, onChange }: FilterBarProps) {
   return (
     <div role="group" aria-label="Marker filters" className="flex flex-wrap items-center gap-2">
-      <span className="text-xs text-muted-foreground">show</span>
+      <span className="text-xs text-muted">show</span>
       <FilterChip
         label="detected"
         glyph="detected"
@@ -185,7 +185,7 @@ export function ZoomControls({ zoom, onZoomChange, className }: ZoomControlsProp
       >
         <Plus className="size-3" />
       </Button>
-      <span className="font-mono text-xs tabular-nums text-muted-foreground" aria-live="polite">
+      <span className="font-mono text-xs tabular-nums text-muted" aria-live="polite">
         {display}
       </span>
     </div>

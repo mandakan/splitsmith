@@ -132,7 +132,7 @@ export function HitlQueuePanel({
             Failed to load HITL queue: {error}
           </p>
         ) : items.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-muted">
             All beeps confirmed. Detect-beep results above the
             confidence threshold land here when the auto-trust gate
             doesn't fire.
@@ -170,7 +170,7 @@ function HitlQueueRow({
         className={`size-4 shrink-0 ${
           item.kind === "beep_missing"
             ? "text-destructive"
-            : "text-muted-foreground"
+            : "text-muted"
         }`}
         aria-hidden="true"
       />
@@ -187,14 +187,14 @@ function HitlQueueRow({
           </Badge>
           {item.confidence !== null ? (
             <span
-              className="text-xs tabular-nums text-muted-foreground"
+              className="text-xs tabular-nums text-muted"
               title="Calibrated detector confidence in [0, 1]"
             >
               conf {item.confidence.toFixed(2)}
             </span>
           ) : null}
         </div>
-        <p className="mt-0.5 text-xs text-muted-foreground">
+        <p className="mt-0.5 text-xs text-muted">
           {item.suggested_action}
         </p>
       </div>
