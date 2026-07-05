@@ -84,13 +84,18 @@ To check logs:
 docker logs -f splitsmith-agent
 ```
 
-On successful registration you will see lines like:
+On the first successful start you will see lines like:
 
 ```
-registered worker <id>
-connecting to channel ...
-connected, waiting for wake events
+splitsmith agent: connecting to https://my.splitsmith.app (state-dir=/data, concurrency=1)
+INFO [splitsmith.agent] registered as worker 01J...
+INFO [splitsmith.agent] connected to wake channel; waiting for wake events
 ```
+
+Later starts log `using cached registration for worker <id>` instead of
+`registered`. When a job arrives you will see `wake received; draining queued
+jobs`, the drain output, then `drain finished; waiting for next wake`. Between
+jobs the agent is idle and quiet - that is expected.
 
 ## Agent lifecycle
 

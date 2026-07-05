@@ -244,7 +244,7 @@ export function RegisterWorkerDialog({ onClose }: RegisterWorkerDialogProps) {
                     3,
                     "Check logs",
                     LOGS_COMMAND,
-                    "A healthy agent stays quiet until a job arrives, then logs a drain. A 404 here means the worker was deleted.",
+                    "You should see 'connected to wake channel; waiting for wake events'. The agent is quiet between jobs. A 404 means the worker was deleted.",
                   )}
                 </div>
               </>
