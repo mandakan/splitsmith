@@ -189,6 +189,16 @@ COPY --chown=splitsmith:splitsmith alembic ./alembic
 # Baked models -> the runtime config dir's models/ cache.
 COPY --from=builder --chown=splitsmith:splitsmith /opt/splitsmith /home/splitsmith/.splitsmith
 
+# Agent state dir. ``splitsmith agent`` (self-hosted worker) persists
+# agent.json here (default SPLITSMITH_AGENT_STATE_DIR=/data). Pre-create it
+# owned by the runtime user so the documented named-volume mount
+# (``-v splitsmith-agent:/data``) inherits splitsmith ownership: a fresh
+# named volume adopts the ownership of the image directory it covers. Without
+# this the mount point auto-creates root-owned and the non-root user cannot
+# write agent.json - the agent would exchange (and burn) its one-time
+# registration token, then crash on the write.
+RUN mkdir -p /data && chown splitsmith:splitsmith /data
+
 USER splitsmith
 
 ENV PATH="/app/.venv/bin:${PATH}" \
