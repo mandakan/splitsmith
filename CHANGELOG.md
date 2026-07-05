@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/mandakan/splitsmith/compare/v0.8.1...v0.8.2) (2026-07-05)
+
+
+### Bug Fixes
+
+* **ui:** exempt /admin surfaces from the project-bind redirect ([#553](https://github.com/mandakan/splitsmith/issues/553)) ([574d334](https://github.com/mandakan/splitsmith/commit/574d334514c4751a10be1979cbbeda64c130ed74))
+
 ## [0.8.1](https://github.com/mandakan/splitsmith/compare/v0.8.0...v0.8.1) (2026-07-05)
 
 
