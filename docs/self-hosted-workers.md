@@ -44,8 +44,13 @@ the command.
 1. Sign in to the splitsmith UI with an admin account.
 2. Go to **Admin > Workers** in the navigation.
 3. Click **Register worker**, enter a name (e.g., "home-server"), and confirm.
-4. The dialog shows a one-time registration token and a `docker run` command.
-   Copy the full command - the token is shown only once.
+4. The dialog shows a one-time registration token and a numbered sequence of
+   copy-paste commands: build the image, start the agent, and check its logs.
+   Each has its own copy button. Copy the start-agent command now - the token
+   it contains is shown only once.
+
+The commands in the dialog are the same ones described below; the dialog fills
+in your server URL and the registration token for you.
 
 ## Running the agent
 

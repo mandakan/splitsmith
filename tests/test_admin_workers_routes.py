@@ -183,6 +183,8 @@ def test_admin_create_docker_command_contains_url_image_token(admin_client) -> N
     assert PUBLIC_URL in cmd
     assert token in cmd
     assert "agent" in cmd
+    # named container so the UI's `docker logs -f splitsmith-agent` step resolves
+    assert "--name splitsmith-agent" in cmd
     # default image
     assert "ghcr.io/mandakan/splitsmith" in cmd
 

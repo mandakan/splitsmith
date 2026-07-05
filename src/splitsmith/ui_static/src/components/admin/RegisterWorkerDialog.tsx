@@ -24,11 +24,16 @@ export function RegisterWorkerDialog({ onClose }: RegisterWorkerDialogProps) {
   const [creating, setCreating] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [result, setResult] = useState<CreateWorkerResponse | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const panelRef = useRef<HTMLDivElement | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useDialogFocus(true, panelRef, onClose);
+
+  const BUILD_COMMAND =
+    "git clone https://github.com/mandakan/splitsmith.git && " +
+    "cd splitsmith && docker build -t splitsmith:local .";
+  const LOGS_COMMAND = "docker logs -f splitsmith-agent";
 
   async function handleCreate() {
     setFormError(null);
@@ -53,16 +58,53 @@ export function RegisterWorkerDialog({ onClose }: RegisterWorkerDialogProps) {
     }
   }
 
-  async function handleCopy() {
-    if (!result) return;
+  async function handleCopy(key: string, text: string) {
     try {
-      await navigator.clipboard.writeText(result.docker_command);
-      setCopied(true);
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
       if (copyTimerRef.current != null) clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
+      copyTimerRef.current = setTimeout(() => setCopiedKey(null), 2000);
     } catch {
       // Clipboard access denied.
     }
+  }
+
+  function renderStep(
+    key: string,
+    index: number,
+    title: string,
+    command: string,
+    note: string,
+  ) {
+    return (
+      <div className="space-y-1">
+        <div className="flex items-baseline gap-2">
+          <span className="font-mono text-xs text-muted-foreground">{index}.</span>
+          <span className="font-mono text-xs uppercase tracking-[0.08em] text-muted-foreground">
+            {title}
+          </span>
+        </div>
+        <div className="flex items-start gap-2">
+          <pre className="min-w-0 flex-1 overflow-x-auto rounded border border-input bg-surface-2 px-3 py-2 font-mono text-xs whitespace-pre-wrap break-all">
+            {command}
+          </pre>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label={
+              copiedKey === key
+                ? `${title} command copied to clipboard`
+                : `Copy ${title} command to clipboard`
+            }
+            onClick={() => void handleCopy(key, command)}
+          >
+            {copiedKey === key ? "Copied" : "Copy"}
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">{note}</p>
+      </div>
+    );
   }
 
   return (
@@ -179,28 +221,31 @@ export function RegisterWorkerDialog({ onClose }: RegisterWorkerDialogProps) {
                   </div>
                 </div>
 
-                <div className="space-y-1">
+                <div className="space-y-3">
                   <div className="font-mono text-xs uppercase tracking-[0.08em] text-muted-foreground">
-                    Docker command
+                    Run the worker on your host
                   </div>
-                  <div className="flex items-start gap-2">
-                    <pre className="min-w-0 flex-1 overflow-x-auto rounded border border-input bg-surface-2 px-3 py-2 font-mono text-xs whitespace-pre-wrap break-all">
-                      {result.docker_command}
-                    </pre>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      aria-label={
-                        copied
-                          ? "Docker command copied to clipboard"
-                          : "Copy docker command to clipboard"
-                      }
-                      onClick={() => void handleCopy()}
-                    >
-                      {copied ? "Copied" : "Copy"}
-                    </Button>
-                  </div>
+                  {renderStep(
+                    "build",
+                    1,
+                    "Build image",
+                    BUILD_COMMAND,
+                    "One-time. Skip if you already have the image (for example pulled from a registry).",
+                  )}
+                  {renderStep(
+                    "run",
+                    2,
+                    "Start agent",
+                    result.docker_command,
+                    "Uses the server's configured image. If you built locally, replace it with your local tag (for example splitsmith:local).",
+                  )}
+                  {renderStep(
+                    "logs",
+                    3,
+                    "Check logs",
+                    LOGS_COMMAND,
+                    "A healthy agent stays quiet until a job arrives, then logs a drain. A 404 here means the worker was deleted.",
+                  )}
                 </div>
               </>
             ) : null}
