@@ -8,6 +8,11 @@
 * **ui:** surface admin Workers link in AccountChip, not AppShell ([#551](https://github.com/mandakan/splitsmith/issues/551)) ([75837a0](https://github.com/mandakan/splitsmith/commit/75837a0939b0b6b5cb40d9280ed876c37877321e))
 
 
+### Refactors
+
+* **ui:** migrate legacy shadcn token aliases to Shot Timer tokens ([#552](https://github.com/mandakan/splitsmith/issues/552)) ([2eb4a66](https://github.com/mandakan/splitsmith/commit/2eb4a66a43094732aa5379adea71cad794df60e9))
+
+
 ### Build / CI
 
 * run image publish and prod deploy automatically on release ([#548](https://github.com/mandakan/splitsmith/issues/548)) ([7044af6](https://github.com/mandakan/splitsmith/commit/7044af6703bce709c4a22e36c6931693e7f7e847))
