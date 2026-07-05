@@ -7732,7 +7732,7 @@ def test_download_export_file_serves_local_and_guards_traversal(tmp_path: Path) 
 # ---------------------------------------------------------------------------
 
 
-def test_boot_retrigger_lifespan_runs_on_app_startup() -> None:
+def test_hosted_boot_lifespan_runs_on_app_startup(monkeypatch) -> None:
     """create_app registers boot_retrigger so it actually runs at startup.
 
     Regression: app.add_event_handler was removed in starlette 1.3; the
@@ -7743,7 +7743,12 @@ def test_boot_retrigger_lifespan_runs_on_app_startup() -> None:
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    from splitsmith.ui.server import _boot_retrigger_lifespan
+    from splitsmith.ui.server import _hosted_boot_lifespan
+
+    # Railway env config must not leak into this test - without it the
+    # lifespan's seeding leg stays off and only the retrigger leg matters.
+    for var in ("SPLITSMITH_WORKER_TRIGGER_TOKEN", "SPLITSMITH_WORKER_SERVICE_ID"):
+        monkeypatch.delenv(var, raising=False)
 
     calls: list[str] = []
 
@@ -7752,15 +7757,17 @@ def test_boot_retrigger_lifespan_runs_on_app_startup() -> None:
 
     class _FakeState:
         boot_retrigger = staticmethod(fake_retrigger)
+        workers_store = None
 
     class _FakeStateNone:
         boot_retrigger = None
+        workers_store = None
 
     # Helper must return None when no hook is wired.
-    assert _boot_retrigger_lifespan(_FakeStateNone()) is None
+    assert _hosted_boot_lifespan(_FakeStateNone()) is None
 
     # Helper must return a lifespan that calls the hook on startup.
-    lifespan = _boot_retrigger_lifespan(_FakeState())
+    lifespan = _hosted_boot_lifespan(_FakeState())
     assert lifespan is not None
 
     app = FastAPI(lifespan=lifespan)
@@ -7768,3 +7775,36 @@ def test_boot_retrigger_lifespan_runs_on_app_startup() -> None:
         pass
 
     assert calls == ["ran"]
+
+
+def test_hosted_boot_lifespan_returned_for_seeding_alone(monkeypatch) -> None:
+    """The lifespan must exist when only the railway-row seeding applies
+    (boot_retrigger None), and it must run ensure_railway_row on startup -
+    a fresh deploy otherwise has an empty workers table and the wake path
+    is silently dead."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from splitsmith.ui.server import _hosted_boot_lifespan
+
+    monkeypatch.setenv("SPLITSMITH_WORKER_TRIGGER_TOKEN", "t")
+    monkeypatch.setenv("SPLITSMITH_WORKER_SERVICE_ID", "s")
+    monkeypatch.setenv("SPLITSMITH_WORKER_ENVIRONMENT_ID", "e")
+
+    calls: list[str] = []
+
+    class _FakeWorkersStore:
+        async def ensure_railway_row(self) -> None:
+            calls.append("seeded")
+
+    class _FakeState:
+        boot_retrigger = None
+        workers_store = _FakeWorkersStore()
+
+    lifespan = _hosted_boot_lifespan(_FakeState())
+    assert lifespan is not None
+
+    with TestClient(FastAPI(lifespan=lifespan)):
+        pass
+
+    assert calls == ["seeded"]

@@ -1150,6 +1150,7 @@ export interface AuthUser {
   id: string;
   email: string;
   display_name: string | null;
+  is_admin: boolean;
 }
 
 /** Saved SSI Scoreboard identity for the operator. Returned by
@@ -3315,7 +3316,66 @@ export const api = {
     request<void>(`/api/match/shares/${encodeURIComponent(shareId)}`, {
       method: "DELETE",
     }),
+
+  // Admin worker management. These paths are operator-global (/api/admin/...)
+  // and do not ride the match-scope prefix.
+
+  /** List all registered compute workers. */
+  adminListWorkers: () => request<WorkerListResponse>("/api/admin/workers"),
+
+  /** Register a new self-hosted worker. Returns the worker plus a one-time
+   *  registration token and the docker command to run. */
+  adminCreateWorker: (name: string, priority: number) =>
+    request<CreateWorkerResponse>("/api/admin/workers", {
+      method: "POST",
+      json: { name, priority },
+    }),
+
+  /** Update a worker's name, priority, or enabled state. */
+  adminUpdateWorker: (id: string, patch: WorkerPatch) =>
+    request<WorkerView>(`/api/admin/workers/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      json: patch,
+    }),
+
+  /** Delete a worker. 204 on success, 404 for unknown, 400 for Railway
+   *  workers (which cannot be deleted via the API). */
+  adminDeleteWorker: (id: string) =>
+    request<void>(`/api/admin/workers/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
 };
+
+/** One compute worker row, mirrored from the backend WorkerView. */
+export interface WorkerView {
+  id: string;
+  name: string;
+  kind: "self_hosted" | "railway";
+  enabled: boolean;
+  priority: number;
+  status: "online" | "offline" | "disabled" | "pending";
+  registered: boolean;
+  last_seen_at: string | null;
+  last_wake_at: string | null;
+  info: object | null;
+}
+
+export interface WorkerListResponse {
+  workers: WorkerView[];
+}
+
+export interface CreateWorkerResponse {
+  worker: WorkerView;
+  registration_token: string;
+  expires_at: string;
+  docker_command: string;
+}
+
+export interface WorkerPatch {
+  enabled?: boolean;
+  priority?: number;
+  name?: string;
+}
 
 export interface PromoteSnapResult {
   shot_number: number;

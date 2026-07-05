@@ -535,3 +535,42 @@ class ShareTokenRow(Base):
             f"<ShareTokenRow user_id={self.user_id!r} match_id={self.match_id!r} "
             f"revoked={self.revoked_at is not None}>"
         )
+
+
+class WorkerRow(Base):
+    """One compute-worker target (self-hosted box or the Railway service).
+
+    Operator infrastructure, not tenant data: no user_id column and not
+    under RLS - the multi-tenant table checklist does not apply. Tokens
+    are stored as sha256 hex digests (sessions precedent, NOT the raw
+    share_tokens one): a worker token bootstraps infra credentials, so a
+    DB leak must not yield usable tokens.
+
+    kind is "self_hosted" (registered via the admin UI) or "railway"
+    (a single row seeded at serve boot when the Railway launcher env
+    vars are present, so the Railway worker gets the same enabled and
+    priority knobs).
+    """
+
+    __tablename__ = "workers"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
+    name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    kind: Mapped[str] = mapped_column(String, nullable=False, default="self_hosted")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=10)
+    registration_token_hash: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    registered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    worker_token_hash: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_wake_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    info: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<WorkerRow id={self.id!r} name={self.name!r} kind={self.kind!r}>"

@@ -96,6 +96,8 @@ if TYPE_CHECKING:
     # so local mode stays free of the db (procrastinate/psycopg) dependency.
     from ..db import PostgresMatchStore, ProjectStateStore
     from ..db.share_tokens import ResolvedShare, ShareTokenStore
+    from ..db.workers import WorkersStore
+    from ..worker_channel import WakeChannelRegistry
 
 from fastapi import (
     Body,
@@ -110,7 +112,9 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import AwareDatetime, BaseModel, Field
 from starlette.background import BackgroundTask
@@ -671,6 +675,77 @@ class ShareListResponse(BaseModel):
     shares: list[ShareInfo]
 
 
+class WorkerRegisterRequest(BaseModel):
+    """Body for ``POST /api/workers/register`` (self-hosted worker bring-up)."""
+
+    token: str
+    info: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkerRegisterResponse(BaseModel):
+    """Successful registration: the long-lived worker token (plaintext, shown
+    exactly once) plus the connection material the worker daemon persists
+    locally (``AppState.worker_credentials``)."""
+
+    worker_id: str
+    worker_token: str
+    credentials: dict[str, Any]
+
+
+class WorkerView(BaseModel):
+    """One worker as returned by admin routes (Task 7).
+
+    ``status`` is derived at query time - not stored - so it reflects live
+    channel state and the Railway config presence without a separate field."""
+
+    id: str
+    name: str
+    kind: str
+    enabled: bool
+    priority: int
+    status: str  # "online" | "offline" | "pending" | "disabled"
+    registered: bool
+    last_seen_at: datetime | None
+    last_wake_at: datetime | None
+    info: dict[str, Any] | None
+
+
+class AdminWorkerListResponse(BaseModel):
+    """Response body for ``GET /api/admin/workers``."""
+
+    workers: list[WorkerView]
+
+
+class AdminCreateWorkerBody(BaseModel):
+    """Request body for ``POST /api/admin/workers``."""
+
+    name: str
+    priority: int = 10
+
+
+class AdminCreateWorkerResponse(BaseModel):
+    """Response body for ``POST /api/admin/workers``.
+
+    ``registration_token`` is the plaintext one-time token the operator
+    pastes into the worker box's bring-up command. It is shown exactly
+    once and not stored in plaintext anywhere."""
+
+    worker: WorkerView
+    registration_token: str
+    expires_at: str  # ISO-8601
+    docker_command: str
+
+
+class AdminPatchWorkerBody(BaseModel):
+    """Request body for ``PATCH /api/admin/workers/{worker_id}``.
+
+    All fields are optional; only supplied fields are updated."""
+
+    enabled: bool | None = None
+    priority: int | None = None
+    name: str | None = None
+
+
 # /api/* paths the auth gate lets through without resolving a user.
 # Anything else under /api/* requires ``state.auth.authenticate_request``
 # to return a non-None User -- see the ``_auth_gate`` middleware inside
@@ -685,6 +760,12 @@ _PUBLIC_API_PATHS: frozenset[str] = frozenset(
         # (The ``/auth/callback`` redemption is not under /api/*, so the
         # auth gate skips it by prefix.)
         "/api/v1/auth/begin",
+        # Self-hosted worker bring-up + wake channel: the registration /
+        # worker token in the request IS the auth (checked in the handlers,
+        # uniform 404 on any failure) - the session gate must not 401 a
+        # headless box that has no cookie jar.
+        "/api/workers/register",
+        "/api/workers/channel",
     }
 )
 
@@ -899,10 +980,28 @@ class AppState:
     # their defaults in local mode (no auth, no cookies).
     public_base_url: str | None = None
     cookie_secure: bool = False
+    # Lowercase email addresses granted admin access. Populated from
+    # ``SPLITSMITH_ADMIN_EMAILS`` by ``_apply_hosted_mode_wiring``; stays
+    # empty in local mode so nobody is admin there.
+    admin_emails: frozenset[str] = frozenset()
     # Hosted + launcher only: serve-boot pending-jobs re-check, registered
     # as a FastAPI startup handler by create_app. Runs on every cold start
     # (incl. each wake from Railway app sleeping).
     boot_retrigger: Callable[[], Awaitable[None]] | None = None
+    # Operator-scoped worker registry (self-hosted workers). ``None`` in
+    # local mode. Built over the RAW session factory - workers are operator
+    # infrastructure shared across tenants, not per-user data (no RLS; the
+    # unique token hash is the isolation boundary).
+    workers_store: WorkersStore | None = None
+    # Live SSE wake channels, one asyncio.Queue per connected self-hosted
+    # worker. ``None`` in local mode and on the headless worker process
+    # (which must never hold launcher capabilities); set by the non-worker
+    # hosted wiring together with the dispatcher that pushes into it.
+    wake_channels: WakeChannelRegistry | None = None
+    # Connection material returned by ``POST /api/workers/register``:
+    # database_url + public_url, plus the S3 sub-dict when the bucket is
+    # configured (``None`` otherwise). ``None`` in local mode.
+    worker_credentials: dict[str, Any] | None = None
     # Anonymous share-token resolver (public share links, issue #349). Set
     # only by hosted wiring; None in local mode. Built over the RAW
     # session_factory (not a tenant factory) because share_tokens is not
@@ -4130,6 +4229,11 @@ SPLITSMITH_DATABASE_URL_ENV = "SPLITSMITH_DATABASE_URL"
 # is the base of the magic-link callback URL and decides the session
 # cookie's Secure flag (Secure iff the scheme is https).
 SPLITSMITH_PUBLIC_URL_ENV = "SPLITSMITH_PUBLIC_URL"
+# Comma-separated list of email addresses granted admin access. Comparison
+# is case-insensitive. Unset or empty means nobody is admin (the default).
+# Parsed only in hosted mode by ``_apply_hosted_mode_wiring``; local mode
+# always has an empty frozenset and no admin path is exercised.
+SPLITSMITH_ADMIN_EMAILS_ENV = "SPLITSMITH_ADMIN_EMAILS"
 # Magic-link e-mail transport selector. Unset / "console" -> log the link
 # (docker / self-host). A provider name selects its HTTP sender. See
 # ``splitsmith.db.email.build_email_sender``.
@@ -4153,6 +4257,11 @@ SPLITSMITH_S3_SECRET_ACCESS_KEY_ENV = "SPLITSMITH_S3_SECRET_ACCESS_KEY"
 # prefix S3 storage uses.
 SPLITSMITH_PROJECTS_DIR_ENV = "SPLITSMITH_PROJECTS_DIR"
 SPLITSMITH_PROJECTS_DIR_DEFAULT = "/home/splitsmith/data"
+# Container image used in the docker_command hint returned by POST
+# /api/admin/workers.  Override via env to pin a specific tag or use a
+# private registry.
+SPLITSMITH_AGENT_IMAGE_ENV = "SPLITSMITH_AGENT_IMAGE"
+SPLITSMITH_AGENT_IMAGE_DEFAULT = "ghcr.io/mandakan/splitsmith:latest"
 
 
 class _HashingReader:
@@ -4251,10 +4360,13 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     )
     from ..db.share_tokens import ShareTokenStore
     from ..db.share_tokens import resolve_share_token as _resolve_share_token_fn
+    from ..db.workers import WorkersStore
     from ..queue import make_deferrer
+    from ..worker_channel import WakeChannelRegistry
     from ..worker_trigger import (
-        build_worker_launcher,
+        build_worker_dispatcher,
         make_boot_retrigger,
+        make_pending_jobs_counter,
         make_worker_active_checker,
         wrap_deferrer,
     )
@@ -4280,6 +4392,9 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # (https) gets Secure and docker / self-host on http does not -- one
     # source of truth, no separate knob to contradict it.
     state.cookie_secure = public_url.lower().startswith("https://")
+
+    raw_admin = os.environ.get(SPLITSMITH_ADMIN_EMAILS_ENV, "")
+    state.admin_emails = frozenset(e.strip().lower() for e in raw_admin.split(",") if e.strip())
 
     # ``pool_disabled=True`` because the hosted-mode boot path runs
     # multiple short-lived event loops (each worker thread's asyncio.run,
@@ -4314,23 +4429,52 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # (queue name from ``user_id``); the S3 client is stateless w.r.t. the
     # tenant (only the key prefix is per-user, see ``_tenant_s3_storage``).
     deferrer = make_deferrer(url)
+    # Operator-scoped worker registry over the RAW session factory (not a
+    # tenant factory): one fleet shared by the operator, no user_id, no RLS.
+    state.workers_store = WorkersStore(session_factory)
     # Scale-to-zero worker: only the API process is the enqueuer and the only
     # process that should be able to redeploy the worker. The worker must never
     # acquire launcher capabilities - redeploying itself would be circular and
     # today is only prevented by the env vars being absent on the worker service.
     # The guard below makes that invariant explicit in code.
     if not worker:
-        # Fires a one-shot worker run through the configured launcher after
-        # each defer, gated on the procrastinate_workers heartbeat so a live
-        # drain is never redeployed out from under its job, and re-checks for
-        # stranded jobs on every boot (see splitsmith.worker_trigger). No-op
-        # when the launcher env vars are unset - local / docker-compose runs
-        # an always-on worker instead.
-        worker_launcher = build_worker_launcher(worker_active=make_worker_active_checker(session_factory))
+        # Wakes a worker through the priority dispatcher after each defer,
+        # gated on the procrastinate_workers heartbeat so a live drain is
+        # never redeployed out from under its job, and re-checks for
+        # stranded jobs on every boot (see splitsmith.worker_trigger).
+        # Disabled via SPLITSMITH_WORKER_LAUNCHER=none - local /
+        # docker-compose runs an always-on worker instead.
+        state.wake_channels = WakeChannelRegistry()
+        worker_launcher = build_worker_dispatcher(
+            state.workers_store,
+            state.wake_channels,
+            worker_active=make_worker_active_checker(session_factory),
+            pending_jobs=make_pending_jobs_counter(session_factory),
+        )
         if worker_launcher is not None:
             deferrer = wrap_deferrer(deferrer, worker_launcher)
             state.boot_retrigger = make_boot_retrigger(session_factory, worker_launcher)
     s3_client, s3_bucket = _build_hosted_s3_client()
+    if not worker:
+        # Connection material handed to a self-hosted worker by the register
+        # endpoint. The S3 sub-dict mirrors _build_hosted_s3_client's env
+        # normalization (which already failed loud above on a half-configured
+        # bucket), so the box connects to the same storage the API uses.
+        state.worker_credentials = {
+            "database_url": url,
+            "public_url": state.public_base_url,
+            "s3": (
+                {
+                    "bucket": s3_bucket,
+                    "endpoint_url": os.environ.get(SPLITSMITH_S3_ENDPOINT_URL_ENV, "").strip() or None,
+                    "region": os.environ.get(SPLITSMITH_S3_REGION_ENV, "").strip() or "auto",
+                    "access_key_id": os.environ.get(SPLITSMITH_S3_ACCESS_KEY_ID_ENV, "").strip(),
+                    "secret_access_key": os.environ.get(SPLITSMITH_S3_SECRET_ACCESS_KEY_ENV, "").strip(),
+                }
+                if s3_bucket is not None
+                else None
+            ),
+        }
 
     def _build_tenant(user_id: str) -> TenantContext:
         # Every per-user store opens its sessions through a tenant-scoped
@@ -4482,23 +4626,126 @@ def _tenant_s3_storage(client: Any, bucket: str | None, user_id: str) -> Storage
     return S3Storage(bucket=bucket, prefix=f"users/{user_id}/", client=client)
 
 
-def _boot_retrigger_lifespan(state: Any) -> Any | None:
-    """Return a lifespan context manager that fires state.boot_retrigger on startup.
+async def _worker_channel_events(
+    store: WorkersStore,
+    registry: WakeChannelRegistry,
+    worker_id: str,
+    *,
+    disabled: bool,
+    boot_retrigger: Callable[[], Awaitable[None]] | None,
+    keepalive_seconds: float = 20.0,
+) -> AsyncIterator[str]:
+    """SSE frames for one worker's wake-channel connection.
 
-    Returns None when state.boot_retrigger is None so callers can pass the
+    Module-level (not a closure in create_app) so tests can drive it with a
+    fake store / short keepalive without streaming through the ASGI stack.
+
+    Contract with the worker daemon (Task 8): event names are exactly
+    ``wake`` / ``disabled`` / ``enabled`` / ``replaced``, data is always
+    ``{}``, and a ``: ka`` comment goes out after ``keepalive_seconds`` of
+    silence so proxies do not idle the connection out. When the worker's
+    row is disabled at connect time, ``disabled`` is sent first so the
+    daemon can park immediately instead of waiting for a wake that will
+    never come.
+    """
+    queue = registry.connect(worker_id)
+    try:
+        await store.touch_seen(worker_id)
+        if boot_retrigger is not None:
+            # A connect often ends an offline stretch; the (internally
+            # throttled) pending-jobs re-check closes the "jobs queued while
+            # the box was offline" gap without waiting for a fresh enqueue.
+            asyncio.create_task(boot_retrigger())
+        if disabled:
+            yield "event: disabled\ndata: {}\n\n"
+        while True:
+            try:
+                event = await asyncio.wait_for(queue.get(), timeout=keepalive_seconds)
+            except TimeoutError:
+                yield ": ka\n\n"
+                continue
+            yield f"event: {event}\ndata: {{}}\n\n"
+    finally:
+        registry.disconnect(worker_id, queue)
+        try:
+            await store.touch_seen(worker_id)
+        except Exception:
+            # Best-effort goodbye stamp: the client is already gone and the
+            # DB may be too.
+            pass
+
+
+def _derive_worker_status(record: Any, connected_ids: frozenset[str]) -> str:
+    """Derive the display status for a WorkerRecord.
+
+    The disabled state is authoritative: a disabled worker that happens to
+    have a live channel still shows as 'disabled' so the admin cannot
+    accidentally treat it as active. Order:
+    1. disabled (not enabled)
+    2. railway: online iff load_railway_config() is present
+    3. self_hosted: online if id in connected_ids
+    4. self_hosted: pending if not yet registered
+    5. offline
+    """
+    if not record.enabled:
+        return "disabled"
+    if record.kind == "railway":
+        from ..worker_trigger import load_railway_config
+
+        return "online" if load_railway_config() is not None else "offline"
+    if record.id in connected_ids:
+        return "online"
+    if not record.registered:
+        return "pending"
+    return "offline"
+
+
+def _to_worker_view(record: Any, connected_ids: frozenset[str]) -> WorkerView:
+    """Convert a WorkerRecord to the admin-facing WorkerView shape."""
+    return WorkerView(
+        id=record.id,
+        name=record.name,
+        kind=record.kind,
+        enabled=record.enabled,
+        priority=record.priority,
+        status=_derive_worker_status(record, connected_ids),
+        registered=record.registered,
+        last_seen_at=record.last_seen_at,
+        last_wake_at=record.last_wake_at,
+        info=record.info,
+    )
+
+
+def _hosted_boot_lifespan(state: Any) -> Any | None:
+    """Return a startup lifespan for the hosted API process, or None.
+
+    Two boot duties, both hosted-only:
+
+    - seed the singleton ``kind='railway'`` worker row when the Railway env
+      config is present - a fresh deploy otherwise has an empty ``workers``
+      table and the wake path is silently dead (idempotent; an existing
+      row's operator-set enabled/priority is preserved);
+    - fire the boot pending-jobs re-check (see ``make_boot_retrigger``).
+
+    Returns None only when neither piece applies, so callers can pass the
     result directly to FastAPI(lifespan=...) without branching.
     """
-    if state.boot_retrigger is None:
-        return None
+    from ..worker_trigger import load_railway_config
 
+    workers_store = state.workers_store if load_railway_config() is not None else None
     retrigger = state.boot_retrigger
+    if workers_store is None and retrigger is None:
+        return None
 
     @asynccontextmanager
     async def _lifespan(_app: Any) -> AsyncIterator[None]:
-        # Cold starts include every wake from Railway app sleeping, so a
-        # stranded queue job recovers on the next visit instead of waiting
-        # for the 6-hourly safety cron.
-        await retrigger()
+        if workers_store is not None:
+            await workers_store.ensure_railway_row()
+        if retrigger is not None:
+            # Cold starts include every wake from Railway app sleeping, so a
+            # stranded queue job recovers on the next visit instead of
+            # waiting for the 6-hourly safety cron.
+            await retrigger()
         yield
 
     return _lifespan
@@ -4577,7 +4824,7 @@ def create_app(
         title="splitsmith UI",
         description="Production UI backend (issue #11/#12).",
         version="0.1.0",
-        lifespan=_boot_retrigger_lifespan(state),
+        lifespan=_hosted_boot_lifespan(state),
     )
     # Stash on app.state so the uvicorn server wrapper in :func:`serve`
     # can read live job state when handling Ctrl-C: the signal handler
@@ -4799,6 +5046,18 @@ def create_app(
             status_code=503,
             content={"detail": {"code": "shutting_down", "message": str(exc)}},
         )
+
+    @app.exception_handler(RequestValidationError)
+    async def _worker_validation_gate(request: Request, exc: RequestValidationError) -> JSONResponse:
+        """Return the uniform 404 for malformed /api/workers/register bodies.
+
+        Any other path gets the default FastAPI 422 so existing validation
+        behavior is unchanged.  The worker register endpoint must not leak
+        its existence or expected shape via a 422.
+        """
+        if request.url.path == "/api/workers/register":
+            return JSONResponse(status_code=404, content={"detail": "not found"})
+        return await request_validation_exception_handler(request, exc)
 
     # Optimistic-locking conflict on a hosted state_docs save -> 409 so the
     # SPA can reload + retry. Registered only when the db layer imports
@@ -5120,6 +5379,73 @@ def create_app(
         if state.boot_retrigger is not None:
             asyncio.create_task(state.boot_retrigger())
         return HealthResponse(bound=False)
+
+    # ------------------------------------------------------------------
+    # Self-hosted workers: registration + SSE wake channel (issue: worker
+    # fleet self-hosting). Both paths are in _PUBLIC_API_PATHS - the token
+    # in the request is the auth, and every failure (local mode, unknown /
+    # expired / replayed token, bad Authorization header) returns the same
+    # opaque 404, the uniform-404 precedent from the share surface.
+    # ------------------------------------------------------------------
+
+    def _workers_not_found() -> JSONResponse:
+        return JSONResponse(status_code=404, content={"detail": "not found"})
+
+    @app.post("/api/workers/register", response_model=WorkerRegisterResponse)
+    async def workers_register(body: WorkerRegisterRequest) -> Any:
+        """Single-use registration-token exchange.
+
+        The box posts the registration token the operator created; on
+        success it gets the long-lived worker token plus the connection
+        material (DB URL, public URL, S3 credentials) it persists locally.
+        Unknown, expired, and replayed tokens are indistinguishable.
+        """
+        store = state.workers_store
+        if store is None or state.worker_credentials is None:
+            return _workers_not_found()
+        result = await store.register(body.token, body.info)
+        if result is None:
+            return _workers_not_found()
+        record, worker_token = result
+        return WorkerRegisterResponse(
+            worker_id=record.id,
+            worker_token=worker_token,
+            credentials=state.worker_credentials,
+        )
+
+    @app.get("/api/workers/channel")
+    async def workers_channel(request: Request) -> Response:
+        """Long-lived SSE stream a registered worker holds open for wakes.
+
+        Auth is the ``Authorization: Bearer <worker_token>`` header, parsed
+        manually (the session gate exempts this path). On connect the
+        worker's ``last_seen_at`` is stamped and the throttled boot
+        re-check fires so jobs queued while the box was offline get
+        dispatched immediately. Frame contract: see
+        :func:`_worker_channel_events`.
+        """
+        store = state.workers_store
+        registry = state.wake_channels
+        if store is None or registry is None:
+            return _workers_not_found()
+        scheme, _, bearer = request.headers.get("authorization", "").partition(" ")
+        token = bearer.strip()
+        if scheme.lower() != "bearer" or not token:
+            return _workers_not_found()
+        record = await store.authenticate(token)
+        if record is None:
+            return _workers_not_found()
+        return StreamingResponse(
+            _worker_channel_events(
+                store,
+                registry,
+                record.id,
+                disabled=not record.enabled,
+                boot_retrigger=state.boot_retrigger,
+            ),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     @app.get("/api/models/status")
     async def models_status() -> dict[str, Any]:
@@ -7446,8 +7772,11 @@ def create_app(
         user (id ``"local"``); hosted mode will resolve cookies to a
         real database user. The SPA reads this once on mount so the
         same code path works in both modes.
+
+        ``is_admin`` is derived from ``state.admin_emails`` at request
+        time; it is never stored on the user record itself.
         """
-        return user
+        return user.model_copy(update={"is_admin": user.email.lower() in state.admin_emails})
 
     @app.get("/api/me/jobs", response_model=list[Job])
     async def list_jobs(user: User = Depends(get_current_user)) -> list[Job]:
@@ -7499,6 +7828,125 @@ def create_app(
         if job is None:
             raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
         return job
+
+    # ----------------------------------------------------------------------
+    # Admin workers API (Task 7)
+    #
+    # Operator CRUD for the self-hosted worker fleet. All routes require
+    # admin (403 non-admin). In local mode workers_store is None so the
+    # combined gate returns 404 before the admin check fires.
+    # ----------------------------------------------------------------------
+
+    async def _gate_admin_workers(user: User = Depends(get_current_user)) -> User:
+        """Combined gate: 404 in local mode (no workers surface), 403 for non-admin.
+
+        Checks workers_store first so local mode returns 404 before the admin
+        check has a chance to return 403. Hosted non-admins still see 403.
+        """
+        if state.workers_store is None:
+            raise HTTPException(status_code=404, detail="not found")
+        if user.email.lower() not in state.admin_emails:
+            raise HTTPException(status_code=403, detail="admin access required")
+        return user.model_copy(update={"is_admin": True})
+
+    @app.get("/api/admin/workers", response_model=AdminWorkerListResponse)
+    async def _admin_list_workers(
+        _admin: User = Depends(_gate_admin_workers),
+    ) -> AdminWorkerListResponse:
+        """List all workers ordered by priority asc, name asc."""
+        store = state.workers_store
+        assert store is not None  # gate guarantees this
+        registry = state.wake_channels
+        connected = registry.connected_ids() if registry is not None else frozenset()
+        records = await store.list()
+        return AdminWorkerListResponse(workers=[_to_worker_view(r, connected) for r in records])
+
+    @app.post("/api/admin/workers", response_model=AdminCreateWorkerResponse)
+    async def _admin_create_worker(
+        body: AdminCreateWorkerBody,
+        _admin: User = Depends(_gate_admin_workers),
+    ) -> AdminCreateWorkerResponse:
+        """Create a pending self-hosted worker row and return the one-time registration token.
+
+        409 when a worker with the same name already exists. The
+        ``docker_command`` field is a ready-to-paste ``docker run`` invocation
+        for the operator; the ``agent`` subcommand is implemented in Task 8.
+        """
+        from sqlalchemy.exc import IntegrityError
+
+        store = state.workers_store
+        assert store is not None
+        try:
+            record, reg_token = await store.create_self_hosted(body.name, priority=body.priority)
+        except IntegrityError as exc:
+            raise HTTPException(status_code=409, detail="worker name already exists") from exc
+        registry = state.wake_channels
+        connected = registry.connected_ids() if registry is not None else frozenset()
+        image = os.environ.get(SPLITSMITH_AGENT_IMAGE_ENV, SPLITSMITH_AGENT_IMAGE_DEFAULT)
+        public_url = state.public_base_url or ""
+        docker_command = (
+            f"docker run -d --restart unless-stopped -v splitsmith-agent:/data "
+            f"{image} agent --server-url {public_url} --token {reg_token}"
+        )
+        expires_at = record.token_expires_at.isoformat() if record.token_expires_at is not None else ""
+        return AdminCreateWorkerResponse(
+            worker=_to_worker_view(record, connected),
+            registration_token=reg_token,
+            expires_at=expires_at,
+            docker_command=docker_command,
+        )
+
+    @app.patch("/api/admin/workers/{worker_id}", response_model=WorkerView)
+    async def _admin_patch_worker(
+        worker_id: str,
+        body: AdminPatchWorkerBody,
+        _admin: User = Depends(_gate_admin_workers),
+    ) -> WorkerView:
+        """Update mutable worker fields (enabled, priority, name).
+
+        When ``enabled`` changes value, pushes the corresponding event
+        (``"enabled"`` or ``"disabled"``) to a connected channel so the
+        worker daemon can react without waiting for the next keepalive.
+        """
+        store = state.workers_store
+        assert store is not None
+        current = await store.get(worker_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="not found")
+        updated = await store.update(worker_id, enabled=body.enabled, priority=body.priority, name=body.name)
+        if updated is None:
+            raise HTTPException(status_code=404, detail="not found")
+        registry = state.wake_channels
+        if registry is not None and body.enabled is not None and body.enabled != current.enabled:
+            event = "enabled" if body.enabled else "disabled"
+            registry.push(worker_id, event)  # best-effort; returns False if not connected
+        connected = registry.connected_ids() if registry is not None else frozenset()
+        return _to_worker_view(updated, connected)
+
+    @app.delete("/api/admin/workers/{worker_id}", status_code=204)
+    async def _admin_delete_worker(
+        worker_id: str,
+        _admin: User = Depends(_gate_admin_workers),
+    ) -> Response:
+        """Delete a self-hosted worker row.
+
+        Pushes ``"disabled"`` to a connected channel first (best-effort) so
+        the daemon parks before the row vanishes. Returns 400 for the
+        singleton railway row (cannot be deleted), 404 for an unknown id.
+        """
+        store = state.workers_store
+        assert store is not None
+        existing = await store.get(worker_id)
+        if existing is None:
+            raise HTTPException(status_code=404, detail="not found")
+        registry = state.wake_channels
+        if registry is not None:
+            registry.push(worker_id, "disabled")  # best-effort
+        deleted = await store.delete(worker_id)
+        if not deleted:
+            # store.delete returns False only for railway rows
+            raise HTTPException(status_code=400, detail="cannot delete the railway worker")
+        return Response(status_code=204)
 
     def _apply_beep_override(
         slug: str,
