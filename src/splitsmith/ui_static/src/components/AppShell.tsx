@@ -92,11 +92,11 @@ export function AppShell() {
   }
 
   return (
-    <div className="flex min-h-screen bg-background text-foreground">
+    <div className="flex min-h-screen bg-bg text-ink">
       {fixtureMode ? null : (
         <aside
           className={cn(
-            "flex flex-col border-r border-border bg-card transition-[width] duration-150",
+            "flex flex-col border-r border-rule bg-surface transition-[width] duration-150",
             sidebarCollapsed ? "w-14" : "w-60",
           )}
         >
@@ -106,7 +106,7 @@ export function AppShell() {
               sidebarCollapsed && "justify-center px-2",
             )}
           >
-            <Crosshair className="size-5 shrink-0 text-primary" />
+            <Crosshair className="size-5 shrink-0 text-led" />
             {sidebarCollapsed ? null : <span>splitsmith</span>}
             <button
               type="button"
@@ -114,7 +114,7 @@ export function AppShell() {
               title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               className={cn(
-                "ml-auto inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+                "ml-auto inline-flex size-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-3 hover:text-ink",
                 sidebarCollapsed && "ml-0",
               )}
             >
@@ -133,7 +133,7 @@ export function AppShell() {
               spacer that pushes the footer down. */}
           <div className="flex-1" />
 
-          <div className="border-t border-border p-2">
+          <div className="border-t border-rule p-2">
             <NavLink
               to="/_design"
               title={sidebarCollapsed ? "Design system" : undefined}
@@ -142,8 +142,8 @@ export function AppShell() {
                   "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
                   sidebarCollapsed && "justify-center px-0",
                   isActive
-                    ? "bg-accent text-accent-foreground font-medium"
-                    : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+                    ? "bg-surface-3 text-ink font-medium"
+                    : "text-muted hover:bg-surface-3/50 hover:text-ink",
                 )
               }
             >
@@ -164,10 +164,10 @@ export function AppShell() {
           this column would let the flex item grow to fit, defeating
           the waveform's own overflow-x-auto and breaking zoom. */}
       <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
-        <header className="flex h-14 items-center justify-between border-b border-border px-6">
+        <header className="flex h-14 items-center justify-between border-b border-rule px-6">
           {fixtureMode ? (
             <div className="flex items-center gap-2 text-sm font-semibold tracking-tight">
-              <Crosshair className="size-4 text-primary" />
+              <Crosshair className="size-4 text-led" />
               splitsmith review
             </div>
           ) : (
@@ -205,14 +205,14 @@ function ProjectHeader({ health }: { health: ServerHealth | null }) {
   }
 
   if (!health || !health.bound) {
-    return <div className="text-sm text-muted-foreground">splitsmith</div>;
+    return <div className="text-sm text-muted">splitsmith</div>;
   }
 
   return (
     <div className="flex items-center gap-3 text-sm">
       <div className="flex flex-col leading-tight">
         <span className="font-medium tracking-tight">{health.project_name}</span>
-        <span className="font-mono text-xs text-muted-foreground truncate max-w-[420px]">
+        <span className="font-mono text-xs text-muted truncate max-w-[420px]">
           {health.project_root}
         </span>
       </div>
@@ -220,7 +220,7 @@ function ProjectHeader({ health }: { health: ServerHealth | null }) {
         type="button"
         onClick={switchProject}
         disabled={switching}
-        className="flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+        className="flex items-center gap-1.5 rounded-md border border-rule bg-surface px-2 py-1 text-xs text-muted transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-50"
         title="Switch to a different project"
       >
         <Repeat className="size-3.5" />

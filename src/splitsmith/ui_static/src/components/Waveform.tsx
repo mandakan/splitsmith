@@ -296,7 +296,7 @@ export function Waveform({
       <div
         ref={outerRef}
         className={cn(
-          "relative select-none rounded-md bg-muted/40 ring-1 ring-border",
+          "relative select-none rounded-md bg-muted/40 ring-1 ring-rule",
           "overflow-x-auto overflow-y-hidden",
         )}
         // Pinning the scroll-host's width to the measured viewport (not
@@ -316,7 +316,7 @@ export function Waveform({
           tabIndex={0}
           className={cn(
             "relative cursor-ew-resize touch-none",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
           )}
           style={{ width: contentWidth, height }}
           onPointerDown={handlePointerDown}

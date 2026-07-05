@@ -137,7 +137,7 @@ export function ShareDialog({ onClose }: ShareDialogProps) {
         aria-modal="true"
         aria-labelledby="share-dialog-title"
         aria-describedby="share-dialog-desc"
-        className="fixed inset-0 z-modal flex items-center justify-center bg-background/70 p-4"
+        className="fixed inset-0 z-modal flex items-center justify-center bg-bg/70 p-4"
         onClick={onClose}
       >
         <Card
@@ -184,9 +184,9 @@ export function ShareDialog({ onClose }: ShareDialogProps) {
 
             {/* Links list */}
             {shares === null && !fetchError ? (
-              <div className="text-xs text-muted-foreground">Loading...</div>
+              <div className="text-xs text-muted">Loading...</div>
             ) : shares !== null && shares.length === 0 ? (
-              <div className="rounded-md border border-dashed border-border p-3 text-xs text-muted-foreground">
+              <div className="rounded-md border border-dashed border-rule p-3 text-xs text-muted">
                 No links yet.
               </div>
             ) : shares !== null ? (
@@ -197,7 +197,7 @@ export function ShareDialog({ onClose }: ShareDialogProps) {
                     <div
                       key={share.id}
                       className={cn(
-                        "rounded-md border border-border p-3 space-y-2 text-sm",
+                        "rounded-md border border-rule p-3 space-y-2 text-sm",
                         !live && "opacity-50",
                       )}
                     >
@@ -209,7 +209,7 @@ export function ShareDialog({ onClose }: ShareDialogProps) {
                             readOnly
                             value={share.url}
                             aria-label="Share link URL"
-                            className="min-w-0 flex-1 rounded border border-input bg-background px-2 py-1 font-mono text-xs"
+                            className="min-w-0 flex-1 rounded border border-rule bg-bg px-2 py-1 font-mono text-xs"
                             onFocus={(e) => e.currentTarget.select()}
                           />
                           <Button
@@ -230,7 +230,7 @@ export function ShareDialog({ onClose }: ShareDialogProps) {
 
                       {/* Meta row: date + revoke control */}
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs text-muted-foreground">
+                        <span className="text-xs text-muted">
                           {live
                             ? `Created ${formatShareDate(share.created_at)}`
                             : `Revoked ${formatShareDate(share.revoked_at!)}`}
@@ -280,7 +280,7 @@ export function ShareDialog({ onClose }: ShareDialogProps) {
             ) : null}
           </CardContent>
 
-          <div className="flex justify-end border-t border-border p-4">
+          <div className="flex justify-end border-t border-rule p-4">
             <Button type="button" variant="ghost" onClick={onClose}>
               Close
             </Button>

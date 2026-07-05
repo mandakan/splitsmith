@@ -41,7 +41,7 @@ export function ShotStepper({
   return (
     <div
       className={cn(
-        "flex flex-wrap items-center gap-3 rounded-md border border-border bg-card px-3 py-2 text-sm",
+        "flex flex-wrap items-center gap-3 rounded-md border border-rule bg-surface px-3 py-2 text-sm",
         className,
       )}
       role="group"
@@ -79,7 +79,7 @@ export function ShotStepper({
       {current ? (
         <>
           <span
-            className="font-mono tabular-nums text-muted-foreground"
+            className="font-mono tabular-nums text-muted"
             aria-label="Time on audit timeline"
           >
             t {current.time.toFixed(3)}s
@@ -91,7 +91,7 @@ export function ShotStepper({
           ) : null}
           {current.kind === "detected" && current.confidence != null ? (
             <span
-              className="font-mono tabular-nums text-muted-foreground"
+              className="font-mono tabular-nums text-muted"
               title="Detector confidence"
             >
               conf {current.confidence.toFixed(2)}
@@ -99,7 +99,7 @@ export function ShotStepper({
           ) : null}
         </>
       ) : (
-        <span className="text-muted-foreground">No shots yet</span>
+        <span className="text-muted">No shots yet</span>
       )}
 
       <input
@@ -109,8 +109,8 @@ export function ShotStepper({
         placeholder={current ? "Notes for this shot" : ""}
         disabled={current == null}
         className={cn(
-          "ml-auto h-8 min-w-48 flex-1 rounded-md border border-input bg-background px-2 py-1 text-xs",
-          "shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "ml-auto h-8 min-w-48 flex-1 rounded-md border border-rule bg-bg px-2 py-1 text-xs",
+          "shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
           "disabled:opacity-50",
         )}
         aria-label="Per-shot notes"

@@ -59,7 +59,7 @@ export function MobileNav({ open, onClose, items, header, extras }: MobileNavPro
     <Portal>
       <div
         aria-hidden
-        className="fixed inset-0 z-drawer bg-background/70"
+        className="fixed inset-0 z-drawer bg-bg/70"
         onClick={onClose}
       />
       <div

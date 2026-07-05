@@ -192,10 +192,10 @@ export function Lab() {
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <Beaker className="size-5 text-primary" />
+            <Beaker className="size-5 text-led" />
             Algorithm Lab
           </h1>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-muted">
             Fixture catalog, ensemble eval, and live tuning. End-user paths are unaffected.
           </p>
         </div>
@@ -312,7 +312,7 @@ function FixtureDetailLite({
   if (!record) {
     return (
       <Card>
-        <CardContent className="py-4 text-sm text-muted-foreground">
+        <CardContent className="py-4 text-sm text-muted">
           Fixture not found in the catalog.
         </CardContent>
       </Card>
@@ -376,11 +376,11 @@ function FixtureDetailLite({
             ))}
           </Waveform>
         ) : (
-          <div className="flex h-[140px] items-center justify-center rounded border border-border/40 bg-muted/30 text-xs text-muted-foreground">
+          <div className="flex h-[140px] items-center justify-center rounded border border-rule/40 bg-muted/30 text-xs text-muted">
             <Loader2 className="mr-2 size-4 animate-spin" /> loading waveform...
           </div>
         )}
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-muted">
           Diffs (TP/FP/FN), the per-voter breakdown, the candidate table, and label
           shortcuts only render after Run eval -- they need the per-candidate feature
           universe (CLAP / PANN / GBDT) which is built by eval.
@@ -417,7 +417,7 @@ function SummaryCard({
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2">
           Summary
-          {rescoreLoading && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+          {rescoreLoading && <Loader2 className="size-4 animate-spin text-muted" />}
         </CardTitle>
         <CardDescription>
           Across {s.n_fixtures} fixtures and {s.n_truth} ground-truth shots.
@@ -445,7 +445,7 @@ function SummaryCard({
 function Metric({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-[11px] uppercase tracking-wide text-muted">{label}</div>
       <div className="mt-0.5 font-mono text-lg">{value}</div>
     </div>
   );
@@ -500,7 +500,7 @@ function TuningCard({
           Use expected_rounds (adaptive voter C + apriori boost)
         </label>
         {cal && (
-          <details className="rounded border border-border/60 bg-muted/30 px-3 py-2 text-xs">
+          <details className="rounded border border-rule/60 bg-muted/30 px-3 py-2 text-xs">
             <summary className="cursor-pointer font-medium">Per-voter threshold overrides</summary>
             <div className="mt-3 space-y-2">
               <ThresholdRow
@@ -561,7 +561,7 @@ function Slider({
 }) {
   return (
     <label className="block text-xs">
-      <div className="mb-1 font-medium text-foreground">{label}</div>
+      <div className="mb-1 font-medium text-ink">{label}</div>
       <input
         type="range"
         min={min}
@@ -598,7 +598,7 @@ function ThresholdRow({
     <div>
       <div className="flex items-center justify-between gap-2">
         <span className="font-medium">{label}</span>
-        <span className="font-mono text-[10px] text-muted-foreground">
+        <span className="font-mono text-[10px] text-muted">
           {active ? `override ${display.toFixed(4)}` : `calibrated ${calibrated.toFixed(4)}`}
         </span>
       </div>
@@ -615,7 +615,7 @@ function ThresholdRow({
         {active && (
           <button
             type="button"
-            className="text-[10px] text-muted-foreground hover:text-foreground"
+            className="text-[10px] text-muted hover:text-ink"
             onClick={() => onChange(null)}
           >
             clear
@@ -699,7 +699,7 @@ function FixtureTable({
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-border/60 text-[11px] uppercase tracking-wide text-muted-foreground">
+              <tr className="border-b border-rule/60 text-[11px] uppercase tracking-wide text-muted">
                 <th className="px-4 py-2 text-left font-medium">Slug</th>
                 <th className="px-3 py-2 text-right font-medium">Truth</th>
                 <th className="px-3 py-2 text-right font-medium">Kept</th>
@@ -729,7 +729,7 @@ function FixtureTable({
                   rows.push(
                     <tr
                       key={`event:${group.eventId}`}
-                      className="bg-muted/30 text-[10px] uppercase tracking-wide text-muted-foreground"
+                      className="bg-muted/30 text-[10px] uppercase tracking-wide text-muted"
                     >
                       <td colSpan={10} className="px-4 py-1 font-medium">
                         Event {group.eventId} -- {group.rows.length} cameras
@@ -781,15 +781,15 @@ function FixtureRow({
   return (
     <tr
       className={cn(
-        "cursor-pointer border-b border-border/40 hover:bg-muted/40",
-        active && "bg-accent/40",
+        "cursor-pointer border-b border-rule/40 hover:bg-muted/40",
+        active && "bg-surface-3/40",
       )}
       onClick={() => onSelect(active ? null : rec.slug)}
     >
       <td
         className={cn(
           "px-4 py-2 font-mono text-xs",
-          isSibling && "pl-8 text-muted-foreground",
+          isSibling && "pl-8 text-muted",
         )}
       >
         {rec.slug}
@@ -833,13 +833,13 @@ function FixtureRow({
           "--"
         )}
       </td>
-      <td className="px-2 py-2 text-muted-foreground">
+      <td className="px-2 py-2 text-muted">
         <div className="flex items-center justify-end gap-1">
           {rec.anchor_slug && (
             <Link
               to={promoteReviewUrl(rec.audit_path, rec.anchor_slug)}
               onClick={(e) => e.stopPropagation()}
-              className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              className="rounded p-1 text-muted hover:bg-surface-3 hover:text-ink"
               title="Re-open the secondary diff-confirm review"
               aria-label={`Re-review promotion ${rec.slug}`}
             >
@@ -849,7 +849,7 @@ function FixtureRow({
           <Link
             to={reviewUrl(rec.audit_path, rec.source_video)}
             onClick={(e) => e.stopPropagation()}
-            className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+            className="rounded p-1 text-muted hover:bg-surface-3 hover:text-ink"
             title="Re-label this fixture in the review editor"
             aria-label={`Re-label ${rec.slug}`}
           >
@@ -872,7 +872,7 @@ function FixtureRow({
                   window.alert(`Delete failed: ${err}`);
                 }
               }}
-              className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              className="rounded p-1 text-muted hover:bg-destructive/10 hover:text-destructive"
               title="Delete this derived fixture (anchor not affected)"
               aria-label={`Delete derived fixture ${rec.slug}`}
             >
@@ -1139,7 +1139,7 @@ function FixtureDetail({
             ))}
           </Waveform>
         ) : (
-          <div className="flex h-[140px] items-center justify-center rounded border border-border/40 bg-muted/30 text-xs text-muted-foreground">
+          <div className="flex h-[140px] items-center justify-center rounded border border-rule/40 bg-muted/30 text-xs text-muted">
             <Loader2 className="mr-2 size-4 animate-spin" /> loading waveform...
           </div>
         )}
@@ -1165,7 +1165,7 @@ function FixtureDetail({
             {stepThrough ? "Exit step-through" : "Step through"}
           </Button>
           {stepThrough && (
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-[11px] text-muted">
               Click a candidate or use J/K. Audio auto-plays on each candidate; space toggles play/pause. Press a label key to save and advance.
             </span>
           )}
@@ -1229,14 +1229,14 @@ function Pin({
 function VoterRecallTable({ metrics }: { metrics: LabEvalFixture["metrics"] }) {
   const order: Array<keyof typeof metrics.voter_recall> = ["vote_a", "vote_b", "vote_c"];
   return (
-    <div className="rounded border border-border/60 p-3">
-      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    <div className="rounded border border-rule/60 p-3">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
         Per-voter recall on this fixture
       </div>
       <div className="grid grid-cols-3 gap-2 text-center">
         {order.map((k) => (
           <div key={String(k)}>
-            <div className="text-[10px] uppercase text-muted-foreground">{String(k).slice(-1).toUpperCase()}</div>
+            <div className="text-[10px] uppercase text-muted">{String(k).slice(-1).toUpperCase()}</div>
             <div className="font-mono text-sm">{fmtPct(metrics.voter_recall[k as string] ?? 0)}</div>
           </div>
         ))}
@@ -1253,8 +1253,8 @@ function DiffList({
   fns: number[];
 }) {
   return (
-    <div className="rounded border border-border/60 p-3 text-xs">
-      <div className="mb-2 font-semibold uppercase tracking-wide text-muted-foreground">
+    <div className="rounded border border-rule/60 p-3 text-xs">
+      <div className="mb-2 font-semibold uppercase tracking-wide text-muted">
         Diffs
       </div>
       {fps.length === 0 && fns.length === 0 && (
@@ -1312,14 +1312,14 @@ function CandidateTable({
   }, [selectedCn]);
 
   return (
-    <details className="rounded border border-border/60" open>
-      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+    <details className="rounded border border-rule/60" open>
+      <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted">
         Candidates ({candidates.length}) -- click a row + use shortcut keys (or the dropdown)
       </summary>
       <div className="max-h-96 overflow-y-auto">
         <table className="w-full text-xs">
-          <thead className="sticky top-0 bg-card text-[10px] uppercase tracking-wide text-muted-foreground">
-            <tr className="border-b border-border/40">
+          <thead className="sticky top-0 bg-surface text-[10px] uppercase tracking-wide text-muted">
+            <tr className="border-b border-rule/40">
               <th className="px-2 py-1 text-left font-medium">#</th>
               <th className="px-2 py-1 text-right font-medium">t (s)</th>
               <th className="px-2 py-1 text-right font-medium">conf</th>
@@ -1344,11 +1344,11 @@ function CandidateTable({
                   key={c.candidate_number}
                   data-cn={c.candidate_number}
                   className={cn(
-                    "cursor-pointer border-b border-border/20 font-mono",
+                    "cursor-pointer border-b border-rule/20 font-mono",
                     isTP && "bg-emerald-500/5",
                     isFP && "bg-orange-500/10",
                     isFN && "bg-red-500/10",
-                    selected && "outline outline-2 outline-primary/70",
+                    selected && "outline outline-2 outline-led/70",
                   )}
                   onClick={() => onSelect(selected ? null : c.candidate_number)}
                 >
@@ -1400,7 +1400,7 @@ function LabelDropdown({
         <select
           value={candidate.subclass ?? ""}
           onChange={(e) => onChange({ subclass: e.target.value || null })}
-          className="rounded border border-border/60 bg-background px-1 py-0.5 text-[11px]"
+          className="rounded border border-rule/60 bg-bg px-1 py-0.5 text-[11px]"
           disabled={saving}
         >
           <option value="">--</option>
@@ -1410,7 +1410,7 @@ function LabelDropdown({
             </option>
           ))}
         </select>
-        {saving && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+        {saving && <Loader2 className="size-3 animate-spin text-muted" />}
       </div>
     );
   }
@@ -1420,7 +1420,7 @@ function LabelDropdown({
         value={candidate.reason ?? ""}
         onChange={(e) => onChange({ reason: e.target.value || null })}
         className={cn(
-          "rounded border border-border/60 bg-background px-1 py-0.5 text-[11px]",
+          "rounded border border-rule/60 bg-bg px-1 py-0.5 text-[11px]",
           isKept && !isPositive && "border-orange-400/60",
         )}
         disabled={saving}
@@ -1432,7 +1432,7 @@ function LabelDropdown({
           </option>
         ))}
       </select>
-      {saving && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+      {saving && <Loader2 className="size-3 animate-spin text-muted" />}
     </div>
   );
 }
@@ -1450,8 +1450,8 @@ function LabelBreakdown({
     return null;
   }
   return (
-    <div className="rounded border border-border/60 p-3 text-xs">
-      <div className="mb-2 font-semibold uppercase tracking-wide text-muted-foreground">
+    <div className="rounded border border-rule/60 p-3 text-xs">
+      <div className="mb-2 font-semibold uppercase tracking-wide text-muted">
         Label breakdown
       </div>
       {fpEntries.length > 0 && (
@@ -1463,7 +1463,7 @@ function LabelBreakdown({
               .map(([k, n]) => (
                 <li key={k} className="flex justify-between">
                   <span>{k}</span>
-                  <span className="text-muted-foreground">{n}</span>
+                  <span className="text-muted">{n}</span>
                 </li>
               ))}
           </ul>
@@ -1478,7 +1478,7 @@ function LabelBreakdown({
               .map(([k, n]) => (
                 <li key={k} className="flex justify-between">
                   <span>{k}</span>
-                  <span className="text-muted-foreground">{n}</span>
+                  <span className="text-muted">{n}</span>
                 </li>
               ))}
           </ul>
@@ -1533,31 +1533,31 @@ function SaveYamlButton({ run }: { run: LabEvalRun | null }) {
         Save as YAML
       </Button>
       {open && (
-        <div className="absolute right-0 top-full z-20 mt-1 w-80 rounded-md border border-border bg-popover p-3 shadow-md">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="absolute right-0 top-full z-20 mt-1 w-80 rounded-md border border-rule bg-surface-2 p-3 shadow-md">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted">
             Save tuning
           </div>
-          <p className="mt-1 text-[11px] text-muted-foreground">
+          <p className="mt-1 text-[11px] text-muted">
             Writes <span className="font-mono">configs/ensemble.&lt;name&gt;.yaml</span> with the active
             config + summary + provenance. Replayable via <span className="font-mono">splitsmith lab load-config</span>.
           </p>
           <label className="mt-2 block text-[11px]">
-            <span className="text-muted-foreground">Name</span>
+            <span className="text-muted">Name</span>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="mt-1 w-full rounded border border-border bg-background px-2 py-1 font-mono text-xs"
+              className="mt-1 w-full rounded border border-rule bg-bg px-2 py-1 font-mono text-xs"
               placeholder="tighter-d"
             />
           </label>
           <label className="mt-2 block text-[11px]">
-            <span className="text-muted-foreground">Note (optional)</span>
+            <span className="text-muted">Note (optional)</span>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
               rows={2}
-              className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-xs"
+              className="mt-1 w-full rounded border border-rule bg-bg px-2 py-1 text-xs"
               placeholder="Why this tuning is interesting..."
             />
           </label>
@@ -1786,17 +1786,17 @@ function PromoteAllStagesButton({
         Promote all stages
       </Button>
       {open && (
-        <div className="absolute right-0 top-full z-20 mt-1 w-[640px] rounded-md border border-border bg-popover p-4 shadow-md">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+        <div className="absolute right-0 top-full z-20 mt-1 w-[640px] rounded-md border border-rule bg-surface-2 p-4 shadow-md">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted mb-2">
             Promote all stages
           </div>
-          <p className="text-[11px] text-muted-foreground mb-3">
+          <p className="text-[11px] text-muted mb-3">
             Batch-runs the per-stage primary-fixture promote against every
             stage that has an audit JSON, a primary beep, and a camera mount.
             Same write path as the single-stage button on the Audit page.
           </p>
           {loading && (
-            <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 py-6 text-xs text-muted">
               <Loader2 className="size-3.5 animate-spin" />
               Loading project + export overview...
             </div>
@@ -1816,13 +1816,13 @@ function PromoteAllStagesButton({
             </div>
           )}
           {!loading && !loadError && project && shooterPinned && rows.length === 0 && (
-            <div className="rounded bg-muted px-2 py-1.5 text-[11px] text-muted-foreground">
+            <div className="rounded bg-muted px-2 py-1.5 text-[11px] text-muted">
               No non-placeholder stages in this project.
             </div>
           )}
           {!loading && !loadError && project && shooterPinned && rows.length > 0 && (
             <>
-              <div className="mb-2 flex items-center justify-between text-[11px] text-muted-foreground">
+              <div className="mb-2 flex items-center justify-between text-[11px] text-muted">
                 <label className="flex items-center gap-1.5 cursor-pointer">
                   <input
                     type="checkbox"
@@ -1842,9 +1842,9 @@ function PromoteAllStagesButton({
                   Overwrite if exists
                 </label>
               </div>
-              <div className="max-h-80 overflow-y-auto rounded border border-border">
+              <div className="max-h-80 overflow-y-auto rounded border border-rule">
                 <table className="w-full text-[11px]">
-                  <thead className="sticky top-0 bg-muted/60 text-left text-muted-foreground">
+                  <thead className="sticky top-0 bg-muted/60 text-left text-muted">
                     <tr>
                       <th className="px-2 py-1.5 w-6"></th>
                       <th className="px-2 py-1.5 w-10">#</th>
@@ -1861,7 +1861,7 @@ function PromoteAllStagesButton({
                         <tr
                           key={row.stageNumber}
                           className={cn(
-                            "border-t border-border align-top",
+                            "border-t border-rule align-top",
                             blocked && "opacity-60",
                           )}
                         >
@@ -1878,7 +1878,7 @@ function PromoteAllStagesButton({
                           </td>
                           <td className="px-2 py-1.5">
                             <div className="font-medium">{row.stageName}</div>
-                            <div className="mt-0.5 font-mono text-[10px] text-muted-foreground break-all">
+                            <div className="mt-0.5 font-mono text-[10px] text-muted break-all">
                               {row.slug}
                             </div>
                             {row.blockers.length > 0 && (
@@ -1899,7 +1899,7 @@ function PromoteAllStagesButton({
                           </td>
                           <td className="px-2 py-1.5">
                             {row.status === "running" && (
-                              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                              <span className="inline-flex items-center gap-1 text-muted">
                                 <Loader2 className="size-3 animate-spin" />
                                 promoting
                               </span>
@@ -1922,7 +1922,7 @@ function PromoteAllStagesButton({
                                   "inline-flex items-center gap-1",
                                   willOverwrite
                                     ? "text-amber-700 dark:text-amber-300"
-                                    : "text-muted-foreground",
+                                    : "text-muted",
                                 )}
                                 title={
                                   willOverwrite
@@ -1935,12 +1935,12 @@ function PromoteAllStagesButton({
                               </span>
                             )}
                             {row.status === "idle" && eligible && !row.exists && (
-                              <span className="text-muted-foreground">
+                              <span className="text-muted">
                                 ready
                               </span>
                             )}
                             {row.status === "idle" && !eligible && (
-                              <span className="text-muted-foreground">
+                              <span className="text-muted">
                                 blocked
                               </span>
                             )}
@@ -1962,7 +1962,7 @@ function PromoteAllStagesButton({
             >
               Close
             </Button>
-            <span className="ml-auto text-[11px] text-muted-foreground">
+            <span className="ml-auto text-[11px] text-muted">
               {selectedCount} selected
             </span>
             <Button
@@ -2075,7 +2075,7 @@ function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] })
 
   const running = job && (job.status === "pending" || job.status === "running");
 
-  const fieldCls = "w-full rounded border border-input bg-background px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring";
+  const fieldCls = "w-full rounded border border-rule bg-bg px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-led";
 
   return (
     <div className="relative">
@@ -2090,13 +2090,13 @@ function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] })
         Promote from anchor
       </Button>
       {open && (
-        <div className="absolute right-0 top-full z-20 mt-1 w-96 rounded-md border border-border bg-popover p-4 shadow-md">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+        <div className="absolute right-0 top-full z-20 mt-1 w-96 rounded-md border border-rule bg-surface-2 p-4 shadow-md">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted mb-3">
             Promote from anchor
           </div>
           <div className="flex flex-col gap-2.5">
             <div>
-              <div className="text-xs text-muted-foreground mb-1">Anchor fixture</div>
+              <div className="text-xs text-muted mb-1">Anchor fixture</div>
               <select
                 className={fieldCls}
                 value={anchorSlug}
@@ -2111,7 +2111,7 @@ function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] })
               </select>
             </div>
             <div>
-              <div className="text-xs text-muted-foreground mb-1">Secondary WAV path (absolute)</div>
+              <div className="text-xs text-muted mb-1">Secondary WAV path (absolute)</div>
               <input
                 className={fieldCls}
                 placeholder="/path/to/secondary.wav"
@@ -2120,7 +2120,7 @@ function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] })
               />
             </div>
             <div>
-              <div className="text-xs text-muted-foreground mb-1">Target fixture slug</div>
+              <div className="text-xs text-muted mb-1">Target fixture slug</div>
               <input
                 className={fieldCls}
                 placeholder="tallmilan-2026-stage5-phone"
@@ -2130,7 +2130,7 @@ function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] })
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <div className="text-xs text-muted-foreground mb-1">Camera ID</div>
+                <div className="text-xs text-muted mb-1">Camera ID</div>
                 <input
                   className={fieldCls}
                   placeholder="apple-iphone17pro"
@@ -2139,7 +2139,7 @@ function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] })
                 />
               </div>
               <div>
-                <div className="text-xs text-muted-foreground mb-1">Snap window (ms)</div>
+                <div className="text-xs text-muted mb-1">Snap window (ms)</div>
                 <input
                   className={fieldCls}
                   type="number"
@@ -2152,7 +2152,7 @@ function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] })
             </div>
             <div className="grid grid-cols-3 gap-2">
               <div>
-                <div className="text-xs text-muted-foreground mb-1">Mount</div>
+                <div className="text-xs text-muted mb-1">Mount</div>
                 <select className={fieldCls} value={mount} onChange={(e) => setMount(e.target.value)}>
                   {["head","chest","belt","helmet","hand","tripod","monopod","gimbal"].map((m) => (
                     <option key={m} value={m}>{m}</option>
@@ -2160,7 +2160,7 @@ function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] })
                 </select>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground mb-1">Position</div>
+                <div className="text-xs text-muted mb-1">Position</div>
                 <select className={fieldCls} value={position} onChange={(e) => setPosition(e.target.value)}>
                   {["shooter","ro","squadmate","bay-fixed"].map((p) => (
                     <option key={p} value={p}>{p}</option>
@@ -2168,7 +2168,7 @@ function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] })
                 </select>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground mb-1">Audio source</div>
+                <div className="text-xs text-muted mb-1">Audio source</div>
                 <select className={fieldCls} value={audioSource} onChange={(e) => setAudioSource(e.target.value)}>
                   {["internal","lav-wired","lav-wireless","shotgun-hotshoe"].map((s) => (
                     <option key={s} value={s}>{s}</option>
@@ -2176,7 +2176,7 @@ function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] })
                 </select>
               </div>
             </div>
-            <label className="flex items-center gap-2 text-xs cursor-pointer text-muted-foreground">
+            <label className="flex items-center gap-2 text-xs cursor-pointer text-muted">
               <input
                 type="checkbox"
                 checked={overwrite}
@@ -2185,7 +2185,7 @@ function PromoteFromAnchorButton({ fixtures }: { fixtures: LabFixtureRecord[] })
               Overwrite if slug exists
             </label>
             {running && (
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2 text-xs text-muted">
                 <Loader2 className="size-3.5 animate-spin" />
                 {job?.message ?? "running..."}
                 {job?.progress != null && (
@@ -2285,22 +2285,22 @@ function RebuildCalibrationButton({ onCompleted }: { onCompleted: () => void }) 
         Rebuild calibration
       </Button>
       {open && (
-        <div className="absolute right-0 top-full z-20 mt-1 w-80 rounded-md border border-border bg-popover p-3 shadow-md">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        <div className="absolute right-0 top-full z-20 mt-1 w-80 rounded-md border border-rule bg-surface-2 p-3 shadow-md">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted">
             Rebuild calibration
           </div>
-          <p className="mt-1 text-[11px] text-muted-foreground">
+          <p className="mt-1 text-[11px] text-muted">
             Refits voter thresholds + the GBDT against every audited fixture and overwrites
             <span className="font-mono"> src/splitsmith/data/</span>. Slow (model-bound). After it
             completes, the next eval picks up the new thresholds.
           </p>
-          <p className="mt-1 text-[11px] text-muted-foreground">
+          <p className="mt-1 text-[11px] text-muted">
             Requires the CLAP / PANN feature caches under
             <span className="font-mono"> tests/fixtures/.cache/</span> -- build them first via the
             extract scripts if a new fixture's cache is missing.
           </p>
           <label className="mt-2 block text-[11px]">
-            <span className="text-muted-foreground">Target recall ({targetRecall.toFixed(2)})</span>
+            <span className="text-muted">Target recall ({targetRecall.toFixed(2)})</span>
             <input
               type="range"
               min={0.8}
@@ -2312,7 +2312,7 @@ function RebuildCalibrationButton({ onCompleted }: { onCompleted: () => void }) 
             />
           </label>
           <label className="mt-2 block text-[11px]">
-            <span className="text-muted-foreground">Tolerance ms ({toleranceMs.toFixed(0)})</span>
+            <span className="text-muted">Tolerance ms ({toleranceMs.toFixed(0)})</span>
             <input
               type="range"
               min={15}
@@ -2340,7 +2340,7 @@ function RebuildCalibrationButton({ onCompleted }: { onCompleted: () => void }) 
             <div className="mt-2 rounded bg-muted/50 px-2 py-1 text-[11px]">
               <div className="flex items-center justify-between">
                 <span className="font-mono">{job.status}</span>
-                {job.message && <span className="text-muted-foreground">{job.message}</span>}
+                {job.message && <span className="text-muted">{job.message}</span>}
               </div>
             </div>
           )}
@@ -2498,17 +2498,17 @@ function StepThroughPanel({
   }, [idxInList, ordered, onSelect]);
 
   return (
-    <div className="rounded border border-primary/40 bg-primary/5 p-3">
+    <div className="rounded border border-led/40 bg-led/5 p-3">
       <div className="mb-3 flex flex-wrap items-end gap-3 text-[11px]">
         <label className="flex flex-col gap-1">
-          <span className="font-medium text-muted-foreground">Filter</span>
+          <span className="font-medium text-muted">Filter</span>
           <select
             value={filter}
             onChange={(e) => {
               setFilter(e.target.value as StepFilter);
               e.currentTarget.blur();
             }}
-            className="rounded border border-border bg-background px-1 py-0.5"
+            className="rounded border border-rule bg-bg px-1 py-0.5"
           >
             <option value="borderline">Borderline (1-3 votes, recommended)</option>
             <option value="rejected_only">Rejected only</option>
@@ -2518,14 +2518,14 @@ function StepThroughPanel({
           </select>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="font-medium text-muted-foreground">Class</span>
+          <span className="font-medium text-muted">Class</span>
           <select
             value={classFilter}
             onChange={(e) => {
               setClassFilter(e.target.value);
               e.currentTarget.blur();
             }}
-            className="rounded border border-border bg-background px-1 py-0.5"
+            className="rounded border border-rule bg-bg px-1 py-0.5"
             title="Show only candidates currently labeled with this class -- useful for reviewing a known-bad batch (e.g. mis-typed S vs Y)."
           >
             <option value="">(any)</option>
@@ -2546,14 +2546,14 @@ function StepThroughPanel({
           </select>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="font-medium text-muted-foreground">Sort</span>
+          <span className="font-medium text-muted">Sort</span>
           <select
             value={sort}
             onChange={(e) => {
               setSort(e.target.value as StepSort);
               e.currentTarget.blur();
             }}
-            className="rounded border border-border bg-background px-1 py-0.5"
+            className="rounded border border-rule bg-bg px-1 py-0.5"
           >
             <option value="ensemble_score_desc">
               Ensemble score desc (near-consensus first)
@@ -2566,7 +2566,7 @@ function StepThroughPanel({
           </select>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="font-medium text-muted-foreground">Pre ms ({preMs})</span>
+          <span className="font-medium text-muted">Pre ms ({preMs})</span>
           <input
             type="range"
             min={0}
@@ -2583,7 +2583,7 @@ function StepThroughPanel({
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="font-medium text-muted-foreground">Post ms ({postMs})</span>
+          <span className="font-medium text-muted">Post ms ({postMs})</span>
           <input
             type="range"
             min={50}
@@ -2595,7 +2595,7 @@ function StepThroughPanel({
             onKeyUp={(e) => e.currentTarget.blur()}
           />
         </label>
-        <span className="ml-auto text-muted-foreground">
+        <span className="ml-auto text-muted">
           {idxInList + 1} / {ordered.length}
           {ordered.length === 0 && " (no candidates match filter)"}
         </span>
@@ -2613,13 +2613,13 @@ function StepThroughPanel({
           truthTimes={fixture.truth_times}
         />
       ) : (
-        <div className="rounded border border-dashed border-border/60 px-4 py-6 text-center text-xs text-muted-foreground">
+        <div className="rounded border border-dashed border-rule/60 px-4 py-6 text-center text-xs text-muted">
           Adjust the filter or run eval to populate the candidate list.
         </div>
       )}
 
       {/* Compact list -- shows position in the queue + assigned labels. */}
-      <div className="mt-3 max-h-60 overflow-y-auto rounded border border-border/60 bg-background/50">
+      <div className="mt-3 max-h-60 overflow-y-auto rounded border border-rule/60 bg-bg/50">
         <table className="w-full text-[11px]">
           <tbody>
             {ordered.map((c) => {
@@ -2630,29 +2630,29 @@ function StepThroughPanel({
                 <tr
                   key={c.candidate_number}
                   className={cn(
-                    "cursor-pointer border-b border-border/30 font-mono",
-                    sel && "bg-primary/15 outline outline-1 outline-primary/60",
+                    "cursor-pointer border-b border-rule/30 font-mono",
+                    sel && "bg-led/15 outline outline-1 outline-led/60",
                     !sel && c.kept && c.truth === 1 && "bg-emerald-500/5",
                     !sel && c.kept && c.truth === 0 && "bg-orange-500/10",
                   )}
                   onClick={() => onSelect(c.candidate_number)}
                 >
                   <td className="px-2 py-0.5">#{c.candidate_number}</td>
-                  <td className="px-2 py-0.5 text-right text-muted-foreground">
+                  <td className="px-2 py-0.5 text-right text-muted">
                     {c.time.toFixed(3)}s
                   </td>
-                  <td className="px-2 py-0.5 text-right text-muted-foreground">
+                  <td className="px-2 py-0.5 text-right text-muted">
                     score {c.ensemble_score.toFixed(2)}
                   </td>
                   <td className="px-2 py-0.5 text-right">
                     {label ? (
                       <span className="rounded bg-muted px-1">{label}</span>
                     ) : (
-                      <span className="text-muted-foreground">--</span>
+                      <span className="text-muted">--</span>
                     )}
                   </td>
                   <td className="w-4">
-                    {saving && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+                    {saving && <Loader2 className="size-3 animate-spin text-muted" />}
                   </td>
                 </tr>
               );
@@ -2676,7 +2676,7 @@ function StepThroughPanel({
                 advanceFromCurrent();
                 e.currentTarget.blur();
               }}
-              className="rounded border border-border/60 bg-background px-2 py-0.5 hover:bg-accent"
+              className="rounded border border-rule/60 bg-bg px-2 py-0.5 hover:bg-surface-3"
             >
               {label}
             </button>
@@ -2691,7 +2691,7 @@ function StepThroughPanel({
               }
               e.currentTarget.blur();
             }}
-            className="rounded border border-border/60 bg-background px-2 py-0.5 text-muted-foreground hover:bg-accent"
+            className="rounded border border-rule/60 bg-bg px-2 py-0.5 text-muted hover:bg-surface-3"
           >
             clear
           </button>
@@ -2979,14 +2979,14 @@ function SnippetPlayer({
               onTogglePlay();
               e.currentTarget.blur();
             }}
-            className="flex size-7 items-center justify-center rounded-full bg-primary text-primary-foreground hover:bg-primary/90"
+            className="flex size-7 items-center justify-center rounded-full bg-led text-bg hover:bg-led/90"
             title={playing ? "Pause (space)" : "Play (space)"}
             aria-label={playing ? "Pause" : "Play"}
           >
             {playing ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
           </button>
           <span className="font-mono">#{candidate.candidate_number}</span>
-          <span className="text-muted-foreground">
+          <span className="text-muted">
             t={candidate.time.toFixed(3)}s · conf {candidate.confidence.toFixed(3)} · score{" "}
             {candidate.ensemble_score.toFixed(2)}
           </span>
@@ -3011,7 +3011,7 @@ function SnippetPlayer({
           Failed to load audio: {error}
         </div>
       ) : loading || !buffer ? (
-        <div className="flex h-[120px] items-center justify-center rounded border border-border/40 bg-muted/30 text-xs text-muted-foreground">
+        <div className="flex h-[120px] items-center justify-center rounded border border-rule/40 bg-muted/30 text-xs text-muted">
           <Loader2 className="mr-2 size-4 animate-spin" /> loading audio buffer...
         </div>
       ) : (
@@ -3028,7 +3028,7 @@ function SnippetPlayer({
           truths={truthsInWindow}
         />
       )}
-      <div className="text-[10px] text-muted-foreground">
+      <div className="text-[10px] text-muted">
         Visible window: {((ctxEnd - ctxStart) * 1000).toFixed(0)} ms · play window:{" "}
         {(safePreMs + safePostMs).toFixed(0)} ms ({safePreMs.toFixed(0)} pre /{" "}
         {safePostMs.toFixed(0)} post){playing ? " · looping" : " · paused"}
@@ -3065,7 +3065,7 @@ function VoterChips({
             "rounded px-1 font-mono text-[9px]",
             it.on
               ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
-              : "bg-muted text-muted-foreground",
+              : "bg-muted text-muted",
           )}
           title={`Voter ${it.label}: ${it.on ? "yes" : "no"}`}
         >
@@ -3158,7 +3158,7 @@ function ZoomedWaveform({
   const playX2 = xFor(playEnd);
 
   return (
-    <div className="rounded border border-border/60 bg-background">
+    <div className="rounded border border-rule/60 bg-bg">
       <svg
         viewBox={`0 0 ${VIEW_W} ${height}`}
         preserveAspectRatio="none"
@@ -3315,15 +3315,15 @@ function outcomeColor(c: LabEvalFixture["candidates"][number]): string {
   if (c.kept && c.truth === 1) return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300";
   if (c.kept && c.truth === 0) return "bg-orange-500/20 text-orange-700 dark:text-orange-300";
   if (!c.kept && c.truth === 1) return "bg-red-500/20 text-red-700 dark:text-red-300";
-  return "bg-muted text-muted-foreground";
+  return "bg-muted text-muted";
 }
 
 function KeyboardLegend({ selectedCn }: { selectedCn: number | null }) {
   return (
     <div
       className={cn(
-        "rounded border border-border/60 px-3 py-2 text-[11px] text-muted-foreground",
-        selectedCn != null && "border-primary/60 bg-primary/5 text-foreground",
+        "rounded border border-rule/60 px-3 py-2 text-[11px] text-muted",
+        selectedCn != null && "border-led/60 bg-led/5 text-ink",
       )}
     >
       <div className="mb-1 font-semibold uppercase tracking-wide">

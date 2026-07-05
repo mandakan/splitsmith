@@ -120,9 +120,9 @@ export function StageTimeSection({
     // set yet, or a small pencil icon to re-edit a manual value.
     if (hasNoValue) {
       return (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-muted/20 px-2 py-1.5 text-xs">
-          <Timer className="size-3.5 text-muted-foreground" />
-          <span className="text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-rule/60 bg-muted/20 px-2 py-1.5 text-xs">
+          <Timer className="size-3.5 text-muted" />
+          <span className="text-muted">
             No scoreboard time. Pick the end of the stage on the waveform to
             unblock trim + shot detection.
           </span>
@@ -158,14 +158,14 @@ export function StageTimeSection({
   }
 
   return (
-    <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3 text-sm">
+    <div className="space-y-2 rounded-md border border-rule bg-muted/30 p-3 text-sm">
       <div className="flex flex-wrap items-end gap-2">
         <div className="flex flex-col gap-1">
-          <span className="text-xs text-muted-foreground">Stage duration (seconds)</span>
+          <span className="text-xs text-muted">Stage duration (seconds)</span>
           <div
             className={cn(
-              "flex h-8 w-32 items-center rounded-md border border-input bg-background px-2 py-1 font-mono text-sm shadow-sm",
-              draftDuration == null && "text-muted-foreground",
+              "flex h-8 w-32 items-center rounded-md border border-rule bg-bg px-2 py-1 font-mono text-sm shadow-sm",
+              draftDuration == null && "text-muted",
             )}
             aria-label={`Manual stage time for stage ${stageNumber}`}
             role="status"
@@ -185,7 +185,7 @@ export function StageTimeSection({
         <Button size="sm" variant="ghost" onClick={reset} disabled={busy}>
           Cancel
         </Button>
-        {busy ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+        {busy ? <Loader2 className="size-4 animate-spin text-muted" /> : null}
       </div>
       <BeepWaveformPicker
         slug={slug}

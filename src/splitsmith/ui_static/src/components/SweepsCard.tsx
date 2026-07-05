@@ -106,7 +106,7 @@ export function SweepsCard() {
       <CardHeader className="flex flex-row items-start justify-between gap-2">
         <div>
           <CardTitle className="flex items-center gap-2 text-base">
-            <LineChart className="size-4 text-primary" />
+            <LineChart className="size-4 text-led" />
             Parameter sweeps
           </CardTitle>
           <CardDescription>
@@ -137,7 +137,7 @@ export function SweepsCard() {
         )}
 
         {runs && runs.length === 0 && (
-          <div className="flex items-start gap-2 rounded-md border border-muted bg-muted/30 p-3 text-xs text-muted-foreground">
+          <div className="flex items-start gap-2 rounded-md border border-muted bg-muted/30 p-3 text-xs text-muted">
             <BarChart3 className="size-4 shrink-0" />
             <span>
               No sweeps yet. Produce one with{" "}
@@ -151,7 +151,7 @@ export function SweepsCard() {
 
         {runs && runs.length > 0 && (
           <div className="space-y-2">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted">
               Runs ({runs.length})
             </p>
             <div className="grid gap-2">
@@ -165,8 +165,8 @@ export function SweepsCard() {
                     className={
                       "w-full rounded-md border px-3 py-2 text-left transition " +
                       (active
-                        ? "border-primary bg-primary/5"
-                        : "border-muted hover:border-muted-foreground/40")
+                        ? "border-led bg-led/5"
+                        : "border-muted hover:border-muted/40")
                     }
                   >
                     <div className="flex items-center justify-between gap-3">
@@ -177,7 +177,7 @@ export function SweepsCard() {
                         F1 {r.best_f1.toFixed(3)}
                       </Badge>
                     </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted">
                       <span>
                         {r.n_combos} combo{r.n_combos === 1 ? "" : "s"}
                       </span>
@@ -206,8 +206,8 @@ export function SweepsCard() {
               <Badge variant="outline" className="font-mono text-[10px]">
                 combo_idx {bestCombo.combo_idx}
               </Badge>
-              <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-                F1 <span className="font-semibold text-foreground">{detail.summary.best_f1.toFixed(4)}</span>
+              <span className="ml-auto text-xs text-muted tabular-nums">
+                F1 <span className="font-semibold text-ink">{detail.summary.best_f1.toFixed(4)}</span>
                 {"  "}P {pct(detail.summary.best_precision)} R {pct(detail.summary.best_recall)}{"  "}
                 kept {detail.summary.best_kept} (TP {detail.summary.best_true_pos}, FP{" "}
                 {detail.summary.best_false_pos}, FN {detail.summary.best_false_neg})
@@ -216,7 +216,7 @@ export function SweepsCard() {
 
             {swept.length > 0 && (
               <details>
-                <summary className="cursor-pointer text-xs text-muted-foreground">
+                <summary className="cursor-pointer text-xs text-muted">
                   Best-combo parameters ({Object.keys(bestCombo.params).length})
                 </summary>
                 <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[11px] sm:grid-cols-3">
@@ -229,8 +229,8 @@ export function SweepsCard() {
                           <code
                             className={
                               isSwept
-                                ? "text-foreground font-semibold"
-                                : "text-muted-foreground"
+                                ? "text-ink font-semibold"
+                                : "text-muted"
                             }
                           >
                             {k}
@@ -245,7 +245,7 @@ export function SweepsCard() {
 
             {detail.available_plots.length > 0 && (
               <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted">
                   Plots
                 </p>
                 <div className="grid gap-3 md:grid-cols-2">
@@ -276,7 +276,7 @@ export function SweepsCard() {
                         rel="noreferrer"
                         className="block rounded-md border bg-muted/30 p-2"
                       >
-                        <p className="mb-1 truncate font-mono text-[10px] text-muted-foreground">
+                        <p className="mb-1 truncate font-mono text-[10px] text-muted">
                           {p}
                         </p>
                         <img
@@ -293,7 +293,7 @@ export function SweepsCard() {
 
             {bestCombo.per_fixture.length > 0 && (
               <details>
-                <summary className="cursor-pointer text-xs text-muted-foreground">
+                <summary className="cursor-pointer text-xs text-muted">
                   Per-fixture (best combo, {bestCombo.per_fixture.length} rows)
                 </summary>
                 <div className="mt-2 max-h-[420px] overflow-auto rounded-md border">
@@ -319,7 +319,7 @@ export function SweepsCard() {
                             <td className="px-2 py-1">
                               <ShortFixture name={r.fixture} />
                             </td>
-                            <td className="px-2 py-1 text-muted-foreground">
+                            <td className="px-2 py-1 text-muted">
                               {r.camera_class}
                             </td>
                             <td className="px-2 py-1 text-right tabular-nums">
@@ -353,7 +353,7 @@ export function SweepsCard() {
 
             {bestCombo.per_class.length > 0 && (
               <details>
-                <summary className="cursor-pointer text-xs text-muted-foreground">
+                <summary className="cursor-pointer text-xs text-muted">
                   Per camera class (best combo)
                 </summary>
                 <div className="mt-2 grid gap-1 text-[11px]">
@@ -363,7 +363,7 @@ export function SweepsCard() {
                       className="flex items-center justify-between rounded border px-2 py-1"
                     >
                       <span className="font-mono">{r.camera_class}</span>
-                      <span className="text-muted-foreground tabular-nums">
+                      <span className="text-muted tabular-nums">
                         kept {r.n_kept}, P {pct(r.precision)}, R {pct(r.recall)}, F1 {r.f1.toFixed(3)}
                       </span>
                     </div>

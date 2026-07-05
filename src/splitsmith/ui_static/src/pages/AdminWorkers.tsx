@@ -139,7 +139,7 @@ function WorkerRow({ worker, onRefetch }: WorkerRowProps) {
             }
           }}
           disabled={patching}
-          className="w-16 rounded border border-input bg-background px-2 py-0.5 text-center font-mono text-xs disabled:opacity-50"
+          className="w-16 rounded border border-rule bg-bg px-2 py-0.5 text-center font-mono text-xs disabled:opacity-50"
           aria-label={`Priority for ${worker.name}`}
         />
       </div>
@@ -252,7 +252,7 @@ export function AdminWorkers() {
 
   if (!user?.is_admin) {
     return (
-      <div className="py-8 text-center font-mono text-sm text-muted-foreground">
+      <div className="py-8 text-center font-mono text-sm text-muted">
         Admin access required.
       </div>
     );
@@ -285,11 +285,11 @@ export function AdminWorkers() {
             Loading...
           </div>
         ) : workers !== null && workers.length === 0 ? (
-          <div className="rounded-md border border-dashed border-border px-4 py-6 text-center font-mono text-xs text-subtle">
+          <div className="rounded-md border border-dashed border-rule px-4 py-6 text-center font-mono text-xs text-subtle">
             No workers registered.
           </div>
         ) : workers !== null ? (
-          <div className="rounded-md border border-border bg-card">
+          <div className="rounded-md border border-rule bg-surface">
             {workers.map((w) => (
               <WorkerRow key={w.id} worker={w} onRefetch={() => void loadWorkers()} />
             ))}

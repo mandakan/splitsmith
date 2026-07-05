@@ -386,7 +386,7 @@ function MarkerLayerInner({
               "group pointer-events-auto absolute top-0 -translate-x-1/2 cursor-grab",
               "flex h-full flex-col items-center justify-start outline-none",
               "active:cursor-grabbing",
-              focused && "ring-2 ring-ring ring-offset-1 ring-offset-background",
+              focused && "ring-2 ring-led ring-offset-1 ring-offset-bg",
             )}
             style={{ left: `${x}%`, width: "10px" }}
             title={label}

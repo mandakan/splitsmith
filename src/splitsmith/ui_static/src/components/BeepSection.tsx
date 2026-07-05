@@ -321,10 +321,10 @@ export function BeepSection({
     const draftSourceTime = Number(draft);
     const draftValid = Number.isFinite(draftSourceTime) && draftSourceTime >= 0;
     return (
-      <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3 text-sm">
+      <div className="space-y-2 rounded-md border border-rule bg-muted/30 p-3 text-sm">
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col gap-1">
-            <span className="text-xs text-muted-foreground">Beep time (seconds)</span>
+            <span className="text-xs text-muted">Beep time (seconds)</span>
             <input
               type="number"
               step="0.001"
@@ -332,8 +332,8 @@ export function BeepSection({
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               className={cn(
-                "h-8 w-32 rounded-md border border-input px-2 py-1 font-mono text-sm shadow-sm transition-colors duration-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                draftFlashing ? "bg-primary/20" : "bg-background",
+                "h-8 w-32 rounded-md border border-rule px-2 py-1 font-mono text-sm shadow-sm transition-colors duration-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
+                draftFlashing ? "bg-led/20" : "bg-bg",
               )}
               disabled={busy}
               aria-label={`Beep time for stage ${stageNumber}`}
@@ -382,7 +382,7 @@ export function BeepSection({
       <div
         className={cn(
           "flex flex-wrap items-center gap-2 px-2 py-1.5 text-xs",
-          !bare && "rounded-md border border-border/60 bg-muted/20",
+          !bare && "rounded-md border border-rule/60 bg-muted/20",
         )}
       >
         <Badge variant={failed ? "statusWarning" : "statusNotStarted"} className="gap-1">
@@ -391,7 +391,7 @@ export function BeepSection({
         {jobStatus ? (
           <JobProgress job={jobStatus} />
         ) : (
-          <span className="text-muted-foreground">
+          <span className="text-muted">
             {failedHint ??
               (isPrimary
                 ? "Audit screen needs this. Run detection or set manually."
@@ -510,7 +510,7 @@ export function BeepSection({
       <div
         className={cn(
           "px-2 py-1.5 text-xs",
-          !bare && "rounded-md border border-border/60 bg-muted/20",
+          !bare && "rounded-md border border-rule/60 bg-muted/20",
         )}
       >
         {shotRedetectBanner}
@@ -539,7 +539,7 @@ export function BeepSection({
     <div
       className={cn(
         "space-y-2 px-2 py-1.5 text-xs",
-        !bare && "rounded-md border border-border/60 bg-muted/20",
+        !bare && "rounded-md border border-rule/60 bg-muted/20",
       )}
     >
       {shotRedetectBanner}
@@ -550,7 +550,7 @@ export function BeepSection({
         </Badge>
         <span className="font-mono tabular-nums">{video.beep_time.toFixed(3)}s</span>
         {video.beep_peak_amplitude != null ? (
-          <span className="text-muted-foreground" title="Peak amplitude on the bandpassed envelope">
+          <span className="text-muted" title="Peak amplitude on the bandpassed envelope">
             peak {video.beep_peak_amplitude.toFixed(2)}
           </span>
         ) : null}
@@ -991,7 +991,7 @@ export function BeepWaveformPicker({
 
   if (loading) {
     return (
-      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+      <div className="flex items-center gap-1 text-xs text-muted">
         <Loader2 className="size-3 animate-spin" aria-hidden />
         Loading waveform...
       </div>
@@ -999,7 +999,7 @@ export function BeepWaveformPicker({
   }
   if (unavailable || !peaks) {
     return (
-      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+      <div className="flex items-center gap-1 text-xs text-muted">
         <Volume2 className="size-3" />
         Run "Detect beep" first to extract audio for the picker.
       </div>
@@ -1009,7 +1009,7 @@ export function BeepWaveformPicker({
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-muted">
           {instructions ??
             (snapEnabled
               ? 'Click / drag the waveform to set the marker (input below updates), then "Snap to beep"'
@@ -1167,18 +1167,18 @@ function SnapProposal({
   const deltaMs = Math.round(proposal.delta * 1000);
   const sign = deltaMs >= 0 ? "+" : "";
   return (
-    <div className="space-y-2 rounded-md border border-primary/40 bg-primary/5 px-2 py-1.5 text-xs">
+    <div className="space-y-2 rounded-md border border-led/40 bg-led/5 px-2 py-1.5 text-xs">
       <div className="flex flex-wrap items-center gap-2">
         <Sparkles className="size-3" />
         <span className="font-mono tabular-nums">
           Suggested: {proposal.snapped_time.toFixed(3)}s
         </span>
-        <span className="text-muted-foreground">
+        <span className="text-muted">
           ({sign}
           {deltaMs} ms)
         </span>
         <span
-          className="text-muted-foreground"
+          className="text-muted"
           title={`Silence-preference score: ${proposal.score.toFixed(1)}. Run peak amplitude: ${proposal.peak_amplitude.toFixed(2)}. Run duration: ${Math.round(proposal.duration_ms)} ms.`}
         >
           peak {proposal.peak_amplitude.toFixed(2)} &middot;{" "}
@@ -1229,7 +1229,7 @@ function ProposalPreview({
   }, [stageNumber, videoId, time]);
   if (errored) {
     return (
-      <div className="flex items-center gap-1 rounded-md border border-dashed border-border/60 bg-background/40 px-2 py-1 text-muted-foreground">
+      <div className="flex items-center gap-1 rounded-md border border-dashed border-rule/60 bg-bg/40 px-2 py-1 text-muted">
         <Sparkles className="size-3" />
         Preview unavailable (no cached clip yet)
       </div>
@@ -1239,7 +1239,7 @@ function ProposalPreview({
     <ReleasingPreviewVideo
       key={`${stageNumber}:${videoId}:${time.toFixed(3)}`}
       src={api.videoBeepPreviewUrl(slug, stageNumber, videoId, time)}
-      className="h-32 w-56 rounded-md border border-border/60 bg-black object-cover"
+      className="h-32 w-56 rounded-md border border-rule/60 bg-black object-cover"
       playsInline
       controls
       preload="metadata"
@@ -1300,11 +1300,11 @@ function BeepCandidates({
   if (!hasAlternatives) return null;
 
   return (
-    <div className="rounded-md border border-border/40 bg-background/40">
+    <div className="rounded-md border border-rule/40 bg-bg/40">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-1 px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
+        className="flex w-full items-center gap-1 px-2 py-1 text-xs text-muted hover:text-ink"
         aria-expanded={open}
         aria-controls={`beep-candidates-${stageNumber}-${videoId}`}
         title="Silence-preference ranked; pick a different one if the auto-winner is wrong"
@@ -1323,7 +1323,7 @@ function BeepCandidates({
         <>
           <ul
             id={`beep-candidates-${stageNumber}-${videoId}`}
-            className="divide-y divide-border/40 border-t border-border/40"
+            className="divide-y divide-rule/40 border-t border-rule/40"
           >
             {candidates.map((c, i) => (
               <CandidateRow
@@ -1341,12 +1341,12 @@ function BeepCandidates({
             ))}
           </ul>
           {previewIndex != null && candidates[previewIndex] ? (
-            <div className="border-t border-border/40 p-2">
-              <div className="mb-1 text-xs text-muted-foreground">
+            <div className="border-t border-rule/40 p-2">
+              <div className="mb-1 text-xs text-muted">
                 Preview #{previewIndex + 1} -- {candidates[previewIndex].time.toFixed(3)}s
               </div>
               {previewError ? (
-                <div className="flex items-center gap-1 rounded-md border border-dashed border-border/60 bg-background/40 px-2 py-1 text-xs text-muted-foreground">
+                <div className="flex items-center gap-1 rounded-md border border-dashed border-rule/60 bg-bg/40 px-2 py-1 text-xs text-muted">
                   <Sparkles className="size-3" />
                   Preview unavailable (no cached clip yet)
                 </div>
@@ -1359,7 +1359,7 @@ function BeepCandidates({
                     videoId,
                     candidates[previewIndex].time,
                   )}
-                  className="aspect-video w-full max-w-sm rounded-md border border-border/60 bg-black object-contain"
+                  className="aspect-video w-full max-w-sm rounded-md border border-rule/60 bg-black object-contain"
                   playsInline
                   controls
                   autoPlay
@@ -1398,7 +1398,7 @@ function CandidateRow({
       className={`px-2 py-1.5 text-xs ${isActive ? "bg-muted/40" : ""}`}
     >
       <div className="flex items-center gap-2">
-        <span className="w-5 shrink-0 text-muted-foreground tabular-nums">
+        <span className="w-5 shrink-0 text-muted tabular-nums">
           #{index + 1}
         </span>
         <span className="font-mono tabular-nums">{candidate.time.toFixed(3)}s</span>
@@ -1433,7 +1433,7 @@ function CandidateRow({
         </div>
       </div>
       <div
-        className="mt-0.5 pl-7 text-[11px] text-muted-foreground"
+        className="mt-0.5 pl-7 text-[11px] text-muted"
         title={`Calibrated detector confidence in [0, 1] (#220 layer 3a). Components: silence-preference ${candidate.silence_score.toFixed(2)} (run peak / pre-window max), tonal concentration ${candidate.tonal_score.toFixed(2)} (energy in IPSC fundamental band). Duration: ${candidate.duration_ms.toFixed(0)} ms; peak ${candidate.peak_amplitude.toFixed(3)}.`}
       >
         conf {candidate.confidence.toFixed(2)} &middot; tonal{" "}
@@ -1465,7 +1465,7 @@ function BeepPreview({
   return (
     <div className="flex flex-wrap items-center gap-2">
       {errored ? (
-        <div className="flex items-center gap-1 rounded-md border border-dashed border-border/60 bg-background/40 px-2 py-1 text-muted-foreground">
+        <div className="flex items-center gap-1 rounded-md border border-dashed border-rule/60 bg-bg/40 px-2 py-1 text-muted">
           <Sparkles className="size-3" />
           Preview unavailable
         </div>
@@ -1473,7 +1473,7 @@ function BeepPreview({
         <ReleasingPreviewVideo
           key={`${stageNumber}:${videoId}:${beepTime.toFixed(3)}`}
           src={api.videoBeepPreviewUrl(slug, stageNumber, videoId, beepTime)}
-          className="h-40 w-64 rounded-md border border-border/60 bg-black object-cover"
+          className="h-40 w-64 rounded-md border border-rule/60 bg-black object-cover"
           playsInline
           controls
           preload="metadata"
@@ -1485,7 +1485,7 @@ function BeepPreview({
       {isPrimary ? (
         <Link
           to={`/audit/${slug}/${stageNumber}`}
-          className="inline-flex items-center gap-1 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          className="inline-flex items-center gap-1 text-xs text-muted underline-offset-2 hover:text-ink hover:underline"
           title="Open the audit screen to verify or correct this beep on the waveform"
         >
           <Sparkles className="size-3" />
@@ -1539,7 +1539,7 @@ function AlignmentDisagreement({
           . Could be a steel-strike mistaken for the buzzer.
         </span>
         <span
-          className="text-muted-foreground"
+          className="text-muted"
           title={`In-stream: ${inStreamTime.toFixed(3)}s. Cross-align: ${crossAlignTime.toFixed(3)}s${
             confidence != null ? ` (conf ${confidence.toFixed(2)})` : ""
           }.`}
@@ -1563,7 +1563,7 @@ function AlignmentDisagreement({
        *  user the missing half of the comparison. */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-col gap-0.5">
-          <span className="text-[11px] text-muted-foreground">
+          <span className="text-[11px] text-muted">
             Cross-align preview ({crossAlignTime.toFixed(3)}s)
           </span>
           <ProposalPreview
@@ -1628,8 +1628,8 @@ function JobProgress({ job }: { job: Job }) {
     job.status === "failed"
       ? "text-destructive"
       : job.status === "succeeded"
-        ? "text-muted-foreground"
-        : "text-foreground";
+        ? "text-muted"
+        : "text-ink";
   const active = job.status === "pending" || job.status === "running";
   return (
     <span

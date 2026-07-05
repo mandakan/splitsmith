@@ -729,7 +729,7 @@ export function Review() {
       <div className="space-y-4">
         <h1 className="text-2xl font-semibold tracking-tight">Review</h1>
         <Card>
-          <CardContent className="flex items-center gap-2 py-6 text-muted-foreground">
+          <CardContent className="flex items-center gap-2 py-6 text-muted">
             <Loader2 className="size-4 animate-spin" /> Loading fixture...
           </CardContent>
         </Card>
@@ -746,7 +746,7 @@ export function Review() {
       <div className="flex items-baseline justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Review</h1>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-muted">
             Standalone fixture review. Drag the waveform to scrub. Double-click
             to add a manual marker. Press <kbd>?</kbd> for the full keyboard
             shortcuts.
@@ -792,7 +792,7 @@ export function Review() {
           )}
 
           {peaksLoading ? (
-            <div className="flex h-32 items-center justify-center gap-2 text-sm text-muted-foreground">
+            <div className="flex h-32 items-center justify-center gap-2 text-sm text-muted">
               <Loader2 className="size-4 animate-spin" /> Computing waveform...
             </div>
           ) : peaksError ? (
@@ -866,7 +866,7 @@ export function Review() {
                 >
                   <Repeat className="size-4" />
                 </Button>
-                <span className="font-mono text-muted-foreground">
+                <span className="font-mono text-muted">
                   {formatTime(currentTime)} / {formatTime(peaks.duration)}
                 </span>
                 <Button
@@ -893,7 +893,7 @@ export function Review() {
                     <Save className="size-4" />
                   )}
                 </Button>
-                <span className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
+                <span className="ml-auto flex items-center gap-3 text-xs text-muted">
                   <span>{detectedCount} detected</span>
                   <span>{rejectedCount} rejected</span>
                   <span>{manualCount} manual</span>
@@ -950,10 +950,10 @@ function SaveToast({ status }: { status: SaveStatus }) {
   let tone = "";
   if (status.kind === "saving") {
     label = "Saving fixture...";
-    tone = "bg-card text-foreground";
+    tone = "bg-surface text-ink";
   } else if (status.kind === "saved") {
     label = "Fixture saved";
-    tone = "bg-status-complete/10 text-foreground border-status-complete/40";
+    tone = "bg-status-complete/10 text-ink border-status-complete/40";
   } else if (status.kind === "error") {
     label = `Save failed: ${status.message}`;
     tone = "bg-destructive/10 text-destructive border-destructive/40";

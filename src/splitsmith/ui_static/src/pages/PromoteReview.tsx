@@ -94,13 +94,13 @@ function EscalationModal({
     >
       <div
         ref={panelRef}
-        className="bg-popover border border-border rounded-lg shadow-xl p-5 w-80 flex flex-col gap-3"
+        className="bg-surface-2 border border-rule rounded-lg shadow-xl p-5 w-80 flex flex-col gap-3"
         onClick={(e) => e.stopPropagation()}
       >
         <div id="escalation-modal-title" className="font-semibold text-sm">
           Shot {shotNumber} -- no candidate found
         </div>
-        <div className="text-xs text-muted-foreground">
+        <div className="text-xs text-muted">
           Choose how to record this shot in the derived fixture.
         </div>
         {(
@@ -124,11 +124,11 @@ function EscalationModal({
         ).map(({ action, title, desc }) => (
           <button
             key={action}
-            className="text-left rounded border border-border px-3 py-2.5 hover:bg-accent transition-colors"
+            className="text-left rounded border border-rule px-3 py-2.5 hover:bg-surface-3 transition-colors"
             onClick={() => onSelect(action)}
           >
             <div className="text-sm font-medium">{title}</div>
-            <div className="text-xs text-muted-foreground mt-0.5">{desc}</div>
+            <div className="text-xs text-muted mt-0.5">{desc}</div>
           </button>
         ))}
         <Button variant="ghost" size="sm" onClick={onClose}>
@@ -569,7 +569,7 @@ export function PromoteReview() {
 
   if (!fixturePath) {
     return (
-      <div className="p-8 text-muted-foreground">
+      <div className="p-8 text-muted">
         Missing <code>fixture</code> query parameter.
       </div>
     );
@@ -586,7 +586,7 @@ export function PromoteReview() {
 
   if (!fixture || shots.length === 0) {
     return (
-      <div className="p-8 text-muted-foreground text-sm">Loading fixture...</div>
+      <div className="p-8 text-muted text-sm">Loading fixture...</div>
     );
   }
 
@@ -594,7 +594,7 @@ export function PromoteReview() {
   const slug = fixturePath.split("/").pop()?.replace(".json", "") ?? "";
 
   return (
-    <div ref={containerRef} className="h-screen flex flex-col overflow-hidden bg-background">
+    <div ref={containerRef} className="h-screen flex flex-col overflow-hidden bg-bg">
       {/* Header */}
       <div className="border-b px-4 py-2 flex items-center gap-3 shrink-0">
         <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
@@ -603,7 +603,7 @@ export function PromoteReview() {
         <div className="flex-1 min-w-0">
           <div className="text-sm font-medium truncate">{slug}</div>
           {(fixture as unknown as { anchor?: { fixture_slug?: string; revision_sha?: string } }).anchor && (
-            <div className="text-xs text-muted-foreground">
+            <div className="text-xs text-muted">
               derived from{" "}
               <span className="font-mono">
                 {(fixture as unknown as { anchor: { fixture_slug?: string } }).anchor.fixture_slug}
@@ -615,7 +615,7 @@ export function PromoteReview() {
           )}
         </div>
         {report && (
-          <div className="flex gap-2 text-xs text-muted-foreground">
+          <div className="flex gap-2 text-xs text-muted">
             <span>
               {report.counts.snapped}/{report.counts.anchor_shots} snapped
             </span>
@@ -649,7 +649,7 @@ export function PromoteReview() {
           >
             <ZoomOut size={12} />
           </Button>
-          <span className="text-[10px] font-mono text-muted-foreground tabular-nums w-8 text-center">
+          <span className="text-[10px] font-mono text-muted tabular-nums w-8 text-center">
             {zoomLevel}x
           </span>
           <Button
@@ -675,7 +675,7 @@ export function PromoteReview() {
           >
             <Crosshair size={12} />
           </Button>
-          <span className="text-xs text-muted-foreground">{pending} pending</span>
+          <span className="text-xs text-muted">{pending} pending</span>
           <Button
             size="sm"
             variant="outline"
@@ -717,7 +717,7 @@ export function PromoteReview() {
               cover this stage
             </span>
           </div>
-          <ul className="text-[11px] text-muted-foreground list-disc pl-6">
+          <ul className="text-[11px] text-muted list-disc pl-6">
             {report.quality.warnings.map((w, i) => (
               <li key={i}>{w}</li>
             ))}
@@ -731,7 +731,7 @@ export function PromoteReview() {
           {/* Anchor waveform (frozen) */}
           {anchorPeaks && anchorFixture && (
             <div className="flex flex-col border-b" style={{ height: "45%" }}>
-              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-muted-foreground font-medium bg-muted/30 shrink-0 flex items-center gap-2">
+              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-muted font-medium bg-muted/30 shrink-0 flex items-center gap-2">
                 <span>anchor (frozen) &mdash; {anchorPath?.split("/").pop()?.replace(".json", "")}</span>
                 {anchorPath && (
                   <audio
@@ -763,7 +763,7 @@ export function PromoteReview() {
                       }}
                     >
                       <div
-                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] font-semibold bg-background/90 px-0.5 rounded"
+                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] font-semibold bg-bg/90 px-0.5 rounded"
                         style={{ color: "var(--color-status-warning)" }}
                       >
                         BEEP
@@ -777,7 +777,7 @@ export function PromoteReview() {
                       style={{ left: m.left, backgroundColor: "var(--color-marker-detected)" }}
                     >
                       <div
-                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] bg-background/80 px-0.5 rounded"
+                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] bg-bg/80 px-0.5 rounded"
                         style={{ color: "var(--color-marker-detected)" }}
                       >
                         {m.label}
@@ -792,7 +792,7 @@ export function PromoteReview() {
           {/* Secondary waveform (editable) */}
           {derivedPeaks && (
             <div className="flex flex-col" style={{ flex: 1 }}>
-              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-muted-foreground font-medium bg-muted/30 shrink-0 flex items-center gap-2">
+              <div className="px-3 py-1 text-[10px] uppercase tracking-wide text-muted font-medium bg-muted/30 shrink-0 flex items-center gap-2">
                 <span>secondary &mdash; {slug}</span>
                 {fixturePath && (
                   <audio
@@ -824,7 +824,7 @@ export function PromoteReview() {
                       }}
                     >
                       <div
-                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] font-semibold bg-background/90 px-0.5 rounded"
+                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] font-semibold bg-bg/90 px-0.5 rounded"
                         style={{ color: "var(--color-status-warning)" }}
                       >
                         BEEP
@@ -850,7 +850,7 @@ export function PromoteReview() {
                       }}
                     >
                       <div
-                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] bg-background/90 px-0.5 rounded font-medium"
+                        className="absolute -top-0.5 -translate-x-1/2 text-[9px] bg-bg/90 px-0.5 rounded font-medium"
                         style={{ color: m.color }}
                       >
                         {m.label}
@@ -866,7 +866,7 @@ export function PromoteReview() {
         {/* Shot list -- right panel */}
         <div className="w-72 flex flex-col overflow-hidden shrink-0">
           {/* Keyboard hint */}
-          <div className="px-3 py-2 border-b text-[10px] text-muted-foreground space-y-0.5 shrink-0">
+          <div className="px-3 py-2 border-b text-[10px] text-muted space-y-0.5 shrink-0">
             <div><kbd className="font-mono bg-muted px-1 rounded">Y</kbd> confirm &nbsp; <kbd className="font-mono bg-muted px-1 rounded">N</kbd> escalate</div>
             <div><kbd className="font-mono bg-muted px-1 rounded">←</kbd><kbd className="font-mono bg-muted px-1 rounded">→</kbd> nudge ±5ms &nbsp; <kbd className="font-mono bg-muted px-1 rounded">J</kbd><kbd className="font-mono bg-muted px-1 rounded">K</kbd> navigate</div>
           </div>
@@ -880,7 +880,7 @@ export function PromoteReview() {
                 <button
                   key={s.shotNumber}
                   className={`w-full text-left px-3 py-2 border-b flex flex-col gap-0.5 transition-colors ${
-                    isCurrent ? "bg-accent" : "hover:bg-muted/50"
+                    isCurrent ? "bg-surface-3" : "hover:bg-muted/50"
                   }`}
                   onClick={() => setCurrentIdx(idx)}
                 >
@@ -893,7 +893,7 @@ export function PromoteReview() {
                     </span>
                     <StatusBadge status={s.status} />
                   </div>
-                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+                  <div className="flex items-center gap-2 text-[10px] text-muted">
                     {s.time !== null ? (
                       <span>{s.time.toFixed(3)}s</span>
                     ) : (
@@ -904,7 +904,7 @@ export function PromoteReview() {
                         className={
                           Math.abs(s.displacement_ms) > 30
                             ? "text-amber-500"
-                            : "text-muted-foreground"
+                            : "text-muted"
                         }
                       >
                         {s.displacement_ms > 0 ? "+" : ""}
@@ -925,7 +925,7 @@ export function PromoteReview() {
           <div className="border-t p-2 shrink-0 flex flex-col gap-1.5">
             {currentShot && (
               <>
-                <div className="text-xs font-medium text-center text-muted-foreground">
+                <div className="text-xs font-medium text-center text-muted">
                   Shot {currentShot.shotNumber} of {shots.length}
                 </div>
                 <div className="flex gap-1">

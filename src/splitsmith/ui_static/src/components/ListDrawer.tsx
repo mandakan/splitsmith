@@ -83,12 +83,12 @@ export function ListDrawer({
       inert={!open}
       className={cn(
         "fixed right-0 top-0 z-drawer flex h-full w-full max-w-md flex-col",
-        "border-l border-border bg-card shadow-xl",
+        "border-l border-rule bg-surface shadow-xl",
         "transition-transform duration-200 ease-out",
         open ? "translate-x-0" : "translate-x-full",
       )}
     >
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+      <div className="flex items-center justify-between border-b border-rule px-4 py-3">
         <h2 className="text-sm font-semibold">All markers ({markers.length})</h2>
         <Button
           size="sm"
@@ -101,14 +101,14 @@ export function ListDrawer({
       </div>
       <div className="flex-1 overflow-y-auto">
         {markers.length === 0 ? (
-          <p className="p-4 text-sm text-muted-foreground">
+          <p className="p-4 text-sm text-muted">
             No candidates yet. Run shot detection on this stage, or double-click
             the waveform to add manual markers.
           </p>
         ) : (
           <table className="w-full text-xs">
-            <thead className="sticky top-0 bg-card text-muted-foreground">
-              <tr className="border-b border-border">
+            <thead className="sticky top-0 bg-surface text-muted">
+              <tr className="border-b border-rule">
                 <SortHeader
                   active={sortKey === "time"}
                   dir={sortDir}
@@ -162,9 +162,9 @@ export function ListDrawer({
                     tabIndex={0}
                     aria-label={`Jump to ${m.kind} marker at ${m.time.toFixed(3)}s`}
                     className={cn(
-                      "cursor-pointer border-b border-border/50 hover:bg-accent",
-                      "focus-visible:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                      selected && "bg-accent",
+                      "cursor-pointer border-b border-rule/50 hover:bg-surface-3",
+                      "focus-visible:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-led",
+                      selected && "bg-surface-3",
                     )}
                     onClick={() => onJumpTo(m)}
                     onKeyDown={(e) => {
@@ -216,7 +216,7 @@ export function ListDrawer({
           </table>
         )}
       </div>
-      <div className="border-t border-border px-4 py-2 text-[0.7rem] text-muted-foreground">
+      <div className="border-t border-rule px-4 py-2 text-[0.7rem] text-muted">
         Press L to toggle - Esc to close
       </div>
     </div>
@@ -246,7 +246,7 @@ function SortHeader({
         onClick={onClick}
         className={cn(
           "inline-flex cursor-pointer items-center gap-0.5",
-          "rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          "rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
         )}
       >
         {children}
