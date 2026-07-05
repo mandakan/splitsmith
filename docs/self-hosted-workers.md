@@ -65,6 +65,11 @@ The `-v splitsmith-agent:/data` flag mounts a named volume at the agent's state 
 On first start, the agent exchanges the registration token for credentials and writes
 `/data/agent.json`. That file persists across container restarts.
 
+The container runs as a non-root user. `/data` is pre-created with that user's
+ownership, so a named volume (as above) is writable out of the box. If you bind-mount
+a host directory instead (`-v /some/host/dir:/data`), make it writable by uid 999, or
+pass `--state-dir` to point at a path that is.
+
 The `--token` flag is only needed on the first run. Once `agent.json` exists, the agent
 uses it directly and `--token` is ignored.
 
