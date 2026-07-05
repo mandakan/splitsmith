@@ -640,3 +640,54 @@ def test_attach_raw_video_422_on_naive_recorded_start(tmp_path: Path) -> None:
         },
     )
     assert resp.status_code == 422
+
+
+def test_attach_raw_video_blocks_cross_shooter_dup(tmp_path: Path) -> None:
+    """A raw object attached to one shooter can't be attached to another
+    shooter in the same match (409), and the raw-upload list marks the
+    owning shooter so the ingest UI can hide it (#562).
+
+    Guards the hosted-pool duplication bug: the shared per-user ``raw/``
+    pool has no filesystem-enforced owner, so the same upload used to end
+    up attached to two shooters at once.
+    """
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from tests.test_ui_server import _match_create_app, _MatchClient
+
+    project_root = tmp_path / "match_dup"
+    app = _match_create_app(project_root=project_root, project_name="Dup Test")
+    client = _MatchClient(app)
+    match_id = app.state.splitsmith_state.matches.known_ids()[0]
+
+    # Add a second shooter to the same match.
+    resp = client.post("/api/match/shooters", json={"name": "Other Shooter"})
+    assert resp.status_code == 200, resp.text
+    other = next(s["slug"] for s in resp.json()["shooters"] if s["slug"] != "me")
+
+    # Fake hosted storage: the object exists and the list surfaces it.
+    fake_storage = MagicMock()
+    fake_storage.stat.return_value = SimpleNamespace(size=1234)
+    fake_storage.list.return_value = [
+        SimpleNamespace(path="raw/VID.mp4", size=1234, last_modified=None, etag=None)
+    ]
+    app.state.splitsmith_state.storage = fake_storage
+
+    # First attach to "me" succeeds.
+    r1 = client.post("/api/shooters/me/raw-videos/attach", json={"filename": "VID.mp4"})
+    assert r1.status_code == 200, r1.text
+
+    # Same object to the other shooter is refused with a clear error.
+    r2 = client.post(f"/api/shooters/{other}/raw-videos/attach", json={"filename": "VID.mp4"})
+    assert r2.status_code == 409, r2.text
+    detail = r2.json()["detail"]
+    assert detail["error"] == "already_attached_to_shooter"
+    assert detail["shooter"] == "me"
+
+    # The raw-upload list marks the owning shooter (match-scoped URL, as the
+    # SPA rewrites /api/me/... to /api/matches/{id}/api/me/...).
+    r3 = client.get(f"/api/matches/{match_id}/me/raw/list")
+    assert r3.status_code == 200, r3.text
+    uploads = {u["path"]: u for u in r3.json()["uploads"]}
+    assert uploads["raw/VID.mp4"]["attached_to"] == "me"

@@ -1123,6 +1123,14 @@ function HostedUploadBody({
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [inFlight]);
 
+  // A raw object belongs to one shooter. Hide uploads already attached to a
+  // DIFFERENT shooter so they can't be re-attached here (attach also 409s
+  // server-side). Entries with no owner, or owned by this shooter, stay. (#562)
+  const availableExisting = (existing ?? []).filter(
+    (e) => !e.attached_to || e.attached_to === slug,
+  );
+  const hiddenExistingCount = (existing?.length ?? 0) - availableExisting.length;
+
   // Escape / focus trap / restore; Escape locked while uploads run.
   useDialogFocus(true, panelRef, onClose, { disableEscape: inFlight });
 
@@ -1219,7 +1227,10 @@ function HostedUploadBody({
           {/* Existing uploads */}
           <section className="flex flex-col gap-2">
             <h3 className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
-              Already in storage{existing ? ` (${existing.length})` : ""}
+              Already in storage{existing ? ` (${availableExisting.length})` : ""}
+              {hiddenExistingCount > 0
+                ? ` . ${hiddenExistingCount} on other shooters`
+                : ""}
             </h3>
             {existing === null ? (
               <p className="font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
@@ -1230,9 +1241,13 @@ function HostedUploadBody({
                 Nothing uploaded yet. Files added here persist across
                 browser sessions.
               </p>
+            ) : availableExisting.length === 0 ? (
+              <p className="rounded-md border border-rule bg-surface-2 px-3 py-2 font-mono text-[0.75rem] text-muted">
+                All uploads here are already attached to another shooter.
+              </p>
             ) : (
               <ul className="flex flex-col gap-2">
-                {existing.map((e) => (
+                {availableExisting.map((e) => (
                   <ExistingRow
                     key={e.path}
                     entry={e}

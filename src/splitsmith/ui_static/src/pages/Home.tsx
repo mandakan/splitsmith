@@ -545,7 +545,7 @@ function EmptyVariant({
                   : "No footage yet"
               }
               addLink={s.video_count === 0 ? "Add footage" : undefined}
-              onAddLink={() => navigate(ingestHref)}
+              onAddLink={() => navigate(href("ingest", s.slug))}
             />
           ))
         ) : (

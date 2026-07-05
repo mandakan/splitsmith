@@ -6475,6 +6475,56 @@ def test_list_match_shooters_includes_per_stage_statuses(tmp_path: Path, _user_c
     assert by_stage == {1: "ready", 2: "todo"}
 
 
+def test_list_match_shooters_counts_unassigned_videos(tmp_path: Path, _user_config_home: Path) -> None:
+    """Attached-but-unassigned footage counts toward ``video_count``.
+
+    A hosted upload attached without stage coverage lands in
+    ``unassigned_videos`` (disjoint from ``stages[].videos``). Before the
+    fix, ``_classify_shooter`` walked only stage videos, so the overview
+    reported "NO FOOTAGE YET" for a shooter that already had N videos
+    attached. Ignored videos still don't count.
+    """
+    from splitsmith import match_model
+
+    target = tmp_path / "mm"
+    match = match_model.Match.init(target, name="Multi-shooter")
+    match.stages = [
+        match_model.MatchStageDefinition(stage_number=1, stage_name="One"),
+        match_model.MatchStageDefinition(stage_number=2, stage_name="Two"),
+    ]
+    match.save(target)
+
+    sroot = match_model.Match.shooter_root(target, "ma")
+    match.add_shooter(target, match_model.Shooter(slug="ma", name="Mathias"))
+    legacy = MatchProject.init(sroot, name="Multi-shooter")
+    legacy.competitor_name = "Mathias"
+    legacy.stages = [
+        StageEntry(stage_number=1, stage_name="One", time_seconds=0.0),
+        StageEntry(stage_number=2, stage_name="Two", time_seconds=0.0),
+    ]
+    # Two attached-but-unassigned videos plus one ignored (must not count).
+    legacy.unassigned_videos = [
+        StageVideo(path="raw/a.mp4", role="secondary"),
+        StageVideo(path="raw/b.mp4", role="secondary"),
+        StageVideo(path="raw/c.mp4", role="ignored"),
+    ]
+    legacy.save(sroot)
+
+    app = create_app()
+    client = _MatchClient(app)
+    resp = client.post(
+        "/api/me/recent-projects/bind",
+        json={"path": str(target.resolve())},
+    )
+    assert resp.status_code == 200
+    match_id = app.state.splitsmith_state.matches.known_ids()[0]
+
+    listing = client.get(f"/api/matches/{match_id}/match/shooters")
+    assert listing.status_code == 200, listing.text
+    ma = next(s for s in listing.json()["shooters"] if s["slug"] == "ma")
+    assert ma["video_count"] == 2
+
+
 def test_list_match_shooters_stages_total_from_project_not_match(
     tmp_path: Path, _user_config_home: Path
 ) -> None:

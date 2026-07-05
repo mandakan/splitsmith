@@ -42,6 +42,7 @@ import {
   type ShooterListEntry,
   type VideoRole,
 } from "@/lib/api";
+import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
 import { ReviewLayout } from "@/pages/ingest/ReviewLayout";
 
@@ -62,6 +63,10 @@ export function Ingest() {
 function IngestInner({ slug }: { slug: string }) {
   const navigate = useNavigate();
   const href = useMatchHref();
+  // Relink rewrites on-disk raw/ symlinks, a local-filesystem concept.
+  // In hosted mode the container FS is ephemeral and sources live in object
+  // storage, so the "Find moved videos" affordance is meaningless there.
+  const mode = useDeploymentMode();
   const [project, setProject] = useState<MatchProject | null>(null);
   const [health, setHealth] = useState<ServerHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -279,7 +284,7 @@ function IngestInner({ slug }: { slug: string }) {
          *  JTBD. It scans a folder recursively, matches by basename, and
          *  rewrites the per-video symlinks. Reachable here so the user
          *  doesn't have to dig through Settings or the CLI. */}
-        {!isEmpty && (
+        {!isEmpty && mode === "local" && (
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <Button
               type="button"
@@ -298,7 +303,7 @@ function IngestInner({ slug }: { slug: string }) {
           </div>
         )}
 
-        {showRelinkDialog && (
+        {showRelinkDialog && mode === "local" && (
           <RelinkDialog
             slug={slug}
             onClose={() => setShowRelinkDialog(false)}
