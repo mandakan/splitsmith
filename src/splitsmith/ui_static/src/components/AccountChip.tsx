@@ -9,9 +9,10 @@
  */
 
 import * as React from "react";
-import { LogOut } from "lucide-react";
+import { LogOut, Server } from "lucide-react";
+import { Link } from "react-router-dom";
 
-import { IconButton } from "@/components/ui/IconButton";
+import { IconButton, iconButtonVariants } from "@/components/ui/IconButton";
 import { useDeploymentMode } from "@/lib/features";
 import { useAuth } from "@/lib/auth";
 
@@ -47,6 +48,16 @@ export function AccountChip({ className }: { className?: string }) {
       >
         {user.display_name ?? user.email}
       </span>
+      {user.is_admin ? (
+        <Link
+          to="/admin/workers"
+          aria-label="Workers (admin)"
+          title="Workers (admin)"
+          className={iconButtonVariants({ variant: "subtle", size: "sm" })}
+        >
+          <Server className="size-3.5" />
+        </Link>
+      ) : null}
       <IconButton
         variant="subtle"
         size="sm"

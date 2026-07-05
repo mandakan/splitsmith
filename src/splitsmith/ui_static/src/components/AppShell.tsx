@@ -4,7 +4,6 @@ import {
   PanelLeftOpen,
   Palette,
   Repeat,
-  Server,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -12,7 +11,6 @@ import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-route
 import { JobsSurface } from "@/components/Jobs";
 import { ModeSwitch } from "@/components/ui/ModeSwitch";
 import { api, type ServerHealth } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
 import { useMode } from "@/lib/mode";
 import { cn } from "@/lib/utils";
 
@@ -22,7 +20,6 @@ export function AppShell() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { mode } = useMode();
-  const { user } = useAuth();
   // AppShell hosts the fixture editor + design system. Either one is
   // mode-agnostic, but flipping to Developer should take the user to
   // the dev workspace rather than leaving them on a hidden-sidebar page
@@ -130,27 +127,11 @@ export function AppShell() {
           </div>
           {/* AppShell only renders the legacy single-purpose surfaces
               (fixture editor, design system). Those screens self-shell;
-              the cross-surface nav lives on MatchShell / DeveloperShell. */}
-          <nav className="flex flex-1 flex-col gap-0.5 p-2">
-            {user?.is_admin ? (
-              <NavLink
-                to="/admin/workers"
-                title={sidebarCollapsed ? "Workers" : undefined}
-                className={({ isActive }) =>
-                  cn(
-                    "flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors",
-                    sidebarCollapsed && "justify-center px-0",
-                    isActive
-                      ? "bg-accent text-accent-foreground font-medium"
-                      : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-                  )
-                }
-              >
-                <Server className="size-4 shrink-0" />
-                {sidebarCollapsed ? null : <span>Workers</span>}
-              </NavLink>
-            ) : null}
-          </nav>
+              the cross-surface nav lives on MatchShell / DeveloperShell,
+              and the global admin link lives in AccountChip so it shows
+              on the shell-less picker too. This region is just the flex
+              spacer that pushes the footer down. */}
+          <div className="flex-1" />
 
           <div className="border-t border-border p-2">
             <NavLink
