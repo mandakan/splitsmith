@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.8.0](https://github.com/mandakan/splitsmith/compare/v0.7.0...v0.8.0) (2026-07-05)
+
+
+### Features
+
+* public share links for match results (MVP) ([#541](https://github.com/mandakan/splitsmith/issues/541)) ([17ad330](https://github.com/mandakan/splitsmith/commit/17ad3301784884dbaa2419d1f867a1c082b8b1bf))
+* self-hosted workers - registration, wake channel, priority dispatch ([#542](https://github.com/mandakan/splitsmith/issues/542)) ([d3fa93b](https://github.com/mandakan/splitsmith/commit/d3fa93b141d31439051cf016e7ed4ff25873da61))
+* **ui:** copy-paste build/run/logs commands in worker register dialog ([#544](https://github.com/mandakan/splitsmith/issues/544)) ([31c4c5a](https://github.com/mandakan/splitsmith/commit/31c4c5ad72a15b69ef080a2c95d5d64733e4c648))
+
+
+### Bug Fixes
+
+* agent state dir /data writable by non-root container user ([#543](https://github.com/mandakan/splitsmith/issues/543)) ([8f80e2a](https://github.com/mandakan/splitsmith/commit/8f80e2af490020acdd1650f15b62af04a53188b4))
+* **ui:** surface app version; drop inert help/settings buttons ([#538](https://github.com/mandakan/splitsmith/issues/538)) ([f14ecd2](https://github.com/mandakan/splitsmith/commit/f14ecd238290ddb97300d20355ca74ef4cbbaa40))
+
+
+### Build / CI
+
+* publish container image to GHCR (edge on main, semver on release) ([#545](https://github.com/mandakan/splitsmith/issues/545)) ([7b08069](https://github.com/mandakan/splitsmith/commit/7b0806973f85966d692a0f8768c5a37be07e7d9a))
+
 ## [0.7.0](https://github.com/mandakan/splitsmith/compare/v0.6.0...v0.7.0) (2026-07-04)
 
 
