@@ -35,6 +35,8 @@ uv tool install splitsmith                       # slim runtime, ~100 MB
 splitsmith ui --project ~/matches/your-match     # auto-fetches ~440 MB of models on first launch
 ```
 
+Running a hosted server or a self-hosted worker instead of the desktop app? Pull the container image from GHCR - see [Which path is for you](#which-path-is-for-you).
+
 The UI kicks off the model prefetch as a background job the moment the server boots; the Jobs panel shows progress and the rest of the app (ingest, beep review) stays responsive while it runs. Shot detection waits on the download to finish.
 
 Prefer the CLI? `splitsmith single` runs the envelope-only detector and needs no model artifacts:
@@ -63,6 +65,14 @@ The repo ships a real Stage 3 audio sample at `tests/fixtures/stage-shots-tallmi
 
 ## Install
 
+### Which path is for you
+
+Three ways to get splitsmith, by what you are doing:
+
+- **Desktop app (most people).** Install from PyPI and run `splitsmith ui` on your own machine to pull splits and cut timelines. This is the primary tool. Start at [Option 1](#option-1-pypi-slim-wheel-desktop-app-100-mb).
+- **Server, worker, or self-hosted agent.** Run the container image from GitHub Container Registry (or build it). Same image, the subcommand picks the role. See [Option 2](#option-2-docker-image-server-worker-or-self-hosted-agent).
+- **Development or contributing.** Install from source with `uv`. See [Option 3](#option-3-from-source-required-for-contributors).
+
 ### System prerequisites
 
 - **OS.** macOS (primary target), Linux, or Windows. FCPXML is generated everywhere but Final Cut Pro itself is macOS-only -- on Linux/Windows you'll need to copy the `.fcpxml` to a Mac to open it (or just use the splits CSV directly).
@@ -75,7 +85,7 @@ The repo ships a real Stage 3 audio sample at `tests/fixtures/stage-shots-tallmi
 
   `splitsmith ui` checks for both on first launch and prints a copy-pasteable install hint if they're missing.
 
-### Option 1: slim wheel (end users, ~100 MB)
+### Option 1: PyPI slim wheel (desktop app, ~100 MB)
 
 ```bash
 uv tool install splitsmith                       # from PyPI
@@ -84,7 +94,39 @@ splitsmith ui --project ~/matches/your-match
 
 Detection models (~440 MB total) are auto-fetched from `models.splitsmith.app` into `~/.splitsmith/models/` in the background as soon as `splitsmith ui` starts; the SPA's Jobs panel shows progress. Pre-fetch in a one-shot run with `splitsmith fetch-models` if you'd rather pay the download up front (CI, metered connections, etc.). No torch, transformers, or panns_inference in the install. The CLI `single` / `process` / `detect` commands use only the envelope-based Voter A and need no model artifacts at all.
 
-### Option 2: from source (required for contributors)
+### Option 2: Docker image (server, worker, or self-hosted agent)
+
+The container image is published to GitHub Container Registry. One image runs every role: the entrypoint is the `splitsmith` CLI, so the subcommand you pass picks the role.
+
+```bash
+docker pull ghcr.io/mandakan/splitsmith:latest   # :edge tracks main; :X.Y.Z pins a release
+```
+
+Multi-arch (linux/amd64 and linux/arm64). The roles:
+
+- `serve` (the default command) runs the hosted, Postgres-backed API.
+- `worker` runs a compute worker for the hosted job queue.
+- `agent` runs a self-hosted worker that lends a home box to a hosted server. The admin UI generates a ready-to-paste `docker run` command; the full setup is in [`docs/self-hosted-workers.md`](docs/self-hosted-workers.md).
+
+Prefer to build the image yourself rather than pull it:
+
+```bash
+git clone https://github.com/mandakan/splitsmith.git
+cd splitsmith
+docker build -t splitsmith:local .
+```
+
+To run the whole hosted stack (server, worker, and bundled Postgres + MinIO) from the published image, layer the GHCR overlay onto the base compose file:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d   # SPLITSMITH_IMAGE_TAG=edge tracks main
+```
+
+`docker-compose.yml` on its own builds from source (the dev / test stack); the overlay swaps that build for the released image. This runs the release locally with bundled dependencies - it is not a production deployment (production is Railway + Neon + R2).
+
+The container is for the server and worker roles, not the desktop `ui` workflow. For that, use the PyPI install above so the app has native access to your video files and Final Cut Pro.
+
+### Option 3: from source (required for contributors)
 
 ```bash
 git clone https://github.com/mandakan/splitsmith.git
@@ -99,7 +141,7 @@ Source checkouts also need **Node.js 20+ and `pnpm`** to build the SPA:
 - Linux: `apt install nodejs npm && sudo npm install -g pnpm`
 - Windows: `winget install -e --id OpenJS.NodeJS.LTS`, open a new shell, then `npm install -g pnpm`
 
-### Option 3: contributor install (adds torch + tests + export tooling)
+### Option 4: contributor extras (adds torch + tests + export tooling)
 
 For running the test suite, rebuilding the ONNX artifacts, or enabling the optional Voter E visual probe:
 
