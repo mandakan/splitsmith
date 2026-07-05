@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/mandakan/splitsmith/compare/v0.8.2...v0.8.3) (2026-07-05)
+
+
+### Bug Fixes
+
+* **ui:** unfreeze hosted upload queue stuck at 0% ([#555](https://github.com/mandakan/splitsmith/issues/555)) ([2f2279c](https://github.com/mandakan/splitsmith/commit/2f2279c4baffa2d9d9aa1f9fc6dc743f29d8566f))
+
 ## [0.8.2](https://github.com/mandakan/splitsmith/compare/v0.8.1...v0.8.2) (2026-07-05)
 
 
