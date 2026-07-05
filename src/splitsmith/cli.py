@@ -742,6 +742,14 @@ def agent(
         f"[green]splitsmith agent[/]: connecting to [bold]{server_url}[/] "
         f"(state-dir={resolved_state_dir}, concurrency={concurrency})   (Ctrl+C to stop)"
     )
+    # Route splitsmith.* INFO to stdout so the agent's lifecycle lines
+    # (registered / connected / draining) are visible in `docker logs`. Called
+    # before hosted-mode env is applied, so the formatter is plain text - more
+    # readable for an operator than the JSON the server emits. Idempotent, so
+    # run_worker's own call during a drain is a no-op.
+    from .ui.server import _configure_app_logging
+
+    _configure_app_logging()
     try:
         _asyncio.run(
             _run_agent(

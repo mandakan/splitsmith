@@ -7884,8 +7884,11 @@ def create_app(
         connected = registry.connected_ids() if registry is not None else frozenset()
         image = os.environ.get(SPLITSMITH_AGENT_IMAGE_ENV, SPLITSMITH_AGENT_IMAGE_DEFAULT)
         public_url = state.public_base_url or ""
+        # ``--name splitsmith-agent`` so the ``docker logs -f splitsmith-agent``
+        # step the admin UI shows next to this command resolves the container.
         docker_command = (
-            f"docker run -d --restart unless-stopped -v splitsmith-agent:/data "
+            f"docker run -d --restart unless-stopped --name splitsmith-agent "
+            f"-v splitsmith-agent:/data "
             f"{image} agent --server-url {public_url} --token {reg_token}"
         )
         expires_at = record.token_expires_at.isoformat() if record.token_expires_at is not None else ""

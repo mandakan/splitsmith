@@ -149,6 +149,7 @@ def register(
         credentials=body["credentials"],
     )
     state.save(state_dir)
+    logger.info("registered as worker %s", state.worker_id)
     return state
 
 
@@ -248,8 +249,10 @@ class _WakeCoordinator:
         elif name == "enabled":
             self.disabled = False
             self.wake_event.set()
+            logger.info("re-enabled by admin; will drain on next wake")
         elif name == "disabled":
             self.disabled = True
+            logger.info("disabled by admin; idling until re-enabled")
         elif name == "replaced":
             return "reconnect"
         return None
@@ -293,6 +296,7 @@ async def _reader_loop(
                     raise SystemExit(3)
                 response.raise_for_status()
                 connected_at = time.monotonic()
+                logger.info("connected to wake channel; waiting for wake events")
                 parser = _SSEParser()
                 async for chunk in response.aiter_bytes():
                     if _feed_and_dispatch(parser, chunk, coordinator):
@@ -349,7 +353,9 @@ async def _drain_loop(
         if stop_event.is_set():
             return
         wake_event.clear()
+        logger.info("wake received; draining queued jobs")
         await run(db_url, concurrency)
+        logger.info("drain finished; waiting for next wake")
 
 
 async def run_agent(
@@ -378,6 +384,8 @@ async def run_agent(
         state = register(
             server_url, registration_token, state_dir, concurrency=concurrency, transport=transport
         )
+    else:
+        logger.info("using cached registration for worker %s", state.worker_id)
 
     apply_credentials(state)
     db_url = state.credentials["database_url"]
