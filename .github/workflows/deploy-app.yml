@@ -6,8 +6,14 @@ name: Deploy app (Railway)
 # RAILWAY_TOKEN secret) decides which Railway environment it lands in.
 #
 #   push to main           -> staging
-#   release published      -> production
+#   release (workflow_call) -> production   (chained from release-please.yml)
 #   workflow_dispatch      -> the chosen environment (manual button)
+#
+# The production path is a `workflow_call` from release-please.yml gated on
+# release_created, not the `release: published` event: a release cut by
+# release-please via GITHUB_TOKEN does not trigger `on: release` workflows, so
+# chaining it into the release run is what makes prod deploy fire automatically.
+# The `release: published` trigger stays as a net for human-published releases.
 #
 # Both services build from the same image (ENTRYPOINT `splitsmith`); the
 # `serve` and `worker` Railway services differ only by start command, set
@@ -25,6 +31,13 @@ on:
         type: choice
         options: [staging, production]
         default: staging
+  workflow_call:
+    inputs:
+      environment:
+        description: Target environment (production on the release path)
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -36,13 +49,18 @@ jobs:
     outputs:
       env: ${{ steps.pick.outputs.env }}
     steps:
+      # workflow_dispatch and workflow_call both supply inputs.environment;
+      # prefer it when set, else fall back to the event (release -> production,
+      # everything else -> staging).
       - id: pick
         run: |
-          case "${{ github.event_name }}" in
-            workflow_dispatch) echo "env=${{ inputs.environment }}" >> "$GITHUB_OUTPUT" ;;
-            release)           echo "env=production" >> "$GITHUB_OUTPUT" ;;
-            *)                 echo "env=staging" >> "$GITHUB_OUTPUT" ;;
-          esac
+          if [ -n "${{ inputs.environment }}" ]; then
+            echo "env=${{ inputs.environment }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "release" ]; then
+            echo "env=production" >> "$GITHUB_OUTPUT"
+          else
+            echo "env=staging" >> "$GITHUB_OUTPUT"
+          fi
 
   deploy:
     name: railway up (${{ needs.target.outputs.env }})
