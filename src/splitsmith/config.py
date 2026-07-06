@@ -386,6 +386,17 @@ class OutputConfig(BaseModel):
     trim_audit_encoder: str = "auto"
 
 
+class ProxyConfig(BaseModel):
+    """Low-res, keyframe-dense preview proxy for fast scrub/seek in Ingest."""
+
+    height: int = 480
+    crf: int = 30
+    preset: str = "veryfast"
+    gop: int = 15
+    audio_bitrate: str = "96k"
+    video_codec: str = "libx264"
+
+
 class CoachAutoClassifyConfig(BaseModel):
     """Gap-time thresholds for the Coach interval auto-classifier (#160).
 
