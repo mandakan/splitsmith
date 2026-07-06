@@ -17,6 +17,7 @@ import { DefaultShooterRedirect } from "@/components/match/DefaultShooterRedirec
 import { ModeProvider } from "@/lib/mode";
 import { ConfirmProvider } from "@/components/useConfirm";
 import { UploadProvider } from "@/lib/uploads";
+import { UploadDock } from "@/components/UploadDock";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { useDeploymentMode } from "@/lib/features";
 import { ShooterScopedRoute } from "@/components/ShooterScopedRoute";
@@ -131,6 +132,7 @@ export function App() {
       <AuthProvider>
         <ConfirmProvider>
           <UploadProvider>
+            <UploadDock />
           <BrowserRouter>
             <AuthGate>
             <Routes>
