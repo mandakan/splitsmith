@@ -111,7 +111,7 @@ class WorkersStore:
         self,
         name: str,
         *,
-        priority: int = 10,
+        priority: int = 1000,
         ttl_hours: float = 24.0,
     ) -> tuple[WorkerRecord, str]:
         """Create a pending self-hosted worker row.
@@ -136,11 +136,15 @@ class WorkersStore:
             return _to_record(row), plain
 
     async def list(self) -> list[WorkerRecord]:
-        """All workers ordered by priority asc, name asc."""
+        """All workers ordered by priority desc, name asc.
+
+        Higher priority is preferred (matches the register-worker copy), so
+        the most-preferred worker sorts first.
+        """
         async with self._session_factory() as session:
             rows = (
                 await session.execute(
-                    select(WorkerRow).order_by(WorkerRow.priority.asc(), WorkerRow.name.asc())
+                    select(WorkerRow).order_by(WorkerRow.priority.desc(), WorkerRow.name.asc())
                 )
             ).scalars()
             return [_to_record(r) for r in rows]
@@ -304,6 +308,9 @@ class WorkersStore:
             row = WorkerRow(
                 name="railway",
                 kind="railway",
+                # Fallback priority: below the self-hosted default (1000), so a
+                # registered home worker is preferred and Railway only wakes
+                # when no home worker takes the job. Higher number = preferred.
                 priority=100,
                 enabled=True,
                 registered_at=datetime.now(UTC),
@@ -315,7 +322,8 @@ class WorkersStore:
     async def list_enabled(self) -> list[WorkerRecord]:
         """Workers that are enabled AND either registered or railway-kind.
 
-        Ordered by priority asc.
+        Ordered by priority desc: the dispatcher walks tiers from this order
+        and wakes the first reachable one, so higher priority is preferred.
         """
         async with self._session_factory() as session:
             rows = (
@@ -325,7 +333,7 @@ class WorkersStore:
                         WorkerRow.enabled.is_(True),
                         (WorkerRow.registered_at.is_not(None)) | (WorkerRow.kind == "railway"),
                     )
-                    .order_by(WorkerRow.priority.asc())
+                    .order_by(WorkerRow.priority.desc())
                 )
             ).scalars()
             return [_to_record(r) for r in rows]

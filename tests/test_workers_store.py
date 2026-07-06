@@ -34,7 +34,7 @@ def test_create_returns_plaintext_token_and_pending_record() -> None:
     assert record.name == "worker-1"
     assert record.kind == "self_hosted"
     assert record.enabled is True
-    assert record.priority == 10
+    assert record.priority == 1000
     # Not registered until register() is called
     assert record.registered is False
     # token_urlsafe(32) always produces 43 chars
@@ -186,15 +186,15 @@ def test_list_enabled_excludes_disabled_and_unregistered_but_includes_railway() 
     assert "worker-unregistered" not in names
 
 
-# - list() order is by priority asc, name asc
+# - list() order is by priority desc, name asc (higher priority preferred)
 def test_list_order_priority_then_name() -> None:
     store = _fresh_store()
     asyncio.run(store.create_self_hosted("b-worker", priority=10))
     asyncio.run(store.create_self_hosted("a-worker", priority=10))
     asyncio.run(store.create_self_hosted("c-worker", priority=5))
     workers = asyncio.run(store.list())
-    names = [w.name for w in workers]
-    assert names == ["c-worker", "a-worker", "b-worker"]
+    names = [w.name for w in workers if w.kind == "self_hosted"]
+    assert names == ["a-worker", "b-worker", "c-worker"]
 
 
 # - touch_seen() updates last_seen_at without error

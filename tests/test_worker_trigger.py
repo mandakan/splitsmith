@@ -132,7 +132,7 @@ def _fresh_store() -> WorkersStore:
 
 
 async def _add_home(
-    store: WorkersStore, name: str = "home", *, priority: int = 10, enabled: bool = True
+    store: WorkersStore, name: str = "home", *, priority: int = 1000, enabled: bool = True
 ) -> str:
     """Create + register a self-hosted worker; returns its id."""
     record, token = await store.create_self_hosted(name, priority=priority)
@@ -188,7 +188,7 @@ async def _drain_tasks(dispatcher: WorkerDispatcher) -> None:
 
 
 def test_dispatcher_wakes_connected_home_worker_not_railway() -> None:
-    """A connected self-hosted worker at a lower priority absorbs the wake;
+    """A connected self-hosted worker at a higher priority absorbs the wake;
     the Railway leg is never touched."""
     store = _fresh_store()
     requests: list[dict[str, Any]] = []
@@ -209,6 +209,31 @@ def test_dispatcher_wakes_connected_home_worker_not_railway() -> None:
     assert qsize == 1
     assert last_wake_at is not None
     assert requests == []
+
+
+def test_dispatcher_prefers_higher_priority_worker() -> None:
+    """Higher priority number wins (matches the register-worker copy). A
+    connected self-hosted worker at priority 500 outranks the railway row
+    at 100, so it absorbs the wake and the Railway leg is never touched."""
+    store = _fresh_store()
+    requests: list[dict[str, Any]] = []
+
+    async def scenario() -> tuple[bool, int, Any]:
+        home_id = await _add_home(store, priority=500)
+        await _railway_row_id(store)  # railway seeded at priority 100
+        registry = WakeChannelRegistry()
+        queue = registry.connect(home_id)
+        dispatcher = _dispatcher(store, registry, railway=_config(), requests=requests)
+        fired = await dispatcher.trigger()
+        woken = await store.get(home_id)
+        assert woken is not None
+        return fired, queue.qsize(), woken.last_wake_at
+
+    fired, qsize, last_wake_at = asyncio.run(scenario())
+    assert fired is True
+    assert qsize == 1  # home (priority 500) absorbed the wake
+    assert last_wake_at is not None
+    assert requests == []  # railway (priority 100) never redeployed
 
 
 def test_dispatcher_falls_through_to_railway_when_home_disconnected() -> None:
@@ -476,8 +501,8 @@ def test_grace_escalations_racing_fire_exactly_one_redeploy() -> None:
             pending_jobs=_pending(1),
         )
         await asyncio.gather(
-            dispatcher._grace_escalate(10, armed_stamp=None),
-            dispatcher._grace_escalate(10, armed_stamp=None),
+            dispatcher._grace_escalate(1000, armed_stamp=None),
+            dispatcher._grace_escalate(1000, armed_stamp=None),
         )
 
     asyncio.run(scenario())
@@ -502,7 +527,7 @@ def test_grace_escalation_stands_down_after_newer_wake_attempt() -> None:
             pending_jobs=_pending(1),
         )
         dispatcher._last_attempt = 12345.0  # a newer attempt moved the stamp
-        await dispatcher._grace_escalate(10, armed_stamp=1.0)
+        await dispatcher._grace_escalate(1000, armed_stamp=1.0)
 
     asyncio.run(scenario())
     assert requests == []
