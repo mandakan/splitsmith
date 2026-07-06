@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.10.0](https://github.com/mandakan/splitsmith/compare/v0.9.0...v0.10.0) (2026-07-06)
+
+
+### Features
+
+* log and display worker version in admin view ([#569](https://github.com/mandakan/splitsmith/issues/569)) ([d4644cc](https://github.com/mandakan/splitsmith/commit/d4644cc567aa744d1db9be5163dabe8a7fd1849e))
+* **ui:** within-session background uploads ([#573](https://github.com/mandakan/splitsmith/issues/573)) ([6d53f35](https://github.com/mandakan/splitsmith/commit/6d53f35b27a683265214f9f939436c6b8ca05ad1))
+
+
+### Bug Fixes
+
+* auto-attach uploads, recover lost worker wakes ([#570](https://github.com/mandakan/splitsmith/issues/570)) ([#572](https://github.com/mandakan/splitsmith/issues/572)) ([b2abc35](https://github.com/mandakan/splitsmith/commit/b2abc35aec2a9ae7b54ce8b44d7b4699cc977ae8))
+
 ## [0.9.0](https://github.com/mandakan/splitsmith/compare/v0.8.4...v0.9.0) (2026-07-06)
 
 
