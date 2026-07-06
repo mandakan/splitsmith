@@ -6,6 +6,7 @@ import { CoverageSelect } from "@/components/ingest/CoverageSelect";
 import { RoleToggles } from "@/components/ingest/RoleToggles";
 import { ShooterPickerPopover } from "@/components/ingest/ShooterPickerPopover";
 import { Portal } from "@/components/ui/Portal";
+import { StatusPill } from "@/components/ui/StatusPill";
 import {
   ApiError,
   api,
@@ -324,19 +325,22 @@ export function ClipDetail({
       {/* Player */}
       <div className="min-h-0 flex-1 overflow-hidden bg-black">
         <video
-          key={video.path}
+          key={`${video.path}:${video.proxy_ready ? "p" : "s"}`}
           ref={videoRef}
           controls
           preload="metadata"
-          src={api.shooterVideoStreamUrl(slug, video.path)}
+          src={api.shooterVideoStreamUrl(slug, video.path, "proxy")}
           className="h-full w-full object-contain"
         />
       </div>
 
       {/* Assignment bar -- docked directly under the player, no scroll gap */}
       <div className="border-t border-rule bg-surface-2 px-4 py-3">
-        <div className="mb-2 font-mono text-[0.5625rem] uppercase tracking-[0.08em] text-subtle">
+        <div className="mb-2 flex items-center gap-2 font-mono text-[0.5625rem] uppercase tracking-[0.08em] text-subtle">
           Streaming source &middot; scrub to identify the stage
+          {video.proxy_ready === false && (
+            <StatusPill tone="in-progress">Proxy generating</StatusPill>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative">
