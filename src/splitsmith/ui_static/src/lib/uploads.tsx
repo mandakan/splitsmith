@@ -10,9 +10,8 @@ import {
 
 import { api, ApiError } from "@/lib/api";
 
-// --- probeFile: MOVED verbatim from AddFootageModal.tsx (~lines 49-89). ---
-// Reads duration + recorded_start from a hidden <video> so attach-after-upload
-// has the metadata. Paste the existing implementation here unchanged.
+// Reads duration + recorded_start from a hidden <video> element so
+// attach-after-upload has the metadata to pass along.
 async function probeFile(
   file: File,
 ): Promise<{ duration_s: number | null; recorded_start: string | null }> {
