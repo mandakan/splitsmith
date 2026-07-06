@@ -65,6 +65,7 @@ export interface PendingUpload {
   bytesSent: number;
   errorMessage?: string;
   controller?: AbortController;
+  suggestedStages?: number[];
 }
 
 interface UploadContextValue {
@@ -154,6 +155,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       slug: string,
       result: { filename: string; sha256: string | null; size: number },
       probe: { duration_s: number | null; recorded_start: string | null } | undefined,
+      stages: { stage_number: number; stage_name: string }[],
       id: string,
     ) => {
       updateOne(id, { attach: "attaching" });
@@ -169,6 +171,24 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         setAttachTick((t) => t + 1);
       } catch {
         updateOne(id, { attach: "failed" });
+        // Pre-fill the manual-attach coverage picker: on auto-attach failure,
+        // fetch the server stage suggestion so the orphan-recovery Attach in
+        // the modal starts with stages selected. Non-fatal.
+        if (probe && stages.length > 0) {
+          void api
+            .suggestCoverage(slug, {
+              recorded_start: probe.recorded_start,
+              duration_s: probe.duration_s,
+            })
+            .then((s) => {
+              if (s.covers_stages.length > 0) {
+                updateOne(id, { suggestedStages: s.covers_stages });
+              }
+            })
+            .catch(() => {
+              /* non-fatal */
+            });
+        }
       }
     },
     [updateOne],
@@ -197,7 +217,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
         });
         updateOne(next.id, { status: "done", bytesSent: next.file.size });
         const probe = probeByFilenameRef.current[next.file.name];
-        await autoAttach(next.slug, result, probe, next.id);
+        await autoAttach(next.slug, result, probe, next.stages, next.id);
       } catch (err) {
         if (err instanceof ApiError && err.detail === "upload cancelled") {
           updateOne(next.id, { status: "cancelled" });

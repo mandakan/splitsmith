@@ -26,7 +26,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { FolderPicker } from "@/components/FolderPicker";
 import { CoverageSelect } from "@/components/ingest/CoverageSelect";
@@ -795,7 +795,7 @@ function HostedUploadBody({
   onImported: (imported: number, paths: string[]) => void;
   stages: { stage_number: number; stage_name: string }[];
 }) {
-  const { uploads: allUploads, enqueue, cancel } = useUploads();
+  const { uploads: allUploads, enqueue, cancel, attachTick } = useUploads();
   // Show only this shooter's pending items in the modal's session list.
   const uploads = allUploads.filter((u) => u.slug === slug);
   const inFlight = uploads.some(
@@ -819,10 +819,18 @@ function HostedUploadBody({
       | { status: "error"; message: string }
     >
   >({});
-  // Server-suggested coverage keyed by filename. The provider owns
-  // auto-attach now, so nothing populates this in-session; it stays for
-  // the manual-attach coverage select's optional pre-fill.
-  const [suggestionByFilename] = useState<Record<string, number[]>>({});
+  // Server-suggested coverage keyed by filename, sourced from the provider:
+  // the pump fetches suggestCoverage on auto-attach failure and stores it on
+  // the upload record. Used to pre-fill the manual-attach picker below.
+  const suggestionByFilename = useMemo(() => {
+    const m: Record<string, number[]> = {};
+    for (const u of allUploads) {
+      if (u.suggestedStages && u.suggestedStages.length > 0) {
+        m[u.file.name] = u.suggestedStages;
+      }
+    }
+    return m;
+  }, [allUploads]);
   // User-selected coverage keyed by filename.
   const [coverageByFilename, setCoverageByFilename] = useState<Record<string, number[]>>({});
 
@@ -855,6 +863,20 @@ function HostedUploadBody({
       // pending list, the user knows it succeeded.
     }
   }, []);
+
+  useEffect(() => {
+    for (const [filename, sugg] of Object.entries(suggestionByFilename)) {
+      setCoverageByFilename((prev) =>
+        prev[filename] ? prev : { ...prev, [filename]: sugg },
+      );
+    }
+  }, [suggestionByFilename]);
+
+  useEffect(() => {
+    if (attachTick === 0) return;
+    void refreshExisting();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachTick]);
 
   const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) doEnqueue(e.target.files);
