@@ -277,6 +277,42 @@ def test_find_raw_video_returns_none_when_absent(tmp_path: Path) -> None:
     assert project.find_raw_video("raw/missing.mp4") is None
 
 
+def test_resolve_video_path_touches_mtime_on_cache_hit(tmp_path: Path) -> None:
+    # A storage-bound cache hit bumps the mirror's mtime so the LRU sweep sees
+    # last-use, not download time - essential on noatime mounts where atime
+    # never advances.
+    project = MatchProject.init(tmp_path / "m", name="M")
+    root = tmp_path / "m"
+    rel = Path("raw/clip.mp4")
+    local = root / rel
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_bytes(b"video")
+    old = local.stat().st_mtime - 10_000
+    os.utime(local, (old, old))
+
+    project.bind_storage(object())  # non-None storage triggers the hosted branch
+    resolved = project.resolve_video_path(root, rel)
+
+    assert resolved == local
+    assert local.stat().st_mtime > old
+
+
+def test_resolve_video_path_does_not_touch_without_storage(tmp_path: Path) -> None:
+    # Local desktop mode (no storage bound) must not rewrite mtimes.
+    project = MatchProject.init(tmp_path / "m", name="M")
+    root = tmp_path / "m"
+    rel = Path("raw/clip.mp4")
+    local = root / rel
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_bytes(b"video")
+    old = local.stat().st_mtime - 10_000
+    os.utime(local, (old, old))
+
+    project.resolve_video_path(root, rel)
+
+    assert local.stat().st_mtime == old
+
+
 def test_init_is_idempotent(tmp_path: Path) -> None:
     root = tmp_path / "match-b"
     first = MatchProject.init(root, name="Match B")

@@ -1,0 +1,46 @@
+# Self-hosted worker agent (see docs/self-hosted-workers.md).
+#
+# This is a STANDALONE compose file: it runs only the `splitsmith agent`, which
+# lends this box's compute to a remote hosted splitsmith server. It does NOT run
+# Postgres / object storage / the API - those live on the server, and the agent
+# receives the credentials it needs at registration time. It is unrelated to the
+# base docker-compose.yml (that stands up the full hosted stack locally).
+#
+# First run (registers, then stays connected):
+#
+#   SPLITSMITH_SERVER_URL=https://my.splitsmith.app \
+#   SPLITSMITH_REGISTRATION_TOKEN=<token-from-admin-ui> \
+#   docker compose -f docker-compose.agent.yml up -d
+#
+# The token is needed only once. After `agent.json` is written to the named
+# volume you can drop SPLITSMITH_REGISTRATION_TOKEN; later `up`s reuse the cache.
+#
+# Staging and production are separate servers - run one copy of this file per
+# environment, each with its own project name (`-p splitsmith-agent-staging`)
+# so the state volumes do not collide.
+
+services:
+  agent:
+    image: ghcr.io/mandakan/splitsmith:${SPLITSMITH_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    command:
+      - agent
+      - --server-url
+      - ${SPLITSMITH_SERVER_URL:?set SPLITSMITH_SERVER_URL to your server, e.g. https://my.splitsmith.app}
+      # --token is only consumed on the first run; once agent.json exists it is
+      # ignored. Leave SPLITSMITH_REGISTRATION_TOKEN empty on later runs.
+      - --token
+      - ${SPLITSMITH_REGISTRATION_TOKEN:-}
+    environment:
+      # Raw-video source cache budget in GB. The agent evicts least-recently-used
+      # files after each drain to stay under this, so the disk cannot fill. Set 0
+      # to disable eviction. The cache lives under /data (the volume below), so it
+      # survives restarts.
+      SPLITSMITH_SOURCE_CACHE_MAX_GB: ${SPLITSMITH_SOURCE_CACHE_MAX_GB:-20}
+    volumes:
+      # Persists agent.json (registration) AND the source cache at /data/projects.
+      # Point this at a disk with room for SPLITSMITH_SOURCE_CACHE_MAX_GB.
+      - splitsmith-agent:/data
+
+volumes:
+  splitsmith-agent:
