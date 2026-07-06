@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/mandakan/splitsmith/compare/v0.8.4...v0.9.0) (2026-07-06)
+
+
+### Features
+
+* persistent LRU source cache for self-hosted worker agent ([#565](https://github.com/mandakan/splitsmith/issues/565)) ([#568](https://github.com/mandakan/splitsmith/issues/568)) ([7fe79dc](https://github.com/mandakan/splitsmith/commit/7fe79dce062849b96c7a17049c9d280a14334294))
+* preview/proxy videos for uploads (fast stage-assignment streaming) ([#566](https://github.com/mandakan/splitsmith/issues/566)) ([b979d48](https://github.com/mandakan/splitsmith/commit/b979d48cdc9f50ac8ae976232d2d149bf47b2c9c))
+
 ## [0.8.4](https://github.com/mandakan/splitsmith/compare/v0.8.3...v0.8.4) (2026-07-05)
 
 
