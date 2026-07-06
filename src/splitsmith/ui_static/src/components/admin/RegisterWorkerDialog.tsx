@@ -185,7 +185,9 @@ export function RegisterWorkerDialog({ onClose }: RegisterWorkerDialogProps) {
                       aria-required="true"
                     />
                     <p className="text-xs text-muted">
-                      Higher priority workers are selected first.
+                      Higher priority workers are selected first, so your
+                      self-hosted workers take jobs before the Railway
+                      fallback. Self-hosted defaults to 1000; Railway is 100.
                     </p>
                   </div>
                 </div>

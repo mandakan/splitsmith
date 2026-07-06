@@ -10,7 +10,9 @@ The queue of record stays in Postgres (Procrastinate); a wake is only a
 signal and must be safe to lose - the serve-boot pending re-check and
 the 6-hourly safety cron on the worker service are the nets. The
 dispatcher walks the registered workers (``workers`` table) in priority
-tiers, ascending:
+tiers, descending (higher priority preferred, matching the
+register-worker copy - so a registered home worker at the default 1000
+outranks the railway fallback at 100):
 
 - **self-hosted** workers are woken by pushing "wake" onto their live
   SSE channel (:class:`~splitsmith.worker_channel.WakeChannelRegistry`);
@@ -197,7 +199,7 @@ class WorkerDispatcher:
                 if self._worker_active is not None and await self._worker_active():
                     logger.info("worker dispatcher: skipped, a live worker heartbeat exists")
                     return False
-                return await self._wake_from(min_priority_exclusive=None)
+                return await self._wake_from(max_priority_exclusive=None)
             except Exception:
                 logger.warning(
                     "worker dispatcher: failed; boot re-check or safety cron will drain the queue",
@@ -205,18 +207,19 @@ class WorkerDispatcher:
                 )
                 return False
 
-    async def _wake_from(self, min_priority_exclusive: int | None) -> bool:
-        """Walk the enabled workers in ascending priority tiers and wake the
-        first tier with at least one reachable target.
+    async def _wake_from(self, max_priority_exclusive: int | None) -> bool:
+        """Walk the enabled workers in descending priority tiers and wake the
+        first tier with at least one reachable target. Higher priority is
+        preferred (matches the register-worker copy).
 
-        ``min_priority_exclusive`` skips tiers at or above that priority
+        ``max_priority_exclusive`` skips tiers at or above that priority
         (used by the grace escalation to wake only the tiers below the one
         it already woke). A tier where every wake fails falls through to
         the next tier. Returns True when any wake was fired.
         """
         workers = await self._store.list_enabled()
-        if min_priority_exclusive is not None:
-            workers = [w for w in workers if w.priority > min_priority_exclusive]
+        if max_priority_exclusive is not None:
+            workers = [w for w in workers if w.priority < max_priority_exclusive]
         for priority, tier in itertools.groupby(workers, key=lambda w: w.priority):
             woken_ids: list[str] = []
             woke_self_hosted = False
@@ -284,7 +287,7 @@ class WorkerDispatcher:
                 self._grace_seconds,
                 woken_priority,
             )
-            await self._wake_from(min_priority_exclusive=woken_priority)
+            await self._wake_from(max_priority_exclusive=woken_priority)
         except Exception:
             logger.warning("worker dispatcher: grace escalation failed; nets will recover", exc_info=True)
 
