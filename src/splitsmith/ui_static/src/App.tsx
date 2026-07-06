@@ -16,6 +16,7 @@ import { ShareShell } from "@/components/share/ShareShell";
 import { DefaultShooterRedirect } from "@/components/match/DefaultShooterRedirect";
 import { ModeProvider } from "@/lib/mode";
 import { ConfirmProvider } from "@/components/useConfirm";
+import { UploadProvider } from "@/lib/uploads";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { useDeploymentMode } from "@/lib/features";
 import { ShooterScopedRoute } from "@/components/ShooterScopedRoute";
@@ -129,6 +130,7 @@ export function App() {
     <ModeProvider>
       <AuthProvider>
         <ConfirmProvider>
+          <UploadProvider>
           <BrowserRouter>
             <AuthGate>
             <Routes>
@@ -237,6 +239,7 @@ export function App() {
             </Routes>
           </AuthGate>
           </BrowserRouter>
+          </UploadProvider>
         </ConfirmProvider>
       </AuthProvider>
     </ModeProvider>
