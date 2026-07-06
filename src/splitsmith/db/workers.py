@@ -74,6 +74,7 @@ class WorkerRecord:
     registered: bool  # derived: registered_at is not None
     last_seen_at: datetime | None
     last_wake_at: datetime | None
+    version: str | None
     info: dict | None
     created_at: datetime
     token_expires_at: datetime | None
@@ -89,6 +90,7 @@ def _to_record(row: WorkerRow) -> WorkerRecord:
         registered=row.registered_at is not None,
         last_seen_at=row.last_seen_at,
         last_wake_at=row.last_wake_at,
+        version=row.version,
         info=row.info,
         created_at=row.created_at,
         token_expires_at=row.token_expires_at,
@@ -228,6 +230,7 @@ class WorkersStore:
             row.registration_token_hash = None  # single-use: clear so it can never match again
             row.registered_at = datetime.now(UTC)
             row.worker_token_hash = worker_hashed
+            row.version = info.get("agent_version")
             row.info = info
             await session.commit()
             await session.refresh(row)
@@ -251,12 +254,19 @@ class WorkersStore:
             return None
         return _to_record(row)
 
-    async def touch_seen(self, worker_id: str) -> None:
-        """Stamp last_seen_at to now for the given worker."""
+    async def touch_seen(self, worker_id: str, *, version: str | None = None) -> None:
+        """Stamp last_seen_at to now for the given worker.
+
+        When ``version`` is given (a reconnecting self-hosted agent reports it
+        via header on every channel connect) the ``version`` column is
+        refreshed too, so an in-place upgrade shows up without re-registration.
+        A ``None`` version leaves the stored value untouched.
+        """
+        values: dict = {"last_seen_at": datetime.now(UTC)}
+        if version is not None:
+            values["version"] = version
         async with self._session_factory() as session:
-            await session.execute(
-                update(WorkerRow).where(WorkerRow.id == worker_id).values(last_seen_at=datetime.now(UTC))
-            )
+            await session.execute(update(WorkerRow).where(WorkerRow.id == worker_id).values(**values))
             await session.commit()
 
     async def touch_wake(self, worker_ids: list[str]) -> None:
@@ -270,13 +280,14 @@ class WorkersStore:
             )
             await session.commit()
 
-    async def ensure_railway_row(self) -> None:
+    async def ensure_railway_row(self, *, version: str | None = None) -> None:
         """Idempotent upsert of the single kind='railway' row.
 
         Creates name='railway', kind='railway', priority=100, enabled=True,
         registered_at=now if no kind='railway' row exists. If one already
-        exists, does NOT touch it - the operator's enabled/priority settings
-        are preserved.
+        exists, the operator's enabled/priority settings are preserved - but
+        ``version`` is always refreshed to the running deploy (web and worker
+        ship from the same image, so serve boot knows the worker's version).
 
         The row is seeded as registered (registered_at stamped) so
         ``list_enabled()`` includes it without requiring a registration flow.
@@ -286,6 +297,9 @@ class WorkersStore:
                 await session.execute(select(WorkerRow).where(WorkerRow.kind == "railway"))
             ).scalar_one_or_none()
             if existing is not None:
+                if version is not None and existing.version != version:
+                    existing.version = version
+                    await session.commit()
                 return
             row = WorkerRow(
                 name="railway",
@@ -293,6 +307,7 @@ class WorkersStore:
                 priority=100,
                 enabled=True,
                 registered_at=datetime.now(UTC),
+                version=version,
             )
             session.add(row)
             await session.commit()

@@ -208,6 +208,62 @@ def test_touch_seen_updates_last_seen_at() -> None:
     assert updated.last_seen_at is not None
 
 
+# - register() stamps the version column from info["agent_version"]
+def test_register_stamps_version_from_info() -> None:
+    store = _fresh_store()
+    _record, reg_token = asyncio.run(store.create_self_hosted("worker-ver"))
+    result = asyncio.run(store.register(reg_token, {"agent_version": "1.2.3", "hostname": "box-1"}))
+    assert result is not None
+    worker_record, _worker_token = result
+    assert worker_record.version == "1.2.3"
+
+
+# - register() leaves version None when info carries no agent_version
+def test_register_version_none_without_agent_version() -> None:
+    store = _fresh_store()
+    _record, reg_token = asyncio.run(store.create_self_hosted("worker-nover"))
+    result = asyncio.run(store.register(reg_token, {"hostname": "box-1"}))
+    assert result is not None
+    worker_record, _worker_token = result
+    assert worker_record.version is None
+
+
+# - touch_seen(version=...) refreshes the version column
+def test_touch_seen_updates_version_when_provided() -> None:
+    store = _fresh_store()
+    record, _ = asyncio.run(store.create_self_hosted("worker-tsv"))
+    asyncio.run(store.touch_seen(record.id, version="9.9.9"))
+    updated = asyncio.run(store.get(record.id))
+    assert updated is not None
+    assert updated.version == "9.9.9"
+
+
+# - touch_seen() without a version leaves a previously-stamped version intact
+def test_touch_seen_without_version_preserves_existing_version() -> None:
+    store = _fresh_store()
+    record, _ = asyncio.run(store.create_self_hosted("worker-tsv2"))
+    asyncio.run(store.touch_seen(record.id, version="1.0.0"))
+    asyncio.run(store.touch_seen(record.id))  # no version arg
+    updated = asyncio.run(store.get(record.id))
+    assert updated is not None
+    assert updated.version == "1.0.0"
+
+
+# - ensure_railway_row(version=...) stamps the version on create AND on an
+#   already-existing row, without disturbing operator enabled/priority settings
+def test_ensure_railway_row_stamps_version_create_and_existing() -> None:
+    store = _fresh_store()
+    asyncio.run(store.ensure_railway_row(version="0.8.4"))
+    railway = next(w for w in asyncio.run(store.list()) if w.kind == "railway")
+    assert railway.version == "0.8.4"
+    # Operator flips it off; a redeploy at a newer version calls ensure again
+    asyncio.run(store.update(railway.id, enabled=False))
+    asyncio.run(store.ensure_railway_row(version="0.9.0"))
+    railway2 = next(w for w in asyncio.run(store.list()) if w.kind == "railway")
+    assert railway2.version == "0.9.0"  # refreshed to the running deploy
+    assert railway2.enabled is False  # operator setting preserved
+
+
 # - touch_wake() updates last_wake_at for each id in the list
 def test_touch_wake_updates_last_wake_at() -> None:
     store = _fresh_store()

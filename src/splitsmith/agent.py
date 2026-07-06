@@ -287,7 +287,12 @@ async def _reader_loop(
             async with client.stream(
                 "GET",
                 f"{server_url}/api/workers/channel",
-                headers={"Authorization": f"Bearer {worker_token}"},
+                headers={
+                    "Authorization": f"Bearer {worker_token}",
+                    # Reported on every reconnect so an in-place upgrade
+                    # refreshes the admin view without re-registration.
+                    "X-Splitsmith-Agent-Version": _agent_version(),
+                },
                 timeout=_CHANNEL_TIMEOUT,
             ) as response:
                 if response.status_code == 404:
@@ -433,6 +438,7 @@ async def run_agent(
     the reader and drainer concurrently until the reader raises ``SystemExit``
     (worker revoked) or the process is interrupted.
     """
+    logger.info("splitsmith agent starting, version %s", _agent_version())
     state = AgentState.load(state_dir)
     if state is None:
         if registration_token is None:

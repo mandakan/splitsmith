@@ -731,6 +731,7 @@ class WorkerView(BaseModel):
     registered: bool
     last_seen_at: datetime | None
     last_wake_at: datetime | None
+    version: str | None  # semver the worker is running; None until first reported
     info: dict[str, Any] | None
 
 
@@ -4709,6 +4710,7 @@ async def _worker_channel_events(
     *,
     disabled: bool,
     boot_retrigger: Callable[[], Awaitable[None]] | None,
+    version: str | None = None,
     keepalive_seconds: float = 20.0,
 ) -> AsyncIterator[str]:
     """SSE frames for one worker's wake-channel connection.
@@ -4726,7 +4728,7 @@ async def _worker_channel_events(
     """
     queue = registry.connect(worker_id)
     try:
-        await store.touch_seen(worker_id)
+        await store.touch_seen(worker_id, version=version)
         if boot_retrigger is not None:
             # A connect often ends an offline stretch; the (internally
             # throttled) pending-jobs re-check closes the "jobs queued while
@@ -4788,6 +4790,7 @@ def _to_worker_view(record: Any, connected_ids: frozenset[str]) -> WorkerView:
         registered=record.registered,
         last_seen_at=record.last_seen_at,
         last_wake_at=record.last_wake_at,
+        version=record.version,
         info=record.info,
     )
 
@@ -4816,7 +4819,7 @@ def _hosted_boot_lifespan(state: Any) -> Any | None:
     @asynccontextmanager
     async def _lifespan(_app: Any) -> AsyncIterator[None]:
         if workers_store is not None:
-            await workers_store.ensure_railway_row()
+            await workers_store.ensure_railway_row(version=splitsmith_version)
         if retrigger is not None:
             # Cold starts include every wake from Railway app sleeping, so a
             # stranded queue job recovers on the next visit instead of
@@ -5511,6 +5514,7 @@ def create_app(
         record = await store.authenticate(token)
         if record is None:
             return _workers_not_found()
+        reported_version = request.headers.get("x-splitsmith-agent-version") or None
         return StreamingResponse(
             _worker_channel_events(
                 store,
@@ -5518,6 +5522,7 @@ def create_app(
                 record.id,
                 disabled=not record.enabled,
                 boot_retrigger=state.boot_retrigger,
+                version=reported_version,
             ),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache"},

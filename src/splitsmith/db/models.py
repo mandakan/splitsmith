@@ -565,6 +565,10 @@ class WorkerRow(Base):
     worker_token_hash: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_wake_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Semver string of the code the worker is running (self-hosted agents report
+    # it at register + on each channel reconnect; the Railway row is stamped at
+    # serve boot). Observational only - nothing gates on it today.
+    version: Mapped[str | None] = mapped_column(String, nullable=True)
     info: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

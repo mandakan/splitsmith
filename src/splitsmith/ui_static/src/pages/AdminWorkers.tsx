@@ -144,6 +144,14 @@ function WorkerRow({ worker, onRefetch }: WorkerRowProps) {
         />
       </div>
 
+      {/* Version */}
+      <div
+        className="shrink-0 font-mono text-xs text-subtle"
+        title="Worker software version"
+      >
+        {worker.version ? `v${worker.version}` : "unknown"}
+      </div>
+
       {/* Last seen */}
       <div
         className="shrink-0 font-mono text-xs text-subtle"
