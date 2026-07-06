@@ -37,6 +37,9 @@ def transcode_proxy(
     """Transcode ``input_path`` to a low-res, dense-GOP, faststart MP4 proxy."""
     cmd = [
         ffmpeg_binary,
+        "-hide_banner",
+        "-loglevel",
+        "error",
         "-nostdin",
         "-y",
         "-i",
@@ -65,6 +68,11 @@ def transcode_proxy(
         "+faststart",
         str(output_path),
     ]
-    result = runner(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise ProxyError(f"ffmpeg proxy transcode failed: {result.stderr}")
+    try:
+        runner(cmd, check=True, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        raise ProxyError(f"ffmpeg binary not found: {ffmpeg_binary}") from exc
+    except subprocess.CalledProcessError as exc:
+        raise ProxyError(
+            f"ffmpeg proxy transcode failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}"
+        ) from exc

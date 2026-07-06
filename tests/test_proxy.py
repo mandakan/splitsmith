@@ -44,7 +44,7 @@ def test_transcode_proxy_builds_expected_argv():
 
 def test_transcode_proxy_raises_on_ffmpeg_error():
     def fake_runner(cmd, **kwargs):
-        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="boom")
+        raise subprocess.CalledProcessError(1, cmd, stderr="boom")
 
     with pytest.raises(ProxyError):
         transcode_proxy(
