@@ -114,6 +114,8 @@ export interface StageVideo {
    *  .../camera-model when ffprobe yielded nothing. */
   camera_make: string | null;
   camera_model: string | null;
+  /** Hosted only: the fast-scrub proxy exists in storage. Drives the "generating" badge. */
+  proxy_ready?: boolean;
 }
 
 /** Mirror of ``splitsmith.ensemble.calibration.normalize_camera_model_key``.
@@ -2613,11 +2615,13 @@ export const api = {
       `/api/match/stage/${stageNumber}/compare`,
     ),
 
-  /** Build a streaming URL for one shooter's lossless trim (#328). */
-  shooterVideoStreamUrl: (slug: string, path: string): string =>
-    scopeRequestPath(
-      `/api/match/shooters/${encodeURIComponent(slug)}/videos/stream?path=${encodeURIComponent(path)}`,
-    ),
+  /** Build a streaming URL for one shooter's lossless trim (#328).
+   *  Pass ``kind="proxy"`` to request the fast-scrub proxy variant. */
+  shooterVideoStreamUrl: (slug: string, path: string, kind?: "auto" | "proxy"): string => {
+    const base = `/api/match/shooters/${encodeURIComponent(slug)}/videos/stream?path=${encodeURIComponent(path)}`;
+    const url = kind && kind !== "auto" ? `${base}&kind=${kind}` : base;
+    return scopeRequestPath(url);
+  },
 
   /** Cross-shooter beep review queue (#326). Pass
    *  ``includeConfirmed`` to also receive already-reviewed items so
