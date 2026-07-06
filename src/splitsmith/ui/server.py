@@ -9348,6 +9348,11 @@ def create_app(
 
         Callers fall through to source resolution on None - proxy absent,
         path not a raw/ key, or no storage configured.
+
+        Local cache is checked first - proxy objects are immutable per key (delete
+        cleanup removes them; a re-upload regenerates), and _mirror_from_storage uses
+        temp+atomic-rename so a present local file is always complete and never stale.
+        This avoids redundant R2 pulls on every HTTP Range request during video scrubbing.
         """
         from ..proxy import proxy_key_for
 
@@ -9356,9 +9361,16 @@ def create_app(
         if not _raw_str.startswith("raw/") or _storage is None:
             return None
         _proxy_key = proxy_key_for(_raw_str)
+        _local_proxy = base_root / _proxy_key
+        if _local_proxy.exists():  # warm cache - no network at all
+            return FileResponse(
+                _local_proxy.resolve(),
+                media_type="video/mp4",
+                filename=_local_proxy.name,
+            )
         if not _storage.exists(_proxy_key):
             return None
-        _local_proxy = base_root / _proxy_key
+        # cold - mirror once, then serve
         MatchProject._mirror_from_storage(_storage, _proxy_key, _local_proxy)
         return FileResponse(
             _local_proxy.resolve(),
