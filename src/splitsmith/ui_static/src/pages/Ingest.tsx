@@ -44,6 +44,7 @@ import {
 } from "@/lib/api";
 import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
+import { useUploads } from "@/lib/uploads";
 import { ReviewLayout } from "@/pages/ingest/ReviewLayout";
 
 type StorageMode = "symlink" | "copy";
@@ -123,6 +124,16 @@ function IngestInner({ slug }: { slug: string }) {
   useEffect(() => {
     void reload();
   }, []);
+
+  // Background uploads auto-attach in the provider and bump attachTick;
+  // reload the tray so freshly landed videos appear even after the
+  // upload sheet has closed, while this page stays mounted.
+  const { attachTick } = useUploads();
+  useEffect(() => {
+    if (attachTick === 0) return;
+    void reload();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attachTick]);
 
   const assignedCount = useMemo(() => {
     if (!project) return 0;

@@ -40,53 +40,8 @@ import {
 } from "@/lib/api";
 import { useDialogFocus } from "@/lib/dialogFocus";
 import { useDeploymentMode } from "@/lib/features";
+import { useUploads, type PendingUpload } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
-
-/** Probe a File object for its duration and compute the recording start
- *  from file.lastModified (modification time) minus duration. Returns
- *  a timezone-aware UTC ISO string so the backend's AwareDatetime field
- *  does not 422. */
-function probeFile(
-  file: File,
-): Promise<{ duration_s: number | null; recorded_start: string | null }> {
-  return new Promise((resolve) => {
-    const el = document.createElement("video");
-    el.preload = "metadata";
-    const url = URL.createObjectURL(file);
-    // Guard: revoke exactly once across all three exit paths.
-    let revoked = false;
-    function revoke() {
-      if (revoked) return;
-      revoked = true;
-      URL.revokeObjectURL(url);
-    }
-    // Timeout guard: if neither onloadedmetadata nor onerror fires (e.g.
-    // the codec is unsupported and the browser stalls silently), revoke
-    // the URL and resolve nulls after 5 seconds.
-    const timer = setTimeout(() => {
-      revoke();
-      resolve({ duration_s: null, recorded_start: null });
-    }, 5000);
-    el.onloadedmetadata = () => {
-      clearTimeout(timer);
-      const duration = Number.isFinite(el.duration) ? el.duration : null;
-      revoke();
-      resolve({
-        duration_s: duration,
-        recorded_start:
-          duration != null && file.lastModified
-            ? new Date(file.lastModified - duration * 1000).toISOString()
-            : null,
-      });
-    };
-    el.onerror = () => {
-      clearTimeout(timer);
-      revoke();
-      resolve({ duration_s: null, recorded_start: null });
-    };
-    el.src = url;
-  });
-}
 
 export type StorageMode = "symlink" | "copy";
 
@@ -829,18 +784,6 @@ function HostedUploadSurface({
   );
 }
 
-interface PendingUpload {
-  /** Stable per-upload id so re-renders keep progress bars aligned
-   *  with the right file. ``crypto.randomUUID`` is fine -- we don't
-   *  persist this. */
-  id: string;
-  file: File;
-  status: "queued" | "uploading" | "done" | "error" | "cancelled";
-  bytesSent: number;
-  errorMessage?: string;
-  controller?: AbortController;
-}
-
 function HostedUploadBody({
   slug,
   onClose,
@@ -852,7 +795,13 @@ function HostedUploadBody({
   onImported: (imported: number, paths: string[]) => void;
   stages: { stage_number: number; stage_name: string }[];
 }) {
-  const [uploads, setUploads] = useState<PendingUpload[]>([]);
+  const { uploads: allUploads, enqueue, cancel } = useUploads();
+  // Show only this shooter's pending items in the modal's session list.
+  const uploads = allUploads.filter((u) => u.slug === slug);
+  const inFlight = uploads.some(
+    (u) => u.status === "queued" || u.status === "uploading",
+  );
+  const doEnqueue = (files: FileList | File[]) => enqueue(files, { slug, stages });
   const [existing, setExisting] = useState<RawUploadEntry[] | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -870,36 +819,12 @@ function HostedUploadBody({
       | { status: "error"; message: string }
     >
   >({});
-  // Client-side probe results keyed by filename. Populated when the file
-  // is enqueued so attach-after-upload still has duration + recorded_start.
-  const probeByFilenameRef = useRef<
-    Record<string, { duration_s: number | null; recorded_start: string | null }>
-  >({});
-  // Server-suggested coverage keyed by filename. Populated after upload
-  // success via suggestCoverage.
-  const [suggestionByFilename, setSuggestionByFilename] = useState<Record<string, number[]>>({});
-  // User-selected coverage keyed by filename. Pre-filled from suggestion.
+  // Server-suggested coverage keyed by filename. The provider owns
+  // auto-attach now, so nothing populates this in-session; it stays for
+  // the manual-attach coverage select's optional pre-fill.
+  const [suggestionByFilename] = useState<Record<string, number[]>>({});
+  // User-selected coverage keyed by filename.
   const [coverageByFilename, setCoverageByFilename] = useState<Record<string, number[]>>({});
-
-  // Queue-pump plumbing. ``pumpingRef`` is a re-entrancy lock so the
-  // pump effect doesn't kick off the next file when the current one
-  // flips queued -> uploading (that mutates ``uploads``, which the
-  // effect depends on). ``pumpTick`` nudges the pump after a file
-  // finishes and the lock is released. ``activeControllerRef`` is
-  // aborted on unmount so an interrupted multipart upload best-effort
-  // aborts in R2 instead of stranding staged parts.
-  const pumpingRef = useRef(false);
-  const activeControllerRef = useRef<AbortController | null>(null);
-  const mountedRef = useRef(true);
-  const [pumpTick, setPumpTick] = useState(0);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-      activeControllerRef.current?.abort();
-    };
-  }, []);
 
   // Initial list -- so the surface opens with a real "you've already
   // uploaded X" view instead of looking empty until the operator
@@ -931,121 +856,8 @@ function HostedUploadBody({
     }
   }, []);
 
-  const updateOne = useCallback(
-    (id: string, patch: Partial<PendingUpload>) => {
-      setUploads((prev) =>
-        prev.map((u) => (u.id === id ? { ...u, ...patch } : u)),
-      );
-    },
-    [],
-  );
-
-  const enqueue = useCallback(
-    (files: FileList | File[]) => {
-      const next: PendingUpload[] = [];
-      for (const f of Array.from(files)) {
-        next.push({
-          id: crypto.randomUUID(),
-          file: f,
-          status: "queued",
-          bytesSent: 0,
-        });
-        // Probe duration + recorded_start client-side so the data is
-        // ready when the user clicks Attach after upload finishes.
-        void probeFile(f).then((result) => {
-          probeByFilenameRef.current[f.name] = result;
-        });
-      }
-      setUploads((prev) => [...prev, ...next]);
-    },
-    [],
-  );
-
-  // Pump the queue one file at a time (one XHR active) so a slow uplink
-  // isn't starved by concurrent multi-hundred-MB transfers.
-  //
-  // The lock is load-bearing: starting a file flips it queued ->
-  // uploading, which mutates ``uploads`` and re-runs this effect.
-  // Without the lock the re-run kicks off the *next* file too, and an
-  // earlier version's cleanup then set a ``cancelled`` flag on the
-  // in-flight upload -- swallowing every progress and done update, so
-  // every bar sat at 0% and the button never left "Uploading..." even
-  // though the bytes were landing in R2. We now abort ONLY on a real
-  // unmount or the per-row Cancel button, never on a pump re-run.
-  //
-  // No client-side hashing: footage runs to many GB, and hashing the
-  // whole file in the browser (one ``arrayBuffer`` + ``crypto.subtle``)
-  // blocks/OOMs the tab. The server computes its own digest on receipt.
-  useEffect(() => {
-    if (pumpingRef.current) return;
-    const next = uploads.find((u) => u.status === "queued");
-    if (!next) return;
-    pumpingRef.current = true;
-
-    void (async () => {
-      const controller = new AbortController();
-      activeControllerRef.current = controller;
-      updateOne(next.id, { status: "uploading", bytesSent: 0, controller });
-      try {
-        const result = await api.uploadRawFile(next.file, {
-          signal: controller.signal,
-          onProgress: (loaded) => updateOne(next.id, { bytesSent: loaded }),
-        });
-        updateOne(next.id, { status: "done", bytesSent: next.file.size });
-        // Attach to the project right away so a finished upload is never
-        // left orphaned in storage. Stages stay unassigned here; the
-        // operator assigns them later in the ingest tray.
-        const probe = probeByFilenameRef.current[next.file.name];
-        const attached = await autoAttach(result, probe);
-        await refreshExisting();
-        // Only fall back to a coverage suggestion when auto-attach failed:
-        // it pre-fills the manual Attach affordance the row then shows.
-        // Non-fatal: coverage stays empty if this fails or returns no stages.
-        if (!attached && probe && stages.length > 0) {
-          void api
-            .suggestCoverage(slug, {
-              recorded_start: probe.recorded_start,
-              duration_s: probe.duration_s,
-            })
-            .then((s) => {
-              if (s.covers_stages.length === 0) return;
-              const suggestion = s.covers_stages;
-              setSuggestionByFilename((prev) => ({
-                ...prev,
-                [next.file.name]: suggestion,
-              }));
-              // Pre-fill coverage from suggestion if the user hasn't set
-              // anything yet for this file.
-              setCoverageByFilename((prev) => ({
-                ...prev,
-                [next.file.name]: prev[next.file.name] ?? suggestion,
-              }));
-            })
-            .catch(() => {
-              /* non-fatal */
-            });
-        }
-      } catch (err) {
-        if (err instanceof ApiError && err.detail === "upload cancelled") {
-          updateOne(next.id, { status: "cancelled" });
-        } else {
-          const msg = err instanceof ApiError ? err.detail : String(err);
-          updateOne(next.id, { status: "error", errorMessage: msg });
-        }
-      } finally {
-        activeControllerRef.current = null;
-        pumpingRef.current = false;
-        // The status writes above re-ran this effect while the lock was
-        // still held (early return), so nudge it once more to pick up
-        // the next queued file after the lock is released.
-        if (mountedRef.current) setPumpTick((t) => t + 1);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [uploads, pumpTick]);
-
   const onPick = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) enqueue(e.target.files);
+    if (e.target.files && e.target.files.length > 0) doEnqueue(e.target.files);
     // Reset so picking the same file twice in a row still fires.
     e.target.value = "";
   };
@@ -1054,13 +866,8 @@ function HostedUploadBody({
     e.preventDefault();
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      enqueue(e.dataTransfer.files);
+      doEnqueue(e.dataTransfer.files);
     }
-  };
-
-  const cancel = (id: string) => {
-    const u = uploads.find((x) => x.id === id);
-    if (u?.controller) u.controller.abort();
   };
 
   const removeUploaded = async (filename: string) => {
@@ -1073,42 +880,6 @@ function HostedUploadBody({
     }
   };
 
-  // Auto-attach a freshly uploaded object to this shooter's project the
-  // moment its bytes land, so the operator never has to click Attach per
-  // file. Lands in the unassigned tray (no covers_stages); stage
-  // assignment happens later in the ingest tray. Returns whether the
-  // attach succeeded so the pump only bothers pre-filling the manual
-  // Attach fallback (coverage suggestion) when it didn't. Never throws:
-  // on failure the object stays uploaded and the manual Attach affordance
-  // in the "already in storage" panel recovers it.
-  const autoAttach = useCallback(
-    async (
-      result: { filename: string; sha256: string | null; size: number },
-      probe: { duration_s: number | null; recorded_start: string | null } | undefined,
-    ): Promise<boolean> => {
-      const filename = result.filename;
-      setAttachState((prev) => ({ ...prev, [filename]: { status: "attaching" } }));
-      try {
-        await api.attachRawVideo(slug, {
-          filename,
-          sha256: result.sha256,
-          size_bytes: result.size,
-          duration_seconds: probe?.duration_s ?? undefined,
-          recorded_start: probe?.recorded_start ?? undefined,
-          // covers_stages omitted -> unassigned tray.
-        });
-        setAttachState((prev) => ({ ...prev, [filename]: { status: "attached" } }));
-        onImported(1, [filename]);
-        return true;
-      } catch (err) {
-        const msg = err instanceof ApiError ? err.detail : String(err);
-        setAttachState((prev) => ({ ...prev, [filename]: { status: "error", message: msg } }));
-        return false;
-      }
-    },
-    [slug, onImported],
-  );
-
   const attachToProject = useCallback(
     async (entry: RawUploadEntry, coverage: number[]) => {
       setAttachState((prev) => ({
@@ -1116,14 +887,11 @@ function HostedUploadBody({
         [entry.filename]: { status: "attaching" },
       }));
       try {
-        const probe = probeByFilenameRef.current[entry.filename];
         await api.attachRawVideo(slug, {
           filename: entry.filename,
           sha256: entry.etag,
           size_bytes: entry.size,
           covers_stages: coverage.length > 0 ? coverage : undefined,
-          duration_seconds: probe?.duration_s ?? undefined,
-          recorded_start: probe?.recorded_start ?? undefined,
         });
         setAttachState((prev) => ({
           ...prev,
@@ -1146,23 +914,6 @@ function HostedUploadBody({
     [slug, onImported],
   );
 
-  const inFlight = uploads.some(
-    (u) => u.status === "queued" || u.status === "uploading",
-  );
-
-  // Warn before the tab is closed / reloaded / navigated away while
-  // uploads are still running. The queue lives only in memory with no
-  // resume, so a stray navigation loses in-flight and queued files.
-  useEffect(() => {
-    if (!inFlight) return;
-    const onBeforeUnload = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "";
-    };
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [inFlight]);
-
   // A raw object belongs to one shooter. Hide uploads already attached to a
   // DIFFERENT shooter so they can't be re-attached here (attach also 409s
   // server-side). Entries with no owner, or owned by this shooter, stay. (#562)
@@ -1171,8 +922,9 @@ function HostedUploadBody({
   );
   const hiddenExistingCount = (existing?.length ?? 0) - availableExisting.length;
 
-  // Escape / focus trap / restore; Escape locked while uploads run.
-  useDialogFocus(true, panelRef, onClose, { disableEscape: inFlight });
+  // Escape / focus trap / restore. The sheet is dismissable mid-upload
+  // now that transfers live in the provider, so Escape always closes.
+  useDialogFocus(true, panelRef, onClose);
 
   return (
     <Portal>
@@ -1181,7 +933,7 @@ function HostedUploadBody({
       aria-modal="true"
       aria-label="Upload raw footage"
       className="fixed inset-0 z-modal flex items-center justify-center bg-bg/70 p-4 backdrop-blur-sm"
-      onClick={!inFlight ? onClose : undefined}
+      onClick={onClose}
     >
       <div
         ref={panelRef}
@@ -1197,17 +949,20 @@ function HostedUploadBody({
               Files land in your hosted storage. Attach to this project
               to drop them into the unassigned tray.
             </p>
+            {inFlight && (
+              <p className="mt-1 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-led">
+                You can close this and keep working - uploads continue in the background.
+              </p>
+            )}
           </div>
-          {!inFlight && (
-            <button
-              type="button"
-              onClick={onClose}
-              aria-label="Close"
-              className="rounded-md p-1.5 text-subtle hover:bg-surface-2 hover:text-ink"
-            >
-              <X className="size-4" />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-md p-1.5 text-subtle hover:bg-surface-2 hover:text-ink"
+          >
+            <X className="size-4" />
+          </button>
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
@@ -1316,10 +1071,9 @@ function HostedUploadBody({
           <button
             type="button"
             onClick={onClose}
-            disabled={inFlight}
-            className="rounded-md bg-led-fill px-3.5 py-1.5 font-mono text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink shadow-[0_0_0_1px_var(--color-led-fill),0_0_18px_var(--color-led-glow)] hover:bg-led disabled:opacity-50 disabled:shadow-none"
+            className="rounded-md bg-led-fill px-3.5 py-1.5 font-mono text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink shadow-[0_0_0_1px_var(--color-led-fill),0_0_18px_var(--color-led-glow)] hover:bg-led"
           >
-            {inFlight ? "Uploading..." : "Done"}
+            Done
           </button>
         </footer>
       </div>
