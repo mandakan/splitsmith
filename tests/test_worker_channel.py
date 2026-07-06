@@ -108,3 +108,59 @@ def test_push_after_disconnect_returns_false() -> None:
     reg.disconnect("worker-1", q)
     result = reg.push("worker-1", "disabled")
     assert result is False
+
+
+# - a wake pushed while the worker is disconnected is owed and delivered on
+#   the next connect, so a wake lost during a channel flap is recovered
+def test_missed_wake_delivered_on_reconnect() -> None:
+    reg = WakeChannelRegistry()
+
+    async def _run() -> str:
+        # Worker flapped: the wake lands while no channel is open.
+        assert reg.push("worker-1", "wake") is False
+        # It reconnects; the fresh queue carries the owed wake.
+        q = reg.connect("worker-1")
+        return await asyncio.wait_for(q.get(), timeout=1.0)
+
+    event = asyncio.run(_run())
+    assert event == "wake"
+
+
+# - only "wake" is owed; control frames (disabled/enabled) are not replayed
+def test_control_frames_are_not_owed_on_reconnect() -> None:
+    reg = WakeChannelRegistry()
+    reg.push("worker-1", "disabled")
+    reg.push("worker-1", "enabled")
+    q = reg.connect("worker-1")
+    assert q.empty()
+
+
+# - an owed wake is delivered once, not on every subsequent reconnect
+def test_owed_wake_delivered_only_once() -> None:
+    reg = WakeChannelRegistry()
+
+    async def _run() -> bool:
+        reg.push("worker-1", "wake")  # owed while offline
+        q1 = reg.connect("worker-1")
+        assert await asyncio.wait_for(q1.get(), timeout=1.0) == "wake"  # delivered on first reconnect
+        reg.disconnect("worker-1", q1)
+        # Reconnect again with no new wake: nothing owed this time.
+        q2 = reg.connect("worker-1")
+        return q2.empty()
+
+    assert asyncio.run(_run()) is True
+
+
+# - a wake delivered to a live channel is not also owed on the next reconnect
+def test_delivered_wake_is_not_owed() -> None:
+    reg = WakeChannelRegistry()
+
+    async def _run() -> bool:
+        q1 = reg.connect("worker-1")
+        assert reg.push("worker-1", "wake") is True
+        assert await asyncio.wait_for(q1.get(), timeout=1.0) == "wake"
+        reg.disconnect("worker-1", q1)
+        q2 = reg.connect("worker-1")
+        return q2.empty()
+
+    assert asyncio.run(_run()) is True

@@ -277,6 +277,10 @@ async def _open_channel(app: Any, worker_token: str) -> tuple[asyncio.Task[Any],
     headers = dict(start["headers"])
     assert headers[b"content-type"].startswith(b"text/event-stream")
     assert headers[b"cache-control"] == b"no-cache"
+    # Tell buffering proxies (nginx / edge) not to hold the stream, so the
+    # 20s keepalive comment actually reaches the agent instead of being
+    # coalesced away.
+    assert headers[b"x-accel-buffering"] == b"no"
     return task, messages
 
 
