@@ -7842,10 +7842,12 @@ def test_hosted_boot_lifespan_returned_for_seeding_alone(monkeypatch) -> None:
     monkeypatch.setenv("SPLITSMITH_WORKER_ENVIRONMENT_ID", "e")
 
     calls: list[str] = []
+    seeded_versions: list[str | None] = []
 
     class _FakeWorkersStore:
-        async def ensure_railway_row(self) -> None:
+        async def ensure_railway_row(self, *, version: str | None = None) -> None:
             calls.append("seeded")
+            seeded_versions.append(version)
 
     class _FakeState:
         boot_retrigger = None
@@ -7858,3 +7860,7 @@ def test_hosted_boot_lifespan_returned_for_seeding_alone(monkeypatch) -> None:
         pass
 
     assert calls == ["seeded"]
+    # The running deploy's version is stamped onto the railway row at boot.
+    from splitsmith import __version__
+
+    assert seeded_versions == [__version__]

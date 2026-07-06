@@ -373,6 +373,13 @@ async def run_worker(
     """
     init_sentry(component="worker")
 
+    if wait:
+        # Long-lived fleet worker boot. One-shot drains (wait=False, the
+        # self-hosted agent's per-wake path) skip this to avoid per-drain spam.
+        from . import __version__
+
+        logger.info("splitsmith worker starting, version %s", __version__)
+
     from .ui.server import (
         _configure_app_logging,
         build_worker_state,

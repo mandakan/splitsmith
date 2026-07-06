@@ -356,10 +356,12 @@ def test_channel_disabled_row_gets_disabled_event_first(
 class _FakeStore:
     def __init__(self, fail_from_call: int | None = None) -> None:
         self.touches: list[str] = []
+        self.seen_versions: list[str | None] = []
         self._fail_from_call = fail_from_call
 
-    async def touch_seen(self, worker_id: str) -> None:
+    async def touch_seen(self, worker_id: str, *, version: str | None = None) -> None:
         self.touches.append(worker_id)
+        self.seen_versions.append(version)
         if self._fail_from_call is not None and len(self.touches) >= self._fail_from_call:
             raise RuntimeError("db gone")
 
@@ -383,6 +385,33 @@ def test_generator_emits_keepalive_comment_on_idle() -> None:
             await gen.aclose()
 
     assert asyncio.run(scenario()) == ": ka\n\n"
+
+
+def test_generator_stamps_reported_version_on_connect() -> None:
+    """A version reported on connect is passed to the connect-time touch_seen
+    so an in-place agent upgrade refreshes the stored version."""
+    from splitsmith.ui.server import _worker_channel_events
+    from splitsmith.worker_channel import WakeChannelRegistry
+
+    store = _FakeStore()
+
+    async def scenario() -> None:
+        gen = _worker_channel_events(
+            store,
+            WakeChannelRegistry(),
+            "w1",
+            disabled=False,
+            boot_retrigger=None,
+            version="1.2.3",
+            keepalive_seconds=0.01,
+        )
+        try:
+            await asyncio.wait_for(gen.__anext__(), timeout=5)
+        finally:
+            await gen.aclose()
+
+    asyncio.run(scenario())
+    assert store.seen_versions[0] == "1.2.3"
 
 
 def test_generator_fires_boot_retrigger_on_connect() -> None:

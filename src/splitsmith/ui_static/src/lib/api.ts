@@ -3367,6 +3367,7 @@ export interface WorkerView {
   registered: boolean;
   last_seen_at: string | null;
   last_wake_at: string | null;
+  version: string | null;
   info: object | null;
 }
 
