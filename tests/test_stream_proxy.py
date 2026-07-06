@@ -168,6 +168,17 @@ def _stream_url(slug: str, match_id: str = MATCH_ID) -> str:
     return f"/api/matches/{match_id}/shooters/{slug}/videos/stream"
 
 
+def _alias_stream_url(slug: str, match_id: str = MATCH_ID) -> str:
+    """URL that routes through the alias middleware to stream_shooter_video.
+
+    The middleware strips 'matches/{match_id}/' and rewrites the remainder,
+    so /api/matches/{id}/match/shooters/{slug}/... becomes
+    /api/match/shooters/{slug}/... and hits stream_shooter_video directly.
+    current_match_root is set by the middleware so state.match_root resolves.
+    """
+    return f"/api/matches/{match_id}/match/shooters/{slug}/videos/stream"
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -199,3 +210,22 @@ def test_stream_proxy_falls_back_to_source_when_absent(
     resp = client.get(_stream_url(SLUG), params={"path": "raw/clip.mp4", "kind": "proxy"})
     assert resp.status_code == 200, resp.text
     assert resp.content == b"SOURCEBYTES"
+
+
+def test_alias_stream_proxy_serves_proxy_when_present(
+    proxy_client: tuple[TestClient, FilesystemStorage],
+) -> None:
+    """Alias endpoint GET /api/match/shooters/{slug}/videos/stream serves proxy bytes.
+
+    Exercises stream_shooter_video directly - the primary endpoint tests above
+    go through the match_id-rewritten route and do not cover this handler.
+    """
+    from splitsmith.proxy import proxy_key_for
+
+    client, storage = proxy_client
+    storage.write_bytes("raw/clip.mp4", b"SOURCEBYTES")
+    storage.write_bytes(proxy_key_for("raw/clip.mp4"), b"PROXYBYTES")
+
+    resp = client.get(_alias_stream_url(SLUG), params={"path": "raw/clip.mp4", "kind": "proxy"})
+    assert resp.status_code == 200, resp.text
+    assert resp.content == b"PROXYBYTES"

@@ -9315,6 +9315,29 @@ def create_app(
         media_type = "video/mp4" if target.suffix.lower() == ".mp4" else "application/octet-stream"
         return FileResponse(target, media_type=media_type, filename=target.name)
 
+    def _serve_proxy(base_root: Path, video: StageVideo) -> FileResponse | None:
+        """Return a FileResponse for the proxy object if it exists, else None.
+
+        Callers fall through to source resolution on None - proxy absent,
+        path not a raw/ key, or no storage configured.
+        """
+        from ..proxy import proxy_key_for
+
+        _raw_str = str(video.path)
+        _storage = state.storage
+        if not _raw_str.startswith("raw/") or _storage is None:
+            return None
+        _proxy_key = proxy_key_for(_raw_str)
+        if not _storage.exists(_proxy_key):
+            return None
+        _local_proxy = base_root / _proxy_key
+        MatchProject._mirror_from_storage(_storage, _proxy_key, _local_proxy)
+        return FileResponse(
+            _local_proxy.resolve(),
+            media_type="video/mp4",
+            filename=_local_proxy.name,
+        )
+
     @app.get("/api/shooters/{slug}/videos/stream")
     def stream_video(
         slug: str,
@@ -9360,21 +9383,10 @@ def create_app(
         stage, video = located
 
         if kind == "proxy":
-            from ..proxy import proxy_key_for
-
-            _raw_str = str(video.path)
-            _storage = state.storage
-            if _raw_str.startswith("raw/") and _storage is not None:
-                _proxy_key = proxy_key_for(_raw_str)
-                if _storage.exists(_proxy_key):
-                    _local_proxy = root / _proxy_key
-                    MatchProject._mirror_from_storage(_storage, _proxy_key, _local_proxy)
-                    return FileResponse(
-                        _local_proxy.resolve(),
-                        media_type="video/mp4",
-                        filename=_local_proxy.name,
-                    )
-            # proxy absent, path not a raw/ key, or no storage - fall through to source
+            _resp = _serve_proxy(root, video)
+            if _resp is not None:
+                return _resp
+            # fall through to source resolution below
 
         served_path: Path | None = None
         if kind in ("auto", "trim") and stage is not None:
@@ -11157,21 +11169,10 @@ def create_app(
         if located is not None:
             stage, video = located
             if kind == "proxy":
-                from ..proxy import proxy_key_for
-
-                _raw_str = str(video.path)
-                _storage = state.storage
-                if _raw_str.startswith("raw/") and _storage is not None:
-                    _proxy_key = proxy_key_for(_raw_str)
-                    if _storage.exists(_proxy_key):
-                        _local_proxy = shooter_root / _proxy_key
-                        MatchProject._mirror_from_storage(_storage, _proxy_key, _local_proxy)
-                        return FileResponse(
-                            _local_proxy.resolve(),
-                            media_type="video/mp4",
-                            filename=_local_proxy.name,
-                        )
-                # proxy absent, path not a raw/ key, or no storage - fall through to source
+                _resp = _serve_proxy(shooter_root, video)
+                if _resp is not None:
+                    return _resp
+                # fall through to source resolution below
             served_path = shooter_project.resolve_video_path(shooter_root, video.path).resolve()
         else:
             resolved = target.expanduser().resolve()
