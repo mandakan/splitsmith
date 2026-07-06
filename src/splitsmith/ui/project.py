@@ -1740,8 +1740,17 @@ class MatchProject(BaseModel):
         if video_path.is_absolute():
             return video_path
         local = root / video_path
-        if self._storage is not None and not local.exists():
-            self._mirror_from_storage(self._storage, str(video_path), local)
+        if self._storage is not None:
+            if not local.exists():
+                self._mirror_from_storage(self._storage, str(video_path), local)
+            else:
+                # Cache hit: bump mtime so the source-cache LRU sweep sees
+                # last-use, not download time. Best-effort - a read-only
+                # mount must not fail the job over a cache-recency hint.
+                try:
+                    os.utime(local, None)
+                except OSError:
+                    pass
         return local
 
     @staticmethod

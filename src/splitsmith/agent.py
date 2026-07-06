@@ -333,6 +333,62 @@ async def _run_worker_once(db_url: str, concurrency: int) -> None:
     await run_worker(db_url, concurrency=concurrency, wait=False)
 
 
+def _prepare_cache_env(state_dir: Path) -> None:
+    """Point the source cache at the persistent state volume by default.
+
+    The agent already requires ``--state-dir`` to be a persistent volume - it
+    holds ``agent.json``. Landing the raw-video mirror cache under it
+    (``<state_dir>/projects``) makes the cache survive restarts and redeploys
+    with no extra operator config: the single ``-v splitsmith-agent:/data``
+    mount already documented for the agent covers both. Without this the cache
+    defaults to ``/home/splitsmith/data`` in the container's ephemeral layer and
+    every job re-downloads its raw video. An explicit ``SPLITSMITH_PROJECTS_DIR``
+    override still wins (``setdefault``).
+    """
+    from .ui.server import SPLITSMITH_PROJECTS_DIR_ENV
+
+    os.environ.setdefault(SPLITSMITH_PROJECTS_DIR_ENV, str(Path(state_dir) / "projects"))
+
+
+def _resolve_cache_root() -> Path:
+    """The directory the source-cache sweep prunes - the mirror cache root."""
+    from .ui.server import SPLITSMITH_PROJECTS_DIR_DEFAULT, SPLITSMITH_PROJECTS_DIR_ENV
+
+    return Path(os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT)
+
+
+async def _run_cache_sweep(cache_root: Path, max_bytes: int | None) -> None:
+    """Evict LRU files from the source cache down to ``max_bytes`` (best-effort).
+
+    A ``None`` cap means the operator disabled eviction. The scan+unlink work is
+    blocking IO, so it runs on a thread to keep the drain loop responsive. Any
+    failure is logged and swallowed - a cache-maintenance hiccup must never
+    fail the drain that triggered it.
+    """
+    if max_bytes is None:
+        return
+    from .source_cache import sweep_source_cache
+
+    try:
+        result = await asyncio.to_thread(sweep_source_cache, cache_root, max_bytes)
+    except Exception:  # noqa: BLE001 - cache upkeep is best-effort, never fatal
+        logger.warning("source-cache sweep failed", exc_info=True)
+        return
+    if result.evicted_files:
+        logger.info(
+            "source-cache sweep evicted %d file(s), %d bytes; %d bytes remain under the %d-byte cap",
+            result.evicted_files,
+            result.evicted_bytes,
+            result.total_bytes_after,
+            max_bytes,
+        )
+
+
+async def _noop_sweep() -> None:
+    """Default drain-loop sweep hook: does nothing (real one injected by run_agent)."""
+    return None
+
+
 async def _drain_loop(
     wake_event: asyncio.Event,
     stop_event: asyncio.Event,
@@ -340,13 +396,15 @@ async def _drain_loop(
     concurrency: int,
     *,
     run: Callable[[str, int], Awaitable[None]],
+    sweep: Callable[[], Awaitable[None]] = _noop_sweep,
 ) -> None:
-    """Run exactly one drain per wake, serialised.
+    """Run exactly one drain per wake, serialised, then sweep the source cache.
 
     The event is cleared *before* the drain, so a wake that arrives while a
     drain is in flight re-arms it and the loop runs one more drain afterwards -
     never lost, never concurrent. Multiple wakes during one drain collapse into
-    a single follow-up (the event is one-slot).
+    a single follow-up (the event is one-slot). The cache sweep runs once after
+    each drain, while no job holds the raw files open.
     """
     while not stop_event.is_set():
         await wake_event.wait()
@@ -355,6 +413,7 @@ async def _drain_loop(
         wake_event.clear()
         logger.info("wake received; draining queued jobs")
         await run(db_url, concurrency)
+        await sweep()
         logger.info("drain finished; waiting for next wake")
 
 
@@ -388,7 +447,16 @@ async def run_agent(
         logger.info("using cached registration for worker %s", state.worker_id)
 
     apply_credentials(state)
+    _prepare_cache_env(state_dir)
     db_url = state.credentials["database_url"]
+
+    from .source_cache import configured_cache_max_bytes
+
+    cache_root = _resolve_cache_root()
+    cache_max_bytes = configured_cache_max_bytes()
+
+    async def _sweep() -> None:
+        await _run_cache_sweep(cache_root, cache_max_bytes)
 
     coordinator = _WakeCoordinator()
     stop_event = asyncio.Event()
@@ -398,7 +466,14 @@ async def run_agent(
             _reader_loop(client, server_url, state.worker_token, coordinator, stop_event)
         )
         drainer_task = asyncio.create_task(
-            _drain_loop(coordinator.wake_event, stop_event, db_url, concurrency, run=_run_worker_once)
+            _drain_loop(
+                coordinator.wake_event,
+                stop_event,
+                db_url,
+                concurrency,
+                run=_run_worker_once,
+                sweep=_sweep,
+            )
         )
         tasks = {reader_task, drainer_task}
         try:

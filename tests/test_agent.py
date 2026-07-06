@@ -21,7 +21,10 @@ from splitsmith import agent
 from splitsmith.agent import (
     AgentState,
     _drain_loop,
+    _prepare_cache_env,
     _reader_loop,
+    _resolve_cache_root,
+    _run_cache_sweep,
     _WakeCoordinator,
     apply_credentials,
     parse_sse_events,
@@ -280,6 +283,97 @@ def test_drain_loop_wake_during_drain_triggers_exactly_one_followup() -> None:
         return count
 
     assert asyncio.run(scenario()) == 2
+
+
+def test_drain_loop_runs_sweep_after_each_drain() -> None:
+    async def scenario() -> list[str]:
+        wake = asyncio.Event()
+        stop = asyncio.Event()
+        calls: list[str] = []
+
+        async def run(_db: str, _conc: int) -> None:
+            calls.append("drain")
+
+        async def sweep() -> None:
+            calls.append("sweep")
+
+        task = asyncio.create_task(_drain_loop(wake, stop, "db", 1, run=run, sweep=sweep))
+        wake.set()
+        await asyncio.sleep(0.02)
+        stop.set()
+        wake.set()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        return calls
+
+    # The sweep runs after the drain, once per wake.
+    assert asyncio.run(scenario()) == ["drain", "sweep"]
+
+
+# ---------------------------------------------------------------------------
+# source-cache wiring
+# ---------------------------------------------------------------------------
+
+
+def test_prepare_cache_env_defaults_projects_dir_under_state_dir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _isolate_env(monkeypatch)
+    os.environ.pop("SPLITSMITH_PROJECTS_DIR", None)
+
+    _prepare_cache_env(tmp_path / "state")
+
+    assert os.environ["SPLITSMITH_PROJECTS_DIR"] == str(tmp_path / "state" / "projects")
+
+
+def test_prepare_cache_env_respects_explicit_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _isolate_env(monkeypatch)
+    os.environ["SPLITSMITH_PROJECTS_DIR"] = "/mnt/big-cache"
+
+    _prepare_cache_env(tmp_path / "state")
+
+    assert os.environ["SPLITSMITH_PROJECTS_DIR"] == "/mnt/big-cache"
+
+
+def test_resolve_cache_root_reads_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    _isolate_env(monkeypatch)
+    os.environ["SPLITSMITH_PROJECTS_DIR"] = "/mnt/cache"
+
+    assert _resolve_cache_root() == Path("/mnt/cache")
+
+
+def test_run_cache_sweep_skips_when_disabled(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    called = False
+
+    def spy(*_args: object, **_kwargs: object) -> object:
+        nonlocal called
+        called = True
+        raise AssertionError("sweep must not run when the cap is disabled")
+
+    monkeypatch.setattr("splitsmith.source_cache.sweep_source_cache", spy)
+
+    asyncio.run(_run_cache_sweep(tmp_path, None))
+
+    assert called is False
+
+
+def test_run_cache_sweep_invokes_eviction(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    seen: list[tuple[Path, int]] = []
+
+    def spy(root: Path, max_bytes: int) -> object:
+        seen.append((root, max_bytes))
+        from splitsmith.source_cache import SweepResult
+
+        return SweepResult(0, 0, 0, 0, 0)
+
+    monkeypatch.setattr("splitsmith.source_cache.sweep_source_cache", spy)
+
+    asyncio.run(_run_cache_sweep(tmp_path, 1_000))
+
+    assert seen == [(tmp_path, 1_000)]
 
 
 # ---------------------------------------------------------------------------

@@ -85,6 +85,53 @@ pass `--state-dir` to point at a path that is.
 The `--token` flag is only needed on the first run. Once `agent.json` exists, the agent
 uses it directly and `--token` is ignored.
 
+### With Docker Compose
+
+If you prefer a compose file over a raw `docker run`, the repo ships
+`docker-compose.agent.yml` - a standalone file that runs just the agent (no
+Postgres or object storage; those live on the server). Set the server URL and
+first-run token via the environment:
+
+```bash
+SPLITSMITH_SERVER_URL=https://my.splitsmith.app \
+SPLITSMITH_REGISTRATION_TOKEN=<REGISTRATION_TOKEN> \
+docker compose -f docker-compose.agent.yml up -d
+```
+
+Drop `SPLITSMITH_REGISTRATION_TOKEN` on later runs once `agent.json` exists. Run
+one copy per environment with distinct project names
+(`docker compose -p splitsmith-agent-staging ...`) so their state volumes do not
+collide.
+
+## Source cache
+
+Every job needs the raw video local. The agent mirrors each raw file from object
+storage on first use and reuses that copy for later jobs on the same file
+(detect, trim, shot-detect, export), so the download happens once per file
+instead of once per job. The mirror lives under the agent's state volume at
+`/data/projects`, so it persists across restarts - the same `-v splitsmith-agent:/data`
+mount covers both `agent.json` and the cache. No extra volume is needed.
+
+The cache is bounded. After each drain the agent evicts least-recently-used files
+until the cache fits a byte budget, so a home box's disk cannot fill even across
+many large matches. The default cap is 20 GB. Override it with
+`SPLITSMITH_SOURCE_CACHE_MAX_GB` (a number of gigabytes; `0` disables eviction):
+
+```bash
+docker run -d \
+  --restart unless-stopped \
+  --name splitsmith-agent \
+  -v splitsmith-agent:/data \
+  -e SPLITSMITH_SOURCE_CACHE_MAX_GB=50 \
+  <IMAGE> agent \
+  --server-url https://my.splitsmith.app \
+  --token <REGISTRATION_TOKEN>
+```
+
+Everything under `/data/projects` is reconstructable from the server and object
+storage, so eviction is always safe - an evicted file is simply re-downloaded on
+next use. Point the state volume at a disk with room for the cap you set.
+
 To check logs:
 
 ```bash
