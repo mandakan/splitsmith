@@ -755,6 +755,59 @@ def test_multipart_abort_discards_upload(hosted_client) -> None:
     assert not storage.exists("raw/scratch.mp4")
 
 
+def test_single_shot_upload_dispatches_generate_proxy(hosted_client, monkeypatch) -> None:
+    """A completed single-shot upload kicks off a ``generate_proxy`` job
+    for the raw key so the Ingest UI gets a fast-scrub preview."""
+    from splitsmith.ui import server as server_mod
+
+    client, _ = hosted_client
+    calls: list[str] = []
+
+    async def _record(_state, raw_key: str) -> None:
+        calls.append(raw_key)
+
+    monkeypatch.setattr(server_mod, "_dispatch_proxy_job", _record)
+
+    resp = client.post(
+        "/api/me/raw/upload",
+        files={"file": ("preview.mp4", io.BytesIO(b"bytes " * 100), "video/mp4")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert calls == ["raw/preview.mp4"]
+
+
+def test_multipart_complete_dispatches_generate_proxy(hosted_client, monkeypatch) -> None:
+    """The multipart ``/complete`` path fires the same proxy kickoff once
+    the object is assembled."""
+    from splitsmith.ui import server as server_mod
+
+    client, storage = hosted_client
+    calls: list[str] = []
+
+    async def _record(_state, raw_key: str) -> None:
+        calls.append(raw_key)
+
+    monkeypatch.setattr(server_mod, "_dispatch_proxy_job", _record)
+
+    create = client.post("/api/me/raw/upload/multipart/create", json={"filename": "big-preview.mp4"}).json()
+    upload_id = create["upload_id"]
+    full_key = f"{storage.prefix}raw/big-preview.mp4"
+    part = b"z" * (5 * 1024 * 1024)
+    out = storage._client.upload_part(
+        Bucket=storage.bucket, Key=full_key, UploadId=upload_id, PartNumber=1, Body=part
+    )
+    done = client.post(
+        "/api/me/raw/upload/multipart/complete",
+        json={
+            "filename": "big-preview.mp4",
+            "upload_id": upload_id,
+            "parts": [{"part_number": 1, "etag": out["ETag"]}],
+        },
+    )
+    assert done.status_code == 200, done.text
+    assert calls == ["raw/big-preview.mp4"]
+
+
 def test_multipart_create_503_when_storage_unwired(hosted_db: str, monkeypatch) -> None:
     monkeypatch.delenv("SPLITSMITH_S3_BUCKET", raising=False)
     from splitsmith.ui.server import create_app

@@ -282,6 +282,30 @@ def _cancellable_runner(handle: JobHandle):
 logger = logging.getLogger(__name__)
 
 
+async def _dispatch_proxy_job(state: AppState, raw_key: str) -> None:
+    """Enqueue a ``generate_proxy`` job for a freshly uploaded raw video.
+
+    Hosted-only and best-effort: the proxy is a fast-scrub optimization,
+    so a local-mode upload (no storage) is a no-op and any dispatch
+    failure is swallowed - it must never fail the upload it follows.
+    Deduped by the raw key so a re-upload of the same name doesn't stack
+    a second transcode on top of one already in flight.
+    """
+    if state.storage is None:
+        return
+    try:
+        existing = await state.jobs.find_active(kind="generate_proxy", video_id=raw_key)
+        if existing is not None:
+            return
+        await state.jobs.submit(
+            kind="generate_proxy",
+            video_id=raw_key,
+            args={"raw_path": raw_key},
+        )
+    except Exception:  # noqa: BLE001 - proxy is an optimization; never fail the upload
+        logger.exception("failed to dispatch generate_proxy for %s", raw_key)
+
+
 def _configure_app_logging(stream: Any | None = None) -> None:
     """Route ``splitsmith.*`` INFO logs to stdout.
 
@@ -2799,12 +2823,64 @@ def register_job_bodies(state: AppState) -> None:
             message=(f"Done: {result.stage_count} stages, " f"{result.duration_seconds:.1f}s{anom_suffix}"),
         )
 
+    def _run_generate_proxy(handle: JobHandle, *, raw_path: str) -> None:
+        """Worker that builds a low-res scrub proxy for a raw upload.
+
+        Hosted-only: fetches the ``raw/<name>`` object from storage,
+        transcodes a dense-GOP preview via ``transcode_proxy``, and
+        uploads it under ``raw_proxy/<name>.mp4``. The proxy is a fast-
+        scrub optimization for the Ingest UI, so both the no-storage
+        (local mode) and already-present cases short-circuit as clean
+        no-ops rather than erroring.
+        """
+        import shutil
+        import tempfile
+
+        from ..proxy import ProxyConfig, proxy_key_for, transcode_proxy
+
+        storage = state.storage
+        if storage is None:
+            handle.set_result({"skipped": "no-storage"})
+            handle.update(progress=1.0, message="Skipped (local mode)")
+            return
+
+        proxy_key = proxy_key_for(raw_path)
+        if storage.exists(proxy_key):
+            handle.set_result({"proxy_key": proxy_key, "skipped": "exists"})
+            handle.update(progress=1.0, message="Proxy already present")
+            return
+
+        handle.update(progress=0.1, message="Fetching source...")
+        with tempfile.TemporaryDirectory() as td:
+            tmp_in = Path(td) / "src"
+            tmp_out = Path(td) / "proxy.mp4"
+            with handle.timer.phase("download"):
+                with storage.open_stream(raw_path) as src, tmp_in.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
+            handle.check_cancel()
+            handle.update(progress=0.4, message="Transcoding preview...")
+            with handle.timer.phase("transcode"):
+                transcode_proxy(
+                    tmp_in,
+                    tmp_out,
+                    ProxyConfig(),
+                    ffmpeg_binary=process_runtime().ffmpeg_binary,
+                    runner=_cancellable_runner(handle),
+                )
+            handle.update(progress=0.85, message="Uploading preview...")
+            with handle.timer.phase("upload"):
+                with tmp_out.open("rb") as fh:
+                    size = storage.upload_stream(proxy_key, fh)
+        handle.set_result({"proxy_key": proxy_key, "size_bytes": size})
+        handle.update(progress=1.0, message="Preview ready")
+
     state.jobs.bodies.register("model_download", _run_model_download_job)
     state.jobs.bodies.register("detect_beep", _run_detect_beep_for_video)
     state.jobs.bodies.register("trim", _run_trim)
     state.jobs.bodies.register("shot_detect", _run_shot_detect)
     state.jobs.bodies.register("export", _run_export_for_stage)
     state.jobs.bodies.register("match_export", _run_match_export)
+    state.jobs.bodies.register("generate_proxy", _run_generate_proxy)
 
 
 class HealthResponse(BaseModel):
@@ -5733,6 +5809,11 @@ def create_app(
                 },
             )
 
+        # Kick off preview transcoding so the Ingest UI can fast-scrub the
+        # upload without pulling the full-res source. Best-effort: never
+        # fails the completed upload (see ``_dispatch_proxy_job``).
+        await _dispatch_proxy_job(state, key)
+
         return JSONResponse(
             {
                 "path": key,
@@ -5826,6 +5907,10 @@ def create_app(
             )
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=500, detail=f"could not complete upload: {exc}") from exc
+        # Same preview kickoff as the single-shot path. This handler is sync
+        # (runs on Starlette's threadpool with no event loop), so bridge to
+        # the async dispatch via ``asyncio.run``.
+        asyncio.run(_dispatch_proxy_job(state, key))
         return JSONResponse({"path": key, "size": size, "sha256": None, "filename": name})
 
     @app.post("/api/me/raw/upload/multipart/abort")
