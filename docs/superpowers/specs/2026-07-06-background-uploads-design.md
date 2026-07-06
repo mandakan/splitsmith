@@ -63,10 +63,16 @@ surfaces background progress.
    sheet or changing routes no longer aborts anything.
 
 2. **`AddFootageModal` / `HostedUploadBody`** (refactor) -- becomes a thin view
-   over `UploadProvider`. It renders the drop zone, the file list, and coverage
-   controls, but reads queue state and dispatches actions to the provider instead
-   of owning `useState`/`useRef` transfer state. The modal is now freely
-   dismissable while uploads run; the unmount-aborts cleanup is removed.
+   over `UploadProvider`. It renders the drop zone and the pending file list from
+   provider state, and dispatches `enqueue`/`cancel` to the provider instead of
+   owning `useState`/`useRef` transfer state. The modal is now freely dismissable
+   while uploads run; the unmount-aborts cleanup is removed. What stays in the
+   modal (open-only concerns): the "already in storage" list + refresh, the
+   manual `attachToProject` + coverage-suggestion fallback, and their local
+   `attachState`. Cross-route tray refresh does not rely on the modal's
+   `onImported` -- the provider bumps an attach signal per slug that the Ingest
+   page subscribes to and reloads on (the modal's `onImported` is kept for the
+   manual-attach path, which only runs while the modal, hence Ingest, is mounted).
    - Footer/hint copy while in flight: "You can close this and keep working --
      uploads continue in the background."
    - Backdrop click, Escape, and the X close are re-enabled during upload.
@@ -74,9 +80,13 @@ surfaces background progress.
      its current behavior.
 
 3. **`UploadDock`** (new) -- a persistent activity surface, visually consistent
-   with the existing `JobsRail`, mounted alongside it in `AppShell`. Fed only by
-   `UploadProvider` (kept separate from `Jobs.tsx`, which continues to mirror
-   *server* jobs -- different data source, one clear purpose each).
+   with the existing `JobsRail`, but mounted **once at the app root** (inside
+   `UploadProvider`, portaled to body, fixed bottom-right) rather than per-shell.
+   The Ingest page is not under `MatchShell`, and the dock must follow the user
+   across every route, so a single app-level fixed dock is both simpler and
+   genuinely global. Fed only by `UploadProvider` (kept separate from `Jobs.tsx`,
+   which continues to mirror *server* jobs -- different data source, one clear
+   purpose each).
    - Collapsed: "Uploading 3 of 11 . 42%" with an aggregate progress bar; hidden
      when the queue is empty and nothing awaits acknowledgement.
    - Expanded: per-file rows (name, percent, status) with per-file cancel and a
