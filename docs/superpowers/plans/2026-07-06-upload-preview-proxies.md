@@ -33,8 +33,8 @@
 **Interfaces:**
 - Produces:
   - `class ProxyConfig(BaseModel)` in `config.py` with fields `height: int = 480`, `crf: int = 30`, `preset: str = "veryfast"`, `gop: int = 15`, `audio_bitrate: str = "96k"`, `video_codec: str = "libx264"`.
-  - `proxy_key_for(raw_path: str) -> str` in `proxy.py` — maps `raw/<name>.<ext>` to `raw_proxy/<name>.mp4`; raises `ValueError` if `raw_path` does not start with `raw/`.
-  - `transcode_proxy(input_path: Path, output_path: Path, config: ProxyConfig, *, ffmpeg_binary: str, runner=subprocess.run) -> None` — builds+runs the ffmpeg command; raises `ProxyError` on non-zero exit.
+  - `proxy_key_for(raw_path: str) -> str` in `proxy.py` - maps `raw/<name>.<ext>` to `raw_proxy/<name>.mp4`; raises `ValueError` if `raw_path` does not start with `raw/`.
+  - `transcode_proxy(input_path: Path, output_path: Path, config: ProxyConfig, *, ffmpeg_binary: str, runner=subprocess.run) -> None` - builds+runs the ffmpeg command; raises `ProxyError` on non-zero exit.
   - `class ProxyError(RuntimeError)`.
 
 - [ ] **Step 1: Write failing tests for `proxy_key_for`**
@@ -67,7 +67,7 @@ Expected: FAIL (ImportError / module not found).
 
 - [ ] **Step 3: Implement `ProxyConfig` in `config.py`**
 
-Add near the other config models (mirror their style — `BaseModel` subclass with field defaults and a short docstring):
+Add near the other config models (mirror their style - `BaseModel` subclass with field defaults and a short docstring):
 
 ```python
 class ProxyConfig(BaseModel):
@@ -246,7 +246,7 @@ git commit -m "feat: add proxy transcode + key mapping + config (#561)"
 
 **Files:**
 - Modify: `src/splitsmith/ui/server.py` (add body in `register_job_bodies`, register it; add `_dispatch_proxy_job`; call it from both upload paths)
-- Test: `tests/ui/test_generate_proxy_job.py` (or the existing hosted-app test module pattern — grep for how other job/upload tests are structured, e.g. tests using moto/MinIO storage)
+- Test: `tests/ui/test_generate_proxy_job.py` (or the existing hosted-app test module pattern - grep for how other job/upload tests are structured, e.g. tests using moto/MinIO storage)
 
 **Interfaces:**
 - Consumes: `proxy_key_for`, `transcode_proxy`, `ProxyConfig` (Task 1).
@@ -402,7 +402,7 @@ git commit -m "feat: generate_proxy job + dispatch on upload (#561)"
 ### Task 3: `kind=proxy` streaming with source fallback
 
 **Files:**
-- Modify: `src/splitsmith/ui/server.py` — `stream_video` (`server.py:9233`) and the match-scoped alias (`server.py:11073`)
+- Modify: `src/splitsmith/ui/server.py` - `stream_video` (`server.py:9233`) and the match-scoped alias (`server.py:11073`)
 - Test: `tests/ui/test_stream_proxy.py`
 
 **Interfaces:**
@@ -451,7 +451,7 @@ if kind == "proxy":
 ```
 
 Implementation notes:
-- Extend the endpoint's `kind` validation to accept `"proxy"` (grep how `kind` is currently constrained — a `Literal`/`Query` enum or an `if kind not in {...}` guard; add `"proxy"`).
+- Extend the endpoint's `kind` validation to accept `"proxy"` (grep how `kind` is currently constrained - a `Literal`/`Query` enum or an `if kind not in {...}` guard; add `"proxy"`).
 - For mirroring the proxy object to local disk, reuse the same mechanism `kind=trim`/source uses. The source path uses `project.resolve_video_path` (which mirrors `video.path`); for an arbitrary storage key like the proxy, mirror it the same way the trim branch pulls `audio_helpers.pull_trimmed_video` does (grep `_mirror_from_storage` / `pull_trimmed_video` in `project.py`/`audio.py` and reuse the lowest-level "download this key to a temp/cache path" helper). If no key-addressed mirror helper is exposed, add a tiny local helper that streams `storage.open_stream(proxy_key)` into a cache file under `root` and returns the path, mirroring `_mirror_from_storage`'s temp+rename.
 - Falling through (not returning) when the proxy is absent gives the transparent source fallback.
 
@@ -478,7 +478,7 @@ git commit -m "feat: kind=proxy video streaming with source fallback (#561)"
 ### Task 4: `proxy_ready` in project serialization + raw-delete cleanup
 
 **Files:**
-- Modify: `src/splitsmith/ui/server.py` — the project serialization used by `getProject`/the match-project payload (grep for where `StageVideo`s are serialized to the API response; likely a `_serialize_project`/`project.to_api_dict` path), and `DELETE /api/me/raw/{filename}` (`server.py:5925`)
+- Modify: `src/splitsmith/ui/server.py` - the project serialization used by `getProject`/the match-project payload (grep for where `StageVideo`s are serialized to the API response; likely a `_serialize_project`/`project.to_api_dict` path), and `DELETE /api/me/raw/{filename}` (`server.py:5925`)
 - Modify: `src/splitsmith/ui/project.py` if `StageVideo`'s serialized shape is produced there
 - Test: `tests/ui/test_proxy_ready.py`
 
@@ -595,7 +595,7 @@ shooterVideoStreamUrl(slug: string, path: string, kind?: "auto" | "proxy"): stri
 }
 ```
 
-Match the existing body (it currently wraps with `scopeRequestPath` and builds the path the same way — preserve that; only add the `kind` param).
+Match the existing body (it currently wraps with `scopeRequestPath` and builds the path the same way - preserve that; only add the `kind` param).
 
 - [ ] **Step 3: Add `generate_proxy` to the Jobs maps**
 
@@ -690,7 +690,7 @@ git commit -m "feat(ui): stream proxy in ClipDetail with generating badge (#561)
 
 - [ ] **Step 1: Add the watcher effect**
 
-In the component that owns the project state + `onProjectUpdate` (the one that already calls `api.getProject(slug)` — mirror how the trim flow in `Audit.tsx` refetches):
+In the component that owns the project state + `onProjectUpdate` (the one that already calls `api.getProject(slug)` - mirror how the trim flow in `Audit.tsx` refetches):
 
 ```tsx
 useEffect(() => {
@@ -762,7 +762,7 @@ Expected: success.
 - [ ] **Step 4: Dash sweep on added lines**
 
 ```bash
-git diff main --unified=0 | grep '^+' | grep -nE '—|--' || echo "clean"
+git diff main --unified=0 | grep '^+' | grep -nE '-|--' || echo "clean"
 ```
 Expected: `clean` (no em dash / `--` in new copy or comments).
 
