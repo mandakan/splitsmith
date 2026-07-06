@@ -76,6 +76,7 @@ interface UploadContextValue {
   ) => void;
   cancel: (id: string) => void;
   cancelAll: () => void;
+  probeFor: (filename: string) => { duration_s: number | null; recorded_start: string | null } | undefined;
   clearFinished: () => void;
   inFlight: boolean;
   attachTick: number;
@@ -128,8 +129,22 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const cancel = useCallback((id: string) => {
-    uploadsRef.current.find((x) => x.id === id)?.controller?.abort();
+    const u = uploadsRef.current.find((x) => x.id === id);
+    if (u?.controller) {
+      u.controller.abort();
+    } else if (u?.status === "queued") {
+      // Queued items have no controller yet (created when the pump starts the
+      // file). Mark cancelled directly so the pump skips it.
+      setUploads((prev) =>
+        prev.map((x) => (x.id === id ? { ...x, status: "cancelled" } : x)),
+      );
+    }
   }, []);
+
+  const probeFor = useCallback(
+    (filename: string) => probeByFilenameRef.current[filename],
+    [],
+  );
 
   const cancelAll = useCallback(() => {
     activeControllerRef.current?.abort();
@@ -252,7 +267,7 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
   return (
     <UploadContext.Provider
-      value={{ uploads, enqueue, cancel, cancelAll, clearFinished, inFlight, attachTick }}
+      value={{ uploads, enqueue, cancel, cancelAll, clearFinished, inFlight, attachTick, probeFor }}
     >
       {children}
     </UploadContext.Provider>

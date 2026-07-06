@@ -795,7 +795,7 @@ function HostedUploadBody({
   onImported: (imported: number, paths: string[]) => void;
   stages: { stage_number: number; stage_name: string }[];
 }) {
-  const { uploads: allUploads, enqueue, cancel, attachTick } = useUploads();
+  const { uploads: allUploads, enqueue, cancel, attachTick, probeFor } = useUploads();
   // Show only this shooter's pending items in the modal's session list.
   const uploads = allUploads.filter((u) => u.slug === slug);
   const inFlight = uploads.some(
@@ -914,6 +914,8 @@ function HostedUploadBody({
           sha256: entry.etag,
           size_bytes: entry.size,
           covers_stages: coverage.length > 0 ? coverage : undefined,
+          duration_seconds: probeFor(entry.filename)?.duration_s ?? undefined,
+          recorded_start: probeFor(entry.filename)?.recorded_start ?? undefined,
         });
         setAttachState((prev) => ({
           ...prev,
@@ -933,7 +935,7 @@ function HostedUploadBody({
         }));
       }
     },
-    [slug, onImported],
+    [slug, onImported, probeFor],
   );
 
   // A raw object belongs to one shooter. Hide uploads already attached to a
