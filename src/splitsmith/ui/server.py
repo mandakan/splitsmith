@@ -5615,10 +5615,27 @@ def create_app(
 
     @app.get("/api/shooters/{slug}/project")
     def get_project(slug: str) -> JSONResponse:
+        from ..proxy import proxy_key_for
+
         project = state.shooter_project(slug)
         root = state.shooter_root(slug)
         statuses = project.stage_statuses(root)
         payload = project.model_dump(mode="json")
+        # Compute proxy_ready set once per request - one storage.list call
+        # covers all videos. Local mode (storage is None) reports True for
+        # all videos because source files stream directly.
+        _storage = state.storage
+        proxy_keys: set[str] = set()
+        if _storage is not None:
+            proxy_keys = {obj.path for obj in _storage.list("raw_proxy/")}
+
+        def _proxy_ready(path_str: str) -> bool:
+            if _storage is None:
+                return True
+            if not path_str.startswith("raw/"):
+                return True
+            return proxy_key_for(path_str) in proxy_keys
+
         # Enrich each stage's serialized dict with its computed status
         # so the SPA never recomputes "is this audited?" client-side.
         # The status field is read-only (not on the StageEntry model);
@@ -5631,6 +5648,10 @@ def create_app(
             status = statuses.get(int(n))
             if status is not None:
                 stage_dict["status"] = status.value
+            for video_dict in stage_dict.get("videos", []):
+                video_dict["proxy_ready"] = _proxy_ready(str(video_dict.get("path", "")))
+        for video_dict in payload.get("unassigned_videos", []):
+            video_dict["proxy_ready"] = _proxy_ready(str(video_dict.get("path", "")))
         # Strip owner-local scan directory from anonymous share responses -
         # it is a server path that serves no purpose for read-only viewers.
         # Video/trim paths are load-bearing for streaming and are kept.
@@ -6009,12 +6030,19 @@ def create_app(
                 status_code=503,
                 detail="raw video delete is hosted-mode only",
             )
+        from ..proxy import proxy_key_for
+
         name = _sanitize_raw_filename(filename)
         key = f"raw/{name}"
         try:
             storage.delete(key)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"delete failed: {exc}") from exc
+        # Best-effort cleanup of the corresponding proxy object.
+        try:
+            storage.delete(proxy_key_for(key))
+        except Exception:
+            logger.exception("failed to delete proxy for %s", name)
         return JSONResponse({"ok": True, "path": key})
 
     def _apply_raw_video_coverage(
