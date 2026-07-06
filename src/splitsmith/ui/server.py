@@ -5525,7 +5525,13 @@ def create_app(
                 version=reported_version,
             ),
             media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache"},
+            # ``X-Accel-Buffering: no`` asks nginx/edge proxies not to buffer
+            # the stream; without it a buffering intermediary can coalesce the
+            # 20s ``: ka`` keepalive and let the connection idle out, which
+            # shows up agent-side as the "incomplete chunked read" reconnect
+            # churn. A lost wake during such a flap is recovered by the
+            # owed-wake replay on reconnect (see WakeChannelRegistry).
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
     @app.get("/api/models/status")

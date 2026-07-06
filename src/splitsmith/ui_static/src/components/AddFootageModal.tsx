@@ -987,17 +987,21 @@ function HostedUploadBody({
       activeControllerRef.current = controller;
       updateOne(next.id, { status: "uploading", bytesSent: 0, controller });
       try {
-        await api.uploadRawFile(next.file, {
+        const result = await api.uploadRawFile(next.file, {
           signal: controller.signal,
           onProgress: (loaded) => updateOne(next.id, { bytesSent: loaded }),
         });
         updateOne(next.id, { status: "done", bytesSent: next.file.size });
-        await refreshExisting();
-        // After upload completes, fetch a coverage suggestion using the
-        // client-side probe data. Non-fatal: coverage stays empty if this
-        // fails or returns no stages.
+        // Attach to the project right away so a finished upload is never
+        // left orphaned in storage. Stages stay unassigned here; the
+        // operator assigns them later in the ingest tray.
         const probe = probeByFilenameRef.current[next.file.name];
-        if (probe && stages.length > 0) {
+        const attached = await autoAttach(result, probe);
+        await refreshExisting();
+        // Only fall back to a coverage suggestion when auto-attach failed:
+        // it pre-fills the manual Attach affordance the row then shows.
+        // Non-fatal: coverage stays empty if this fails or returns no stages.
+        if (!attached && probe && stages.length > 0) {
           void api
             .suggestCoverage(slug, {
               recorded_start: probe.recorded_start,
@@ -1068,6 +1072,42 @@ function HostedUploadBody({
       // can retry. We don't blow away the row.
     }
   };
+
+  // Auto-attach a freshly uploaded object to this shooter's project the
+  // moment its bytes land, so the operator never has to click Attach per
+  // file. Lands in the unassigned tray (no covers_stages); stage
+  // assignment happens later in the ingest tray. Returns whether the
+  // attach succeeded so the pump only bothers pre-filling the manual
+  // Attach fallback (coverage suggestion) when it didn't. Never throws:
+  // on failure the object stays uploaded and the manual Attach affordance
+  // in the "already in storage" panel recovers it.
+  const autoAttach = useCallback(
+    async (
+      result: { filename: string; sha256: string | null; size: number },
+      probe: { duration_s: number | null; recorded_start: string | null } | undefined,
+    ): Promise<boolean> => {
+      const filename = result.filename;
+      setAttachState((prev) => ({ ...prev, [filename]: { status: "attaching" } }));
+      try {
+        await api.attachRawVideo(slug, {
+          filename,
+          sha256: result.sha256,
+          size_bytes: result.size,
+          duration_seconds: probe?.duration_s ?? undefined,
+          recorded_start: probe?.recorded_start ?? undefined,
+          // covers_stages omitted -> unassigned tray.
+        });
+        setAttachState((prev) => ({ ...prev, [filename]: { status: "attached" } }));
+        onImported(1, [filename]);
+        return true;
+      } catch (err) {
+        const msg = err instanceof ApiError ? err.detail : String(err);
+        setAttachState((prev) => ({ ...prev, [filename]: { status: "error", message: msg } }));
+        return false;
+      }
+    },
+    [slug, onImported],
+  );
 
   const attachToProject = useCallback(
     async (entry: RawUploadEntry, coverage: number[]) => {
