@@ -128,6 +128,29 @@ function IngestInner({ slug }: { slug: string }) {
     if (!project) return 0;
     return project.stages.reduce((sum, s) => sum + (s.videos?.length ?? 0), 0);
   }, [project]);
+
+  // Poll for proxy generation: while any video has proxy_ready === false,
+  // refetch the project every ~5s so badges update without SSE.
+  const anyProxyPending = useMemo(() => {
+    if (!project) return false;
+    const allVideos = [
+      ...project.stages.flatMap((s) => s.videos ?? []),
+      ...(project.unassigned_videos ?? []),
+    ];
+    return allVideos.some((v) => v.proxy_ready === false);
+  }, [project]);
+
+  useEffect(() => {
+    if (!anyProxyPending) return;
+    const id = window.setInterval(async () => {
+      try {
+        setProject(await api.getProject(slug));
+      } catch {
+        /* transient; next tick retries */
+      }
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [anyProxyPending, slug]);
   // Count unassigned too -- a successful import where nothing auto-
   // matched a stage still produces visible work for the user (the
   // "To assign" queue in the ReviewLayout clip list). Without this the

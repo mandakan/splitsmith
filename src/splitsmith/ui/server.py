@@ -282,6 +282,30 @@ def _cancellable_runner(handle: JobHandle):
 logger = logging.getLogger(__name__)
 
 
+async def _dispatch_proxy_job(state: AppState, raw_key: str) -> None:
+    """Enqueue a ``generate_proxy`` job for a freshly uploaded raw video.
+
+    Hosted-only and best-effort: the proxy is a fast-scrub optimization,
+    so a local-mode upload (no storage) is a no-op and any dispatch
+    failure is swallowed - it must never fail the upload it follows.
+    Deduped by the raw key so a re-upload of the same name doesn't stack
+    a second transcode on top of one already in flight.
+    """
+    if state.storage is None:
+        return
+    try:
+        existing = await state.jobs.find_active(kind="generate_proxy", video_id=raw_key)
+        if existing is not None:
+            return
+        await state.jobs.submit(
+            kind="generate_proxy",
+            video_id=raw_key,
+            args={"raw_path": raw_key},
+        )
+    except Exception:  # noqa: BLE001 - proxy is an optimization; never fail the upload
+        logger.exception("failed to dispatch generate_proxy for %s", raw_key)
+
+
 def _configure_app_logging(stream: Any | None = None) -> None:
     """Route ``splitsmith.*`` INFO logs to stdout.
 
@@ -2799,12 +2823,64 @@ def register_job_bodies(state: AppState) -> None:
             message=(f"Done: {result.stage_count} stages, " f"{result.duration_seconds:.1f}s{anom_suffix}"),
         )
 
+    def _run_generate_proxy(handle: JobHandle, *, raw_path: str) -> None:
+        """Worker that builds a low-res scrub proxy for a raw upload.
+
+        Hosted-only: fetches the ``raw/<name>`` object from storage,
+        transcodes a dense-GOP preview via ``transcode_proxy``, and
+        uploads it under ``raw_proxy/<name>.mp4``. The proxy is a fast-
+        scrub optimization for the Ingest UI, so both the no-storage
+        (local mode) and already-present cases short-circuit as clean
+        no-ops rather than erroring.
+        """
+        import shutil
+        import tempfile
+
+        from ..proxy import ProxyConfig, proxy_key_for, transcode_proxy
+
+        storage = state.storage
+        if storage is None:
+            handle.set_result({"skipped": "no-storage"})
+            handle.update(progress=1.0, message="Skipped (local mode)")
+            return
+
+        proxy_key = proxy_key_for(raw_path)
+        if storage.exists(proxy_key):
+            handle.set_result({"proxy_key": proxy_key, "skipped": "exists"})
+            handle.update(progress=1.0, message="Proxy already present")
+            return
+
+        handle.update(progress=0.1, message="Fetching source...")
+        with tempfile.TemporaryDirectory() as td:
+            tmp_in = Path(td) / "src"
+            tmp_out = Path(td) / "proxy.mp4"
+            with handle.timer.phase("download"):
+                with storage.open_stream(raw_path) as src, tmp_in.open("wb") as dst:
+                    shutil.copyfileobj(src, dst)
+            handle.check_cancel()
+            handle.update(progress=0.4, message="Transcoding preview...")
+            with handle.timer.phase("transcode"):
+                transcode_proxy(
+                    tmp_in,
+                    tmp_out,
+                    ProxyConfig(),
+                    ffmpeg_binary=process_runtime().ffmpeg_binary,
+                    runner=_cancellable_runner(handle),
+                )
+            handle.update(progress=0.85, message="Uploading preview...")
+            with handle.timer.phase("upload"):
+                with tmp_out.open("rb") as fh:
+                    size = storage.upload_stream(proxy_key, fh)
+        handle.set_result({"proxy_key": proxy_key, "size_bytes": size})
+        handle.update(progress=1.0, message="Preview ready")
+
     state.jobs.bodies.register("model_download", _run_model_download_job)
     state.jobs.bodies.register("detect_beep", _run_detect_beep_for_video)
     state.jobs.bodies.register("trim", _run_trim)
     state.jobs.bodies.register("shot_detect", _run_shot_detect)
     state.jobs.bodies.register("export", _run_export_for_stage)
     state.jobs.bodies.register("match_export", _run_match_export)
+    state.jobs.bodies.register("generate_proxy", _run_generate_proxy)
 
 
 class HealthResponse(BaseModel):
@@ -5539,10 +5615,27 @@ def create_app(
 
     @app.get("/api/shooters/{slug}/project")
     def get_project(slug: str) -> JSONResponse:
+        from ..proxy import proxy_key_for
+
         project = state.shooter_project(slug)
         root = state.shooter_root(slug)
         statuses = project.stage_statuses(root)
         payload = project.model_dump(mode="json")
+        # Compute proxy_ready set once per request - one storage.list call
+        # covers all videos. Local mode (storage is None) reports True for
+        # all videos because source files stream directly.
+        _storage = state.storage
+        proxy_keys: set[str] = set()
+        if _storage is not None:
+            proxy_keys = {obj.path for obj in _storage.list("raw_proxy/")}
+
+        def _proxy_ready(path_str: str) -> bool:
+            if _storage is None:
+                return True
+            if not path_str.startswith("raw/"):
+                return True
+            return proxy_key_for(path_str) in proxy_keys
+
         # Enrich each stage's serialized dict with its computed status
         # so the SPA never recomputes "is this audited?" client-side.
         # The status field is read-only (not on the StageEntry model);
@@ -5555,6 +5648,10 @@ def create_app(
             status = statuses.get(int(n))
             if status is not None:
                 stage_dict["status"] = status.value
+            for video_dict in stage_dict.get("videos", []):
+                video_dict["proxy_ready"] = _proxy_ready(str(video_dict.get("path", "")))
+        for video_dict in payload.get("unassigned_videos", []):
+            video_dict["proxy_ready"] = _proxy_ready(str(video_dict.get("path", "")))
         # Strip owner-local scan directory from anonymous share responses -
         # it is a server path that serves no purpose for read-only viewers.
         # Video/trim paths are load-bearing for streaming and are kept.
@@ -5733,6 +5830,11 @@ def create_app(
                 },
             )
 
+        # Kick off preview transcoding so the Ingest UI can fast-scrub the
+        # upload without pulling the full-res source. Best-effort: never
+        # fails the completed upload (see ``_dispatch_proxy_job``).
+        await _dispatch_proxy_job(state, key)
+
         return JSONResponse(
             {
                 "path": key,
@@ -5826,6 +5928,10 @@ def create_app(
             )
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=500, detail=f"could not complete upload: {exc}") from exc
+        # Same preview kickoff as the single-shot path. This handler is sync
+        # (runs on Starlette's threadpool with no event loop), so bridge to
+        # the async dispatch via ``asyncio.run``.
+        asyncio.run(_dispatch_proxy_job(state, key))
         return JSONResponse({"path": key, "size": size, "sha256": None, "filename": name})
 
     @app.post("/api/me/raw/upload/multipart/abort")
@@ -5941,12 +6047,19 @@ def create_app(
                 status_code=503,
                 detail="raw video delete is hosted-mode only",
             )
+        from ..proxy import proxy_key_for
+
         name = _sanitize_raw_filename(filename)
         key = f"raw/{name}"
         try:
             storage.delete(key)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"delete failed: {exc}") from exc
+        # Best-effort cleanup of the corresponding proxy object.
+        try:
+            storage.delete(proxy_key_for(key))
+        except Exception:
+            logger.exception("failed to delete proxy for %s", name)
         return JSONResponse({"ok": True, "path": key})
 
     def _apply_raw_video_coverage(
@@ -9272,11 +9385,46 @@ def create_app(
         media_type = "video/mp4" if target.suffix.lower() == ".mp4" else "application/octet-stream"
         return FileResponse(target, media_type=media_type, filename=target.name)
 
+    def _serve_proxy(base_root: Path, video: StageVideo) -> FileResponse | None:
+        """Return a FileResponse for the proxy object if it exists, else None.
+
+        Callers fall through to source resolution on None - proxy absent,
+        path not a raw/ key, or no storage configured.
+
+        Local cache is checked first - proxy objects are immutable per key (delete
+        cleanup removes them; a re-upload regenerates), and _mirror_from_storage uses
+        temp+atomic-rename so a present local file is always complete and never stale.
+        This avoids redundant R2 pulls on every HTTP Range request during video scrubbing.
+        """
+        from ..proxy import proxy_key_for
+
+        _raw_str = str(video.path)
+        _storage = state.storage
+        if not _raw_str.startswith("raw/") or _storage is None:
+            return None
+        _proxy_key = proxy_key_for(_raw_str)
+        _local_proxy = base_root / _proxy_key
+        if _local_proxy.exists():  # warm cache - no network at all
+            return FileResponse(
+                _local_proxy.resolve(),
+                media_type="video/mp4",
+                filename=_local_proxy.name,
+            )
+        if not _storage.exists(_proxy_key):
+            return None
+        # cold - mirror once, then serve
+        MatchProject._mirror_from_storage(_storage, _proxy_key, _local_proxy)
+        return FileResponse(
+            _local_proxy.resolve(),
+            media_type="video/mp4",
+            filename=_local_proxy.name,
+        )
+
     @app.get("/api/shooters/{slug}/videos/stream")
     def stream_video(
         slug: str,
         path: str = Query(...),
-        kind: Literal["auto", "trim", "source"] = Query("auto"),
+        kind: Literal["auto", "trim", "source", "proxy"] = Query("auto"),
     ) -> FileResponse:
         """Serve a registered video file with HTTP Range support.
 
@@ -9289,6 +9437,10 @@ def create_app(
           responsive.
         - ``source``: the original camera file. Used while the trim is
           still building.
+        - ``proxy``: low-res fast-seek MP4 produced by the
+          ``generate_proxy`` worker (``raw_proxy/<name>.mp4``). Falls
+          back to the source if the proxy object is absent in storage,
+          so the player always gets something.
         - ``auto`` (default, for back-compat with non-audit callers):
           trim if present, source otherwise.
 
@@ -9311,6 +9463,12 @@ def create_app(
                 detail=f"video not registered with project: {path}",
             )
         stage, video = located
+
+        if kind == "proxy":
+            _resp = _serve_proxy(root, video)
+            if _resp is not None:
+                return _resp
+            # fall through to source resolution below
 
         served_path: Path | None = None
         if kind in ("auto", "trim") and stage is not None:
@@ -11074,6 +11232,7 @@ def create_app(
     def stream_shooter_video(
         slug: str,
         path: str = Query(...),
+        kind: Literal["auto", "trim", "source", "proxy"] = Query("auto"),
     ) -> FileResponse:
         """Serve a video registered to any shooter in the bound match (#328).
 
@@ -11081,7 +11240,9 @@ def create_app(
         regular /api/videos/stream endpoint only sees the active
         shooter's registry. This thin wrapper validates ``path`` against
         the named shooter's project then returns a FileResponse on the
-        resolved trim/source.
+        resolved trim/source. ``kind=proxy`` follows the same fallback
+        semantics as the primary stream endpoint: serves the proxy object
+        when present, source otherwise.
         """
         match_root, match = _resolve_match_context()
         if slug not in match.shooters:
@@ -11101,6 +11262,11 @@ def create_app(
         served_path: Path | None = None
         if located is not None:
             stage, video = located
+            if kind == "proxy":
+                _resp = _serve_proxy(shooter_root, video)
+                if _resp is not None:
+                    return _resp
+                # fall through to source resolution below
             served_path = shooter_project.resolve_video_path(shooter_root, video.path).resolve()
         else:
             resolved = target.expanduser().resolve()
