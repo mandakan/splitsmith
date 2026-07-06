@@ -9319,7 +9319,7 @@ def create_app(
     def stream_video(
         slug: str,
         path: str = Query(...),
-        kind: Literal["auto", "trim", "source"] = Query("auto"),
+        kind: Literal["auto", "trim", "source", "proxy"] = Query("auto"),
     ) -> FileResponse:
         """Serve a registered video file with HTTP Range support.
 
@@ -9332,6 +9332,10 @@ def create_app(
           responsive.
         - ``source``: the original camera file. Used while the trim is
           still building.
+        - ``proxy``: low-res fast-seek MP4 produced by the
+          ``generate_proxy`` worker (``raw_proxy/<name>.mp4``). Falls
+          back to the source if the proxy object is absent in storage,
+          so the player always gets something.
         - ``auto`` (default, for back-compat with non-audit callers):
           trim if present, source otherwise.
 
@@ -9354,6 +9358,23 @@ def create_app(
                 detail=f"video not registered with project: {path}",
             )
         stage, video = located
+
+        if kind == "proxy":
+            from ..proxy import proxy_key_for
+
+            _raw_str = str(video.path)
+            _storage = state.storage
+            if _raw_str.startswith("raw/") and _storage is not None:
+                _proxy_key = proxy_key_for(_raw_str)
+                if _storage.exists(_proxy_key):
+                    _local_proxy = root / _proxy_key
+                    MatchProject._mirror_from_storage(_storage, _proxy_key, _local_proxy)
+                    return FileResponse(
+                        _local_proxy.resolve(),
+                        media_type="video/mp4",
+                        filename=_local_proxy.name,
+                    )
+            # proxy absent, path not a raw/ key, or no storage - fall through to source
 
         served_path: Path | None = None
         if kind in ("auto", "trim") and stage is not None:
@@ -11105,6 +11126,7 @@ def create_app(
     def stream_shooter_video(
         slug: str,
         path: str = Query(...),
+        kind: Literal["auto", "trim", "source", "proxy"] = Query("auto"),
     ) -> FileResponse:
         """Serve a video registered to any shooter in the bound match (#328).
 
@@ -11112,7 +11134,9 @@ def create_app(
         regular /api/videos/stream endpoint only sees the active
         shooter's registry. This thin wrapper validates ``path`` against
         the named shooter's project then returns a FileResponse on the
-        resolved trim/source.
+        resolved trim/source. ``kind=proxy`` follows the same fallback
+        semantics as the primary stream endpoint: serves the proxy object
+        when present, source otherwise.
         """
         match_root, match = _resolve_match_context()
         if slug not in match.shooters:
@@ -11132,6 +11156,22 @@ def create_app(
         served_path: Path | None = None
         if located is not None:
             stage, video = located
+            if kind == "proxy":
+                from ..proxy import proxy_key_for
+
+                _raw_str = str(video.path)
+                _storage = state.storage
+                if _raw_str.startswith("raw/") and _storage is not None:
+                    _proxy_key = proxy_key_for(_raw_str)
+                    if _storage.exists(_proxy_key):
+                        _local_proxy = shooter_root / _proxy_key
+                        MatchProject._mirror_from_storage(_storage, _proxy_key, _local_proxy)
+                        return FileResponse(
+                            _local_proxy.resolve(),
+                            media_type="video/mp4",
+                            filename=_local_proxy.name,
+                        )
+                # proxy absent, path not a raw/ key, or no storage - fall through to source
             served_path = shooter_project.resolve_video_path(shooter_root, video.path).resolve()
         else:
             resolved = target.expanduser().resolve()
