@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.5](https://github.com/mandakan/splitsmith/compare/v0.10.4...v0.10.5) (2026-07-07)
+
+
+### Bug Fixes
+
+* serve preview media directly from R2 to fix slow hosted playback ([#589](https://github.com/mandakan/splitsmith/issues/589)) ([fa070cc](https://github.com/mandakan/splitsmith/commit/fa070cc91df537c13363c496de25e3fefe045df0))
+
 ## [0.10.4](https://github.com/mandakan/splitsmith/compare/v0.10.3...v0.10.4) (2026-07-07)
 
 
