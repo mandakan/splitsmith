@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.3](https://github.com/mandakan/splitsmith/compare/v0.10.2...v0.10.3) (2026-07-07)
+
+
+### Bug Fixes
+
+* **ui:** show match name in Ingest breadcrumb instead of "..." ([#585](https://github.com/mandakan/splitsmith/issues/585)) ([fa0e80e](https://github.com/mandakan/splitsmith/commit/fa0e80e620d81dae25fe0cdb0e3d8e638e132651))
+* **ui:** stop Space double-toggling a focused video player ([#586](https://github.com/mandakan/splitsmith/issues/586)) ([06dbd6e](https://github.com/mandakan/splitsmith/commit/06dbd6e215401a3f2036c788d0a8267066641701))
+
+
+### Build / CI
+
+* decouple prod deploy from the image publish ([#584](https://github.com/mandakan/splitsmith/issues/584)) ([e490fc5](https://github.com/mandakan/splitsmith/commit/e490fc5d52eb5095be76875a87a0aaf5c4a6df69))
+* skip redundant :edge image build on release commits ([#582](https://github.com/mandakan/splitsmith/issues/582)) ([823dd7b](https://github.com/mandakan/splitsmith/commit/823dd7b4dbf35686cf2a1b7b6400eb00928a9c9d))
+
 ## [0.10.2](https://github.com/mandakan/splitsmith/compare/v0.10.1...v0.10.2) (2026-07-07)
 
 
