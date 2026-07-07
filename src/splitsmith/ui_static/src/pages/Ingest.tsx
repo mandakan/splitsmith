@@ -30,6 +30,7 @@ import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { AddFootageModal } from "@/components/AddFootageModal";
 import { RelinkDialog } from "@/components/RelinkDialog";
+import { useConfirm } from "@/components/useConfirm";
 import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { Brand, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
@@ -65,6 +66,7 @@ export function Ingest() {
 function IngestInner({ slug }: { slug: string }) {
   const navigate = useNavigate();
   const href = useMatchHref();
+  const confirm = useConfirm();
   // Relink rewrites on-disk raw/ symlinks, a local-filesystem concept.
   // In hosted mode the container FS is ephemeral and sources live in object
   // storage, so the "Find moved videos" affordance is meaningless there.
@@ -280,7 +282,19 @@ function IngestInner({ slug }: { slug: string }) {
   // authoritative project the backend returns (an earlier response predates the
   // later optimistic edits and would revert them). Any failure resyncs via
   // reload(). Returns a resolved promise so callers that `void` it stay simple.
-  function removeVideo(videoPath: string): Promise<void> {
+  async function removeVideo(videoPath: string): Promise<void> {
+    // Guard the destructive action: removal drops the video from the project
+    // and clears its regenerable caches. It's recoverable in both deployment
+    // modes: local unlinks only the raw/ symlink (source on disk untouched);
+    // hosted clears the ephemeral local mirror but retains the uploaded object.
+    // So the copy is mode-neutral ("original footage isn't deleted") rather
+    // than the shooter dialog's "cannot be undone".
+    const ok = await confirm({
+      title: "Remove this video?",
+      body: "It's removed from this project and its cached audio and trims are cleared. Your original footage isn't deleted, so you can re-add it to bring it back.",
+      confirmLabel: "Remove video",
+    });
+    if (!ok.confirmed) return;
     setError(null);
     setProject((cur) => (cur ? removeVideoLocally(cur, videoPath) : cur));
     inflight.current += 1;
