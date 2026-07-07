@@ -25,7 +25,7 @@ import {
   Info,
   Package,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { AddFootageModal } from "@/components/AddFootageModal";
@@ -45,6 +45,7 @@ import {
 import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
 import { useUploads } from "@/lib/uploads";
+import { applyAssignmentLocally } from "@/pages/ingest/model";
 import { ReviewLayout } from "@/pages/ingest/ReviewLayout";
 
 type StorageMode = "symlink" | "copy";
@@ -90,6 +91,14 @@ function IngestInner({ slug }: { slug: string }) {
   const [lastImportedPaths, setLastImportedPaths] = useState<string[] | null>(null);
   // B1: Blocked stages surfaced after a move attempt.
   const [moveBlocked, setMoveBlocked] = useState<MoveShooterBlocked[]>([]);
+  // Stage assignments are applied optimistically (instant UI) but their POSTs
+  // are serialized: the backend saves the project doc under optimistic version
+  // locking, so overlapping writes would 409. moveChain threads each write
+  // after the previous one; inflight tracks the burst so we only reconcile with
+  // the authoritative server doc once it drains (a mid-burst response predates
+  // the later optimistic moves and would drop them).
+  const moveChain = useRef<Promise<void>>(Promise.resolve());
+  const inflight = useRef(0);
 
   async function reload() {
     setError(null);
@@ -206,23 +215,48 @@ function IngestInner({ slug }: { slug: string }) {
     }
   }
 
-  async function moveAssignment(
+  // Assigning a video to a stage is applied optimistically: the local project
+  // updates on click (mirroring the backend's assign_video), so the UI never
+  // sits behind the round-trip - the freeze that made users re-click and land
+  // wrong assignments. The POST runs in the background, serialized via
+  // moveChain; the returned doc reconciles once the burst drains, and any
+  // failure resyncs authoritatively via reload(). Resolves true immediately so
+  // the layout can auto-advance selection without waiting on the network.
+  function moveAssignment(
     videoPath: string,
     toStage: number | null,
     role: VideoRole,
   ): Promise<boolean> {
-    setBusy(true);
     setError(null);
-    try {
-      await api.moveAssignment(slug, videoPath, toStage, role);
-      await reload();
-      return true;
-    } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.detail : String(e));
-      return false;
-    } finally {
-      setBusy(false);
-    }
+    // Build on the latest state (functional update) so a burst of clicks stacks
+    // correctly - each move layers onto the previous optimistic result.
+    setProject((cur) =>
+      cur ? applyAssignmentLocally(cur, videoPath, toStage, role) : cur,
+    );
+    inflight.current += 1;
+    moveChain.current = moveChain.current.then(async () => {
+      try {
+        const updated = await api.moveAssignment(slug, videoPath, toStage, role);
+        // Only the last write in the burst reconciles; an earlier response
+        // predates the still-queued optimistic moves and would revert them.
+        if (inflight.current === 1) {
+          setProject(updated);
+          // Assigning to a real stage auto-queues a beep; refresh the CTA count
+          // out of band so it never gates the click. Non-fatal on error.
+          void api
+            .getBeepQueue()
+            .then((q) => setBeepPending(q.pending_count))
+            .catch(() => {});
+        }
+      } catch (e: unknown) {
+        setError(e instanceof ApiError ? e.detail : String(e));
+        // Optimistic state may be ahead of the server now; pull the truth back.
+        void reload();
+      } finally {
+        inflight.current -= 1;
+      }
+    });
+    return Promise.resolve(true);
   }
 
   async function removeVideo(videoPath: string) {
