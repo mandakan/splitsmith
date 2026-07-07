@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.4](https://github.com/mandakan/splitsmith/compare/v0.10.3...v0.10.4) (2026-07-07)
+
+
+### Bug Fixes
+
+* **ui:** make Space own play/pause over native video controls ([#587](https://github.com/mandakan/splitsmith/issues/587)) ([968e875](https://github.com/mandakan/splitsmith/commit/968e875c7a548d98dbddb75433f3b7bed5c63440))
+
 ## [0.10.3](https://github.com/mandakan/splitsmith/compare/v0.10.2...v0.10.3) (2026-07-07)
 
 
