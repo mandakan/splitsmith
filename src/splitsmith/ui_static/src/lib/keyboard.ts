@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 
 /**
- * Window-level Space → toggle play/pause hook.
+ * Window-level Space -> toggle play/pause hook.
  *
  * Every Splitsmith surface that mounts a <video> or <audio> element
  * should wire this so the user can hit Space without first clicking
@@ -11,13 +11,25 @@ import { useEffect } from "react";
  * page" or "activate the button" -- neither of which is what the
  * operator wants when they're auditioning a clip.
  *
+ * Native <video controls>/<audio controls> are the tricky case. Their
+ * sub-controls live in the browser's shadow DOM, so once the user
+ * clicks anywhere on the control strip the event target retargets to
+ * the media element and we can't tell WHICH sub-control has focus:
+ *   - play button focused: the browser toggles on Space, so if we also
+ *     toggled it would fire twice and cancel out.
+ *   - scrubber/timeline focused: the browser does nothing on Space and
+ *     lets the page scroll instead.
+ * Both report the same target, so no bubble-phase handler can do the
+ * right thing for both. Instead we intercept Space in the CAPTURE
+ * phase -- which runs before the event ever reaches the native
+ * controls -- preventDefault + stopImmediatePropagation so the browser
+ * never acts, and toggle exactly once. Space then means play/pause
+ * consistently no matter which sub-control the mouse last touched.
+ *
  * Skips the handler when the target is a real text input (INPUT,
- * TEXTAREA, contenteditable) so typing in a stage note / search box
- * still inserts a space. Also skips when a focused media element
- * (VIDEO/AUDIO) already handles Space through its native controls, so
- * a mouse click on the play button doesn't leave us double-toggling.
- * Also skips when a modifier is held so we don't steal browser
- * shortcuts (Ctrl+Space etc).
+ * TEXTAREA, SELECT, contenteditable) so typing in a stage note /
+ * search box still inserts a space. Also skips when a modifier is held
+ * so we don't steal browser shortcuts (Ctrl+Space etc).
  *
  * Pass ``enabled = false`` while playback isn't ready (no clip loaded,
  * picker unavailable, etc) so Space falls through to the browser
@@ -29,27 +41,55 @@ export function useSpacePlayPause(
 ): void {
   useEffect(() => {
     if (!enabled) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.code !== "Space" && e.key !== " ") return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const t = e.target;
-      if (t instanceof HTMLElement) {
-        if (t.isContentEditable) return;
-        if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT") {
-          return;
-        }
-        // A focused <video controls>/<audio controls> already toggles
-        // itself on Space via the browser's native controls. Clicking
-        // the play button with the mouse leaves focus there, so if we
-        // also toggled we'd fire twice and cancel out (the "Space does
-        // nothing after clicking play" bug). Stand down and let the
-        // native control own Space when the media element is focused.
-        if (t.tagName === "VIDEO" || t.tagName === "AUDIO") return;
+
+    function isSpace(e: KeyboardEvent): boolean {
+      if (e.code !== "Space" && e.key !== " ") return false;
+      return !(e.metaKey || e.ctrlKey || e.altKey);
+    }
+
+    function isTextTarget(t: EventTarget | null): boolean {
+      if (!(t instanceof HTMLElement)) return false;
+      return (
+        t.isContentEditable ||
+        t.tagName === "INPUT" ||
+        t.tagName === "TEXTAREA" ||
+        t.tagName === "SELECT"
+      );
+    }
+
+    function isMediaTarget(t: EventTarget | null): boolean {
+      return (
+        t instanceof HTMLElement &&
+        (t.tagName === "VIDEO" || t.tagName === "AUDIO")
+      );
+    }
+
+    // Capture phase: fires before the native media controls see the
+    // key, so we own Space whenever the player (any sub-control) has
+    // focus. stopImmediatePropagation keeps the browser from also
+    // toggling or scrolling; preventDefault covers the default action.
+    function onCapture(e: KeyboardEvent) {
+      if (!isSpace(e) || !isMediaTarget(e.target)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      toggle();
+    }
+
+    // Bubble phase: focus lives elsewhere (a sidebar row, a chip), so
+    // Space would otherwise scroll or activate that affordance.
+    function onBubble(e: KeyboardEvent) {
+      if (!isSpace(e) || isTextTarget(e.target) || isMediaTarget(e.target)) {
+        return;
       }
       e.preventDefault();
       toggle();
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+
+    window.addEventListener("keydown", onCapture, true);
+    window.addEventListener("keydown", onBubble);
+    return () => {
+      window.removeEventListener("keydown", onCapture, true);
+      window.removeEventListener("keydown", onBubble);
+    };
   }, [toggle, enabled]);
 }
