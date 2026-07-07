@@ -249,7 +249,11 @@ def detect_shots_for_stage(
     if not source.exists():
         raise FileNotFoundError(f"primary source missing for stage {stage_number}: {source}")
 
-    audit = audio_helpers.ensure_audit_audio(root, stage_number, source, primary.beep_time, project=project)
+    # ``source`` is already resolved + existence-checked above; the thunk is a
+    # no-op here (ensure_audit_audio only invokes it on the no-trim fallback).
+    audit = audio_helpers.ensure_audit_audio(
+        root, stage_number, lambda: source, primary.beep_time, project=project
+    )
     beep_in_clip = audit.beep_in_clip if audit.beep_in_clip is not None else primary.beep_time
 
     audit_dir = project.audit_path(root)

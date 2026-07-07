@@ -2283,10 +2283,13 @@ def register_job_bodies(state: AppState) -> None:
 
         handle.update(progress=0.1, message="Preparing audio...")
         with handle.timer.phase("prepare_audio"):
+            # ``source`` is already resolved above (the trim needs it), so the
+            # thunk is a no-op here; ensure_audit_audio only calls it on the
+            # no-trim fallback (#592).
             audit = audio_helpers.ensure_audit_audio(
                 state.shooter_root(slug),
                 stage_number,
-                source,
+                lambda: source,
                 prim.beep_time,
                 project=proj,
                 ffmpeg_binary=process_runtime().ffmpeg_binary,
@@ -8762,7 +8765,10 @@ def create_app(
             return audio_helpers.ensure_audit_audio(
                 state.shooter_root(slug),
                 stage_number,
-                project.resolve_video_path(state.shooter_root(slug), primary.path),
+                # Lazy: the trimmed path (the common case) pulls only the
+                # small trim + WAV from storage and never needs the source.
+                # Resolving it eagerly mirrors the whole source from R2 (#592).
+                lambda: project.resolve_video_path(state.shooter_root(slug), primary.path),
                 primary.beep_time,
                 project=project,
                 ffmpeg_binary=process_runtime().ffmpeg_binary,

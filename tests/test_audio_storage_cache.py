@@ -21,7 +21,7 @@ from pathlib import Path
 import pytest
 
 from splitsmith.storage import FilesystemStorage
-from splitsmith.ui.audio import ensure_video_audio
+from splitsmith.ui.audio import ensure_audit_audio, ensure_video_audio
 from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 
 
@@ -242,6 +242,61 @@ def test_storage_pull_torn_file_falls_through_to_ffmpeg(
     # ffmpeg output, not a half-downloaded PRECACHED.
     assert result.read_bytes() == b"WAVDATA"
     assert len(fake_ffmpeg) == 1
+
+
+def test_audit_audio_no_trim_resolves_source_lazily(tmp_path: Path, fake_ffmpeg: list[list[str]]) -> None:
+    """When no trim exists, ensure_audit_audio must call the source
+    resolver (the fallback needs the full source WAV) exactly once.
+
+    Guards the #592 fix: source resolution is a lazy ``Callable[[], Path]``
+    invoked only on the no-trim fallback path, never up front.
+    """
+    root = tmp_path / "p"
+    source = tmp_path / "raw" / "v.mp4"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"video bytes")
+    project, _video = _project_with_stage_video(root, source)
+
+    calls: list[int] = []
+
+    def resolve_source() -> Path:
+        calls.append(1)
+        return source
+
+    result = ensure_audit_audio(root, 1, resolve_source, 2.0, project=project)
+
+    assert result.trimmed is False
+    assert calls == [1]  # resolver invoked exactly once, on the fallback
+    assert result.audio_path.exists()
+
+
+def test_audit_audio_trimmed_path_never_resolves_source(tmp_path: Path, fake_ffmpeg: list[list[str]]) -> None:
+    """When a trim + audit WAV are cached in storage, ensure_audit_audio
+    must never invoke the source resolver; that is the whole point of #592."""
+    backing = tmp_path / "tenant"
+    backing.mkdir()
+    storage = FilesystemStorage(backing)
+    root = tmp_path / "p"
+    source = tmp_path / "raw" / "v.mp4"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"video bytes")
+    project, video = _project_with_stage_video(root, source)
+    project.bind_storage(storage, scope="matches/m1/shooters/me")
+
+    # Seed the trim MP4 + derived audit WAV in storage so the trimmed
+    # branch is fully satisfied without ffmpeg.
+    scope = "matches/m1/shooters/me"
+    storage.write_bytes(f"{scope}/trimmed/stage1_cam_{video.video_id}_trimmed.mp4", b"TRIMDATA")
+    storage.write_bytes(f"{scope}/audio/stage1_cam_{video.video_id}_audit.wav", b"AUDITWAV")
+
+    def resolve_source() -> Path:
+        raise AssertionError("source resolver must not be called on the trimmed path")
+
+    result = ensure_audit_audio(root, 1, resolve_source, 2.0, project=project)
+
+    assert result.trimmed is True
+    assert result.audio_path.read_bytes() == b"AUDITWAV"
+    assert len(fake_ffmpeg) == 0  # ffmpeg never ran either
 
 
 def test_bind_storage_without_scope_disables_audio_cache(

@@ -50,6 +50,24 @@ _VIDEO_ID = hashlib.blake2s(b"raw/clip.mp4#1", digest_size=6).hexdigest()
 # where scope = matches/{MATCH_ID}/shooters/{SLUG}.
 _TRIM_KEY = f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed/stage1_cam_{_VIDEO_ID}_trimmed.mp4"
 
+# Audit WAV storage key for the same stage/video.
+# Formula: {scope}/audio/stage{n}_cam_{video_id}_audit.wav
+_AUDIT_WAV_KEY = f"matches/{MATCH_ID}/shooters/{SLUG}/audio/stage1_cam_{_VIDEO_ID}_audit.wav"
+
+
+def _tiny_wav_bytes() -> bytes:
+    """A minimal valid mono WAV (0.1 s of silence) that ensure_peaks can parse."""
+    import io
+    import wave
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(48000)
+        w.writeframes(b"\x00\x00" * 4800)
+    return buf.getvalue()
+
 
 # ---------------------------------------------------------------------------
 # DB helpers (mirror the pattern in test_stream_proxy.py / test_proxy_ready.py)
@@ -332,6 +350,46 @@ def test_trim_kind_present_returns_307(
     location = resp.headers["location"]
     assert "trimmed" in location
     assert _VIDEO_ID in location
+
+
+# ---------------------------------------------------------------------------
+# Tests: audit /peaks + /audio must not mirror the full source (#592)
+# ---------------------------------------------------------------------------
+
+
+def test_peaks_trimmed_path_does_not_mirror_source(
+    s3_stream_client: tuple[TestClient, S3Storage],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A /peaks request for a stage whose trim + audit WAV are already in
+    storage must NOT resolve (and therefore mirror) the full source video.
+
+    Regression for #592: the endpoint used to resolve the source eagerly as
+    a call argument, downloading hundreds of MB from R2 before returning a
+    tiny peaks payload. The trimmed path only needs the small trim + WAV.
+    """
+    from splitsmith.ui.project import MatchProject
+
+    client, storage = s3_stream_client
+    # Seed the trim + audit WAV, but NOT the source object. If the code
+    # reaches for the source at all we catch it via the spy below.
+    storage.write_bytes(_TRIM_KEY, b"TRIMDATA")
+    storage.write_bytes(_AUDIT_WAV_KEY, _tiny_wav_bytes())
+
+    resolved: list[Path] = []
+    original = MatchProject.resolve_video_path
+
+    def spy(self: MatchProject, root: Path, video_path: Path) -> Path:
+        resolved.append(video_path)
+        return original(self, root, video_path)
+
+    monkeypatch.setattr(MatchProject, "resolve_video_path", spy)
+
+    resp = client.get(f"/api/matches/{MATCH_ID}/shooters/{SLUG}/stages/1/peaks")
+
+    assert resp.status_code == 200
+    assert resp.json()["trimmed"] is True
+    assert resolved == [], f"source was mirrored on the trimmed path: {resolved}"
 
 
 # ---------------------------------------------------------------------------
