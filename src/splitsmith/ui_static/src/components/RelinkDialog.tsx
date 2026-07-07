@@ -168,18 +168,21 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
       }
       const resp = await api.relinkApply(slug, decisions);
       setAppliedCount((c) => c + resp.applied.length);
-      // Refresh statuses so applied rows flip to ``ok`` and the user
-      // sees them turn green.
-      const fresh = await api.getLinkStatus(slug);
+      // The apply response already names every link it rewrote and its new
+      // target, so flip those rows to ``ok`` locally instead of a second full
+      // getLinkStatus round-trip while the dialog is locked. Rows that weren't
+      // part of this apply are left untouched.
+      const appliedById = new Map(resp.applied.map((a) => [a.video_id, a]));
       setRows((prev) =>
-        fresh.entries.map((link) => {
-          const old = prev.find((r) => r.link.video_id === link.video_id);
+        prev.map((row) => {
+          const hit = appliedById.get(row.link.video_id);
+          if (!hit) return row;
           return {
-            link,
-            scan: old?.scan ?? null,
-            // Once relinked, drop the pick so the row no longer counts
-            // as "to apply". A subsequent scan can repopulate it.
-            picked: link.status === "ok" ? null : old?.picked ?? null,
+            ...row,
+            link: { ...row.link, status: "ok", current_target: hit.new_target },
+            // Once relinked, drop the pick so the row no longer counts as
+            // "to apply". A subsequent scan can repopulate it.
+            picked: null,
           };
         }),
       );

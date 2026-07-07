@@ -63,7 +63,7 @@ export function ReviewLayout({
   ) => Promise<boolean>;
   onRemoveVideo: (videoPath: string) => Promise<void>;
   onConfirm: () => void;
-  onSaved: () => Promise<void>;
+  onSaved: (project?: MatchProject) => Promise<void>;
   busy: boolean;
   lastScannedDir: string | null;
   onError: (msg: string | null) => void;

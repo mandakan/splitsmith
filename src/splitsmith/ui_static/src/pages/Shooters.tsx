@@ -172,17 +172,18 @@ export function Shooters() {
     setError(null);
     try {
       const result = await api.buildShooterTrimCaches(slug);
-      // The jobs rail already polls /api/jobs and surfaces the queued
-      // trim jobs; we just refresh the shooter list so the missing-trim
-      // count moves toward zero as jobs complete (the user re-loads the
-      // page or comes back here later; we don't long-poll here).
+      // The jobs rail already polls /api/jobs and surfaces the queued trim
+      // jobs. We deliberately don't reload the shooter list here: the jobs run
+      // asynchronously after this POST returns, so an immediate refetch would
+      // report the same missing-trim count and just hold the per-shooter busy
+      // lock across a second, pointless round-trip. The count settles the next
+      // time the user loads this page.
       const submitted = result.jobs_submitted.length;
       if (submitted === 0) {
         setError(
           `No trim jobs to run for ${name} -- ${count} stages were eligible by count but every one was already cached, missing prerequisites, or already queued.`,
         );
       }
-      await reload();
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
     } finally {

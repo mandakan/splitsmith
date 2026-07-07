@@ -45,7 +45,7 @@ import {
 import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
 import { useUploads } from "@/lib/uploads";
-import { applyAssignmentLocally } from "@/pages/ingest/model";
+import { applyAssignmentLocally, removeVideoLocally } from "@/pages/ingest/model";
 import { ReviewLayout } from "@/pages/ingest/ReviewLayout";
 
 type StorageMode = "symlink" | "copy";
@@ -207,7 +207,19 @@ function IngestInner({ slug }: { slug: string }) {
       const resp = await api.moveShooter(slug, targetSlug, videoPaths);
       setMoveBlocked(resp.outcome.blocked);
       setLastImportedPaths(null);
-      await reload();
+      // The move already returns the updated source project (the videos that
+      // moved away are gone from it); use it instead of a blocking full
+      // reload(). The shooter chip counts + beep CTA are refreshed out of band
+      // so neither gates the move round-trip.
+      setProject(resp.source_project);
+      void api
+        .listMatchShooters()
+        .then((r) => setShooters(r.shooters))
+        .catch(() => {});
+      void api
+        .getBeepQueue()
+        .then((q) => setBeepPending(q.pending_count))
+        .catch(() => {});
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
     } finally {
@@ -259,17 +271,49 @@ function IngestInner({ slug }: { slug: string }) {
     return Promise.resolve(true);
   }
 
-  async function removeVideo(videoPath: string) {
-    setBusy(true);
+  // Removing a video is applied optimistically - the clip disappears on click
+  // (mirroring the backend's remove_video via removeVideoLocally) instead of
+  // after the round-trip, so the delete never feels like the freeze that made
+  // users re-click. Its POST is serialized on the same moveChain as the
+  // assignment writes so a delete racing an assign can't 409 on the shared
+  // optimistic version lock; only the last write in a burst reconciles with the
+  // authoritative project the backend returns (an earlier response predates the
+  // later optimistic edits and would revert them). Any failure resyncs via
+  // reload(). Returns a resolved promise so callers that `void` it stay simple.
+  function removeVideo(videoPath: string): Promise<void> {
     setError(null);
-    try {
-      await api.removeVideo(slug, videoPath, false);
-      await reload();
-    } catch (e: unknown) {
-      setError(e instanceof ApiError ? e.detail : String(e));
-    } finally {
-      setBusy(false);
+    setProject((cur) => (cur ? removeVideoLocally(cur, videoPath) : cur));
+    inflight.current += 1;
+    moveChain.current = moveChain.current.then(async () => {
+      try {
+        const resp = await api.removeVideo(slug, videoPath, false);
+        if (inflight.current === 1) {
+          setProject(resp.project);
+          void api
+            .getBeepQueue()
+            .then((q) => setBeepPending(q.pending_count))
+            .catch(() => {});
+        }
+      } catch (e: unknown) {
+        setError(e instanceof ApiError ? e.detail : String(e));
+        // Optimistic state may be ahead of the server now; pull the truth back.
+        void reload();
+      } finally {
+        inflight.current -= 1;
+      }
+    });
+    return Promise.resolve();
+  }
+
+  // Detail-pane saves (camera set, coverage) can hand back the updated project
+  // the mutation already returned; splice it in directly and skip the refetch.
+  // A bare call (no project) still falls back to a full reload().
+  function handleSaved(updated?: MatchProject): Promise<void> {
+    if (updated) {
+      setProject(updated);
+      return Promise.resolve();
     }
+    return reload();
   }
 
   return (
@@ -406,7 +450,7 @@ function IngestInner({ slug }: { slug: string }) {
             onMoveAssignment={moveAssignment}
             onRemoveVideo={removeVideo}
             onConfirm={() => navigate(href(""), { replace: true })}
-            onSaved={reload}
+            onSaved={handleSaved}
             busy={busy}
             lastScannedDir={lastScannedDir}
             onError={setError}
