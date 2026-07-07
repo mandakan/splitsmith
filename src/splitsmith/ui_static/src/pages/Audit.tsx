@@ -1506,22 +1506,24 @@ export function Audit() {
     return () => flushAltNudge();
   }, [stageNumber, flushAltNudge]);
 
-  // Pin the served file to either trim or source for the lifetime of
+  // Pin the served file to either trim or proxy for the lifetime of
   // this <video> element. Without this, a background trim job that
   // completes mid-playback would flip the server's auto-pick from
-  // source to trim and the browser's next Range request would fall
+  // proxy to trim and the browser's next Range request would fall
   // past the (shorter) trim's EOF -- the player errors out with
   // "source not found" and only a full reload recovers. Wait for
   // peaks to load so we know which kind to pin to; when peaks fails
   // (no beep yet, etc.) the server's ``auto`` still does the right
   // thing because the trim can't exist without a beep.
+  // proxy_ready === false means the proxy object is not in storage yet;
+  // VideoPanel renders an explicit placeholder rather than a broken player.
   const videoSrc = activeVideo
     ? peaks
       ? // Sync mode swaps to the full source stream so the operator can
         api.videoStreamUrl(
           slug,
           activeVideo.path,
-          peaks.trimmed ? "trim" : "source",
+          peaks.trimmed ? "trim" : "proxy",
         )
       : peaksError != null
         ? api.videoStreamUrl(slug, activeVideo.path)
@@ -2012,11 +2014,13 @@ export function Audit() {
                 >
                   <VideoPanel
                     ref={videoRef}
+                    slug={slug}
                     videos={videos}
                     primaryBeepTime={primaryBeep}
                     activeIndex={activeVideoIndex}
                     onActiveIndexChange={setActiveVideoIndex}
                     videoSrc={videoSrc}
+                    proxyReady={activeVideo?.proxy_ready}
                     // v2 column: focus mode shows a single tile in the
                     // primary slot; secondaries surface as picker tiles
                     // below (CamStrip / CamThumb) rather than as live

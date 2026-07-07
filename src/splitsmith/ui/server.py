@@ -227,6 +227,38 @@ def _ensure_source_reachable(stage_number: int | None, source: Path) -> None:
     )
 
 
+def serve_media(
+    storage: Storage | None,
+    key: str | None,
+    local_path: Path,
+    *,
+    content_type: str,
+    filename: str | None = None,
+) -> FileResponse | RedirectResponse:
+    """Serve a media object - redirect to R2 in hosted mode, FileResponse in local.
+
+    Redirect (storage supports presigned GET + key not None): presigns a
+    GET URL with a caller-type-aware TTL (15 min for share requests, 6 h
+    for owner sessions) and returns a 307. The browser reads ranged bytes
+    directly from R2 - this process never mirrors the object.
+
+    Direct (no storage, no key, or a storage whose bytes aren't
+    browser-reachable such as FilesystemStorage): returns FileResponse
+    from ``local_path``, range-native. Unchanged from the pre-R2 behavior.
+
+    The caller is responsible for resolving the correct key (proxy,
+    trim, or source) and for checking existence before calling when a
+    "not found" response needs a specific status code (e.g. 425 for a
+    missing proxy vs 404 for a missing trim).
+    """
+    if storage is not None and key is not None and storage.supports_presigned_get:
+        ttl = _SHARE_MEDIA_TTL if current_share_request.get() else _OWNER_MEDIA_TTL
+        url = storage.presign_get_url(key, expires_in=ttl, content_type=content_type, disposition="inline")
+        return RedirectResponse(url, status_code=307)
+    fn = filename or local_path.name
+    return FileResponse(local_path, media_type=content_type, filename=fn)
+
+
 def _cancellable_runner(handle: JobHandle):
     """Build a ``trim.Runner`` that registers ffmpeg with the job for cancel.
 
@@ -856,6 +888,12 @@ current_match_id: ContextVar[str | None] = ContextVar("splitsmith_current_match_
 # strip server-local fields (e.g. match_root, last_scanned_dir) from their
 # response payloads before returning them to anonymous viewers.
 current_share_request: ContextVar[bool] = ContextVar("splitsmith_current_share_request", default=False)
+
+# TTL (seconds) for presigned media GET URLs. Short for share requests so
+# that revoking a token takes effect within one window; generous for owner
+# sessions that span a long editing or review session.
+_SHARE_MEDIA_TTL: int = 15 * 60  # 15 minutes
+_OWNER_MEDIA_TTL: int = 6 * 3600  # 6 hours
 
 
 @dataclass
@@ -3217,6 +3255,11 @@ class BeepQueueItem(BaseModel):
     beep_reviewed: bool
     status: Literal["missing", "low_confidence", "unreviewed", "confirmed"]
     alt_candidates: list[BeepQueueAltCandidate]
+    # True once the low-res proxy exists (or always, in local mode). The
+    # beep review video element streams the proxy, so the SPA renders a
+    # "preview generating" placeholder instead of a broken player when
+    # this is False.
+    proxy_ready: bool
     # Auto-computed cross-align suggestion for secondaries lives on the
     # shooter's other videos; the SPA fetches them lazily if needed.
 
@@ -9458,35 +9501,29 @@ def create_app(
             filename=_local_proxy.name,
         )
 
-    @app.get("/api/shooters/{slug}/videos/stream")
+    @app.get("/api/shooters/{slug}/videos/stream", response_model=None)
     def stream_video(
         slug: str,
         path: str = Query(...),
         kind: Literal["auto", "trim", "source", "proxy"] = Query("auto"),
-    ) -> FileResponse:
+    ) -> FileResponse | RedirectResponse:
         """Serve a registered video file with HTTP Range support.
 
         ``kind`` selects which file backs the response:
 
-        - ``trim``: per-video short-GOP MP4 produced by Sub 5 / #16
-          (``<trimmed>/stage<N>_cam_<video_id>_trimmed.mp4``); 404 if not
-          built yet. The re-encoded clip seeks frame-accurately, which
-          is what makes the audit screen's drag-scrubbing feel
-          responsive.
-        - ``source``: the original camera file. Used while the trim is
-          still building.
-        - ``proxy``: low-res fast-seek MP4 produced by the
-          ``generate_proxy`` worker (``raw_proxy/<name>.mp4``). Falls
-          back to the source if the proxy object is absent in storage,
-          so the player always gets something.
-        - ``auto`` (default, for back-compat with non-audit callers):
-          trim if present, source otherwise.
+        - ``trim``: per-video short-GOP MP4 (``<trimmed>/stage<N>_cam_<video_id>_trimmed.mp4``);
+          404 if not built yet. Frame-accurate seeking makes audit-screen scrubbing fast.
+        - ``source``: the original camera file.
+        - ``proxy``: low-res fast-seek MP4 (``raw_proxy/<name>.mp4``). In hosted mode,
+          returns 425 ``preview_generating`` when the proxy object is absent - never
+          silently falls back to source. In local mode, falls back to source on miss.
+        - ``auto`` (default): trim if present, source otherwise.
 
-        The audit screen always passes an explicit ``kind`` so the file
-        bound to a ``<video>`` element can't change mid-session when a
-        background trim job completes -- a switch from source bytes to
-        trim bytes mid-Range-request wedges the player ("source not
-        found") and forced a full reload to recover.
+        In hosted mode (storage bound, relative path) the endpoint presigns a GET
+        URL and returns a 307. The browser reads ranged bytes directly from R2 - no
+        whole-file mirror through this process.
+
+        In local mode the endpoint returns FileResponse from disk, range-native.
 
         Validates that ``path`` matches a video registered to the project
         (any stage, any role, or unassigned) so the endpoint cannot be
@@ -9502,21 +9539,58 @@ def create_app(
             )
         stage, video = located
 
-        if kind == "proxy":
-            _resp = _serve_proxy(root, video)
-            if _resp is not None:
-                return _resp
-            # fall through to source resolution below
+        storage = state.storage
+        raw_str = str(video.path)
+        # "hosted" here means "redirect the browser to a presigned URL". A
+        # storage whose bytes aren't browser-reachable (FilesystemStorage)
+        # takes the local byte-serving path below, same as no storage at all.
+        is_hosted = storage is not None and storage.supports_presigned_get and not video.path.is_absolute()
 
+        if kind == "proxy":
+            if is_hosted and raw_str.startswith("raw/"):
+                # hosted mode: redirect to proxy key in R2; 425 if not yet generated
+                from ..proxy import proxy_key_for
+
+                proxy_key = proxy_key_for(raw_str)
+                if not storage.exists(proxy_key):  # type: ignore[union-attr]
+                    raise HTTPException(
+                        status_code=425,
+                        detail={
+                            "code": "preview_generating",
+                            "message": "proxy preview not ready yet - the worker is still generating it",
+                            "path": raw_str,
+                        },
+                    )
+                return serve_media(storage, proxy_key, root / proxy_key, content_type="video/mp4")
+            else:
+                # local mode: try cached proxy on disk; fall through to source on miss
+                _resp = _serve_proxy(root, video)
+                if _resp is not None:
+                    return _resp
+                # kind=proxy + local + no proxy - serve source below
+
+        if is_hosted:
+            # hosted mode: resolve the R2 key and redirect; never mirror
+            if kind in ("auto", "trim") and stage is not None:
+                # check for trim in storage without downloading
+                local_mp4 = audio_helpers.trimmed_video_path(root, stage.stage_number, video, project=project)
+                trim_key = audio_helpers._storage_trim_key(project, local_mp4)
+                if trim_key is not None and storage.exists(trim_key):  # type: ignore[union-attr]
+                    return serve_media(storage, trim_key, local_mp4, content_type="video/mp4")
+                if kind == "trim":
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"trimmed clip not built yet for {path}",
+                    )
+                # kind=auto: fall through to source redirect below
+            source_ct = "video/mp4" if Path(raw_str).suffix.lower() == ".mp4" else "application/octet-stream"
+            return serve_media(storage, raw_str, root / raw_str, content_type=source_ct)
+
+        # local mode: existing disk-based serving
         served_path: Path | None = None
         if kind in ("auto", "trim") and stage is not None:
             # Per-video short-GOP trim is keyed per role: each angle has
-            # its own scrub clip cut around its own beep, so dragging
-            # the audit playhead doesn't stall on a 4K MOV from a phone.
-            # Hosted: a worker cut this trim into its own filesystem and
-            # pushed it to storage; pull it down before serving the bytes.
-            # Never invokes ffmpeg -- a missing trim falls through to the
-            # source clip (kind=auto) or 404s (kind=trim), as before.
+            # its own scrub clip cut around its own beep.
             trimmed = audio_helpers.pull_trimmed_video(root, stage.stage_number, video, project=project)
             if trimmed.exists():
                 served_path = trimmed.resolve()
@@ -11274,21 +11348,26 @@ def create_app(
             shooters=records,
         )
 
-    @app.get("/api/match/shooters/{slug}/videos/stream")
+    @app.get("/api/match/shooters/{slug}/videos/stream", response_model=None)
     def stream_shooter_video(
         slug: str,
         path: str = Query(...),
         kind: Literal["auto", "trim", "source", "proxy"] = Query("auto"),
-    ) -> FileResponse:
+    ) -> FileResponse | RedirectResponse:
         """Serve a video registered to any shooter in the bound match (#328).
 
         The Compare view streams from up to N shooters at once; the
         regular /api/videos/stream endpoint only sees the active
         shooter's registry. This thin wrapper validates ``path`` against
-        the named shooter's project then returns a FileResponse on the
-        resolved trim/source. ``kind=proxy`` follows the same fallback
-        semantics as the primary stream endpoint: serves the proxy object
-        when present, source otherwise.
+        the named shooter's project then redirects (hosted) or serves
+        (local) the resolved video.
+
+        ``kind=proxy`` follows the same semantics as the primary stream
+        endpoint: in hosted mode returns 425 when the proxy is absent;
+        in local mode falls back to source.
+
+        Non-registered paths (exports/ or trimmed/) are always served
+        from local disk regardless of mode.
         """
         match_root, match = _resolve_match_context()
         if slug not in match.shooters:
@@ -11305,49 +11384,87 @@ def create_app(
         # the audit-mode short-GOP cache under trimmed/ (compare's fallback
         # when no lossless export exists yet).
         located = shooter_project.find_video(target)
-        served_path: Path | None = None
         if located is not None:
             stage, video = located
-            if kind == "proxy":
-                _resp = _serve_proxy(shooter_root, video)
-                if _resp is not None:
-                    return _resp
-                # fall through to source resolution below
-            served_path = shooter_project.resolve_video_path(shooter_root, video.path).resolve()
-        else:
-            resolved = target.expanduser().resolve()
-            exports_dir = (
-                Path(shooter_project.exports_dir).expanduser().resolve()
-                if shooter_project.exports_dir
-                else (shooter_root / "exports").resolve()
+            storage = state.storage
+            raw_str = str(video.path)
+            # "hosted" here means "redirect the browser to a presigned URL". A
+            # storage whose bytes aren't browser-reachable (FilesystemStorage)
+            # takes the local byte-serving path below, same as no storage at all.
+            is_hosted = (
+                storage is not None and storage.supports_presigned_get and not video.path.is_absolute()
             )
-            trimmed_dir = (
-                Path(shooter_project.trimmed_dir).expanduser().resolve()
-                if shooter_project.trimmed_dir
-                else (shooter_root / "trimmed").resolve()
-            )
-            in_allowed_dir = False
-            for allowed in (exports_dir, trimmed_dir):
-                try:
-                    resolved.relative_to(allowed)
-                    in_allowed_dir = True
-                    break
-                except ValueError:
-                    continue
-            if not in_allowed_dir:
-                raise HTTPException(
-                    status_code=403,
-                    detail=(
-                        f"path {path} is neither a registered video nor inside "
-                        f"the shooter's exports/ or trimmed/ dirs"
-                    ),
-                )
-            if not resolved.exists():
-                raise HTTPException(status_code=404, detail=f"file not found: {resolved}")
-            served_path = resolved
 
-        media_type = "video/mp4"
-        return FileResponse(served_path, media_type=media_type)
+            if kind == "proxy":
+                if is_hosted and raw_str.startswith("raw/"):
+                    # hosted mode: redirect to proxy key; 425 if not yet generated
+                    from ..proxy import proxy_key_for
+
+                    proxy_key = proxy_key_for(raw_str)
+                    if not storage.exists(proxy_key):  # type: ignore[union-attr]
+                        raise HTTPException(
+                            status_code=425,
+                            detail={
+                                "code": "preview_generating",
+                                "message": "proxy preview not ready yet - the worker is still generating it",
+                                "path": raw_str,
+                            },
+                        )
+                    return serve_media(
+                        storage,
+                        proxy_key,
+                        shooter_root / proxy_key,
+                        content_type="video/mp4",
+                    )
+                else:
+                    # local mode: try cached proxy, fall through to source on miss
+                    _resp = _serve_proxy(shooter_root, video)
+                    if _resp is not None:
+                        return _resp
+                    # kind=proxy + local + no proxy - fall through to source
+
+            if is_hosted:
+                # hosted mode: redirect to source key; no mirroring
+                source_ct = (
+                    "video/mp4" if Path(raw_str).suffix.lower() == ".mp4" else "application/octet-stream"
+                )
+                return serve_media(storage, raw_str, shooter_root / raw_str, content_type=source_ct)
+
+            # local mode: mirror-then-serve (existing behavior)
+            served_path = shooter_project.resolve_video_path(shooter_root, video.path).resolve()
+            return FileResponse(served_path, media_type="video/mp4")
+
+        # non-registered path: must be inside exports/ or trimmed/ (local disk only)
+        resolved = target.expanduser().resolve()
+        exports_dir = (
+            Path(shooter_project.exports_dir).expanduser().resolve()
+            if shooter_project.exports_dir
+            else (shooter_root / "exports").resolve()
+        )
+        trimmed_dir = (
+            Path(shooter_project.trimmed_dir).expanduser().resolve()
+            if shooter_project.trimmed_dir
+            else (shooter_root / "trimmed").resolve()
+        )
+        in_allowed_dir = False
+        for allowed in (exports_dir, trimmed_dir):
+            try:
+                resolved.relative_to(allowed)
+                in_allowed_dir = True
+                break
+            except ValueError:
+                continue
+        if not in_allowed_dir:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"path {path} is neither a registered video nor inside "
+                    f"the shooter's exports/ or trimmed/ dirs"
+                ),
+            )
+        if not resolved.exists():
+            raise HTTPException(status_code=404, detail=f"file not found: {resolved}")
+        return FileResponse(resolved, media_type="video/mp4")
 
     # ----------------------------------------------------------------------
     # Cross-shooter beep review queue (#326)
@@ -11391,6 +11508,24 @@ def create_app(
         total_pending = 0
         total_confirmed = 0
         total_primaries = 0
+
+        # Proxy readiness drives the beep review "preview generating"
+        # placeholder. Raw uploads and their proxies live in the tenant-root
+        # pool shared across the match's shooters, so one list covers every
+        # item. Local mode (no storage) reports ready - source streams direct.
+        from ..proxy import proxy_key_for
+
+        _storage = state.storage
+        _proxy_keys: set[str] = set()
+        if _storage is not None:
+            _proxy_keys = {obj.path for obj in _storage.list("raw_proxy/")}
+
+        def _proxy_ready(path_str: str) -> bool:
+            if _storage is None:
+                return True
+            if not path_str.startswith("raw/"):
+                return True
+            return proxy_key_for(path_str) in _proxy_keys
 
         for slug in match.shooters:
             shooter_root = match_model.Match.shooter_root(match_root, slug)
@@ -11451,6 +11586,7 @@ def create_app(
                         beep_reviewed=primary.beep_reviewed,
                         status=status,
                         alt_candidates=alts,
+                        proxy_ready=_proxy_ready(primary.path.as_posix()),
                     )
                 )
 

@@ -27,9 +27,10 @@
  */
 
 import { forwardRef, useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, LayoutGrid, LayoutList, Loader2 } from "lucide-react";
+import { AlertCircle, Clock, LayoutGrid, LayoutList, Loader2 } from "lucide-react";
 
 import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
+import { api } from "@/lib/api";
 import type { StageVideo } from "@/lib/api";
 
 const BUFFER_FLASH_DELAY_MS = 150;
@@ -43,11 +44,17 @@ const BUFFER_WATCHDOG_INTERVAL_MS = 500;
 type LoadStatus = "idle" | "loading" | "buffering" | "ready" | "error";
 
 interface VideoPanelProps {
+  /** Shooter slug - used to build scoped stream URLs for secondary cams. */
+  slug: string;
   videos: StageVideo[];
   primaryBeepTime: number | null;
   activeIndex: number;
   onActiveIndexChange: (index: number) => void;
   videoSrc: string;
+  /** When false the proxy is not yet available in storage; the primary
+   *  player renders an explicit "Preview generating" placeholder instead
+   *  of a broken video element. Undefined = ready (or local mode). */
+  proxyReady?: boolean;
   gridMode: boolean;
   onGridModeToggle: () => void;
   onSecondaryRef: (path: string, el: HTMLVideoElement | null) => void;
@@ -206,11 +213,13 @@ function SecondarySlot({ label, src, onRef, onBuffering, overlay }: SecondarySlo
 export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
   function VideoPanel(
     {
+      slug,
       videos,
       primaryBeepTime,
       activeIndex,
       onActiveIndexChange,
       videoSrc,
+      proxyReady,
       gridMode,
       onGridModeToggle,
       onSecondaryRef,
@@ -426,39 +435,55 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
                 {renderCamOverlay(videos[0], 0)}
               </div>
             ) : null}
-            <video
-              key={videoSrc}
-              ref={setVideoEl}
-              src={videoSrc}
-              preload="metadata"
-              playsInline
-              controls={false}
-              className={cn(
-                "block h-auto w-full",
-                showGrid ? "max-h-[40vh]" : "max-h-[60vh]",
-              )}
-              data-active-path={active.path}
-              onLoadStart={() => setStatus("loading")}
-              onLoadedData={() => setStatus("ready")}
-              onCanPlay={() => setStatus("ready")}
-              onPlaying={() => setStatus("ready")}
-              onSeeked={() => setStatus("ready")}
-              onWaiting={() => setStatus("buffering")}
-              onSeeking={() => setStatus("buffering")}
-              onStalled={() => setStatus("buffering")}
-              onTimeUpdate={onPrimaryTimeUpdate}
-              onError={(e) => {
-                setStatus("error");
-                const code = e.currentTarget.error?.code;
-                setErrorMessage(
-                  code === 4
-                    ? "Source not found or unsupported"
-                    : code === 2
-                      ? "Network error while loading video"
-                      : "Couldn't play this video",
-                );
-              }}
-            />
+            {proxyReady === false ? (
+              <div
+                role="status"
+                aria-label="Preview still generating"
+                className={cn(
+                  "flex flex-col items-center justify-center gap-2 bg-black p-4 text-center text-white/70",
+                  showGrid ? "max-h-[40vh]" : "max-h-[60vh]",
+                  "h-full min-h-[10rem] w-full",
+                )}
+              >
+                <Clock className="size-5 opacity-60" aria-hidden />
+                <span className="text-sm">Preview generating</span>
+                <span className="text-xs text-white/40">Check back shortly</span>
+              </div>
+            ) : (
+              <video
+                key={videoSrc}
+                ref={setVideoEl}
+                src={videoSrc}
+                preload="metadata"
+                playsInline
+                controls={false}
+                className={cn(
+                  "block h-auto w-full",
+                  showGrid ? "max-h-[40vh]" : "max-h-[60vh]",
+                )}
+                data-active-path={active.path}
+                onLoadStart={() => setStatus("loading")}
+                onLoadedData={() => setStatus("ready")}
+                onCanPlay={() => setStatus("ready")}
+                onPlaying={() => setStatus("ready")}
+                onSeeked={() => setStatus("ready")}
+                onWaiting={() => setStatus("buffering")}
+                onSeeking={() => setStatus("buffering")}
+                onStalled={() => setStatus("buffering")}
+                onTimeUpdate={onPrimaryTimeUpdate}
+                onError={(e) => {
+                  setStatus("error");
+                  const code = e.currentTarget.error?.code;
+                  setErrorMessage(
+                    code === 4
+                      ? "Source not found or unsupported"
+                      : code === 2
+                        ? "Network error while loading video"
+                        : "Couldn't play this video",
+                  );
+                }}
+              />
+            )}
             {showBufferIndicator && status !== "error" ? (
               <div
                 role="status"
@@ -489,7 +514,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
                 <SecondarySlot
                   key={v.path}
                   label={`Cam ${i + 2}`}
-                  src={`/api/videos/stream?path=${encodeURIComponent(v.path)}`}
+                  src={api.videoStreamUrl(slug, v.path, "proxy")}
                   onRef={(el) => onSecondaryRef(v.path, el)}
                   onBuffering={(b) => onSecondaryBuffering(v.path, b)}
                   overlay={renderCamOverlay ? renderCamOverlay(v, i + 1) : null}
