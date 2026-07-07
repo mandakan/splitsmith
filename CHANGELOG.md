@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.6](https://github.com/mandakan/splitsmith/compare/v0.10.5...v0.10.6) (2026-07-07)
+
+
+### Bug Fixes
+
+* serve audit /peaks + /audio without mirroring the full source ([#592](https://github.com/mandakan/splitsmith/issues/592)) ([#593](https://github.com/mandakan/splitsmith/issues/593)) ([8a17876](https://github.com/mandakan/splitsmith/commit/8a17876617fff458577a76e0a8ddaedcc442ec5d))
+
 ## [0.10.5](https://github.com/mandakan/splitsmith/compare/v0.10.4...v0.10.5) (2026-07-07)
 
 
