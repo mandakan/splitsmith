@@ -964,6 +964,28 @@ class MatchProject(BaseModel):
             return
         atomic_write_json(root / PROJECT_FILE, self.model_dump(mode="json"))
 
+    async def save_async(self, root: Path) -> None:
+        """Async twin of :meth:`save`.
+
+        Awaits the state store directly instead of bouncing through
+        ``run_sync`` (which blocks the event loop on a throwaway worker
+        thread). Call this from hot async handlers - e.g. the assignment
+        endpoints, where blocking the loop per save serialized every other
+        request behind it. Local mode has no store, so it falls back to the
+        same atomic file write, run inline (a small local write, not worth a
+        thread hop).
+        """
+        self.updated_at = datetime.now(UTC)
+        if self._state_store is not None:
+            self._state_version = await self._state_store.save_project(
+                self._state_match_id,
+                self._state_slug,
+                self.model_dump(mode="json"),
+                expected_version=self._state_version,
+            )
+            return
+        atomic_write_json(root / PROJECT_FILE, self.model_dump(mode="json"))
+
     def stage(self, stage_number: int) -> StageEntry:
         """Return the stage with this number; raises ``KeyError`` if absent."""
         for s in self.stages:

@@ -100,6 +100,7 @@ if TYPE_CHECKING:
     from ..worker_channel import WakeChannelRegistry
 
 from fastapi import (
+    BackgroundTasks,
     Body,
     Depends,
     FastAPI,
@@ -1311,6 +1312,32 @@ class AppState:
             # (carrying the version we just read), and bind storage for
             # media mirroring. No project.json on disk is involved.
             doc, version = run_sync(store.load_project(match_id, slug))
+            if doc is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"shooter {slug!r} has no project document",
+                )
+            project = MatchProject.model_validate(doc)
+            project.bind_state(store, match_id=match_id, slug=slug, version=version)
+        else:
+            project = MatchProject.load(shooter_root)
+        project.bind_storage(self.storage, scope=scope)
+        return project
+
+    async def shooter_project_async(self, slug: str) -> MatchProject:
+        """Async twin of :meth:`shooter_project`.
+
+        Awaits the store load directly instead of blocking the event loop
+        via ``run_sync``. Use from hot async handlers (assignment moves) so
+        one shooter's load doesn't stall every other in-flight request. Local
+        mode has no store and falls back to the sync file loader (cheap read).
+        """
+        shooter_root = self.shooter_root(slug)
+        match_id = current_match_id.get()
+        scope = f"matches/{match_id}/shooters/{slug}" if match_id is not None else None
+        store = self.project_state
+        if store is not None and match_id is not None:
+            doc, version = await store.load_project(match_id, slug)
             if doc is None:
                 raise HTTPException(
                     status_code=404,
@@ -9846,9 +9873,12 @@ def create_app(
         )
 
     @app.post("/api/shooters/{slug}/assignments/move")
-    async def move_assignment(slug: str, req: MoveRequest) -> JSONResponse:
+    async def move_assignment(slug: str, req: MoveRequest, background: BackgroundTasks) -> JSONResponse:
+        # Load + save await the store directly (no run_sync loop-block); the
+        # SPA already applies the move optimistically, so the only thing gating
+        # its reconcile is this round-trip - keep it off the event loop.
         root = state.shooter_root(slug)
-        project = state.shooter_project(slug)
+        project = await state.shooter_project_async(slug)
         try:
             project.assign_video(
                 Path(req.video_path),
@@ -9857,21 +9887,24 @@ def create_app(
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        project.save(root)
+        await project.save_async(root)
 
         # Auto-queue beep on assignment to a real stage (#67). Skip when
         # unassigning (to_stage_number=None) or marking ignored -- those
-        # don't put the video into the pipeline.
+        # don't put the video into the pipeline. Deferred to a background task:
+        # it can mirror media from storage and writes a job row, neither of
+        # which the response needs to wait on (the SPA picks up the job via
+        # JobsPanel polling).
         if req.to_stage_number is not None and req.role != "ignored":
             stage = project.stage(req.to_stage_number)
             video = next((v for v in stage.videos if str(v.path) == req.video_path), None)
             if video is not None:
-                await _auto_queue_beep_if_needed(slug, project, req.to_stage_number, video)
+                background.add_task(_auto_queue_beep_if_needed, slug, project, req.to_stage_number, video)
 
         return JSONResponse(project.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/assignments/swap-primary")
-    async def swap_primary(slug: str, req: SwapPrimaryRequest) -> JSONResponse:
+    async def swap_primary(slug: str, req: SwapPrimaryRequest, background: BackgroundTasks) -> JSONResponse:
         """Promote ``video_path`` to primary on ``stage_number``.
 
         Audit-safe: when the stage has shots in its audit JSON, refuses with
@@ -9880,7 +9913,7 @@ def create_app(
         the new primary's processed flags are cleared so detection re-runs.
         """
         root = state.shooter_root(slug)
-        project = state.shooter_project(slug)
+        project = await state.shooter_project_async(slug)
         try:
             stage = project.stage(req.stage_number)
         except KeyError as exc:
@@ -9912,15 +9945,17 @@ def create_app(
             )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
-        project.save(root)
+        await project.save_async(root)
 
         # Auto-queue beep for the new primary (#67). swap_primary may
         # clear ``processed.beep`` to force re-detection on the new
         # video's audio; the helper picks up the cleared flag and queues
         # accordingly. No-op when the video already had a current beep.
+        # Deferred (see move_assignment) so the media mirror + job write stay
+        # off the response path.
         new_primary = project.stage(req.stage_number).primary()
         if new_primary is not None:
-            await _auto_queue_beep_if_needed(slug, project, req.stage_number, new_primary)
+            background.add_task(_auto_queue_beep_if_needed, slug, project, req.stage_number, new_primary)
 
         return JSONResponse(project.model_dump(mode="json"))
 
