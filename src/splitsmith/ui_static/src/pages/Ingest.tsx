@@ -352,7 +352,9 @@ function IngestInner({ slug }: { slug: string }) {
         <div className="mx-auto flex max-w-[1240px] items-center gap-6 px-8 py-3.5">
           <Brand variant="compact" />
           <div className="ml-auto inline-flex items-center gap-3 text-[0.8125rem]">
-            <span className="text-muted">{health?.project_name ?? ""}</span>
+            <span className="text-muted">
+              {project?.name ?? health?.project_name ?? ""}
+            </span>
           </div>
         </div>
         <div className="border-t border-rule bg-bg">
@@ -374,7 +376,7 @@ function IngestInner({ slug }: { slug: string }) {
              *  (app root), which ejected the user out of the match they were
              *  viewing back toward the global picker. */}
             <Link to={href("")} className="text-subtle hover:text-ink-2">
-              {health?.project_name ?? "..."}
+              {project?.name ?? health?.project_name ?? "..."}
             </Link>
             <span className="text-whisper">/</span>
             <span className="font-bold text-ink">Add footage</span>
