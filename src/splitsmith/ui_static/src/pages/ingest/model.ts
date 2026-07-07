@@ -234,6 +234,28 @@ export function applyAssignmentLocally(
   };
 }
 
+/**
+ * Client-side mirror of the backend ``MatchProject.remove_video`` (project.py)
+ * for the default (``reset_audit=false``) path the Ingest page uses: drop the
+ * video from whichever stage or the unassigned tray holds it. The backend does
+ * not promote another video to primary on a plain removal, so neither do we.
+ * The POST response is authoritative and reconciles any divergence - this only
+ * needs to be close enough to make the clip disappear instantly on click
+ * instead of after the round-trip.
+ */
+export function removeVideoLocally(
+  project: MatchProject,
+  videoPath: string,
+): MatchProject {
+  const detach = (list: StageVideo[]): StageVideo[] =>
+    list.filter((v) => v.path !== videoPath);
+  return {
+    ...project,
+    stages: project.stages.map((s) => ({ ...s, videos: detach(s.videos ?? []) })),
+    unassigned_videos: detach(project.unassigned_videos ?? []),
+  };
+}
+
 /** First unassigned clip's path, or null if the queue is empty. */
 export function firstUnassignedPath(model: ClipModel): string | null {
   return model.unassigned[0]?.video.path ?? null;

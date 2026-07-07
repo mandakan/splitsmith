@@ -10,6 +10,7 @@ import { StatusPill } from "@/components/ui/StatusPill";
 import {
   ApiError,
   api,
+  type MatchProject,
   type RawVideoManifestEntry,
   type ShooterListEntry,
   type StageEntry,
@@ -55,7 +56,7 @@ export function ClipDetail({
   /** Fires after a successful coverage update so the parent can reload
    *  project state. Optional -- coverage updates succeed silently if
    *  omitted. */
-  onReload?: () => Promise<void>;
+  onReload?: (project?: MatchProject) => Promise<void>;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const { matchId } = useParams<{ matchId?: string }>();

@@ -7,6 +7,7 @@ import {
   api,
   type CalibratedCameraModel,
   type CameraMount,
+  type MatchProject,
 } from "@/lib/api";
 import type { CameraGroup } from "@/pages/ingest/model";
 
@@ -17,7 +18,7 @@ export function CameraCard({
 }: {
   camera: CameraGroup;
   slug: string;
-  onSaved: () => Promise<void>;
+  onSaved: (project?: MatchProject) => Promise<void>;
 }) {
   const [models, setModels] = useState<CalibratedCameraModel[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -43,12 +44,15 @@ export function CameraCard({
     setBusy(true);
     setError(null);
     try {
-      await api.bulkSetCamera(slug, {
+      const updated = await api.bulkSetCamera(slug, {
         items: camera.members,
         set_mount: true,
         mount,
       });
-      await onSaved();
+      // bulkSetCamera returns the full updated project; hand it up so the
+      // Ingest page splices it in instead of firing a redundant refetch while
+      // both camera dropdowns are locked.
+      await onSaved(updated);
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
     } finally {
@@ -70,13 +74,13 @@ export function CameraCard({
     setBusy(true);
     setError(null);
     try {
-      await api.bulkSetCamera(slug, {
+      const updated = await api.bulkSetCamera(slug, {
         items: camera.members,
         set_model: true,
         make,
         model,
       });
-      await onSaved();
+      await onSaved(updated);
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
     } finally {
