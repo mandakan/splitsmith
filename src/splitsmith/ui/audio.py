@@ -27,6 +27,7 @@ import json
 import logging
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -461,7 +462,7 @@ def audit_audio_path(
 def ensure_audit_audio(
     project_root: Path,
     stage_number: int,
-    primary_source: Path,
+    resolve_primary_source: Callable[[], Path],
     primary_beep_time: float | None,
     *,
     project: MatchProject,
@@ -475,6 +476,12 @@ def ensure_audit_audio(
     to the full primary WAV so the audit screen still loads -- you'll see
     the entire source clip with the original (slow) scrub feel. Either way
     the result is mtime-cached.
+
+    ``resolve_primary_source`` is a thunk, not a ``Path``, so the source is
+    only materialized on the no-trim fallback. In hosted mode resolving it
+    mirrors the whole source from R2 to local disk (#589); the common
+    trimmed path pulls only the small trim + WAV from storage and must never
+    trigger that download (#592).
     """
     trimmed_video = trimmed_primary_path(project_root, stage_number, project=project)
     # Hosted: the trim was cut on a worker, not here. Pull it down so the
@@ -509,7 +516,7 @@ def ensure_audit_audio(
     fallback = ensure_primary_audio(
         project_root,
         stage_number,
-        primary_source,
+        resolve_primary_source(),
         sample_rate=sample_rate,
         ffmpeg_binary=ffmpeg_binary,
         project=project,
