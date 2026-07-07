@@ -48,6 +48,15 @@ concurrency:
 
 jobs:
   publish:
+    # Skip the :edge build on release-merge commits. The release-please chain
+    # (workflow_call, release_tag set) already publishes :X.Y.Z/:latest for
+    # these, and both runs land in the same concurrency group -- the plain
+    # push :edge build always loses the tie and shows up as a spurious
+    # "cancelled" every release. Run when: this is the chained release call
+    # (release_tag set), OR a push whose head commit is not a release commit.
+    if: >-
+      inputs.release_tag != ''
+      || !startsWith(github.event.head_commit.message, 'chore(main): release ')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
