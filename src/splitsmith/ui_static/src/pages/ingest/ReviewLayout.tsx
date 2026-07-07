@@ -52,8 +52,10 @@ export function ReviewLayout({
   onDismissBanner: () => void;
   onMoveShooter: (targetSlug: string, videoPaths: string[]) => Promise<void>;
   onAddMore: () => void;
-  // Resolves true when the move landed, false if it failed. Lets the layout
-  // avoid auto-advancing selection off a clip whose assignment did not stick.
+  // Applies the move optimistically and resolves true immediately so selection
+  // can auto-advance without waiting on the network. A rare server failure
+  // resyncs the project in the background (Ingest.moveAssignment), after which
+  // the selection effect re-resolves against the corrected model.
   onMoveAssignment: (
     videoPath: string,
     toStage: number | null,

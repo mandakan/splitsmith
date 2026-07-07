@@ -4,6 +4,7 @@ import type {
   MatchProject,
   StageEntry,
   StageVideo,
+  VideoRole,
 } from "@/lib/api";
 
 export function pad2(n: number): string {
@@ -166,6 +167,71 @@ export function selectDelta(
   if (idx === -1) return order[0].video.path;
   const next = Math.min(order.length - 1, Math.max(0, idx + delta));
   return order[next].video.path;
+}
+
+/**
+ * Client-side mirror of the backend ``MatchProject.assign_video`` (project.py).
+ * Returns a NEW project with ``videoPath`` moved to ``toStage`` (or back to the
+ * unassigned tray when null), applying the same auto-primary-upgrade rule, so
+ * the Ingest page can reflect a click instantly instead of waiting on the
+ * server round-trip. The POST response is authoritative and reconciles any
+ * divergence - this only needs to be close enough to avoid a visible flash.
+ *
+ * Placement in the arrays (not a field on the video) is what ``buildClipModel``
+ * reads as a clip's stage, so the move is purely detach-from-one-array,
+ * push-into-another. Unchanged videos keep their references; only the touched
+ * video, its source array, and its target array are rebuilt (immutable so the
+ * caller can roll back to the previous project on error).
+ */
+export function applyAssignmentLocally(
+  project: MatchProject,
+  videoPath: string,
+  toStage: number | null,
+  role: VideoRole,
+): MatchProject {
+  const moved =
+    project.stages
+      .flatMap((s) => s.videos ?? [])
+      .find((v) => v.path === videoPath) ??
+    (project.unassigned_videos ?? []).find((v) => v.path === videoPath) ??
+    null;
+  // Unknown path: leave the project untouched. The server will 404 and the
+  // caller resyncs; guessing here would only desync the optimistic view.
+  if (moved == null) return project;
+
+  const detach = (list: StageVideo[]): StageVideo[] =>
+    list.filter((v) => v.path !== videoPath);
+
+  // Back to the unassigned tray: the server clears the role to "secondary".
+  if (toStage == null) {
+    return {
+      ...project,
+      stages: project.stages.map((s) => ({ ...s, videos: detach(s.videos ?? []) })),
+      unassigned_videos: [
+        ...detach(project.unassigned_videos ?? []),
+        { ...moved, role: "secondary" },
+      ],
+    };
+  }
+
+  return {
+    ...project,
+    unassigned_videos: detach(project.unassigned_videos ?? []),
+    stages: project.stages.map((s) => {
+      const videos = detach(s.videos ?? []);
+      if (s.stage_number !== toStage) return { ...s, videos };
+      // Auto-upgrade: a "secondary" drop onto a stage with no primary becomes
+      // the primary; an explicit primary demotes the incumbent.
+      const hasPrimary = videos.some((v) => v.role === "primary");
+      const effective: VideoRole =
+        role === "secondary" && !hasPrimary ? "primary" : role;
+      const rebased =
+        effective === "primary"
+          ? videos.map((v) => (v.role === "primary" ? { ...v, role: "secondary" as VideoRole } : v))
+          : videos;
+      return { ...s, videos: [...rebased, { ...moved, role: effective }] };
+    }),
+  };
 }
 
 /** First unassigned clip's path, or null if the queue is empty. */
