@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.2](https://github.com/mandakan/splitsmith/compare/v0.10.1...v0.10.2) (2026-07-07)
+
+
+### Bug Fixes
+
+* stop blocking the event loop on stage assignment (async DB path) ([#578](https://github.com/mandakan/splitsmith/issues/578)) ([f123b33](https://github.com/mandakan/splitsmith/commit/f123b33ad9f48cd26d1a556d8afeb4fb66fd54a4))
+* **ui:** drop redundant post-mutation refetches across the SPA ([#579](https://github.com/mandakan/splitsmith/issues/579)) ([571ea8c](https://github.com/mandakan/splitsmith/commit/571ea8cf06d5f5182035f9e11c0a29388ff2eab4))
+* **ui:** optimistic stage assignment to kill click-to-update lag ([#576](https://github.com/mandakan/splitsmith/issues/576)) ([58640a8](https://github.com/mandakan/splitsmith/commit/58640a893836f0414bb8e2bc96660231150e59a4))
+
 ## [0.10.1](https://github.com/mandakan/splitsmith/compare/v0.10.0...v0.10.1) (2026-07-06)
 
 
