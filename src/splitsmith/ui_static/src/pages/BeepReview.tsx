@@ -33,6 +33,7 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  Clock,
   Crosshair,
   Loader2,
   RefreshCw,
@@ -943,6 +944,7 @@ function ActiveDetail({
           key={`${item.slug}::${item.stage_number}::${item.video_id}`}
           slug={item.slug}
           videoPath={item.video_path}
+          proxyReady={item.proxy_ready}
           initialTime={previewTime}
           videoRef={videoRef}
           mode={mode}
@@ -1193,6 +1195,7 @@ function ActiveDetail({
 function BeepVideoMini({
   slug,
   videoPath,
+  proxyReady,
   initialTime,
   videoRef,
   mode,
@@ -1202,6 +1205,10 @@ function BeepVideoMini({
    *  audit canvas streams) so the timeline matches the picker's
    *  waveform 1:1. */
   videoPath: string;
+  /** False while the low-res proxy is still being generated. Drives the
+   *  "preview generating" placeholder so we never mount a player that
+   *  the server would answer with 425. */
+  proxyReady: boolean;
   /** Time to park the playhead at when the clip first loads (detector
    *  beep, or the draft if the operator has picked one). */
   initialTime: number | null;
@@ -1212,6 +1219,9 @@ function BeepVideoMini({
 }) {
   const localRef = useRef<HTMLVideoElement | null>(null);
   useReleaseMediaOnUnmount(localRef);
+  const [videoError, setVideoError] = useState(false);
+  // Reset error when the source video changes.
+  useEffect(() => { setVideoError(false); }, [videoPath]);
   const label =
     mode === "picking"
       ? "ON DRAFT BEEP"
@@ -1252,25 +1262,53 @@ function BeepVideoMini({
           {label}
         </span>
       </div>
-      {/* kind="source": beep review must play the full source, never the
-          trim. The waveform (_resolve_video_audio) is always the source WAV
-          so a beep outside the trim window stays visible, and the shared
-          playhead (this <video>'s currentTime) only lines up with that
-          waveform when the video is source too. kind="auto" would serve the
-          cached audit trim once detect-beep has run, drifting the playhead. */}
-      <video
-        ref={(el) => {
-          localRef.current = el;
-          videoRef.current = el;
-        }}
-        src={api.videoStreamUrl(slug, videoPath, "source")}
-        playsInline
-        controls
-        preload="metadata"
-        className="aspect-video w-full bg-black object-cover"
-        aria-label="Primary cam, full source -- the playback master for both this pane and the waveform"
-        title="Space toggles play/pause"
-      />
+      {/* kind="proxy": beep review plays the low-res proxy, never the trim.
+          The proxy is untrimmed and shares the source timeline origin, so
+          the playhead stays in sync with the waveform (which is always the
+          full-source WAV). kind="auto" would serve the cached audit trim
+          once detect-beep has run, drifting the playhead.
+          When the proxy is still being generated (proxyReady === false) the
+          server would answer the stream with 425, so we render an explicit
+          placeholder instead of mounting a player that cannot load. */}
+      {!proxyReady ? (
+        <div
+          role="status"
+          className="flex aspect-video w-full flex-col items-center justify-center gap-2 bg-black p-4 text-center text-sm text-white/70"
+        >
+          <Clock className="h-5 w-5 text-white/40" aria-hidden="true" />
+          <span>Preview generating</span>
+          <span className="text-xs text-white/40">Check back shortly</span>
+        </div>
+      ) : videoError ? (
+        <div
+          role="alert"
+          className="flex aspect-video w-full flex-col items-center justify-center gap-2 bg-black p-4 text-center text-sm text-white/70"
+        >
+          <span>Preview unavailable</span>
+          <button
+            type="button"
+            className="rounded border border-white/20 px-3 py-1 text-xs text-white/60 hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40"
+            onClick={() => setVideoError(false)}
+          >
+            Retry
+          </button>
+        </div>
+      ) : (
+        <video
+          ref={(el) => {
+            localRef.current = el;
+            videoRef.current = el;
+          }}
+          src={api.videoStreamUrl(slug, videoPath, "proxy")}
+          playsInline
+          controls
+          preload="metadata"
+          className="aspect-video w-full bg-black object-cover"
+          aria-label="Primary cam, proxy - the playback master for both this pane and the waveform"
+          title="Space toggles play/pause"
+          onError={() => setVideoError(true)}
+        />
+      )}
     </div>
   );
 }

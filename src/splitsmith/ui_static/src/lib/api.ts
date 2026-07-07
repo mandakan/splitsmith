@@ -1432,6 +1432,10 @@ export interface BeepQueueItem {
   beep_reviewed: boolean;
   status: "missing" | "low_confidence" | "unreviewed" | "confirmed";
   alt_candidates: BeepQueueAltCandidate[];
+  /** True once the low-res proxy exists (always true in local mode). The
+   *  beep review video streams the proxy, so the SPA shows a "preview
+   *  generating" placeholder instead of a broken player when this is false. */
+  proxy_ready: boolean;
 }
 
 export interface BeepQueueStageGroup {
@@ -2797,15 +2801,17 @@ export const api = {
    *
    *  ``kind`` selects what the server serves and is encoded into the URL
    *  so the browser sees a different resource per kind. The audit screen
-   *  passes ``trim`` or ``source`` explicitly so a background trim job
+   *  passes ``trim`` or ``proxy`` explicitly so a background trim job
    *  completing mid-playback can't switch the file under an open
    *  ``<video>`` element (which fails its next Range request with
    *  "source not found"). Other callers default to ``auto``: trim if
-   *  present, source otherwise. */
+   *  present, source otherwise. ``proxy`` serves the low-res fast-scrub
+   *  proxy (or source on local mode); in hosted mode the server returns
+   *  HTTP 425 when the proxy object is absent. */
   videoStreamUrl: (
     slug: string,
     videoPath: string,
-    kind: "auto" | "trim" | "source" = "auto",
+    kind: "auto" | "trim" | "source" | "proxy" = "auto",
   ) =>
     scopeRequestPath(
       `/api/shooters/${encodeURIComponent(slug)}/videos/stream?path=${encodeURIComponent(videoPath)}&kind=${kind}`,

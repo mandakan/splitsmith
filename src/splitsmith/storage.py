@@ -100,6 +100,34 @@ class Storage(Protocol):
     def delete(self, path: str) -> None:
         """Remove the object. No-op if absent."""
 
+    # -- Presigned GET (direct browser read from storage) --
+    #
+    # The browser fetches media directly from the object store via a
+    # short-lived presigned URL returned as a 307 redirect. The API
+    # process never mirrors the bytes, so large video files don't stall
+    # on a cold cache. Only object stores that hand out browser-reachable
+    # URLs support this; callers gate on ``supports_presigned_get`` and
+    # serve bytes directly when it is False.
+
+    @property
+    def supports_presigned_get(self) -> bool:
+        """True when :meth:`presign_get_url` yields a browser-reachable URL."""
+        ...
+
+    def presign_get_url(
+        self,
+        path: str,
+        *,
+        expires_in: int,
+        content_type: str | None = None,
+        disposition: str = "inline",
+    ) -> str:
+        """Return a short-lived presigned GET URL for ``path``.
+
+        ``content_type`` sets ``ResponseContentType``; ``disposition``
+        sets ``ResponseContentDisposition``. ``expires_in`` is in seconds.
+        """
+
     # -- Presigned multipart upload (large files, direct browser->store) --
     #
     # The client uploads parts straight to the store via presigned URLs, so
@@ -278,6 +306,24 @@ class FilesystemStorage:
 
     def abort_multipart_upload(self, path: str, upload_id: str) -> None:
         raise NotImplementedError("FilesystemStorage has no presigned multipart upload")
+
+    @property
+    def supports_presigned_get(self) -> bool:
+        # Local disk is not reachable by the browser over a URL, so callers
+        # must serve the bytes directly (FileResponse) rather than redirect.
+        return False
+
+    def presign_get_url(
+        self,
+        path: str,
+        *,
+        expires_in: int,
+        content_type: str | None = None,
+        disposition: str = "inline",
+    ) -> str:
+        raise NotImplementedError(
+            "FilesystemStorage has no presigned GET URL - local mode serves files directly via FileResponse"
+        )
 
 
 class _S3StreamWrapper:
@@ -505,6 +551,32 @@ class S3Storage:
                 "UploadId": upload_id,
                 "PartNumber": part_number,
             },
+            ExpiresIn=expires_in,
+        )
+
+    @property
+    def supports_presigned_get(self) -> bool:
+        # S3/R2 presigned GET URLs are fetched directly by the browser.
+        return True
+
+    def presign_get_url(
+        self,
+        path: str,
+        *,
+        expires_in: int,
+        content_type: str | None = None,
+        disposition: str = "inline",
+    ) -> str:
+        params: dict[str, object] = {
+            "Bucket": self._bucket,
+            "Key": self._key(path),
+            "ResponseContentDisposition": disposition,
+        }
+        if content_type is not None:
+            params["ResponseContentType"] = content_type
+        return self._client.generate_presigned_url(
+            "get_object",
+            Params=params,
             ExpiresIn=expires_in,
         )
 

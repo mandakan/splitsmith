@@ -7864,3 +7864,40 @@ def test_hosted_boot_lifespan_returned_for_seeding_alone(monkeypatch) -> None:
     from splitsmith import __version__
 
     assert seeded_versions == [__version__]
+
+
+# ---------------------------------------------------------------------------
+# beep-queue proxy_ready
+# ---------------------------------------------------------------------------
+
+
+def test_beep_queue_proxy_ready_local_mode_always_true(tmp_path: Path) -> None:
+    """In local mode (state.storage is None) every beep-queue item carries
+    proxy_ready=True - source streams directly from disk so there is no
+    "generating" state to report.
+
+    The proxy_ready contract: _storage is None -> True for all paths,
+    regardless of whether a raw_proxy/ object exists.
+    """
+    root = tmp_path / "match"
+    _build_project_with_primary(
+        root,
+        "Beep Queue Proxy Ready",
+        beep_time=10.0,
+        beep_source="auto",  # type: ignore[arg-type]
+        beep_confidence=0.4,
+        beep_reviewed=False,
+    )
+    # _build_project_with_primary stores the path as an absolute path
+    # (root / "primary.mp4"). The _proxy_ready helper returns True for
+    # paths not starting with "raw/" - both that rule and the "storage is
+    # None" rule guarantee True in local mode.
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
+
+    resp = client.get("/api/match/beep-queue")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    items = [item for stage in body["stages"] for item in stage["items"]]
+    assert len(items) == 1, f"expected 1 beep-queue item, got {len(items)}"
+    assert items[0]["proxy_ready"] is True, "local mode must always report proxy_ready=True"
