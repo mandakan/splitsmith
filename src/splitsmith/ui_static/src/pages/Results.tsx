@@ -296,7 +296,7 @@ export function Results() {
           </div>
         </div>
         {error ? (
-          <div className="mt-3 rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
+          <div role="alert" className="mt-3 rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
             {error}
           </div>
         ) : null}
@@ -545,7 +545,7 @@ export function Results() {
               <span className="tabular-nums text-ink-2">
                 {scoreTotals.hitFactor.toFixed(4)}
               </span>
-              {" hit factor"}
+              {" hit factor (derived)"}
             </span>
           ) : null}
           <span className="flex items-center gap-3">
