@@ -26,6 +26,7 @@ import {
 
 import type { CoachShot } from "@/lib/api";
 import { ShotTicker } from "@/components/results/ShotTicker";
+import { useDialogFocus } from "@/lib/dialogFocus";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { splitBucket } from "@/lib/splits";
 import { cn } from "@/lib/utils";
@@ -227,9 +228,17 @@ export function ResultsPlayer({
       return;
     }
     if (typeof el.requestFullscreen === "function") {
-      el.requestFullscreen()
-        .then(() => setFullscreenMode("native"))
-        .catch(() => setFullscreenMode("faux"));
+      // try/catch + Promise.resolve: a non-compliant engine may throw
+      // synchronously or return a non-thenable instead of rejecting;
+      // every failure shape must land in faux mode, not escape the
+      // click handler.
+      try {
+        void Promise.resolve(el.requestFullscreen())
+          .then(() => setFullscreenMode("native"))
+          .catch(() => setFullscreenMode("faux"));
+      } catch {
+        setFullscreenMode("faux");
+      }
     } else {
       setFullscreenMode("faux");
     }
@@ -248,20 +257,26 @@ export function ResultsPlayer({
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, [fullscreen, setFullscreenMode]);
 
-  // Faux mode: Escape exits, and the page behind must not scroll.
+  // Faux mode is a full-viewport takeover, so it rides the shared
+  // dialog contract: topmost-only Escape via the dialog stack, Tab
+  // trapped inside the card, focus restored to the trigger on exit.
+  const exitFaux = useCallback(() => setFullscreenMode("off"), [setFullscreenMode]);
+  useDialogFocus(fullscreen === "faux", wrapperRef, exitFaux);
+
+  // Faux mode: the page behind must not scroll. Both html and body -
+  // html-only overflow:hidden is a no-op for body scroll on iOS Safari,
+  // the exact browser class the faux path serves.
   useEffect(() => {
     if (fullscreen !== "faux") return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setFullscreenMode("off");
-    };
-    document.addEventListener("keydown", onKey);
-    const prev = document.documentElement.style.overflow;
+    const prevHtml = document.documentElement.style.overflow;
+    const prevBody = document.body.style.overflow;
     document.documentElement.style.overflow = "hidden";
+    document.body.style.overflow = "hidden";
     return () => {
-      document.removeEventListener("keydown", onKey);
-      document.documentElement.style.overflow = prev;
+      document.documentElement.style.overflow = prevHtml;
+      document.body.style.overflow = prevBody;
     };
-  }, [fullscreen, setFullscreenMode]);
+  }, [fullscreen]);
 
   const isFs = fullscreen !== "off";
 

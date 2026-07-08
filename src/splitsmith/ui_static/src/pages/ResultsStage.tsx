@@ -64,20 +64,28 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [fsMode, setFsMode] = useState<FullscreenMode>("off");
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const [playerBox, setPlayerBox] = useState<HTMLDivElement | null>(null);
-  const [playerH, setPlayerH] = useState(0);
 
   // The pinned player's height varies with viewport width, so no
   // constant is safe (same rationale as useShellHeaderHeight). Measured
   // into a CSS var the splits rows use as scroll-margin-top, so the
   // mobile auto-scroll never tucks the active row under the sticky
-  // player. Callback-ref: the player mounts only after coach data is in.
+  // player. Written imperatively (not React state): resize churn must
+  // not re-render the whole page per tick. Paused during fullscreen -
+  // the fullscreened card leaves normal flow, collapsing the wrapper,
+  // and publishing that bogus height would break the first auto-scroll
+  // after exit. Callback-ref: the player mounts only after coach data
+  // is in.
   useEffect(() => {
-    if (!playerBox) return;
-    const ro = new ResizeObserver(() => setPlayerH(playerBox.offsetHeight));
+    if (!playerBox || fsMode !== "off") return;
+    const write = () =>
+      rootRef.current?.style.setProperty("--results-player-h", `${playerBox.offsetHeight}px`);
+    write();
+    const ro = new ResizeObserver(write);
     ro.observe(playerBox);
     return () => ro.disconnect();
-  }, [playerBox]);
+  }, [playerBox, fsMode]);
 
   useEffect(() => {
     let alive = true;
@@ -261,24 +269,29 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
 
   return (
     <div
+      ref={rootRef}
       className="flex flex-col gap-4 px-4 py-4 md:px-7 lg:grid lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start"
-      style={{ "--results-player-h": `${playerH}px` } as React.CSSProperties}
     >
       <div className="flex flex-col gap-4 lg:col-span-2">{header}</div>
       {/* Sticky below lg so playback + auto-scrolling splits never lose
-          the video. Disabled on short (landscape-phone) viewports where
-          fullscreen is the intended mode. Full-bleed bg fill so list
-          content cannot ghost through the page gutters while pinned.
-          --shell-header-h falls back to 0px: the share surface has no
-          sticky header and never sets the var. The z raise during faux
-          fullscreen frees the fixed card from this wrapper's stacking
-          context (trapped-z, see elevation tokens). */}
+          the video. Disabled at viewport heights <= 500px: landscape
+          phones report ~330-440px and the pinned player would eat the
+          whole viewport there - fullscreen is the intended landscape
+          mode; the smallest portrait phones are ~640px and keep sticky.
+          Full-bleed bg fill so list content cannot ghost through the
+          page gutters while pinned. --shell-header-h falls back to 0px:
+          the share surface has no sticky header and never sets the var.
+          During faux fullscreen the z classes SWAP (never stack): the
+          raise frees the fixed card from this wrapper's stacking context
+          (trapped-z, see elevation tokens), and keeping max-lg:z-20
+          alongside would defeat it - that rule is emitted later in the
+          stylesheet and would win the cascade at mobile widths. */}
       <div
         ref={setPlayerBox}
         className={cn(
-          "max-lg:z-20 max-lg:-mx-4 max-lg:bg-bg max-lg:px-4 max-lg:pb-2",
+          "max-lg:-mx-4 max-lg:bg-bg max-lg:px-4 max-lg:pb-2",
           "max-lg:[@media(min-height:501px)]:sticky max-lg:[@media(min-height:501px)]:top-[var(--shell-header-h,0px)]",
-          fsMode === "faux" && "z-takeover",
+          fsMode === "faux" ? "z-takeover" : "max-lg:z-20",
         )}
       >
         <ResultsPlayer
