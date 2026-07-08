@@ -116,10 +116,18 @@ export function Results() {
     setRefreshing(true);
     setError(null);
     try {
-      for (const s of shooters) {
-        if (s.selected_competitor_id != null) await api.refreshScoreboardTimes(s.slug);
-      }
+      const linked = shooters.filter((s) => s.selected_competitor_id != null);
+      const results = await Promise.allSettled(
+        linked.map((s) => api.refreshScoreboardTimes(s.slug)),
+      );
+      // Always refresh, even on partial failure - shooters whose refresh
+      // DID succeed must still become visible instead of being hidden
+      // behind a sibling's error.
       refresh();
+      const failedSlugs = results
+        .map((r, i) => (r.status === "rejected" ? linked[i].slug : null))
+        .filter((slug): slug is string => slug !== null);
+      setError(failedSlugs.length > 0 ? `Refresh failed for: ${failedSlugs.join(", ")}` : null);
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
     } finally {
@@ -263,9 +271,7 @@ export function Results() {
                 size="sm"
                 disabled={refreshing}
                 onClick={() => void refreshFromScoreboard()}
-                aria-label={
-                  refreshing ? "Refreshing from scoreboard" : "Refresh times from scoreboard"
-                }
+                aria-label={refreshing ? "Refreshing from scoreboard" : "Refresh from scoreboard"}
               >
                 {refreshing ? (
                   <Loader2 className="size-4 animate-spin" aria-hidden="true" />
