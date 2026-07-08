@@ -1540,6 +1540,45 @@ def test_manual_stage_time_survives_scoreboard_sync(tmp_path: Path) -> None:
     assert proj.stages[1].time_seconds_manual is False
 
 
+def test_scoreboard_sync_persists_full_scorecard() -> None:
+    from splitsmith.ui.project import MatchProject
+    from splitsmith.ui.scoreboard.models import (
+        CompetitorStageResult,
+        CompetitorStageResults,
+    )
+
+    proj = MatchProject(name="t", schema_version=1)
+    proj.init_placeholder_stages(count=1)
+    results = CompetitorStageResults(
+        competitorId=1,
+        stages=[
+            CompetitorStageResult(
+                stage_number=1,
+                time_seconds=12.34,
+                scorecard_updated_at="2026-07-08T10:00:00+00:00",
+                hit_factor=6.5,
+                stage_points=80.0,
+                stage_pct=95.5,
+                alphas=10,
+                charlies=2,
+                deltas=0,
+                misses=0,
+                no_shoots=0,
+                procedurals=1,
+                dq=False,
+            )
+        ],
+    )
+    updated = proj.merge_stage_times(results)
+    assert updated == 1
+    stage = proj.stages[0]
+    assert stage.scorecard is not None
+    assert stage.scorecard.hit_factor == 6.5
+    assert stage.scorecard.alphas == 10
+    assert stage.scorecard.procedurals == 1
+    assert stage.scorecard.dq is False
+
+
 def _three_candidates() -> list:
     from splitsmith.config import BeepCandidate
 

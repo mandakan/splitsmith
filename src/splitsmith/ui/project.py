@@ -503,6 +503,25 @@ def stage_audit_status(
     return StageStatus.in_progress
 
 
+class StageScorecard(BaseModel):
+    """Per-shooter, per-stage scoring pulled from the SSI Scoreboard.
+
+    Persisted so hosted share viewers -- who have no scoreboard identity and
+    cannot fetch live -- still see scores. Populated by ``merge_stage_times``.
+    """
+
+    hit_factor: float | None = None
+    stage_points: float | None = None
+    stage_pct: float | None = None
+    alphas: int | None = None
+    charlies: int | None = None
+    deltas: int | None = None
+    misses: int | None = None
+    no_shoots: int | None = None
+    procedurals: int | None = None
+    dq: bool | None = None
+
+
 class StageEntry(BaseModel):
     """A stage in the match: scoreboard data + assigned videos + audit status."""
 
@@ -532,6 +551,10 @@ class StageEntry(BaseModel):
     # and for projects imported before this field existed; the next
     # scoreboard import will populate it.
     stage_rounds: StageRounds | None = None
+    # Full per-shooter scorecard from the SSI Scoreboard, persisted so hosted
+    # share viewers (no live scoreboard access) still see scores. ``None`` for
+    # placeholders and pre-scorecard projects; populated by merge_stage_times.
+    scorecard: StageScorecard | None = None
 
     def primary(self) -> StageVideo | None:
         """Return the primary video, or ``None`` if no video is the primary yet."""
@@ -1660,6 +1683,21 @@ class MatchProject(BaseModel):
                     scorecard_set = True
                 except ValueError:
                     pass
+            # Persist the full scorecard (previously parsed then discarded).
+            # Kept even when time/updated_at are absent so a partially-scored
+            # stage still surfaces hits in the results view.
+            stage.scorecard = StageScorecard(
+                hit_factor=r.hit_factor,
+                stage_points=r.stage_points,
+                stage_pct=r.stage_pct,
+                alphas=r.alphas,
+                charlies=r.charlies,
+                deltas=r.deltas,
+                misses=r.misses,
+                no_shoots=r.no_shoots,
+                procedurals=r.procedurals,
+                dq=r.dq,
+            )
             if time_set and scorecard_set:
                 stage.placeholder = False
                 updated += 1
