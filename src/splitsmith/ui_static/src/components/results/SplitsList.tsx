@@ -60,6 +60,9 @@ export function SplitsList({ shots, activeShotNumber, onSeek, isPlaying }: Split
               onClick={() => onSeek(shot)}
               className={cn(
                 "relative block w-full min-h-11 px-4 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led focus-visible:ring-inset",
+                // Mobile auto-scroll target must land below the sticky
+                // player (document scroll can't see the pinned overlay).
+                "max-lg:scroll-mt-[calc(var(--shell-header-h,0px)+var(--results-player-h,0px)+8px)]",
                 active && "bg-surface-2",
               )}
             >
