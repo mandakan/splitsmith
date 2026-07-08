@@ -148,7 +148,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   if (error) {
     return (
       <div className="px-4 py-8 md:px-7">
-        <div className="rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
+        <div role="alert" className="rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
           {error}
         </div>
         <button
