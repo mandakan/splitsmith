@@ -270,6 +270,9 @@ export function Audit() {
   useEffect(() => { currentTimeRef.current = currentTime; }, [currentTime]);
 
   const [filters, setFilters] = useState<MarkerFilters>(DEFAULT_FILTERS);
+  // Momentary "peek": true while the user holds the peek button or the p key.
+  // Adds "rejected" to visibleKinds without touching the sticky filter chip.
+  const [peeking, setPeeking] = useState(false);
   // ``null`` = fit-to-width; numeric multiplier scales pixels-per-second
   // relative to fit. Reset on stage change.
   const [zoom, setZoom] = useState<number | null>(null);
@@ -1103,7 +1106,18 @@ export function Audit() {
     [keptShots, currentShotIndex, focusedMarkerId, currentTime, handleScrub],
   );
 
-  const visibleKinds = useMemo(() => visibleKindsFromFilters(filters), [filters]);
+  const visibleKinds = useMemo(() => {
+    const kinds = visibleKindsFromFilters(filters);
+    if (peeking) kinds.add("rejected");
+    // Keep a keyboard-focused rejected marker visible even when the
+    // rejected filter is off, so `n`-stepping onto it never focuses
+    // an invisible marker (the user can then K it back to kept).
+    if (focusedMarkerId) {
+      const f = markers.find((x) => x.id === focusedMarkerId);
+      if (f?.kind === "rejected") kinds.add("rejected");
+    }
+    return kinds;
+  }, [filters, peeking, focusedMarkerId, markers]);
 
   // Markers in time order, filtered to currently-visible kinds. N and
   // K-auto-progress walk this list -- a marker that's filtered out of
@@ -1509,6 +1523,36 @@ export function Audit() {
     return () => flushAltNudge();
   }, [stageNumber, flushAltNudge]);
 
+  // Peek key handler -- separate from the main onKey effect so it can be
+  // a lightweight listener that only cares about p/P down/up.
+  // Guards: ignore when typing in a text field, when a modifier key is held,
+  // and on auto-repeat (keydown fires repeatedly when held; we only need the
+  // first press to set peeking). window blur resets peek when the user
+  // alt-tabs or otherwise loses focus mid-hold.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "p" && e.key !== "P") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.repeat) return;
+      const target = e.target as HTMLElement | null;
+      if (isTypingTextTarget(target)) return;
+      setPeeking(true);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key !== "p" && e.key !== "P") return;
+      setPeeking(false);
+    };
+    const onBlur = () => setPeeking(false);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
   // Pull keyboard focus into the editor once it mounts (and on each stage
   // change) so the global ``window`` keydown shortcuts are delivered to
   // the page right away. Browser accelerators like Cmd+1 are only
@@ -1723,6 +1767,9 @@ export function Audit() {
                   beep: auditBeep != null ? 1 : 0,
                 }}
                 onChange={setFilters}
+                peeking={peeking}
+                onPeekStart={() => setPeeking(true)}
+                onPeekEnd={() => setPeeking(false)}
               />
             ) : null}
             <div className="ml-auto inline-flex items-center gap-2">
