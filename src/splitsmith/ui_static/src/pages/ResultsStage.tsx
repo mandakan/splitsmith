@@ -15,15 +15,28 @@ import { Link, useOutletContext, useParams } from "react-router-dom";
 
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { ResultsPlayer } from "@/components/results/ResultsPlayer";
+import { Scorecard } from "@/components/results/Scorecard";
 import { SplitsList } from "@/components/results/SplitsList";
 import { StageStats } from "@/components/results/StageStats";
 import { Kicker } from "@/components/ui";
-import { ApiError, api, type CoachStageResponse } from "@/lib/api";
+import { ApiError, api, type CoachStageResponse, type StageScorecard } from "@/lib/api";
 import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 
 function pad2(n: number): string {
   return n.toString().padStart(2, "0");
+}
+
+function formatTimestamp(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 export function ResultsStage() {
@@ -41,6 +54,8 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const { shooters } = useOutletContext<MatchShellOutletContext>();
   const href = useMatchHref();
   const [coach, setCoach] = useState<CoachStageResponse | null>(null);
+  const [scorecard, setScorecard] = useState<StageScorecard | null>(null);
+  const [scorecardUpdatedAt, setScorecardUpdatedAt] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -52,14 +67,29 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
     let alive = true;
     setLoaded(false);
     setError(null);
+    setScorecard(null);
+    setScorecardUpdatedAt(null);
     (async () => {
-      try {
-        const c = await api.getStageCoach(slug, stage);
-        if (!alive) return;
-        setCoach(c);
+      const [coachResult, projectResult] = await Promise.allSettled([
+        api.getStageCoach(slug, stage),
+        api.getProject(slug),
+      ]);
+      if (!alive) return;
+
+      if (coachResult.status === "fulfilled") {
+        setCoach(coachResult.value);
         setLoaded(true);
-      } catch (e) {
-        if (alive) setError(e instanceof ApiError ? e.detail : String(e));
+      } else {
+        const e = coachResult.reason;
+        setError(e instanceof ApiError ? e.detail : String(e));
+      }
+
+      // Scorecard is a nice-to-have: a failed project fetch just means no
+      // scorecard shows, it must never surface through the coach error banner.
+      if (projectResult.status === "fulfilled") {
+        const stageEntry = projectResult.value.stages.find((s) => s.stage_number === stage);
+        setScorecard(stageEntry?.scorecard ?? null);
+        setScorecardUpdatedAt(stageEntry?.scorecard_updated_at ?? null);
       }
     })();
     return () => {
@@ -246,6 +276,16 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           onSeek={seekToShot}
           isPlaying={isPlaying}
         />
+        {scorecard ? (
+          <div className="flex flex-col gap-2">
+            <Scorecard scorecard={scorecard} />
+            {scorecardUpdatedAt ? (
+              <p className="font-mono text-xs uppercase tracking-[0.08em] text-muted">
+                from scoreboard, updated {formatTimestamp(scorecardUpdatedAt)}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );
