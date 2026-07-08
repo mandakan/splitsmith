@@ -14,7 +14,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router-dom";
 
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
-import { ResultsPlayer } from "@/components/results/ResultsPlayer";
+import { ResultsPlayer, type FullscreenMode } from "@/components/results/ResultsPlayer";
 import { Scorecard } from "@/components/results/Scorecard";
 import { SplitsList } from "@/components/results/SplitsList";
 import { StageStats } from "@/components/results/StageStats";
@@ -63,6 +63,21 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [fsMode, setFsMode] = useState<FullscreenMode>("off");
+  const [playerBox, setPlayerBox] = useState<HTMLDivElement | null>(null);
+  const [playerH, setPlayerH] = useState(0);
+
+  // The pinned player's height varies with viewport width, so no
+  // constant is safe (same rationale as useShellHeaderHeight). Measured
+  // into a CSS var the splits rows use as scroll-margin-top, so the
+  // mobile auto-scroll never tucks the active row under the sticky
+  // player. Callback-ref: the player mounts only after coach data is in.
+  useEffect(() => {
+    if (!playerBox) return;
+    const ro = new ResizeObserver(() => setPlayerH(playerBox.offsetHeight));
+    ro.observe(playerBox);
+    return () => ro.disconnect();
+  }, [playerBox]);
 
   useEffect(() => {
     let alive = true;
@@ -245,16 +260,37 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   }
 
   return (
-    <div className="flex flex-col gap-4 px-4 py-4 md:px-7 lg:grid lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start">
+    <div
+      className="flex flex-col gap-4 px-4 py-4 md:px-7 lg:grid lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start"
+      style={{ "--results-player-h": `${playerH}px` } as React.CSSProperties}
+    >
       <div className="flex flex-col gap-4 lg:col-span-2">{header}</div>
-      <ResultsPlayer
-        src={api.videoStreamUrl(slug, primary.path)}
-        beepTime={coach.beep_time}
-        shots={shots}
-        videoRef={videoRef}
-        onTimeChange={setCurrentTime}
-        onPlayingChange={setIsPlaying}
-      />
+      {/* Sticky below lg so playback + auto-scrolling splits never lose
+          the video. Disabled on short (landscape-phone) viewports where
+          fullscreen is the intended mode. Full-bleed bg fill so list
+          content cannot ghost through the page gutters while pinned.
+          --shell-header-h falls back to 0px: the share surface has no
+          sticky header and never sets the var. The z raise during faux
+          fullscreen frees the fixed card from this wrapper's stacking
+          context (trapped-z, see elevation tokens). */}
+      <div
+        ref={setPlayerBox}
+        className={cn(
+          "max-lg:z-20 max-lg:-mx-4 max-lg:bg-bg max-lg:px-4 max-lg:pb-2",
+          "max-lg:[@media(min-height:501px)]:sticky max-lg:[@media(min-height:501px)]:top-[var(--shell-header-h,0px)]",
+          fsMode === "faux" && "z-takeover",
+        )}
+      >
+        <ResultsPlayer
+          src={api.videoStreamUrl(slug, primary.path)}
+          beepTime={coach.beep_time}
+          shots={shots}
+          videoRef={videoRef}
+          onTimeChange={setCurrentTime}
+          onPlayingChange={setIsPlaying}
+          onFullscreenChange={setFsMode}
+        />
+      </div>
       <div className="flex flex-col gap-4 lg:max-h-[calc(100dvh-var(--shell-header-h,86px)-2rem)] lg:overflow-y-auto">
         <StageStats
           stageTime={stageTime}
