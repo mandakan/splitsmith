@@ -9,18 +9,19 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router-dom";
-import { Share2 } from "lucide-react";
+import { Loader2, RefreshCw, Share2 } from "lucide-react";
 
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
-import { api, type StageStatus } from "@/lib/api";
+import { ApiError, api, type StageScorecard, type StageStatus } from "@/lib/api";
 import { buildStageMatrix, matchTotals } from "@/lib/stageMatrix";
 import { statusLabel } from "@/lib/stageStatus";
 import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 import { ShareDialog } from "@/components/results/ShareDialog";
+import { matchTotals as scorecardTotals } from "@/components/results/Scorecard";
 
 /* -------------------------------------------------------------------------- */
 /* Status chip                                                                 */
@@ -78,12 +79,19 @@ function formatTime(seconds: number): string {
   return mins > 0 ? `${pad2(mins)}:${secsStr}` : secsStr;
 }
 
+/** Compact "HF 5.24" label - text-paired so hit factor is never a bare,
+ *  color-only number. 2dp (vs the 4dp Scorecard detail view) keeps the
+ *  dense grid/card cells from wrapping. */
+function formatHitFactor(hitFactor: number): string {
+  return `HF ${hitFactor.toFixed(2)}`;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Page                                                                        */
 /* -------------------------------------------------------------------------- */
 
 export function Results() {
-  const { project, shooters } = useOutletContext<MatchShellOutletContext>();
+  const { project, shooters, refresh } = useOutletContext<MatchShellOutletContext>();
   const href = useMatchHref();
 
   // Share button: hosted mode only, and only on the owner route. The same
@@ -95,6 +103,37 @@ export function Results() {
   const shareToken = useParams<{ token?: string }>().token;
   const canShare = deploymentMode === "hosted" && !shareToken;
   const [showShare, setShowShare] = useState(false);
+
+  // Refresh-from-scoreboard: owner-only (share viewers cannot fetch
+  // upstream), and only worth showing once the match is scoreboard-linked.
+  // Unlike Share, this works in local mode too - it just re-pulls each
+  // linked shooter's scorecard from the already-linked match.
+  const canRefresh = !shareToken && project?.scoreboard_match_id != null;
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refreshFromScoreboard() {
+    setRefreshing(true);
+    setError(null);
+    try {
+      const linked = shooters.filter((s) => s.selected_competitor_id != null);
+      const results = await Promise.allSettled(
+        linked.map((s) => api.refreshScoreboardTimes(s.slug)),
+      );
+      // Always refresh, even on partial failure - shooters whose refresh
+      // DID succeed must still become visible instead of being hidden
+      // behind a sibling's error.
+      refresh();
+      const failedSlugs = results
+        .map((r, i) => (r.status === "rejected" ? linked[i].slug : null))
+        .filter((slug): slug is string => slug !== null);
+      setError(failedSlugs.length > 0 ? `Refresh failed for: ${failedSlugs.join(", ")}` : null);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   const rows = useMemo(
     () => (project ? buildStageMatrix(project.stages, shooters) : []),
@@ -112,7 +151,7 @@ export function Results() {
   // wrong time is worse than no time on a results surface.
   const [shooterStageTimes, setShooterStageTimes] = useState<Record<
     string,
-    Record<number, number>
+    Record<number, { time_seconds: number; scorecard: StageScorecard | null }>
   > | null>(null);
   useEffect(() => {
     if (shooters.length <= 1) {
@@ -130,11 +169,17 @@ export function Results() {
       ),
     ).then((entries) => {
       if (!alive) return;
-      const map: Record<string, Record<number, number>> = {};
+      const map: Record<
+        string,
+        Record<number, { time_seconds: number; scorecard: StageScorecard | null }>
+      > = {};
       for (const [slug, p] of entries) {
         if (!p) continue;
         map[slug] = Object.fromEntries(
-          p.stages.map((st) => [st.stage_number, st.time_seconds]),
+          p.stages.map((st) => [
+            st.stage_number,
+            { time_seconds: st.time_seconds, scorecard: st.scorecard },
+          ]),
         );
       }
       setShooterStageTimes(map);
@@ -155,7 +200,23 @@ export function Results() {
       );
     }
     const t = shooterStageTimes?.[slug]?.[stageNumber];
-    return typeof t === "number" ? t : null;
+    return typeof t?.time_seconds === "number" ? t.time_seconds : null;
+  };
+
+  // Scorecard for one cell, or null when unknown/unscored. Mirrors cellTime's
+  // sibling-lookup pattern rather than threading through buildStageMatrix -
+  // scorecard, like time, is per-shooter data outside the status matrix.
+  const cellScorecard = (
+    slug: string,
+    stageNumber: number,
+  ): StageScorecard | null => {
+    if (isSingleShooter) {
+      return (
+        project?.stages.find((s) => s.stage_number === stageNumber)
+          ?.scorecard ?? null
+      );
+    }
+    return shooterStageTimes?.[slug]?.[stageNumber]?.scorecard ?? null;
   };
 
   // Total match time: single-shooter only. In multi-shooter mode there is
@@ -168,6 +229,17 @@ export function Results() {
         : 0,
     [isSingleShooter, project],
   );
+
+  // Scoring totals summary: single-shooter only. A multi-shooter match has
+  // no single "match total" score to show (each shooter has their own),
+  // same reasoning as totalTimeSecs above omitting the header time for
+  // multi-shooter. Null when no stage has a scorecard yet, so the overview
+  // renders exactly as it did pre-scoring (time-only, no empty chrome).
+  const scoreTotals = useMemo(() => {
+    if (!isSingleShooter || !project) return null;
+    if (!project.stages.some((s) => s.scorecard != null)) return null;
+    return scorecardTotals(project.stages);
+  }, [isSingleShooter, project]);
 
   if (!project) {
     return (
@@ -191,20 +263,43 @@ export function Results() {
               {project.name}
             </h1>
           </div>
-          {canShare ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="mt-1 shrink-0"
-              onClick={() => setShowShare(true)}
-              aria-label="Manage share links for these results"
-            >
-              <Share2 className="size-4" aria-hidden="true" />
-              Share
-            </Button>
-          ) : null}
+          <div className="mt-1 flex shrink-0 items-center gap-2">
+            {canRefresh ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={refreshing}
+                onClick={() => void refreshFromScoreboard()}
+                aria-label={refreshing ? "Refreshing from scoreboard" : "Refresh from scoreboard"}
+              >
+                {refreshing ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <RefreshCw className="size-4" aria-hidden="true" />
+                )}
+                {refreshing ? "Refreshing..." : "Refresh from scoreboard"}
+              </Button>
+            ) : null}
+            {canShare ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowShare(true)}
+                aria-label="Manage share links for these results"
+              >
+                <Share2 className="size-4" aria-hidden="true" />
+                Share
+              </Button>
+            ) : null}
+          </div>
         </div>
+        {error ? (
+          <div className="mt-3 rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
+            {error}
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center gap-3 font-mono text-xs uppercase tracking-[0.06em] text-muted">
           {project.match_date ? (
             <time
@@ -261,6 +356,8 @@ export function Results() {
                   const audited = cell.status === "audited";
                   if (audited) {
                     const time = cellTime(cell.shooter.slug, row.stageNumber);
+                    const hitFactor = cellScorecard(cell.shooter.slug, row.stageNumber)
+                      ?.hit_factor;
                     return (
                       <Link
                         key={cell.shooter.slug}
@@ -274,11 +371,18 @@ export function Results() {
                         )}
                         <span
                           className={cn(
-                            "font-mono text-sm tabular-nums text-ink-2",
-                            isSingleShooter && "flex-1",
+                            "flex flex-col leading-tight",
+                            isSingleShooter ? "flex-1 items-start" : "items-end",
                           )}
                         >
-                          {time != null ? formatTime(time) : "-"}
+                          <span className="font-mono text-sm tabular-nums text-ink-2">
+                            {time != null ? formatTime(time) : "-"}
+                          </span>
+                          {hitFactor != null ? (
+                            <span className="font-mono text-[0.6875rem] tabular-nums text-muted">
+                              {formatHitFactor(hitFactor)}
+                            </span>
+                          ) : null}
                         </span>
                         <StatusChip tone={cell.tone} status={cell.status} />
                       </Link>
@@ -372,14 +476,23 @@ export function Results() {
                   const audited = cell.status === "audited";
                   if (audited) {
                     const time = cellTime(cell.shooter.slug, row.stageNumber);
+                    const hitFactor = cellScorecard(cell.shooter.slug, row.stageNumber)
+                      ?.hit_factor;
                     return (
                       <Link
                         key={cell.shooter.slug}
                         to={href("results", cell.shooter.slug, String(row.stageNumber))}
                         className="flex min-h-11 items-center justify-between gap-2 bg-surface-2 px-3 py-2 hover:bg-surface-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led focus-visible:ring-inset"
                       >
-                        <span className="font-mono text-sm tabular-nums text-ink-2">
-                          {time != null ? formatTime(time) : "-"}
+                        <span className="flex flex-col leading-tight">
+                          <span className="font-mono text-sm tabular-nums text-ink-2">
+                            {time != null ? formatTime(time) : "-"}
+                          </span>
+                          {hitFactor != null ? (
+                            <span className="font-mono text-[0.6875rem] tabular-nums text-muted">
+                              {formatHitFactor(hitFactor)}
+                            </span>
+                          ) : null}
                         </span>
                         <StatusChip tone={cell.tone} status={cell.status} />
                       </Link>
@@ -410,6 +523,47 @@ export function Results() {
           })}
         </div>
       </div>
+
+      {/* Match totals summary - single-shooter only. Multi-shooter mode has
+          no single match total to show (each shooter has their own scoring
+          run), the same reasoning the header above uses to omit total time
+          for multi-shooter. Renders nothing until at least one stage has a
+          scorecard, so an unscored match keeps today's time-only overview. */}
+      {scoreTotals ? (
+        <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-rule-strong bg-surface-2 px-4 py-3 font-mono text-xs uppercase tracking-[0.06em] text-muted">
+          <span className="font-bold text-ink-2">Match totals</span>
+          <span>
+            <span className="tabular-nums text-ink-2">{formatTime(scoreTotals.time)}</span>
+            {" scored time"}
+          </span>
+          <span>
+            <span className="tabular-nums text-ink-2">{scoreTotals.points}</span>
+            {" points"}
+          </span>
+          {scoreTotals.hitFactor != null ? (
+            <span>
+              <span className="tabular-nums text-ink-2">
+                {scoreTotals.hitFactor.toFixed(4)}
+              </span>
+              {" hit factor"}
+            </span>
+          ) : null}
+          <span className="flex items-center gap-3">
+            <span>
+              <span className="tabular-nums text-ink-2">{scoreTotals.alphas}</span> A
+            </span>
+            <span>
+              <span className="tabular-nums text-ink-2">{scoreTotals.charlies}</span> C
+            </span>
+            <span>
+              <span className="tabular-nums text-ink-2">{scoreTotals.deltas}</span> D
+            </span>
+            <span>
+              <span className="tabular-nums text-ink-2">{scoreTotals.misses}</span> M
+            </span>
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }
