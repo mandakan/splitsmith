@@ -9,12 +9,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router-dom";
-import { Share2 } from "lucide-react";
+import { Loader2, RefreshCw, Share2 } from "lucide-react";
 
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
-import { api, type StageScorecard, type StageStatus } from "@/lib/api";
+import { ApiError, api, type StageScorecard, type StageStatus } from "@/lib/api";
 import { buildStageMatrix, matchTotals } from "@/lib/stageMatrix";
 import { statusLabel } from "@/lib/stageStatus";
 import { useDeploymentMode } from "@/lib/features";
@@ -91,7 +91,7 @@ function formatHitFactor(hitFactor: number): string {
 /* -------------------------------------------------------------------------- */
 
 export function Results() {
-  const { project, shooters } = useOutletContext<MatchShellOutletContext>();
+  const { project, shooters, refresh } = useOutletContext<MatchShellOutletContext>();
   const href = useMatchHref();
 
   // Share button: hosted mode only, and only on the owner route. The same
@@ -103,6 +103,29 @@ export function Results() {
   const shareToken = useParams<{ token?: string }>().token;
   const canShare = deploymentMode === "hosted" && !shareToken;
   const [showShare, setShowShare] = useState(false);
+
+  // Refresh-from-scoreboard: owner-only (share viewers cannot fetch
+  // upstream), and only worth showing once the match is scoreboard-linked.
+  // Unlike Share, this works in local mode too - it just re-pulls each
+  // linked shooter's scorecard from the already-linked match.
+  const canRefresh = !shareToken && project?.scoreboard_match_id != null;
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function refreshFromScoreboard() {
+    setRefreshing(true);
+    setError(null);
+    try {
+      for (const s of shooters) {
+        if (s.selected_competitor_id != null) await api.refreshScoreboardTimes(s.slug);
+      }
+      refresh();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setRefreshing(false);
+    }
+  }
 
   const rows = useMemo(
     () => (project ? buildStageMatrix(project.stages, shooters) : []),
@@ -232,20 +255,45 @@ export function Results() {
               {project.name}
             </h1>
           </div>
-          {canShare ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="mt-1 shrink-0"
-              onClick={() => setShowShare(true)}
-              aria-label="Manage share links for these results"
-            >
-              <Share2 className="size-4" aria-hidden="true" />
-              Share
-            </Button>
-          ) : null}
+          <div className="mt-1 flex shrink-0 items-center gap-2">
+            {canRefresh ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={refreshing}
+                onClick={() => void refreshFromScoreboard()}
+                aria-label={
+                  refreshing ? "Refreshing from scoreboard" : "Refresh times from scoreboard"
+                }
+              >
+                {refreshing ? (
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                ) : (
+                  <RefreshCw className="size-4" aria-hidden="true" />
+                )}
+                {refreshing ? "Refreshing..." : "Refresh from scoreboard"}
+              </Button>
+            ) : null}
+            {canShare ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setShowShare(true)}
+                aria-label="Manage share links for these results"
+              >
+                <Share2 className="size-4" aria-hidden="true" />
+                Share
+              </Button>
+            ) : null}
+          </div>
         </div>
+        {error ? (
+          <div className="mt-3 rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
+            {error}
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center gap-3 font-mono text-xs uppercase tracking-[0.06em] text-muted">
           {project.match_date ? (
             <time
