@@ -21,6 +21,7 @@ import { StageStats } from "@/components/results/StageStats";
 import { Kicker } from "@/components/ui";
 import { ApiError, api, type CoachStageResponse, type StageScorecard } from "@/lib/api";
 import { useMatchHref } from "@/lib/matchHref";
+import { currentShotIndex } from "@/lib/splits";
 import { cn } from "@/lib/utils";
 
 function pad2(n: number): string {
@@ -115,17 +116,8 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
 
   const shots = useMemo(() => coach?.shots ?? [], [coach]);
   const activeShotNumber = useMemo(() => {
-    // Last shot whose time_absolute has passed under the playhead.
-    // No sort assumption - scan for the max qualifying time.
-    let current: number | null = null;
-    let bestT = -Infinity;
-    for (const s of shots) {
-      if (s.time_absolute <= currentTime + 0.02 && s.time_absolute >= bestT) {
-        bestT = s.time_absolute;
-        current = s.shot_number;
-      }
-    }
-    return current;
+    const idx = currentShotIndex(shots, currentTime);
+    return idx >= 0 ? shots[idx].shot_number : null;
   }, [shots, currentTime]);
 
   const stageTime = shots.length > 0 ? shots[shots.length - 1].time_from_beep : null;

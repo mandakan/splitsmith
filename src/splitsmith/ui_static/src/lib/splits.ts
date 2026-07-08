@@ -31,6 +31,27 @@ export const INTERVAL_LABEL: Record<CoachIntervalClass, string> = {
   activation: "Activation",
 };
 
+/** Index of the shot currently "live" under the playhead: the last shot
+ *  whose time_absolute has passed (+20ms grace so a seek exactly onto a
+ *  shot counts it). No sort assumption - scans for the max qualifying
+ *  time. Returns -1 before the first shot. Shared by ResultsStage
+ *  (active row) and ShotTicker so the two can never drift. */
+export function currentShotIndex(
+  shots: readonly { time_absolute: number }[],
+  time: number,
+): number {
+  let idx = -1;
+  let bestT = -Infinity;
+  for (let i = 0; i < shots.length; i++) {
+    const t = shots[i].time_absolute;
+    if (t <= time + 0.02 && t >= bestT) {
+      bestT = t;
+      idx = i;
+    }
+  }
+  return idx;
+}
+
 export const INTERVAL_TONE: Record<CoachIntervalClass, string> = {
   first_shot: "text-led border-led-deep bg-led/10",
   split: "text-done border-done/40 bg-done/10",
