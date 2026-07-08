@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.11.0](https://github.com/mandakan/splitsmith/compare/v0.10.6...v0.11.0) (2026-07-08)
+
+
+### Features
+
+* post-creation scoreboard linking + scorecard persistence (PR A) ([#599](https://github.com/mandakan/splitsmith/issues/599)) ([8311df3](https://github.com/mandakan/splitsmith/commit/8311df36223c1901d1302fc3f7e6ce22cc14cd87))
+* **ui:** hide rejected shots by default with hold-to-peek ([#597](https://github.com/mandakan/splitsmith/issues/597)) ([c7bee6e](https://github.com/mandakan/splitsmith/commit/c7bee6ea59d79292d62bbb5f24068ba11c5a1369))
+* **ui:** scored results view -- scorecard + splits + match totals (PR B) ([#600](https://github.com/mandakan/splitsmith/issues/600)) ([1422172](https://github.com/mandakan/splitsmith/commit/142217215cbf8c71004c747efbed60fc1dd09cc7))
+
+
+### Bug Fixes
+
+* derive stage status from state_docs in hosted mode ([#595](https://github.com/mandakan/splitsmith/issues/595)) ([6d609da](https://github.com/mandakan/splitsmith/commit/6d609da8710d489c5b402026504676448d0c0206))
+
+
+### Documentation
+
+* scoreboard linking + scored results (spec + PR A/B plans) ([#598](https://github.com/mandakan/splitsmith/issues/598)) ([b468bae](https://github.com/mandakan/splitsmith/commit/b468bae90d55e568d6f9cc0b0967856ebaf31249))
+
 ## [0.10.6](https://github.com/mandakan/splitsmith/compare/v0.10.5...v0.10.6) (2026-07-07)
 
 
