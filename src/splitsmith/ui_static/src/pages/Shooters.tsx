@@ -37,6 +37,10 @@ import {
 
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { CompetitorRow } from "@/components/scoreboard/CompetitorRow";
+import {
+  ConnectMatchButton,
+  ConnectMatchDialog,
+} from "@/components/scoreboard/ConnectMatchDialog";
 import { Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/useConfirm";
@@ -121,7 +125,7 @@ export function Shooters() {
   const navigate = useNavigate();
   const confirm = useConfirm();
   const href = useMatchHref();
-  const { project } = useOutletContext<MatchShellOutletContext>();
+  const { project, refresh } = useOutletContext<MatchShellOutletContext>();
   const [searchParams] = useSearchParams();
   const pickSection = PICK_SECTION_LABELS[searchParams.get("pick") ?? ""] ?? null;
   const [data, setData] = useState<ShooterListResponse | null>(null);
@@ -145,6 +149,10 @@ export function Shooters() {
   const [rosterError, setRosterError] = useState<string | null>(null);
   const [rosterFilter, setRosterFilter] = useState("");
   const [pickingId, setPickingId] = useState<number | null>(null);
+  // Connect-to-scoreboard flow (#598): shown only for a match that isn't
+  // linked yet. Lives in a modal since it's a two-step wizard (search ->
+  // confirm mapping) that doesn't belong inline in the page flow.
+  const [connectOpen, setConnectOpen] = useState(false);
 
   useEffect(() => {
     if (scoreboardMatchId == null || scoreboardContentType == null) {
@@ -302,7 +310,18 @@ export function Shooters() {
             coverage.
           </p>
         </div>
+        {!isLinked && (
+          <ConnectMatchButton onClick={() => setConnectOpen(true)} />
+        )}
       </div>
+
+      {!isLinked && (
+        <div className="mb-4 rounded-md border border-rule-strong bg-surface-2 px-3 py-2 text-sm text-ink-2">
+          Not linked to the scoreboard yet -- connect it to pull official
+          stage scores and give shot detection an expected-rounds prior
+          for every shooter.
+        </div>
+      )}
 
       {pickSection && (
         <div className="mb-4 rounded-md border border-rule-strong bg-surface-2 px-3 py-2 text-sm text-ink">
@@ -481,6 +500,17 @@ export function Shooters() {
           )}
         </div>
       </section>
+
+      {connectOpen && (
+        <ConnectMatchDialog
+          shooters={active}
+          onClose={() => setConnectOpen(false)}
+          onApplied={() => {
+            void reload();
+            refresh();
+          }}
+        />
+      )}
     </div>
   );
 }
