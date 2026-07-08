@@ -660,6 +660,60 @@ def test_audited_count_only_counts_saved_stages(tmp_path: Path) -> None:
     assert project.audited_count(root) == 1
 
 
+def test_stage_audit_status_uses_audit_docs_over_disk(tmp_path: Path) -> None:
+    """Hosted mode keeps audit docs in ``state_docs``, not on this
+    container's disk. When ``audit_docs`` is supplied the derivation must
+    read from it and never consult the (absent) local file -- otherwise
+    every hosted stage reports ``ready`` and the sidebar counter sticks at
+    0/N. Mirrors the ``export_overview`` audit_docs contract."""
+    root, project = _bare_project(tmp_path)
+    project.stages[0].videos.append(StageVideo(path=Path("raw/v.mp4"), role="primary"))
+    project.stages[0].time_seconds = 12.5
+    audit_dir = project.audit_path(root)  # deliberately never created on disk
+    # A save event lives only in the supplied doc (the state_docs analogue).
+    docs = {1: {"audit_events": [{"kind": "shot_detect_run"}, {"kind": "save"}]}}
+    assert stage_audit_status(project.stages[0], audit_dir, audit_docs=docs) == StageStatus.audited
+
+
+def test_stage_audit_status_audit_docs_missing_entry_is_ready(tmp_path: Path) -> None:
+    """In docs mode a stage with no doc means detection hasn't produced an
+    audit yet -> ``ready``. The local ``audit_dir`` file is never read even
+    if one happens to exist."""
+    root, project = _bare_project(tmp_path)
+    project.stages[0].videos.append(StageVideo(path=Path("raw/v.mp4"), role="primary"))
+    project.stages[0].time_seconds = 12.5
+    audit_dir = project.audit_path(root)
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    # A stale on-disk file that WOULD read as audited must be ignored when
+    # docs mode is active -- state_docs is authoritative in hosted mode.
+    (audit_dir / "stage1.json").write_text(json.dumps({"audit_events": [{"kind": "save"}]}), encoding="utf-8")
+    assert stage_audit_status(project.stages[0], audit_dir, audit_docs={}) == StageStatus.ready
+
+
+def test_stage_statuses_and_audited_count_honor_audit_docs(tmp_path: Path) -> None:
+    """``stage_statuses`` / ``audited_count`` forward ``audit_docs`` so the
+    GET-project + shooter-list endpoints report the right hosted status
+    without touching disk."""
+    root = tmp_path / "match-docs"
+    project = MatchProject.init(root, name="Docs")
+    project.stages = [StageEntry(stage_number=i, stage_name=f"S{i}", time_seconds=10.0) for i in range(1, 4)]
+    for s in project.stages:
+        s.videos.append(StageVideo(path=Path(f"raw/v{s.stage_number}.mp4"), role="primary"))
+    # No audit dir on disk at all -- purely state_docs-backed.
+    docs = {
+        1: {"audit_events": [{"kind": "save"}]},  # audited
+        2: {"audit_events": [{"kind": "shot_detect_run"}]},  # in_progress
+        # stage 3: no doc -> ready
+    }
+    statuses = project.stage_statuses(root, audit_docs=docs)
+    assert statuses == {
+        1: StageStatus.audited,
+        2: StageStatus.in_progress,
+        3: StageStatus.ready,
+    }
+    assert project.audited_count(root, audit_docs=docs) == 1
+
+
 def test_import_scoreboard_populates_stages(tmp_path: Path) -> None:
     """Dropping an SSI Scoreboard JSON populates stages, match name, and competitor."""
     root = tmp_path / "match-import"

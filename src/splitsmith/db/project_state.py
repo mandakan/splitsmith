@@ -159,6 +159,31 @@ class ProjectStateStore:
             )
         return [(row.slug, row.doc) for row in rows]
 
+    async def list_audit_docs(self, match_id: str, slug: str | None = None) -> list[tuple[str, int, dict]]:
+        """Return ``(slug, stage_number, doc)`` for audit docs in a match.
+
+        One indexed query instead of N per-stage ``load_audit`` round
+        trips -- the status/count endpoints load every stage's audit doc
+        to derive hosted-mode stage status, and doing that per-stage was
+        both the source of the "counter stuck at 0/N" bug (the disk read
+        it replaced saw nothing) and needlessly chatty. Pass ``slug`` to
+        scope to a single shooter (the GET-project / shooter-list path);
+        omit it to sweep the whole match (the recent-projects card, which
+        averages audited counts across shooters). ``slug`` and
+        ``stage_number`` are non-NULL for audit docs, so both are always
+        real values here.
+        """
+        terms = [
+            StateDocRow.user_id == self._user_id,
+            StateDocRow.match_id == match_id,
+            StateDocRow.doc_kind == _KIND_AUDIT,
+        ]
+        if slug is not None:
+            terms.append(StateDocRow.slug == slug)
+        async with self._session_factory() as session:
+            rows = (await session.execute(select(StateDocRow).where(*terms))).scalars().all()
+        return [(row.slug, row.stage_number, row.doc) for row in rows]
+
     async def delete_shooter(self, match_id: str, slug: str) -> int:
         """Delete one shooter's docs within a match; return the row count.
 

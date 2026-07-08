@@ -444,6 +444,7 @@ def stage_audit_status(
     audit_dir: Path,
     *,
     has_trim: bool | None = None,
+    audit_docs: dict[int, dict] | None = None,
 ) -> StageStatus:
     """Compute the lifecycle status of a single stage.
 
@@ -455,6 +456,17 @@ def stage_audit_status(
     cache will surface as the Audit page's PrereqGate, not as a
     different status here. Keeping this stat-light keeps the overview
     cheap to render.
+
+    ``audit_docs`` (stage_number -> audit doc) makes the derivation
+    hosted-aware: in hosted mode audit docs live in ``state_docs``, not
+    on this container's disk, so the caller loads them (via
+    ``state.load_audit`` / the bulk store query) and hands them in. When
+    ``audit_docs`` is not ``None`` the local ``audit_dir`` file is never
+    read -- a missing entry means the stage has no audit yet (``ready``).
+    ``None`` (local desktop / CLI) keeps the original on-disk read. This
+    is the same contract :meth:`MatchProject.export_overview` uses; the
+    status path was previously missed, which stuck the hosted sidebar
+    counter at 0/N.
     """
     if stage.skipped:
         return StageStatus.skipped
@@ -463,18 +475,27 @@ def stage_audit_status(
         return StageStatus.todo
     if stage.time_seconds <= 0:
         return StageStatus.partial
-    audit_file = audit_dir / f"stage{stage.stage_number}.json"
-    if not audit_file.exists():
-        # Has primary + has time, but no audit JSON means detection
-        # hasn't run yet. Beep absence falls under "ready" too -- the
-        # PrereqGate handles that distinction in-page.
-        return StageStatus.ready
-    try:
-        payload = json.loads(audit_file.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        # Corrupt audit JSON -- treat as ready so the operator can re-run
-        # detection. The Audit page will surface the read error itself.
-        return StageStatus.ready
+    if audit_docs is not None:
+        # Hosted: state_docs is authoritative. No entry -> detection
+        # hasn't produced an audit yet -> ready. The on-disk file (which
+        # may be a stale mirror or absent entirely) is deliberately
+        # ignored so the two sources can't disagree.
+        payload = audit_docs.get(stage.stage_number)
+        if payload is None:
+            return StageStatus.ready
+    else:
+        audit_file = audit_dir / f"stage{stage.stage_number}.json"
+        if not audit_file.exists():
+            # Has primary + has time, but no audit JSON means detection
+            # hasn't run yet. Beep absence falls under "ready" too -- the
+            # PrereqGate handles that distinction in-page.
+            return StageStatus.ready
+        try:
+            payload = json.loads(audit_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            # Corrupt audit JSON -- treat as ready so the operator can
+            # re-run detection. The Audit page surfaces the read error.
+            return StageStatus.ready
     events = payload.get("audit_events") or []
     saved = any(isinstance(e, dict) and e.get("kind") == "save" for e in events)
     if saved:
@@ -1032,19 +1053,24 @@ class MatchProject(BaseModel):
         # remove-video flow so it can clean up the per-stage JSON.
         return root / "audit"
 
-    def stage_statuses(self, root: Path) -> dict[int, StageStatus]:
+    def stage_statuses(
+        self, root: Path, *, audit_docs: dict[int, dict] | None = None
+    ) -> dict[int, StageStatus]:
         """Compute :class:`StageStatus` for every stage on this project.
 
         One-shot dict so the GET project endpoint can enrich every
         stage's serialized dict with its status without making the
-        client recompute. Reads one audit JSON per stage (cheap; ~12
-        stages typical) -- callers that only need ``audited`` counts
-        can use :meth:`audited_count` instead, which is the same work.
+        client recompute. Local: reads one audit JSON per stage off disk
+        (cheap; ~12 stages typical). Hosted: pass ``audit_docs``
+        (stage_number -> doc, loaded from ``state_docs``) so the status
+        reflects the saved audit instead of an absent local file -- see
+        :func:`stage_audit_status`. Callers that only need ``audited``
+        counts can use :meth:`audited_count`, which is the same work.
         """
         audit_dir = self.audit_path(root)
-        return {s.stage_number: stage_audit_status(s, audit_dir) for s in self.stages}
+        return {s.stage_number: stage_audit_status(s, audit_dir, audit_docs=audit_docs) for s in self.stages}
 
-    def audited_count(self, root: Path) -> int:
+    def audited_count(self, root: Path, *, audit_docs: dict[int, dict] | None = None) -> int:
         """Number of stages that are ``audited`` (Save has been hit).
 
         Backend-side single source of truth for "how many stages did
@@ -1052,9 +1078,16 @@ class MatchProject(BaseModel):
         or skipped" heuristic that overcounted every set-up stage.
         Skipped stages do not count as audited; they're a terminal
         state but represent operator intent to ignore, not work done.
+
+        ``audit_docs`` makes the count hosted-aware, same contract as
+        :meth:`stage_statuses`.
         """
         audit_dir = self.audit_path(root)
-        return sum(1 for s in self.stages if stage_audit_status(s, audit_dir) == StageStatus.audited)
+        return sum(
+            1
+            for s in self.stages
+            if stage_audit_status(s, audit_dir, audit_docs=audit_docs) == StageStatus.audited
+        )
 
     # ------------------------------------------------------------------
     # Video registry helpers (Sub 2 / #13)

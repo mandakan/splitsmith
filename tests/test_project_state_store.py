@@ -239,6 +239,39 @@ def test_list_project_docs_returns_slug_and_doc() -> None:
     assert docs["ada"]["raw_videos"][0]["storage_path"] == "raw/ada.mp4"
 
 
+def test_list_audit_docs_returns_slug_stage_and_doc() -> None:
+    sf, (uid,) = _engine_with_users("m@thias.se")
+    store = ProjectStateStore(sf, user_id=uid)
+    _seed_full_match(store, "brm-abc")
+    asyncio.run(store.save_audit("brm-abc", "ada", 2, {"shots": [1]}, expected_version=0))
+    asyncio.run(store.save_audit("brm-abc", "bo", 1, {"shots": [2]}, expected_version=0))
+
+    rows = asyncio.run(store.list_audit_docs("brm-abc"))
+    by_key = {(slug, stage): doc for slug, stage, doc in rows}
+    assert set(by_key) == {("ada", 1), ("ada", 2), ("bo", 1)}
+    assert by_key[("ada", 2)]["shots"] == [1]
+
+
+def test_list_audit_docs_scopes_to_slug() -> None:
+    sf, (uid,) = _engine_with_users("m@thias.se")
+    store = ProjectStateStore(sf, user_id=uid)
+    _seed_full_match(store, "brm-abc")
+    asyncio.run(store.save_audit("brm-abc", "bo", 1, {"shots": [2]}, expected_version=0))
+
+    rows = asyncio.run(store.list_audit_docs("brm-abc", "ada"))
+    assert {(slug, stage) for slug, stage, _ in rows} == {("ada", 1)}
+
+
+def test_list_audit_docs_tenant_isolation() -> None:
+    sf, (alice, bob) = _engine_with_users("alice@thias.se", "bob@thias.se")
+    a, b = ProjectStateStore(sf, user_id=alice), ProjectStateStore(sf, user_id=bob)
+    asyncio.run(a.save_audit("shared", "x", 1, {"who": "alice"}, expected_version=0))
+    asyncio.run(b.save_audit("shared", "x", 1, {"who": "bob"}, expected_version=0))
+
+    assert asyncio.run(a.list_audit_docs("shared")) == [("x", 1, {"who": "alice"})]
+    assert asyncio.run(b.list_audit_docs("shared")) == [("x", 1, {"who": "bob"})]
+
+
 def test_delete_match_removes_all_kinds() -> None:
     sf, (uid,) = _engine_with_users("m@thias.se")
     store = ProjectStateStore(sf, user_id=uid)
