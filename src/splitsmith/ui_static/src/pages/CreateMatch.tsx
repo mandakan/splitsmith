@@ -34,6 +34,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { DirectoryPickerModal } from "@/components/DirectoryPickerModal";
+import { CompetitorRow } from "@/components/scoreboard/CompetitorRow";
 import { Brand, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import {
@@ -1006,53 +1007,6 @@ function DivisionAccordion({
       </div>
       {open ? children : null}
     </div>
-  );
-}
-
-function CompetitorRow({
-  competitor,
-  checked,
-  onToggle,
-}: {
-  competitor: ScoreboardMatchCompetitor;
-  checked: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <label
-      className={cn(
-        "grid w-full cursor-pointer items-center gap-3 border-b border-rule px-4 py-2.5 transition-colors last:border-b-0",
-        checked ? "bg-led-tint/40" : "hover:bg-surface-2",
-      )}
-      style={{ gridTemplateColumns: "24px 1fr" }}
-    >
-      <span className="flex items-center justify-center">
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={onToggle}
-          aria-label={`Add ${competitor.name}`}
-          className="size-4 cursor-pointer accent-led"
-        />
-      </span>
-      <span className="min-w-0">
-        <span className="block truncate text-sm font-medium text-ink">
-          {competitor.name}
-        </span>
-        <span className="mt-0.5 flex flex-wrap gap-x-2 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
-          {[competitor.club, competitor.division]
-            .filter(Boolean)
-            .map((s, i, arr) => (
-              <span key={i}>
-                {s}
-                {i < arr.length - 1 && (
-                  <span className="ml-2 text-whisper">&middot;</span>
-                )}
-              </span>
-            ))}
-        </span>
-      </span>
-    </label>
   );
 }
 
