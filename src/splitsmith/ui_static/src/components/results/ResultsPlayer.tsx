@@ -25,6 +25,7 @@ import {
 } from "react";
 
 import type { CoachShot } from "@/lib/api";
+import { ShotTicker } from "@/components/results/ShotTicker";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { splitBucket } from "@/lib/splits";
 
@@ -224,6 +225,7 @@ export function ResultsPlayer({
           onError={() => setVideoError(true)}
           className="aspect-video w-full bg-black"
         />
+        <ShotTicker shots={shots} beepTime={beepTime} time={time} />
         {videoError ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface-3">
             <p className="px-4 text-center text-sm text-ink-2">Video failed to load</p>
