@@ -14,7 +14,7 @@
  *
  * Read-only by contract: part of the future share-link surface.
  */
-import { Maximize, Pause, Play } from "lucide-react";
+import { Maximize, Minimize, Pause, Play } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -28,6 +28,12 @@ import type { CoachShot } from "@/lib/api";
 import { ShotTicker } from "@/components/results/ShotTicker";
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { splitBucket } from "@/lib/splits";
+import { cn } from "@/lib/utils";
+
+/** How the player card is currently presented. "native" is the
+ *  Fullscreen API top layer; "faux" is a fixed-inset takeover for
+ *  browsers without container fullscreen (iPhone before iOS 16.4). */
+export type FullscreenMode = "off" | "native" | "faux";
 
 interface ResultsPlayerProps {
   src: string;
@@ -36,6 +42,11 @@ interface ResultsPlayerProps {
   videoRef: RefObject<HTMLVideoElement | null>;
   onTimeChange: (t: number) => void;
   onPlayingChange?: (playing: boolean) => void;
+  /** Fired on fullscreen mode changes. The page needs to know about
+   *  "faux" to lift its sticky wrapper's z-index - the fixed card would
+   *  otherwise be trapped under the shell header (see the trapped-z
+   *  warning on the elevation tokens). */
+  onFullscreenChange?: (mode: FullscreenMode) => void;
 }
 
 function clamp(t: number, lo: number, hi: number): number {
@@ -57,6 +68,7 @@ export function ResultsPlayer({
   videoRef,
   onTimeChange,
   onPlayingChange,
+  onFullscreenChange,
 }: ResultsPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState<number | null>(null);
@@ -186,25 +198,86 @@ export function ResultsPlayer({
   // elapsed readout in the transport row.
   const stageTime = shots.length > 0 ? shots[shots.length - 1].time_from_beep : null;
 
-  // iPhone Safari has no requestFullscreen on video elements (it ships
-  // webkitEnterFullscreen instead); feature-test so neither path throws.
-  const enterFullscreen = useCallback(() => {
-    const v = videoRef.current;
-    if (!v) return;
-    if (typeof v.requestFullscreen === "function") {
-      void v.requestFullscreen().catch(() => {});
+  // Container fullscreen keeps the ticker + transport + scrub alive.
+  // Native Fullscreen API where it exists (Android, desktop, iOS
+  // 16.4+); otherwise a "faux" fixed-inset takeover so older iPhones
+  // get the same experience. The DOM is restyled in place in both
+  // modes - the video element is never re-parented (that resets
+  // playback).
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const [fullscreen, setFullscreen] = useState<FullscreenMode>("off");
+
+  const setFullscreenMode = useCallback(
+    (m: FullscreenMode) => {
+      setFullscreen(m);
+      onFullscreenChange?.(m);
+    },
+    [onFullscreenChange],
+  );
+
+  const toggleFullscreen = useCallback(() => {
+    const el = wrapperRef.current;
+    if (!el) return;
+    if (fullscreen === "native") {
+      void document.exitFullscreen().catch(() => {});
       return;
     }
-    try {
-      (v as HTMLVideoElement & { webkitEnterFullscreen?: () => void }).webkitEnterFullscreen?.();
-    } catch { /* ignore */ }
-  }, [videoRef]);
+    if (fullscreen === "faux") {
+      setFullscreenMode("off");
+      return;
+    }
+    if (typeof el.requestFullscreen === "function") {
+      el.requestFullscreen()
+        .then(() => setFullscreenMode("native"))
+        .catch(() => setFullscreenMode("faux"));
+    } else {
+      setFullscreenMode("faux");
+    }
+  }, [fullscreen, setFullscreenMode]);
+
+  // Sync native exits (Esc, swipe, system UI).
+  useEffect(() => {
+    const onChange = () => {
+      if (document.fullscreenElement === wrapperRef.current) {
+        setFullscreenMode("native");
+      } else if (fullscreen === "native") {
+        setFullscreenMode("off");
+      }
+    };
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, [fullscreen, setFullscreenMode]);
+
+  // Faux mode: Escape exits, and the page behind must not scroll.
+  useEffect(() => {
+    if (fullscreen !== "faux") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setFullscreenMode("off");
+    };
+    document.addEventListener("keydown", onKey);
+    const prev = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.documentElement.style.overflow = prev;
+    };
+  }, [fullscreen, setFullscreenMode]);
+
+  const isFs = fullscreen !== "off";
 
   return (
-    <div className="overflow-hidden rounded-2xl border border-rule-strong bg-surface p-3">
+    <div
+      ref={wrapperRef}
+      className={cn(
+        "overflow-hidden bg-surface",
+        isFs
+          ? "fixed inset-0 z-takeover flex flex-col bg-black p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-[max(0.75rem,env(safe-area-inset-top))]"
+          : "rounded-2xl border border-rule-strong p-3",
+      )}
+    >
       {/* Video box. The element stays mounted through errors so the ref
           survives and retry can call load() on it. */}
-      <div className="relative">
+      <div className={cn("relative", isFs && "min-h-0 flex-1")}>
         <video
           ref={videoRef}
           src={src}
@@ -223,7 +296,7 @@ export function ResultsPlayer({
             seekToWindowStart();
           }}
           onError={() => setVideoError(true)}
-          className="aspect-video w-full bg-black"
+          className={cn("w-full bg-black", isFs ? "h-full object-contain" : "aspect-video")}
         />
         <ShotTicker shots={shots} beepTime={beepTime} time={time} />
         {videoError ? (
@@ -261,11 +334,11 @@ export function ResultsPlayer({
         </span>
         <button
           type="button"
-          onClick={enterFullscreen}
-          aria-label="Fullscreen"
+          onClick={toggleFullscreen}
+          aria-label={isFs ? "Exit fullscreen" : "Fullscreen"}
           className="ml-auto inline-flex size-11 shrink-0 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
         >
-          <Maximize className="size-4" />
+          {isFs ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
         </button>
       </div>
 
