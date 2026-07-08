@@ -45,6 +45,7 @@ _SCOPED_PREFIXES = (
     "/api/shooters/",
     "/api/stages/",
     "/api/match/shooters",
+    "/api/match/scoreboard",
     "/api/match/beep-queue",
     "/api/match/videos",
     "/api/project",
@@ -675,6 +676,83 @@ def test_create_from_scoreboard_creates_n_shooters_from_local(
     # and make len(match.stages)-based coverage counts read 0.
     assert len(match_json["stages"]) == len(project["stages"])
     assert {s["stage_number"] for s in match_json["stages"]} == {s["stage_number"] for s in project["stages"]}
+
+
+def _connect_fixture_shooter(tmp_path: Path):
+    """Scaffold a match with a shooter whose name matches a fixture
+    competitor, stage the offline match JSON, and return
+    ``(client, match_root, shooter_slug, competitor)`` ready to connect."""
+    import json as _json
+
+    fixture = _load_v1_match_fixture()
+    competitor = fixture["competitors"][0]  # Viktor Bergendahl / Production Optics
+
+    match_root = tmp_path / "match"
+    app = _match_create_app(project_root=match_root, project_name="Manual")
+    client = _MatchClient(app)
+
+    add = client.post("/api/match/shooters", json={"name": competitor["name"]})
+    assert add.status_code == 200, add.text
+    slug = next(s["slug"] for s in add.json()["shooters"] if s["name"] == competitor["name"])
+
+    # Pre-place the match fixture so _resolve_scoreboard_client picks
+    # LocalJsonScoreboard for the match root instead of SsiHttpClient.
+    scoreboard_dir = match_root / "scoreboard"
+    scoreboard_dir.mkdir(parents=True, exist_ok=True)
+    (scoreboard_dir / "match.json").write_text(_json.dumps(fixture), encoding="utf-8")
+    return client, match_root, slug, competitor
+
+
+def test_connect_match_links_and_proposes(tmp_path: Path) -> None:
+    import json as _json
+
+    client, match_root, slug, competitor = _connect_fixture_shooter(tmp_path)
+
+    resp = client.post(
+        "/api/match/scoreboard/connect",
+        json={"match_id": 27190, "content_type": 22},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "proposals" in body and "stage_mismatch" in body
+    # The exact-name shooter is proposed against its fixture competitor.
+    proposal = next(p for p in body["proposals"] if p["slug"] == slug)
+    assert proposal["competitor_id"] == competitor["id"]
+    assert proposal["shooter_id"] == competitor["shooterId"]
+
+    # Every shooter's project now carries the match link.
+    project = _json.loads((match_root / "shooters" / slug / "project.json").read_text(encoding="utf-8"))
+    assert project["scoreboard_match_id"] == "27190"
+    assert project["scoreboard_content_type"] == 22
+
+
+def test_reconcile_applies_links(tmp_path: Path) -> None:
+    import json as _json
+
+    client, match_root, slug, competitor = _connect_fixture_shooter(tmp_path)
+    connect = client.post(
+        "/api/match/scoreboard/connect",
+        json={"match_id": 27190, "content_type": 22},
+    )
+    assert connect.status_code == 200, connect.text
+
+    resp = client.post(
+        "/api/match/scoreboard/reconcile",
+        json={
+            "links": [
+                {
+                    "slug": slug,
+                    "shooter_id": competitor["shooterId"],
+                    "competitor_id": competitor["id"],
+                }
+            ]
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    project = _json.loads((match_root / "shooters" / slug / "project.json").read_text(encoding="utf-8"))
+    assert project["selected_competitor_id"] == competitor["id"]
+    assert project["selected_shooter_id"] == competitor["shooterId"]
 
 
 def test_scoreboard_upload_legacy_examples_auto_merges_stage_times(tmp_path: Path) -> None:

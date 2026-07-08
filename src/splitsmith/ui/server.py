@@ -197,6 +197,7 @@ from .scoreboard import (
     StageTimesUnavailable,
 )
 from .scoreboard.local import DEFAULT_MATCH_FILENAME, DEFAULT_SCOREBOARD_DIRNAME
+from .scoreboard.reconcile import CompetitorRef, LocalShooter, propose_shooter_links
 
 
 def _ensure_source_reachable(stage_number: int | None, source: Path) -> None:
@@ -3147,6 +3148,33 @@ class CreateMatchScoreboardRequest(BaseModel):
     match_id: int
     content_type: int
     competitors: list[CreateMatchCompetitorPick]
+
+
+class ConnectMatchRequest(BaseModel):
+    """Body for POST /api/match/scoreboard/connect.
+
+    Attaches an existing (possibly manually-created) match to an SSI
+    Scoreboard match after the fact. Sets the link on the match container
+    and every shooter's project, then returns name-based link proposals
+    for the operator to confirm.
+    """
+
+    match_id: int
+    content_type: int
+
+
+class ReconcileLink(BaseModel):
+    """One confirmed local-shooter -> scoreboard-competitor binding."""
+
+    slug: str
+    shooter_id: int
+    competitor_id: int
+
+
+class ReconcileRequest(BaseModel):
+    """Body for POST /api/match/scoreboard/reconcile."""
+
+    links: list[ReconcileLink]
 
 
 class ShooterCameraInfo(BaseModel):
@@ -11117,6 +11145,109 @@ def create_app(
                     slug,
                     exc.detail,
                 )
+        return list_match_shooters()
+
+    @app.post("/api/match/scoreboard/connect")
+    def scoreboard_connect_match(req: ConnectMatchRequest) -> JSONResponse:
+        """Link an existing match to an SSI Scoreboard match after creation.
+
+        Persists ``scoreboard_match_id`` + ``scoreboard_content_type`` on the
+        match container and mirrors them onto every shooter's project so the
+        per-shooter merge/refresh paths can pull scores. Stage shells are
+        adopted from the scoreboard ONLY when the local match carries no real
+        stages yet (all placeholders) and the stage counts line up -- a
+        mismatch never rewrites local stages, trims, or audits; scores attach
+        by stage number and the caller gets ``stage_mismatch=True`` to warn.
+
+        Returns name-based ``proposals`` for the operator to confirm via the
+        reconcile endpoint; this route never auto-applies a shooter link.
+        """
+        match_root, match = _resolve_match_context()
+        with _resolve_scoreboard_client(match_root) as client:
+            try:
+                match_data = client.get_match(req.content_type, req.match_id)
+            except MatchNotFound as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            except ScoreboardError as exc:
+                _raise_scoreboard_http(exc)
+
+        # Measure BEFORE any adoption so the response reports what the operator
+        # had locally, which is what the mismatch warning is about.
+        local_stage_count = len(match.stages)
+        sb_stage_count = len(match_data.stages)
+        # A warning is warranted only when the operator has real local stages
+        # whose count differs -- an empty match adopts cleanly below.
+        stage_mismatch = local_stage_count > 0 and sb_stage_count != local_stage_count
+
+        match.scoreboard_match_id = str(req.match_id)
+        match.scoreboard_content_type = req.content_type
+        # Adopt stage names/rounds only when it can't clobber real structure:
+        # an empty stage list, or an all-placeholder list whose count matches.
+        placeholders_only = all(s.placeholder for s in match.stages)
+        if not match.stages or (placeholders_only and not stage_mismatch):
+            match.stages_from_match_data(match_data)
+        match.save(match_root)
+
+        competitors = [
+            CompetitorRef(
+                competitor_id=c.id,
+                shooter_id=c.shooterId,
+                name=c.name,
+                division=c.division,
+            )
+            for c in match_data.competitors
+        ]
+        local_shooters: list[LocalShooter] = []
+        for slug in match.shooters:
+            legacy = state.shooter_project(slug)
+            legacy.scoreboard_match_id = str(req.match_id)
+            legacy.scoreboard_content_type = req.content_type
+            legacy.save(state.shooter_root(slug))
+            local_shooters.append(LocalShooter(slug=slug, name=legacy.competitor_name or slug, division=None))
+        proposals = propose_shooter_links(local_shooters, competitors)
+        return JSONResponse(
+            {
+                "stage_mismatch": stage_mismatch,
+                "local_stage_count": local_stage_count,
+                "scoreboard_stage_count": sb_stage_count,
+                "proposals": [p.model_dump() for p in proposals],
+            }
+        )
+
+    @app.post("/api/match/scoreboard/reconcile", response_model=ShooterListResponse)
+    def scoreboard_reconcile(req: ReconcileRequest) -> ShooterListResponse:
+        """Apply confirmed shooter -> competitor links for a linked match.
+
+        Mirrors the per-shooter select-shooter endpoint for each link: pins
+        the ids on the shooter's project and merges stage times so detection
+        picks up its expected-rounds prior. A merge failure is non-fatal (the
+        link is still persisted); the operator can refresh later. Local names
+        are left untouched -- reconcile binds identity, it doesn't rename.
+        """
+        _resolve_match_context()
+        for link in req.links:
+            legacy = state.shooter_project(link.slug)
+            shooter_root = state.shooter_root(link.slug)
+            legacy.selected_shooter_id = link.shooter_id
+            legacy.selected_competitor_id = link.competitor_id
+            legacy.save(shooter_root)
+            if legacy.scoreboard_match_id and legacy.scoreboard_content_type is not None:
+                try:
+                    _fetch_and_merge_stage_times(
+                        shooter_root,
+                        legacy,
+                        legacy.scoreboard_content_type,
+                        int(legacy.scoreboard_match_id),
+                        link.competitor_id,
+                    )
+                except HTTPException as exc:
+                    # Non-fatal: the link persists even if stage times aren't
+                    # fetchable yet (mirrors create-from-scoreboard).
+                    logger.warning(
+                        "stage-times merge failed for %s: %s",
+                        link.slug,
+                        exc.detail,
+                    )
         return list_match_shooters()
 
     @app.delete("/api/match/shooters/{slug}", response_model=ShooterListResponse)
