@@ -1,4 +1,5 @@
 import type { StageStatus } from "@/lib/api";
+import { isTerminal } from "@/lib/stageStatus";
 import { StageDot } from "@/components/ui/StageDot";
 import { cn } from "@/lib/utils";
 
@@ -44,7 +45,7 @@ export function StageChipRail({ stages, activeStage, onPick }: StageChipRailProp
       <div className="flex shrink-0 items-center gap-0.5">
         {stages.map((s) => {
           const on = s.stageNumber === activeStage;
-          const isTerminal = s.status === "audited" || s.status === "skipped";
+          const terminal = isTerminal(s.status);
           return (
             <button
               key={s.stageNumber}
@@ -56,7 +57,7 @@ export function StageChipRail({ stages, activeStage, onPick }: StageChipRailProp
                 "inline-flex shrink-0 items-center gap-2.5 whitespace-nowrap rounded-md border px-3 py-2 font-display text-xs font-bold uppercase tracking-[0.04em] transition-colors",
                 on
                   ? "border-led-deep bg-led-tint text-ink"
-                  : isTerminal
+                  : terminal
                     ? "border-transparent text-ink-2 hover:bg-surface-2"
                     : "border-transparent text-muted hover:bg-surface-2",
               )}

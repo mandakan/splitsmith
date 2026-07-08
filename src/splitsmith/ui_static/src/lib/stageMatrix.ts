@@ -11,6 +11,7 @@
 
 import type { ShooterListEntry, StageEntry, StageStatus } from "@/lib/api";
 import {
+  countsAsDone,
   isTerminal,
   statusTone,
   type StageStatusTone,
@@ -79,7 +80,11 @@ export function buildStageMatrix(
       stageName: stage.stage_name,
       cells,
       rollupTone: rollupTone(cells),
-      auditedCount: cells.filter((c) => c.status === "audited").length,
+      // Progress-counter numerator: audited-only, via the shared rule so
+      // the Home "X of Y audited" tally can't drift from the sidebar.
+      // (Row-level "fully done" bucketing below still uses isTerminal --
+      // a different question: is every shooter's cell closed out.)
+      auditedCount: cells.filter((c) => countsAsDone(c.status)).length,
     };
   });
 }

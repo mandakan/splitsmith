@@ -1280,6 +1280,26 @@ class AppState:
         except (OSError, json.JSONDecodeError) as exc:
             raise HTTPException(status_code=500, detail=f"audit read failed: {exc}") from exc
 
+    def load_audit_docs(self, slug: str) -> dict[int, dict] | None:
+        """Per-stage audit docs for one shooter, for hosted-aware status.
+
+        Returns ``{stage_number: doc}`` in hosted mode (one bulk
+        ``state_docs`` query), or ``None`` in local mode so the status
+        helpers fall back to their on-disk read. This is the single
+        loader the status/count endpoints hand to
+        :meth:`MatchProject.stage_statuses` /
+        :meth:`MatchProject.audited_count` -- keeping the state_docs
+        access in one place is what stops the disk-vs-state_docs
+        divergence from creeping back (the sidebar counter bug). Relies
+        on ``current_match_id`` being set by the ``/api/matches/{id}/...``
+        alias middleware, same as :meth:`load_audit`.
+        """
+        mid = current_match_id.get()
+        store = self.project_state
+        if store is None or mid is None:
+            return None
+        return {stage_number: doc for _slug, stage_number, doc in run_sync(store.list_audit_docs(mid, slug))}
+
     def save_audit(self, slug: str, stage_number: int, doc: dict, *, version: int) -> int:
         """Persist a stage's audit doc; return the new version.
 
@@ -4350,8 +4370,21 @@ async def _enrich_recent_project_hosted(
     detail.match_date = match_doc.get("match_date")  # JSON doc -> ISO str | None
     detail.manual = match_doc.get("scoreboard_match_id") is None
 
+    # Every audit doc for the match in one query, grouped by shooter, so
+    # the card's audited count is accurate in hosted mode. This used to be
+    # hard-coded to 0 ("not worth loading for a list view"), which meant a
+    # fully-audited match still read as in-progress on the picker -- the
+    # same disk-vs-state_docs blind spot the sidebar had. One indexed query
+    # per match is cheap; a shooter with no audits gets an empty dict ->
+    # audited_count 0 (docs mode: every stage reads "ready").
+    audit_by_slug: dict[str, dict[int, dict]] = {}
+    for a_slug, stage_number, doc in await state.project_state.list_audit_docs(rp.match_id):
+        audit_by_slug.setdefault(a_slug, {})[stage_number] = doc
+
     names: list[str] = []
     video_total = 0
+    audited_total = 0
+    project_root = Path(rp.path)  # unused by audited_count in docs mode
     for slug in shooters:
         pdoc, _ = await state.project_state.load_project(rp.match_id, slug)
         if pdoc is None:
@@ -4361,14 +4394,21 @@ async def _enrich_recent_project_hosted(
             proj = MatchProject.model_validate(pdoc)
             names.append(proj.competitor_name or slug)
             video_total += len(proj.all_videos())
+            audited_total += proj.audited_count(project_root, audit_docs=audit_by_slug.get(slug, {}))
         except Exception:  # noqa: BLE001 -- never break the listing on one bad doc
             names.append(slug)
     detail.shooter_names = names
     detail.video_count = video_total
-    # Per-stage audited counts live in separate state_docs rows; loading
-    # them all for a list view isn't worth it, so leave stages_audited at 0
-    # (the Audit screen shows the real per-stage status).
-    detail.status = "awaiting_footage" if video_total == 0 else "in_progress"
+    detail.stages_audited = audited_total // max(len(shooters), 1) if shooters else 0
+    # Mirror the local enricher's status derivation (minus "archived",
+    # which needs an on-disk mtime we don't have here): all stages audited
+    # -> exported; no footage -> awaiting_footage; otherwise in_progress.
+    if detail.stage_count > 0 and detail.stages_audited >= detail.stage_count:
+        detail.status = "exported"
+    elif video_total == 0:
+        detail.status = "awaiting_footage"
+    else:
+        detail.status = "in_progress"
     return detail
 
 
@@ -5703,7 +5743,13 @@ def create_app(
 
         project = state.shooter_project(slug)
         root = state.shooter_root(slug)
-        statuses = project.stage_statuses(root)
+        # Hosted: audit docs live in state_docs, not on this container's
+        # disk, so load them and derive status from there -- otherwise
+        # every stage reads as "ready" and the sidebar counter sticks at
+        # 0/N (and the anonymous share/Results view shows no audited
+        # stages to stream). Local: load_audit_docs returns None and the
+        # helper reads the on-disk audit files as before.
+        statuses = project.stage_statuses(root, audit_docs=state.load_audit_docs(slug))
         payload = project.model_dump(mode="json")
         # Compute proxy_ready set once per request - one storage.list call
         # covers all videos. Local mode (storage is None) reports True for
@@ -10775,7 +10821,9 @@ def create_app(
         # One pass: derive both the per-stage status list and the audited
         # count from a single ``stage_statuses`` walk rather than also
         # calling ``audited_count`` (which repeats the same audit-dir read).
-        stage_status_map = legacy.stage_statuses(shooter_root)
+        stage_status_map = legacy.stage_statuses(
+            shooter_root, audit_docs=state.load_audit_docs(shooter_root.name)
+        )
         stages_audited = sum(1 for st in stage_status_map.values() if st == StageStatus.audited)
         stages_missing_trim = 0
         for s in legacy.stages:

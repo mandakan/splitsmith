@@ -199,6 +199,9 @@ export function Audit() {
   const beepChipRef = useRef<BeepStatusChipHandle>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  // Focus target for the editor shell. Focused on mount so the page owns
+  // keyboard focus immediately -- see the focus effect below.
+  const editorRootRef = useRef<HTMLDivElement | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeVideoIndex, setActiveVideoIndex] = useState(0);
@@ -1506,6 +1509,24 @@ export function Audit() {
     return () => flushAltNudge();
   }, [stageNumber, flushAltNudge]);
 
+  // Pull keyboard focus into the editor once it mounts (and on each stage
+  // change) so the global ``window`` keydown shortcuts are delivered to
+  // the page right away. Browser accelerators like Cmd+1 are only
+  // cancelable when the document -- not the browser chrome -- owns focus;
+  // without this the page never saw Cmd+1 until the user first clicked the
+  // video, so the browser switched tabs instead of the handler zooming
+  // (the reported bug). Guarded so it never yanks focus out of a text
+  // field the operator is mid-typing in.
+  const editorReady = stage != null && primary != null;
+  useEffect(() => {
+    if (!editorReady) return;
+    const root = editorRootRef.current;
+    if (!root) return;
+    const active = document.activeElement as HTMLElement | null;
+    if (active && active !== document.body && isTypingTextTarget(active)) return;
+    root.focus({ preventScroll: true });
+  }, [stageNumber, editorReady]);
+
   // Pin the served file to either trim or proxy for the lifetime of
   // this <video> element. Without this, a background trim job that
   // completes mid-playback would flip the server's auto-pick from
@@ -1635,7 +1656,11 @@ export function Audit() {
   const prereqShouldShow = prereqActive;
 
   return (
-    <div className="relative flex min-h-full flex-col gap-4 px-7 pb-24 pt-5 text-ink">
+    <div
+      ref={editorRootRef}
+      tabIndex={-1}
+      className="relative flex min-h-full flex-col gap-4 px-7 pb-24 pt-5 text-ink outline-none"
+    >
       {stage && primary ? (
         <>
           {/* Stage chip rail. Audit / Compare / Coach view switching

@@ -82,12 +82,28 @@ export function statusLabel(status: StageStatus): string {
 }
 
 /** ``true`` when the stage represents work the operator has finished --
- *  audited or explicitly skipped. The match-overview progress bar /
- *  "N of 12 done" counter uses this so skipped stages still count as
- *  closed out (the operator decided not to audit them, which is a
- *  decision, not pending work). */
+ *  audited or explicitly skipped. Used for "next up" selection and
+ *  closed-out styling (a skipped stage should not be highlighted as the
+ *  next thing to do). NOT the progress-counter rule -- see
+ *  ``countsAsDone`` for that. */
 export function isTerminal(status: StageStatus): boolean {
   return status === "audited" || status === "skipped";
+}
+
+/** ``true`` when a stage counts toward the "N of M" progress tally.
+ *
+ *  Product decision (2026-07-08): ONLY ``audited`` stages count. A
+ *  skipped stage is a deliberate non-audit, so it stays out of the
+ *  numerator (the denominator is still the full stage list -- a match
+ *  with skips caps below 100%). This is the single rule every progress
+ *  counter reads -- sidebar, Home cards, chip strip -- so the surfaces
+ *  can't drift apart again (they previously disagreed: the sidebar
+ *  counted audited+skipped while Home counted audited-only). Distinct
+ *  from ``isTerminal``, which also treats ``skipped`` as closed out for
+ *  next-up / styling. If the rule should ever include skipped, change it
+ *  HERE only. */
+export function countsAsDone(status: StageStatus): boolean {
+  return status === "audited";
 }
 
 /** ``true`` when the stage is the natural "next up" candidate the

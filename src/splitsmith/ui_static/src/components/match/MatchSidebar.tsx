@@ -20,6 +20,7 @@ import { NavLink, useLocation } from "react-router-dom";
 
 import { JobsSurface } from "@/components/Jobs";
 import { type StageStatus } from "@/lib/api";
+import { countsAsDone } from "@/lib/stageStatus";
 import { StageDot } from "@/components/ui/StageDot";
 import { cn } from "@/lib/utils";
 import { FOOTAGE_HINT, matchNavItems } from "./navItems";
@@ -121,12 +122,11 @@ export function MatchSidebar({
   // Without a match id we fall back to the bare paths -- legacy routes
   // in App.tsx still resolve them, so this stays backwards compatible.
   const base = matchId ? `/match/${matchId}` : "";
-  // Sidebar header shows audited / total. Skipped stages count as
-  // closed out (operator made a decision) but read as audited in the
-  // tally; this matches the Home progress bar.
-  const audited = stages.filter(
-    (s) => s.status === "audited" || s.status === "skipped",
-  ).length;
+  // Sidebar header shows audited / total. Only AUDITED stages count
+  // toward the tally (skipped stays out of the numerator) -- the shared
+  // ``countsAsDone`` rule keeps this in lockstep with the Home progress
+  // cards, which this used to silently disagree with.
+  const audited = stages.filter((s) => countsAsDone(s.status)).length;
   const total = stages.length;
 
   return (
