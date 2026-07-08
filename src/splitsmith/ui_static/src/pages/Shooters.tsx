@@ -22,19 +22,32 @@ import {
   CheckCircle2,
   Plus,
   RefreshCw,
+  Search,
   Star,
   Trash2,
   UserPlus,
+  X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useNavigate,
+  useOutletContext,
+  useSearchParams,
+} from "react-router-dom";
 
+import type { MatchShellOutletContext } from "@/components/match/MatchShell";
+import { CompetitorRow } from "@/components/scoreboard/CompetitorRow";
+import {
+  ConnectMatchButton,
+  ConnectMatchDialog,
+} from "@/components/scoreboard/ConnectMatchDialog";
 import { Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/useConfirm";
 import {
   ApiError,
   api,
+  type ScoreboardMatchCompetitor,
   type ShooterCameraInfo,
   type ShooterListEntry,
   type ShooterListResponse,
@@ -112,6 +125,7 @@ export function Shooters() {
   const navigate = useNavigate();
   const confirm = useConfirm();
   const href = useMatchHref();
+  const { project, refresh } = useOutletContext<MatchShellOutletContext>();
   const [searchParams] = useSearchParams();
   const pickSection = PICK_SECTION_LABELS[searchParams.get("pick") ?? ""] ?? null;
   const [data, setData] = useState<ShooterListResponse | null>(null);
@@ -119,6 +133,94 @@ export function Shooters() {
   const [busy, setBusy] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState("");
+  // Roster picker (#598): when the match is scoreboard-linked, add-shooter
+  // defaults to picking an unclaimed competitor instead of typing a name
+  // from scratch. ``manualRoster`` lets the operator opt into the plain
+  // name form anyway (imported reference shooters, walk-ons not yet on
+  // the scoreboard, etc).
+  const scoreboardMatchId = project?.scoreboard_match_id ?? null;
+  const scoreboardContentType = project?.scoreboard_content_type ?? null;
+  const isLinked = scoreboardMatchId != null && scoreboardContentType != null;
+  const [manualRoster, setManualRoster] = useState(false);
+  const [roster, setRoster] = useState<ScoreboardMatchCompetitor[] | null>(
+    null,
+  );
+  const [rosterLoading, setRosterLoading] = useState(false);
+  const [rosterError, setRosterError] = useState<string | null>(null);
+  const [rosterFilter, setRosterFilter] = useState("");
+  const [pickingId, setPickingId] = useState<number | null>(null);
+  // Connect-to-scoreboard flow (#598): shown only for a match that isn't
+  // linked yet. Lives in a modal since it's a two-step wizard (search ->
+  // confirm mapping) that doesn't belong inline in the page flow.
+  const [connectOpen, setConnectOpen] = useState(false);
+
+  useEffect(() => {
+    if (scoreboardMatchId == null || scoreboardContentType == null) {
+      setRoster(null);
+      return;
+    }
+    let alive = true;
+    setRosterLoading(true);
+    setRosterError(null);
+    api
+      .getScoreboardMatchDataUnbound(
+        scoreboardContentType,
+        Number(scoreboardMatchId),
+      )
+      .then((match) => {
+        if (!alive) return;
+        setRoster(match.competitors);
+      })
+      .catch((e) => {
+        if (!alive) return;
+        setRoster(null);
+        setRosterError(e instanceof ApiError ? e.detail : String(e));
+      })
+      .finally(() => {
+        if (alive) setRosterLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [scoreboardMatchId, scoreboardContentType]);
+
+  // Competitors already claimed by a local shooter never show up as
+  // pickable -- picking them again would just re-run the same bind.
+  const claimedCompetitorIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const s of data?.shooters ?? []) {
+      if (s.selected_competitor_id != null) ids.add(s.selected_competitor_id);
+    }
+    return ids;
+  }, [data]);
+
+  const availableRoster = useMemo(() => {
+    const q = rosterFilter.trim().toLowerCase();
+    return (roster ?? []).filter((c) => {
+      if (claimedCompetitorIds.has(c.id)) return false;
+      if (!q) return true;
+      const hay = `${c.name} ${c.club ?? ""} ${c.division ?? ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [roster, claimedCompetitorIds, rosterFilter]);
+
+  async function pickCompetitor(c: ScoreboardMatchCompetitor) {
+    setPickingId(c.id);
+    setError(null);
+    try {
+      const next = await api.addMatchShooter({
+        name: c.name,
+        division: c.division,
+        selected_shooter_id: c.shooterId,
+        selected_competitor_id: c.id,
+      });
+      setData(next);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setPickingId(null);
+    }
+  }
 
   const reload = useCallback(async () => {
     setError(null);
@@ -208,7 +310,18 @@ export function Shooters() {
             coverage.
           </p>
         </div>
+        {!isLinked && (
+          <ConnectMatchButton onClick={() => setConnectOpen(true)} />
+        )}
       </div>
+
+      {!isLinked && (
+        <div className="mb-4 rounded-md border border-rule-strong bg-surface-2 px-3 py-2 text-sm text-ink-2">
+          Not linked to the scoreboard yet -- connect it to pull official
+          stage scores and give shot detection an expected-rounds prior
+          for every shooter.
+        </div>
+      )}
 
       {pickSection && (
         <div className="mb-4 rounded-md border border-rule-strong bg-surface-2 px-3 py-2 text-sm text-ink">
@@ -280,35 +393,124 @@ export function Shooters() {
             <UserPlus className="size-4 text-led" />
             New shooter
           </div>
-          <p className="mb-4 text-[0.8125rem] text-muted">
-            Add a squadmate by name; footage gets attached on the Ingest
-            page once you pick their folder.
-          </p>
-          <div className="flex flex-wrap items-stretch gap-2.5">
-            <input
-              type="text"
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Johan Larsson"
-              className="flex-1 min-w-[260px] rounded-md border border-rule bg-surface-3 px-3.5 py-2.5 text-sm text-ink outline-none focus:border-led focus:shadow-[0_0_0_3px_var(--color-led-tint)]"
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void add();
-              }}
-            />
-            <Button
-              type="button"
-              onClick={() => void add()}
-              disabled={adding || !newName.trim()}
-              className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
-            >
-              <Plus className="size-3.5" />
-              <span className="font-display uppercase tracking-[0.08em]">
-                {adding ? "Adding..." : "Add shooter"}
-              </span>
-            </Button>
-          </div>
+
+          {isLinked && !manualRoster ? (
+            <>
+              <p className="mb-4 text-[0.8125rem] text-muted">
+                This match is linked to the scoreboard -- pick a competitor
+                below to add them with their scoreboard identity already
+                bound, so their splits get an expected-rounds prior for
+                free.
+              </p>
+              {rosterError && (
+                <div className="mb-3 rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
+                  {rosterError}
+                </div>
+              )}
+              <label className="mb-3 flex min-h-10 items-center gap-2.5 rounded-lg border border-rule bg-surface-3 px-3.5 py-2 transition-colors focus-within:border-led focus-within:bg-bg-glow focus-within:shadow-[0_0_0_3px_var(--color-led-tint)]">
+                <Search aria-hidden className="size-4 text-subtle" />
+                <input
+                  type="text"
+                  value={rosterFilter}
+                  onChange={(e) => setRosterFilter(e.target.value)}
+                  placeholder="Filter by name, club, or division..."
+                  className="flex-1 bg-transparent text-sm text-ink outline-none placeholder:text-subtle"
+                />
+                {rosterFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setRosterFilter("")}
+                    className="rounded p-0.5 text-subtle hover:bg-surface-2 hover:text-ink"
+                    aria-label="Clear filter"
+                  >
+                    <X className="size-3.5" />
+                  </button>
+                )}
+              </label>
+              <div className="max-h-80 overflow-y-auto rounded-[10px] border border-rule bg-bg-glow">
+                {rosterLoading ? (
+                  <div className="px-4 py-8 text-center font-mono text-xs uppercase tracking-[0.08em] text-muted">
+                    Loading roster from scoreboard...
+                  </div>
+                ) : availableRoster.length === 0 ? (
+                  <div className="px-4 py-8 text-center font-mono text-xs uppercase tracking-[0.08em] text-muted">
+                    {roster && roster.length > 0
+                      ? "Every roster competitor is already linked to a shooter."
+                      : "No competitors on this match yet."}
+                  </div>
+                ) : (
+                  availableRoster.map((c) => (
+                    <CompetitorRow
+                      key={c.id}
+                      competitor={c}
+                      checked={false}
+                      disabled={pickingId !== null}
+                      onToggle={() => void pickCompetitor(c)}
+                    />
+                  ))
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => setManualRoster(true)}
+                className="mt-3 font-mono text-[0.6875rem] uppercase tracking-[0.08em] text-led hover:text-led-soft"
+              >
+                Add manually instead
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="mb-4 text-[0.8125rem] text-muted">
+                Add a squadmate by name; footage gets attached on the Ingest
+                page once you pick their folder.
+              </p>
+              <div className="flex flex-wrap items-stretch gap-2.5">
+                <input
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="Johan Larsson"
+                  className="flex-1 min-w-[260px] rounded-md border border-rule bg-surface-3 px-3.5 py-2.5 text-sm text-ink outline-none focus:border-led focus:shadow-[0_0_0_3px_var(--color-led-tint)]"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void add();
+                  }}
+                />
+                <Button
+                  type="button"
+                  onClick={() => void add()}
+                  disabled={adding || !newName.trim()}
+                  className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
+                >
+                  <Plus className="size-3.5" />
+                  <span className="font-display uppercase tracking-[0.08em]">
+                    {adding ? "Adding..." : "Add shooter"}
+                  </span>
+                </Button>
+              </div>
+              {isLinked && (
+                <button
+                  type="button"
+                  onClick={() => setManualRoster(false)}
+                  className="mt-3 font-mono text-[0.6875rem] uppercase tracking-[0.08em] text-led hover:text-led-soft"
+                >
+                  Pick from roster instead
+                </button>
+              )}
+            </>
+          )}
         </div>
       </section>
+
+      {connectOpen && (
+        <ConnectMatchDialog
+          shooters={active}
+          onClose={() => setConnectOpen(false)}
+          onApplied={() => {
+            void reload();
+            refresh();
+          }}
+        />
+      )}
     </div>
   );
 }

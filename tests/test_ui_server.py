@@ -45,6 +45,7 @@ _SCOPED_PREFIXES = (
     "/api/shooters/",
     "/api/stages/",
     "/api/match/shooters",
+    "/api/match/scoreboard",
     "/api/match/beep-queue",
     "/api/match/videos",
     "/api/project",
@@ -675,6 +676,83 @@ def test_create_from_scoreboard_creates_n_shooters_from_local(
     # and make len(match.stages)-based coverage counts read 0.
     assert len(match_json["stages"]) == len(project["stages"])
     assert {s["stage_number"] for s in match_json["stages"]} == {s["stage_number"] for s in project["stages"]}
+
+
+def _connect_fixture_shooter(tmp_path: Path):
+    """Scaffold a match with a shooter whose name matches a fixture
+    competitor, stage the offline match JSON, and return
+    ``(client, match_root, shooter_slug, competitor)`` ready to connect."""
+    import json as _json
+
+    fixture = _load_v1_match_fixture()
+    competitor = fixture["competitors"][0]  # Viktor Bergendahl / Production Optics
+
+    match_root = tmp_path / "match"
+    app = _match_create_app(project_root=match_root, project_name="Manual")
+    client = _MatchClient(app)
+
+    add = client.post("/api/match/shooters", json={"name": competitor["name"]})
+    assert add.status_code == 200, add.text
+    slug = next(s["slug"] for s in add.json()["shooters"] if s["name"] == competitor["name"])
+
+    # Pre-place the match fixture so _resolve_scoreboard_client picks
+    # LocalJsonScoreboard for the match root instead of SsiHttpClient.
+    scoreboard_dir = match_root / "scoreboard"
+    scoreboard_dir.mkdir(parents=True, exist_ok=True)
+    (scoreboard_dir / "match.json").write_text(_json.dumps(fixture), encoding="utf-8")
+    return client, match_root, slug, competitor
+
+
+def test_connect_match_links_and_proposes(tmp_path: Path) -> None:
+    import json as _json
+
+    client, match_root, slug, competitor = _connect_fixture_shooter(tmp_path)
+
+    resp = client.post(
+        "/api/match/scoreboard/connect",
+        json={"match_id": 27190, "content_type": 22},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "proposals" in body and "stage_mismatch" in body
+    # The exact-name shooter is proposed against its fixture competitor.
+    proposal = next(p for p in body["proposals"] if p["slug"] == slug)
+    assert proposal["competitor_id"] == competitor["id"]
+    assert proposal["shooter_id"] == competitor["shooterId"]
+
+    # Every shooter's project now carries the match link.
+    project = _json.loads((match_root / "shooters" / slug / "project.json").read_text(encoding="utf-8"))
+    assert project["scoreboard_match_id"] == "27190"
+    assert project["scoreboard_content_type"] == 22
+
+
+def test_reconcile_applies_links(tmp_path: Path) -> None:
+    import json as _json
+
+    client, match_root, slug, competitor = _connect_fixture_shooter(tmp_path)
+    connect = client.post(
+        "/api/match/scoreboard/connect",
+        json={"match_id": 27190, "content_type": 22},
+    )
+    assert connect.status_code == 200, connect.text
+
+    resp = client.post(
+        "/api/match/scoreboard/reconcile",
+        json={
+            "links": [
+                {
+                    "slug": slug,
+                    "shooter_id": competitor["shooterId"],
+                    "competitor_id": competitor["id"],
+                }
+            ]
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    project = _json.loads((match_root / "shooters" / slug / "project.json").read_text(encoding="utf-8"))
+    assert project["selected_competitor_id"] == competitor["id"]
+    assert project["selected_shooter_id"] == competitor["shooterId"]
 
 
 def test_scoreboard_upload_legacy_examples_auto_merges_stage_times(tmp_path: Path) -> None:
@@ -1538,6 +1616,45 @@ def test_manual_stage_time_survives_scoreboard_sync(tmp_path: Path) -> None:
     assert proj.stages[0].time_seconds_manual is True
     assert proj.stages[1].time_seconds == 11.0
     assert proj.stages[1].time_seconds_manual is False
+
+
+def test_scoreboard_sync_persists_full_scorecard() -> None:
+    from splitsmith.ui.project import MatchProject
+    from splitsmith.ui.scoreboard.models import (
+        CompetitorStageResult,
+        CompetitorStageResults,
+    )
+
+    proj = MatchProject(name="t", schema_version=1)
+    proj.init_placeholder_stages(count=1)
+    results = CompetitorStageResults(
+        competitorId=1,
+        stages=[
+            CompetitorStageResult(
+                stage_number=1,
+                time_seconds=12.34,
+                scorecard_updated_at="2026-07-08T10:00:00+00:00",
+                hit_factor=6.5,
+                stage_points=80.0,
+                stage_pct=95.5,
+                alphas=10,
+                charlies=2,
+                deltas=0,
+                misses=0,
+                no_shoots=0,
+                procedurals=1,
+                dq=False,
+            )
+        ],
+    )
+    updated = proj.merge_stage_times(results)
+    assert updated == 1
+    stage = proj.stages[0]
+    assert stage.scorecard is not None
+    assert stage.scorecard.hit_factor == 6.5
+    assert stage.scorecard.alphas == 10
+    assert stage.scorecard.procedurals == 1
+    assert stage.scorecard.dq is False
 
 
 def _three_candidates() -> list:
@@ -6587,6 +6704,64 @@ def test_add_match_shooter_appends_and_scaffolds(tmp_path: Path, _user_config_ho
     new_root = match_model.Match.shooter_root(target, new_slug)
     assert (new_root / "project.json").exists()
     assert (new_root / "shooter.json").exists()
+
+
+def test_add_shooter_with_competitor_pick_sets_ids_and_merges(
+    tmp_path: Path, _user_config_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /api/match/shooters with selected_competitor_id binds the new
+    shooter to a scoreboard competitor in one step -- no separate
+    select-shooter round trip needed.
+
+    Uses the offline LocalJsonScoreboard path (drop the match fixture on
+    disk, no SsiHttpClient/network needed). The new shooter's slug is
+    minted with a random hex suffix, so the fixture has to be pre-placed
+    at a *known* shooter root -- mint_shooter_slug is monkeypatched to a
+    fixed value for that reason.
+    """
+    import json as _json
+
+    from splitsmith import match_model
+
+    target = tmp_path / "mm"
+    match = match_model.Match.init(target, name="Add Test")
+    match.scoreboard_match_id = "27190"
+    match.scoreboard_content_type = 22
+    match.add_shooter(target, match_model.Shooter(slug="ma", name="Mathias"))
+    MatchProject.init(match_model.Match.shooter_root(target, "ma"), name="Add Test")
+
+    fixture = _load_v1_match_fixture()
+    competitor = fixture["competitors"][0]
+    competitor_id = competitor["id"]
+    shooter_id = competitor["shooterId"]
+
+    monkeypatch.setattr(match_model, "mint_shooter_slug", lambda taken=None: "s_deadbeef")
+    new_root = match_model.Match.shooter_root(target, "s_deadbeef")
+    scoreboard_dir = new_root / "scoreboard"
+    scoreboard_dir.mkdir(parents=True)
+    (scoreboard_dir / "match.json").write_text(_json.dumps(fixture), encoding="utf-8")
+
+    app = create_app()
+    client = _MatchClient(app)
+    client.post(
+        "/api/me/recent-projects/bind",
+        json={"path": str(target.resolve())},
+    )
+    match_id = app.state.splitsmith_state.matches.known_ids()[0]
+    resp = client.post(
+        f"/api/matches/{match_id}/match/shooters",
+        json={
+            "name": competitor["name"],
+            "selected_shooter_id": shooter_id,
+            "selected_competitor_id": competitor_id,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    project = MatchProject.load(new_root)
+    assert project.selected_competitor_id == competitor_id
+    assert project.selected_shooter_id == shooter_id
+    assert project.competitor_name == competitor["name"]
 
 
 def test_remove_match_shooter_drops_dir(tmp_path: Path, _user_config_home: Path) -> None:

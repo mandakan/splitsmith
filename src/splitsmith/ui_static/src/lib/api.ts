@@ -186,6 +186,22 @@ export interface StageRounds {
   steel_targets: number | null;
 }
 
+/** Per-shooter, per-stage scoring pulled from the SSI Scoreboard and
+ *  persisted on the project so hosted share viewers (who cannot fetch
+ *  live) still see scores. Null until a scoreboard sync populates it. */
+export interface StageScorecard {
+  hit_factor: number | null;
+  stage_points: number | null;
+  stage_pct: number | null;
+  alphas: number | null;
+  charlies: number | null;
+  deltas: number | null;
+  misses: number | null;
+  no_shoots: number | null;
+  procedurals: number | null;
+  dq: boolean | null;
+}
+
 export interface StageEntry {
   stage_number: number;
   stage_name: string;
@@ -205,6 +221,10 @@ export interface StageEntry {
   /** Round/target metadata already sent by the project API; surfaced in the
    *  Ingest stage reference panel. Null when the match carries no round data. */
   stage_rounds: StageRounds | null;
+  /** Full scoreboard scorecard for this shooter's run of the stage. Null
+   *  for placeholders and pre-scorecard projects. Populated on scoreboard
+   *  sync; displayed in the scored results view. */
+  scorecard: StageScorecard | null;
 }
 
 export interface MatchProject {
@@ -347,6 +367,27 @@ export interface ScoreboardMatchData {
   competitors: ScoreboardMatchCompetitor[];
   scoring_completed: number;
   match_status: string;
+}
+
+/** A name-based proposal binding one local shooter (by ``slug``) to a
+ *  scoreboard competitor, returned by the connect-match endpoint. A null
+ *  ``competitor_id`` means no confident match (leave unlinked); ``ambiguous``
+ *  flags a near-tie the operator should double-check before applying. */
+export interface LinkProposal {
+  slug: string;
+  competitor_id: number | null;
+  shooter_id: number | null;
+  competitor_name: string | null;
+  score: number;
+  ambiguous: boolean;
+}
+
+/** Response from POST /api/match/scoreboard/connect. */
+export interface ConnectMatchResponse {
+  stage_mismatch: boolean;
+  local_stage_count: number;
+  scoreboard_stage_count: number;
+  proposals: LinkProposal[];
 }
 
 /** Pull a typed scoreboard error out of an ApiError, or null if the body
@@ -1933,6 +1974,26 @@ export const api = {
       { method: "POST" },
     ),
 
+  /** Attach the bound match to a scoreboard match after creation (#598).
+   *  Sets the link on the match + every shooter, then returns name-based
+   *  proposals for the operator to confirm via ``reconcileScoreboardLinks``. */
+  connectScoreboardMatch: (matchId: number, contentType: number) =>
+    request<ConnectMatchResponse>("/api/match/scoreboard/connect", {
+      method: "POST",
+      json: { match_id: matchId, content_type: contentType },
+    }),
+
+  /** Apply confirmed shooter -> competitor links for the bound match (#598).
+   *  Pins each shooter's ids and merges stage times; returns the refreshed
+   *  roster. Rows the operator left unlinked should be omitted. */
+  reconcileScoreboardLinks: (
+    links: { slug: string; shooter_id: number; competitor_id: number }[],
+  ) =>
+    request<ShooterListResponse>("/api/match/scoreboard/reconcile", {
+      method: "POST",
+      json: { links },
+    }),
+
 
   createPlaceholderStages: (slug: string, req: PlaceholderStagesRequest) =>
     request<MatchProject>(
@@ -2605,8 +2666,15 @@ export const api = {
       { method: "POST" },
     ),
 
-  /** Add a new shooter to the bound match (#324). */
-  addMatchShooter: (body: { name: string; division?: string | null }) =>
+  /** Add a new shooter to the bound match (#324). When the match is
+   *  scoreboard-linked, pass ``selected_shooter_id`` + ``selected_competitor_id``
+   *  to bind the roster pick in one step (#598). */
+  addMatchShooter: (body: {
+    name: string;
+    division?: string | null;
+    selected_shooter_id?: number | null;
+    selected_competitor_id?: number | null;
+  }) =>
     request<ShooterListResponse>("/api/match/shooters", {
       method: "POST",
       json: body,
