@@ -8,7 +8,7 @@
  */
 
 import { useMemo } from "react";
-import { Maximize2, Minus, Plus } from "lucide-react";
+import { Eye, Maximize2, Minus, Plus } from "lucide-react";
 
 import { MarkerGlyph, type MarkerKind } from "@/components/MarkerGlyph";
 import { Button } from "@/components/ui/button";
@@ -24,7 +24,7 @@ export interface MarkerFilters {
 
 export const DEFAULT_FILTERS: MarkerFilters = {
   detected: true,
-  rejected: true,
+  rejected: false,
   manual: true,
   beep: true,
 };
@@ -88,9 +88,15 @@ export interface FilterBarProps {
   filters: MarkerFilters;
   counts: { detected: number; rejected: number; manual: number; beep: number };
   onChange: (next: MarkerFilters) => void;
+  /** True while the user is holding the peek gesture (pointer or key). */
+  peeking?: boolean;
+  /** Called on pointerdown / keydown(Space|Enter) of the peek button. */
+  onPeekStart?: () => void;
+  /** Called on pointerup / pointerleave / lostpointercapture / keyup(Space|Enter). */
+  onPeekEnd?: () => void;
 }
 
-export function FilterBar({ filters, counts, onChange }: FilterBarProps) {
+export function FilterBar({ filters, counts, onChange, peeking, onPeekStart, onPeekEnd }: FilterBarProps) {
   return (
     <div role="group" aria-label="Marker filters" className="flex flex-wrap items-center gap-2">
       <span className="text-xs text-muted">show</span>
@@ -108,6 +114,53 @@ export function FilterBar({ filters, counts, onChange }: FilterBarProps) {
         count={counts.rejected}
         onToggle={() => onChange({ ...filters, rejected: !filters.rejected })}
       />
+      {/* Peek button: only rendered when the parent wires up onPeekStart.
+          Visually distinct from the toggle chips -- it reads as "hold",
+          not "toggle" -- but shares the same size class so it sits flush
+          in the row. */}
+      {onPeekStart != null && (
+        <button
+          type="button"
+          aria-label="Peek rejected shots (hold)"
+          aria-pressed={!!peeking}
+          className={cn(
+            "inline-flex cursor-pointer select-none items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
+            peeking
+              ? "border-led bg-led/10 text-led"
+              : "border-rule/40 bg-bg text-muted",
+          )}
+          onPointerDown={(e) => {
+            // Capture so pointerup is received even if the pointer moves
+            // off the button before release. With capture held we must NOT
+            // end on pointerleave -- the whole point of capture is to keep
+            // tracking off-element -- so release is driven by pointerup /
+            // pointercancel / lostpointercapture instead (lostpointercapture
+            // also fires as a safety net when capture releases for any
+            // other reason).
+            e.currentTarget.setPointerCapture(e.pointerId);
+            onPeekStart();
+          }}
+          onPointerUp={onPeekEnd}
+          onPointerCancel={onPeekEnd}
+          onLostPointerCapture={onPeekEnd}
+          onKeyDown={(e) => {
+            if ((e.key === " " || e.key === "Enter") && !e.repeat) {
+              // Prevent the default click-on-Space and form-submit-on-Enter.
+              e.preventDefault();
+              onPeekStart();
+            }
+          }}
+          onKeyUp={(e) => {
+            if (e.key === " " || e.key === "Enter") {
+              onPeekEnd?.();
+            }
+          }}
+        >
+          <Eye className="size-3" aria-hidden />
+          <span>peek</span>
+        </button>
+      )}
       <FilterChip
         label="manual"
         glyph="manual"

@@ -144,6 +144,9 @@ export function Review() {
   }, [loopMode, focusedMarkerId, markers, peaks]);
 
   const [filters, setFilters] = useState<MarkerFilters>(DEFAULT_FILTERS);
+  // Momentary "peek": true while the user holds the peek button or the p key.
+  // Adds "rejected" to visibleKinds without touching the sticky filter chip.
+  const [peeking, setPeeking] = useState(false);
   const [zoom, setZoom] = useState<number | null>(null);
   // Callback ref attaches the ResizeObserver exactly when the wrapper
   // mounts. The wrapper is inside a {peaks ? ...} conditional render;
@@ -170,7 +173,18 @@ export function Review() {
   }, []);
   const rafRef = useRef<number | null>(null);
 
-  const visibleKinds = useMemo(() => visibleKindsFromFilters(filters), [filters]);
+  const visibleKinds = useMemo(() => {
+    const kinds = visibleKindsFromFilters(filters);
+    if (peeking) kinds.add("rejected");
+    // Keep a keyboard-focused rejected marker visible even when the
+    // rejected filter is off, so `n`-stepping onto it never focuses
+    // an invisible marker (the user can then K it back to kept).
+    if (focusedMarkerId) {
+      const f = markers.find((x) => x.id === focusedMarkerId);
+      if (f?.kind === "rejected") kinds.add("rejected");
+    }
+    return kinds;
+  }, [filters, peeking, focusedMarkerId, markers]);
 
   // Load fixture JSON.
   useEffect(() => {
@@ -691,6 +705,35 @@ export function Review() {
     elapsedFromMedia,
   ]);
 
+  // Peek key handler -- separate from the main onKey effect so it can be
+  // a lightweight listener that only cares about p/P down/up.
+  // Guards: ignore when typing in a text field, when a modifier key is held,
+  // and on auto-repeat. window blur resets peek when the user alt-tabs or
+  // otherwise loses focus mid-hold.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "p" && e.key !== "P") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.repeat) return;
+      const target = e.target as HTMLElement | null;
+      if (isTypingTextTarget(target)) return;
+      setPeeking(true);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key !== "p" && e.key !== "P") return;
+      setPeeking(false);
+    };
+    const onBlur = () => setPeeking(false);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
   // ---- Render ------------------------------------------------------------
 
   if (!fixturePath) {
@@ -811,6 +854,9 @@ export function Review() {
                     beep: peaks.beep_time != null ? 1 : 0,
                   }}
                   onChange={setFilters}
+                  peeking={peeking}
+                  onPeekStart={() => setPeeking(true)}
+                  onPeekEnd={() => setPeeking(false)}
                 />
                 <ZoomControls zoom={zoom} onZoomChange={setZoom} />
               </div>
