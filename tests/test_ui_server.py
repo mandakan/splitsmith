@@ -6628,6 +6628,64 @@ def test_add_match_shooter_appends_and_scaffolds(tmp_path: Path, _user_config_ho
     assert (new_root / "shooter.json").exists()
 
 
+def test_add_shooter_with_competitor_pick_sets_ids_and_merges(
+    tmp_path: Path, _user_config_home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """POST /api/match/shooters with selected_competitor_id binds the new
+    shooter to a scoreboard competitor in one step -- no separate
+    select-shooter round trip needed.
+
+    Uses the offline LocalJsonScoreboard path (drop the match fixture on
+    disk, no SsiHttpClient/network needed). The new shooter's slug is
+    minted with a random hex suffix, so the fixture has to be pre-placed
+    at a *known* shooter root -- mint_shooter_slug is monkeypatched to a
+    fixed value for that reason.
+    """
+    import json as _json
+
+    from splitsmith import match_model
+
+    target = tmp_path / "mm"
+    match = match_model.Match.init(target, name="Add Test")
+    match.scoreboard_match_id = "27190"
+    match.scoreboard_content_type = 22
+    match.add_shooter(target, match_model.Shooter(slug="ma", name="Mathias"))
+    MatchProject.init(match_model.Match.shooter_root(target, "ma"), name="Add Test")
+
+    fixture = _load_v1_match_fixture()
+    competitor = fixture["competitors"][0]
+    competitor_id = competitor["id"]
+    shooter_id = competitor["shooterId"]
+
+    monkeypatch.setattr(match_model, "mint_shooter_slug", lambda taken=None: "s_deadbeef")
+    new_root = match_model.Match.shooter_root(target, "s_deadbeef")
+    scoreboard_dir = new_root / "scoreboard"
+    scoreboard_dir.mkdir(parents=True)
+    (scoreboard_dir / "match.json").write_text(_json.dumps(fixture), encoding="utf-8")
+
+    app = create_app()
+    client = _MatchClient(app)
+    client.post(
+        "/api/me/recent-projects/bind",
+        json={"path": str(target.resolve())},
+    )
+    match_id = app.state.splitsmith_state.matches.known_ids()[0]
+    resp = client.post(
+        f"/api/matches/{match_id}/match/shooters",
+        json={
+            "name": competitor["name"],
+            "selected_shooter_id": shooter_id,
+            "selected_competitor_id": competitor_id,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    project = MatchProject.load(new_root)
+    assert project.selected_competitor_id == competitor_id
+    assert project.selected_shooter_id == shooter_id
+    assert project.competitor_name == competitor["name"]
+
+
 def test_remove_match_shooter_drops_dir(tmp_path: Path, _user_config_home: Path) -> None:
     from splitsmith import match_model
 

@@ -3208,6 +3208,8 @@ class AddShooterRequest(BaseModel):
 
     name: str
     division: str | None = None
+    selected_shooter_id: int | None = None
+    selected_competitor_id: int | None = None
 
 
 class MoveShooterRequest(BaseModel):
@@ -11083,7 +11085,38 @@ def create_app(
                         placeholder=sd.placeholder,
                     )
                 )
+        if req.selected_competitor_id is not None:
+            # Bind the scoreboard pick in the same request instead of
+            # forcing a follow-up call to select-shooter -- mirrors
+            # create-from-scoreboard's per-competitor handling. Note
+            # legacy.competitor_name is already req.name from above.
+            legacy.selected_shooter_id = req.selected_shooter_id
+            legacy.selected_competitor_id = req.selected_competitor_id
         legacy.save(shooter_root)
+        if (
+            req.selected_competitor_id is not None
+            and legacy.scoreboard_match_id
+            and legacy.scoreboard_content_type is not None
+        ):
+            try:
+                _fetch_and_merge_stage_times(
+                    shooter_root,
+                    legacy,
+                    legacy.scoreboard_content_type,
+                    int(legacy.scoreboard_match_id),
+                    req.selected_competitor_id,
+                )
+            except HTTPException as exc:
+                # Non-fatal: the shooter <-> competitor link succeeds even
+                # if stage times aren't fetchable yet (mirrors
+                # create-from-scoreboard's per-shooter merge failure
+                # handling above).
+                logger.warning(
+                    "stage-times merge failed for new shooter %s (%s): %s",
+                    req.name,
+                    slug,
+                    exc.detail,
+                )
         return list_match_shooters()
 
     @app.delete("/api/match/shooters/{slug}", response_model=ShooterListResponse)
