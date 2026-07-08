@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.0](https://github.com/mandakan/splitsmith/compare/v0.11.0...v0.12.0) (2026-07-08)
+
+
+### Features
+
+* **ui:** mobile results viewer -- shot ticker, fullscreen, sticky player ([#603](https://github.com/mandakan/splitsmith/issues/603)) ([041dbbf](https://github.com/mandakan/splitsmith/commit/041dbbfa26ba29338e3d095819f7d8523f47d9d9))
+
+
+### Bug Fixes
+
+* **ui:** label derived match HF + announce error banners to AT ([#601](https://github.com/mandakan/splitsmith/issues/601)) ([5710ed7](https://github.com/mandakan/splitsmith/commit/5710ed7514f545d8a7084a346c913638d7656182))
+
 ## [0.11.0](https://github.com/mandakan/splitsmith/compare/v0.10.6...v0.11.0) (2026-07-08)
 
 
