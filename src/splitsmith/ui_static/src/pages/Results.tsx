@@ -480,7 +480,7 @@ export function Results() {
           <span className="font-bold text-ink-2">Match totals</span>
           <span>
             <span className="tabular-nums text-ink-2">{formatTime(scoreTotals.time)}</span>
-            {" time"}
+            {" scored time"}
           </span>
           <span>
             <span className="tabular-nums text-ink-2">{scoreTotals.points}</span>
