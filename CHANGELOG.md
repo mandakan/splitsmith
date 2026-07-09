@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.13.0](https://github.com/mandakan/splitsmith/compare/v0.12.0...v0.13.0) (2026-07-09)
+
+
+### Features
+
+* **scripts:** staging magic-link minting script + /staging-login skill ([#606](https://github.com/mandakan/splitsmith/issues/606)) ([35c7c69](https://github.com/mandakan/splitsmith/commit/35c7c695749bce3e21c98e38637b80f4edf5db2b))
+* **ui:** self-relative split tier labels (quick/typical/long) ([#604](https://github.com/mandakan/splitsmith/issues/604)) ([c9d58d9](https://github.com/mandakan/splitsmith/commit/c9d58d9362a968244552b8d948d7dd7e754682ef))
+
+
+### Bug Fixes
+
+* **ui:** anomaly pins track waveform zoom + scroll ([#607](https://github.com/mandakan/splitsmith/issues/607)) ([c085c73](https://github.com/mandakan/splitsmith/commit/c085c73f3c40ca887ea50e6cd4f5ed79f2d53b44))
+
 ## [0.12.0](https://github.com/mandakan/splitsmith/compare/v0.11.0...v0.12.0) (2026-07-08)
 
 
