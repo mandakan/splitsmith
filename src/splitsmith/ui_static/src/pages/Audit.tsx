@@ -75,7 +75,7 @@ import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { ShotStepper } from "@/components/ShotStepper";
 import { VideoPanel } from "@/components/VideoPanel";
-import { Waveform } from "@/components/Waveform";
+import { Waveform, type WaveformView } from "@/components/Waveform";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/Kbd";
@@ -276,6 +276,10 @@ export function Audit() {
   // ``null`` = fit-to-width; numeric multiplier scales pixels-per-second
   // relative to fit. Reset on stage change.
   const [zoom, setZoom] = useState<number | null>(null);
+  // Scroll-host geometry reported by <Waveform>. AnomalyPins lives outside
+  // the scroll host (its overflow-y-hidden would clip the seam-straddling
+  // pins), so it needs this to place pins correctly under zoom + scroll.
+  const [waveView, setWaveView] = useState<WaveformView | null>(null);
   // Callback ref so we attach the ResizeObserver exactly when the
   // wrapper mounts. A useEffect-based ref + ``[]`` deps wouldn't fire
   // again once peaks load and the conditional render finally inserts
@@ -1990,6 +1994,7 @@ export function Audit() {
                     pixelsPerSecond={pixelsPerSecond}
                     onScrub={handleScrub}
                     onDoubleClick={handleAddManual}
+                    onViewChange={setWaveView}
                     height={180}
                   >
                     <MarkerLayer
@@ -2008,10 +2013,11 @@ export function Audit() {
                   </Waveform>
                   {/* Anomaly pins sit on the seam between the legend
                       header and the waveform bars. `inset-x-4` matches
-                      the wrapper's px-4 so the % positions align with
-                      the Waveform's content box (at fit zoom). The h-0
-                      overlay + per-pin `-translate-y-1/2` puts each pin
-                      visually centred on the seam. */}
+                      the wrapper's px-4 so the overlay's left edge aligns
+                      with the Waveform's scroll host; `waveView` maps the
+                      pin times into that host's zoom + scroll space. The
+                      h-0 overlay + per-pin `-translate-y-1/2` puts each
+                      pin visually centred on the seam. */}
                   <div
                     aria-hidden
                     className="pointer-events-none absolute inset-x-4 top-0 z-10 h-0"
@@ -2019,6 +2025,7 @@ export function Audit() {
                     <AnomalyPins
                       anomalies={anomalies}
                       duration={displayPeaks.duration}
+                      view={waveView}
                       onJump={(a) => {
                         if (a.time != null) handleScrub(a.time);
                       }}

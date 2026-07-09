@@ -26,6 +26,19 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 
 import { cn } from "@/lib/utils";
 
+/** Scroll-host geometry, reported via ``onViewChange``. Lets overlays
+ *  that must live *outside* the scroll host (they'd be clipped by its
+ *  overflow-y-hidden, e.g. the anomaly pins straddling the seam above
+ *  the bars) convert time -> viewport-x under zoom + scroll. */
+export interface WaveformView {
+  /** Rendered content width in CSS px (duration * pps, or viewport at fit). */
+  contentWidth: number;
+  /** Visible scroll-window width in CSS px. */
+  viewportWidth: number;
+  /** Current horizontal scroll offset of the scroll host. */
+  scrollLeft: number;
+}
+
 interface WaveformProps {
   peaks: number[];
   duration: number;
@@ -46,6 +59,10 @@ interface WaveformProps {
   height?: number;
   className?: string;
   ariaLabel?: string;
+  /** Fires whenever the scroll-host geometry changes (initial measure,
+   *  zoom, horizontal scroll). Children composed inside the content div
+   *  don't need this -- their % positions already track content width. */
+  onViewChange?: (view: WaveformView) => void;
   children?: React.ReactNode;
 }
 
@@ -62,6 +79,7 @@ export function Waveform({
   height = 128,
   className,
   ariaLabel = "Audio waveform -- drag to scrub",
+  onViewChange,
   children,
 }: WaveformProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -73,6 +91,7 @@ export function Waveform({
   // and zoom would have no visible effect.
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const [viewportWidth, setViewportWidth] = useState(0);
+  const [scrollLeft, setScrollLeft] = useState(0);
   const dpr = typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
   const draggingRef = useRef(false);
   const pendingTimeRef = useRef<number | null>(null);
@@ -102,6 +121,18 @@ export function Waveform({
     }
     return viewportWidth;
   }, [pixelsPerSecond, duration, viewportWidth]);
+
+  // Re-read scrollLeft when the content resizes: a zoom-out can clamp the
+  // scroll position, and not every browser fires a scroll event for the
+  // clamp. Cheap; runs only on zoom / measure changes.
+  useEffect(() => {
+    const outer = outerRef.current;
+    if (outer) setScrollLeft(outer.scrollLeft);
+  }, [contentWidth]);
+
+  useEffect(() => {
+    onViewChange?.({ contentWidth, viewportWidth, scrollLeft });
+  }, [onViewChange, contentWidth, viewportWidth, scrollLeft]);
 
   const cssVar = useCallback((name: string, fallback: string) => {
     if (typeof window === "undefined") return fallback;
@@ -304,6 +335,7 @@ export function Waveform({
         // content is wider; otherwise block layout would let the
         // scroll-host expand to fit and the scrollbar would never appear.
         style={{ width: viewportWidth || "100%", height }}
+        onScroll={(e) => setScrollLeft(e.currentTarget.scrollLeft)}
       >
         <div
           ref={innerRef}
