@@ -1,11 +1,23 @@
 import type { Anomaly } from "@/lib/anomalies";
+import type { WaveformView } from "@/components/Waveform";
 import { cn } from "@/lib/utils";
 
 export interface AnomalyPinsProps {
   anomalies: Anomaly[];
   duration: number;
   onJump: (anomaly: Anomaly) => void;
+  /** Scroll-host geometry from ``<Waveform onViewChange>``. Under zoom the
+   *  waveform content is wider than the visible window and scrolls inside
+   *  its own host; this overlay sits *outside* that host (it would be
+   *  clipped by its overflow-y-hidden), so it needs the geometry to map
+   *  time -> viewport-x. Null (pre-measure) falls back to fit-mode
+   *  percentages, which are only correct at fit zoom. */
+  view?: WaveformView | null;
 }
+
+/** Half the pin glyph width -- a pin whose center is within this margin of
+ *  the visible window's edge is still partially visible, so keep it. */
+const PIN_HALF_PX = 9;
 
 /**
  * Anomaly pins for the waveform timeline. Renders as an absolute overlay
@@ -20,24 +32,31 @@ export interface AnomalyPinsProps {
  *       <AnomalyPins ... />
  *     </div>
  *
+ * The wrapper's left edge must align with the scroll host's left edge
+ * (inset-x-4 vs the Waveform wrapper's px-4) so the pixel positions
+ * computed from ``view`` line up with the bars. Pins scrolled out of the
+ * visible window are dropped, mirroring the scroll host's own clipping.
+ *
  * Stage-level anomalies (count band, no shots) have no `time` and are
  * filtered out here -- those still surface in the chip strip above the
  * waveform via <AnomalyChips>.
- *
- * Known limitation: at zoom > fit the Waveform content scrolls inside
- * its own scroll host; this overlay sits outside that host, so the pin
- * X positions drift from the bar positions when scrolled. The chip
- * strip above the waveform stays correct (it doesn't reference X).
  */
-export function AnomalyPins({ anomalies, duration, onJump }: AnomalyPinsProps) {
+export function AnomalyPins({ anomalies, duration, onJump, view }: AnomalyPinsProps) {
   if (duration <= 0) return null;
   const pinned = anomalies.filter((a) => a.time != null);
   if (pinned.length === 0) return null;
   return (
     <>
       {pinned.map((a, i) => {
-        const leftPct = ((a.time as number) / duration) * 100;
         const isWarn = a.severity === "warn";
+        let left: string;
+        if (view && view.viewportWidth > 0) {
+          const x = ((a.time as number) / duration) * view.contentWidth - view.scrollLeft;
+          if (x < -PIN_HALF_PX || x > view.viewportWidth + PIN_HALF_PX) return null;
+          left = `${x}px`;
+        } else {
+          left = `${((a.time as number) / duration) * 100}%`;
+        }
         return (
           <button
             key={`${a.kind}-${a.shot_number ?? "stage"}-${i}`}
@@ -51,7 +70,7 @@ export function AnomalyPins({ anomalies, duration, onJump }: AnomalyPinsProps) {
                 ? "bg-live text-bg shadow-[0_0_10px_var(--color-live-glow)]"
                 : "bg-beep text-bg shadow-[0_0_10px_var(--color-beep-glow)]",
             )}
-            style={{ left: `${leftPct}%`, top: 0 }}
+            style={{ left, top: 0 }}
           >
             !
           </button>
