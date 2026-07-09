@@ -1,28 +1,36 @@
 /**
  * ShotTicker - chronograph HUD overlaid bottom-left on the Results
  * video. Elapsed-from-beep clock + shot counter on top; the current
- * shot's interval label, split value (bucket-colored), and bucket text
- * below - color is never the sole cue. aria-hidden: the transport row
+ * shot's interval label, split value (tier-colored), and tier text
+ * below - color is never the sole cue; the tier word is omitted when
+ * no baseline judgment is possible. aria-hidden: the transport row
  * already carries the accessible clock, and a live region firing per
  * shot would be noise. Read-only by contract (share-link surface).
  */
 import { useEffect, useRef, useState } from "react";
 
 import type { CoachShot } from "@/lib/api";
-import { INTERVAL_LABEL, currentShotIndex, splitBucket } from "@/lib/splits";
+import {
+  INTERVAL_LABEL,
+  TIER_NEUTRAL_COLOR,
+  type TierBaselines,
+  currentShotIndex,
+  gapTier,
+} from "@/lib/splits";
 import { cn } from "@/lib/utils";
 
 interface ShotTickerProps {
   shots: CoachShot[];
   beepTime: number;
   time: number;
+  baselines: TierBaselines | null;
 }
 
 function pad2(n: number): string {
   return n.toString().padStart(2, "0");
 }
 
-export function ShotTicker({ shots, beepTime, time }: ShotTickerProps) {
+export function ShotTicker({ shots, beepTime, time, baselines }: ShotTickerProps) {
   const idx = currentShotIndex(shots, time);
   const shot = idx >= 0 ? shots[idx] : null;
   const elapsed = Math.max(0, time - beepTime);
@@ -42,7 +50,7 @@ export function ShotTicker({ shots, beepTime, time }: ShotTickerProps) {
     return () => window.clearTimeout(t);
   }, [shot]);
 
-  const bucket = shot ? splitBucket(shot.split) : null;
+  const tier = shot ? gapTier(shot.split, shot.interval_class, baselines) : null;
 
   return (
     <div
@@ -57,7 +65,7 @@ export function ShotTicker({ shots, beepTime, time }: ShotTickerProps) {
           {pad2(shot?.shot_number ?? 0)}/{pad2(shots.length)}
         </span>
       </div>
-      {shot && bucket ? (
+      {shot ? (
         <div
           className={cn(
             "-mx-1 mt-1 flex items-baseline gap-2 rounded px-1 transition-colors",
@@ -69,13 +77,15 @@ export function ShotTicker({ shots, beepTime, time }: ShotTickerProps) {
           </span>
           <span
             className="font-mono text-sm font-bold tabular-nums"
-            style={{ color: bucket.color }}
+            style={{ color: tier?.color ?? TIER_NEUTRAL_COLOR }}
           >
             {shot.split.toFixed(2)}
           </span>
-          <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-            {bucket.label}
-          </span>
+          {tier ? (
+            <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+              {tier.label}
+            </span>
+          ) : null}
         </div>
       ) : null}
     </div>

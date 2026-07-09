@@ -839,6 +839,7 @@ _SHARE_PATH_RE = re.compile(
     r"^(?:match/shooters"
     r"|shooters/[^/]+/project"
     r"|shooters/[^/]+/stages/\d+/coach"
+    r"|shooters/[^/]+/coach/distributions"
     r"|shooters/[^/]+/videos/stream)$"
 )
 
