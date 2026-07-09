@@ -21,7 +21,11 @@ import { StageStats } from "@/components/results/StageStats";
 import { Kicker } from "@/components/ui";
 import { ApiError, api, type CoachStageResponse, type StageScorecard } from "@/lib/api";
 import { useMatchHref } from "@/lib/matchHref";
-import { currentShotIndex } from "@/lib/splits";
+import {
+  type TierBaselines,
+  baselinesFromMatchDistributions,
+  currentShotIndex,
+} from "@/lib/splits";
 import { cn } from "@/lib/utils";
 
 function pad2(n: number): string {
@@ -55,6 +59,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const { shooters } = useOutletContext<MatchShellOutletContext>();
   const href = useMatchHref();
   const [coach, setCoach] = useState<CoachStageResponse | null>(null);
+  const [baselines, setBaselines] = useState<TierBaselines | null>(null);
   const [scorecard, setScorecard] = useState<StageScorecard | null>(null);
   const [scorecardUpdatedAt, setScorecardUpdatedAt] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -94,9 +99,10 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
     setScorecard(null);
     setScorecardUpdatedAt(null);
     (async () => {
-      const [coachResult, projectResult] = await Promise.allSettled([
+      const [coachResult, projectResult, distResult] = await Promise.allSettled([
         api.getStageCoach(slug, stage),
         api.getProject(slug),
+        api.getMatchCoachDistributions(slug),
       ]);
       if (!alive) return;
 
@@ -107,6 +113,14 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
         const e = coachResult.reason;
         setError(e instanceof ApiError ? e.detail : String(e));
       }
+
+      // Baselines are a nice-to-have like the scorecard: a failed fetch
+      // just means unjudged (chip-less) rows, never an error banner.
+      setBaselines(
+        distResult.status === "fulfilled"
+          ? baselinesFromMatchDistributions(distResult.value)
+          : null,
+      );
 
       // Scorecard is a nice-to-have: a failed project fetch just means no
       // scorecard shows, it must never surface through the coach error banner.
@@ -302,6 +316,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           onTimeChange={setCurrentTime}
           onPlayingChange={setIsPlaying}
           onFullscreenChange={setFsMode}
+          baselines={baselines}
         />
       </div>
       <div className="flex flex-col gap-4 lg:max-h-[calc(100dvh-var(--shell-header-h,86px)-2rem)] lg:overflow-y-auto">
@@ -316,6 +331,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           activeShotNumber={activeShotNumber}
           onSeek={seekToShot}
           isPlaying={isPlaying}
+          baselines={baselines}
         />
         {scorecard ? (
           <div className="flex flex-col gap-2">

@@ -537,6 +537,8 @@ def test_share_management_routes_local_mode_404() -> None:
         "shooters/anna/stages/1/coach",
         "shooters/s_ab12/stages/12/coach",
         "shooters/anna/videos/stream",
+        "shooters/anna/coach/distributions",
+        "shooters/s_ab12/coach/distributions",
     ],
 )
 def test_share_path_re_accepts(rest: str) -> None:
@@ -559,6 +561,9 @@ def test_share_path_re_accepts(rest: str) -> None:
         "shooters/a/stages/1/coach/distributions",
         "shooters/a/b/project",
         "shooters/anna/stages/1/coach/reclassify",
+        "shooters/anna/coach/reclassify",
+        "shooters//coach/distributions",
+        "shooters/anna/coach/distributions/extra",
         "me",
         "match/shares",
     ],

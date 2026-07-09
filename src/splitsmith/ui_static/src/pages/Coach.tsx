@@ -55,7 +55,15 @@ import {
 import { useSpacePlayPause } from "@/lib/keyboard";
 import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
-import { INTERVAL_LABEL, INTERVAL_TONE, SPLIT_BUCKETS, splitBucket } from "@/lib/splits";
+import {
+  INTERVAL_LABEL,
+  INTERVAL_TONE,
+  TIER_COLORS,
+  TIER_ORDER,
+  type TierBaselines,
+  baselinesFromMatchDistributions,
+  gapTier,
+} from "@/lib/splits";
 import { ShotRuler } from "@/components/results/ShotRuler";
 
 export function Coach() {
@@ -89,6 +97,9 @@ interface PerStageAggregate {
   avg_split: number | null;
   fastest_split: number | null;
   slowest_split: number | null;
+  /** Count of gaps that fed avg/fastest/slowest (fire splits only when
+   *  the stage has classifications). */
+  split_count: number;
   split_buckets: Record<string, number>;
   flagged_count: number;
 }
@@ -151,6 +162,7 @@ function CoachMatchInner({ slug }: { slug: string }) {
         ]);
         if (!alive) return;
         setDistributions(dist);
+        const baselines = baselinesFromMatchDistributions(dist);
 
         const coachByStage = new Map<number, CoachStageResponse | null>();
         auditedStages.forEach((s, i) =>
@@ -169,15 +181,24 @@ function CoachMatchInner({ slug }: { slug: string }) {
               avg_split: null,
               fastest_split: null,
               slowest_split: null,
-              split_buckets: { fast: 0, ok: 0, slow: 0, vslow: 0 },
+              split_count: 0,
+              split_buckets: { quick: 0, typical: 0, long: 0 },
               flagged_count: 0,
             };
           }
-          const splits = coach.shots.map((shot) => shot.split);
-          const buckets = { fast: 0, ok: 0, slow: 0, vslow: 0 };
-          for (const sp of splits) {
-            const b = splitBucket(sp);
-            (buckets as Record<string, number>)[b.label] += 1;
+          // Avg/fastest/slowest judge fire splits only; other interval
+          // classes (draws, movement...) live on different timescales.
+          // Unclassified stages fall back to every gap but the draw.
+          const anyClassified = coach.shots.some((shot) => shot.interval_class !== null);
+          const splits = coach.shots
+            .filter((shot) =>
+              anyClassified ? shot.interval_class === "split" : shot.shot_number !== 1,
+            )
+            .map((shot) => shot.split);
+          const buckets = { quick: 0, typical: 0, long: 0 };
+          for (const shot of coach.shots) {
+            const tier = gapTier(shot.split, shot.interval_class, baselines);
+            if (tier) buckets[tier.label] += 1;
           }
           for (const shot of coach.shots) {
             if (shot.coaching_note && shot.coaching_note.trim()) {
@@ -214,6 +235,7 @@ function CoachMatchInner({ slug }: { slug: string }) {
                 : splits.reduce((a, b) => a + b, 0) / splits.length,
             fastest_split: splits.length === 0 ? null : Math.min(...splits),
             slowest_split: splits.length === 0 ? null : Math.max(...splits),
+            split_count: splits.length,
             split_buckets: buckets,
             flagged_count: coach.shots.filter((sh) => sh.improvement_flag).length,
           };
@@ -233,6 +255,10 @@ function CoachMatchInner({ slug }: { slug: string }) {
 
   const auditedAggs = perStage.filter((s) => s.audited);
   const headline = useMemo(() => computeHeadline(auditedAggs), [auditedAggs]);
+  const baselines = useMemo(
+    () => baselinesFromMatchDistributions(distributions),
+    [distributions],
+  );
 
   if (loading) {
     return (
@@ -302,7 +328,7 @@ function CoachMatchInner({ slug }: { slug: string }) {
               ? `${headline.avgSplit.toFixed(2)}s`
               : "--"
           }
-          unit="across all shots"
+          unit="across fire splits"
           tone="done"
         />
         <StatCard
@@ -327,7 +353,8 @@ function CoachMatchInner({ slug }: { slug: string }) {
               : "--"
           }
           tone={
-            headline.slowestSplit && headline.slowestSplit.value > 0.85
+            headline.slowestSplit &&
+            gapTier(headline.slowestSplit.value, "split", baselines)?.label === "long"
               ? "warn"
               : undefined
           }
@@ -396,9 +423,11 @@ function computeHeadline(aggs: PerStageAggregate[]) {
   for (const s of aggs) {
     totalSeconds += s.total_seconds;
     shotCount += s.shot_count;
+    if (s.avg_split != null) {
+      splitSum += s.avg_split * s.split_count;
+      splitCount += s.split_count;
+    }
     if (s.fastest_split != null) {
-      splitSum += s.fastest_split * s.shot_count;
-      splitCount += s.shot_count;
       if (fastest == null || s.fastest_split < fastest.value) {
         fastest = {
           value: s.fastest_split,
@@ -543,13 +572,13 @@ function SplitDistributionBar({
   }
   return (
     <div className="flex h-2 w-full overflow-hidden rounded-full bg-surface-3">
-      {SPLIT_BUCKETS.map((b) => {
-        const w = ((buckets[b.label] ?? 0) / total) * 100;
+      {TIER_ORDER.map((label) => {
+        const w = ((buckets[label] ?? 0) / total) * 100;
         return (
           <span
-            key={b.label}
-            style={{ width: `${w}%`, backgroundColor: b.color }}
-            title={`${b.label}: ${buckets[b.label] ?? 0}`}
+            key={label}
+            style={{ width: `${w}%`, backgroundColor: TIER_COLORS[label] }}
+            title={`${label}: ${buckets[label] ?? 0}`}
           />
         );
       })}
@@ -947,6 +976,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   const auditPrefix = href("audit", slug);
   const [project, setProject] = useState<MatchProject | null>(null);
   const [coach, setCoach] = useState<CoachStageResponse | null>(null);
+  const [baselines, setBaselines] = useState<TierBaselines | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reclassifying, setReclassifying] = useState(false);
   const [activeShotNumber, setActiveShotNumber] = useState<number | null>(null);
@@ -960,13 +990,17 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
     let alive = true;
     (async () => {
       try {
-        const [p, c] = await Promise.all([
+        const [p, c, dist] = await Promise.all([
           api.getProject(slug),
           api.getStageCoach(slug, stage),
+          // Match-scope baseline for the tier chips; a failed fetch just
+          // means unjudged rows, never an error.
+          api.getMatchCoachDistributions(slug).catch(() => null),
         ]);
         if (!alive) return;
         setProject(p);
         setCoach(c);
+        setBaselines(baselinesFromMatchDistributions(dist));
         if (c && c.shots.length > 0) {
           setActiveShotNumber(c.shots[0].shot_number);
         }
@@ -1196,20 +1230,22 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
         <span className="ml-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
           shot legend
         </span>
-        {SPLIT_BUCKETS.map((b) => (
+        {TIER_ORDER.map((label) => (
           <span
-            key={b.label}
+            key={label}
             className="inline-flex items-center gap-1 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted"
           >
             <span
               aria-hidden
               className="inline-block size-1.5 rounded-full"
-              style={{ backgroundColor: b.color }}
+              style={{ backgroundColor: TIER_COLORS[label] }}
             />
-            {b.label}
-            {b.max !== Infinity ? ` ≤ ${b.max}s` : " > 0.85s"}
+            {label}
           </span>
         ))}
+        <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
+          vs your match baseline per interval type
+        </span>
       </div>
 
       <ShotRuler
@@ -1218,6 +1254,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
         span={span}
         activeShotNumber={activeShotNumber}
         onSeek={seekToShot}
+        baselines={baselines}
       />
 
       {/* Work grid: video + current shot panel on left, full list on right */}
@@ -1271,6 +1308,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
           {activeShot && (
             <ActiveShotPanel
               shot={activeShot}
+              baselines={baselines}
               noteDraft={noteDraft}
               onNoteChange={setNoteDraft}
               onSave={() =>
@@ -1318,6 +1356,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
                 shot={shot}
                 active={activeShotNumber === shot.shot_number}
                 onClick={() => seekToShot(shot)}
+                baselines={baselines}
               />
             ))}
           </div>
@@ -1329,6 +1368,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
 
 function ActiveShotPanel({
   shot,
+  baselines,
   noteDraft,
   onNoteChange,
   onSave,
@@ -1336,25 +1376,27 @@ function ActiveShotPanel({
   onToggleFlag,
 }: {
   shot: CoachShot;
+  baselines: TierBaselines | null;
   noteDraft: string;
   onNoteChange: (v: string) => void;
   onSave: () => void;
   onClassify: (cls: CoachIntervalClass) => void;
   onToggleFlag: () => void;
 }) {
-  const b = splitBucket(shot.split);
+  const tier = gapTier(shot.split, shot.interval_class, baselines);
   return (
     <div className="overflow-hidden rounded-2xl border border-rule-strong bg-surface px-5 py-4">
       <div className="mb-3 flex items-center gap-3">
         <span
           className="font-display text-4xl font-bold leading-none tabular-nums text-ink"
-          style={{ color: b.color }}
+          style={tier ? { color: tier.color } : undefined}
         >
           {pad2(shot.shot_number)}
         </span>
         <div className="min-w-0 flex-1">
           <div className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
-            Shot {pad2(shot.shot_number)} &middot; {b.label}
+            Shot {pad2(shot.shot_number)}
+            {tier ? <> &middot; {tier.label}</> : null}
           </div>
           <div className="font-display text-sm font-bold uppercase tracking-[0.04em] text-ink">
             {shot.split.toFixed(3)}s split
@@ -1453,12 +1495,14 @@ function ShotRow({
   shot,
   active,
   onClick,
+  baselines,
 }: {
   shot: CoachShot;
   active: boolean;
   onClick: () => void;
+  baselines: TierBaselines | null;
 }) {
-  const b = splitBucket(shot.split);
+  const tier = gapTier(shot.split, shot.interval_class, baselines);
   return (
     <button
       type="button"
@@ -1476,8 +1520,11 @@ function ShotRow({
         {shot.time_from_beep.toFixed(2)}s
       </span>
       <span
-        className="text-right font-mono text-[0.6875rem] font-semibold tabular-nums"
-        style={{ color: b.color }}
+        className={cn(
+          "text-right font-mono text-[0.6875rem] font-semibold tabular-nums",
+          !tier && "text-ink-2",
+        )}
+        style={tier ? { color: tier.color } : undefined}
       >
         {shot.split.toFixed(3)}s
       </span>

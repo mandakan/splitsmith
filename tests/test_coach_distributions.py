@@ -173,3 +173,60 @@ def test_match_skips_empty_stage(cfg: CoachAutoClassifyConfig) -> None:
         config=cfg,
     )
     assert out.stage_count == 1
+
+
+# ---------------------------------------------------------------------------
+# p25 / p75 percentiles (self-relative split tier labels, #split-tier-labels)
+# ---------------------------------------------------------------------------
+
+
+def test_stage_distribution_percentiles_none_for_empty_class(cfg: CoachAutoClassifyConfig) -> None:
+    # Just three splits -- the empty "transition" class gets no percentiles.
+    shots = [_shot(1, 1500), _shot(2, 1700), _shot(3, 1900), _shot(4, 2100)]
+    out = stage_distributions(stage_number=1, stage_name="x", shots=shots, config=cfg)
+    transitions = next(d for d in out.distributions if d.interval_class == "transition")
+    assert transitions.count == 0
+    assert transitions.p25_s is None
+    assert transitions.p75_s is None
+
+
+def test_stage_distribution_percentiles_none_for_single_sample(cfg: CoachAutoClassifyConfig) -> None:
+    # A single transition -- one sample isn't enough for quartiles.
+    shots = [_shot(1, 1500), _shot(2, 2200)]  # one 0.70 transition
+    out = stage_distributions(stage_number=1, stage_name="x", shots=shots, config=cfg)
+    transitions = next(d for d in out.distributions if d.interval_class == "transition")
+    assert transitions.count == 1
+    assert transitions.p25_s is None
+    assert transitions.p75_s is None
+
+
+def test_stage_distribution_percentiles_populated_for_two_samples(cfg: CoachAutoClassifyConfig) -> None:
+    # Two splits -- exactly the >= 2 threshold; both fields populate.
+    shots = [_shot(1, 1500), _shot(2, 1700), _shot(3, 1900)]  # splits at 0.20, 0.20
+    out = stage_distributions(stage_number=1, stage_name="x", shots=shots, config=cfg)
+    splits = next(d for d in out.distributions if d.interval_class == "split")
+    assert splits.count == 2
+    assert splits.p25_s is not None
+    assert splits.p75_s is not None
+
+
+def test_stage_distribution_percentiles_known_quartiles(cfg: CoachAutoClassifyConfig) -> None:
+    # Splits at 0.10, 0.20, 0.30, 0.40, 0.50 -- statistics.quantiles(n=4)
+    # with the default "exclusive" method gives p25=0.20, p75=0.40 here.
+    shots = [
+        _shot(1, 1000),
+        _shot(2, 1100),  # 0.10
+        _shot(3, 1300),  # 0.20
+        _shot(4, 1600),  # 0.30
+        _shot(5, 2000),  # 0.40
+        _shot(6, 2500),  # 0.50
+    ]
+    out = stage_distributions(stage_number=1, stage_name="x", shots=shots, config=cfg)
+    splits = next(d for d in out.distributions if d.interval_class == "split")
+    values = [0.10, 0.20, 0.30, 0.40, 0.50]
+    import statistics as _statistics
+
+    expected_p25, _, expected_p75 = _statistics.quantiles(values, n=4)
+    assert splits.count == 5
+    assert splits.p25_s == pytest.approx(expected_p25)
+    assert splits.p75_s == pytest.approx(expected_p75)

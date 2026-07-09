@@ -71,6 +71,8 @@ class IntervalDistribution(BaseModel):
     mean_s: float | None = None
     median_s: float | None = None
     p90_s: float | None = None
+    p25_s: float | None = None
+    p75_s: float | None = None
 
 
 class TopShotEntry(BaseModel):
@@ -181,18 +183,27 @@ def _bucket_values(values: list[float], bucket_size: float) -> list[HistogramBuc
     ]
 
 
-def _summarize(values: list[float]) -> tuple[float | None, float | None, float | None]:
+def _summarize(
+    values: list[float],
+) -> tuple[float | None, float | None, float | None, float | None, float | None]:
     if not values:
-        return None, None, None
+        return None, None, None, None, None
     mean = statistics.fmean(values)
     median = statistics.median(values)
     if len(values) >= 2:
         # quantiles(n=10) returns 9 cut-points; the 9th == 90th percentile.
         # Pad with the max for tiny lists where quantiles can't compute.
         p90 = statistics.quantiles(values, n=10)[8]
+        # quantiles(n=4) returns 3 cut-points: index 0 == p25, index 2 == p75.
+        # Used by the self-relative split tier labels (quick/typical/long).
+        quartiles = statistics.quantiles(values, n=4)
+        p25 = quartiles[0]
+        p75 = quartiles[2]
     else:
         p90 = values[0]
-    return mean, median, p90
+        p25 = None
+        p75 = None
+    return mean, median, p90, p25, p75
 
 
 def _build_distribution(
@@ -200,7 +211,7 @@ def _build_distribution(
     values: list[float],
 ) -> IntervalDistribution:
     bucket = DEFAULT_BUCKET_S[cls]
-    mean, median, p90 = _summarize(values)
+    mean, median, p90, p25, p75 = _summarize(values)
     return IntervalDistribution(
         interval_class=cls,
         bucket_size_s=bucket,
@@ -209,6 +220,8 @@ def _build_distribution(
         mean_s=mean,
         median_s=median,
         p90_s=p90,
+        p25_s=p25,
+        p75_s=p75,
     )
 
 

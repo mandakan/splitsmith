@@ -28,7 +28,7 @@ import type { CoachShot } from "@/lib/api";
 import { ShotTicker } from "@/components/results/ShotTicker";
 import { useDialogFocus } from "@/lib/dialogFocus";
 import { useSpacePlayPause } from "@/lib/keyboard";
-import { splitBucket } from "@/lib/splits";
+import { TIER_NEUTRAL_COLOR, type TierBaselines, gapTier } from "@/lib/splits";
 import { cn } from "@/lib/utils";
 
 /** How the player card is currently presented. "native" is the
@@ -48,6 +48,9 @@ interface ResultsPlayerProps {
    *  otherwise be trapped under the shell header (see the trapped-z
    *  warning on the elevation tokens). */
   onFullscreenChange?: (mode: FullscreenMode) => void;
+  /** Match-scope per-class baselines for tier-colored markers; null
+   *  degrades to neutral dots. */
+  baselines: TierBaselines | null;
 }
 
 function clamp(t: number, lo: number, hi: number): number {
@@ -70,6 +73,7 @@ export function ResultsPlayer({
   onTimeChange,
   onPlayingChange,
   onFullscreenChange,
+  baselines,
 }: ResultsPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState<number | null>(null);
@@ -313,7 +317,7 @@ export function ResultsPlayer({
           onError={() => setVideoError(true)}
           className={cn("w-full bg-black", isFs ? "h-full object-contain" : "aspect-video")}
         />
-        <ShotTicker shots={shots} beepTime={beepTime} time={time} />
+        <ShotTicker shots={shots} beepTime={beepTime} time={time} baselines={baselines} />
         {videoError ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-surface-3">
             <p className="px-4 text-center text-sm text-ink-2">Video failed to load</p>
@@ -402,7 +406,7 @@ export function ResultsPlayer({
         >
           beep
         </span>
-        {/* Shot dots, colored by split bucket */}
+        {/* Shot dots, colored by gap tier (neutral when unjudged) */}
         {shots.map((shot) => (
           <span
             key={shot.shot_number}
@@ -410,7 +414,9 @@ export function ResultsPlayer({
             className="pointer-events-none absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full"
             style={{
               left: `${pct(shot.time_absolute)}%`,
-              backgroundColor: splitBucket(shot.split).color,
+              backgroundColor:
+                gapTier(shot.split, shot.interval_class, baselines)?.color ??
+                TIER_NEUTRAL_COLOR,
             }}
           />
         ))}

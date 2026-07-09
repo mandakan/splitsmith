@@ -1020,6 +1020,9 @@ export interface CoachIntervalDistribution {
   mean_s: number | null;
   median_s: number | null;
   p90_s: number | null;
+  /** Quartiles backing the self-relative gap tiers; null below 2 samples. */
+  p25_s: number | null;
+  p75_s: number | null;
 }
 
 export interface CoachTopShotEntry {

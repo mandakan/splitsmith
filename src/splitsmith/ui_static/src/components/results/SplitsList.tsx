@@ -1,7 +1,8 @@
 /**
  * SplitsList - read-only per-shot list for the Results stage view.
- * One button row per shot: number, time from beep, split, bucket chip
- * (text label + color dot - never color alone), interval-class chip,
+ * One button row per shot: number, time from beep, split, tier chip
+ * (text label + color dot - never color alone; omitted when no baseline
+ * judgment is possible), interval-class chip,
  * improvement flag + coaching note when present. Tap seeks the video.
  * The active row highlights and, while playing, scrolls into view
  * (instant under prefers-reduced-motion). Read-only by contract: part
@@ -11,7 +12,7 @@ import { Flag } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import type { CoachShot } from "@/lib/api";
-import { INTERVAL_LABEL, INTERVAL_TONE, splitBucket } from "@/lib/splits";
+import { INTERVAL_LABEL, INTERVAL_TONE, type TierBaselines, gapTier } from "@/lib/splits";
 import { cn } from "@/lib/utils";
 
 interface SplitsListProps {
@@ -21,13 +22,21 @@ interface SplitsListProps {
   /** Auto-scroll the active row into view only while playing, so a
    *  manual tap on a row doesn't yank the list around. */
   isPlaying: boolean;
+  /** Match-scope per-class baselines; null degrades to unjudged rows. */
+  baselines: TierBaselines | null;
 }
 
 function pad2(n: number): string {
   return n.toString().padStart(2, "0");
 }
 
-export function SplitsList({ shots, activeShotNumber, onSeek, isPlaying }: SplitsListProps) {
+export function SplitsList({
+  shots,
+  activeShotNumber,
+  onSeek,
+  isPlaying,
+  baselines,
+}: SplitsListProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -50,7 +59,7 @@ export function SplitsList({ shots, activeShotNumber, onSeek, isPlaying }: Split
       </div>
       <div ref={listRef} className="divide-y divide-rule">
         {shots.map((shot) => {
-          const bucket = splitBucket(shot.split);
+          const tier = gapTier(shot.split, shot.interval_class, baselines);
           const active = activeShotNumber === shot.shot_number;
           return (
             <button
@@ -83,14 +92,16 @@ export function SplitsList({ shots, activeShotNumber, onSeek, isPlaying }: Split
                 <span className="w-16 shrink-0 text-right font-mono text-sm font-bold tabular-nums text-ink">
                   {shot.split.toFixed(3)}
                 </span>
-                <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-                  <span
-                    aria-hidden
-                    className="size-2 rounded-full"
-                    style={{ backgroundColor: bucket.color }}
-                  />
-                  {bucket.label}
-                </span>
+                {tier ? (
+                  <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+                    <span
+                      aria-hidden
+                      className="size-2 rounded-full"
+                      style={{ backgroundColor: tier.color }}
+                    />
+                    {tier.label}
+                  </span>
+                ) : null}
                 {shot.interval_class ? (
                   <span
                     className={cn(

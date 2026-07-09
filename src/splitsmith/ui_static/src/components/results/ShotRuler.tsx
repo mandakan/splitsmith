@@ -1,9 +1,15 @@
 /**
- * ShotRuler - horizontal shot-dot timeline, colored by split bucket,
- * click/tap seeks. Read-only; shared by Coach per-stage and Results.
+ * ShotRuler - horizontal shot-dot timeline, colored by gap tier (neutral
+ * when unjudged), click/tap seeks. Read-only; shared by Coach per-stage
+ * and Results.
  */
 import type { CoachShot } from "@/lib/api";
-import { INTERVAL_LABEL, splitBucket } from "@/lib/splits";
+import {
+  INTERVAL_LABEL,
+  TIER_NEUTRAL_COLOR,
+  type TierBaselines,
+  gapTier,
+} from "@/lib/splits";
 import { cn } from "@/lib/utils";
 
 interface ShotRulerProps {
@@ -12,9 +18,17 @@ interface ShotRulerProps {
   span: number;
   activeShotNumber: number | null;
   onSeek: (shot: CoachShot) => void;
+  baselines: TierBaselines | null;
 }
 
-export function ShotRuler({ shots, minAbs, span, activeShotNumber, onSeek }: ShotRulerProps) {
+export function ShotRuler({
+  shots,
+  minAbs,
+  span,
+  activeShotNumber,
+  onSeek,
+  baselines,
+}: ShotRulerProps) {
   return (
     <div className="overflow-hidden rounded-xl border border-rule-strong bg-surface px-6 py-5">
       <div className="relative h-5">
@@ -24,7 +38,7 @@ export function ShotRuler({ shots, minAbs, span, activeShotNumber, onSeek }: Sho
         />
         {shots.map((shot) => {
           const x = ((shot.time_absolute - minAbs) / span) * 100;
-          const b = splitBucket(shot.split);
+          const tier = gapTier(shot.split, shot.interval_class, baselines);
           const active = activeShotNumber === shot.shot_number;
           return (
             <button
@@ -41,7 +55,7 @@ export function ShotRuler({ shots, minAbs, span, activeShotNumber, onSeek }: Sho
                   ? "size-4 ring-2 ring-led ring-offset-2 ring-offset-surface shadow-[0_0_8px_var(--color-led-glow)]"
                   : "size-3 hover:size-3.5",
               )}
-              style={{ left: `${x}%`, backgroundColor: b.color }}
+              style={{ left: `${x}%`, backgroundColor: tier?.color ?? TIER_NEUTRAL_COLOR }}
             />
           );
         })}
