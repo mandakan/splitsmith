@@ -172,6 +172,7 @@ from .jobs import (
 )
 from .match_delete import DeletionSummary, delete_match_cascade
 from .project import (
+    STUB_AUDIT_DETECTION,
     VIDEO_EXTENSIONS,
     MatchProject,
     RawVideo,
@@ -8613,6 +8614,21 @@ def create_app(
             )
         video.beep_reviewed = bool(req.reviewed)
         project.save(state.shooter_root(slug))
+
+        # Leave a concrete audit document behind so status surfaces and the
+        # lab read a document instead of inferring from absence. Never
+        # overwrite a real one -- a re-confirm on an audited stage must not
+        # wipe shot data. The exporter does not depend on this existing;
+        # projects predating this change have no stub and still export.
+        if req.reviewed:
+            existing_doc, audit_version = state.load_audit(slug, stage_number)
+            if existing_doc is None:
+                state.save_audit(
+                    slug,
+                    stage_number,
+                    {"shots": [], "detection": STUB_AUDIT_DETECTION},
+                    version=audit_version,
+                )
 
         # When the user confirms the primary's beep AND the trim is
         # already cached from the auto-detect chain, kick off the

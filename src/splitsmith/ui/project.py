@@ -439,6 +439,22 @@ class StageStatus(StrEnum):
     skipped = "skipped"
 
 
+#: ``detection`` value marking an audit document that exists only because a
+#: beep was confirmed -- no detector ever ran. Readers must treat it as
+#: equivalent to no audit document at all.
+STUB_AUDIT_DETECTION = "none"
+
+
+def is_stub_audit(payload: dict[str, Any]) -> bool:
+    """True when this audit document is a beep-confirm placeholder.
+
+    Seeded by the beep-review endpoint so status surfaces and the lab have
+    a concrete document to read instead of inferring from absence. It
+    carries no shot data and represents no audit work.
+    """
+    return payload.get("detection") == STUB_AUDIT_DETECTION
+
+
 def stage_audit_status(
     stage: StageEntry,
     audit_dir: Path,
@@ -496,6 +512,9 @@ def stage_audit_status(
             # Corrupt audit JSON -- treat as ready so the operator can
             # re-run detection. The Audit page surfaces the read error.
             return StageStatus.ready
+    if is_stub_audit(payload):
+        # Beep-confirm placeholder: same meaning as no audit document.
+        return StageStatus.ready
     events = payload.get("audit_events") or []
     saved = any(isinstance(e, dict) and e.get("kind") == "save" for e in events)
     if saved:

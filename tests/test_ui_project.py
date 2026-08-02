@@ -690,6 +690,53 @@ def test_stage_audit_status_audit_docs_missing_entry_is_ready(tmp_path: Path) ->
     assert stage_audit_status(project.stages[0], audit_dir, audit_docs={}) == StageStatus.ready
 
 
+def test_stub_audit_doc_keeps_stage_ready(tmp_path: Path) -> None:
+    """A beep-confirm stub is not evidence of audit work. Without this the
+    sidebar, Home cards and chip strip all report in_progress for stages
+    nobody has opened -- the exact drift StageStatus exists to prevent."""
+    audit_dir = tmp_path / "audit"
+    audit_dir.mkdir()
+    (audit_dir / "stage1.json").write_text(json.dumps({"shots": [], "detection": "none"}), encoding="utf-8")
+    stage = StageEntry(
+        stage_number=1,
+        stage_name="El Prez",
+        time_seconds=8.0,
+        videos=[StageVideo(path=Path("/tmp/GX010042.MP4"), role="primary", beep_time=10.0)],
+    )
+
+    assert stage_audit_status(stage, audit_dir) == StageStatus.ready
+
+
+def test_real_audit_without_save_event_is_in_progress(tmp_path: Path) -> None:
+    """Regression guard: relaxing the stub case must not relax the real one."""
+    audit_dir = tmp_path / "audit"
+    audit_dir.mkdir()
+    (audit_dir / "stage1.json").write_text(
+        json.dumps({"shots": [{"shot_number": 1, "time": 5.5}]}), encoding="utf-8"
+    )
+    stage = StageEntry(
+        stage_number=1,
+        stage_name="El Prez",
+        time_seconds=8.0,
+        videos=[StageVideo(path=Path("/tmp/GX010042.MP4"), role="primary", beep_time=10.0)],
+    )
+
+    assert stage_audit_status(stage, audit_dir) == StageStatus.in_progress
+
+
+def test_stub_audit_doc_keeps_stage_ready_hosted(tmp_path: Path) -> None:
+    """Hosted mode reads audit_docs, not the filesystem -- same rule."""
+    stage = StageEntry(
+        stage_number=1,
+        stage_name="El Prez",
+        time_seconds=8.0,
+        videos=[StageVideo(path=Path("/tmp/GX010042.MP4"), role="primary", beep_time=10.0)],
+    )
+    docs = {1: {"shots": [], "detection": "none"}}
+
+    assert stage_audit_status(stage, tmp_path, audit_docs=docs) == StageStatus.ready
+
+
 def test_stage_statuses_and_audited_count_honor_audit_docs(tmp_path: Path) -> None:
     """``stage_statuses`` / ``audited_count`` forward ``audit_docs`` so the
     GET-project + shooter-list endpoints report the right hosted status
