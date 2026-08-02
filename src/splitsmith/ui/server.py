@@ -2434,7 +2434,15 @@ def register_job_bodies(state: AppState) -> None:
             candidate block is rewritten, ``shots[]`` is seeded only when
             empty (or on ``reset``) so a concurrent manual edit survives,
             and the run is appended to the ``audit_events`` log.
+
+            ``doc`` may be the beep-confirm stub (``{"shots": [],
+            "detection": "none"}``) seeded by ``set_beep_reviewed``. This
+            run supersedes that placeholder, so the sentinel is dropped --
+            leaving it in place would make ``stage_audit_status`` keep
+            reading this now-real doc as "no audit yet" forever.
             """
+            if doc.get("detection") == STUB_AUDIT_DETECTION:
+                del doc["detection"]
             if stg.stage_rounds is not None:
                 doc["stage_rounds"] = stg.stage_rounds.model_dump(mode="json", exclude_none=True)
             doc["_candidates_pending_audit"] = {

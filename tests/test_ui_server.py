@@ -2859,6 +2859,76 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
     assert proj_after["stages"][0]["videos"][0]["processed"]["shot_detect"] is True
 
 
+def test_shot_detect_clears_beep_confirm_stub_marker(tmp_path: Path, monkeypatch) -> None:
+    """A beep-confirm run seeds ``{"shots": [], "detection": "none"}`` and
+    shot-detect merges its real results into that same doc rather than
+    replacing it (issue: lost optimistic-lock races must re-merge, not
+    clobber). If the stub sentinel survives the merge,
+    ``stage_audit_status`` reads the now-real, shot_detect_run-logged doc
+    as "no audit yet" forever -- the opposite failure mode from the one
+    stubs exist to prevent."""
+    import json as _json
+
+    import numpy as np
+    import soundfile as sf
+
+    from splitsmith.ui.project import StageStatus, is_stub_audit, stage_audit_status
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
+
+    # Seed the beep-confirm stub exactly as set_beep_reviewed does.
+    audit_file = _shooter_root / "audit" / "stage1.json"
+    audit_file.parent.mkdir(parents=True, exist_ok=True)
+    audit_file.write_text(_json.dumps({"shots": [], "detection": "none"}), encoding="utf-8")
+
+    audio_dir = _shooter_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav = audio_dir / "stage1_audit.wav"
+    sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
+    trimmed_dir = _shooter_root / "trimmed"
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00")
+
+    from splitsmith import ensemble as ensemble_module
+    from splitsmith.ui import audio as audio_helpers
+    from splitsmith.ui import server as server_module
+
+    class FakeAudit:
+        audio_path = wav
+        beep_in_clip = 5.0
+        trimmed = True
+
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    fake_result = _fake_ensemble_result(
+        [{"time": 5.5, "confidence": 0.8, "ensemble_score": 3.0, "kept": True}],
+        consensus=2,
+    )
+    monkeypatch.setattr(ensemble_module, "detect_shots_ensemble", lambda *a, **kw: fake_result)
+
+    resp = client.post("/api/shooters/me/stages/1/shot-detect")
+    assert resp.status_code == 200
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+
+    saved = _json.loads(audit_file.read_text(encoding="utf-8"))
+    assert saved["shots"], "real detection should have seeded shots"
+    assert not is_stub_audit(saved)
+
+    project_after = MatchProject.load(_shooter_root)
+    status = stage_audit_status(project_after.stages[0], project_after.audit_path(_shooter_root))
+    assert status == StageStatus.in_progress
+
+
 def test_shot_detect_job_records_phase_timings(tmp_path: Path, monkeypatch) -> None:
     """The instrumented ``shot_detect`` body opens a phase per natural
     boundary; the backend persists ``timer.build()`` onto the job so the
