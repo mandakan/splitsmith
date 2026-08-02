@@ -194,22 +194,41 @@ def run_trims(
 
 
 def _run_one(match_root: Path, entry: TrimPlanEntry) -> TrimResult:
-    """Export one stage's trim. Never raises."""
+    """Export one stage's trim. Never raises -- every failure is a ``TrimResult``.
+
+    Everything that re-reads the shooter happens inside the guarded region.
+    The user may have edited the project (or unplugged the drive) between
+    ``--dry-run`` and the real run, so loading it, finding the stage and
+    resolving the source can all fail -- and any of those escaping would
+    end ``run_trims``'s loop, costing the user every stage after this one.
+    """
     shooter_root = Match.shooter_root(match_root, entry.shooter_slug)
-    project = MatchProject.load(shooter_root)
-    stage = project.stage(entry.stage_number)
-    # Re-resolving against a freshly loaded project can disagree with the
-    # plan: the user may have edited the shooter between --dry-run and the
-    # real run. Both disagreements (ambiguity, a vanished beep) are this
-    # stage's problem, never the run's.
     try:
-        chosen, _ = _choose_video(stage, entry.camera)
+        project = MatchProject.load(shooter_root)
+        stage = project.stage(entry.stage_number)
+        chosen, substituted_from = _choose_video(stage, entry.camera)
+        if chosen is None or chosen.beep_time is None:
+            return TrimResult(entry=entry, skip_reasons=["beep disappeared between plan and run"])
+        source = project.resolve_video_path(shooter_root, chosen.path)
     except camera_select.CameraResolutionError as exc:
         return TrimResult(entry=entry, skip_reasons=[f"camera became ambiguous after planning: {exc}"])
-    if chosen is None or chosen.beep_time is None:
-        return TrimResult(entry=entry, skip_reasons=["beep disappeared between plan and run"])
+    except (ValueError, KeyError, OSError) as exc:
+        # ValueError covers pydantic's ValidationError and json's
+        # JSONDecodeError (a rewritten or truncated project.json); KeyError
+        # is a stage deleted since the plan; OSError is the file or its
+        # media gone.
+        return TrimResult(entry=entry, skip_reasons=[f"stage unavailable at run time: {exc}"])
 
-    source = project.resolve_video_path(shooter_root, chosen.path)
+    # A substitution that disagrees with the plan means the run is exporting
+    # a different camera than --dry-run showed (the shooter gained -- or
+    # lost -- the requested cam in between). Export it, but say so.
+    notes: list[str] = []
+    if substituted_from != entry.substituted_from:
+        notes.append(
+            "camera substitution changed since planning: planned "
+            f"{entry.substituted_from or 'none'}, ran {substituted_from or 'none'}"
+        )
+
     secondaries: list[exports.SecondaryExport] = []
     if chosen.role != "primary":
         secondaries.append(
@@ -249,7 +268,7 @@ def _run_one(match_root: Path, entry: TrimPlanEntry) -> TrimResult:
             secondaries=secondaries,
         )
     except (exports.StageExportError, OSError, RuntimeError) as exc:
-        return TrimResult(entry=entry, skip_reasons=[str(exc)])
+        return TrimResult(entry=entry, skip_reasons=[str(exc), *notes])
 
     # ``result.anomalies`` mixes shot-audit findings with export failures.
     # In a trim-only run "No shots detected in the stage window" is the
@@ -265,7 +284,7 @@ def _run_one(match_root: Path, entry: TrimPlanEntry) -> TrimResult:
     reasons = [a for a in result.anomalies if a.startswith(prefix)]
     if path is None and not reasons:
         reasons = [f"{prefix}: export produced no file"]
-    return TrimResult(entry=entry, trim_path=path, skip_reasons=reasons)
+    return TrimResult(entry=entry, trim_path=path, skip_reasons=[*reasons, *notes])
 
 
 __all__ = [

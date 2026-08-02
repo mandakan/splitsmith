@@ -208,6 +208,81 @@ def test_run_trims_reports_ffmpeg_failure_without_aborting(
     assert any(r.trim_path is not None for r in results)
 
 
+def test_run_trims_survives_a_stage_deleted_after_the_plan(
+    two_shooter_match: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Re-loading the project at run time can find the stage gone.
+
+    ``run_trims``'s promise is that one stage's failure never ends the run,
+    so a stage the user deleted between --dry-run and the run is that
+    stage's skip -- the rest of the match still exports.
+    """
+    written: list[Path] = []
+    monkeypatch.setattr(match_trims.exports.trim, "trim_video", _fake_trim_video(written))
+
+    plan = match_trims.plan_trims(two_shooter_match)
+    assert _find(plan, "anders", 1).eligible is True
+
+    anders = Match.shooter_root(two_shooter_match, "anders")
+    project = MatchProject.load(anders)
+    project.stages = [s for s in project.stages if s.stage_number != 1]
+    project.save(anders)
+
+    results = match_trims.run_trims(two_shooter_match, plan)
+
+    gone = next(r for r in results if r.entry.shooter_slug == "anders" and r.entry.stage_number == 1)
+    assert gone.trim_path is None
+    assert any("no stage 1" in reason for reason in gone.skip_reasons)
+    # The other shooter's eligible stage still ran.
+    assert [r.entry.stage_number for r in results if r.trim_path] == [2]
+
+
+def test_run_trims_survives_an_unloadable_project_after_the_plan(
+    two_shooter_match: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A project.json that stops parsing is one shooter's problem, not the run's."""
+    monkeypatch.setattr(match_trims.exports.trim, "trim_video", _fake_trim_video([]))
+
+    plan = match_trims.plan_trims(two_shooter_match)
+    anders = Match.shooter_root(two_shooter_match, "anders")
+    (anders / "project.json").write_text("{ not json", encoding="utf-8")
+
+    results = match_trims.run_trims(two_shooter_match, plan)
+
+    broken = next(r for r in results if r.entry.shooter_slug == "anders" and r.entry.stage_number == 1)
+    assert broken.trim_path is None
+    assert broken.skip_reasons
+    assert any(r.trim_path is not None for r in results)
+
+
+def test_run_trims_records_substitution_that_changed_since_the_plan(
+    two_shooter_match: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The plan said "chest missing, using primary"; by run time the chest cam
+    is there. The run exports a different camera than --dry-run showed, so it
+    has to say so rather than swap angles silently."""
+    written: list[Path] = []
+    monkeypatch.setattr(match_trims.exports.trim, "trim_video", _fake_trim_video(written))
+
+    plan = match_trims.plan_trims(
+        two_shooter_match, shooters=["anders"], stages=[1], cameras={"anders": "chest"}
+    )
+    assert _find(plan, "anders", 1).substituted_from == "chest"
+
+    anders = Match.shooter_root(two_shooter_match, "anders")
+    project = MatchProject.load(anders)
+    project.stage(1).videos.append(
+        _video(anders, "raw/a1_chest.mov", role="secondary", beep_time=4.0, camera_mount="chest")
+    )
+    project.save(anders)
+
+    results = match_trims.run_trims(two_shooter_match, plan)
+
+    assert results[0].trim_path is not None
+    assert "_cam_" in results[0].trim_path.name
+    assert any("chest" in reason for reason in results[0].skip_reasons)
+
+
 def test_run_trims_survives_camera_ambiguity_appearing_after_the_plan(
     two_shooter_match: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
