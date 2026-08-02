@@ -737,6 +737,33 @@ def test_stub_audit_doc_keeps_stage_ready_hosted(tmp_path: Path) -> None:
     assert stage_audit_status(stage, tmp_path, audit_docs=docs) == StageStatus.ready
 
 
+def test_stale_stub_marker_does_not_mask_a_saved_audit(tmp_path: Path) -> None:
+    """A writer that folds real data into a stub without stripping the
+    sentinel (e.g. the Audit page's save, or the MCP detect tool) must
+    still read as genuinely audited. The marker alone is not sufficient
+    evidence of "no audit work" once shots and a save event exist."""
+    audit_dir = tmp_path / "audit"
+    audit_dir.mkdir()
+    (audit_dir / "stage1.json").write_text(
+        json.dumps(
+            {
+                "detection": "none",
+                "shots": [{"shot_number": 1, "time": 5.5}],
+                "audit_events": [{"kind": "save"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    stage = StageEntry(
+        stage_number=1,
+        stage_name="El Prez",
+        time_seconds=8.0,
+        videos=[StageVideo(path=Path("/tmp/GX010042.MP4"), role="primary", beep_time=10.0)],
+    )
+
+    assert stage_audit_status(stage, audit_dir) == StageStatus.audited
+
+
 def test_stage_statuses_and_audited_count_honor_audit_docs(tmp_path: Path) -> None:
     """``stage_statuses`` / ``audited_count`` forward ``audit_docs`` so the
     GET-project + shooter-list endpoints report the right hosted status

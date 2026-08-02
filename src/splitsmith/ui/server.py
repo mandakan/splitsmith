@@ -2436,11 +2436,25 @@ def register_job_bodies(state: AppState) -> None:
             and the run is appended to the ``audit_events`` log.
 
             ``doc`` may be the beep-confirm stub (``{"shots": [],
-            "detection": "none"}``) seeded by ``set_beep_reviewed``. This
-            run supersedes that placeholder, so the sentinel is dropped --
-            leaving it in place would make ``stage_audit_status`` keep
-            reading this now-real doc as "no audit yet" forever.
+            "detection": "none"}``) seeded by ``set_beep_reviewed`` --
+            which has none of the base fields (``stage_number``,
+            ``beep_time``, ...) that ``_default_audit_doc`` sets, because
+            those are unknown at beep-confirm time. Backfill them here so
+            a stage that only ever had a stub still ends up with a
+            complete document (readers like the compare-timeline exporter
+            key on ``beep_time``). ``setdefault`` keeps this idempotent
+            under re-merge and never overwrites a value the doc already
+            carries (e.g. a genuinely-audited doc's own fields).
+
+            The sentinel is also dropped when present so the saved
+            document stays clean, but ``is_stub_audit`` no longer depends
+            on that for correctness -- it also requires the absence of
+            ``shots``/``audit_events``, so a doc this function has
+            written to can never read back as a stub even if some other
+            writer forgot to strip the marker.
             """
+            for key, value in _default_audit_doc().items():
+                doc.setdefault(key, value)
             if doc.get("detection") == STUB_AUDIT_DETECTION:
                 del doc["detection"]
             if stg.stage_rounds is not None:

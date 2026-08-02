@@ -449,10 +449,22 @@ def is_stub_audit(payload: dict[str, Any]) -> bool:
     """True when this audit document is a beep-confirm placeholder.
 
     Seeded by the beep-review endpoint so status surfaces and the lab have
-    a concrete document to read instead of inferring from absence. It
-    carries no shot data and represents no audit work.
+    a concrete document to read instead of inferring from absence. A stub
+    is the sentinel *plus* the absence of any real audit content -- both
+    ``shots`` and ``audit_events`` must be empty. The marker alone is not
+    enough: several writers (the shot-detect job, the Audit page's save,
+    the MCP detect tool) fold real results into whatever doc already
+    exists rather than replacing it, and none of them is guaranteed to
+    strip the sentinel afterward. Requiring "no real content" as well
+    means a document that has actually been worked on -- shots detected,
+    or a save event logged -- can never read back as a stub, regardless
+    of whether the marker was cleared.
     """
-    return payload.get("detection") == STUB_AUDIT_DETECTION
+    return (
+        payload.get("detection") == STUB_AUDIT_DETECTION
+        and not payload.get("shots")
+        and not payload.get("audit_events")
+    )
 
 
 def stage_audit_status(

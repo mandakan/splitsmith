@@ -2923,6 +2923,11 @@ def test_shot_detect_clears_beep_confirm_stub_marker(tmp_path: Path, monkeypatch
     saved = _json.loads(audit_file.read_text(encoding="utf-8"))
     assert saved["shots"], "real detection should have seeded shots"
     assert not is_stub_audit(saved)
+    # The stub had none of the base fields (unknown at beep-confirm time);
+    # the merge must backfill them so downstream readers keying on
+    # beep_time (e.g. the compare-timeline exporter) don't silently drop
+    # this stage's shots.
+    assert saved["beep_time"] == pytest.approx(5.0)
 
     project_after = MatchProject.load(_shooter_root)
     status = stage_audit_status(project_after.stages[0], project_after.audit_path(_shooter_root))
