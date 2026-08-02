@@ -33,18 +33,6 @@ from .ui.project import MatchProject, StageEntry, StageVideo
 # approach as ``ui.server`` and ``mcp.export_tools``.
 _PLACEHOLDER_SCORECARD_TIME = datetime(2000, 1, 1, tzinfo=UTC)
 
-#: Every value ``TrimPlanEntry.reason`` can take when a stage is ineligible.
-#: Exposed so callers (the CLI's summary table) can render them without
-#: hardcoding a list that silently drifts out of date.
-SKIP_REASONS = (
-    "skipped",
-    "camera_ambiguous",
-    "no_beep",
-    "no_stage_time",
-    "source_unreachable",
-    "already_exported",
-)
-
 
 class TrimPlanEntry(BaseModel):
     """One shooter-stage, classified as trim-exportable or not."""
@@ -288,7 +276,6 @@ def _run_one(match_root: Path, entry: TrimPlanEntry) -> TrimResult:
 
 
 __all__ = [
-    "SKIP_REASONS",
     "TrimPlanEntry",
     "TrimResult",
     "plan_trims",

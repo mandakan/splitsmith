@@ -404,14 +404,6 @@ def _render_plan(plan: match_model.MergePlan, *, dry_run: bool, move: bool) -> N
     console.print(table)
 
 
-#: Human-facing status text per ``match_trims.TrimPlanEntry.reason``. Driven
-#: from ``match_trims.SKIP_REASONS`` (rather than hand-listing the values
-#: here) so a new reason added to that module can never render a blank cell;
-#: ``_status_cell`` also falls back to the raw string for anything missing
-#: from this dict, so an unmapped reason is impossible to ship silently.
-_REASON_LABELS: dict[str, str] = {reason: reason for reason in match_trims.SKIP_REASONS}
-
-
 def _camera_cell(entry: match_trims.TrimPlanEntry) -> str:
     """Render the Camera column; a substitution shows ``requested -> primary``."""
     if entry.substituted_from:
@@ -434,7 +426,9 @@ def _status_cell(entry: match_trims.TrimPlanEntry, result: match_trims.TrimResul
             return "; ".join(result.skip_reasons)
     if entry.eligible:
         return "eligible"
-    return _REASON_LABELS.get(entry.reason or "", entry.reason or "ineligible")
+    # ``match_trims`` reasons are already human-readable, so they render
+    # as-is; a new reason added there can never blank out this cell.
+    return entry.reason or "ineligible"
 
 
 def _render_trims_table(
