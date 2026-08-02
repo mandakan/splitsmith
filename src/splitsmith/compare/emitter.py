@@ -269,8 +269,8 @@ def emit_compare_fcpxml(
 
     # Build per-stage <media> compound clips first (resources), then the
     # outer <sequence> referencing them via <ref-clip>.
-    stage_compound_ids: list[tuple[int, str, str, int]] = []
-    # (stage_number, media_id, stage_name, compound_duration_frames_seq)
+    stage_compound_ids: list[tuple[int, str, str, int, list[str]]] = []
+    # (stage_number, media_id, stage_name, compound_duration_frames_seq, substituted_labels)
 
     for stage_number in all_stage_numbers:
         present_labels = {label for label in sorted_labels if (label, stage_number) in assets}
@@ -329,6 +329,8 @@ def emit_compare_fcpxml(
         compound_frames = max(
             tile_offsets_frames[lab] + tile_durations_in_parent_frames[lab] for lab in present_labels
         )
+
+        substituted_labels = sorted(lab for lab, sb in present_stages.items() if sb.substituted)
 
         media_id = _next_id()
         media_el = ET.SubElement(
@@ -403,7 +405,7 @@ def emit_compare_fcpxml(
             ET.SubElement(filler_clip, "adjust-transform", transform_attrs)
             next_lane += 1
 
-        stage_compound_ids.append((stage_number, media_id, stage_name, compound_frames))
+        stage_compound_ids.append((stage_number, media_id, stage_name, compound_frames, substituted_labels))
 
     # Outer <sequence>: stitch the compound clips together with markers.
     library = ET.SubElement(fcpxml, "library")
@@ -425,7 +427,7 @@ def emit_compare_fcpxml(
     )
     outer_spine = ET.SubElement(outer_seq, "spine")
     cumulative_frames = 0
-    for stage_number, media_id, stage_name, frames in stage_compound_ids:
+    for stage_number, media_id, stage_name, frames, substituted_labels in stage_compound_ids:
         ref_clip = ET.SubElement(
             outer_spine,
             "ref-clip",
@@ -438,13 +440,19 @@ def emit_compare_fcpxml(
                 "srcEnable": "all",
             },
         )
+        # Substituted tiles are named in the marker so the editor can see, on
+        # the timeline, that one shooter's angle changed for this stage.
+        marker_value = f"Stage {stage_number} -- {stage_name}"
+        if substituted_labels:
+            noted = ", ".join(f"{label}: primary" for label in substituted_labels)
+            marker_value = f"{marker_value} ({noted})"
         ET.SubElement(
             ref_clip,
             "marker",
             {
                 "start": "0s",
                 "duration": _frame_aligned_str(1, fd_num, fd_den),
-                "value": f"Stage {stage_number} -- {stage_name}",
+                "value": marker_value,
             },
         )
         cumulative_frames += frames
