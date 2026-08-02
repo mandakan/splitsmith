@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .. import fcpxml_gen
 from ..fcpxml_gen import VideoMetadata
-from ..match_model import Match, Shooter
+from ..match_model import Match
 from ..ui.match_exports import _slugify
 from ..ui.project import MatchProject
 
@@ -126,17 +126,14 @@ def load_shooter(
 
 
 def _trim_path_for_shooter_stage(
-    shooter: Shooter,
+    project: MatchProject,
     shooter_root: Path,
     stage_number: int,
     stage_name: str,
 ) -> Path:
     """Same naming as :func:`trim_path_for_stage` but rooted at a shooter dir."""
     base = f"stage{stage_number}_{_slugify(stage_name)}"
-    exports = Path(shooter.exports_dir).expanduser() if shooter.exports_dir else shooter_root / "exports"
-    if not exports.is_absolute():
-        exports = shooter_root / exports
-    return exports / f"{base}_trimmed.mp4"
+    return project.exports_path(shooter_root) / f"{base}_trimmed.mp4"
 
 
 def load_shooter_from_match(
@@ -157,20 +154,25 @@ def load_shooter_from_match(
     if probe is None:
         probe = fcpxml_gen.probe_video
     match = Match.load(match_root)
-    shooter = match.load_shooter(match_root, slug)
     shooter_root = Match.shooter_root(match_root, slug)
-    # Stage name lookup from the match-level definitions.
+    # Per-stage data comes from project.json: it is authoritative for
+    # everything the server writes (beeps, roles, buffers). shooter.json is
+    # a merge-time snapshot that nothing keeps in sync, so reading it drops
+    # any beep confirmed after the merge. Stage *names* still come from the
+    # match, which owns the shared stage definitions.
+    project = MatchProject.load(shooter_root)
     stage_names: dict[int, str] = {s.stage_number: s.stage_name for s in match.stages}
+    pre_buffer = project.trim_pre_buffer_seconds
 
     bundles: dict[int, CompareStageBundle] = {}
-    for stage in shooter.stages:
+    for stage in project.stages:
         if stage.skipped:
             continue
-        primary = next((v for v in stage.videos if v.role == "primary"), None)
+        primary = stage.primary()
         if primary is None or primary.beep_time is None:
             continue
-        stage_name = stage_names.get(stage.stage_number, f"stage{stage.stage_number}")
-        trim = _trim_path_for_shooter_stage(shooter, shooter_root, stage.stage_number, stage_name)
+        stage_name = stage_names.get(stage.stage_number, stage.stage_name)
+        trim = _trim_path_for_shooter_stage(project, shooter_root, stage.stage_number, stage_name)
         if not trim.exists():
             continue
         meta = probe(trim)
@@ -179,7 +181,7 @@ def load_shooter_from_match(
             stage_name=stage_name,
             trim_path=trim,
             audit_path=shooter_root / "audit" / f"stage{stage.stage_number}.json",
-            beep_offset_in_clip=min(shooter.trim_pre_buffer_seconds, primary.beep_time),
+            beep_offset_in_clip=min(pre_buffer, primary.beep_time),
             duration_seconds=meta.duration_seconds,
             width=meta.width,
             height=meta.height,
