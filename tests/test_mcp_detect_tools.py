@@ -11,7 +11,13 @@ import pytest
 from splitsmith.beep_detect import BeepNotFoundError
 from splitsmith.config import BeepCandidate, BeepDetection
 from splitsmith.mcp import detect_tools
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
+from splitsmith.ui.project import (
+    STUB_AUDIT_DETECTION,
+    MatchProject,
+    StageEntry,
+    StageVideo,
+    is_stub_audit,
+)
 
 
 def _fake_ensemble_result(times: list[float], consensus: int = 3, expected_rounds=None):
@@ -474,6 +480,76 @@ def test_detect_shots_reset_wipes_existing_shots(tmp_path: Path) -> None:
     assert len(payload["shots"]) == 2
     assert all(s["source"] == "detected" for s in payload["shots"])
     assert result["shots_seeded"] is True
+
+
+def test_detect_shots_backfills_base_fields_over_a_beep_confirm_stub(tmp_path: Path) -> None:
+    """Confirming a beep in the SPA seeds ``{"shots": [], "detection": "none"}``.
+
+    Detecting via MCP afterwards used to fold shots into that stub verbatim,
+    saving a document with no ``beep_time`` -- which the compare-timeline
+    exporter keys on, so every shot silently vanished from the grid.
+    """
+    root, _src, wav = _seed_shot_detect_project(tmp_path)
+    audit_dir = root / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    audit_file = audit_dir / "stage1.json"
+    audit_file.write_text(
+        json.dumps({"shots": [], "detection": STUB_AUDIT_DETECTION}, indent=2), encoding="utf-8"
+    )
+    fake_result = _fake_ensemble_result([5.5, 6.1])
+
+    with (
+        patch(
+            "splitsmith.mcp.detect_tools.audio_helpers.ensure_audit_audio",
+            return_value=_FakeAudit(wav, beep_in_clip=5.0),
+        ),
+        patch("splitsmith.mcp.detect_tools._get_ensemble_runtime", return_value=None),
+        patch(
+            "splitsmith.mcp.detect_tools.ensemble_module.detect_shots_ensemble",
+            return_value=fake_result,
+        ),
+    ):
+        detect_tools.detect_shots_for_stage(str(root), stage_number=1)
+
+    payload = json.loads(audit_file.read_text())
+    assert payload["beep_time"] == pytest.approx(5.0)
+    assert payload["stage_number"] == 1
+    assert payload["stage_name"] == "One"
+    assert payload["stage_time_seconds"] == pytest.approx(12.0)
+    assert len(payload["shots"]) == 2
+    # The sentinel is dropped once real detection has run, and the doc can
+    # no longer read back as a placeholder either way.
+    assert "detection" not in payload
+    assert is_stub_audit(payload) is False
+
+
+def test_detect_shots_does_not_overwrite_an_existing_beep_time(tmp_path: Path) -> None:
+    """Backfill is ``setdefault``: a doc that already carries a beep keeps it,
+    even when the audit clip's beep-in-clip disagrees."""
+    root, _src, wav = _seed_shot_detect_project(tmp_path)
+    audit_dir = root / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    audit_file = audit_dir / "stage1.json"
+    audit_file.write_text(
+        json.dumps({"stage_number": 1, "beep_time": 4.25, "shots": []}, indent=2), encoding="utf-8"
+    )
+
+    with (
+        patch(
+            "splitsmith.mcp.detect_tools.audio_helpers.ensure_audit_audio",
+            return_value=_FakeAudit(wav, beep_in_clip=5.0),
+        ),
+        patch("splitsmith.mcp.detect_tools._get_ensemble_runtime", return_value=None),
+        patch(
+            "splitsmith.mcp.detect_tools.ensemble_module.detect_shots_ensemble",
+            return_value=_fake_ensemble_result([5.5]),
+        ),
+    ):
+        detect_tools.detect_shots_for_stage(str(root), stage_number=1)
+
+    payload = json.loads(audit_file.read_text())
+    assert payload["beep_time"] == pytest.approx(4.25)
+    assert payload["stage_name"] == "One"
 
 
 def test_detect_shots_rejects_stage_without_beep_time(tmp_path: Path) -> None:
