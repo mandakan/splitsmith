@@ -94,8 +94,25 @@ class StageExportResult:
 
 
 class StageExportError(RuntimeError):
-    """Raised when the audit JSON is missing / malformed / lacks the data
-    needed to produce an export. Endpoints surface this as a 400."""
+    """Raised when the audit JSON is malformed or lacks the data needed to
+    produce an export. Endpoints surface this as a 400."""
+
+
+def _read_audit_data(audit_path: Path) -> dict[str, Any]:
+    """Return the stage's audit document, or an empty one when absent.
+
+    A missing file means shot detection never ran for this stage. That is
+    a legitimate state -- the lossless trim and the FCPXML spine need only
+    a beep and a stage time -- so it collapses to zero shots and the
+    shot-dependent artefacts skip themselves downstream. A file that
+    exists but won't parse is a real fault and still raises.
+    """
+    if not audit_path.exists():
+        return {"shots": []}
+    try:
+        return json.loads(audit_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise StageExportError(f"failed to read audit JSON {audit_path}: {exc}") from exc
 
 
 def audit_shots_to_engine_shots(
@@ -205,17 +222,14 @@ def export_stage(
       - ``stage<N>_<slug>.fcpxml`` (references the lossless trim above)
       - ``stage<N>_<slug>_report.txt``
 
-    ``audit_path`` must exist and contain at least one shot. ``exports_dir``
-    is created if missing. ``source_video_path`` is the primary's source
-    file (resolved through any symlink); it is required when ``write_trim``
-    or ``write_fcpxml`` is set.
+    ``audit_path`` may be absent -- a stage that never ran shot detection
+    still exports its trim, FCPXML spine and report. Artefacts that need
+    shots (CSV, overlay, shot markers) skip themselves with a recorded
+    reason. ``exports_dir`` is created if missing. ``source_video_path`` is
+    the primary's source file (resolved through any symlink); it is required
+    when ``write_trim`` or ``write_fcpxml`` is set.
     """
-    if not audit_path.exists():
-        raise StageExportError(f"no audit JSON at {audit_path}; finish auditing this stage first")
-    try:
-        audit_data = json.loads(audit_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise StageExportError(f"failed to read audit JSON {audit_path}: {exc}") from exc
+    audit_data = _read_audit_data(audit_path)
 
     shots = audit_shots_to_engine_shots(audit_data, beep_time_in_source=beep_time_in_source)
     # Empty ``shots[]`` is permissive (#214): the user may want a trim-only

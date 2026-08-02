@@ -175,24 +175,31 @@ def test_export_stage_writes_csv_and_report(tmp_path: Path) -> None:
     assert rows[2][0] == "2"
 
 
-def test_export_stage_refuses_missing_audit(tmp_path: Path) -> None:
-    with pytest.raises(exports_mod.StageExportError):
-        exports_mod.export_stage(
-            request=exports_mod.StageExportRequest(stage_number=1),
-            audit_path=tmp_path / "missing.json",
-            exports_dir=tmp_path / "exports",
-            source_video_path=None,
-            pre_buffer_seconds=5.0,
-            post_buffer_seconds=5.0,
-            stage_data=StageData(
-                stage_number=1,
-                stage_name="S",
-                time_seconds=8.0,
-                scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
-            ),
-            beep_time_in_source=10.0,
-            config=Config(),
-        )
+def test_export_stage_missing_audit_no_longer_refuses(tmp_path: Path) -> None:
+    """Superseded by the missing-audit tests below: a stage that never ran
+    shot detection is a legitimate state, not a fault. This regression
+    guard replaces the old hard-refusal assertion (this task's change) --
+    it still exercises the no-source, all-artefacts-requested path, just
+    without expecting an exception."""
+    result = exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(stage_number=1),
+        audit_path=tmp_path / "missing.json",
+        exports_dir=tmp_path / "exports",
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="S",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    assert result.shots_written == 0
+    assert result.csv_path is None
+    assert result.trimmed_video_path is None
 
 
 def test_export_stage_permissive_with_empty_shots(tmp_path: Path) -> None:
@@ -236,6 +243,116 @@ def test_export_stage_permissive_with_empty_shots(tmp_path: Path) -> None:
     assert any("csv not written: no shots audited" in a for a in result.anomalies)
     assert any("overlay not written: no shots audited" in a for a in result.anomalies)
     assert any("No shots detected" in a for a in result.anomalies)
+
+
+def test_export_stage_missing_audit_writes_trim(tmp_path: Path, monkeypatch) -> None:
+    """A stage that never ran shot detection still exports its lossless
+    trim: beep + stage time are the only real prerequisites (#214 made
+    empty shots[] permissive, but the gate above it was unreachable)."""
+    source = tmp_path / "GX010042.MP4"
+    source.write_bytes(b"not really video")
+    calls: list[dict] = []
+
+    def fake_trim_video(src, dst, **kwargs):
+        calls.append({"src": src, "dst": dst, **kwargs})
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(b"trimmed")
+
+    monkeypatch.setattr(exports_mod.trim, "trim_video", fake_trim_video)
+
+    result = exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1,
+            write_trim=True,
+            write_csv=False,
+            write_fcpxml=False,
+            write_report=False,
+        ),
+        audit_path=tmp_path / "audit" / "stage1.json",  # deliberately absent
+        exports_dir=tmp_path / "exports",
+        source_video_path=source,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="El Prez",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+
+    assert result.trimmed_video_path is not None
+    assert result.trimmed_video_path.exists()
+    assert result.shots_written == 0
+    assert calls[0]["beep_time"] == 10.0
+    assert calls[0]["stage_time"] == 8.0
+    assert calls[0]["mode"] == "lossless"
+
+
+def test_export_stage_missing_audit_skips_csv_with_reason(tmp_path: Path, monkeypatch) -> None:
+    """Asking for CSV without shot data is not an error -- the trim ships
+    and the CSV skip is surfaced as an anomaly, same as an empty shots[]."""
+    source = tmp_path / "GX010042.MP4"
+    source.write_bytes(b"not really video")
+    monkeypatch.setattr(
+        exports_mod.trim,
+        "trim_video",
+        lambda src, dst, **kw: dst.write_bytes(b"trimmed"),
+    )
+
+    result = exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1,
+            write_trim=True,
+            write_csv=True,
+            write_fcpxml=False,
+            write_report=False,
+        ),
+        audit_path=tmp_path / "audit" / "stage1.json",
+        exports_dir=tmp_path / "exports",
+        source_video_path=source,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="El Prez",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+
+    assert result.csv_path is None
+    assert result.trimmed_video_path is not None
+    assert any("csv not written: no shots audited" in a for a in result.anomalies)
+
+
+def test_export_stage_corrupt_audit_still_raises(tmp_path: Path) -> None:
+    """A malformed audit file is a real fault -- distinct from 'detection
+    never ran' -- and must not be silently treated as zero shots."""
+    audit_path = tmp_path / "stage1.json"
+    audit_path.write_text("{not json", encoding="utf-8")
+
+    with pytest.raises(exports_mod.StageExportError, match="failed to read audit JSON"):
+        exports_mod.export_stage(
+            request=exports_mod.StageExportRequest(stage_number=1, write_trim=False),
+            audit_path=audit_path,
+            exports_dir=tmp_path / "exports",
+            source_video_path=None,
+            pre_buffer_seconds=5.0,
+            post_buffer_seconds=5.0,
+            stage_data=StageData(
+                stage_number=1,
+                stage_name="El Prez",
+                time_seconds=8.0,
+                scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+            ),
+            beep_time_in_source=10.0,
+            config=Config(),
+        )
 
 
 def test_export_stage_skips_trim_and_fcpxml_when_source_unreachable(tmp_path: Path) -> None:
