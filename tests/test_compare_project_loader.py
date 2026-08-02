@@ -444,6 +444,19 @@ def test_load_shooter_defaults_to_persisted_compare_camera(tmp_path: Path) -> No
     assert bundle.stages_by_number[1].camera_mount == "chest"
 
 
+def test_explicit_camera_beats_persisted_compare_camera(tmp_path: Path) -> None:
+    """A per-run selector is the more recent intent; the persisted value loses."""
+    root = _seed_project_with_two_cams(tmp_path)
+    project = MatchProject.load(root)
+    project.compare_camera = "chest"
+    project.save(root)
+
+    bundle = load_shooter(root, "Mathias", camera="helmet", probe=_stub_probe)
+    stage = bundle.stages_by_number[1]
+    assert stage.camera_mount == "helmet"
+    assert "_cam_" not in stage.trim_path.name
+
+
 def test_load_shooter_from_match_selects_camera(tmp_path: Path) -> None:
     """The merged-match loader honours ``camera`` the same way."""
     match_root = _build_two_stage_match(tmp_path)

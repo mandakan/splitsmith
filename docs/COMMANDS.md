@@ -82,6 +82,11 @@ Render:
 uv run splitsmith compare export examples/compare-bromma-classifier-2026.yaml
 ```
 
+`--audio-from`, `--output` and `--camera SLUG=VALUE` override the manifest's
+`audio_from`, `output` and per-shooter `camera:` keys for that run. A relative
+`--output` resolves against the current directory; a relative `output:` inside
+the YAML stays anchored to the YAML's own directory.
+
 Smallest-fits grid: 1 shooter -> 1up; 2 -> 2up (horizontal or vertical); 3-4 -> 2x2; 5-9 -> 3x3; 10-16 -> 4x4. Empty slots in the chosen grid become black filler tiles for the duration of that stage. Sequence frame rate / size come from the audio-source shooter's first stage; mismatched cam rates / sizes get their own `<format>` resource and ride on FCP's edit-time conform.
 
 ## `lab` -- algorithm Lab (fixtures, eval, tuning)

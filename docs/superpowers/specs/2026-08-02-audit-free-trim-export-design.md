@@ -131,6 +131,22 @@ as `compare_camera`, so the SPA can own it as a picker and the CLI reads it
 without restatement. Precedence: `--camera` flag > manifest `camera:` >
 persisted `compare_camera` > primary.
 
+A CLI flag beating a manifest key is the rule for *every* flag on
+`compare export`, not just `--camera`: `--audio-from` and `--output` now
+override the manifest's `audio_from` and `output` keys too. This changes
+shipped behavior -- both flags previously lost to their manifest keys and
+the CLI said so in its help text. The flag is typed now and the YAML was
+written earlier, so the flag is the more recent statement of intent, and one
+precedence rule across all three flags is easier to hold than a per-flag
+table. Two details follow from it: an `--audio-from` override is validated
+against the manifest's labels exactly as the YAML's own value is, exiting 2
+and listing the labels when it matches none; and a relative `--output`
+resolves against the current directory, not the manifest's parent -- a path
+typed at a prompt should land where the user is standing, while a relative
+path inside the YAML stays anchored to the YAML so the manifest keeps
+travelling with its projects. Overriding is the documented contract, so no
+flag warns about it.
+
 **Alignment needs no new math.** Secondary trims are cut with the same pre/post
 buffers as the primary, anchored on that camera's own `beep_time`
 (`exports.py:300`). The loader's `beep_offset_in_clip = min(pre_buffer,
