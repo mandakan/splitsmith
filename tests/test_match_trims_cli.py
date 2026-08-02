@@ -9,6 +9,9 @@ from typer.testing import CliRunner
 
 from splitsmith import match_trims
 from splitsmith.cli import app
+from splitsmith.match_model import Match, MatchStageDefinition
+from splitsmith.ui.project import MatchProject, StageEntry
+from tests.conftest import _video
 
 runner = CliRunner()
 
@@ -112,3 +115,80 @@ def test_force_recuts_already_exported(two_shooter_match: Path, monkeypatch: pyt
     result = runner.invoke(app, ["match", "trims", str(two_shooter_match), "--force"])
     assert result.exit_code == 0, result.output
     assert "already_exported" not in result.stdout
+
+
+def _fully_exportable_match(tmp_path: Path) -> Path:
+    """One shooter, one exportable stage plus one deliberately skipped stage.
+
+    No permanently-ineligible reason (no_beep, no_stage_time, ...) appears,
+    so once the exportable stage has a trim, every remaining entry is either
+    ``already_exported`` or ``skipped`` -- a match that is genuinely done.
+    """
+    match_root = tmp_path / "done_match"
+    match = Match.init(match_root, name="Done Match")
+    match.stages = [
+        MatchStageDefinition(stage_number=1, stage_name="Only Real Stage"),
+        MatchStageDefinition(stage_number=2, stage_name="Skipped Stage"),
+    ]
+    match.shooters = ["solo"]
+    match.save(match_root)
+
+    shooter_root = Match.shooter_root(match_root, "solo")
+    project = MatchProject.init(shooter_root, name="Done Match")
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="Only Real Stage",
+            time_seconds=10.0,
+            videos=[_video(shooter_root, "raw/a.mov")],
+        ),
+        StageEntry(stage_number=2, stage_name="Skipped Stage", time_seconds=10.0, skipped=True),
+    ]
+    project.save(shooter_root)
+    return match_root
+
+
+def test_rerun_of_fully_exported_match_exits_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Re-running against a match that's already fully exported must not fail --
+    ``match trims <match> && compare export <match> ...`` needs to chain safely
+    even when the second run writes nothing because everything is already done."""
+    monkeypatch.setattr(match_trims.exports.trim, "trim_video", lambda src, dst, **kw: dst.write_bytes(b"t"))
+    match_root = _fully_exportable_match(tmp_path)
+
+    first = runner.invoke(app, ["match", "trims", str(match_root)])
+    assert first.exit_code == 0, first.output
+
+    second = runner.invoke(app, ["match", "trims", str(match_root)])
+    assert second.exit_code == 0, second.output
+    assert "already_exported" in second.stdout
+
+
+def test_no_beep_and_no_stage_time_still_exit_1(tmp_path: Path) -> None:
+    """The outstanding-work fix must not turn every zero-write run green --
+    stages that never got a trim (no_beep, no_stage_time) are still a failure."""
+    match_root = tmp_path / "no_work"
+    match = Match.init(match_root, name="No Work")
+    match.stages = [
+        MatchStageDefinition(stage_number=1, stage_name="Stage A"),
+        MatchStageDefinition(stage_number=2, stage_name="Stage B"),
+    ]
+    match.shooters = ["solo"]
+    match.save(match_root)
+
+    shooter_root = Match.shooter_root(match_root, "solo")
+    project = MatchProject.init(shooter_root, name="No Work")
+    project.stages = [
+        StageEntry(stage_number=1, stage_name="Stage A", time_seconds=10.0, videos=[]),
+        StageEntry(
+            stage_number=2,
+            stage_name="Stage B",
+            time_seconds=0.0,
+            videos=[_video(shooter_root, "raw/b.mov")],
+        ),
+    ]
+    project.save(shooter_root)
+
+    result = runner.invoke(app, ["match", "trims", str(match_root)])
+    assert result.exit_code == 1, result.output
+    assert "no_beep" in result.stdout
+    assert "no_stage_time" in result.stdout

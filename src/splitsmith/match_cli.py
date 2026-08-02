@@ -356,7 +356,15 @@ def trims(
     substitutions = sum(1 for e in plan if e.substituted_from is not None)
     console.print(f"\n[bold]{written}[/] trims written, {skipped} skipped, {substitutions} substitutions")
 
-    if written == 0 and plan:
+    # already_exported is satisfied work (a re-run of a finished match) and
+    # skipped is a deliberate user choice -- neither is a failure. Only a
+    # reason meaning "this stage still needs a trim and doesn't have one"
+    # counts as outstanding work, so a fully re-run match exits 0, while a
+    # match that never got any trims (no_beep / no_stage_time / etc.) exits 1.
+    outstanding = [
+        r for r in results if r.trim_path is None and r.entry.reason not in ("already_exported", "skipped")
+    ]
+    if written == 0 and outstanding:
         raise typer.Exit(code=1)
 
 

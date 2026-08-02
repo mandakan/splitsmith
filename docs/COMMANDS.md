@@ -67,7 +67,7 @@ uv run splitsmith match trims ~/splitsmith/matches/bromma-classifier-2026
 
 `--shooter` and `--stage` (both repeatable) narrow the run; `--camera SLUG=VALUE` overrides one shooter's persisted `compare_camera` the same way `compare export`'s `--camera` does; `--dry-run` prints the plan and writes nothing; `--force` re-cuts trims that already exist (the default reports them as `already_exported` and leaves them alone).
 
-Output is a table of shooter/stage/camera/status, followed by a summary line. A stage missing a beep, a stage time, its source file, or resolved to an ambiguous camera is reported and skipped rather than aborting the run; the command exits non-zero only when the run had work to do but wrote zero trims.
+Output is a table of shooter/stage/camera/status, followed by a summary line. A stage missing a beep, a stage time, its source file, or resolved to an ambiguous camera is reported and skipped rather than aborting the run; the command exits non-zero only when zero trims were written and at least one stage still needs one. An already-exported or a deliberately skipped stage is not outstanding work, so re-running `match trims` against a match that's already fully exported exits 0 -- safe to chain as `splitsmith match trims <match> && splitsmith compare export <match> ...`.
 
 ## `compare` -- multi-shooter side-by-side FCPXML
 
