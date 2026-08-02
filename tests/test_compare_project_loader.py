@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from splitsmith.camera_select import CameraResolutionError
 from splitsmith.compare.project_loader import (
     audit_path_for_stage,
     load_shooter,
@@ -61,6 +62,59 @@ def _stub_probe(_path: Path) -> VideoMetadata:
         frame_rate_num=30,
         frame_rate_den=1,
     )
+
+
+#: The one chest-cam source file in ``_seed_project_with_two_cams``. Its
+#: ``video_id`` hashes "<path>#<stage_number>", so the stage-1 id is a
+#: constant the trim-name assertions can spell out.
+CHEST_SOURCE = Path("raw/chest.mov")
+CHEST_VIDEO_ID = StageVideo(path=CHEST_SOURCE, stage_number=1).video_id
+
+
+def _seed_project_with_two_cams(tmp_path: Path, *, chest_on_stage_2: bool = True) -> Path:
+    """Two-stage project: a helmet primary per stage plus a chest secondary.
+
+    Both cams' lossless trims are on disk under the names
+    ``ui.exports.export_stage`` writes. The chest cam beeps 1 s after the
+    helmet cam; both beeps sit past the default 5.0 s pre-buffer, so the
+    clip-local beep offset is 5.0 either way -- secondaries are cut with
+    the same buffers anchored on their own beep.
+    """
+    root = tmp_path / "two-cams"
+    stages: list[StageEntry] = []
+    for number, name in ((1, "Stage One"), (2, "Stage Two")):
+        videos = [
+            StageVideo(
+                path=Path(f"raw/helmet_{number}.mov"),
+                role="primary",
+                camera_mount="helmet",
+                beep_time=10.0,
+            )
+        ]
+        if number == 1 or chest_on_stage_2:
+            videos.append(
+                StageVideo(
+                    path=CHEST_SOURCE,
+                    role="secondary",
+                    camera_mount="chest",
+                    beep_time=11.0,
+                )
+            )
+        stages.append(StageEntry(stage_number=number, stage_name=name, time_seconds=10.0, videos=videos))
+    _build_project(root, name="two-cams", stages=stages)
+
+    # Reload so every StageVideo carries its stamped ``stage_number`` and
+    # therefore its real ``video_id`` -- the trim names depend on it.
+    project = MatchProject.load(root)
+    exports = project.exports_path(root)
+    for stage in project.stages:
+        base = f"stage{stage.stage_number}_{_slugify(stage.stage_name)}"
+        for video in stage.videos:
+            if video.role == "primary":
+                _touch(exports / f"{base}_trimmed.mp4")
+            else:
+                _touch(exports / f"{base}_cam_{video.video_id}_trimmed.mp4")
+    return root
 
 
 def _build_two_stage_match(tmp_path: Path) -> Path:
@@ -347,6 +401,72 @@ def test_default_probe_is_fcpxml_gen(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     bundle = load_shooter(root, "M")  # no probe= -> module default
     assert len(calls) == 1
     assert bundle.stages_by_number[1].duration_seconds == 30.0
+
+
+def test_load_shooter_selects_secondary_cam_trim_and_beep(tmp_path: Path) -> None:
+    """A shooter on a chest cam contributes that cam's trim, aligned on that
+    cam's own beep -- secondaries are cut with the same buffers anchored on
+    their own beep_time (ui/exports.py), so the offset formula is identical."""
+    root = _seed_project_with_two_cams(tmp_path)
+    bundle = load_shooter(root, "Mathias", camera="chest", probe=_stub_probe)
+
+    stage = bundle.stages_by_number[1]
+    assert stage.trim_path.name.endswith("_cam_" + CHEST_VIDEO_ID + "_trimmed.mp4")
+    assert stage.beep_offset_in_clip == pytest.approx(5.0)
+    assert stage.camera_mount == "chest"
+    assert stage.substituted is False
+
+
+def test_load_shooter_substitutes_primary_when_cam_missing(tmp_path: Path) -> None:
+    """Chest cam absent on stage 2 -> that tile uses the primary and says so."""
+    root = _seed_project_with_two_cams(tmp_path, chest_on_stage_2=False)
+    bundle = load_shooter(root, "Mathias", camera="chest", probe=_stub_probe)
+
+    stage = bundle.stages_by_number[2]
+    assert "_cam_" not in stage.trim_path.name
+    assert stage.substituted is True
+
+
+def test_load_shooter_rejects_camera_that_matches_nothing(tmp_path: Path) -> None:
+    root = _seed_project_with_two_cams(tmp_path)
+    with pytest.raises(CameraResolutionError, match="chest"):
+        load_shooter(root, "Mathias", camera="backpack", probe=_stub_probe)
+
+
+def test_load_shooter_defaults_to_persisted_compare_camera(tmp_path: Path) -> None:
+    """No explicit camera -> the project's own ``compare_camera`` decides."""
+    root = _seed_project_with_two_cams(tmp_path)
+    project = MatchProject.load(root)
+    project.compare_camera = "chest"
+    project.save(root)
+
+    bundle = load_shooter(root, "Mathias", probe=_stub_probe)
+    assert bundle.stages_by_number[1].camera_mount == "chest"
+
+
+def test_load_shooter_from_match_selects_camera(tmp_path: Path) -> None:
+    """The merged-match loader honours ``camera`` the same way."""
+    match_root = _build_two_stage_match(tmp_path)
+    shooter_root = Match.shooter_root(match_root, "mathias")
+    project = MatchProject.load(shooter_root)
+    chest = StageVideo(
+        path=CHEST_SOURCE,
+        role="secondary",
+        camera_mount="chest",
+        beep_time=6.0,
+    )
+    project.stage(1).videos.append(chest)
+    project.save(shooter_root)
+
+    chest_id = MatchProject.load(shooter_root).stage(1).videos[-1].video_id
+    exports = shooter_root / "exports"
+    (exports / f"stage1_{_slugify('Stage One')}_cam_{chest_id}_trimmed.mp4").write_bytes(b"trim")
+
+    bundle = load_shooter_from_match(match_root, "mathias", "Mathias", camera="chest", probe=_stub_probe)
+    stage = bundle.stages_by_number[1]
+    assert stage.trim_path.name.endswith(f"_cam_{chest_id}_trimmed.mp4")
+    assert stage.camera_mount == "chest"
+    assert stage.beep_offset_in_clip == pytest.approx(5.0)
 
 
 def test_load_shooter_from_match_sees_post_merge_beeps(tmp_path: Path) -> None:

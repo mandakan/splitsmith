@@ -7,6 +7,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from .. import camera_select
 from ..match_model import Match, is_match_folder
 from . import emitter as emitter_mod
 from . import manifest as manifest_mod
@@ -50,6 +51,16 @@ def export(
             "ignored when SOURCE is a manifest (the YAML's output key wins)."
         ),
     ),
+    camera: list[str] = typer.Option(
+        [],
+        "--camera",
+        help=(
+            "Camera selector for one shooter, as SLUG=VALUE (repeatable). "
+            "VALUE is a camera mount ('chest') or a role ('primary', "
+            "'secondary'). Overrides the shooter's persisted compare_camera. "
+            "Match-folder source only."
+        ),
+    ),
 ) -> None:
     """Render a multi-shooter comparison FCPXML.
 
@@ -69,7 +80,12 @@ def export(
         if output is None:
             console.print("[red]Error:[/] --output is required when SOURCE is a match folder.")
             raise typer.Exit(code=2)
-        _export_from_match(source, audio_from=audio_from, output=output)
+        try:
+            cameras = camera_select.parse_camera_overrides(camera)
+        except ValueError as exc:
+            console.print(f"[red]Error:[/] {exc}")
+            raise typer.Exit(code=2) from exc
+        _export_from_match(source, audio_from=audio_from, output=output, cameras=cameras)
         return
 
     if source.is_dir():
@@ -80,8 +96,19 @@ def export(
         raise typer.Exit(code=2)
 
     # Manifest path.
+    if camera:
+        console.print(
+            "[yellow]Warning:[/] --camera is ignored when SOURCE is a manifest; "
+            "each shooter's camera: key wins."
+        )
     manifest = manifest_mod.load_manifest(source)
-    shooters = [project_loader.load_shooter(s.project, s.label) for s in manifest.shooters]
+    shooters: list[project_loader.CompareShooterBundle] = []
+    for s in manifest.shooters:
+        try:
+            shooters.append(project_loader.load_shooter(s.project, s.label, camera=s.camera))
+        except camera_select.CameraResolutionError as exc:
+            console.print(f"[red]Error:[/] shooter {s.label!r}: {exc}")
+            raise typer.Exit(code=2) from exc
     emitter_mod.emit_compare_fcpxml(
         manifest=manifest,
         shooters=shooters,
@@ -90,7 +117,9 @@ def export(
     console.print(f"[green]Wrote[/] {manifest.output}")
 
 
-def _export_from_match(match_root: Path, *, audio_from: str, output: Path) -> None:
+def _export_from_match(
+    match_root: Path, *, audio_from: str, output: Path, cameras: dict[str, str] | None = None
+) -> None:
     """Render the compare FCPXML directly from a merged Match."""
     match = Match.load(match_root)
     if not match.shooters:
@@ -107,6 +136,17 @@ def _export_from_match(match_root: Path, *, audio_from: str, output: Path) -> No
         )
         raise typer.Exit(code=2)
 
+    # A --camera slug that names nobody would apply to nothing and look like
+    # it worked, so it stops the run the same way a malformed pair does.
+    cameras = cameras or {}
+    unknown = sorted(set(cameras) - set(match.shooters))
+    if unknown:
+        console.print(
+            f"[red]Error:[/] --camera names no shooter on this match: {', '.join(unknown)}. "
+            f"Slugs available: {', '.join(match.shooters)}"
+        )
+        raise typer.Exit(code=2)
+
     # Build the bundles. Each bundle's label is the shooter's display name
     # (Shooter.name), falling back to the slug. The audio_from in the synthesized
     # manifest must match one of these labels.
@@ -115,7 +155,13 @@ def _export_from_match(match_root: Path, *, audio_from: str, output: Path) -> No
     for slug in match.shooters:
         shooter = match.load_shooter(match_root, slug)
         label = shooter.name or slug
-        bundles.append(project_loader.load_shooter_from_match(match_root, slug, label))
+        try:
+            bundles.append(
+                project_loader.load_shooter_from_match(match_root, slug, label, camera=cameras.get(slug))
+            )
+        except camera_select.CameraResolutionError as exc:
+            console.print(f"[red]Error:[/] shooter {slug}: {exc}")
+            raise typer.Exit(code=2) from exc
         if slug == resolved_audio_slug:
             audio_label = label
 

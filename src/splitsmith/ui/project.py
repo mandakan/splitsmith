@@ -859,6 +859,12 @@ class MatchProject(BaseModel):
     # a specific encoder name (e.g. ``"libx264"``) to pin the choice; the
     # next trim job uses the new value.
     trim_audit_encoder: str = "auto"
+    #: Which camera this shooter contributes to a multi-shooter compare grid
+    #: and to trim-only runs. Resolved per stage by ``camera_select``: a
+    #: ``camera_mount`` value first, then the ``primary`` / ``secondary``
+    #: role. ``None`` means the primary. CLI flags and manifest entries
+    #: override this per run without persisting.
+    compare_camera: str | None = None
     # Layered automation overrides (issue #215). Each field is
     # optional; ``None`` means "inherit from the global default."
     # Resolved at call time via :func:`splitsmith.automation.resolve_automation`
