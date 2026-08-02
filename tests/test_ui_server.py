@@ -3496,6 +3496,56 @@ def test_camera_model_patch_rejects_half_filled_pair(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Compare-camera endpoint tests
+# ---------------------------------------------------------------------------
+
+
+def test_set_compare_camera_persists(tmp_path: Path) -> None:
+    """A mount that exists on the shooter's footage round-trips to disk."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    shooter_root = tmp_path / "match" / "shooters" / "me"
+    primary = MatchProject.load(shooter_root).stages[0].primary()
+    assert primary is not None
+    client.patch(
+        f"/api/shooters/me/stages/1/videos/{primary.video_id}/camera-mount",
+        json={"mount": "chest"},
+    )
+
+    resp = client.patch("/api/shooters/me/compare-camera", json={"camera": "chest"})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["compare_camera"] == "chest"
+    assert MatchProject.load(shooter_root).compare_camera == "chest"
+
+
+def test_set_compare_camera_rejects_unknown_selector(tmp_path: Path) -> None:
+    """Typing 'chset' must fail here, not silently export every tile from
+    the primary."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    shooter_root = tmp_path / "match" / "shooters" / "me"
+
+    resp = client.patch("/api/shooters/me/compare-camera", json={"camera": "backpack"})
+
+    assert resp.status_code == 400, resp.text
+    assert "backpack" in resp.json()["detail"]
+    assert MatchProject.load(shooter_root).compare_camera is None
+
+
+def test_clear_compare_camera(tmp_path: Path) -> None:
+    """``null`` clears the selection back to "whatever the primary is"."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    shooter_root = tmp_path / "match" / "shooters" / "me"
+    # A role selector resolves without any mount tagging.
+    assert client.patch("/api/shooters/me/compare-camera", json={"camera": "primary"}).status_code == 200
+    assert MatchProject.load(shooter_root).compare_camera == "primary"
+
+    resp = client.patch("/api/shooters/me/compare-camera", json={"camera": None})
+
+    assert resp.status_code == 200, resp.text
+    assert MatchProject.load(shooter_root).compare_camera is None
+
+
+# ---------------------------------------------------------------------------
 # Bulk camera set endpoint tests
 # ---------------------------------------------------------------------------
 

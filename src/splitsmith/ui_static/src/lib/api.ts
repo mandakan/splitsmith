@@ -261,6 +261,11 @@ export interface MatchProject {
   /** #218 phase 4 -- per-project list of stage numbers whose audit-
    *  pending nudge the user has explicitly dismissed. */
   nudges_dismissed_stages: number[];
+  /** Which camera this shooter contributes to a multi-shooter compare
+   *  grid and to trim-only runs. A ``camera_mount`` value ("chest") or a
+   *  role ("primary" / "secondary"); ``null`` means the primary. Written
+   *  via ``setCompareCamera``. */
+  compare_camera: string | null;
   /** Registered raw source recordings (doc 05). One entry per source
    *  file; a single take covering stages 1-4 is one entry with
    *  ``covers_stages = [1, 2, 3, 4]``. StageVideo entries reference
@@ -2167,6 +2172,20 @@ export const api = {
       {
         method: "PATCH",
         json: { make, model },
+      },
+    ),
+
+  /** Persist which camera this shooter contributes to a compare grid and
+   *  to trim-only exports. Accepts a ``camera_mount`` ("chest") or a role
+   *  ("primary" / "secondary"); ``null`` clears back to the primary. The
+   *  server rejects a selector that resolves on no stage with a 400, so a
+   *  typo surfaces here rather than in a finished grid. */
+  setCompareCamera: (slug: string, camera: string | null) =>
+    request<MatchProject>(
+      `/api/shooters/${encodeURIComponent(slug)}/compare-camera`,
+      {
+        method: "PATCH",
+        json: { camera },
       },
     ),
 

@@ -123,7 +123,16 @@ from starlette.background import BackgroundTask
 from .. import __version__ as splitsmith_version
 from .. import automation as automation_settings
 from .. import backup as backup_mod
-from .. import beep_detect, beep_windows, cross_align, match_model, report, user_config, video_probe
+from .. import (
+    beep_detect,
+    beep_windows,
+    camera_select,
+    cross_align,
+    match_model,
+    report,
+    user_config,
+    video_probe,
+)
 from .. import cleanup as cleanup_module
 from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
@@ -3875,6 +3884,16 @@ class CameraModelRequest(BaseModel):
 
     make: str | None
     model: str | None
+
+
+class CompareCameraRequest(BaseModel):
+    """Body for PATCH /api/shooters/{slug}/compare-camera.
+
+    ``camera`` is a camera mount ("chest") or a role ("primary",
+    "secondary"); ``None`` clears the selection back to the primary.
+    """
+
+    camera: str | None = None
 
 
 class BulkCameraSetItem(BaseModel):
@@ -8726,6 +8745,25 @@ def create_app(
         project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
         video.camera_make = req.make
         video.camera_model = req.model
+        project.save(state.shooter_root(slug))
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.patch("/api/shooters/{slug}/compare-camera")
+    def set_compare_camera(slug: str, req: CompareCameraRequest) -> JSONResponse:
+        """Persist which camera this shooter contributes to grids and trims.
+
+        Validated against the shooter's actual videos so a typo fails here
+        rather than silently exporting every tile from the primary. Skipped
+        stages don't count -- they contribute no footage to a grid.
+        """
+        project = state.shooter_project(slug)
+        try:
+            camera_select.validate_camera(
+                [stage.videos for stage in project.stages if not stage.skipped], req.camera
+            )
+        except camera_select.CameraResolutionError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        project.compare_camera = req.camera
         project.save(state.shooter_root(slug))
         return JSONResponse(project.model_dump(mode="json"))
 
