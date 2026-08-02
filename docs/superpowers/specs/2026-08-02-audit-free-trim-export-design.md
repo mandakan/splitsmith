@@ -82,12 +82,35 @@ A document with `detection: "none"` is treated as no-audit and stays `ready`. Th
 independent classifiers drifted and began labeling unaudited stages "audited";
 this rule keeps that from recurring.
 
+### 4b. The compare loader must read the authoritative project file
+
+Found while planning, not part of the original brief, but it blocks the whole
+workflow and is fixed here.
+
+`compare/project_loader.load_shooter_from_match` reads per-stage videos from
+`shooter.json` via `Match.load_shooter`. `shooter.json` is written once at merge
+time (`match_model.py:741-755`); every server write afterwards goes to
+`project.json` (`MatchProject.save`, `project.py:985`, and every
+`legacy.save(shooter_root)` call site in `server.py`). Nothing syncs the two, and
+`project.json` is documented as authoritative (`match_model.py:805`).
+
+So beeps confirmed *after* the merge are invisible to the match-folder compare
+path, which then emits an all-filler grid. That is exactly the order of operations
+this feature is for: merge four shooters, then confirm beeps.
+`tests/test_compare_merged_match.py` misses it because it seeds all data before
+merging and never edits afterwards.
+
+The fix is contained: `load_shooter_from_match` sources per-stage data from
+`MatchProject.load(shooter_root)` and keeps `match.json` for stage names only.
+Syncing `shooter.json` on every project save is the larger alternative and is not
+taken here.
+
 ### 5. Cameras are selected per shooter by mount, with a role fallback
 
-`video_id` is a hash of the source path (`project.py:394`), so it identifies a
-file and changes every stage. A per-shooter choice that holds across a match must
-key off something stage-independent: `camera_mount` (`project.py:370`, the
-helmet/chest classification from issue #143) or `role`.
+`video_id` hashes `"<path>#<stage_number>"` (`project.py:394`), so it identifies a
+file on one stage rather than a camera across a match. A per-shooter choice that
+holds for a whole match must key off something stage-independent: `camera_mount`
+(`project.py:370`, the helmet/chest classification from issue #143) or `role`.
 
 Resolution, per stage, for a shooter's `camera` value:
 
@@ -184,10 +207,10 @@ then a summary line.
 ### Compare package
 
 - `compare/manifest.py`: `CompareShooter` gains `camera: str | None`.
-- `compare/project_loader.py`: `load_shooter` and `load_shooter_from_match` take
-  the resolved camera and select the video plus trim path accordingly.
-  `CompareStageBundle` gains `camera_mount: str | None` and
-  `substituted: bool` for reporting.
+- `compare/project_loader.py`: per-stage data moves to `project.json` (decision
+  4b); `load_shooter` and `load_shooter_from_match` take the resolved camera and
+  select the video plus trim path accordingly. `CompareStageBundle` gains
+  `camera_mount: str | None` and `substituted: bool` for reporting.
 - `compare/cli.py`: `--camera <slug>=<value>` on the match-folder path.
 - `compare/emitter.py`: stage marker text appends substitutions, e.g.
   `Stage 4 -- El Prez (Mathias: primary)`.
