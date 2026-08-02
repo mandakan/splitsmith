@@ -350,6 +350,8 @@ The `fcpxml` regeneration command matters — the user will manually fix detecti
 
 The `compare` command reads N existing single-shooter projects (each with per-stage lossless trims already exported) plus a manifest YAML naming them, and emits one FCPXML where each stage is a beep-aligned grid compound clip. See `compare/` under module responsibilities for the per-module breakdown and `examples/compare-bromma-classifier-2026.yaml` for an annotated manifest.
 
+`splitsmith match trims <match>` produces those per-stage trims for every shooter in a match folder directly from a beep and a stage time -- shot detection is not required. Run it before `compare export` when a match hasn't been through the full audit pipeline yet.
+
 ## Error handling principles
 
 - Fail loudly on missing inputs, unsupported video formats, missing ffmpeg.

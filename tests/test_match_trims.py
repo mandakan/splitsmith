@@ -2,21 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
 from splitsmith import camera_select, match_trims
-from splitsmith.match_model import Match, MatchStageDefinition
-from splitsmith.ui.match_exports import _slugify
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
+from splitsmith.match_model import Match
+from splitsmith.ui.project import MatchProject
+from tests.conftest import _video
 
-STAGE_DEFS: list[tuple[int, str]] = [
-    (1, "Egg Grab"),
-    (2, "Tower"),
-    (3, "Long Range"),
-]
+# ``two_shooter_match`` lives in tests/conftest.py so ``test_match_trims_cli.py``
+# can reuse it (pytest fixtures are auto-discovered; the plain ``_video`` helper
+# is not, hence the explicit import above).
 
 
 def _find(plan: list[match_trims.TrimPlanEntry], slug: str, stage: int) -> match_trims.TrimPlanEntry:
@@ -24,116 +21,6 @@ def _find(plan: list[match_trims.TrimPlanEntry], slug: str, stage: int) -> match
     matches = [e for e in plan if e.shooter_slug == slug and e.stage_number == stage]
     assert len(matches) == 1, f"expected exactly one entry for {slug}/{stage}, got {len(matches)}"
     return matches[0]
-
-
-def _video(
-    shooter_root: Path,
-    rel: str,
-    *,
-    role: str = "primary",
-    beep_time: float | None = 5.0,
-    camera_mount: str | None = None,
-) -> StageVideo:
-    """Create the source blob on disk and return the StageVideo pointing at it.
-
-    Real bytes (not just a model) so ``_classify``'s reachability check sees
-    a file where the project says one is.
-    """
-    source = shooter_root / rel
-    source.parent.mkdir(parents=True, exist_ok=True)
-    source.write_bytes(b"video")
-    return StageVideo(
-        path=Path(rel),
-        role=role,  # type: ignore[arg-type]
-        beep_time=beep_time,
-        beep_source="auto" if beep_time is not None else None,
-        camera_mount=camera_mount,
-        match_timestamp=datetime(2026, 4, 3, 12, 0, tzinfo=UTC),
-    )
-
-
-@pytest.fixture
-def two_shooter_match(tmp_path: Path) -> Path:
-    """A two-shooter match covering every classification branch.
-
-    anders:  1 helmet primary w/ beep + time (eligible)
-             2 primary with no beep (+ an unbeeped chest secondary)
-             3 skipped
-    mathias: 1 beep + time + a trim already in exports/
-             2 beep + time, no trim, plus one chest secondary w/ beep
-             3 beep but time_seconds=0.0, plus two unmounted secondaries
-               (so ``camera="secondary"`` is ambiguous on this stage)
-    """
-    match_root = tmp_path / "match"
-    match = Match.init(match_root, name="Bromma Classifier")
-    match.stages = [MatchStageDefinition(stage_number=n, stage_name=name) for n, name in STAGE_DEFS]
-    match.shooters = ["anders", "mathias"]
-    match.save(match_root)
-
-    anders = Match.shooter_root(match_root, "anders")
-    project = MatchProject.init(anders, name="Bromma Classifier")
-    project.stages = [
-        StageEntry(
-            stage_number=1,
-            stage_name="Egg Grab",
-            time_seconds=11.0,
-            videos=[_video(anders, "raw/a1.mov", camera_mount="helmet")],
-        ),
-        StageEntry(
-            stage_number=2,
-            stage_name="Tower",
-            time_seconds=14.0,
-            videos=[
-                _video(anders, "raw/a2.mov", beep_time=None),
-                _video(
-                    anders,
-                    "raw/a2_chest.mov",
-                    role="secondary",
-                    beep_time=None,
-                    camera_mount="chest",
-                ),
-            ],
-        ),
-        StageEntry(stage_number=3, stage_name="Long Range", time_seconds=13.0, skipped=True),
-    ]
-    project.save(anders)
-
-    mathias = Match.shooter_root(match_root, "mathias")
-    project = MatchProject.init(mathias, name="Bromma Classifier")
-    project.stages = [
-        StageEntry(
-            stage_number=1,
-            stage_name="Egg Grab",
-            time_seconds=12.0,
-            videos=[_video(mathias, "raw/m1.mov")],
-        ),
-        StageEntry(
-            stage_number=2,
-            stage_name="Tower",
-            time_seconds=13.0,
-            videos=[
-                _video(mathias, "raw/m2.mov"),
-                _video(mathias, "raw/m2_chest.mov", role="secondary", beep_time=4.0, camera_mount="chest"),
-            ],
-        ),
-        StageEntry(
-            stage_number=3,
-            stage_name="Long Range",
-            time_seconds=0.0,
-            videos=[
-                _video(mathias, "raw/m3.mov"),
-                _video(mathias, "raw/m3_left.mov", role="secondary", beep_time=4.0),
-                _video(mathias, "raw/m3_right.mov", role="secondary", beep_time=4.0),
-            ],
-        ),
-    ]
-    project.save(mathias)
-
-    exports = project.exports_path(mathias)
-    exports.mkdir(parents=True, exist_ok=True)
-    (exports / f"stage1_{_slugify('Egg Grab')}_trimmed.mp4").write_bytes(b"old trim")
-
-    return match_root
 
 
 # ---------------------------------------------------------------------------

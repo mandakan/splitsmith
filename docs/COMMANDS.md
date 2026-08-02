@@ -57,6 +57,18 @@ uv run splitsmith process \
 
 If videos can't be matched cleanly (multiple candidates for one stage, no candidate, ambiguity across stages), the offending stages and videos are listed and the run aborts. Re-run with the videos renamed/separated, or use `single` for each stage explicitly.
 
+## `match trims` -- batch lossless trims across a match
+
+Write the per-stage lossless trim for every shooter in a merged match folder, from a confirmed beep and a stage time alone -- no shot detection involved. This is the batch path that feeds `compare export`: run it once after beeps and stage times are in, then point `compare export` at the same match folder.
+
+```bash
+uv run splitsmith match trims ~/splitsmith/matches/bromma-classifier-2026
+```
+
+`--shooter` and `--stage` (both repeatable) narrow the run; `--camera SLUG=VALUE` overrides one shooter's persisted `compare_camera` the same way `compare export`'s `--camera` does; `--dry-run` prints the plan and writes nothing; `--force` re-cuts trims that already exist (the default reports them as `already_exported` and leaves them alone).
+
+Output is a table of shooter/stage/camera/status, followed by a summary line. A stage missing a beep, a stage time, its source file, or resolved to an ambiguous camera is reported and skipped rather than aborting the run; the command exits non-zero only when the run had work to do but wrote zero trims.
+
 ## `compare` -- multi-shooter side-by-side FCPXML
 
 Render one FCPXML where each stage is a beep-aligned grid of N shooters' trims. Tile slots are alphabetical by label and stay fixed across every stage so a shooter who's missing a stage gets a black filler tile rather than reshuffling the grid. Audio comes from a single nominated shooter; everyone else is muted.
