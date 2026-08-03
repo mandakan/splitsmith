@@ -416,10 +416,39 @@ export function asScoreboardError(err: unknown): ScoreboardErrorDetail | null {
   return null;
 }
 
-export interface PlaceholderStagesRequest {
-  stage_count: number;
-  match_name?: string | null;
-  match_date?: string | null;
+/** One row of the SPA's stage-list editor, sent as the full desired list
+ *  to ``editMatchStages`` (#521). Mirrors ``stage_edit.SubmittedStage``. */
+export interface StageEditRow {
+  /** null marks a row the user added; the server allocates the number. */
+  stage_number: number | null;
+  stage_name: string;
+  stage_rounds?: StageRounds | null;
+}
+
+/** What a stage-list edit did to one shooter, mirrors
+ *  ``stage_edit.ShooterStageEditResult``. A non-null ``error`` means this
+ *  shooter's stage list was NOT saved -- the other counts on this row then
+ *  describe only what happened before the failure. */
+export interface ShooterStageEditResult {
+  slug: string;
+  videos_unassigned: number;
+  audit_docs_deleted: number;
+  files_deleted: number;
+  objects_deleted: number;
+  error: string | null;
+}
+
+/** Response from PUT /api/match/stages, mirrors ``stage_edit.StageEditSummary``.
+ *  ``jobs_cancelled`` is always 0 -- cancellation was deliberately dropped
+ *  (#645) but the field remains in the wire shape. A 200 with a non-empty
+ *  ``errors`` means the edit committed but something did not get cleaned up. */
+export interface StageEditSummary {
+  removed: number[];
+  added: number[];
+  renamed: number[];
+  jobs_cancelled: number;
+  shooters: ShooterStageEditResult[];
+  errors: string[];
 }
 
 export interface ProjectSettingsPatch {
@@ -2008,14 +2037,15 @@ export const api = {
     }),
 
 
-  createPlaceholderStages: (slug: string, req: PlaceholderStagesRequest) =>
-    request<MatchProject>(
-      `/api/shooters/${encodeURIComponent(slug)}/project/placeholder-stages`,
-      {
-        method: "POST",
-        json: req,
-      },
-    ),
+  /** Add, remove, and rename stages on the bound match (#521). Send the
+   *  full desired list; the server diffs it. Removing a stage releases its
+   *  videos to unassigned and deletes its audit + derived caches on every
+   *  shooter. Stage numbers are never reused, so removing one leaves a gap. */
+  editMatchStages: (stages: StageEditRow[]) =>
+    request<StageEditSummary>("/api/match/stages", {
+      method: "PUT",
+      json: { stages },
+    }),
 
   scanVideos: (
     slug: string,
