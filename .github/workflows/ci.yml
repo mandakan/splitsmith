@@ -187,6 +187,54 @@ jobs:
         # registry. Failure here means R2 + calibration are out of sync.
         run: slim-venv/bin/splitsmith fetch-models
 
+      - name: Sentinel -- ensemble joblib artifacts must load under the resolved sklearn
+        env:
+          SPLITSMITH_CONFIG_DIR: ${{ github.workspace }}/slim-cfg
+        # The joblib artifacts are pickled sklearn estimators, coupled to
+        # whatever sklearn the *installing user* resolves rather than to
+        # uv.lock. The detect step below exercises the envelope detector
+        # (voter A) and never touches them, which is how a sklearn 1.9
+        # incompatibility reached a release: this job already installed the
+        # wheel with a fresh resolve, it just never loaded the models.
+        run: |
+          slim-venv/bin/python - <<'PY'
+          import sys
+          import warnings
+
+          import sklearn
+          from sklearn.exceptions import InconsistentVersionWarning
+
+          from splitsmith.ensemble.calibration import load_voter_c_model
+          from splitsmith.runtime import runtime
+
+          print(f"sklearn {sklearn.__version__}")
+
+          # A cross-version unpickle that sklearn calls possibly-invalid is a
+          # failure, not a warning -- silently wrong detection beats a crash
+          # for nobody.
+          with warnings.catch_warnings():
+              warnings.simplefilter("error", InconsistentVersionWarning)
+              try:
+                  load_voter_c_model()
+              except InconsistentVersionWarning as exc:
+                  sys.exit(f"voter C artifact is cross-version: {exc}")
+              except Exception as exc:
+                  sys.exit(f"voter C artifact did not load: {type(exc).__name__}: {exc}")
+
+              probe = runtime().artifact("voter_e_visual_probe.joblib")
+              if probe.exists():
+                  import joblib
+
+                  try:
+                      joblib.load(probe)
+                  except InconsistentVersionWarning as exc:
+                      sys.exit(f"voter E probe is cross-version: {exc}")
+                  except Exception as exc:
+                      sys.exit(f"voter E probe did not load: {type(exc).__name__}: {exc}")
+
+          print("ensemble artifacts load clean")
+          PY
+
       - name: splitsmith detect on bundled fixture
         env:
           SPLITSMITH_CONFIG_DIR: ${{ github.workspace }}/slim-cfg

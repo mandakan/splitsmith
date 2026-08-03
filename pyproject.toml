@@ -30,7 +30,18 @@ dependencies = [
     # torch / transformers / panns-inference moved to [dev] -- they
     # power the export scripts + the optional Voter E visual probe,
     # not the shipped audit hot path.
-    "scikit-learn>=1.8.0",
+    # Upper bound is load-bearing, not caution. ``voter_c_gbdt.joblib``
+    # pickles a Cython loss class whose ``__module__`` is the bare string
+    # ``_loss``. Under 1.8 that resolves only because importing sklearn's
+    # loss machinery self-registers ``sys.modules["_loss"]``; 1.9 drops that
+    # side effect and the unpickle dies with ``ModuleNotFoundError: No
+    # module named '_loss'``, taking the whole ensemble shot-detect path
+    # with it. ``voter_e_visual_probe.joblib`` still loads under 1.9 but
+    # sklearn warns the cross-version estimator may give invalid results,
+    # which is worse than the hard failure. Raising this bound means
+    # rebuilding both artifacts and re-verifying the calibration set --
+    # see the ONNX migration that removes the coupling entirely.
+    "scikit-learn>=1.8.0,<1.9",
     "joblib>=1.4.0",
     "onnxruntime>=1.20.0",
     "huggingface_hub>=0.26.0",
