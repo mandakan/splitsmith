@@ -1793,6 +1793,79 @@ git commit -m "feat(ui): EditStagesDrawer component (#521)"
 
 ---
 
+### Task 9A: Make non-reuse of stage numbers actually true
+
+**Inserted mid-execution.** Task 9's review found the invariant this whole
+design rests on is false. The server allocates `max(post-save list) + 1` with
+no persisted counter, so removing the **highest-numbered** stage hands that
+number straight back: stages 1..6, remove 6, and the next stage added is 6
+again. Verified by running the real `diff_stage_list` in sequence.
+
+That matters well beyond a wrong dialog string. Non-reuse is the property that
+justified dropping job cancellation (#645): a worker write landing after the
+purge is only harmless because those bytes sit at a number that can never name
+a live stage again. With the top stage removed, a late `stage6_cam_*.wav`
+write plus a newly allocated stage 6 means the new stage silently inherits the
+old one's trim and audio.
+
+The ruling (human partner, 2026-08-03) was to make the invariant true.
+
+**Files:**
+- Modify: `src/splitsmith/match_model.py` (the `Match` model)
+- Modify: `src/splitsmith/ui/stage_edit.py` (allocation + `ShooterStageEditResult`)
+- Test: `tests/test_stage_edit.py`, `tests/test_ui_server_stage_edit.py`
+
+**Interfaces:**
+- `Match.next_stage_number: int | None = None` — monotonic high-water mark.
+  `None` on existing documents; readers must fall back to
+  `max(s.stage_number for s in stages)` (0 for an empty list) so matches
+  created before this field backfill safely on first edit.
+- `diff_stage_list` gains the high-water mark as an input rather than deriving
+  it from the stage list. Decide the exact signature and record it; every
+  caller and test must be updated consistently.
+- `ShooterStageEditResult` gains a discriminator for the two meanings of
+  `error` (see below).
+
+Required behaviour:
+
+1. Allocation reads the high-water mark, allocates above it, and writes it
+   back so it only ever increases. `1..6, remove 6, add` must yield **7**.
+2. A match whose document predates the field must behave identically to today
+   on its first edit, then persist the mark.
+3. The mark must survive the fan-out ordering — it belongs to the match doc,
+   which is saved last.
+
+**Also fix here (Task 9's finding 3):** `ShooterStageEditResult.error` is set
+in two places with opposite meanings. The outer catch means the shooter's
+project was never saved. The **inner** per-stage catch also sets it, and then
+execution falls through and the project *is* saved — only one removed stage's
+cleanup failed. The SPA cannot distinguish them (inner is
+`"{slug} stage {n}: ..."`, outer is bare `str(exc)`), so string-matching is
+not a fix. Add an explicit discriminator — e.g. `saved: bool` — set correctly
+on both paths, and cover both with tests.
+
+- [ ] **Step 1: Write the failing tests**
+
+Cover, at minimum: allocation after removing the max; allocation on a document
+with `next_stage_number` absent (backfill); the mark increasing monotonically
+across two successive edits; and the two `error` meanings producing different
+`saved` values. Each must fail against the current code — run them and confirm
+the failure reason before implementing.
+
+- [ ] **Step 2: Implement**
+
+- [ ] **Step 3: Update the docs that assert the old behaviour**
+
+`docs/superpowers/specs/2026-08-03-stage-list-editor-design.md` and the
+docstrings in `stage_edit.py` describe non-reuse as a consequence of never
+renumbering. That reasoning is now wrong even though the conclusion holds —
+non-reuse is a property of the persisted counter. Correct the explanation
+rather than deleting it; the *why* is what a future reader needs.
+
+- [ ] **Step 4: ruff, black, full suite, commit**
+
+---
+
 ### Task 10: Wire the entry points
 
 **Files:**
