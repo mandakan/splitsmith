@@ -1567,7 +1567,7 @@ git commit -m "feat(ui): PUT /api/match/stages endpoint (#521)"
 
 ---
 
-### Task 7: Job cancellation is targeted
+### Task 7: A stage edit must not cancel jobs
 
 **Files:**
 - Test: `tests/test_ui_server_stage_edit.py`
@@ -1575,13 +1575,32 @@ git commit -m "feat(ui): PUT /api/match/stages endpoint (#521)"
 **Interfaces:**
 - Consumes: the endpoint from Task 6.
 
-This task is test-only. It exists because "cancel only the right jobs" is the requirement most likely to regress into `cancel_active_for_user`, and no earlier test proves the negative.
+**This task was rewritten mid-execution.** It originally asserted that stage
+removal cancels *only* the removed stage's jobs. Task 6's review found that
+the filter could not be made precise: `compute_jobs` carries no match id and
+`Job` has no match or slug field, so filtering on `stage_number` alone --
+correct across shooters -- also reaches the user's *other matches*. Removing
+stage 3 from match A would have cancelled a running stage-3 job in match B.
 
-- [ ] **Step 1: Write the failing test**
+The ruling (human partner, 2026-08-03) was to drop cancellation entirely and
+rely on the inert-orphan property: freed stage numbers are never reused, so a
+late worker write lands at `stage<N>_*` for a number that can never again name
+a live stage. Precise cancellation is filed as **#645**.
+
+So this task now locks in the *negative*: a stage edit must leave every job
+alone. Without it, the natural "fix" for a doomed job is to re-add coarse
+cancellation, reintroducing the cross-match bug.
+
+- [ ] **Step 1: Write the test**
 
 ```python
-def test_removal_cancels_only_jobs_for_the_removed_stage(tmp_path: Path) -> None:
-    """cancel_active_for_user would kill the stage-1 job too. It must not."""
+def test_stage_removal_does_not_cancel_any_jobs(tmp_path: Path) -> None:
+    """Cancellation is deliberately absent -- see #645.
+
+    Jobs carry no match id, so cancelling on stage_number alone would reach
+    the user's other matches. Removed stage numbers are never reused, which
+    makes a late worker write inert, so declining to cancel is safe.
+    """
     client, state = _seeded_match(tmp_path, stages=3, shooters=["me"])
 
     doomed = _submit_stalled_job(state, stage_number=3)
@@ -1598,14 +1617,16 @@ def test_removal_cancels_only_jobs_for_the_removed_stage(tmp_path: Path) -> None
     )
 
     assert resp.status_code == 200
-    assert resp.json()["jobs_cancelled"] == 1
+    assert resp.json()["removed"] == [3]
+    assert resp.json()["jobs_cancelled"] == 0
+    assert resp.json()["errors"] == []
 
     jobs = {j["id"]: j for j in client.get("/api/me/jobs").json()}
-    assert jobs[doomed]["status"] == "cancelled"
+    assert jobs[doomed]["status"] in ("pending", "running")
     assert jobs[bystander]["status"] in ("pending", "running")
 ```
 
-Write `_submit_stalled_job(state, *, stage_number)` as a local helper that submits a job which blocks until cancelled, and returns its id. Read `src/splitsmith/ui/jobs.py` around `submit` for the real signature, and check how existing tests in `tests/test_ui_server.py` submit jobs -- reuse their approach.
+Write `_submit_stalled_job(state, *, stage_number)` as a local helper that submits a job which blocks until cancelled, and returns its id. Read `src/splitsmith/ui/jobs.py` around `submit` for the real signature, and check how existing tests in `tests/test_ui_server.py` submit jobs -- reuse their approach. Make sure the helper's jobs are cleaned up so they do not leak into other tests.
 
 The jobs-list route is **`/api/me/jobs`** and it returns a bare list. `/api/jobs` is rewritten by `_MatchClient` but matches no route and 404s with `{"detail": "api route not found"}`.
 
@@ -1613,17 +1634,19 @@ CI runners start with no cached ML models, so the app queues a `model_download` 
 
 - [ ] **Step 2: Run the test**
 
-Run: `uv run pytest tests/test_ui_server_stage_edit.py -k only_jobs -v`
-Expected: PASS -- Task 6 already implemented targeted cancellation, so this
-test documents the behaviour rather than driving it. A green run here proves
-nothing on its own; step 3 is what gives the test its value.
+Run: `uv run pytest tests/test_ui_server_stage_edit.py -k does_not_cancel -v`
+Expected: PASS against Task 6's no-op cancellation.
 
 - [ ] **Step 3: Prove it discriminates**
 
-Temporarily replace the `_cancel` closure body in `server.py` with `return await state.jobs.cancel_active_for_user()` and re-run:
+Temporarily replace the route's no-op `_cancel` with the coarse version the
+review rejected -- iterate `await state.jobs.list()`, cancel every
+PENDING/RUNNING job whose `stage_number` is in the removed set -- and re-run:
 
-Run: `uv run pytest tests/test_ui_server_stage_edit.py -k only_jobs -v`
-Expected: FAIL -- the bystander is cancelled. Restore the targeted version and re-run to green.
+Run: `uv run pytest tests/test_ui_server_stage_edit.py -k does_not_cancel -v`
+Expected: FAIL -- `jobs_cancelled` is 1 and `doomed` reads `cancelled`.
+Restore the no-op and re-run to green. Record both outputs in your report;
+without this step the test cannot tell a working no-op from a broken one.
 
 - [ ] **Step 4: Format and commit**
 
