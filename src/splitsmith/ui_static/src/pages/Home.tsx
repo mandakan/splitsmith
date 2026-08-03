@@ -272,7 +272,7 @@ export function Home() {
         open={editStagesOpen}
         onClose={() => setEditStagesOpen(false)}
         stages={project.stages}
-        shooterCount={shooters.length}
+        shooterCount={shooters.length || 1}
         onSaved={handleStagesSaved}
       />
     </>
