@@ -47,6 +47,158 @@ jobs:
         # neither of which lives in the repo.
         run: uv run pytest -q
 
+  spa:
+    # The SPA had no CI validation on a normal PR at all: the job above
+    # runs ruff, black and pytest and nothing else, so TypeScript could
+    # merge having been compiled nowhere but a developer's laptop. It was
+    # built only inside ``slim-smoke`` (opt-in) and at publish time, so
+    # the feedback arrived at release time and blocked a release rather
+    # than a merge (#647).
+    #
+    # Always-on because it is cheap by construction: no Python, no
+    # models, no R2 egress.
+    name: spa typecheck + lint + tests + build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        # No ``version:`` -- the root package.json declares
+        # ``packageManager``, and pnpm/action-setup@v4 refuses to run if
+        # both are set.
+        uses: pnpm/action-setup@v4
+
+      - name: Install SPA dependencies
+        working-directory: src/splitsmith/ui_static
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        working-directory: src/splitsmith/ui_static
+        run: pnpm typecheck
+
+      - name: Lint
+        working-directory: src/splitsmith/ui_static
+        run: pnpm lint
+
+      - name: Unit tests
+        working-directory: src/splitsmith/ui_static
+        run: pnpm test
+
+      - name: Build
+        # Last because it is the slowest and least specific: when the
+        # bundle fails to build, one of the three above usually says why.
+        working-directory: src/splitsmith/ui_static
+        run: pnpm build
+
+  packaging:
+    # The cheap half of ``slim-smoke``, promoted to always-on.
+    #
+    # Every release bug this repo has shipped was a packaging or resolve
+    # problem that CI was structurally unable to see, and in each case
+    # the assertion that would have caught it was fast: wheel contents
+    # (#642), the slim import surface (#388), the ensemble artifacts
+    # loading under a freshly-resolved sklearn (#648). What made
+    # ``slim-smoke`` expensive -- ``fetch-models`` and a real detection
+    # run -- is not what caught them.
+    #
+    # So the fast assertions run on every PR and the expensive flow stays
+    # gated. Deliberately does NOT ``uv sync --all-groups``: ``uv build``
+    # is isolated, which keeps torch out of this job entirely.
+    name: wheel + artifact sentinels
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Build SPA so the wheel has something to ship
+        working-directory: src/splitsmith/ui_static
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+          find dist -name '*.map' -delete
+
+      - name: Build wheel
+        run: uv build
+
+      - name: Sentinel -- the wheel must contain the built SPA
+        run: python3 scripts/ci/assert_wheel_contents.py
+
+      - name: Create fresh slim venv (no dev extras)
+        run: uv venv slim-venv --python 3.11
+
+      - name: Install only the built wheel
+        # The venv's own interpreter, so this is the install path an end
+        # user gets from ``uv tool install splitsmith``.
+        run: uv pip install --python slim-venv/bin/python dist/splitsmith-*.whl
+
+      - name: Sentinel -- torch / transformers / panns_inference must NOT be installed
+        run: slim-venv/bin/python scripts/ci/assert_slim_import_surface.py
+
+      - name: Sentinel -- ensemble joblib artifacts must load under the resolved sklearn
+        # Needs neither fetch-models nor ffmpeg: ``artifacts_dir``
+        # resolves to the packaged ``splitsmith/data/``, so these come
+        # out of the wheel itself.
+        run: slim-venv/bin/python scripts/ci/assert_ensemble_artifacts.py
+
+      - name: CLI -- splitsmith --help
+        run: slim-venv/bin/splitsmith --help > /dev/null
+
+  changes:
+    # Decides whether a PR touches the inputs ``slim-smoke`` exists to
+    # protect. The job was opt-in via a label, which meant it was off by
+    # default in exactly the situation it is for -- a change to packaging
+    # or to dependency bounds -- and both release bugs it now guards
+    # reached a release because nothing ran a fresh resolve against the
+    # changed inputs. Remembering a label is not a control.
+    name: detect packaging-relevant changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    outputs:
+      packaging: ${{ steps.check.outputs.packaging }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Need the base commit to diff against.
+          fetch-depth: 0
+
+      - id: check
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          changed=$(git diff --name-only "$BASE"...HEAD)
+          echo "changed files:"
+          echo "$changed"
+          if echo "$changed" | grep -Eq '^(pyproject\.toml|uv\.lock|\.gitignore|src/splitsmith/data/)'; then
+            echo "packaging=true" >> "$GITHUB_OUTPUT"
+            echo "-> packaging-relevant; slim-smoke will run"
+          else
+            echo "packaging=false" >> "$GITHUB_OUTPUT"
+            echo "-> not packaging-relevant; slim-smoke stays opt-in"
+          fi
+
   slim-smoke:
     # Release gate: builds the slim wheel + installs it into a fresh venv
     # that has no dev extras, then exercises the user-facing flow end-to-
@@ -56,20 +208,28 @@ jobs:
     # Cadence:
     #   - push to main: automatic (post-merge regression detection)
     #   - workflow_dispatch: manual on-demand from the Actions tab
-    #   - pull_request: opt-in via the ``run-slim-smoke`` label
+    #   - pull_request: automatic when the diff touches pyproject.toml,
+    #     uv.lock, .gitignore or src/splitsmith/data/**; otherwise
+    #     opt-in via the ``run-slim-smoke`` label
     #
-    # Skipped on default PR pushes because each run costs ~2 min wall
-    # + ~440 MiB R2 egress; the same flow runs locally via
-    # ``scripts/smoke_slim_install.sh`` if you want a fast signal
-    # before opening the PR.
+    # Still skipped on unrelated PR pushes because each run costs ~2 min
+    # wall + ~440 MiB R2 egress; the cheap assertions moved to the
+    # ``packaging`` job above, and the same flow runs locally via
+    # ``scripts/smoke_slim_install.sh``.
     name: slim wheel smoke test
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, changes]
+    # ``needs.changes`` is skipped outside pull_request, and a skipped
+    # dependency would skip this job too -- hence ``always()`` plus an
+    # explicit success check on ``test``.
     if: >-
-      github.event_name == 'push'
-      || github.event_name == 'workflow_dispatch'
-      || (github.event_name == 'pull_request'
-          && contains(github.event.pull_request.labels.*.name, 'run-slim-smoke'))
+      always()
+      && needs.test.result == 'success'
+      && (github.event_name == 'push'
+          || github.event_name == 'workflow_dispatch'
+          || (github.event_name == 'pull_request'
+              && (contains(github.event.pull_request.labels.*.name, 'run-slim-smoke')
+                  || needs.changes.outputs.packaging == 'true')))
 
     steps:
       - uses: actions/checkout@v5
@@ -111,11 +271,6 @@ jobs:
         # exercises the artifact users actually get.
         run: |
           pnpm install --frozen-lockfile
-          # The only place SPA unit tests run today. This job is opt-in on
-          # PRs (the ``run-slim-smoke`` label), so it is a partial guard,
-          # not a gate -- wiring pnpm test + typecheck into the main job
-          # is #647. Cheap to run here because pnpm is already installed.
-          pnpm test
           pnpm build
           find dist -name '*.map' -delete
 
@@ -126,23 +281,9 @@ jobs:
         run: uv build
 
       - name: Sentinel -- the wheel must contain the built SPA
-        # Regression gate for #642: the root .gitignore's unanchored
-        # ``dist/`` made hatchling silently drop the SPA, so published
-        # wheels served a bare 404 on ``GET /``. This job already built and
-        # installed the wheel; it just never checked the UI was in it.
-        run: |
-          python - <<'PY'
-          import glob, sys, zipfile
-
-          wheel = glob.glob("dist/splitsmith-*.whl")[0]
-          names = zipfile.ZipFile(wheel).namelist()
-          if not any(n.endswith("splitsmith/ui_static/dist/index.html") for n in names):
-              sys.exit(f"{wheel} ships no SPA: ui_static/dist/index.html missing (see #642)")
-          maps = [n for n in names if n.endswith(".map")]
-          if maps:
-              sys.exit(f"{wheel} ships source maps: {maps}")
-          print(f"{wheel}: SPA present, no source maps")
-          PY
+        # Shared with the always-on ``packaging`` job so the two cannot
+        # drift; a sentinel that has drifted is worse than none.
+        run: python3 scripts/ci/assert_wheel_contents.py
 
       - name: Create fresh slim venv (no dev extras)
         run: uv venv slim-venv --python 3.11
@@ -153,26 +294,7 @@ jobs:
         run: uv pip install --python slim-venv/bin/python dist/splitsmith-*.whl
 
       - name: Sentinel -- torch / transformers / panns_inference must NOT be installed
-        run: |
-          slim-venv/bin/python - <<'PY'
-          import sys
-
-          forbidden = ("torch", "transformers", "panns_inference")
-          for name in forbidden:
-              try:
-                  __import__(name)
-              except ImportError:
-                  continue
-              raise SystemExit(
-                  f"slim wheel pulled in {name} -- the [dev] group leaked into the runtime install"
-              )
-
-          required = ("onnxruntime", "librosa", "huggingface_hub", "numpy", "PIL")
-          for name in required:
-              __import__(name)
-
-          print("import surface ok: no torch trio; slim ML stack present")
-          PY
+        run: slim-venv/bin/python scripts/ci/assert_slim_import_surface.py
 
       - name: CLI -- splitsmith --help
         run: slim-venv/bin/splitsmith --help > /dev/null
@@ -195,50 +317,7 @@ jobs:
       - name: Sentinel -- ensemble joblib artifacts must load under the resolved sklearn
         env:
           SPLITSMITH_CONFIG_DIR: ${{ github.workspace }}/slim-cfg
-        # The joblib artifacts are pickled sklearn estimators, coupled to
-        # whatever sklearn the *installing user* resolves rather than to
-        # uv.lock. The detect step below exercises the envelope detector
-        # (voter A) and never touches them, which is how a sklearn 1.9
-        # incompatibility reached a release: this job already installed the
-        # wheel with a fresh resolve, it just never loaded the models.
-        run: |
-          slim-venv/bin/python - <<'PY'
-          import sys
-          import warnings
-
-          import sklearn
-          from sklearn.exceptions import InconsistentVersionWarning
-
-          from splitsmith.ensemble.calibration import load_voter_c_model
-          from splitsmith.runtime import runtime
-
-          print(f"sklearn {sklearn.__version__}")
-
-          # A cross-version unpickle that sklearn calls possibly-invalid is a
-          # failure, not a warning -- silently wrong detection beats a crash
-          # for nobody.
-          with warnings.catch_warnings():
-              warnings.simplefilter("error", InconsistentVersionWarning)
-              try:
-                  load_voter_c_model()
-              except InconsistentVersionWarning as exc:
-                  sys.exit(f"voter C artifact is cross-version: {exc}")
-              except Exception as exc:
-                  sys.exit(f"voter C artifact did not load: {type(exc).__name__}: {exc}")
-
-              probe = runtime().artifact("voter_e_visual_probe.joblib")
-              if probe.exists():
-                  import joblib
-
-                  try:
-                      joblib.load(probe)
-                  except InconsistentVersionWarning as exc:
-                      sys.exit(f"voter E probe is cross-version: {exc}")
-                  except Exception as exc:
-                      sys.exit(f"voter E probe did not load: {type(exc).__name__}: {exc}")
-
-          print("ensemble artifacts load clean")
-          PY
+        run: slim-venv/bin/python scripts/ci/assert_ensemble_artifacts.py
 
       - name: splitsmith detect on bundled fixture
         env:
