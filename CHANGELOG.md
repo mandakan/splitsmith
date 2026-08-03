@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/mandakan/splitsmith/compare/v0.13.1...v0.14.0) (2026-08-03)
+
+
+### Bug Fixes
+
+* **packaging:** ship the built SPA in the wheel ([#643](https://github.com/mandakan/splitsmith/issues/643)) ([393942a](https://github.com/mandakan/splitsmith/commit/393942af97248476d55d1d7e880a958467a2b437)), closes [#642](https://github.com/mandakan/splitsmith/issues/642)
+
 ## [0.13.1](https://github.com/mandakan/splitsmith/compare/v0.13.0...v0.13.1) (2026-08-03)
 
 
