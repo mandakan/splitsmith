@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/mandakan/splitsmith/compare/v0.14.1...v0.15.0) (2026-08-03)
+
+
+### Features
+
+* **ui:** stage-list editor in the SPA ([#652](https://github.com/mandakan/splitsmith/issues/652)) ([47896cd](https://github.com/mandakan/splitsmith/commit/47896cd0acfee777ab35a9fa2404b0a1ba455dfa))
+
 ## [0.14.1](https://github.com/mandakan/splitsmith/compare/v0.14.0...v0.14.1) (2026-08-03)
 
 
