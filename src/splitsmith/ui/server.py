@@ -239,6 +239,72 @@ def _ensure_source_reachable(stage_number: int | None, source: Path) -> None:
     )
 
 
+def _audit_trim_targets(
+    project: MatchProject,
+    shooter_root: Path,
+    stage: StageEntry,
+) -> tuple[list[StageVideo], list[dict[str, Any]]]:
+    """Split ``stage``'s angles into (needs an audit trim, skipped-with-reason).
+
+    One rule, two callers: the ``stages_missing_trim`` count that decides
+    whether the Rebuild button renders, and the bulk rebuild endpoint that
+    the button posts to (#351). They disagreed before only by accident;
+    keeping the rule in one place is the #613 lesson applied here.
+
+    The audit-mode cache is keyed per ``video_id`` for every role -- Audit
+    plays secondaries alongside the primary, each synced by its own beep
+    offset -- so every non-``ignored`` angle is a target, not just the
+    primary. Stage-level skips (no primary, no primary beep, no stage
+    time) reject the whole stage and carry no ``video_id``: without an
+    auditable primary the other angles have nothing to sync against.
+
+    Existence is answered with ``source_present`` / ``trim_available``,
+    both metadata-only. Neither this pass nor its callers may fetch source
+    bytes -- the count backs ``GET /api/match/shooters``, which is mounted
+    on nearly every SPA route including the anonymous share shell (#637).
+    """
+    primary = next((v for v in stage.videos if v.role == "primary"), None)
+    if primary is None:
+        return [], [{"stage": stage.stage_number, "reason": "no_primary"}]
+    if primary.beep_time is None:
+        return [], [{"stage": stage.stage_number, "reason": "no_beep"}]
+    if stage.time_seconds <= 0:
+        return [], [{"stage": stage.stage_number, "reason": "no_stage_time"}]
+
+    targets: list[StageVideo] = []
+    skipped: list[dict[str, Any]] = []
+
+    def _skip(video: StageVideo, reason: str) -> None:
+        skipped.append({"stage": stage.stage_number, "video_id": video.video_id, "reason": reason})
+
+    for video in stage.videos:
+        # ``ignored`` is the operator saying this angle isn't part of the
+        # take. It has no audit surface, so it gets no encode -- and no
+        # skip entry either, since it was never a candidate.
+        if video.role == "ignored":
+            continue
+        if video.beep_time is None:
+            _skip(video, "no_beep")
+            continue
+        # The ``try`` wraps only the lookup so the two reasons stay
+        # distinct: ``source_unreachable`` means storage raised,
+        # ``source_missing`` means it answered no.
+        try:
+            present = project.source_present(shooter_root, video.path)
+        except Exception:  # noqa: BLE001 -- defensive
+            _skip(video, "source_unreachable")
+            continue
+        if not present:
+            _skip(video, "source_missing")
+            continue
+        cache = audio_helpers.trimmed_video_path(shooter_root, stage.stage_number, video, project=project)
+        if audio_helpers.trim_available(project, cache):
+            _skip(video, "already_cached")
+            continue
+        targets.append(video)
+    return targets, skipped
+
+
 def serve_media(
     storage: Storage | None,
     key: str | None,
@@ -11132,23 +11198,10 @@ def create_app(
             shooter_root, audit_docs=state.load_audit_docs(shooter_root.name)
         )
         stages_audited = sum(1 for st in stage_status_map.values() if st == StageStatus.audited)
-        stages_missing_trim = 0
-        for s in legacy.stages:
-            prim = next((v for v in s.videos if v.role == "primary"), None)
-            if prim is None or prim.beep_time is None or s.time_seconds <= 0:
-                continue
-            # ``source_present``, not ``resolve_video_path``: this endpoint
-            # backs nearly every SPA route (including the anonymous share
-            # shell), and the latter mirrors a hosted object on first access
-            # -- so counting missing trims downloaded the whole match (#637).
-            try:
-                if not legacy.source_present(shooter_root, prim.path):
-                    continue
-            except Exception:  # noqa: BLE001 -- defensive
-                continue
-            cache = audio_helpers.trimmed_video_path(shooter_root, s.stage_number, prim, project=legacy)
-            if not audio_helpers.trim_available(legacy, cache):
-                stages_missing_trim += 1
+        # A stage counts once however many of its angles are uncached --
+        # the field is a stage count, and the CTA it drives rebuilds the
+        # whole stage in one click.
+        stages_missing_trim = sum(1 for s in legacy.stages if _audit_trim_targets(legacy, shooter_root, s)[0])
         # Camera grouping: ``(make, model, mount)`` -> [(role, count, stages)].
         groups: dict[tuple[str | None, str | None, str | None], dict[str, Any]] = {}
         total_videos = 0
@@ -11653,17 +11706,20 @@ def create_app(
 
     @app.post("/api/match/shooters/{slug}/build-trim-caches")
     async def build_shooter_trim_caches(slug: str) -> JSONResponse:
-        """Submit trim-cache jobs for every stage in ``slug``'s project
-        where the audit-mode short-GOP MP4 is missing (#351).
+        """Submit trim-cache jobs for every angle in ``slug``'s project
+        whose audit-mode short-GOP MP4 is missing (#351).
 
         Operates against the shooter's project root directly rather than
         the bound ``state``, so the user can regenerate Mathias's caches
-        while staying on Anton's audit screen. Each stage with a primary
-        + beep + stage_time + reachable source becomes one trim job in
+        while staying on Anton's audit screen. Eligibility is
+        :func:`_audit_trim_targets` -- one job per uncached angle, not one
+        per stage, because Audit plays secondaries alongside the primary
+        and each has its own cache keyed on ``video_id``. Jobs go through
         the existing JobRegistry; the SPA's JobsPanel surfaces them.
-        Stages already cached are skipped silently (the underlying
-        ``ensure_video_audit_trim`` is idempotent, but skipping early
-        avoids the queue churn).
+
+        Already-cached angles are reported under ``skipped`` rather than
+        re-queued: the underlying ``ensure_video_audit_trim`` is
+        idempotent, but skipping early avoids the queue churn.
         """
         match_root, match = _resolve_match_context()
         if slug not in match.shooters:
@@ -11677,56 +11733,33 @@ def create_app(
         jobs_submitted: list[dict[str, Any]] = []
         skipped: list[dict[str, Any]] = []
         for stage in proj.stages:
-            primary = next((v for v in stage.videos if v.role == "primary"), None)
-            if primary is None:
-                skipped.append({"stage": stage.stage_number, "reason": "no_primary"})
-                continue
-            if primary.beep_time is None:
-                skipped.append({"stage": stage.stage_number, "reason": "no_beep"})
-                continue
-            if stage.time_seconds <= 0:
-                skipped.append({"stage": stage.stage_number, "reason": "no_stage_time"})
-                continue
-            # ``source_present``, not ``resolve_video_path``: a rebuild pass
-            # that skips a stage must not download that stage's source to
-            # decide (#637). The ``try`` wraps only the lookup so the two
-            # skip reasons stay distinct -- ``source_unreachable`` means
-            # storage raised, ``source_missing`` means it answered no.
-            try:
-                present = proj.source_present(shooter_root, primary.path)
-            except Exception:  # noqa: BLE001 -- defensive
-                skipped.append({"stage": stage.stage_number, "reason": "source_unreachable"})
-                continue
-            if not present:
-                skipped.append({"stage": stage.stage_number, "reason": "source_missing"})
-                continue
-            cache = audio_helpers.trimmed_video_path(shooter_root, stage.stage_number, primary, project=proj)
-            if audio_helpers.trim_available(proj, cache):
-                skipped.append({"stage": stage.stage_number, "reason": "already_cached"})
-                continue
-            # video_id is a hash of the source path so it's unique across
-            # shooters -- the JobRegistry dedup key (kind, stage, video_id)
-            # won't collide with the same stage on a different shooter.
-            existing = await state.jobs.find_active(
-                kind="trim",
-                stage_number=stage.stage_number,
-                video_id=primary.video_id,
-            )
-            if existing is not None:
-                jobs_submitted.append(existing.model_dump(mode="json"))
-                continue
-            job = await state.jobs.submit(
-                kind="trim",
-                stage_number=stage.stage_number,
-                video_id=primary.video_id,
-                args={
-                    "slug": slug,
-                    "stage_number": stage.stage_number,
-                    "video_id": primary.video_id,
-                    "chain_shot_detect": False,
-                },
-            )
-            jobs_submitted.append(job.model_dump(mode="json"))
+            targets, stage_skips = _audit_trim_targets(proj, shooter_root, stage)
+            skipped.extend(stage_skips)
+            for video in targets:
+                # video_id is a hash of the source path so it's unique across
+                # shooters -- the JobRegistry dedup key (kind, stage, video_id)
+                # won't collide with the same stage on a different shooter,
+                # nor with a sibling angle on this one.
+                existing = await state.jobs.find_active(
+                    kind="trim",
+                    stage_number=stage.stage_number,
+                    video_id=video.video_id,
+                )
+                if existing is not None:
+                    jobs_submitted.append(existing.model_dump(mode="json"))
+                    continue
+                job = await state.jobs.submit(
+                    kind="trim",
+                    stage_number=stage.stage_number,
+                    video_id=video.video_id,
+                    args={
+                        "slug": slug,
+                        "stage_number": stage.stage_number,
+                        "video_id": video.video_id,
+                        "chain_shot_detect": False,
+                    },
+                )
+                jobs_submitted.append(job.model_dump(mode="json"))
 
         return JSONResponse(
             {
