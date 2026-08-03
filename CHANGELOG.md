@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/mandakan/splitsmith/compare/v0.14.0...v0.14.1) (2026-08-03)
+
+
+### Bug Fixes
+
+* **deps:** pin scikit-learn &lt;1.9 so the ensemble artifacts load ([#648](https://github.com/mandakan/splitsmith/issues/648)) ([d9fa707](https://github.com/mandakan/splitsmith/commit/d9fa707e97cf803aae0d41e133622c46e7e6a2dd))
+
 ## [0.14.0](https://github.com/mandakan/splitsmith/compare/v0.13.1...v0.14.0) (2026-08-03)
 
 
