@@ -166,7 +166,7 @@ from ..observability import StructuredJsonFormatter, init_sentry
 from ..runtime import runtime as process_runtime
 from ..storage import Storage
 from . import audio as audio_helpers
-from . import export_storage
+from . import export_storage, stage_edit
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from . import shooter_move as shooter_move_module
@@ -3174,6 +3174,17 @@ class CreateMatchStageDraft(BaseModel):
     stage_name: str
     expected_rounds: int | None = None
     target_type: str | None = None
+
+
+class StageEditRequest(BaseModel):
+    """Body for ``PUT /api/match/stages`` (#521).
+
+    The full desired stage list, not a patch. The server diffs it against
+    the match's current list, so the SPA does not have to track which rows
+    it changed. ``stage_number: null`` marks a newly added row.
+    """
+
+    stages: list[stage_edit.SubmittedStage]
 
 
 class CreateMatchPrimaryShooter(BaseModel):
@@ -7500,6 +7511,58 @@ def create_app(
         merged = project.merge_stage_times(results)
         project.save(root)
         return merged
+
+    @app.put("/api/match/stages", response_model=stage_edit.StageEditSummary)
+    async def edit_match_stages(req: StageEditRequest) -> stage_edit.StageEditSummary:
+        """Add, remove, and rename stages on an existing match (#521).
+
+        The stage list is a property of the match, so an edit fans out to
+        every shooter -- their stage lists have to stay aligned. Removing
+        a stage releases its videos to ``unassigned_videos`` and deletes
+        its audit doc and derived caches; stages the user did not touch
+        keep everything, which is the whole point of never renumbering.
+
+        A ``StateConflictError`` raised by ``save_match()`` (hosted mode,
+        optimistic-locking loss) is not caught here -- it propagates to the
+        app-level ``exception_handler`` registered near the top of
+        ``create_app``, which already maps it to 409 ``version_conflict``.
+        """
+        root = current_match_root.get()
+        if root is None:
+            raise _no_project_error()
+        match = state.match()
+        slugs = list(match.shooters)
+
+        async def _cancel(stage_numbers: set[int]) -> int:
+            from .jobs import JobStatus
+
+            cancelled = 0
+            for job in await state.jobs.list():
+                if job.stage_number not in stage_numbers:
+                    continue
+                if job.status not in (JobStatus.PENDING, JobStatus.RUNNING):
+                    continue
+                if await state.jobs.cancel(job.id) is not None:
+                    cancelled += 1
+            return cancelled
+
+        def _save_project(slug: str, project: MatchProject) -> None:
+            project.save(state.shooter_root(slug))
+
+        try:
+            return await stage_edit.apply_stage_edit(
+                match=match,
+                root=root,
+                submitted=req.stages,
+                shooter_slugs=slugs,
+                load_project=state.shooter_project,
+                save_project=_save_project,
+                save_match=lambda: match.save(root),
+                delete_audit=state.delete_audit,
+                cancel_jobs=_cancel,
+            )
+        except stage_edit.StageEditError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/shooters/{slug}/project/placeholder-stages")
     def create_placeholder_stages(slug: str, req: PlaceholderStagesRequest) -> JSONResponse:
