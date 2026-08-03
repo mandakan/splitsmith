@@ -80,10 +80,19 @@ export function StageActionBar({
               isReview ? "text-done" : "text-subtle",
             )}
           >
+            {/*
+              `stageIdx + 1` is a POSITION in this shooter's stage list,
+              not a stage number, so it must not be labelled "Stage N".
+              Stage numbers stopped being 1..N when the stage-list editor
+              shipped (#521): on a match where stage 3 was removed, being
+              on stage 4 rendered "Stage 3 of 4" directly above the "04"
+              badge below. The identity is the badge; this line is
+              progress.
+            */}
             {stage != null && shooters.length > 0
-              ? `Stage ${stageIdx + 1} of ${stages.length} · Shooter ${shooterIdx + 1} of ${shooters.length}`
+              ? `${stageIdx + 1} of ${stages.length} stages · Shooter ${shooterIdx + 1} of ${shooters.length}`
               : stage != null
-                ? `Stage ${stageIdx + 1} of ${stages.length}`
+                ? `${stageIdx + 1} of ${stages.length} stages`
                 : ""}
             {isReview ? <span className="ml-1.5">· Review</span> : null}
           </div>
