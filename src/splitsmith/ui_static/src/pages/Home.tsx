@@ -21,6 +21,7 @@
 import {
   ArrowDownToLine,
   ArrowRight,
+  Layers,
   Plus,
   Timer,
   UploadCloud,
@@ -31,6 +32,7 @@ import { Link, useNavigate, useOutletContext } from "react-router-dom";
 
 import { Avatar, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
+import { EditStagesDrawer } from "@/components/match/EditStagesDrawer";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import {
   api,
@@ -75,6 +77,7 @@ export function Home() {
   const ctx = useOutletContext<MatchShellOutletContext>();
   const project = ctx?.project ?? null;
   const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
+  const [editStagesOpen, setEditStagesOpen] = useState(false);
   // Slug used for slug-bearing nav links from this page. The
   // ``/api/health.default_shooter_slug`` field this used to read was
   // retired with the bound-state singleton (doc 10 Tier 1 step 4) and
@@ -106,6 +109,22 @@ export function Home() {
       alive = false;
     };
   }, [project?.name]);
+
+  // Stage list just changed under us (add/remove/rename via
+  // EditStagesDrawer). ``ctx.refresh()`` is the same mechanism Shooters.tsx
+  // uses after a mutation -- it bumps MatchShell's refreshKey, which
+  // re-fetches the bound project (so ``project.stages`` and the stage
+  // grid derived from it pick up the edit). That refetch doesn't touch
+  // this page's own ``shooters`` state (stages_total/stages_audited per
+  // shooter also changed), so re-run the same listMatchShooters() call
+  // the mount effect above uses.
+  function handleStagesSaved() {
+    ctx?.refresh();
+    api
+      .listMatchShooters()
+      .then((r) => setShooters(r.shooters))
+      .catch(() => setShooters([]));
+  }
 
   const stageRows = useMemo<StageMatrixRow[]>(
     () => (project ? buildStageMatrix(project.stages, shooters) : []),
@@ -221,6 +240,12 @@ export function Home() {
               Export Match
             </span>
           </Button>
+          <Button variant="outline" onClick={() => setEditStagesOpen(true)}>
+            <Layers className="size-3.5" />
+            <span className="font-display uppercase tracking-[0.08em]">
+              Edit Stages
+            </span>
+          </Button>
         </div>
       </div>
 
@@ -231,6 +256,7 @@ export function Home() {
             stageViews={stageViews}
             shooters={shooters}
             navSlug={navSlug}
+            onEditStages={() => setEditStagesOpen(true)}
           />
         ) : (
           <ActiveVariant
@@ -241,6 +267,14 @@ export function Home() {
           />
         )}
       </div>
+
+      <EditStagesDrawer
+        open={editStagesOpen}
+        onClose={() => setEditStagesOpen(false)}
+        stages={project.stages}
+        shooterCount={shooters.length}
+        onSaved={handleStagesSaved}
+      />
     </>
   );
 }
@@ -455,11 +489,13 @@ function EmptyVariant({
   stageViews,
   shooters,
   navSlug,
+  onEditStages,
 }: {
   project: MatchProject;
   stageViews: StageView[];
   shooters: ShooterListEntry[];
   navSlug: string | null;
+  onEditStages: () => void;
 }) {
   const navigate = useNavigate();
   const href = useMatchHref();
@@ -588,7 +624,7 @@ function EmptyVariant({
       </div>
 
       <SectionHead title="Get going" />
-      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
         <HelpCard
           icon={<UploadCloud className="size-4" />}
           title="Drop your SD card"
@@ -602,6 +638,13 @@ function EmptyVariant({
           desc="Add up to 4 shooters' footage for multi-shooter compare grids and side-by-side exports."
           cta="Add shooter"
           onClick={() => navigate(href("shooters"))}
+        />
+        <HelpCard
+          icon={<Layers className="size-4" />}
+          title="Adjust the stage list"
+          desc="Reality differs from scoreboard? Add, remove, or rename stages without losing audit progress."
+          cta="Edit stages"
+          onClick={onEditStages}
         />
       </div>
     </>
