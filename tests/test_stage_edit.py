@@ -6,7 +6,6 @@ from splitsmith.config import StageRounds
 from splitsmith.match_model import MatchStageDefinition
 from splitsmith.ui.stage_edit import (
     StageEditError,
-    StageListDiff,
     SubmittedStage,
     diff_stage_list,
 )
