@@ -1415,9 +1415,12 @@ export interface ShooterListEntry {
   stages_total: number;
   video_count: number;
   cameras: ShooterCameraInfo[];
-  /** Stages where the audit-mode trim cache is missing and rebuildable
-   *  (primary + beep + stage_time + reachable source). Drives the
-   *  "Rebuild trim caches (N)" CTA on /shooters (#351). */
+  /** Stages with at least one rebuildable angle whose audit-mode trim
+   *  cache is missing. The stage must have a primary with a beep and a
+   *  non-zero stage time; within it, every non-ignored angle with its own
+   *  beep + reachable source counts, secondaries included. One stage
+   *  counts once however many of its angles are uncached, because the CTA
+   *  it drives rebuilds the whole stage. (#351) */
   stages_missing_trim: number;
   /** Per-stage status for this shooter (one entry per stage in the
    *  shooter's own project). Drives the aggregate Overview grid. */
@@ -1429,7 +1432,10 @@ export interface BuildTrimCachesResult {
   shooter_slug: string;
   shooter_name: string | null;
   jobs_submitted: Job[];
-  skipped: { stage: number; reason: string }[];
+  /** Angles considered and passed over. ``video_id`` is absent when the
+   *  whole stage was rejected (no primary, no primary beep, no stage
+   *  time) rather than one of its angles. */
+  skipped: { stage: number; video_id?: string; reason: string }[];
 }
 
 export interface ShooterListResponse {

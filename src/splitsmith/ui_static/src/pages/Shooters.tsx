@@ -283,7 +283,7 @@ export function Shooters() {
       const submitted = result.jobs_submitted.length;
       if (submitted === 0) {
         setError(
-          `No trim jobs to run for ${name} -- ${count} stages were eligible by count but every one was already cached, missing prerequisites, or already queued.`,
+          `No trim jobs to run for ${name} -- ${count} stages were eligible by count but every angle on them was already cached, missing prerequisites, or already queued.`,
         );
       }
     } catch (e) {
@@ -610,8 +610,8 @@ function ShooterCard({
               type="button"
               onClick={onRebuildTrims}
               disabled={busy}
-              title={`Rebuild ${shooter.stages_missing_trim} missing trim cache${shooter.stages_missing_trim === 1 ? "" : "s"} for ${shooter.name}`}
-              aria-label={`Rebuild ${shooter.stages_missing_trim} missing trim caches for ${shooter.name}`}
+              title={`Rebuild missing trim caches on ${shooter.stages_missing_trim} stage${shooter.stages_missing_trim === 1 ? "" : "s"} for ${shooter.name} (every angle, not just the primary)`}
+              aria-label={`Rebuild missing trim caches on ${shooter.stages_missing_trim} stages for ${shooter.name}`}
               className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-rule bg-surface-2 px-2.5 font-display text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-ink-2 transition-colors hover:border-led hover:bg-led/10 hover:text-led disabled:opacity-50"
             >
               <RefreshCw className="size-3.5" />
