@@ -7560,6 +7560,17 @@ def create_app(
         optimistic-locking loss) is not caught here -- it propagates to the
         app-level ``exception_handler`` registered near the top of
         ``create_app``, which already maps it to 409 ``version_conflict``.
+
+        An empty ``shooters`` roster is allowed, not an error: the stage
+        list is a property of the match, so editing it before anyone is
+        added is a legitimate thing to do and refusing would block it. Such
+        a request updates ``match.stages`` and fans out to nobody, so it
+        returns 200 with ``shooters: []``. Read that field rather than
+        assuming a shooter was touched -- ``Home.tsx`` carries a
+        ``shooters.length || 1`` fallback (for legacy single-shooter
+        projects, which report an empty roster), so its confirm dialog says
+        "for 1 shooter" on a genuinely empty match while the server touches
+        zero.
         """
         root = current_match_root.get()
         if root is None:

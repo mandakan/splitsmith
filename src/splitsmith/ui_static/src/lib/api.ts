@@ -454,8 +454,11 @@ export interface StageEditRow {
  *  that are not equally bad -- read ``saved``, not the message, to tell
  *  them apart: ``saved=true`` with an ``error`` means the shooter's
  *  project WAS written and only a cleanup step (video release, audit
- *  delete, artifact purge) failed; ``saved=false`` means the project doc
- *  was never written and this shooter's stage list is unchanged on disk. */
+ *  delete, or the artifact purge raising) failed; ``saved=false`` means the
+ *  project doc was never written and this shooter's stage list is unchanged
+ *  on disk. Individual files or storage objects the purge could not delete
+ *  are best-effort and land in ``StageEditSummary.errors`` alone, so a
+ *  shooter with orphaned cache files can still report ``error: null``. */
 export interface ShooterStageEditResult {
   slug: string;
   videos_unassigned: number;

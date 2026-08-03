@@ -35,7 +35,10 @@
  * discriminator: ``saved=false`` is a real per-shooter failure (their
  * project doc was never written), while ``saved=true`` with an ``error``
  * means the edit committed for that shooter and only a cleanup step
- * (video release, audit delete, artifact purge) came up short.
+ * (video release, audit delete, or the artifact purge raising) came up
+ * short. Individual files or storage objects the purge could not delete
+ * are best-effort and appear in ``summary.errors`` only, so a shooter with
+ * orphaned cache files can still report ``error: null``.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -105,14 +108,32 @@ function rowsFromStages(stages: MatchStageDefinition[]): EditRow[] {
   }));
 }
 
-/** Branch on the three error body shapes from Task 8's report: a bare
+/** Branch on the error body shapes this endpoint can return: a bare
  *  string ``detail`` (400 validation) sets ``ApiError.detail`` directly,
  *  while both 409 shapes carry ``detail: {code, message}`` which lands on
  *  ``ApiError.body`` as an object -- ``err.detail`` for those would just
- *  be a stringified blob, so the object case must be checked first. */
+ *  be a stringified blob, so the object case must be checked first.
+ *
+ *  FastAPI's 422 is a fourth shape and needs its own branch ahead of the
+ *  object one: its ``detail`` is an ARRAY of pydantic errors, which passes
+ *  ``typeof === "object"`` and fails ``"message" in body``, so it would
+ *  otherwise fall through to ``err.detail`` -- a raw ``JSON.stringify`` of
+ *  the pydantic blob, rendered verbatim into the alert. */
 function stageEditErrorMessage(err: unknown): string {
   if (err instanceof ApiError) {
     const body = err.body;
+    if (Array.isArray(body)) {
+      const messages = body
+        .map((entry) =>
+          entry && typeof entry === "object" && "msg" in entry
+            ? String((entry as { msg: unknown }).msg)
+            : null,
+        )
+        .filter((m): m is string => m !== null);
+      return messages.length > 0
+        ? messages.join("; ")
+        : "The stage list was rejected as invalid.";
+    }
     if (body && typeof body === "object" && "message" in body) {
       return String((body as { message: unknown }).message);
     }
@@ -303,7 +324,8 @@ export function EditStagesDrawer({
               <p className="mb-4 text-[0.8125rem] text-muted">
                 Stage numbers are stable for a stage's lifetime and are
                 never reused -- removing a stage leaves a gap in the
-                numbering, and a new stage always gets the next free one.
+                numbering, and a new stage gets the next number after the
+                highest one ever used, not the gap.
               </p>
 
               {error ? (
@@ -470,12 +492,23 @@ function EditStageRow({
  *  interface in ``api.ts``): ``saved=false`` means the project doc was
  *  never written and the shooter's stage list is unchanged, while
  *  ``saved=true`` with a non-null ``error`` means the list DID save and
- *  only a cleanup step (video release, audit delete, artifact purge)
+ *  only a cleanup step (video release, audit delete, or the purge raising)
  *  failed afterward. The two get separate lists so a cleanup hiccup never
  *  reads as "your edit didn't take". */
 function SaveResult({ result }: { result: StageEditSummary }) {
   const notSaved = result.shooters.filter((s) => !s.saved);
   const cleanupIssues = result.shooters.filter((s) => s.saved && s.error != null);
+  // Every per-shooter ``error`` the server sets is ALSO appended to
+  // ``summary.errors``, so rendering both lists verbatim showed the same
+  // sentence twice. Keep the per-shooter lists (they carry the saved /
+  // not-saved distinction) and show only the errors no shooter row
+  // already accounts for -- purge object failures, cancel failures.
+  const shooterMessages = new Set(
+    result.shooters
+      .map((s) => s.error)
+      .filter((e): e is string => e != null),
+  );
+  const generalErrors = result.errors.filter((e) => !shooterMessages.has(e));
   return (
     <div className="space-y-3">
       <div className="flex items-start gap-2 rounded-md border border-status-warning/40 bg-status-warning/10 p-3 text-sm text-ink">
@@ -491,9 +524,9 @@ function SaveResult({ result }: { result: StageEditSummary }) {
         </div>
       </div>
 
-      {result.errors.length > 0 ? (
+      {generalErrors.length > 0 ? (
         <ul className="list-disc space-y-1 pl-5 text-xs text-muted">
-          {result.errors.map((e, i) => (
+          {generalErrors.map((e, i) => (
             <li key={i}>{e}</li>
           ))}
         </ul>

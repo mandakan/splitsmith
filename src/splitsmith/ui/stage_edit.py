@@ -255,10 +255,17 @@ class ShooterStageEditResult(BaseModel):
     but it covers two outcomes that are not equally bad, and the strings
     differ only in formatting -- so read :attr:`saved`, never the message:
 
-    * ``saved=True`` with an ``error``: one removed stage's cleanup step
-      failed (video release, audit delete, or artifact purge). The
-      shooter's stage list still updated and their project was written;
-      what is left behind is orphaned derived state.
+    * ``saved=True`` with an ``error``: one removed stage's cleanup raised
+      -- video release, audit delete, or the artifact purge failing
+      outright. The shooter's stage list still updated and their project
+      was written; what is left behind is orphaned derived state.
+
+      Note what does *not* land here: a purge that ran but could not
+      delete some individual file or storage object. Those are best-effort
+      (see :func:`purge_stage_artifacts`), come back in
+      :attr:`PurgeCounts.errors`, and are copied into
+      :attr:`StageEditSummary.errors` alone. So a shooter with orphaned
+      cache files can still report ``error=None``.
     * ``saved=False``: the project doc was never written. This shooter's
       stage list is unchanged on disk and still describes the pre-edit
       world, while the match doc has moved on.
@@ -311,9 +318,17 @@ async def apply_stage_edit(
 
     Ordering is deliberate and mirrors ``match_delete._delete_hosted``:
 
-    1. Cancel jobs targeting removed stages, so no worker rewrites
-       artifacts under the purge. Jobs carry no shooter slug, and removal
-       is match-wide, so filtering on ``stage_number`` is exactly right.
+    1. ``cancel_jobs`` runs before any purge -- but it ships as a no-op,
+       and the ordering is all that is left of it. ``Job`` carries no match
+       id, so a filter on ``stage_number`` (the only key this function can
+       hand a ``cancel_jobs`` callback) would also cancel stage-3 work in
+       every OTHER match the user owns, which is worse than not cancelling.
+       Declining is safe because the persisted ``next_stage_number``
+       counter never reissues a freed number, so a late worker write to
+       ``stage<freed>_*`` can never be read back as a live stage. See the
+       route's ``_cancel`` in ``server.py`` and #645; do not "restore"
+       coarse cancellation -- ``test_stage_removal_does_not_cancel_any_jobs``
+       exists to catch that.
     2. Per shooter: release videos, delete the audit doc, purge caches,
        apply adds and renames, save.
     3. Save the match doc **last**. A crash mid-fan-out then leaves the
