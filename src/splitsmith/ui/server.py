@@ -7534,17 +7534,20 @@ def create_app(
         slugs = list(match.shooters)
 
         async def _cancel(stage_numbers: set[int]) -> int:
-            from .jobs import JobStatus
-
-            cancelled = 0
-            for job in await state.jobs.list():
-                if job.stage_number not in stage_numbers:
-                    continue
-                if job.status not in (JobStatus.PENDING, JobStatus.RUNNING):
-                    continue
-                if await state.jobs.cancel(job.id) is not None:
-                    cancelled += 1
-            return cancelled
+            """No-op: ``compute_jobs`` carries no match id, and ``Job`` has
+            no match/slug field, so a filter on ``stage_number`` alone (the
+            only key ``apply_stage_edit`` gives us) cannot be scoped to this
+            match. Removing stage 3 here would reach into every OTHER
+            match's PENDING/RUNNING stage-3 job too, which is worse than not
+            cancelling at all. Cancellation was belt-and-braces on top of
+            the design's real guarantee: freed stage numbers are never
+            reused, so a late worker write to ``stage3_*`` can never be read
+            back as a live stage -- it's inert. Precise (match-scoped)
+            cancellation is tracked in #645; until then this stays a no-op
+            rather than a plausible-looking bug for the next reader to
+            "restore".
+            """
+            return 0
 
         def _save_project(slug: str, project: MatchProject) -> None:
             project.save(state.shooter_root(slug))

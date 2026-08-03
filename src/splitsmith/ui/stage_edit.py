@@ -25,6 +25,26 @@ class StageEditError(Exception):
     """A stage-list submission the server refuses. Maps to HTTP 400."""
 
 
+def _state_conflict_excs() -> tuple[type[BaseException], ...]:
+    """Resolve ``StateConflictError`` lazily, mirroring
+    ``splitsmith.ui.server._state_conflict_excs``.
+
+    This module must stay importable on a slim local install without the
+    ``[hosted]`` extra (``splitsmith.ui.server`` imports it at module scope,
+    and ``test_local_mode_no_hosted_imports`` pins that ``splitsmith.db``
+    never leaks into a local-mode entrypoint's import chain), so the import
+    is deferred to call time and guarded rather than hoisted to the top of
+    the file. Empty tuple on a slim install -- ``except ():`` then matches
+    nothing, which is correct: local file saves never raise a conflict.
+    """
+    try:
+        from ..db import StateConflictError
+
+        return (StateConflictError,)
+    except Exception:  # pragma: no cover - slim local install without db extras
+        return ()
+
+
 class SubmittedStage(BaseModel):
     """One row of the SPA's stage editor.
 
@@ -260,7 +280,10 @@ async def apply_stage_edit(
     as "nothing to remove." Per-stage failures are therefore caught inline
     and recorded, while the shooter's stage-list update and save still go
     ahead. Only a failure loading or saving the project itself (outside any
-    single stage's control) leaves that shooter unsaved.
+    single stage's control) leaves that shooter unsaved -- except a lost
+    optimistic-lock race on that save (hosted mode), which is not recorded
+    as an ordinary per-shooter error but re-raised so the caller's 409
+    handling applies, the same as a match-doc save conflict.
     """
     diff = diff_stage_list(list(match.stages), submitted)
     summary = StageEditSummary(
@@ -277,6 +300,7 @@ async def apply_stage_edit(
 
     renamed_by_number = {s.stage_number: s for s in diff.renamed}
     removed = set(diff.removed)
+    conflict_excs = _state_conflict_excs()
 
     for slug in shooter_slugs:
         result = ShooterStageEditResult(slug=slug)
@@ -319,6 +343,17 @@ async def apply_stage_edit(
                 )
             project.stages.sort(key=lambda s: s.stage_number)
             save_project(slug, project)
+        except conflict_excs:
+            # A lost optimistic-lock race on THIS shooter's project save
+            # must not be swallowed into ``summary.errors`` as an ordinary
+            # per-shooter failure -- that would return 200 with the
+            # stage-list edit silently unsaved for this shooter. Re-raise
+            # so it propagates past ``apply_stage_edit`` the same way a
+            # match-doc save conflict already does, reaching the caller's
+            # global ``StateConflictError`` handler (-> 409). This aborts
+            # the fan-out; any earlier shooters in ``shooter_slugs`` this
+            # pass already saved keep their changes.
+            raise
         except Exception as exc:  # noqa: BLE001 -- one shooter must not
             # strand the others or the match doc. Reaching here means the
             # project was never saved, so any in-memory video-unassignment

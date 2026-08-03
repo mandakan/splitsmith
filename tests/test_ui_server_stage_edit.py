@@ -179,16 +179,18 @@ class TestEditMatchStages:
 
         assert resp.status_code == 200
         assert resp.json()["removed"] == [3]
+        assert resp.json()["errors"] == []
         assert not state._audit_file("me", 3).exists()
         assert state._audit_file("me", 4).read_bytes() == before_4
         assert state._audit_file("me", 5).read_bytes() == before_5
 
     def test_add_after_remove_allocates_six_not_the_freed_three(self, tmp_path: Path) -> None:
         client, _state = _seeded_match(tmp_path, stages=5, shooters=["me"])
-        client.put(
+        first = client.put(
             "/api/match/stages",
             json={"stages": [{"stage_number": n, "stage_name": f"Stage {n}"} for n in (1, 2, 4, 5)]},
         )
+        assert first.status_code == 200
 
         resp = client.put(
             "/api/match/stages",
@@ -234,7 +236,38 @@ class TestEditMatchStages:
         )
 
         assert resp.status_code == 200
+        assert resp.json()["errors"] == []
         assert sorted(s["slug"] for s in resp.json()["shooters"]) == ["anna", "erik"]
         for slug in ("anna", "erik"):
             project = client.get(f"/api/shooters/{slug}/project").json()
             assert [s["stage_number"] for s in project["stages"]] == [1, 2]
+
+    def test_shooter_project_save_conflict_is_a_409_not_a_200(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A lost optimistic-lock race on a shooter project's save must not
+        be swallowed into ``errors`` as an ordinary per-shooter failure --
+        that would return 200 with the stage-list edit silently unsaved for
+        that shooter (Task 6 review finding 2)."""
+        from splitsmith.db import StateConflictError
+        from splitsmith.ui.project import MatchProject
+
+        client, _state = _seeded_match(tmp_path, stages=3, shooters=["me"])
+
+        def _raise_conflict(self: MatchProject, root: Path) -> None:
+            raise StateConflictError("scripted conflict")
+
+        monkeypatch.setattr(MatchProject, "save", _raise_conflict)
+
+        resp = client.put(
+            "/api/match/stages",
+            json={
+                "stages": [
+                    {"stage_number": 1, "stage_name": "Stage 1"},
+                    {"stage_number": 2, "stage_name": "El Presidente"},
+                    {"stage_number": 3, "stage_name": "Stage 3"},
+                ]
+            },
+        )
+
+        assert resp.status_code == 409
