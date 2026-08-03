@@ -11,6 +11,7 @@ from alembic import context
 # Import the declarative Base so ``--autogenerate`` diffs against
 # our model metadata. Every new table just needs an import in
 # ``splitsmith.db.models``; alembic picks it up here.
+from splitsmith.db.migrations import connect_with_retry, engine_connect_args  # noqa: E402
 from splitsmith.db.models import Base  # noqa: E402
 
 # this is the Alembic Config object, which provides
@@ -71,18 +72,36 @@ async def run_async_migrations() -> None:
     """In this scenario we need to create an Engine
     and associate a connection with the context.
 
+    The connect is retried (see
+    :func:`splitsmith.db.migrations.connect_with_retry`); the migration
+    itself is not. On the hosted deploy this runs before uvicorn binds,
+    so a transient asyncpg ``TimeoutError`` against a scale-to-zero Neon
+    used to cost the whole healthcheck window (#559).
     """
 
     connectable = async_engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=engine_connect_args(config.get_main_option("sqlalchemy.url") or ""),
     )
 
-    async with connectable.connect() as connection:
-        await connection.run_sync(do_run_migrations)
-
-    await connectable.dispose()
+    try:
+        # ``connect_with_retry`` returns an already-started connection,
+        # so close it explicitly rather than re-entering it with
+        # ``async with`` (which would raise "already started").
+        connection = await connect_with_retry(connectable)
+        try:
+            await connection.run_sync(do_run_migrations)
+        finally:
+            # ``AsyncConnection.__aexit__`` shields its close from
+            # cancellation; keep that property, so a second Ctrl-C
+            # during a long migration doesn't abort the close.
+            await asyncio.shield(connection.close())
+    finally:
+        # Outside the connect, so an exhausted retry still disposes the
+        # engine instead of leaving asyncpg's background close pending.
+        await connectable.dispose()
 
 
 def run_migrations_online() -> None:
