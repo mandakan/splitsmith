@@ -12,12 +12,13 @@ engine; see the design doc for the renumber/reorder work it defers.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 from splitsmith.config import StageRounds
 from splitsmith.match_model import MatchStageDefinition
-from splitsmith.ui.project import MatchProject
+from splitsmith.ui.project import MatchProject, StageEntry
 
 
 class StageEditError(Exception):
@@ -186,3 +187,124 @@ def purge_stage_artifacts(
                 counts.errors.append(f"delete {obj.path!r}: {exc}")
 
     return counts
+
+
+class ShooterStageEditResult(BaseModel):
+    """What the edit did to one shooter."""
+
+    slug: str
+    videos_unassigned: int = 0
+    audit_docs_deleted: int = 0
+    files_deleted: int = 0
+    objects_deleted: int = 0
+
+
+class StageEditSummary(BaseModel):
+    """Outcome of a stage-list edit, modelled on ``DeletionSummary``.
+
+    Failures are collected rather than raised: the stage list committing
+    matters more than one uncooperative cache object, and the user needs
+    to see what did not get cleaned up.
+    """
+
+    removed: list[int] = Field(default_factory=list)
+    added: list[int] = Field(default_factory=list)
+    renamed: list[int] = Field(default_factory=list)
+    jobs_cancelled: int = 0
+    shooters: list[ShooterStageEditResult] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+
+
+async def apply_stage_edit(
+    *,
+    match: Any,
+    root: Path,
+    submitted: list[SubmittedStage],
+    shooter_slugs: list[str],
+    load_project: Any,
+    save_project: Any,
+    save_match: Any,
+    delete_audit: Any,
+    cancel_jobs: Any,
+) -> StageEditSummary:
+    """Apply a stage-list edit to the match and every shooter in it.
+
+    Ordering is deliberate and mirrors ``match_delete._delete_hosted``:
+
+    1. Cancel jobs targeting removed stages, so no worker rewrites
+       artifacts under the purge. Jobs carry no shooter slug, and removal
+       is match-wide, so filtering on ``stage_number`` is exactly right.
+    2. Per shooter: release videos, delete the audit doc, purge caches,
+       apply adds and renames, save.
+    3. Save the match doc **last**. A crash mid-fan-out then leaves the
+       canonical list describing the pre-edit world rather than promising
+       stages the shooters no longer have.
+
+    Cancellation is not instantaneous, so a worker can still land a write
+    after step 2's purge. Because freed numbers are never reused, that
+    write is inert garbage that can never be read as a live stage.
+    """
+    diff = diff_stage_list(list(match.stages), submitted)
+    summary = StageEditSummary(
+        removed=list(diff.removed),
+        added=[s.stage_number for s in diff.added],
+        renamed=[s.stage_number for s in diff.renamed],
+    )
+
+    if diff.removed:
+        try:
+            summary.jobs_cancelled = await cancel_jobs(set(diff.removed))
+        except Exception as exc:  # noqa: BLE001
+            summary.errors.append(f"cancel jobs: {exc}")
+
+    renamed_by_number = {s.stage_number: s for s in diff.renamed}
+    removed = set(diff.removed)
+
+    for slug in shooter_slugs:
+        result = ShooterStageEditResult(slug=slug)
+        try:
+            project = load_project(slug)
+
+            for stage_number in diff.removed:
+                result.videos_unassigned += project.unassign_stage_videos(stage_number)
+                if delete_audit(slug, stage_number):
+                    result.audit_docs_deleted += 1
+                counts = purge_stage_artifacts(project, root, stage_number)
+                result.files_deleted += counts.files_deleted
+                result.objects_deleted += counts.objects_deleted
+                summary.errors.extend(f"{slug}: {e}" for e in counts.errors)
+
+            project.stages = [s for s in project.stages if s.stage_number not in removed]
+            for stage in project.stages:
+                update = renamed_by_number.get(stage.stage_number)
+                if update is not None:
+                    stage.stage_name = update.stage_name
+                    stage.stage_rounds = update.stage_rounds
+            for definition in diff.added:
+                project.stages.append(
+                    StageEntry(
+                        stage_number=definition.stage_number,
+                        stage_name=definition.stage_name,
+                        time_seconds=0.0,
+                        stage_rounds=definition.stage_rounds,
+                        placeholder=True,
+                    )
+                )
+            project.stages.sort(key=lambda s: s.stage_number)
+            save_project(slug, project)
+        except Exception as exc:  # noqa: BLE001 -- one shooter must not
+            # strand the others or the match doc.
+            summary.errors.append(f"{slug}: {exc}")
+        summary.shooters.append(result)
+
+    match.stages = [s for s in match.stages if s.stage_number not in removed]
+    for definition in match.stages:
+        update = renamed_by_number.get(definition.stage_number)
+        if update is not None:
+            definition.stage_name = update.stage_name
+            definition.stage_rounds = update.stage_rounds
+    match.stages.extend(diff.added)
+    match.stages.sort(key=lambda s: s.stage_number)
+    save_match()
+
+    return summary

@@ -1,5 +1,8 @@
 """Unit tests for the stage-list editor engine (#521)."""
 
+import asyncio
+from pathlib import Path
+
 import pytest
 
 from splitsmith.config import StageRounds
@@ -281,3 +284,271 @@ def test_purge_with_no_storage_bound_is_local_only(tmp_path) -> None:
 
     assert counts.files_deleted == 1
     assert counts.objects_deleted == 0
+
+
+def _match_with_stages(*numbers: int):
+    from splitsmith.match_model import Match
+
+    match = Match(name="M")
+    match.stages = _existing(*numbers)
+    return match
+
+
+def _harness(tmp_path, slugs, stage_numbers):
+    """Build in-memory projects plus the injected callables.
+
+    ``hooks["save_match"]`` defaults to a no-op so most tests don't need to
+    supply one; the ordering test overrides that key directly rather than
+    also passing ``save_match=`` alongside ``**hooks`` (which would collide).
+    """
+    from splitsmith.ui.project import MatchProject
+
+    projects = {}
+    for slug in slugs:
+        project = MatchProject(name="M")
+        project.init_placeholder_stages(max(stage_numbers))
+        project.audio_path(tmp_path).mkdir(parents=True, exist_ok=True)
+        project.trimmed_path(tmp_path).mkdir(parents=True, exist_ok=True)
+        projects[slug] = project
+
+    saved: list[str] = []
+    audits_deleted: list[tuple[str, int]] = []
+    cancelled: list[set[int]] = []
+
+    async def cancel_jobs(stage_numbers_arg):
+        cancelled.append(set(stage_numbers_arg))
+        return len(stage_numbers_arg)
+
+    hooks = {
+        "load_project": lambda slug: projects[slug],
+        "save_project": lambda slug, project: saved.append(slug),
+        "delete_audit": lambda slug, n: (audits_deleted.append((slug, n)) or True),
+        "cancel_jobs": cancel_jobs,
+        "save_match": lambda: None,
+    }
+    return projects, saved, audits_deleted, cancelled, hooks
+
+
+def test_apply_removes_the_stage_from_every_shooter(tmp_path) -> None:
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3)
+    projects, saved, audits_deleted, cancelled, hooks = _harness(
+        tmp_path, ["anna", "erik", "mathias"], [1, 2, 3]
+    )
+
+    summary = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[
+                SubmittedStage(stage_number=1, stage_name="Stage 1"),
+                SubmittedStage(stage_number=2, stage_name="Stage 2"),
+            ],
+            shooter_slugs=["anna", "erik", "mathias"],
+            **hooks,
+        )
+    )
+
+    assert summary.removed == [3]
+    assert [s.stage_number for s in match.stages] == [1, 2]
+    for project in projects.values():
+        assert [s.stage_number for s in project.stages] == [1, 2]
+    assert sorted(saved) == ["anna", "erik", "mathias"]
+    assert sorted(audits_deleted) == [("anna", 3), ("erik", 3), ("mathias", 3)]
+
+
+def test_apply_preserves_untouched_stages_artifacts(tmp_path) -> None:
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3)
+    projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["me"], [1, 2, 3])
+    audio = projects["me"].audio_path(tmp_path)
+    (audio / "stage3_cam_a.wav").write_bytes(b"gone")
+    survivor = audio / "stage2_cam_a.wav"
+    survivor.write_bytes(b"keep")
+
+    asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[
+                SubmittedStage(stage_number=1, stage_name="Stage 1"),
+                SubmittedStage(stage_number=2, stage_name="Stage 2"),
+            ],
+            shooter_slugs=["me"],
+            **hooks,
+        )
+    )
+
+    assert survivor.read_bytes() == b"keep"
+    assert not (audio / "stage3_cam_a.wav").exists()
+
+
+def test_apply_cancels_jobs_for_removed_stages_only(tmp_path) -> None:
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3)
+    _p, _saved, _audits, cancelled, hooks = _harness(tmp_path, ["me"], [1, 2, 3])
+
+    summary = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[
+                SubmittedStage(stage_number=1, stage_name="Stage 1"),
+                SubmittedStage(stage_number=2, stage_name="Stage 2"),
+            ],
+            shooter_slugs=["me"],
+            **hooks,
+        )
+    )
+
+    assert cancelled == [{3}]
+    assert summary.jobs_cancelled == 1
+
+
+def test_apply_with_no_removals_cancels_nothing(tmp_path) -> None:
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2)
+    _p, _saved, audits_deleted, cancelled, hooks = _harness(tmp_path, ["me"], [1, 2])
+
+    summary = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[
+                SubmittedStage(stage_number=1, stage_name="Renamed"),
+                SubmittedStage(stage_number=2, stage_name="Stage 2"),
+            ],
+            shooter_slugs=["me"],
+            **hooks,
+        )
+    )
+
+    assert cancelled == []
+    assert audits_deleted == []
+    assert summary.jobs_cancelled == 0
+    assert summary.renamed == [1]
+    assert match.stages[0].stage_name == "Renamed"
+
+
+def test_apply_adds_a_stage_to_match_and_every_shooter(tmp_path) -> None:
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2)
+    projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["a", "b"], [1, 2])
+
+    summary = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[
+                SubmittedStage(stage_number=1, stage_name="Stage 1"),
+                SubmittedStage(stage_number=2, stage_name="Stage 2"),
+                SubmittedStage(stage_number=None, stage_name="Standards"),
+            ],
+            shooter_slugs=["a", "b"],
+            **hooks,
+        )
+    )
+
+    assert summary.added == [3]
+    assert [s.stage_number for s in match.stages] == [1, 2, 3]
+    for project in projects.values():
+        assert [s.stage_number for s in project.stages] == [1, 2, 3]
+        added = project.stages[-1]
+        assert added.stage_name == "Standards"
+        assert added.time_seconds == 0.0
+        assert added.placeholder is True
+
+
+def test_apply_reports_per_shooter_counts(tmp_path) -> None:
+    from splitsmith.ui.project import StageVideo
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3)
+    projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["haves", "havenots"], [1, 2, 3])
+    projects["haves"].stages[2].videos = [StageVideo(path=Path("a.mp4"), role="primary")]
+
+    summary = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[
+                SubmittedStage(stage_number=1, stage_name="Stage 1"),
+                SubmittedStage(stage_number=2, stage_name="Stage 2"),
+            ],
+            shooter_slugs=["haves", "havenots"],
+            **hooks,
+        )
+    )
+
+    by_slug = {s.slug: s for s in summary.shooters}
+    assert by_slug["haves"].videos_unassigned == 1
+    assert by_slug["havenots"].videos_unassigned == 0
+    assert projects["haves"].unassigned_videos[0].role == "secondary"
+
+
+def test_apply_saves_the_match_doc_after_every_shooter(tmp_path) -> None:
+    """Match doc last: a crash mid-fan-out must leave the canonical list
+    describing the pre-edit world, never a match promising stages the
+    shooters no longer have."""
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3)
+    order: list[str] = []
+    projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["a", "b"], [1, 2, 3])
+    hooks["save_project"] = lambda slug, project: order.append(f"project:{slug}")
+
+    def save_match() -> None:
+        order.append("match")
+
+    hooks["save_match"] = save_match
+
+    asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[
+                SubmittedStage(stage_number=1, stage_name="Stage 1"),
+                SubmittedStage(stage_number=2, stage_name="Stage 2"),
+            ],
+            shooter_slugs=["a", "b"],
+            **hooks,
+        )
+    )
+
+    assert order == ["project:a", "project:b", "match"]
+
+
+def test_apply_collects_a_failing_shooter_and_still_commits(tmp_path) -> None:
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3)
+    projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["ok", "bad"], [1, 2, 3])
+
+    def delete_audit(slug: str, n: int) -> bool:
+        if slug == "bad":
+            raise RuntimeError("state store down")
+        return True
+
+    hooks["delete_audit"] = delete_audit
+
+    summary = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[
+                SubmittedStage(stage_number=1, stage_name="Stage 1"),
+                SubmittedStage(stage_number=2, stage_name="Stage 2"),
+            ],
+            shooter_slugs=["ok", "bad"],
+            **hooks,
+        )
+    )
+
+    assert len(summary.errors) == 1
+    assert "state store down" in summary.errors[0]
+    assert [s.stage_number for s in match.stages] == [1, 2]
