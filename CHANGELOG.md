@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.1](https://github.com/mandakan/splitsmith/compare/v0.13.0...v0.13.1) (2026-08-03)
+
+
+### Bug Fixes
+
+* **deploy:** retry the startup migration's DB connect ([#559](https://github.com/mandakan/splitsmith/issues/559)) ([#635](https://github.com/mandakan/splitsmith/issues/635)) ([58b20fa](https://github.com/mandakan/splitsmith/commit/58b20faa82a98bc1b32de7daf4ae9224551dcf69))
+* **hosted:** five more preflights downloaded raw sources to check existence ([#638](https://github.com/mandakan/splitsmith/issues/638)) ([#640](https://github.com/mandakan/splitsmith/issues/640)) ([c5d2dbd](https://github.com/mandakan/splitsmith/commit/c5d2dbd45a9e12c5720693214d589bed09a489a6))
+* **hosted:** three preflights downloaded raw sources to check existence ([#637](https://github.com/mandakan/splitsmith/issues/637)) ([#639](https://github.com/mandakan/splitsmith/issues/639)) ([8b35747](https://github.com/mandakan/splitsmith/commit/8b357475885ba2a9b05fd860ec6ddbb19abcfdb5))
+
+
+### Documentation
+
+* **ui:** correct stale HostedUploadSurface docstring ([#523](https://github.com/mandakan/splitsmith/issues/523)) ([#633](https://github.com/mandakan/splitsmith/issues/633)) ([c1279f1](https://github.com/mandakan/splitsmith/commit/c1279f16d61adc97fe04bdd0a1f9112f5ab6bbf8))
+
 ## [0.13.0](https://github.com/mandakan/splitsmith/compare/v0.12.0...v0.13.0) (2026-08-03)
 
 
