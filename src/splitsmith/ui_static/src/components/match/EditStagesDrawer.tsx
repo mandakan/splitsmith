@@ -30,8 +30,12 @@
  * call ``onSaved(summary)`` unconditionally (the caller's stage list did
  * change and needs a refresh), but if ``summary.errors`` is non-empty or
  * any ``ShooterStageEditResult.error`` is set, the drawer stays open and
- * shows what didn't fully clean up instead of closing -- that failure is
- * real and per-shooter, even though the edit itself committed.
+ * shows what happened instead of closing. ``error`` alone does not mean
+ * that shooter's list failed to save, though -- ``saved`` is the
+ * discriminator: ``saved=false`` is a real per-shooter failure (their
+ * project doc was never written), while ``saved=true`` with an ``error``
+ * means the edit committed for that shooter and only a cleanup step
+ * (video release, audit delete, artifact purge) came up short.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -70,6 +74,14 @@ interface EditRow {
   paperTargets: number | null;
   steelTargets: number | null;
   removed: boolean;
+  /** Whether the source ``StageEntry.stage_rounds`` was a non-null object
+   *  (even one whose fields were all null). Preserved so an all-blank row
+   *  round-trips to the SAME shape it came in as -- otherwise coercing an
+   *  untouched ``{expected: null, paper_targets: null, steel_targets:
+   *  null}`` down to a bare ``null`` on submit makes the server's
+   *  ``stage_rounds`` comparison see a change that never happened, which
+   *  it then counts as a no-op rename. */
+  hadStageRounds: boolean;
 }
 
 let nextDraftId = -1;
@@ -83,6 +95,7 @@ function rowsFromStages(stages: StageEntry[]): EditRow[] {
     paperTargets: s.stage_rounds?.paper_targets ?? null,
     steelTargets: s.stage_rounds?.steel_targets ?? null,
     removed: false,
+    hadStageRounds: s.stage_rounds !== null,
   }));
 }
 
@@ -102,11 +115,7 @@ function stageEditErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-function removalConfirmBody(
-  toRemove: EditRow[],
-  shooterCount: number,
-  nextStageNumber: number,
-): string {
+function removalConfirmBody(toRemove: EditRow[], shooterCount: number): string {
   const numbers = toRemove
     .map((r) => r.stageNumber)
     .filter((n): n is number => n !== null);
@@ -114,11 +123,17 @@ function removalConfirmBody(
     numbers.length === 1 ? `stage ${numbers[0]}` : `stages ${numbers.join(", ")}`;
   const pronoun = numbers.length === 1 ? "its" : "their";
   const pronounCap = numbers.length === 1 ? "Its" : "Their";
-  const shooterWord = shooterCount === 1 ? "shooter" : "shooters";
+  // "all N shooters" reads oddly at N=1 ("all 1 shooter") -- drop "all"
+  // in that case rather than special-casing the whole sentence.
+  const forShooters =
+    shooterCount === 1 ? "for 1 shooter" : `for all ${shooterCount} shooters`;
   return (
-    `Removing ${label} deletes ${pronoun} audit and trims for all ${shooterCount} ${shooterWord}. ` +
+    `Removing ${label} deletes ${pronoun} audit and trims ${forShooters}. ` +
     `${pronounCap} videos move to unassigned so you can re-attach them. ` +
-    `Stage numbers are not reused -- the next stage you add will be ${nextStageNumber}.`
+    // The server allocates from a persisted counter the SPA never sees
+    // (Match.next_stage_number) -- non-reuse is a real guarantee now, but
+    // the specific next number is not something this client can predict.
+    `Stage numbers are not reused, so the number you remove will not come back.`
   );
 }
 
@@ -186,6 +201,7 @@ export function EditStagesDrawer({
         paperTargets: null,
         steelTargets: null,
         removed: false,
+        hadStageRounds: false,
       },
     ]);
   }
@@ -193,15 +209,12 @@ export function EditStagesDrawer({
   async function handleSaveClick() {
     if (saveDisabled) return;
     if (toRemove.length > 0) {
-      const existingMax = stages.reduce((m, s) => Math.max(m, s.stage_number), 0);
-      const draftsInThisSave = remaining.filter((r) => r.stageNumber === null).length;
-      const nextStageNumber = existingMax + draftsInThisSave + 1;
       const confirmed = await confirm({
         title:
           toRemove.length === 1
             ? "Remove 1 stage?"
             : `Remove ${toRemove.length} stages?`,
-        body: removalConfirmBody(toRemove, shooterCount, nextStageNumber),
+        body: removalConfirmBody(toRemove, shooterCount),
         confirmLabel: "Remove and save",
       });
       if (!confirmed.confirmed) return;
@@ -217,7 +230,10 @@ export function EditStagesDrawer({
         stage_number: r.stageNumber,
         stage_name: r.stageName,
         stage_rounds:
-          r.expectedRounds == null && r.paperTargets == null && r.steelTargets == null
+          r.expectedRounds == null &&
+          r.paperTargets == null &&
+          r.steelTargets == null &&
+          !r.hadStageRounds
             ? null
             : {
                 expected: r.expectedRounds,
@@ -285,7 +301,10 @@ export function EditStagesDrawer({
               </p>
 
               {error ? (
-                <div className="mb-4 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
+                <div
+                  role="alert"
+                  className="mb-4 flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive"
+                >
                   <AlertTriangle className="size-4 shrink-0" />
                   <span>{error}</span>
                 </div>
@@ -365,6 +384,10 @@ function EditStageRow({
 }) {
   const isNew = row.stageNumber === null;
   const rowDisabled = disabled || row.removed;
+  // Distinguish rows for screen-reader users -- with an identical label
+  // on every row, "Remove stage" announced six times in a row gives no
+  // way to tell which one is under the cursor.
+  const rowIdentity = isNew ? "new stage" : `stage ${row.stageNumber}`;
 
   return (
     <div
@@ -421,7 +444,7 @@ function EditStageRow({
         type="button"
         onClick={onToggleRemove}
         disabled={disabled}
-        aria-label={row.removed ? "Undo remove" : "Remove stage"}
+        aria-label={row.removed ? `Undo remove for ${rowIdentity}` : `Remove ${rowIdentity}`}
         className="inline-flex size-7 items-center justify-center rounded-md text-subtle transition-colors hover:bg-led/10 hover:text-led disabled:opacity-50"
       >
         {row.removed ? <RotateCcw className="size-3.5" /> : <X className="size-3.5" />}
@@ -433,11 +456,20 @@ function EditStageRow({
 /** Post-save panel for a summary that carries cleanup errors. The edit
  *  itself committed -- ``removed``/``added``/``renamed`` reflect what
  *  actually changed -- so this reads as "saved, with some issues" (amber,
- *  not red) rather than a failure banner. Per-shooter errors are called
- *  out individually: a non-null ``error`` on a shooter means that
- *  shooter's stage list specifically was NOT saved. */
+ *  not red) rather than a failure banner.
+ *
+ *  A shooter's ``error`` alone does not mean that shooter's list wasn't
+ *  saved -- ``saved`` is the discriminator (see the docstring on
+ *  ``ShooterStageEditResult`` in ``stage_edit.py``, mirrored on the TS
+ *  interface in ``api.ts``): ``saved=false`` means the project doc was
+ *  never written and the shooter's stage list is unchanged, while
+ *  ``saved=true`` with a non-null ``error`` means the list DID save and
+ *  only a cleanup step (video release, audit delete, artifact purge)
+ *  failed afterward. The two get separate lists so a cleanup hiccup never
+ *  reads as "your edit didn't take". */
 function SaveResult({ result }: { result: StageEditSummary }) {
-  const failedShooters = result.shooters.filter((s) => s.error != null);
+  const notSaved = result.shooters.filter((s) => !s.saved);
+  const cleanupIssues = result.shooters.filter((s) => s.saved && s.error != null);
   return (
     <div className="space-y-3">
       <div className="flex items-start gap-2 rounded-md border border-status-warning/40 bg-status-warning/10 p-3 text-sm text-ink">
@@ -447,8 +479,8 @@ function SaveResult({ result }: { result: StageEditSummary }) {
           <p className="mt-1 text-xs text-muted">
             The stage list change committed ({result.removed.length} removed,{" "}
             {result.added.length} added, {result.renamed.length} renamed). The
-            problems below are cleanup that didn't fully finish -- they
-            don't mean the edit itself failed.
+            problems below are what didn't fully finish -- they don't all
+            mean the edit itself failed.
           </p>
         </div>
       </div>
@@ -461,13 +493,28 @@ function SaveResult({ result }: { result: StageEditSummary }) {
         </ul>
       ) : null}
 
-      {failedShooters.length > 0 ? (
+      {notSaved.length > 0 ? (
         <div className="space-y-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-subtle">
             Not saved for these shooters
           </p>
           <ul className="space-y-1 text-xs text-muted">
-            {failedShooters.map((s) => (
+            {notSaved.map((s) => (
+              <li key={s.slug}>
+                <span className="font-mono text-ink">{s.slug}</span>: {s.error}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
+      {cleanupIssues.length > 0 ? (
+        <div className="space-y-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-subtle">
+            Saved, but cleanup didn't fully finish
+          </p>
+          <ul className="space-y-1 text-xs text-muted">
+            {cleanupIssues.map((s) => (
               <li key={s.slug}>
                 <span className="font-mono text-ink">{s.slug}</span>: {s.error}
               </li>

@@ -426,9 +426,12 @@ export interface StageEditRow {
 }
 
 /** What a stage-list edit did to one shooter, mirrors
- *  ``stage_edit.ShooterStageEditResult``. A non-null ``error`` means this
- *  shooter's stage list was NOT saved -- the other counts on this row then
- *  describe only what happened before the failure. */
+ *  ``stage_edit.ShooterStageEditResult``. ``error`` covers two outcomes
+ *  that are not equally bad -- read ``saved``, not the message, to tell
+ *  them apart: ``saved=true`` with an ``error`` means the shooter's
+ *  project WAS written and only a cleanup step (video release, audit
+ *  delete, artifact purge) failed; ``saved=false`` means the project doc
+ *  was never written and this shooter's stage list is unchanged on disk. */
 export interface ShooterStageEditResult {
   slug: string;
   videos_unassigned: number;
@@ -436,6 +439,7 @@ export interface ShooterStageEditResult {
   files_deleted: number;
   objects_deleted: number;
   error: string | null;
+  saved: boolean;
 }
 
 /** Response from PUT /api/match/stages, mirrors ``stage_edit.StageEditSummary``.
