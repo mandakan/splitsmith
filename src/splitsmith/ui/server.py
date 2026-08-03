@@ -7879,13 +7879,19 @@ def create_app(
             return False
         if video.beep_source == "manual":
             return False
-        source = project.resolve_video_path(state.shooter_root(slug), video.path)
-        if not source.exists():
+        # ``source_present``, not ``resolve_video_path``: this only decides
+        # whether to queue, and two of this helper's callers await it in the
+        # request path, so mirroring the raw source here made a video
+        # assignment block on a full download (#638). ``shooter_root`` is
+        # hoisted because it is a blocking Postgres read in hosted mode and
+        # the scan loop calls this helper once per video.
+        root = state.shooter_root(slug)
+        if not project.source_present(root, video.path):
             logger.info(
                 "auto-beep skipped for stage %d video %s: source not reachable (%s)",
                 stage_number,
                 video.video_id,
-                source,
+                root / video.path,
             )
             return False
         await _submit_detect_beep(slug, stage_number, video)
@@ -7944,9 +7950,12 @@ def create_app(
         their own beep so they don't need their own shot timeline.
         """
         project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
-        _ensure_source_reachable(
-            stage_number, project.resolve_video_path(state.shooter_root(slug), video.path)
-        )
+        # ``source_present``, not ``resolve_video_path``: the bytes belong to
+        # the queued job, so resolving here downloaded the raw source into
+        # the API container just to decide whether to queue (#638).
+        root = state.shooter_root(slug)
+        if not project.source_present(root, video.path):
+            _ensure_source_reachable(stage_number, root / video.path)
         if video.beep_source == "manual" and not force:
             raise HTTPException(
                 status_code=409,
@@ -7977,9 +7986,11 @@ def create_app(
                 status_code=400,
                 detail=f"stage {stage_number} has no primary video",
             )
-        _ensure_source_reachable(
-            stage_number, project.resolve_video_path(state.shooter_root(slug), primary.path)
-        )
+        # ``source_present``, not ``resolve_video_path`` -- see the per-video
+        # detect-beep endpoint above (#638).
+        root = state.shooter_root(slug)
+        if not project.source_present(root, primary.path):
+            _ensure_source_reachable(stage_number, root / primary.path)
         if primary.beep_source == "manual" and not force:
             raise HTTPException(
                 status_code=409,
@@ -8025,9 +8036,12 @@ def create_app(
         apply equally to primary and secondary -- both need a beep_time
         and a non-zero stage_time to define the trim window.
         """
-        _ensure_source_reachable(
-            stage_number, project.resolve_video_path(state.shooter_root(slug), video.path)
-        )
+        # ``source_present``, not ``resolve_video_path``: ffmpeg runs in the
+        # trim job, not here, so this preflight has no use for the bytes
+        # (#638).
+        root = state.shooter_root(slug)
+        if not project.source_present(root, video.path):
+            _ensure_source_reachable(stage_number, root / video.path)
         if video.beep_time is None:
             raise HTTPException(
                 status_code=400,
@@ -10151,9 +10165,9 @@ def create_app(
         # Auto-queue beep on assignment to a real stage (#67). Skip when
         # unassigning (to_stage_number=None) or marking ignored -- those
         # don't put the video into the pipeline. Deferred to a background task:
-        # it can mirror media from storage and writes a job row, neither of
-        # which the response needs to wait on (the SPA picks up the job via
-        # JobsPanel polling).
+        # it writes a job row, which the response doesn't need to wait on (the
+        # SPA picks up the job via JobsPanel polling). It no longer mirrors
+        # media from storage either -- see the auto-fire's preflight (#638).
         if req.to_stage_number is not None and req.role != "ignored":
             stage = project.stage(req.to_stage_number)
             video = next((v for v in stage.videos if str(v.path) == req.video_path), None)
@@ -10210,8 +10224,8 @@ def create_app(
         # clear ``processed.beep`` to force re-detection on the new
         # video's audio; the helper picks up the cleared flag and queues
         # accordingly. No-op when the video already had a current beep.
-        # Deferred (see move_assignment) so the media mirror + job write stay
-        # off the response path.
+        # Deferred (see move_assignment) so the job write stays off the
+        # response path; the media mirror it used to pay for is gone (#638).
         new_primary = project.stage(req.stage_number).primary()
         if new_primary is not None:
             background.add_task(_auto_queue_beep_if_needed, slug, project, req.stage_number, new_primary)
@@ -10331,10 +10345,13 @@ def create_app(
         # still work, but the explicit 424 lets them re-try after
         # reconnecting rather than hunting for the partial degradation
         # message in the per-row anomaly list).
+        # ``source_present``, not ``resolve_video_path``: the export job owns
+        # the ffmpeg pass, so resolving here mirrored the raw source into the
+        # API container purely as an existence check (#638).
         if req.write_trim or req.write_fcpxml:
-            _ensure_source_reachable(
-                stage_number, project.resolve_video_path(state.shooter_root(slug), primary.path)
-            )
+            root = state.shooter_root(slug)
+            if not project.source_present(root, primary.path):
+                _ensure_source_reachable(stage_number, root / primary.path)
 
         existing = await state.jobs.find_active(kind="export", stage_number=stage_number)
         if existing is not None:
