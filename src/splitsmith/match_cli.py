@@ -337,13 +337,24 @@ def trims(
         raise typer.Exit(code=2) from exc
 
     match = Match.load(match_path)
-    unknown = sorted(set(cameras) - set(match.shooters))
+    # Accept a slug or a display name, exactly as ``compare export`` does --
+    # these two commands are documented as a chain, so a shooter spelled one
+    # way in the first must be spellable the same way in the second (#618).
+    resolved_cameras: dict[str, str] = {}
+    unknown: list[str] = []
+    for key, value in cameras.items():
+        slug = match.resolve_shooter_slug(match_path, key)
+        if slug is None:
+            unknown.append(key)
+        else:
+            resolved_cameras[slug] = value
     if unknown:
         console.print(
-            f"[red]Error:[/] --camera names no shooter on this match: {', '.join(unknown)}. "
+            f"[red]Error:[/] --camera names no shooter on this match: {', '.join(sorted(unknown))}. "
             f"Slugs available: {', '.join(match.shooters)}"
         )
         raise typer.Exit(code=2)
+    cameras = resolved_cameras
 
     try:
         plan = match_trims.plan_trims(

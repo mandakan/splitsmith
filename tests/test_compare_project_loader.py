@@ -432,6 +432,32 @@ def test_load_shooter_substitutes_primary_when_cam_missing(tmp_path: Path) -> No
     assert stage.substituted is True
 
 
+def test_present_but_unbeeped_camera_substitutes_the_primary(tmp_path: Path) -> None:
+    """The "battery died" half of the substitution branch (#620).
+
+    ``_choose_video`` substitutes when the requested cam is *absent* -- that
+    half is covered -- and also when it is present but has no ``beep_time``,
+    which is untested. Without a beep the cam cannot be aligned to the grid,
+    so the primary stands in and the tile stays live rather than going black.
+    """
+    root = _seed_project_with_two_cams(tmp_path)
+    project = MatchProject.load(root)
+    chest = next(v for v in project.stage(2).videos if v.camera_mount == "chest")
+    chest.beep_time = None  # cam rolled, but the beep was never found
+    project.save(root)
+
+    bundle = load_shooter(root, "Mathias", camera="chest", probe=_stub_probe)
+
+    # Stage 1's chest cam still has its beep, so that tile is the chest.
+    assert bundle.stages_by_number[1].camera_mount == "chest"
+    assert bundle.stages_by_number[1].substituted is False
+    # Stage 2 falls back to the primary and says so -- a live tile, not a hole.
+    stage2 = bundle.stages_by_number[2]
+    assert stage2.substituted is True
+    assert stage2.camera_mount == "helmet"
+    assert "_cam_" not in stage2.trim_path.name
+
+
 def test_missing_trim_for_a_requested_camera_names_the_camera(tmp_path: Path) -> None:
     """The quietly-wrong-artifact case (#618): the user asked for the chest
     cam, the chest trims were never exported, and the grid came back empty

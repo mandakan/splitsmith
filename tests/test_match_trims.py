@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal, get_args, get_origin
 
@@ -240,7 +241,7 @@ def test_cli_satisfied_reasons_are_real_skip_reasons() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _fake_trim_video(written: list[Path]):
+def _fake_trim_video(written: list[Path]) -> Callable[..., None]:
     def fake_trim_video(src: Path, dst: Path, **kwargs: object) -> None:
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(b"trimmed")

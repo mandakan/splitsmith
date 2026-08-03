@@ -37,6 +37,20 @@ Personal tool for an IPSC competitor to extract shot splits from head-mounted ca
 - Mock ffmpeg in trim tests; don't actually shell out during unit tests
 - Integration tests can use real ffmpeg but mark them with `@pytest.mark.integration`
 
+## Review practice
+
+For changes to the detection or export pipeline, run a review pass before merging. On PR #612 every substantive defect was found this way and none by the test suite, which was green over all four.
+
+What actually finds things:
+
+- **Name the specific claims to verify.** "The implementer says X is provably equivalent to Y -- check it against the original and treat any diverging input as a finding" beats "review this diff", which returns generic results.
+- **Tell the reviewer the implementation report is unverified.** A stated rationale never downgrades a finding's severity.
+- **Ask whether each new test genuinely fails against the pre-change code.** Several tests on that branch would have passed against the bug they claimed to cover. Deleting the fix and watching the test fail takes a minute and is the only real proof.
+- **Run the code when behaviour is in question.** The exit-code defect was demonstrated by invoking the verb twice and capturing both codes, not by reading.
+- **Finish with one whole-branch pass over the seams.** One defect lived in a seam no single task owned; only a cross-cutting read found it.
+
+A green suite over a change is evidence the change didn't break anything known -- not evidence it works. A fix can also be real and still invisible: on #617 the note reached the table cell and rich ellipsized it away, so the assertion passed while the user saw nothing. Read the actual output.
+
 ## When in doubt
 
 - **Ask before guessing.** Especially about audio detection thresholds, FCPXML structure, or anything user-facing.

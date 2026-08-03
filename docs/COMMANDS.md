@@ -57,6 +57,35 @@ uv run splitsmith process \
 
 If videos can't be matched cleanly (multiple candidates for one stage, no candidate, ambiguity across stages), the offending stages and videos are listed and the run aborts. Re-run with the videos renamed/separated, or use `single` for each stage explicitly.
 
+## `match merge` -- fold single-shooter projects into one match
+
+Combine two or more legacy single-shooter project folders into a match folder, the layout every multi-shooter command expects.
+
+```bash
+uv run splitsmith match merge ~/splitsmith/projects/mathias-bromma ~/splitsmith/projects/anders-bromma \
+  --output ~/splitsmith/matches/bromma-classifier-2026
+```
+
+All inputs must share a scoreboard match id (or a name, for projects predating the scoreboard linkage). Stage definitions are reconciled across inputs: two inputs carrying the same stage number under different names or round counts abort with a conflict report rather than silently picking a winner.
+
+Non-destructive by default -- sources are copied. `--move` relocates them instead; `--dry-run` inspects everything and prints the plan without writing; `--name` sets the match name when inputs disagree on theirs.
+
+## `match info` -- one-screen summary of a match
+
+```bash
+uv run splitsmith match info ~/splitsmith/matches/bromma-classifier-2026
+```
+
+Works on either layout: a match folder, or a legacy single-shooter project rendered as a one-shooter view. Useful for confirming what a merge produced before running trims over it.
+
+## `match rename-shooter-slugs` -- drop PII from on-disk paths
+
+```bash
+uv run splitsmith match rename-shooter-slugs ~/splitsmith/matches/bromma-classifier-2026 --dry-run
+```
+
+Renames every shooter from a human-readable slug to an opaque `s_<hex>` id: moves `shooters/<old>/`, rewrites `match.json`, and refreshes the shooter list in place. Run once after upgrading. Safe to re-run -- shooters already on an opaque slug are skipped. `--dry-run` prints the plan without touching disk.
+
 ## `match trims` -- batch lossless trims across a match
 
 Write the per-stage lossless trim for every shooter in a merged match folder, from a confirmed beep and a stage time alone -- no shot detection involved. This is the batch path that feeds `compare export`: run it once after beeps and stage times are in, then point `compare export` at the same match folder.

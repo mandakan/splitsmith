@@ -67,6 +67,26 @@ def test_unknown_camera_slug_exits_2(two_shooter_match: Path) -> None:
     assert "mathias" in result.output
 
 
+def test_camera_flag_accepts_a_display_name(two_shooter_match: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``match trims`` and ``compare export`` are documented as a chain, so a
+    shooter spelled by display name in one must work in the other (#618)."""
+    from splitsmith.match_model import Shooter
+
+    # The fixture registers the slug but writes no shooter.json; the display
+    # name lives in that file, so give it one.
+    Shooter(slug="anders", name="Anders Bengtsson").save(Match.shooter_root(two_shooter_match, "anders"))
+
+    monkeypatch.setattr(match_trims.exports.trim, "trim_video", lambda src, dst, **kw: dst.write_bytes(b"t"))
+    result = runner.invoke(
+        app,
+        ["match", "trims", str(two_shooter_match), "--camera", "Anders Bengtsson=chest"],
+    )
+    assert result.exit_code == 0, result.output
+    # The override reached the planner: anders' stage 1 has no chest cam, so
+    # it substitutes and the Camera column says so.
+    assert "chest -> primary" in " ".join(result.stdout.split())
+
+
 def test_unresolvable_camera_exits_2(two_shooter_match: Path) -> None:
     """A selector matching no mount or role anywhere is a config error, not a traceback."""
     result = runner.invoke(app, ["match", "trims", str(two_shooter_match), "--camera", "anders=backpack"])

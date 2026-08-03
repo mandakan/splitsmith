@@ -352,6 +352,35 @@ class Match(BaseModel):
             raise KeyError(f"no shooter {slug!r} in match {self.name!r}")
         return Shooter.load(self.shooter_root(match_root, slug))
 
+    def resolve_shooter_slug(self, match_root: Path, name_or_slug: str) -> str | None:
+        """Match a user-typed shooter reference to a slug, or ``None``.
+
+        Accepts an exact slug (``"s_a4f12d8e"``) or a display name
+        (``"Anton Johansson"``, case-insensitive). Slugs are opaque random
+        ids, so the old "slugify the display name to guess a slug" trick no
+        longer applies -- we look the name up instead.
+
+        Lives here rather than in one CLI because both ``match trims`` and
+        ``compare export`` take shooter references and are documented as a
+        chain; a user who spells a shooter one way in the first command must
+        be able to spell it the same way in the second (#618).
+
+        A shooter whose ``shooter.json`` is unreadable is skipped rather
+        than raising: one broken file must not make every *other* shooter
+        unaddressable.
+        """
+        if name_or_slug in self.shooters:
+            return name_or_slug
+        needle = name_or_slug.casefold().strip()
+        for slug in self.shooters:
+            try:
+                shooter = self.load_shooter(match_root, slug)
+            except (FileNotFoundError, KeyError, ValueError):
+                continue
+            if shooter.name.casefold().strip() == needle:
+                return slug
+        return None
+
     def add_shooter(
         self,
         match_root: Path,

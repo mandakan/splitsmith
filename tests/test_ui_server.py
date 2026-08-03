@@ -3531,6 +3531,32 @@ def test_set_compare_camera_rejects_unknown_selector(tmp_path: Path) -> None:
     assert MatchProject.load(shooter_root).compare_camera is None
 
 
+def test_set_compare_camera_ignores_mounts_only_on_skipped_stages(tmp_path: Path) -> None:
+    """A skipped stage contributes no footage to a grid, so a mount that
+    exists only there is not a usable selection (#620).
+
+    Untested until now: without the ``if not stage.skipped`` filter the
+    endpoint accepts the mount, and every unskipped stage then silently
+    exports from the primary instead -- the exact silent-wrong-camera
+    failure this validation exists to prevent.
+    """
+    client, _ = _seed_project_with_primary(tmp_path)
+    shooter_root = tmp_path / "match" / "shooters" / "me"
+
+    project = MatchProject.load(shooter_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.camera_mount = "chest"
+    project.stages[0].skipped = True
+    project.save(shooter_root)
+
+    resp = client.patch("/api/shooters/me/compare-camera", json={"camera": "chest"})
+
+    assert resp.status_code == 400, resp.text
+    assert "chest" in resp.json()["detail"]
+    assert MatchProject.load(shooter_root).compare_camera is None
+
+
 def test_clear_compare_camera(tmp_path: Path) -> None:
     """``null`` clears the selection back to "whatever the primary is"."""
     client, _ = _seed_project_with_primary(tmp_path)
@@ -3909,6 +3935,88 @@ def test_bulk_camera_set_hosted_state_docs_parity(tmp_path: Path) -> None:
     assert vid_doc["camera_mount"] == "head"
     assert vid_doc["camera_make"] == "Meta"
     assert vid_doc["camera_model"] == "Vanguard"
+
+
+def test_beep_confirm_seeds_the_stub_in_hosted_state_docs(tmp_path: Path) -> None:
+    """Hosted mode is production, and the beep-confirm stub was only ever
+    tested against local files (#620).
+
+    ``set_beep_reviewed`` seeds ``{"shots": [], "detection": "none"}`` so
+    status surfaces read a document instead of inferring from absence. In
+    hosted mode that write goes to ``state_docs``, not disk, and the
+    "already has a doc" check reads back through the same store -- so a
+    re-confirm on an audited stage must not wipe shot data there either.
+    Neither half had a hosted test; only the status *reader* did.
+    """
+    import asyncio as _asyncio
+
+    from splitsmith import match_model as _match_model
+    from splitsmith.db import Base, ProjectStateStore, User, create_engine, sessionmaker
+    from splitsmith.ui.project import is_stub_audit
+
+    engine = create_engine("sqlite+aiosqlite:///:memory:")
+    sf = sessionmaker(engine)
+
+    async def _setup_db() -> str:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with sf() as s:
+            user = User(email="hosted-stub@test.se")
+            s.add(user)
+            await s.commit()
+            await s.refresh(user)
+            return user.id
+
+    uid = _asyncio.run(_setup_db())
+    store = ProjectStateStore(sf, user_id=uid)
+
+    project_root = tmp_path / "match"
+    client, _ = _seed_project_with_primary(tmp_path)
+    shooter_root = project_root / "shooters" / "me"
+    local_match = _match_model.Match.load(project_root)
+    match_id = local_match.match_id
+    _asyncio.run(store.save_match(match_id, local_match.model_dump(mode="json"), expected_version=0))
+
+    project = MatchProject.load(shooter_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.save(shooter_root)
+    primary_id = primary.video_id
+    _asyncio.run(store.save_project(match_id, "me", project.model_dump(mode="json"), expected_version=0))
+
+    _state = client.app.state.splitsmith_state
+    old_project_state = _state._project_state
+    _state._project_state = store
+    try:
+        resp = client.post(
+            f"/api/shooters/me/stages/1/videos/{primary_id}/beep/review",
+            json={"reviewed": True},
+        )
+        assert resp.status_code == 200, resp.text
+
+        doc, version = _asyncio.run(store.load_audit(match_id, "me", 1))
+        assert doc is not None, "the stub must land in state_docs, not on disk"
+        assert is_stub_audit(doc)
+        assert version > 0
+
+        # No stub file was written locally -- hosted writes go to the store.
+        assert not (shooter_root / "audit" / "stage1.json").exists()
+
+        # Re-confirming must not overwrite a real audit. Put one in the
+        # store and confirm again.
+        real_doc = {"shots": [{"shot_number": 1, "ms_after_beep": 500}], "beep_time": 5.0}
+        _asyncio.run(store.save_audit(match_id, "me", 1, real_doc, expected_version=version))
+        resp = client.post(
+            f"/api/shooters/me/stages/1/videos/{primary_id}/beep/review",
+            json={"reviewed": True},
+        )
+        assert resp.status_code == 200, resp.text
+        after, _ = _asyncio.run(store.load_audit(match_id, "me", 1))
+        assert after is not None
+        assert after["shots"], "a re-confirm must never wipe audited shots"
+    finally:
+        _state._project_state = old_project_state
 
 
 def test_calibrated_camera_models_endpoint_lists_shipped_models(tmp_path: Path) -> None:
