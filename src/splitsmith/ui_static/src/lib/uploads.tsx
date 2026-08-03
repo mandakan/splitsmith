@@ -9,6 +9,17 @@ import {
 } from "react";
 
 import { api, ApiError } from "@/lib/api";
+import {
+  queueStats,
+  trimSamples,
+  type QueueStats,
+  type ThroughputSample,
+} from "@/lib/uploadStats";
+
+/** How far back the ETA looks. Long enough to ride out the jitter of
+ *  individual XHR progress events, short enough to react when the uplink
+ *  changes speed. */
+const THROUGHPUT_WINDOW_MS = 10_000;
 
 // Reads duration + recorded_start from a hidden <video> element so
 // attach-after-upload has the metadata to pass along.
@@ -79,6 +90,9 @@ interface UploadContextValue {
   clearFinished: () => void;
   inFlight: boolean;
   attachTick: number;
+  /** Queue-level progress. Computed once here so the dock and the modal
+   *  cannot disagree about what "3 of 12" means (#556). */
+  queue: QueueStats;
 }
 
 const UploadContext = createContext<UploadContextValue | null>(null);
@@ -98,6 +112,16 @@ export function UploadProvider({ children }: { children: ReactNode }) {
   const pumpingRef = useRef(false);
   const activeControllerRef = useRef<AbortController | null>(null);
   const [pumpTick, setPumpTick] = useState(0);
+  // Trailing window of queue-wide sent-byte readings, feeding the ETA.
+  // A ref rather than state: samples arrive on every XHR progress event
+  // and only ever get read during render, so storing them in state would
+  // double the renders for no gain.
+  const samplesRef = useRef<ThroughputSample[]>([]);
+  // Forces a re-render about once a second while uploading, so the ETA
+  // counts down (and goes stale-silent) even when no progress event
+  // arrives to re-render us. The value is never read -- the render is
+  // the whole point.
+  const [, forceClockTick] = useState(0);
   // Mirror of `uploads` so cancel/cancelAll can read controllers without a
   // stale closure and without abusing setState as a getter.
   const uploadsRef = useRef<PendingUpload[]>([]);
@@ -224,10 +248,26 @@ export function UploadProvider({ children }: { children: ReactNode }) {
       const controller = new AbortController();
       activeControllerRef.current = controller;
       updateOne(next.id, { status: "uploading", bytesSent: 0, controller });
+      // Bytes already banked by finished files, so samples measure the
+      // whole queue rather than restarting from zero each file -- an ETA
+      // that reset per file would be useless for "when is this done?".
+      // Only `done` files count: an errored file's partial bytes are not
+      // coming back, and including them would make the counter step
+      // backwards later.
+      const bankedBytes = uploadsRef.current
+        .filter((u) => u.status === "done")
+        .reduce((a, u) => a + u.file.size, 0);
       try {
         const result = await api.uploadRawFile(next.file, {
           signal: controller.signal,
-          onProgress: (loaded) => updateOne(next.id, { bytesSent: loaded }),
+          onProgress: (loaded) => {
+            samplesRef.current = trimSamples(
+              [...samplesRef.current, { t: Date.now(), bytes: bankedBytes + loaded }],
+              Date.now(),
+              THROUGHPUT_WINDOW_MS,
+            );
+            updateOne(next.id, { bytesSent: loaded });
+          },
         });
         updateOne(next.id, { status: "done", bytesSent: next.file.size });
         const probe = probeByFilenameRef.current[next.file.name];
@@ -252,6 +292,24 @@ export function UploadProvider({ children }: { children: ReactNode }) {
     (u) => u.status === "queued" || u.status === "uploading",
   );
 
+  // Drop the window when the queue drains, so the next run projects from
+  // its own throughput instead of inheriting the last one's rate.
+  useEffect(() => {
+    if (inFlight) return;
+    samplesRef.current = [];
+  }, [inFlight]);
+
+  useEffect(() => {
+    if (!inFlight) return;
+    const timer = setInterval(() => forceClockTick((t) => t + 1), 1000);
+    return () => clearInterval(timer);
+  }, [inFlight]);
+
+  // Recomputed every render rather than memoised: it reads a ref and the
+  // clock, neither of which a dependency array can track, and it is a
+  // handful of reduces over a short list.
+  const queue = queueStats(uploads, samplesRef.current, Date.now());
+
   // Warn before reload / tab-close while uploads run. The queue is in-memory
   // with no resume, so a stray navigation loses in-flight and queued files.
   useEffect(() => {
@@ -266,7 +324,17 @@ export function UploadProvider({ children }: { children: ReactNode }) {
 
   return (
     <UploadContext.Provider
-      value={{ uploads, enqueue, cancel, cancelAll, clearFinished, inFlight, attachTick, probeFor }}
+      value={{
+        uploads,
+        enqueue,
+        cancel,
+        cancelAll,
+        clearFinished,
+        inFlight,
+        attachTick,
+        probeFor,
+        queue,
+      }}
     >
       {children}
     </UploadContext.Provider>
