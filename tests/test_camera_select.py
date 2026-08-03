@@ -59,6 +59,31 @@ def test_secondary_role_with_two_secondaries_raises() -> None:
         resolve_camera(videos, "secondary")
 
 
+def test_duplicate_mount_is_ambiguous() -> None:
+    """Two cams wearing one mount tag is the same failure as two secondaries:
+    ingest order would decide which angle ships, silently (#618). The message
+    names both files, because the fix is re-tagging the project."""
+    videos = [
+        _video("a", role="primary", mount="helmet"),
+        _video("b", role="secondary", mount="chest"),
+        _video("c", role="secondary", mount="chest"),
+    ]
+    with pytest.raises(CameraResolutionError, match="2 cameras tagged 'chest'") as exc:
+        resolve_camera(videos, "chest")
+    assert "b.MP4" in str(exc.value)
+    assert "c.MP4" in str(exc.value)
+
+
+def test_duplicate_mount_ignores_ignored_videos() -> None:
+    """An ignored video is not a camera, so it cannot make one ambiguous."""
+    videos = [
+        _video("a", role="primary", mount="helmet"),
+        _video("b", role="secondary", mount="chest"),
+        _video("c", role="ignored", mount="chest"),
+    ]
+    assert resolve_camera(videos, "chest").path.name == "b.MP4"
+
+
 def test_unresolvable_on_this_stage_returns_none() -> None:
     """Absent on one stage is normal -- caller substitutes the primary."""
     videos = [_video("a", role="primary", mount="helmet")]

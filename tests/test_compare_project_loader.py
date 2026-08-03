@@ -230,6 +230,11 @@ def test_loads_present_stages_and_skips_missing(tmp_path: Path) -> None:
     assert s1.audit_path == audit_path_for_stage(project, root, 1)
     # beep_time > pre_buffer so beep_offset_in_clip == pre_buffer
     assert s1.beep_offset_in_clip == 5.0
+    # The dropped stage is recorded rather than silently vanishing: it will
+    # render as a black filler tile, and the user gets told which file was
+    # missing (#618).
+    assert [m.stage_number for m in bundle.missing_trims] == [2]
+    assert bundle.missing_trims[0].expected_path == trim_path_for_stage(project, root, 2, "No Trim Yet")
 
 
 def test_short_head_clamps_beep_offset(tmp_path: Path) -> None:
@@ -425,6 +430,37 @@ def test_load_shooter_substitutes_primary_when_cam_missing(tmp_path: Path) -> No
     stage = bundle.stages_by_number[2]
     assert "_cam_" not in stage.trim_path.name
     assert stage.substituted is True
+
+
+def test_missing_trim_for_a_requested_camera_names_the_camera(tmp_path: Path) -> None:
+    """The quietly-wrong-artifact case (#618): the user asked for the chest
+    cam, the chest trims were never exported, and the grid came back empty
+    with no explanation. The omission now carries the selector that chose
+    the camera, so the CLI can say which cam is missing rather than just
+    which file."""
+    root = _seed_project_with_two_cams(tmp_path)
+    # Remove the chest trims, keeping the primaries.
+    for trim in root.glob("exports/*_cam_*_trimmed.mp4"):
+        trim.unlink()
+
+    bundle = load_shooter(root, "Mathias", camera="chest", probe=_stub_probe)
+    assert bundle.stages_by_number == {}
+    assert {m.camera for m in bundle.missing_trims} == {"chest"}
+    assert all("_cam_" in m.expected_path.name for m in bundle.missing_trims)
+
+
+def test_missing_trim_after_substitution_does_not_blame_the_camera(tmp_path: Path) -> None:
+    """When the primary stood in, the missing file is the primary's trim --
+    reporting it against the requested camera would send the user looking
+    for a cam that was never going to be used on that stage."""
+    root = _seed_project_with_two_cams(tmp_path, chest_on_stage_2=False)
+    for trim in root.glob("exports/*_trimmed.mp4"):
+        trim.unlink()
+
+    bundle = load_shooter(root, "Mathias", camera="chest", probe=_stub_probe)
+    by_stage = {m.stage_number: m for m in bundle.missing_trims}
+    assert by_stage[1].camera == "chest"  # chest was used on stage 1
+    assert by_stage[2].camera is None  # stage 2 fell back to the primary
 
 
 def test_load_shooter_rejects_camera_that_matches_nothing(tmp_path: Path) -> None:

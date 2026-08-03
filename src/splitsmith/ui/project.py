@@ -1928,6 +1928,27 @@ class MatchProject(BaseModel):
                     pass
         return local
 
+    def source_present(self, root: Path, video_path: Path) -> bool:
+        """Is this video's source available, *without* fetching it?
+
+        The read-only counterpart to :meth:`resolve_video_path`, for callers
+        that only want to know whether a source exists. That method mirrors
+        a hosted object into the local cache on first access, so using it as
+        an existence check downloads the file -- which turns a planning pass
+        that promises to touch no media into a full download of the match
+        (#617). Here a bound storage is asked with a cheap ``exists``.
+
+        Deliberately does not mirror, so it cannot be used as a way to warm
+        the cache; call ``resolve_video_path`` when you need the bytes.
+        """
+        if video_path.is_absolute():
+            return video_path.exists()
+        if (root / video_path).exists():
+            return True
+        if self._storage is None:
+            return False
+        return self._storage.exists(str(video_path))
+
     @staticmethod
     def _mirror_from_storage(storage: Storage, key: str, dest: Path) -> None:
         """Stream ``key`` from ``storage`` into ``dest`` via temp+rename.

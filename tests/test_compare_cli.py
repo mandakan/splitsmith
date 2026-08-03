@@ -147,6 +147,130 @@ def test_camera_flag_reaches_the_match_loader(tmp_path: Path, monkeypatch: pytes
     assert output.exists()
 
 
+def test_camera_flag_accepts_a_display_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """``--audio-from`` takes a display name, so ``--camera`` must too --
+    otherwise one command spells the same shooter two different ways and
+    fails on the second half (#618)."""
+    match_root = _seed_match_with_two_cams(tmp_path / "match")
+    output = tmp_path / "out.fcpxml"
+
+    import splitsmith.compare.emitter as em_mod
+    import splitsmith.compare.project_loader as pl_mod
+
+    real = pl_mod.load_shooter_from_match
+    seen: list[str | None] = []
+
+    def spy(
+        match_root_arg: Path,
+        slug: str,
+        label: str,
+        *,
+        camera: str | None = None,
+        probe: ProbeFn | None = None,
+    ) -> CompareShooterBundle:
+        seen.append(camera)
+        return real(match_root_arg, slug, label, camera=camera, probe=_fake_probe)
+
+    monkeypatch.setattr(pl_mod, "load_shooter_from_match", spy)
+    monkeypatch.setattr(em_mod.subprocess, "run", _ffmpeg_stub_factory())
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "Mathias",  # display name
+            "--output",
+            str(output),
+            "--camera",
+            "Mathias=chest",  # the same display name
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert seen == ["chest"]
+    assert output.exists()
+
+
+def test_missing_per_cam_trim_warns_instead_of_silently_emptying(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one place this feature could produce a quietly wrong artifact:
+    ask for a camera whose trims were never exported and the shooter's tiles
+    all go black with no message (#618)."""
+    match_root = _seed_match_with_two_cams(tmp_path / "match")
+    output = tmp_path / "out.fcpxml"
+
+    # A second shooter, on the primary, keeps its trim -- it is the audio
+    # source, so the sequence still has a frame rate to derive. Only the
+    # chest-cam shooter goes dark.
+    match = Match.load(match_root)
+    match.add_shooter(
+        match_root,
+        Shooter(
+            slug="anders",
+            name="Anders",
+            stages=[ShooterStageData(stage_number=1, time_seconds=10.0, videos=_cams())],
+        ),
+    )
+    anders_root = Match.shooter_root(match_root, "anders")
+    project = MatchProject.init(anders_root, name=match.name)
+    project.stages = [StageEntry(stage_number=1, stage_name="Skipper", time_seconds=10.0, videos=_cams())]
+    project.save(anders_root)
+    stamped = MatchProject.load(anders_root)
+    exports = stamped.exports_path(anders_root)
+    exports.mkdir(parents=True, exist_ok=True)
+    (exports / f"stage1_{_slugify('Skipper')}_trimmed.mp4").write_bytes(b"")
+
+    for trim in (match_root / "shooters" / "mathias" / "exports").glob("*_cam_*_trimmed.mp4"):
+        trim.unlink()
+
+    import splitsmith.compare.emitter as em_mod
+    import splitsmith.compare.project_loader as pl_mod
+
+    real = pl_mod.load_shooter_from_match
+    monkeypatch.setattr(
+        pl_mod,
+        "load_shooter_from_match",
+        lambda *a, **kw: real(*a, **{**kw, "probe": _fake_probe}),
+    )
+    monkeypatch.setattr(em_mod.subprocess, "run", _ffmpeg_stub_factory())
+
+    # The dropped tile becomes black filler, which the real renderer shells
+    # out to ffmpeg for. Stub it: this test is about the warning, and the
+    # renderer has its own tests.
+    def _stub_filler(*, output_dir: Path, **_kw: Any) -> Path:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        path = output_dir / "_compare_filler_stub.mp4"
+        path.write_bytes(b"")
+        return path
+
+    monkeypatch.setattr(em_mod, "ensure_filler", _stub_filler)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "anders",
+            "--output",
+            str(output),
+            "--camera",
+            "mathias=chest",
+        ],
+    )
+    out = " ".join(result.output.split())
+    # Still an export -- a partial grid is a legitimate thing to want.
+    assert result.exit_code == 0, result.output
+    assert "Warning" in out
+    assert "'chest'" in out
+    assert "black filler" in out
+    assert "_cam_" in out  # names the file it looked for
+
+
 def test_camera_flag_rejects_malformed_pair(tmp_path: Path) -> None:
     match_root = _seed_match_with_two_cams(tmp_path / "match")
     runner = CliRunner()

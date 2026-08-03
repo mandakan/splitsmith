@@ -54,6 +54,17 @@ def resolve_camera(videos: list[StageVideo], camera: str | None) -> StageVideo |
         return next((v for v in selectable if v.role == "primary"), None)
 
     by_mount = [v for v in selectable if v.camera_mount == camera]
+    if len(by_mount) > 1:
+        # Same failure as two secondaries under ``camera="secondary"``:
+        # ingest order would decide which camera the user gets, and the
+        # wrong angle exports silently. There is no finer selector to
+        # suggest -- two cams wearing one mount tag is a tagging mistake --
+        # so name the files and let the user fix the project.
+        paths = ", ".join(v.path.name for v in by_mount)
+        raise CameraResolutionError(
+            f"stage has {len(by_mount)} cameras tagged {camera!r} ({paths}); "
+            "re-tag them so the mount identifies one camera"
+        )
     if by_mount:
         return by_mount[0]
 
