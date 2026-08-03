@@ -198,7 +198,10 @@ def test_auto_beep_on_assignment_does_not_fetch_sources(tmp_path: Path) -> None:
     )
 
     assert resp.status_code == 200, resp.text
-    assert [j["kind"] for j in client.get("/api/me/jobs").json()] == ["detect_beep"]
+    # Membership, not equality: a runner with no cached models queues a
+    # ``model_download`` alongside this one.
+    kinds = [j["kind"] for j in client.get("/api/me/jobs").json()]
+    assert "detect_beep" in kinds, kinds
     assert storage.fetched == []
 
 
