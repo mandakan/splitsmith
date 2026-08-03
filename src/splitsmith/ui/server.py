@@ -190,6 +190,7 @@ from .project import (
     StageStatus,
     StageVideo,
     VideoRole,
+    trim_blocker,
 )
 from .scoreboard import (
     CachingScoreboardClient,
@@ -10299,29 +10300,31 @@ def create_app(
             stage = project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # One rule, three surfaces (#613): ``trim_blocker`` is what the CLI
+        # planner and ``export_overview.ready_to_trim`` ask too. The verdict
+        # is only decomposed here to word the 400 -- the SPA shows the
+        # detail verbatim, so "no beep" and "no stage time" can't share one
+        # message. Note a positive ``time_seconds`` is the whole duration
+        # test: an untouched placeholder has 0.0. Also demanding a
+        # ``scorecard_updated_at`` or a ``time_seconds_manual`` stamp used to
+        # reject a scoreboard row whose timestamp failed to parse -- a stage
+        # the CLI cut without complaint.
         primary = stage.primary()
-        if primary is None or primary.beep_time is None:
-            raise HTTPException(
-                status_code=400,
-                detail=(
+        blocker = trim_blocker(stage, primary)
+        if blocker is not None:
+            detail = {
+                "skipped": f"stage {stage_number} is marked skipped; un-skip it before exporting",
+                "no_beep": (
                     f"stage {stage_number} has no primary or no beep yet; "
                     "finish ingest + audit before exporting"
                 ),
-            )
-        # A stage is exportable once it has a real duration: either a
-        # scoreboard import (``scorecard_updated_at`` set) OR a manually
-        # entered time (``set_stage_time`` stamps ``time_seconds_manual``
-        # for exactly the no-scoreboard flow). Blocking the manual case
-        # left manual matches able to detect but not export -- the gate
-        # only meant to reject untouched placeholders.
-        if stage.time_seconds <= 0 or (stage.scorecard_updated_at is None and not stage.time_seconds_manual):
-            raise HTTPException(
-                status_code=400,
-                detail=(
+                "no_stage_time": (
                     f"stage {stage_number} is a placeholder; set a stage time "
                     "or import a scoreboard before exporting"
                 ),
-            )
+            }[blocker]
+            raise HTTPException(status_code=400, detail=detail)
+        assert primary is not None  # guaranteed: ``trim_blocker`` said no_beep otherwise
         # Source-reachability surfaces as a structured 424 so the SPA
         # renders the same "reconnect external storage" message used
         # elsewhere -- even if the user only wants CSV/report (those would

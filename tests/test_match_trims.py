@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, Literal, get_args, get_origin
 
 import pytest
+from pydantic import ValidationError
 
 from splitsmith import camera_select, match_trims
 from splitsmith.match_model import Match
@@ -14,6 +16,13 @@ from tests.conftest import _video
 # ``two_shooter_match`` lives in tests/conftest.py so ``test_match_trims_cli.py``
 # can reuse it (pytest fixtures are auto-discovered; the plain ``_video`` helper
 # is not, hence the explicit import above).
+
+
+def _literal_values(annotation: Any) -> set[str]:
+    """Flatten a ``Literal[...]`` -- or a union of them -- to its strings."""
+    if get_origin(annotation) is Literal:
+        return set(get_args(annotation))
+    return {v for arg in get_args(annotation) for v in _literal_values(arg)}
 
 
 def _find(plan: list[match_trims.TrimPlanEntry], slug: str, stage: int) -> match_trims.TrimPlanEntry:
@@ -114,6 +123,73 @@ def test_plan_touches_no_media(two_shooter_match: Path, monkeypatch: pytest.Monk
 
     monkeypatch.setattr(match_trims.exports.trim, "trim_video", explode)
     match_trims.plan_trims(two_shooter_match)
+
+
+# ---------------------------------------------------------------------------
+# Shared eligibility rule (#613) and typed skip reasons (#614)
+# ---------------------------------------------------------------------------
+
+
+def test_plan_agrees_with_export_overview_on_trim_eligibility(two_shooter_match: Path) -> None:
+    """The planner and the SPA's overview must classify the same stage the
+    same way -- one rule, two surfaces (#613).
+
+    ``ready_to_trim`` covers only the permanent blockers (skipped / no beep /
+    no stage time). A stage the planner turns down for a *transient* reason
+    (the trim is already on disk, the drive is unplugged) is still
+    trim-ready, so the SPA keeps offering it.
+    """
+    transient = {"already_exported", "source_unreachable", "camera_ambiguous"}
+    plan = match_trims.plan_trims(two_shooter_match)
+    for slug in ("anders", "mathias"):
+        shooter_root = Match.shooter_root(two_shooter_match, slug)
+        project = MatchProject.load(shooter_root)
+        for row in project.export_overview(shooter_root):
+            entry = _find(plan, slug, row.stage_number)
+            if row.ready_to_trim:
+                assert entry.eligible or entry.reason in transient, (
+                    f"{slug}/{row.stage_number}: overview says trim-ready, " f"planner says {entry.reason}"
+                )
+            else:
+                assert not entry.eligible
+                assert entry.reason not in transient
+
+
+def test_stage_time_alone_makes_a_stage_trim_ready(two_shooter_match: Path) -> None:
+    """A scoreboard row that carried a time but an unparseable
+    ``scorecard_updated_at`` leaves ``time_seconds > 0`` with neither
+    ``scorecard_updated_at`` nor ``time_seconds_manual`` set. The trim is
+    cuttable from a beep plus a duration, so every surface must accept it.
+    """
+    shooter_root = Match.shooter_root(two_shooter_match, "mathias")
+    project = MatchProject.load(shooter_root)
+    stage = project.stages[0]
+    assert stage.scorecard_updated_at is None
+    assert stage.time_seconds_manual is False
+
+    row = next(r for r in project.export_overview(shooter_root) if r.stage_number == 1)
+    assert row.ready_to_trim is True
+
+
+def test_skip_reason_is_a_closed_set(two_shooter_match: Path) -> None:
+    """A typo'd reason must not validate (#614) -- the CLI's exit code keys
+    off these strings, so a silent typo silently changes the exit code."""
+    with pytest.raises(ValidationError):
+        match_trims.TrimPlanEntry(
+            shooter_slug="mathias",
+            stage_number=1,
+            stage_name="Egg Grab",
+            reason="allready_exported",  # type: ignore[arg-type]
+        )
+
+
+def test_cli_satisfied_reasons_are_real_skip_reasons() -> None:
+    """The exit-code rule's "not outstanding work" set must be drawn from
+    the same Literal, so a rename can't leave the CLI matching on a string
+    nothing produces any more."""
+    from splitsmith import match_cli
+
+    assert set(match_cli.SATISFIED_REASONS) <= _literal_values(match_trims.SkipReason)
 
 
 # ---------------------------------------------------------------------------

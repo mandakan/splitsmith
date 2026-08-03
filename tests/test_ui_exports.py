@@ -602,6 +602,8 @@ def test_export_overview_status(tmp_path: Path) -> None:
     # 1 was implicitly rejected.
     assert row.total_candidate_count == 2
     assert row.ready_to_export is True
+    # A trim needs the beep + the stage time only -- no audit, no shots (#613).
+    assert row.ready_to_trim is True
     assert row.has_exports is False
     # source_reachable is False -- the test fixture's primary path
     # ``raw/a.mp4`` doesn't exist on disk, mirroring the "USB unplugged"
@@ -724,6 +726,53 @@ def test_export_overview_surfaces_secondaries(tmp_path: Path) -> None:
     # on disk -- not just primary outputs.
     assert row.has_exports is True
     assert row.last_export_at is not None
+
+
+def test_export_overview_ready_to_trim_branches(tmp_path: Path) -> None:
+    """``ready_to_trim`` is the one rule the CLI, the server and the SPA all
+    read (#613): not skipped, a primary with a beep, a positive stage time.
+
+    Deliberately *not* part of it: an audit, shots, or a reachable source.
+    A bare trim needs none of the first two, and reachability is reported
+    separately so the SPA can badge "source missing" on an otherwise
+    exportable row rather than hiding it.
+    """
+    from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
+
+    def _stage(n: int, **kw: object) -> StageEntry:
+        stage = StageEntry(
+            stage_number=n,
+            stage_name=f"Stage {n}",
+            time_seconds=float(kw.pop("time_seconds", 8.0)),  # type: ignore[arg-type]
+            skipped=bool(kw.pop("skipped", False)),
+        )
+        if kw.pop("primary", True):
+            stage.videos.append(
+                StageVideo(
+                    path=Path(f"raw/s{n}.mp4"),
+                    role="primary",
+                    beep_time=kw.pop("beep_time", 1.0),  # type: ignore[arg-type]
+                )
+            )
+        assert not kw, f"unused kwargs: {kw}"
+        return stage
+
+    root = tmp_path / "m"
+    project = MatchProject.init(root, name="m")
+    project.stages = [
+        _stage(1),  # ready: beep + time, no audit, no scorecard timestamp
+        _stage(2, beep_time=None),  # no beep
+        _stage(3, time_seconds=0.0),  # untouched placeholder
+        _stage(4, skipped=True),  # explicitly skipped
+        _stage(5, primary=False),  # no primary at all
+    ]
+    ready = {r.stage_number: r.ready_to_trim for r in project.export_overview(root)}
+    assert ready == {1: True, 2: False, 3: False, 4: False, 5: False}
+    # Stage 1 is trim-ready without any of the shot-detection prerequisites
+    # ``ready_to_export`` insists on -- the two flags are not the same gate.
+    row1 = next(r for r in project.export_overview(root) if r.stage_number == 1)
+    assert row1.ready_to_export is False
+    assert row1.source_reachable is False
 
 
 def test_export_stage_request_accepts_secondary_video_ids() -> None:

@@ -200,31 +200,19 @@ function ExportInner({ slug }: { slug: string }) {
 
   // Stage eligibility
   const stages: StageExportStatus[] = overview?.stages ?? [];
-  // A bare trim needs no audit: the server's per-stage export gate is a
-  // primary with a beep plus a real stage duration (scoreboard or manual),
-  // and that is exactly what the lossless trim is cut from. Holding
+  // A bare trim needs no audit: it is cut from a beep plus a stage
+  // duration, which is exactly what ``ready_to_trim`` reports. Holding
   // trims-only to ``ready_to_export`` would gate the mode on the shot
-  // detection it exists to skip.
-  const trimReadyNumbers = useMemo(() => {
-    const ready = new Set<number>();
-    for (const s of project?.stages ?? []) {
-      if (s.skipped) continue;
-      const primary = s.videos.find((v) => v.role === "primary");
-      if (!primary || primary.beep_time === null) continue;
-      if (s.time_seconds <= 0) continue;
-      if (s.scorecard_updated_at === null && !s.time_seconds_manual) continue;
-      ready.add(s.stage_number);
-    }
-    return ready;
-  }, [project]);
+  // detection it exists to skip. Both flags come off the overview row --
+  // this page used to hand-port the server's trim rule into TypeScript and
+  // derive it from ``project.stages`` while filtering ``overview.stages``,
+  // which is two sources of truth for one list and drifted (#613).
   const readyStages = useMemo(
     () =>
       stages.filter(
-        (s) =>
-          !s.skipped &&
-          (trimsOnly ? trimReadyNumbers.has(s.stage_number) : s.ready_to_export),
+        (s) => !s.skipped && (trimsOnly ? s.ready_to_trim : s.ready_to_export),
       ),
-    [stages, trimsOnly, trimReadyNumbers],
+    [stages, trimsOnly],
   );
   const eligibleNumbers = useMemo(
     () =>

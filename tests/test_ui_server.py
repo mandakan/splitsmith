@@ -7213,17 +7213,6 @@ def _export_csv_only(client, stage_number: int = 1):
     )
 
 
-def test_export_stage_400_on_untouched_placeholder(tmp_path: Path) -> None:
-    """A stage with neither a scoreboard import nor a manual time is a
-    placeholder and must not export."""
-    client, _ = _seed_match_export_project(tmp_path, stage_count=1)
-    # The seed leaves scorecard_updated_at unset + time not manually
-    # stamped, so the stage is an untouched placeholder.
-    resp = _export_csv_only(client)
-    assert resp.status_code == 400
-    assert "placeholder" in resp.json()["detail"]
-
-
 def test_export_stage_allows_a_manually_timed_stage(tmp_path: Path) -> None:
     """Manual matches (no scoreboard) set the duration via
     ``set_stage_time``; the export gate must then accept the stage rather
@@ -7243,6 +7232,71 @@ def test_export_stage_allows_a_manually_timed_stage(tmp_path: Path) -> None:
     # fails with a pydantic datetime validation error.
     final = _wait_for_job(client, resp.json()["id"])
     assert final["status"] == "succeeded", final
+
+
+def test_export_stage_accepts_a_scoreboard_time_without_a_timestamp(tmp_path: Path) -> None:
+    """A stage time with no ``scorecard_updated_at`` and no manual flag is
+    still exportable (#613).
+
+    ``apply_stage_time_results`` sets ``time_seconds`` even when the row's
+    ``scorecard_updated_at`` fails to parse, so that combination is reachable
+    from a plain scoreboard import. The CLI planner has always been willing
+    to cut it; the server used to reject it as a placeholder, which is the
+    divergence the shared ``ready_to_trim`` rule closes.
+    """
+    from splitsmith.ui.project import MatchProject
+
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    stage = MatchProject.load(project_root / "shooters" / "me").stages[0]
+    assert stage.time_seconds > 0
+    assert stage.scorecard_updated_at is None
+    assert stage.time_seconds_manual is False
+
+    resp = _export_csv_only(client)
+    assert resp.status_code == 200, resp.text
+    assert _wait_for_job(client, resp.json()["id"])["status"] == "succeeded"
+
+
+def test_export_stage_400_on_untouched_placeholder(tmp_path: Path) -> None:
+    """The gate that survives is the one that means something: a stage with
+    no duration cannot be trimmed, because the trim is sized by it.
+
+    Replaces an older test of the same name whose fixture carried
+    ``time_seconds=10.0`` -- it asserted the stricter rule (#613) rather
+    than the placeholder case its name described.
+    """
+    from splitsmith.ui.project import MatchProject
+
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(shooter_root)
+    project.stages[0].time_seconds = 0.0
+    project.save(shooter_root)
+
+    resp = _export_csv_only(client)
+    assert resp.status_code == 400
+    assert "placeholder" in resp.json()["detail"]
+
+
+def test_export_stage_400_on_a_skipped_stage(tmp_path: Path) -> None:
+    """New with the shared rule (#613): a stage marked skipped is refused.
+
+    The endpoint never checked ``skipped`` before -- only the SPA's stage
+    list did, by filtering it out. Now that all three surfaces read the same
+    ``trim_blocker``, a direct API call gets the same answer the UI implies,
+    with a message that names the actual problem.
+    """
+    from splitsmith.ui.project import MatchProject
+
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(shooter_root)
+    project.stages[0].skipped = True
+    project.save(shooter_root)
+
+    resp = _export_csv_only(client)
+    assert resp.status_code == 400
+    assert "skipped" in resp.json()["detail"]
 
 
 def test_export_stage_reports_secondary_trim_filenames(tmp_path: Path, monkeypatch) -> None:
