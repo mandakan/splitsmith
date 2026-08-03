@@ -111,7 +111,7 @@ class StageExportError(RuntimeError):
     produce an export. Endpoints surface this as a 400."""
 
 
-def _read_audit_data(audit_path: Path) -> dict[str, Any]:
+def read_audit_data(audit_path: Path) -> dict[str, Any]:
     """Return the stage's audit document, or an empty one when absent.
 
     A missing file means shot detection never ran for this stage. That is
@@ -119,6 +119,11 @@ def _read_audit_data(audit_path: Path) -> dict[str, Any]:
     a beep and a stage time -- so it collapses to zero shots and the
     shot-dependent artefacts skip themselves downstream. A file that
     exists but won't parse is a real fault and still raises.
+
+    Public because it is *the* audit precondition (#619): the MCP export
+    tools and ``ui.match_exports`` used to hard-gate on the file existing,
+    which told a user asking for a trim-only export to run exactly the shot
+    detection the audit-free path exists to make optional.
     """
     if not audit_path.exists():
         return {"shots": []}
@@ -242,7 +247,7 @@ def export_stage(
     the primary's source file (resolved through any symlink); it is required
     when ``write_trim`` or ``write_fcpxml`` is set.
     """
-    audit_data = _read_audit_data(audit_path)
+    audit_data = read_audit_data(audit_path)
 
     shots = audit_shots_to_engine_shots(audit_data, beep_time_in_source=beep_time_in_source)
     # Empty ``shots[]`` is permissive (#214): the user may want a trim-only

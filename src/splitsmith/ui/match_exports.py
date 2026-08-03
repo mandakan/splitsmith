@@ -14,7 +14,6 @@ That keeps the unit tests free of project fixtures.
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -22,7 +21,7 @@ from typing import Literal
 
 from .. import composition, fcp7xml_render, fcpxml_gen, mp4_render, youtube_sidecar
 from ..config import OutputConfig
-from .exports import audit_shots_to_engine_shots
+from .exports import StageExportError, audit_shots_to_engine_shots, read_audit_data
 
 PipLayout = Literal["stacked", "pip-corners"]
 # Issue #197. ``"fcpxml"`` writes a Final Cut Pro 1.10 timeline (current
@@ -175,13 +174,14 @@ def export_match(
                 f"stage {stage_input.stage_number}: lossless trim missing at "
                 f"{stage_input.trimmed_path} -- run the per-stage export first"
             )
-        if not stage_input.audit_path.exists():
-            raise MatchExportError(
-                f"stage {stage_input.stage_number}: audit JSON missing at " f"{stage_input.audit_path}"
-            )
+        # One audit precondition for every surface (#619): absent means the
+        # stage never ran shot detection, which is a legitimate state for a
+        # trim-only export; unparseable is still a real fault. Re-raised as
+        # ``MatchExportError`` so this module's callers keep getting the one
+        # exception type they map to a 400.
         try:
-            audit_data = json.loads(stage_input.audit_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
+            audit_data = read_audit_data(stage_input.audit_path)
+        except StageExportError as exc:
             raise MatchExportError(
                 f"stage {stage_input.stage_number}: failed to read audit JSON: {exc}"
             ) from exc
