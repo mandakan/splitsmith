@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
+from splitsmith.compare.project_loader import trim_path_for_video
 from splitsmith.match_model import Match, MatchStageDefinition
-from splitsmith.ui.match_exports import _slugify
 from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 
 # Re-export hosted-mode fixtures so pytest auto-discovers them without
@@ -198,7 +198,14 @@ def two_shooter_match(tmp_path: Path) -> Path:
 
     exports = project.exports_path(mathias)
     exports.mkdir(parents=True, exist_ok=True)
-    (exports / f"stage1_{_slugify('Egg Grab')}_trimmed.mp4").write_bytes(b"old trim")
+    # Ask the public helper where the exporter would write this trim rather
+    # than spelling the filename with the private ``_slugify`` (#620): the
+    # fixture then follows any rename of the naming convention instead of
+    # silently seeding a file nothing looks for. Reload first so the stage's
+    # videos carry their stamped ``video_id``.
+    stamped = MatchProject.load(mathias)
+    stage1 = stamped.stage(1)
+    trim_path_for_video(stamped, mathias, 1, stage1.stage_name, stage1.primary()).write_bytes(b"old trim")
 
     return match_root
 

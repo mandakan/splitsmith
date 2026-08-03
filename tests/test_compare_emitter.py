@@ -136,6 +136,63 @@ def test_stage_marker_unchanged_without_substitutions(tmp_path: Path) -> None:
     assert all("primary" not in (m or "") for m in markers)
 
 
+def test_stage_marker_joins_multiple_substitutions_in_sorted_order(tmp_path: Path) -> None:
+    """Two shooters substituted on one stage: the note lists both, comma-
+    joined and sorted by label (#620).
+
+    Correct by construction today -- the emitter sorts, and the join is a
+    literal. Pinned because the marker is what the editor reads on the
+    timeline, so an accidental set-ordering or a changed separator would
+    show up as unstable output in every export.
+    """
+    xml = _emit_with_bundles(tmp_path, substitutions={"Mathias": True, "Anders": True})
+    markers = [m.get("value") or "" for m in xml.iter("marker")]
+    noted = [m for m in markers if "primary" in m]
+    assert noted, "expected a marker naming the substitutions"
+    assert "(Anders: primary, Mathias: primary)" in noted[0]
+
+
+def test_stage_marker_never_names_an_absent_shooter(tmp_path: Path) -> None:
+    """A shooter with no bundle for this stage renders as black filler. It
+    did not substitute anything -- it has no footage at all -- so naming it
+    in the substitution note would tell the editor to look for an angle
+    change that never happened (#620).
+    """
+    labels = ["Anders", "Mathias", "Ghost"]
+    bundles = []
+    for label in labels:
+        root = tmp_path / label.lower()
+        # Ghost contributes no stage 1 bundle at all -> filler tile.
+        stages = (
+            []
+            if label == "Ghost"
+            else [
+                _stage(
+                    stage_number=1,
+                    stage_name="Skipper",
+                    trim_path=root / "exports" / "1.mp4",
+                    substituted=(label == "Mathias"),
+                )
+            ]
+        )
+        bundles.append(_bundle(label, stages, project_root=root))
+
+    out = tmp_path / "out.fcpxml"
+    m = _manifest(out, "Mathias", labels)
+    emit_compare_fcpxml(manifest=m, shooters=bundles, output_path=out, runner=_stub_ffmpeg_runner())
+    xml = ET.fromstring(out.read_bytes())
+
+    markers = [m.get("value") or "" for m in xml.iter("marker")]
+    noted = [m for m in markers if "primary" in m]
+    assert noted, "expected a marker naming Mathias' substitution"
+    assert "Mathias: primary" in noted[0]
+    assert "Ghost" not in noted[0]
+    # And the filler tile really is in the timeline -- otherwise this test
+    # would pass by never exercising the filler path at all.
+    clip_names = [c.attrib.get("name") for c in xml.findall("./resources/media/sequence/spine/asset-clip")]
+    assert "filler" in clip_names
+
+
 def test_two_shooters_minimal_structure(tmp_path: Path) -> None:
     a_root = tmp_path / "a"
     b_root = tmp_path / "b"

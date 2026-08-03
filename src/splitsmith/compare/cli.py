@@ -292,24 +292,9 @@ def _export_from_match(
 
 
 def _resolve_shooter_slug(match: Match, match_root: Path, name_or_slug: str) -> str | None:
-    """Match a user-typed shooter reference to a slug.
+    """Thin alias for :meth:`Match.resolve_shooter_slug`.
 
-    Accepts an exact slug (``"s_a4f12d8e"``) or a display name
-    (``"Anton Johansson"``, case-insensitive). Slugs are opaque random
-    ids now, so the old "slugify the display name to guess a slug"
-    fallback no longer applies; we look up by display name instead.
-
-    Shared by ``--audio-from`` and the keys of ``--camera`` so one command
-    can spell the same shooter the same way twice (#618).
+    The lookup moved onto ``Match`` so ``match trims`` shares it (#618, #620);
+    this keeps the call sites here reading the same as before.
     """
-    if name_or_slug in match.shooters:
-        return name_or_slug
-    needle = name_or_slug.casefold().strip()
-    for slug in match.shooters:
-        try:
-            shooter = match.load_shooter(match_root, slug)
-        except FileNotFoundError:
-            continue
-        if shooter.name.casefold().strip() == needle:
-            return slug
-    return None
+    return match.resolve_shooter_slug(match_root, name_or_slug)
