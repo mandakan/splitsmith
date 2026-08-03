@@ -10432,10 +10432,18 @@ def create_app(
             # Source-reachability matters because the worker may have to
             # produce missing trims via ffmpeg. Surface up-front rather
             # than letting the worker fail mid-flight.
-            if not project.resolve_video_path(state.shooter_root(slug), primary.path).exists():
+            # ``source_present``, not ``resolve_video_path``: the latter
+            # mirrors a hosted object into the local cache, so a preflight
+            # that only decides whether to queue downloaded every source
+            # into the API container -- twice per stage (#637). The path
+            # handed to the 424 helper is rebuilt rather than resolved;
+            # ``root / path`` is what ``resolve_video_path`` returns in the
+            # no-storage and mirror-hit cases, and ``pathlib`` drops the
+            # left operand when ``primary.path`` is absolute.
+            if not project.source_present(state.shooter_root(slug), primary.path):
                 _ensure_source_reachable(
                     stage_number,
-                    project.resolve_video_path(state.shooter_root(slug), primary.path),
+                    state.shooter_root(slug) / primary.path,
                 )
 
         existing = await state.jobs.find_active(kind="match_export")
@@ -10965,9 +10973,12 @@ def create_app(
             prim = next((v for v in s.videos if v.role == "primary"), None)
             if prim is None or prim.beep_time is None or s.time_seconds <= 0:
                 continue
+            # ``source_present``, not ``resolve_video_path``: this endpoint
+            # backs nearly every SPA route (including the anonymous share
+            # shell), and the latter mirrors a hosted object on first access
+            # -- so counting missing trims downloaded the whole match (#637).
             try:
-                source = legacy.resolve_video_path(shooter_root, prim.path)
-                if not source.exists():
+                if not legacy.source_present(shooter_root, prim.path):
                     continue
             except Exception:  # noqa: BLE001 -- defensive
                 continue
@@ -11512,12 +11523,17 @@ def create_app(
             if stage.time_seconds <= 0:
                 skipped.append({"stage": stage.stage_number, "reason": "no_stage_time"})
                 continue
+            # ``source_present``, not ``resolve_video_path``: a rebuild pass
+            # that skips a stage must not download that stage's source to
+            # decide (#637). The ``try`` wraps only the lookup so the two
+            # skip reasons stay distinct -- ``source_unreachable`` means
+            # storage raised, ``source_missing`` means it answered no.
             try:
-                source = proj.resolve_video_path(shooter_root, primary.path)
+                present = proj.source_present(shooter_root, primary.path)
             except Exception:  # noqa: BLE001 -- defensive
                 skipped.append({"stage": stage.stage_number, "reason": "source_unreachable"})
                 continue
-            if not source.exists():
+            if not present:
                 skipped.append({"stage": stage.stage_number, "reason": "source_missing"})
                 continue
             cache = audio_helpers.trimmed_video_path(shooter_root, stage.stage_number, primary, project=proj)
