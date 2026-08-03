@@ -320,6 +320,18 @@ async def apply_stage_edit(
        canonical list describing the pre-edit world rather than promising
        stages the shooters no longer have.
 
+    The fan-out is not atomic, so applying an edit must be idempotent. A
+    ``StateConflictError`` on shooter N's save re-raises (-> 409) after
+    shooters 1..N-1 have already written their projects, while
+    ``match.stages`` and ``match.next_stage_number`` have not moved. An
+    identical retry then re-diffs against the unchanged match doc and
+    allocates the *same* numbers again. Both ``append`` sites below
+    therefore skip a ``stage_number`` the target list already holds:
+    without that, a shooter who saved on the first pass ends up with two
+    ``StageEntry`` rows sharing one number -- one artifact key, one audit
+    doc, one export slot, with ``project.stage(n)`` resolving the first and
+    the second invisible. Two browser tabs on one hosted match is enough.
+
     ``shooter_root(slug)`` resolves the directory a shooter's derived
     caches live under, and is called per shooter inside the fan-out rather
     than taken once as a single ``root``. Those caches are at
@@ -411,7 +423,16 @@ async def apply_stage_edit(
                 if update is not None:
                     stage.stage_name = update.stage_name
                     stage.stage_rounds = update.stage_rounds
+            live_numbers = {s.stage_number for s in project.stages}
             for definition in diff.added:
+                # Idempotence guard, not defensive noise: see the docstring.
+                # A retry after a mid-fan-out 409 re-allocates the same
+                # number onto a shooter who already saved it, and a second
+                # ``StageEntry`` with that number would silently shadow the
+                # first everywhere ``project.stage(n)`` is called.
+                if definition.stage_number in live_numbers:
+                    continue
+                live_numbers.add(definition.stage_number)
                 project.stages.append(
                     StageEntry(
                         stage_number=definition.stage_number,
@@ -453,7 +474,8 @@ async def apply_stage_edit(
         if update is not None:
             definition.stage_name = update.stage_name
             definition.stage_rounds = update.stage_rounds
-    match.stages.extend(diff.added)
+    match_numbers = {s.stage_number for s in match.stages}
+    match.stages.extend(s for s in diff.added if s.stage_number not in match_numbers)
     match.stages.sort(key=lambda s: s.stage_number)
     # Persist the counter in the same save as the stages it numbered.
     # Assigned unconditionally, not only when something was added: on a

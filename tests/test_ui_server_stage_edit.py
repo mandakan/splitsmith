@@ -352,6 +352,55 @@ class TestEditMatchStages:
 
         assert resp.status_code == 409
 
+    def test_retry_after_a_mid_fanout_conflict_does_not_duplicate_a_stage(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An identical retry after a mid-fan-out 409 must be a no-op for the
+        shooters that already saved.
+
+        The fan-out is not atomic: a ``StateConflictError`` on shooter N's
+        save re-raises so the route 409s, but shooters 1..N-1 already wrote
+        their projects while ``match.stages`` and ``match.next_stage_number``
+        did not. The retry therefore re-diffs against the unchanged match doc,
+        reallocates the SAME number, and appends it a second time to a shooter
+        who already has it -- two ``StageEntry`` rows sharing one artifact key,
+        one audit doc, one export slot, with ``project.stage(n)`` silently
+        resolving the first. Two browser tabs on one hosted match reach this.
+        """
+        from splitsmith.db import StateConflictError
+        from splitsmith.ui.project import MatchProject
+
+        client, state = _seeded_match(tmp_path, stages=3, shooters=["anna", "erik"])
+        real_save = MatchProject.save
+        fired: list[bool] = []
+
+        def _conflict_once_for_erik(self: MatchProject, root: Path) -> None:
+            if root.name == "erik" and not fired:
+                fired.append(True)
+                raise StateConflictError("scripted conflict")
+            real_save(self, root)
+
+        monkeypatch.setattr(MatchProject, "save", _conflict_once_for_erik)
+
+        payload = {
+            "stages": [{"stage_number": n, "stage_name": f"Stage {n}"} for n in (1, 2, 3)]
+            + [{"stage_number": None, "stage_name": "Standards"}]
+        }
+
+        first = client.put("/api/match/stages", json=payload)
+        assert first.status_code == 409
+        assert fired == [True]
+
+        second = client.put("/api/match/stages", json=payload)
+        assert second.status_code == 200
+
+        for slug in ("anna", "erik"):
+            numbers = [
+                s["stage_number"] for s in client.get(f"/api/shooters/{slug}/project").json()["stages"]
+            ]
+            assert numbers == [1, 2, 3, 4], f"{slug} got {numbers}"
+        assert [s.stage_number for s in state.match().stages] == [1, 2, 3, 4]
+
 
 # --- a stage edit must not cancel jobs (#521 review; see #645) -------------
 #
