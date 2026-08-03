@@ -1,22 +1,13 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 
 import { Portal } from "@/components/ui/Portal";
+import { UploadQueueSummary } from "@/components/UploadQueueSummary";
 import { useUploads, type PendingUpload } from "@/lib/uploads";
 
 export function UploadDock() {
-  const { uploads, cancel, cancelAll, clearFinished, inFlight } = useUploads();
+  const { uploads, cancel, cancelAll, clearFinished, inFlight, queue } = useUploads();
   const [expanded, setExpanded] = useState(true);
-
-  const { done, total, pct } = useMemo(() => {
-    const totalBytes = uploads.reduce((a, u) => a + u.file.size, 0);
-    const sentBytes = uploads.reduce((a, u) => a + u.bytesSent, 0);
-    return {
-      done: uploads.filter((u) => u.status === "done").length,
-      total: uploads.length,
-      pct: totalBytes > 0 ? Math.min(100, Math.round((sentBytes / totalBytes) * 100)) : 0,
-    };
-  }, [uploads]);
 
   if (uploads.length === 0) return null;
 
@@ -28,16 +19,15 @@ export function UploadDock() {
           onClick={() => setExpanded((v) => !v)}
           className="flex w-full items-center justify-between gap-3 border-b border-rule bg-surface-2 px-4 py-2.5 text-left"
         >
-          <span className="font-display text-[0.75rem] font-bold uppercase tracking-[0.08em]">
-            {inFlight ? `Uploading ${done + 1} of ${total}` : `Uploads ${done}/${total}`} . {pct}%
-          </span>
+          <UploadQueueSummary
+            queue={queue}
+            inFlight={inFlight}
+            showBar={inFlight}
+            layout="stacked"
+            className="flex-1"
+          />
           {expanded ? <ChevronDown className="size-4 text-muted" /> : <ChevronUp className="size-4 text-muted" />}
         </button>
-        {!inFlight ? null : (
-          <div className="h-1 w-full bg-surface-3">
-            <div className="h-full bg-led transition-[width]" style={{ width: `${pct}%` }} />
-          </div>
-        )}
         {expanded && (
           <div className="flex max-h-[40vh] flex-col gap-1.5 overflow-y-auto px-3 py-3">
             {uploads.map((u) => (

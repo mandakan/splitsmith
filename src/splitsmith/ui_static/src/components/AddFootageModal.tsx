@@ -29,6 +29,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { FolderPicker } from "@/components/FolderPicker";
+import { UploadQueueSummary } from "@/components/UploadQueueSummary";
 import { CoverageSelect } from "@/components/ingest/CoverageSelect";
 import { Avatar } from "@/components/ui";
 import { Portal } from "@/components/ui/Portal";
@@ -39,6 +40,7 @@ import {
   type ScanResponse,
 } from "@/lib/api";
 import { useDialogFocus } from "@/lib/dialogFocus";
+import { formatBytes } from "@/lib/format";
 import { useDeploymentMode } from "@/lib/features";
 import { useUploads, type PendingUpload } from "@/lib/uploads";
 import { cn } from "@/lib/utils";
@@ -795,12 +797,25 @@ function HostedUploadBody({
   onImported: (imported: number, paths: string[]) => void;
   stages: { stage_number: number; stage_name: string }[];
 }) {
-  const { uploads: allUploads, enqueue, cancel, attachTick, probeFor } = useUploads();
+  const {
+    uploads: allUploads,
+    enqueue,
+    cancel,
+    attachTick,
+    probeFor,
+    queue,
+    inFlight: queueInFlight,
+  } = useUploads();
   // Show only this shooter's pending items in the modal's session list.
   const uploads = allUploads.filter((u) => u.slug === slug);
   const inFlight = uploads.some(
     (u) => u.status === "queued" || u.status === "uploading",
   );
+  // The summary above the list reports the whole queue, not this
+  // shooter's slice: the pump is global and sequential, so a file queued
+  // for another shooter genuinely delays these. Say so when that is
+  // actually the case rather than showing numbers that outrun the list.
+  const hasOtherShooters = allUploads.some((u) => u.slug !== slug);
   const doEnqueue = (files: FileList | File[]) => enqueue(files, { slug, stages });
   const [existing, setExisting] = useState<RawUploadEntry[] | null>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -1035,6 +1050,16 @@ function HostedUploadBody({
               <h3 className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
                 This session ({uploads.length})
               </h3>
+              {/* The dock carries this readout too, but it is a fixed
+                  bottom-right portal sitting behind this modal's overlay
+                  -- so without a copy here the queue looks frozen on the
+                  one surface the operator is actually looking at (#556). */}
+              <UploadQueueSummary
+                queue={queue}
+                inFlight={queueInFlight}
+                note={hasOtherShooters ? "all shooters" : undefined}
+                className="rounded-md border border-rule bg-surface-2 px-3 py-2 text-ink"
+              />
               <ul className="flex flex-col gap-1.5">
                 {uploads.map((u) => (
                   <UploadRow key={u.id} upload={u} onCancel={() => cancel(u.id)} />
@@ -1263,13 +1288,6 @@ function shooterInitials(name: string): string {
   if (parts.length === 0) return "?";
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return (parts[0][0] + parts[1][0]).toUpperCase();
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function formatRelative(iso: string): string {

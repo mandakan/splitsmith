@@ -111,6 +111,11 @@ jobs:
         # exercises the artifact users actually get.
         run: |
           pnpm install --frozen-lockfile
+          # The only place SPA unit tests run today. This job is opt-in on
+          # PRs (the ``run-slim-smoke`` label), so it is a partial guard,
+          # not a gate -- wiring pnpm test + typecheck into the main job
+          # is #647. Cheap to run here because pnpm is already installed.
+          pnpm test
           pnpm build
           find dist -name '*.map' -delete
 
