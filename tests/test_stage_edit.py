@@ -76,6 +76,48 @@ def test_allocation_follows_the_mark_not_the_list_max() -> None:
     assert diff.next_stage_number == 8
 
 
+def test_a_mark_that_does_not_clear_the_live_stages_is_rejected() -> None:
+    """The collision floor lives in ``Match.resolve_next_stage_number``,
+    which is guidance for callers, not enforcement. A mark at or below
+    ``max(existing)`` would allocate a number a live stage already holds,
+    and nothing downstream checks: ``apply_stage_edit`` would extend
+    ``match.stages`` with a duplicate ``stage_number``, leaving two stages
+    sharing one artifact key. Refuse it here rather than allocate it.
+    """
+    with pytest.raises(StageEditError, match="5"):
+        diff_stage_list(
+            _existing(1, 2, 3, 4, 5),
+            [SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2, 3, 4, 5)],
+            next_stage_number=5,
+        )
+
+
+def test_a_mark_below_a_gapped_lists_max_is_rejected() -> None:
+    """The freed number in a gap is not a licence to allocate below the
+    top: stages 1, 2, 5 with a mark of 3 would hand out 3 and then 4 --
+    numbers that are free -- but the mark is meant to be monotonic, and a
+    caller offering one this stale is broken in a way that will also
+    produce 5 on a later pass."""
+    with pytest.raises(StageEditError, match="3"):
+        diff_stage_list(
+            _existing(1, 2, 5),
+            [SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2, 5)],
+            next_stage_number=3,
+        )
+
+
+def test_a_mark_exactly_one_above_the_max_is_accepted() -> None:
+    """The boundary the guard must not overshoot: ``max + 1`` is the
+    backfilled value every pre-counter match resolves to."""
+    diff = diff_stage_list(
+        _existing(1, 2, 5),
+        [SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2, 5)]
+        + [SubmittedStage(stage_number=None, stage_name="Standards")],
+        next_stage_number=6,
+    )
+    assert [s.stage_number for s in diff.added] == [6]
+
+
 def test_the_returned_mark_does_not_move_when_nothing_is_added() -> None:
     diff = diff_stage_list(
         _existing(1, 2),

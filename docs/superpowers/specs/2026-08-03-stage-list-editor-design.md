@@ -287,8 +287,10 @@ before and after.
   removed stage.
 - Removing stage 3 does not delete stage 30's artifacts. This is the
   glob-underscore test and it needs a fixture with a two-digit stage.
-- A removed stage with an active job has that job cancelled and no other
-  job touched.
+- A stage edit cancels no jobs at all, not even one targeting a removed
+  stage. Cancellation shipped as a no-op (#645, see "Execution order"),
+  and the negative needs locking in so nobody restores the coarse
+  cross-match version.
 - A storage delete that raises lands in `errors` and the stage list
   still commits.
 - Remove-everything is refused with 400.

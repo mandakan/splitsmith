@@ -103,11 +103,25 @@ def diff_stage_list(
     cancels it, see #645); those bytes are inert only while the number can
     never name a live stage again, and a new stage 6 would silently
     inherit the old one's audio and trim.
+
+    A mark that does not clear ``max(existing)`` is refused outright. The
+    collision floor in ``Match.resolve_next_stage_number`` keeps the one
+    caller honest, but that is guidance, not enforcement, and nothing
+    downstream would catch the result: the allocated number would land on
+    a live stage, and ``apply_stage_edit`` would extend ``match.stages``
+    with a second definition sharing its artifact key. Failing loudly here
+    beats clamping, which would hide a caller that is computing the mark
+    wrongly and will get it wrong again.
     """
     if not submitted:
         raise StageEditError("a match must keep at least one stage")
 
     by_number = {s.stage_number: s for s in existing}
+    if by_number and next_stage_number <= max(by_number):
+        raise StageEditError(
+            f"next_stage_number {next_stage_number} does not clear stage {max(by_number)}; "
+            "the allocation counter must be above every live stage"
+        )
     seen: set[int] = set()
     for row in submitted:
         if not row.stage_name.strip():
