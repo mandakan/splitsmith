@@ -3446,7 +3446,7 @@ wheels = [
 
 [[package]]
 name = "splitsmith"
-version = "0.13.0"
+version = "0.14.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -3526,7 +3526,7 @@ requires-dist = [
     { name = "python-ulid", marker = "extra == 'hosted'", specifier = ">=3.0.0" },
     { name = "pyyaml", specifier = ">=6.0.1" },
     { name = "rich", specifier = ">=13.7.0" },
-    { name = "scikit-learn", specifier = ">=1.8.0" },
+    { name = "scikit-learn", specifier = ">=1.8.0,<1.9" },
     { name = "scipy", specifier = ">=1.13.0" },
     { name = "sentry-sdk", extras = ["fastapi"], marker = "extra == 'hosted'", specifier = ">=2.0.0" },
     { name = "soundfile", specifier = ">=0.12.1" },

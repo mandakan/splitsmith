@@ -149,6 +149,55 @@ echo "==> fetch-models --list"
 echo "==> fetch-models (downloads if missing)"
 "$SMOKE_VENV/bin/splitsmith" fetch-models
 
+# --- ensemble artifacts ----------------------------------------------
+#
+# The joblib artifacts are pickled sklearn estimators, so they are coupled
+# to the sklearn version the *installing user* resolves -- not the one in
+# uv.lock. ``splitsmith detect`` below exercises the envelope detector
+# (voter A) and never touches them, so it cannot catch a break here: that
+# is exactly how a sklearn 1.9 incompatibility reached a release. Load
+# them explicitly, in the slim venv, with whatever sklearn a fresh resolve
+# produced.
+
+echo "==> sentinel: ensemble joblib artifacts must load under the resolved sklearn"
+"$SMOKE_VENV/bin/python" - <<'PY'
+import sys
+import warnings
+
+import sklearn
+from sklearn.exceptions import InconsistentVersionWarning
+
+from splitsmith.ensemble.calibration import load_voter_c_model
+from splitsmith.runtime import runtime
+
+print(f"    sklearn {sklearn.__version__}")
+
+# A cross-version unpickle that sklearn itself calls possibly-invalid is a
+# failure here, not a warning -- silently wrong detection is worse than a
+# crash.
+with warnings.catch_warnings():
+    warnings.simplefilter("error", InconsistentVersionWarning)
+    try:
+        load_voter_c_model()
+    except InconsistentVersionWarning as exc:
+        sys.exit(f"    FAIL: voter C artifact is cross-version: {exc}")
+    except Exception as exc:
+        sys.exit(f"    FAIL: voter C artifact did not load: {type(exc).__name__}: {exc}")
+
+    probe = runtime().artifact("voter_e_visual_probe.joblib")
+    if probe.exists():
+        import joblib
+
+        try:
+            joblib.load(probe)
+        except InconsistentVersionWarning as exc:
+            sys.exit(f"    FAIL: voter E probe is cross-version: {exc}")
+        except Exception as exc:
+            sys.exit(f"    FAIL: voter E probe did not load: {type(exc).__name__}: {exc}")
+
+print("    ok: ensemble artifacts load clean")
+PY
+
 # --- detection smoke -------------------------------------------------
 
 echo "==> splitsmith detect on $(basename "$SAMPLE_WAV")"
