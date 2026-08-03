@@ -213,8 +213,17 @@ def load_shooter_from_match(
     # Per-stage data comes from project.json: it is authoritative for
     # everything the server writes (beeps, roles, buffers). shooter.json is
     # a merge-time snapshot that nothing keeps in sync, so reading it drops
-    # any beep confirmed after the merge. Stage *names* still come from the
-    # match, which owns the shared stage definitions.
+    # any beep confirmed after the merge.
+    #
+    # Stage names have two jobs and two different authorities (#615):
+    #   - the trim *filename* follows the shooter's own project.json,
+    #     because that is what every writer of a trim derives its basename
+    #     from. A per-shooter scoreboard import rewrites project.stages and
+    #     leaves match.json alone, so looking the file up by the match's
+    #     name turns that stage into a black tile.
+    #   - the grid *label* follows match.json, which owns the shared stage
+    #     definitions: one stage must read the same across every tile,
+    #     whatever a single shooter's scorecard called it.
     project = MatchProject.load(shooter_root)
     stage_names: dict[int, str] = {s.stage_number: s.stage_name for s in match.stages}
     pre_buffer = project.trim_pre_buffer_seconds
@@ -227,14 +236,14 @@ def load_shooter_from_match(
         chosen, substituted = _choose_video(stage.videos, stage.primary(), effective_camera)
         if chosen is None or chosen.beep_time is None:
             continue
-        stage_name = stage_names.get(stage.stage_number, stage.stage_name)
-        trim = trim_path_for_video(project, shooter_root, stage.stage_number, stage_name, chosen)
+        stage_label = stage_names.get(stage.stage_number, stage.stage_name)
+        trim = trim_path_for_video(project, shooter_root, stage.stage_number, stage.stage_name, chosen)
         if not trim.exists():
             continue
         meta = probe(trim)
         bundles[stage.stage_number] = CompareStageBundle(
             stage_number=stage.stage_number,
-            stage_name=stage_name,
+            stage_name=stage_label,
             trim_path=trim,
             audit_path=shooter_root / "audit" / f"stage{stage.stage_number}.json",
             beep_offset_in_clip=min(pre_buffer, chosen.beep_time),
