@@ -90,6 +90,76 @@ def test_camera_ambiguous_reason_rendered(two_shooter_match: Path) -> None:
     assert "camera_ambiguous" in result.stdout
 
 
+def _run_with_a_stale_plan(match_root: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Drive ``match trims`` with a plan computed before the project changed.
+
+    The real divergence: ``--dry-run`` (or the plan pass) sees no chest cam
+    and records a substitution, the user plugs in the cam, then the run
+    exports the chest angle instead. The command re-plans internally, so the
+    only way to model a stale plan is to hand it one -- which is exactly what
+    a user does by planning, editing, then running.
+    """
+    monkeypatch.setattr(match_trims.exports.trim, "trim_video", lambda src, dst, **kw: dst.write_bytes(b"t"))
+
+    stale = match_trims.plan_trims(match_root, shooters=["anders"], stages=[1], cameras={"anders": "chest"})
+    assert stale[0].substituted_from == "chest", "fixture no longer sets up a substitution"
+
+    anders = Match.shooter_root(match_root, "anders")
+    project = MatchProject.load(anders)
+    project.stage(1).videos.append(
+        _video(anders, "raw/a1_chest.mov", role="secondary", beep_time=4.0, camera_mount="chest")
+    )
+    project.save(anders)
+
+    monkeypatch.setattr(match_trims, "plan_trims", lambda *_a, **_kw: stale)
+    result = runner.invoke(
+        app,
+        [
+            "match",
+            "trims",
+            str(match_root),
+            "--shooter",
+            "anders",
+            "--stage",
+            "1",
+            "--camera",
+            "anders=chest",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    return " ".join(result.stdout.split())  # rich wraps the table column
+
+
+def test_camera_divergence_reaches_the_user(two_shooter_match: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The whole point of #617: the run exported a different angle than the
+    plan showed, and the user has to be able to see that.
+
+    The datum existed and was tested before this -- it just never reached
+    the screen, because the Status column short-circuited on "written" and
+    the note was filed under ``skip_reasons`` on a successful export.
+    """
+    out = _run_with_a_stale_plan(two_shooter_match, monkeypatch)
+    # The row is flagged...
+    assert "see note" in out
+    # ...and the note itself is printed in full, under the table, where rich
+    # cannot ellipsize it into uselessness.
+    assert "camera substitution changed since planning" in out
+    assert "planned chest, ran none" in out
+    assert "anders stage 1" in out
+
+
+def test_substitution_count_describes_the_run_not_the_plan(
+    two_shooter_match: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The plan expected to substitute; the run did not, because the cam was
+    there by then. The summary describes the run, so it counts zero."""
+    out = _run_with_a_stale_plan(two_shooter_match, monkeypatch)
+    assert "0 substitutions" in out
+    # And so does the Camera column: this row shipped the chest angle, so
+    # claiming "chest -> primary" would be a straight falsehood.
+    assert "chest -> primary" not in out
+
+
 def test_shooter_and_stage_filters_narrow_the_plan(
     two_shooter_match: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

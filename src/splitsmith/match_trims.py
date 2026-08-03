@@ -21,7 +21,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from . import camera_select
-from .compare.project_loader import trim_path_for_video
+from .compare.project_loader import audit_path_for_stage, trim_path_for_video
 from .config import Config, StageData
 from .match_model import Match
 from .ui import exports
@@ -68,7 +68,19 @@ class TrimResult(BaseModel):
 
     entry: TrimPlanEntry
     trim_path: Path | None = None
+    # Why no trim was written. Empty on a successful export.
     skip_reasons: list[str] = []
+    # Things worth telling the user about a trim that *was* written --
+    # currently only "the camera changed between plan and run". Separate
+    # from ``skip_reasons`` because a note on a successful export is not a
+    # skip, and a reader (or a renderer) that treats the two alike either
+    # hides the note or reports a success as a failure (#617).
+    notes: list[str] = []
+    # The camera this run actually stood in for, which is not necessarily
+    # ``entry.substituted_from``: that is what the *plan* expected, and a cam
+    # that appeared or vanished in between makes them disagree. ``None`` when
+    # nothing was substituted or the entry never ran.
+    substituted_from: str | None = None
 
 
 def _choose_video(stage: StageEntry, camera: str | None) -> tuple[StageVideo | None, str | None]:
@@ -175,11 +187,14 @@ def _classify(
         return entry.model_copy(update={"reason": reason})
     assert chosen is not None  # a missing video is the "no_beep" blocker
 
+    # ``source_present``, not ``resolve_video_path``: the latter mirrors a
+    # hosted object into the local cache on first access, so using it as an
+    # existence check would download every video in the match during a pass
+    # that promises to touch no media (#617).
     try:
-        source = project.resolve_video_path(shooter_root, chosen.path)
+        if not project.source_present(shooter_root, chosen.path):
+            return entry.model_copy(update={"reason": "source_unreachable"})
     except Exception:  # noqa: BLE001 -- any resolution failure is unreachable
-        return entry.model_copy(update={"reason": "source_unreachable"})
-    if not source.exists():
         return entry.model_copy(update={"reason": "source_unreachable"})
 
     target = trim_path_for_video(project, shooter_root, stage.stage_number, entry.stage_name, chosen)
@@ -269,7 +284,7 @@ def _run_one(match_root: Path, entry: TrimPlanEntry) -> TrimResult:
                 write_report=False,
                 write_overlay=False,
             ),
-            audit_path=project.audit_path(shooter_root) / f"stage{entry.stage_number}.json",
+            audit_path=audit_path_for_stage(project, shooter_root, entry.stage_number),
             exports_dir=project.exports_path(shooter_root),
             # A secondary-cam run wants only the per-cam trim; passing no
             # primary source skips export_stage's primary-trim branch.
@@ -287,7 +302,9 @@ def _run_one(match_root: Path, entry: TrimPlanEntry) -> TrimResult:
             secondaries=secondaries,
         )
     except (exports.StageExportError, OSError, RuntimeError) as exc:
-        return TrimResult(entry=entry, skip_reasons=[str(exc), *notes])
+        return TrimResult(
+            entry=entry, skip_reasons=[str(exc)], notes=notes, substituted_from=substituted_from
+        )
 
     # ``result.anomalies`` mixes shot-audit findings with export failures.
     # In a trim-only run "No shots detected in the stage window" is the
@@ -303,7 +320,13 @@ def _run_one(match_root: Path, entry: TrimPlanEntry) -> TrimResult:
     reasons = [a for a in result.anomalies if a.startswith(prefix)]
     if path is None and not reasons:
         reasons = [f"{prefix}: export produced no file"]
-    return TrimResult(entry=entry, trim_path=path, skip_reasons=[*reasons, *notes])
+    return TrimResult(
+        entry=entry,
+        trim_path=path,
+        skip_reasons=reasons,
+        notes=notes,
+        substituted_from=substituted_from,
+    )
 
 
 __all__ = [

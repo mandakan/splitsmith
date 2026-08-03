@@ -57,9 +57,10 @@ def export(
         [],
         "--camera",
         help=(
-            "Camera selector for one shooter, as SLUG=VALUE (repeatable). "
+            "Camera selector for one shooter, as SHOOTER=VALUE (repeatable). "
             "VALUE is a camera mount ('chest') or a role ('primary', "
-            "'secondary'). SLUG is the match shooter's slug, or a manifest "
+            "'secondary'). SHOOTER is the match shooter's slug or display "
+            "name -- the same spellings --audio-from takes -- or a manifest "
             "shooter's label. Overrides the manifest's camera: key and the "
             "shooter's persisted compare_camera."
         ),
@@ -122,12 +123,35 @@ def export(
         except camera_select.CameraResolutionError as exc:
             console.print(f"[red]Error:[/] shooter {s.label!r}: {exc}")
             raise typer.Exit(code=2) from exc
+    _warn_missing_trims(shooters)
     emitter_mod.emit_compare_fcpxml(
         manifest=manifest,
         shooters=shooters,
         output_path=manifest.output,
     )
     console.print(f"[green]Wrote[/] {manifest.output}")
+
+
+def _warn_missing_trims(bundles: list[project_loader.CompareShooterBundle]) -> None:
+    """Say out loud which stages will render as black filler, and why.
+
+    A stage whose trim is not on disk is dropped from the grid. That is the
+    right output -- the footage isn't there -- but it is indistinguishable
+    from "this shooter didn't shoot the stage", and running
+    ``--camera x=chest`` against a project whose chest trims were never
+    exported produced a silently empty shooter (#618). Naming the path the
+    loader looked for turns a mystery into a one-line fix: export that cam.
+
+    A warning, not an error: a partial grid is a legitimate thing to want.
+    """
+    for bundle in bundles:
+        for miss in bundle.missing_trims:
+            asked = f" for camera {miss.camera!r}" if miss.camera else ""
+            console.print(
+                f"[yellow]Warning:[/] {bundle.label} stage {miss.stage_number} "
+                f"({miss.stage_name}){asked}: no trim at {miss.expected_path} "
+                "-- this stage renders as black filler."
+            )
 
 
 def _apply_manifest_overrides(
@@ -202,7 +226,7 @@ def _export_from_match(
         raise typer.Exit(code=2)
 
     # Resolve audio_from to a slug (accept slug exact match OR display-name slugify).
-    resolved_audio_slug = _resolve_audio_slug(match, match_root, audio_from)
+    resolved_audio_slug = _resolve_shooter_slug(match, match_root, audio_from)
     if resolved_audio_slug is None:
         slugs = ", ".join(match.shooters)
         console.print(
@@ -211,16 +235,28 @@ def _export_from_match(
         )
         raise typer.Exit(code=2)
 
-    # A --camera slug that names nobody would apply to nothing and look like
+    # A --camera key that names nobody would apply to nothing and look like
     # it worked, so it stops the run the same way a malformed pair does.
+    # Keys go through the same resolver as --audio-from: requiring an exact
+    # slug here while accepting a display name there made
+    # ``--audio-from "Mathias Axell" --camera "Mathias Axell=chest"`` fail on
+    # the second half of one command (#618).
     cameras = cameras or {}
-    unknown = sorted(set(cameras) - set(match.shooters))
+    resolved_cameras: dict[str, str] = {}
+    unknown: list[str] = []
+    for key, value in cameras.items():
+        slug = _resolve_shooter_slug(match, match_root, key)
+        if slug is None:
+            unknown.append(key)
+        else:
+            resolved_cameras[slug] = value
     if unknown:
         console.print(
-            f"[red]Error:[/] --camera names no shooter on this match: {', '.join(unknown)}. "
+            f"[red]Error:[/] --camera names no shooter on this match: {', '.join(sorted(unknown))}. "
             f"Slugs available: {', '.join(match.shooters)}"
         )
         raise typer.Exit(code=2)
+    cameras = resolved_cameras
 
     # Build the bundles. Each bundle's label is the shooter's display name
     # (Shooter.name), falling back to the slug. The audio_from in the synthesized
@@ -240,6 +276,8 @@ def _export_from_match(
         if slug == resolved_audio_slug:
             audio_label = label
 
+    _warn_missing_trims(bundles)
+
     # Synthesize a manifest the emitter can consume. ``layout_2up`` matches
     # today's manifest default; the smallest-fits grid kicks in at 3+ shooters
     # so the choice only matters when N=2.
@@ -253,17 +291,20 @@ def _export_from_match(
     console.print(f"[green]Wrote[/] {output}")
 
 
-def _resolve_audio_slug(match: Match, match_root: Path, audio_from: str) -> str | None:
-    """Match ``audio_from`` to a shooter slug.
+def _resolve_shooter_slug(match: Match, match_root: Path, name_or_slug: str) -> str | None:
+    """Match a user-typed shooter reference to a slug.
 
     Accepts an exact slug (``"s_a4f12d8e"``) or a display name
     (``"Anton Johansson"``, case-insensitive). Slugs are opaque random
     ids now, so the old "slugify the display name to guess a slug"
     fallback no longer applies; we look up by display name instead.
+
+    Shared by ``--audio-from`` and the keys of ``--camera`` so one command
+    can spell the same shooter the same way twice (#618).
     """
-    if audio_from in match.shooters:
-        return audio_from
-    needle = audio_from.casefold().strip()
+    if name_or_slug in match.shooters:
+        return name_or_slug
+    needle = name_or_slug.casefold().strip()
     for slug in match.shooters:
         try:
             shooter = match.load_shooter(match_root, slug)

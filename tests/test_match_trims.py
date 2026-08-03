@@ -125,6 +125,49 @@ def test_plan_touches_no_media(two_shooter_match: Path, monkeypatch: pytest.Monk
     match_trims.plan_trims(two_shooter_match)
 
 
+def test_plan_downloads_nothing_when_storage_is_bound(
+    two_shooter_match: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Purity has a second half the ffmpeg check can't see (#617).
+
+    ``resolve_video_path`` mirrors a hosted object into the local cache on
+    first access, so using it as an existence check turns planning into a
+    download of every video in the match. Patching ``trim_video`` alone
+    would never catch that -- this asserts on the resolver itself.
+    """
+
+    def explode(*_a: object, **_kw: object) -> None:
+        raise AssertionError("plan_trims must not fetch media")
+
+    monkeypatch.setattr(MatchProject, "_mirror_from_storage", staticmethod(explode))
+    monkeypatch.setattr(MatchProject, "resolve_video_path", explode)
+
+    plan = match_trims.plan_trims(two_shooter_match)
+    # And it still classified correctly without the mirroring resolver.
+    assert _find(plan, "anders", 1).eligible is True
+    assert _find(plan, "mathias", 3).reason == "no_stage_time"
+
+
+def test_source_present_asks_storage_without_downloading(tmp_path: Path) -> None:
+    """The resolver planning uses: a bound storage answers with ``exists``,
+    and the bytes stay where they are."""
+    from splitsmith.storage import FilesystemStorage
+
+    backing = tmp_path / "tenant"
+    backing.mkdir()
+    storage = FilesystemStorage(backing)
+    storage.write_bytes("raw/remote.mov", b"VIDEO")
+
+    root = tmp_path / "p"
+    project = MatchProject.init(root, name="p")
+    project.bind_storage(storage, scope="scope")
+
+    assert project.source_present(root, Path("raw/remote.mov")) is True
+    assert project.source_present(root, Path("raw/absent.mov")) is False
+    # Crucially: no local mirror was written.
+    assert not (root / "raw" / "remote.mov").exists()
+
+
 # ---------------------------------------------------------------------------
 # Shared eligibility rule (#613) and typed skip reasons (#614)
 # ---------------------------------------------------------------------------
@@ -356,7 +399,15 @@ def test_run_trims_records_substitution_that_changed_since_the_plan(
 
     assert results[0].trim_path is not None
     assert "_cam_" in results[0].trim_path.name
-    assert any("chest" in reason for reason in results[0].skip_reasons)
+    # The note is a note, not a skip: this stage exported successfully.
+    # Keeping it in ``skip_reasons`` is what let the CLI's "written"
+    # short-circuit hide it (#617).
+    assert results[0].skip_reasons == []
+    assert any("chest" in note for note in results[0].notes)
+    # The run substituted nothing (the chest cam was there by then), which
+    # is what the summary counts -- unlike the plan, which expected to.
+    assert results[0].substituted_from is None
+    assert results[0].entry.substituted_from == "chest"
 
 
 def test_run_trims_survives_camera_ambiguity_appearing_after_the_plan(

@@ -47,6 +47,26 @@ class CompareStageBundle:
 
 
 @dataclass(frozen=True)
+class MissingTrim:
+    """A stage dropped from the grid because its trim is not on disk.
+
+    The grid renders a black filler tile for it. That is the right output
+    -- the footage genuinely isn't there -- but it is indistinguishable
+    from "this shooter didn't shoot the stage", so the loader records what
+    it looked for and the CLI says so out loud (#618). Reporting only;
+    nothing downstream reads it.
+    """
+
+    stage_number: int
+    stage_name: str
+    expected_path: Path
+    #: The selector that chose this camera, when the run asked for one.
+    #: ``None`` means the primary, where a missing trim just means the
+    #: stage was never exported.
+    camera: str | None = None
+
+
+@dataclass(frozen=True)
 class CompareShooterBundle:
     """A shooter's project + the per-stage bundles ready for export.
 
@@ -61,6 +81,8 @@ class CompareShooterBundle:
     project_root: Path
     project: MatchProject | None = None
     stages_by_number: dict[int, CompareStageBundle] = field(default_factory=dict)
+    #: Stages omitted because their trim was missing. See :class:`MissingTrim`.
+    missing_trims: list[MissingTrim] = field(default_factory=list)
 
 
 def trim_path_for_video(
@@ -157,6 +179,7 @@ def load_shooter(
     pre_buffer = project.trim_pre_buffer_seconds
     effective_camera = _resolve_effective_camera(project, camera)
     bundles: dict[int, CompareStageBundle] = {}
+    missing: list[MissingTrim] = []
     for stage in project.stages:
         if stage.skipped:
             continue
@@ -165,6 +188,14 @@ def load_shooter(
             continue
         trim = trim_path_for_video(project, project_root, stage.stage_number, stage.stage_name, chosen)
         if not trim.exists():
+            missing.append(
+                MissingTrim(
+                    stage_number=stage.stage_number,
+                    stage_name=stage.stage_name,
+                    expected_path=trim,
+                    camera=effective_camera if not substituted else None,
+                )
+            )
             continue
         meta = probe(trim)
         bundles[stage.stage_number] = CompareStageBundle(
@@ -186,6 +217,7 @@ def load_shooter(
         project_root=project_root,
         project=project,
         stages_by_number=bundles,
+        missing_trims=missing,
     )
 
 
@@ -230,6 +262,7 @@ def load_shooter_from_match(
     effective_camera = _resolve_effective_camera(project, camera)
 
     bundles: dict[int, CompareStageBundle] = {}
+    missing: list[MissingTrim] = []
     for stage in project.stages:
         if stage.skipped:
             continue
@@ -239,13 +272,21 @@ def load_shooter_from_match(
         stage_label = stage_names.get(stage.stage_number, stage.stage_name)
         trim = trim_path_for_video(project, shooter_root, stage.stage_number, stage.stage_name, chosen)
         if not trim.exists():
+            missing.append(
+                MissingTrim(
+                    stage_number=stage.stage_number,
+                    stage_name=stage_label,
+                    expected_path=trim,
+                    camera=effective_camera if not substituted else None,
+                )
+            )
             continue
         meta = probe(trim)
         bundles[stage.stage_number] = CompareStageBundle(
             stage_number=stage.stage_number,
             stage_name=stage_label,
             trim_path=trim,
-            audit_path=shooter_root / "audit" / f"stage{stage.stage_number}.json",
+            audit_path=audit_path_for_stage(project, shooter_root, stage.stage_number),
             beep_offset_in_clip=min(pre_buffer, chosen.beep_time),
             duration_seconds=meta.duration_seconds,
             width=meta.width,
@@ -261,4 +302,5 @@ def load_shooter_from_match(
         project_root=shooter_root,
         project=None,
         stages_by_number=bundles,
+        missing_trims=missing,
     )

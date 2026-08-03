@@ -200,7 +200,10 @@ class TrimPlanEntry(BaseModel):
 class TrimResult(BaseModel):
     entry: TrimPlanEntry
     trim_path: Path | None
-    skip_reasons: list[str]
+    skip_reasons: list[str]       # why no trim was written
+    notes: list[str]              # things to say about one that *was* (#617)
+    substituted_from: str | None  # what the run stood in for, which can
+                                  # differ from entry.substituted_from
 
 def plan_trims(match_root, *, shooters=None, stages=None,
                cameras=None, force=False) -> list[TrimPlanEntry]

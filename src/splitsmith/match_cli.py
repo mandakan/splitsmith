@@ -306,7 +306,15 @@ def trims(
             "Overrides the shooter's persisted compare_camera."
         ),
     ),
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan; write nothing."),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        # Not "writes nothing": planning calls ``MatchProject.load``, which
+        # rewrites project.json once on a schema-version bump. That is
+        # unavoidable on any read of a stale project, but no media is
+        # touched and no trim is written, which is what the flag promises.
+        help="Print the plan; write no trims.",
+    ),
     force: bool = typer.Option(False, "--force", help="Re-cut trims that already exist."),
 ) -> None:
     """Write lossless per-stage trims for every shooter in a match.
@@ -363,8 +371,19 @@ def trims(
 
     written = sum(1 for r in results if r.trim_path is not None)
     skipped = len(results) - written
-    substitutions = sum(1 for e in plan if e.substituted_from is not None)
+    # Count off the results, not the plan: ``entry.substituted_from`` is what
+    # we *intended* to substitute, and a cam that appeared or vanished in
+    # between makes the two disagree. The summary has to describe the run
+    # that happened (#617).
+    substitutions = sum(1 for r in results if r.substituted_from is not None)
     console.print(f"\n[bold]{written}[/] trims written, {skipped} skipped, {substitutions} substitutions")
+    # Printed under the table rather than inside it: these are full
+    # sentences, and a rich column would ellipsize them away (#617).
+    for result in results:
+        for note in result.notes:
+            console.print(
+                f"[yellow]note[/] {result.entry.shooter_slug} stage {result.entry.stage_number}: {note}"
+            )
 
     outstanding = [r for r in results if r.trim_path is None and r.entry.reason not in SATISFIED_REASONS]
     if written == 0 and outstanding:
@@ -407,10 +426,20 @@ def _render_plan(plan: match_model.MergePlan, *, dry_run: bool, move: bool) -> N
     console.print(table)
 
 
-def _camera_cell(entry: match_trims.TrimPlanEntry) -> str:
-    """Render the Camera column; a substitution shows ``requested -> primary``."""
-    if entry.substituted_from:
-        return f"{entry.substituted_from} -> primary"
+def _camera_cell(entry: match_trims.TrimPlanEntry, result: match_trims.TrimResult | None) -> str:
+    """Render the Camera column; a substitution shows ``requested -> primary``.
+
+    After a run this describes the run, not the plan: a cam that appeared
+    between the two means the plan's ``substituted_from`` is stale, and a
+    post-run table claiming ``chest -> primary`` for a row that actually
+    shipped the chest angle is simply wrong (#617). ``--dry-run`` has no
+    result, and an ineligible entry never ran, so both fall back to the
+    plan -- its intent is all the information those rows have.
+    """
+    ran = result is not None and entry.eligible
+    substituted_from = result.substituted_from if ran and result else entry.substituted_from
+    if substituted_from:
+        return f"{substituted_from} -> primary"
     return entry.camera or "primary"
 
 
@@ -424,9 +453,19 @@ def _status_cell(entry: match_trims.TrimPlanEntry, result: match_trims.TrimResul
     """
     if result is not None:
         if result.trim_path is not None:
+            # Notes ride along on a success -- a camera that changed between
+            # plan and run means this row shipped a different angle than
+            # --dry-run showed. Returning a bare "written" here is what kept
+            # that datum off the screen entirely (#617). Flagged, not spelled
+            # out: the full note goes under the table, where rich won't
+            # ellipsize it into uselessness at 80 columns.
+            if result.notes:
+                return "[green]written[/] [yellow](see note)[/]"
             return "[green]written[/]"
         if result.skip_reasons:
             return "; ".join(result.skip_reasons)
+        if result.notes:
+            return "[yellow](see note)[/]"
     if entry.eligible:
         return "eligible"
     # ``match_trims`` reasons are already human-readable, so they render
@@ -453,7 +492,7 @@ def _render_trims_table(
         table.add_row(
             entry.shooter_slug,
             f"{entry.stage_number} -- {entry.stage_name}",
-            _camera_cell(entry),
+            _camera_cell(entry, result),
             _status_cell(entry, result),
         )
     return table
