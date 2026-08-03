@@ -294,12 +294,17 @@ def _match_with_stages(*numbers: int):
     return match
 
 
-def _harness(tmp_path, slugs, stage_numbers):
+def _harness(tmp_path, slugs, stage_numbers, *, order: list[str] | None = None):
     """Build in-memory projects plus the injected callables.
 
     ``hooks["save_match"]`` defaults to a no-op so most tests don't need to
     supply one; the ordering test overrides that key directly rather than
     also passing ``save_match=`` alongside ``**hooks`` (which would collide).
+
+    ``order`` is an optional shared list: when given, ``cancel_jobs``
+    appends ``"cancel"`` to it, so a caller that also wires ``save_project``
+    / ``save_match`` to append their own markers gets one combined
+    timeline proving cancellation happens before the per-shooter fan-out.
     """
     from splitsmith.ui.project import MatchProject
 
@@ -317,6 +322,8 @@ def _harness(tmp_path, slugs, stage_numbers):
 
     async def cancel_jobs(stage_numbers_arg):
         cancelled.append(set(stage_numbers_arg))
+        if order is not None:
+            order.append("cancel")
         return len(stage_numbers_arg)
 
     hooks = {
@@ -412,7 +419,7 @@ def test_apply_with_no_removals_cancels_nothing(tmp_path) -> None:
     from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
 
     match = _match_with_stages(1, 2)
-    _p, _saved, audits_deleted, cancelled, hooks = _harness(tmp_path, ["me"], [1, 2])
+    projects, _saved, audits_deleted, cancelled, hooks = _harness(tmp_path, ["me"], [1, 2])
 
     summary = asyncio.run(
         apply_stage_edit(
@@ -432,6 +439,10 @@ def test_apply_with_no_removals_cancels_nothing(tmp_path) -> None:
     assert summary.jobs_cancelled == 0
     assert summary.renamed == [1]
     assert match.stages[0].stage_name == "Renamed"
+    # Rename fan-out: the shooter's own project.stages must be updated too,
+    # not just the match doc -- deleting this line leaves the suite green
+    # even if the per-shooter rename loop is removed entirely.
+    assert projects["me"].stages[0].stage_name == "Renamed"
 
 
 def test_apply_adds_a_stage_to_match_and_every_shooter(tmp_path) -> None:
@@ -499,7 +510,7 @@ def test_apply_saves_the_match_doc_after_every_shooter(tmp_path) -> None:
 
     match = _match_with_stages(1, 2, 3)
     order: list[str] = []
-    projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["a", "b"], [1, 2, 3])
+    projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["a", "b"], [1, 2, 3], order=order)
     hooks["save_project"] = lambda slug, project: order.append(f"project:{slug}")
 
     def save_match() -> None:
@@ -520,19 +531,118 @@ def test_apply_saves_the_match_doc_after_every_shooter(tmp_path) -> None:
         )
     )
 
-    assert order == ["project:a", "project:b", "match"]
+    # Cancellation (step 1) must land before any per-shooter save (step 2),
+    # which in turn must land before the match doc save (step 3).
+    assert order == ["cancel", "project:a", "project:b", "match"]
 
 
 def test_apply_collects_a_failing_shooter_and_still_commits(tmp_path) -> None:
+    """A shooter whose project doc genuinely fails to save is collected as
+    an error but does not strand the other shooter or block the match
+    commit.
+
+    The failing slug goes FIRST (``["bad", "ok"]``): every assertion here
+    is about what happens *after* "bad" fails, so an abort-on-first-error
+    implementation (a stray ``break``/``return`` in the shooter loop)
+    cannot pass by accident the way it could if "bad" were last and
+    nothing after it were observed.
+
+    The failure lives in ``save_project``, not ``delete_audit``: a
+    per-stage cleanup failure is recoverable (see
+    ``test_apply_recovers_a_shooter_when_one_stage_cleanup_step_fails``
+    below) and no longer strands the shooter, so exercising "one shooter
+    fails outright" now needs a failure outside any single stage's
+    control.
+    """
     from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
 
     match = _match_with_stages(1, 2, 3)
-    projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["ok", "bad"], [1, 2, 3])
+    projects, saved, _audits, _cancelled, hooks = _harness(tmp_path, ["bad", "ok"], [1, 2, 3])
 
-    def delete_audit(slug: str, n: int) -> bool:
+    def save_project(slug: str, project) -> None:
         if slug == "bad":
             raise RuntimeError("state store down")
-        return True
+        saved.append(slug)
+
+    hooks["save_project"] = save_project
+
+    summary = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[
+                SubmittedStage(stage_number=1, stage_name="Stage 1"),
+                SubmittedStage(stage_number=2, stage_name="Stage 2"),
+            ],
+            shooter_slugs=["bad", "ok"],
+            **hooks,
+        )
+    )
+
+    assert len(summary.errors) == 1
+    assert "state store down" in summary.errors[0]
+    assert [s.stage_number for s in match.stages] == [1, 2]
+    # The loop kept going past "bad" instead of aborting: an
+    # abort-on-first-error implementation would leave "ok" unsaved and
+    # would never reach the point of appending its result.
+    assert saved == ["ok"]
+    assert [s.slug for s in summary.shooters] == ["bad", "ok"]
+
+
+def test_apply_resets_videos_unassigned_and_records_error_when_save_fails(tmp_path) -> None:
+    """When a shooter's project never gets saved, any in-memory
+    video-unassignment counted along the way must not be reported as if it
+    happened -- the video is still bound to its old stage on disk. Counts
+    for cleanup that genuinely already ran (the audit-doc delete here)
+    survive, because those are independent, already-committed side
+    effects, not part of the unsaved project doc.
+    """
+    from splitsmith.ui.project import StageVideo
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3)
+    projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["me"], [1, 2, 3])
+    projects["me"].stages[2].videos = [StageVideo(path=Path("a.mp4"), role="primary")]
+
+    def save_project(slug: str, project) -> None:
+        raise RuntimeError("disk full")
+
+    hooks["save_project"] = save_project
+
+    summary = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[
+                SubmittedStage(stage_number=1, stage_name="Stage 1"),
+                SubmittedStage(stage_number=2, stage_name="Stage 2"),
+            ],
+            shooter_slugs=["me"],
+            **hooks,
+        )
+    )
+
+    result = summary.shooters[0]
+    assert result.error is not None
+    assert "disk full" in result.error
+    assert result.videos_unassigned == 0
+    assert result.audit_docs_deleted == 1
+
+
+def test_apply_recovers_a_shooter_when_one_stage_cleanup_step_fails(tmp_path) -> None:
+    """A per-stage cleanup failure (here, ``delete_audit`` raising) must
+    not strand the shooter: their stage-list update and save must still go
+    through, because ``diff_stage_list`` runs against ``match.stages``,
+    which will have already forgotten the removed stage by the next edit --
+    there would be no way to retry a stranded shooter's cleanup later.
+    """
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3)
+    projects, saved, _audits, _cancelled, hooks = _harness(tmp_path, ["me"], [1, 2, 3])
+
+    def delete_audit(slug: str, n: int) -> bool:
+        raise RuntimeError("state store down")
 
     hooks["delete_audit"] = delete_audit
 
@@ -544,11 +654,15 @@ def test_apply_collects_a_failing_shooter_and_still_commits(tmp_path) -> None:
                 SubmittedStage(stage_number=1, stage_name="Stage 1"),
                 SubmittedStage(stage_number=2, stage_name="Stage 2"),
             ],
-            shooter_slugs=["ok", "bad"],
+            shooter_slugs=["me"],
             **hooks,
         )
     )
 
+    assert [s.stage_number for s in projects["me"].stages] == [1, 2]
+    assert saved == ["me"]
     assert len(summary.errors) == 1
     assert "state store down" in summary.errors[0]
-    assert [s.stage_number for s in match.stages] == [1, 2]
+    result = summary.shooters[0]
+    assert result.error is not None
+    assert "state store down" in result.error

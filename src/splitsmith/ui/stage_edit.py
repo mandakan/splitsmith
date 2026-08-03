@@ -190,13 +190,20 @@ def purge_stage_artifacts(
 
 
 class ShooterStageEditResult(BaseModel):
-    """What the edit did to one shooter."""
+    """What the edit did to one shooter.
+
+    ``error`` is set when something failed for this shooter specifically
+    (a per-stage cleanup step, or the load/save of the project doc
+    itself). Consumers should check it rather than string-matching the
+    shooter's slug inside :attr:`StageEditSummary.errors`.
+    """
 
     slug: str
     videos_unassigned: int = 0
     audit_docs_deleted: int = 0
     files_deleted: int = 0
     objects_deleted: int = 0
+    error: str | None = None
 
 
 class StageEditSummary(BaseModel):
@@ -243,6 +250,17 @@ async def apply_stage_edit(
     Cancellation is not instantaneous, so a worker can still land a write
     after step 2's purge. Because freed numbers are never reused, that
     write is inert garbage that can never be read as a live stage.
+
+    A single removed stage's cleanup (video release, audit delete, artifact
+    purge) failing must not stop the rest of that shooter's update: this
+    diff is computed against ``match.stages`` (see above ``diff_stage_list``
+    call), which will no longer contain the removed stage once the match
+    doc is saved, so a shooter who did not get to drop that stage on this
+    pass would have no way to retry it later -- the diff would already read
+    as "nothing to remove." Per-stage failures are therefore caught inline
+    and recorded, while the shooter's stage-list update and save still go
+    ahead. Only a failure loading or saving the project itself (outside any
+    single stage's control) leaves that shooter unsaved.
     """
     diff = diff_stage_list(list(match.stages), submitted)
     summary = StageEditSummary(
@@ -266,13 +284,22 @@ async def apply_stage_edit(
             project = load_project(slug)
 
             for stage_number in diff.removed:
-                result.videos_unassigned += project.unassign_stage_videos(stage_number)
-                if delete_audit(slug, stage_number):
-                    result.audit_docs_deleted += 1
-                counts = purge_stage_artifacts(project, root, stage_number)
-                result.files_deleted += counts.files_deleted
-                result.objects_deleted += counts.objects_deleted
-                summary.errors.extend(f"{slug}: {e}" for e in counts.errors)
+                try:
+                    result.videos_unassigned += project.unassign_stage_videos(stage_number)
+                    if delete_audit(slug, stage_number):
+                        result.audit_docs_deleted += 1
+                    counts = purge_stage_artifacts(project, root, stage_number)
+                    result.files_deleted += counts.files_deleted
+                    result.objects_deleted += counts.objects_deleted
+                    summary.errors.extend(f"{slug}: {e}" for e in counts.errors)
+                except Exception as exc:  # noqa: BLE001 -- one stage's
+                    # cleanup failing must not block this shooter's
+                    # stage-list update, renames, adds, or save (see the
+                    # docstring: the alternative permanently strands the
+                    # shooter on this stage).
+                    message = f"{slug} stage {stage_number}: {exc}"
+                    summary.errors.append(message)
+                    result.error = message
 
             project.stages = [s for s in project.stages if s.stage_number not in removed]
             for stage in project.stages:
@@ -293,8 +320,13 @@ async def apply_stage_edit(
             project.stages.sort(key=lambda s: s.stage_number)
             save_project(slug, project)
         except Exception as exc:  # noqa: BLE001 -- one shooter must not
-            # strand the others or the match doc.
+            # strand the others or the match doc. Reaching here means the
+            # project was never saved, so any in-memory video-unassignment
+            # this shooter accumulated is discarded along with it; only
+            # already-performed audit/artifact deletions are real.
             summary.errors.append(f"{slug}: {exc}")
+            result.error = str(exc)
+            result.videos_unassigned = 0
         summary.shooters.append(result)
 
     match.stages = [s for s in match.stages if s.stage_number not in removed]
