@@ -2665,9 +2665,19 @@ def register_job_bodies(state: AppState) -> None:
         with handle.timer.phase("r2_upload"):
             export_storage.push_stage_export_outputs(proj, result)
 
+        # What the user gets to report: only the anomalies that describe
+        # *this* request. Shot findings explain the audit, and a run that
+        # asked for a bare trim consumed no shots -- "No shots detected in
+        # the stage window" is then the designed state of a trims-only
+        # export, not a problem with it, and reporting it turns every clean
+        # run into a warning (#616). Anything that failed to write is
+        # always relevant. ``match_trims._run_one`` makes the same cut on
+        # the CLI side.
+        wants_shots = req.write_csv or req.write_fcpxml or req.write_overlay or req.write_report
+        reported = result.anomalies if wants_shots else result.export_failures
+
         # Final message summarises what shipped + flags any skipped
-        # artefacts (FCPXML without a trim, etc). The full list lives in
-        # the report.txt; the user can Reveal it for details.
+        # artefacts (FCPXML without a trim, etc).
         bits: list[str] = []
         if result.trimmed_video_path is not None:
             bits.append("trim")
@@ -2682,11 +2692,24 @@ def register_job_bodies(state: AppState) -> None:
             bits.append("report")
         if result.overlay_path is not None:
             bits.append("overlay")
+
+        # A run asked for a trim that produced no clip of any kind wrote
+        # nothing at all -- the endpoint already 424s an unreachable source,
+        # so getting here means ffmpeg itself failed. Fail the job: a red
+        # row with the reason beats "Done: nothing written", which reads as
+        # a no-op the user is meant to shrug at. Matches how the CLI counts
+        # the same outcome (``match_trims`` returns no path -> a failure).
+        if req.write_trim and result.trimmed_video_path is None and not result.secondary_trimmed_paths:
+            raise RuntimeError("; ".join(result.export_failures) or "no trim was written")
+
         summary = ", ".join(bits) if bits else "nothing written"
-        if result.anomalies:
-            n = len(result.anomalies)
+        if reported:
+            n = len(reported)
             word = "anomaly" if n == 1 else "anomalies"
-            summary += f" ({n} {word} -- see report.txt)"
+            # Only point at report.txt when this run actually wrote one --
+            # a trims-only export never does.
+            where = " -- see report.txt" if result.report_path is not None else ""
+            summary += f" ({n} {word}{where})"
 
         # Record the deliverables on the job so the SPA can offer downloads
         # without a separate overview round-trip. Basenames only: the
@@ -2707,7 +2730,7 @@ def register_job_bodies(state: AppState) -> None:
                 # ``secondary_trimmed_paths`` maps video_id -> Path; iterate
                 # the values, not the mapping (which yields the ids).
                 "secondary_trims": [p.name for p in result.secondary_trimmed_paths.values()],
-                "anomalies": result.anomalies,
+                "anomalies": reported,
             }
         )
         handle.update(progress=1.0, message=f"Done: {summary}")

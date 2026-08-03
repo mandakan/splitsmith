@@ -37,6 +37,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -156,6 +157,16 @@ function ExportInner({ slug }: { slug: string }) {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Trim jobs outlive a navigation away from this page; the post-run
+  // refresh below checks this before touching state.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
 
   // === Form state ===
@@ -298,6 +309,25 @@ function ExportInner({ slug }: { slug: string }) {
     return [...found].sort();
   }, [project]);
 
+  // The persisted ``compare_camera`` can name a selector this project no
+  // longer offers -- set via the CLI, or a mount later untagged. A <select>
+  // with no matching <option> renders blank, so the picker would claim
+  // "Primary (default)" while the summary rail reports the real value: two
+  // widgets disagreeing about one field. Carry the orphan as its own
+  // option, labelled, so the picker stays truthful and the user can see
+  // what to change.
+  const cameraOptions = useMemo(() => {
+    const current = project?.compare_camera ?? null;
+    const options = [
+      { value: "", label: "Primary (default)" },
+      ...cameraSelectors.map((s) => ({ value: s, label: s })),
+    ];
+    if (current !== null && !cameraSelectors.includes(current)) {
+      options.push({ value: current, label: `${current} (not on this shooter)` });
+    }
+    return options;
+  }, [cameraSelectors, project]);
+
   async function changeCamera(value: string) {
     const next = value || null;
     if (next === (project?.compare_camera ?? null)) return;
@@ -409,28 +439,75 @@ function ExportInner({ slug }: { slug: string }) {
    *  full bundle. Progress lives in the jobs rail from here on. */
   async function submitTrims() {
     setQueueing(true);
-    let queued = 0;
+    // The endpoint returns the *existing* job when one is already active
+    // for a stage rather than queueing a second one -- and that job may be
+    // a full-bundle export with entirely different flags. Counting those
+    // as queued trims promises work nobody scheduled, so find them first
+    // and report the two outcomes separately.
+    let active = new Set<number>();
+    try {
+      const running = await api.listJobs();
+      active = new Set(
+        running
+          .filter(
+            (j) =>
+              j.kind === "export" &&
+              j.stage_number !== null &&
+              (j.status === "pending" || j.status === "running"),
+          )
+          .map((j) => j.stage_number as number),
+      );
+    } catch {
+      // Advisory only -- a failed pre-check must not block the export.
+    }
+
+    const queuedIds: string[] = [];
+    let attached = 0;
     try {
       for (const stageNumber of orderedSelection) {
-        await api.exportStage(slug, stageNumber, {
+        const submitted = await api.exportStage(slug, stageNumber, {
           write_trim: true,
           write_csv: false,
           write_fcpxml: false,
           write_report: false,
           write_overlay: false,
         });
-        queued += 1;
+        if (active.has(stageNumber)) attached += 1;
+        queuedIds.push(submitted.id);
       }
+      const queued = queuedIds.length - attached;
       setQueuedNote(
-        `Queued ${queued} trim ${queued === 1 ? "job" : "jobs"}. Track progress in the jobs rail.`,
+        [
+          `Queued ${queued} trim ${queued === 1 ? "job" : "jobs"}.`,
+          attached > 0
+            ? ` ${attached} ${attached === 1 ? "stage" : "stages"} already had an export running -- ` +
+              `that job was joined, not replaced.`
+            : "",
+          " Track progress in the jobs rail.",
+        ].join(""),
       );
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
-      if (queued > 0) {
-        setQueuedNote(`Queued ${queued} of ${orderedSelection.length} trim jobs.`);
+      if (queuedIds.length > 0) {
+        setQueuedNote(
+          `Queued ${queuedIds.length} of ${orderedSelection.length} trim jobs.`,
+        );
       }
     } finally {
       setQueueing(false);
+    }
+
+    // Progress lives in the jobs rail from here, but this page's own state
+    // (has_exports, lossless_trim_present, last_export_at) is written by
+    // those jobs and would otherwise stay stale until a manual reload.
+    // Refresh once they settle, without blocking the button on trims that
+    // can take minutes.
+    if (queuedIds.length > 0) {
+      void Promise.allSettled(
+        queuedIds.map((id) => api.pollJob(id, () => {})),
+      ).then(() => {
+        if (mountedRef.current) void reload();
+      });
     }
   }
 
@@ -547,10 +624,7 @@ function ExportInner({ slug }: { slug: string }) {
                   label="Camera for the grid"
                   value={project?.compare_camera ?? ""}
                   onChange={(v) => void changeCamera(v)}
-                  options={[
-                    { value: "", label: "Primary (default)" },
-                    ...cameraSelectors.map((s) => ({ value: s, label: s })),
-                  ]}
+                  options={cameraOptions}
                 />
                 <p className="self-end text-[0.75rem] leading-relaxed text-muted">
                   Which of this shooter's cameras the compare grid uses.
@@ -612,130 +686,130 @@ function ExportInner({ slug }: { slug: string }) {
               trims-only hides them and the Output section renumbers. */}
           {!trimsOnly && (
             <>
-          {/* Section 3: Trim padding */}
-          <Section number={3} title="Trim padding" help="Padding around each stage's beep and last shot.">
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {(Object.keys(PADDING_PRESETS) as Array<
-                Exclude<PaddingPreset, "custom">
-              >).map((key) => (
-                <PresetCard
-                  key={key}
-                  selected={preset === key}
-                  onClick={() => selectPreset(key)}
-                  title={PADDING_PRESETS[key].label}
-                  body={`${PADDING_PRESETS[key].head}s / ${PADDING_PRESETS[key].tail}s`}
-                />
-              ))}
-              <PresetCard
-                selected={preset === "custom"}
-                onClick={() => selectPreset("custom")}
-                title="Custom"
-                body="set below"
-              />
-            </div>
-            {preset === "custom" && (
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <NumInput
-                  label="Before beep (s)"
-                  value={headPad}
-                  step={0.1}
-                  min={0}
-                  onChange={setHeadPad}
-                />
-                <NumInput
-                  label="After last shot (s)"
-                  value={tailPad}
-                  step={0.1}
-                  min={0}
-                  onChange={setTailPad}
-                />
-              </div>
-            )}
-          </Section>
-
-          {/* Section 4: Transitions */}
-          <Section number={4} title="Transitions" help="How adjacent stages connect on the spine.">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              {TRANSITIONS.map((t) => (
-                <PresetCard
-                  key={t.kind}
-                  selected={transitionKind === t.kind}
-                  onClick={() => setTransitionKind(t.kind)}
-                  title={t.label}
-                  body={t.body}
-                />
-              ))}
-            </div>
-            {transitionKind !== "none" && (
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <NumInput
-                  label="Duration (s)"
-                  value={transitionDurationSeconds}
-                  step={0.1}
-                  min={0.1}
-                  onChange={setTransitionDurationSeconds}
-                />
-              </div>
-            )}
-            <div className="mt-4 border-t border-rule pt-4">
-              <div className="mb-2 font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-muted">
-                Title card
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                {TITLE_STYLES.map((t) => (
+              {/* Section 3: Trim padding */}
+              <Section number={3} title="Trim padding" help="Padding around each stage's beep and last shot.">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  {(Object.keys(PADDING_PRESETS) as Array<
+                    Exclude<PaddingPreset, "custom">
+                  >).map((key) => (
+                    <PresetCard
+                      key={key}
+                      selected={preset === key}
+                      onClick={() => selectPreset(key)}
+                      title={PADDING_PRESETS[key].label}
+                      body={`${PADDING_PRESETS[key].head}s / ${PADDING_PRESETS[key].tail}s`}
+                    />
+                  ))}
                   <PresetCard
-                    key={t.kind}
-                    selected={titleKind === t.kind}
-                    onClick={() => setTitleKind(t.kind)}
-                    title={t.label}
-                  />
-                ))}
-              </div>
-              {titleKind !== "none" && (
-                <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <NumInput
-                    label="Title hold (s)"
-                    value={titleDurationSeconds}
-                    step={0.1}
-                    min={0.5}
-                    onChange={setTitleDurationSeconds}
+                    selected={preset === "custom"}
+                    onClick={() => selectPreset("custom")}
+                    title="Custom"
+                    body="set below"
                   />
                 </div>
-              )}
-            </div>
-          </Section>
+                {preset === "custom" && (
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <NumInput
+                      label="Before beep (s)"
+                      value={headPad}
+                      step={0.1}
+                      min={0}
+                      onChange={setHeadPad}
+                    />
+                    <NumInput
+                      label="After last shot (s)"
+                      value={tailPad}
+                      step={0.1}
+                      min={0}
+                      onChange={setTailPad}
+                    />
+                  </div>
+                )}
+              </Section>
 
-          {/* Section 5: Overlay */}
-          <Section number={5} title="Overlay" help="Burned-in shot counter + splits. Heavier render -- opt in.">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <PresetCard
-                selected={!includeOverlay}
-                onClick={() => setIncludeOverlay(false)}
-                title="No overlay"
-                body="Faster export. FCPXML still carries shot markers."
-              />
-              <PresetCard
-                selected={includeOverlay}
-                onClick={() => setIncludeOverlay(true)}
-                title="Shot counter + splits"
-                body="Render shot index + split time per shot, burned in."
-              />
-            </div>
-            {includeOverlay && (
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <SelectField
-                  label="Overlay codec"
-                  value={overlayCodec}
-                  onChange={(v) => setOverlayCodec(v as OverlayCodec)}
-                  options={[
-                    { value: "auto", label: "Auto" },
-                    { value: "h264", label: "H.264" },
-                    { value: "prores422", label: "ProRes 422" },
-                  ]}
-                />
-              </div>
-            )}
-          </Section>
+              {/* Section 4: Transitions */}
+              <Section number={4} title="Transitions" help="How adjacent stages connect on the spine.">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  {TRANSITIONS.map((t) => (
+                    <PresetCard
+                      key={t.kind}
+                      selected={transitionKind === t.kind}
+                      onClick={() => setTransitionKind(t.kind)}
+                      title={t.label}
+                      body={t.body}
+                    />
+                  ))}
+                </div>
+                {transitionKind !== "none" && (
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <NumInput
+                      label="Duration (s)"
+                      value={transitionDurationSeconds}
+                      step={0.1}
+                      min={0.1}
+                      onChange={setTransitionDurationSeconds}
+                    />
+                  </div>
+                )}
+                <div className="mt-4 border-t border-rule pt-4">
+                  <div className="mb-2 font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-muted">
+                    Title card
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    {TITLE_STYLES.map((t) => (
+                      <PresetCard
+                        key={t.kind}
+                        selected={titleKind === t.kind}
+                        onClick={() => setTitleKind(t.kind)}
+                        title={t.label}
+                      />
+                    ))}
+                  </div>
+                  {titleKind !== "none" && (
+                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <NumInput
+                        label="Title hold (s)"
+                        value={titleDurationSeconds}
+                        step={0.1}
+                        min={0.5}
+                        onChange={setTitleDurationSeconds}
+                      />
+                    </div>
+                  )}
+                </div>
+              </Section>
+
+              {/* Section 5: Overlay */}
+              <Section number={5} title="Overlay" help="Burned-in shot counter + splits. Heavier render -- opt in.">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <PresetCard
+                    selected={!includeOverlay}
+                    onClick={() => setIncludeOverlay(false)}
+                    title="No overlay"
+                    body="Faster export. FCPXML still carries shot markers."
+                  />
+                  <PresetCard
+                    selected={includeOverlay}
+                    onClick={() => setIncludeOverlay(true)}
+                    title="Shot counter + splits"
+                    body="Render shot index + split time per shot, burned in."
+                  />
+                </div>
+                {includeOverlay && (
+                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <SelectField
+                      label="Overlay codec"
+                      value={overlayCodec}
+                      onChange={(v) => setOverlayCodec(v as OverlayCodec)}
+                      options={[
+                        { value: "auto", label: "Auto" },
+                        { value: "h264", label: "H.264" },
+                        { value: "prores422", label: "ProRes 422" },
+                      ]}
+                    />
+                  </div>
+                )}
+              </Section>
             </>
           )}
 

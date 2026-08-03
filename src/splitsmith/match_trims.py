@@ -83,9 +83,14 @@ def plan_trims(
 ) -> list[TrimPlanEntry]:
     """Classify every shooter-stage in the match. Touches no media.
 
-    Reads ``project.json`` per shooter -- authoritative for beeps and roles;
-    ``shooter.json`` is a merge-time snapshot nothing keeps in sync. Stage
-    names come from the match's shared definitions.
+    Reads ``project.json`` per shooter -- authoritative for beeps, roles and
+    stage *names*; ``shooter.json`` is a merge-time snapshot nothing keeps in
+    sync. The name matters because it becomes the trim's filename, and every
+    writer (the SPA's per-stage export, ``splitsmith single``, this module)
+    derives that basename from the shooter's own project. A per-shooter
+    scoreboard import rewrites ``project.stages`` without touching
+    ``match.json``, so planning against the match's names would miss trims
+    that already exist and re-cut them under a second filename (#615).
 
     Raises ``camera_select.CameraResolutionError`` when a requested camera
     matches nothing anywhere in a shooter's project. That is a config error
@@ -96,7 +101,6 @@ def plan_trims(
     match = Match.load(match_root)
     wanted_shooters = set(shooters) if shooters else None
     wanted_stages = set(stages) if stages else None
-    stage_names = {s.stage_number: s.stage_name for s in match.stages}
     overrides = cameras or {}
 
     plan: list[TrimPlanEntry] = []
@@ -114,7 +118,7 @@ def plan_trims(
             entry = TrimPlanEntry(
                 shooter_slug=slug,
                 stage_number=stage.stage_number,
-                stage_name=stage_names.get(stage.stage_number, stage.stage_name),
+                stage_name=stage.stage_name,
                 camera=camera,
             )
             plan.append(_classify(entry, stage, project, shooter_root, camera, force=force))

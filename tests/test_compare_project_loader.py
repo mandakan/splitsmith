@@ -503,3 +503,37 @@ def test_load_shooter_from_match_sees_post_merge_beeps(tmp_path: Path) -> None:
 
     assert 2 in bundle.stages_by_number
     assert bundle.stages_by_number[2].beep_offset_in_clip == pytest.approx(5.0)
+
+
+def test_load_shooter_from_match_names_trims_from_the_shooters_own_stage_name(
+    tmp_path: Path,
+) -> None:
+    """The trim *filename* follows project.json, the grid *label* follows match.json.
+
+    A per-shooter scoreboard import rewrites ``project.stages[*].stage_name``
+    and never touches ``match.json``. Every writer of a trim -- the SPA's
+    per-stage export, ``splitsmith single``, ``match trims`` -- derives the
+    basename from the shooter's own project, so the loader has to look it up
+    the same way or the stage silently becomes a black tile in the grid.
+    """
+    match_root = _build_two_stage_match(tmp_path)
+    shooter_root = Match.shooter_root(match_root, "mathias")
+
+    # Scoreboard import: the shooter now calls stage 1 by its real name.
+    project = MatchProject.load(shooter_root)
+    project.stage(1).stage_name = "El Presidente"
+    project.save(shooter_root)
+
+    exports = shooter_root / "exports"
+    exports.mkdir(parents=True, exist_ok=True)
+    for stale in exports.glob("stage1_*_trimmed.mp4"):
+        stale.unlink()
+    (exports / f"stage1_{_slugify('El Presidente')}_trimmed.mp4").write_bytes(b"trim")
+
+    bundle = load_shooter_from_match(match_root, "mathias", "Mathias", probe=_stub_probe)
+
+    stage = bundle.stages_by_number[1]
+    assert stage.trim_path.name == f"stage1_{_slugify('El Presidente')}_trimmed.mp4"
+    # The label stays the match's: a shared stage must read the same across
+    # every tile in the grid, whatever one shooter's scorecard called it.
+    assert stage.stage_name == "Stage One"
