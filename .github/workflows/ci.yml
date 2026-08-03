@@ -105,16 +105,39 @@ jobs:
       - name: Build SPA so wheel includes it
         working-directory: src/splitsmith/ui_static
         # The wheel's hatch config ships ui_static/dist; building here
-        # populates that path before uv build runs.
+        # populates that path before uv build runs. The maps are dropped
+        # because pyproject's ``artifacts`` directive overrides ``exclude``
+        # (see #642) -- this mirrors the publish workflow so the smoke test
+        # exercises the artifact users actually get.
         run: |
           pnpm install --frozen-lockfile
           pnpm build
+          find dist -name '*.map' -delete
 
       - name: Sync dev deps so we can build the wheel
         run: uv sync --frozen --all-groups
 
       - name: Build wheel
         run: uv build
+
+      - name: Sentinel -- the wheel must contain the built SPA
+        # Regression gate for #642: the root .gitignore's unanchored
+        # ``dist/`` made hatchling silently drop the SPA, so published
+        # wheels served a bare 404 on ``GET /``. This job already built and
+        # installed the wheel; it just never checked the UI was in it.
+        run: |
+          python - <<'PY'
+          import glob, sys, zipfile
+
+          wheel = glob.glob("dist/splitsmith-*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          if not any(n.endswith("splitsmith/ui_static/dist/index.html") for n in names):
+              sys.exit(f"{wheel} ships no SPA: ui_static/dist/index.html missing (see #642)")
+          maps = [n for n in names if n.endswith(".map")]
+          if maps:
+              sys.exit(f"{wheel} ships source maps: {maps}")
+          print(f"{wheel}: SPA present, no source maps")
+          PY
 
       - name: Create fresh slim venv (no dev extras)
         run: uv venv slim-venv --python 3.11

@@ -53,15 +53,40 @@ jobs:
 
       - name: Build SPA so wheel includes it
         working-directory: src/splitsmith/ui_static
+        # ``artifacts`` in pyproject.toml re-includes dist/ (it is git-ignored
+        # build output), but ``artifacts`` overrides ``exclude`` -- so the
+        # ``*.map`` exclude no longer applies and the 4 MB source map would
+        # ship. Drop the maps here rather than setting ``sourcemap: false``,
+        # so the hosted Docker build keeps them for debugging prod errors.
         run: |
           pnpm install --frozen-lockfile
           pnpm build
+          find dist -name '*.map' -delete
 
       - name: Sync build deps
         run: uv sync --frozen --all-groups
 
       - name: Build sdist + wheel
         run: uv build
+
+      - name: Verify the wheel actually contains the SPA
+        # Guards #642: the root .gitignore's unanchored ``dist/`` made
+        # hatchling drop the built SPA, so every published wheel 404'd on
+        # ``GET /``. Without this assertion the next .gitignore edit can
+        # silently reintroduce it.
+        run: |
+          python - <<'PY'
+          import glob, sys, zipfile
+
+          wheel = glob.glob("dist/splitsmith-*.whl")[0]
+          names = zipfile.ZipFile(wheel).namelist()
+          if not any(n.endswith("splitsmith/ui_static/dist/index.html") for n in names):
+              sys.exit(f"{wheel} ships no SPA: ui_static/dist/index.html missing (see #642)")
+          maps = [n for n in names if n.endswith(".map")]
+          if maps:
+              sys.exit(f"{wheel} ships source maps: {maps}")
+          print(f"{wheel}: SPA present, no source maps")
+          PY
 
       - name: Publish to PyPI
         # OIDC trusted publishing -- pypi.org verifies the workflow identity

@@ -67,12 +67,30 @@ mkdir -p "$SMOKE_DIR"
 # --- SPA build + wheel build ----------------------------------------
 
 echo "==> building SPA"
+# Maps are deleted because pyproject's ``artifacts`` directive (which
+# re-includes the git-ignored dist/) overrides ``exclude``, so the *.map
+# rule no longer drops them. Mirrors the publish workflow -- see #642.
 (cd src/splitsmith/ui_static && pnpm install --frozen-lockfile && pnpm build) >/dev/null
+find src/splitsmith/ui_static/dist -name '*.map' -delete
 
 echo "==> building wheel"
 uv build >/dev/null
 WHEEL=$(ls -t dist/splitsmith-*.whl | head -1)
 echo "    $WHEEL"
+
+echo "==> sentinel: wheel must contain the built SPA"
+python3 - "$WHEEL" <<'PY'
+import sys, zipfile
+
+wheel = sys.argv[1]
+names = zipfile.ZipFile(wheel).namelist()
+if not any(n.endswith("splitsmith/ui_static/dist/index.html") for n in names):
+    sys.exit(f"    FAIL: {wheel} ships no SPA -- ui_static/dist/index.html missing (see #642)")
+maps = [n for n in names if n.endswith(".map")]
+if maps:
+    sys.exit(f"    FAIL: {wheel} ships source maps: {maps}")
+print("    ok: SPA present, no source maps")
+PY
 
 # --- venv setup ------------------------------------------------------
 
