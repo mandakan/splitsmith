@@ -39,7 +39,7 @@ from .. import automation as automation_module
 from .. import beep_detect
 from .. import ensemble as ensemble_module
 from ..ui import audio as audio_helpers
-from ..ui.project import MatchProject
+from ..ui.project import STUB_AUDIT_DETECTION, MatchProject
 from .sandbox import resolve_project_root
 from .write_tools import _resolve_stage_video
 
@@ -365,18 +365,42 @@ def _candidate_dict(cand: Any) -> dict[str, Any]:
 
 
 def _load_or_seed_audit_json(audit_file: Any, stage: Any, beep_in_clip: float) -> dict[str, Any]:
+    """Load this stage's audit document, backfilling the base fields.
+
+    The loaded doc may be the beep-confirm stub (``{"shots": [],
+    "detection": "none"}``) seeded by the SPA's beep-review endpoint --
+    which has none of the base fields (``stage_number``, ``beep_time``,
+    ...) that a detection run's document carries, because those are
+    unknown at beep-confirm time. Backfill them here so a stage that only
+    ever had a stub still ends up with a complete document (readers like
+    the compare-timeline exporter key on ``beep_time`` and drop every shot
+    when it is missing). ``setdefault`` never overwrites a value the doc
+    already carries, so a genuinely-audited doc keeps its own fields.
+
+    The sentinel is dropped once real detection has run so the saved
+    document stays clean; ``is_stub_audit`` no longer depends on that for
+    correctness. Mirrors ``ui.server``'s ``_merge_detection_into``.
+    """
+    doc: dict[str, Any] | None = None
     if audit_file.exists():
         try:
-            return json.loads(audit_file.read_text(encoding="utf-8"))
+            doc = json.loads(audit_file.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             logger.warning("Discarding unreadable audit JSON at %s: %s", audit_file, exc)
-    return {
+    if doc is None:
+        doc = {}
+    seed = {
         "stage_number": stage.stage_number,
         "stage_name": stage.stage_name,
         "stage_time_seconds": stage.time_seconds,
         "beep_time": round(beep_in_clip, 4),
         "shots": [],
     }
+    for key, value in seed.items():
+        doc.setdefault(key, value)
+    if doc.get("detection") == STUB_AUDIT_DETECTION:
+        del doc["detection"]
+    return doc
 
 
 def _expected_rounds_from(audit_json: dict[str, Any]) -> int | None:

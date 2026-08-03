@@ -57,6 +57,18 @@ uv run splitsmith process \
 
 If videos can't be matched cleanly (multiple candidates for one stage, no candidate, ambiguity across stages), the offending stages and videos are listed and the run aborts. Re-run with the videos renamed/separated, or use `single` for each stage explicitly.
 
+## `match trims` -- batch lossless trims across a match
+
+Write the per-stage lossless trim for every shooter in a merged match folder, from a confirmed beep and a stage time alone -- no shot detection involved. This is the batch path that feeds `compare export`: run it once after beeps and stage times are in, then point `compare export` at the same match folder.
+
+```bash
+uv run splitsmith match trims ~/splitsmith/matches/bromma-classifier-2026
+```
+
+`--shooter` and `--stage` (both repeatable) narrow the run; `--camera SLUG=VALUE` overrides one shooter's persisted `compare_camera` the same way `compare export`'s `--camera` does; `--dry-run` prints the plan and writes nothing; `--force` re-cuts trims that already exist (the default reports them as `already_exported` and leaves them alone).
+
+Output is a table of shooter/stage/camera/status, followed by a summary line. A stage missing a beep, a stage time, its source file, or resolved to an ambiguous camera is reported and skipped rather than aborting the run; the command exits non-zero only when zero trims were written and at least one stage still needs one. An already-exported or a deliberately skipped stage is not outstanding work, so re-running `match trims` against a match that's already fully exported exits 0 -- safe to chain as `splitsmith match trims <match> && splitsmith compare export <match> ...`.
+
 ## `compare` -- multi-shooter side-by-side FCPXML
 
 Render one FCPXML where each stage is a beep-aligned grid of N shooters' trims. Tile slots are alphabetical by label and stay fixed across every stage so a shooter who's missing a stage gets a black filler tile rather than reshuffling the grid. Audio comes from a single nominated shooter; everyone else is muted.
@@ -81,6 +93,11 @@ Render:
 ```bash
 uv run splitsmith compare export examples/compare-bromma-classifier-2026.yaml
 ```
+
+`--audio-from`, `--output` and `--camera SLUG=VALUE` override the manifest's
+`audio_from`, `output` and per-shooter `camera:` keys for that run. A relative
+`--output` resolves against the current directory; a relative `output:` inside
+the YAML stays anchored to the YAML's own directory.
 
 Smallest-fits grid: 1 shooter -> 1up; 2 -> 2up (horizontal or vertical); 3-4 -> 2x2; 5-9 -> 3x3; 10-16 -> 4x4. Empty slots in the chosen grid become black filler tiles for the duration of that stage. Sequence frame rate / size come from the audio-source shooter's first stage; mismatched cam rates / sizes get their own `<format>` resource and ride on FCP's edit-time conform.
 

@@ -7,7 +7,9 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from .. import camera_select
 from ..match_model import Match, is_match_folder
+from ..ui.match_exports import _slugify
 from . import emitter as emitter_mod
 from . import manifest as manifest_mod
 from . import project_loader
@@ -37,8 +39,8 @@ def export(
         "--audio-from",
         help=(
             "Slug or name of the shooter whose audio plays. Required when SOURCE "
-            "is a match folder; ignored when SOURCE is a manifest (the YAML's "
-            "audio_from key takes precedence)."
+            "is a match folder; overrides the manifest's audio_from key when "
+            "SOURCE is a manifest."
         ),
     ),
     output: Path | None = typer.Option(
@@ -47,7 +49,19 @@ def export(
         "-o",
         help=(
             "Where to write the FCPXML. Required when SOURCE is a match folder; "
-            "ignored when SOURCE is a manifest (the YAML's output key wins)."
+            "overrides the manifest's output key when SOURCE is a manifest. A "
+            "relative value resolves against the current directory."
+        ),
+    ),
+    camera: list[str] = typer.Option(
+        [],
+        "--camera",
+        help=(
+            "Camera selector for one shooter, as SLUG=VALUE (repeatable). "
+            "VALUE is a camera mount ('chest') or a role ('primary', "
+            "'secondary'). SLUG is the match shooter's slug, or a manifest "
+            "shooter's label. Overrides the manifest's camera: key and the "
+            "shooter's persisted compare_camera."
         ),
     ),
 ) -> None:
@@ -61,6 +75,11 @@ def export(
       2. A merged match folder (new in #320): every shooter under
          `<match>/shooters/` contributes a tile; --audio-from picks the
          unmuted one and --output names the FCPXML.
+
+    Precedence on the manifest path: a CLI flag beats the matching YAML
+    key. The flag is typed now and the YAML was written earlier, so the
+    flag is the more recent statement of intent -- overriding is the
+    contract, not an anomaly worth warning about.
     """
     if source.is_dir() and is_match_folder(source):
         if audio_from is None:
@@ -69,7 +88,12 @@ def export(
         if output is None:
             console.print("[red]Error:[/] --output is required when SOURCE is a match folder.")
             raise typer.Exit(code=2)
-        _export_from_match(source, audio_from=audio_from, output=output)
+        try:
+            cameras = camera_select.parse_camera_overrides(camera)
+        except ValueError as exc:
+            console.print(f"[red]Error:[/] {exc}")
+            raise typer.Exit(code=2) from exc
+        _export_from_match(source, audio_from=audio_from, output=output, cameras=cameras)
         return
 
     if source.is_dir():
@@ -81,7 +105,23 @@ def export(
 
     # Manifest path.
     manifest = manifest_mod.load_manifest(source)
-    shooters = [project_loader.load_shooter(s.project, s.label) for s in manifest.shooters]
+    try:
+        cameras = camera_select.parse_camera_overrides(camera)
+    except ValueError as exc:
+        console.print(f"[red]Error:[/] {exc}")
+        raise typer.Exit(code=2) from exc
+    manifest, cameras_by_label = _apply_manifest_overrides(
+        manifest, audio_from=audio_from, output=output, cameras=cameras
+    )
+
+    shooters: list[project_loader.CompareShooterBundle] = []
+    for s in manifest.shooters:
+        selected = cameras_by_label.get(s.label, s.camera)
+        try:
+            shooters.append(project_loader.load_shooter(s.project, s.label, camera=selected))
+        except camera_select.CameraResolutionError as exc:
+            console.print(f"[red]Error:[/] shooter {s.label!r}: {exc}")
+            raise typer.Exit(code=2) from exc
     emitter_mod.emit_compare_fcpxml(
         manifest=manifest,
         shooters=shooters,
@@ -90,7 +130,71 @@ def export(
     console.print(f"[green]Wrote[/] {manifest.output}")
 
 
-def _export_from_match(match_root: Path, *, audio_from: str, output: Path) -> None:
+def _apply_manifest_overrides(
+    manifest: manifest_mod.CompareManifest,
+    *,
+    audio_from: str | None,
+    output: Path | None,
+    cameras: dict[str, str],
+) -> tuple[manifest_mod.CompareManifest, dict[str, str]]:
+    """Fold the CLI flags into ``manifest``; flags win over YAML keys.
+
+    Returns the overridden manifest plus the per-shooter camera overrides
+    keyed by the manifest's own labels (``--camera`` names a shooter by
+    slug, and a manifest shooter's slug is its slugified label).
+
+    ``model_copy`` skips the model validators, so every override is
+    checked here first -- an ``--audio-from`` naming nobody would
+    otherwise reach the emitter as a bare ``ValueError``.
+    """
+    by_key = {_slugify(s.label): s.label for s in manifest.shooters}
+    cameras_by_label: dict[str, str] = {}
+    unknown: list[str] = []
+    for key, value in cameras.items():
+        label = by_key.get(_slugify(key))
+        if label is None:
+            unknown.append(key)
+        else:
+            cameras_by_label[label] = value
+    if unknown:
+        console.print(
+            f"[red]Error:[/] --camera names no shooter in this manifest: "
+            f"{', '.join(sorted(unknown))}. "
+            f"Labels available: {', '.join(sorted(by_key.values()))}"
+        )
+        raise typer.Exit(code=2)
+
+    updates: dict[str, object] = {}
+    if audio_from is not None:
+        labels = sorted(s.label for s in manifest.shooters)
+        if audio_from not in labels:
+            console.print(
+                f"[red]Error:[/] --audio-from={audio_from!r} matches no shooter label "
+                f"in this manifest. Labels available: {', '.join(labels)}"
+            )
+            raise typer.Exit(code=2)
+        updates["audio_from"] = audio_from
+    if output is not None:
+        updates["output"] = _resolve_output_override(output)
+    if updates:
+        manifest = manifest.model_copy(update=updates)
+    return manifest, cameras_by_label
+
+
+def _resolve_output_override(output: Path) -> Path:
+    """Anchor a ``--output`` flag to the current directory when relative.
+
+    The manifest's own ``output`` stays anchored to the manifest's parent
+    (``load_manifest``) so a YAML stays portable. A path typed at a prompt
+    has no such anchor -- it should land where the user is standing.
+    """
+    expanded = output.expanduser()
+    return expanded if expanded.is_absolute() else (Path.cwd() / expanded).resolve()
+
+
+def _export_from_match(
+    match_root: Path, *, audio_from: str, output: Path, cameras: dict[str, str] | None = None
+) -> None:
     """Render the compare FCPXML directly from a merged Match."""
     match = Match.load(match_root)
     if not match.shooters:
@@ -107,6 +211,17 @@ def _export_from_match(match_root: Path, *, audio_from: str, output: Path) -> No
         )
         raise typer.Exit(code=2)
 
+    # A --camera slug that names nobody would apply to nothing and look like
+    # it worked, so it stops the run the same way a malformed pair does.
+    cameras = cameras or {}
+    unknown = sorted(set(cameras) - set(match.shooters))
+    if unknown:
+        console.print(
+            f"[red]Error:[/] --camera names no shooter on this match: {', '.join(unknown)}. "
+            f"Slugs available: {', '.join(match.shooters)}"
+        )
+        raise typer.Exit(code=2)
+
     # Build the bundles. Each bundle's label is the shooter's display name
     # (Shooter.name), falling back to the slug. The audio_from in the synthesized
     # manifest must match one of these labels.
@@ -115,7 +230,13 @@ def _export_from_match(match_root: Path, *, audio_from: str, output: Path) -> No
     for slug in match.shooters:
         shooter = match.load_shooter(match_root, slug)
         label = shooter.name or slug
-        bundles.append(project_loader.load_shooter_from_match(match_root, slug, label))
+        try:
+            bundles.append(
+                project_loader.load_shooter_from_match(match_root, slug, label, camera=cameras.get(slug))
+            )
+        except camera_select.CameraResolutionError as exc:
+            console.print(f"[red]Error:[/] shooter {slug}: {exc}")
+            raise typer.Exit(code=2) from exc
         if slug == resolved_audio_slug:
             audio_label = label
 

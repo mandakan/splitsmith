@@ -6,11 +6,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import fcpxml_gen
+from .. import camera_select, fcpxml_gen
 from ..fcpxml_gen import VideoMetadata
-from ..match_model import Match, Shooter
+from ..match_model import Match
 from ..ui.match_exports import _slugify
-from ..ui.project import MatchProject
+from ..ui.project import MatchProject, StageVideo
 
 ProbeFn = Callable[[Path], VideoMetadata]
 
@@ -29,6 +29,11 @@ class CompareStageBundle:
     height: int
     frame_rate_num: int
     frame_rate_den: int
+    #: Mount of the camera that produced this tile, when tagged. Reporting only.
+    camera_mount: str | None = None
+    #: True when the requested camera was unavailable on this stage and the
+    #: primary stood in. Surfaced in the run summary and the FCPXML marker.
+    substituted: bool = False
 
     @property
     def metadata(self) -> VideoMetadata:
@@ -58,26 +63,76 @@ class CompareShooterBundle:
     stages_by_number: dict[int, CompareStageBundle] = field(default_factory=dict)
 
 
+def trim_path_for_video(
+    project: MatchProject,
+    project_root: Path,
+    stage_number: int,
+    stage_name: str,
+    video: StageVideo | None,
+) -> Path:
+    """Path the exporter writes for ``video`` on this stage.
+
+    Primaries land at ``stage<N>_<slug>_trimmed.mp4``; every other camera
+    at ``stage<N>_<slug>_cam_<video_id>_trimmed.mp4``. Mirrors
+    ``exports.export_stage``. ``video=None`` means the primary, same
+    convention as :func:`splitsmith.camera_select.resolve_camera`.
+    """
+    base = f"stage{stage_number}_{_slugify(stage_name)}"
+    exports = project.exports_path(project_root)
+    if video is None or video.role == "primary":
+        return exports / f"{base}_trimmed.mp4"
+    return exports / f"{base}_cam_{video.video_id}_trimmed.mp4"
+
+
 def trim_path_for_stage(
     project: MatchProject, project_root: Path, stage_number: int, stage_name: str
 ) -> Path:
     """Return the lossless-trim path the per-stage exporter would write.
 
     Mirrors :func:`splitsmith.ui.exports.export_audit_clip`'s naming:
-    ``<exports>/stage<N>_<slug>_trimmed.mp4``.
+    ``<exports>/stage<N>_<slug>_trimmed.mp4``. Thin wrapper over
+    :func:`trim_path_for_video` for callers that only have a stage.
     """
-    base = f"stage{stage_number}_{_slugify(stage_name)}"
-    return project.exports_path(project_root) / f"{base}_trimmed.mp4"
+    return trim_path_for_video(project, project_root, stage_number, stage_name, None)
 
 
 def audit_path_for_stage(project: MatchProject, project_root: Path, stage_number: int) -> Path:
     return project.audit_path(project_root) / f"stage{stage_number}.json"
 
 
+def _resolve_effective_camera(project: MatchProject, camera: str | None) -> str | None:
+    """Pick the selector this run uses and check it against the whole project.
+
+    A per-run value (manifest entry / CLI flag) beats the persisted
+    ``compare_camera``. Validation happens once here rather than per stage:
+    a selector that resolves nowhere is a typo, while one that merely
+    misses a stage is a gap the stage walk substitutes around.
+    """
+    effective = camera if camera is not None else project.compare_camera
+    camera_select.validate_camera([stage.videos for stage in project.stages if not stage.skipped], effective)
+    return effective
+
+
+def _choose_video(
+    stage_videos: list[StageVideo], primary: StageVideo | None, camera: str | None
+) -> tuple[StageVideo | None, bool]:
+    """Return the video that feeds this stage's tile and whether it stood in.
+
+    The requested cam can be absent or unbeeped on a single stage (battery
+    died, cam forgotten). The primary then stands in so the grid keeps a
+    live tile, and the substitution is recorded rather than silently applied.
+    """
+    chosen = camera_select.resolve_camera(stage_videos, camera)
+    if chosen is None or chosen.beep_time is None:
+        return primary, camera is not None
+    return chosen, False
+
+
 def load_shooter(
     project_root: Path,
     label: str,
     *,
+    camera: str | None = None,
     probe: ProbeFn | None = None,
 ) -> CompareShooterBundle:
     """Open ``project_root`` and build per-stage bundles for ``label``.
@@ -87,6 +142,12 @@ def load_shooter(
       - there is no primary video, or the primary has no ``beep_time``;
       - the lossless trim is not on disk.
 
+    ``camera`` selects which of the shooter's cameras feeds the tiles;
+    ``None`` falls back to the project's persisted ``compare_camera``,
+    then the primary. Raises
+    :class:`splitsmith.camera_select.CameraResolutionError` when the
+    selector resolves on no stage at all.
+
     ``probe`` defaults to :func:`splitsmith.fcpxml_gen.probe_video`;
     pass a stub in tests to avoid shelling out to ffprobe.
     """
@@ -94,14 +155,15 @@ def load_shooter(
         probe = fcpxml_gen.probe_video
     project = MatchProject.load(project_root)
     pre_buffer = project.trim_pre_buffer_seconds
+    effective_camera = _resolve_effective_camera(project, camera)
     bundles: dict[int, CompareStageBundle] = {}
     for stage in project.stages:
         if stage.skipped:
             continue
-        primary = stage.primary()
-        if primary is None or primary.beep_time is None:
+        chosen, substituted = _choose_video(stage.videos, stage.primary(), effective_camera)
+        if chosen is None or chosen.beep_time is None:
             continue
-        trim = trim_path_for_stage(project, project_root, stage.stage_number, stage.stage_name)
+        trim = trim_path_for_video(project, project_root, stage.stage_number, stage.stage_name, chosen)
         if not trim.exists():
             continue
         meta = probe(trim)
@@ -110,12 +172,14 @@ def load_shooter(
             stage_name=stage.stage_name,
             trim_path=trim,
             audit_path=audit_path_for_stage(project, project_root, stage.stage_number),
-            beep_offset_in_clip=min(pre_buffer, primary.beep_time),
+            beep_offset_in_clip=min(pre_buffer, chosen.beep_time),
             duration_seconds=meta.duration_seconds,
             width=meta.width,
             height=meta.height,
             frame_rate_num=meta.frame_rate_num,
             frame_rate_den=meta.frame_rate_den,
+            camera_mount=chosen.camera_mount,
+            substituted=substituted,
         )
     return CompareShooterBundle(
         label=label,
@@ -125,25 +189,12 @@ def load_shooter(
     )
 
 
-def _trim_path_for_shooter_stage(
-    shooter: Shooter,
-    shooter_root: Path,
-    stage_number: int,
-    stage_name: str,
-) -> Path:
-    """Same naming as :func:`trim_path_for_stage` but rooted at a shooter dir."""
-    base = f"stage{stage_number}_{_slugify(stage_name)}"
-    exports = Path(shooter.exports_dir).expanduser() if shooter.exports_dir else shooter_root / "exports"
-    if not exports.is_absolute():
-        exports = shooter_root / exports
-    return exports / f"{base}_trimmed.mp4"
-
-
 def load_shooter_from_match(
     match_root: Path,
     slug: str,
     label: str,
     *,
+    camera: str | None = None,
     probe: ProbeFn | None = None,
 ) -> CompareShooterBundle:
     """Build a :class:`CompareShooterBundle` from one shooter inside a merged Match.
@@ -152,25 +203,32 @@ def load_shooter_from_match(
     stage data (time + videos) comes from the shooter. Same skip rules
     as :func:`load_shooter`: a stage is omitted when it's marked skipped,
     has no primary video with a beep time, or its lossless trim is
-    missing from the shooter's exports dir.
+    missing from the shooter's exports dir. ``camera`` selects the
+    contributing camera exactly as in :func:`load_shooter`.
     """
     if probe is None:
         probe = fcpxml_gen.probe_video
     match = Match.load(match_root)
-    shooter = match.load_shooter(match_root, slug)
     shooter_root = Match.shooter_root(match_root, slug)
-    # Stage name lookup from the match-level definitions.
+    # Per-stage data comes from project.json: it is authoritative for
+    # everything the server writes (beeps, roles, buffers). shooter.json is
+    # a merge-time snapshot that nothing keeps in sync, so reading it drops
+    # any beep confirmed after the merge. Stage *names* still come from the
+    # match, which owns the shared stage definitions.
+    project = MatchProject.load(shooter_root)
     stage_names: dict[int, str] = {s.stage_number: s.stage_name for s in match.stages}
+    pre_buffer = project.trim_pre_buffer_seconds
+    effective_camera = _resolve_effective_camera(project, camera)
 
     bundles: dict[int, CompareStageBundle] = {}
-    for stage in shooter.stages:
+    for stage in project.stages:
         if stage.skipped:
             continue
-        primary = next((v for v in stage.videos if v.role == "primary"), None)
-        if primary is None or primary.beep_time is None:
+        chosen, substituted = _choose_video(stage.videos, stage.primary(), effective_camera)
+        if chosen is None or chosen.beep_time is None:
             continue
-        stage_name = stage_names.get(stage.stage_number, f"stage{stage.stage_number}")
-        trim = _trim_path_for_shooter_stage(shooter, shooter_root, stage.stage_number, stage_name)
+        stage_name = stage_names.get(stage.stage_number, stage.stage_name)
+        trim = trim_path_for_video(project, shooter_root, stage.stage_number, stage_name, chosen)
         if not trim.exists():
             continue
         meta = probe(trim)
@@ -179,12 +237,14 @@ def load_shooter_from_match(
             stage_name=stage_name,
             trim_path=trim,
             audit_path=shooter_root / "audit" / f"stage{stage.stage_number}.json",
-            beep_offset_in_clip=min(shooter.trim_pre_buffer_seconds, primary.beep_time),
+            beep_offset_in_clip=min(pre_buffer, chosen.beep_time),
             duration_seconds=meta.duration_seconds,
             width=meta.width,
             height=meta.height,
             frame_rate_num=meta.frame_rate_num,
             frame_rate_den=meta.frame_rate_den,
+            camera_mount=chosen.camera_mount,
+            substituted=substituted,
         )
 
     return CompareShooterBundle(

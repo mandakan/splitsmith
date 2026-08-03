@@ -146,6 +146,24 @@ def test_top_level_must_be_mapping(tmp_path: Path) -> None:
         load_manifest(src)
 
 
+def test_manifest_accepts_camera_per_shooter(tmp_path: Path) -> None:
+    path = tmp_path / "m.yaml"
+    path.write_text(
+        "output: out.fcpxml\n"
+        "audio_from: Mathias\n"
+        "shooters:\n"
+        "  - project: ./mathias\n"
+        "    label: Mathias\n"
+        "    camera: chest\n"
+        "  - project: ./anders\n"
+        "    label: Anders\n",
+        encoding="utf-8",
+    )
+    manifest = load_manifest(path)
+    assert manifest.shooters[0].camera == "chest"
+    assert manifest.shooters[1].camera is None
+
+
 def test_validate_directly_skips_path_resolution() -> None:
     """``CompareManifest.model_validate`` works without going through
     :func:`load_manifest`; relative paths simply stay relative."""

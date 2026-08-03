@@ -31,6 +31,7 @@ import {
   FileText,
   Film,
   Loader2,
+  Scissors,
 } from "lucide-react";
 import {
   useCallback,
@@ -56,7 +57,7 @@ import {
 import { useDeploymentMode } from "@/lib/features";
 import { cn } from "@/lib/utils";
 
-type OutputMode = "single" | "compare";
+type OutputMode = "single" | "compare" | "trims";
 type PaddingPreset = "full" | "action" | "highlight" | "custom";
 
 const PADDING_PRESETS: Record<
@@ -133,6 +134,10 @@ function ExportInner({ slug }: { slug: string }) {
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [result, setResult] = useState<MatchExportResult | null>(null);
+  // Trims-only queues one job per stage instead of a single bundle job,
+  // so it reports "N queued" here and hands progress to the jobs rail.
+  const [queueing, setQueueing] = useState<boolean>(false);
+  const [queuedNote, setQueuedNote] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     try {
@@ -180,18 +185,42 @@ function ExportInner({ slug }: { slug: string }) {
     if (project && !projectName) setProjectName(project.name);
   }, [project, projectName]);
 
+  const trimsOnly = mode === "trims";
+
   // Stage eligibility
   const stages: StageExportStatus[] = overview?.stages ?? [];
-  const auditedStages = useMemo(
-    () => stages.filter((s) => !s.skipped && s.ready_to_export),
-    [stages],
+  // A bare trim needs no audit: the server's per-stage export gate is a
+  // primary with a beep plus a real stage duration (scoreboard or manual),
+  // and that is exactly what the lossless trim is cut from. Holding
+  // trims-only to ``ready_to_export`` would gate the mode on the shot
+  // detection it exists to skip.
+  const trimReadyNumbers = useMemo(() => {
+    const ready = new Set<number>();
+    for (const s of project?.stages ?? []) {
+      if (s.skipped) continue;
+      const primary = s.videos.find((v) => v.role === "primary");
+      if (!primary || primary.beep_time === null) continue;
+      if (s.time_seconds <= 0) continue;
+      if (s.scorecard_updated_at === null && !s.time_seconds_manual) continue;
+      ready.add(s.stage_number);
+    }
+    return ready;
+  }, [project]);
+  const readyStages = useMemo(
+    () =>
+      stages.filter(
+        (s) =>
+          !s.skipped &&
+          (trimsOnly ? trimReadyNumbers.has(s.stage_number) : s.ready_to_export),
+      ),
+    [stages, trimsOnly, trimReadyNumbers],
   );
   const eligibleNumbers = useMemo(
     () =>
-      auditedStages
+      readyStages
         .filter((s) => s.source_reachable !== false)
         .map((s) => s.stage_number),
-    [auditedStages],
+    [readyStages],
   );
   const eligibleSet = useMemo(
     () => new Set(eligibleNumbers),
@@ -199,10 +228,10 @@ function ExportInner({ slug }: { slug: string }) {
   );
   const sourceMissingNumbers = useMemo(
     () =>
-      auditedStages
+      readyStages
         .filter((s) => s.source_reachable === false)
         .map((s) => s.stage_number),
-    [auditedStages],
+    [readyStages],
   );
   const sourceMissingSet = useMemo(
     () => new Set(sourceMissingNumbers),
@@ -242,6 +271,43 @@ function ExportInner({ slug }: { slug: string }) {
     () => stages.map((s) => s.stage_number).filter((n) => selection.has(n)),
     [stages, selection],
   );
+
+  // Switching mode changes which stages are exportable, so drop the
+  // selection and let the pre-select effect above refill it from the new
+  // eligible set rather than leaving the previous mode's picks behind.
+  const selectMode = useCallback((next: OutputMode) => {
+    setMode(next);
+    setSelection(new Set());
+    setResult(null);
+    setQueuedNote(null);
+  }, []);
+
+  // Selectors the server's ``camera_select.validate_camera`` will accept:
+  // mounts tagged on this shooter's videos, plus whichever roles are
+  // actually present. Offering anything else would just earn a 400.
+  const cameraSelectors = useMemo(() => {
+    const found = new Set<string>();
+    for (const stage of project?.stages ?? []) {
+      if (stage.skipped) continue;
+      for (const v of stage.videos) {
+        if (v.role === "ignored") continue;
+        if (v.camera_mount) found.add(v.camera_mount);
+        if (v.role === "primary" || v.role === "secondary") found.add(v.role);
+      }
+    }
+    return [...found].sort();
+  }, [project]);
+
+  async function changeCamera(value: string) {
+    const next = value || null;
+    if (next === (project?.compare_camera ?? null)) return;
+    setError(null);
+    try {
+      setProject(await api.setCompareCamera(slug, next));
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
 
   // Hosted mode has no "Reveal in Finder": the worker that produced the
   // bundle ran in a separate container. Surface the finished match FCPXML
@@ -303,9 +369,14 @@ function ExportInner({ slug }: { slug: string }) {
   const estimate = useMemo(() => {
     const selectedCount = orderedSelection.length;
     let duration = 0;
+    // Trims-only doesn't expose the padding controls; the per-stage
+    // export job pads with the project's own trim buffers instead.
+    const head = trimsOnly ? (project?.trim_pre_buffer_seconds ?? 0) : headPad;
+    const tail = trimsOnly ? (project?.trim_post_buffer_seconds ?? 0) : tailPad;
     for (const n of orderedSelection) {
-      duration += (stageTimeByNumber.get(n) ?? 0) + headPad + tailPad;
+      duration += (stageTimeByNumber.get(n) ?? 0) + head + tail;
     }
+    if (trimsOnly) return { duration };
     if (transitionKind !== "none" && selectedCount > 1) {
       duration += transitionDurationSeconds * (selectedCount - 1);
     }
@@ -316,6 +387,8 @@ function ExportInner({ slug }: { slug: string }) {
   }, [
     orderedSelection,
     stageTimeByNumber,
+    trimsOnly,
+    project,
     headPad,
     tailPad,
     transitionKind,
@@ -324,14 +397,52 @@ function ExportInner({ slug }: { slug: string }) {
     titleDurationSeconds,
   ]);
 
-  const busy = job?.status === "pending" || job?.status === "running";
+  const busy =
+    job?.status === "pending" || job?.status === "running" || queueing;
   const canExport =
-    !busy && mode === "single" && orderedSelection.length > 0 && !!project;
+    !busy && mode !== "compare" && orderedSelection.length > 0 && !!project;
+
+  /** Queue one trim-only job per selected stage through the per-stage
+   *  export endpoint. The write flags are literals rather than the
+   *  section state: the overlay / format controls are hidden in this
+   *  mode, and a stale toggle must never turn a bare trim back into a
+   *  full bundle. Progress lives in the jobs rail from here on. */
+  async function submitTrims() {
+    setQueueing(true);
+    let queued = 0;
+    try {
+      for (const stageNumber of orderedSelection) {
+        await api.exportStage(slug, stageNumber, {
+          write_trim: true,
+          write_csv: false,
+          write_fcpxml: false,
+          write_report: false,
+          write_overlay: false,
+        });
+        queued += 1;
+      }
+      setQueuedNote(
+        `Queued ${queued} trim ${queued === 1 ? "job" : "jobs"}. Track progress in the jobs rail.`,
+      );
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+      if (queued > 0) {
+        setQueuedNote(`Queued ${queued} of ${orderedSelection.length} trim jobs.`);
+      }
+    } finally {
+      setQueueing(false);
+    }
+  }
 
   async function submitExport() {
     if (!canExport || !project) return;
     setError(null);
     setResult(null);
+    setQueuedNote(null);
+    if (trimsOnly) {
+      await submitTrims();
+      return;
+    }
     try {
       const submitted = await api.exportMatch(slug, {
         stage_numbers: orderedSelection,
@@ -388,10 +499,9 @@ function ExportInner({ slug }: { slug: string }) {
           Export
         </h1>
         <p className="max-w-[40rem] text-sm text-muted">
-          Pick stages, trim, transitions, and overlays. Splitsmith writes
-          a final-cut bundle (FCPXML + CSV + text report) to the
-          project's exports folder. Open the FCPXML in Final Cut to
-          finish the cut.
+          {trimsOnly
+            ? "Pick stages and Splitsmith cuts one lossless trim each -- beep to last shot, no shot detection needed. These are what the multi-shooter compare grid stacks."
+            : "Pick stages, trim, transitions, and overlays. Splitsmith writes a final-cut bundle (FCPXML + CSV + text report) to the project's exports folder. Open the FCPXML in Final Cut to finish the cut."}
         </p>
       </div>
 
@@ -405,11 +515,11 @@ function ExportInner({ slug }: { slug: string }) {
         {/* Left column: sections */}
         <div className="flex min-w-0 flex-col gap-5">
           {/* Section 1: Output mode */}
-          <Section number={1} title="Output mode" help="Single-shooter timeline today; compare grid arrives in #328.">
+          <Section number={1} title="Output mode" help="Single-shooter timeline or bare trims; compare grid arrives in #328.">
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <ModeOption
                 selected={mode === "single"}
-                onClick={() => setMode("single")}
+                onClick={() => selectMode("single")}
                 title="Single-shooter timeline"
                 body="One FCPXML with selected stages back-to-back on the spine."
                 icon={<Film className="size-4" />}
@@ -417,13 +527,38 @@ function ExportInner({ slug }: { slug: string }) {
               <ModeOption
                 disabled
                 selected={mode === "compare"}
-                onClick={() => setMode("compare")}
+                onClick={() => selectMode("compare")}
                 title="Multi-shooter compare grid"
                 body="Side-by-side grid per stage, audio from one shooter. Arrives with #328."
                 icon={<Film className="size-4" />}
                 badge="#328"
               />
+              <ModeOption
+                selected={trimsOnly}
+                onClick={() => selectMode("trims")}
+                title="Trims only"
+                body="Lossless per-stage trims, no shot detection. Feeds the compare grid."
+                icon={<Scissors className="size-4" />}
+              />
             </div>
+            {trimsOnly && (
+              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <SelectField
+                  label="Camera for the grid"
+                  value={project?.compare_camera ?? ""}
+                  onChange={(v) => void changeCamera(v)}
+                  options={[
+                    { value: "", label: "Primary (default)" },
+                    ...cameraSelectors.map((s) => ({ value: s, label: s })),
+                  ]}
+                />
+                <p className="self-end text-[0.75rem] leading-relaxed text-muted">
+                  Which of this shooter's cameras the compare grid uses.
+                  Saved on the shooter; the trims themselves cover every
+                  camera on the stage.
+                </p>
+              </div>
+            )}
           </Section>
 
           {/* Section 2: Stages */}
@@ -433,8 +568,9 @@ function ExportInner({ slug }: { slug: string }) {
             help={stageSectionHelp(
               eligibleNumbers.length,
               sourceMissingNumbers.length,
-              auditedStages.length,
+              readyStages.length,
               stages.length,
+              trimsOnly,
             )}
           >
             {sourceMissingNumbers.length > 0 && (
@@ -448,7 +584,7 @@ function ExportInner({ slug }: { slug: string }) {
                     Source offline
                   </div>
                   <div className="mt-0.5 text-muted">
-                    {sourceMissingNumbers.length} audited{" "}
+                    {sourceMissingNumbers.length} otherwise-ready{" "}
                     {sourceMissingNumbers.length === 1 ? "stage" : "stages"} can't
                     export -- the original video files aren't reachable. Mount
                     the source drive (or use Relink) and reload the page.
@@ -464,12 +600,18 @@ function ExportInner({ slug }: { slug: string }) {
                   selected={selection.has(s.stage_number)}
                   eligible={eligibleSet.has(s.stage_number)}
                   sourceMissing={sourceMissingSet.has(s.stage_number)}
+                  trimsOnly={trimsOnly}
                   onToggle={() => toggleStage(s.stage_number)}
                 />
               ))}
             </div>
           </Section>
 
+          {/* Sections 3-5 shape a cut: padding, transitions/titles and the
+              burned-in overlay. None of them apply to a bare trim, so
+              trims-only hides them and the Output section renumbers. */}
+          {!trimsOnly && (
+            <>
           {/* Section 3: Trim padding */}
           <Section number={3} title="Trim padding" help="Padding around each stage's beep and last shot.">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -594,9 +736,30 @@ function ExportInner({ slug }: { slug: string }) {
               </div>
             )}
           </Section>
+            </>
+          )}
 
-          {/* Section 6: Output */}
-          <Section number={6} title="Output" help="Bundle written to the project's exports folder.">
+          {/* Section 6 (3 in trims-only): Output */}
+          <Section
+            number={trimsOnly ? 3 : 6}
+            title="Output"
+            help={
+              trimsOnly
+                ? "One lossless trim per stage, written to the project's exports folder."
+                : "Bundle written to the project's exports folder."
+            }
+          >
+            {trimsOnly ? (
+              <FormatRow
+                icon={<Scissors className="size-4" />}
+                name="Lossless trim"
+                suffix=".mp4"
+                detail="Stream-copy cut per stage, beep-aligned. No re-encode, no detection."
+                selected
+                locked
+              />
+            ) : (
+              <>
             <FormatRow
               icon={<Film className="size-4" />}
               name="FCPXML"
@@ -637,6 +800,8 @@ function ExportInner({ slug }: { slug: string }) {
               selected
               locked
             />
+              </>
+            )}
             <div className="mt-4">
               <label className="mb-1.5 block font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-muted">
                 Destination
@@ -655,15 +820,19 @@ function ExportInner({ slug }: { slug: string }) {
                   </button>
                 )}
               </div>
-              <p className="mt-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
-                Bundle name:{" "}
-                <input
-                  type="text"
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  className="rounded border border-rule bg-surface-3 px-2 py-0.5 font-mono text-[0.6875rem] text-ink-2 outline-none focus:border-led"
-                />
-              </p>
+              {/* The bundle name only names the match FCPXML/CSV/report;
+                  trim filenames come from the stage. */}
+              {!trimsOnly && (
+                <p className="mt-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
+                  Bundle name:{" "}
+                  <input
+                    type="text"
+                    value={projectName}
+                    onChange={(e) => setProjectName(e.target.value)}
+                    className="rounded border border-rule bg-surface-3 px-2 py-0.5 font-mono text-[0.6875rem] text-ink-2 outline-none focus:border-led"
+                  />
+                </p>
+              )}
             </div>
           </Section>
         </div>
@@ -673,7 +842,7 @@ function ExportInner({ slug }: { slug: string }) {
           <div className="overflow-hidden rounded-2xl border border-rule-strong bg-gradient-to-b from-surface to-surface-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
             <div className="border-b border-rule px-5 py-3.5">
               <div className="font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
-                Bundle summary
+                {trimsOnly ? "Trim summary" : "Bundle summary"}
               </div>
               <div className="mt-1 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
                 Pre-flight check
@@ -684,26 +853,35 @@ function ExportInner({ slug }: { slug: string }) {
                 label="Stages"
                 value={`${orderedSelection.length} / ${eligibleNumbers.length}`}
               />
-              <SummaryStat
-                label="Padding"
-                value={`${headPad.toFixed(1)}s / ${tailPad.toFixed(1)}s`}
-              />
-              <SummaryStat
-                label="Transitions"
-                value={
-                  transitionKind === "none"
-                    ? "hard cut"
-                    : `${transitionKind} ${transitionDurationSeconds.toFixed(1)}s`
-                }
-              />
-              <SummaryStat
-                label="Titles"
-                value={titleKind === "none" ? "off" : titleKind}
-              />
-              <SummaryStat
-                label="Overlay"
-                value={includeOverlay ? "on" : "off"}
-              />
+              {trimsOnly ? (
+                <SummaryStat
+                  label="Grid camera"
+                  value={project?.compare_camera ?? "primary"}
+                />
+              ) : (
+                <>
+                  <SummaryStat
+                    label="Padding"
+                    value={`${headPad.toFixed(1)}s / ${tailPad.toFixed(1)}s`}
+                  />
+                  <SummaryStat
+                    label="Transitions"
+                    value={
+                      transitionKind === "none"
+                        ? "hard cut"
+                        : `${transitionKind} ${transitionDurationSeconds.toFixed(1)}s`
+                    }
+                  />
+                  <SummaryStat
+                    label="Titles"
+                    value={titleKind === "none" ? "off" : titleKind}
+                  />
+                  <SummaryStat
+                    label="Overlay"
+                    value={includeOverlay ? "on" : "off"}
+                  />
+                </>
+              )}
               <SummaryStat
                 label="~ Duration"
                 value={formatDuration(estimate.duration)}
@@ -712,15 +890,25 @@ function ExportInner({ slug }: { slug: string }) {
             <div className="border-t border-rule bg-surface px-5 py-3 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
               Will write:
               <div className="mt-1.5 flex flex-col gap-0.5 text-ink-2 normal-case tracking-normal">
-                <span className="truncate">
-                  {projectName || project?.name}.fcpxml
-                </span>
-                <span className="truncate text-muted">
-                  {projectName || project?.name}.csv
-                </span>
-                <span className="truncate text-muted">
-                  {projectName || project?.name}.txt
-                </span>
+                {trimsOnly ? (
+                  <span className="truncate">
+                    {orderedSelection.length} lossless{" "}
+                    {orderedSelection.length === 1 ? "trim" : "trims"} into
+                    exports/
+                  </span>
+                ) : (
+                  <>
+                    <span className="truncate">
+                      {projectName || project?.name}.fcpxml
+                    </span>
+                    <span className="truncate text-muted">
+                      {projectName || project?.name}.csv
+                    </span>
+                    <span className="truncate text-muted">
+                      {projectName || project?.name}.txt
+                    </span>
+                  </>
+                )}
               </div>
             </div>
             <div className="border-t border-rule px-5 py-4">
@@ -736,12 +924,27 @@ function ExportInner({ slug }: { slug: string }) {
                   <Check className="size-3.5" strokeWidth={3} />
                 )}
                 <span className="font-display uppercase tracking-[0.08em]">
-                  {busy ? "Exporting..." : "Export bundle"}
+                  {busy
+                    ? trimsOnly
+                      ? "Queueing..."
+                      : "Exporting..."
+                    : trimsOnly
+                      ? "Export trims"
+                      : "Export bundle"}
                 </span>
               </Button>
               {busy && job?.message && (
                 <div className="mt-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
                   {job.message}
+                </div>
+              )}
+              {queuedNote && (
+                <div className="mt-3 rounded-lg border border-done/40 bg-done/10 px-3 py-2 text-[0.8125rem] text-ink-2">
+                  <span className="inline-flex items-center gap-1.5 font-display font-bold uppercase tracking-[0.08em] text-done">
+                    <CheckCircle2 className="size-3.5" strokeWidth={2.5} />{" "}
+                    Queued
+                  </span>
+                  <div className="mt-1 text-muted">{queuedNote}</div>
                 </div>
               )}
               {result && (
@@ -988,12 +1191,14 @@ function StageChip({
   selected,
   eligible,
   sourceMissing,
+  trimsOnly,
   onToggle,
 }: {
   stage: StageExportStatus;
   selected: boolean;
   eligible: boolean;
   sourceMissing: boolean;
+  trimsOnly: boolean;
   onToggle: () => void;
 }) {
   let title: string;
@@ -1003,6 +1208,8 @@ function StageChip({
     title = "Source video offline -- reconnect the drive and reload.";
   } else if (stage.skipped) {
     title = "Stage skipped.";
+  } else if (trimsOnly) {
+    title = "Stage needs a beep and a stage time before it can be trimmed.";
   } else {
     title = "Stage not audited yet.";
   }
@@ -1046,19 +1253,24 @@ function StageChip({
 function stageSectionHelp(
   eligibleCount: number,
   sourceMissingCount: number,
-  auditedCount: number,
+  readyCount: number,
   totalCount: number,
+  trimsOnly: boolean,
 ): string {
   if (eligibleCount > 0) {
     return `${eligibleCount} of ${totalCount} stages exportable.`;
   }
-  if (sourceMissingCount > 0 && auditedCount === sourceMissingCount) {
-    return "Audited, but every source video is offline. Mount the source drive and reload.";
+  if (sourceMissingCount > 0 && readyCount === sourceMissingCount) {
+    return "Ready, but every source video is offline. Mount the source drive and reload.";
   }
-  if (auditedCount === 0) {
-    return "No stage is exportable yet. Finish auditing a stage first.";
+  if (readyCount === 0) {
+    return trimsOnly
+      ? "No stage is trimmable yet. A stage needs a confirmed beep and a stage time."
+      : "No stage is exportable yet. Finish auditing a stage first.";
   }
-  return "No stage is exportable. Finish auditing or reconnect missing sources.";
+  return trimsOnly
+    ? "No stage is trimmable. Reconnect the missing sources."
+    : "No stage is exportable. Finish auditing or reconnect missing sources.";
 }
 
 function NumInput({

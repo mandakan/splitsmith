@@ -439,6 +439,34 @@ class StageStatus(StrEnum):
     skipped = "skipped"
 
 
+#: ``detection`` value marking an audit document that exists only because a
+#: beep was confirmed -- no detector ever ran. Readers must treat it as
+#: equivalent to no audit document at all.
+STUB_AUDIT_DETECTION = "none"
+
+
+def is_stub_audit(payload: dict[str, Any]) -> bool:
+    """True when this audit document is a beep-confirm placeholder.
+
+    Seeded by the beep-review endpoint so status surfaces and the lab have
+    a concrete document to read instead of inferring from absence. A stub
+    is the sentinel *plus* the absence of any real audit content -- both
+    ``shots`` and ``audit_events`` must be empty. The marker alone is not
+    enough: several writers (the shot-detect job, the Audit page's save,
+    the MCP detect tool) fold real results into whatever doc already
+    exists rather than replacing it, and none of them is guaranteed to
+    strip the sentinel afterward. Requiring "no real content" as well
+    means a document that has actually been worked on -- shots detected,
+    or a save event logged -- can never read back as a stub, regardless
+    of whether the marker was cleared.
+    """
+    return (
+        payload.get("detection") == STUB_AUDIT_DETECTION
+        and not payload.get("shots")
+        and not payload.get("audit_events")
+    )
+
+
 def stage_audit_status(
     stage: StageEntry,
     audit_dir: Path,
@@ -496,6 +524,9 @@ def stage_audit_status(
             # Corrupt audit JSON -- treat as ready so the operator can
             # re-run detection. The Audit page surfaces the read error.
             return StageStatus.ready
+    if is_stub_audit(payload):
+        # Beep-confirm placeholder: same meaning as no audit document.
+        return StageStatus.ready
     events = payload.get("audit_events") or []
     saved = any(isinstance(e, dict) and e.get("kind") == "save" for e in events)
     if saved:
@@ -828,6 +859,12 @@ class MatchProject(BaseModel):
     # a specific encoder name (e.g. ``"libx264"``) to pin the choice; the
     # next trim job uses the new value.
     trim_audit_encoder: str = "auto"
+    #: Which camera this shooter contributes to a multi-shooter compare grid
+    #: and to trim-only runs. Resolved per stage by ``camera_select``: a
+    #: ``camera_mount`` value first, then the ``primary`` / ``secondary``
+    #: role. ``None`` means the primary. CLI flags and manifest entries
+    #: override this per run without persisting.
+    compare_camera: str | None = None
     # Layered automation overrides (issue #215). Each field is
     # optional; ``None`` means "inherit from the global default."
     # Resolved at call time via :func:`splitsmith.automation.resolve_automation`

@@ -42,6 +42,7 @@ def _stage(
     height: int = 1080,
     fps_num: int = 30,
     fps_den: int = 1,
+    substituted: bool = False,
 ) -> CompareStageBundle:
     trim_path.parent.mkdir(parents=True, exist_ok=True)
     if not trim_path.exists():
@@ -57,6 +58,7 @@ def _stage(
         height=height,
         frame_rate_num=fps_num,
         frame_rate_den=fps_den,
+        substituted=substituted,
     )
 
 
@@ -88,6 +90,50 @@ def _manifest(
         layout_2up=layout_2up,
         shooters=[CompareShooter(project=Path(f"/p/{lab}"), label=lab) for lab in labels],
     )
+
+
+def _emit_with_bundles(tmp_path: Path, *, substitutions: dict[str, bool]) -> ET.Element:
+    """Emit a two-shooter (Anders, Mathias), one-stage FCPXML and return its root.
+
+    ``substitutions`` maps a label to ``substituted`` for that shooter's
+    stage 1 bundle -- everyone else defaults to ``substituted=False``.
+    """
+    labels = ["Anders", "Mathias"]
+    bundles = []
+    for label in labels:
+        root = tmp_path / label.lower()
+        bundles.append(
+            _bundle(
+                label,
+                [
+                    _stage(
+                        stage_number=1,
+                        stage_name="Skipper",
+                        trim_path=root / "exports" / "1.mp4",
+                        substituted=substitutions.get(label, False),
+                    )
+                ],
+                project_root=root,
+            )
+        )
+    out = tmp_path / "out.fcpxml"
+    m = _manifest(out, "Mathias", labels)
+    emit_compare_fcpxml(manifest=m, shooters=bundles, output_path=out, runner=_stub_ffmpeg_runner())
+    return ET.fromstring(out.read_bytes())
+
+
+def test_stage_marker_names_camera_substitutions(tmp_path: Path) -> None:
+    """A substituted tile is visible on the timeline, not just in a
+    terminal the user has already closed."""
+    xml = _emit_with_bundles(tmp_path, substitutions={"Mathias": True})
+    markers = [m.get("value") for m in xml.iter("marker")]
+    assert any("Mathias: primary" in (m or "") for m in markers)
+
+
+def test_stage_marker_unchanged_without_substitutions(tmp_path: Path) -> None:
+    xml = _emit_with_bundles(tmp_path, substitutions={})
+    markers = [m.get("value") for m in xml.iter("marker")]
+    assert all("primary" not in (m or "") for m in markers)
 
 
 def test_two_shooters_minimal_structure(tmp_path: Path) -> None:

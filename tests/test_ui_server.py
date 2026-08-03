@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 import threading
 from pathlib import Path
@@ -2858,6 +2859,81 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
     assert proj_after["stages"][0]["videos"][0]["processed"]["shot_detect"] is True
 
 
+def test_shot_detect_clears_beep_confirm_stub_marker(tmp_path: Path, monkeypatch) -> None:
+    """A beep-confirm run seeds ``{"shots": [], "detection": "none"}`` and
+    shot-detect merges its real results into that same doc rather than
+    replacing it (issue: lost optimistic-lock races must re-merge, not
+    clobber). If the stub sentinel survives the merge,
+    ``stage_audit_status`` reads the now-real, shot_detect_run-logged doc
+    as "no audit yet" forever -- the opposite failure mode from the one
+    stubs exist to prevent."""
+    import json as _json
+
+    import numpy as np
+    import soundfile as sf
+
+    from splitsmith.ui.project import StageStatus, is_stub_audit, stage_audit_status
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
+
+    # Seed the beep-confirm stub exactly as set_beep_reviewed does.
+    audit_file = _shooter_root / "audit" / "stage1.json"
+    audit_file.parent.mkdir(parents=True, exist_ok=True)
+    audit_file.write_text(_json.dumps({"shots": [], "detection": "none"}), encoding="utf-8")
+
+    audio_dir = _shooter_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav = audio_dir / "stage1_audit.wav"
+    sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
+    trimmed_dir = _shooter_root / "trimmed"
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00")
+
+    from splitsmith import ensemble as ensemble_module
+    from splitsmith.ui import audio as audio_helpers
+    from splitsmith.ui import server as server_module
+
+    class FakeAudit:
+        audio_path = wav
+        beep_in_clip = 5.0
+        trimmed = True
+
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    fake_result = _fake_ensemble_result(
+        [{"time": 5.5, "confidence": 0.8, "ensemble_score": 3.0, "kept": True}],
+        consensus=2,
+    )
+    monkeypatch.setattr(ensemble_module, "detect_shots_ensemble", lambda *a, **kw: fake_result)
+
+    resp = client.post("/api/shooters/me/stages/1/shot-detect")
+    assert resp.status_code == 200
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+
+    saved = _json.loads(audit_file.read_text(encoding="utf-8"))
+    assert saved["shots"], "real detection should have seeded shots"
+    assert not is_stub_audit(saved)
+    # The stub had none of the base fields (unknown at beep-confirm time);
+    # the merge must backfill them so downstream readers keying on
+    # beep_time (e.g. the compare-timeline exporter) don't silently drop
+    # this stage's shots.
+    assert saved["beep_time"] == pytest.approx(5.0)
+
+    project_after = MatchProject.load(_shooter_root)
+    status = stage_audit_status(project_after.stages[0], project_after.audit_path(_shooter_root))
+    assert status == StageStatus.in_progress
+
+
 def test_shot_detect_job_records_phase_timings(tmp_path: Path, monkeypatch) -> None:
     """The instrumented ``shot_detect`` body opens a phase per natural
     boundary; the backend persists ``timer.build()`` onto the job so the
@@ -3417,6 +3493,56 @@ def test_camera_model_patch_rejects_half_filled_pair(tmp_path: Path) -> None:
         json={"make": None, "model": "Vanguard"},
     )
     assert resp.status_code == 400, resp.text
+
+
+# ---------------------------------------------------------------------------
+# Compare-camera endpoint tests
+# ---------------------------------------------------------------------------
+
+
+def test_set_compare_camera_persists(tmp_path: Path) -> None:
+    """A mount that exists on the shooter's footage round-trips to disk."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    shooter_root = tmp_path / "match" / "shooters" / "me"
+    primary = MatchProject.load(shooter_root).stages[0].primary()
+    assert primary is not None
+    client.patch(
+        f"/api/shooters/me/stages/1/videos/{primary.video_id}/camera-mount",
+        json={"mount": "chest"},
+    )
+
+    resp = client.patch("/api/shooters/me/compare-camera", json={"camera": "chest"})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["compare_camera"] == "chest"
+    assert MatchProject.load(shooter_root).compare_camera == "chest"
+
+
+def test_set_compare_camera_rejects_unknown_selector(tmp_path: Path) -> None:
+    """Typing 'chset' must fail here, not silently export every tile from
+    the primary."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    shooter_root = tmp_path / "match" / "shooters" / "me"
+
+    resp = client.patch("/api/shooters/me/compare-camera", json={"camera": "backpack"})
+
+    assert resp.status_code == 400, resp.text
+    assert "backpack" in resp.json()["detail"]
+    assert MatchProject.load(shooter_root).compare_camera is None
+
+
+def test_clear_compare_camera(tmp_path: Path) -> None:
+    """``null`` clears the selection back to "whatever the primary is"."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    shooter_root = tmp_path / "match" / "shooters" / "me"
+    # A role selector resolves without any mount tagging.
+    assert client.patch("/api/shooters/me/compare-camera", json={"camera": "primary"}).status_code == 200
+    assert MatchProject.load(shooter_root).compare_camera == "primary"
+
+    resp = client.patch("/api/shooters/me/compare-camera", json={"camera": None})
+
+    assert resp.status_code == 200, resp.text
+    assert MatchProject.load(shooter_root).compare_camera is None
 
 
 # ---------------------------------------------------------------------------
@@ -5836,6 +5962,56 @@ def test_beep_review_endpoint_flips_flag(tmp_path: Path, monkeypatch) -> None:
     )
     assert resp.status_code == 200
     assert resp.json()["stages"][0]["videos"][0]["beep_reviewed"] is False
+
+
+def test_beep_review_seeds_stub_audit(tmp_path: Path) -> None:
+    """Confirming a beep leaves a concrete audit document behind so status
+    surfaces read a document rather than inferring from absence."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    shooter_root = tmp_path / "match" / "shooters" / "me"
+    project = MatchProject.load(shooter_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 12.453
+    project.save(shooter_root)
+
+    audit_file = shooter_root / "audit" / "stage1.json"
+    assert not audit_file.exists()
+
+    video_id = client.get("/api/shooters/me/project").json()["stages"][0]["videos"][0]["video_id"]
+    resp = client.post(
+        f"/api/shooters/me/stages/1/videos/{video_id}/beep/review",
+        json={"reviewed": True},
+    )
+    assert resp.status_code == 200
+
+    payload = json.loads(audit_file.read_text(encoding="utf-8"))
+    assert payload == {"shots": [], "detection": "none"}
+
+
+def test_beep_review_does_not_clobber_existing_audit(tmp_path: Path) -> None:
+    """Re-confirming a beep on an audited stage must not wipe shot data."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    shooter_root = tmp_path / "match" / "shooters" / "me"
+    project = MatchProject.load(shooter_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 12.453
+    project.save(shooter_root)
+
+    audit_file = shooter_root / "audit" / "stage1.json"
+    audit_file.parent.mkdir(parents=True, exist_ok=True)
+    audit_file.write_text(json.dumps({"shots": [{"shot_number": 1, "time": 5.5}]}), encoding="utf-8")
+
+    video_id = client.get("/api/shooters/me/project").json()["stages"][0]["videos"][0]["video_id"]
+    resp = client.post(
+        f"/api/shooters/me/stages/1/videos/{video_id}/beep/review",
+        json={"reviewed": True},
+    )
+    assert resp.status_code == 200
+
+    payload = json.loads(audit_file.read_text(encoding="utf-8"))
+    assert payload["shots"] == [{"shot_number": 1, "time": 5.5}]
 
 
 def test_beep_review_400_when_no_beep_yet(tmp_path: Path) -> None:

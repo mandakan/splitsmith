@@ -9,6 +9,10 @@ Today's commands:
 
 - ``info``: print a one-screen summary of a match (or legacy project)
   at a given path.
+
+- ``trims``: write lossless per-stage trims for every shooter in a match
+  from a beep and a stage time alone -- no shot detection. Feeds
+  ``splitsmith compare export``.
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-from . import match_model, user_config
+from . import camera_select, match_model, match_trims, user_config
 from .match_model import (
     MATCH_FILE,
     Match,
@@ -276,6 +280,94 @@ def rename_shooter_slugs(
     console.print(f"[green]Renamed {len(plan)} shooter(s).[/]")
 
 
+@match_app.command("trims")
+def trims(
+    match_path: Path = typer.Argument(
+        ..., exists=True, readable=True, help="Match folder to produce trims for."
+    ),
+    shooter: list[str] = typer.Option([], "--shooter", help="Limit to these shooter slugs (repeatable)."),
+    stage: list[int] = typer.Option([], "--stage", help="Limit to these stage numbers (repeatable)."),
+    camera: list[str] = typer.Option(
+        [],
+        "--camera",
+        help=(
+            "Camera for one shooter as SLUG=VALUE (repeatable). VALUE is a "
+            "camera mount ('chest') or a role ('primary', 'secondary'). "
+            "Overrides the shooter's persisted compare_camera."
+        ),
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan; write nothing."),
+    force: bool = typer.Option(False, "--force", help="Re-cut trims that already exist."),
+) -> None:
+    """Write lossless per-stage trims for every shooter in a match.
+
+    Needs only a confirmed beep and a stage time per stage -- no shot
+    detection. Feeds ``splitsmith compare export``, which reads these trims
+    to build the beep-aligned grid.
+    """
+    if not is_match_folder(match_path):
+        console.print(
+            f"[red]Error:[/] {match_path} is not a match folder (no {MATCH_FILE}). "
+            "Pass a merged match folder."
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        cameras = camera_select.parse_camera_overrides(camera)
+    except ValueError as exc:
+        console.print(f"[red]Error:[/] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    match = Match.load(match_path)
+    unknown = sorted(set(cameras) - set(match.shooters))
+    if unknown:
+        console.print(
+            f"[red]Error:[/] --camera names no shooter on this match: {', '.join(unknown)}. "
+            f"Slugs available: {', '.join(match.shooters)}"
+        )
+        raise typer.Exit(code=2)
+
+    try:
+        plan = match_trims.plan_trims(
+            match_path,
+            shooters=shooter or None,
+            stages=stage or None,
+            cameras=cameras,
+            force=force,
+        )
+    except camera_select.CameraResolutionError as exc:
+        console.print(f"[red]Error:[/] {exc}")
+        raise typer.Exit(code=2) from exc
+
+    if dry_run:
+        console.print(_render_trims_table(plan))
+        console.print("[dim]Dry run -- no trims written.[/]")
+        return
+
+    results = match_trims.run_trims(
+        match_path,
+        plan,
+        progress=lambda e: console.print(f"[dim]exporting {e.shooter_slug} stage {e.stage_number}...[/]"),
+    )
+    console.print(_render_trims_table(plan, results))
+
+    written = sum(1 for r in results if r.trim_path is not None)
+    skipped = len(results) - written
+    substitutions = sum(1 for e in plan if e.substituted_from is not None)
+    console.print(f"\n[bold]{written}[/] trims written, {skipped} skipped, {substitutions} substitutions")
+
+    # already_exported is satisfied work (a re-run of a finished match) and
+    # skipped is a deliberate user choice -- neither is a failure. Only a
+    # reason meaning "this stage still needs a trim and doesn't have one"
+    # counts as outstanding work, so a fully re-run match exits 0, while a
+    # match that never got any trims (no_beep / no_stage_time / etc.) exits 1.
+    outstanding = [
+        r for r in results if r.trim_path is None and r.entry.reason not in ("already_exported", "skipped")
+    ]
+    if written == 0 and outstanding:
+        raise typer.Exit(code=1)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -310,6 +402,58 @@ def _render_plan(plan: match_model.MergePlan, *, dry_run: bool, move: bool) -> N
             str(mv.destination_root),
         )
     console.print(table)
+
+
+def _camera_cell(entry: match_trims.TrimPlanEntry) -> str:
+    """Render the Camera column; a substitution shows ``requested -> primary``."""
+    if entry.substituted_from:
+        return f"{entry.substituted_from} -> primary"
+    return entry.camera or "primary"
+
+
+def _status_cell(entry: match_trims.TrimPlanEntry, result: match_trims.TrimResult | None) -> str:
+    """Render the Status column.
+
+    Before a run (or under ``--dry-run``) this is the plan's classification.
+    Once ``run_trims`` has actually run, it is what happened -- a write, or
+    the reason(s) it didn't happen, which may differ from the plan (e.g. the
+    beep vanished between planning and running).
+    """
+    if result is not None:
+        if result.trim_path is not None:
+            return "[green]written[/]"
+        if result.skip_reasons:
+            return "; ".join(result.skip_reasons)
+    if entry.eligible:
+        return "eligible"
+    # ``match_trims`` reasons are already human-readable, so they render
+    # as-is; a new reason added there can never blank out this cell.
+    return entry.reason or "ineligible"
+
+
+def _render_trims_table(
+    plan: list[match_trims.TrimPlanEntry],
+    results: list[match_trims.TrimResult] | None = None,
+) -> Table:
+    """Build the Shooter / Stage / Camera / Status table for ``match trims``.
+
+    ``results`` is ``None`` for ``--dry-run`` (nothing ran yet); otherwise it
+    is ``run_trims``'s output, one-to-one and in order with ``plan``.
+    """
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Shooter")
+    table.add_column("Stage")
+    table.add_column("Camera")
+    table.add_column("Status")
+    rows = zip(plan, results, strict=True) if results is not None else ((entry, None) for entry in plan)
+    for entry, result in rows:
+        table.add_row(
+            entry.shooter_slug,
+            f"{entry.stage_number} -- {entry.stage_name}",
+            _camera_cell(entry),
+            _status_cell(entry, result),
+        )
+    return table
 
 
 __all__ = ["match_app"]

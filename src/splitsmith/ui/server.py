@@ -123,7 +123,16 @@ from starlette.background import BackgroundTask
 from .. import __version__ as splitsmith_version
 from .. import automation as automation_settings
 from .. import backup as backup_mod
-from .. import beep_detect, beep_windows, cross_align, match_model, report, user_config, video_probe
+from .. import (
+    beep_detect,
+    beep_windows,
+    camera_select,
+    cross_align,
+    match_model,
+    report,
+    user_config,
+    video_probe,
+)
 from .. import cleanup as cleanup_module
 from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
@@ -172,6 +181,7 @@ from .jobs import (
 )
 from .match_delete import DeletionSummary, delete_match_cascade
 from .project import (
+    STUB_AUDIT_DETECTION,
     VIDEO_EXTENSIONS,
     MatchProject,
     RawVideo,
@@ -2433,7 +2443,29 @@ def register_job_bodies(state: AppState) -> None:
             candidate block is rewritten, ``shots[]`` is seeded only when
             empty (or on ``reset``) so a concurrent manual edit survives,
             and the run is appended to the ``audit_events`` log.
+
+            ``doc`` may be the beep-confirm stub (``{"shots": [],
+            "detection": "none"}``) seeded by ``set_beep_reviewed`` --
+            which has none of the base fields (``stage_number``,
+            ``beep_time``, ...) that ``_default_audit_doc`` sets, because
+            those are unknown at beep-confirm time. Backfill them here so
+            a stage that only ever had a stub still ends up with a
+            complete document (readers like the compare-timeline exporter
+            key on ``beep_time``). ``setdefault`` keeps this idempotent
+            under re-merge and never overwrites a value the doc already
+            carries (e.g. a genuinely-audited doc's own fields).
+
+            The sentinel is also dropped when present so the saved
+            document stays clean, but ``is_stub_audit`` no longer depends
+            on that for correctness -- it also requires the absence of
+            ``shots``/``audit_events``, so a doc this function has
+            written to can never read back as a stub even if some other
+            writer forgot to strip the marker.
             """
+            for key, value in _default_audit_doc().items():
+                doc.setdefault(key, value)
+            if doc.get("detection") == STUB_AUDIT_DETECTION:
+                del doc["detection"]
             if stg.stage_rounds is not None:
                 doc["stage_rounds"] = stg.stage_rounds.model_dump(mode="json", exclude_none=True)
             doc["_candidates_pending_audit"] = {
@@ -3852,6 +3884,16 @@ class CameraModelRequest(BaseModel):
 
     make: str | None
     model: str | None
+
+
+class CompareCameraRequest(BaseModel):
+    """Body for PATCH /api/shooters/{slug}/compare-camera.
+
+    ``camera`` is a camera mount ("chest") or a role ("primary",
+    "secondary"); ``None`` clears the selection back to the primary.
+    """
+
+    camera: str | None = None
 
 
 class BulkCameraSetItem(BaseModel):
@@ -8614,6 +8656,21 @@ def create_app(
         video.beep_reviewed = bool(req.reviewed)
         project.save(state.shooter_root(slug))
 
+        # Leave a concrete audit document behind so status surfaces and the
+        # lab read a document instead of inferring from absence. Never
+        # overwrite a real one -- a re-confirm on an audited stage must not
+        # wipe shot data. The exporter does not depend on this existing;
+        # projects predating this change have no stub and still export.
+        if req.reviewed:
+            existing_doc, audit_version = state.load_audit(slug, stage_number)
+            if existing_doc is None:
+                state.save_audit(
+                    slug,
+                    stage_number,
+                    {"shots": [], "detection": STUB_AUDIT_DETECTION},
+                    version=audit_version,
+                )
+
         # When the user confirms the primary's beep AND the trim is
         # already cached from the auto-detect chain, kick off the
         # gated shot-detect now. No-op when trim hasn't run yet (it
@@ -8688,6 +8745,25 @@ def create_app(
         project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
         video.camera_make = req.make
         video.camera_model = req.model
+        project.save(state.shooter_root(slug))
+        return JSONResponse(project.model_dump(mode="json"))
+
+    @app.patch("/api/shooters/{slug}/compare-camera")
+    def set_compare_camera(slug: str, req: CompareCameraRequest) -> JSONResponse:
+        """Persist which camera this shooter contributes to grids and trims.
+
+        Validated against the shooter's actual videos so a typo fails here
+        rather than silently exporting every tile from the primary. Skipped
+        stages don't count -- they contribute no footage to a grid.
+        """
+        project = state.shooter_project(slug)
+        try:
+            camera_select.validate_camera(
+                [stage.videos for stage in project.stages if not stage.skipped], req.camera
+            )
+        except camera_select.CameraResolutionError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        project.compare_camera = req.camera
         project.save(state.shooter_root(slug))
         return JSONResponse(project.model_dump(mode="json"))
 

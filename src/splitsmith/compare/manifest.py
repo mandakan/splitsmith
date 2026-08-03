@@ -14,6 +14,11 @@ class CompareShooter(BaseModel):
 
     project: Path
     label: str = Field(min_length=1)
+    #: Camera selector for this shooter's tiles. A ``camera_mount`` value
+    #: ("chest", "helmet") or a role ("primary", "secondary"). ``None``
+    #: falls back to the shooter's persisted ``compare_camera``, then the
+    #: primary.
+    camera: str | None = None
 
     @field_validator("project", mode="before")
     @classmethod
