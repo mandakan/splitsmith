@@ -1,12 +1,14 @@
 """API-process preflights must not fetch raw source bytes (#637, #638).
 
-Eight endpoints used ``MatchProject.resolve_video_path`` purely to decide
+Eight preflights used ``MatchProject.resolve_video_path`` purely to decide
 whether a source existed. That method mirrors a hosted object into the
 local cache on first access, so an existence check downloaded the whole
 video into the API container -- the #617 pattern, for which
 ``MatchProject.source_present`` was written. Three were fixed in #637 and
 the remaining five -- all of them gates in front of a queued job that
-does its own download on the worker -- in #638.
+does its own download on the worker -- in #638. Seven sit in endpoints;
+the eighth is ``_auto_queue_beep_if_needed``, a helper reached from four
+of them.
 
 The contract these tests pin is cross-cutting rather than per-endpoint:
 *a preflight answers from metadata, never from bytes.* Hence a themed
@@ -204,6 +206,10 @@ def test_detect_beep_424_when_storage_lacks_the_key(tmp_path: Path) -> None:
     """Same reconstruction pin as the match-export one below, for the #638
     sites: the ``Path`` handed to the 424 helper is now rebuilt by hand
     instead of resolved, and this proves the two agree.
+
+    Passes both pre- and post-change by design -- it is a payload pin, not
+    a regression pin. The ``storage.fetched`` tests above are the ones that
+    fail against the bug.
     """
     client, project_root, storage = _hosted_source_only(tmp_path, in_storage=False)
     client.app.state.splitsmith_state.job_bodies.register("detect_beep", lambda handle, **args: None)

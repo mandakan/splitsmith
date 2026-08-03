@@ -7882,14 +7882,16 @@ def create_app(
         # ``source_present``, not ``resolve_video_path``: this only decides
         # whether to queue, and two of this helper's callers await it in the
         # request path, so mirroring the raw source here made a video
-        # assignment block on a full download (#638).
-        source = state.shooter_root(slug) / video.path
-        if not project.source_present(state.shooter_root(slug), video.path):
+        # assignment block on a full download (#638). ``shooter_root`` is
+        # hoisted because it is a blocking Postgres read in hosted mode and
+        # the scan loop calls this helper once per video.
+        root = state.shooter_root(slug)
+        if not project.source_present(root, video.path):
             logger.info(
                 "auto-beep skipped for stage %d video %s: source not reachable (%s)",
                 stage_number,
                 video.video_id,
-                source,
+                root / video.path,
             )
             return False
         await _submit_detect_beep(slug, stage_number, video)
@@ -7951,8 +7953,9 @@ def create_app(
         # ``source_present``, not ``resolve_video_path``: the bytes belong to
         # the queued job, so resolving here downloaded the raw source into
         # the API container just to decide whether to queue (#638).
-        if not project.source_present(state.shooter_root(slug), video.path):
-            _ensure_source_reachable(stage_number, state.shooter_root(slug) / video.path)
+        root = state.shooter_root(slug)
+        if not project.source_present(root, video.path):
+            _ensure_source_reachable(stage_number, root / video.path)
         if video.beep_source == "manual" and not force:
             raise HTTPException(
                 status_code=409,
@@ -7985,8 +7988,9 @@ def create_app(
             )
         # ``source_present``, not ``resolve_video_path`` -- see the per-video
         # detect-beep endpoint above (#638).
-        if not project.source_present(state.shooter_root(slug), primary.path):
-            _ensure_source_reachable(stage_number, state.shooter_root(slug) / primary.path)
+        root = state.shooter_root(slug)
+        if not project.source_present(root, primary.path):
+            _ensure_source_reachable(stage_number, root / primary.path)
         if primary.beep_source == "manual" and not force:
             raise HTTPException(
                 status_code=409,
@@ -8035,8 +8039,9 @@ def create_app(
         # ``source_present``, not ``resolve_video_path``: ffmpeg runs in the
         # trim job, not here, so this preflight has no use for the bytes
         # (#638).
-        if not project.source_present(state.shooter_root(slug), video.path):
-            _ensure_source_reachable(stage_number, state.shooter_root(slug) / video.path)
+        root = state.shooter_root(slug)
+        if not project.source_present(root, video.path):
+            _ensure_source_reachable(stage_number, root / video.path)
         if video.beep_time is None:
             raise HTTPException(
                 status_code=400,
@@ -10219,8 +10224,8 @@ def create_app(
         # clear ``processed.beep`` to force re-detection on the new
         # video's audio; the helper picks up the cleared flag and queues
         # accordingly. No-op when the video already had a current beep.
-        # Deferred (see move_assignment) so the media mirror + job write stay
-        # off the response path.
+        # Deferred (see move_assignment) so the job write stays off the
+        # response path; the media mirror it used to pay for is gone (#638).
         new_primary = project.stage(req.stage_number).primary()
         if new_primary is not None:
             background.add_task(_auto_queue_beep_if_needed, slug, project, req.stage_number, new_primary)
@@ -10344,8 +10349,9 @@ def create_app(
         # the ffmpeg pass, so resolving here mirrored the raw source into the
         # API container purely as an existence check (#638).
         if req.write_trim or req.write_fcpxml:
-            if not project.source_present(state.shooter_root(slug), primary.path):
-                _ensure_source_reachable(stage_number, state.shooter_root(slug) / primary.path)
+            root = state.shooter_root(slug)
+            if not project.source_present(root, primary.path):
+                _ensure_source_reachable(stage_number, root / primary.path)
 
         existing = await state.jobs.find_active(kind="export", stage_number=stage_number)
         if existing is not None:
