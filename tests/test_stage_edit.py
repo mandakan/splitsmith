@@ -133,3 +133,152 @@ def test_changed_stage_rounds_counts_as_a_rename() -> None:
     assert [s.stage_number for s in diff.renamed] == [1]
     assert diff.renamed[0].stage_rounds is not None
     assert diff.renamed[0].stage_rounds.expected == 12
+
+
+class _FakeObject:
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+
+class _FakeStorage:
+    """Minimal stand-in for the S3/R2 storage backend.
+
+    Mirrors the three methods the purge uses: ``list(prefix)`` yielding
+    objects with a ``.path``, and ``delete(path)``. ``fail_on`` makes one
+    delete raise so the error-collection path can be exercised.
+    """
+
+    def __init__(self, paths: list[str], *, fail_on: str | None = None) -> None:
+        self.paths = list(paths)
+        self.deleted: list[str] = []
+        self.fail_on = fail_on
+
+    def list(self, prefix: str):
+        return [_FakeObject(p) for p in self.paths if p.startswith(prefix)]
+
+    def delete(self, path: str) -> None:
+        if path == self.fail_on:
+            raise RuntimeError("boom")
+        self.deleted.append(path)
+        self.paths.remove(path)
+
+
+def _project_with_dirs(tmp_path):
+    from splitsmith.ui.project import MatchProject
+
+    project = MatchProject(name="M")
+    project.init_placeholder_stages(3)
+    project.audio_path(tmp_path).mkdir(parents=True, exist_ok=True)
+    project.trimmed_path(tmp_path).mkdir(parents=True, exist_ok=True)
+    return project
+
+
+def test_purge_deletes_local_artifacts_for_the_stage(tmp_path) -> None:
+    from splitsmith.ui.stage_edit import purge_stage_artifacts
+
+    project = _project_with_dirs(tmp_path)
+    audio = project.audio_path(tmp_path)
+    trimmed = project.trimmed_path(tmp_path)
+    (audio / "stage3_cam_abc.wav").write_bytes(b"x")
+    (audio / "stage3_cam_abc_audit.wav").write_bytes(b"x")
+    (audio / "stage3_primary.wav").write_bytes(b"x")
+    (audio / "stage3_audit.peaks-100.json").write_bytes(b"x")
+    (trimmed / "stage3_cam_abc_trimmed.mp4").write_bytes(b"x")
+    (trimmed / "stage3_trimmed.params.json").write_bytes(b"x")
+
+    counts = purge_stage_artifacts(project, tmp_path, 3)
+
+    assert counts.files_deleted == 6
+    assert counts.errors == []
+    assert list(audio.glob("stage3_*")) == []
+    assert list(trimmed.glob("stage3_*")) == []
+
+
+def test_purge_leaves_neighbouring_stages_untouched(tmp_path) -> None:
+    from splitsmith.ui.stage_edit import purge_stage_artifacts
+
+    project = _project_with_dirs(tmp_path)
+    audio = project.audio_path(tmp_path)
+    (audio / "stage3_cam_abc.wav").write_bytes(b"x")
+    keep = audio / "stage4_cam_abc.wav"
+    keep.write_bytes(b"keep")
+
+    purge_stage_artifacts(project, tmp_path, 3)
+
+    assert keep.read_bytes() == b"keep"
+
+
+def test_purging_stage_3_does_not_delete_stage_30(tmp_path) -> None:
+    """The trailing underscore in the glob is what makes this pass."""
+    from splitsmith.ui.stage_edit import purge_stage_artifacts
+
+    project = _project_with_dirs(tmp_path)
+    audio = project.audio_path(tmp_path)
+    (audio / "stage3_cam_abc.wav").write_bytes(b"x")
+    two_digit = audio / "stage30_cam_abc.wav"
+    two_digit.write_bytes(b"keep")
+
+    counts = purge_stage_artifacts(project, tmp_path, 3)
+
+    assert counts.files_deleted == 1
+    assert two_digit.read_bytes() == b"keep"
+
+
+def test_purge_deletes_storage_objects_for_the_stage(tmp_path) -> None:
+    from splitsmith.ui.stage_edit import purge_stage_artifacts
+
+    project = _project_with_dirs(tmp_path)
+    scope = "matches/m1/shooters/me"
+    storage = _FakeStorage(
+        [
+            f"{scope}/audio/stage3_cam_abc.wav",
+            f"{scope}/audio/stage30_cam_abc.wav",
+            f"{scope}/audio/stage4_cam_abc.wav",
+            f"{scope}/trimmed/stage3_cam_abc_trimmed.mp4",
+            f"{scope}/trimmed/stage3_cam_abc_trimmed.params.json",
+        ]
+    )
+    project.bind_storage(storage, scope=scope)
+
+    counts = purge_stage_artifacts(project, tmp_path, 3)
+
+    assert counts.objects_deleted == 3
+    assert sorted(storage.deleted) == sorted(
+        [
+            f"{scope}/audio/stage3_cam_abc.wav",
+            f"{scope}/trimmed/stage3_cam_abc_trimmed.mp4",
+            f"{scope}/trimmed/stage3_cam_abc_trimmed.params.json",
+        ]
+    )
+    assert f"{scope}/audio/stage30_cam_abc.wav" in storage.paths
+
+
+def test_purge_collects_storage_errors_instead_of_raising(tmp_path) -> None:
+    from splitsmith.ui.stage_edit import purge_stage_artifacts
+
+    project = _project_with_dirs(tmp_path)
+    scope = "matches/m1/shooters/me"
+    doomed = f"{scope}/audio/stage3_cam_abc.wav"
+    storage = _FakeStorage(
+        [doomed, f"{scope}/trimmed/stage3_cam_abc_trimmed.mp4"],
+        fail_on=doomed,
+    )
+    project.bind_storage(storage, scope=scope)
+
+    counts = purge_stage_artifacts(project, tmp_path, 3)
+
+    assert counts.objects_deleted == 1
+    assert len(counts.errors) == 1
+    assert "boom" in counts.errors[0]
+
+
+def test_purge_with_no_storage_bound_is_local_only(tmp_path) -> None:
+    from splitsmith.ui.stage_edit import purge_stage_artifacts
+
+    project = _project_with_dirs(tmp_path)
+    (project.audio_path(tmp_path) / "stage3_cam_abc.wav").write_bytes(b"x")
+
+    counts = purge_stage_artifacts(project, tmp_path, 3)
+
+    assert counts.files_deleted == 1
+    assert counts.objects_deleted == 0

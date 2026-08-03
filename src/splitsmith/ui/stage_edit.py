@@ -11,10 +11,13 @@ engine; see the design doc for the renumber/reorder work it defers.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import BaseModel, Field
 
 from splitsmith.config import StageRounds
 from splitsmith.match_model import MatchStageDefinition
+from splitsmith.ui.project import MatchProject
 
 
 class StageEditError(Exception):
@@ -106,3 +109,80 @@ def diff_stage_list(
 
     diff.unchanged.sort()
     return diff
+
+
+class PurgeCounts(BaseModel):
+    """What a single stage's artifact purge managed to remove."""
+
+    files_deleted: int = 0
+    objects_deleted: int = 0
+    errors: list[str] = Field(default_factory=list)
+
+
+def _stage_artifact_glob(stage_number: int) -> str:
+    """Glob matching every artifact basename for ``stage_number``.
+
+    Covers both naming tiers in one pattern: per-cam
+    (``stage3_cam_<id>.wav``, ``..._audit.wav``, ``..._trimmed.mp4``) and
+    legacy (``stage3_primary.wav``, ``stage3_audit.peaks-*.json``,
+    ``stage3_trimmed.params.json``).
+
+    The trailing underscore is load-bearing. ``stage3*`` would also match
+    ``stage30_cam_x.wav``, so removing stage 3 would silently delete stage
+    30's cached audio and trim.
+    """
+    return f"stage{stage_number}_*"
+
+
+def purge_stage_artifacts(
+    project: MatchProject,
+    root: Path,
+    stage_number: int,
+) -> PurgeCounts:
+    """Delete every derived artifact for ``stage_number``, locally and in storage.
+
+    Derived state only -- audio WAVs, peaks, trims and their sidecars. The
+    audit doc is purged separately (it lives in ``state_docs`` in hosted
+    mode, not in these directories) and the stage's videos are released by
+    :meth:`MatchProject.unassign_stage_videos` rather than deleted.
+
+    Best-effort, following ``match_delete``: a failed delete is recorded in
+    ``errors`` and the sweep continues. Leaving the stage list unwritten
+    because one cache object refused to die would be the worse outcome.
+    """
+    counts = PurgeCounts()
+    pattern = _stage_artifact_glob(stage_number)
+
+    for directory in (project.audio_path(root), project.trimmed_path(root)):
+        if not directory.exists():
+            continue
+        for victim in sorted(directory.glob(pattern)):
+            try:
+                victim.unlink()
+                counts.files_deleted += 1
+            except OSError as exc:
+                counts.errors.append(f"delete {victim}: {exc}")
+
+    storage = project._storage
+    scope = project._storage_scope
+    if storage is None or scope is None:
+        return counts
+
+    prefix_basename = f"stage{stage_number}_"
+    for subdir in ("audio", "trimmed"):
+        prefix = f"{scope}/{subdir}/"
+        try:
+            objects = list(storage.list(prefix))
+        except Exception as exc:  # noqa: BLE001 -- best-effort teardown
+            counts.errors.append(f"list storage {prefix!r}: {exc}")
+            continue
+        for obj in objects:
+            if not obj.path.rsplit("/", 1)[-1].startswith(prefix_basename):
+                continue
+            try:
+                storage.delete(obj.path)
+                counts.objects_deleted += 1
+            except Exception as exc:  # noqa: BLE001
+                counts.errors.append(f"delete {obj.path!r}: {exc}")
+
+    return counts
