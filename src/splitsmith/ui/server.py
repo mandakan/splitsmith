@@ -7559,13 +7559,16 @@ def create_app(
         try:
             return await stage_edit.apply_stage_edit(
                 match=match,
-                root=root,
                 submitted=req.stages,
                 shooter_slugs=slugs,
                 load_project=state.shooter_project,
                 save_project=_save_project,
                 save_match=lambda: match.save(root),
                 delete_audit=state.delete_audit,
+                # Per-shooter, not the match root: derived caches live at
+                # ``<match_root>/shooters/<slug>/{audio,trimmed}``, the same
+                # root ``_save_project`` above writes the project doc to.
+                shooter_root=state.shooter_root,
                 cancel_jobs=_cancel,
             )
         except stage_edit.StageEditError as exc:

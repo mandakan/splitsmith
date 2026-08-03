@@ -298,13 +298,13 @@ class StageEditSummary(BaseModel):
 async def apply_stage_edit(
     *,
     match: Any,
-    root: Path,
     submitted: list[SubmittedStage],
     shooter_slugs: list[str],
     load_project: Any,
     save_project: Any,
     save_match: Any,
     delete_audit: Any,
+    shooter_root: Any,
     cancel_jobs: Any,
 ) -> StageEditSummary:
     """Apply a stage-list edit to the match and every shooter in it.
@@ -319,6 +319,16 @@ async def apply_stage_edit(
     3. Save the match doc **last**. A crash mid-fan-out then leaves the
        canonical list describing the pre-edit world rather than promising
        stages the shooters no longer have.
+
+    ``shooter_root(slug)`` resolves the directory a shooter's derived
+    caches live under, and is called per shooter inside the fan-out rather
+    than taken once as a single ``root``. Those caches are at
+    ``<match_root>/shooters/<slug>/{audio,trimmed}/``, so one root cannot
+    stand in for the whole match: passing the match root made
+    ``project.audio_path(root)`` resolve to ``<match_root>/audio``, which
+    does not exist, and ``purge_stage_artifacts``' directory-missing
+    ``continue`` then reported a clean ``files_deleted: 0`` while every
+    file survived.
 
     The advanced allocation counter rides along on that final save: it is
     assigned to ``match.next_stage_number`` immediately before
@@ -378,7 +388,7 @@ async def apply_stage_edit(
                     result.videos_unassigned += project.unassign_stage_videos(stage_number)
                     if delete_audit(slug, stage_number):
                         result.audit_docs_deleted += 1
-                    counts = purge_stage_artifacts(project, root, stage_number)
+                    counts = purge_stage_artifacts(project, shooter_root(slug), stage_number)
                     result.files_deleted += counts.files_deleted
                     result.objects_deleted += counts.objects_deleted
                     summary.errors.extend(f"{slug}: {e}" for e in counts.errors)

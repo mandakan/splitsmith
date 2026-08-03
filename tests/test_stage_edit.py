@@ -414,6 +414,11 @@ def _harness(tmp_path, slugs, stage_numbers, *, order: list[str] | None = None):
         "save_project": lambda slug, project: saved.append(slug),
         "delete_audit": lambda slug, n: (audits_deleted.append((slug, n)) or True),
         "cancel_jobs": cancel_jobs,
+        # These in-memory projects are built AT ``tmp_path``, so the
+        # shooter root and the match root coincide here. That is exactly
+        # why this harness cannot see a wrong-root purge -- the HTTP
+        # test in ``test_ui_server_stage_edit.py`` owns that case.
+        "shooter_root": lambda slug: tmp_path,
         "save_match": lambda: None,
     }
     return projects, saved, audits_deleted, cancelled, hooks
@@ -430,7 +435,6 @@ def test_apply_removes_the_stage_from_every_shooter(tmp_path) -> None:
     summary = asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[
                 SubmittedStage(stage_number=1, stage_name="Stage 1"),
                 SubmittedStage(stage_number=2, stage_name="Stage 2"),
@@ -461,7 +465,6 @@ def test_apply_preserves_untouched_stages_artifacts(tmp_path) -> None:
     asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[
                 SubmittedStage(stage_number=1, stage_name="Stage 1"),
                 SubmittedStage(stage_number=2, stage_name="Stage 2"),
@@ -484,7 +487,6 @@ def test_apply_cancels_jobs_for_removed_stages_only(tmp_path) -> None:
     summary = asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[
                 SubmittedStage(stage_number=1, stage_name="Stage 1"),
                 SubmittedStage(stage_number=2, stage_name="Stage 2"),
@@ -507,7 +509,6 @@ def test_apply_with_no_removals_cancels_nothing(tmp_path) -> None:
     summary = asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[
                 SubmittedStage(stage_number=1, stage_name="Renamed"),
                 SubmittedStage(stage_number=2, stage_name="Stage 2"),
@@ -537,7 +538,6 @@ def test_apply_adds_a_stage_to_match_and_every_shooter(tmp_path) -> None:
     summary = asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[
                 SubmittedStage(stage_number=1, stage_name="Stage 1"),
                 SubmittedStage(stage_number=2, stage_name="Stage 2"),
@@ -569,7 +569,6 @@ def test_apply_reports_per_shooter_counts(tmp_path) -> None:
     summary = asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[
                 SubmittedStage(stage_number=1, stage_name="Stage 1"),
                 SubmittedStage(stage_number=2, stage_name="Stage 2"),
@@ -604,7 +603,6 @@ def test_apply_saves_the_match_doc_after_every_shooter(tmp_path) -> None:
     asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[
                 SubmittedStage(stage_number=1, stage_name="Stage 1"),
                 SubmittedStage(stage_number=2, stage_name="Stage 2"),
@@ -652,7 +650,6 @@ def test_apply_collects_a_failing_shooter_and_still_commits(tmp_path) -> None:
     summary = asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[
                 SubmittedStage(stage_number=1, stage_name="Stage 1"),
                 SubmittedStage(stage_number=2, stage_name="Stage 2"),
@@ -695,7 +692,6 @@ def test_apply_resets_videos_unassigned_and_records_error_when_save_fails(tmp_pa
     summary = asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[
                 SubmittedStage(stage_number=1, stage_name="Stage 1"),
                 SubmittedStage(stage_number=2, stage_name="Stage 2"),
@@ -732,7 +728,6 @@ def test_apply_recovers_a_shooter_when_one_stage_cleanup_step_fails(tmp_path) ->
     summary = asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[
                 SubmittedStage(stage_number=1, stage_name="Stage 1"),
                 SubmittedStage(stage_number=2, stage_name="Stage 2"),
@@ -766,15 +761,12 @@ def test_apply_does_not_hand_back_the_number_of_a_removed_top_stage(tmp_path) ->
     _projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["me"], [1, 2, 3, 4, 5, 6])
     keep = [SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2, 3, 4, 5)]
 
-    removal = asyncio.run(
-        apply_stage_edit(match=match, root=tmp_path, submitted=list(keep), shooter_slugs=["me"], **hooks)
-    )
+    removal = asyncio.run(apply_stage_edit(match=match, submitted=list(keep), shooter_slugs=["me"], **hooks))
     assert removal.removed == [6]
 
     addition = asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[*keep, SubmittedStage(stage_number=None, stage_name="Standards")],
             shooter_slugs=["me"],
             **hooks,
@@ -798,7 +790,6 @@ def test_apply_backfills_the_mark_on_a_match_that_predates_the_field(tmp_path) -
     summary = asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2, 3)]
             + [SubmittedStage(stage_number=None, stage_name="Standards")],
             shooter_slugs=["me"],
@@ -823,7 +814,6 @@ def test_apply_advances_the_mark_monotonically_across_edits(tmp_path) -> None:
     first = asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[*keep, SubmittedStage(stage_number=None, stage_name="Standards")],
             shooter_slugs=["me"],
             **hooks,
@@ -834,7 +824,6 @@ def test_apply_advances_the_mark_monotonically_across_edits(tmp_path) -> None:
     second = asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[
                 *keep,
                 SubmittedStage(stage_number=4, stage_name="Standards"),
@@ -867,7 +856,6 @@ def test_apply_persists_the_mark_with_the_match_doc_saved_last(tmp_path) -> None
     asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2)]
             + [SubmittedStage(stage_number=None, stage_name="Standards")],
             shooter_slugs=["me"],
@@ -899,7 +887,6 @@ def test_a_failed_stage_cleanup_still_reports_the_shooter_as_saved(tmp_path) -> 
     summary = asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2)],
             shooter_slugs=["me"],
             **hooks,
@@ -926,7 +913,6 @@ def test_a_failed_project_save_reports_the_shooter_as_not_saved(tmp_path) -> Non
     summary = asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2)],
             shooter_slugs=["me"],
             **hooks,
@@ -947,7 +933,6 @@ def test_an_untroubled_shooter_is_saved_with_no_error(tmp_path) -> None:
     summary = asyncio.run(
         apply_stage_edit(
             match=match,
-            root=tmp_path,
             submitted=[SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2)],
             shooter_slugs=["me"],
             **hooks,

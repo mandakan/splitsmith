@@ -187,6 +187,47 @@ class TestEditMatchStages:
         assert state._audit_file("me", 4).read_bytes() == before_4
         assert state._audit_file("me", 5).read_bytes() == before_5
 
+    def test_removal_purges_the_shooters_own_cache_dirs(self, tmp_path: Path) -> None:
+        """The purge has to resolve caches under ``<match>/shooters/<slug>/``,
+        not under the match root.
+
+        Every other ``audio_path``/``trimmed_path`` call site in the server
+        passes ``state.shooter_root(slug)``; the stage-edit route passed the
+        *match* root, so ``project.audio_path(root)`` pointed at
+        ``<match>/audio`` -- a directory that does not exist -- and the
+        directory-missing ``continue`` in ``purge_stage_artifacts`` swallowed
+        it. The response still read ``removed:[3], errors:[]``, so only the
+        on-disk assertions below discriminate.
+
+        The unit tests in ``test_stage_edit.py`` cannot catch this by
+        construction: they build the project at ``tmp_path`` and pass the
+        same ``tmp_path`` as the root, so both roots coincide.
+        """
+        client, state = _seeded_match(tmp_path, stages=3, shooters=["me"])
+        shooter_root = state.shooter_root("me")
+        audio_dir = shooter_root / "audio"
+        trimmed_dir = shooter_root / "trimmed"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        trimmed_dir.mkdir(parents=True, exist_ok=True)
+        doomed_wav = audio_dir / "stage3_cam_abc.wav"
+        doomed_mp4 = trimmed_dir / "stage3_cam_abc_trimmed.mp4"
+        keeper_wav = audio_dir / "stage2_cam_abc.wav"
+        for f in (doomed_wav, doomed_mp4, keeper_wav):
+            f.write_bytes(b"\0")
+
+        resp = client.put(
+            "/api/match/stages",
+            json={"stages": [{"stage_number": n, "stage_name": f"Stage {n}"} for n in (1, 2)]},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["removed"] == [3]
+        assert resp.json()["errors"] == []
+        assert not doomed_wav.exists()
+        assert not doomed_mp4.exists()
+        assert keeper_wav.exists()
+        assert resp.json()["shooters"][0]["files_deleted"] == 2
+
     def test_add_after_remove_allocates_six_not_the_freed_three(self, tmp_path: Path) -> None:
         client, _state = _seeded_match(tmp_path, stages=5, shooters=["me"])
         first = client.put(
