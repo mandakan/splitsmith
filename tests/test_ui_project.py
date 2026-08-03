@@ -1991,3 +1991,39 @@ def test_export_overview_hosted_uses_storage_and_audit_docs(tmp_path) -> None:
     assert r.last_export_at is not None
     # Nothing was written to the local exports/ dir.
     assert not any(proj.exports_path(root).glob("*"))
+
+
+def test_unassign_stage_videos_moves_videos_to_unassigned(tmp_path: Path) -> None:
+    project = MatchProject(name="M")
+    project.init_placeholder_stages(3)
+    stage = project.stages[1]
+    stage.videos = [
+        StageVideo(path=Path("a.mp4"), role="primary"),
+        StageVideo(path=Path("b.mp4"), role="secondary"),
+    ]
+
+    moved = project.unassign_stage_videos(2)
+
+    assert moved == 2
+    assert stage.videos == []
+    assert {str(v.path) for v in project.unassigned_videos} == {"a.mp4", "b.mp4"}
+    assert all(v.role == "secondary" for v in project.unassigned_videos)
+
+
+def test_unassign_stage_videos_leaves_other_stages_alone(tmp_path: Path) -> None:
+    project = MatchProject(name="M")
+    project.init_placeholder_stages(3)
+    project.stages[0].videos = [StageVideo(path=Path("keep.mp4"), role="primary")]
+    project.stages[1].videos = [StageVideo(path=Path("drop.mp4"), role="primary")]
+
+    project.unassign_stage_videos(2)
+
+    assert [str(v.path) for v in project.stages[0].videos] == ["keep.mp4"]
+    assert project.stages[0].videos[0].role == "primary"
+
+
+def test_unassign_stage_videos_unknown_stage_is_a_noop(tmp_path: Path) -> None:
+    project = MatchProject(name="M")
+    project.init_placeholder_stages(2)
+    assert project.unassign_stage_videos(99) == 0
+    assert project.unassigned_videos == []
