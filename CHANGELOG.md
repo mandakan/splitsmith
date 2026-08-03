@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.13.0](https://github.com/mandakan/splitsmith/compare/v0.12.0...v0.13.0) (2026-08-03)
+
+
+### Features
+
+* audit-free trim export with per-shooter camera selection ([#612](https://github.com/mandakan/splitsmith/issues/612)) ([4933580](https://github.com/mandakan/splitsmith/commit/49335807911d4f25bf59b5c9645335030e70b6fa))
+* **scripts:** staging magic-link minting script + /staging-login skill ([#606](https://github.com/mandakan/splitsmith/issues/606)) ([35c7c69](https://github.com/mandakan/splitsmith/commit/35c7c695749bce3e21c98e38637b80f4edf5db2b))
+* **ui:** self-relative split tier labels (quick/typical/long) ([#604](https://github.com/mandakan/splitsmith/issues/604)) ([c9d58d9](https://github.com/mandakan/splitsmith/commit/c9d58d9362a968244552b8d948d7dd7e754682ef))
+
+
+### Bug Fixes
+
+* one audit precondition across every export surface ([#619](https://github.com/mandakan/splitsmith/issues/619)) ([#627](https://github.com/mandakan/splitsmith/issues/627)) ([7eb5626](https://github.com/mandakan/splitsmith/commit/7eb56264a111a53033d8b495f38e5a1c12415a42))
+* one trim-eligibility rule across CLI, server and SPA ([#613](https://github.com/mandakan/splitsmith/issues/613), [#614](https://github.com/mandakan/splitsmith/issues/614)) ([#625](https://github.com/mandakan/splitsmith/issues/625)) ([1a8df09](https://github.com/mandakan/splitsmith/commit/1a8df09ca2dbb658a2340d265f35f4321b1e6363))
+* surface trim-run divergence, guard camera ambiguity ([#617](https://github.com/mandakan/splitsmith/issues/617), [#618](https://github.com/mandakan/splitsmith/issues/618)) ([#626](https://github.com/mandakan/splitsmith/issues/626)) ([7b01927](https://github.com/mandakan/splitsmith/commit/7b019276f76cc1196dad4061f9c914f54a0e54f1))
+* trim filename authority ([#615](https://github.com/mandakan/splitsmith/issues/615)) + honest trims-only export reporting ([#616](https://github.com/mandakan/splitsmith/issues/616)) ([#624](https://github.com/mandakan/splitsmith/issues/624)) ([6ea9dd7](https://github.com/mandakan/splitsmith/commit/6ea9dd76a005f74794da6f2b40e18f1ea45dfb74))
+* **ui:** anomaly pins track waveform zoom + scroll ([#607](https://github.com/mandakan/splitsmith/issues/607)) ([c085c73](https://github.com/mandakan/splitsmith/commit/c085c73f3c40ca887ea50e6cd4f5ed79f2d53b44))
+* **ui:** multi-cam per-stage export job crashed building its result ([#622](https://github.com/mandakan/splitsmith/issues/622)) ([05f5e2d](https://github.com/mandakan/splitsmith/commit/05f5e2d48b08b2618fc024c4b19c8595ed70dfe7))
+
 ## [0.12.0](https://github.com/mandakan/splitsmith/compare/v0.11.0...v0.12.0) (2026-07-08)
 
 
