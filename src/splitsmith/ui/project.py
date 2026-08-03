@@ -607,6 +607,42 @@ class StageEntry(BaseModel):
         return None
 
 
+TrimBlocker = Literal["skipped", "no_beep", "no_stage_time"]
+"""Why a stage cannot be trim-exported. ``None`` means it can."""
+
+
+def trim_blocker(stage: StageEntry, video: StageVideo | None) -> TrimBlocker | None:
+    """Return what stops this stage from being trim-exported, or ``None``.
+
+    The single source of truth for "is this stage trim-exportable?" (#613).
+    A lossless trim is cut from a beep (where it starts) and a stage time
+    (how long it runs) -- nothing else. It needs no audit and no shots,
+    which is what separates this from ``StageExportStatus.ready_to_export``.
+
+    ``video`` is the camera the trim would be cut from, and is explicit
+    rather than defaulted because ``match_trims`` resolves a per-shooter
+    camera selector first; everywhere else passes ``stage.primary()``.
+    ``None`` means there is no such video, which is a ``"no_beep"`` answer.
+
+    Deliberately excluded: source reachability. That is a transient,
+    stat-costing condition reported alongside as ``source_reachable``, so
+    the SPA can badge an unplugged drive on a row that is otherwise ready
+    instead of hiding it, and so this rule stays pure.
+
+    A positive ``time_seconds`` is the whole duration test. An untouched
+    placeholder has ``0.0``, so it fails here; a scoreboard row whose
+    ``scorecard_updated_at`` did not parse does not, and used to be
+    rejected by the SPA while the CLI cut it happily.
+    """
+    if stage.skipped:
+        return "skipped"
+    if video is None or video.beep_time is None:
+        return "no_beep"
+    if stage.time_seconds <= 0:
+        return "no_stage_time"
+    return None
+
+
 class ScoreboardImportConflictError(Exception):
     """Raised when ``import_scoreboard`` would overwrite existing stage data."""
 
@@ -696,6 +732,14 @@ class StageExportStatus(BaseModel):
     has_exports: bool
     last_export_at: datetime | None
     ready_to_export: bool
+    # Whether a bare lossless trim can be cut: a beep plus a stage time, no
+    # audit and no shots (#613). Strictly weaker than ``ready_to_export``,
+    # and the flag the SPA's trims-only mode reads instead of re-deriving
+    # the rule in TypeScript. Computed by :func:`trim_blocker`, which the
+    # CLI planner and the per-stage export endpoint also call. Required, not
+    # defaulted: a missed call site should fail loudly rather than quietly
+    # empty the trims-only stage list.
+    ready_to_trim: bool
     # Whether the primary's source video resolves to a present file.
     # ``False`` typically means the symlink under ``raw/`` is dangling
     # because external storage is disconnected; the SPA badges the row
@@ -1361,6 +1405,7 @@ class MatchProject(BaseModel):
                     has_exports=has_exports,
                     last_export_at=last_export_at,
                     ready_to_export=ready_to_export,
+                    ready_to_trim=trim_blocker(stage, primary) is None,
                     source_reachable=source_reachable,
                     secondaries=secondaries_status,
                 )

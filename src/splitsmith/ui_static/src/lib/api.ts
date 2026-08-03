@@ -673,6 +673,11 @@ export interface StageExportStatus {
   has_exports: boolean;
   last_export_at: string | null;
   ready_to_export: boolean;
+  /** Whether a bare lossless trim can be cut: a beep plus a stage time, no
+   *  audit and no shots (#613). Strictly weaker than ``ready_to_export``;
+   *  the trims-only export mode reads this instead of re-deriving the rule
+   *  here, which is what let the TS copy drift from the server's. */
+  ready_to_trim: boolean;
   source_reachable: boolean | null;
   /** Multi-cam roster (issue #54). One entry per secondary on the stage,
    *  including cams without a beep / unreachable cams (the SPA renders

@@ -178,7 +178,12 @@ duration for every shooter, and guessing is worse than a visible hole.
 
 ### New: `src/splitsmith/match_trims.py`
 
-The shared core both surfaces call, so skip rules cannot drift.
+The shared core both surfaces call. The *permanent* skip rules live one level
+down in `ui.project.trim_blocker`, which the SPA's `export_overview`
+(`ready_to_trim`) and the per-stage export endpoint call too -- this module
+adds only the reasons a planner can see (#613). Reasons are a `Literal`, so a
+typo fails at construction rather than silently changing the CLI's exit code
+(#614).
 
 ```python
 class TrimPlanEntry(BaseModel):
@@ -187,8 +192,9 @@ class TrimPlanEntry(BaseModel):
     stage_name: str
     camera: str | None            # resolved selector, None = primary
     eligible: bool
-    reason: str | None            # "no_beep" | "no_stage_time" | "skipped"
-                                  # | "source_unreachable" | "already_exported"
+    reason: SkipReason | None     # TrimBlocker ("no_beep" | "no_stage_time"
+                                  # | "skipped") plus "source_unreachable"
+                                  # | "already_exported" | "camera_ambiguous"
     substituted_from: str | None  # chosen cam that was unavailable
 
 class TrimResult(BaseModel):

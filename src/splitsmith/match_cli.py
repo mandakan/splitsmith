@@ -44,6 +44,16 @@ match_app = typer.Typer(
 )
 console = Console()
 
+# Skip reasons that are *not* outstanding work: ``already_exported`` is a
+# re-run of a finished match, ``skipped`` is a deliberate user choice.
+# Anything else ("this stage still needs a trim and doesn't have one")
+# fails the run, so a fully re-run match exits 0 while a match that never
+# got any trims (no_beep / no_stage_time / ...) exits 1. Typed against
+# ``match_trims.SkipReason`` so a rename can't leave this matching on a
+# string nothing produces any more (#614) -- the documented
+# ``match trims && compare export`` chain hangs off this exit code.
+SATISFIED_REASONS: tuple[match_trims.SkipReason, ...] = ("already_exported", "skipped")
+
 
 @match_app.command("merge")
 def merge(
@@ -356,14 +366,7 @@ def trims(
     substitutions = sum(1 for e in plan if e.substituted_from is not None)
     console.print(f"\n[bold]{written}[/] trims written, {skipped} skipped, {substitutions} substitutions")
 
-    # already_exported is satisfied work (a re-run of a finished match) and
-    # skipped is a deliberate user choice -- neither is a failure. Only a
-    # reason meaning "this stage still needs a trim and doesn't have one"
-    # counts as outstanding work, so a fully re-run match exits 0, while a
-    # match that never got any trims (no_beep / no_stage_time / etc.) exits 1.
-    outstanding = [
-        r for r in results if r.trim_path is None and r.entry.reason not in ("already_exported", "skipped")
-    ]
+    outstanding = [r for r in results if r.trim_path is None and r.entry.reason not in SATISFIED_REASONS]
     if written == 0 and outstanding:
         raise typer.Exit(code=1)
 
