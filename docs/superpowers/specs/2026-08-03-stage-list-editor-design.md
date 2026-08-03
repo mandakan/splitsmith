@@ -1,0 +1,252 @@
+# Stage-list editor in the SPA (#521)
+
+Add, remove, and rename stages on an existing match from the SPA, without
+losing audit progress on the stages the user did not touch.
+
+Issue #521. Tier 1 of the hosted feature-completeness epic (#632).
+
+## Why this is a blocker, not polish
+
+On desktop a wrong stage list is an annoyance: drop to `splitsmith match`
+and fix it. A hosted user on my.splitsmith.app has no CLI, so a wrong
+stage list chosen at creation is unrecoverable short of recreating the
+match and re-attaching every upload.
+
+## What already exists, and why it is not reusable
+
+`POST /api/shooters/{slug}/project/placeholder-stages` looks like the
+backend half of this feature. It is not:
+
+- It replaces the entire stage list rather than editing it, and moves
+  every assigned video to `unassigned_videos` (`project.py:1518-1538`).
+- It raises `ScoreboardImportConflictError` -> 409 when any
+  non-placeholder stage exists, so it refuses on scoreboard-backed
+  matches.
+- It has zero SPA callers. `api.ts:2011` defines `createPlaceholderStages`
+  and nothing imports it. Manual match creation goes through
+  `POST /api/match/create-manual`, not this endpoint.
+
+The issue body's claim that the endpoint is "implemented but unwired" and
+"called from `lib/api.ts:2013` but only from the create flow" is
+inaccurate on both counts.
+
+## Data model
+
+`Match.stages` (`list[MatchStageDefinition]` in `match.json`) is the
+canonical stage list. Each shooter's `MatchProject.stages`
+(`list[StageEntry]`) mirrors it, joined on `stage_number`. Every
+per-stage artifact is keyed on `stage_number`:
+
+| Artifact | Location |
+| --- | --- |
+| Audit doc | `audit/stage<N>.json` (local) / `state_docs` (hosted) |
+| Per-cam audio | `<audio>/stage<N>_cam_<video_id>.wav` |
+| Per-cam audit audio | `<audio>/stage<N>_cam_<video_id>_audit.wav` |
+| Window audio | `<audio>/stage<N>_cam_<video_id>...` |
+| Peaks | `<audio>/stage<N>_*.peaks-*.json` |
+| Trimmed video | `<trimmed>/stage<N>_cam_<video_id>_trimmed.mp4` |
+| Legacy tier | `stage<N>_primary.wav`, `stage<N>_audit.wav`, `stage<N>_trimmed.mp4`, `.params.json`, `.partial.mp4` |
+
+That keying is the constraint the whole design turns on: renumbering a
+stage orphans every artifact belonging to it.
+
+## Stage identity
+
+`stage_number` is stable for the lifetime of a stage. Three operations:
+
+- **rename** sets `stage_name` (and `stage_rounds`) in place. Touches no
+  artifacts.
+- **add** allocates `max(existing_numbers) + 1`.
+- **remove** drops the entry. Numbers freed by removal are never reused.
+
+Removing a stage mid-list therefore leaves a gap: removing 3 from 1-6
+yields 1, 2, 4, 5, 6.
+
+### This is a deliberate expedient, not a principle
+
+Gaps were chosen to ship the feature without building an artifact
+migration engine. The intended future is contiguous renumbering plus
+reordering, which this design does not implement and does not preclude.
+
+What that future needs, recorded here so it is not rediscovered:
+
+1. A migration that renames per-stage artifacts across both storage
+   backends and both naming tiers, per shooter, restartably.
+2. Identity decoupled from display position. Either a stable opaque
+   `stage_id` on `MatchStageDefinition` with artifacts keyed on it, or
+   an explicit `display_order` field with `stage_number` retained as
+   the key.
+3. `Match.stages` list order becoming meaningful independently of
+   `stage_number`.
+
+Two cheap hedges are in scope now because they cost nothing today and
+are tedious to retrofit:
+
+- The editor renders rows in list order and shows `stage_number` as
+  secondary identity, not as the row's ordinal. Nothing in the new UI
+  equates position with number.
+- No new artifact kind is keyed on `stage_number`. Every one added today
+  is one more entry in the future migration's table.
+
+Stored order stays ascending by `stage_number`, which is today's
+invariant everywhere. Persisting submitted order instead would be the
+more forward-compatible choice, but with no reordering UI the only way
+to submit a non-ascending list is a bug, and honouring it would push a
+silently non-ascending list past consumers that have always assumed
+otherwise. Reordering later means dropping that normalisation
+deliberately, alongside the identity change it needs anyway.
+
+Do not write "stage_number is the permanent identity" into docstrings.
+It is stable, not permanent.
+
+## Scope
+
+Rename applies to every stage regardless of origin. Remove applies to
+every stage, scoreboard-backed included.
+
+This is safe because `merge_stage_times` overlays onto existing stages
+and silently drops unknown `stage_number` values -- it never grows the
+list (`project.py:1741-1744`). A refresh-times cannot resurrect a
+removed stage. Only a full overwrite-import can, and that path already
+warns that it orphans video assignments.
+
+`StageEntry.skipped` remains the softer marker: "this stage exists, I
+did not shoot it". Remove means "this stage does not exist".
+
+## Removal semantics
+
+Uploaded footage is the only irreplaceable artifact, and in hosted it
+may be the user's only copy. It is never deleted.
+
+- Videos on a removed stage move to `unassigned_videos` with
+  `role = "secondary"`, following `init_placeholder_stages`
+  (`project.py:1520-1523`). The user can re-bind them to another stage.
+- The audit doc and every derived cache for that stage are deleted.
+  Derived state is cheap to regenerate, and leaving it orphaned invites
+  a stale doc reattaching if the number is ever reused.
+
+The purge glob is `stage<N>_*` per directory, which covers both the
+per-cam and legacy naming tiers in one pattern. The trailing underscore
+is load-bearing: a bare `stage<N>*` prefix makes removing stage 3 delete
+stage 30's artifacts.
+
+## API
+
+`PUT /api/match/stages`, taking the desired list:
+
+```json
+{"stages": [{"stage_number": 1, "stage_name": "El Presidente",
+             "stage_rounds": null}, ...]}
+```
+
+`stage_number: null` marks a new row. The server diffs against
+`Match.stages`:
+
+```
+removed = existing_numbers - submitted_numbers
+added   = submitted rows with stage_number == null
+renamed = matching numbers whose stage_name or stage_rounds changed
+```
+
+A submission with no removals skips the destructive path entirely.
+
+The response is a `StageEditSummary` modelled on
+`match_delete.DeletionSummary`: per-shooter counts of videos unassigned,
+audit docs deleted, cache objects deleted, jobs cancelled, plus
+`errors: list[str]`. Individual failures are collected, not raised --
+teardown is best-effort, and a failed cache delete must not strand the
+stage list in a half-written state.
+
+Concurrency uses the existing `expected_version` optimistic lock on
+`save_match` and `save_project`. A lost race returns 409.
+
+Validation: at least one stage must remain; `stage_name` is required and
+trimmed; a submitted `stage_number` not present in `Match.stages` is a
+400 rather than an implicit add.
+
+## Execution order
+
+Compute stops before storage moves, mirroring `_delete_hosted`
+(`match_delete.py:130-196`):
+
+1. Cancel active jobs whose `(slug, stage_number)` is in the removed
+   set. Per-job `jobs.cancel(job_id)`, never `cancel_active_for_user` --
+   the coarse version would kill the user's unrelated work.
+2. Per shooter: move removed stages' videos to `unassigned_videos`.
+3. Per shooter: delete the audit doc via a new
+   `AppState.delete_audit(slug, n)` wrapper. Hosted delegates to the
+   existing `project_state.delete_audit(match_id, slug, n)`
+   (`db/project_state.py:206`); local unlinks the file. This mirrors the
+   existing `load_audit` / `save_audit` local-vs-hosted split
+   (`server.py:1280-1326`).
+4. Per shooter: delete cache objects matching `stage<N>_*` in the audio
+   and trimmed directories, collecting per-object errors.
+5. Per shooter: apply adds and renames, then save the project doc.
+6. Save the match doc last, so a crash mid-fan-out leaves the canonical
+   list describing the pre-edit world.
+
+Cancellation is not instantaneous, so a worker can still land a write
+after step 4. Because freed numbers are never reused, that write is
+inert garbage rather than a correctness bug -- it can never be read as
+belonging to a live stage. This is the property that makes gaps worth
+their cost, and it is lost the day renumbering lands, which is why the
+future migration needs its own compute-quiescing step.
+
+## SPA
+
+`EditStagesDrawer`, a new component reusing the row shape from the
+manual-create stage editor (`CreateMatch.tsx:1205-1264`): stage name
+field, expected rounds, remove button.
+
+- Entry points: the match overview, in both its empty and active
+  variants. This restores the affordance PR #520 deleted along with the
+  dead "Edit stage list" button and "Adjust the stage list" help card.
+- Rows marked for removal stay visible, struck through, until Save.
+- Save is gated behind a confirm naming what will be destroyed,
+  aggregated across shooters from roster data the drawer already holds.
+- `api.editMatchStages()` replaces `createPlaceholderStages`, which is
+  deleted rather than left as a second, destructive path to the same
+  concept.
+
+The Shooters page is deliberately not an entry point. Stage lists are
+match-level; offering the edit from a per-shooter screen implies a
+per-shooter stage list that does not exist.
+
+## Contiguity audit
+
+Gaps are new: until now stage numbers were always 1..N. Nothing found so
+far assumes contiguity -- `Pick.tsx`'s `TickStrip` renders anonymous
+done/todo ticks from a count rather than from numbers, and the `idx + 1`
+sites in `server.py` are progress-message cosmetics. That is a survey,
+not a proof, so a deliberate sweep for count-derived stage lists is a
+plan step with its own verification, not an assumption.
+
+## Testing
+
+Per the project's review practice, every test must fail against
+pre-change code. The relevant lesson from #638: pick the assertion that
+actually discriminates, because status codes are frequently identical
+before and after.
+
+- Rename preserves `audit/stage<N>.json` and the trim. Assert on
+  artifact bytes, not on the response.
+- Remove stage 3 of 5: stages 4 and 5 keep audit docs and trims
+  byte-identical, stage 3's are gone, its videos are in
+  `unassigned_videos`.
+- After removing stage 3 from a 5-stage match, adding a stage allocates
+  6, not the freed 3.
+- Fan-out across three shooters where only one has content on the
+  removed stage.
+- Removing stage 3 does not delete stage 30's artifacts. This is the
+  glob-underscore test and it needs a fixture with a two-digit stage.
+- A removed stage with an active job has that job cancelled and no other
+  job touched.
+- A storage delete that raises lands in `errors` and the stage list
+  still commits.
+- Remove-everything is refused with 400.
+- A concurrent edit losing the `expected_version` race returns 409.
+
+Frontend: the drawer renders a gapped list correctly, and the confirm
+reports the right per-shooter destruction counts. Read the rendered
+output rather than trusting the assertion -- on #617 a fix reached the
+table cell and rich ellipsized it away while the test stayed green.
