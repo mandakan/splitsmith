@@ -303,3 +303,25 @@ def test_run_trims_survives_camera_ambiguity_appearing_after_the_plan(
 
     assert results[0].trim_path is None
     assert results[0].skip_reasons
+
+
+def test_plan_names_trims_from_the_shooters_own_stage_name(two_shooter_match: Path) -> None:
+    """``already_exported`` must recognise a trim written under the shooter's name.
+
+    ``match.json`` and ``project.json`` agree right after ``match merge``
+    (which validates stage-definition consistency), but a per-shooter
+    scoreboard import rewrites ``project.stages`` and leaves the match
+    alone. Planning against the match name then misses a trim the SPA
+    already wrote and re-cuts it under a second filename.
+    """
+    mathias = Match.shooter_root(two_shooter_match, "mathias")
+    project = MatchProject.load(mathias)
+    project.stage(2).stage_name = "El Presidente"
+    project.save(mathias)
+
+    exports = project.exports_path(mathias)
+    (exports / "stage2_el-presidente_trimmed.mp4").write_bytes(b"written by the SPA")
+
+    entry = _find(match_trims.plan_trims(two_shooter_match), "mathias", 2)
+    assert entry.stage_name == "El Presidente"
+    assert entry.reason == "already_exported"

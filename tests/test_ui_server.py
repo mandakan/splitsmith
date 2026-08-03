@@ -7296,6 +7296,167 @@ def test_export_stage_reports_secondary_trim_filenames(tmp_path: Path, monkeypat
     assert final["result"]["secondary_trims"] == [f"stage1_stage-1_cam_{secondary_id}_trimmed.mp4"]
 
 
+def _seed_trims_only_stage(tmp_path: Path, monkeypatch) -> tuple[object, Path]:
+    """A stage with a beep, a reachable source and an audit holding zero shots.
+
+    That is the trims-only reality: the compare grid never reads shot data,
+    so the user cuts trims without ever running detection.
+    """
+    import json as _json
+
+    from splitsmith import trim
+
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    shooter_root = project_root / "shooters" / "me"
+    (shooter_root / "audit" / "stage1.json").write_text(
+        _json.dumps(
+            {
+                "stage_number": 1,
+                "stage_name": "Stage 1",
+                "stage_time_seconds": 10.0,
+                "beep_time": 5.0,
+                "shots": [],
+                "_candidates_pending_audit": {"candidates": []},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_trim_video(source, output_path, **kwargs):  # type: ignore[no-untyped-def]
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"TRIMMED")
+        return trim.TrimResult(output_path=Path(output_path), start_time=0.0, end_time=10.0)
+
+    monkeypatch.setattr(trim, "trim_video", fake_trim_video)
+    assert client.post("/api/shooters/me/stages/1/time", json={"time_seconds": 10.0}).status_code == 200
+    return client, project_root
+
+
+def _post_trims_only(client, stage_number: int = 1):
+    return client.post(
+        f"/api/shooters/me/stages/{stage_number}/export",
+        json={
+            "write_trim": True,
+            "write_csv": False,
+            "write_fcpxml": False,
+            "write_report": False,
+            "write_overlay": False,
+        },
+    )
+
+
+def test_trims_only_export_reports_a_clean_run(tmp_path: Path, monkeypatch) -> None:
+    """A successful trims-only export must not announce an anomaly (#616).
+
+    The compare grid needs a beep and a stage time, never shots, so an
+    audit with an empty ``shots[]`` is the *designed* state here. Reporting
+    ``report.detect_anomalies``' "No shots detected in the stage window"
+    turned every clean trims-only run into a warning -- and pointed the
+    user at a report.txt this mode never writes.
+    """
+    client, _ = _seed_trims_only_stage(tmp_path, monkeypatch)
+
+    final = _wait_for_job(client, _post_trims_only(client).json()["id"])
+
+    assert final["status"] == "succeeded", final
+    assert final["result"]["anomalies"] == []
+    assert final["message"] == "Done: trim"
+    assert "report.txt" not in final["message"]
+
+
+def test_trims_only_export_still_reports_a_failed_secondary(tmp_path: Path, monkeypatch) -> None:
+    """Filtering shot findings must not swallow an artefact that failed."""
+    from splitsmith import trim
+    from splitsmith.ui.project import MatchProject
+
+    client, project_root = _seed_trims_only_stage(tmp_path, monkeypatch)
+    shooter_root = project_root / "shooters" / "me"
+
+    project = MatchProject.load(shooter_root)
+    secondary_src = shooter_root / "raw" / "VID1_cam2.mp4"
+    secondary_src.write_bytes(b"\x00")
+    registered = project.register_video(secondary_src, project_root)
+    project.assign_video(registered.path, to_stage_number=1, role="secondary")
+    secondary = next(v for v in project.stage(1).videos if v.role == "secondary")
+    secondary.beep_time = 5.0
+    secondary_id = secondary.video_id
+    project.save(shooter_root)
+
+    real_trim = trim.trim_video
+
+    def flaky_trim_video(source, output_path, **kwargs):  # type: ignore[no-untyped-def]
+        if "_cam_" in Path(output_path).name:
+            raise trim.FFmpegError("secondary codec unsupported")
+        return real_trim(source, output_path, **kwargs)
+
+    monkeypatch.setattr(trim, "trim_video", flaky_trim_video)
+
+    final = _wait_for_job(client, _post_trims_only(client).json()["id"])
+
+    assert final["status"] == "succeeded", final
+    assert final["result"]["anomalies"] == [
+        f"secondary cam {secondary_id} trim not written: secondary codec unsupported"
+    ]
+    # The shot finding stays filtered; only the real failure is reported.
+    assert final["message"] == "Done: trim (1 anomaly)"
+
+
+def test_export_that_writes_no_trim_at_all_fails_the_job(tmp_path: Path, monkeypatch) -> None:
+    """Zero deliverables from a trim request is a failure, not a quiet "Done".
+
+    The endpoint 424s an unreachable source before queueing, so reaching
+    this branch means ffmpeg itself blew up. Reporting it as a successful
+    job that wrote "nothing" hides a total failure behind a green row.
+    """
+    from splitsmith import trim
+
+    client, project_root = _seed_trims_only_stage(tmp_path, monkeypatch)
+    (project_root / "shooters" / "me" / "exports" / "stage1_stage-1_trimmed.mp4").unlink()
+
+    def failing_trim_video(source, output_path, **kwargs):  # type: ignore[no-untyped-def]
+        raise trim.FFmpegError("moov atom not found")
+
+    monkeypatch.setattr(trim, "trim_video", failing_trim_video)
+
+    final = _wait_for_job(client, _post_trims_only(client).json()["id"])
+
+    assert final["status"] == "failed", final
+    assert "moov atom not found" in final["error"]
+
+
+def test_full_bundle_export_still_reports_shot_anomalies(tmp_path: Path, monkeypatch) -> None:
+    """The filter is scoped to requests that consume no shots.
+
+    A CSV/report run reads the audit, so "no shots" is a genuine finding
+    there and must keep surfacing -- with the report.txt pointer, which
+    that run does write.
+    """
+    client, _ = _seed_trims_only_stage(tmp_path, monkeypatch)
+
+    resp = client.post(
+        "/api/shooters/me/stages/1/export",
+        json={
+            "write_trim": True,
+            "write_csv": True,
+            "write_fcpxml": False,
+            "write_report": True,
+            "write_overlay": False,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    final = _wait_for_job(client, resp.json()["id"])
+
+    assert final["status"] == "succeeded", final
+    assert final["result"]["anomalies"] == [
+        "No shots detected in the stage window.",
+        # The CSV was asked for and could not be written -- an export
+        # failure, reported alongside the shot finding rather than instead
+        # of it.
+        "csv not written: no shots audited",
+    ]
+    assert "2 anomalies -- see report.txt" in final["message"]
+
+
 def test_match_export_endpoint_400_on_empty_stage_numbers(tmp_path: Path) -> None:
     client, _ = _seed_match_export_project(tmp_path, stage_count=1)
     resp = client.post("/api/shooters/me/export/match", json={"stage_numbers": []})

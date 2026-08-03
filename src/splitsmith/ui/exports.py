@@ -86,11 +86,24 @@ class StageExportResult:
     report_path: Path | None
     overlay_path: Path | None
     shots_written: int
+    # Everything worth telling the user about, in report.txt order: the shot
+    # findings first, then anything that failed to write. Callers that need
+    # to tell the two apart -- because the answer decides whether a run
+    # succeeded -- should read the two fields below instead (#616).
     anomalies: list[str]
     # Per-cam lossless trims keyed by ``StageVideo.video_id`` (issue #54).
     # Empty when the stage is single-cam or all secondaries failed to trim.
     # The FCPXML references each present file as a connected clip.
     secondary_trimmed_paths: dict[str, Path] = field(default_factory=dict)
+    # Findings about the *shots* -- no shots in the window, a split short
+    # enough to look like a double, a last shot past the official time.
+    # On a trim-only export these describe the audit, not this run: "No
+    # shots detected in the stage window" is the designed state when the
+    # caller asked for a bare trim and nothing that consumes shots.
+    shot_anomalies: list[str] = field(default_factory=list)
+    # Artefacts this run was asked for and could not write, with the reason.
+    # Always a real problem, whatever the request flags were.
+    export_failures: list[str] = field(default_factory=list)
 
 
 class StageExportError(RuntimeError):
@@ -497,9 +510,8 @@ def export_stage(
                 skip_reasons.append(f"fcpxml not written: {exc}")
                 fcpxml_path = None
 
-    anomalies = report.detect_anomalies(shots, beep_time_in_source, stage_data.time_seconds)
-    if skip_reasons:
-        anomalies = [*anomalies, *skip_reasons]
+    shot_anomalies = report.detect_anomalies(shots, beep_time_in_source, stage_data.time_seconds)
+    anomalies = [*shot_anomalies, *skip_reasons]
 
     report_path: Path | None = None
     if request.write_report:
@@ -534,6 +546,8 @@ def export_stage(
         shots_written=len(shots),
         anomalies=anomalies,
         secondary_trimmed_paths=secondary_paths_present,
+        shot_anomalies=shot_anomalies,
+        export_failures=list(skip_reasons),
     )
 
 
