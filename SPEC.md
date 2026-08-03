@@ -479,6 +479,16 @@ Sub 2 (#13) shipped: ingest screen + supporting backend.
 
 Subsequent sub-issues fill in the audit screen (#15), short-GOP trim (#16), and analysis/export (#17).
 
+### Stage-list editing (#521)
+
+Stage lists are editable after creation via `PUT /api/match/stages`. The request carries the full desired list, not a patch -- the server diffs it against `Match.stages` to compute what was added, removed, and renamed. The edit is match-level and fans out to every shooter, because per-shooter stage lists have to stay aligned with the match's.
+
+`stage_number` is stable for a stage's lifetime -- not permanent. Nothing renumbers an existing stage while it lives, but contiguous renumbering and reordering are intended future work that this design defers rather than precludes. Removing a stage therefore leaves a gap: removing stage 3 from 1-6 yields 1, 2, 4, 5, 6. A stage added afterward is allocated from `Match.next_stage_number`, a monotonic counter persisted on the match document; it only ever increases, so a freed number is never handed out again. A match document predating the field backfills it from `max(stages) + 1` on its first edit. That non-reuse is a property of the counter, not of leaving gaps -- computing `max(stages) + 1` fresh on every add would hand a freed number straight back out whenever the removed stage happened to be the highest-numbered one.
+
+Non-reuse is what lets this ship without an artifact-migration engine: every per-stage artifact is keyed on `stage_number` (`audit/stage<N>.json`, `stage<N>_cam_*.wav`, `stage<N>_cam_*_trimmed.mp4`), so never renumbering a live stage is what keeps the audit progress on stages the user didn't touch intact. It also means a worker write that lands after a removed stage's artifacts are purged is inert rather than a correctness bug -- the number can never be read back as belonging to a live stage -- which is why this feature ships with no job cancellation (see #645).
+
+Removing a stage releases its videos to `unassigned_videos` on every shooter (uploaded footage is never deleted -- in a hosted deployment it may be the user's only copy) and deletes that stage's audit doc plus derived caches.
+
 ## Hosted deployment: self-hosted workers
 
 The production server supports registering home Docker boxes as compute workers alongside
