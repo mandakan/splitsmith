@@ -291,9 +291,10 @@ def create_server(name: str = "splitsmith") -> FastMCP:
 
         Writes (subject to flags): the lossless trim under
         ``<project>/exports/stage<N>_<slug>_trimmed.mp4``, splits CSV,
-        FCPXML, report, and optional overlay MOV. Preconditions:
-        primary has ``beep_time``; ``audit/stage<N>.json`` exists
-        with at least one shot (run ``detect_shots`` first).
+        FCPXML, report, and optional overlay MOV. Precondition: primary
+        has ``beep_time``. No audit needed -- without one the trim is
+        still cut and the shot-dependent artefacts skip themselves,
+        reporting why in ``anomalies``.
         """
         return export_tools.export_stage_tool(
             project_root,

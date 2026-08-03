@@ -107,9 +107,11 @@ def export_stage_tool(
     distinct from the audit-mode short-GOP scrub copy under
     ``<project>/trimmed/`` (which ``trim_audit_clip`` writes).
 
-    Preconditions: stage has primary, primary has ``beep_time``,
-    ``audit/stage<N>.json`` exists with at least one shot
-    (``detect_shots`` runs first; or the audit JSON was hand-edited).
+    Preconditions: stage has primary, primary has ``beep_time``, source
+    reachable. No audit is required: a stage that never ran ``detect_shots``
+    exports its lossless trim, and the shot-dependent artefacts (CSV,
+    overlay, FCPXML markers) skip themselves and report why in
+    ``anomalies``. An audit that exists but won't parse is still an error.
 
     Returns paths to the artefacts written + per-secondary trim map +
     any anomalies surfaced by the engine.
@@ -131,12 +133,14 @@ def export_stage_tool(
     if not source.exists():
         raise FileNotFoundError(f"primary source missing for stage {stage_number}: {source}")
 
+    # No audit gate (#619): ``export_stage`` reads the document through
+    # ``read_audit_data``, which treats an absent file as zero shots. A
+    # trim needs only a beep and a stage time, so demanding the audit here
+    # told a user asking for a trim-only export to run exactly the shot
+    # detection the audit-free path exists to make optional. The
+    # shot-dependent artefacts (CSV, overlay, markers) skip themselves and
+    # say so in ``anomalies``.
     audit_path = project.audit_path(root) / f"stage{stage_number}.json"
-    if not audit_path.exists():
-        raise FileNotFoundError(
-            f"audit JSON missing for stage {stage_number}: {audit_path}; "
-            "run detect_shots or write the audit file first"
-        )
 
     exports_dir = project.exports_path(root)
     exports_dir.mkdir(parents=True, exist_ok=True)
@@ -278,9 +282,12 @@ def export_match_tool(
                 f"stage {stage_number}: lossless trim missing at "
                 f"{trimmed_path} -- call export_stage first"
             )
+        # Absent audit == zero shots, same rule as everywhere else (#619).
+        # The stage still rides the spine as a trim-only segment; only its
+        # markers, chapters and overlay drop out, and ``export_match``
+        # records that as an anomaly. The lossless trim is still required
+        # above -- that is the thing being stitched.
         audit_path = audit_dir / f"stage{stage_number}.json"
-        if not audit_path.exists():
-            raise FileNotFoundError(f"stage {stage_number}: audit JSON missing at {audit_path}")
         primary_clip_beep = min(primary.beep_time, project.trim_pre_buffer_seconds)
         secondaries: list[match_export_helpers.MatchSecondaryInput] = []
         if include_secondaries:

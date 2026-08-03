@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from splitsmith.mcp import export_tools
+from splitsmith.ui.exports import StageExportError
 from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 
 
@@ -146,10 +147,45 @@ def test_export_stage_calls_helper_and_returns_paths(tmp_path: Path) -> None:
     assert result["anomalies"] == []
 
 
-def test_export_stage_rejects_missing_audit_json(tmp_path: Path) -> None:
+def test_export_stage_allows_a_missing_audit_json(tmp_path: Path, monkeypatch) -> None:
+    """A trim needs a beep and a stage time, not an audit (#619).
+
+    This used to raise ``FileNotFoundError("... run detect_shots or write
+    the audit file first")`` -- telling a user asking for a trim-only export
+    to run exactly the shot detection the audit-free path exists to make
+    optional, while the HTTP surface next door cut the same trim happily.
+    """
+    from splitsmith import trim
+
+    def fake_trim_video(source, output_path, **kwargs):  # type: ignore[no-untyped-def]
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"TRIMMED")
+        return trim.TrimResult(output_path=Path(output_path), start_time=0.0, end_time=10.0)
+
+    monkeypatch.setattr(trim, "trim_video", fake_trim_video)
+
     root, _src = _seed_export_project(tmp_path)
     # Note: no audit JSON created.
-    with pytest.raises(FileNotFoundError, match="audit JSON missing"):
+    result = export_tools.export_stage_tool(
+        str(root),
+        stage_number=1,
+        write_trim=True,
+        write_csv=False,
+        write_fcpxml=False,
+        write_report=False,
+    )
+    assert result["trimmed_video_path"] is not None
+    assert result["shots_written"] == 0
+
+
+def test_export_stage_still_rejects_an_unparseable_audit(tmp_path: Path) -> None:
+    """Absent is a legitimate state; corrupt is a real fault. The relaxed
+    precondition must not swallow the second."""
+    root, _src = _seed_export_project(tmp_path)
+    audit = root / "audit" / "stage1.json"
+    audit.parent.mkdir(parents=True, exist_ok=True)
+    audit.write_text("{not json", encoding="utf-8")
+    with pytest.raises(StageExportError, match="failed to read audit JSON"):
         export_tools.export_stage_tool(str(root), stage_number=1)
 
 
@@ -281,14 +317,41 @@ def test_export_match_errors_when_trim_missing(tmp_path: Path) -> None:
         export_tools.export_match_tool(str(root), stage_numbers=[1])
 
 
-def test_export_match_errors_when_audit_missing(tmp_path: Path) -> None:
+def test_export_match_allows_a_missing_audit(tmp_path: Path) -> None:
+    """A stage with no audit still reaches the composer (#619) rather than
+    being refused up front. What the composer then does with it -- rides the
+    spine as a trim-only segment, minus markers / chapters / overlay -- is
+    pinned in ``test_ui_match_exports``. The *trim* is still required here:
+    that is the thing being stitched.
+    """
     root, _src = _seed_export_project(tmp_path)
     exports_dir = root / "exports"
     exports_dir.mkdir(exist_ok=True)
-    (exports_dir / "stage1_k-vallen_trimmed.mp4").write_bytes(b"x")
+    trimmed = exports_dir / "stage1_k-vallen_trimmed.mp4"
+    trimmed.write_bytes(b"x")
+
+    fake_result = type(
+        "FakeMatchResult",
+        (),
+        {
+            "fcpxml_path": exports_dir / "match.fcpxml",
+            "stage_count": 1,
+            "duration_seconds": 10.0,
+            "anomalies": [],
+        },
+    )()
     # No audit JSON.
-    with pytest.raises(FileNotFoundError, match="audit JSON missing"):
-        export_tools.export_match_tool(str(root), stage_numbers=[1])
+    with patch(
+        "splitsmith.mcp.export_tools.match_export_helpers.export_match",
+        return_value=fake_result,
+    ) as mock_export:
+        result = export_tools.export_match_tool(str(root), stage_numbers=[1])
+
+    assert result["stage_count"] == 1
+    stages_input = mock_export.call_args.kwargs["stages"]
+    # The audit path is still handed down -- it just doesn't have to exist.
+    assert stages_input[0].audit_path == root / "audit" / "stage1.json"
+    assert not stages_input[0].audit_path.exists()
 
 
 def test_export_match_validates_head_pad_against_project_buffer(tmp_path: Path) -> None:

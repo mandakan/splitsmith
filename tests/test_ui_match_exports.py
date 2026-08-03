@@ -121,6 +121,79 @@ def test_export_match_produces_stitched_fcpxml(tmp_path: Path) -> None:
     assert spine_clips[1].attrib["name"] == "Stage 2"
 
 
+def test_export_match_treats_a_missing_audit_as_zero_shots(tmp_path: Path) -> None:
+    """One audit precondition across every surface (#619).
+
+    ``exports.export_stage`` has treated an absent audit as zero shots since
+    #612 -- a trim needs only a beep and a stage time. This composer still
+    refused outright, so a match built from trim-only stages was impossible
+    on the very stages the audit-free path exists to produce. Absent is fine
+    and reported; the stage just loses its shot-dependent artefacts.
+    """
+    audit1 = _make_audit(
+        tmp_path,
+        "stage1.json",
+        _audit_payload([{"shot_number": 1, "ms_after_beep": 500}]),
+    )
+    trim1 = _make_trim(tmp_path, "stage1_trimmed.mp4")
+    trim2 = _make_trim(tmp_path, "stage2_trimmed.mp4")
+
+    result = match_exports_mod.export_match(
+        stages=[
+            match_exports_mod.MatchStageInput(
+                stage_number=1,
+                stage_name="Stage 1",
+                audit_path=audit1,
+                trimmed_path=trim1,
+                beep_offset_seconds=5.0,
+            ),
+            match_exports_mod.MatchStageInput(
+                stage_number=2,
+                stage_name="Stage 2",
+                audit_path=tmp_path / "audit" / "nope.json",  # never written
+                trimmed_path=trim2,
+                beep_offset_seconds=5.0,
+            ),
+        ],
+        request=_make_request(),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    # Both stages ride the spine; the audit-less one is flagged, not dropped.
+    assert result.stage_count == 2
+    root = ET.fromstring(result.fcpxml_path.read_bytes())
+    spine_clips = root.findall("./library/event/project/sequence/spine/asset-clip")
+    assert [c.attrib["name"] for c in spine_clips] == ["Stage 1", "Stage 2"]
+    assert any("stage 2" in a and "no shots audited" in a for a in result.anomalies)
+
+
+def test_export_match_still_rejects_an_unparseable_audit(tmp_path: Path) -> None:
+    """Absent means "never ran detection"; corrupt means something is wrong.
+    Relaxing the first must not swallow the second."""
+    bad = tmp_path / "audit" / "stage1.json"
+    bad.parent.mkdir(parents=True, exist_ok=True)
+    bad.write_text("{not json", encoding="utf-8")
+    trim1 = _make_trim(tmp_path, "stage1_trimmed.mp4")
+
+    with pytest.raises(match_exports_mod.MatchExportError, match="failed to read audit JSON"):
+        match_exports_mod.export_match(
+            stages=[
+                match_exports_mod.MatchStageInput(
+                    stage_number=1,
+                    stage_name="Stage 1",
+                    audit_path=bad,
+                    trimmed_path=trim1,
+                    beep_offset_seconds=5.0,
+                )
+            ],
+            request=_make_request(),
+            exports_dir=tmp_path / "exports",
+            config=OutputConfig(),
+            probe=_stub_probe,
+        )
+
+
 def test_export_match_action_cut_padding_shrinks_total_duration(tmp_path: Path) -> None:
     """head=0.5, tail=1.0 against a 20s clip with beep at 5s and last shot
     at 0.5s past beep collapses each stage to ~2.0s on the timeline."""
@@ -335,26 +408,6 @@ def test_export_match_raises_on_missing_trim(tmp_path: Path) -> None:
                     stage_name="Stage 1",
                     audit_path=audit,
                     trimmed_path=tmp_path / "missing_trim.mp4",
-                    beep_offset_seconds=5.0,
-                )
-            ],
-            request=_make_request(),
-            exports_dir=tmp_path / "exports",
-            config=OutputConfig(),
-            probe=_stub_probe,
-        )
-
-
-def test_export_match_raises_on_missing_audit(tmp_path: Path) -> None:
-    trim = _make_trim(tmp_path, "stage1_trimmed.mp4")
-    with pytest.raises(match_exports_mod.MatchExportError, match="audit JSON missing"):
-        match_exports_mod.export_match(
-            stages=[
-                match_exports_mod.MatchStageInput(
-                    stage_number=1,
-                    stage_name="Stage 1",
-                    audit_path=tmp_path / "missing_audit.json",
-                    trimmed_path=trim,
                     beep_offset_seconds=5.0,
                 )
             ],
