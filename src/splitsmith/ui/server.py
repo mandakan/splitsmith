@@ -2704,7 +2704,9 @@ def register_job_bodies(state: AppState) -> None:
                 "fcpxml": _name(result.fcpxml_path),
                 "report": _name(result.report_path),
                 "overlay": _name(result.overlay_path),
-                "secondary_trims": [p.name for p in result.secondary_trimmed_paths],
+                # ``secondary_trimmed_paths`` maps video_id -> Path; iterate
+                # the values, not the mapping (which yields the ids).
+                "secondary_trims": [p.name for p in result.secondary_trimmed_paths.values()],
                 "anomalies": result.anomalies,
             }
         )

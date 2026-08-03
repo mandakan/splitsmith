@@ -7245,6 +7245,57 @@ def test_export_stage_allows_a_manually_timed_stage(tmp_path: Path) -> None:
     assert final["status"] == "succeeded", final
 
 
+def test_export_stage_reports_secondary_trim_filenames(tmp_path: Path, monkeypatch) -> None:
+    """A per-stage export that writes a secondary-cam trim must report the
+    trim's *filename* in ``result.secondary_trims``.
+
+    ``StageExportResult.secondary_trimmed_paths`` is a ``{video_id: Path}``
+    mapping; iterating it yields video-id strings, so building the result
+    payload from the bare iteration raised ``'str' object has no attribute
+    'name'`` and failed the whole job -- every multi-cam Generate from the
+    SPA, after the trims had already been written to disk.
+    """
+    from splitsmith import trim
+    from splitsmith.ui.project import MatchProject
+
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    shooter_root = project_root / "shooters" / "me"
+
+    # Give the stage a second camera with its own beep and reachable source.
+    project = MatchProject.load(shooter_root)
+    secondary_src = shooter_root / "raw" / "VID1_cam2.mp4"
+    secondary_src.write_bytes(b"\x00")
+    registered = project.register_video(secondary_src, project_root)
+    project.assign_video(registered.path, to_stage_number=1, role="secondary")
+    secondary = next(v for v in project.stage(1).videos if v.role == "secondary")
+    secondary.beep_time = 5.0
+    secondary_id = secondary.video_id
+    project.save(shooter_root)
+
+    def fake_trim_video(source, output_path, **kwargs):  # type: ignore[no-untyped-def]
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"TRIMMED")
+        return trim.TrimResult(output_path=Path(output_path), start_time=0.0, end_time=10.0)
+
+    monkeypatch.setattr(trim, "trim_video", fake_trim_video)
+
+    assert client.post("/api/shooters/me/stages/1/time", json={"time_seconds": 10.0}).status_code == 200
+    resp = client.post(
+        "/api/shooters/me/stages/1/export",
+        json={
+            "write_trim": True,
+            "write_csv": False,
+            "write_fcpxml": False,
+            "write_report": False,
+            "write_overlay": False,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+    assert final["result"]["secondary_trims"] == [f"stage1_stage-1_cam_{secondary_id}_trimmed.mp4"]
+
+
 def test_match_export_endpoint_400_on_empty_stage_numbers(tmp_path: Path) -> None:
     client, _ = _seed_match_export_project(tmp_path, stage_count=1)
     resp = client.post("/api/shooters/me/export/match", json={"stage_numbers": []})
