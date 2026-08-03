@@ -56,11 +56,37 @@ stage orphans every artifact belonging to it.
 
 - **rename** sets `stage_name` (and `stage_rounds`) in place. Touches no
   artifacts.
-- **add** allocates `max(existing_numbers) + 1`.
-- **remove** drops the entry. Numbers freed by removal are never reused.
+- **add** allocates from `Match.next_stage_number`, the match's
+  monotonic allocation counter, and writes the advanced value back.
+- **remove** drops the entry and leaves the counter alone, so the freed
+  number is never handed out again.
 
 Removing a stage mid-list therefore leaves a gap: removing 3 from 1-6
 yields 1, 2, 4, 5, 6.
+
+### Non-reuse comes from the counter, not from leaving gaps
+
+Never renumbering is what keeps *existing* stages' artifacts valid. It
+says nothing about which number the next added stage gets, and the two
+were conflated in the first cut of this design: allocation was
+`max(existing_numbers) + 1`, computed fresh from the post-save list with
+nothing persisted. That reuses a number as soon as the removed stage was
+the highest-numbered one -- stages 1-6, remove 6, add, and the new stage
+is 6 again, inheriting `stage6_cam_*.wav` and its trim from a worker that
+landed a write after the purge.
+
+`Match.next_stage_number` is therefore persisted on the match document
+and only ever increases. It is `None` on matches written before the field
+existed; `Match.resolve_next_stage_number()` backfills those from
+`max(stages) + 1`, which is exactly what the old allocation would have
+returned, so an existing match behaves identically on its first edit and
+carries a stored mark from then on. That same expression is also a floor
+on a stored mark, because `Match.stages` can be replaced wholesale from a
+scoreboard shell without the counter being consulted.
+
+The counter is written in the same save as the stage list it numbered
+(the match doc, saved last), so a crash cannot leave a number spent but
+unrecorded.
 
 ### This is a deliberate expedient, not a principle
 
@@ -123,7 +149,8 @@ may be the user's only copy. It is never deleted.
   (`project.py:1520-1523`). The user can re-bind them to another stage.
 - The audit doc and every derived cache for that stage are deleted.
   Derived state is cheap to regenerate, and leaving it orphaned invites
-  a stale doc reattaching if the number is ever reused.
+  a stale doc reattaching if the number is ever reused. The counter is
+  the guarantee that it is not; the purge is the second line.
 
 The purge glob is `stage<N>_*` per directory, which covers both the
 per-cam and legacy naming tiers in one pattern. The trailing underscore
@@ -157,6 +184,15 @@ audit docs deleted, cache objects deleted, jobs cancelled, plus
 teardown is best-effort, and a failed cache delete must not strand the
 stage list in a half-written state.
 
+Each `ShooterStageEditResult` carries `saved: bool` alongside `error`,
+because an error means two different things. A per-stage cleanup failure
+is recorded and then execution falls through: that shooter's stage list
+is written and only derived state is orphaned (`saved=True`). A failure
+loading or saving the project doc means the shooter's list is unchanged
+on disk while the match doc has moved on (`saved=False`). The two error
+strings differ only in formatting, so a client cannot tell them apart by
+matching on the message.
+
 Concurrency uses the existing `expected_version` optimistic lock on
 `save_match` and `save_project`. A lost race returns 409.
 
@@ -182,15 +218,21 @@ Compute stops before storage moves, mirroring `_delete_hosted`
 4. Per shooter: delete cache objects matching `stage<N>_*` in the audio
    and trimmed directories, collecting per-object errors.
 5. Per shooter: apply adds and renames, then save the project doc.
-6. Save the match doc last, so a crash mid-fan-out leaves the canonical
-   list describing the pre-edit world.
+6. Save the match doc last, carrying the advanced allocation counter, so
+   a crash mid-fan-out leaves the canonical list describing the pre-edit
+   world.
 
-Cancellation is not instantaneous, so a worker can still land a write
-after step 4. Because freed numbers are never reused, that write is
-inert garbage rather than a correctness bug -- it can never be read as
-belonging to a live stage. This is the property that makes gaps worth
-their cost, and it is lost the day renumbering lands, which is why the
-future migration needs its own compute-quiescing step.
+Nothing cancels jobs on removed stages today: `Job` carries no match id,
+so filtering on `stage_number` alone would reach the user's other
+matches, and step 1 shipped as a no-op (#645). A worker can therefore
+land a write well after step 4. Because the allocation counter never
+reissues a freed number, that write is inert garbage rather than a
+correctness bug -- it can never be read as belonging to a live stage.
+Restoring cancellation, precisely scoped, is what #645 tracks; until
+then the counter is the only thing making the write harmless, which is
+why it is persisted rather than derived. The same property is lost the
+day renumbering lands, so the future migration needs its own
+compute-quiescing step.
 
 ## SPA
 
@@ -235,6 +277,12 @@ before and after.
   `unassigned_videos`.
 - After removing stage 3 from a 5-stage match, adding a stage allocates
   6, not the freed 3.
+- After removing stage 5 from a 5-stage match, adding a stage allocates
+  6, not the freed 5. This is the case a list-derived `max + 1` gets
+  wrong, and it has to go through the HTTP layer: the counter is only
+  worth anything if it survives the round trip through `match.json`.
+- A shooter whose per-stage cleanup fails reports `saved=True`; one whose
+  project save fails reports `saved=False`.
 - Fan-out across three shooters where only one has content on the
   removed stage.
 - Removing stage 3 does not delete stage 30's artifacts. This is the

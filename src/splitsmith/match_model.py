@@ -218,6 +218,16 @@ class Match(BaseModel):
     scoreboard_content_type: int | None = None
     match_date: date | None = None
     stages: list[MatchStageDefinition] = Field(default_factory=list)
+    #: Monotonic allocation counter for ``stage_number`` (#521): the number
+    #: the next stage added through the stage-list editor will get. Only
+    #: ever increases, so a number freed by removing a stage is not handed
+    #: out again -- which is what keeps a removed stage's artifacts
+    #: (``stage<N>_cam_*.wav`` and friends) from reattaching to a later
+    #: stage. Deriving the number from ``max(stages)`` instead cannot do
+    #: that: removing the highest-numbered stage would return its number to
+    #: circulation. ``None`` on documents written before this field existed;
+    #: read it through :meth:`resolve_next_stage_number`, never directly.
+    next_stage_number: int | None = None
     #: Ordered list of shooter slugs (= subdir names under ``shooters/``).
     shooters: list[str] = Field(default_factory=list)
 
@@ -405,6 +415,33 @@ class Match(BaseModel):
     # ------------------------------------------------------------------
     # Inspection helpers
     # ------------------------------------------------------------------
+
+    def resolve_next_stage_number(self) -> int:
+        """The next ``stage_number`` to hand out (#521).
+
+        Two guards, both needed:
+
+        * **Backfill.** Matches written before ``next_stage_number``
+          existed carry ``None``. They resolve to ``max(stages) + 1`` (1
+          when there are no stages) -- exactly the number the old
+          ``max(...) + 1`` allocation would have produced -- so an existing
+          match behaves identically on its first edit, and that edit
+          persists the mark from then on.
+        * **Floor.** ``max(stages) + 1`` is a floor on the stored value,
+          not merely a fallback. ``stages`` can grow outside the stage-list
+          editor (:meth:`stages_from_match_data` replaces the list from a
+          scoreboard shell without touching the counter), and honouring a
+          stale mark there would allocate a number a live stage already
+          holds. Taking the larger of the two keeps the counter monotonic
+          *and* collision-free.
+
+        The caller writes the advanced value back onto
+        :attr:`next_stage_number`; nothing here mutates the model.
+        """
+        floor = max((s.stage_number for s in self.stages), default=0) + 1
+        if self.next_stage_number is None:
+            return floor
+        return max(self.next_stage_number, floor)
 
     def stage(self, stage_number: int) -> MatchStageDefinition:
         """Return the stage definition for ``stage_number``. Raises KeyError."""

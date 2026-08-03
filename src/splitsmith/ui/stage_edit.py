@@ -1,12 +1,19 @@
 """Stage-list editing for an existing match (#521).
 
 Adds, removes, and renames stages on a match that already has audit
-progress. ``stage_number`` is stable for a stage's lifetime: removing a
-stage leaves a gap and freed numbers are never handed out again, so every
-per-stage artifact key (``audit/stage<N>.json``, ``stage<N>_cam_*.wav``,
+progress. ``stage_number`` is stable for a stage's lifetime: nothing here
+renumbers an existing stage, so every per-stage artifact key
+(``audit/stage<N>.json``, ``stage<N>_cam_*.wav``,
 ``stage<N>_cam_*_trimmed.mp4``) stays valid for the stages the user did
 not touch. That is what lets this ship without an artifact-migration
 engine; see the design doc for the renumber/reorder work it defers.
+
+Removing a stage leaves a gap, and the freed number is not handed out
+again. That second property does *not* follow from never renumbering --
+it comes from the persisted counter ``Match.next_stage_number``, which
+this module reads, allocates above, and writes back. Allocating
+``max(stages) + 1`` instead would return the number of a removed
+*highest*-numbered stage straight back to circulation.
 """
 
 from __future__ import annotations
@@ -66,19 +73,36 @@ class StageListDiff(BaseModel):
     added: list[MatchStageDefinition] = Field(default_factory=list)
     renamed: list[MatchStageDefinition] = Field(default_factory=list)
     unchanged: list[int] = Field(default_factory=list)
+    #: The allocation counter after this diff: the mark it was given,
+    #: advanced past every number in :attr:`added`. Required rather than
+    #: defaulted -- a diff that allocated numbers without reporting where
+    #: the counter ended is exactly the state that lets one be reissued.
+    #: The caller persists it (see :func:`apply_stage_edit`).
+    next_stage_number: int
 
 
 def diff_stage_list(
     existing: list[MatchStageDefinition],
     submitted: list[SubmittedStage],
+    *,
+    next_stage_number: int,
 ) -> StageListDiff:
     """Diff ``submitted`` against ``existing``. Raises :class:`StageEditError`.
 
-    New rows are numbered from ``max(existing) + 1`` upward, deliberately
-    skipping numbers freed by an earlier removal: a worker whose
-    cancellation lost the race can still write ``stage<freed>_*`` bytes,
-    and never reusing the number keeps that write inert instead of letting
-    it reattach to a live stage.
+    ``next_stage_number`` is the match's allocation counter
+    (``Match.resolve_next_stage_number()``): new rows are numbered from it
+    upward, and :attr:`StageListDiff.next_stage_number` reports where it
+    ended so the caller can write it back. It is an *input* precisely
+    because the list cannot supply it. Deriving the next number from
+    ``max(existing) + 1`` -- what this function used to do -- reuses the
+    number of a removed highest-numbered stage: with stages 1..6, removing
+    6 and then adding hands 6 back out.
+
+    That reuse is not cosmetic. A worker still running on the removed
+    stage can land ``stage<freed>_cam_*.wav`` after the purge (nothing
+    cancels it, see #645); those bytes are inert only while the number can
+    never name a live stage again, and a new stage 6 would silently
+    inherit the old one's audio and trim.
     """
     if not submitted:
         raise StageEditError("a match must keep at least one stage")
@@ -98,10 +122,10 @@ def diff_stage_list(
             )
         seen.add(row.stage_number)
 
-    diff = StageListDiff()
+    diff = StageListDiff(next_stage_number=next_stage_number)
     diff.removed = sorted(set(by_number) - seen)
 
-    next_number = (max(by_number) if by_number else 0) + 1
+    next_number = next_stage_number
     for row in submitted:
         name = row.stage_name.strip()
         if row.stage_number is None:
@@ -129,6 +153,7 @@ def diff_stage_list(
             diff.unchanged.append(current.stage_number)
 
     diff.unchanged.sort()
+    diff.next_stage_number = next_number
     return diff
 
 
@@ -212,10 +237,20 @@ def purge_stage_artifacts(
 class ShooterStageEditResult(BaseModel):
     """What the edit did to one shooter.
 
-    ``error`` is set when something failed for this shooter specifically
-    (a per-stage cleanup step, or the load/save of the project doc
-    itself). Consumers should check it rather than string-matching the
-    shooter's slug inside :attr:`StageEditSummary.errors`.
+    ``error`` is set when something failed for this shooter specifically,
+    but it covers two outcomes that are not equally bad, and the strings
+    differ only in formatting -- so read :attr:`saved`, never the message:
+
+    * ``saved=True`` with an ``error``: one removed stage's cleanup step
+      failed (video release, audit delete, or artifact purge). The
+      shooter's stage list still updated and their project was written;
+      what is left behind is orphaned derived state.
+    * ``saved=False``: the project doc was never written. This shooter's
+      stage list is unchanged on disk and still describes the pre-edit
+      world, while the match doc has moved on.
+
+    Consumers should check these rather than string-matching the shooter's
+    slug inside :attr:`StageEditSummary.errors`.
     """
 
     slug: str
@@ -224,6 +259,10 @@ class ShooterStageEditResult(BaseModel):
     files_deleted: int = 0
     objects_deleted: int = 0
     error: str | None = None
+    #: True once this shooter's project doc was written. Defaults to
+    #: False so any path that does not reach the save reports the
+    #: conservative answer.
+    saved: bool = False
 
 
 class StageEditSummary(BaseModel):
@@ -267,9 +306,18 @@ async def apply_stage_edit(
        canonical list describing the pre-edit world rather than promising
        stages the shooters no longer have.
 
+    The advanced allocation counter rides along on that final save: it is
+    assigned to ``match.next_stage_number`` immediately before
+    ``save_match()``, in the same write as the stages it numbered. A crash
+    before that point discards the mark and the stage list together, so
+    the two can never disagree about which numbers have been spent.
+
     Cancellation is not instantaneous, so a worker can still land a write
-    after step 2's purge. Because freed numbers are never reused, that
-    write is inert garbage that can never be read as a live stage.
+    after step 2's purge. Because the counter never reissues a freed
+    number, that write is inert garbage that can never be read as a live
+    stage. Nothing cancels those jobs today (#645), which makes the
+    counter the only thing standing between a late write and a new stage
+    silently inheriting a removed one's audio.
 
     A single removed stage's cleanup (video release, audit delete, artifact
     purge) failing must not stop the rest of that shooter's update: this
@@ -285,7 +333,11 @@ async def apply_stage_edit(
     as an ordinary per-shooter error but re-raised so the caller's 409
     handling applies, the same as a match-doc save conflict.
     """
-    diff = diff_stage_list(list(match.stages), submitted)
+    diff = diff_stage_list(
+        list(match.stages),
+        submitted,
+        next_stage_number=match.resolve_next_stage_number(),
+    )
     summary = StageEditSummary(
         removed=list(diff.removed),
         added=[s.stage_number for s in diff.added],
@@ -320,7 +372,11 @@ async def apply_stage_edit(
                     # cleanup failing must not block this shooter's
                     # stage-list update, renames, adds, or save (see the
                     # docstring: the alternative permanently strands the
-                    # shooter on this stage).
+                    # shooter on this stage). Execution falls through to
+                    # the save below, so this shooter still ends up with
+                    # ``saved=True`` alongside the error -- that pairing
+                    # is what tells a consumer "orphaned artifacts", not
+                    # "unsaved shooter".
                     message = f"{slug} stage {stage_number}: {exc}"
                     summary.errors.append(message)
                     result.error = message
@@ -343,6 +399,7 @@ async def apply_stage_edit(
                 )
             project.stages.sort(key=lambda s: s.stage_number)
             save_project(slug, project)
+            result.saved = True
         except conflict_excs:
             # A lost optimistic-lock race on THIS shooter's project save
             # must not be swallowed into ``summary.errors`` as an ordinary
@@ -359,6 +416,8 @@ async def apply_stage_edit(
             # project was never saved, so any in-memory video-unassignment
             # this shooter accumulated is discarded along with it; only
             # already-performed audit/artifact deletions are real.
+            # ``result.saved`` stays at its False default, which is the
+            # difference between this error and the per-stage one above.
             summary.errors.append(f"{slug}: {exc}")
             result.error = str(exc)
             result.videos_unassigned = 0
@@ -372,6 +431,11 @@ async def apply_stage_edit(
             definition.stage_rounds = update.stage_rounds
     match.stages.extend(diff.added)
     match.stages.sort(key=lambda s: s.stage_number)
+    # Persist the counter in the same save as the stages it numbered.
+    # Assigned unconditionally, not only when something was added: on a
+    # match whose document predates the field this is what turns the
+    # backfilled value into a stored one.
+    match.next_stage_number = diff.next_stage_number
     save_match()
 
     return summary

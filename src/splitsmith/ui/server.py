@@ -7521,6 +7521,9 @@ def create_app(
         a stage releases its videos to ``unassigned_videos`` and deletes
         its audit doc and derived caches; stages the user did not touch
         keep everything, which is the whole point of never renumbering.
+        A stage the user adds is numbered from the match's persisted
+        ``next_stage_number`` counter, so it can never land on a number a
+        removed stage used to hold.
 
         A ``StateConflictError`` raised by ``save_match()`` (hosted mode,
         optimistic-locking loss) is not caught here -- it propagates to the
@@ -7540,8 +7543,9 @@ def create_app(
             match. Removing stage 3 here would reach into every OTHER
             match's PENDING/RUNNING stage-3 job too, which is worse than not
             cancelling at all. Cancellation was belt-and-braces on top of
-            the design's real guarantee: freed stage numbers are never
-            reused, so a late worker write to ``stage3_*`` can never be read
+            the design's real guarantee: the match's persisted
+            ``next_stage_number`` counter never reissues a freed stage
+            number, so a late worker write to ``stage3_*`` can never be read
             back as a live stage -- it's inert. Precise (match-scoped)
             cancellation is tracked in #645; until then this stays a no-op
             rather than a plausible-looking bug for the next reader to

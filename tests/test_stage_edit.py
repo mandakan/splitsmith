@@ -26,6 +26,7 @@ def test_rename_only_is_not_a_removal() -> None:
             SubmittedStage(stage_number=2, stage_name="Stage 2"),
             SubmittedStage(stage_number=3, stage_name="Stage 3"),
         ],
+        next_stage_number=4,
     )
     assert diff.removed == []
     assert diff.added == []
@@ -38,6 +39,7 @@ def test_removal_is_detected_by_absence() -> None:
     diff = diff_stage_list(
         _existing(1, 2, 3, 4, 5),
         [SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2, 4, 5)],
+        next_stage_number=6,
     )
     assert diff.removed == [3]
     assert diff.added == []
@@ -54,9 +56,37 @@ def test_added_rows_allocate_above_the_current_max_not_the_gap() -> None:
             SubmittedStage(stage_number=5, stage_name="Stage 5"),
             SubmittedStage(stage_number=None, stage_name="Standards"),
         ],
+        next_stage_number=6,
     )
     assert [s.stage_number for s in diff.added] == [6]
     assert diff.added[0].stage_name == "Standards"
+
+
+def test_allocation_follows_the_mark_not_the_list_max() -> None:
+    """A mark above ``max(existing) + 1`` is what a removed top stage
+    leaves behind: stages 1..5 with 6 already spent must allocate 7, and
+    the returned mark must advance past it."""
+    diff = diff_stage_list(
+        _existing(1, 2, 3, 4, 5),
+        [SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2, 3, 4, 5)]
+        + [SubmittedStage(stage_number=None, stage_name="Standards")],
+        next_stage_number=7,
+    )
+    assert [s.stage_number for s in diff.added] == [7]
+    assert diff.next_stage_number == 8
+
+
+def test_the_returned_mark_does_not_move_when_nothing_is_added() -> None:
+    diff = diff_stage_list(
+        _existing(1, 2),
+        [
+            SubmittedStage(stage_number=1, stage_name="Renamed"),
+            SubmittedStage(stage_number=2, stage_name="Stage 2"),
+        ],
+        next_stage_number=9,
+    )
+    assert diff.added == []
+    assert diff.next_stage_number == 9
 
 
 def test_two_added_rows_get_consecutive_numbers() -> None:
@@ -68,12 +98,18 @@ def test_two_added_rows_get_consecutive_numbers() -> None:
             SubmittedStage(stage_number=None, stage_name="A"),
             SubmittedStage(stage_number=None, stage_name="B"),
         ],
+        next_stage_number=3,
     )
     assert [s.stage_number for s in diff.added] == [3, 4]
+    assert diff.next_stage_number == 5
 
 
 def test_add_to_an_empty_existing_list_starts_at_one() -> None:
-    diff = diff_stage_list([], [SubmittedStage(stage_number=None, stage_name="Only")])
+    diff = diff_stage_list(
+        [],
+        [SubmittedStage(stage_number=None, stage_name="Only")],
+        next_stage_number=1,
+    )
     assert [s.stage_number for s in diff.added] == [1]
 
 
@@ -86,12 +122,13 @@ def test_unknown_stage_number_is_rejected_not_implicitly_added() -> None:
                 SubmittedStage(stage_number=2, stage_name="Stage 2"),
                 SubmittedStage(stage_number=99, stage_name="Ghost"),
             ],
+            next_stage_number=3,
         )
 
 
 def test_empty_submission_is_rejected() -> None:
     with pytest.raises(StageEditError, match="at least one stage"):
-        diff_stage_list(_existing(1, 2), [])
+        diff_stage_list(_existing(1, 2), [], next_stage_number=3)
 
 
 def test_duplicate_stage_number_is_rejected() -> None:
@@ -102,6 +139,7 @@ def test_duplicate_stage_number_is_rejected() -> None:
                 SubmittedStage(stage_number=1, stage_name="Stage 1"),
                 SubmittedStage(stage_number=1, stage_name="Stage 1 again"),
             ],
+            next_stage_number=3,
         )
 
 
@@ -110,6 +148,7 @@ def test_blank_stage_name_is_rejected() -> None:
         diff_stage_list(
             _existing(1),
             [SubmittedStage(stage_number=1, stage_name="   ")],
+            next_stage_number=2,
         )
 
 
@@ -117,6 +156,7 @@ def test_stage_name_is_trimmed() -> None:
     diff = diff_stage_list(
         _existing(1),
         [SubmittedStage(stage_number=1, stage_name="  Padded  ")],
+        next_stage_number=2,
     )
     assert diff.renamed[0].stage_name == "Padded"
 
@@ -131,6 +171,7 @@ def test_changed_stage_rounds_counts_as_a_rename() -> None:
                 stage_rounds=StageRounds(expected=12),
             )
         ],
+        next_stage_number=2,
     )
     assert [s.stage_number for s in diff.renamed] == [1]
     assert diff.renamed[0].stage_rounds is not None
@@ -666,3 +707,210 @@ def test_apply_recovers_a_shooter_when_one_stage_cleanup_step_fails(tmp_path) ->
     result = summary.shooters[0]
     assert result.error is not None
     assert "state store down" in result.error
+
+
+# --- the allocation counter (#521 Task 9 review) ---------------------------
+
+
+def test_apply_does_not_hand_back_the_number_of_a_removed_top_stage(tmp_path) -> None:
+    """Removing the highest-numbered stage must not return its number to
+    circulation. A worker still running on stage 6 can land a
+    ``stage6_cam_*.wav`` write after the purge; if the next added stage
+    were 6 again it would silently inherit that audio and its trim.
+    """
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3, 4, 5, 6)
+    _projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["me"], [1, 2, 3, 4, 5, 6])
+    keep = [SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2, 3, 4, 5)]
+
+    removal = asyncio.run(
+        apply_stage_edit(match=match, root=tmp_path, submitted=list(keep), shooter_slugs=["me"], **hooks)
+    )
+    assert removal.removed == [6]
+
+    addition = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[*keep, SubmittedStage(stage_number=None, stage_name="Standards")],
+            shooter_slugs=["me"],
+            **hooks,
+        )
+    )
+
+    assert addition.added == [7]
+    assert [s.stage_number for s in match.stages] == [1, 2, 3, 4, 5, 7]
+
+
+def test_apply_backfills_the_mark_on_a_match_that_predates_the_field(tmp_path) -> None:
+    """A match document written before the counter existed carries no
+    mark. Its first edit must allocate exactly as it did before the field
+    existed (``max + 1``), and must persist the advanced mark so the
+    second edit no longer has to guess."""
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3)
+    assert match.next_stage_number is None
+
+    summary = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2, 3)]
+            + [SubmittedStage(stage_number=None, stage_name="Standards")],
+            shooter_slugs=["me"],
+            **_harness(tmp_path, ["me"], [1, 2, 3])[4],
+        )
+    )
+
+    assert summary.added == [4]
+    assert match.next_stage_number == 5
+
+
+def test_apply_advances_the_mark_monotonically_across_edits(tmp_path) -> None:
+    """Two successive edits: the mark never goes backwards, and the
+    second edit's allocation starts where the first one stopped even
+    though the first edit also removed the top stage."""
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3)
+    _projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["me"], [1, 2, 3])
+    keep = [SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2)]
+
+    first = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[*keep, SubmittedStage(stage_number=None, stage_name="Standards")],
+            shooter_slugs=["me"],
+            **hooks,
+        )
+    )
+    after_first = match.next_stage_number
+
+    second = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[
+                *keep,
+                SubmittedStage(stage_number=4, stage_name="Standards"),
+                SubmittedStage(stage_number=None, stage_name="Classifier"),
+            ],
+            shooter_slugs=["me"],
+            **hooks,
+        )
+    )
+
+    assert first.removed == [3]
+    assert first.added == [4]
+    assert after_first == 5
+    assert second.added == [5]
+    assert match.next_stage_number == 6
+
+
+def test_apply_persists_the_mark_with_the_match_doc_saved_last(tmp_path) -> None:
+    """The mark rides on the match doc, which is written last. It must be
+    set on the model *before* that save, not after -- otherwise the number
+    just handed out is not recorded anywhere and the next edit reissues
+    it."""
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2)
+    _projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["me"], [1, 2])
+    seen: list[int | None] = []
+    hooks["save_match"] = lambda: seen.append(match.next_stage_number)
+
+    asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2)]
+            + [SubmittedStage(stage_number=None, stage_name="Standards")],
+            shooter_slugs=["me"],
+            **hooks,
+        )
+    )
+
+    assert seen == [4]
+
+
+# --- ``saved`` discriminates the two meanings of ``error`` -----------------
+
+
+def test_a_failed_stage_cleanup_still_reports_the_shooter_as_saved(tmp_path) -> None:
+    """The inner per-stage catch records an error and then falls through:
+    the shooter's stage list *is* written. ``saved`` is how a consumer
+    tells that from an unsaved shooter -- the two error strings differ
+    only by formatting, which is not something a client can match on."""
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3)
+    _projects, saved, _audits, _cancelled, hooks = _harness(tmp_path, ["me"], [1, 2, 3])
+
+    def delete_audit(slug: str, n: int) -> bool:
+        raise RuntimeError("state store down")
+
+    hooks["delete_audit"] = delete_audit
+
+    summary = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2)],
+            shooter_slugs=["me"],
+            **hooks,
+        )
+    )
+
+    result = summary.shooters[0]
+    assert saved == ["me"]
+    assert result.error is not None
+    assert result.saved is True
+
+
+def test_a_failed_project_save_reports_the_shooter_as_not_saved(tmp_path) -> None:
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3)
+    _projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["me"], [1, 2, 3])
+
+    def save_project(slug: str, project) -> None:
+        raise RuntimeError("disk full")
+
+    hooks["save_project"] = save_project
+
+    summary = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2)],
+            shooter_slugs=["me"],
+            **hooks,
+        )
+    )
+
+    result = summary.shooters[0]
+    assert result.error is not None
+    assert result.saved is False
+
+
+def test_an_untroubled_shooter_is_saved_with_no_error(tmp_path) -> None:
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3)
+    _projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["me"], [1, 2, 3])
+
+    summary = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            root=tmp_path,
+            submitted=[SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2)],
+            shooter_slugs=["me"],
+            **hooks,
+        )
+    )
+
+    assert summary.shooters[0].error is None
+    assert summary.shooters[0].saved is True

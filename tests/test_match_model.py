@@ -112,6 +112,52 @@ def test_slugify_filename_empty_falls_back():
 
 
 # ---------------------------------------------------------------------------
+# Stage-number allocation counter (#521)
+# ---------------------------------------------------------------------------
+
+
+def test_next_stage_number_backfills_from_the_stage_list_when_absent(tmp_path: Path):
+    """A match.json written before the counter existed has no mark. It
+    must resolve to ``max + 1`` -- the number the old ``max(...) + 1``
+    allocation would have handed out -- so an existing match behaves
+    identically on its first edit."""
+    root = tmp_path / "match"
+    match = Match.init(root, name="Pre-counter match")
+    match.stages = [MatchStageDefinition(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2, 3)]
+    match.save(root)
+
+    doc = json.loads((root / MATCH_FILE).read_text(encoding="utf-8"))
+    doc.pop("next_stage_number", None)
+    (root / MATCH_FILE).write_text(json.dumps(doc), encoding="utf-8")
+
+    reloaded = Match.load(root)
+    assert reloaded.next_stage_number is None
+    assert reloaded.resolve_next_stage_number() == 4
+
+
+def test_next_stage_number_backfills_to_one_for_a_match_with_no_stages():
+    assert Match(name="Empty").resolve_next_stage_number() == 1
+
+
+def test_a_stored_mark_wins_over_the_list_max():
+    """The whole point: 6 was allocated and then removed, so the list
+    tops out at 5 while the mark says 7."""
+    match = Match(name="M", next_stage_number=7)
+    match.stages = [MatchStageDefinition(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2, 3, 4, 5)]
+    assert match.resolve_next_stage_number() == 7
+
+
+def test_a_stale_mark_can_never_collide_with_a_live_stage():
+    """Stage lists can also grow outside the editor (a scoreboard import
+    replaces ``stages`` wholesale and does not touch the mark). Resolving
+    to the stored value alone would then re-allocate a number a live
+    stage already holds, so the list max is a floor, not an alternative."""
+    match = Match(name="M", next_stage_number=4)
+    match.stages = [MatchStageDefinition(stage_number=n, stage_name=f"Stage {n}") for n in range(1, 13)]
+    assert match.resolve_next_stage_number() == 13
+
+
+# ---------------------------------------------------------------------------
 # Schema round-trips
 # ---------------------------------------------------------------------------
 

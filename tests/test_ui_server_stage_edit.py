@@ -206,6 +206,42 @@ class TestEditMatchStages:
         assert resp.status_code == 200
         assert resp.json()["added"] == [6]
 
+    def test_add_after_removing_the_top_stage_does_not_reuse_its_number(self, tmp_path: Path) -> None:
+        """The counter has to survive the round trip through ``match.json``:
+        every request reloads the match, so a mark held only in memory
+        would hand stage 5 straight back on the second PUT.
+
+        This is the case the old ``max(list) + 1`` allocation got wrong,
+        and the one #645 leans on -- a worker still writing ``stage5_*``
+        after the purge is only inert while 5 can never name a live stage
+        again.
+        """
+        client, _state = _seeded_match(tmp_path, stages=5, shooters=["me"])
+        keep = [{"stage_number": n, "stage_name": f"Stage {n}"} for n in (1, 2, 3, 4)]
+
+        removal = client.put("/api/match/stages", json={"stages": keep})
+        assert removal.status_code == 200
+        assert removal.json()["removed"] == [5]
+
+        addition = client.put(
+            "/api/match/stages",
+            json={"stages": keep + [{"stage_number": None, "stage_name": "Standards"}]},
+        )
+
+        assert addition.status_code == 200
+        assert addition.json()["added"] == [6]
+
+    def test_the_shooter_result_reports_whether_the_project_was_saved(self, tmp_path: Path) -> None:
+        client, _state = _seeded_match(tmp_path, stages=3, shooters=["me"])
+        resp = client.put(
+            "/api/match/stages",
+            json={"stages": [{"stage_number": n, "stage_name": f"Stage {n}"} for n in (1, 2)]},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["shooters"][0]["saved"] is True
+        assert resp.json()["shooters"][0]["error"] is None
+
     def test_removing_every_stage_is_rejected(self, tmp_path: Path) -> None:
         client, _state = _seeded_match(tmp_path, stages=2, shooters=["me"])
         resp = client.put("/api/match/stages", json={"stages": []})
@@ -282,10 +318,11 @@ class TestEditMatchStages:
 # ``stage_number`` alone -- the only key ``apply_stage_edit`` can give a
 # ``cancel_jobs`` callback -- would also reach the user's OTHER matches.
 # Removing stage 3 from match A would cancel a running stage-3 job in match
-# B. The ruling was to drop cancellation entirely and rely on freed stage
-# numbers never being reused: a late worker write to ``stage3_*`` can never
-# be read back as a live stage, so it's inert. Precise (match-scoped)
-# cancellation is tracked in #645.
+# B. The ruling was to drop cancellation entirely and rely on the match's
+# persisted ``next_stage_number`` counter never reissuing a freed stage
+# number: a late worker write to ``stage3_*`` can never be read back as a
+# live stage, so it's inert. Precise (match-scoped) cancellation is tracked
+# in #645.
 #
 # This section locks in that negative: a stage edit must leave every job
 # alone, so nobody "fixes" a doomed job by restoring the coarse, cross-match
@@ -360,8 +397,9 @@ def test_stage_removal_does_not_cancel_any_jobs(tmp_path: Path) -> None:
     """Cancellation is deliberately absent -- see #645.
 
     Jobs carry no match id, so cancelling on stage_number alone would reach
-    the user's other matches. Removed stage numbers are never reused, which
-    makes a late worker write inert, so declining to cancel is safe.
+    the user's other matches. The match's persisted allocation counter
+    never reissues a removed stage's number, which makes a late worker
+    write inert, so declining to cancel is safe.
     """
     client, state = _seeded_match(tmp_path, stages=3, shooters=["me"])
 
