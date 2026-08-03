@@ -765,9 +765,9 @@ function StatusIcon({ state }: { state: ScanState }) {
  *  per-file progress, list of what's already uploaded, prune via
  *  delete. Files land in S3 under ``users/<id>/raw/`` via
  *  ``POST /api/me/raw/upload``; the SPA never sees a host filesystem
- *  path. Today the upload terminates at object storage -- attaching
- *  to a project happens once the worker pipeline can read from S3
- *  (separate chunk per the saas-readiness roadmap). */
+ *  path. Uploaded objects are then attached to the project from here
+ *  (``attachToProject`` -> ``POST /api/shooters/{slug}/raw-videos/attach``),
+ *  which is what makes them visible to the worker pipeline (#523). */
 function HostedUploadSurface({
   slug,
   onClose,
