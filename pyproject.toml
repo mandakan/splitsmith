@@ -93,6 +93,23 @@ hosted = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build]
+# The built SPA is git-ignored build output, and hatchling honours the *root*
+# .gitignore -- whose unanchored ``dist/`` matches ``ui_static/dist/`` at any
+# depth. Without this directive hatchling silently drops the whole directory,
+# the wheel ships no index.html, ``STATIC_DIR.exists()`` is False at runtime,
+# the SPA routes in ui/server.py never register, and ``splitsmith ui`` answers
+# ``GET /`` with a bare 404. ``artifacts`` is hatchling's mechanism for
+# re-including VCS-ignored build output; it is set here (not per-target)
+# because ``uv build`` builds the sdist first and then the wheel *from that
+# sdist*, so the SPA has to survive both. See #642.
+#
+# Note ``artifacts`` overrides ``exclude``, so the ``*.map`` rules below no
+# longer drop source maps -- the publish and CI workflows delete them after
+# ``pnpm build`` instead, which keeps ``sourcemap: true`` useful for the
+# hosted Docker build while leaving the 4 MB map out of the wheel.
+artifacts = ["src/splitsmith/ui_static/dist/**"]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/splitsmith"]
 # Frontend dev artefacts and node_modules don't belong in the published wheel.
