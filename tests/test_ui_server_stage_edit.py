@@ -7,7 +7,10 @@ stage add/remove/rename routes alongside it.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -271,3 +274,115 @@ class TestEditMatchStages:
         )
 
         assert resp.status_code == 409
+
+
+# --- a stage edit must not cancel jobs (#521 review; see #645) -------------
+#
+# ``compute_jobs``/``Job`` carry no match id, so filtering cancellation on
+# ``stage_number`` alone -- the only key ``apply_stage_edit`` can give a
+# ``cancel_jobs`` callback -- would also reach the user's OTHER matches.
+# Removing stage 3 from match A would cancel a running stage-3 job in match
+# B. The ruling was to drop cancellation entirely and rely on freed stage
+# numbers never being reused: a late worker write to ``stage3_*`` can never
+# be read back as a live stage, so it's inert. Precise (match-scoped)
+# cancellation is tracked in #645.
+#
+# This section locks in that negative: a stage edit must leave every job
+# alone, so nobody "fixes" a doomed job by restoring the coarse, cross-match
+# cancellation review rejected.
+
+_STALLED_JOB_RELEASES: list[threading.Event] = []
+
+
+@pytest.fixture(autouse=True)
+def _release_stalled_jobs():
+    """Unblock every job ``_submit_stalled_job`` started in this test.
+
+    Each such job's body waits on a ``threading.Event`` that only this
+    fixture (or the body's own 5s timeout) sets. Without this, a stalled
+    worker thread would sit inside the registry's executor -- tying up
+    one of its two worker slots -- until that timeout fires, well past
+    the end of the test that created it.
+    """
+    yield
+    while _STALLED_JOB_RELEASES:
+        _STALLED_JOB_RELEASES.pop().set()
+
+
+def _submit_stalled_job(state, *, stage_number: int) -> str:
+    """Submit a job that blocks until released (or 5s elapse) and return
+    its id.
+
+    Mirrors the ``submit_fn`` pattern ``test_ui_server.py`` already uses
+    for ``test_cleanup_apply_refuses_while_jobs_active`` -- register a
+    throwaway body on ``state.jobs.bodies``, then submit through the real
+    ``JobBackend.submit(kind=..., stage_number=...)`` so the job is a
+    normal PENDING/RUNNING entry indistinguishable from production work.
+    The ``kind`` is unique per call (stage-number-suffixed) so two calls
+    in the same test don't clobber each other's registered body.
+
+    The body polls ``handle.check_cancel()`` between short waits on the
+    release event, so it behaves like a real cooperative worker: a
+    genuine ``jobs.cancel(...)`` (as the review-rejected coarse version
+    would issue) flips it to CANCELLED almost immediately, while a
+    no-op ``_cancel`` (the shipped behaviour) leaves it blocking, and it
+    is this file's own ``_release_stalled_jobs`` fixture (or its 5s
+    fallback) that ever lets it finish.
+
+    Not flaky: the job never has to reach a particular lifecycle phase --
+    it only has to still be PENDING or RUNNING (either is fine; the caller
+    asserts membership in both) by the time the test's assertions run,
+    which holds for as long as the block lasts and nothing cancels it.
+    """
+    from tests.conftest import submit_fn
+
+    release = threading.Event()
+    _STALLED_JOB_RELEASES.append(release)
+
+    def _worker(handle) -> None:
+        deadline = time.monotonic() + 5.0
+        while not release.is_set() and time.monotonic() < deadline:
+            handle.check_cancel()
+            release.wait(timeout=0.02)
+
+    job = asyncio.run(
+        submit_fn(
+            state.jobs,
+            kind=f"test_stalled_stage{stage_number}",
+            fn=_worker,
+            stage_number=stage_number,
+        )
+    )
+    return job.id
+
+
+def test_stage_removal_does_not_cancel_any_jobs(tmp_path: Path) -> None:
+    """Cancellation is deliberately absent -- see #645.
+
+    Jobs carry no match id, so cancelling on stage_number alone would reach
+    the user's other matches. Removed stage numbers are never reused, which
+    makes a late worker write inert, so declining to cancel is safe.
+    """
+    client, state = _seeded_match(tmp_path, stages=3, shooters=["me"])
+
+    doomed = _submit_stalled_job(state, stage_number=3)
+    bystander = _submit_stalled_job(state, stage_number=1)
+
+    resp = client.put(
+        "/api/match/stages",
+        json={
+            "stages": [
+                {"stage_number": 1, "stage_name": "Stage 1"},
+                {"stage_number": 2, "stage_name": "Stage 2"},
+            ]
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["removed"] == [3]
+    assert resp.json()["jobs_cancelled"] == 0
+    assert resp.json()["errors"] == []
+
+    jobs = {j["id"]: j for j in client.get("/api/me/jobs").json()}
+    assert jobs[doomed]["status"] in ("pending", "running")
+    assert jobs[bystander]["status"] in ("pending", "running")
