@@ -1341,6 +1341,38 @@ class AppState:
             raise HTTPException(status_code=500, detail=f"audit write failed: {exc}") from exc
         return 0
 
+    def delete_audit(self, slug: str, stage_number: int) -> bool:
+        """Delete a stage's audit doc. Returns True when one was removed.
+
+        The hosted/local split mirrors :meth:`load_audit` and
+        :meth:`save_audit`. Used when a stage is removed from the match
+        (#521): the doc describes shots on a stage that no longer exists,
+        and leaving it behind risks a stale audit reattaching.
+
+        The local branch also removes the ``.bak`` sibling that
+        :meth:`save_audit` rotates the previous doc into -- deleting only
+        the live file would leave the previous audit recoverable on disk
+        after the user asked for the stage to be gone.
+        """
+        mid = current_match_id.get()
+        store = self.project_state
+        if store is not None and mid is not None:
+            return run_sync(store.delete_audit(mid, slug, stage_number)) > 0
+        audit_file = self._audit_file(slug, stage_number)
+        backup = audit_file.with_suffix(audit_file.suffix + ".bak")
+        removed = False
+        for victim in (audit_file, backup):
+            if victim.exists():
+                try:
+                    victim.unlink()
+                    removed = removed or victim == audit_file
+                except OSError as exc:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"audit delete failed: {exc}",
+                    ) from exc
+        return removed
+
     def materialize_audit(self, slug: str, stage_number: int) -> Path:
         """Ensure the stage's audit doc is present at its on-disk path and
         return that path.
