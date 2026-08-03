@@ -56,11 +56,24 @@ export function computeAuditNextStep(args: {
       const rotated = [...shooters.slice(myIdx + 1), ...shooters.slice(0, myIdx)];
       const next = rotated.find((s) => s.stages_audited < s.stages_total);
       if (next) {
+        // The pickup stage is read off the next shooter's OWN list, not
+        // assumed to be 01. Stage numbers stopped being 1..N when the
+        // stage-list editor shipped (#521): on a match whose stage 1 was
+        // removed the next shooter starts at 02, and the hardcoded "01"
+        // named a stage that no longer exists. `stage_statuses` carries
+        // one entry per stage in that shooter's project and the server
+        // emits it `sorted(...)` by stage_number, so `.at(0)` is their
+        // first stage. Falls back to the bare name rather than inventing
+        // a number when the list is empty.
+        const firstStage = next.stage_statuses.at(0)?.stage_number;
         return {
           kind: "shooter",
           nextSlug: next.slug,
           label: "Save & next shooter",
-          sublabel: `${next.name} · stage 01`,
+          sublabel:
+            firstStage != null
+              ? `${next.name} · stage ${String(firstStage).padStart(2, "0")}`
+              : next.name,
         };
       }
     }

@@ -416,10 +416,70 @@ export function asScoreboardError(err: unknown): ScoreboardErrorDetail | null {
   return null;
 }
 
-export interface PlaceholderStagesRequest {
-  stage_count: number;
-  match_name?: string | null;
-  match_date?: string | null;
+/** One stage as a property of the MATCH, mirrors
+ *  ``match_model.MatchStageDefinition`` (#521).
+ *
+ *  Not interchangeable with ``StageEntry``, which is one shooter's copy
+ *  plus their own time / videos / audit. The two documents diverge and
+ *  stay diverged: linking a scoreboard rewrites ``Match.stages`` with the
+ *  scoreboard's names and ``stage_rounds`` while leaving every shooter
+ *  project on its placeholder names, and no later sync closes the gap.
+ *  ``PUT /api/match/stages`` diffs a submission against ``Match.stages``,
+ *  so the stage editor must read and submit THIS shape -- feeding it a
+ *  shooter's list on a diverged match reports every untouched stage as
+ *  renamed and wipes ``stage_rounds`` off the match. */
+export interface MatchStageDefinition {
+  stage_number: number;
+  stage_name: string;
+  stage_rounds: StageRounds | null;
+  placeholder: boolean;
+}
+
+/** Response from GET /api/match/stages, mirrors ``MatchStagesResponse``. */
+export interface MatchStagesResponse {
+  stages: MatchStageDefinition[];
+}
+
+/** One row of the SPA's stage-list editor, sent as the full desired list
+ *  to ``editMatchStages`` (#521). Mirrors ``stage_edit.SubmittedStage``. */
+export interface StageEditRow {
+  /** null marks a row the user added; the server allocates the number. */
+  stage_number: number | null;
+  stage_name: string;
+  stage_rounds?: StageRounds | null;
+}
+
+/** What a stage-list edit did to one shooter, mirrors
+ *  ``stage_edit.ShooterStageEditResult``. ``error`` covers two outcomes
+ *  that are not equally bad -- read ``saved``, not the message, to tell
+ *  them apart: ``saved=true`` with an ``error`` means the shooter's
+ *  project WAS written and only a cleanup step (video release, audit
+ *  delete, or the artifact purge raising) failed; ``saved=false`` means the
+ *  project doc was never written and this shooter's stage list is unchanged
+ *  on disk. Individual files or storage objects the purge could not delete
+ *  are best-effort and land in ``StageEditSummary.errors`` alone, so a
+ *  shooter with orphaned cache files can still report ``error: null``. */
+export interface ShooterStageEditResult {
+  slug: string;
+  videos_unassigned: number;
+  audit_docs_deleted: number;
+  files_deleted: number;
+  objects_deleted: number;
+  error: string | null;
+  saved: boolean;
+}
+
+/** Response from PUT /api/match/stages, mirrors ``stage_edit.StageEditSummary``.
+ *  ``jobs_cancelled`` is always 0 -- cancellation was deliberately dropped
+ *  (#645) but the field remains in the wire shape. A 200 with a non-empty
+ *  ``errors`` means the edit committed but something did not get cleaned up. */
+export interface StageEditSummary {
+  removed: number[];
+  added: number[];
+  renamed: number[];
+  jobs_cancelled: number;
+  shooters: ShooterStageEditResult[];
+  errors: string[];
 }
 
 export interface ProjectSettingsPatch {
@@ -2008,14 +2068,21 @@ export const api = {
     }),
 
 
-  createPlaceholderStages: (slug: string, req: PlaceholderStagesRequest) =>
-    request<MatchProject>(
-      `/api/shooters/${encodeURIComponent(slug)}/project/placeholder-stages`,
-      {
-        method: "POST",
-        json: req,
-      },
-    ),
+  /** The bound match's canonical stage list (#521) -- the same document
+   *  ``editMatchStages`` diffs a submission against. Load this before
+   *  opening the stage editor; a shooter's ``project.stages`` is a
+   *  different document (see ``MatchStageDefinition``). */
+  getMatchStages: () => request<MatchStagesResponse>("/api/match/stages"),
+
+  /** Add, remove, and rename stages on the bound match (#521). Send the
+   *  full desired list; the server diffs it. Removing a stage releases its
+   *  videos to unassigned and deletes its audit + derived caches on every
+   *  shooter. Stage numbers are never reused, so removing one leaves a gap. */
+  editMatchStages: (stages: StageEditRow[]) =>
+    request<StageEditSummary>("/api/match/stages", {
+      method: "PUT",
+      json: { stages },
+    }),
 
   scanVideos: (
     slug: string,

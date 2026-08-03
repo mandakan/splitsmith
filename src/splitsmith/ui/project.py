@@ -1537,6 +1537,28 @@ class MatchProject(BaseModel):
             for i in range(1, count + 1)
         ]
 
+    def unassign_stage_videos(self, stage_number: int) -> int:
+        """Move ``stage_number``'s videos to ``unassigned_videos``.
+
+        Used when a stage is removed from the match (#521). Uploaded
+        footage is the only artifact that cannot be regenerated -- in
+        hosted it may be the user's sole copy -- so removal releases it
+        for re-binding instead of deleting it. Demoting to ``secondary``
+        matches :meth:`init_placeholder_stages`: an unassigned video has
+        no stage to be primary of, and the next assignment decides the
+        role. Returns the number of videos moved.
+        """
+        for stage in self.stages:
+            if stage.stage_number != stage_number:
+                continue
+            moved = list(stage.videos)
+            for video in moved:
+                video.role = "secondary"
+                self.unassigned_videos.append(video)
+            stage.videos = []
+            return len(moved)
+        return 0
+
     def import_scoreboard(self, raw: dict[str, Any], *, overwrite: bool = False) -> None:
         """Populate ``stages`` (and metadata) from a parsed SSI Scoreboard JSON.
 

@@ -6,6 +6,7 @@ import asyncio
 import json
 import sys
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 from unittest.mock import patch
 
@@ -7210,28 +7211,40 @@ def test_promote_against_fixture_endpoint_validates_anchor_exists(
 # --- /api/match/export (issue #171) ---------------------------------------
 
 
-def _seed_match_export_project(tmp_path: Path, *, stage_count: int = 2) -> tuple[TestClient, Path]:
+def _seed_match_export_project(
+    tmp_path: Path,
+    *,
+    stage_count: int = 2,
+    stage_numbers: Sequence[int] | None = None,
+) -> tuple[TestClient, Path]:
     """Seed a project with N stages, each having a primary + beep_time +
     audit JSON + lossless trim ready for match export.
+
+    ``stage_numbers`` overrides the default contiguous ``1..stage_count``
+    so callers can seed a *gapped* list (``[1, 2, 4, 5]``) -- the shape a
+    match takes once the stage-list editor removes a stage (#521). The
+    numbers are used verbatim for stage identity, artifact filenames and
+    audit keys; nothing here derives a number from a list position.
     """
     import json as _json
 
     from splitsmith.ui.project import MatchProject, StageEntry
 
+    numbers = list(stage_numbers) if stage_numbers is not None else list(range(1, stage_count + 1))
     project_root = tmp_path / "match"
     _shooter_root = project_root / "shooters" / "me"
     app = _match_create_app(project_root=project_root, project_name="Match Export Test")
     client = _MatchClient(app)
     project = MatchProject.load(_shooter_root)
     project.stages = []
-    for n in range(1, stage_count + 1):
+    for n in numbers:
         project.stages.append(StageEntry(stage_number=n, stage_name=f"Stage {n}", time_seconds=10.0))
         src = _shooter_root / "raw" / f"VID{n}.mp4"
         src.parent.mkdir(parents=True, exist_ok=True)
         src.write_bytes(b"\x00")
         video = project.register_video(src, project_root)
         project.assign_video(video.path, to_stage_number=n, role="primary")
-        primary = project.stages[n - 1].primary()
+        primary = project.stage(n).primary()
         assert primary is not None
         primary.beep_time = 5.0
     project.save(_shooter_root)
@@ -7240,7 +7253,7 @@ def _seed_match_export_project(tmp_path: Path, *, stage_count: int = 2) -> tuple
     audit_dir.mkdir(parents=True, exist_ok=True)
     exports_dir = _shooter_root / "exports"
     exports_dir.mkdir(parents=True, exist_ok=True)
-    for n in range(1, stage_count + 1):
+    for n in numbers:
         (audit_dir / f"stage{n}.json").write_text(
             _json.dumps(
                 {
@@ -7306,6 +7319,56 @@ def test_match_export_endpoint_writes_fcpxml(tmp_path: Path, monkeypatch: pytest
     # = 5.0 - 0.5 = 4.5s; tail_trim = (20 - 5.5) - 1.0 = 13.5s; eff = 2.0s.
     # Two stages -> 4.0s total.
     assert result["duration_seconds"] == pytest.approx(4.0, abs=0.1)
+
+
+def test_export_over_a_gapped_stage_list_covers_every_remaining_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Match export over 1, 2, 4, 5 -- the shape the stage-list editor
+    leaves behind once stage 3 is removed (#521).
+
+    Until that editor shipped, ``Match.stages`` was always 1..N, so any
+    consumer that rebuilt stage numbers from a count instead of reading
+    the list was indistinguishable from a correct one. The export path is
+    the highest-risk consumer: it derives artifact filenames
+    (``stage<N>_<slug>_trimmed.mp4``), audit keys (``audit/stage<N>.json``)
+    and timeline clip names per stage. This asserts on the rendered
+    FCPXML, not just the job's ``stage_count``: a count of 4 would also be
+    satisfied by exporting stages 1, 2, 3, 4.
+    """
+    client, _ = _seed_match_export_project(tmp_path, stage_numbers=[1, 2, 4, 5])
+    _stub_match_export_probe(monkeypatch)
+
+    resp = client.post(
+        "/api/shooters/me/export/match",
+        json={
+            "stage_numbers": [1, 2, 4, 5],
+            "head_pad_seconds": 0.5,
+            "tail_pad_seconds": 1.0,
+            "include_secondaries": True,
+            "include_overlay": False,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+    result = final["result"]
+    assert result is not None
+    assert result["stage_count"] == 4
+    # No "stage N missing its trim / audit" anomalies: every gapped number
+    # resolved to the artifacts seeded under its own name.
+    assert result["anomalies"] == [], result["anomalies"]
+
+    xml = Path(result["fcpxml_path"]).read_text(encoding="utf-8")
+    # Each stage contributes an asset whose src is its own trim. Stage 3
+    # was never seeded, so a consumer that walked positions 0..3 as stages
+    # 1..4 would either name stage 3 here or fail to find its trim.
+    for n in (1, 2, 4, 5):
+        assert f"stage{n}_stage-{n}_trimmed.mp4" in xml, f"stage {n} missing from the timeline"
+    assert "stage3_stage-3_trimmed.mp4" not in xml
+    assert xml.count("_trimmed.mp4") >= 4
+    # Same per-stage arithmetic as the contiguous test: 2.0s each.
+    assert result["duration_seconds"] == pytest.approx(8.0, abs=0.1)
 
 
 def _export_csv_only(client, stage_number: int = 1):

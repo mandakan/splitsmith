@@ -166,7 +166,7 @@ from ..observability import StructuredJsonFormatter, init_sentry
 from ..runtime import runtime as process_runtime
 from ..storage import Storage
 from . import audio as audio_helpers
-from . import export_storage
+from . import export_storage, stage_edit
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from . import shooter_move as shooter_move_module
@@ -1340,6 +1340,38 @@ class AppState:
                 tmp.unlink()
             raise HTTPException(status_code=500, detail=f"audit write failed: {exc}") from exc
         return 0
+
+    def delete_audit(self, slug: str, stage_number: int) -> bool:
+        """Delete a stage's audit doc. Returns True when one was removed.
+
+        The hosted/local split mirrors :meth:`load_audit` and
+        :meth:`save_audit`. Used when a stage is removed from the match
+        (#521): the doc describes shots on a stage that no longer exists,
+        and leaving it behind risks a stale audit reattaching.
+
+        The local branch also removes the ``.bak`` sibling that
+        :meth:`save_audit` rotates the previous doc into -- deleting only
+        the live file would leave the previous audit recoverable on disk
+        after the user asked for the stage to be gone.
+        """
+        mid = current_match_id.get()
+        store = self.project_state
+        if store is not None and mid is not None:
+            return run_sync(store.delete_audit(mid, slug, stage_number)) > 0
+        audit_file = self._audit_file(slug, stage_number)
+        backup = audit_file.with_suffix(audit_file.suffix + ".bak")
+        removed = False
+        for victim in (audit_file, backup):
+            if victim.exists():
+                try:
+                    victim.unlink()
+                    removed = removed or victim == audit_file
+                except OSError as exc:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"audit delete failed: {exc}",
+                    ) from exc
+        return removed
 
     def materialize_audit(self, slug: str, stage_number: int) -> Path:
         """Ensure the stage's audit doc is present at its on-disk path and
@@ -3142,6 +3174,37 @@ class CreateMatchStageDraft(BaseModel):
     stage_name: str
     expected_rounds: int | None = None
     target_type: str | None = None
+
+
+class MatchStagesResponse(BaseModel):
+    """Body of ``GET /api/match/stages`` (#521).
+
+    The canonical stage list, read straight off ``Match.stages`` -- the
+    same document ``PUT /api/match/stages`` diffs a submission against.
+    The stage editor needs this rather than a shooter's ``project.stages``:
+    a scoreboard link rewrites ``match.stages`` with the scoreboard's names
+    and ``stage_rounds`` while leaving the shooter projects on their
+    placeholder names, and nothing (``merge_stage_times`` included) ever
+    closes that gap. Diffing a shooter's copy against the match then reads
+    every untouched stage as renamed.
+
+    Deliberately no ``next_stage_number``: allocation is server-side (see
+    ``stage_edit.diff_stage_list``) and a client that can see the counter is
+    a client that will guess with it.
+    """
+
+    stages: list[match_model.MatchStageDefinition]
+
+
+class StageEditRequest(BaseModel):
+    """Body for ``PUT /api/match/stages`` (#521).
+
+    The full desired stage list, not a patch. The server diffs it against
+    the match's current list, so the SPA does not have to track which rows
+    it changed. ``stage_number: null`` marks a newly added row.
+    """
+
+    stages: list[stage_edit.SubmittedStage]
 
 
 class CreateMatchPrimaryShooter(BaseModel):
@@ -7468,6 +7531,90 @@ def create_app(
         merged = project.merge_stage_times(results)
         project.save(root)
         return merged
+
+    @app.get("/api/match/stages", response_model=MatchStagesResponse)
+    def get_match_stages() -> MatchStagesResponse:
+        """The bound match's canonical stage list (#521).
+
+        The read half of the stage editor: ``PUT /api/match/stages`` diffs a
+        submission against ``Match.stages``, so the editor has to load
+        ``Match.stages`` too. A shooter's ``project.stages`` is not a
+        substitute -- see :class:`MatchStagesResponse`.
+        """
+        return MatchStagesResponse(stages=list(state.match().stages))
+
+    @app.put("/api/match/stages", response_model=stage_edit.StageEditSummary)
+    async def edit_match_stages(req: StageEditRequest) -> stage_edit.StageEditSummary:
+        """Add, remove, and rename stages on an existing match (#521).
+
+        The stage list is a property of the match, so an edit fans out to
+        every shooter -- their stage lists have to stay aligned. Removing
+        a stage releases its videos to ``unassigned_videos`` and deletes
+        its audit doc and derived caches; stages the user did not touch
+        keep everything, which is the whole point of never renumbering.
+        A stage the user adds is numbered from the match's persisted
+        ``next_stage_number`` counter, so it can never land on a number a
+        removed stage used to hold.
+
+        A ``StateConflictError`` raised by ``save_match()`` (hosted mode,
+        optimistic-locking loss) is not caught here -- it propagates to the
+        app-level ``exception_handler`` registered near the top of
+        ``create_app``, which already maps it to 409 ``version_conflict``.
+
+        An empty ``shooters`` roster is allowed, not an error: the stage
+        list is a property of the match, so editing it before anyone is
+        added is a legitimate thing to do and refusing would block it. Such
+        a request updates ``match.stages`` and fans out to nobody, so it
+        returns 200 with ``shooters: []``. Read that field rather than
+        assuming a shooter was touched -- ``Home.tsx`` carries a
+        ``shooters.length || 1`` fallback (for legacy single-shooter
+        projects, which report an empty roster), so its confirm dialog says
+        "for 1 shooter" on a genuinely empty match while the server touches
+        zero.
+        """
+        root = current_match_root.get()
+        if root is None:
+            raise _no_project_error()
+        match = state.match()
+        slugs = list(match.shooters)
+
+        async def _cancel(stage_numbers: set[int]) -> int:
+            """No-op: ``compute_jobs`` carries no match id, and ``Job`` has
+            no match/slug field, so a filter on ``stage_number`` alone (the
+            only key ``apply_stage_edit`` gives us) cannot be scoped to this
+            match. Removing stage 3 here would reach into every OTHER
+            match's PENDING/RUNNING stage-3 job too, which is worse than not
+            cancelling at all. Cancellation was belt-and-braces on top of
+            the design's real guarantee: the match's persisted
+            ``next_stage_number`` counter never reissues a freed stage
+            number, so a late worker write to ``stage3_*`` can never be read
+            back as a live stage -- it's inert. Precise (match-scoped)
+            cancellation is tracked in #645; until then this stays a no-op
+            rather than a plausible-looking bug for the next reader to
+            "restore".
+            """
+            return 0
+
+        def _save_project(slug: str, project: MatchProject) -> None:
+            project.save(state.shooter_root(slug))
+
+        try:
+            return await stage_edit.apply_stage_edit(
+                match=match,
+                submitted=req.stages,
+                shooter_slugs=slugs,
+                load_project=state.shooter_project,
+                save_project=_save_project,
+                save_match=lambda: match.save(root),
+                delete_audit=state.delete_audit,
+                # Per-shooter, not the match root: derived caches live at
+                # ``<match_root>/shooters/<slug>/{audio,trimmed}``, the same
+                # root ``_save_project`` above writes the project doc to.
+                shooter_root=state.shooter_root,
+                cancel_jobs=_cancel,
+            )
+        except stage_edit.StageEditError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/shooters/{slug}/project/placeholder-stages")
     def create_placeholder_stages(slug: str, req: PlaceholderStagesRequest) -> JSONResponse:

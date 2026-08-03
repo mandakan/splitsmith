@@ -21,6 +21,7 @@
 import {
   ArrowDownToLine,
   ArrowRight,
+  Layers,
   Plus,
   Timer,
   UploadCloud,
@@ -31,10 +32,12 @@ import { Link, useNavigate, useOutletContext } from "react-router-dom";
 
 import { Avatar, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
+import { EditStagesDrawer } from "@/components/match/EditStagesDrawer";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import {
   api,
   type MatchProject,
+  type MatchStageDefinition,
   type ShooterListEntry,
   type StageEntry,
   type StageStatus,
@@ -75,6 +78,24 @@ export function Home() {
   const ctx = useOutletContext<MatchShellOutletContext>();
   const project = ctx?.project ?? null;
   const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
+  // The stage editor's read model is the MATCH's stage list, not
+  // ``project.stages``. Those are different documents and they diverge
+  // permanently: linking a scoreboard rewrites ``match.stages`` with the
+  // scoreboard's names and ``stage_rounds`` and only touches
+  // ``scoreboard_match_id``/``content_type`` on each shooter project, and
+  // no later sync (``merge_stage_times`` included) closes the gap. Since
+  // the server diffs the submission against ``match.stages``, submitting a
+  // shooter's copy reports every untouched stage as renamed and strips
+  // ``stage_rounds`` -- which is the ensemble's ``expected`` prior, not
+  // cosmetic. Null means "not loaded yet"; the drawer is not mounted until
+  // it has the real list, so it can never open against an empty one and
+  // submit that as "remove every stage".
+  const [matchStages, setMatchStages] = useState<MatchStageDefinition[] | null>(
+    null,
+  );
+  const [stagesLoading, setStagesLoading] = useState(false);
+  const [stagesError, setStagesError] = useState<string | null>(null);
+  const [editStagesOpen, setEditStagesOpen] = useState(false);
   // Slug used for slug-bearing nav links from this page. The
   // ``/api/health.default_shooter_slug`` field this used to read was
   // retired with the bound-state singleton (doc 10 Tier 1 step 4) and
@@ -106,6 +127,50 @@ export function Home() {
       alive = false;
     };
   }, [project?.name]);
+
+  // Stage list just changed under us (add/remove/rename via
+  // EditStagesDrawer). ``ctx.refresh()`` is the same mechanism Shooters.tsx
+  // uses after a mutation -- it bumps MatchShell's refreshKey, which
+  // re-fetches the bound project (so ``project.stages`` and the stage
+  // grid derived from it pick up the edit). That refetch doesn't touch
+  // this page's own ``shooters`` state (stages_total/stages_audited per
+  // shooter also changed), so re-run the same listMatchShooters() call
+  // the mount effect above uses.
+  function handleStagesSaved() {
+    ctx?.refresh();
+    api
+      .listMatchShooters()
+      .then((r) => setShooters(r.shooters))
+      .catch(() => setShooters([]));
+    // The drawer stays open when the summary carries cleanup errors, so
+    // refresh its read model too rather than leaving it on the pre-edit
+    // list. Rows are only re-seeded from this prop when ``open`` flips,
+    // so this cannot discard edits under an open drawer.
+    api
+      .getMatchStages()
+      .then((r) => setMatchStages(r.stages))
+      .catch(() => {});
+  }
+
+  /** Fetch the match stage list, then open the drawer. Fetch-then-open
+   *  rather than open-then-fetch: an editor rendered against a
+   *  not-yet-loaded list shows zero rows, and zero rows submitted is
+   *  "remove every stage". */
+  async function openEditStages() {
+    setStagesLoading(true);
+    setStagesError(null);
+    try {
+      const r = await api.getMatchStages();
+      setMatchStages(r.stages);
+      setEditStagesOpen(true);
+    } catch (e) {
+      setStagesError(
+        e instanceof Error ? e.message : "Could not load the stage list.",
+      );
+    } finally {
+      setStagesLoading(false);
+    }
+  }
 
   const stageRows = useMemo<StageMatrixRow[]>(
     () => (project ? buildStageMatrix(project.stages, shooters) : []),
@@ -221,7 +286,22 @@ export function Home() {
               Export Match
             </span>
           </Button>
+          <Button
+            variant="outline"
+            onClick={openEditStages}
+            disabled={stagesLoading}
+          >
+            <Layers className="size-3.5" />
+            <span className="font-display uppercase tracking-[0.08em]">
+              {stagesLoading ? "Loading Stages" : "Edit Stages"}
+            </span>
+          </Button>
         </div>
+        {stagesError ? (
+          <p role="alert" className="mt-2.5 text-xs text-destructive">
+            {stagesError}
+          </p>
+        ) : null}
       </div>
 
       <div className="mx-auto max-w-[1280px] px-8 pb-20 pt-6">
@@ -231,6 +311,7 @@ export function Home() {
             stageViews={stageViews}
             shooters={shooters}
             navSlug={navSlug}
+            onEditStages={openEditStages}
           />
         ) : (
           <ActiveVariant
@@ -241,6 +322,16 @@ export function Home() {
           />
         )}
       </div>
+
+      {matchStages ? (
+        <EditStagesDrawer
+          open={editStagesOpen}
+          onClose={() => setEditStagesOpen(false)}
+          stages={matchStages}
+          shooterCount={shooters.length || 1}
+          onSaved={handleStagesSaved}
+        />
+      ) : null}
     </>
   );
 }
@@ -455,11 +546,13 @@ function EmptyVariant({
   stageViews,
   shooters,
   navSlug,
+  onEditStages,
 }: {
   project: MatchProject;
   stageViews: StageView[];
   shooters: ShooterListEntry[];
   navSlug: string | null;
+  onEditStages: () => void;
 }) {
   const navigate = useNavigate();
   const href = useMatchHref();
@@ -588,7 +681,7 @@ function EmptyVariant({
       </div>
 
       <SectionHead title="Get going" />
-      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
         <HelpCard
           icon={<UploadCloud className="size-4" />}
           title="Drop your SD card"
@@ -602,6 +695,13 @@ function EmptyVariant({
           desc="Add up to 4 shooters' footage for multi-shooter compare grids and side-by-side exports."
           cta="Add shooter"
           onClick={() => navigate(href("shooters"))}
+        />
+        <HelpCard
+          icon={<Layers className="size-4" />}
+          title="Adjust the stage list"
+          desc="Reality differs from scoreboard? Add, remove, or rename stages without losing audit progress."
+          cta="Edit stages"
+          onClick={onEditStages}
         />
       </div>
     </>

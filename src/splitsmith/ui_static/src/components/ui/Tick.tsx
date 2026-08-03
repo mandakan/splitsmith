@@ -69,8 +69,17 @@ export function TickStrip({ states, ariaLabel, className }: TickStripProps) {
       aria-label={ariaLabel}
       className={cn("inline-flex items-end gap-1", className)}
     >
+      {/*
+        Per-tick label is POSITIONAL, never "Stage <n>". `states` is a
+        progress array -- Pick.tsx builds it from stage_count +
+        stages_audited and it carries no stage identity at all. Stage
+        numbers stopped being 1..N when the stage-list editor shipped
+        (#521): removing stage 3 from six leaves 1, 2, 4, 5, 6, so
+        `i + 1` named the wrong stage to every screen reader from tick 3
+        on. The group's ariaLabel carries the summary.
+      */}
       {states.map((s, i) => (
-        <Tick key={i} state={s} label={`Stage ${i + 1}: ${s}`} />
+        <Tick key={i} state={s} label={`${i + 1} of ${states.length}: ${s}`} />
       ))}
     </div>
   );
