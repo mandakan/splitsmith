@@ -142,6 +142,113 @@ def _seeded_match(tmp_path: Path, *, stages: int, shooters: list[str]):
     return client, state
 
 
+def _diverge_match_stages(state) -> None:
+    """Give the match doc scoreboard names + ``stage_rounds`` while every
+    shooter project keeps its placeholder names.
+
+    This is not a contrived state: ``connect_scoreboard_match`` calls
+    ``match.stages_from_match_data(...)``, which rewrites ``match.stages``
+    with the scoreboard's names and rounds, and then updates only
+    ``scoreboard_match_id``/``content_type`` on each shooter project.
+    ``merge_stage_times`` never touches ``stage_name``/``stage_rounds``, so
+    the divergence is permanent -- and ``expected`` feeds the ensemble's
+    adaptive Voter C and apriori boost, so it is real analysis data.
+    """
+    from splitsmith.config import StageRounds
+
+    match = state.match()
+    names = {1: "Alpha", 2: "Bravo", 3: "Charlie"}
+    for definition in match.stages:
+        definition.stage_name = names[definition.stage_number]
+        definition.stage_rounds = StageRounds(expected=12)
+    match.save(state.match_root)
+
+
+class TestMatchStagesRead:
+    """``GET /api/match/stages`` -- the match-level stage list (#521).
+
+    The editor drawer diffs against ``Match.stages``, so it has to *read*
+    ``Match.stages``. It used to be handed one shooter's ``project.stages``
+    because no match-level read existed; on a scoreboard-linked match those
+    two documents diverge permanently, and submitting the shooter's copy
+    reverted every untouched stage to its placeholder name and wiped
+    ``stage_rounds`` off the match.
+    """
+
+    def test_returns_the_match_document_not_a_shooters(self, tmp_path: Path) -> None:
+        client, state = _seeded_match(tmp_path, stages=3, shooters=["me"])
+        _diverge_match_stages(state)
+
+        resp = client.get("/api/match/stages")
+
+        assert resp.status_code == 200
+        stages = resp.json()["stages"]
+        assert [s["stage_number"] for s in stages] == [1, 2, 3]
+        assert [s["stage_name"] for s in stages] == ["Alpha", "Bravo", "Charlie"]
+        assert [s["stage_rounds"]["expected"] for s in stages] == [12, 12, 12]
+        # The seed really is diverged -- otherwise the assertions above
+        # would pass just as well against the shooter's project.
+        project_stages = client.get("/api/shooters/me/project").json()["stages"]
+        assert [s["stage_name"] for s in project_stages] == ["Stage 1", "Stage 2", "Stage 3"]
+
+    def test_read_then_rename_leaves_the_untouched_stages_alone(self, tmp_path: Path) -> None:
+        """The round trip the drawer performs: read the match list, change
+        one row, submit the whole list back.
+
+        Basing that payload on a shooter's ``project.stages`` instead
+        returned ``renamed: [1, 2, 3]`` -- stages 2 and 3 reverted to their
+        placeholder names and lost ``stage_rounds`` -- because the server
+        diffs the submission against ``Match.stages``.
+        """
+        client, state = _seeded_match(tmp_path, stages=3, shooters=["me"])
+        _diverge_match_stages(state)
+
+        rows = client.get("/api/match/stages").json()["stages"]
+        payload = [
+            {
+                "stage_number": s["stage_number"],
+                "stage_name": "El Presidente" if s["stage_number"] == 1 else s["stage_name"],
+                "stage_rounds": s["stage_rounds"],
+            }
+            for s in rows
+        ]
+        resp = client.put("/api/match/stages", json={"stages": payload})
+
+        assert resp.status_code == 200
+        assert resp.json()["renamed"] == [1]
+        after = client.get("/api/match/stages").json()["stages"]
+        assert [s["stage_name"] for s in after] == ["El Presidente", "Bravo", "Charlie"]
+        assert [s["stage_rounds"]["expected"] for s in after] == [12, 12, 12]
+
+    def test_a_shooters_project_list_is_not_a_safe_payload_basis(self, tmp_path: Path) -> None:
+        """The trap the match-level read exists to close, pinned as a
+        negative so nobody points the drawer back at ``project.stages``.
+
+        The server is not at fault here -- it diffs the submission against
+        ``Match.stages``, which is the contract. Feed it a shooter's list on
+        a diverged match and a one-row rename silently rewrites everything.
+        """
+        client, state = _seeded_match(tmp_path, stages=3, shooters=["me"])
+        _diverge_match_stages(state)
+
+        project_rows = client.get("/api/shooters/me/project").json()["stages"]
+        payload = [
+            {
+                "stage_number": s["stage_number"],
+                "stage_name": "El Presidente" if s["stage_number"] == 1 else s["stage_name"],
+                "stage_rounds": s["stage_rounds"],
+            }
+            for s in project_rows
+        ]
+        resp = client.put("/api/match/stages", json={"stages": payload})
+
+        assert resp.status_code == 200
+        assert resp.json()["renamed"] == [1, 2, 3]
+        after = client.get("/api/match/stages").json()["stages"]
+        assert [s["stage_name"] for s in after] == ["El Presidente", "Stage 2", "Stage 3"]
+        assert [s["stage_rounds"] for s in after] == [None, None, None]
+
+
 class TestEditMatchStages:
     def test_rename_preserves_the_audit_doc(self, tmp_path: Path) -> None:
         """The discriminating assertion is the artifact, not the status code:

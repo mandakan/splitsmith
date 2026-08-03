@@ -3176,6 +3176,26 @@ class CreateMatchStageDraft(BaseModel):
     target_type: str | None = None
 
 
+class MatchStagesResponse(BaseModel):
+    """Body of ``GET /api/match/stages`` (#521).
+
+    The canonical stage list, read straight off ``Match.stages`` -- the
+    same document ``PUT /api/match/stages`` diffs a submission against.
+    The stage editor needs this rather than a shooter's ``project.stages``:
+    a scoreboard link rewrites ``match.stages`` with the scoreboard's names
+    and ``stage_rounds`` while leaving the shooter projects on their
+    placeholder names, and nothing (``merge_stage_times`` included) ever
+    closes that gap. Diffing a shooter's copy against the match then reads
+    every untouched stage as renamed.
+
+    Deliberately no ``next_stage_number``: allocation is server-side (see
+    ``stage_edit.diff_stage_list``) and a client that can see the counter is
+    a client that will guess with it.
+    """
+
+    stages: list[match_model.MatchStageDefinition]
+
+
 class StageEditRequest(BaseModel):
     """Body for ``PUT /api/match/stages`` (#521).
 
@@ -7511,6 +7531,17 @@ def create_app(
         merged = project.merge_stage_times(results)
         project.save(root)
         return merged
+
+    @app.get("/api/match/stages", response_model=MatchStagesResponse)
+    def get_match_stages() -> MatchStagesResponse:
+        """The bound match's canonical stage list (#521).
+
+        The read half of the stage editor: ``PUT /api/match/stages`` diffs a
+        submission against ``Match.stages``, so the editor has to load
+        ``Match.stages`` too. A shooter's ``project.stages`` is not a
+        substitute -- see :class:`MatchStagesResponse`.
+        """
+        return MatchStagesResponse(stages=list(state.match().stages))
 
     @app.put("/api/match/stages", response_model=stage_edit.StageEditSummary)
     async def edit_match_stages(req: StageEditRequest) -> stage_edit.StageEditSummary:

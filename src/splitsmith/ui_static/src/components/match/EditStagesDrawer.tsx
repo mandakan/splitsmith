@@ -49,15 +49,21 @@ import { cn } from "@/lib/utils";
 import {
   ApiError,
   api,
+  type MatchStageDefinition,
   type StageEditRow,
   type StageEditSummary,
-  type StageEntry,
 } from "@/lib/api";
 
 export interface EditStagesDrawerProps {
   open: boolean;
   onClose: () => void;
-  stages: StageEntry[];
+  /** The MATCH's stage list (``GET /api/match/stages``), never a shooter's
+   *  ``project.stages``. The server diffs the submission against
+   *  ``Match.stages``, and the two documents diverge permanently once a
+   *  scoreboard is linked -- submitting a shooter's copy reports every
+   *  untouched stage as renamed and wipes ``stage_rounds`` off the match
+   *  (which the ensemble's adaptive Voter C reads as ``expected``). */
+  stages: MatchStageDefinition[];
   shooterCount: number;
   onSaved: (summary: StageEditSummary) => void;
 }
@@ -86,7 +92,7 @@ interface EditRow {
 
 let nextDraftId = -1;
 
-function rowsFromStages(stages: StageEntry[]): EditRow[] {
+function rowsFromStages(stages: MatchStageDefinition[]): EditRow[] {
   return stages.map((s) => ({
     key: `stage-${s.stage_number}`,
     stageNumber: s.stage_number,

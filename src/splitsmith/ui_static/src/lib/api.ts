@@ -416,6 +416,30 @@ export function asScoreboardError(err: unknown): ScoreboardErrorDetail | null {
   return null;
 }
 
+/** One stage as a property of the MATCH, mirrors
+ *  ``match_model.MatchStageDefinition`` (#521).
+ *
+ *  Not interchangeable with ``StageEntry``, which is one shooter's copy
+ *  plus their own time / videos / audit. The two documents diverge and
+ *  stay diverged: linking a scoreboard rewrites ``Match.stages`` with the
+ *  scoreboard's names and ``stage_rounds`` while leaving every shooter
+ *  project on its placeholder names, and no later sync closes the gap.
+ *  ``PUT /api/match/stages`` diffs a submission against ``Match.stages``,
+ *  so the stage editor must read and submit THIS shape -- feeding it a
+ *  shooter's list on a diverged match reports every untouched stage as
+ *  renamed and wipes ``stage_rounds`` off the match. */
+export interface MatchStageDefinition {
+  stage_number: number;
+  stage_name: string;
+  stage_rounds: StageRounds | null;
+  placeholder: boolean;
+}
+
+/** Response from GET /api/match/stages, mirrors ``MatchStagesResponse``. */
+export interface MatchStagesResponse {
+  stages: MatchStageDefinition[];
+}
+
 /** One row of the SPA's stage-list editor, sent as the full desired list
  *  to ``editMatchStages`` (#521). Mirrors ``stage_edit.SubmittedStage``. */
 export interface StageEditRow {
@@ -2040,6 +2064,12 @@ export const api = {
       json: { links },
     }),
 
+
+  /** The bound match's canonical stage list (#521) -- the same document
+   *  ``editMatchStages`` diffs a submission against. Load this before
+   *  opening the stage editor; a shooter's ``project.stages`` is a
+   *  different document (see ``MatchStageDefinition``). */
+  getMatchStages: () => request<MatchStagesResponse>("/api/match/stages"),
 
   /** Add, remove, and rename stages on the bound match (#521). Send the
    *  full desired list; the server diffs it. Removing a stage releases its

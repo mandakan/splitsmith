@@ -37,6 +37,7 @@ import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import {
   api,
   type MatchProject,
+  type MatchStageDefinition,
   type ShooterListEntry,
   type StageEntry,
   type StageStatus,
@@ -77,6 +78,23 @@ export function Home() {
   const ctx = useOutletContext<MatchShellOutletContext>();
   const project = ctx?.project ?? null;
   const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
+  // The stage editor's read model is the MATCH's stage list, not
+  // ``project.stages``. Those are different documents and they diverge
+  // permanently: linking a scoreboard rewrites ``match.stages`` with the
+  // scoreboard's names and ``stage_rounds`` and only touches
+  // ``scoreboard_match_id``/``content_type`` on each shooter project, and
+  // no later sync (``merge_stage_times`` included) closes the gap. Since
+  // the server diffs the submission against ``match.stages``, submitting a
+  // shooter's copy reports every untouched stage as renamed and strips
+  // ``stage_rounds`` -- which is the ensemble's ``expected`` prior, not
+  // cosmetic. Null means "not loaded yet"; the drawer is not mounted until
+  // it has the real list, so it can never open against an empty one and
+  // submit that as "remove every stage".
+  const [matchStages, setMatchStages] = useState<MatchStageDefinition[] | null>(
+    null,
+  );
+  const [stagesLoading, setStagesLoading] = useState(false);
+  const [stagesError, setStagesError] = useState<string | null>(null);
   const [editStagesOpen, setEditStagesOpen] = useState(false);
   // Slug used for slug-bearing nav links from this page. The
   // ``/api/health.default_shooter_slug`` field this used to read was
@@ -124,6 +142,34 @@ export function Home() {
       .listMatchShooters()
       .then((r) => setShooters(r.shooters))
       .catch(() => setShooters([]));
+    // The drawer stays open when the summary carries cleanup errors, so
+    // refresh its read model too rather than leaving it on the pre-edit
+    // list. Rows are only re-seeded from this prop when ``open`` flips,
+    // so this cannot discard edits under an open drawer.
+    api
+      .getMatchStages()
+      .then((r) => setMatchStages(r.stages))
+      .catch(() => {});
+  }
+
+  /** Fetch the match stage list, then open the drawer. Fetch-then-open
+   *  rather than open-then-fetch: an editor rendered against a
+   *  not-yet-loaded list shows zero rows, and zero rows submitted is
+   *  "remove every stage". */
+  async function openEditStages() {
+    setStagesLoading(true);
+    setStagesError(null);
+    try {
+      const r = await api.getMatchStages();
+      setMatchStages(r.stages);
+      setEditStagesOpen(true);
+    } catch (e) {
+      setStagesError(
+        e instanceof Error ? e.message : "Could not load the stage list.",
+      );
+    } finally {
+      setStagesLoading(false);
+    }
   }
 
   const stageRows = useMemo<StageMatrixRow[]>(
@@ -240,13 +286,22 @@ export function Home() {
               Export Match
             </span>
           </Button>
-          <Button variant="outline" onClick={() => setEditStagesOpen(true)}>
+          <Button
+            variant="outline"
+            onClick={openEditStages}
+            disabled={stagesLoading}
+          >
             <Layers className="size-3.5" />
             <span className="font-display uppercase tracking-[0.08em]">
-              Edit Stages
+              {stagesLoading ? "Loading Stages" : "Edit Stages"}
             </span>
           </Button>
         </div>
+        {stagesError ? (
+          <p role="alert" className="mt-2.5 text-xs text-destructive">
+            {stagesError}
+          </p>
+        ) : null}
       </div>
 
       <div className="mx-auto max-w-[1280px] px-8 pb-20 pt-6">
@@ -256,7 +311,7 @@ export function Home() {
             stageViews={stageViews}
             shooters={shooters}
             navSlug={navSlug}
-            onEditStages={() => setEditStagesOpen(true)}
+            onEditStages={openEditStages}
           />
         ) : (
           <ActiveVariant
@@ -268,13 +323,15 @@ export function Home() {
         )}
       </div>
 
-      <EditStagesDrawer
-        open={editStagesOpen}
-        onClose={() => setEditStagesOpen(false)}
-        stages={project.stages}
-        shooterCount={shooters.length || 1}
-        onSaved={handleStagesSaved}
-      />
+      {matchStages ? (
+        <EditStagesDrawer
+          open={editStagesOpen}
+          onClose={() => setEditStagesOpen(false)}
+          stages={matchStages}
+          shooterCount={shooters.length || 1}
+          onSaved={handleStagesSaved}
+        />
+      ) : null}
     </>
   );
 }
