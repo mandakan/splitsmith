@@ -126,18 +126,31 @@ Open the file. Check, in order:
 - **Switch audio tracks.** In QuickTime, VLC or Final Cut. Each should be the
   corresponding shooter's audio.
 
-## Known issues to expect
+## Known issues -- all fixed, listed so you can spot a regression
 
-- **Fewer stages than you selected can be reported as complete success.** If a
-  selected stage has no trim from *any* shooter, it is dropped and the count
-  reported is against what was planned, not what was asked for. Cross-check the
-  stage count in the output against what you requested. (Fix in flight; confirm
-  whether it landed before relying on the count.)
-- **Empty grid cells rendered bright green** on roster sizes that do not fill the
-  grid -- 3, 5, 7, 8, 10-15 shooters. A 4-shooter 2x2 is full and unaffected.
-  (Fix in flight; verify on the merge commit.)
-- The UI progress bar sits at 5% for an entire render. The CLI reports per stage;
-  prefer the CLI for a long job.
+These were found by the whole-branch review and fixed in `14f6a95` / `0faac22`.
+They are recorded because each is a plausible regression and each is invisible
+to a passing test suite:
+
+- **Empty grid cells rendered bright green.** `xstack` defaults to `fill=none`,
+  leaving unused regions as raw frame buffer -- YUV(0,0,0), which is
+  RGB(0,135,0). It hit rosters of 3, 5, 7, 8 and 10-15; a 4-shooter 2x2 is full
+  and was never affected. Now filled with black inputs per
+  `layout.GridLayout.empty_slots`, matching what `emitter.py` already did.
+  Verified on a 3-shooter render: empty quadrant RGB(0,0,0), canvas still
+  3840x2160, audio track count still 3 (empty cells add video only -- an extra
+  audio track there would break the concat stitch).
+- **A selected stage no shooter had a trim for was silently dropped and reported
+  as complete success.** Requesting stages 1-3 with trims for 1 and 2 returned
+  "Rendered all 2 stages" with a green tick. Counts are now against the
+  *requested* stages, and the missing shooter/stage pairs are reported.
+- **The UI progress bar sat at 5% for the entire render.** Now reports per
+  stage, matching the CLI.
+
+If any of these reappears, it means a regression rather than a new bug -- the
+fixes have covering tests, but the green-cells one in particular can only fail a
+test whose roster leaves an empty cell (3 or 5 shooters). A 2- or 4-shooter test
+cannot detect it, which is exactly why it shipped past seven reviews.
 
 ## If it fails
 
