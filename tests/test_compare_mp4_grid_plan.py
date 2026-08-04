@@ -7,10 +7,12 @@ from splitsmith.compare.layout import grid_shape
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
 
 
-def _stage(n: int, *, trim: Path, beep: float, duration: float) -> CompareStageBundle:
+def _stage(
+    n: int, *, trim: Path, beep: float, duration: float, name: str | None = None
+) -> CompareStageBundle:
     return CompareStageBundle(
         stage_number=n,
-        stage_name=f"Stage {n}",
+        stage_name=name or f"Stage {n}",
         trim_path=trim,
         audit_path=Path("/nonexistent.json"),
         beep_offset_in_clip=beep,
@@ -214,6 +216,105 @@ def test_two_up_grids_are_not_transposed():
     )[0]
     assert (vertical.rows, vertical.cols) == (2, 1)
     assert [(t.row, t.col) for t in vertical.tiles] == [(0, 0), (1, 0)]
+
+
+def test_stage_name_prefers_the_audio_source_shooter():
+    # emitter.py uses the audio-source shooter's spelling; the MP4 renderer
+    # must agree or the same stage is labelled differently in the two
+    # exports of the same match.
+    anna = _bundle(
+        "Anna", {1: _stage(1, trim=Path("/a1.mp4"), beep=2.0, duration=12.0, name="Stage 1 - Anna's name")}
+    )
+    zed = _bundle(
+        "Zed", {1: _stage(1, trim=Path("/z1.mp4"), beep=2.0, duration=12.0, name="Stage 1 - Zed's name")}
+    )
+
+    plans = mp4_grid.build_stage_plans(
+        [anna, zed], audio_label="Zed", head_pad_seconds=0.0, tail_pad_seconds=0.0
+    )
+
+    assert plans[0].stage_name == "Stage 1 - Zed's name"
+
+
+def test_stage_name_falls_back_to_first_present_when_audio_shooter_skipped_the_stage():
+    anna = _bundle(
+        "Anna", {2: _stage(2, trim=Path("/a2.mp4"), beep=2.0, duration=12.0, name="Stage 2 - Anna's name")}
+    )
+    zed = _bundle(
+        "Zed",
+        {
+            1: _stage(1, trim=Path("/z1.mp4"), beep=2.0, duration=12.0),
+            # No stage 2 for the audio source.
+        },
+    )
+
+    plans = mp4_grid.build_stage_plans(
+        [anna, zed], audio_label="Zed", head_pad_seconds=0.0, tail_pad_seconds=0.0
+    )
+
+    stage2 = next(p for p in plans if p.stage_number == 2)
+    assert stage2.stage_name == "Stage 2 - Anna's name"
+
+
+def test_duplicate_labels_are_rejected():
+    # sorted() keeps both copies while the by-label dict collapses them, so
+    # the first bundle's footage would silently never be rendered.
+    a1 = _bundle("Anna", {1: _stage(1, trim=Path("/a1.mp4"), beep=2.0, duration=12.0)})
+    a2 = _bundle("Anna", {1: _stage(1, trim=Path("/a2.mp4"), beep=2.0, duration=12.0)})
+
+    with pytest.raises(ValueError, match="Anna"):
+        mp4_grid.build_stage_plans([a1, a2], audio_label="Anna", head_pad_seconds=0.0, tail_pad_seconds=0.0)
+
+
+def test_audio_source_shooter_with_no_stages_is_rejected():
+    # Task 2 unmutes only the audio tile. If that shooter is a filler in
+    # every stage the whole render is silent, with nothing to explain it.
+    anna = _bundle("Anna", {1: _stage(1, trim=Path("/a1.mp4"), beep=2.0, duration=12.0)})
+    silent = _bundle("Zed", {})
+
+    with pytest.raises(ValueError, match="Zed"):
+        mp4_grid.build_stage_plans(
+            [anna, silent], audio_label="Zed", head_pad_seconds=0.0, tail_pad_seconds=0.0
+        )
+
+
+def test_audio_source_shooter_may_still_miss_an_individual_stage():
+    # The per-stage case is different from the no-stages-at-all case above:
+    # that stage simply has no unmuted tile, which is correct and must keep
+    # working. Guards the fix above against over-reaching.
+    anna = _bundle(
+        "Anna",
+        {
+            1: _stage(1, trim=Path("/a1.mp4"), beep=2.0, duration=12.0),
+            2: _stage(2, trim=Path("/a2.mp4"), beep=2.0, duration=12.0),
+        },
+    )
+    zed = _bundle("Zed", {1: _stage(1, trim=Path("/z1.mp4"), beep=2.0, duration=12.0)})
+
+    plans = mp4_grid.build_stage_plans(
+        [anna, zed], audio_label="Zed", head_pad_seconds=0.0, tail_pad_seconds=0.0
+    )
+
+    assert [p.stage_number for p in plans] == [1, 2]
+    zed_tile = next(t for t in plans[1].tiles if t.label == "Zed")
+    assert zed_tile.trim_path is None
+
+
+def test_empty_roster_is_rejected_with_an_actionable_message():
+    with pytest.raises(ValueError, match="no shooters"):
+        mp4_grid.build_stage_plans([], audio_label="Anna", head_pad_seconds=0.0, tail_pad_seconds=0.0)
+
+
+@pytest.mark.parametrize("head_pad,tail_pad", [(-1.0, 0.0), (0.0, -1.0)])
+def test_negative_pads_are_rejected(head_pad: float, tail_pad: float):
+    # A negative head pad seeks *past* the beep and shortens the stage below
+    # its own content, silently.
+    anna = _bundle("Anna", {1: _stage(1, trim=Path("/a1.mp4"), beep=2.0, duration=12.0)})
+
+    with pytest.raises(ValueError, match="negative"):
+        mp4_grid.build_stage_plans(
+            [anna], audio_label="Anna", head_pad_seconds=head_pad, tail_pad_seconds=tail_pad
+        )
 
 
 def test_unknown_audio_label_is_rejected():

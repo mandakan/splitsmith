@@ -125,12 +125,43 @@ def build_stage_plans(
     Slots are alphabetical by label and stable across stages, matching
     ``compare/emitter.py``'s rule: a label always lands in the same cell
     and a missing trim becomes filler rather than reshuffling the grid.
+    Stage names follow the emitter too: the audio-source shooter's
+    spelling wins, so the FCPXML and MP4 exports of one match cannot
+    label the same stage differently.
     """
+    if not shooters:
+        raise ValueError("no shooters to render: build_stage_plans needs at least one loaded shooter")
+
     labels = sorted(s.label for s in shooters)
+    # Stricter than emitter.py, which collapses same-named shooters into
+    # one tile. Here ``by_label`` would bind both tiles to the last
+    # bundle and drop the first shooter's footage without a word, which
+    # is the worse failure. ``CompareManifest._labels_unique`` already
+    # rejects duplicates on the CLI path, so nothing shipped regresses.
+    duplicates = sorted({label for label in labels if labels.count(label) > 1})
+    if duplicates:
+        raise ValueError(f"duplicate shooter labels: {', '.join(duplicates)}")
+
+    if head_pad_seconds < 0 or tail_pad_seconds < 0:
+        raise ValueError(
+            "pads must not be negative: got "
+            f"head_pad_seconds={head_pad_seconds}, tail_pad_seconds={tail_pad_seconds}"
+        )
+
     if audio_label not in labels:
         raise ValueError(f"audio_label={audio_label!r} matches no shooter. Labels: {', '.join(labels)}")
 
     by_label = {s.label: s for s in shooters}
+    audio_bundle = by_label[audio_label]
+    # Task 2 unmutes only the audio tile. A shooter with no stages at all
+    # is a filler everywhere, so the render would come out silent with
+    # nothing to explain it. Missing a single stage is different, and
+    # fine: that one stage just has no unmuted tile.
+    if not audio_bundle.stages_by_number:
+        raise ValueError(
+            f"audio_label={audio_label!r} has no stages with trims; the render would have no audio"
+        )
+
     rows, cols = grid_shape(choose_grid(len(labels), layout_2up=layout_2up))
 
     stage_numbers = sorted({n for s in shooters for n in s.stages_by_number})
@@ -156,6 +187,8 @@ def build_stage_plans(
                     )
                 )
                 continue
+            # Fallback only: the audio-source shooter's spelling wins when
+            # they have this stage. Resolved after the loop.
             stage_name = stage_name or bundle.stage_name
             post_beep_spans.append(bundle.duration_seconds - bundle.beep_offset_in_clip)
             tiles.append(
@@ -169,6 +202,12 @@ def build_stage_plans(
                     col=col,
                 )
             )
+
+        # Mirrors emitter.py: prefer the audio-source shooter's spelling of
+        # the stage, else the alphabetically-first shooter that has it.
+        audio_stage = audio_bundle.stages_by_number.get(stage_number)
+        if audio_stage is not None:
+            stage_name = audio_stage.stage_name
 
         # The lead pad does not change this. A tile's content ends at
         # ``lead_pad + (clip duration - seek)``, which reduces to
