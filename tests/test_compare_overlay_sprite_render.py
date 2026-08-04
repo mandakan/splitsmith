@@ -302,6 +302,16 @@ def test_the_list_pins_the_demuxer_framerate_on_every_entry(tmp_path):
         assert lines[index + 1] == "option framerate 30000/1001"
 
 
+def test_fonts_are_loaded_once_per_face_and_size():
+    # The width-fitting loops ask for a font once per size step per panel
+    # per state, and each miss re-reads the bundled TTF off disk. One
+    # 3x3 state at 3840x2160 asks 374 times for 17 distinct fonts.
+    overlay_sprites._font_at.cache_clear()
+    first = overlay_sprites._scaled_font(SPLITSMITH_THEME, 48)
+    assert overlay_sprites._scaled_font(SPLITSMITH_THEME, 48) is first
+    assert overlay_sprites._scaled_font(SPLITSMITH_THEME, 46) is not first
+
+
 def test_materialize_font_writes_a_readable_file(tmp_path):
     path = overlay_text.materialize_font("splitsmith-mono", tmp_path)
     assert path.is_file()

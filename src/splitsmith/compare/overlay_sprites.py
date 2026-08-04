@@ -14,6 +14,7 @@ import json
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 
 from PIL import Image, ImageDraw
@@ -330,13 +331,30 @@ def render_state(state: OverlayState, geometry: SpriteGeometry, *, theme: Overla
     return canvas
 
 
+@lru_cache(maxsize=256)
+def _font_at(font_name: str | None, size: int):
+    """One :class:`PIL.ImageFont.FreeTypeFont` per ``(face, size)``.
+
+    ``_load_font`` re-reads the bundled TTF off disk every call, and the
+    width-fitting loops call it once per size step per panel per state.
+    At 3840x2160 / 3x3 that dominated ``render_state``, which a 12-stage
+    9-shooter match pays a few hundred times before ffmpeg starts.
+
+    Fonts are only measured and drawn from here, never mutated, so one
+    instance is safe to share. The key is the face *name* rather than the
+    theme, so an unhashable theme object can never break the cache and
+    two themes resolving to the same face share one font.
+    """
+    return _load_font(None, size, font_name=font_name)
+
+
 def _scaled_font(theme: OverlayTheme, size: int):
     """Load a font at ``size`` using the same default-face selection
     ``DefaultTemplate`` uses: the bundled mono face for the splitsmith
     theme (deterministic across hosts), generic system discovery
     otherwise."""
     font_name = "splitsmith-mono" if theme.name == "splitsmith" else None
-    return _load_font(None, size, font_name=font_name)
+    return _font_at(font_name, size)
 
 
 def _text_width(draw: ImageDraw.ImageDraw, text: str, font) -> int:
