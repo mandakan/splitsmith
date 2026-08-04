@@ -32,9 +32,23 @@ What is missing:
 4. **The Export page cannot host it.** The page is scoped to one
    shooter, so a multi-shooter mode has nowhere to live.
 
+## Priority
+
+**The MP4 grid is priority 0 and needs to produce a video today.**
+Everything else in this spec is sequenced behind it.
+
+The bare grid -- decode N trims, scale, `xstack`, map audio, encode --
+has no dependency on sprites, overlays, transitions or any UI. It ships
+first, on its own, driven from the CLI. See Sequencing.
+
+Everything layered on top of the bare grid is **optional and defaults
+to off**: splits overlay, transitions, title cards. A grid render must
+never require them, and the phase-0 renderer must be correct with all of
+them absent rather than merely tolerating their absence.
+
 ## Scope
 
-One spec, engine and UI shipped together.
+One spec. The engine ships in usable increments; the UI comes last.
 
 Out of scope, deliberately:
 
@@ -329,13 +343,38 @@ while the test passed. The integration test probes the rendered file.
 
 ## Sequencing
 
-Engine before UI, shipped on one branch:
+### Phase 0 -- bare grid MP4 (today)
 
-1. `overlay_text.py` extraction (behaviour-preserving, no new features).
-2. `overlay_sprites.py` with unit tests.
-3. `compare/mp4_grid.py` with command-construction tests.
-4. CLI: `splitsmith compare export` gains MP4 output, making the whole
-   engine drivable and verifiable before any UI exists.
-5. Match-scoped export endpoint + job wiring.
-6. Export page rebuild against the now-existing capability surface.
-7. Integration test and a real 4-shooter render.
+The smallest thing that produces a watchable video. No sprites, no PIL,
+no overlay, no transitions, no UI.
+
+1. `compare/mp4_grid.py`: per-stage ffmpeg call (N trims `-ss`-aligned,
+   `scale`, `xstack`, N audio `-map`s, 4K canvas) plus the `concat`
+   stitch. Pure command builders with an injectable runner.
+2. `splitsmith compare export` gains `--format mp4`, reusing the
+   existing match-folder source, `--audio-from` and `--camera` flags
+   unchanged.
+3. Command-construction unit tests + one real 4-shooter render.
+
+Phase 0 is independently shippable and is the deliverable that matters
+today.
+
+### Phase 1 -- splits overlay (opt-in)
+
+4. `overlay_text.py` extraction from `overlay_render.py`
+   (behaviour-preserving, no new features).
+5. `overlay_sprites.py` with unit tests.
+6. Wire sprites + `drawtext` clock into `mp4_grid.py` behind an
+   `--overlay` flag that defaults to off.
+
+### Phase 2 -- transitions and title cards (opt-in)
+
+7. Optional, default off. Note these force a re-encode at the concat
+   seams, which phase 0's `-c copy` stitch deliberately avoids -- so
+   they are a separate code path, not a parameter on the existing one.
+
+### Phase 3 -- UI
+
+8. Match-scoped export endpoint + job wiring.
+9. Export page rebuild against the now-existing capability surface.
+10. Integration test covering the full path.
