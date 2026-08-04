@@ -127,7 +127,12 @@ def export(
             "tiles by decision, so --overlay with --format fcpxml would silently do nothing."
         )
         raise typer.Exit(code=2)
-    if overlay and overlay_theme not in THEME_NAMES:
+    # Validated whether or not --overlay is on. A typo'd theme with no
+    # --overlay used to be accepted in silence, so the next run -- the one
+    # that adds --overlay and re-encodes the whole match -- is where the
+    # user finds out. Rejecting a name that is never a valid theme costs
+    # nothing and fails at the point the typo was made.
+    if overlay_theme not in THEME_NAMES:
         console.print(
             f"[red]Error:[/] --overlay-theme must be one of {', '.join(THEME_NAMES)}, "
             f"got {overlay_theme!r}."

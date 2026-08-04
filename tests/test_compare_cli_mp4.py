@@ -432,6 +432,38 @@ def test_unknown_overlay_theme_is_refused(tmp_path: Path, monkeypatch: pytest.Mo
     assert "overlay-theme" in strip_ansi(result.output).lower()
 
 
+def test_unknown_overlay_theme_is_refused_without_the_overlay_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A theme name that is never valid is rejected on the spot.
+
+    Accepting it in silence defers the error to the next run -- the one
+    that adds --overlay and re-encodes the whole match.
+    """
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    output = tmp_path / "out.mp4"
+    _patch_probe(monkeypatch)
+
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "--overlay-theme",
+            "neon",
+            "-o",
+            str(output),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "overlay-theme" in strip_ansi(result.output).lower()
+
+
 def test_mp4_render_prints_per_stage_progress(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     match_root = _seed_match_with_stages(tmp_path / "match", stage_count=2)
     output = tmp_path / "out.mp4"
