@@ -64,11 +64,16 @@ class GridTile:
     never dropped -- doing so would shuffle the grid between stages and
     change the stream count, which breaks the concat stitch.
 
-    ``seek_seconds`` and ``lead_pad_seconds`` are a pair, and exactly one
-    of them is non-zero. Together they put every tile's beep at exactly
+    ``seek_seconds`` and ``lead_pad_seconds`` are a pair, and at most one
+    of them is non-zero -- both are ``0.0`` when the beep falls exactly
+    on the head pad. Together they put a tile's beep at exactly
     ``head_pad_seconds`` on the output timeline::
 
         lead_pad_seconds + (beep_offset_in_clip - seek_seconds) == head_pad_seconds
+
+    That invariant covers tiles that have a clip. A filler tile
+    (``trim_path=None``) has no beep to place and leaves all three fields
+    at ``0.0``, so it lands at ``0.0`` rather than at ``head_pad``.
 
     A clip with enough footage before its beep just seeks later into
     itself. A clip whose beep sits closer to its start than the head pad
