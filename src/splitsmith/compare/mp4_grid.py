@@ -63,12 +63,33 @@ class GridTile:
     cell renders black and contributes a silent audio track. The slot is
     never dropped -- doing so would shuffle the grid between stages and
     change the stream count, which breaks the concat stitch.
+
+    ``seek_seconds`` and ``lead_pad_seconds`` are a pair, and exactly one
+    of them is non-zero. Together they put every tile's beep at exactly
+    ``head_pad_seconds`` on the output timeline::
+
+        lead_pad_seconds + (beep_offset_in_clip - seek_seconds) == head_pad_seconds
+
+    A clip with enough footage before its beep just seeks later into
+    itself. A clip whose beep sits closer to its start than the head pad
+    cannot seek to a negative time, so the shortfall has to be
+    synthesised instead -- without it that tile's beep lands early and
+    the grid is desynced, which is the one thing the grid exists to
+    prevent.
     """
 
     label: str
     trim_path: Path | None
     beep_offset_in_clip: float
     seek_seconds: float
+    lead_pad_seconds: float
+    """Black video + silence to prepend before the clip, in seconds.
+
+    Non-zero only when ``seek_seconds`` clamped at ``0.0``. Filler tiles
+    (``trim_path=None``) are black for the whole stage, so there is no
+    clip to shift and this stays ``0.0``.
+    """
+
     row: int
     col: int
 
@@ -124,6 +145,7 @@ def build_stage_plans(
                         trim_path=None,
                         beep_offset_in_clip=0.0,
                         seek_seconds=0.0,
+                        lead_pad_seconds=0.0,
                         row=row,
                         col=col,
                     )
@@ -137,11 +159,17 @@ def build_stage_plans(
                     trim_path=bundle.trim_path,
                     beep_offset_in_clip=bundle.beep_offset_in_clip,
                     seek_seconds=max(0.0, bundle.beep_offset_in_clip - head_pad_seconds),
+                    lead_pad_seconds=max(0.0, head_pad_seconds - bundle.beep_offset_in_clip),
                     row=row,
                     col=col,
                 )
             )
 
+        # The lead pad does not change this. A tile's content ends at
+        # ``lead_pad + (clip duration - seek)``, which reduces to
+        # ``head_pad + (clip duration - beep)`` whether or not the seek
+        # clamped -- the pad fills exactly the gap the clamp opened. So
+        # the stage still runs until the longest post-beep span is done.
         duration = head_pad_seconds + max(post_beep_spans, default=0.0) + tail_pad_seconds
         plans.append(
             GridStagePlan(

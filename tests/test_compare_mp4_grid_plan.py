@@ -92,6 +92,48 @@ def test_seek_and_duration_are_beep_aligned():
     assert plans[0].duration_seconds == pytest.approx(1.0 + 11.0 + 0.5)
 
 
+def test_a_clamped_tile_carries_the_head_pad_shortfall():
+    # Early's beep is 0.5s into its clip but head_pad is 1.0s, so 0.5s
+    # of the pad has nowhere to come from and must be synthesised.
+    # Without this the tile's beep lands 0.5s early and the grid is
+    # desynced -- the one thing the grid exists to prevent.
+    early = _bundle("Early", {1: _stage(1, trim=Path("/e.mp4"), beep=0.5, duration=10.0)})
+    late = _bundle("Late", {1: _stage(1, trim=Path("/l.mp4"), beep=3.0, duration=14.0)})
+
+    plans = mp4_grid.build_stage_plans(
+        [early, late], audio_label="Early", head_pad_seconds=1.0, tail_pad_seconds=0.5
+    )
+
+    tiles = {t.label: t for t in plans[0].tiles}
+    assert tiles["Early"].lead_pad_seconds == pytest.approx(0.5)
+    assert tiles["Late"].lead_pad_seconds == pytest.approx(0.0)
+    # The invariant the lead pad exists to hold: every tile's beep lands at
+    # exactly head_pad on the output timeline, clamped or not.
+    for tile in plans[0].tiles:
+        landed = tile.lead_pad_seconds + (tile.beep_offset_in_clip - tile.seek_seconds)
+        assert landed == pytest.approx(1.0)
+
+
+def test_filler_tile_has_no_lead_pad():
+    a = _bundle("Anders", {1: _stage(1, trim=Path("/a1.mp4"), beep=2.0, duration=12.0)})
+    m = _bundle(
+        "Mathias",
+        {
+            1: _stage(1, trim=Path("/m1.mp4"), beep=3.0, duration=14.0),
+            2: _stage(2, trim=Path("/m2.mp4"), beep=1.0, duration=9.0),
+        },
+    )
+
+    plans = mp4_grid.build_stage_plans(
+        [m, a], audio_label="Mathias", head_pad_seconds=1.0, tail_pad_seconds=0.0
+    )
+
+    anders = next(t for t in plans[1].tiles if t.label == "Anders")
+    # A filler tile is black for the whole stage; there is no clip to shift.
+    assert anders.trim_path is None
+    assert anders.lead_pad_seconds == pytest.approx(0.0)
+
+
 def test_unknown_audio_label_is_rejected():
     a = _bundle("Anders", {1: _stage(1, trim=Path("/a1.mp4"), beep=2.0, duration=12.0)})
     with pytest.raises(ValueError, match="Nobody"):
