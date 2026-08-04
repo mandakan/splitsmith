@@ -20,6 +20,7 @@ from typer.testing import CliRunner
 import splitsmith.compare.cli as cli_mod
 import splitsmith.compare.project_loader as pl_mod
 from splitsmith.cli import app
+from splitsmith.compare import mp4_grid
 from splitsmith.fcpxml_gen import VideoMetadata
 from splitsmith.match_model import Match, MatchStageDefinition, Shooter, ShooterStageData
 from splitsmith.ui.match_exports import _slugify
@@ -301,6 +302,134 @@ def test_work_dir_does_not_survive_a_failed_render(tmp_path: Path, monkeypatch: 
 
 
 # --- progress --------------------------------------------------------------
+
+
+# --- overlay flag -----------------------------------------------------
+
+
+def test_overlay_flag_is_documented() -> None:
+    result = runner.invoke(app, ["compare", "export", "--help"])
+    assert result.exit_code == 0
+    text = strip_ansi(result.output)
+    assert "--overlay" in text
+    assert "--overlay-theme" in text
+
+
+def test_overlay_defaults_to_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    output = tmp_path / "out.mp4"
+    _patch_probe(monkeypatch)
+
+    captured: dict[str, Any] = {}
+
+    def fake_render(*args: Any, **kwargs: Any) -> mp4_grid.GridRenderResult:
+        captured.update(kwargs)
+        return mp4_grid.GridRenderResult(output_path=kwargs["output_path"], stages=())
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", fake_render)
+
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "-o",
+            str(output),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["overlay"] is False
+    assert captured["overlay_theme"] == "splitsmith"
+
+
+def test_overlay_flag_reaches_the_renderer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    output = tmp_path / "out.mp4"
+    _patch_probe(monkeypatch)
+
+    captured: dict[str, Any] = {}
+
+    def fake_render(*args: Any, **kwargs: Any) -> mp4_grid.GridRenderResult:
+        captured.update(kwargs)
+        return mp4_grid.GridRenderResult(output_path=kwargs["output_path"], stages=())
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", fake_render)
+
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "--overlay",
+            "--overlay-theme",
+            "clean",
+            "-o",
+            str(output),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["overlay"] is True
+    assert captured["overlay_theme"] == "clean"
+
+
+def test_overlay_with_fcpxml_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    output = tmp_path / "out.fcpxml"
+    _patch_probe(monkeypatch)
+
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "fcpxml",
+            "--overlay",
+            "-o",
+            str(output),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "fcpxml" in strip_ansi(result.output).lower()
+
+
+def test_unknown_overlay_theme_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    output = tmp_path / "out.mp4"
+    _patch_probe(monkeypatch)
+
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "--overlay",
+            "--overlay-theme",
+            "neon",
+            "-o",
+            str(output),
+        ],
+    )
+    assert result.exit_code != 0
+    assert "overlay-theme" in strip_ansi(result.output).lower()
 
 
 def test_mp4_render_prints_per_stage_progress(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
