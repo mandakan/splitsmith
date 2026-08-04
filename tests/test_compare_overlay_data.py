@@ -72,10 +72,40 @@ def test_beep_offset_in_clip_does_not_shift_shot_times(tmp_path):
 
 
 def test_first_split_is_the_draw_and_later_splits_are_differences(tmp_path):
-    audit = _write_audit(tmp_path / "ann", 1, [1200, 1450, 1700])
+    # Deliberately fed out of order: with already-ordered input this test
+    # cannot tell time order from shot_number order, and the two disagree
+    # on exactly the audits that produce a negative split.
+    audit = _write_audit(tmp_path / "ann", 1, [1450, 1200, 1700])
     data = overlay_data.load_overlay_data([_bundle(tmp_path, "ann", audit=audit)])
     splits = [round(s.split, 3) for s in data[("ann", 1)].shots]
     assert splits == [1.2, 0.25, 0.25]
+
+
+def test_splits_are_recomputed_over_the_time_sorted_sequence(tmp_path):
+    # ``audit.py``'s CSV apply preserves row order as ``shot_number``, so a
+    # hand-sorted prep sheet lands shots out of time order.
+    # ``audit_shots_to_engine_shots`` would then hand back splits of
+    # [1.7, -0.5, 0.25] -- a negative number the overlay would draw.
+    audit = _write_audit(tmp_path / "ann", 1, [1700, 1200, 1450])
+    data = overlay_data.load_overlay_data([_bundle(tmp_path, "ann", audit=audit)])
+    tile = data[("ann", 1)]
+    assert [round(s.time_from_beep, 3) for s in tile.shots] == [1.2, 1.45, 1.7]
+    assert [round(s.split, 3) for s in tile.shots] == [1.2, 0.25, 0.25]
+    assert all(s.split > 0 for s in tile.shots)
+
+
+@pytest.mark.parametrize("payload", ["[]", "null", '"nope"', "3"])
+def test_valid_json_that_is_not_an_object_degrades_and_warns(tmp_path, caplog, payload):
+    # ``read_audit_data`` hands back whatever ``json.loads`` produced with
+    # no shape check, so these reach ``.get`` and used to raise
+    # ``AttributeError`` past the handler, failing the whole render.
+    root = tmp_path / "cy"
+    (root / "audit").mkdir(parents=True)
+    bad = root / "audit" / "stage1.json"
+    bad.write_text(payload)
+    data = overlay_data.load_overlay_data([_bundle(tmp_path, "cy", audit=bad)])
+    assert data[("cy", 1)].shots == ()
+    assert any("stage1.json" in r.getMessage() for r in caplog.records)
 
 
 def test_shot_numbers_are_one_based_and_ordered(tmp_path):
@@ -233,6 +263,18 @@ def test_missing_project_is_logged_once_per_shooter_not_per_stage(tmp_path, capl
     assert set(data) == {("ann", 1), ("ann", 2), ("ann", 3)}
     project_warnings = [r for r in caplog.records if "project.json" in r.getMessage()]
     assert len(project_warnings) == 1
+
+
+def test_an_invalid_project_json_stays_loud(tmp_path):
+    # Only *missing* data degrades. A project.json that exists but will not
+    # validate is a bug, and a shooter that silently renders without any
+    # scoring is exactly how it would go unnoticed.
+    root = tmp_path / "ann"
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "project.json").write_text(json.dumps({"name": "ann", "stages": "not a list"}))
+    with pytest.raises(Exception) as excinfo:
+        overlay_data.load_overlay_data([_bundle(tmp_path, "ann")])
+    assert not isinstance(excinfo.value, OSError)
 
 
 def test_a_preloaded_project_on_the_bundle_is_reused(tmp_path):

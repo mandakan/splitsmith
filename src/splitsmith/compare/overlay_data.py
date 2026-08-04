@@ -97,7 +97,12 @@ def _load_project(bundle: CompareShooterBundle) -> MatchProject | None:
         return bundle.project
     try:
         return MatchProject.load(bundle.project_root)
-    except Exception as exc:  # noqa: BLE001 -- any unreadable project degrades
+    except OSError as exc:
+        # Deliberately narrow. The requirement is that a shooter with no
+        # ``project.json`` degrades, which is ``FileNotFoundError``. A
+        # validation failure, a hosted state conflict or a broken schema
+        # migration are bugs, not missing data, and must stay loud rather
+        # than turn into a shooter that silently renders without scoring.
         logger.warning(
             "compare overlay: no readable project.json for %s at %s (%s); "
             "scoring and stage times will be omitted for this shooter",
@@ -115,9 +120,35 @@ def _load_shots(stage: CompareStageBundle) -> tuple[TileShot, ...]:
     degenerate to ``time_from_beep`` so nothing downstream can mistake it
     for a source-absolute value. A corrupt audit degrades to no shots:
     one bad file must not fail a 12-stage render.
+
+    Splits are re-derived over the time-sorted sequence rather than taken
+    from ``audit_shots_to_engine_shots``, which is the one audit consumer
+    in this codebase that orders by ``shot_number`` instead of by time
+    (``ui/server.py`` and ``coach_distributions`` both sort by time). The
+    two orderings agree on every audit a detector writes, but
+    ``audit.py``'s CSV apply preserves row order as ``shot_number``, so a
+    hand-sorted prep sheet can land shots out of time order -- and the
+    helper's splits would then be differences between non-adjacent shots,
+    including negative ones. The overlay draws the split on screen, so a
+    wrong number is worse than no number. Parsing and the helper's
+    rejection filtering are still its job; only ``split`` is recomputed.
     """
     try:
         audit_data = read_audit_data(stage.audit_path)
+        if not isinstance(audit_data, dict):
+            # Valid JSON, wrong shape. ``read_audit_data`` returns whatever
+            # ``json.loads`` produced, so a list/null/string audit would
+            # otherwise reach ``.get`` and raise past this handler.
+            raise TypeError(f"audit JSON is {type(audit_data).__name__}, expected object")
+        if is_stub_audit(audit_data):
+            # A beep-confirm placeholder means the same thing as no audit.
+            # Belt and braces today: ``is_stub_audit`` requires an empty
+            # ``shots``, so this branch can never change the result while
+            # that definition holds. It is here so the intent survives a
+            # future loosening of the sentinel rather than becoming a
+            # silent bug.
+            return ()
+        engine_shots = audit_shots_to_engine_shots(audit_data, beep_time_in_source=0.0)
     except Exception as exc:  # noqa: BLE001 -- one bad file must not fail the render
         logger.warning(
             "compare overlay: unreadable audit %s (%s); rendering this tile without shots",
@@ -125,19 +156,16 @@ def _load_shots(stage: CompareStageBundle) -> tuple[TileShot, ...]:
             exc,
         )
         return ()
-    if is_stub_audit(audit_data):
-        # A beep-confirm placeholder means the same thing as no audit.
-        # Belt and braces today: ``is_stub_audit`` requires an empty
-        # ``shots``, so this branch can never change the result while that
-        # definition holds. It is here so the intent survives a future
-        # loosening of the sentinel rather than becoming a silent bug.
-        return ()
-    engine_shots = audit_shots_to_engine_shots(audit_data, beep_time_in_source=0.0)
     ordered = sorted(engine_shots, key=lambda s: s.time_from_beep)
-    return tuple(
-        TileShot(number=i + 1, time_from_beep=shot.time_from_beep, split=shot.split)
-        for i, shot in enumerate(ordered)
-    )
+    shots: list[TileShot] = []
+    previous: float | None = None
+    for index, shot in enumerate(ordered):
+        # Shot 1's split is the draw; every later split is the gap from
+        # the shot before it in time order.
+        split = shot.time_from_beep if previous is None else shot.time_from_beep - previous
+        previous = shot.time_from_beep
+        shots.append(TileShot(number=index + 1, time_from_beep=shot.time_from_beep, split=split))
+    return tuple(shots)
 
 
 def _load_tile(
