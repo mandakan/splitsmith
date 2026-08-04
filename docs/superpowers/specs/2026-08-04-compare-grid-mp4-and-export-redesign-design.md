@@ -392,11 +392,70 @@ phases fold the shooter export into this page rather than replacing it.
 6. Wire sprites + `drawtext` clock into `mp4_grid.py` behind an
    `--overlay` flag that defaults to off.
 
-### Phase 2 -- transitions and title cards (opt-in)
+### Phase 1b -- merged audio track (requested after phase 0 shipped)
 
-7. Optional, default off. Note these force a re-encode at the concat
-   seams, which phase 0's `-c copy` stitch deliberately avoids -- so
-   they are a separate code path, not a parameter on the existing one.
+The grid currently ships one audio track per shooter and nothing else.
+YouTube, browser `<video>` and every social player read **track 1 only**,
+so a shared grid plays exactly one shooter -- which makes the whole
+multi-track design invisible to anyone the video is sent to.
+
+- A mixed track is **always** present as track 1 and carries the
+  `default` disposition; the per-shooter tracks follow as 2..N+1.
+- Mixing is `amix` with `normalize=1`. It cannot clip, and because the
+  sources are uncorrelated the perceived loudness stays close to a single
+  shooter. Known weakness, accepted: a stretch where only one shooter is
+  active still sits at 1/N.
+
+Three consequences that are not optional to handle:
+
+- The **stream-count invariant moves from N to N+1**. That is the rule
+  `concat -c copy` enforces, so every assertion counting audio tracks
+  moves with it -- including the empty-cell test that specifically checks
+  an unfilled grid cell adds *no* audio track.
+- **`--audio-from` loses its primary job.** With the mix always default,
+  it only drives frame-rate derivation. Its help text and docstring
+  currently describe it as choosing which track plays first, which
+  becomes false.
+- The **handoff doc's probe expectations change** -- it tells the next
+  session to expect exactly one track per shooter with the default on the
+  chosen one. A stale verification checklist is worse than none.
+
+### Phase 2 -- titles, transitions, and summary screens (opt-in)
+
+Everything here is optional and defaults to off. All of it forces a
+re-encode at the concat seams, which phase 0's `-c copy` stitch
+deliberately avoids -- so it is a separate code path, not a parameter on
+the existing one.
+
+7. **Transitions between stages** and **stage title cards**.
+8. **Opening title screen** and **end summary**.
+9. **Per-shooter post-stage summary screen**, with a configurable hold
+   duration, showing that shooter's splits alongside their scoring for
+   the stage.
+
+**Reuse, do not rebuild.** `composition.py` already models
+`TitleCard` (text, duration, style, font), `Transition` (kind, duration)
+and `Segment` (intro / outro), and the single-shooter renderers already
+consume them. The grid path needs its own rendering of these concepts,
+but the IR vocabulary and the FCPXML semantics exist -- diverging from
+them would give the two exporters different ideas of what a title is.
+
+**Scoring data has two sources with different reach.** The offline
+scoreboard JSON (`examples/tallmilan-2026.json`) carries
+`competitor_id`, `name`, `division`, `club`, `squad` and per-stage
+`stage_number`, `stage_name`, `time_seconds`, `scorecard_updated_at` --
+**time only, no points and no hit factor**. Hit factor, penalties and
+percentage-of-winner live in the SSI Scoreboard MCP. A summary screen
+must therefore degrade honestly: render what is present, and never imply
+a number it does not have. Manually-timed stages have neither a
+scorecard nor a `scorecard_updated_at`, and that case already exists in
+the codebase (a placeholder timestamp is fed to `StageData`).
+
+**Ranking must not be invented.** Per the scoreboard tooling's own
+rules, competitors are never ranked by raw points -- points are
+meaningless across stages and divisions. Any comparative figure on a
+summary screen is hit-factor percentage against the stage winner, or it
+is not shown.
 
 ### Phase 3 -- hosted mode + full Export page
 
