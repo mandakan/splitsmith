@@ -1,6 +1,7 @@
 """Shared pytest fixtures."""
 
 import os
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,6 +18,19 @@ from tests.hosted_helpers import hosted_app, hosted_env  # noqa: F401
 from tests.synthetic_media import build_synthetic_video, ffmpeg_available
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+# rich detects GITHUB_ACTIONS and renders CliRunner ``--help`` output with
+# ANSI colour/style escapes interleaved into the text -- so a literal
+# substring check like ``"--format" in result.output`` can fail on CI while
+# passing locally, even though the flag is genuinely documented in both. Any
+# test asserting on rendered CLI help text should strip escapes first.
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences so CLI help assertions are colour-independent."""
+    return _ANSI_ESCAPE_RE.sub("", text)
+
 
 _MATCH_TRIMS_STAGE_DEFS: list[tuple[int, str]] = [
     (1, "Egg Grab"),

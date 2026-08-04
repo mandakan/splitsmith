@@ -24,6 +24,7 @@ from splitsmith.fcpxml_gen import VideoMetadata
 from splitsmith.match_model import Match, MatchStageDefinition, Shooter, ShooterStageData
 from splitsmith.ui.match_exports import _slugify
 from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
+from tests.conftest import strip_ansi
 
 runner = CliRunner()
 
@@ -92,8 +93,9 @@ def _patch_probe(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_format_flag_is_documented() -> None:
     result = runner.invoke(app, ["compare", "export", "--help"])
     assert result.exit_code == 0
-    assert "--format" in result.output
-    assert "mp4" in result.output
+    output = strip_ansi(result.output)
+    assert "--format" in output
+    assert "mp4" in output
 
 
 def test_mp4_format_rejects_a_manifest_source(tmp_path: Path) -> None:
