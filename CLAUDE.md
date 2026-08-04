@@ -72,9 +72,12 @@ Beep detection runs inside per-stage derived search windows for multi-stage sing
   every other voter sees only candidates A emits.
 - **Voter B** -- threshold on the CLAP shot-vs-not-shot prompt similarity
   differential; calibrated against labeled fixtures.
-- **Voter C** -- trained ``sklearn`` ``GradientBoostingClassifier`` over
-  hand-crafted features + CLAP per-prompt similarities + PANN gunshot
-  probability; calibrated to a target recall on the same set. Switches
+- **Voter C** -- a ``GradientBoostingClassifier`` over hand-crafted
+  features + CLAP per-prompt similarities + PANN gunshot probability;
+  calibrated to a target recall on the same set. Trained with
+  ``sklearn`` in the build script, but shipped as one ONNX graph per
+  camera class and run through ``onnxruntime`` -- nothing under
+  ``src/`` imports sklearn or unpickles an estimator. Switches
   to a per-stage adaptive top-(K+slack) mode when the audit JSON has
   ``stage_rounds.expected``. The PANN gunshot-class probability used to
   be a separate voter D; it is now a feature column on voter C so the
@@ -87,9 +90,10 @@ Beep detection runs inside per-stage derived search windows for multi-stage sing
 The pipeline lives in ``src/splitsmith/ensemble/`` and is wired into the
 production UI's ``/api/stages/{n}/shot-detect`` endpoint. Calibration
 artifacts ship under ``src/splitsmith/data/`` (built once by
-``scripts/build_ensemble_artifacts.py``); the FastAPI server lazy-loads
-the CLAP / PANN / GBDT models on the first detection. Re-run the build
-script after adding new audited fixtures. Set
+``scripts/build_ensemble_artifacts.py``) -- ``ensemble_calibration.json``
+plus the voter C / voter E ONNX graphs it names; the FastAPI server
+lazy-loads the CLAP / PANN / GBDT models on the first detection. Re-run
+the build script after adding new audited fixtures. Set
 ``SPLITSMITH_ARTIFACTS_DIR=/path/to/experimental`` to point the engine
 at a different artifact set for A/B comparisons without rebuilding the
 shipped one (see ``splitsmith.runtime`` for the full env-var list).

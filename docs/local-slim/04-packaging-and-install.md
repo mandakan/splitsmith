@@ -24,8 +24,6 @@ dependencies = [
     "uvicorn[standard]>=0.30.0",
     "httpx>=0.28.0",
     "python-dotenv>=1.0.0",
-    "scikit-learn>=1.8.0",
-    "joblib>=1.4.0",
     # Slim runtime inference + model download (doc 02 + doc 03).
     "onnxruntime>=1.20.0",
     "huggingface_hub>=0.26.0",
@@ -39,6 +37,12 @@ Versus today's list, the changes are:
 - **Removed:** `torch`, `panns-inference`, `transformers`. None of
   these are required for the prod inference path after the ONNX
   migration.
+- **Removed:** `scikit-learn`, `joblib`. Once the voter C GBDT and
+  the voter E probe head became ONNX graphs too (#649, doc 02),
+  nothing under `src/` imports either -- they moved to the `dev`
+  group with the rest of the training side. This does not shrink
+  the install (librosa pulls scikit-learn in transitively); what it
+  drops is our own version pin.
 - **Added:** `onnxruntime`, `huggingface_hub`. `onnxruntime` ships
   the inference engine; `huggingface_hub` ships the resumable
   download helper we point at our own R2 URL.
@@ -81,6 +85,11 @@ dev = [
     # Tooling for exporting CLAP / CLIP to ONNX.
     "optimum>=1.20.0",
     "onnx>=1.16.0",
+    # Training + export of the voter C GBDT and voter E probe head,
+    # which ship as ONNX graphs since #649. No runtime import.
+    "scikit-learn>=1.8.0",
+    "joblib>=1.4.0",
+    "skl2onnx>=1.17",
 ]
 ```
 
@@ -91,7 +100,10 @@ or `pip install splitsmith` never see these wheels.
 Note that `optimum` and `onnx` join the dev group. They are only
 needed by `scripts/build_ensemble_artifacts.py --onnx` and the
 parity tests. The prod path uses `onnxruntime`, which is a separate
-wheel and doesn't depend on `onnx`.
+wheel and doesn't depend on `onnx`. `scikit-learn`, `joblib` and
+`skl2onnx` sit in the same position since #649: the build script fits
+the voter C GBDT and the voter E probe head and converts them, while
+the runtime only ever loads the resulting `.onnx`.
 
 ## Optional consumer extras
 
@@ -233,8 +245,11 @@ exclude = [
 ]
 ```
 
-`ensemble_calibration.json` and the existing `.joblib` files stay
-included (they are tiny and load-bearing).
+`ensemble_calibration.json` stays included, and so do the voter C /
+voter E ONNX graphs that sit beside it in `src/splitsmith/data/`
+(`voter_c_gbdt_*.onnx`, `voter_e_visual_probe.onnx`). At ~110 KB and
+~5.5 KB they are tiny and load-bearing; only the large encoder
+exports under `data/onnx/` go to R2.
 
 ## Migration for existing users
 

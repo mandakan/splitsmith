@@ -4,12 +4,18 @@ Reads the audited fixtures listed in ``DEFAULT_FIXTURES`` and writes:
 
 * ``src/splitsmith/data/ensemble_calibration.json`` -- per-voter
   thresholds, the CLAP prompt bank, calibration provenance.
-* ``src/splitsmith/data/voter_c_gbdt.joblib`` -- the trained
-  ``GradientBoostingClassifier`` (fit on ALL calibration data, threshold
-  picked from 5-fold CV predictions on the same set).
+* ``src/splitsmith/data/voter_c_gbdt_{camera_class}.onnx`` -- the trained
+  ``GradientBoostingClassifier`` per camera class, exported to ONNX (fit
+  on ALL calibration data for that class, threshold picked from 5-fold CV
+  predictions on the same set).
+* ``src/splitsmith/data/voter_e_visual_probe.onnx`` -- the CLIP visual
+  probe head, exported to ONNX (when Voter E is trained).
 
-The production server loads both via ``splitsmith.ensemble.calibration``
-and reuses them across detections.
+The production server loads all of them via
+``splitsmith.ensemble.calibration`` and reuses them across detections.
+
+The ONNX export needs ``skl2onnx`` (dev group); it is imported lazily so
+the rest of the script runs without it.
 
 Re-run this script after adding new audited fixtures or changing the
 hand-feature / CLAP-prompt set. The fixture-builder script
@@ -37,7 +43,6 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-import joblib
 import numpy as np
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
@@ -73,6 +78,17 @@ FULL_DIR = FIXTURES_DIR / "full"
 CACHE_DIR = FIXTURES_DIR / ".cache"
 MINED_NEGATIVES_PATH = CACHE_DIR / "_mined_negatives.npz"
 DATA_DIR = Path("src/splitsmith/data")
+TESTS_DIR = Path("tests")
+TESTS_DATA_DIR = TESTS_DIR / "data"
+
+# Frozen sklearn-vs-ONNX parity references (issue #649). Written next to
+# the tests so ``tests/test_onnx_parity.py`` needs neither scikit-learn
+# nor the retired pickles. Voter E rows are subsampled with a fixed seed
+# to keep the 512-wide embedding matrix near 2 MB on disk.
+VOTER_C_PARITY_REFERENCE_PATH = TESTS_DATA_DIR / "voter_c_parity_reference.npz"
+VOTER_E_PARITY_REFERENCE_PATH = TESTS_DATA_DIR / "voter_e_parity_reference.npz"
+VOTER_E_PARITY_MAX_ROWS: int = 1024
+PARITY_SUBSAMPLE_SEED: int = 649
 
 # Cap mined negatives per fixture relative to that fixture's positive count,
 # sampled by descending Voter A confidence so the hardest survivors win.
@@ -684,6 +700,16 @@ def _build_visual_universe(
     return rows, skipped_no_video
 
 
+def _voter_e_binary_rows(visual_universe: list[dict]) -> list[dict]:
+    """Rows Voter E trains on: true shots vs audited ``cross_bay`` negatives."""
+    return [row for row in visual_universe if row["label"] == 1 or row.get("subclass") == "cross_bay"]
+
+
+def _voter_e_matrix(rows: list[dict]) -> np.ndarray:
+    """Stack CLIP embeddings into the Voter E design matrix."""
+    return np.stack([row["embedding"] for row in rows], axis=0).astype(np.float32)
+
+
 def _train_voter_e(
     visual_universe: list[dict],
     target_recall: float,
@@ -701,7 +727,7 @@ def _train_voter_e(
         log("  Voter E: empty visual universe, skipping")
         return None, None
 
-    binary = [row for row in visual_universe if row["label"] == 1 or row.get("subclass") == "cross_bay"]
+    binary = _voter_e_binary_rows(visual_universe)
     if len(binary) < 20 or sum(1 for r in binary if r["label"] == 1) < 5:
         log(
             f"  Voter E: insufficient binary corpus "
@@ -712,7 +738,7 @@ def _train_voter_e(
 
     fixtures = sorted({row["fixture"] for row in binary})
     fixture_idx = {f: i for i, f in enumerate(fixtures)}
-    X = np.stack([row["embedding"] for row in binary], axis=0).astype(np.float32)
+    X = _voter_e_matrix(binary)
     y = np.array([row["label"] for row in binary], dtype=np.int64)
     groups = np.array([fixture_idx[row["fixture"]] for row in binary], dtype=np.int64)
 
@@ -740,6 +766,97 @@ def _train_voter_e(
         f"threshold={threshold:.4f} at target_recall={target_recall:.2f}"
     )
     return final, float(threshold)
+
+
+def _export_onnx_proba(clf: Any, n_features: int, path: Path) -> None:
+    """Serialise a fitted sklearn probability classifier as an ONNX graph.
+
+    ``skl2onnx`` is export-side tooling only (dev group), so it is
+    imported here rather than at module scope -- the rest of the script
+    runs in environments that do not have it.
+
+    The input tensor must be declared float32: ``DoubleTensorType``
+    converts, but onnxruntime then refuses to instantiate the session
+    because ``TreeEnsembleClassifier`` emits float probabilities.
+    ``zipmap=False`` keeps the output a plain (N, 2) tensor instead of a
+    sequence of dicts.
+    """
+    from skl2onnx import to_onnx
+    from skl2onnx.common.data_types import FloatTensorType
+
+    onx = to_onnx(
+        clf,
+        initial_types=[("X", FloatTensorType([None, n_features]))],
+        options={id(clf): {"zipmap": False}},
+    )
+    path.write_bytes(onx.SerializeToString())
+
+
+def _write_voter_c_parity_reference(
+    models: dict[str, Any],
+    thresholds_by_class: dict[str, dict],
+    X: np.ndarray,
+    *,
+    log: Callable[[str], None] = print,
+) -> None:
+    """Freeze the sklearn voter C probabilities the ONNX graphs must match.
+
+    ``X`` is the real calibration feature matrix -- every class model is
+    scored over the whole matrix, not just its own class's rows, so the
+    parity test exercises more of each tree ensemble. Stored as float32
+    because that is what the runtime feeds the ONNX session; the frozen
+    probabilities are sklearn's own output over those same float32
+    values.
+    """
+    if not TESTS_DIR.is_dir():
+        log(f"  skipped voter C parity reference ({TESTS_DIR}/ not present)")
+        return
+    TESTS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    X32 = np.ascontiguousarray(X, dtype=np.float32)
+    arrays: dict[str, np.ndarray] = {"X": X32}
+    for cls, model in sorted(models.items()):
+        arrays[f"proba_{cls}"] = np.asarray(
+            model.predict_proba(X32.astype(np.float64))[:, 1], dtype=np.float64
+        )
+        arrays[f"threshold_{cls}"] = np.float64(thresholds_by_class[cls]["voter_c_threshold"])
+    np.savez_compressed(VOTER_C_PARITY_REFERENCE_PATH, **arrays)
+    log(
+        f"Wrote {VOTER_C_PARITY_REFERENCE_PATH} "
+        f"(X {X32.shape} float32, classes: {', '.join(sorted(models))})"
+    )
+
+
+def _write_voter_e_parity_reference(
+    probe: Any,
+    X: np.ndarray,
+    threshold: float,
+    *,
+    log: Callable[[str], None] = print,
+) -> None:
+    """Freeze the sklearn voter E probabilities the ONNX probe must match.
+
+    Rows are deterministically subsampled to at most
+    ``VOTER_E_PARITY_MAX_ROWS`` -- the CLIP embeddings are 512 wide, so
+    the full binary corpus would push the reference file well past a
+    couple of megabytes for no extra coverage.
+    """
+    if not TESTS_DIR.is_dir():
+        log(f"  skipped voter E parity reference ({TESTS_DIR}/ not present)")
+        return
+    TESTS_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if X.shape[0] > VOTER_E_PARITY_MAX_ROWS:
+        rng = np.random.default_rng(PARITY_SUBSAMPLE_SEED)
+        keep = np.sort(rng.choice(X.shape[0], size=VOTER_E_PARITY_MAX_ROWS, replace=False))
+        X = X[keep]
+    X32 = np.ascontiguousarray(X, dtype=np.float32)
+    proba = np.asarray(probe.predict_proba(X32.astype(np.float64))[:, 1], dtype=np.float64)
+    np.savez_compressed(
+        VOTER_E_PARITY_REFERENCE_PATH,
+        X=X32,
+        proba=proba,
+        threshold=np.float64(threshold),
+    )
+    log(f"Wrote {VOTER_E_PARITY_REFERENCE_PATH} (X {X32.shape} float32)")
 
 
 def build_artifacts(
@@ -864,6 +981,7 @@ def build_artifacts(
     # succeeds without Voter E and the runtime falls back to 4 voters.
     voter_e_probe = None
     voter_e_threshold: float | None = None
+    voter_e_matrix: np.ndarray | None = None
     voter_e_provenance: dict[str, Any] = {}
     if voter_e:
         log("Voter E: building visual universe...")
@@ -875,6 +993,8 @@ def build_artifacts(
         voter_e_probe, voter_e_threshold = _train_voter_e(
             visual_universe, target_recall=voter_e_target_recall, log=log
         )
+        if voter_e_probe is not None:
+            voter_e_matrix = _voter_e_matrix(_voter_e_binary_rows(visual_universe))
         voter_e_provenance = {
             "n_visual_candidates": len(visual_universe),
             "n_visual_skipped_missing_video": len(missing_video),
@@ -906,8 +1026,21 @@ def build_artifacts(
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     cal_path = DATA_DIR / "ensemble_calibration.json"
-    model_path = DATA_DIR / "voter_c_gbdt.joblib"
     voter_e_path = DATA_DIR / DEFAULT_VOTER_E_PROBE_FILENAME
+
+    # ONNX instead of joblib (#649): the pickles bound the shipped models
+    # to whichever scikit-learn version the installing user resolved.
+    # Exported before the calibration JSON is written so a failed export
+    # never leaves a JSON pointing at artifacts that don't exist.
+    voter_c_onnx_artifacts: dict[str, str] = {}
+    for cls, cls_model in sorted(voter_c_models.items()):
+        onnx_path = DATA_DIR / f"voter_c_gbdt_{cls}.onnx"
+        _export_onnx_proba(cls_model, int(cls_model.n_features_in_), onnx_path)
+        voter_c_onnx_artifacts[cls] = onnx_path.name
+        log(f"Wrote {onnx_path}")
+    if voter_e_probe is not None:
+        _export_onnx_proba(voter_e_probe, int(voter_e_probe.n_features_in_), voter_e_path)
+        log(f"Wrote {voter_e_path}")
 
     cal = {
         "voter_a_floor": default_thresholds["voter_a_floor"],
@@ -923,6 +1056,7 @@ def build_artifacts(
         "n_calibration_candidates": n_total,
         "n_calibration_positives": int(n_pos),
         "voter_c_feature_dim": feat.VOTER_C_FEATURE_DIM,
+        "voter_c_onnx_artifacts": voter_c_onnx_artifacts,
         "voter_e_clip_model_id": vis.CLIP_VISUAL_MODEL_ID if voter_e_probe is not None else None,
         "voter_e_frame_offsets": (list(vis.DEFAULT_FRAME_OFFSETS) if voter_e_probe is not None else None),
         "voter_e_probe_artifact": (DEFAULT_VOTER_E_PROBE_FILENAME if voter_e_probe is not None else None),
@@ -937,12 +1071,13 @@ def build_artifacts(
         **mining_provenance,
     }
     cal_path.write_text(json.dumps(cal, indent=2) + "\n")
-    joblib.dump(voter_c_models, model_path)
-    if voter_e_probe is not None:
-        joblib.dump(voter_e_probe, voter_e_path)
-        log(f"Wrote {voter_e_path}")
     log(f"Wrote {cal_path}")
-    log(f"Wrote {model_path}")
+
+    # Frozen sklearn probabilities for tests/test_onnx_parity.py. Skipped
+    # in a wheel context (the dev retrain endpoint), where tests/ is absent.
+    _write_voter_c_parity_reference(voter_c_models, thresholds_by_class, _x_from(voter_c_universe), log=log)
+    if voter_e_probe is not None and voter_e_matrix is not None and voter_e_threshold is not None:
+        _write_voter_e_parity_reference(voter_e_probe, voter_e_matrix, voter_e_threshold, log=log)
     return cal
 
 

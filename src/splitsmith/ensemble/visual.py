@@ -10,9 +10,10 @@ Frames are extracted via ffmpeg (fast pre-seek + accurate fine seek)
 and cached on disk keyed on the source video's stat fingerprint, so
 re-runs over the same video are fast.
 
-The probe head is a ``sklearn`` ``LogisticRegression`` trained binary
-on shots vs cross_bay candidates. See
-``scripts/build_ensemble_artifacts.py``.
+The probe head is a linear classifier trained binary on shots vs
+cross_bay candidates and shipped as an ONNX graph (issue #649); the
+runtime object is a ``calibration.OnnxProbaModel`` exposing
+``predict_proba``. See ``scripts/build_ensemble_artifacts.py``.
 """
 
 from __future__ import annotations
@@ -51,11 +52,13 @@ class VisualRuntime:
     their backend-specific objects inside this callable so voter code
     is backend-agnostic.
 
-    ``probe`` is the trained sklearn classifier
-    (``LogisticRegression``) that maps a CLIP image embedding to a
-    per-candidate shot probability. ``model`` / ``processor`` slots
-    remain as opaque ``Any`` references so the torch branch can hold
-    its objects alive; consumers should not read them directly.
+    ``probe`` is the trained linear probe head that maps a CLIP image
+    embedding to a per-candidate shot probability -- an ONNX-backed
+    ``calibration.OnnxProbaModel`` in production, but only its
+    ``predict_proba`` is ever called, so any object with that method
+    works. ``model`` / ``processor`` slots remain as opaque ``Any``
+    references so the torch branch can hold its objects alive;
+    consumers should not read them directly.
     """
 
     encode_images: Callable[[list[PilImage]], np.ndarray]
@@ -264,7 +267,8 @@ def score_visual_candidates(features: np.ndarray, runtime: VisualRuntime) -> np.
     """Predict ``P(shot)`` per candidate from CLIP image embeddings.
 
     Returns shape ``(N,)`` ``float32``. ``runtime.probe`` is expected to
-    be a sklearn classifier with ``predict_proba``.
+    expose ``predict_proba`` returning ``(N, 2)`` class probabilities --
+    in production the ONNX-backed ``calibration.OnnxProbaModel``.
     """
     if features.size == 0:
         return np.zeros(0, dtype=np.float32)

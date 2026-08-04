@@ -278,9 +278,10 @@ The detector is built around half-rise leading-edge timing (consistent across re
 
 Shot detection is driven by a 3-voter ensemble (envelope onsets, CLAP audio embeddings, and a per-camera-class GBDT) calibrated against the audited fixtures under `tests/fixtures/`. Each fixture is a real beep-to-last-shot audio slice with hand-labeled shot times plus a `camera` / `shooter` / `stage_rounds` provenance block.
 
-The corpus grows over time -- right now I curate it by hand from my own matches and a few squadmates'. After dropping new audited fixtures into `tests/fixtures/`, rebuild the shipped calibration artifacts (`src/splitsmith/data/ensemble_calibration.json` and `src/splitsmith/data/voter_c_gbdt.joblib`) with:
+The corpus grows over time -- right now I curate it by hand from my own matches and a few squadmates'. After dropping new audited fixtures into `tests/fixtures/`, rebuild the shipped calibration artifacts -- `src/splitsmith/data/ensemble_calibration.json` plus the ONNX voter graphs next to it (`voter_c_gbdt_headcam.onnx`, `voter_c_gbdt_handheld.onnx`, and `voter_e_visual_probe.onnx` when Voter E is trained) -- with:
 
 ```bash
+uv sync --all-groups   # training + ONNX export tooling lives in the dev group
 uv run python scripts/build_ensemble_artifacts.py
 ```
 

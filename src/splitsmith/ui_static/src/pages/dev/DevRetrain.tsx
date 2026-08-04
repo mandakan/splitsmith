@@ -44,7 +44,7 @@ const STAGES: PipelineStage[] = [
   { num: "03", name: "CLAP scoring", desc: "Run prompt-similarity differential" },
   { num: "04", name: "Feature build", desc: "Stack hand-crafted + CLAP + PANN" },
   { num: "05", name: "GBDT 5-fold CV", desc: "Train + pick voter C threshold" },
-  { num: "06", name: "Write artifact", desc: "Save calibration JSON + joblib" },
+  { num: "06", name: "Write artifact", desc: "Save calibration JSON + ONNX graphs" },
 ];
 
 export function DevRetrain() {

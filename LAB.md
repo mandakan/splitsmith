@@ -354,8 +354,10 @@ alter calibration until you rebuild.
 **From the UI**: click **Rebuild calibration** in the Lab header. The
 popover lets you pick `target_recall` and `tolerance_ms` and requires
 an explicit confirmation checkbox before submitting -- the operation
-overwrites `src/splitsmith/data/ensemble_calibration.json` and
-`voter_c_gbdt.joblib`. Progress streams into the popover as the script
+overwrites `src/splitsmith/data/ensemble_calibration.json` and the
+ONNX voter graphs next to it (`voter_c_gbdt_headcam.onnx`,
+`voter_c_gbdt_handheld.onnx`, and `voter_e_visual_probe.onnx` when
+Voter E is trained). Progress streams into the popover as the script
 logs; the cached `EnsembleRuntime` is invalidated on success so the
 next Run eval picks up the new thresholds.
 
@@ -370,7 +372,7 @@ so it can score against any fixture immediately. But the *thresholds*
 voter A/B/C/D use are still the shipped ones until you rebuild. If you
 want the new fixture to influence those thresholds, hit Rebuild
 calibration (or run the build script) -- this regenerates the JSON +
-joblib artifacts.
+ONNX artifacts.
 
 For pure regression-tracking ("is the current pipeline still good on
 this new stage?"), no rebuild is needed -- just add the fixture and

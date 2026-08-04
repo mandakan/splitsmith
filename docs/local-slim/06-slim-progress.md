@@ -28,7 +28,7 @@ panns_inference in the prod path with ONNX Runtime + first-run model
 download, ship a slim wheel that installs in under 100 MB, and lands
 detection inside the <300 MB on-disk target.
 
-**Last updated:** 2026-05-15 (initial draft of doc set).
+**Last updated:** 2026-08-04 (voter C / voter E ONNX export, #649).
 
 ### Foundation -- backend abstraction in the codebase
 
@@ -54,11 +54,18 @@ detection inside the <300 MB on-disk target.
 - [x] Pure-numpy mel-spectrogram for CLAP (no Apache-2.0 vendoring;
   uses BSD-3 librosa + numpy primitives). Parity vs
   `ClapFeatureExtractor`: L_inf 3.8e-6 dB. **PR #383.**
-- [-] CLIP visual encoder export. Deferred to v2 with Voter E ONNX
-  migration; Voter E is off by default (`enable_voter_e=False`,
-  gated by `SPLITSMITH_ENABLE_VOTER_E`) and explicitly out of slim
-  v1. To use Voter E today, install dev extras
-  (`uv sync --all-groups`) so the torch backend stays available.
+- [x] Voter C GBDT + Voter E linear probe head exported via
+  `skl2onnx` from `scripts/build_ensemble_artifacts.py`:
+  `voter_c_gbdt_headcam.onnx`, `voter_c_gbdt_handheld.onnx`,
+  `voter_e_visual_probe.onnx`, all in `src/splitsmith/data/` and
+  shipped in the wheel (~110 KB each, too small to be worth the R2
+  registry). The joblib pickles are deleted. **Issue #649.**
+- [-] CLIP visual encoder export. Still deferred to v2; #649 covered
+  the probe head, not the encoder in front of it. Voter E is off by
+  default (`enable_voter_e=False`, gated by
+  `SPLITSMITH_ENABLE_VOTER_E`) and explicitly out of slim v1. To use
+  Voter E today, install dev extras (`uv sync --all-groups`) so the
+  torch backend stays available.
 - [ ] `--upload` step on the export scripts: SHA256 + size +
   filename + R2 URL written into a `model_artifacts` block in
   `ensemble_calibration.json` and uploaded via `wrangler r2 object
@@ -112,12 +119,22 @@ detection inside the <300 MB on-disk target.
   `[project] dependencies`. **PR #384.**
 - [x] `onnx` + `onnxscript` kept in `[dev]` alongside torch for the
   export scripts + parity tests. **PR #384.**
+- [x] `scikit-learn` + `joblib` moved to `[dependency-groups] dev`
+  and the `scikit-learn<1.9` pin from #648 dropped, once voters C
+  and E stopped shipping as pickles. Contributor-side only now
+  (training + export). librosa still pulls scikit-learn in
+  transitively, so this shrinks the constraint set, not the install.
+  **Issue #649.**
+- [x] `skl2onnx>=1.17` added to `[dev]` next to `onnx` /
+  `onnxscript`. **Issue #649.**
 - [-] `[project.optional-dependencies] gpu = ["onnxruntime-gpu"]`.
   Deferred until measured demand from a CUDA user; CPU path covers
   the desktop app at responsive cold-start times.
 - [-] `[tool.hatch.build.targets.wheel] exclude` for `**/data/onnx/**`.
-  Not needed yet -- no ONNX files live under `src/splitsmith/data/`.
-  Reconsider when the R2 upload tooling lands.
+  Still not needed. The voter C / voter E graphs do live under
+  `src/splitsmith/data/` since #649, but they are ~110 KB each and
+  are *meant* to ship in the wheel. Reconsider when the R2 upload
+  tooling lands and multi-MB exports start landing in that directory.
 
 ### ffmpeg + install UX
 
