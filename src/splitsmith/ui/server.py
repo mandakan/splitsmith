@@ -86,7 +86,7 @@ import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO, Literal
@@ -143,6 +143,7 @@ from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
 from ..auth import AuthBackend, LoopbackAuth, User
+from ..compare import mp4_grid, project_loader
 from ..compute import ComputeBackend, LocalComputeBackend
 from ..config import (
     BeepDetectConfig,
@@ -1631,6 +1632,224 @@ def warm_ensemble_runtime() -> None:
     ``cold_model_load`` phase) on the first shot-detect job.
     """
     _get_ensemble_runtime()
+
+
+def _shooter_label(match: match_model.Match, match_root: Path, slug: str) -> str:
+    """The display label a slug binds to: the shooter's name, or the slug itself.
+
+    Mirrors ``compare/cli.py::_export_from_match``'s ``label = shooter.name
+    or slug``. Shared so the compare-grid endpoint's audio-source check and
+    its worker's ``audio_label`` resolution can't drift from
+    ``_load_compare_bundles``'s own per-shooter labelling.
+    """
+    shooter = match.load_shooter(match_root, slug)
+    return shooter.name or slug
+
+
+def _load_compare_bundles(
+    match_root: Path,
+    match: match_model.Match,
+    *,
+    cameras: dict[str, str] | None = None,
+) -> list[project_loader.CompareShooterBundle]:
+    """Load every shooter on ``match`` as a compare-grid bundle.
+
+    Shared by the compare-grid endpoint's up-front validation and its
+    worker (``_run_compare_grid``), so both read exactly the same trims --
+    the endpoint decides whether to queue from this same read, and the
+    worker renders from it. ``cameras`` keys match either a shooter's
+    slug or its display name, mirroring ``compare export``'s
+    ``--camera SHOOTER=VALUE`` flag. Raises
+    :class:`splitsmith.camera_select.CameraResolutionError` when a
+    requested camera resolves on no stage of that shooter's project --
+    callers map that to a 400.
+    """
+    cameras = cameras or {}
+    bundles: list[project_loader.CompareShooterBundle] = []
+    for slug in match.shooters:
+        label = _shooter_label(match, match_root, slug)
+        camera = cameras.get(slug, cameras.get(label))
+        bundles.append(project_loader.load_shooter_from_match(match_root, slug, label, camera=camera))
+    return bundles
+
+
+def _filter_bundles_to_stages(
+    bundles: list[project_loader.CompareShooterBundle], stage_numbers: list[int]
+) -> list[project_loader.CompareShooterBundle]:
+    """Restrict each bundle to just the requested stage numbers.
+
+    ``CompareGridRequest.stage_numbers`` selects a subset explicitly --
+    unlike the CLI's whole-match export, which always renders every
+    stage a shooter has a trim for. Rendering unfiltered bundles here
+    would grid every stage on disk regardless of what the user picked.
+    """
+    wanted = set(stage_numbers)
+    return [
+        replace(b, stages_by_number={n: s for n, s in b.stages_by_number.items() if n in wanted})
+        for b in bundles
+    ]
+
+
+#: A compare-grid output name is a bare file stem, not a path.
+_COMPARE_OUTPUT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _compare_output_stem(name: str) -> str:
+    """Validate ``CompareGridRequest.output_name`` as a plain file stem.
+
+    The worker builds ``exports / f"{name}.mp4"``, so ``"../../x"``
+    writes outside the match directory. Local mode on the user's own
+    machine and the SPA hardcodes the value, so this is a cheap guard
+    rather than a security boundary -- but nothing else stops it, and
+    rejecting is a line.
+    """
+    stem = name.strip()
+    if not _COMPARE_OUTPUT_NAME.match(stem):
+        raise ValueError(
+            f"output_name={name!r} must be a plain file name: it has to start with a letter "
+            "or digit and may contain only letters, digits, dots, dashes and underscores "
+            "(no path separators)"
+        )
+    return stem
+
+
+def _compare_missing_trims(
+    bundles: list[project_loader.CompareShooterBundle], stage_numbers: list[int]
+) -> list[dict[str, Any]]:
+    """Shooter/stage pairs inside the selection whose trim is not on disk.
+
+    ``project_loader`` records these on every bundle it loads and the CLI
+    already prints them (``compare/cli.py::_warn_missing_trims``); the
+    endpoint used to load them and throw them away, which left a black
+    cell indistinguishable from a shooter who skipped the stage (#618).
+    Filtered to the selection because ``missing_trims`` covers the whole
+    project, and gaps outside the render are noise.
+    """
+    wanted = set(stage_numbers)
+    return [
+        {
+            "shooter": bundle.label,
+            "stage_number": miss.stage_number,
+            "stage_name": miss.stage_name,
+            "expected_path": str(miss.expected_path),
+            "camera": miss.camera,
+        }
+        for bundle in bundles
+        for miss in bundle.missing_trims
+        if miss.stage_number in wanted
+    ]
+
+
+def _compare_grid_progress_runner(
+    handle: JobHandle,
+    plans: tuple[mp4_grid.GridStagePlan, ...],
+    *,
+    base_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> Callable[..., subprocess.CompletedProcess]:
+    """Wrap ``render_grid_mp4``'s ``runner`` hook so the job reports stages.
+
+    Same trick ``compare/cli.py::_render_grid_mp4`` uses for its console
+    output: the engine has no progress callback, but it does take an
+    injectable runner, and it invokes exactly one per stage followed by
+    one for the stitch. Without this the job sits at 5% for the whole
+    multi-minute encode and a working render looks exactly like a hung
+    one.
+    """
+    total = len(plans)
+    state = {"calls": 0}
+
+    def _runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        index = state["calls"]
+        state["calls"] += 1
+        if index < total:
+            plan = plans[index]
+            handle.update(
+                progress=0.05 + 0.9 * (index / total) if total else 0.05,
+                message=(
+                    f"Rendering stage {plan.stage_number} ({plan.stage_name}) "
+                    f"-- {index + 1} of {total}..."
+                ),
+            )
+        else:
+            handle.update(progress=0.95, message=f"Stitching {total} stage(s)...")
+        return base_runner(cmd, **kwargs)
+
+    return _runner
+
+
+def _run_compare_grid(handle: JobHandle, req: CompareGridRequest, match_root: str) -> None:
+    """Worker for the match-scoped compare-grid MP4 export (phase 0).
+
+    Mirrors ``compare/cli.py::_render_grid_mp4``'s shape: owns a scratch
+    work dir beside the output and always removes it, success or not.
+    Local mode only -- no Storage push, no download deliverable; the
+    result carries the on-disk output path and per-stage outcomes so a
+    partially-successful render (some stages failed, others didn't) is
+    reported rather than treated as an all-or-nothing failure.
+
+    ``stages_total`` counts the stages the *request* asked for, not the
+    ones that got planned. ``build_stage_plans`` derives its stage list
+    from the shooters' trims, so a selected stage nobody has produces no
+    plan at all -- counted against the plans, that read back as
+    "rendered all 2 stages" for a three-stage request. Those stages are
+    named in ``skipped_stages``, and the shooter/stage pairs behind them
+    in ``missing_trims``.
+    """
+    root = Path(match_root)
+    match = match_model.Match.load(root)
+    stem = _compare_output_stem(req.output_name)
+    requested = sorted(set(req.stage_numbers))
+
+    handle.update(progress=0.02, message="Loading shooters...")
+    with handle.timer.phase("load_shooters"):
+        bundles = _load_compare_bundles(root, match, cameras=req.cameras)
+        filtered = _filter_bundles_to_stages(bundles, requested)
+        audio_label = _shooter_label(match, root, req.audio_from)
+
+    output_dir = root / "exports"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{stem}.mp4"
+
+    # Planned up front purely for the progress messages and the skipped
+    # count -- pure planning, no ffmpeg. ``render_grid_mp4`` plans again
+    # internally from the same inputs and so sees the same stages.
+    plans = mp4_grid.build_stage_plans(
+        filtered,
+        audio_label=audio_label,
+        head_pad_seconds=1.0,
+        tail_pad_seconds=0.5,
+        layout_2up="horizontal",
+    )
+    skipped = [number for number in requested if number not in {p.stage_number for p in plans}]
+
+    handle.update(progress=0.05, message=f"Rendering {len(plans)} stage(s)...")
+    with (
+        handle.timer.phase("render"),
+        tempfile.TemporaryDirectory(dir=output_dir, prefix=".compare-grid-work-") as tmp,
+    ):
+        result = mp4_grid.render_grid_mp4(
+            filtered,
+            audio_label=audio_label,
+            output_path=output_path,
+            canvas=mp4_grid.GridCanvas(width=req.canvas_width, height=req.canvas_height),
+            work_dir=Path(tmp),
+            runner=_compare_grid_progress_runner(handle, plans),
+        )
+
+    handle.update(progress=1.0, message=f"Wrote {output_path}")
+    handle.set_result(
+        {
+            "output_path": str(result.output_path),
+            "stages_rendered": len(result.stages) - len(result.failed),
+            "stages_total": len(requested),
+            "skipped_stages": skipped,
+            "missing_trims": _compare_missing_trims(bundles, requested),
+            "failed": [
+                {"stage_number": s.stage_number, "stage_name": s.stage_name, "error": s.error}
+                for s in result.failed
+            ],
+        }
+    )
 
 
 def _run_model_download_job(handle: JobHandle) -> None:
@@ -3128,6 +3347,7 @@ def register_job_bodies(state: AppState) -> None:
     state.jobs.bodies.register("export", _run_export_for_stage)
     state.jobs.bodies.register("match_export", _run_match_export)
     state.jobs.bodies.register("generate_proxy", _run_generate_proxy)
+    state.jobs.bodies.register("compare-grid", _run_compare_grid)
 
 
 class HealthResponse(BaseModel):
@@ -4225,6 +4445,26 @@ class MatchExportRequest(BaseModel):
     # H.264 profile / GOP / colour / audio params. Only meaningful for
     # ``output_format == "mp4"``; ignored otherwise (anomaly surfaced).
     youtube_preset: bool = False
+
+
+class CompareGridRequest(BaseModel):
+    """Body for POST /api/match/compare-export (phase 0).
+
+    Local mode only: the response is a Job snapshot the SPA polls, since
+    a full-match grid re-encode runs for minutes. ``cameras`` keys match
+    either a shooter's slug or its display name, mirroring ``compare
+    export``'s ``--camera SHOOTER=VALUE`` flag. ``canvas_width`` /
+    ``canvas_height`` default to 4K; the frame rate is never taken from
+    the request -- it always derives from the audio-source shooter's
+    footage (see ``mp4_grid.derive_frame_rate``).
+    """
+
+    stage_numbers: list[int]
+    audio_from: str
+    cameras: dict[str, str] = Field(default_factory=dict)
+    canvas_width: int = mp4_grid.DEFAULT_CANVAS_WIDTH
+    canvas_height: int = mp4_grid.DEFAULT_CANVAS_HEIGHT
+    output_name: str = "compare-grid"
 
 
 class RevealRequest(BaseModel):
@@ -11910,6 +12150,79 @@ def create_app(
             stage_name=stage_def.stage_name,
             shooters=records,
         )
+
+    @app.post("/api/match/compare-export")
+    async def export_compare_grid(req: CompareGridRequest) -> JSONResponse:
+        """Render the match's shooters as one grid MP4 (phase 0).
+
+        Local mode only -- no Storage writes, no download deliverables,
+        no export history. Job-queued: a full-match grid re-encode runs
+        for minutes.
+
+        Validation up-front so the SPA shows a clear error before
+        queueing: empty selection, an unknown audio shooter, an
+        unresolvable camera selector, and the no-trims-at-all case all
+        400 rather than producing a grid of black tiles.
+        """
+        match_root, match = _resolve_match_context()
+        if not req.stage_numbers:
+            raise HTTPException(status_code=400, detail="stage_numbers cannot be empty")
+        try:
+            _compare_output_stem(req.output_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if req.audio_from not in match.shooters:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"audio_from={req.audio_from!r} matches no shooter on this match. "
+                    f"Slugs available: {', '.join(match.shooters)}"
+                ),
+            )
+
+        try:
+            bundles = _load_compare_bundles(match_root, match, cameras=req.cameras)
+        except camera_select.CameraResolutionError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        present = sum(
+            1 for bundle in bundles for number in req.stage_numbers if number in bundle.stages_by_number
+        )
+        if present == 0:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "no shooter has an exported trim for the selected stages. "
+                    "Run `splitsmith match trims` (or export trims per shooter) first."
+                ),
+            )
+
+        # A shooter other than the audio source can cover the selection --
+        # ``present`` above only proves *someone* has a trim, not that the
+        # chosen audio source does. Queueing that would burn a many-minute
+        # 4K render before the user learns the result has no sound at all;
+        # catch it here instead, naming the shooter and the fix (a
+        # different audio source, or a different stage selection).
+        audio_label = _shooter_label(match, match_root, req.audio_from)
+        audio_bundle = next((bundle for bundle in bundles if bundle.label == audio_label), None)
+        if audio_bundle is None or not any(
+            number in audio_bundle.stages_by_number for number in req.stage_numbers
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"audio_from={req.audio_from!r} ({audio_label}) has no trim on any of the "
+                    f"selected stages ({', '.join(str(n) for n in req.stage_numbers)}); the "
+                    "render would have no audio. Pick a different audio source, or select "
+                    f"stages {audio_label} has a trim for."
+                ),
+            )
+
+        job = await state.jobs.submit(
+            kind="compare-grid",
+            args={"req": req, "match_root": str(match_root)},
+        )
+        return JSONResponse(job.model_dump(mode="json"))
 
     @app.get("/api/match/shooters/{slug}/videos/stream", response_model=None)
     def stream_shooter_video(

@@ -50,6 +50,7 @@ _SCOPED_PREFIXES = (
     "/api/match/scoreboard",
     "/api/match/beep-queue",
     "/api/match/videos",
+    "/api/match/compare-export",
     "/api/project",
     "/api/assignments/",
     "/api/videos/",
