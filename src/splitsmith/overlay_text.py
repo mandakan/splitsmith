@@ -166,6 +166,33 @@ def _load_bundled_font(name: str, size: int) -> ImageFont.FreeTypeFont | None:
     return font
 
 
+def materialize_font(font_name: str, dest_dir: Path) -> Path:
+    """Copy a bundled font to a real path that outlives this call.
+
+    ``_load_font`` hands PIL an mmap'd resource, which is fine for a
+    process that draws and exits. ffmpeg's ``drawtext`` is a different
+    consumer: it needs ``fontfile=`` to name a path that still exists
+    when ffmpeg opens it, and ``importlib.resources.as_file`` may be
+    handing back a temp file that is unlinked when its context closes.
+    """
+    key = font_name.lower()
+    spec = _BUNDLED_FONTS.get(key)
+    if spec is None:
+        raise OverlayRenderError(
+            f"unknown bundled font {font_name!r}; available: {', '.join(_BUNDLED_FONTS)}"
+        )
+    resource = files("splitsmith.data").joinpath("fonts").joinpath(spec.filename)
+    if not resource.is_file():
+        raise OverlayRenderError(f"bundled font file missing for {font_name!r}: {spec.filename}")
+    data = resource.read_bytes()
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_path = dest_dir / spec.filename
+    if dest_path.exists() and dest_path.stat().st_size == len(data):
+        return dest_path
+    dest_path.write_bytes(data)
+    return dest_path
+
+
 def _load_font(
     font_path: Path | None,
     size: int,

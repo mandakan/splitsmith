@@ -9,9 +9,16 @@ Pure computation: states in seconds, no rasterizer, no file I/O. Turning
 a state into pixels belongs to the sprite renderer, not here.
 """
 
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 
+from PIL import Image, ImageDraw
+
+from ..overlay_text import _draw_text_with_shadow, _load_font
+from ..overlay_theme import OverlayTheme
 from .overlay_data import TileShot, TileStageData
 
 # Shots land on the tolerance side of a boundary rather than the wrong
@@ -239,3 +246,304 @@ def _rank(
         ranks[label] = position + 1
         deltas[label] = shots[-1].time_from_beep - leader[len(shots) - 1].time_from_beep
     return ranks, deltas
+
+
+# --- rendering --------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SpriteGeometry:
+    """Canvas + grid geometry a sprite is rendered for.
+
+    ``cell_width`` / ``cell_height`` use floor division, matching
+    ``mp4_grid._cell_size`` exactly -- the sprite has to land on the same
+    integer cell boundaries the xstack filter graph uses, or the overlay
+    drifts off the tile it is meant to sit on.
+    """
+
+    canvas_width: int
+    canvas_height: int
+    rows: int
+    cols: int
+
+    @property
+    def cell_width(self) -> int:
+        return self.canvas_width // self.cols
+
+    @property
+    def cell_height(self) -> int:
+        return self.canvas_height // self.rows
+
+    @property
+    def strip_height(self) -> int:
+        return max(48, self.canvas_height // 20)
+
+
+def render_state(state: OverlayState, geometry: SpriteGeometry, *, theme: OverlayTheme) -> Image.Image:
+    """Rasterize one :class:`OverlayState` to a canvas-sized RGBA sprite.
+
+    Layout mirrors ``overlay_render.DefaultTemplate`` cell-for-cell so the
+    single-shooter alpha overlay and this grid overlay read as one
+    product: top-left counter, bottom-center last split, same padding and
+    type-size formulas driven by the cell (not the canvas).
+
+    Deliberate divergence from ``DefaultTemplate``: the single-shooter
+    overlay fades the last split out after ``split_hold_seconds``. This is
+    a step function over discrete states, not a per-frame loop, so it
+    cannot fade without inventing extra states purely to animate an alpha
+    ramp. In a grid the viewer also wants to glance at any moment and read
+    what a shooter's last split was, not just the instant after they
+    fired. The split label therefore persists at full alpha until the
+    next shot replaces it.
+    """
+    canvas = Image.new("RGBA", (geometry.canvas_width, geometry.canvas_height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(canvas)
+
+    pad = max(24, geometry.cell_height // 36)
+    big = max(48, geometry.cell_height // 14)
+    # Same default-font selection ``DefaultTemplate`` uses: the bundled
+    # mono face for the splitsmith theme (deterministic across hosts),
+    # generic system discovery otherwise.
+    font_name = "splitsmith-mono" if theme.name == "splitsmith" else None
+    font = _load_font(None, big, font_name=font_name)
+    stroke_width = max(2, big // 18)
+    shadow_offset = max(2, big // 24)
+    shadow_blur = max(3, big // 12)
+
+    for panel in state.panels:
+        _draw_panel(
+            canvas,
+            draw,
+            panel,
+            geometry,
+            font=font,
+            theme=theme,
+            pad=pad,
+            stroke_width=stroke_width,
+            shadow_offset=shadow_offset,
+            shadow_blur=shadow_blur,
+        )
+
+    _draw_strip(canvas, draw, state, geometry, theme=theme)
+    return canvas
+
+
+def _draw_panel(
+    canvas: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    panel: TilePanel,
+    geometry: SpriteGeometry,
+    *,
+    font,
+    theme: OverlayTheme,
+    pad: int,
+    stroke_width: int,
+    shadow_offset: int,
+    shadow_blur: int,
+) -> None:
+    """One tile's counter + last split. A filler tile (``present`` False)
+    draws nothing at all -- it is not a shooter, so drawing "--/12" over
+    black would imply a competitor who isn't there."""
+    if not panel.present:
+        return
+
+    x0 = panel.col * geometry.cell_width
+    y0 = panel.row * geometry.cell_height
+    # The strip sits over the bottom of the whole canvas, which can
+    # overlap a bottom-row tile's nominal cell. Bottom-anchored content
+    # must clear it or the split label would render under the strip.
+    content_bottom = min(y0 + geometry.cell_height, geometry.canvas_height - geometry.strip_height)
+    ink = (*theme.ink, 255)
+
+    if panel.shots_fired > 0:
+        if panel.expected_shots is not None:
+            counter_text = f"{panel.shots_fired}/{panel.expected_shots}"
+        else:
+            counter_text = f"{panel.shots_fired}"
+        _draw_text_with_shadow(
+            draw,
+            canvas,
+            (x0 + pad, y0 + pad),
+            counter_text,
+            font,
+            ink,
+            stroke_width=stroke_width,
+            shadow_offset=shadow_offset,
+            shadow_blur=shadow_blur,
+            stroke_color=theme.stroke,
+            shadow_color=theme.shadow,
+        )
+
+    if panel.last_split is not None:
+        split_text = f"{panel.last_split:.2f}s"
+        bbox = draw.textbbox((0, 0), split_text, font=font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        x = x0 + (geometry.cell_width - tw) // 2
+        y = content_bottom - th - pad * 2
+        _draw_text_with_shadow(
+            draw,
+            canvas,
+            (x, y),
+            split_text,
+            font,
+            (*theme.split, 255),
+            stroke_width=stroke_width,
+            shadow_offset=shadow_offset,
+            shadow_blur=shadow_blur,
+            stroke_color=theme.stroke,
+            shadow_color=theme.shadow,
+        )
+
+
+def _strip_entry_text(panel: TilePanel) -> str:
+    """One shooter's label in the delta strip.
+
+    The leader's elapsed time at their last shot is not known to the
+    sprite (only per-tile shot data crosses into ``render_state``), so
+    the leader gets rank + label only -- never a fabricated number. Every
+    other ranked tile gets a signed delta; ``delta_to_leader`` can be
+    negative (a tile behind on shot count but faster to its own shot k),
+    so the sign must come from ``:+.2f`` formatting, never a hardcoded
+    ``+`` prefix, or a negative delta would render as ``+-0.10``. A tile
+    that hasn't fired yet gets its label with no rank number at all.
+    """
+    label = panel.label.upper()
+    if panel.rank is None:
+        return label
+    if panel.rank == 1 or panel.delta_to_leader is None:
+        return f"{panel.rank} {label}"
+    return f"{panel.rank} {label} {panel.delta_to_leader:+.2f}"
+
+
+def _draw_strip(
+    canvas: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    state: OverlayState,
+    geometry: SpriteGeometry,
+    *,
+    theme: OverlayTheme,
+) -> None:
+    """The bottom band: one entry per present tile, ranked tiles first.
+
+    Nothing is drawn until at least one present tile has fired -- before
+    the first shot there is no ranking to show, and a band of bare labels
+    would just be noise the viewer has already seen on the tiles above.
+    """
+    present = [p for p in state.panels if p.present]
+    ranked = sorted((p for p in present if p.rank is not None), key=lambda p: p.rank)
+    if not ranked:
+        return
+    unranked = [p for p in present if p.rank is None]
+    entries = ranked + unranked
+
+    strip_size = max(20, geometry.strip_height * 2 // 3)
+    font = _load_font(None, strip_size, font_name="splitsmith-mono" if theme.name == "splitsmith" else None)
+    stroke_width = max(2, strip_size // 18)
+    shadow_offset = max(2, strip_size // 24)
+    shadow_blur = max(3, strip_size // 12)
+    ink = (*theme.ink, 255)
+
+    y0 = geometry.canvas_height - geometry.strip_height
+    slot_width = geometry.canvas_width / len(entries)
+    for index, panel in enumerate(entries):
+        text = _strip_entry_text(panel)
+        bbox = draw.textbbox((0, 0), text, font=font)
+        tw = bbox[2] - bbox[0]
+        th = bbox[3] - bbox[1]
+        cx = slot_width * index + slot_width / 2
+        x = int(cx - tw / 2)
+        y = y0 + (geometry.strip_height - th) // 2
+        _draw_text_with_shadow(
+            draw,
+            canvas,
+            (x, y),
+            text,
+            font,
+            ink,
+            stroke_width=stroke_width,
+            shadow_offset=shadow_offset,
+            shadow_blur=shadow_blur,
+            stroke_color=theme.stroke,
+            shadow_color=theme.shadow,
+        )
+
+
+def _cache_key(geometry: SpriteGeometry, theme: OverlayTheme, panels: tuple[TilePanel, ...]) -> str:
+    """SHA-256 over a stable JSON dump of the render *inputs* -- never the
+    rendered bytes. Two states with identical geometry/theme/panels hash
+    to the same key regardless of timing, so a stage where nothing
+    changes between two shot events writes one PNG, not two."""
+    payload = {
+        "geometry": {
+            "canvas_width": geometry.canvas_width,
+            "canvas_height": geometry.canvas_height,
+            "rows": geometry.rows,
+            "cols": geometry.cols,
+        },
+        "theme": theme.name,
+        "panels": [
+            {
+                "label": p.label,
+                "row": p.row,
+                "col": p.col,
+                "present": p.present,
+                "shots_fired": p.shots_fired,
+                "expected_shots": p.expected_shots,
+                "last_split": p.last_split,
+                "rank": p.rank,
+                "delta_to_leader": p.delta_to_leader,
+            }
+            for p in panels
+        ],
+    }
+    blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()
+
+
+def write_sprite_sequence(
+    states: Sequence[OverlayState],
+    geometry: SpriteGeometry,
+    *,
+    theme: OverlayTheme,
+    cache_dir: Path,
+) -> tuple[tuple[Path, float], ...]:
+    """Render every state, content-addressed, and return ``(png_path,
+    duration_seconds)`` per state in order.
+
+    States with identical ``(geometry, theme.name, panels)`` share one
+    file -- a 30-shot stage where nothing changes between two events
+    writes one PNG, not two, which is the whole point of stepping on
+    events instead of frames.
+    """
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    written: dict[str, Path] = {}
+    sequence: list[tuple[Path, float]] = []
+    for state in states:
+        key = _cache_key(geometry, theme, state.panels)
+        path = written.get(key)
+        if path is None:
+            path = cache_dir / f"sprite-{key[:16]}.png"
+            if not path.exists():
+                render_state(state, geometry, theme=theme).save(path)
+            written[key] = path
+        sequence.append((path, state.duration_seconds))
+    return tuple(sequence)
+
+
+def write_concat_list(sequence: Sequence[tuple[Path, float]], path: Path) -> Path:
+    """Write an ffmpeg concat-demuxer list for ``sequence``.
+
+    The final ``file`` line repeats the last entry with no duration --
+    the concat demuxer ignores the last entry's duration otherwise and
+    drops that state to a single frame.
+    """
+    lines: list[str] = []
+    for sprite_path, duration in sequence:
+        lines.append(f"file '{sprite_path.resolve()}'")
+        lines.append(f"duration {duration:g}")
+    if sequence:
+        lines.append(f"file '{sequence[-1][0].resolve()}'")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    return path
