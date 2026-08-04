@@ -30,13 +30,16 @@ trims only.
 
    ```bash
    ffmpeg -hide_banner -filters | grep -E ' (xstack|tpad|adelay|apad|anullsrc|aformat) '
-   ffmpeg -hide_banner -encoders | grep -E 'libx264|aac '
+   ffmpeg -hide_banner -encoders | grep -E 'libx264|aac |pcm_s16le'
    ```
 
 2. **Python 3.11+** and **`uv`** (never `pip` in this repo).
 3. **Disk headroom.** The renderer writes per-stage segments to a temp work
-   directory before stitching. Budget roughly the size of the finished video
-   again, transiently.
+   directory beside the output before stitching. Budget roughly the size of the
+   finished video again, transiently, plus the segments' uncompressed audio:
+   they carry PCM rather than AAC so the stitch has no per-segment encoder
+   padding to accumulate, which costs ~1.5 Mbps per shooter -- about 260MB
+   across a 12-stage 4-shooter match.
 4. **Time.** A full-match 4K re-encode is plausibly tens of minutes of CPU. This
    is a re-encode, not a stream copy -- there is no fast path.
 

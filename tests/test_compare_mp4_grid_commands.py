@@ -65,7 +65,7 @@ def _graph(cmd: tuple[str, ...]) -> str:
 
 def test_every_tile_is_scaled_padded_and_xstacked():
     cmd = mp4_grid.build_stage_command(
-        _plan(), canvas=mp4_grid.GridCanvas(), output_path=Path("/out/stage1.mp4")
+        _plan(), canvas=mp4_grid.GridCanvas(), output_path=Path("/out/stage1.mov")
     )
     graph = _graph(cmd)
     # 3840x2160 canvas, 2x2 -> 1920x1080 cells.
@@ -96,7 +96,7 @@ def test_tiles_are_sar_normalised_before_stacking():
 
 def test_audio_track_per_shooter_in_alphabetical_order():
     cmd = mp4_grid.build_stage_command(
-        _plan(), canvas=mp4_grid.GridCanvas(), output_path=Path("/out/stage1.mp4")
+        _plan(), canvas=mp4_grid.GridCanvas(), output_path=Path("/out/stage1.mov")
     )
     maps = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-map"]
     # One composited video, then one audio label per shooter.
@@ -333,6 +333,22 @@ def test_output_frame_rate_is_pinned_for_concat_compatibility():
     assert cmd[cmd.index("-r") + 1] == "30000/1001"
 
 
+def test_a_stage_segment_carries_pcm_so_the_stitch_has_nothing_to_accumulate():
+    # AAC cannot encode an arbitrary length exactly, and its priming and
+    # padding do not compose across the concat demuxer -- they arrive at
+    # the stitch as real samples, ~30ms of them per stage, all pushing
+    # audio later against picture. PCM has neither.
+    cmd = mp4_grid.build_stage_command(
+        _plan(), canvas=mp4_grid.GridCanvas(), output_path=Path("/out/stage1.mov")
+    )
+    assert cmd[cmd.index("-c:a") + 1] == "pcm_s16le"
+    assert "aac" not in cmd
+    assert "-b:a" not in cmd
+    # Nothing streams an intermediate, so faststart's second pass over a
+    # multi-gigabyte segment buys nothing.
+    assert "-movflags" not in cmd
+
+
 def test_a_lead_padded_tile_is_front_padded_so_its_beep_still_lands_on_time():
     # Erik's beep sits closer to his clip start than head_pad, so 0.5s of
     # pad has to be synthesised. Without it his beep lands 0.5s early and
@@ -410,10 +426,19 @@ def test_every_tile_is_tail_padded_to_the_stage_duration():
     assert graph.count("atrim=0:12.5") == 4
 
 
-def test_concat_command_stream_copies():
+def test_concat_copies_the_video_and_encodes_the_audio_once():
+    # Video is copied -- every segment was pinned to the same canvas and
+    # rate precisely so it can be. Audio is not: the segments carry PCM,
+    # and one encode over the whole match is what keeps per-segment AAC
+    # priming from accumulating into audible A/V drift.
     cmd = mp4_grid.build_concat_command(list_path=Path("/tmp/list.txt"), output_path=Path("/out/grid.mp4"))
     assert cmd[-1] == "/out/grid.mp4"
-    assert "-c" in cmd and cmd[cmd.index("-c") + 1] == "copy"
+    assert cmd[cmd.index("-c:v") + 1] == "copy"
+    assert cmd[cmd.index("-c:a") + 1] == "aac"
+    assert cmd[cmd.index("-b:a") + 1] == "192k"
+    # A blanket "-c copy" would put the segments' PCM straight into the
+    # MP4, which is the container that does not officially carry it.
+    assert "-c" not in cmd
     assert "concat" in cmd
 
 

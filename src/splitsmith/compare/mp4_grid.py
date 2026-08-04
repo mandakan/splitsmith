@@ -5,7 +5,8 @@ consumes the same ``project_loader`` bundles and ``layout`` grid math.
 Renders one ffmpeg call per stage -- scale + pad each tile to a uniform
 cell, ``xstack`` them into the grid, map every shooter's audio as its
 own output track -- then stitches the per-stage temps with the
-``concat`` demuxer at ``-c copy``.
+``concat`` demuxer, copying the video and encoding the audio exactly
+once (see :data:`SEGMENT_SUFFIX`).
 
 Phase 0 scope: no overlay, no transitions, no title cards. The overlay
 lands in phase 1 as pre-rendered sprite PNGs; nothing here should make
@@ -40,6 +41,52 @@ DEFAULT_CANVAS_HEIGHT = 2160
 FALLBACK_FRAME_RATE_NUM = 30000
 FALLBACK_FRAME_RATE_DEN = 1001
 
+#: Container for the per-stage temps, and it is not ``.mp4`` on purpose.
+#:
+#: The segments used to carry AAC and be joined at ``-c copy``. AAC cannot
+#: encode a clip of arbitrary length exactly: every encode contributes
+#: priming samples at the front and padding at the back, and an MP4 edit
+#: list hides them by declaring the true extent. Edit lists do not compose
+#: under the concat demuxer, so each segment's priming and padding arrived
+#: at the muxer as real decodable samples the timeline had no room for --
+#: about 30ms per segment, all of it pushing audio later against picture.
+#: A 12-stage match came out 386ms out by its last stage, which is every
+#: beep and every shot audibly behind the recoil.
+#:
+#: Nothing about that is visible in the finished file's metadata. Handed
+#: overlapping timestamps, the mov muxer shrinks the two AAC frames either
+#: side of each boundary to durations of 1 and 191 samples rather than
+#: 1024, so the container declares a timeline 21ms out while the samples
+#: are 352ms out. Re-encoding the audio at the stitch does not fix it
+#: either: the concat demuxer has already decoded the priming into the
+#: stream, so that re-encodes the drift instead of removing it (measured
+#: on ffmpeg 6.1.1: 12 segments went from 352ms to 117ms, still growing
+#: with segment count).
+#:
+#: So AAC stays out of the segments entirely. PCM has no priming and no
+#: padding, one segment of it is exactly as long as it claims, and the
+#: single AAC encode at the stitch contributes exactly one priming, which
+#: the output's own edit list accounts for correctly because there is
+#: nothing to compose it against. Residual drift is then a constant ~32ms
+#: regardless of how many stages are stitched.
+#:
+#: MP4 does not officially carry PCM; QuickTime does, keeps the source
+#: timebase intact (Matroska rounds timestamps to a millisecond, which a
+#: 30000/1001 video stream should not be put through), and still lets the
+#: video be ``-c copy``'d into the final MP4. The segments live in a work
+#: directory created and deleted per render, so the choice costs nothing
+#: but disk: s16le at 48kHz stereo is ~1.5 Mbps per shooter, so ~260MB
+#: across a 4-shooter match against a 4GB output.
+SEGMENT_SUFFIX = ".mov"
+
+#: Audio codec for the per-stage temps. See :data:`SEGMENT_SUFFIX`.
+SEGMENT_AUDIO_CODEC = "pcm_s16le"
+
+#: Audio codec and bitrate for the finished file -- applied once, at the
+#: stitch, over the whole match.
+OUTPUT_AUDIO_CODEC = "aac"
+OUTPUT_AUDIO_BITRATE = "192k"
+
 
 class GridRenderError(RuntimeError):
     """ffmpeg refused to render a grid stage or the final stitch."""
@@ -49,8 +96,9 @@ class GridRenderError(RuntimeError):
 class GridCanvas:
     """Output geometry for the whole render.
 
-    Pinned once and applied to every stage: ``concat -c copy`` rejects
-    segments whose video parameters differ.
+    Pinned once and applied to every stage: the stitch stream-copies the
+    video, and the concat demuxer rejects segments whose video
+    parameters differ.
 
     The size is a product decision and does not follow the footage: a
     2x2 of 1080p tiles is exactly 4K, so that is the default regardless
@@ -303,7 +351,8 @@ def derive_frame_rate(shooters: Sequence[CompareShooterBundle], *, audio_label: 
     One rate for the render, not one per stage. A match whose shooters
     or stages carry different rates (30 here, 59.94 there -- ordinary
     for GoPro material) still gets a single pinned rate, because
-    ``concat -c copy`` refuses segments whose frame rate differs; the
+    the stitch's video stream copy refuses segments whose frame rate
+    differs; the
     other tiles are conformed to it by the ``fps=`` filter.
 
     Falls back to :data:`FALLBACK_FRAME_RATE_NUM` / ``_DEN`` when the
@@ -365,7 +414,7 @@ def build_stage_command(
 
     Stream layout is fixed at one video plus one audio track per tile,
     in alphabetical label order, regardless of which shooters actually
-    have a trim for this stage. ``concat -c copy`` rejects segments
+    have a trim for this stage. The concat demuxer rejects segments
     whose stream layout differs, so a missing tile contributes a black
     ``color`` source and a silent ``anullsrc`` track rather than
     nothing at all.
@@ -477,12 +526,12 @@ def build_stage_command(
         "20",
         "-pix_fmt",
         "yuv420p",
+        # PCM, not AAC, and no ``+faststart``. See ``SEGMENT_SUFFIX``:
+        # a lossy segment's priming and padding survive the stitch as
+        # audible samples, and faststart's second pass over an
+        # intermediate nobody streams is pure cost.
         "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-movflags",
-        "+faststart",
+        SEGMENT_AUDIO_CODEC,
         str(output_path),
     ]
     return tuple(args)
@@ -553,8 +602,8 @@ def _build_filter_graph(
         # post-beep span, while the stage runs ``head_pad`` + the longest
         # post-beep span + ``tail_pad`` -- so even the longest tile falls
         # exactly one tail pad short, and the segment's video would end
-        # before its audio on every filler-free stage. ``concat -c copy``
-        # then carries that gap into every later stage. Padding by a full
+        # before its audio on every filler-free stage. The stitch then
+        # carries that gap into every later stage. Padding by a full
         # stage duration is the one bound that always covers the
         # shortfall without measuring each source; ``trim`` cuts the
         # excess back off, and dropped frames are cheap because nothing
@@ -615,7 +664,14 @@ def build_concat_command(
     audio_labels: Sequence[str] = (),
     default_audio_label: str | None = None,
 ) -> tuple[str, ...]:
-    """Stitch the per-stage temps without re-encoding.
+    """Stitch the per-stage temps, copying video and encoding audio once.
+
+    The video is stream-copied: every segment was rendered to the same
+    pinned canvas and rate precisely so it can be. The audio cannot be,
+    because the segments carry PCM (see :data:`SEGMENT_SUFFIX`) and the
+    deliverable is an MP4. That asymmetry is the fix, not a compromise:
+    one encode over the whole match contributes one priming instead of
+    one per stage, so nothing accumulates across the join.
 
     ``-map 0`` is load-bearing, not decoration. Without it ffmpeg's
     default stream selection keeps one stream per type, so a stitch of
@@ -642,8 +698,12 @@ def build_concat_command(
         str(list_path),
         "-map",
         "0",
-        "-c",
+        "-c:v",
         "copy",
+        "-c:a",
+        OUTPUT_AUDIO_CODEC,
+        "-b:a",
+        OUTPUT_AUDIO_BITRATE,
     ]
     args += list(_track_naming_args(audio_labels))
     if default_audio_label is not None:
@@ -757,7 +817,7 @@ def render_grid_mp4(
     if not plans:
         raise GridRenderError("no stages to render -- no shooter has an exported trim")
 
-    # ``concat -c copy`` rejects segments whose stream layout differs, and
+    # The concat demuxer rejects segments whose stream layout differs, and
     # skipping a failed stage means the stitch list is not simply "all of
     # them". Every plan from ``build_stage_plans`` carries one tile per
     # label, so this holds today; check it anyway rather than discover a
@@ -770,7 +830,7 @@ def render_grid_mp4(
             raise GridRenderError(
                 f"stage {plan.stage_number} has a different stream layout to stage "
                 f"{plans[0].stage_number} ({', '.join(other)} vs {', '.join(labels)}); "
-                "concat -c copy cannot stitch those together"
+                "the concat demuxer cannot stitch those together"
             )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -780,7 +840,7 @@ def render_grid_mp4(
     outcomes: list[StageOutcome] = []
     segments: list[Path] = []
     for plan in plans:
-        segment = work / f"stage{plan.stage_number}.mp4"
+        segment = work / f"stage{plan.stage_number}{SEGMENT_SUFFIX}"
         cmd = build_stage_command(plan, canvas=canvas, output_path=segment, ffmpeg_binary=binary)
         completed = _run_ffmpeg(cmd, runner=runner)
         if completed.returncode != 0:
@@ -830,6 +890,10 @@ __all__ = [
     "DEFAULT_CANVAS_WIDTH",
     "FALLBACK_FRAME_RATE_DEN",
     "FALLBACK_FRAME_RATE_NUM",
+    "OUTPUT_AUDIO_BITRATE",
+    "OUTPUT_AUDIO_CODEC",
+    "SEGMENT_AUDIO_CODEC",
+    "SEGMENT_SUFFIX",
     "GridCanvas",
     "GridRenderError",
     "GridRenderResult",

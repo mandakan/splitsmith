@@ -302,8 +302,10 @@ def test_renders_each_stage_then_concats(tmp_path: Path):
     )
 
     assert len(calls) == 3  # two stages + one concat
-    assert calls[0][-1] == str(tmp_path / "work" / "stage1.mp4")
-    assert calls[1][-1] == str(tmp_path / "work" / "stage2.mp4")
+    # ``.mov``, not ``.mp4``: the segments carry PCM so the stitch has no
+    # per-segment AAC priming to accumulate, and MP4 does not carry PCM.
+    assert calls[0][-1] == str(tmp_path / "work" / "stage1.mov")
+    assert calls[1][-1] == str(tmp_path / "work" / "stage2.mov")
     assert calls[2][calls[2].index("-f") + 1] == "concat"
     assert calls[2][-1] == str(tmp_path / "grid.mp4")
     assert [(s.stage_number, s.ok) for s in result.stages] == [(1, True), (2, True)]
@@ -340,10 +342,10 @@ def test_the_stitch_keeps_every_audio_track_and_the_chosen_default(tmp_path: Pat
 
 
 def test_the_concat_list_names_only_the_segments_that_rendered(tmp_path: Path):
-    # concat -c copy refuses a list naming a segment that was never
+    # The concat demuxer refuses a list naming a segment that was never
     # written, and a failed stage leaves no file behind.
     def inner(cmd, **kwargs):
-        code = 1 if str(tmp_path / "work" / "stage1.mp4") in [str(c) for c in cmd] else 0
+        code = 1 if str(tmp_path / "work" / "stage1.mov") in [str(c) for c in cmd] else 0
         return subprocess.CompletedProcess(cmd, code, b"", b"boom")
 
     calls, runner = _recorder(inner)
@@ -359,14 +361,14 @@ def test_the_concat_list_names_only_the_segments_that_rendered(tmp_path: Path):
     )
 
     listed = (tmp_path / "work" / "concat.txt").read_text(encoding="utf-8")
-    assert "stage2.mp4" in listed
-    assert "stage1.mp4" not in listed
+    assert "stage2.mov" in listed
+    assert "stage1.mov" not in listed
     assert str(tmp_path / "work" / "concat.txt") in calls[-1]
 
 
 def test_a_failing_stage_does_not_abort_the_run(tmp_path: Path):
     def inner(cmd, **kwargs):
-        code = 1 if str(tmp_path / "work" / "stage2.mp4") in [str(c) for c in cmd] else 0
+        code = 1 if str(tmp_path / "work" / "stage2.mov") in [str(c) for c in cmd] else 0
         return subprocess.CompletedProcess(cmd, code, b"", b"boom: no such file")
 
     calls, runner = _recorder(inner)
@@ -1090,7 +1092,7 @@ def test_a_mixed_rate_match_still_stitches_at_the_audio_sources_rate(tmp_path: P
     # Mathias' first stage is 30fps, so the whole render is -- not 29.97,
     # and not stage 2's 60.
     assert _video_fps(result.output_path) == pytest.approx(30.0, abs=0.01)
-    for segment in ("stage1.mp4", "stage2.mp4"):
+    for segment in ("stage1.mov", "stage2.mov"):
         assert _video_fps(tmp_path / "work" / segment) == pytest.approx(30.0, abs=0.01)
     assert _stream_seconds(result.output_path, "0:v:0") == pytest.approx(6.0, abs=0.2)
     assert _audio_streams(result.output_path) == [("Anders", False), ("Mathias", True)]
