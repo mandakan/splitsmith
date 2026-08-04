@@ -402,11 +402,24 @@ def _build_filter_graph(
             if tile.lead_pad_seconds > 0
             else ""
         )
+        # Tail: every tile has to run the full stage, not stop where its
+        # footage does. A tile's content is ``head_pad`` plus its own
+        # post-beep span, while the stage runs ``head_pad`` + the longest
+        # post-beep span + ``tail_pad`` -- so even the longest tile falls
+        # exactly one tail pad short, and the segment's video would end
+        # before its audio on every filler-free stage. ``concat -c copy``
+        # then carries that gap into every later stage. Padding by a full
+        # stage duration is the one bound that always covers the
+        # shortfall without measuring each source; ``trim`` cuts the
+        # excess back off, and dropped frames are cheap because nothing
+        # downstream encodes them.
         parts.append(
             f"[{video_index[slot]}:v]{lead}setpts=PTS-STARTPTS,"
             f"scale={cell_w}:{cell_h}:force_original_aspect_ratio=decrease,"
             f"pad={cell_w}:{cell_h}:(ow-iw)/2:(oh-ih)/2,"
-            f"setsar=1,fps={rate}[t{slot}]"
+            f"setsar=1,fps={rate},"
+            f"tpad=stop_duration={plan.duration_seconds:g}:stop_mode=add:color=black,"
+            f"trim=0:{plan.duration_seconds:g}[t{slot}]"
         )
 
     stack_inputs = "".join(f"[t{slot}]" for slot in range(len(plan.tiles)))

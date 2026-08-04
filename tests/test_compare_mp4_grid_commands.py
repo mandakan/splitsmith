@@ -265,12 +265,34 @@ def test_the_lead_pad_comes_before_setpts_or_ffmpeg_swallows_it():
     assert erik_video.index("tpad=") < erik_video.index("setpts=")
 
 
-def test_tiles_without_a_lead_pad_emit_no_padding_filters():
+def test_tiles_without_a_lead_pad_emit_no_head_padding_filters():
+    # The tail pad is unconditional, so this is specifically about the
+    # head: a tile that needs no lead pad must not get one.
     graph = _graph(
         mp4_grid.build_stage_command(_plan(), canvas=mp4_grid.GridCanvas(), output_path=Path("/o.mp4"))
     )
-    assert "tpad=" not in graph
+    assert "tpad=start_duration" not in graph
     assert "adelay=" not in graph
+
+
+def test_every_tile_is_tail_padded_to_the_stage_duration():
+    # A tile's content is head_pad + its own post-beep span, while the
+    # stage runs head_pad + the longest post-beep span + tail_pad, so
+    # even the longest tile falls exactly one tail pad short. Left alone,
+    # the segment's video ends before its audio on every filler-free
+    # stage and concat -c copy carries the gap into every later stage.
+    graph = _graph(
+        mp4_grid.build_stage_command(_plan(), canvas=mp4_grid.GridCanvas(), output_path=Path("/o.mp4"))
+    )
+    for slot in range(4):
+        chain = next(part for part in graph.split(";") if part.endswith(f"[t{slot}]"))
+        assert "tpad=stop_duration=12.5:stop_mode=add:color=black" in chain
+        assert chain.endswith(f"trim=0:12.5[t{slot}]")
+        # Pad first, then cut back: trimming before the pad would trim
+        # footage that is already too short and change nothing.
+        assert chain.index("tpad=stop_duration") < chain.index("trim=0:")
+    # Which is the length the audio side is already held to.
+    assert graph.count("atrim=0:12.5") == 4
 
 
 def test_concat_command_stream_copies():
