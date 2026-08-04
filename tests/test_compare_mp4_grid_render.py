@@ -706,44 +706,70 @@ def test_a_three_shooter_match_stitches_with_its_empty_quadrant_black(tmp_path: 
 # decoder can play a 1024-sample frame in 1 sample of time, so a player
 # runs the samples out back to back and hears the drift in full.
 #
-# Both assertions below therefore count decoded samples. Nothing that
-# reads the container's own account of the timeline can see this defect.
+# So the check has to measure decoded *content*, and it has to measure it
+# against the picture rather than against a number in a header. The test
+# below renders a synchronised marker -- a black->white cut and a
+# full-scale audio transient on the very same instant -- and asserts that
+# they still coincide in the finished file.
+#
+# What this must NOT do is count coded samples. An earlier version of this
+# test measured ``nb_read_packets * 1024 / sample_rate`` and reported a
+# constant ~32ms of audio beyond the video on a file that is in fact
+# sample-exact. That figure is real but it is not an offset: it is the one
+# AAC encode's 1024 priming samples plus a partial flushed final frame. MP4
+# signals priming with an edit list (``elst`` media_time), which the stitch
+# writes correctly and every conforming player honours, and the tail sits
+# after the last picture where nothing can hear it. Measured on ffmpeg
+# 6.1.1 with the marker below: audio landed on exactly the intended sample
+# (48000, 168000, 288000, ...) against the exact video frame, at N=2, 6 and
+# 12, while the packet-count metric wandered between +34.7 and +40.0ms.
+#
+# ``initial_padding`` is not the signal to check either. ffprobe reports it
+# as 0 for every AAC-in-MP4 stream, including a hand-built control file
+# whose marker is known to be sample-exact -- the mov demuxer simply does
+# not populate that field, because MP4 carries priming in the edit list.
 
-#: One continuous AAC encode still contributes its own priming (1024
-#: samples) plus up to a frame of tail padding, so even a correct file
-#: decodes up to 2048 samples longer than its video. That is the floor,
-#: and -- this is the whole point -- it is a constant: it does not grow
-#: with the number of segments stitched.
-AAC_ENCODER_SLACK_SECONDS = 2048 / 48000  # 42.7ms
+#: What a single continuous AAC encode legitimately leaves in the decoded
+#: stream once the edit list has trimmed the front: a partial final frame,
+#: under one AAC frame long, sitting after the last video frame. It is a
+#: constant -- it does not grow with the number of segments stitched --
+#: and it is inaudible, but it is why the length assertion is not exact.
+AAC_TAIL_SLACK_SECONDS = 1024 / 48000  # 21.3ms
+
+#: How far the audio marker may sit from the picture cut it was authored
+#: on. Video resolution is one frame, so one frame is the floor of what
+#: this can resolve; the fix measures 0 samples of error, not 33ms of it.
+MARKER_TOLERANCE_SECONDS = FRAME_SECONDS
 
 #: Not 2. The drift is roughly one AAC frame per segment, so a two-segment
 #: stitch lands ~29ms off -- inside any tolerance a sane person picks for a
 #: file whose video is 30fps, which is exactly why this defect shipped
-#: through a green suite. Eight segments put it at ~230ms, five times the
-#: slack above and impossible to read as rounding.
+#: through a green suite. Eight segments put it at ~230ms, seven video
+#: frames, impossible to read as rounding.
 DRIFT_STAGE_COUNT = 8
 
 
-def _decoded_audio_seconds(path: Path, slot: int = 0) -> float:
-    """Audio length as it actually decodes, not as the container declares.
+def _presented_audio_seconds(path: Path, slot: int = 0) -> float:
+    """How much audio a player actually renders, in decoded samples.
 
-    Every AAC packet carries exactly 1024 samples, so the packet count is
-    the honest length. ``ffprobe``'s ``duration`` / ``duration_ts`` are the
-    edit list's claim, and the concat bug lived entirely in the gap between
-    the two -- assert on those and the broken file passes.
+    Not ``nb_read_packets * 1024``: that counts the coded samples, which
+    include the encoder priming the edit list exists to hide, so a
+    correct file scores ~32ms over. Not ``duration`` / ``duration_ts``
+    either: those are the container's claim, and the concat bug lived
+    entirely in the gap between the claim and the samples. Decoding is
+    the only reading that is both honest about the content and honest
+    about the edit list -- ffmpeg's mov demuxer applies ``elst`` unless
+    told otherwise, which is what a conforming player does.
     """
     done = subprocess.run(
         [
-            FFPROBE, "-v", "error", "-count_packets",
-            "-select_streams", f"a:{slot}", "-show_entries", "stream=nb_read_packets,sample_rate",
-            "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+            FFMPEG, "-v", "error", "-i", str(path), "-map", f"0:a:{slot}",
+            "-f", "s16le", "-acodec", "pcm_s16le", "-ac", "1", "-ar", "48000", "-",
         ],  # fmt: skip
         capture_output=True,
-        text=True,
     )
-    assert done.returncode == 0, done.stderr[-2000:]
-    sample_rate, packets = (int(line) for line in done.stdout.split())
-    return packets * 1024 / sample_rate
+    assert done.returncode == 0, done.stderr[-2000:].decode(errors="replace")
+    return len(done.stdout) // 2 / 48000
 
 
 def _declared_seconds(path: Path, stream: str) -> float:
@@ -760,8 +786,8 @@ def _declared_seconds(path: Path, stream: str) -> float:
     return float(done.stdout.strip())
 
 
-def _tone_onsets(path: Path, slot: int = 0) -> list[float]:
-    """Where each tone burst starts, counted in decoded samples.
+def _audio_mark_times(path: Path, slot: int = 0) -> list[float]:
+    """Where each audio transient starts, to the sample, honouring the edit list.
 
     Deliberately not ``silencedetect``. That filter reports the timestamps
     the container claims, and on a file broken by this defect the claim is
@@ -775,7 +801,8 @@ def _tone_onsets(path: Path, slot: int = 0) -> list[float]:
     a file that was 290ms out: ``silencedetect`` saw 21ms.
 
     Counting samples is what the audio device does, so that is what this
-    counts.
+    counts -- one sample at a time, not in blocks, because the whole point
+    of the marker is that it can be compared against a picture cut.
     """
     done = subprocess.run(
         [
@@ -789,37 +816,111 @@ def _tone_onsets(path: Path, slot: int = 0) -> list[float]:
     samples.frombytes(done.stdout)
     assert samples, "no audio decoded"
 
-    # 5ms blocks, and a threshold relative to the file's own peak so the
-    # test does not depend on what gain the chain happens to apply.
-    block = 240
-    peaks = [max(map(abs, samples[at : at + block])) for at in range(0, len(samples) - block, block)]
-    floor = max(peaks) // 4
-    onsets: list[float] = []
-    was_quiet = True
-    for index, peak in enumerate(peaks):
-        if peak > floor and was_quiet:
-            onsets.append(index * block / 48000)
-        was_quiet = peak <= floor
-    return onsets
+    # Threshold relative to the file's own peak, so the test does not
+    # depend on what gain the chain happens to apply. 20ms of quiet ends a
+    # burst -- the marker is a square wave, so it crosses zero constantly.
+    floor = max(max(samples), -min(samples)) // 4
+    gap = 48000 // 50
+    marks: list[float] = []
+    loud = True
+    quiet_for = 0
+    for index, value in enumerate(samples):
+        if abs(value) > floor:
+            if not loud:
+                marks.append(index / 48000)
+            loud = True
+            quiet_for = 0
+        else:
+            quiet_for += 1
+            if quiet_for > gap:
+                loud = False
+    return marks
 
 
-def _marked_source(path: Path, *, seconds: float, color: str, tone_at: float) -> Path:
-    """A clip that is silent until ``tone_at``, then a 440Hz tone.
+def _video_mark_times(path: Path, fps: float = 1 / FRAME_SECONDS) -> list[float]:
+    """Where the picture cuts from dark to bright, by decoded frame index.
 
-    A continuous tone measures length but not *placement*: the drift moves
-    audio later without changing how much of it there is on any one track.
-    The burst is the marker that says where it landed.
+    Frame index over frame rate, not a container timestamp: the index is
+    the order a player puts frames on screen, and the count is what an
+    honest reading of a stream-copied video track looks like. Decoding
+    applies the video track's own edit list (ffmpeg's mov demuxer honours
+    ``elst`` unless told not to), which is what compensates the h264
+    reorder delay -- so this and :func:`_audio_mark_times` are read on the
+    same timeline a player uses.
     """
+    done = subprocess.run(
+        [
+            FFMPEG, "-v", "error", "-i", str(path), "-map", "0:v:0",
+            "-vf", "scale=8:8", "-f", "rawvideo", "-pix_fmt", "gray", "-",
+        ],  # fmt: skip
+        capture_output=True,
+    )
+    assert done.returncode == 0, done.stderr[-2000:].decode(errors="replace")
+    pixels = done.stdout
+    step = 64
+    means = [sum(pixels[at : at + step]) / step for at in range(0, len(pixels) - step + 1, step)]
+    assert means, "no video decoded"
+    marks: list[float] = []
+    bright = True  # a file that opens bright must not count frame 0 as a cut
+    for index, mean in enumerate(means):
+        if mean > 120 and not bright:
+            marks.append(index / fps)
+        bright = mean > 120
+    return marks
+
+
+def _marked_source(
+    path: Path, *, seconds: float, mark_at: float, width: int = 320, height: int = 240
+) -> Path:
+    """A clip whose picture cuts and whose audio fires on the same instant.
+
+    Black until ``mark_at``, white after; silent until ``mark_at``, then a
+    full-scale square wave. Both planes are written raw and muxed, rather
+    than built with lavfi sources and ``adelay``, because the marker has to
+    be exact to the frame *and* to the sample -- it is the reference the
+    whole A/V measurement is read against, so it cannot itself carry a
+    millisecond of filter rounding.
+
+    A continuous tone would measure length but not *placement*: drift moves
+    audio later without changing how much of it there is. And an audio
+    marker alone can only be compared against arithmetic. Cutting the
+    picture on the same instant is what turns this into a sync measurement:
+    the finished file is asked where its sound sits relative to its own
+    picture, which is the question the user is actually asking.
+    """
+    frames = int(round(seconds * 30))
+    mark_frame = int(round(mark_at * 30))
+    luma = {False: bytes([16]) * (width * height), True: bytes([235]) * (width * height)}
+    chroma = bytes([128]) * (width * height // 4)
+    raw_video = path.with_suffix(".yuv")
+    with raw_video.open("wb") as handle:
+        for index in range(frames):
+            handle.write(luma[index >= mark_frame])
+            handle.write(chroma)
+            handle.write(chroma)
+
+    total = int(round(seconds * 48000))
+    mark_sample = int(round(mark_at * 48000))
+    pcm = array.array("h", bytes(2 * total))
+    # A square wave, so the onset is a single-sample step and the detector
+    # has no envelope attack to guess at.
+    for index in range(mark_sample, total):
+        pcm[index] = 20000 if ((index - mark_sample) // 48) % 2 == 0 else -20000
+    raw_audio = path.with_suffix(".pcm")
+    raw_audio.write_bytes(pcm.tobytes())
+
     cmd = [
         FFMPEG, "-hide_banner", "-y",
-        "-f", "lavfi", "-t", str(seconds), "-i", f"color=c={color}:s=320x240:r=30",
-        "-f", "lavfi", "-t", str(seconds),
-        "-i", f"sine=frequency=440:sample_rate=48000:duration={seconds - tone_at:g},"
-              f"adelay={int(round(tone_at * 1000))}:all=1",
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(path),
+        "-f", "rawvideo", "-pix_fmt", "yuv420p", "-s", f"{width}x{height}", "-r", "30",
+        "-i", str(raw_video),
+        "-f", "s16le", "-ar", "48000", "-ac", "1", "-i", str(raw_audio),
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18",
+        "-c:a", "aac", "-ac", "2", str(path),
     ]  # fmt: skip
     done = subprocess.run(cmd, capture_output=True, text=True)
     assert done.returncode == 0, done.stderr[-2000:]
+    raw_video.unlink()
+    raw_audio.unlink()
     return path
 
 
@@ -833,8 +934,8 @@ def test_a_long_stitch_does_not_drift_audio_late_against_video(tmp_path: Path):
     # 1.0s. Stage k's burst therefore belongs at 2.5 * k + 1.0.
     stage_seconds = 2.5
     shooters = []
-    for label, colour in (("Anders", "red"), ("Mathias", "blue")):
-        clip = _marked_source(tmp_path / f"{label}.mp4", seconds=2.0, color=colour, tone_at=1.0)
+    for label in ("Anders", "Mathias"):
+        clip = _marked_source(tmp_path / f"{label}.mp4", seconds=2.0, mark_at=1.0)
         shooters.append(
             CompareShooterBundle(
                 label=label,
@@ -870,22 +971,34 @@ def test_a_long_stitch_does_not_drift_audio_late_against_video(tmp_path: Path):
     video = _declared_seconds(result.output_path, "v:0")
     assert video == pytest.approx(stage_seconds * DRIFT_STAGE_COUNT, abs=FRAME_SECONDS)
 
+    # Where the picture cuts, on the timeline a player uses. Read once:
+    # the video is stream-copied, so every track is measured against the
+    # same picture.
+    picture = _video_mark_times(result.output_path)
+    assert len(picture) == DRIFT_STAGE_COUNT, picture
+    for index, cut in enumerate(picture):
+        expected = stage_seconds * index + 1.0
+        assert cut == pytest.approx(
+            expected, abs=FRAME_SECONDS
+        ), f"stage {index + 1}: picture cuts at {cut:.4f}s, the grid put it at {expected:.4f}s"
+
     for slot in range(len(shooters)):
-        decoded = _decoded_audio_seconds(result.output_path, slot)
-        assert decoded - video == pytest.approx(0.0, abs=AAC_ENCODER_SLACK_SECONDS), (
-            f"track {slot} decodes {decoded - video:+.3f}s against its video; "
+        presented = _presented_audio_seconds(result.output_path, slot)
+        assert presented - video == pytest.approx(0.0, abs=AAC_TAIL_SLACK_SECONDS), (
+            f"track {slot} presents {presented - video:+.3f}s of audio against its video; "
             "the segments are leaking per-segment encoder padding into the stitch"
         )
 
-        # Length alone is not sync. Every burst has to still be where the
-        # grid put it, and the last one is where the drift has accumulated.
-        onsets = _tone_onsets(result.output_path, slot)
-        assert len(onsets) == DRIFT_STAGE_COUNT, onsets
-        for index, onset in enumerate(onsets):
-            expected = stage_seconds * index + 1.0
-            assert onset == pytest.approx(
-                expected, abs=FRAME_SECONDS
-            ), f"track {slot} stage {index + 1}: beep at {onset:.3f}s, expected {expected:.3f}s"
+        # Length alone is not sync, and arithmetic alone is not either.
+        # Every transient has to still coincide with the picture cut it
+        # was authored on -- and the last one is where drift accumulates.
+        marks = _audio_mark_times(result.output_path, slot)
+        assert len(marks) == DRIFT_STAGE_COUNT, marks
+        for index, (mark, cut) in enumerate(zip(marks, picture, strict=True)):
+            assert mark - cut == pytest.approx(0.0, abs=MARKER_TOLERANCE_SECONDS), (
+                f"track {slot} stage {index + 1}: sound at {mark:.4f}s against a picture cut at "
+                f"{cut:.4f}s -- {1000 * (mark - cut):+.1f}ms out"
+            )
 
 
 # --- canvas frame rate ----------------------------------------------------

@@ -67,8 +67,22 @@ FALLBACK_FRAME_RATE_DEN = 1001
 #: padding, one segment of it is exactly as long as it claims, and the
 #: single AAC encode at the stitch contributes exactly one priming, which
 #: the output's own edit list accounts for correctly because there is
-#: nothing to compose it against. Residual drift is then a constant ~32ms
-#: regardless of how many stages are stitched.
+#: nothing to compose it against. Residual drift is then zero -- not
+#: small, zero. Measured on ffmpeg 6.1.1 with a synchronised marker (a
+#: black-to-white picture cut and a full-scale audio transient authored on
+#: the same instant), rendered through this module at 2, 6 and 12 stages:
+#: every marker's sound landed on exactly the intended sample against
+#: exactly the intended frame, on every track.
+#:
+#: Do not go chasing the ~32ms that ``nb_read_packets * 1024 /
+#: sample_rate`` reports on these files. That counts *coded* samples,
+#: which include the one encode's 1024 priming samples and its partial
+#: flushed final frame; MP4 signals priming in the edit list
+#: (``elst`` media_time, which this output carries and every conforming
+#: player honours) and the flushed tail sits after the last picture.
+#: ffprobe's ``initial_padding`` is not the thing to check either -- it
+#: reads 0 for every AAC-in-MP4 stream, including files proven
+#: sample-exact, because the mov demuxer does not populate it.
 #:
 #: MP4 does not officially carry PCM; QuickTime does, keeps the source
 #: timebase intact (Matroska rounds timestamps to a millisecond, which a
