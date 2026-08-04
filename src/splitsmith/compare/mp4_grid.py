@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import subprocess
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..runtime import runtime
@@ -32,6 +32,13 @@ Runner = Callable[..., subprocess.CompletedProcess]
 
 DEFAULT_CANVAS_WIDTH = 3840
 DEFAULT_CANVAS_HEIGHT = 2160
+
+#: Last resort only. The render's frame rate follows the audio-source
+#: shooter's footage (see :func:`derive_frame_rate`); this is what a
+#: canvas reports when nobody pinned a rate and there is no bundle to
+#: derive one from.
+FALLBACK_FRAME_RATE_NUM = 30000
+FALLBACK_FRAME_RATE_DEN = 1001
 
 
 class GridRenderError(RuntimeError):
@@ -44,16 +51,63 @@ class GridCanvas:
 
     Pinned once and applied to every stage: ``concat -c copy`` rejects
     segments whose video parameters differ.
+
+    The size is a product decision and does not follow the footage: a
+    2x2 of 1080p tiles is exactly 4K, so that is the default regardless
+    of what came in. The *frame rate* is the opposite -- forcing
+    30000/1001 onto 30fps GoPro material resamples every frame for
+    nothing and risks judder, and it would leave this exporter
+    disagreeing with ``compare/emitter.py``, which takes the FCPXML
+    sequence rate from the audio-source shooter's first stage. So the
+    rate fields default to ``None``, meaning "derive from the footage";
+    :func:`render_grid_mp4` resolves them via :func:`derive_frame_rate`
+    before any command is built. Pin both fields to override that; the
+    pin is honoured exactly.
     """
 
     width: int = DEFAULT_CANVAS_WIDTH
     height: int = DEFAULT_CANVAS_HEIGHT
-    frame_rate_num: int = 30000
-    frame_rate_den: int = 1001
+    frame_rate_num: int | None = None
+    frame_rate_den: int | None = None
+
+    def __post_init__(self) -> None:
+        if (self.frame_rate_num is None) != (self.frame_rate_den is None):
+            raise ValueError(
+                "GridCanvas frame rate must be given as both or neither: got "
+                f"frame_rate_num={self.frame_rate_num!r}, frame_rate_den={self.frame_rate_den!r}"
+            )
+
+    @property
+    def is_frame_rate_pinned(self) -> bool:
+        """True when the caller chose a rate, so derivation must not touch it."""
+        return self.frame_rate_num is not None and self.frame_rate_den is not None
+
+    @property
+    def frame_rate(self) -> tuple[int, int]:
+        """The concrete ``(num, den)``, falling back when nothing is pinned.
+
+        The fallback exists for direct callers of
+        :func:`build_stage_command`, which have a plan but no bundles to
+        derive from. It is never what a full render uses.
+        """
+        if self.frame_rate_num is None or self.frame_rate_den is None:
+            return FALLBACK_FRAME_RATE_NUM, FALLBACK_FRAME_RATE_DEN
+        return self.frame_rate_num, self.frame_rate_den
+
+    @property
+    def rate_string(self) -> str:
+        """``num/den`` as ffmpeg's ``-r`` and ``fps=`` want it."""
+        num, den = self.frame_rate
+        return f"{num}/{den}"
 
     @property
     def fps(self) -> float:
-        return self.frame_rate_num / self.frame_rate_den
+        num, den = self.frame_rate
+        return num / den
+
+    def with_frame_rate(self, frame_rate_num: int, frame_rate_den: int) -> GridCanvas:
+        """This canvas with its rate pinned. Used to apply a derived rate."""
+        return replace(self, frame_rate_num=frame_rate_num, frame_rate_den=frame_rate_den)
 
 
 @dataclass(frozen=True)
@@ -230,6 +284,33 @@ def build_stage_plans(
     return tuple(plans)
 
 
+def derive_frame_rate(shooters: Sequence[CompareShooterBundle], *, audio_label: str) -> tuple[int, int]:
+    """The rate the whole render conforms to: the audio source's first stage.
+
+    Mirrors ``compare/emitter.py``, which seeds the FCPXML sequence
+    format from ``audio_bundle.stages_by_number[min(...)]``. Both
+    exporters have to agree -- one match cannot come out at 30fps as
+    FCPXML and 29.97 as MP4.
+
+    One rate for the render, not one per stage. A match whose shooters
+    or stages carry different rates (30 here, 59.94 there -- ordinary
+    for GoPro material) still gets a single pinned rate, because
+    ``concat -c copy`` refuses segments whose frame rate differs; the
+    other tiles are conformed to it by the ``fps=`` filter.
+
+    Falls back to :data:`FALLBACK_FRAME_RATE_NUM` / ``_DEN`` when the
+    audio source has no stage to read, which
+    :func:`build_stage_plans` rejects before a render ever gets here.
+    """
+    bundle = next((s for s in shooters if s.label == audio_label), None)
+    if bundle is None or not bundle.stages_by_number:
+        return FALLBACK_FRAME_RATE_NUM, FALLBACK_FRAME_RATE_DEN
+    seed = bundle.stages_by_number[min(bundle.stages_by_number)]
+    if seed.frame_rate_num <= 0 or seed.frame_rate_den <= 0:
+        return FALLBACK_FRAME_RATE_NUM, FALLBACK_FRAME_RATE_DEN
+    return seed.frame_rate_num, seed.frame_rate_den
+
+
 # --- command construction -------------------------------------------------
 
 
@@ -255,7 +336,7 @@ def build_stage_command(
     nothing at all.
     """
     cell_w, cell_h = _cell_size(canvas, plan)
-    rate = f"{canvas.frame_rate_num}/{canvas.frame_rate_den}"
+    rate = canvas.rate_string
 
     args: list[str] = [ffmpeg_binary, "-hide_banner", "-y"]
     # Filler tiles take two inputs where a real tile takes one, so a
@@ -388,7 +469,7 @@ def _build_filter_graph(
     ``xstack`` refuses inputs whose sample aspect ratios disagree.
     """
     cell_w, cell_h = _cell_size(canvas, plan)
-    rate = f"{canvas.frame_rate_num}/{canvas.frame_rate_den}"
+    rate = canvas.rate_string
     parts: list[str] = []
 
     for slot, tile in enumerate(plan.tiles):
@@ -582,6 +663,11 @@ def render_grid_mp4(
     pass a path they own.
     """
     canvas = canvas or GridCanvas()
+    # Derivation keys off the rate fields, not off "no canvas given": a
+    # caller who pinned only the geometry must still get the footage's
+    # rate, and a caller who pinned a rate must get exactly that.
+    if not canvas.is_frame_rate_pinned:
+        canvas = canvas.with_frame_rate(*derive_frame_rate(shooters, audio_label=audio_label))
     binary = ffmpeg_binary or runtime().ffmpeg_binary
     plans = build_stage_plans(
         shooters,
@@ -664,6 +750,8 @@ def render_grid_mp4(
 __all__ = [
     "DEFAULT_CANVAS_HEIGHT",
     "DEFAULT_CANVAS_WIDTH",
+    "FALLBACK_FRAME_RATE_DEN",
+    "FALLBACK_FRAME_RATE_NUM",
     "GridCanvas",
     "GridRenderError",
     "GridRenderResult",
@@ -673,5 +761,6 @@ __all__ = [
     "build_concat_command",
     "build_stage_command",
     "build_stage_plans",
+    "derive_frame_rate",
     "render_grid_mp4",
 ]

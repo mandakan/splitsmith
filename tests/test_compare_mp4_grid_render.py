@@ -35,11 +35,11 @@ FRAME_SECONDS = 1 / 30
 STAGE_SECONDS = 4.0
 
 
-def _source(path: Path, *, seconds: float, color: str) -> Path:
+def _source(path: Path, *, seconds: float, color: str, fps: str = "30") -> Path:
     """A solid-colour clip with a tone, so both streams are measurable."""
     cmd = [
         FFMPEG, "-hide_banner", "-y",
-        "-f", "lavfi", "-t", str(seconds), "-i", f"color=c={color}:s=320x240:r=30",
+        "-f", "lavfi", "-t", str(seconds), "-i", f"color=c={color}:s=320x240:r={fps}",
         "-f", "lavfi", "-t", str(seconds), "-i", "sine=frequency=440:sample_rate=48000",
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(path),
     ]  # fmt: skip
@@ -562,3 +562,229 @@ def test_a_stage_whose_source_is_gone_is_skipped_and_the_rest_still_stitches(tmp
     assert result.output_path.exists()
     assert _stream_seconds(result.output_path, "0:v:0") == pytest.approx(3.0, abs=0.2)
     assert _audio_streams(result.output_path) == [("Anders", False), ("Mathias", True)]
+
+
+# --- canvas frame rate ----------------------------------------------------
+#
+# The canvas geometry is a product decision (a 2x2 of 1080p tiles is
+# exactly 4K), but its frame rate is not: forcing 30000/1001 onto 30fps
+# GoPro footage resamples every frame for nothing and risks judder. The
+# rate follows the audio-source shooter's first stage, which is what
+# compare/emitter.py already does for the FCPXML sequence -- otherwise
+# the two exporters disagree about the same match.
+
+
+def _rated_shooters(rates: dict[str, dict[int, tuple[int, int]]]):
+    """Shooters whose stages carry the given ``{label: {stage: (num, den)}}`` rates."""
+    shooters = []
+    for label, by_number in rates.items():
+        stages = {
+            number: CompareStageBundle(
+                stage_number=number,
+                stage_name=f"Stage {number}",
+                trim_path=Path(f"/trims/{label}{number}.mp4"),
+                audit_path=Path("/nonexistent.json"),
+                beep_offset_in_clip=2.0,
+                duration_seconds=12.0,
+                width=1920,
+                height=1080,
+                frame_rate_num=num,
+                frame_rate_den=den,
+            )
+            for number, (num, den) in by_number.items()
+        }
+        shooters.append(
+            CompareShooterBundle(label=label, project_root=Path(f"/p/{label}"), stages_by_number=stages)
+        )
+    return shooters
+
+
+def _rates_used(calls: list[tuple[str, ...]]) -> set[str]:
+    """Every ``-r`` value across the per-stage commands (the concat has none)."""
+    return {cmd[i + 1] for cmd in calls for i, arg in enumerate(cmd) if arg == "-r"}
+
+
+def test_the_canvas_frame_rate_follows_the_audio_source_shooter(tmp_path: Path):
+    calls, runner = _recorder()
+
+    mp4_grid.render_grid_mp4(
+        _rated_shooters({"Mathias": {1: (30, 1), 2: (30, 1)}, "Anders": {1: (60, 1), 2: (60, 1)}}),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        runner=runner,
+        work_dir=tmp_path / "work",
+    )
+
+    assert _rates_used(calls) == {"30/1"}
+    assert "fps=30/1" in " ".join(calls[0])
+
+
+def test_an_explicitly_pinned_frame_rate_is_never_overridden(tmp_path: Path):
+    calls, runner = _recorder()
+
+    mp4_grid.render_grid_mp4(
+        _rated_shooters({"Mathias": {1: (30, 1)}, "Anders": {1: (30, 1)}}),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=mp4_grid.GridCanvas(frame_rate_num=24, frame_rate_den=1),
+        runner=runner,
+        work_dir=tmp_path / "work",
+    )
+
+    assert _rates_used(calls) == {"24/1"}
+
+
+def test_a_custom_size_without_a_frame_rate_still_derives_one(tmp_path: Path):
+    # Derivation keys off the frame-rate fields, not off "no canvas given":
+    # a caller pinning the geometry must not silently lose the rate.
+    calls, runner = _recorder()
+
+    mp4_grid.render_grid_mp4(
+        _rated_shooters({"Mathias": {1: (50, 1)}, "Anders": {1: (30, 1)}}),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=mp4_grid.GridCanvas(width=1280, height=720),
+        runner=runner,
+        work_dir=tmp_path / "work",
+    )
+
+    assert _rates_used(calls) == {"50/1"}
+    assert "scale=640:720" in " ".join(calls[0])  # geometry still the caller's
+
+
+def test_a_mixed_rate_match_pins_one_rate_across_every_stage(tmp_path: Path):
+    # concat -c copy refuses segments whose frame rate differs, so a match
+    # of mixed footage still gets exactly one rate -- the audio source's
+    # first stage -- and every other tile is conformed to it.
+    calls, runner = _recorder()
+
+    mp4_grid.render_grid_mp4(
+        _rated_shooters(
+            {
+                "Mathias": {1: (30, 1), 2: (60, 1)},
+                "Anders": {1: (25, 1), 2: (30000, 1001)},
+            }
+        ),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        runner=runner,
+        work_dir=tmp_path / "work",
+    )
+
+    assert _rates_used(calls) == {"30/1"}
+    for cmd in calls[:2]:
+        assert cmd.count("-r") == 1
+
+
+def test_the_frame_rate_falls_back_when_no_bundle_can_supply_one():
+    assert mp4_grid.derive_frame_rate([], audio_label="Mathias") == (30000, 1001)
+    assert mp4_grid.derive_frame_rate(
+        [CompareShooterBundle(label="Mathias", project_root=Path("/p"))], audio_label="Mathias"
+    ) == (30000, 1001)
+    # A shooter that isn't the audio source cannot supply it either.
+    assert mp4_grid.derive_frame_rate(_rated_shooters({"Anders": {1: (60, 1)}}), audio_label="Mathias") == (
+        30000,
+        1001,
+    )
+
+
+def test_the_rate_comes_from_the_lowest_numbered_stage_like_the_emitter():
+    shooters = _rated_shooters({"Mathias": {3: (24, 1), 1: (30, 1), 2: (60, 1)}})
+    assert mp4_grid.derive_frame_rate(shooters, audio_label="Mathias") == (30, 1)
+
+
+def test_a_default_canvas_still_reports_the_fallback_rate():
+    # build_stage_command is called directly by callers with no shooters to
+    # derive from; an unpinned canvas must not emit "None/None".
+    assert mp4_grid.GridCanvas().frame_rate == (30000, 1001)
+    assert mp4_grid.GridCanvas().rate_string == "30000/1001"
+    assert mp4_grid.GridCanvas().fps == pytest.approx(29.97, abs=0.01)
+    assert not mp4_grid.GridCanvas().is_frame_rate_pinned
+    assert mp4_grid.GridCanvas(frame_rate_num=30, frame_rate_den=1).is_frame_rate_pinned
+
+
+def test_half_a_frame_rate_is_rejected_rather_than_silently_derived():
+    with pytest.raises(ValueError, match="both or neither"):
+        mp4_grid.GridCanvas(frame_rate_num=30)
+    with pytest.raises(ValueError, match="both or neither"):
+        mp4_grid.GridCanvas(frame_rate_den=1)
+
+
+def _video_fps(path: Path) -> float:
+    """The rate ffmpeg reports for the file's video stream."""
+    done = subprocess.run([FFMPEG, "-hide_banner", "-i", str(path)], capture_output=True, text=True)
+    found = re.search(r"Video:.*?, (\d+(?:\.\d+)?) fps", done.stderr)
+    assert found, done.stderr[-2000:]
+    return float(found.group(1))
+
+
+@integration
+@needs_ffmpeg
+def test_a_mixed_rate_match_still_stitches_at_the_audio_sources_rate(tmp_path: Path):
+    # The case that would break the stitch for real: shooters at
+    # different rates, and the audio source itself changing rate between
+    # stages. concat -c copy refuses segments whose frame rate differs,
+    # so one rate has to win for the whole render. Asserting on argv
+    # cannot see that ffmpeg accepts the result -- this can.
+    sources = {
+        ("Mathias", 1): ("blue", "30"),
+        ("Mathias", 2): ("blue", "60"),
+        ("Anders", 1): ("red", "25"),
+        ("Anders", 2): ("red", "30000/1001"),
+    }
+    shooters = []
+    for label in ("Mathias", "Anders"):
+        stages = {}
+        for number in (1, 2):
+            colour, fps = sources[(label, number)]
+            clip = _source(tmp_path / f"{label}{number}.mp4", seconds=2.0, color=colour, fps=fps)
+            num, _, den = fps.partition("/")
+            stages[number] = CompareStageBundle(
+                stage_number=number,
+                stage_name=f"Stage {number}",
+                trim_path=clip,
+                audit_path=tmp_path / "audit.json",
+                beep_offset_in_clip=0.5,
+                duration_seconds=2.0,
+                width=320,
+                height=240,
+                frame_rate_num=int(num),
+                frame_rate_den=int(den or 1),
+            )
+        shooters.append(
+            CompareShooterBundle(label=label, project_root=tmp_path / label, stages_by_number=stages)
+        )
+
+    result = mp4_grid.render_grid_mp4(
+        shooters,
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=mp4_grid.GridCanvas(width=640, height=360),  # size pinned, rate derived
+        ffmpeg_binary=FFMPEG,
+        work_dir=tmp_path / "work",
+    )
+
+    assert result.failed == ()
+    # Mathias' first stage is 30fps, so the whole render is -- not 29.97,
+    # and not stage 2's 60.
+    assert _video_fps(result.output_path) == pytest.approx(30.0, abs=0.01)
+    for segment in ("stage1.mp4", "stage2.mp4"):
+        assert _video_fps(tmp_path / "work" / segment) == pytest.approx(30.0, abs=0.01)
+    assert _stream_seconds(result.output_path, "0:v:0") == pytest.approx(6.0, abs=0.2)
+    assert _audio_streams(result.output_path) == [("Anders", False), ("Mathias", True)]
+
+
+@integration
+@needs_ffmpeg
+def test_a_30fps_source_is_not_silently_resampled_to_29_97(tmp_path: Path):
+    # The defect this section exists for, measured on the finished file.
+    result = mp4_grid.render_grid_mp4(
+        _real_shooters(tmp_path),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=mp4_grid.GridCanvas(width=640, height=360),
+        ffmpeg_binary=FFMPEG,
+        work_dir=tmp_path / "work",
+    )
+
+    assert _video_fps(result.output_path) == pytest.approx(30.0, abs=0.001)
