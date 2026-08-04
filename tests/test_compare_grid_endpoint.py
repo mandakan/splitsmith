@@ -187,6 +187,59 @@ def test_rejects_an_unresolvable_camera_selector(match_client: _MatchClient) -> 
     assert "drone" in response.json()["detail"]
 
 
+def test_rejects_when_audio_source_has_no_trim_on_any_selected_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """anna has a trim on stage 1; mathias -- the chosen audio source --
+    only has one on stage 2. Selecting just stage 1 must 400: rendering
+    would produce a grid with anna's picture and no audio at all, a
+    many-minute render away from a doomed request the SPA should have
+    caught at submit time.
+    """
+    monkeypatch.setattr(pl_mod.fcpxml_gen, "probe_video", _fake_probe)
+    match_root = _seed_match(tmp_path, shooters=["mathias", "anna"], stage_numbers=[1, 2])
+    _write_trims(match_root, slug="anna", stage_numbers=[1])
+    _write_trims(match_root, slug="mathias", stage_numbers=[2])
+    app = _match_create_app(project_root=match_root, project_name="Compare Match")
+    client = _MatchClient(app)
+
+    response = client.post(
+        "/api/match/compare-export",
+        json={"stage_numbers": [1], "audio_from": "mathias"},
+    )
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "mathias" in detail.lower()
+    assert "trim" in detail.lower()
+
+
+def test_audio_source_missing_only_some_selected_stages_is_still_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """mathias (the audio source) has a trim on stage 1 but not stage 2;
+    anna has trims on both. Selecting both stages must still queue --
+    stage 2 simply renders mathias as filler, which is normal. Only a
+    *total* absence of trims on the selection is fatal for the audio
+    source, not a partial one.
+    """
+    monkeypatch.setattr(pl_mod.fcpxml_gen, "probe_video", _fake_probe)
+    monkeypatch.setattr(mp4_grid_mod, "render_grid_mp4", _fake_render_grid_mp4)
+    match_root = _seed_match(tmp_path, shooters=["mathias", "anna"], stage_numbers=[1, 2])
+    _write_trims(match_root, slug="mathias", stage_numbers=[1])
+    _write_trims(match_root, slug="anna", stage_numbers=[1, 2])
+    app = _match_create_app(project_root=match_root, project_name="Compare Match")
+    client = _MatchClient(app)
+
+    response = client.post(
+        "/api/match/compare-export",
+        json={"stage_numbers": [1, 2], "audio_from": "mathias"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["kind"] == "compare-grid"
+    assert body["status"] in ("pending", "running")
+
+
 # --- queueing -----------------------------------------------------------------
 
 

@@ -1634,6 +1634,18 @@ def warm_ensemble_runtime() -> None:
     _get_ensemble_runtime()
 
 
+def _shooter_label(match: match_model.Match, match_root: Path, slug: str) -> str:
+    """The display label a slug binds to: the shooter's name, or the slug itself.
+
+    Mirrors ``compare/cli.py::_export_from_match``'s ``label = shooter.name
+    or slug``. Shared so the compare-grid endpoint's audio-source check and
+    its worker's ``audio_label`` resolution can't drift from
+    ``_load_compare_bundles``'s own per-shooter labelling.
+    """
+    shooter = match.load_shooter(match_root, slug)
+    return shooter.name or slug
+
+
 def _load_compare_bundles(
     match_root: Path,
     match: match_model.Match,
@@ -1655,8 +1667,7 @@ def _load_compare_bundles(
     cameras = cameras or {}
     bundles: list[project_loader.CompareShooterBundle] = []
     for slug in match.shooters:
-        shooter = match.load_shooter(match_root, slug)
-        label = shooter.name or slug
+        label = _shooter_label(match, match_root, slug)
         camera = cameras.get(slug, cameras.get(label))
         bundles.append(project_loader.load_shooter_from_match(match_root, slug, label, camera=camera))
     return bundles
@@ -1696,8 +1707,7 @@ def _run_compare_grid(handle: JobHandle, req: CompareGridRequest, match_root: st
     with handle.timer.phase("load_shooters"):
         bundles = _load_compare_bundles(root, match, cameras=req.cameras)
         filtered = _filter_bundles_to_stages(bundles, req.stage_numbers)
-        audio_shooter = match.load_shooter(root, req.audio_from)
-        audio_label = audio_shooter.name or req.audio_from
+        audio_label = _shooter_label(match, root, req.audio_from)
 
     output_dir = root / "exports"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -12068,6 +12078,27 @@ def create_app(
                 detail=(
                     "no shooter has an exported trim for the selected stages. "
                     "Run `splitsmith match trims` (or export trims per shooter) first."
+                ),
+            )
+
+        # A shooter other than the audio source can cover the selection --
+        # ``present`` above only proves *someone* has a trim, not that the
+        # chosen audio source does. Queueing that would burn a many-minute
+        # 4K render before the user learns the result has no sound at all;
+        # catch it here instead, naming the shooter and the fix (a
+        # different audio source, or a different stage selection).
+        audio_label = _shooter_label(match, match_root, req.audio_from)
+        audio_bundle = next((bundle for bundle in bundles if bundle.label == audio_label), None)
+        if audio_bundle is None or not any(
+            number in audio_bundle.stages_by_number for number in req.stage_numbers
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"audio_from={req.audio_from!r} ({audio_label}) has no trim on any of the "
+                    f"selected stages ({', '.join(str(n) for n in req.stage_numbers)}); the "
+                    "render would have no audio. Pick a different audio source, or select "
+                    f"stages {audio_label} has a trim for."
                 ),
             )
 
