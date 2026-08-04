@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Python 3.11+, type hints everywhere. Black line length 110. Ruff clean.
-- `uv` for dependency management, never `pip`. **No new dependencies** in this plan.
+- `uv` for dependency management, never `pip`. Adding a well-established dependency is allowed and preferred over hand-rolling something a mature library already does well; reuse what the codebase already has before either.
 - `pathlib.Path` for paths, never strings. f-strings for formatting.
 - Imports grouped stdlib / third-party / local, separated by blank lines. No relative imports beyond a single dot.
 - Pydantic models for data crossing module boundaries.
@@ -374,7 +374,15 @@ git commit -m "feat(compare): plan beep-aligned grid stages for MP4 render"
 - Test: `tests/test_compare_mp4_grid_commands.py`
 
 **Interfaces:**
-- Consumes: `GridStagePlan`, `GridTile`, `GridCanvas` from Task 1
+- Consumes: `GridStagePlan`, `GridTile`, `GridCanvas` from Task 1 — including `GridTile.lead_pad_seconds`
+
+**Lead pad (added after Task 1's review).** A tile whose beep sits closer to its clip start than `head_pad_seconds` cannot supply the full head pad, so `seek_seconds` clamps to 0 and `lead_pad_seconds` carries the shortfall. That shortfall must be synthesised at the front of the tile or its beep lands early and the grid is desynced — the exact failure the grid exists to prevent. For a tile with `lead_pad_seconds > 0`:
+
+- video: append `tpad=start_duration={lead}:start_mode=add:color=black` to that tile's chain
+- audio: append `adelay={lead_ms}:all=1` to that tile's audio chain
+- the input's `-t` becomes `duration_seconds - lead_pad_seconds`, because the lead pad supplies the remainder
+
+For `lead_pad_seconds == 0.0` (the common case) neither filter is emitted and `-t` is the full stage duration.
 - Produces:
   - `mp4_grid.build_stage_command(plan, *, canvas, output_path, ffmpeg_binary="ffmpeg") -> tuple[str, ...]`
   - `mp4_grid.build_concat_command(*, list_path, output_path, ffmpeg_binary="ffmpeg") -> tuple[str, ...]`
@@ -388,7 +396,9 @@ from pathlib import Path
 from splitsmith.compare import mp4_grid
 
 
-def _plan(*, missing: str | None = None) -> mp4_grid.GridStagePlan:
+def _plan(
+    *, missing: str | None = None, lead_padded: str | None = None
+) -> mp4_grid.GridStagePlan:
     labels = ["Anders", "Erik", "Johan", "Mathias"]
     tiles = []
     for index, label in enumerate(labels):
@@ -399,6 +409,7 @@ def _plan(*, missing: str | None = None) -> mp4_grid.GridStagePlan:
                 trim_path=None if label == missing else Path(f"/trims/{label}.mp4"),
                 beep_offset_in_clip=2.0,
                 seek_seconds=1.0,
+                lead_pad_seconds=0.5 if label == lead_padded else 0.0,
                 row=row,
                 col=col,
             )
@@ -475,6 +486,35 @@ def test_output_frame_rate_is_pinned_for_concat_compatibility():
     assert cmd[cmd.index("-r") + 1] == "30000/1001"
 
 
+def test_a_lead_padded_tile_is_front_padded_so_its_beep_still_lands_on_time():
+    # Erik's beep sits closer to his clip start than head_pad, so 0.5s of
+    # pad has to be synthesised. Without it his beep lands 0.5s early and
+    # the grid is desynced -- the failure the grid exists to prevent.
+    cmd = mp4_grid.build_stage_command(
+        _plan(lead_padded="Erik"), canvas=mp4_grid.GridCanvas(), output_path=Path("/o.mp4")
+    )
+    graph = _graph(cmd)
+    assert "tpad=start_duration=0.5:start_mode=add:color=black" in graph
+    assert "adelay=500:all=1" in graph
+    # Only Erik is padded; the other three tiles are untouched.
+    assert graph.count("tpad=start_duration") == 1
+    assert graph.count("adelay=") == 1
+    # Erik's input reads 0.5s less, since the pad supplies the remainder.
+    joined = " ".join(cmd)
+    assert "-t 12 -i /trims/Erik.mp4" in joined
+    assert "-t 12.5 -i /trims/Anders.mp4" in joined
+
+
+def test_tiles_without_a_lead_pad_emit_no_padding_filters():
+    graph = _graph(
+        mp4_grid.build_stage_command(
+            _plan(), canvas=mp4_grid.GridCanvas(), output_path=Path("/o.mp4")
+        )
+    )
+    assert "tpad=" not in graph
+    assert "adelay=" not in graph
+
+
 def test_concat_command_stream_copies():
     cmd = mp4_grid.build_concat_command(
         list_path=Path("/tmp/list.txt"), output_path=Path("/out/grid.mp4")
@@ -527,11 +567,14 @@ def build_stage_command(
         if tile.trim_path is not None:
             # Seek before -i so ffmpeg fast-seeks; the trim's head buffer
             # absorbs any imprecision, same trade-off as trim.py.
+            # A lead-padded tile reads that much less from its source: the
+            # synthesised pad at the front supplies the remainder, so the
+            # tile still totals ``duration_seconds``.
             args += [
                 "-ss",
                 f"{tile.seek_seconds:g}",
                 "-t",
-                f"{plan.duration_seconds:g}",
+                f"{plan.duration_seconds - tile.lead_pad_seconds:g}",
                 "-i",
                 str(tile.trim_path),
             ]
@@ -615,11 +658,19 @@ def _build_filter_graph(
     parts: list[str] = []
 
     for slot, tile in enumerate(plan.tiles):
+        # ``tpad`` goes after ``pad`` so the synthesised black is already
+        # cell-sized, and before ``fps`` so the padded frames are counted
+        # at the output rate.
+        lead = (
+            f"tpad=start_duration={tile.lead_pad_seconds:g}:start_mode=add:color=black,"
+            if tile.lead_pad_seconds > 0
+            else ""
+        )
         parts.append(
             f"[{video_index[slot]}:v]setpts=PTS-STARTPTS,"
             f"scale={cell_w}:{cell_h}:force_original_aspect_ratio=decrease,"
             f"pad={cell_w}:{cell_h}:(ow-iw)/2:(oh-ih)/2,"
-            f"setsar=1,fps={rate}[t{slot}]"
+            f"{lead}setsar=1,fps={rate}[t{slot}]"
         )
 
     stack_inputs = "".join(f"[t{slot}]" for slot in range(len(plan.tiles)))
@@ -631,12 +682,16 @@ def _build_filter_graph(
     )
     parts.append("[grid]format=yuv420p[final]")
 
-    for slot in range(len(plan.tiles)):
+    for slot, tile in enumerate(plan.tiles):
         # ``aresample=async=1`` keeps a track that starts short from
         # drifting; ``apad`` + ``atrim`` guarantee every track is exactly
         # the stage duration so the segment's streams end together.
+        # ``adelay`` mirrors the video's ``tpad`` so a lead-padded tile's
+        # audio stays locked to its picture.
+        delay_ms = int(round(tile.lead_pad_seconds * 1000))
+        lead = f"adelay={delay_ms}:all=1," if delay_ms > 0 else ""
         parts.append(
-            f"[{audio_index[slot]}:a]asetpts=PTS-STARTPTS,aresample=async=1,"
+            f"[{audio_index[slot]}:a]asetpts=PTS-STARTPTS,{lead}aresample=async=1,"
             f"apad,atrim=0:{plan.duration_seconds:g}[a{slot}]"
         )
 
@@ -1329,7 +1384,9 @@ git commit -m "feat(ui): add exportCompareGrid API client method"
 - Create: `src/splitsmith/ui_static/src/pages/MatchExport.tsx`
 - Create: `src/splitsmith/ui_static/src/pages/matchExportModel.ts`
 - Modify: `src/splitsmith/ui_static/src/App.tsx:195` (the `export` redirect route)
-- Test: `src/splitsmith/ui_static/src/pages/matchExportModel.test.ts`
+- Test: `src/splitsmith/ui_static/src/pages/matchExportModel.test.ts` (logic)
+- Test: `src/splitsmith/ui_static/src/pages/MatchExport.test.tsx` (rendering + interaction)
+- Modify: `src/splitsmith/ui_static/package.json` (devDeps), and the vitest config block for the jsdom environment
 
 **Interfaces:**
 - Consumes: `api.exportCompareGrid`, `api.pollJob`, `api.revealFile`, `api.getMatch` (or the existing match-context hook used by `Compare.tsx`)
@@ -1338,7 +1395,9 @@ git commit -m "feat(ui): add exportCompareGrid API client method"
   - `summarizeGridResult(result: CompareGridResult) -> { headline: string; partial: boolean; failedStages: string[] }`
   - `CANVAS_CHOICES` -- `[{ id: "uhd", label: "4K UHD (3840x2160)", width: 3840, height: 2160 }, { id: "hd", label: "1080p (1920x1080) -- faster", width: 1920, height: 1080 }]`
 
-**Testing approach (deviation from the original plan text, ruled by the user):** this SPA has no React Testing Library, no jsdom, and zero `.test.tsx` files, and the plan's Global Constraints forbid new dependencies. So the page's logic is extracted into `matchExportModel.ts` and unit-tested there, matching the existing convention (`src/lib/format.test.ts`, `src/lib/apiErrors.test.ts`). `MatchExport.tsx` holds rendering only and is verified by hand in Task 8 Step 5. Do **not** add `@testing-library/*` or `jsdom`.
+**Testing approach:** the SPA currently has no React Testing Library, no jsdom, and zero `.test.tsx` files. The user has confirmed new dependencies are welcome where a mature library beats hand-rolling, so this task **adds `@testing-library/react`, `@testing-library/user-event`, `@testing-library/jest-dom` and `jsdom` as devDependencies** and writes a real component test. Wire jsdom as the vitest environment in the existing vite config rather than adding a second config file.
+
+Keep the `matchExportModel.ts` extraction regardless: payload construction and result summarising are logic, not rendering, and belong in a plain module that both the component and its test can use. The component test covers rendering and interaction; the model test covers the logic. Write both.
 
 **Behaviour:**
 - Route `match/:matchId/export` renders `<MatchExport />` wrapped in `<DesktopGate screen="Match export">`, matching the `Compare` route at `src/splitsmith/ui_static/src/App.tsx:169`.
