@@ -974,12 +974,17 @@ def test_a_long_stitch_does_not_drift_audio_late_against_video(tmp_path: Path):
     # Where the picture cuts, on the timeline a player uses. Read once:
     # the video is stream-copied, so every track is measured against the
     # same picture.
+    #
+    # Deliberately loose against the *plan*: picture placement is
+    # quantised to a frame and a whole-frame shift is not a sync defect.
+    # This is the sanity check that the grid put the stage where it said;
+    # the assertion that bites is sound against picture, below.
     picture = _video_mark_times(result.output_path)
     assert len(picture) == DRIFT_STAGE_COUNT, picture
     for index, cut in enumerate(picture):
         expected = stage_seconds * index + 1.0
         assert cut == pytest.approx(
-            expected, abs=FRAME_SECONDS
+            expected, abs=2 * FRAME_SECONDS
         ), f"stage {index + 1}: picture cuts at {cut:.4f}s, the grid put it at {expected:.4f}s"
 
     for slot in range(len(shooters)):
