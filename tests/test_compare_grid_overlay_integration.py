@@ -125,6 +125,40 @@ FIRING_QUADRANT_MIN_MEAN_ABS_DIFF = 5.0  # measured 16.79 with the counter+clock
 UNREACHED_QUADRANT_MAX_MEAN_ABS_DIFF = NOISE_FLOOR_MEAN_ABS_DIFF
 PRE_BEEP_MAX_MEAN_ABS_DIFF = NOISE_FLOOR_MEAN_ABS_DIFF
 
+# --- sprite-vs-clock sub-boxes ------------------------------------------
+#
+# The whole-quadrant checks above prove *something* from the overlay
+# landed in the right cell, but a fully-blanked ``overlay_sprites``
+# renderer (counter + split label drawn nowhere at all) still clears
+# FIRING_QUADRANT_MIN_MEAN_ABS_DIFF, because the per-tile clock is a
+# separate ``drawtext`` chain in ``mp4_grid.py`` that keeps drawing on
+# its own. A fully broken sprite panel would ship green under that
+# check alone. So the quadrant is additionally split into three coarse,
+# non-overlapping quarter/half boxes -- no font-metric precision needed,
+# since the sprite panel (``overlay_sprites._draw_panel``: counter at
+# the cell's top-left corner, split label bottom-center) and the clock
+# (``mp4_grid._clock_filters``: top-right corner) are non-overlapping by
+# construction:
+#   - COUNTER_BOX: top-left quarter of the cell.
+#   - CLOCK_BOX: top-right quarter of the cell.
+#   - SPLIT_BOX: bottom half of the cell, inset from both edges.
+#
+# Measured against this fixture (same render as above, T_AFTER_FIRST_SHOT):
+#   real render                    counter 8.19   clock 22.63   split 35.08
+#   real render, sprite+split pooled                            21.63
+#   overlay_sprites._draw_panel blanked (``if True: return`` in place of
+#   ``if not panel.present: return`` -- draws nothing for any tile, ever)
+#                                   counter 1.35   clock 22.68   split 1.41
+#                                   sprite+split pooled            1.38
+# The clock box is unmoved by the mutation (confirms it is drawn by a
+# separate code path); the sprite-only pooled figure drops from 21.63 to
+# 1.38, below NOISE_FLOOR_MEAN_ABS_DIFF -- so a broken sprite renderer
+# now fails FIRING_SPRITE_MIN_MEAN_ABS_DIFF while a broken clock alone
+# would fail FIRING_CLOCK_MIN_MEAN_ABS_DIFF, each independently of the
+# other. See task-6-report.md, "Finding 1", for the full mutation record.
+FIRING_SPRITE_MIN_MEAN_ABS_DIFF = 8.0  # measured 21.63 real, 1.38 with the sprite panel blanked
+FIRING_CLOCK_MIN_MEAN_ABS_DIFF = 8.0  # measured 22.63 real, 22.68 with the sprite panel blanked
+
 #: One AAC frame, the unit ``nb_read_frames * 1024 / sample_rate``
 #: resolves to. The two renders' audio graphs are byte-for-byte
 #: identical (overlay only touches the video half -- see
@@ -299,6 +333,18 @@ def _mean_abs_diff(a: Image.Image, b: Image.Image, box: tuple[int, int, int, int
     return float(np.abs(ca - cb).mean())
 
 
+def _mean_abs_diff_multi(a: Image.Image, b: Image.Image, boxes: list[tuple[int, int, int, int]]) -> float:
+    """Mean absolute per-channel pixel difference pooled over several
+    (possibly non-contiguous) boxes -- e.g. the sprite's counter and
+    split-label regions, which sit in different corners of the same
+    cell and cannot be expressed as one rectangular crop."""
+    parts_a = [np.asarray(a.crop(box), dtype=np.int16).reshape(-1, 3) for box in boxes]
+    parts_b = [np.asarray(b.crop(box), dtype=np.int16).reshape(-1, 3) for box in boxes]
+    ca = np.concatenate(parts_a, axis=0)
+    cb = np.concatenate(parts_b, axis=0)
+    return float(np.abs(ca - cb).mean())
+
+
 @integration
 @needs_ffmpeg
 def test_overlay_reaches_the_rendered_pixels(tmp_path: Path, synthetic_source_video: Path):
@@ -346,6 +392,28 @@ def test_overlay_reaches_the_rendered_pixels(tmp_path: Path, synthetic_source_vi
     assert firing_diff >= FIRING_QUADRANT_MIN_MEAN_ABS_DIFF, (
         f"no visible overlay content in the firing shooter's own quadrant: "
         f"mean abs diff {firing_diff:.2f} (threshold {FIRING_QUADRANT_MIN_MEAN_ABS_DIFF})"
+    )
+
+    # The whole-quadrant check above cannot tell a broken sprite panel
+    # from a broken clock -- either alone still moves the quadrant
+    # average. Split it into the sprite's own regions (counter,
+    # top-left quarter; split label, bottom half) versus the clock's
+    # (top-right quarter) and require each to independently show real
+    # content. See the module-level comment above FIRING_SPRITE_MIN_MEAN_ABS_DIFF.
+    counter_box = (0, 0, cell_w // 2, cell_h // 2)
+    clock_box = (cell_w // 2, 0, cell_w, cell_h // 2)
+    split_box = (cell_w // 4, cell_h // 2, 3 * cell_w // 4, cell_h)
+
+    sprite_diff = _mean_abs_diff_multi(after_plain, after_overlaid, [counter_box, split_box])
+    assert sprite_diff >= FIRING_SPRITE_MIN_MEAN_ABS_DIFF, (
+        f"no visible sprite content (counter + split label) in the firing shooter's "
+        f"quadrant: mean abs diff {sprite_diff:.2f} (threshold {FIRING_SPRITE_MIN_MEAN_ABS_DIFF})"
+    )
+
+    clock_diff = _mean_abs_diff(after_plain, after_overlaid, clock_box)
+    assert clock_diff >= FIRING_CLOCK_MIN_MEAN_ABS_DIFF, (
+        f"no visible clock content in the firing shooter's quadrant: "
+        f"mean abs diff {clock_diff:.2f} (threshold {FIRING_CLOCK_MIN_MEAN_ABS_DIFF})"
     )
 
     unreached_diff = _mean_abs_diff(after_plain, after_overlaid, unreached_quadrant_no_strip)
