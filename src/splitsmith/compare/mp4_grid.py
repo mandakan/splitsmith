@@ -518,12 +518,42 @@ class StageOverlayPlan:
     ``drawtext`` opens it itself, so a temp file from
     ``importlib.resources.as_file`` will not do. See
     :func:`splitsmith.overlay_text.materialize_font`.
+
+    ``ink`` and ``stroke`` are the clock's fill and outline, defaulting to
+    plain white on black for a caller that has no theme to hand.
+    :func:`render_grid_mp4` passes the theme's own values so the clock and
+    the sprite text beside it are the same colour.
     """
 
     sprite_list_path: Path
     font_path: Path
     font_size: int
     clocks: tuple[TileClock, ...] = ()
+    ink: tuple[int, int, int] = (255, 255, 255)
+    stroke: tuple[int, int, int] = (0, 0, 0)
+
+
+def _ffmpeg_color(rgb: tuple[int, int, int]) -> str:
+    """``drawtext`` colour literal. Hex, because it takes named colours
+    only from its own table -- the splitsmith theme's ink is
+    ``(244, 244, 245)``, which has no name."""
+    red, green, blue = rgb
+    return f"0x{red:02x}{green:02x}{blue:02x}"
+
+
+def _clock_text(seconds: float) -> str:
+    """Format an elapsed time the way the ticking filter renders it.
+
+    Truncated to hundredths rather than rounded, so the held value can
+    never read above the last value the ticking filter drew.
+
+    The truncation runs on integer milliseconds and not on
+    ``math.floor(seconds * 100) / 100``: ``2.09 * 100`` is
+    ``208.99999999999997`` in binary floating point, which floors to
+    ``2.08`` and would show the clock jumping backwards at the freeze.
+    """
+    hundredths = round(seconds * 1000) // 10
+    return f"{hundredths // 100}.{hundredths % 100:02d}"
 
 
 def _ffmpeg_quote(value: str) -> str:
@@ -557,6 +587,18 @@ def _clock_filters(plan: GridStagePlan, canvas: GridCanvas, overlay: StageOverla
     it stops the clock where the shooter stopped rather than running it
     on to the end of the longest tile.
 
+    Every ticking filter carries a ``gte(t,start)`` lower guard, including
+    the open-ended one. Without it the filter runs from frame zero and
+    ``t - start`` is negative through the head pad, so the clock reads
+    ``-1.00`` at t=0 and counts up to zero as the beep approaches --
+    an elapsed time for a run that has not started.
+
+    The upper bound is ``lt``, not the inclusive half of a ``between``.
+    ``between(t,start,freeze)`` and the hold's ``gte(t,freeze)`` are both
+    true at exactly ``freeze``, so a frame landing there draws both
+    filters over each other; measured on ffmpeg 6.1.1, that renders two
+    superimposed numbers when the two spellings disagree.
+
     The escaping is not negotiable and was established against ffmpeg
     6.1.1 rather than reasoned about: inside ``text='...'`` the ``:`` and
     ``,`` separators of ``%{eif:...}`` still have to be backslash-escaped
@@ -570,8 +612,10 @@ def _clock_filters(plan: GridStagePlan, canvas: GridCanvas, overlay: StageOverla
     filters: list[str] = []
     for clock in overlay.clocks:
         common = (
-            f"fontfile={font}:fontsize={overlay.font_size}:fontcolor=white:"
-            f"borderw={max(2, overlay.font_size // 18)}:bordercolor=black:"
+            f"fontfile={font}:fontsize={overlay.font_size}:"
+            f"fontcolor={_ffmpeg_color(overlay.ink)}:"
+            f"borderw={max(2, overlay.font_size // 18)}:"
+            f"bordercolor={_ffmpeg_color(overlay.stroke)}:"
             f"x={clock.col * cell_w}+{cell_w}-tw-{pad}:y={clock.row * cell_h}+{pad}"
         )
         start = f"{clock.start_seconds:g}"
@@ -579,11 +623,12 @@ def _clock_filters(plan: GridStagePlan, canvas: GridCanvas, overlay: StageOverla
             f"text='%{{eif\\:trunc(t-{start})\\:d}}." f"%{{eif\\:trunc(mod((t-{start})*100\\,100))\\:d\\:2}}'"
         )
         if clock.freeze_seconds is None:
-            # No known end: tick to the end of the stage, hold nothing.
-            filters.append(f"drawtext={common}:{elapsed}")
+            # No known end: tick from the beep to the end of the stage,
+            # hold nothing after it.
+            filters.append(f"drawtext={common}:{elapsed}:enable='gte(t\\,{start})'")
             continue
         freeze = f"{clock.freeze_seconds:g}"
-        filters.append(f"drawtext={common}:{elapsed}:enable='between(t\\,{start}\\,{freeze})'")
+        filters.append(f"drawtext={common}:{elapsed}:enable='gte(t\\,{start})*lt(t\\,{freeze})'")
         if clock.final_text is not None:
             held = _ffmpeg_quote(clock.final_text)
             filters.append(f"drawtext={common}:text={held}:enable='gte(t\\,{freeze})'")
@@ -1040,6 +1085,7 @@ def _stage_overlay_plan(
     work: Path,
 ) -> StageOverlayPlan:
     """Render one stage's sprites and describe its clocks."""
+    theme = load_theme(theme_name)
     stage_data = _overlay_data_for_stage(data, plan.stage_number)
     placements = tuple(
         TilePlacement(label=tile.label, row=tile.row, col=tile.col, present=tile.trim_path is not None)
@@ -1062,7 +1108,7 @@ def _stage_overlay_plan(
     sequence = write_sprite_sequence(
         states,
         geometry,
-        theme=load_theme(theme_name),
+        theme=theme,
         cache_dir=work / "sprites",
     )
     list_path = write_concat_list(sequence, work / f"sprites-stage{plan.stage_number}.txt")
@@ -1086,7 +1132,9 @@ def _stage_overlay_plan(
                 # assumed to be 1.0.
                 start_seconds=head_pad_seconds,
                 freeze_seconds=head_pad_seconds + last,
-                final_text=f"{last:.2f}",
+                # Truncated, not rounded, so the held value cannot read
+                # above the last value the ticking filter drew.
+                final_text=_clock_text(last),
             )
         )
 
@@ -1098,6 +1146,8 @@ def _stage_overlay_plan(
         # and the sprite's shot counter are the same size in the cell.
         font_size=max(48, cell_h // 14),
         clocks=tuple(clocks),
+        ink=theme.ink,
+        stroke=theme.stroke,
     )
 
 

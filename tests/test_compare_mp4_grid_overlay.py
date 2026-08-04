@@ -87,17 +87,29 @@ def test_without_overlay_the_graph_is_untouched(tmp_path):
 
 
 def test_the_video_chain_ends_at_format_yuv420p(tmp_path):
-    """``[final]`` is the last video node with the overlay on or off."""
+    """``[final]`` terminates the video half, with the overlay on or off.
+
+    Asserts the partition, not just that the part named ``[final]`` is
+    named ``[final]``: exactly one node produces it, it converts to
+    yuv420p, everything before it is video and everything after it is
+    audio.
+    """
     for overlay in (None, _overlay(tmp_path)):
         graph = _graph(
             mp4_grid.build_stage_command(
-                _plan([_tile("ann", 0, 0)]),
+                _plan([_tile("ann", 0, 0), _tile("bo", 0, 1)]),
                 canvas=CANVAS,
                 output_path=tmp_path / "o.mov",
                 overlay=overlay,
             )
         )
-        assert _video_parts(graph)[-1].endswith("format=yuv420p[final]")
+        parts = graph.split(";")
+        finals = [i for i, p in enumerate(parts) if p.endswith("[final]")]
+        assert len(finals) == 1
+        cut = finals[0]
+        assert parts[cut].endswith("format=yuv420p[final]")
+        assert all(":a]" not in p and "amix" not in p for p in parts[:cut])
+        assert parts[cut + 1 :] and all(":a]" in p or "amix" in p for p in parts[cut + 1 :])
 
 
 def test_overlay_defaults_to_off(tmp_path):
@@ -333,14 +345,24 @@ def test_the_ticking_clock_stops_where_the_static_one_starts(tmp_path):
             overlay=_overlay(tmp_path, clocks),
         )
     )
-    assert "between(t" in graph
-    assert "gte(t" in graph
-    assert graph.count("6") >= 2  # the freeze time bounds both filters
-    assert r"enable='between(t\,1\,6)'" in graph
+    # The ticking filter stops strictly below the freeze and the hold
+    # starts at it, so no frame can ever draw both.
+    assert r"enable='gte(t\,1)*lt(t\,6)'" in graph
     assert r"enable='gte(t\,6)'" in graph
+    # The same freeze time bounds both filters -- not two different ones.
+    assert graph.count(r"lt(t\,6)") == 1
+    assert graph.count(r"gte(t\,6)") == 1
+    assert "between(t" not in graph
 
 
-def test_an_open_ended_clock_ticks_to_the_end_with_no_static_hold(tmp_path):
+def test_an_open_ended_clock_still_waits_for_the_beep(tmp_path):
+    """No freeze does not mean no lower bound.
+
+    Without ``gte(t,start)`` the filter runs from frame zero and
+    ``t - start`` is negative through the head pad, so the clock renders
+    a negative elapsed time for a run that has not begun (measured:
+    ``-1.00`` at t=0, ``0.50`` at t=0.5 for a start of 1.5).
+    """
     clocks = (mp4_grid.TileClock(row=0, col=0, start_seconds=1.5, freeze_seconds=None, final_text=None),)
     graph = _graph(
         mp4_grid.build_stage_command(
@@ -351,9 +373,11 @@ def test_an_open_ended_clock_ticks_to_the_end_with_no_static_hold(tmp_path):
         )
     )
     assert graph.count("drawtext") == 1
-    assert "gte(t" not in graph
-    assert "between(t" not in graph
     assert r"trunc(t-1.5)" in graph
+    assert r"enable='gte(t\,1.5)'" in graph
+    # No end, so nothing bounds it from above.
+    assert "lt(t" not in graph
+    assert "between(t" not in graph
 
 
 def test_clock_is_positioned_inside_its_own_cell(tmp_path):
@@ -366,18 +390,23 @@ def test_clock_is_positioned_inside_its_own_cell(tmp_path):
             overlay=_overlay(tmp_path, clocks),
         )
     )
-    # cell is 960x540 on a 1920x1080 canvas; the bottom-right cell starts
-    # at x=960, y=540.
-    assert "960" in graph
-    assert "540" in graph
+    # Cells are 960x540 on a 1920x1080 canvas, so the bottom-right cell
+    # starts at x=960, y=540; the inset is max(24, 540 // 36) = 24. ``tw``
+    # is drawtext's own text width, so the right edge costs no measuring.
     drawn = next(p for p in graph.split(";") if "drawtext" in p)
-    assert ":x=960+960-tw-" in drawn
-    assert ":y=540+" in drawn
+    assert ":x=960+960-tw-24:y=540+24:" in drawn
 
 
-def test_the_clock_uses_the_font_and_size_the_plan_names(tmp_path):
+def test_the_clock_uses_the_font_size_and_colours_the_plan_names(tmp_path):
     clocks = (mp4_grid.TileClock(row=0, col=0, start_seconds=0.0, freeze_seconds=None, final_text=None),)
-    overlay = _overlay(tmp_path, clocks)
+    overlay = mp4_grid.StageOverlayPlan(
+        sprite_list_path=_overlay(tmp_path).sprite_list_path,
+        font_path=tmp_path / "font.ttf",
+        font_size=64,
+        clocks=clocks,
+        ink=(244, 244, 245),
+        stroke=(10, 11, 13),
+    )
     graph = _graph(
         mp4_grid.build_stage_command(
             _plan([_tile("ann", 0, 0)]),
@@ -388,6 +417,71 @@ def test_the_clock_uses_the_font_and_size_the_plan_names(tmp_path):
     )
     assert f"fontfile='{overlay.font_path}'" in graph
     assert "fontsize=64" in graph
+    # Hex, not a name: ffmpeg only knows colours from its own table and
+    # has no name for (244, 244, 245).
+    assert "fontcolor=0xf4f4f5" in graph
+    assert "bordercolor=0x0a0b0d" in graph
+
+
+def test_the_clock_colours_default_to_white_on_black(tmp_path):
+    """A caller with no theme to hand still gets a legible clock."""
+    clocks = (mp4_grid.TileClock(row=0, col=0, start_seconds=0.0, freeze_seconds=None, final_text=None),)
+    graph = _graph(
+        mp4_grid.build_stage_command(
+            _plan([_tile("ann", 0, 0)]),
+            canvas=CANVAS,
+            output_path=tmp_path / "o.mov",
+            overlay=_overlay(tmp_path, clocks),
+        )
+    )
+    assert "fontcolor=0xffffff" in graph
+    assert "bordercolor=0x000000" in graph
+
+
+def test_the_render_gives_the_clock_the_themes_own_colours(tmp_path):
+    """The clock and the sprite text beside it must not differ in colour."""
+    from splitsmith.overlay_theme import load_theme
+
+    calls, runner = _recorder()
+    mp4_grid.render_grid_mp4(
+        _shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="ffmpeg",
+        overlay=True,
+    )
+    theme = load_theme("splitsmith")
+    graph = _graph(calls[0])
+    assert f"fontcolor=0x{theme.ink[0]:02x}{theme.ink[1]:02x}{theme.ink[2]:02x}" in graph
+    assert f"bordercolor=0x{theme.stroke[0]:02x}{theme.stroke[1]:02x}{theme.stroke[2]:02x}" in graph
+
+
+def test_the_held_text_is_truncated_not_rounded(tmp_path):
+    """The hold must never read above the last value the clock ticked."""
+    assert mp4_grid._clock_text(1.958) == "1.95"  # truncated, not 1.96
+    assert mp4_grid._clock_text(5.0) == "5.00"
+    assert mp4_grid._clock_text(0.05) == "0.05"
+    assert mp4_grid._clock_text(12.999) == "12.99"
+
+
+def test_the_held_text_truncates_on_milliseconds_not_in_floating_point(tmp_path):
+    """``math.floor(x * 100) / 100`` is wrong for ordinary split times.
+
+    ``0.29 * 100`` is ``28.999999999999996`` and ``1.13 * 100`` is
+    ``112.99999999999999``, so flooring the product drops a hundredth and
+    the clock reads low at the freeze. Both are perfectly ordinary shot
+    times, so this is not a corner case. Truncation runs on integer
+    milliseconds instead.
+
+    (The reviewer's example, ``2.09``, happens to be exact on this
+    platform -- ``2.09 * 100 == 209.0`` -- which is why the value matters
+    here and a plausible-looking one proves nothing.)
+    """
+    assert mp4_grid._clock_text(0.29) == "0.29"
+    assert mp4_grid._clock_text(1.13) == "1.13"
 
 
 # --- the graph ffmpeg actually accepts ------------------------------------
@@ -636,21 +730,60 @@ def test_the_head_pad_is_threaded_into_the_clock_not_hardcoded(tmp_path):
     )
     graph = _graph(calls[0])
     assert r"trunc(t-2.5)" in graph
-    assert r"enable='between(t\,2.5\,3.5)'" in graph
+    assert r"enable='gte(t\,2.5)*lt(t\,3.5)'" in graph
+
+
+def _two_stage_shooters(tmp_path: Path):
+    """One shooter, two stages, with *different* shot times per stage.
+
+    Identical data across stages would let a wrong per-stage slice --
+    ``_overlay_data_for_stage(data, 1)`` for every stage -- pass
+    unnoticed.
+    """
+    shooters = _shooters(tmp_path, shots={"Anders": [0.9, 2.5]})
+    stage2 = _stage_bundle(2, tmp_path, "Anders")
+    _audit(stage2.audit_path, [1.2, 4.0])
+    shooters[0].stages_by_number[2] = stage2
+    return shooters
+
+
+def test_each_stage_draws_its_own_shot_data_not_stage_ones(tmp_path):
+    """The clock in stage 2 must come from stage 2's audit.
+
+    ``load_overlay_data`` is keyed by ``(label, stage)``; slicing it on a
+    fixed stage number rather than the plan's yields a graph that is
+    perfectly well-formed and shows the wrong stage's times.
+    """
+    calls, runner = _recorder()
+    mp4_grid.render_grid_mp4(
+        _two_stage_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="ffmpeg",
+        overlay=True,
+        head_pad_seconds=1.0,
+    )
+    stage1, stage2 = _graph(calls[0]), _graph(calls[1])
+    # Stage 1's last shot is 2.5 -> freeze 3.5, holding "2.50".
+    assert r"enable='gte(t\,3.5)'" in stage1
+    assert "text='2.50'" in stage1
+    # Stage 2's last shot is 4.0 -> freeze 5.0, holding "4.00".
+    assert r"enable='gte(t\,5)'" in stage2
+    assert "text='4.00'" in stage2
+    # ...and stage 1's numbers must not appear in stage 2's graph.
+    assert "text='2.50'" not in stage2
+    assert r"gte(t\,3.5)" not in stage2
 
 
 def test_the_sprite_cache_is_shared_across_stages(tmp_path):
     """One cache dir for the run, so an unchanged state is drawn once."""
     calls, runner = _recorder()
     work = tmp_path / "work"
-    shooters = _shooters(tmp_path)
-    for bundle in shooters:
-        stage2 = _stage_bundle(2, tmp_path, bundle.label)
-        _audit(stage2.audit_path, [0.9, 1.4, 2.1])
-        bundle.stages_by_number[2] = stage2
-
     mp4_grid.render_grid_mp4(
-        shooters,
+        _two_stage_shooters(tmp_path),
         audio_label="Anders",
         output_path=tmp_path / "grid.mp4",
         canvas=CANVAS,
@@ -663,3 +796,10 @@ def test_the_sprite_cache_is_shared_across_stages(tmp_path):
     assert (work / "sprites-stage2.txt").exists()
     assert len(list((work / "sprites").glob("*.png"))) >= 1
     assert len(calls) == 3  # two stages + the stitch
+    # Each stage's command names its own list file, not the other's.
+    assert str(work / "sprites-stage1.txt") in calls[0]
+    assert str(work / "sprites-stage2.txt") in calls[1]
+    # ...and carries its own stage's freeze, so a slice pinned to a fixed
+    # stage number cannot hide behind a shared cache.
+    assert "text='2.50'" in _graph(calls[0])
+    assert "text='4.00'" in _graph(calls[1])
