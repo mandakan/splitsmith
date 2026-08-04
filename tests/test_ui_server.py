@@ -4042,6 +4042,29 @@ def test_calibrated_camera_models_endpoint_lists_shipped_models(tmp_path: Path) 
         assert isinstance(row["amp_floor"], float)
 
 
+def test_calibrated_camera_models_never_loads_the_ensemble_runtime(tmp_path: Path, monkeypatch) -> None:
+    """The camera list is a calibration read, not a model load (issue #667).
+
+    Two failure modes this pins down at once: the endpoint used to warm
+    several hundred MB of ONNX sessions on the first Ingest-screen fetch,
+    and a missing model artifact turned the camera list into a 500 even
+    though no model feeds the response. Stubbing the runtime loader to
+    blow up reproduces the missing-artifact case exactly.
+    """
+    from splitsmith.ui import server as server_module
+
+    client, _ = _seed_project_with_primary(tmp_path)
+
+    def _boom() -> None:
+        raise RuntimeError("ensemble runtime must not be built for a metadata read")
+
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", _boom)
+
+    resp = client.get("/api/calibrated-camera-models")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["models"], "shipped calibration should list at least one model"
+
+
 def test_shot_detect_endpoint_400_when_no_beep(tmp_path: Path) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
