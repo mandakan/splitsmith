@@ -1,8 +1,8 @@
 """Tests for trim.py.
 
-Unit tests mock the ffmpeg subprocess (per CLAUDE.md). An integration test runs
-real ffmpeg against the stage_sample.mp4 fixture and is gated by the
-``integration`` marker.
+Unit tests mock the ffmpeg subprocess (per CLAUDE.md). The integration tests run
+real ffmpeg against the clip ``tests.synthetic_media`` builds, and are gated by
+the ``integration`` marker.
 """
 
 from __future__ import annotations
@@ -295,10 +295,8 @@ def test_select_audit_encoder_explicit_override_when_unsupported(monkeypatch) ->
 
 
 @pytest.mark.integration
-def test_trim_integration_real_ffmpeg(tmp_path: Path, fixtures_dir: Path) -> None:
-    src = fixtures_dir / "stage_sample.mp4"
-    if not src.exists():
-        pytest.skip(f"sample video not available at {src}")
+def test_trim_integration_real_ffmpeg(tmp_path: Path, synthetic_source_video: Path) -> None:
+    src = synthetic_source_video
     dst = tmp_path / "trimmed.mp4"
 
     result = trim_video(src, dst, beep_time=4.853, stage_time=14.74, buffer_seconds=2.0)
@@ -327,11 +325,9 @@ def test_trim_integration_real_ffmpeg(tmp_path: Path, fixtures_dir: Path) -> Non
 
 
 @pytest.mark.integration
-def test_trim_audit_mode_emits_short_gop(tmp_path: Path, fixtures_dir: Path) -> None:
+def test_trim_audit_mode_emits_short_gop(tmp_path: Path, synthetic_source_video: Path) -> None:
     """End-to-end: audit mode produces a clip with keyframes every <= 0.5s."""
-    src = fixtures_dir / "stage_sample.mp4"
-    if not src.exists():
-        pytest.skip(f"sample video not available at {src}")
+    src = synthetic_source_video
     dst = tmp_path / "trimmed_audit.mp4"
 
     trim_video(

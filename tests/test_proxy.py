@@ -1,3 +1,4 @@
+import json
 import subprocess
 from pathlib import Path
 
@@ -57,8 +58,69 @@ def test_transcode_proxy_raises_on_ffmpeg_error():
 
 
 @pytest.mark.integration
-def test_transcode_proxy_produces_smaller_valid_mp4(tmp_path):
-    pytest.skip(
-        "No short video fixture available in tests/fixtures/ (only .wav files exist); "
-        "skipping real-ffmpeg integration test until a video fixture is added."
+def test_transcode_proxy_produces_smaller_valid_mp4(tmp_path, synthetic_source_video):
+    """Real ffmpeg: the proxy is 480p, keyframe-dense and faststart.
+
+    This test skipped unconditionally from the day it was written --
+    there was no video fixture for it to use. It now runs against the
+    clip ``tests.synthetic_media`` builds (#670).
+    """
+    out = tmp_path / "proxy.mp4"
+
+    transcode_proxy(
+        synthetic_source_video,
+        out,
+        ProxyConfig(),
+        ffmpeg_binary="ffmpeg",
     )
+
+    assert out.exists() and out.stat().st_size > 0
+    assert out.stat().st_size < synthetic_source_video.stat().st_size
+
+    streams = json.loads(
+        subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "stream=codec_type,codec_name,height",
+                "-of",
+                "json",
+                str(out),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    )["streams"]
+    video = next(s for s in streams if s["codec_type"] == "video")
+    audio = next(s for s in streams if s["codec_type"] == "audio")
+    assert video["codec_name"] == "h264"
+    assert video["height"] == ProxyConfig().height
+    assert audio["codec_name"] == "aac"
+
+    # The point of the proxy is scrubbing: keyframes every ``gop`` frames
+    # so a seek lands on one. Asserting the argv carries ``-g 15`` (the
+    # unit test above) does not prove ffmpeg honoured it.
+    frames = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "frame=key_frame",
+            "-of",
+            "csv=p=0",
+            str(out),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    keyframe_indices = [i for i, flag in enumerate(frames) if flag.strip() == "1"]
+    assert len(keyframe_indices) >= 2, f"expected a dense GOP, got {keyframe_indices}"
+    gaps = [b - a for a, b in zip(keyframe_indices, keyframe_indices[1:], strict=False)]
+    assert max(gaps) <= ProxyConfig().gop, f"keyframe gaps {gaps} exceed gop={ProxyConfig().gop}"

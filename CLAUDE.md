@@ -36,6 +36,12 @@ Personal tool for an IPSC competitor to extract shot splits from head-mounted ca
 - Detection tests assert within tolerance (e.g., ±15ms for shot times)
 - Mock ffmpeg in trim tests; don't actually shell out during unit tests
 - Integration tests can use real ffmpeg but mark them with `@pytest.mark.integration`
+- CI installs ffmpeg and runs the integration suite with
+  `SPLITSMITH_REQUIRE_INTEGRATION=1`, which turns any skip of an
+  `integration`-marked test into a failure. A test that needs media builds it
+  with `tests/synthetic_media.py` rather than depending on the gitignored
+  `stage_sample.mp4` — if a new integration test skips in CI, supply the input,
+  don't re-add the skip.
 
 ## Review practice
 

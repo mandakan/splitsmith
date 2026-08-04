@@ -3,7 +3,8 @@
 Unit tests don't shell out to ffprobe; they construct a synthetic VideoMetadata
 and a small list of Shot records, then parse the generated FCPXML to verify
 shape and frame-aligned marker placement. probe_video has a separate
-integration test against the real stage_sample.mp4 fixture.
+integration test that runs real ffprobe against the ffmpeg-built clip from
+``tests.synthetic_media``.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from splitsmith.fcpxml_gen import (
     probe_video,
     split_color_band,
 )
+from tests import synthetic_media
 
 
 def _shot(n: int, time_from_beep: float, split: float, peak: float = 0.5, conf: float = 0.8) -> Shot:
@@ -2372,13 +2374,17 @@ def test_title_index_out_of_range_raises(tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
-def test_probe_video_against_real_fixture(fixtures_dir: Path) -> None:
-    src = fixtures_dir / "stage_sample.mp4"
-    if not src.exists():
-        pytest.skip(f"sample video not available at {src}")
-    meta = probe_video(src)
-    assert meta.width == 3840
-    assert meta.height == 2160
-    assert meta.frame_rate_num == 30000
-    assert meta.frame_rate_den == 1001
-    assert meta.duration_seconds == pytest.approx(46.11, abs=0.5)
+def test_probe_video_against_real_media(synthetic_source_video: Path) -> None:
+    """Real ffprobe, real container.
+
+    Used to read the gitignored ``stage_sample.mp4`` and skip whenever it
+    was absent -- which was always, in CI (#670). The synthetic clip
+    keeps the part that matters here: a fractional NTSC frame rate that
+    must come back as the 30000/1001 pair rather than a rounded 30.
+    """
+    meta = probe_video(synthetic_source_video)
+    assert meta.width == synthetic_media.SYNTHETIC_WIDTH
+    assert meta.height == synthetic_media.SYNTHETIC_HEIGHT
+    assert meta.frame_rate_num == synthetic_media.SYNTHETIC_FPS_NUM
+    assert meta.frame_rate_den == synthetic_media.SYNTHETIC_FPS_DEN
+    assert meta.duration_seconds == pytest.approx(synthetic_media.SYNTHETIC_DURATION_S, abs=0.5)
