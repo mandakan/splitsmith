@@ -108,12 +108,18 @@ def test_valid_json_that_is_not_an_object_degrades_and_warns(tmp_path, caplog, p
     assert any("stage1.json" in r.getMessage() for r in caplog.records)
 
 
-def test_shot_numbers_are_one_based_and_ordered(tmp_path):
+def test_shots_come_back_in_time_order(tmp_path):
+    """Ordered by time, whatever order the audit's rows were in.
+
+    ``TileShot`` carries no shot number: the sequence is the ordering, and
+    a stored ``index + 1`` would disagree with the audit's own
+    ``shot_number`` on exactly this input.
+    """
     audit = _write_audit(tmp_path / "ann", 1, [1700, 1200, 1450])
     data = overlay_data.load_overlay_data([_bundle(tmp_path, "ann", audit=audit)])
     tile = data[("ann", 1)]
-    assert [s.number for s in tile.shots] == [1, 2, 3]
-    assert [s.time_from_beep for s in tile.shots] == sorted(s.time_from_beep for s in tile.shots)
+    assert [round(s.time_from_beep, 3) for s in tile.shots] == [1.2, 1.45, 1.7]
+    assert not hasattr(tile.shots[0], "number")
 
 
 def test_missing_audit_degrades_to_no_shots(tmp_path):

@@ -30,9 +30,15 @@ class TileShot:
     :attr:`CompareStageBundle.beep_offset_in_clip` -- that field converts
     to *clip-local* time, which is a different origin, and the grid's own
     head pad is applied later by the sprite builder.
+
+    There is deliberately no shot number here. The sequence is ordered by
+    time and the overlay counts what has been fired, so an index over
+    this tuple is all any caller needs. A stored number would have been
+    that index plus one, which disagrees with the audit's own
+    ``shot_number`` on exactly the input that motivated re-deriving the
+    splits -- an audit whose row order is not its time order.
     """
 
-    number: int
     time_from_beep: float
     split: float
 
@@ -159,12 +165,12 @@ def _load_shots(stage: CompareStageBundle) -> tuple[TileShot, ...]:
     ordered = sorted(engine_shots, key=lambda s: s.time_from_beep)
     shots: list[TileShot] = []
     previous: float | None = None
-    for index, shot in enumerate(ordered):
+    for shot in ordered:
         # Shot 1's split is the draw; every later split is the gap from
         # the shot before it in time order.
         split = shot.time_from_beep if previous is None else shot.time_from_beep - previous
         previous = shot.time_from_beep
-        shots.append(TileShot(number=index + 1, time_from_beep=shot.time_from_beep, split=split))
+        shots.append(TileShot(time_from_beep=shot.time_from_beep, split=split))
     return tuple(shots)
 
 

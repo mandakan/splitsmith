@@ -215,8 +215,13 @@ def _panels_at(
                 present=placement.present,
                 shots_fired=len(shots),
                 expected_shots=tile.stage_rounds.expected if tile.stage_rounds else None,
-                # The audit's own split, never re-derived from the times:
-                # the two can legitimately disagree and the audit wins.
+                # ``overlay_data`` re-derives every split over the
+                # time-sorted sequence rather than taking the audit's own,
+                # because an audit whose row order is not its time order
+                # yields splits between non-adjacent shots -- negative
+                # ones included, and this is the number a viewer reads off
+                # the screen. Treat ``split`` as given; do not recompute
+                # it here from ``time_from_beep``.
                 last_split=shots[-1].split if shots else None,
                 rank=ranks.get(placement.label),
                 delta_to_leader=deltas.get(placement.label),

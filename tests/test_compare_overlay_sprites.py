@@ -12,8 +12,8 @@ DURATION = 10.0
 def _tile(label: str, times: list[float], *, expected: int | None = None) -> TileStageData:
     shots = []
     prev = 0.0
-    for i, t in enumerate(times):
-        shots.append(TileShot(number=i + 1, time_from_beep=t, split=t - prev))
+    for t in times:
+        shots.append(TileShot(time_from_beep=t, split=t - prev))
         prev = t
     rounds = None
     if expected is not None:
