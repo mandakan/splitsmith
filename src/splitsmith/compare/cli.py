@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import tempfile
 from pathlib import Path
 
 import typer
@@ -12,7 +14,7 @@ from ..match_model import Match, is_match_folder
 from ..ui.match_exports import _slugify
 from . import emitter as emitter_mod
 from . import manifest as manifest_mod
-from . import project_loader
+from . import mp4_grid, project_loader
 
 compare_app = typer.Typer(
     name="compare",
@@ -65,6 +67,15 @@ def export(
             "shooter's persisted compare_camera."
         ),
     ),
+    output_format: str = typer.Option(
+        "fcpxml",
+        "--format",
+        help=(
+            "Output kind: 'fcpxml' (Final Cut timeline, the default) or "
+            "'mp4' (rendered grid video). MP4 requires SOURCE to be a "
+            "merged match folder."
+        ),
+    ),
 ) -> None:
     """Render a multi-shooter comparison FCPXML.
 
@@ -82,6 +93,15 @@ def export(
     flag is the more recent statement of intent -- overriding is the
     contract, not an anomaly worth warning about.
     """
+    if output_format not in ("fcpxml", "mp4"):
+        console.print(f"[red]Error:[/] --format must be 'fcpxml' or 'mp4', got {output_format!r}.")
+        raise typer.Exit(code=2)
+    if output_format == "mp4" and not (source.is_dir() and is_match_folder(source)):
+        console.print(
+            "[red]Error:[/] --format mp4 requires SOURCE to be a merged match folder, not a manifest."
+        )
+        raise typer.Exit(code=2)
+
     if source.is_dir() and is_match_folder(source):
         if audio_from is None:
             console.print("[red]Error:[/] --audio-from is required when SOURCE is a match folder.")
@@ -94,7 +114,13 @@ def export(
         except ValueError as exc:
             console.print(f"[red]Error:[/] {exc}")
             raise typer.Exit(code=2) from exc
-        _export_from_match(source, audio_from=audio_from, output=output, cameras=cameras)
+        _export_from_match(
+            source,
+            audio_from=audio_from,
+            output=output,
+            cameras=cameras,
+            output_format=output_format,
+        )
         return
 
     if source.is_dir():
@@ -217,9 +243,14 @@ def _resolve_output_override(output: Path) -> Path:
 
 
 def _export_from_match(
-    match_root: Path, *, audio_from: str, output: Path, cameras: dict[str, str] | None = None
+    match_root: Path,
+    *,
+    audio_from: str,
+    output: Path,
+    cameras: dict[str, str] | None = None,
+    output_format: str = "fcpxml",
 ) -> None:
-    """Render the compare FCPXML directly from a merged Match."""
+    """Render the compare export directly from a merged Match."""
     match = Match.load(match_root)
     if not match.shooters:
         console.print(f"[red]Error:[/] match {match_root} has no shooters.")
@@ -278,6 +309,10 @@ def _export_from_match(
 
     _warn_missing_trims(bundles)
 
+    if output_format == "mp4":
+        _render_grid_mp4(bundles, audio_label=audio_label, output=output)
+        return
+
     # Synthesize a manifest the emitter can consume. ``layout_2up`` matches
     # today's manifest default; the smallest-fits grid kicks in at 3+ shooters
     # so the choice only matters when N=2.
@@ -289,6 +324,74 @@ def _export_from_match(
     )
     emitter_mod.emit_compare_fcpxml(manifest=synthetic, shooters=bundles, output_path=output)
     console.print(f"[green]Wrote[/] {output}")
+
+
+def _render_grid_mp4(
+    bundles: list[project_loader.CompareShooterBundle], *, audio_label: str, output: Path
+) -> None:
+    """Render the grid straight to MP4, owning the scratch work dir.
+
+    ``render_grid_mp4`` leaves its per-stage segments on disk by design --
+    they're what a failed stitch gets debugged from -- so a caller that
+    wants them gone has to supply a directory it owns. On a 12-stage 4K
+    match those segments are many gigabytes; a CLI run has no use for them
+    once the concat succeeds (or fails), so this always removes them,
+    success or not. The temp dir is created beside the output rather than
+    under the system tmp dir for the same reason ``render_grid_mp4``'s own
+    default lives beside the output: a match's worth of 4K segments should
+    not have to fit on whatever filesystem backs /tmp.
+
+    ``render_grid_mp4`` has no progress callback, so progress is reported
+    by wrapping its ``runner`` hook (already part of its public signature,
+    and already how its own tests inject a fake ffmpeg) rather than
+    reaching into the engine to add one. ``build_stage_plans`` is called
+    once up front -- pure planning, no ffmpeg -- purely to learn the stage
+    count and names for the "N of M" messages; ``render_grid_mp4`` plans
+    again internally with the same inputs and so sees the same stages.
+    """
+    plans = mp4_grid.build_stage_plans(
+        bundles,
+        audio_label=audio_label,
+        head_pad_seconds=1.0,
+        tail_pad_seconds=0.5,
+        layout_2up="horizontal",
+    )
+    total = len(plans)
+    progress = {"calls": 0}
+
+    def _reporting_runner(cmd: list[str], **kwargs: object) -> subprocess.CompletedProcess:
+        index = progress["calls"]
+        progress["calls"] += 1
+        if index < total:
+            plan = plans[index]
+            console.print(
+                f"[cyan]Rendering[/] stage {plan.stage_number} ({plan.stage_name}) "
+                f"-- {index + 1} of {total}..."
+            )
+        else:
+            console.print(f"[cyan]Stitching[/] {total} stage(s) into {output}...")
+        return subprocess.run(cmd, **kwargs)  # type: ignore[arg-type]
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=output.parent, prefix=".compare-grid-work-") as tmp:
+        try:
+            result = mp4_grid.render_grid_mp4(
+                bundles,
+                audio_label=audio_label,
+                output_path=output,
+                runner=_reporting_runner,
+                work_dir=Path(tmp),
+            )
+        except mp4_grid.GridRenderError as exc:
+            console.print(f"[red]Error:[/] {exc}")
+            raise typer.Exit(code=1) from exc
+
+    for outcome in result.failed:
+        console.print(
+            f"[yellow]Stage {outcome.stage_number} ({outcome.stage_name}) failed:[/] {outcome.error}"
+        )
+    rendered = len(result.stages) - len(result.failed)
+    console.print(f"[green]Wrote[/] {output} ({rendered}/{len(result.stages)} stages)")
 
 
 def _resolve_shooter_slug(match: Match, match_root: Path, name_or_slug: str) -> str | None:
