@@ -24,6 +24,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..runtime import runtime
 from .layout import Layout2Up, choose_grid, grid_shape
 from .project_loader import CompareShooterBundle
 
@@ -495,3 +496,182 @@ def build_concat_command(
         args += list(_disposition_args(audio_labels, list(audio_labels).index(default_audio_label)))
     args += ["-movflags", "+faststart", str(output_path)]
     return tuple(args)
+
+
+# --- render driver --------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class StageOutcome:
+    """What happened to one stage of a grid render."""
+
+    stage_number: int
+    stage_name: str
+    ok: bool
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class GridRenderResult:
+    """Result of a whole grid render, including partial failures."""
+
+    output_path: Path
+    stages: tuple[StageOutcome, ...]
+
+    @property
+    def failed(self) -> tuple[StageOutcome, ...]:
+        return tuple(s for s in self.stages if not s.ok)
+
+
+def _run_ffmpeg(cmd: tuple[str, ...], *, runner: Runner) -> subprocess.CompletedProcess:
+    """Invoke ffmpeg, turning a missing binary into a clear error.
+
+    A binary that isn't there is not a per-stage failure -- every stage
+    would fail the same way -- so it stops the run rather than being
+    recorded N times and reported as "every stage failed".
+    """
+    try:
+        return runner(list(cmd), capture_output=True)
+    except FileNotFoundError as exc:
+        raise GridRenderError(f"ffmpeg binary not found: {cmd[0]}") from exc
+
+
+def _stderr_text(completed: subprocess.CompletedProcess) -> str:
+    """ffmpeg's complaint, trimmed to its last 2000 useful characters.
+
+    Decoded defensively: ``capture_output`` without ``text`` yields
+    bytes, but a caller-supplied runner may hand back either.
+    """
+    raw = completed.stderr or completed.stdout or b""
+    detail = raw.decode(errors="replace") if isinstance(raw, bytes) else str(raw)
+    return detail.strip()[-2000:] or "(no output)"
+
+
+def render_grid_mp4(
+    shooters: Sequence[CompareShooterBundle],
+    *,
+    audio_label: str,
+    output_path: Path,
+    canvas: GridCanvas | None = None,
+    head_pad_seconds: float = 1.0,
+    tail_pad_seconds: float = 0.5,
+    layout_2up: Layout2Up = "horizontal",
+    ffmpeg_binary: str | None = None,
+    runner: Runner = subprocess.run,
+    work_dir: Path | None = None,
+) -> GridRenderResult:
+    """Render every stage as a grid, then stitch them into one MP4.
+
+    A stage whose ffmpeg call fails is recorded and skipped rather than
+    ending the run: a full-match grid re-encode is far too long to lose
+    to one bad stage. The stitch runs over whatever succeeded, and the
+    caller reports failures from :attr:`GridRenderResult.failed`. Only
+    when *every* stage fails does this raise -- there is nothing to
+    concatenate and a zero-byte output would be worse than an error.
+
+    ``ffmpeg_binary`` defaults to :func:`splitsmith.runtime.runtime`'s
+    resolution rather than the literal ``"ffmpeg"``: the binary is not
+    on PATH in a packaged app, and ``SPLITSMITH_FFMPEG`` has to win.
+
+    ``work_dir`` holds the per-stage segments and the concat list. It
+    defaults to a directory beside the output -- same filesystem, so a
+    match's worth of 4K segments doesn't have to fit in ``/tmp`` -- and
+    is *not* cleaned up: the segments are what a failed stitch is
+    debugged from, and skipping cleanup keeps a successful render from
+    deleting a caller's own directory. Callers that want it gone should
+    pass a path they own.
+    """
+    canvas = canvas or GridCanvas()
+    binary = ffmpeg_binary or runtime().ffmpeg_binary
+    plans = build_stage_plans(
+        shooters,
+        audio_label=audio_label,
+        head_pad_seconds=head_pad_seconds,
+        tail_pad_seconds=tail_pad_seconds,
+        layout_2up=layout_2up,
+    )
+    if not plans:
+        raise GridRenderError("no stages to render -- no shooter has an exported trim")
+
+    # ``concat -c copy`` rejects segments whose stream layout differs, and
+    # skipping a failed stage means the stitch list is not simply "all of
+    # them". Every plan from ``build_stage_plans`` carries one tile per
+    # label, so this holds today; check it anyway rather than discover a
+    # future planner change at the stitch, after the whole match has been
+    # encoded.
+    labels = tuple(tile.label for tile in plans[0].tiles)
+    for plan in plans[1:]:
+        other = tuple(tile.label for tile in plan.tiles)
+        if other != labels:
+            raise GridRenderError(
+                f"stage {plan.stage_number} has a different stream layout to stage "
+                f"{plans[0].stage_number} ({', '.join(other)} vs {', '.join(labels)}); "
+                "concat -c copy cannot stitch those together"
+            )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    work = work_dir or output_path.parent / ".compare-grid-work"
+    work.mkdir(parents=True, exist_ok=True)
+
+    outcomes: list[StageOutcome] = []
+    segments: list[Path] = []
+    for plan in plans:
+        segment = work / f"stage{plan.stage_number}.mp4"
+        cmd = build_stage_command(plan, canvas=canvas, output_path=segment, ffmpeg_binary=binary)
+        completed = _run_ffmpeg(cmd, runner=runner)
+        if completed.returncode != 0:
+            outcomes.append(
+                StageOutcome(
+                    stage_number=plan.stage_number,
+                    stage_name=plan.stage_name,
+                    ok=False,
+                    error=_stderr_text(completed),
+                )
+            )
+            continue
+        segments.append(segment)
+        outcomes.append(StageOutcome(stage_number=plan.stage_number, stage_name=plan.stage_name, ok=True))
+
+    if not segments:
+        raise GridRenderError(
+            f"every stage failed to render ({len(outcomes)} attempted); nothing to stitch. "
+            f"Last error: {outcomes[-1].error}"
+        )
+
+    list_path = work / "concat.txt"
+    list_path.write_text(
+        "".join(f"file '{segment.resolve().as_posix()}'\n" for segment in segments),
+        encoding="utf-8",
+    )
+    # The labels and the default flag have to be restated here: stream
+    # copy does not carry them across the concat demuxer, and the muxer's
+    # own default lands on the first audio track -- the alphabetically
+    # first shooter, not the one the caller chose.
+    concat_cmd = build_concat_command(
+        list_path=list_path,
+        output_path=output_path,
+        ffmpeg_binary=binary,
+        audio_labels=labels,
+        default_audio_label=plans[0].audio_label,
+    )
+    completed = _run_ffmpeg(concat_cmd, runner=runner)
+    if completed.returncode != 0:
+        raise GridRenderError(f"concat stitch failed: {_stderr_text(completed)}")
+
+    return GridRenderResult(output_path=output_path, stages=tuple(outcomes))
+
+
+__all__ = [
+    "DEFAULT_CANVAS_HEIGHT",
+    "DEFAULT_CANVAS_WIDTH",
+    "GridCanvas",
+    "GridRenderError",
+    "GridRenderResult",
+    "GridStagePlan",
+    "GridTile",
+    "StageOutcome",
+    "build_concat_command",
+    "build_stage_command",
+    "build_stage_plans",
+    "render_grid_mp4",
+]
