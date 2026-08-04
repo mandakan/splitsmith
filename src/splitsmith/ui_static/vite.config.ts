@@ -1,5 +1,6 @@
 import path from "node:path";
-import { defineConfig } from "vite";
+/// <reference types="vitest/config" />
+import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 
@@ -25,5 +26,13 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: true,
+  },
+  test: {
+    // Component tests (MatchExport.test.tsx) need a DOM; plain-logic
+    // suites (matchExportModel.test.ts, api.compareGrid.test.ts, ...)
+    // run fine under jsdom too, so one environment covers both rather
+    // than splitting test files across a node/jsdom pool.
+    environment: "jsdom",
+    setupFiles: ["./src/testSetup.ts"],
   },
 });

@@ -24,13 +24,11 @@
 import {
   Check,
   CheckCircle2,
-  ChevronDown,
   Download,
   ExternalLink,
   FileBarChart,
   FileText,
   Film,
-  Loader2,
   Scissors,
 } from "lucide-react";
 import {
@@ -44,7 +42,12 @@ import {
 
 import { Navigate, useParams } from "react-router-dom";
 
-import { Button } from "@/components/ui/button";
+import {
+  LedCtaButton,
+  Section,
+  SelectField,
+  StageChip,
+} from "@/components/export/primitives";
 import {
   ApiError,
   api,
@@ -655,17 +658,22 @@ function ExportInner({ slug }: { slug: string }) {
               </div>
             )}
             <div className="flex flex-wrap gap-2">
-              {stages.map((s) => (
-                <StageChip
-                  key={s.stage_number}
-                  stage={s}
-                  selected={selection.has(s.stage_number)}
-                  eligible={eligibleSet.has(s.stage_number)}
-                  sourceMissing={sourceMissingSet.has(s.stage_number)}
-                  trimsOnly={trimsOnly}
-                  onToggle={() => toggleStage(s.stage_number)}
-                />
-              ))}
+              {stages.map((s) => {
+                const eligible = eligibleSet.has(s.stage_number);
+                const sourceMissing = sourceMissingSet.has(s.stage_number);
+                return (
+                  <StageChip
+                    key={s.stage_number}
+                    stageNumber={s.stage_number}
+                    stageName={s.stage_name}
+                    selected={selection.has(s.stage_number)}
+                    eligible={eligible}
+                    sourceMissing={sourceMissing}
+                    title={stageChipTitle(s, eligible, sourceMissing, trimsOnly)}
+                    onToggle={() => toggleStage(s.stage_number)}
+                  />
+                );
+              })}
             </div>
           </Section>
 
@@ -974,27 +982,14 @@ function ExportInner({ slug }: { slug: string }) {
               </div>
             </div>
             <div className="border-t border-rule px-5 py-4">
-              <Button
-                type="button"
+              <LedCtaButton
+                busy={busy}
+                icon={<Check className="size-3.5" strokeWidth={3} />}
+                label={trimsOnly ? "Export trims" : "Export bundle"}
+                busyLabel={trimsOnly ? "Queueing..." : "Exporting..."}
                 onClick={() => void submitExport()}
                 disabled={!canExport}
-                className="w-full bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
-              >
-                {busy ? (
-                  <Loader2 className="size-3.5 animate-spin" />
-                ) : (
-                  <Check className="size-3.5" strokeWidth={3} />
-                )}
-                <span className="font-display uppercase tracking-[0.08em]">
-                  {busy
-                    ? trimsOnly
-                      ? "Queueing..."
-                      : "Exporting..."
-                    : trimsOnly
-                      ? "Export trims"
-                      : "Export bundle"}
-                </span>
-              </Button>
+              />
               {busy && job?.message && (
                 <div className="mt-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
                   {job.message}
@@ -1089,37 +1084,6 @@ function ResultPanel({
 /* -------------------------------------------------------------------------- */
 /* Section primitives                                                         */
 /* -------------------------------------------------------------------------- */
-
-function Section({
-  number,
-  title,
-  help,
-  children,
-}: {
-  number: number;
-  title: string;
-  help?: string;
-  children: ReactNode;
-}) {
-  return (
-    <section className="overflow-hidden rounded-2xl border border-rule-strong bg-gradient-to-b from-surface to-surface-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
-      <div className="flex items-start gap-3 border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3.5">
-        <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-led-deep bg-led/10 font-mono text-[0.6875rem] font-bold tabular-nums text-led">
-          {pad2(number)}
-        </span>
-        <div className="min-w-0">
-          <div className="font-display text-sm font-bold uppercase tracking-[0.06em] text-ink">
-            {title}
-          </div>
-          {help && (
-            <div className="mt-0.5 text-[0.75rem] text-muted">{help}</div>
-          )}
-        </div>
-      </div>
-      <div className="p-5">{children}</div>
-    </section>
-  );
-}
 
 function Kicker({ className, children }: { className?: string; children: ReactNode }) {
   return (
@@ -1248,68 +1212,21 @@ function PresetCard({
   );
 }
 
-function StageChip({
-  stage,
-  selected,
-  eligible,
-  sourceMissing,
-  trimsOnly,
-  onToggle,
-}: {
-  stage: StageExportStatus;
-  selected: boolean;
-  eligible: boolean;
-  sourceMissing: boolean;
-  trimsOnly: boolean;
-  onToggle: () => void;
-}) {
-  let title: string;
-  if (eligible) {
-    title = `Stage ${stage.stage_number} -- ${stage.stage_name}`;
-  } else if (sourceMissing) {
-    title = "Source video offline -- reconnect the drive and reload.";
-  } else if (stage.skipped) {
-    title = "Stage skipped.";
-  } else if (trimsOnly) {
-    title = "Stage needs a beep and a stage time before it can be trimmed.";
-  } else {
-    title = "Stage not audited yet.";
-  }
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      disabled={!eligible}
-      aria-pressed={selected}
-      title={title}
-      className={cn(
-        "inline-flex min-h-9 items-center gap-2 rounded-md border px-3 py-1.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.06em] transition-all",
-        !eligible &&
-          !sourceMissing &&
-          "cursor-not-allowed border-rule bg-surface-2 text-subtle opacity-50",
-        !eligible &&
-          sourceMissing &&
-          "cursor-not-allowed border-live/40 bg-live/10 text-live",
-        eligible &&
-          selected &&
-          "border-led bg-led/10 text-ink shadow-[0_0_0_1px_var(--color-led-deep),0_0_10px_var(--color-led-glow)]",
-        eligible &&
-          !selected &&
-          "border-rule-strong bg-surface-3 text-muted hover:bg-surface-4 hover:text-ink",
-      )}
-    >
-      <span className="font-mono tabular-nums">
-        {pad2(stage.stage_number)}
-      </span>
-      <span>{stage.stage_name}</span>
-      {sourceMissing && (
-        <span
-          aria-hidden
-          className="ml-1 inline-block size-1.5 rounded-full bg-live shadow-[0_0_6px_var(--color-live-glow)]"
-        />
-      )}
-    </button>
-  );
+/** Tooltip text for one stage chip in Section 2. Mirrors the disabled-
+ *  reason ladder the chip used to compute internally before `StageChip`
+ *  moved to `components/export/primitives.tsx` and became agnostic to
+ *  this page's `StageExportStatus` shape. */
+function stageChipTitle(
+  stage: StageExportStatus,
+  eligible: boolean,
+  sourceMissing: boolean,
+  trimsOnly: boolean,
+): string {
+  if (eligible) return `Stage ${stage.stage_number} -- ${stage.stage_name}`;
+  if (sourceMissing) return "Source video offline -- reconnect the drive and reload.";
+  if (stage.skipped) return "Stage skipped.";
+  if (trimsOnly) return "Stage needs a beep and a stage time before it can be trimmed.";
+  return "Stage not audited yet.";
 }
 
 function stageSectionHelp(
@@ -1364,43 +1281,6 @@ function NumInput({
         }}
         className="rounded-md border border-rule bg-surface-3 px-3 py-2 font-mono text-sm tabular-nums text-ink outline-none focus:border-led focus:bg-bg-glow focus:shadow-[0_0_0_3px_var(--color-led-tint)]"
       />
-    </label>
-  );
-}
-
-function SelectField({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-}) {
-  return (
-    <label className="flex flex-col gap-1.5">
-      <span className="font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-muted">
-        {label}
-      </span>
-      <div className="relative">
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="w-full appearance-none rounded-md border border-rule bg-surface-3 px-3 py-2 pr-8 font-mono text-sm text-ink outline-none focus:border-led"
-        >
-          {options.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-        <ChevronDown
-          aria-hidden
-          className="pointer-events-none absolute right-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted"
-        />
-      </div>
     </label>
   );
 }
@@ -1493,10 +1373,6 @@ function SummaryStat({
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
 /* -------------------------------------------------------------------------- */
-
-function pad2(n: number): string {
-  return n.toString().padStart(2, "0");
-}
 
 function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return "0:00";
