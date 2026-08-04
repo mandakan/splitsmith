@@ -443,22 +443,68 @@ consume them. The grid path needs its own rendering of these concepts,
 but the IR vocabulary and the FCPXML semantics exist -- diverging from
 them would give the two exporters different ideas of what a title is.
 
-**Scoring data has two sources with different reach.** The offline
-scoreboard JSON (`examples/tallmilan-2026.json`) carries
-`competitor_id`, `name`, `division`, `club`, `squad` and per-stage
-`stage_number`, `stage_name`, `time_seconds`, `scorecard_updated_at` --
-**time only, no points and no hit factor**. Hit factor, penalties and
-percentage-of-winner live in the SSI Scoreboard MCP. A summary screen
-must therefore degrade honestly: render what is present, and never imply
-a number it does not have. Manually-timed stages have neither a
-scorecard nor a `scorecard_updated_at`, and that case already exists in
-the codebase (a placeholder timestamp is fed to `StageData`).
+**The scoring data is already on disk.** `StageEntry.scorecard`
+(`ui/project.py`) persists a full `StageScorecard` per shooter per
+stage -- `hit_factor`, `stage_points`, `stage_pct`, `alphas`,
+`charlies`, `deltas`, `misses`, `no_shoots`, `procedurals`, `dq` --
+populated by `merge_stage_times` from the SSI Scoreboard, plus
+`stage_rounds` for round counts. This matters because **the renderer is
+offline batch and must not call a network service mid-render**: the data
+lives in the same `MatchProject` the grid already loads.
+
+(The example JSON under `examples/` carries times only. That is the
+export format, not what a project stores -- do not design against it.)
+
+Degradation is therefore narrow but real: `scorecard` is `None` for
+placeholder stages and for projects imported before the field existed,
+and manually-timed stages carry `time_seconds_manual` with no scorecard.
+A summary must render what is present and never imply a number it does
+not have.
 
 **Ranking must not be invented.** Per the scoreboard tooling's own
 rules, competitors are never ranked by raw points -- points are
-meaningless across stages and divisions. Any comparative figure on a
-summary screen is hit-factor percentage against the stage winner, or it
-is not shown.
+meaningless across stages and divisions. The correct field,
+`stage_pct`, is already persisted, so the rule costs nothing to honour.
+Do not reach for `stage_points` because it is the more obvious-sounding
+name.
+
+### Where the two overlays live in the frame
+
+They coexist, so they are one design, not two:
+
+- **During a stage:** the live per-tile overlay -- shot counter, last
+  split, running clock -- draws on top of each tile, per phase 1.
+- **After a stage:** each tile **freezes on its last frame, blurred and
+  dimmed**, and that shooter's stage summary draws over their own cell.
+  The grid layout persists so each shooter's numbers land where the
+  viewer has been watching them. Held for a configurable duration.
+- **End summary:** the same treatment with match-level figures.
+
+Two consequences fall out of the frozen-tile approach:
+
+- **The blur is computed once, not per frame.** The tile is a still, so
+  the blurred, dimmed frame is rendered once per stage and held --
+  the same economy as the pre-rendered sprites. Applying `gblur` to
+  every frame of a multi-second hold at 4K would cost orders of
+  magnitude more for an identical result.
+- **The hold extends the stage segment rather than adding a new one.**
+  The summary lives inside the stage's own segment, so the stitch stays
+  dumb and the stream-layout invariant is untouched. The duration model
+  grows by the hold; `build_stage_plans` owns that.
+
+**The live overlay stops at the freeze and hands off.** It does not
+persist into the hold -- a frozen shot counter beside a stopped clock is
+what the filter graph would do by default, and it reads as a stall
+rather than a conclusion. At the freeze the live overlay ends and the
+summary takes its place, presenting that shooter's splits statistics for
+the stage.
+
+That handoff has a useful consequence for the sprite architecture: the
+live overlay's sprite sequence terminates at the last shot event, and
+the summary is a **single additional static sprite** held for the
+configured duration. It is not a new kind of thing -- it is one more
+state in a sequence that is already a step function, so it costs one
+PIL draw per stage.
 
 ### Phase 3 -- hosted mode + full Export page
 
