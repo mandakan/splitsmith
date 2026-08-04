@@ -34,12 +34,26 @@ What is missing:
 
 ## Priority
 
-**The MP4 grid is priority 0 and needs to produce a video today.**
-Everything else in this spec is sequenced behind it.
+**The MP4 grid is priority 0 and needs to produce a video today,
+drivable from the local-mode UI.** Everything else is sequenced behind
+it.
 
-The bare grid -- decode N trims, scale, `xstack`, map audio, encode --
-has no dependency on sprites, overlays, transitions or any UI. It ships
-first, on its own, driven from the CLI. See Sequencing.
+Phase 0 is the bare grid -- decode N trims, scale, `xstack`, map audio,
+encode -- plus the minimum UI to trigger it in local mode. It has no
+dependency on sprites, overlays or transitions.
+
+Explicitly deferred out of phase 0:
+
+- **Hosted mode.** No `Storage` writes, no presigned URLs, no download
+  deliverables, no export history. The new surface is wrapped in
+  `DesktopGate`, the same way `Compare` already is. Hosted support is a
+  later phase.
+- **FCPXML from the new surface.** Phase 0 renders MP4 only. The
+  existing `splitsmith compare export` FCPXML path keeps working from
+  the CLI exactly as it does today.
+- **The full two-axis Export page.** Phase 0 adds a match-scoped page
+  carrying only the grid flow; the existing shooter-scoped
+  `export/:slug` page is untouched.
 
 Everything layered on top of the bare grid is **optional and defaults
 to off**: splits overlay, transitions, title cards. A grid render must
@@ -343,21 +357,32 @@ while the test passed. The integration test probes the rendered file.
 
 ## Sequencing
 
-### Phase 0 -- bare grid MP4 (today)
+### Phase 0 -- bare grid MP4, CLI + local-mode UI (today)
 
-The smallest thing that produces a watchable video. No sprites, no PIL,
-no overlay, no transitions, no UI.
+The smallest thing that produces a watchable video from the app. No
+sprites, no PIL, no overlay, no transitions, no hosted mode, no FCPXML.
 
 1. `compare/mp4_grid.py`: per-stage ffmpeg call (N trims `-ss`-aligned,
    `scale`, `xstack`, N audio `-map`s, 4K canvas) plus the `concat`
    stitch. Pure command builders with an injectable runner.
 2. `splitsmith compare export` gains `--format mp4`, reusing the
    existing match-folder source, `--audio-from` and `--camera` flags
-   unchanged.
-3. Command-construction unit tests + one real 4-shooter render.
+   unchanged. At this point the engine is verifiable without any UI.
+3. Match-scoped endpoint, local mode only: takes stage numbers, the
+   audio-source slug, per-shooter cameras and the canvas size; runs
+   through the existing job queue; reports missing trims by
+   shooter/stage rather than silently emitting filler.
+4. `match/:matchId/export` stops redirecting to a default shooter and
+   becomes a real match-scoped page, wrapped in `DesktopGate`. It
+   carries only the grid-MP4 flow: shooter list with the audio source
+   picked, stage chips, canvas size, render button, job progress,
+   reveal-on-disk. `export/:slug` continues to resolve to the existing
+   shooter page, unchanged.
+5. Command-construction unit tests + one real 4-shooter render.
 
 Phase 0 is independently shippable and is the deliverable that matters
-today.
+today. Step 4 is the redesign's foundation, not scaffolding: later
+phases fold the shooter export into this page rather than replacing it.
 
 ### Phase 1 -- splits overlay (opt-in)
 
@@ -373,8 +398,11 @@ today.
    seams, which phase 0's `-c copy` stitch deliberately avoids -- so
    they are a separate code path, not a parameter on the existing one.
 
-### Phase 3 -- UI
+### Phase 3 -- hosted mode + full Export page
 
-8. Match-scoped export endpoint + job wiring.
-9. Export page rebuild against the now-existing capability surface.
-10. Integration test covering the full path.
+8. Hosted-mode support for the match-scoped endpoint: `Storage` writes,
+   download deliverables, removal of the `DesktopGate`.
+9. Fold the shooter-scoped export into the match-scoped page and
+   complete the two-axis restructure described above.
+10. FCPXML as a peer output on the new surface.
+11. Integration test covering the full path.
