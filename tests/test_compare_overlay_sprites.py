@@ -69,9 +69,13 @@ def test_durations_sum_to_the_segment_duration():
 
 
 def test_no_state_is_zero_length():
-    data = {"ann": _tile("ann", [1.0]), "bo": _tile("bo", [1.0004])}
+    # ann's second shot lands exactly on the segment end (HEAD_PAD + 9.0 ==
+    # DURATION). Admitting a boundary event there would open a state with
+    # nowhere left to run, so the drop must be strict: at the end counts as
+    # past it. bo covers the sub-millisecond neighbour of ann's first shot.
+    data = {"ann": _tile("ann", [1.0, 9.0]), "bo": _tile("bo", [1.0004])}
     states = _states(_placements("ann", "bo"), data)
-    assert all(s.duration_seconds > 0 for s in states)
+    assert [(s.start_seconds, s.duration_seconds) for s in states if s.duration_seconds <= 0] == []
 
 
 def test_simultaneous_shots_collapse_to_one_state():
@@ -146,6 +150,35 @@ def test_delta_compares_the_same_shot_number():
     last = states[-1]
     assert _panel(last, "ann").delta_to_leader == pytest.approx(0.0)
     assert _panel(last, "cy").delta_to_leader == pytest.approx(0.2)
+
+
+def test_delta_is_negative_for_a_tile_behind_but_faster_to_its_own_shot():
+    # cy is a shot behind ann, so cy ranks second -- but cy's shot 1 came at
+    # 0.9s against ann's 1.0s, so like-for-like cy is 0.1s AHEAD. The delta
+    # is signed and genuinely goes negative; a renderer must not hardcode a
+    # leading "+" or clamp this to zero.
+    data = {"ann": _tile("ann", [1.0, 1.5]), "cy": _tile("cy", [0.9])}
+    states = _states(_placements("ann", "cy"), data)
+    last = states[-1]
+    assert _panel(last, "cy").rank == 2
+    assert _panel(last, "cy").delta_to_leader == pytest.approx(-0.1)
+    assert _panel(last, "ann").delta_to_leader == pytest.approx(0.0)
+
+
+def test_shots_a_millisecond_apart_stay_separate_states():
+    # 1.000 and 1.001 are adjacent millisecond slots, not the same one.
+    # Scaling the key to an int bucket truncates them together.
+    data = {"ann": _tile("ann", [1.0]), "bo": _tile("bo", [1.001])}
+    states = _states(_placements("ann", "bo"), data)
+    assert [round(s.start_seconds, 3) for s in states] == [0.0, 2.0, 2.001]
+
+
+def test_a_whole_match_mapping_is_rejected_rather_than_rendered_blank():
+    # load_overlay_data is keyed by (label, stage_number). Passing it
+    # straight through would match no label and blank every tile silently.
+    data = {("ann", 1): _tile("ann", [1.0])}
+    with pytest.raises(ValueError, match="keyed by tile label"):
+        _states(_placements("ann"), data)
 
 
 def test_a_tile_that_has_not_fired_has_no_rank_and_no_delta():

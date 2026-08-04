@@ -91,7 +91,12 @@ def build_overlay_states(
     next one's start and the last is clamped to the segment end, so the
     durations sum to ``duration_seconds`` and the overlay neither leaves a
     gap nor overruns the clip.
+
+    ``data`` is keyed by tile label, for *one* stage. ``load_overlay_data``
+    returns a whole-match mapping keyed by ``(label, stage_number)``, so a
+    caller must slice out the stage first.
     """
+    _check_keys(data)
     starts = _state_starts(
         placements,
         data,
@@ -114,6 +119,24 @@ def build_overlay_states(
     return tuple(states)
 
 
+def _check_keys(data: Mapping[str, TileStageData]) -> None:
+    """Reject a whole-match mapping passed where a per-stage one belongs.
+
+    ``load_overlay_data`` is keyed by ``(label, stage_number)``. Handing
+    that straight to :func:`build_overlay_states` would match no label at
+    all, so every tile would fall back to ``_EMPTY`` and the overlay would
+    render completely blank -- no crash, no warning, just an empty panel
+    on every tile. Cheap to check, invisible if left to run.
+    """
+    for key in data:
+        if not isinstance(key, str):
+            raise ValueError(
+                "build_overlay_states expects a mapping keyed by tile label (str), "
+                f"got a {type(key).__name__} key {key!r}. load_overlay_data is keyed "
+                "by (label, stage_number) -- slice out the stage first."
+            )
+
+
 def _state_starts(
     placements: Sequence[TilePlacement],
     data: Mapping[str, TileStageData],
@@ -129,14 +152,17 @@ def _state_starts(
     and that shot would then be counted in no state at all -- it would
     simply never appear on screen.
     """
-    buckets: dict[int, float] = {}
+    buckets: dict[float, float] = {}
     for placement in placements:
         if not placement.present:
             continue
         for shot in data.get(placement.label, _EMPTY).shots:
+            # Key on the rounded time itself. Scaling it to an int bucket
+            # invites ``int(round(1.001, 3) * 1000) == 1000``, which is
+            # truncation, not rounding, and silently merges 1.001 into
+            # 1.000 -- 372 of the 60000 millisecond slots in a 60s stage.
             key = round(shot.time_from_beep, _EVENT_PRECISION)
-            bucket = int(key * 10**_EVENT_PRECISION)
-            buckets[bucket] = max(buckets.get(bucket, shot.time_from_beep), shot.time_from_beep)
+            buckets[key] = max(buckets.get(key, shot.time_from_beep), shot.time_from_beep)
     # 0.0 is the opening state, already covered; a shot at or past the
     # segment end has nowhere to be drawn.
     starts = {0.0} | {
