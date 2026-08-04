@@ -285,12 +285,20 @@ def build_stage_plans(
 
 
 def derive_frame_rate(shooters: Sequence[CompareShooterBundle], *, audio_label: str) -> tuple[int, int]:
-    """The rate the whole render conforms to: the audio source's first stage.
+    """The rate the whole render conforms to: the audio source's lowest stage.
 
-    Mirrors ``compare/emitter.py``, which seeds the FCPXML sequence
-    format from ``audio_bundle.stages_by_number[min(...)]``. Both
-    exporters have to agree -- one match cannot come out at 30fps as
-    FCPXML and 29.97 as MP4.
+    Follows ``compare/emitter.py``, which seeds the FCPXML sequence
+    format from ``audio_bundle.stages_by_number[min(...)]``, so a
+    whole-match export of one match comes out at the same rate either
+    way -- it cannot be 30fps as FCPXML and 29.97 as MP4.
+
+    "Lowest stage" means the lowest stage *in the bundles handed in*,
+    not the lowest the shooter shot. The UI path filters bundles to the
+    user's stage selection before calling this (see
+    ``server._filter_bundles_to_stages``), so exporting only stages 5-12
+    seeds from stage 5 and can pick a different rate than a whole-match
+    FCPXML of the same shooter would. That is deliberate: the rate
+    should follow the footage actually being rendered.
 
     One rate for the render, not one per stage. A match whose shooters
     or stages carry different rates (30 here, 59.94 there -- ordinary

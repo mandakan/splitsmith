@@ -35,11 +35,74 @@ describe("summarizeGridResult", () => {
       stages_rendered: 2,
       stages_total: 2,
       failed: [],
+      skipped_stages: [],
+      missing_trims: [],
     });
 
     expect(summary.partial).toBe(false);
     expect(summary.failedStages).toEqual([]);
+    expect(summary.skippedStages).toEqual([]);
+    expect(summary.missingTrims).toEqual([]);
     expect(summary.headline).toContain("2");
+  });
+
+  it("never calls a short render a complete success", () => {
+    // The endpoint counts stages_total against what was requested, so a
+    // stage nobody had a trim for shows up as a shortfall here. Reading
+    // "Rendered all 2 stages" after asking for three is the defect.
+    const summary = summarizeGridResult({
+      output_path: "/m/exports/compare-grid.mp4",
+      stages_rendered: 2,
+      stages_total: 3,
+      failed: [],
+      skipped_stages: [3],
+      missing_trims: [],
+    });
+
+    expect(summary.partial).toBe(true);
+    expect(summary.headline).toContain("2 of 3");
+    expect(summary.headline).not.toMatch(/all/i);
+    expect(summary.skippedStages).toEqual([3]);
+  });
+
+  it("names the shooter and stage behind every missing trim", () => {
+    const summary = summarizeGridResult({
+      output_path: "/m/exports/compare-grid.mp4",
+      stages_rendered: 2,
+      stages_total: 2,
+      failed: [],
+      skipped_stages: [],
+      missing_trims: [
+        {
+          shooter: "Anna",
+          stage_number: 2,
+          stage_name: "El Presidente",
+          expected_path: "/m/anna/exports/stage2_el-presidente_trimmed.mp4",
+          camera: null,
+        },
+      ],
+    });
+
+    // A black cell with no explanation looks exactly like a shooter who
+    // skipped the stage, so the warning stands even when every selected
+    // stage rendered.
+    expect(summary.partial).toBe(true);
+    expect(summary.missingTrims).toEqual([
+      "Anna has no trim for stage 2 (El Presidente)",
+    ]);
+  });
+
+  it("tolerates a result payload without the newer fields", () => {
+    const summary = summarizeGridResult({
+      output_path: "/m/exports/compare-grid.mp4",
+      stages_rendered: 1,
+      stages_total: 1,
+      failed: [],
+    });
+
+    expect(summary.partial).toBe(false);
+    expect(summary.skippedStages).toEqual([]);
+    expect(summary.missingTrims).toEqual([]);
   });
 
   it("names the failed stages without calling the whole render a failure", () => {
@@ -48,6 +111,8 @@ describe("summarizeGridResult", () => {
       stages_rendered: 1,
       stages_total: 2,
       failed: [{ stage_number: 2, stage_name: "Stage 2", error: "boom" }],
+      skipped_stages: [],
+      missing_trims: [],
     });
 
     expect(summary.partial).toBe(true);

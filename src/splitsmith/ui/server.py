@@ -1690,6 +1690,93 @@ def _filter_bundles_to_stages(
     ]
 
 
+#: A compare-grid output name is a bare file stem, not a path.
+_COMPARE_OUTPUT_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+
+def _compare_output_stem(name: str) -> str:
+    """Validate ``CompareGridRequest.output_name`` as a plain file stem.
+
+    The worker builds ``exports / f"{name}.mp4"``, so ``"../../x"``
+    writes outside the match directory. Local mode on the user's own
+    machine and the SPA hardcodes the value, so this is a cheap guard
+    rather than a security boundary -- but nothing else stops it, and
+    rejecting is a line.
+    """
+    stem = name.strip()
+    if not _COMPARE_OUTPUT_NAME.match(stem):
+        raise ValueError(
+            f"output_name={name!r} must be a plain file name: it has to start with a letter "
+            "or digit and may contain only letters, digits, dots, dashes and underscores "
+            "(no path separators)"
+        )
+    return stem
+
+
+def _compare_missing_trims(
+    bundles: list[project_loader.CompareShooterBundle], stage_numbers: list[int]
+) -> list[dict[str, Any]]:
+    """Shooter/stage pairs inside the selection whose trim is not on disk.
+
+    ``project_loader`` records these on every bundle it loads and the CLI
+    already prints them (``compare/cli.py::_warn_missing_trims``); the
+    endpoint used to load them and throw them away, which left a black
+    cell indistinguishable from a shooter who skipped the stage (#618).
+    Filtered to the selection because ``missing_trims`` covers the whole
+    project, and gaps outside the render are noise.
+    """
+    wanted = set(stage_numbers)
+    return [
+        {
+            "shooter": bundle.label,
+            "stage_number": miss.stage_number,
+            "stage_name": miss.stage_name,
+            "expected_path": str(miss.expected_path),
+            "camera": miss.camera,
+        }
+        for bundle in bundles
+        for miss in bundle.missing_trims
+        if miss.stage_number in wanted
+    ]
+
+
+def _compare_grid_progress_runner(
+    handle: JobHandle,
+    plans: tuple[mp4_grid.GridStagePlan, ...],
+    *,
+    base_runner: Callable[..., subprocess.CompletedProcess] = subprocess.run,
+) -> Callable[..., subprocess.CompletedProcess]:
+    """Wrap ``render_grid_mp4``'s ``runner`` hook so the job reports stages.
+
+    Same trick ``compare/cli.py::_render_grid_mp4`` uses for its console
+    output: the engine has no progress callback, but it does take an
+    injectable runner, and it invokes exactly one per stage followed by
+    one for the stitch. Without this the job sits at 5% for the whole
+    multi-minute encode and a working render looks exactly like a hung
+    one.
+    """
+    total = len(plans)
+    state = {"calls": 0}
+
+    def _runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        index = state["calls"]
+        state["calls"] += 1
+        if index < total:
+            plan = plans[index]
+            handle.update(
+                progress=0.05 + 0.9 * (index / total) if total else 0.05,
+                message=(
+                    f"Rendering stage {plan.stage_number} ({plan.stage_name}) "
+                    f"-- {index + 1} of {total}..."
+                ),
+            )
+        else:
+            handle.update(progress=0.95, message=f"Stitching {total} stage(s)...")
+        return base_runner(cmd, **kwargs)
+
+    return _runner
+
+
 def _run_compare_grid(handle: JobHandle, req: CompareGridRequest, match_root: str) -> None:
     """Worker for the match-scoped compare-grid MP4 export (phase 0).
 
@@ -1699,21 +1786,43 @@ def _run_compare_grid(handle: JobHandle, req: CompareGridRequest, match_root: st
     result carries the on-disk output path and per-stage outcomes so a
     partially-successful render (some stages failed, others didn't) is
     reported rather than treated as an all-or-nothing failure.
+
+    ``stages_total`` counts the stages the *request* asked for, not the
+    ones that got planned. ``build_stage_plans`` derives its stage list
+    from the shooters' trims, so a selected stage nobody has produces no
+    plan at all -- counted against the plans, that read back as
+    "rendered all 2 stages" for a three-stage request. Those stages are
+    named in ``skipped_stages``, and the shooter/stage pairs behind them
+    in ``missing_trims``.
     """
     root = Path(match_root)
     match = match_model.Match.load(root)
+    stem = _compare_output_stem(req.output_name)
+    requested = sorted(set(req.stage_numbers))
 
     handle.update(progress=0.02, message="Loading shooters...")
     with handle.timer.phase("load_shooters"):
         bundles = _load_compare_bundles(root, match, cameras=req.cameras)
-        filtered = _filter_bundles_to_stages(bundles, req.stage_numbers)
+        filtered = _filter_bundles_to_stages(bundles, requested)
         audio_label = _shooter_label(match, root, req.audio_from)
 
     output_dir = root / "exports"
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{req.output_name}.mp4"
+    output_path = output_dir / f"{stem}.mp4"
 
-    handle.update(progress=0.05, message=f"Rendering {len(req.stage_numbers)} stage(s)...")
+    # Planned up front purely for the progress messages and the skipped
+    # count -- pure planning, no ffmpeg. ``render_grid_mp4`` plans again
+    # internally from the same inputs and so sees the same stages.
+    plans = mp4_grid.build_stage_plans(
+        filtered,
+        audio_label=audio_label,
+        head_pad_seconds=1.0,
+        tail_pad_seconds=0.5,
+        layout_2up="horizontal",
+    )
+    skipped = [number for number in requested if number not in {p.stage_number for p in plans}]
+
+    handle.update(progress=0.05, message=f"Rendering {len(plans)} stage(s)...")
     with (
         handle.timer.phase("render"),
         tempfile.TemporaryDirectory(dir=output_dir, prefix=".compare-grid-work-") as tmp,
@@ -1724,6 +1833,7 @@ def _run_compare_grid(handle: JobHandle, req: CompareGridRequest, match_root: st
             output_path=output_path,
             canvas=mp4_grid.GridCanvas(width=req.canvas_width, height=req.canvas_height),
             work_dir=Path(tmp),
+            runner=_compare_grid_progress_runner(handle, plans),
         )
 
     handle.update(progress=1.0, message=f"Wrote {output_path}")
@@ -1731,7 +1841,9 @@ def _run_compare_grid(handle: JobHandle, req: CompareGridRequest, match_root: st
         {
             "output_path": str(result.output_path),
             "stages_rendered": len(result.stages) - len(result.failed),
-            "stages_total": len(result.stages),
+            "stages_total": len(requested),
+            "skipped_stages": skipped,
+            "missing_trims": _compare_missing_trims(bundles, requested),
             "failed": [
                 {"stage_number": s.stage_number, "stage_name": s.stage_name, "error": s.error}
                 for s in result.failed
@@ -12055,6 +12167,10 @@ def create_app(
         match_root, match = _resolve_match_context()
         if not req.stage_numbers:
             raise HTTPException(status_code=400, detail="stage_numbers cannot be empty")
+        try:
+            _compare_output_stem(req.output_name)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         if req.audio_from not in match.shooters:
             raise HTTPException(
                 status_code=400,

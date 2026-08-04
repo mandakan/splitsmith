@@ -916,12 +916,27 @@ export interface CompareGridRequestPayload {
 /** ``Job.result`` shape for a ``"compare-grid"`` job, mirrors the dict
  *  built by ``server._run_compare_grid``. A partially-successful render
  *  (some stages failed, others didn't) is reported via ``failed`` rather
- *  than treated as an all-or-nothing failure. */
+ *  than treated as an all-or-nothing failure.
+ *
+ *  ``stages_total`` counts the stages the *request* asked for. A stage
+ *  nobody has a trim for never gets planned, so it renders neither
+ *  successfully nor as a failure: it lands in ``skipped_stages``, and
+ *  the shooter/stage pairs behind it in ``missing_trims``. Both are
+ *  optional so a snapshot from a job queued before they existed still
+ *  parses. */
 export interface CompareGridResult {
   output_path: string;
   stages_rendered: number;
   stages_total: number;
   failed: Array<{ stage_number: number; stage_name: string; error: string }>;
+  skipped_stages?: number[];
+  missing_trims?: Array<{
+    shooter: string;
+    stage_number: number;
+    stage_name: string;
+    expected_path: string;
+    camera: string | null;
+  }>;
 }
 
 export interface RemovalPlan {

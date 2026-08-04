@@ -382,7 +382,15 @@ export function MatchExport() {
                   {summary.partial && (
                     <ul className="ml-4 list-disc text-muted">
                       {summary.failedStages.map((name) => (
-                        <li key={name}>{name} did not render</li>
+                        <li key={`failed-${name}`}>{name} did not render</li>
+                      ))}
+                      {summary.skippedStages.map((n) => (
+                        <li key={`skipped-${n}`}>
+                          Stage {n} had no trim from any shooter -- not rendered
+                        </li>
+                      ))}
+                      {summary.missingTrims.map((line) => (
+                        <li key={`missing-${line}`}>{line} -- that cell is black</li>
                       ))}
                     </ul>
                   )}

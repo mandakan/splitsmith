@@ -210,6 +210,46 @@ describe("MatchExport", () => {
     expect(screen.queryByText(/render failed/i)).not.toBeInTheDocument();
   });
 
+  it("never reports a short render as a complete success", async () => {
+    // Three stages requested, one of which nobody had a trim for: the
+    // renderer never planned it, so the result is 2 of 3. Reading
+    // "Rendered all 2 stages" under a green tick is the defect.
+    const user = userEvent.setup();
+    vi.mocked(api.exportCompareGrid).mockResolvedValue(makeJob({ status: "running" }));
+    vi.mocked(api.pollJob).mockResolvedValue(
+      makeJob({
+        status: "succeeded",
+        result: {
+          output_path: "/m/exports/compare-grid.mp4",
+          stages_rendered: 2,
+          stages_total: 3,
+          failed: [],
+          skipped_stages: [3],
+          missing_trims: [
+            {
+              shooter: "Casper",
+              stage_number: 3,
+              stage_name: "Stage Three",
+              expected_path: "/m/casper/exports/stage3_stage-three_trimmed.mp4",
+              camera: null,
+            },
+          ],
+        },
+      }),
+    );
+
+    render(<MatchExport />);
+    await screen.findByRole("radio", { name: /Mathias/i });
+    await user.click(screen.getByRole("button", { name: /render grid/i }));
+
+    expect(await screen.findByText(/rendered 2 of 3 stages/i)).toBeInTheDocument();
+    expect(screen.queryByText(/rendered all/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/stage 3 had no trim from any shooter/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Casper has no trim for stage 3 \(Stage Three\)/i),
+    ).toBeInTheDocument();
+  });
+
   it("deselecting a stage removes it from the render payload", async () => {
     const user = userEvent.setup();
     vi.mocked(api.exportCompareGrid).mockResolvedValue(makeJob({ status: "running" }));
