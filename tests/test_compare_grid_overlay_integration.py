@@ -89,9 +89,16 @@ SEGMENT_SECONDS = HEAD_PAD_SECONDS + (STAGE_DURATION_SECONDS - BEEP_OFFSET_SECON
 ANDERS_SHOTS_MS = [500, 3000]
 MATHIAS_SHOTS_MS = [1200, 2000]  # absolute 2.2s / 3.0s
 
-#: Sampled well inside the head pad -- before the beep, nothing has
-#: fired and nothing should be drawn anywhere.
-T_BEFORE_BEEP = 0.3
+#: Sampled inside the head pad -- before the beep, nothing has fired and
+#: nothing should be drawn anywhere.
+#:
+#: Late in the pad rather than early in it, and that matters. If the head
+#: pad stops being threaded into the sprite builder, every state starts a
+#: head pad early and Anders' counter reads "1" from 0.5s, half a second
+#: before the beep. At 0.3s that mutant is still blank and this check
+#: passes; 0.9s catches it. Frame 27 of 30fps, exactly on the boundary,
+#: which is why ``_frame`` selects by index.
+T_BEFORE_BEEP = 0.9
 
 #: Sampled after Anders' first shot (absolute 1.5s) but before her
 #: clock freezes (4.0s) and before Mathias fires at all (2.2s) --
@@ -479,6 +486,19 @@ def test_overlay_reaches_the_rendered_pixels(tmp_path: Path, synthetic_source_vi
     assert pre_beep_diff <= PRE_BEEP_MAX_MEAN_ABS_DIFF, (
         f"overlay drew something before the beep: mean abs diff {pre_beep_diff:.2f} "
         f"outside the strip band (threshold {PRE_BEEP_MAX_MEAN_ABS_DIFF})"
+    )
+
+    # The whole-canvas check above is a gate against gross pre-beep
+    # drawing, and it dilutes: one shot counter is a few hundred pixels
+    # of a 640x312 crop, which moves the mean by well under a tenth.
+    # Anders' counter corner is where a head pad that stopped reaching
+    # the sprite builder would put a "1" half a second before the beep,
+    # so check that region on its own scale.
+    pre_beep_counter_diff = _mean_abs_diff(before_plain, before_overlaid, (0, 0, cell_w // 2, cell_h // 2))
+    assert pre_beep_counter_diff <= NOISE_FLOOR_MEAN_ABS_DIFF, (
+        f"a shot counter is on screen before the beep: mean abs diff "
+        f"{pre_beep_counter_diff:.2f} in the firing shooter's counter corner "
+        f"(threshold {NOISE_FLOOR_MEAN_ABS_DIFF})"
     )
 
     # --- after the first shot: Anders' quadrant changed, the unreached

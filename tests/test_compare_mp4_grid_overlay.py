@@ -16,6 +16,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from splitsmith.compare import mp4_grid
 from splitsmith.compare.mp4_grid import GridCanvas, GridStagePlan, GridTile
@@ -766,6 +767,86 @@ def test_the_head_pad_is_threaded_into_the_clock_not_hardcoded(tmp_path):
     graph = _graph(calls[0])
     assert r"trunc(t-2.5)" in graph
     assert r"enable='gte(t\,2.5)*lt(t\,3.5)'" in graph
+
+
+def _sprite_entries(work: Path, stage: int = 1) -> list[tuple[Path, float]]:
+    """``(png, duration)`` per entry of a written sprite concat list."""
+    lines = [ln for ln in (work / f"sprites-stage{stage}.txt").read_text().splitlines() if ln.strip()]
+    entries: list[tuple[Path, float]] = []
+    current: Path | None = None
+    for line in lines:
+        if line.startswith("file "):
+            current = Path(line[len("file ") :].strip().strip("'"))
+        elif line.startswith("duration ") and current is not None:
+            entries.append((current, float(line.split()[1])))
+    return entries
+
+
+def test_no_sprite_draws_before_the_beep(tmp_path):
+    """The head pad must reach the *sprite* builder, not just the clock.
+
+    ``build_overlay_states`` measures shot events from the beep and the
+    grid's own head pad shifts them onto the segment timeline. Drop the
+    thread and every state starts a head pad early: with a 1.0s pad and a
+    first shot 0.5s after the beep, a shooter's counter reads "1" from
+    0.5s -- half a second of a shot on screen before the picture's own
+    start signal, and out of step with the clock, which is threaded
+    separately and stays correct.
+
+    ``test_the_head_pad_is_threaded_into_the_clock_not_hardcoded`` covers
+    the other half of this seam.
+    """
+    calls, runner = _recorder()
+    work = tmp_path / "work"
+    mp4_grid.render_grid_mp4(
+        _shooters(tmp_path, shots={"Anders": [0.5], "Mathias": [0.5]}),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        work_dir=work,
+        ffmpeg_binary="ffmpeg",
+        overlay=True,
+        head_pad_seconds=1.0,
+    )
+    entries = _sprite_entries(work)
+    assert entries, "no sprite states were written"
+    blank_seconds = 0.0
+    for png, duration in entries:
+        with Image.open(png) as image:
+            if image.convert("RGBA").getextrema()[3][1] > 0:
+                break
+        blank_seconds += duration
+    assert (
+        blank_seconds >= 1.0
+    ), f"the overlay starts drawing {blank_seconds:.3f}s in, before the beep at 1.0s"
+
+
+@pytest.mark.parametrize("head_pad", [0.5, 1.0, 2.5])
+def test_the_first_sprite_state_spans_the_head_pad(tmp_path, head_pad):
+    """The opening state runs from 0 to ``head_pad + first shot``.
+
+    A blunter reading of the same seam than the pre-beep pixel check, and
+    the one that pins the pad's actual value rather than only that there
+    is one.
+    """
+    calls, runner = _recorder()
+    work = tmp_path / "work"
+    mp4_grid.render_grid_mp4(
+        _shooters(tmp_path, shots={"Anders": [0.5], "Mathias": [0.5]}),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        work_dir=work,
+        ffmpeg_binary="ffmpeg",
+        overlay=True,
+        head_pad_seconds=head_pad,
+    )
+    entries = _sprite_entries(work)
+    # Quantised to a whole canvas frame, so allow one frame of lag.
+    frame = CANVAS.frame_rate_den / CANVAS.frame_rate_num
+    assert entries[0][1] == pytest.approx(head_pad + 0.5, abs=frame)
 
 
 def _two_stage_shooters(tmp_path: Path):
