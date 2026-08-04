@@ -227,3 +227,258 @@ def build_stage_plans(
             )
         )
     return tuple(plans)
+
+
+# --- command construction -------------------------------------------------
+
+
+def _cell_size(canvas: GridCanvas, plan: GridStagePlan) -> tuple[int, int]:
+    """Uniform cell geometry. Integer division keeps the xstack offsets exact."""
+    return canvas.width // plan.cols, canvas.height // plan.rows
+
+
+def build_stage_command(
+    plan: GridStagePlan,
+    *,
+    canvas: GridCanvas,
+    output_path: Path,
+    ffmpeg_binary: str = "ffmpeg",
+) -> tuple[str, ...]:
+    """Build the ffmpeg invocation rendering one grid stage.
+
+    Stream layout is fixed at one video plus one audio track per tile,
+    in alphabetical label order, regardless of which shooters actually
+    have a trim for this stage. ``concat -c copy`` rejects segments
+    whose stream layout differs, so a missing tile contributes a black
+    ``color`` source and a silent ``anullsrc`` track rather than
+    nothing at all.
+    """
+    cell_w, cell_h = _cell_size(canvas, plan)
+    rate = f"{canvas.frame_rate_num}/{canvas.frame_rate_den}"
+
+    args: list[str] = [ffmpeg_binary, "-hide_banner", "-y"]
+    # Filler tiles take two inputs where a real tile takes one, so a
+    # tile's slot is not its input index past the first filler.
+    video_index: list[int] = []
+    audio_index: list[int] = []
+    next_index = 0
+
+    for tile in plan.tiles:
+        if tile.trim_path is not None:
+            # Seek before -i so ffmpeg fast-seeks; the trim's head buffer
+            # absorbs any imprecision, same trade-off as trim.py.
+            # A lead-padded tile reads that much less from its source: the
+            # synthesised pad at the front supplies the remainder, so the
+            # tile still totals ``duration_seconds``.
+            args += [
+                "-ss",
+                f"{tile.seek_seconds:g}",
+                "-t",
+                f"{plan.duration_seconds - tile.lead_pad_seconds:g}",
+                "-i",
+                str(tile.trim_path),
+            ]
+            video_index.append(next_index)
+            audio_index.append(next_index)
+            next_index += 1
+        else:
+            args += [
+                "-f",
+                "lavfi",
+                "-t",
+                f"{plan.duration_seconds:g}",
+                "-i",
+                f"color=c=black:s={cell_w}x{cell_h}:r={rate}",
+            ]
+            video_index.append(next_index)
+            next_index += 1
+            args += [
+                "-f",
+                "lavfi",
+                "-t",
+                f"{plan.duration_seconds:g}",
+                "-i",
+                "anullsrc=channel_layout=stereo:sample_rate=48000",
+            ]
+            audio_index.append(next_index)
+            next_index += 1
+
+    args += ["-filter_complex", _build_filter_graph(plan, canvas, video_index, audio_index)]
+
+    args += ["-map", "[final]"]
+    for slot in range(len(plan.tiles)):
+        args += ["-map", f"[a{slot}]"]
+
+    # Only the audio-source shooter plays by default. Marking every track
+    # default leaves the player free to pick, so the grid can come out
+    # with the wrong shooter's audio. ``build_stage_plans`` guarantees the
+    # label is on every plan; name it if a hand-built plan disagrees,
+    # rather than letting ``next`` raise a bare StopIteration.
+    default_slot = next(
+        (i for i, t in enumerate(plan.tiles) if t.label == plan.audio_label),
+        None,
+    )
+    if default_slot is None:
+        raise ValueError(
+            f"audio_label={plan.audio_label!r} matches no tile in stage {plan.stage_number}; "
+            f"tiles: {', '.join(t.label for t in plan.tiles)}"
+        )
+    args += list(_disposition_args([t.label for t in plan.tiles], default_slot))
+    args += list(_track_naming_args([t.label for t in plan.tiles]))
+
+    args += [
+        "-r",
+        rate,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
+    return tuple(args)
+
+
+def _track_naming_args(labels: Sequence[str]) -> tuple[str, ...]:
+    """Name each audio track after its shooter.
+
+    Both spellings are needed. MP4 has no per-track title box, so
+    ``-metadata:s:a:N title=`` alone writes nothing the user can see
+    (verified against ffmpeg 7.0.2: the tracks come back out as plain
+    ``SoundHandler``); ``handler_name`` is what the container stores and
+    what a player shows in its audio-track menu. ``title`` is kept
+    because it is the portable spelling every other container uses.
+    """
+    args: list[str] = []
+    for slot, label in enumerate(labels):
+        args += [f"-metadata:s:a:{slot}", f"title={label}"]
+        args += [f"-metadata:s:a:{slot}", f"handler_name={label}"]
+    return tuple(args)
+
+
+def _disposition_args(labels: Sequence[str], default_slot: int) -> tuple[str, ...]:
+    """Mark exactly one audio track as the one that plays by default."""
+    args: list[str] = []
+    for slot in range(len(labels)):
+        args += [f"-disposition:a:{slot}", "default" if slot == default_slot else "0"]
+    return tuple(args)
+
+
+def _build_filter_graph(
+    plan: GridStagePlan,
+    canvas: GridCanvas,
+    video_index: list[int],
+    audio_index: list[int],
+) -> str:
+    """Scale + pad every tile to a uniform cell, then ``xstack`` the grid.
+
+    ``force_original_aspect_ratio=decrease`` plus ``pad`` letterboxes
+    each source into its cell, so mixed aspect ratios and mixed source
+    resolutions both land correctly. ``setsar=1`` is required or
+    ``xstack`` refuses inputs whose sample aspect ratios disagree.
+    """
+    cell_w, cell_h = _cell_size(canvas, plan)
+    rate = f"{canvas.frame_rate_num}/{canvas.frame_rate_den}"
+    parts: list[str] = []
+
+    for slot, tile in enumerate(plan.tiles):
+        # ``tpad`` must come first, before ``setpts``. Measured on ffmpeg
+        # 7.0.2: with ``setpts=PTS-STARTPTS`` ahead of it, a 2.5s input
+        # asked for 0.5s of head pad came out 2.52s -- the pad is
+        # silently swallowed and the tile's beep lands early, which is
+        # the desync the pad exists to prevent. Padding at source size
+        # costs nothing: the black frames letterbox like any other.
+        lead = (
+            f"tpad=start_duration={tile.lead_pad_seconds:g}:start_mode=add:color=black,"
+            if tile.lead_pad_seconds > 0
+            else ""
+        )
+        parts.append(
+            f"[{video_index[slot]}:v]{lead}setpts=PTS-STARTPTS,"
+            f"scale={cell_w}:{cell_h}:force_original_aspect_ratio=decrease,"
+            f"pad={cell_w}:{cell_h}:(ow-iw)/2:(oh-ih)/2,"
+            f"setsar=1,fps={rate}[t{slot}]"
+        )
+
+    stack_inputs = "".join(f"[t{slot}]" for slot in range(len(plan.tiles)))
+    offsets = "|".join(f"{tile.col * cell_w}_{tile.row * cell_h}" for tile in plan.tiles)
+    parts.append(f"{stack_inputs}xstack=inputs={len(plan.tiles)}:layout={offsets}[grid]")
+    parts.append("[grid]format=yuv420p[final]")
+
+    for slot, tile in enumerate(plan.tiles):
+        # ``aresample=async=1`` keeps a track that starts short from
+        # drifting; ``apad`` + ``atrim`` guarantee every track is exactly
+        # the stage duration so the segment's streams end together.
+        # ``adelay`` mirrors the video's ``tpad`` so a lead-padded tile's
+        # audio stays locked to its picture.
+        # ``aformat`` is the audio half of the concat invariant: a mono
+        # trim and the stereo ``anullsrc`` filler would otherwise put
+        # differently-shaped tracks in the same slot across segments.
+        delay_ms = int(round(tile.lead_pad_seconds * 1000))
+        lead = f"adelay={delay_ms}:all=1," if delay_ms > 0 else ""
+        parts.append(
+            f"[{audio_index[slot]}:a]asetpts=PTS-STARTPTS,{lead}aresample=async=1,"
+            f"aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+            f"apad,atrim=0:{plan.duration_seconds:g}[a{slot}]"
+        )
+
+    return ";".join(parts)
+
+
+def build_concat_command(
+    *,
+    list_path: Path,
+    output_path: Path,
+    ffmpeg_binary: str = "ffmpeg",
+    audio_labels: Sequence[str] = (),
+    default_audio_label: str | None = None,
+) -> tuple[str, ...]:
+    """Stitch the per-stage temps without re-encoding.
+
+    ``-map 0`` is load-bearing, not decoration. Without it ffmpeg's
+    default stream selection keeps one stream per type, so a stitch of
+    four-shooter segments comes out with a single audio track and the
+    per-shooter audio the whole feature exists for is gone -- silently,
+    at the very last step, after every stage has been encoded (verified
+    against ffmpeg 7.0.2).
+
+    ``audio_labels`` / ``default_audio_label`` restore the track names
+    and the default flag on the stitched file. Stream copy does not
+    carry them across the concat demuxer: the muxer re-derives the
+    default flag and lands it on the first audio track, which would
+    play the alphabetically-first shooter instead of the audio source.
+    """
+    args: list[str] = [
+        ffmpeg_binary,
+        "-hide_banner",
+        "-y",
+        "-f",
+        "concat",
+        "-safe",
+        "0",
+        "-i",
+        str(list_path),
+        "-map",
+        "0",
+        "-c",
+        "copy",
+    ]
+    args += list(_track_naming_args(audio_labels))
+    if default_audio_label is not None:
+        if default_audio_label not in audio_labels:
+            raise ValueError(
+                f"default_audio_label={default_audio_label!r} is not in audio_labels: "
+                f"{', '.join(audio_labels) or '(none given)'}"
+            )
+        args += list(_disposition_args(audio_labels, list(audio_labels).index(default_audio_label)))
+    args += ["-movflags", "+faststart", str(output_path)]
+    return tuple(args)
