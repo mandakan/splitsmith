@@ -27,6 +27,15 @@ _GRID_SHAPE: dict[GridKind, tuple[int, int]] = {
 }
 
 
+def grid_shape(kind: GridKind) -> tuple[int, int]:
+    """``(rows, cols)`` for a grid kind.
+
+    Public accessor for ``_GRID_SHAPE`` so renderers can lay out cells
+    without reaching into a private module global.
+    """
+    return _GRID_SHAPE[kind]
+
+
 @dataclass(frozen=True)
 class GridSlot:
     """One tile's transform inside the sequence frame."""
