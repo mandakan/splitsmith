@@ -898,6 +898,32 @@ export interface MatchExportResult {
   anomalies: string[];
 }
 
+/** Request payload for POST /api/match/compare-export (phase 0), mirrors
+ *  ``server.CompareGridRequest``. ``cameras`` keys match either a
+ *  shooter's slug or its display name, mirroring ``compare export``'s
+ *  ``--camera SHOOTER=VALUE`` flag. ``canvas_width`` / ``canvas_height``
+ *  default to 4K server-side; the frame rate is never taken from the
+ *  request -- it always derives from the audio-source shooter's footage. */
+export interface CompareGridRequestPayload {
+  stage_numbers: number[];
+  audio_from: string;
+  cameras?: Record<string, string>;
+  canvas_width?: number;
+  canvas_height?: number;
+  output_name?: string;
+}
+
+/** ``Job.result`` shape for a ``"compare-grid"`` job, mirrors the dict
+ *  built by ``server._run_compare_grid``. A partially-successful render
+ *  (some stages failed, others didn't) is reported via ``failed`` rather
+ *  than treated as an all-or-nothing failure. */
+export interface CompareGridResult {
+  output_path: string;
+  stages_rendered: number;
+  stages_total: number;
+  failed: Array<{ stage_number: number; stage_name: string; error: string }>;
+}
+
 export interface RemovalPlan {
   video_path: string;
   raw_link_path: string;
@@ -3223,6 +3249,31 @@ export const api = {
           : {}),
         ...(payload.youtube_preset !== undefined
           ? { youtube_preset: payload.youtube_preset }
+          : {}),
+      },
+    }),
+
+  /** Render every shooter on the bound match into one grid MP4 (phase 0).
+   *  Local mode only -- no Storage writes, no download deliverable, no
+   *  export history. Job-queued: a full-match grid re-encode runs for
+   *  minutes. Returns a Job snapshot; poll via {@link api.pollJob} until
+   *  terminal, then read the {@link CompareGridResult} from
+   *  ``Job.result``. */
+  exportCompareGrid: (payload: CompareGridRequestPayload) =>
+    request<Job>("/api/match/compare-export", {
+      method: "POST",
+      json: {
+        stage_numbers: payload.stage_numbers,
+        audio_from: payload.audio_from,
+        ...(payload.cameras !== undefined ? { cameras: payload.cameras } : {}),
+        ...(payload.canvas_width !== undefined
+          ? { canvas_width: payload.canvas_width }
+          : {}),
+        ...(payload.canvas_height !== undefined
+          ? { canvas_height: payload.canvas_height }
+          : {}),
+        ...(payload.output_name !== undefined
+          ? { output_name: payload.output_name }
           : {}),
       },
     }),
