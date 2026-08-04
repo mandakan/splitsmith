@@ -1230,6 +1230,42 @@ export function isNoProjectError(err: unknown): boolean {
   return (body as { code?: unknown }).code === "no_project";
 }
 
+/** A sentence fit to render inline in the UI for an arbitrary thrown value.
+ *
+ *  ``ApiError.message`` is ```${status}: ${detail}` `` and ``detail`` is
+ *  ``JSON.stringify(rawDetail)`` whenever the server sent a structured
+ *  ``detail`` (the ``{code, ...}`` 409s / 424s). Rendering ``e.message``
+ *  therefore drops a raw JSON blob into the page. This helper renders the
+ *  detail only when it is genuinely prose, and ``fallback`` otherwise.
+ *
+ *  The discriminator is ``ApiError.body``, which holds the raw ``detail``
+ *  before stringification:
+ *
+ *  - ``string`` -- the server sent ``{"detail": "some sentence"}``, or an
+ *    XHR path fell back to ``xhr.statusText``. Prose either way; show it.
+ *  - ``null`` -- either :func:`request` never found a ``detail`` key and
+ *    fell back to ``resp.statusText``, or a client-side construction site
+ *    (network error, cancelled upload, missing ETag) passed a hand-written
+ *    English message. Both are prose; show it. Suppressing them would
+ *    replace "network error during upload" with a vaguer fallback, and
+ *    would make the two status-text paths disagree -- :func:`request`
+ *    leaves ``body`` null where the XHR upload path passes the status text
+ *    through as ``body``, for the same "Internal Server Error" string.
+ *  - anything else (object, array, number, boolean) -- ``detail`` was
+ *    stringified from a structure. Never show it; use ``fallback``.
+ *
+ *  Non-``ApiError`` values (including plain ``Error``) get ``fallback``:
+ *  their messages are internal-facing, not written for an operator.
+ *  ``ApiError`` is not exported, so the ``instanceof`` test has to live in
+ *  this module.
+ */
+export function apiErrorText(err: unknown, fallback: string): string {
+  if (!(err instanceof ApiError)) return fallback;
+  if (err.body !== null && typeof err.body !== "string") return fallback;
+  const detail = err.detail?.trim();
+  return detail ? detail : fallback;
+}
+
 /** Server health snapshot. ``bound === false`` means no project is open --
  *  the SPA renders the picker until the user selects one. */
 export interface ServerHealth {

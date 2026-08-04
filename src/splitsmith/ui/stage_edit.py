@@ -252,8 +252,8 @@ class ShooterStageEditResult(BaseModel):
     """What the edit did to one shooter.
 
     ``error`` is set when something failed for this shooter specifically,
-    but it covers two outcomes that are not equally bad, and the strings
-    differ only in formatting -- so read :attr:`saved`, never the message:
+    but it covers two outcomes that are not equally bad -- so read
+    :attr:`saved`, never the message, to tell them apart:
 
     * ``saved=True`` with an ``error``: one removed stage's cleanup raised
       -- video release, audit delete, or the artifact purge failing
@@ -272,6 +272,10 @@ class ShooterStageEditResult(BaseModel):
 
     Consumers should check these rather than string-matching the shooter's
     slug inside :attr:`StageEditSummary.errors`.
+
+    Whenever this field is set, the matching :attr:`StageEditSummary.errors`
+    entry is exactly ``f"{slug}: {error}"`` -- see that attribute for the
+    full contract and why a client must not dedup on the slug alone.
     """
 
     slug: str
@@ -299,6 +303,30 @@ class StageEditSummary(BaseModel):
     renamed: list[int] = Field(default_factory=list)
     jobs_cancelled: int = 0
     shooters: list[ShooterStageEditResult] = Field(default_factory=list)
+    #: Every failure this edit collected, as flat display strings.
+    #:
+    #: **The contract:** whenever a shooter-scoped failure sets
+    #: :attr:`ShooterStageEditResult.error`, the matching entry here is
+    #: exactly ``f"{slug}: {result.error}"``. Both handlers in
+    #: :func:`apply_stage_edit` obey it -- the outer per-shooter one
+    #: (``error`` is ``str(exc)``) and the per-stage cleanup one (``error``
+    #: is ``f"stage {n}: {exc}"``). A consumer rendering both this list and
+    #: the shooter rows can therefore drop the duplicates by rebuilding
+    #: that string per shooter row, with no string-shape guessing.
+    #:
+    #: **The carve-out:** best-effort ``purge_stage_artifacts`` failures
+    #: (one cache file or storage object that refused to be deleted) are
+    #: also appended as ``f"{slug}: {e}"`` but are deliberately tied to no
+    #: ``result.error`` at all -- see :class:`ShooterStageEditResult`, where
+    #: a shooter can report ``error=None`` while these exist. That is why a
+    #: consumer must not dedup on the slug: doing so would hide them
+    #: entirely, and they are the only place they are reported.
+    #:
+    #: **Last per-stage failure wins:** if two removed stages fail for one
+    #: shooter, ``result.error`` holds the last of them, so the earlier one
+    #: survives here alone rather than being lost. Intended -- one row
+    #: cannot carry two messages, and dropping the earlier one outright
+    #: would be the worse trade.
     errors: list[str] = Field(default_factory=list)
 
 
@@ -348,14 +376,16 @@ async def apply_stage_edit(
     the second invisible. Two browser tabs on one hosted match is enough.
 
     ``shooter_root(slug)`` resolves the directory a shooter's derived
-    caches live under, and is called per shooter inside the fan-out rather
-    than taken once as a single ``root``. Those caches are at
-    ``<match_root>/shooters/<slug>/{audio,trimmed}/``, so one root cannot
-    stand in for the whole match: passing the match root made
+    caches live under, and is called once per shooter inside the fan-out
+    rather than taken once as a single ``root`` for the whole edit. Those
+    caches are at ``<match_root>/shooters/<slug>/{audio,trimmed}/``, so one
+    root cannot stand in for the whole match: passing the match root made
     ``project.audio_path(root)`` resolve to ``<match_root>/audio``, which
     does not exist, and ``purge_stage_artifacts``' directory-missing
     ``continue`` then reported a clean ``files_deleted: 0`` while every
-    file survived.
+    file survived. Per *shooter* is as coarse as it can get -- and it is
+    hoisted to exactly that granularity, above the removed-stage loop,
+    because in hosted mode each call is a ``store.load_match`` round-trip.
 
     The advanced allocation counter rides along on that final save: it is
     assigned to ``match.next_stage_number`` immediately before
@@ -383,6 +413,10 @@ async def apply_stage_edit(
     optimistic-lock race on that save (hosted mode), which is not recorded
     as an ordinary per-shooter error but re-raised so the caller's 409
     handling applies, the same as a match-doc save conflict.
+
+    Both recorded shapes obey one contract, documented in full on
+    :attr:`StageEditSummary.errors`: the general entry is exactly
+    ``f"{slug}: {result.error}"``.
     """
     diff = diff_stage_list(
         list(match.stages),
@@ -409,13 +443,24 @@ async def apply_stage_edit(
         result = ShooterStageEditResult(slug=slug)
         try:
             project = load_project(slug)
+            # Resolved once per shooter, not once per removed stage: in
+            # hosted mode ``shooter_root`` costs a ``store.load_match``
+            # round-trip, and its answer cannot change inside the loop.
+            # The ``if diff.removed`` guard keeps a no-removal edit paying
+            # nothing at all. This does move a ``shooter_root`` failure
+            # from the per-stage handler (which records the error and
+            # still saves) out to the per-shooter one (``saved=False``),
+            # and that is intentional: ``shooter_root`` failing is a
+            # store-read failure of the same class as ``load_project``
+            # failing, not one stage's cleanup problem.
+            root: Any = shooter_root(slug) if diff.removed else None
 
             for stage_number in diff.removed:
                 try:
                     result.videos_unassigned += project.unassign_stage_videos(stage_number)
                     if delete_audit(slug, stage_number):
                         result.audit_docs_deleted += 1
-                    counts = purge_stage_artifacts(project, shooter_root(slug), stage_number)
+                    counts = purge_stage_artifacts(project, root, stage_number)
                     result.files_deleted += counts.files_deleted
                     result.objects_deleted += counts.objects_deleted
                     summary.errors.extend(f"{slug}: {e}" for e in counts.errors)
@@ -428,9 +473,19 @@ async def apply_stage_edit(
                     # ``saved=True`` alongside the error -- that pairing
                     # is what tells a consumer "orphaned artifacts", not
                     # "unsaved shooter".
-                    message = f"{slug} stage {stage_number}: {exc}"
-                    summary.errors.append(message)
-                    result.error = message
+                    #
+                    # The two appends satisfy the contract documented on
+                    # ``StageEditSummary.errors``: the general entry is
+                    # exactly ``f"{slug}: {result.error}"``, so a client
+                    # rendering both lists can rebuild it and drop the
+                    # duplicate. This used to prefix the slug into
+                    # ``result.error`` as well, which held for this path
+                    # but not for the outer handler's shape below -- so a
+                    # string-equality dedup let a failed shooter render
+                    # twice in the SPA.
+                    detail = f"stage {stage_number}: {exc}"
+                    result.error = detail
+                    summary.errors.append(f"{slug}: {detail}")
 
             project.stages = [s for s in project.stages if s.stage_number not in removed]
             for stage in project.stages:
@@ -478,6 +533,8 @@ async def apply_stage_edit(
             # already-performed audit/artifact deletions are real.
             # ``result.saved`` stays at its False default, which is the
             # difference between this error and the per-stage one above.
+            # The pair already satisfies the ``StageEditSummary.errors``
+            # contract: the general entry is ``f"{slug}: {result.error}"``.
             summary.errors.append(f"{slug}: {exc}")
             result.error = str(exc)
             result.videos_unassigned = 0

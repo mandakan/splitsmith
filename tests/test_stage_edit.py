@@ -941,3 +941,174 @@ def test_an_untroubled_shooter_is_saved_with_no_error(tmp_path) -> None:
 
     assert summary.shooters[0].error is None
     assert summary.shooters[0].saved is True
+
+
+# --- the ``summary.errors`` / ``result.error`` shape contract (#651) -------
+
+
+def test_an_outer_shooter_failure_is_reconstructible_from_its_row(tmp_path) -> None:
+    """Contract: whenever a shooter row carries an ``error``, the matching
+    ``summary.errors`` entry is exactly ``f"{slug}: {result.error}"``.
+
+    The SPA renders both lists and drops the general entries its shooter
+    rows already account for. It can only do that by rebuilding this
+    string -- when the two shapes disagreed, a failed shooter was rendered
+    twice (#651 item 1).
+    """
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3)
+    _projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["me"], [1, 2, 3])
+
+    def save_project(slug: str, project) -> None:
+        raise RuntimeError("disk full")
+
+    hooks["save_project"] = save_project
+
+    summary = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            submitted=[SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2)],
+            shooter_slugs=["me"],
+            **hooks,
+        )
+    )
+
+    result = summary.shooters[0]
+    assert result.saved is False
+    assert result.error is not None
+    assert summary.errors == [f"{result.slug}: {result.error}"]
+
+
+def test_a_per_stage_failure_is_reconstructible_from_its_row(tmp_path) -> None:
+    """The per-stage counterpart of the contract above. This is the half
+    that changed: ``result.error`` used to carry the slug itself, so the
+    general entry was NOT ``f"{slug}: {result.error}"``.
+    """
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3)
+    _projects, saved, _audits, _cancelled, hooks = _harness(tmp_path, ["me"], [1, 2, 3])
+
+    def delete_audit(slug: str, n: int) -> bool:
+        raise RuntimeError("state store down")
+
+    hooks["delete_audit"] = delete_audit
+
+    summary = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            submitted=[SubmittedStage(stage_number=n, stage_name=f"Stage {n}") for n in (1, 2)],
+            shooter_slugs=["me"],
+            **hooks,
+        )
+    )
+
+    result = summary.shooters[0]
+    assert result.saved is True
+    assert result.error == "stage 3: state store down"
+    assert summary.errors == [f"{result.slug}: {result.error}"]
+    assert saved == ["me"]
+
+
+def test_the_last_of_several_per_stage_failures_wins_the_row(tmp_path) -> None:
+    """One row cannot carry two messages, so ``result.error`` holds the
+    last failure and the earlier ones survive in ``summary.errors`` alone.
+    Intended -- and it means the general list is NOT fully redundant with
+    the rows.
+    """
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3)
+    _projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["me"], [1, 2, 3])
+
+    def delete_audit(slug: str, n: int) -> bool:
+        raise RuntimeError(f"stage {n} store down")
+
+    hooks["delete_audit"] = delete_audit
+
+    summary = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            submitted=[SubmittedStage(stage_number=1, stage_name="Stage 1")],
+            shooter_slugs=["me"],
+            **hooks,
+        )
+    )
+
+    result = summary.shooters[0]
+    assert result.error == "stage 3: stage 3 store down"
+    assert summary.errors == [
+        "me: stage 2: stage 2 store down",
+        "me: stage 3: stage 3 store down",
+    ]
+
+
+# --- ``shooter_root`` is resolved once per shooter (#651 item 2) -----------
+
+
+def test_shooter_root_is_resolved_once_per_shooter(tmp_path) -> None:
+    """In hosted mode every ``shooter_root`` call is a ``store.load_match``
+    round-trip. Calling it inside the removed-stage loop cost one read per
+    (shooter, removed stage); the answer cannot change within a shooter, so
+    it is resolved once, above the loop.
+    """
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2, 3, 4)
+    _projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["anna", "erik"], [1, 2, 3, 4])
+
+    calls: list[str] = []
+
+    def counting_shooter_root(slug: str):
+        calls.append(slug)
+        return tmp_path
+
+    hooks["shooter_root"] = counting_shooter_root
+
+    summary = asyncio.run(
+        apply_stage_edit(
+            match=match,
+            submitted=[SubmittedStage(stage_number=1, stage_name="Stage 1")],
+            shooter_slugs=["anna", "erik"],
+            **hooks,
+        )
+    )
+
+    # Three stages removed from each of two shooters: six calls before the
+    # hoist, two after.
+    assert summary.removed == [2, 3, 4]
+    assert calls == ["anna", "erik"]
+
+
+def test_an_edit_with_no_removals_never_resolves_a_shooter_root(tmp_path) -> None:
+    """The ``if diff.removed`` guard: a pure rename/add pays no round-trip
+    at all, which is the common case.
+    """
+    from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
+
+    match = _match_with_stages(1, 2)
+    _projects, _saved, _audits, _cancelled, hooks = _harness(tmp_path, ["anna"], [1, 2])
+
+    calls: list[str] = []
+
+    def counting_shooter_root(slug: str):
+        calls.append(slug)
+        return tmp_path
+
+    hooks["shooter_root"] = counting_shooter_root
+
+    asyncio.run(
+        apply_stage_edit(
+            match=match,
+            submitted=[
+                SubmittedStage(stage_number=1, stage_name="El Presidente"),
+                SubmittedStage(stage_number=2, stage_name="Stage 2"),
+                SubmittedStage(stage_number=None, stage_name="Standards"),
+            ],
+            shooter_slugs=["anna"],
+            **hooks,
+        )
+    )
+
+    assert calls == []
