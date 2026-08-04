@@ -319,6 +319,33 @@ def _cell_size(canvas: GridCanvas, plan: GridStagePlan) -> tuple[int, int]:
     return canvas.width // plan.cols, canvas.height // plan.rows
 
 
+def _unreached_cells(plan: GridStagePlan) -> tuple[tuple[int, int], ...]:
+    """``(row, col)`` for every cell of the grid no tile occupies.
+
+    The grid is sized by :func:`choose_grid` for the whole roster, so a
+    roster of 3 in a ``2x2`` (or 6 in a ``3x3``) leaves cells nobody
+    reaches. ``compare/layout.py`` has always modelled these as
+    :attr:`GridLayout.empty_slots` and ``compare/emitter.py`` emits a
+    black filler asset for each; this is the same concept for the MP4
+    path, and the two exporters have to agree on what an unfilled cell
+    looks like.
+
+    Handing them to ``xstack`` unfilled is not neutral. Its default
+    ``fill=none`` leaves the unused output region as raw frame buffer,
+    which decodes as RGB(0,135,0) -- solid bright green, at every
+    timestamp (measured on ffmpeg 6.1.1) -- and its extents shrink to
+    the tiles actually stacked, so a 6-shooter render came out
+    3840x1440 instead of the 4K canvas it was asked for. The ``fill``
+    option would paper over the colour but not the extents, and it
+    needs ffmpeg >= 5.1, which this repo does not pin; a real black
+    input does both on every version.
+    """
+    occupied = {(tile.row, tile.col) for tile in plan.tiles}
+    return tuple(
+        (row, col) for row in range(plan.rows) for col in range(plan.cols) if (row, col) not in occupied
+    )
+
+
 def build_stage_command(
     plan: GridStagePlan,
     *,
@@ -334,6 +361,11 @@ def build_stage_command(
     whose stream layout differs, so a missing tile contributes a black
     ``color`` source and a silent ``anullsrc`` track rather than
     nothing at all.
+
+    Cells the roster does not reach (see :func:`_unreached_cells`) get a
+    black ``color`` source too, but *video only*: an empty cell is not a
+    shooter, and giving it a track would take the audio count away from
+    the roster size -- the very thing the paragraph above pins.
     """
     cell_w, cell_h = _cell_size(canvas, plan)
     rate = canvas.rate_string
@@ -385,7 +417,25 @@ def build_stage_command(
             audio_index.append(next_index)
             next_index += 1
 
-    args += ["-filter_complex", _build_filter_graph(plan, canvas, video_index, audio_index)]
+    # Video only, and after every tile input so the tiles' own indices
+    # are untouched.
+    empty_index: list[int] = []
+    for _cell in _unreached_cells(plan):
+        args += [
+            "-f",
+            "lavfi",
+            "-t",
+            f"{plan.duration_seconds:g}",
+            "-i",
+            f"color=c=black:s={cell_w}x{cell_h}:r={rate}",
+        ]
+        empty_index.append(next_index)
+        next_index += 1
+
+    args += [
+        "-filter_complex",
+        _build_filter_graph(plan, canvas, video_index, audio_index, empty_index),
+    ]
 
     args += ["-map", "[final]"]
     for slot in range(len(plan.tiles)):
@@ -460,6 +510,7 @@ def _build_filter_graph(
     canvas: GridCanvas,
     video_index: list[int],
     audio_index: list[int],
+    empty_index: Sequence[int] = (),
 ) -> str:
     """Scale + pad every tile to a uniform cell, then ``xstack`` the grid.
 
@@ -467,6 +518,11 @@ def _build_filter_graph(
     each source into its cell, so mixed aspect ratios and mixed source
     resolutions both land correctly. ``setsar=1`` is required or
     ``xstack`` refuses inputs whose sample aspect ratios disagree.
+
+    ``empty_index`` names the black sources standing in for the cells no
+    tile reaches. They run the same chain as a tile so ``xstack`` sees
+    one uniform set of inputs, and they are stacked after the tiles, at
+    their own cell offsets.
     """
     cell_w, cell_h = _cell_size(canvas, plan)
     rate = canvas.rate_string
@@ -504,9 +560,23 @@ def _build_filter_graph(
             f"trim=0:{plan.duration_seconds:g}[t{slot}]"
         )
 
+    empty_cells = _unreached_cells(plan)
+    for index, source in enumerate(empty_index):
+        parts.append(
+            f"[{source}:v]setpts=PTS-STARTPTS,"
+            f"scale={cell_w}:{cell_h}:force_original_aspect_ratio=decrease,"
+            f"pad={cell_w}:{cell_h}:(ow-iw)/2:(oh-ih)/2,"
+            f"setsar=1,fps={rate},"
+            f"tpad=stop_duration={plan.duration_seconds:g}:stop_mode=add:color=black,"
+            f"trim=0:{plan.duration_seconds:g}[e{index}]"
+        )
+
     stack_inputs = "".join(f"[t{slot}]" for slot in range(len(plan.tiles)))
-    offsets = "|".join(f"{tile.col * cell_w}_{tile.row * cell_h}" for tile in plan.tiles)
-    parts.append(f"{stack_inputs}xstack=inputs={len(plan.tiles)}:layout={offsets}[grid]")
+    stack_inputs += "".join(f"[e{index}]" for index in range(len(empty_index)))
+    placements = [(tile.row, tile.col) for tile in plan.tiles]
+    placements += list(empty_cells[: len(empty_index)])
+    offsets = "|".join(f"{col * cell_w}_{row * cell_h}" for row, col in placements)
+    parts.append(f"{stack_inputs}xstack=inputs={len(placements)}:layout={offsets}[grid]")
     parts.append("[grid]format=yuv420p[final]")
 
     for slot, tile in enumerate(plan.tiles):

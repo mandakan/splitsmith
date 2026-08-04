@@ -202,6 +202,121 @@ def test_a_filler_tile_shifts_the_input_indices_of_the_tiles_behind_it():
     assert "[2:v]" not in graph and "[1:a]" not in graph
 
 
+# --- cells the roster does not reach -------------------------------------
+#
+# A roster of 3 fills a 2x2 grid three quarters of the way. xstack's
+# default ``fill=none`` leaves the fourth quadrant as raw frame buffer,
+# which decodes as RGB(0,135,0) -- bright green, at every timestamp
+# (measured with ffmpeg 6.1.1). And a roster of 6 in a 3x3 leaves xstack
+# with extents of only two rows, so the render silently shrinks below the
+# canvas. Both are fixed by giving every unreached cell the same black
+# filler a missing trim already gets.
+
+
+def _partial_plan(*, roster: int, rows: int, cols: int) -> mp4_grid.GridStagePlan:
+    """``roster`` tiles laid row-major into a ``rows``x``cols`` grid."""
+    labels = [f"Shooter{index}" for index in range(roster)]
+    tiles = tuple(
+        mp4_grid.GridTile(
+            label=label,
+            trim_path=Path(f"/trims/{label}.mp4"),
+            beep_offset_in_clip=2.0,
+            seek_seconds=1.0,
+            lead_pad_seconds=0.0,
+            row=index // cols,
+            col=index % cols,
+        )
+        for index, label in enumerate(labels)
+    )
+    return mp4_grid.GridStagePlan(
+        stage_number=1,
+        stage_name="Stage 1",
+        tiles=tiles,
+        duration_seconds=12.5,
+        audio_label=labels[0],
+        rows=rows,
+        cols=cols,
+    )
+
+
+def test_an_unreached_cell_is_filled_with_black_rather_than_left_to_xstack():
+    cmd = mp4_grid.build_stage_command(
+        _partial_plan(roster=3, rows=2, cols=2),
+        canvas=mp4_grid.GridCanvas(),
+        output_path=Path("/o.mp4"),
+    )
+    graph = _graph(cmd)
+    # Four cells stacked, not three -- the fourth is the filler.
+    assert "xstack=inputs=4:layout=0_0|1920_0|0_1080|1920_1080" in graph
+    # And it is a real black source, not xstack's fill= option (which
+    # needs ffmpeg >= 5.1 and this repo pins no floor).
+    assert " ".join(cmd).count("color=c=black:s=1920x1080:r=30000/1001") == 1
+    assert "fill=" not in graph
+
+
+def test_an_unreached_cell_adds_no_audio_track():
+    # An empty cell is not a shooter. Giving it a track would change the
+    # stream count away from the roster size and break concat -c copy.
+    cmd = mp4_grid.build_stage_command(
+        _partial_plan(roster=3, rows=2, cols=2),
+        canvas=mp4_grid.GridCanvas(),
+        output_path=Path("/o.mp4"),
+    )
+    maps = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-map"]
+    assert maps == ["[final]", "[a0]", "[a1]", "[a2]"]
+    assert "anullsrc" not in " ".join(cmd)
+    named = [cmd[i + 1] for i, a in enumerate(cmd) if a.startswith("-metadata:s:a:")]
+    assert named == [
+        "title=Shooter0",
+        "handler_name=Shooter0",
+        "title=Shooter1",
+        "handler_name=Shooter1",
+        "title=Shooter2",
+        "handler_name=Shooter2",
+    ]
+
+
+def test_a_partly_filled_grid_still_stacks_out_to_the_whole_canvas():
+    # Six shooters in a 3x3: without the bottom row's fillers xstack's
+    # extents are 3840x1440 and the render comes out short of the canvas.
+    graph = _graph(
+        mp4_grid.build_stage_command(
+            _partial_plan(roster=6, rows=3, cols=3),
+            canvas=mp4_grid.GridCanvas(),
+            output_path=Path("/o.mp4"),
+        )
+    )
+    assert "xstack=inputs=9:" in graph
+    layout = graph.split("xstack=inputs=9:layout=")[1].split("[")[0]
+    offsets = layout.split("|")
+    assert offsets[6:] == ["0_1440", "1280_1440", "2560_1440"]
+
+
+def test_a_filler_tile_and_an_unreached_cell_can_coexist():
+    # A three-shooter roster where one has no trim: three colour sources
+    # (two fillers' worth of cell plus the empty quadrant) but only one
+    # silent audio track, because only the shooter gets one.
+    plan = _partial_plan(roster=3, rows=2, cols=2)
+    tiles = list(plan.tiles)
+    tiles[1] = replace(tiles[1], trim_path=None)
+    cmd = mp4_grid.build_stage_command(
+        replace(plan, tiles=tuple(tiles)),
+        canvas=mp4_grid.GridCanvas(),
+        output_path=Path("/o.mp4"),
+    )
+    joined = " ".join(cmd)
+    assert joined.count("color=c=black:s=1920x1080") == 2
+    assert joined.count("anullsrc") == 1
+    maps = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-map"]
+    assert maps == ["[final]", "[a0]", "[a1]", "[a2]"]
+
+
+def test_a_full_grid_adds_no_filler_inputs():
+    cmd = mp4_grid.build_stage_command(_plan(), canvas=mp4_grid.GridCanvas(), output_path=Path("/o.mp4"))
+    assert "color=c=black" not in " ".join(cmd)
+    assert "xstack=inputs=4:" in _graph(cmd)
+
+
 def test_seek_and_duration_are_applied_before_each_input():
     cmd = mp4_grid.build_stage_command(_plan(), canvas=mp4_grid.GridCanvas(), output_path=Path("/out/s.mp4"))
     first_input = cmd.index("-i")

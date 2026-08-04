@@ -89,21 +89,49 @@ def _tile(label: str, trim: Path | None, *, col: int, lead_pad: float = 0.0) -> 
     )
 
 
-def _render(tmp_path: Path, tiles: tuple[mp4_grid.GridTile, ...], name: str) -> Path:
+def _render(
+    tmp_path: Path,
+    tiles: tuple[mp4_grid.GridTile, ...],
+    name: str,
+    *,
+    rows: int | None = None,
+    cols: int | None = None,
+    canvas: mp4_grid.GridCanvas = CANVAS,
+) -> Path:
     plan = mp4_grid.GridStagePlan(
         stage_number=1,
         stage_name="Stage 1",
         tiles=tiles,
         duration_seconds=STAGE_SECONDS,
         audio_label=tiles[-1].label,
-        rows=1,
-        cols=len(tiles),
+        rows=rows if rows is not None else 1,
+        cols=cols if cols is not None else len(tiles),
     )
     out = tmp_path / name
-    cmd = mp4_grid.build_stage_command(plan, canvas=CANVAS, output_path=out, ffmpeg_binary=FFMPEG)
+    cmd = mp4_grid.build_stage_command(plan, canvas=canvas, output_path=out, ffmpeg_binary=FFMPEG)
     done = subprocess.run(list(cmd), capture_output=True, text=True)
     assert done.returncode == 0, done.stderr[-3000:]
     return out
+
+
+def _video_size(path: Path) -> tuple[int, int]:
+    """``(width, height)`` of the file's video stream, per ffmpeg itself."""
+    done = subprocess.run([FFMPEG, "-hide_banner", "-i", str(path)], capture_output=True, text=True)
+    found = re.search(r"Video:.*?, (\d+)x(\d+)", done.stderr)
+    assert found, done.stderr[-2000:]
+    return int(found.group(1)), int(found.group(2))
+
+
+def _grid_tile(label: str, trim: Path | None, *, row: int, col: int) -> mp4_grid.GridTile:
+    return mp4_grid.GridTile(
+        label=label,
+        trim_path=trim,
+        beep_offset_in_clip=0.0,
+        seek_seconds=0.0,
+        lead_pad_seconds=0.0,
+        row=row,
+        col=col,
+    )
 
 
 @integration
@@ -157,6 +185,56 @@ def test_the_tail_pad_is_black_and_does_not_disturb_the_head_pad(tmp_path: Path)
     assert _patch_colour(out, at=3.5, x=cell_w + centre_x, y=centre_y) == (0, 0, 0)
 
     assert _stream_seconds(out, "0:v:0") == pytest.approx(STAGE_SECONDS, abs=2 * FRAME_SECONDS)
+
+
+@integration
+@needs_ffmpeg
+def test_a_cell_no_shooter_reaches_renders_black_not_raw_frame_buffer(tmp_path: Path):
+    # Three shooters fill a 2x2 three quarters of the way. xstack's
+    # default fill=none leaves the fourth quadrant as whatever the frame
+    # buffer held -- YUV(0,0,0), which is RGB(0,135,0): bright green, at
+    # every timestamp. Only a roster that leaves a cell empty can see
+    # this, which is why 2- and 4-shooter fixtures never did.
+    tiles = (
+        _grid_tile("A", _source(tmp_path / "a.mp4", seconds=2.0, color="red"), row=0, col=0),
+        _grid_tile("B", _source(tmp_path / "b.mp4", seconds=2.0, color="blue"), row=0, col=1),
+        _grid_tile("C", _source(tmp_path / "c.mp4", seconds=2.0, color="yellow"), row=1, col=0),
+    )
+    out = _render(tmp_path, tiles, "three_up.mp4", rows=2, cols=2)
+
+    cell_w, cell_h = CANVAS.width // 2, CANVAS.height // 2
+    for at in (0.1, 1.0, 3.5):
+        assert _patch_colour(out, at=at, x=cell_w + cell_w // 2, y=cell_h + cell_h // 2) == (0, 0, 0)
+    # The three real tiles are still where they belong.
+    assert _patch_colour(out, at=1.0, x=cell_w // 2, y=cell_h // 2)[0] > 200  # red
+    assert _patch_colour(out, at=1.0, x=cell_w + cell_w // 2, y=cell_h // 2)[2] > 200  # blue
+    # The empty cell is not a shooter: three audio tracks, not four.
+    assert len(_audio_streams(out)) == 3
+    assert _video_size(out) == (CANVAS.width, CANVAS.height)
+
+
+@integration
+@needs_ffmpeg
+def test_a_partly_filled_grid_keeps_the_whole_canvas(tmp_path: Path):
+    # Six shooters in a 3x3. With the bottom row unfilled xstack's
+    # extents are two rows tall and the render silently comes out below
+    # the canvas the caller asked for.
+    canvas = mp4_grid.GridCanvas(width=960, height=540, frame_rate_num=30, frame_rate_den=1)
+    clips = {
+        colour: _source(tmp_path / f"{colour}.mp4", seconds=2.0, color=colour)
+        for colour in ("red", "blue", "yellow", "green", "white", "gray")
+    }
+    tiles = tuple(
+        _grid_tile(f"S{index}", clip, row=index // 3, col=index % 3)
+        for index, clip in enumerate(clips.values())
+    )
+    out = _render(tmp_path, tiles, "six_up.mp4", rows=3, cols=3, canvas=canvas)
+
+    assert _video_size(out) == (960, 540)
+    cell_w, cell_h = 320, 180
+    for col in range(3):
+        assert _patch_colour(out, at=1.0, x=col * cell_w + 4, y=2 * cell_h + cell_h // 2) == (0, 0, 0)
+    assert len(_audio_streams(out)) == 6
 
 
 # --- driver ---------------------------------------------------------------
@@ -490,9 +568,14 @@ def _audio_streams(path: Path) -> list[tuple[str, bool]]:
     return streams
 
 
-def _real_shooters(tmp_path: Path, *, broken_stage: int | None = None):
-    """Two shooters with two stages each, backed by real 2s clips."""
-    colours = {"Anders": "red", "Mathias": "blue"}
+def _real_shooters(
+    tmp_path: Path,
+    *,
+    broken_stage: int | None = None,
+    colours: dict[str, str] | None = None,
+):
+    """Shooters with two stages each, backed by real 2s clips."""
+    colours = colours or {"Anders": "red", "Mathias": "blue"}
     shooters = []
     for label, colour in colours.items():
         stages = {}
@@ -562,6 +645,38 @@ def test_a_stage_whose_source_is_gone_is_skipped_and_the_rest_still_stitches(tmp
     assert result.output_path.exists()
     assert _stream_seconds(result.output_path, "0:v:0") == pytest.approx(3.0, abs=0.2)
     assert _audio_streams(result.output_path) == [("Anders", False), ("Mathias", True)]
+
+
+@integration
+@needs_ffmpeg
+def test_a_three_shooter_match_stitches_with_its_empty_quadrant_black(tmp_path: Path):
+    # The whole driver at a roster size that does not fill its grid. The
+    # per-stage command tests prove the filler is emitted; only the
+    # stitched file proves concat -c copy still accepts segments that
+    # carry one, and that the audio count is still the roster's three.
+    result = mp4_grid.render_grid_mp4(
+        _real_shooters(tmp_path, colours={"Anders": "red", "Bea": "blue", "Mathias": "yellow"}),
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        ffmpeg_binary=FFMPEG,
+        work_dir=tmp_path / "work",
+    )
+
+    assert result.failed == ()
+    assert _video_size(result.output_path) == (CANVAS.width, CANVAS.height)
+    assert _audio_streams(result.output_path) == [
+        ("Anders", False),
+        ("Bea", False),
+        ("Mathias", True),
+    ]
+    cell_w, cell_h = CANVAS.width // 2, CANVAS.height // 2
+    for at in (1.0, 4.0):
+        assert _patch_colour(result.output_path, at=at, x=cell_w + cell_w // 2, y=cell_h + cell_h // 2) == (
+            0,
+            0,
+            0,
+        )
 
 
 # --- canvas frame rate ----------------------------------------------------
