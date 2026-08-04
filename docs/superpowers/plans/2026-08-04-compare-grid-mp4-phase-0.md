@@ -42,7 +42,7 @@ A shooter missing a stage's trim therefore contributes a **black video tile AND 
 **Files:**
 - Modify: `src/splitsmith/compare/layout.py` (add public `grid_shape`)
 - Create: `src/splitsmith/compare/mp4_grid.py`
-- Test: `tests/compare/test_mp4_grid_plan.py`
+- Test: `tests/test_compare_mp4_grid_plan.py`
 
 **Interfaces:**
 - Consumes: `compare.layout.choose_grid`, `compare.project_loader.CompareShooterBundle`, `CompareStageBundle`
@@ -56,7 +56,7 @@ A shooter missing a stage's trim therefore contributes a **black video tile AND 
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# tests/compare/test_mp4_grid_plan.py
+# tests/test_compare_mp4_grid_plan.py
 from pathlib import Path
 
 import pytest
@@ -163,7 +163,7 @@ def test_unknown_audio_label_is_rejected():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/compare/test_mp4_grid_plan.py -v`
+Run: `uv run pytest tests/test_compare_mp4_grid_plan.py -v`
 Expected: FAIL -- `ImportError: cannot import name 'mp4_grid'` and `cannot import name 'grid_shape'`.
 
 - [ ] **Step 3: Add `grid_shape` to `layout.py`**
@@ -348,18 +348,18 @@ def build_stage_plans(
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `uv run pytest tests/compare/test_mp4_grid_plan.py -v`
+Run: `uv run pytest tests/test_compare_mp4_grid_plan.py -v`
 Expected: PASS (5 tests)
 
 - [ ] **Step 6: Lint and format**
 
-Run: `uv run ruff check src/splitsmith/compare/ tests/compare/ && uv run black --line-length 110 src/splitsmith/compare/ tests/compare/`
+Run: `uv run ruff check src/splitsmith/compare/ tests/ && uv run black --line-length 110 src/splitsmith/compare/ tests/`
 Expected: clean.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add src/splitsmith/compare/layout.py src/splitsmith/compare/mp4_grid.py tests/compare/test_mp4_grid_plan.py
+git add src/splitsmith/compare/layout.py src/splitsmith/compare/mp4_grid.py tests/test_compare_mp4_grid_plan.py
 git commit -m "feat(compare): plan beep-aligned grid stages for MP4 render"
 ```
 
@@ -371,7 +371,7 @@ git commit -m "feat(compare): plan beep-aligned grid stages for MP4 render"
 
 **Files:**
 - Modify: `src/splitsmith/compare/mp4_grid.py`
-- Test: `tests/compare/test_mp4_grid_commands.py`
+- Test: `tests/test_compare_mp4_grid_commands.py`
 
 **Interfaces:**
 - Consumes: `GridStagePlan`, `GridTile`, `GridCanvas` from Task 1
@@ -382,7 +382,7 @@ git commit -m "feat(compare): plan beep-aligned grid stages for MP4 render"
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# tests/compare/test_mp4_grid_commands.py
+# tests/test_compare_mp4_grid_commands.py
 from pathlib import Path
 
 from splitsmith.compare import mp4_grid
@@ -486,7 +486,7 @@ def test_concat_command_stream_copies():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/compare/test_mp4_grid_commands.py -v`
+Run: `uv run pytest tests/test_compare_mp4_grid_commands.py -v`
 Expected: FAIL -- `AttributeError: module 'splitsmith.compare.mp4_grid' has no attribute 'build_stage_command'`.
 
 - [ ] **Step 3: Implement the command builders**
@@ -670,18 +670,18 @@ def build_concat_command(
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest tests/compare/test_mp4_grid_commands.py -v`
+Run: `uv run pytest tests/test_compare_mp4_grid_commands.py -v`
 Expected: PASS (6 tests)
 
 - [ ] **Step 5: Run the whole compare suite for regressions**
 
-Run: `uv run pytest tests/compare/ -v`
+Run: `uv run pytest tests/test_compare_*.py -v`
 Expected: PASS, including the pre-existing FCPXML emitter tests (this task must not touch them).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/splitsmith/compare/mp4_grid.py tests/compare/test_mp4_grid_commands.py
+git add src/splitsmith/compare/mp4_grid.py tests/test_compare_mp4_grid_commands.py
 git commit -m "feat(compare): build ffmpeg xstack grid + per-shooter audio tracks"
 ```
 
@@ -693,7 +693,7 @@ git commit -m "feat(compare): build ffmpeg xstack grid + per-shooter audio track
 
 **Files:**
 - Modify: `src/splitsmith/compare/mp4_grid.py`
-- Test: `tests/compare/test_mp4_grid_render.py`
+- Test: `tests/test_compare_mp4_grid_render.py`
 
 **Interfaces:**
 - Consumes: `build_stage_plans`, `build_stage_command`, `build_concat_command`, `GridCanvas`
@@ -705,7 +705,7 @@ git commit -m "feat(compare): build ffmpeg xstack grid + per-shooter audio track
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# tests/compare/test_mp4_grid_render.py
+# tests/test_compare_mp4_grid_render.py
 import subprocess
 from pathlib import Path
 
@@ -797,7 +797,7 @@ def test_all_stages_failing_raises_rather_than_concatenating_nothing(tmp_path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/compare/test_mp4_grid_render.py -v`
+Run: `uv run pytest tests/test_compare_mp4_grid_render.py -v`
 Expected: FAIL -- `AttributeError: ... has no attribute 'render_grid_mp4'`.
 
 - [ ] **Step 3: Implement the driver**
@@ -927,13 +927,13 @@ __all__ = [
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest tests/compare/test_mp4_grid_render.py -v`
+Run: `uv run pytest tests/test_compare_mp4_grid_render.py -v`
 Expected: PASS (3 tests)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/splitsmith/compare/mp4_grid.py tests/compare/test_mp4_grid_render.py
+git add src/splitsmith/compare/mp4_grid.py tests/test_compare_mp4_grid_render.py
 git commit -m "feat(compare): drive grid MP4 render with per-stage failure isolation"
 ```
 
@@ -945,7 +945,7 @@ git commit -m "feat(compare): drive grid MP4 render with per-stage failure isola
 
 **Files:**
 - Modify: `src/splitsmith/compare/cli.py` (the `export` command, `src/splitsmith/compare/cli.py:27-134`, and `_export_from_match`, `src/splitsmith/compare/cli.py:219`)
-- Test: `tests/compare/test_compare_cli_mp4.py`
+- Test: `tests/test_compare_cli_mp4.py`
 
 **Interfaces:**
 - Consumes: `mp4_grid.render_grid_mp4`, `mp4_grid.GridCanvas`
@@ -954,7 +954,7 @@ git commit -m "feat(compare): drive grid MP4 render with per-stage failure isola
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# tests/compare/test_compare_cli_mp4.py
+# tests/test_compare_cli_mp4.py
 from typer.testing import CliRunner
 
 from splitsmith.compare.cli import compare_app
@@ -981,7 +981,7 @@ def test_mp4_format_rejects_a_manifest_source(tmp_path):
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/compare/test_compare_cli_mp4.py -v`
+Run: `uv run pytest tests/test_compare_cli_mp4.py -v`
 Expected: FAIL -- `--format` is not in the help output.
 
 - [ ] **Step 3: Add the flag to the `export` command**
@@ -1053,13 +1053,13 @@ Add `from . import mp4_grid` to the module imports.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
-Run: `uv run pytest tests/compare/test_compare_cli_mp4.py -v && uv run pytest tests/compare/ -v`
+Run: `uv run pytest tests/test_compare_cli_mp4.py -v && uv run pytest tests/test_compare_*.py -v`
 Expected: PASS, existing FCPXML CLI tests unaffected.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/splitsmith/compare/cli.py tests/compare/test_compare_cli_mp4.py
+git add src/splitsmith/compare/cli.py tests/test_compare_cli_mp4.py
 git commit -m "feat(compare): add --format mp4 to compare export"
 ```
 
@@ -1072,7 +1072,7 @@ git commit -m "feat(compare): add --format mp4 to compare export"
 **Files:**
 - Modify: `src/splitsmith/ui/server.py` (request model near `src/splitsmith/ui/server.py:4166`; endpoint near the stage-compare block at `src/splitsmith/ui/server.py:11801`)
 - Modify: the job worker that dispatches `kind="export"` (find it by searching for `kind == "export"` in the queue consumer)
-- Test: `tests/ui/test_compare_grid_endpoint.py`
+- Test: `tests/test_compare_grid_endpoint.py`
 
 **Interfaces:**
 - Consumes: `mp4_grid.render_grid_mp4`, `compare.project_loader.load_shooter`, `match_model.Match`
@@ -1099,7 +1099,7 @@ class CompareGridRequest(BaseModel):
 - [ ] **Step 1: Write the failing test**
 
 ```python
-# tests/ui/test_compare_grid_endpoint.py
+# tests/test_compare_grid_endpoint.py
 import pytest
 
 
@@ -1143,11 +1143,11 @@ def test_queues_a_job_when_trims_exist(match_client_with_trims):
     assert body["status"] in ("pending", "running")
 ```
 
-**Note for the implementer:** `match_client` / `match_client_with_trims` fixtures may not exist yet. Look in `tests/ui/conftest.py` for the existing match-scoped client fixture used by the stage-compare tests (`/api/match/stage/{n}/compare`) and reuse or extend it. Do not invent a new fixture shape if one is already established.
+**Note for the implementer:** `match_client` / `match_client_with_trims` do not exist yet -- build them from what is already there rather than inventing a new shape. `tests/test_trims_to_compare_e2e.py` has a `chained_match` fixture (`tests/test_trims_to_compare_e2e.py:118`) that seeds a real merged match under `tmp_path` via a `_seed_shooter` helper, and `tests/test_compare_merged_match.py` has `_stub_probe` / `_stub_ffmpeg_runner` / `_seed_legacy_project`. Reuse those seeding helpers for the match on disk, and find the existing FastAPI `TestClient` fixture that the other `/api/match/...` route tests use for the client half.
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `uv run pytest tests/ui/test_compare_grid_endpoint.py -v`
+Run: `uv run pytest tests/test_compare_grid_endpoint.py -v`
 Expected: FAIL with 404 (route does not exist).
 
 - [ ] **Step 3: Add the request model**
@@ -1226,7 +1226,7 @@ Find the queue consumer that branches on `kind == "export"` and add a sibling br
 
 - [ ] **Step 6: Run tests to verify they pass**
 
-Run: `uv run pytest tests/ui/test_compare_grid_endpoint.py -v`
+Run: `uv run pytest tests/test_compare_grid_endpoint.py -v`
 Expected: PASS (4 tests)
 
 - [ ] **Step 7: Verify local-mode import isolation**
@@ -1237,7 +1237,7 @@ Expected: PASS. `mp4_grid` must not pull in `splitsmith.db`.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add src/splitsmith/ui/server.py tests/ui/test_compare_grid_endpoint.py
+git add src/splitsmith/ui/server.py tests/test_compare_grid_endpoint.py
 git commit -m "feat(ui): add match-scoped compare-grid MP4 export endpoint"
 ```
 
@@ -1249,7 +1249,7 @@ git commit -m "feat(ui): add match-scoped compare-grid MP4 export endpoint"
 
 **Files:**
 - Modify: `src/splitsmith/ui_static/src/lib/api.ts`
-- Test: `src/splitsmith/ui_static/src/lib/__tests__/api.compareGrid.test.ts`
+- Test: `src/splitsmith/ui_static/src/lib/api.compareGrid.test.ts`
 
 **Interfaces:**
 - Produces:
@@ -1259,19 +1259,24 @@ git commit -m "feat(ui): add match-scoped compare-grid MP4 export endpoint"
 
 - [ ] **Step 1: Write the failing test**
 
+Follow the existing fetch-mocking idiom in `src/splitsmith/ui_static/src/lib/apiErrors.test.ts`: `vi.spyOn(globalThis, "fetch")` plus `vi.restoreAllMocks()` in `afterEach`. Do not use `vi.stubGlobal`; this suite does not.
+
 ```ts
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { api } from "@/lib/api";
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("api.exportCompareGrid", () => {
   it("posts the selection to the match-scoped endpoint", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({ id: "job-1", kind: "compare-grid", status: "pending" }),
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    } as unknown as Response);
 
     const job = await api.exportCompareGrid({
       stage_numbers: [1, 2],
@@ -1279,20 +1284,18 @@ describe("api.exportCompareGrid", () => {
     });
 
     expect(fetchMock).toHaveBeenCalled();
-    const [url, init] = fetchMock.mock.calls[0];
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(String(url)).toContain("/api/match/compare-export");
     expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body).stage_numbers).toEqual([1, 2]);
+    expect(JSON.parse(init.body as string).stage_numbers).toEqual([1, 2]);
     expect(job.kind).toBe("compare-grid");
-
-    vi.unstubAllGlobals();
   });
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd src/splitsmith/ui_static && pnpm vitest run src/lib/__tests__/api.compareGrid.test.ts`
+Run: `cd src/splitsmith/ui_static && pnpm vitest run src/lib/api.compareGrid.test.ts`
 Expected: FAIL -- `api.exportCompareGrid is not a function`.
 
 - [ ] **Step 3: Add the types and method**
@@ -1301,7 +1304,7 @@ Add the two interfaces next to `MatchExportResult` (`src/splitsmith/ui_static/sr
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `cd src/splitsmith/ui_static && pnpm vitest run src/lib/__tests__/api.compareGrid.test.ts`
+Run: `cd src/splitsmith/ui_static && pnpm vitest run src/lib/api.compareGrid.test.ts`
 Expected: PASS
 
 - [ ] **Step 5: Typecheck**
@@ -1312,7 +1315,7 @@ Expected: clean.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/splitsmith/ui_static/src/lib/api.ts src/splitsmith/ui_static/src/lib/__tests__/api.compareGrid.test.ts
+git add src/splitsmith/ui_static/src/lib/api.ts src/splitsmith/ui_static/src/lib/api.compareGrid.test.ts
 git commit -m "feat(ui): add exportCompareGrid API client method"
 ```
 
@@ -1324,11 +1327,18 @@ git commit -m "feat(ui): add exportCompareGrid API client method"
 
 **Files:**
 - Create: `src/splitsmith/ui_static/src/pages/MatchExport.tsx`
+- Create: `src/splitsmith/ui_static/src/pages/matchExportModel.ts`
 - Modify: `src/splitsmith/ui_static/src/App.tsx:195` (the `export` redirect route)
-- Test: `src/splitsmith/ui_static/src/pages/__tests__/MatchExport.test.tsx`
+- Test: `src/splitsmith/ui_static/src/pages/matchExportModel.test.ts`
 
 **Interfaces:**
 - Consumes: `api.exportCompareGrid`, `api.pollJob`, `api.revealFile`, `api.getMatch` (or the existing match-context hook used by `Compare.tsx`)
+- Produces (in `matchExportModel.ts`):
+  - `buildCompareGridPayload(input: { stageNumbers: number[]; audioFrom: string; canvas: CanvasChoice; outputName: string }) -> CompareGridRequestPayload`
+  - `summarizeGridResult(result: CompareGridResult) -> { headline: string; partial: boolean; failedStages: string[] }`
+  - `CANVAS_CHOICES` -- `[{ id: "uhd", label: "4K UHD (3840x2160)", width: 3840, height: 2160 }, { id: "hd", label: "1080p (1920x1080) -- faster", width: 1920, height: 1080 }]`
+
+**Testing approach (deviation from the original plan text, ruled by the user):** this SPA has no React Testing Library, no jsdom, and zero `.test.tsx` files, and the plan's Global Constraints forbid new dependencies. So the page's logic is extracted into `matchExportModel.ts` and unit-tested there, matching the existing convention (`src/lib/format.test.ts`, `src/lib/apiErrors.test.ts`). `MatchExport.tsx` holds rendering only and is verified by hand in Task 8 Step 5. Do **not** add `@testing-library/*` or `jsdom`.
 
 **Behaviour:**
 - Route `match/:matchId/export` renders `<MatchExport />` wrapped in `<DesktopGate screen="Match export">`, matching the `Compare` route at `src/splitsmith/ui_static/src/App.tsx:169`.
@@ -1338,80 +1348,76 @@ git commit -m "feat(ui): add exportCompareGrid API client method"
 
 - [ ] **Step 1: Write the failing test**
 
-```tsx
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+```ts
+import { describe, expect, it } from "vitest";
 
-import { MatchExport } from "@/pages/MatchExport";
+import {
+  CANVAS_CHOICES,
+  buildCompareGridPayload,
+  summarizeGridResult,
+} from "@/pages/matchExportModel";
 
-vi.mock("@/lib/api", () => ({
-  api: {
-    exportCompareGrid: vi.fn().mockResolvedValue({ id: "job-1", status: "pending" }),
-    pollJob: vi.fn().mockResolvedValue({
-      id: "job-1",
-      status: "succeeded",
-      result: {
-        output_path: "/m/exports/compare-grid.mp4",
-        stages_rendered: 2,
-        stages_total: 2,
-        failed: [],
-      },
-    }),
-    revealFile: vi.fn().mockResolvedValue(undefined),
-  },
-}));
+describe("buildCompareGridPayload", () => {
+  it("carries the selection and the chosen canvas", () => {
+    const payload = buildCompareGridPayload({
+      stageNumbers: [3, 1, 2],
+      audioFrom: "mathias",
+      canvas: CANVAS_CHOICES[0],
+      outputName: "bromma-grid",
+    });
 
-describe("MatchExport", () => {
-  it("renders the grid and shows the output on success", async () => {
-    const { api } = await import("@/lib/api");
-    render(
-      <MemoryRouter>
-        <MatchExport />
-      </MemoryRouter>,
-    );
-
-    await userEvent.click(await screen.findByRole("button", { name: /render grid/i }));
-
-    await waitFor(() => expect(api.exportCompareGrid).toHaveBeenCalled());
-    expect(await screen.findByText(/compare-grid\.mp4/)).toBeInTheDocument();
+    expect(payload.stage_numbers).toEqual([1, 2, 3]);
+    expect(payload.audio_from).toBe("mathias");
+    expect(payload.canvas_width).toBe(3840);
+    expect(payload.canvas_height).toBe(2160);
+    expect(payload.output_name).toBe("bromma-grid");
   });
 
-  it("warns about partially failed stages without claiming failure", async () => {
-    const { api } = await import("@/lib/api");
-    vi.mocked(api.pollJob).mockResolvedValueOnce({
-      id: "job-1",
-      status: "succeeded",
-      result: {
-        output_path: "/m/exports/compare-grid.mp4",
-        stages_rendered: 1,
-        stages_total: 2,
-        failed: [{ stage_number: 2, stage_name: "Stage 2", error: "boom" }],
-      },
-    } as never);
+  it("defaults to 4K UHD as the first canvas choice", () => {
+    expect(CANVAS_CHOICES[0].width).toBe(3840);
+    expect(CANVAS_CHOICES[0].height).toBe(2160);
+  });
+});
 
-    render(
-      <MemoryRouter>
-        <MatchExport />
-      </MemoryRouter>,
-    );
-    await userEvent.click(await screen.findByRole("button", { name: /render grid/i }));
+describe("summarizeGridResult", () => {
+  it("reports a clean render without a partial warning", () => {
+    const summary = summarizeGridResult({
+      output_path: "/m/exports/compare-grid.mp4",
+      stages_rendered: 2,
+      stages_total: 2,
+      failed: [],
+    });
 
-    expect(await screen.findByText(/Stage 2/)).toBeInTheDocument();
-    expect(await screen.findByText(/1 of 2/i)).toBeInTheDocument();
+    expect(summary.partial).toBe(false);
+    expect(summary.failedStages).toEqual([]);
+    expect(summary.headline).toContain("2");
+  });
+
+  it("names the failed stages without calling the whole render a failure", () => {
+    const summary = summarizeGridResult({
+      output_path: "/m/exports/compare-grid.mp4",
+      stages_rendered: 1,
+      stages_total: 2,
+      failed: [{ stage_number: 2, stage_name: "Stage 2", error: "boom" }],
+    });
+
+    expect(summary.partial).toBe(true);
+    expect(summary.failedStages).toEqual(["Stage 2"]);
+    expect(summary.headline).toContain("1 of 2");
   });
 });
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd src/splitsmith/ui_static && pnpm vitest run src/pages/__tests__/MatchExport.test.tsx`
-Expected: FAIL -- cannot resolve `@/pages/MatchExport`.
+Run: `cd src/splitsmith/ui_static && pnpm vitest run src/pages/matchExportModel.test.ts`
+Expected: FAIL -- cannot resolve `@/pages/matchExportModel`.
 
-- [ ] **Step 3: Build the page**
+- [ ] **Step 3: Write `matchExportModel.ts`, then build the page around it**
 
-Create `MatchExport.tsx`. Reuse the shooter-loading and match-context pattern from `Compare.tsx` (`src/splitsmith/ui_static/src/pages/Compare.tsx`), and the visual primitives (`Section`, `StageChip`, `SelectField`, the LED CTA `Button`) from `Export.tsx` (`src/splitsmith/ui_static/src/pages/Export.tsx:1090-1500`). Import them by lifting the shared primitives into `src/splitsmith/ui_static/src/components/export/` rather than copy-pasting -- phase 3 folds both pages together and duplicated primitives would have to be reconciled then.
+Implement the three exports listed under **Interfaces** so the test passes, then create `MatchExport.tsx` as rendering only -- it calls `buildCompareGridPayload` to build the request and `summarizeGridResult` to render the outcome, holding no payload or summary logic of its own.
+
+Reuse the shooter-loading and match-context pattern from `Compare.tsx` (`src/splitsmith/ui_static/src/pages/Compare.tsx`), and the visual primitives (`Section`, `StageChip`, `SelectField`, the LED CTA `Button`) from `Export.tsx` (`src/splitsmith/ui_static/src/pages/Export.tsx:1090-1500`). Lift those primitives into `src/splitsmith/ui_static/src/components/export/` rather than copy-pasting -- phase 3 folds both pages together and duplicated primitives would have to be reconciled then.
 
 - [ ] **Step 4: Wire the route**
 
@@ -1444,7 +1450,7 @@ Expected: PASS, clean typecheck.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/splitsmith/ui_static/src/pages/MatchExport.tsx src/splitsmith/ui_static/src/App.tsx src/splitsmith/ui_static/src/components/export/ src/splitsmith/ui_static/src/pages/__tests__/MatchExport.test.tsx
+git add src/splitsmith/ui_static/src/pages/MatchExport.tsx src/splitsmith/ui_static/src/pages/matchExportModel.ts src/splitsmith/ui_static/src/pages/matchExportModel.test.ts src/splitsmith/ui_static/src/App.tsx src/splitsmith/ui_static/src/components/export/
 git commit -m "feat(ui): add match-scoped compare-grid export page"
 ```
 
@@ -1455,7 +1461,7 @@ git commit -m "feat(ui): add match-scoped compare-grid export page"
 **Model: Opus.** This is the task that decides whether phase 0 actually shipped.
 
 **Files:**
-- Create: `tests/compare/test_mp4_grid_integration.py`
+- Create: `tests/test_compare_mp4_grid_integration.py`
 
 - [ ] **Step 1: Write the integration test**
 
@@ -1503,11 +1509,11 @@ def test_renders_a_real_grid_with_four_audio_tracks(tmp_path, four_shooter_bundl
     assert audio[3]["disposition"]["default"] == 1, "audio source is the default track"
 ```
 
-**Note for the implementer:** build the `four_shooter_bundles` fixture from real short clips already in `tests/fixtures/`. Per the project's rules, **do not generate fake fixtures** -- if four suitable clips do not exist, ask the user for a sample rather than synthesising audio.
+**Note for the implementer:** build the `four_shooter_bundles` fixture from real short clips already in `tests/fixtures/`. Per the project's rules, **do not generate fake fixtures** -- if four suitable clips do not exist, ask the user for a sample rather than synthesising audio. `tests/test_trims_to_compare_e2e.py:118`'s `chained_match` fixture shows how a merged match is seeded on disk; `CompareShooterBundle`s can be loaded from it with `project_loader.load_shooter`.
 
 - [ ] **Step 2: Run it**
 
-Run: `uv run pytest tests/compare/test_mp4_grid_integration.py -v -m integration`
+Run: `uv run pytest tests/test_compare_mp4_grid_integration.py -v -m integration`
 Expected: PASS
 
 - [ ] **Step 3: Drive the real match from the CLI**
@@ -1534,7 +1540,7 @@ Start the local server, open `match/:matchId/export`, select all stages, pick th
 - [ ] **Step 6: Commit**
 
 ```bash
-git add tests/compare/test_mp4_grid_integration.py
+git add tests/test_compare_mp4_grid_integration.py
 git commit -m "test(compare): integration coverage for the grid MP4 render"
 ```
 
