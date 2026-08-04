@@ -11,6 +11,7 @@ command layer -- the head pad being swallowed when ``setpts`` ran before
 the rendered file.
 """
 
+import array
 import re
 import shutil
 import subprocess
@@ -23,12 +24,16 @@ from splitsmith.compare import mp4_grid
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
 
 FFMPEG = shutil.which("ffmpeg")
+FFPROBE = shutil.which("ffprobe")
 
 #: Applied per-test rather than module-wide: the driver tests below run
 #: everywhere, and marking them ``integration`` would skip them exactly
 #: where they are needed most -- a machine with no ffmpeg.
 integration = pytest.mark.integration
 needs_ffmpeg = pytest.mark.skipif(FFMPEG is None, reason="needs a real ffmpeg on PATH")
+needs_ffprobe = pytest.mark.skipif(
+    FFMPEG is None or FFPROBE is None, reason="needs a real ffmpeg and ffprobe on PATH"
+)
 
 CANVAS = mp4_grid.GridCanvas(width=640, height=360, frame_rate_num=30, frame_rate_den=1)
 FRAME_SECONDS = 1 / 30
@@ -677,6 +682,208 @@ def test_a_three_shooter_match_stitches_with_its_empty_quadrant_black(tmp_path: 
             0,
             0,
         )
+
+
+# --- stitch A/V sync ------------------------------------------------------
+#
+# The stitch used to write AAC into every per-stage segment and join them
+# with ``concat -c copy``. Each segment's encoder priming and tail padding
+# then survived into the output as real decodable samples that the
+# container timeline does not account for, so audio ran progressively late
+# against video: +29ms after one stage, +352ms after twelve (measured on
+# ffmpeg 6.1.1), which is every beep and every shot landing audibly behind
+# the recoil by the back half of a match.
+#
+# The container metadata hides this completely, and does so twice over.
+# The concat demuxer hands the muxer overlapping timestamps, and the mov
+# muxer resolves the overlap by shrinking the two AAC frames either side
+# of every segment boundary to durations of 1 and 191 samples instead of
+# 1024. So the *declared* timeline comes out only 21ms long on a file that
+# is 352ms long in samples, and every duration-based check passes: a
+# 12-stage render reports audio 342.177s against video 342.156s. No
+# decoder can play a 1024-sample frame in 1 sample of time, so a player
+# runs the samples out back to back and hears the drift in full.
+#
+# Both assertions below therefore count decoded samples. Nothing that
+# reads the container's own account of the timeline can see this defect.
+
+#: One continuous AAC encode still contributes its own priming (1024
+#: samples) plus up to a frame of tail padding, so even a correct file
+#: decodes up to 2048 samples longer than its video. That is the floor,
+#: and -- this is the whole point -- it is a constant: it does not grow
+#: with the number of segments stitched.
+AAC_ENCODER_SLACK_SECONDS = 2048 / 48000  # 42.7ms
+
+#: Not 2. The drift is roughly one AAC frame per segment, so a two-segment
+#: stitch lands ~29ms off -- inside any tolerance a sane person picks for a
+#: file whose video is 30fps, which is exactly why this defect shipped
+#: through a green suite. Eight segments put it at ~230ms, five times the
+#: slack above and impossible to read as rounding.
+DRIFT_STAGE_COUNT = 8
+
+
+def _decoded_audio_seconds(path: Path, slot: int = 0) -> float:
+    """Audio length as it actually decodes, not as the container declares.
+
+    Every AAC packet carries exactly 1024 samples, so the packet count is
+    the honest length. ``ffprobe``'s ``duration`` / ``duration_ts`` are the
+    edit list's claim, and the concat bug lived entirely in the gap between
+    the two -- assert on those and the broken file passes.
+    """
+    done = subprocess.run(
+        [
+            FFPROBE, "-v", "error", "-count_packets",
+            "-select_streams", f"a:{slot}", "-show_entries", "stream=nb_read_packets,sample_rate",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+        ],  # fmt: skip
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr[-2000:]
+    sample_rate, packets = (int(line) for line in done.stdout.split())
+    return packets * 1024 / sample_rate
+
+
+def _declared_seconds(path: Path, stream: str) -> float:
+    """The container's own claim about a stream's length."""
+    done = subprocess.run(
+        [
+            FFPROBE, "-v", "error", "-select_streams", stream,
+            "-show_entries", "stream=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(path),
+        ],  # fmt: skip
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr[-2000:]
+    return float(done.stdout.strip())
+
+
+def _tone_onsets(path: Path, slot: int = 0) -> list[float]:
+    """Where each tone burst starts, counted in decoded samples.
+
+    Deliberately not ``silencedetect``. That filter reports the timestamps
+    the container claims, and on a file broken by this defect the claim is
+    a physical impossibility: the mov muxer, handed overlapping timestamps
+    by the concat demuxer, writes the two AAC frames straddling every
+    segment boundary with durations of 1 and 191 samples instead of 1024.
+    No decoder can play a 1024-sample frame in 1 sample of time, so a
+    player just runs the samples out back to back and every later beep
+    lands late -- while ``silencedetect``, reading the impossible table,
+    reports every burst exactly on time. Measured on ffmpeg 6.1.1 against
+    a file that was 290ms out: ``silencedetect`` saw 21ms.
+
+    Counting samples is what the audio device does, so that is what this
+    counts.
+    """
+    done = subprocess.run(
+        [
+            FFMPEG, "-v", "error", "-i", str(path), "-map", f"0:a:{slot}",
+            "-f", "s16le", "-acodec", "pcm_s16le", "-ac", "1", "-ar", "48000", "-",
+        ],  # fmt: skip
+        capture_output=True,
+    )
+    assert done.returncode == 0, done.stderr[-2000:].decode(errors="replace")
+    samples = array.array("h")
+    samples.frombytes(done.stdout)
+    assert samples, "no audio decoded"
+
+    # 5ms blocks, and a threshold relative to the file's own peak so the
+    # test does not depend on what gain the chain happens to apply.
+    block = 240
+    peaks = [max(map(abs, samples[at : at + block])) for at in range(0, len(samples) - block, block)]
+    floor = max(peaks) // 4
+    onsets: list[float] = []
+    was_quiet = True
+    for index, peak in enumerate(peaks):
+        if peak > floor and was_quiet:
+            onsets.append(index * block / 48000)
+        was_quiet = peak <= floor
+    return onsets
+
+
+def _marked_source(path: Path, *, seconds: float, color: str, tone_at: float) -> Path:
+    """A clip that is silent until ``tone_at``, then a 440Hz tone.
+
+    A continuous tone measures length but not *placement*: the drift moves
+    audio later without changing how much of it there is on any one track.
+    The burst is the marker that says where it landed.
+    """
+    cmd = [
+        FFMPEG, "-hide_banner", "-y",
+        "-f", "lavfi", "-t", str(seconds), "-i", f"color=c={color}:s=320x240:r=30",
+        "-f", "lavfi", "-t", str(seconds),
+        "-i", f"sine=frequency=440:sample_rate=48000:duration={seconds - tone_at:g},"
+              f"adelay={int(round(tone_at * 1000))}:all=1",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(path),
+    ]  # fmt: skip
+    done = subprocess.run(cmd, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr[-2000:]
+    return path
+
+
+@integration
+@needs_ffprobe
+def test_a_long_stitch_does_not_drift_audio_late_against_video(tmp_path: Path):
+    # One clip per shooter, reused as every stage's trim: the stitch does
+    # not care that the stages look alike, and eight encodes beat sixteen.
+    # Beep at 1.0s in a 2.0s clip, head pad 1.0 -> no seek, no lead pad, so
+    # each stage is 1.0 + 1.0 + 0.5 = 2.5s with its tone burst at exactly
+    # 1.0s. Stage k's burst therefore belongs at 2.5 * k + 1.0.
+    stage_seconds = 2.5
+    shooters = []
+    for label, colour in (("Anders", "red"), ("Mathias", "blue")):
+        clip = _marked_source(tmp_path / f"{label}.mp4", seconds=2.0, color=colour, tone_at=1.0)
+        shooters.append(
+            CompareShooterBundle(
+                label=label,
+                project_root=tmp_path / label,
+                stages_by_number={
+                    number: CompareStageBundle(
+                        stage_number=number,
+                        stage_name=f"Stage {number}",
+                        trim_path=clip,
+                        audit_path=tmp_path / "audit.json",
+                        beep_offset_in_clip=1.0,
+                        duration_seconds=2.0,
+                        width=320,
+                        height=240,
+                        frame_rate_num=30,
+                        frame_rate_den=1,
+                    )
+                    for number in range(1, DRIFT_STAGE_COUNT + 1)
+                },
+            )
+        )
+
+    result = mp4_grid.render_grid_mp4(
+        shooters,
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        ffmpeg_binary=FFMPEG,
+        work_dir=tmp_path / "work",
+    )
+    assert result.failed == ()
+
+    video = _declared_seconds(result.output_path, "v:0")
+    assert video == pytest.approx(stage_seconds * DRIFT_STAGE_COUNT, abs=FRAME_SECONDS)
+
+    for slot in range(len(shooters)):
+        decoded = _decoded_audio_seconds(result.output_path, slot)
+        assert decoded - video == pytest.approx(0.0, abs=AAC_ENCODER_SLACK_SECONDS), (
+            f"track {slot} decodes {decoded - video:+.3f}s against its video; "
+            "the segments are leaking per-segment encoder padding into the stitch"
+        )
+
+        # Length alone is not sync. Every burst has to still be where the
+        # grid put it, and the last one is where the drift has accumulated.
+        onsets = _tone_onsets(result.output_path, slot)
+        assert len(onsets) == DRIFT_STAGE_COUNT, onsets
+        for index, onset in enumerate(onsets):
+            expected = stage_seconds * index + 1.0
+            assert onset == pytest.approx(
+                expected, abs=FRAME_SECONDS
+            ), f"track {slot} stage {index + 1}: beep at {onset:.3f}s, expected {expected:.3f}s"
 
 
 # --- canvas frame rate ----------------------------------------------------
