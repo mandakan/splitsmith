@@ -637,6 +637,41 @@ def test_render_with_overlay_writes_sprites_and_uses_them(tmp_path):
     assert Path(font).is_file()
 
 
+def test_the_sprite_list_is_written_at_the_canvas_frame_rate(tmp_path):
+    """The list writer gets the *output* rate, not a guess.
+
+    Both halves of what the writer does need it: the ``option framerate``
+    directive that stops the concat demuxer taking image2's default 25fps
+    as its time base, and the quantisation that puts every state boundary
+    on a frame that exists. A hardcoded rate produces a list that decodes
+    fine and steps the sprite a frame away from the clock.
+    """
+    calls, runner = _recorder()
+    work = tmp_path / "work"
+    mp4_grid.render_grid_mp4(
+        _shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,  # 60000/1001, deliberately not a round rate
+        runner=runner,
+        work_dir=work,
+        ffmpeg_binary="ffmpeg",
+        overlay=True,
+        head_pad_seconds=1.0,
+    )
+    lines = [ln for ln in (work / "sprites-stage1.txt").read_text().splitlines() if ln.strip()]
+    options = {ln for ln in lines if ln.startswith("option ")}
+    assert options == {"option framerate 60000/1001"}, options
+
+    elapsed = 0.0
+    for line in lines:
+        if not line.startswith("duration "):
+            continue
+        frames = elapsed * CANVAS.frame_rate_num / CANVAS.frame_rate_den
+        assert abs(frames - round(frames)) < 1e-6, f"boundary {elapsed} is not on a canvas frame"
+        elapsed += float(line.split()[1])
+
+
 def test_the_stage_slice_reaches_the_sprites_rather_than_blanking_them(tmp_path):
     """``load_overlay_data`` is keyed by ``(label, stage)``; the sprite
     builder is keyed by label. Passing the wrong one through blanks every

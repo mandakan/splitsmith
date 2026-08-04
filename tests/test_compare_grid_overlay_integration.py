@@ -49,6 +49,7 @@ from PIL import Image
 
 from splitsmith.compare import mp4_grid
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
+from splitsmith.overlay_theme import load_theme
 from tests.synthetic_media import SYNTHETIC_FPS_DEN, SYNTHETIC_FPS_NUM
 
 FFMPEG = shutil.which("ffmpeg")
@@ -375,6 +376,71 @@ def _mean_abs_diff_multi(a: Image.Image, b: Image.Image, boxes: list[tuple[int, 
     ca = np.concatenate(parts_a, axis=0)
     cb = np.concatenate(parts_b, axis=0)
     return float(np.abs(ca - cb).mean())
+
+
+@integration
+@needs_ffmpeg
+def test_sprite_states_decode_at_the_boundaries_they_were_written_at(tmp_path: Path):
+    """The concat demuxer must hand back the boundaries it was given.
+
+    Nothing in the unit tests can see this: the list is a text file, and
+    what ffmpeg does with it depends on the sub-demuxer it opens each PNG
+    with. Before ``write_concat_list`` pinned the rate, the ``image2``
+    demuxer's default 25fps became the stream's time base and every
+    boundary snapped to the 1/25s grid -- requested ``0, 1.6, 1.7, 2.4,
+    2.5, 3.1`` decoded as ``0, 1.6, 1.72, 2.4, 2.52, 3.12``. 1/30s
+    boundaries are not expressible on a 1/25s grid at all, so no amount
+    of arithmetic on this side fixes it; only the demuxer's own rate does.
+    """
+    from splitsmith.compare import overlay_sprites
+
+    geometry = overlay_sprites.SpriteGeometry(canvas_width=320, canvas_height=180, rows=2, cols=2)
+    theme = load_theme("splitsmith")
+    # Boundaries at 0, 1.6, 1.7, 2.4, 2.5, 3.1 -- three of the five are
+    # off the 1/25s grid and were the ones that used to move.
+    starts = [0.0, 1.6, 1.7, 2.4, 2.5, 3.1]
+    total = 3.6
+    states = [
+        overlay_sprites.OverlayState(
+            start_seconds=start,
+            duration_seconds=(starts[i + 1] if i + 1 < len(starts) else total) - start,
+            panels=(
+                overlay_sprites.TilePanel(
+                    label="ann",
+                    row=0,
+                    col=0,
+                    present=True,
+                    shots_fired=i,
+                    expected_shots=None,
+                    last_split=None,
+                    rank=1 if i else None,
+                    delta_to_leader=0.0 if i else None,
+                ),
+            ),
+        )
+        for i, start in enumerate(starts)
+    ]
+    sequence = overlay_sprites.write_sprite_sequence(
+        states, geometry, theme=theme, cache_dir=tmp_path / "sprites"
+    )
+    list_path = overlay_sprites.write_concat_list(sequence, tmp_path / "s.txt", frame_rate=(30, 1))
+
+    done = subprocess.run(
+        [
+            FFMPEG, "-hide_banner", "-loglevel", "info", "-f", "concat", "-safe", "0",
+            "-i", str(list_path), "-vf", "showinfo", "-f", "null", "-",
+        ],  # fmt: skip
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr[-2000:]
+    decoded = [float(value) for value in re.findall(r"pts_time:([0-9.]+)", done.stderr)]
+    # One line per state plus the trailing repeat, which sits at the end
+    # of the last state.
+    assert decoded[: len(starts)] == pytest.approx(
+        starts, abs=1e-6
+    ), f"concat demuxer moved the state boundaries: requested {starts}, decoded {decoded}"
+    assert decoded[len(starts)] == pytest.approx(total, abs=1e-6)
 
 
 @integration

@@ -1111,7 +1111,14 @@ def _stage_overlay_plan(
         theme=theme,
         cache_dir=work / "sprites",
     )
-    list_path = write_concat_list(sequence, work / f"sprites-stage{plan.stage_number}.txt")
+    # The canvas rate, not a guess: the list writer quantises every state
+    # boundary onto a whole output frame and pins the demuxer's own time
+    # base to it, so the sprite steps on the same frame the clock does.
+    list_path = write_concat_list(
+        sequence,
+        work / f"sprites-stage{plan.stage_number}.txt",
+        frame_rate=canvas.frame_rate,
+    )
 
     clocks: list[TileClock] = []
     for tile in plan.tiles:

@@ -11,6 +11,7 @@ a state into pixels belongs to the sprite renderer, not here.
 
 import hashlib
 import json
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,6 +29,13 @@ _EPSILON = 1e-6
 # Two shooters firing within the same millisecond must collapse to one
 # state; a zero-length state would render a sprite nobody ever sees.
 _EVENT_PRECISION = 3
+
+# A boundary already sitting on a frame must stay on it. Frame positions
+# are computed in binary floating point, where ``8.3 * 30`` is
+# ``249.00000000000003``, so the ceil that rounds a mid-frame boundary
+# forward needs a tolerance well below one frame at any real rate. Three
+# of the 20000 millisecond positions in a 20s stage do this at 30fps.
+_FRAME_EPSILON = 1e-9
 
 _EMPTY = TileStageData(label="", stage_number=0)
 
@@ -644,19 +652,103 @@ def write_sprite_sequence(
     return tuple(sequence)
 
 
-def write_concat_list(sequence: Sequence[tuple[Path, float]], path: Path) -> Path:
+def quantize_durations(
+    durations: Sequence[float],
+    *,
+    frame_rate: tuple[int, int],
+) -> tuple[float, ...]:
+    """Snap every state boundary onto a whole output frame.
+
+    The overlay's boundaries are shot times, which are millisecond-grained
+    and land wherever they land. The picture underneath them can only
+    change on a frame, so a boundary between two frames is one the
+    renderer has to round -- and the ``drawtext`` clock, a per-frame
+    expression rather than a stepped image, does not round with it. Left
+    alone the two halves of the overlay disagree at every shot: the frame
+    at a shot's own time shows the clock reading ``0.70`` with no
+    counter, and the counter arrives a frame later against ``0.73``.
+
+    Boundaries round **up**, never to nearest. A shot at 1.712s has not
+    happened yet on the frame shown at 1.700s, so incrementing that
+    tile's counter there would put a shot on screen before it was fired.
+    Rounding up costs at most one frame of lag and can never show a shot
+    early.
+
+    Only the boundaries move; the total is preserved exactly, since the
+    last state runs to the end of the segment either way.
+
+    Two events closer together than one frame land on the same boundary.
+    The earlier state then has zero length and is dropped by
+    :func:`write_concat_list` -- a *display* is skipped, never a shot:
+    every state's ``shots_fired`` counts all shots up to its own event,
+    so the surviving state already accounts for both.
+    """
+    num, den = frame_rate
+    if num <= 0 or den <= 0:
+        raise ValueError(f"frame rate must be positive, got {num}/{den}")
+    total = math.fsum(durations)
+    boundaries: list[float] = []
+    elapsed = 0.0
+    for duration in durations:
+        # ``- _FRAME_EPSILON`` keeps a boundary that is already exactly on
+        # a frame there: ``8.3 * 30`` is ``249.00000000000003`` in binary
+        # floating point, and a bare ceil would push it a whole frame late.
+        frame = math.ceil(elapsed * num / den - _FRAME_EPSILON)
+        boundaries.append(frame * den / num)
+        elapsed += duration
+    return tuple(
+        (boundaries[index + 1] if index + 1 < len(boundaries) else total) - start
+        for index, start in enumerate(boundaries)
+    )
+
+
+def write_concat_list(
+    sequence: Sequence[tuple[Path, float]],
+    path: Path,
+    *,
+    frame_rate: tuple[int, int],
+) -> Path:
     """Write an ffmpeg concat-demuxer list for ``sequence``.
+
+    ``frame_rate`` is the *output* rate, threaded from the canvas rather
+    than assumed, and it does two things.
+
+    It quantises every boundary onto a whole output frame
+    (:func:`quantize_durations`), so a state can only start on a frame
+    that actually exists.
+
+    It is also written into the list as an ``option framerate`` directive
+    per entry. Without it the concat demuxer opens each PNG with the
+    ``image2`` demuxer's default 25 fps, takes its time base from it and
+    snaps every boundary to the 1/25 s grid -- measured with
+    ``showinfo``, requested boundaries ``0, 1.6, 1.7, 2.4, 2.5, 3.1``
+    decode as ``0, 1.6, 1.72, 2.4, 2.52, 3.12``. Quantising alone cannot
+    survive that, because 1/30 s boundaries are not expressible on a
+    1/25 s grid at all. The directive goes on the trailing repeat too:
+    without it that entry is opened at 25 fps and lands early.
+
+    Zero-length states -- two shots inside one frame, collapsed by the
+    quantiser -- are dropped rather than written as ``duration 0``, which
+    the demuxer turns into a state no frame can ever show.
 
     The final ``file`` line repeats the last entry with no duration --
     the concat demuxer ignores the last entry's duration otherwise and
     drops that state to a single frame.
     """
+    num, den = frame_rate
+    durations = quantize_durations([duration for _, duration in sequence], frame_rate=frame_rate)
     lines: list[str] = []
-    for sprite_path, duration in sequence:
-        lines.append(f"file '{sprite_path.resolve()}'")
-        lines.append(f"duration {duration:g}")
-    if sequence:
-        lines.append(f"file '{sequence[-1][0].resolve()}'")
+    last: Path | None = None
+    for (sprite_path, _), duration in zip(sequence, durations, strict=True):
+        if duration <= 0.0:
+            continue
+        last = sprite_path.resolve()
+        lines.append(f"file '{last}'")
+        lines.append(f"option framerate {num}/{den}")
+        lines.append(f"duration {duration:.9g}")
+    if last is not None:
+        lines.append(f"file '{last}'")
+        lines.append(f"option framerate {num}/{den}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
     return path
