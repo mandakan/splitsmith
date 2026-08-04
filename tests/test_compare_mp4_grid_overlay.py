@@ -849,6 +849,58 @@ def test_the_first_sprite_state_spans_the_head_pad(tmp_path, head_pad):
     assert entries[0][1] == pytest.approx(head_pad + 0.5, abs=frame)
 
 
+def test_the_sprite_grid_geometry_is_the_plans_own_rows_and_cols(tmp_path):
+    """A 1x2 head-to-head is where a rows/cols swap becomes visible.
+
+    Every other overlay fixture is 2x2, where swapping the two is a
+    no-op. ``choose_grid(2, "horizontal")`` is one row of two -- the most
+    common comparison there is -- and under the swap the sprite builder
+    thinks the canvas is two rows of one: the right-hand shooter's panel
+    is drawn at ``x0 = 1 * cell_width``, which for a single column is the
+    full canvas width, so it lands off the edge and that shooter loses
+    their counter and split entirely.
+
+    Each tile is probed at its *own* top-left corner, where only that
+    tile's shot counter is ever drawn. A whole-half crop is not enough:
+    under the swap the surviving shooter's split label is centred on a
+    cell as wide as the canvas, so it straddles the halfway line and puts
+    ink in the empty half -- the mutant's "0.30s across the tile
+    boundary", which reads as coverage while proving nothing.
+    """
+    calls, runner = _recorder()
+    work = tmp_path / "work"
+    canvas = GridCanvas(width=1280, height=360, frame_rate_num=30, frame_rate_den=1)
+    mp4_grid.render_grid_mp4(
+        _shooters(tmp_path, shots={"Anders": [0.5, 1.2], "Mathias": [0.7, 1.5]}),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=canvas,
+        runner=runner,
+        work_dir=work,
+        ffmpeg_binary="ffmpeg",
+        overlay=True,
+        head_pad_seconds=1.0,
+        layout_2up="horizontal",
+    )
+    # One row of two: cells are 640x360 and each counter sits a small pad
+    # in from its own cell's top-left corner.
+    cell_w, cell_h = canvas.width // 2, canvas.height
+    corners = {
+        "left": (0, 0, cell_w // 2, cell_h // 5),
+        "right": (cell_w, 0, cell_w + cell_w // 2, cell_h // 5),
+    }
+
+    def _ink(box) -> bool:
+        for png, _ in _sprite_entries(work):
+            with Image.open(png) as image:
+                if image.convert("RGBA").crop(box).getextrema()[3][1] > 0:
+                    return True
+        return False
+
+    for name, box in corners.items():
+        assert _ink(box), f"the {name} tile's shot counter is never drawn in its own cell"
+
+
 def _two_stage_shooters(tmp_path: Path):
     """One shooter, two stages, with *different* shot times per stage.
 
