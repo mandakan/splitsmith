@@ -295,37 +295,67 @@ def render_state(state: OverlayState, geometry: SpriteGeometry, *, theme: Overla
     what a shooter's last split was, not just the instant after they
     fired. The split label therefore persists at full alpha until the
     next shot replaces it.
+
+    All text -- per-cell counter/split and each delta-strip entry -- is
+    fit to the space it actually has (cell width, strip slot width) before
+    it is drawn: 3x3 and 4x4 are first-class grid kinds
+    (``compare/layout.py`` routes 5-16 shooters there), and a font size
+    picked from ``cell_height``/``strip_height`` alone overflows a narrow
+    cell or collides with a neighbouring strip entry once there are more
+    than a handful of columns or entries.
     """
     canvas = Image.new("RGBA", (geometry.canvas_width, geometry.canvas_height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
 
     pad = max(24, geometry.cell_height // 36)
     big = max(48, geometry.cell_height // 14)
-    # Same default-font selection ``DefaultTemplate`` uses: the bundled
-    # mono face for the splitsmith theme (deterministic across hosts),
-    # generic system discovery otherwise.
-    font_name = "splitsmith-mono" if theme.name == "splitsmith" else None
-    font = _load_font(None, big, font_name=font_name)
-    stroke_width = max(2, big // 18)
-    shadow_offset = max(2, big // 24)
-    shadow_blur = max(3, big // 12)
 
     for panel in state.panels:
-        _draw_panel(
-            canvas,
-            draw,
-            panel,
-            geometry,
-            font=font,
-            theme=theme,
-            pad=pad,
-            stroke_width=stroke_width,
-            shadow_offset=shadow_offset,
-            shadow_blur=shadow_blur,
-        )
+        _draw_panel(canvas, draw, panel, geometry, theme=theme, pad=pad, base_size=big)
 
     _draw_strip(canvas, draw, state, geometry, theme=theme)
     return canvas
+
+
+def _scaled_font(theme: OverlayTheme, size: int):
+    """Load a font at ``size`` using the same default-face selection
+    ``DefaultTemplate`` uses: the bundled mono face for the splitsmith
+    theme (deterministic across hosts), generic system discovery
+    otherwise."""
+    font_name = "splitsmith-mono" if theme.name == "splitsmith" else None
+    return _load_font(None, size, font_name=font_name)
+
+
+def _text_width(draw: ImageDraw.ImageDraw, text: str, font) -> int:
+    bbox = draw.textbbox((0, 0), text, font=font)
+    return bbox[2] - bbox[0]
+
+
+# Font sizes never shrink below this floor. Still legible at typical
+# viewing distances; below it a further shrink reads as noise rather
+# than smaller text, so entries that still don't fit at the floor get
+# their label truncated instead of the font shrunk further.
+_MIN_FONT_SIZE = 12
+
+
+def _fit_font_by_width(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    theme: OverlayTheme,
+    *,
+    base_size: int,
+    budget: float,
+) -> tuple[object, int]:
+    """The largest font at or below ``base_size`` (in steps of 2) that
+    draws ``text`` no wider than ``budget`` pixels, floored at
+    :data:`_MIN_FONT_SIZE`. Returns ``(font, size)`` -- the caller derives
+    stroke/shadow parameters from ``size`` so they scale down with it."""
+    size = base_size
+    font = _scaled_font(theme, size)
+    while size > _MIN_FONT_SIZE and _text_width(draw, text, font) > budget:
+        size -= 2
+        font = _scaled_font(theme, size)
+    return font, size
 
 
 def _draw_panel(
@@ -334,16 +364,18 @@ def _draw_panel(
     panel: TilePanel,
     geometry: SpriteGeometry,
     *,
-    font,
     theme: OverlayTheme,
     pad: int,
-    stroke_width: int,
-    shadow_offset: int,
-    shadow_blur: int,
+    base_size: int,
 ) -> None:
     """One tile's counter + last split. A filler tile (``present`` False)
     draws nothing at all -- it is not a shooter, so drawing "--/12" over
-    black would imply a competitor who isn't there."""
+    black would imply a competitor who isn't there.
+
+    Each text is sized to the cell's own width, not just ``base_size``
+    off ``cell_height`` -- a narrow cell (many columns) can't fit a
+    "16/16" counter at the height-driven size, and the text must never
+    spill past the tile it belongs to."""
     if not panel.present:
         return
 
@@ -354,12 +386,14 @@ def _draw_panel(
     # must clear it or the split label would render under the strip.
     content_bottom = min(y0 + geometry.cell_height, geometry.canvas_height - geometry.strip_height)
     ink = (*theme.ink, 255)
+    width_budget = max(1, geometry.cell_width - 2 * pad)
 
     if panel.shots_fired > 0:
         if panel.expected_shots is not None:
             counter_text = f"{panel.shots_fired}/{panel.expected_shots}"
         else:
             counter_text = f"{panel.shots_fired}"
+        font, size = _fit_font_by_width(draw, counter_text, theme, base_size=base_size, budget=width_budget)
         _draw_text_with_shadow(
             draw,
             canvas,
@@ -367,15 +401,16 @@ def _draw_panel(
             counter_text,
             font,
             ink,
-            stroke_width=stroke_width,
-            shadow_offset=shadow_offset,
-            shadow_blur=shadow_blur,
+            stroke_width=max(2, size // 18),
+            shadow_offset=max(2, size // 24),
+            shadow_blur=max(3, size // 12),
             stroke_color=theme.stroke,
             shadow_color=theme.shadow,
         )
 
     if panel.last_split is not None:
         split_text = f"{panel.last_split:.2f}s"
+        font, size = _fit_font_by_width(draw, split_text, theme, base_size=base_size, budget=width_budget)
         bbox = draw.textbbox((0, 0), split_text, font=font)
         tw = bbox[2] - bbox[0]
         th = bbox[3] - bbox[1]
@@ -388,16 +423,16 @@ def _draw_panel(
             split_text,
             font,
             (*theme.split, 255),
-            stroke_width=stroke_width,
-            shadow_offset=shadow_offset,
-            shadow_blur=shadow_blur,
+            stroke_width=max(2, size // 18),
+            shadow_offset=max(2, size // 24),
+            shadow_blur=max(3, size // 12),
             stroke_color=theme.stroke,
             shadow_color=theme.shadow,
         )
 
 
-def _strip_entry_text(panel: TilePanel) -> str:
-    """One shooter's label in the delta strip.
+def _strip_entry_parts(panel: TilePanel) -> tuple[str | None, str, str | None]:
+    """Rank / label / delta tokens for one strip entry, before fitting.
 
     The leader's elapsed time at their last shot is not known to the
     sprite (only per-tile shot data crosses into ``render_state``), so
@@ -410,10 +445,53 @@ def _strip_entry_text(panel: TilePanel) -> str:
     """
     label = panel.label.upper()
     if panel.rank is None:
-        return label
+        return None, label, None
     if panel.rank == 1 or panel.delta_to_leader is None:
-        return f"{panel.rank} {label}"
-    return f"{panel.rank} {label} {panel.delta_to_leader:+.2f}"
+        return str(panel.rank), label, None
+    return str(panel.rank), label, f"{panel.delta_to_leader:+.2f}"
+
+
+def _join_strip_parts(rank: str | None, label: str, delta: str | None) -> str:
+    return " ".join(token for token in (rank, label, delta) if token)
+
+
+def _strip_entry_text(panel: TilePanel) -> str:
+    """One shooter's full, untruncated label in the delta strip. See
+    :func:`_strip_entry_parts` for the leader / sign-formatting rules;
+    :func:`_fit_strip_entry` shortens this for tight layouts."""
+    return _join_strip_parts(*_strip_entry_parts(panel))
+
+
+def _fit_strip_entry(
+    draw: ImageDraw.ImageDraw,
+    panel: TilePanel,
+    font,
+    budget: float,
+) -> str:
+    """This entry's text, shortened to fit ``budget`` pixels if the full
+    text doesn't. The label is truncated character by character first --
+    it is the least essential token, and an abbreviated name still reads
+    as that shooter. The delta is dropped only if even a single-character
+    label doesn't fit; the rank number is never dropped, since a bare
+    label is still meaningfully different from a ranked one. This is the
+    fallback for an already-shrunk font -- see :func:`_draw_strip`, which
+    picks the font size from the tightest slot before reaching here.
+    """
+    rank, label, delta = _strip_entry_parts(panel)
+    text = _join_strip_parts(rank, label, delta)
+    if _text_width(draw, text, font) <= budget:
+        return text
+    trimmed = label
+    while len(trimmed) > 1:
+        trimmed = trimmed[:-1]
+        text = _join_strip_parts(rank, trimmed, delta)
+        if _text_width(draw, text, font) <= budget:
+            return text
+    if delta is not None:
+        text = _join_strip_parts(rank, trimmed, None)
+        if _text_width(draw, text, font) <= budget:
+            return text
+    return text
 
 
 def _draw_strip(
@@ -429,6 +507,17 @@ def _draw_strip(
     Nothing is drawn until at least one present tile has fired -- before
     the first shot there is no ranking to show, and a band of bare labels
     would just be noise the viewer has already seen on the tiles above.
+
+    Entries live in disjoint, equal-width slots. As long as every entry's
+    rendered width (plus a safety margin covering its stroke and shadow)
+    fits inside its own slot, centering it there guarantees no two
+    entries' ink can ever touch -- the slots themselves don't overlap.
+    The font size is picked from the *tightest* slot -- entry count and
+    canvas width both drive it, not ``strip_height`` alone, which is what
+    let a 3x3 with 8+ shooters collide (one rank digit printing on top of
+    the previous entry's delta). Any entry that still doesn't fit at the
+    size floor gets its label truncated by :func:`_fit_strip_entry`
+    rather than left to collide with its neighbour.
     """
     present = [p for p in state.panels if p.present]
     ranked = sorted((p for p in present if p.rank is not None), key=lambda p: p.rank)
@@ -437,17 +526,41 @@ def _draw_strip(
     unranked = [p for p in present if p.rank is None]
     entries = ranked + unranked
 
-    strip_size = max(20, geometry.strip_height * 2 // 3)
-    font = _load_font(None, strip_size, font_name="splitsmith-mono" if theme.name == "splitsmith" else None)
-    stroke_width = max(2, strip_size // 18)
-    shadow_offset = max(2, strip_size // 24)
-    shadow_blur = max(3, strip_size // 12)
+    n = len(entries)
+    slot_width = geometry.canvas_width / n
+    base_size = max(20, geometry.strip_height * 2 // 3)
+
+    # The margin has to absorb not just the glyph bbox but the stroke and
+    # blurred drop shadow drawn around it (see the ``pad`` computation
+    # inside ``_draw_text_with_shadow``) -- a size picked to fit the bare
+    # text could still let the shadow halo of one entry touch the next.
+    def margin_for(size: int) -> float:
+        stroke = max(2, size // 18)
+        offset = max(2, size // 24)
+        blur = max(3, size // 12)
+        return max(6, geometry.strip_height // 12) + blur * 2 + offset + stroke
+
+    size = base_size
+    while size > _MIN_FONT_SIZE:
+        budget = slot_width - 2 * margin_for(size)
+        font = _scaled_font(theme, size)
+        if budget > 0 and all(_text_width(draw, _strip_entry_text(p), font) <= budget for p in entries):
+            break
+        size -= 2
+    else:
+        font = _scaled_font(theme, _MIN_FONT_SIZE)
+        size = _MIN_FONT_SIZE
+    budget = max(1.0, slot_width - 2 * margin_for(size))
+
+    texts = [_fit_strip_entry(draw, p, font, budget) for p in entries]
+
+    stroke_width = max(2, size // 18)
+    shadow_offset = max(2, size // 24)
+    shadow_blur = max(3, size // 12)
     ink = (*theme.ink, 255)
 
     y0 = geometry.canvas_height - geometry.strip_height
-    slot_width = geometry.canvas_width / len(entries)
-    for index, panel in enumerate(entries):
-        text = _strip_entry_text(panel)
+    for index, text in enumerate(texts):
         bbox = draw.textbbox((0, 0), text, font=font)
         tw = bbox[2] - bbox[0]
         th = bbox[3] - bbox[1]
