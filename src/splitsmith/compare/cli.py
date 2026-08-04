@@ -40,9 +40,12 @@ def export(
         None,
         "--audio-from",
         help=(
-            "Slug or name of the shooter whose audio plays. Required when SOURCE "
-            "is a match folder; overrides the manifest's audio_from key when "
-            "SOURCE is a manifest."
+            "Slug or name of the reference shooter. With --format fcpxml theirs "
+            "is the one unmuted tile; with --format mp4 every shooter is mixed "
+            "into the default track and gets a named track of their own, so this "
+            "only sets the render's frame rate, from their footage. Required when "
+            "SOURCE is a match folder; overrides the manifest's audio_from key "
+            "when SOURCE is a manifest."
         ),
     ),
     output: Path | None = typer.Option(
@@ -85,8 +88,8 @@ def export(
          `splitsmith compare export examples/compare-foo.yaml`.
 
       2. A merged match folder (new in #320): every shooter under
-         `<match>/shooters/` contributes a tile; --audio-from picks the
-         unmuted one and --output names the FCPXML.
+         `<match>/shooters/` contributes a tile; --audio-from names the
+         reference shooter and --output names the file.
 
     Precedence on the manifest path: a CLI flag beats the matching YAML
     key. The flag is typed now and the YAML was written earlier, so the

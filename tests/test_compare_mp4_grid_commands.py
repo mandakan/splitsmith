@@ -94,24 +94,86 @@ def test_tiles_are_sar_normalised_before_stacking():
     assert graph.count("setsar=1") == 4
 
 
-def test_audio_track_per_shooter_in_alphabetical_order():
+def test_the_mix_is_track_one_and_the_shooters_follow_alphabetically():
     cmd = mp4_grid.build_stage_command(
         _plan(), canvas=mp4_grid.GridCanvas(), output_path=Path("/out/stage1.mov")
     )
     maps = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-map"]
-    # One composited video, then one audio label per shooter.
-    assert maps == ["[final]", "[a0]", "[a1]", "[a2]", "[a3]"]
-    # Mathias is index 3 alphabetically and is the audio source.
-    assert "-disposition:a:3" in cmd
-    assert cmd[cmd.index("-disposition:a:3") + 1] == "default"
+    # One composited video, the mix, then one audio label per shooter.
+    # The mix has to be *first*: everything that is not an NLE -- YouTube,
+    # browser <video>, every social embed -- plays audio stream 0 and no
+    # other, so a mix in any later slot is a mix nobody hears.
+    assert maps == ["[final]", "[amix]", "[a0]", "[a1]", "[a2]", "[a3]"]
 
 
-def test_only_the_audio_source_track_plays_by_default():
+def test_only_the_mix_plays_by_default():
     # Every track default is as wrong as none: the player picks one
-    # arbitrarily and the grid can come out with the wrong shooter's audio.
+    # arbitrarily and the grid can come out with one shooter's audio.
     cmd = mp4_grid.build_stage_command(_plan(), canvas=mp4_grid.GridCanvas(), output_path=Path("/o.mp4"))
-    dispositions = [cmd[cmd.index(f"-disposition:a:{slot}") + 1] for slot in range(4)]
-    assert dispositions == ["0", "0", "0", "default"]
+    dispositions = [cmd[cmd.index(f"-disposition:a:{slot}") + 1] for slot in range(5)]
+    assert dispositions == ["default", "0", "0", "0", "0"]
+
+
+def test_the_audio_source_shooter_gets_no_special_track_treatment():
+    # --audio-from used to pick the default track. It does not any more,
+    # so nothing about Mathias' own track may differ from the others'.
+    cmd = mp4_grid.build_stage_command(_plan(), canvas=mp4_grid.GridCanvas(), output_path=Path("/o.mp4"))
+    # Mathias is tile 3, hence audio stream 4.
+    assert cmd[cmd.index("-disposition:a:4") + 1] == "0"
+    assert ("-metadata:s:a:4", "handler_name=Mathias") in list(zip(cmd, cmd[1:], strict=False))
+
+
+def test_the_mix_carries_every_tile_and_is_normalised():
+    # normalize=0 sums the tiles instead of averaging them, which clips a
+    # four-shooter mix into distortion on every loud transient -- and a
+    # gunshot is nothing but loud transients. Dropping a tile is the other
+    # plausible wrong answer: the mix would play but a shooter would be
+    # missing from it, which no duration or track-count check can see.
+    graph = _graph(
+        mp4_grid.build_stage_command(_plan(), canvas=mp4_grid.GridCanvas(), output_path=Path("/o.mp4"))
+    )
+    assert "[m0][m1][m2][m3]amix=inputs=4:normalize=1[amix]" in graph
+
+
+def test_the_mix_is_taken_from_each_tiles_finished_track():
+    # The split has to come after the delay, the format conform and the
+    # length clamp, or the mix carries a stream that is not the one the
+    # user can select. A lead-padded shooter split early would sit half a
+    # second early in the mix while his own track was on time.
+    graph = _graph(
+        mp4_grid.build_stage_command(
+            _plan(lead_padded="Erik"), canvas=mp4_grid.GridCanvas(), output_path=Path("/o.mp4")
+        )
+    )
+    erik = next(part for part in graph.split(";") if part.endswith("[a1][m1]"))
+    assert erik.index("adelay=500:all=1") < erik.index("asplit=2")
+    assert erik.index("aformat=") < erik.index("asplit=2")
+    assert erik.index("atrim=0:12.5") < erik.index("asplit=2")
+
+
+def test_a_silent_filler_tile_is_still_mixed_in():
+    # amix's normalize divides by the number of inputs, not the number
+    # carrying signal, so keeping the filler costs 3dB on a half-covered
+    # stage. That is the deliberate trade: dropping it instead would make
+    # the mix level step up and down between stages as the roster's
+    # coverage changes, which is worse across a match-length video.
+    graph = _graph(
+        mp4_grid.build_stage_command(
+            _plan(missing="Erik"), canvas=mp4_grid.GridCanvas(), output_path=Path("/o.mp4")
+        )
+    )
+    assert "[m0][m1][m2][m3]amix=inputs=4:normalize=1[amix]" in graph
+    assert graph.count("asplit=2") == 4
+
+
+def test_a_single_shooter_still_gets_a_mix_track():
+    # N=1 is a legal roster (choose_grid handles it), and the stream
+    # layout must not become a special case there.
+    plan = replace(_plan(), tiles=_plan().tiles[:1], audio_label="Anders", rows=1, cols=1)
+    cmd = mp4_grid.build_stage_command(plan, canvas=mp4_grid.GridCanvas(), output_path=Path("/o.mp4"))
+    maps = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-map"]
+    assert maps == ["[final]", "[amix]", "[a0]"]
+    assert "[m0]amix=inputs=1:normalize=1[amix]" in _graph(cmd)
 
 
 def test_an_audio_label_matching_no_tile_is_named_not_a_bare_stopiteration():
@@ -127,6 +189,8 @@ def test_each_audio_track_is_named_after_its_shooter():
     cmd = mp4_grid.build_stage_command(_plan(), canvas=mp4_grid.GridCanvas(), output_path=Path("/o.mp4"))
     named = [cmd[i + 1] for i, a in enumerate(cmd) if a.startswith("-metadata:s:a:")]
     assert named == [
+        "title=Mix",
+        "handler_name=Mix",
         "title=Anders",
         "handler_name=Anders",
         "title=Erik",
@@ -166,9 +230,9 @@ def test_missing_trim_still_contributes_video_and_a_silent_audio_track():
     joined = " ".join(cmd)
     assert "color=c=black:s=1920x1080" in joined
     assert "anullsrc" in joined
-    # The stream layout must not change: still four audio maps.
+    # The stream layout must not change: still the mix plus four shooters.
     maps = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-map"]
-    assert maps == ["[final]", "[a0]", "[a1]", "[a2]", "[a3]"]
+    assert maps == ["[final]", "[amix]", "[a0]", "[a1]", "[a2]", "[a3]"]
     # And Erik's trim is not an input.
     assert "/trims/Erik.mp4" not in joined
 
@@ -256,17 +320,22 @@ def test_an_unreached_cell_is_filled_with_black_rather_than_left_to_xstack():
 
 def test_an_unreached_cell_adds_no_audio_track():
     # An empty cell is not a shooter. Giving it a track would change the
-    # stream count away from the roster size and break concat -c copy.
+    # stream count away from the roster size plus the mix and break
+    # concat -c copy -- and it would drag a silent input into the mix,
+    # costing the three real shooters a quarter of their level.
     cmd = mp4_grid.build_stage_command(
         _partial_plan(roster=3, rows=2, cols=2),
         canvas=mp4_grid.GridCanvas(),
         output_path=Path("/o.mp4"),
     )
     maps = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-map"]
-    assert maps == ["[final]", "[a0]", "[a1]", "[a2]"]
+    assert maps == ["[final]", "[amix]", "[a0]", "[a1]", "[a2]"]
     assert "anullsrc" not in " ".join(cmd)
+    assert "amix=inputs=3:" in _graph(cmd)
     named = [cmd[i + 1] for i, a in enumerate(cmd) if a.startswith("-metadata:s:a:")]
     assert named == [
+        "title=Mix",
+        "handler_name=Mix",
         "title=Shooter0",
         "handler_name=Shooter0",
         "title=Shooter1",
@@ -308,7 +377,7 @@ def test_a_filler_tile_and_an_unreached_cell_can_coexist():
     assert joined.count("color=c=black:s=1920x1080") == 2
     assert joined.count("anullsrc") == 1
     maps = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-map"]
-    assert maps == ["[final]", "[a0]", "[a1]", "[a2]"]
+    assert maps == ["[final]", "[amix]", "[a0]", "[a1]", "[a2]"]
 
 
 def test_a_full_grid_adds_no_filler_inputs():
@@ -377,7 +446,7 @@ def test_the_lead_pad_is_applied_to_the_padded_tiles_own_chain():
         )
     )
     erik_video = next(part for part in graph.split(";") if part.endswith("[t1]"))
-    erik_audio = next(part for part in graph.split(";") if part.endswith("[a1]"))
+    erik_audio = next(part for part in graph.split(";") if part.endswith("[a1][m1]"))
     assert "tpad=start_duration=0.5" in erik_video
     assert "adelay=500:all=1" in erik_audio
 
@@ -455,26 +524,29 @@ def test_concat_keeps_every_audio_track():
 
 
 def test_concat_restores_the_track_names_and_the_default_track():
-    # Stream copy does not carry either across the concat demuxer: the
-    # muxer re-derives the default flag onto the first audio track, so
-    # the stitched file would play the alphabetically-first shooter
-    # instead of the audio source.
+    # Stream copy carries neither across the concat demuxer: the names
+    # come back out as plain SoundHandler and the muxer re-derives the
+    # default flag, so without this the stitched file offers five
+    # anonymous tracks.
+    #
+    # ``audio_labels`` is the shooters; the mix is prepended here, so a
+    # caller cannot get the offset wrong and relabel every shooter.
     cmd = mp4_grid.build_concat_command(
         list_path=Path("/tmp/list.txt"),
         output_path=Path("/out/grid.mp4"),
         audio_labels=["Anders", "Erik", "Johan", "Mathias"],
-        default_audio_label="Mathias",
     )
-    dispositions = [cmd[cmd.index(f"-disposition:a:{slot}") + 1] for slot in range(4)]
-    assert dispositions == ["0", "0", "0", "default"]
-    assert "handler_name=Erik" in cmd
+    dispositions = [cmd[cmd.index(f"-disposition:a:{slot}") + 1] for slot in range(5)]
+    assert dispositions == ["default", "0", "0", "0", "0"]
+    pairs = list(zip(cmd, cmd[1:], strict=False))
+    assert ("-metadata:s:a:0", "handler_name=Mix") in pairs
+    assert ("-metadata:s:a:2", "handler_name=Erik") in pairs
+    assert ("-metadata:s:a:4", "handler_name=Mathias") in pairs
 
 
-def test_concat_rejects_a_default_label_outside_the_roster():
-    with pytest.raises(ValueError, match="Nobody"):
-        mp4_grid.build_concat_command(
-            list_path=Path("/tmp/list.txt"),
-            output_path=Path("/out/grid.mp4"),
-            audio_labels=["Anders"],
-            default_audio_label="Nobody",
-        )
+def test_concat_names_nothing_when_it_is_given_no_roster():
+    # A caller stitching segments it did not build has no labels to
+    # restate, and naming a mix track that may not exist is worse than
+    # naming nothing.
+    cmd = mp4_grid.build_concat_command(list_path=Path("/tmp/list.txt"), output_path=Path("/out/grid.mp4"))
+    assert not [a for a in cmd if a.startswith("-metadata:s:a:") or a.startswith("-disposition:a:")]

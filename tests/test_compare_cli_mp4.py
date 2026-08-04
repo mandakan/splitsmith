@@ -98,6 +98,24 @@ def test_format_flag_is_documented() -> None:
     assert "mp4" in output
 
 
+def test_audio_from_no_longer_claims_to_pick_the_track_that_plays() -> None:
+    # It used to. Phase 1b made the mix the default track on every MP4,
+    # so help text promising "the shooter whose audio plays" is now a
+    # false statement about the file the user gets -- and help text is
+    # the only place most people will ever read the rule.
+    result = runner.invoke(app, ["compare", "export", "--help"])
+    assert result.exit_code == 0
+    # rich hard-wraps the option table and draws a box rule down both
+    # sides of every wrapped line, so the border characters and the
+    # padding have to come out before matching. Without this the
+    # assertion passes for the wrong reason on any terminal width that
+    # breaks a phrase.
+    output = " ".join(strip_ansi(result.output).replace("│", " ").split())
+    assert "whose audio plays" not in output
+    assert "every shooter is mixed into the default track" in output
+    assert "sets the render's frame rate" in output
+
+
 def test_mp4_format_rejects_a_manifest_source(tmp_path: Path) -> None:
     manifest = tmp_path / "m.yaml"
     manifest.write_text("output: out.fcpxml\naudio_from: A\nshooters: []\n", encoding="utf-8")

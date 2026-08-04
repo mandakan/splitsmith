@@ -3,10 +3,10 @@
 Sits beside :mod:`splitsmith.compare.emitter` (which emits FCPXML) and
 consumes the same ``project_loader`` bundles and ``layout`` grid math.
 Renders one ffmpeg call per stage -- scale + pad each tile to a uniform
-cell, ``xstack`` them into the grid, map every shooter's audio as its
-own output track -- then stitches the per-stage temps with the
-``concat`` demuxer, copying the video and encoding the audio exactly
-once (see :data:`SEGMENT_SUFFIX`).
+cell, ``xstack`` them into the grid, map a mix of every shooter as
+track 1 and each shooter's own audio as tracks 2..N+1 -- then stitches
+the per-stage temps with the ``concat`` demuxer, copying the video and
+encoding the audio exactly once (see :data:`SEGMENT_SUFFIX`).
 
 Phase 0 scope: no overlay, no transitions, no title cards. The overlay
 lands in phase 1 as pre-rendered sprite PNGs; nothing here should make
@@ -21,7 +21,7 @@ with an injectable runner, mirroring :mod:`splitsmith.mp4_render` and
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -100,6 +100,37 @@ SEGMENT_AUDIO_CODEC = "pcm_s16le"
 #: stitch, over the whole match.
 OUTPUT_AUDIO_CODEC = "aac"
 OUTPUT_AUDIO_BITRATE = "192k"
+
+#: ``handler_name`` of the merged track, which is always audio stream 0.
+#:
+#: Every player that is not an NLE reads track 1 and nothing else --
+#: YouTube, browser ``<video>``, every social embed. Shipping only
+#: per-shooter tracks meant a shared grid played exactly one shooter and
+#: the whole multi-track design was invisible to whoever it was sent to.
+#: So a mix of every shooter is always present, always first, and always
+#: carries the ``default`` disposition; the named per-shooter tracks
+#: follow it in the same alphabetical order they always had.
+MIX_TRACK_LABEL = "Mix"
+
+#: ``amix`` is given ``normalize=1``, which scales the sum by 1/inputs.
+#:
+#: It cannot clip, and because shooters' microphones are uncorrelated the
+#: sum of N of them grows as sqrt(N) while the divisor grows as N -- so a
+#: fully-covered stage lands 10*log10(N)/2 dB under a single shooter's
+#: track (measured: -6.0 dB at N=4) rather than the -12 dB a naive
+#: reading suggests.
+#:
+#: Every tile is mixed in, including the silent ``anullsrc`` a shooter
+#: with no trim for the stage contributes. That is deliberate.
+#: ``normalize`` divides by the number of *inputs*, not the number of
+#: inputs carrying signal, so a stage where half the roster is missing
+#: comes out 3 dB quieter than a fully-covered one (measured: -9.0 dB
+#: against -6.0 dB at N=4, 2 real). Mixing only the tiles that have
+#: footage would even that out, at the cost of the level stepping up and
+#: down between stages as the roster's coverage changes -- which is far
+#: more noticeable across a match-length video than a level that is
+#: consistently conservative. A predictable 3 dB is the better trade.
+MIX_NORMALIZE = 1
 
 
 class GridRenderError(RuntimeError):
@@ -224,7 +255,16 @@ class GridStagePlan:
     stage_name: str
     tiles: tuple[GridTile, ...]
     duration_seconds: float
+
     audio_label: str
+    """The ``--audio-from`` shooter. Not "whose track plays": the mix does.
+
+    Every shooter is in the mix and every shooter has a named track, so
+    this no longer selects anything in the MP4. What it still does is
+    seed :func:`derive_frame_rate` and settle the stage's spelling, and
+    on the FCPXML path it is the one tile left unmuted.
+    """
+
     rows: int
     cols: int
 
@@ -270,13 +310,15 @@ def build_stage_plans(
 
     by_label = {s.label: s for s in shooters}
     audio_bundle = by_label[audio_label]
-    # Task 2 unmutes only the audio tile. A shooter with no stages at all
-    # is a filler everywhere, so the render would come out silent with
-    # nothing to explain it. Missing a single stage is different, and
-    # fine: that one stage just has no unmuted tile.
+    # A shooter with no stages at all is a filler everywhere: black tile,
+    # silent track, and nothing for :func:`derive_frame_rate` to read, so
+    # the whole render silently falls back to 30000/1001 instead of
+    # following the footage. Missing a single stage is different, and
+    # fine -- that stage just renders their cell black.
     if not audio_bundle.stages_by_number:
         raise ValueError(
-            f"audio_label={audio_label!r} has no stages with trims; the render would have no audio"
+            f"audio_label={audio_label!r} has no stages with trims; it drives the render's frame "
+            "rate and the FCPXML export's unmuted tile, so it cannot be a shooter with no footage"
         )
 
     rows, cols = grid_shape(choose_grid(len(labels), layout_2up=layout_2up))
@@ -426,8 +468,9 @@ def build_stage_command(
 ) -> tuple[str, ...]:
     """Build the ffmpeg invocation rendering one grid stage.
 
-    Stream layout is fixed at one video plus one audio track per tile,
-    in alphabetical label order, regardless of which shooters actually
+    Stream layout is fixed at one video plus N+1 audio tracks: the mix
+    (see :data:`MIX_TRACK_LABEL`) first, then one track per tile in
+    alphabetical label order, regardless of which shooters actually
     have a trim for this stage. The concat demuxer rejects segments
     whose stream layout differs, so a missing tile contributes a black
     ``color`` source and a silent ``anullsrc`` track rather than
@@ -436,7 +479,7 @@ def build_stage_command(
     Cells the roster does not reach (see :func:`_unreached_cells`) get a
     black ``color`` source too, but *video only*: an empty cell is not a
     shooter, and giving it a track would take the audio count away from
-    the roster size -- the very thing the paragraph above pins.
+    the roster size plus one -- the very thing the paragraph above pins.
     """
     cell_w, cell_h = _cell_size(canvas, plan)
     rate = canvas.rate_string
@@ -508,26 +551,25 @@ def build_stage_command(
         _build_filter_graph(plan, canvas, video_index, audio_index, empty_index),
     ]
 
-    args += ["-map", "[final]"]
+    # The mix is mapped first so it lands as audio stream 0. Everything
+    # that is not an NLE plays that stream and no other.
+    args += ["-map", "[final]", "-map", "[amix]"]
     for slot in range(len(plan.tiles)):
         args += ["-map", f"[a{slot}]"]
 
-    # Only the audio-source shooter plays by default. Marking every track
-    # default leaves the player free to pick, so the grid can come out
-    # with the wrong shooter's audio. ``build_stage_plans`` guarantees the
-    # label is on every plan; name it if a hand-built plan disagrees,
-    # rather than letting ``next`` raise a bare StopIteration.
-    default_slot = next(
-        (i for i, t in enumerate(plan.tiles) if t.label == plan.audio_label),
-        None,
-    )
-    if default_slot is None:
+    # ``audio_label`` no longer decides which track plays -- the mix
+    # always does -- but a plan naming a shooter who has no tile is still
+    # incoherent, and it is the field the frame-rate derivation and the
+    # FCPXML exporter both key off. ``build_stage_plans`` guarantees it;
+    # name it if a hand-built plan disagrees.
+    if plan.audio_label not in {t.label for t in plan.tiles}:
         raise ValueError(
             f"audio_label={plan.audio_label!r} matches no tile in stage {plan.stage_number}; "
             f"tiles: {', '.join(t.label for t in plan.tiles)}"
         )
-    args += list(_disposition_args([t.label for t in plan.tiles], default_slot))
-    args += list(_track_naming_args([t.label for t in plan.tiles]))
+    track_labels = audio_track_labels(t.label for t in plan.tiles)
+    args += list(_disposition_args(track_labels, 0))
+    args += list(_track_naming_args(track_labels))
 
     args += [
         "-r",
@@ -549,6 +591,17 @@ def build_stage_command(
         str(output_path),
     ]
     return tuple(args)
+
+
+def audio_track_labels(shooter_labels: Iterable[str]) -> tuple[str, ...]:
+    """The finished file's audio tracks, in container order.
+
+    One place decides that the mix is track 0 and the shooters follow in
+    their own order, so the per-stage segments and the stitch cannot
+    disagree about it -- they name the tracks in two separate ffmpeg
+    invocations and a mismatch would relabel every shooter.
+    """
+    return (MIX_TRACK_LABEL, *shooter_labels)
 
 
 def _track_naming_args(labels: Sequence[str]) -> tuple[str, ...]:
@@ -659,13 +712,28 @@ def _build_filter_graph(
         # ``aformat`` is the audio half of the concat invariant: a mono
         # trim and the stereo ``anullsrc`` filler would otherwise put
         # differently-shaped tracks in the same slot across segments.
+        # ``asplit`` last, not earlier: the mix has to be taken from the
+        # tile's *finished* track, after the delay, the format conform and
+        # the length clamp. Splitting ahead of any of those would feed
+        # ``amix`` a stream that is not the one the user can select, and a
+        # lead-padded shooter would sit half a second early in the mix
+        # while his own track was on time -- the exact desync the grid
+        # exists to prevent, audible only in the track everyone hears.
         delay_ms = int(round(tile.lead_pad_seconds * 1000))
         lead = f"adelay={delay_ms}:all=1," if delay_ms > 0 else ""
         parts.append(
             f"[{audio_index[slot]}:a]asetpts=PTS-STARTPTS,{lead}aresample=async=1,"
             f"aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
-            f"apad,atrim=0:{plan.duration_seconds:g}[a{slot}]"
+            f"apad,atrim=0:{plan.duration_seconds:g},asplit=2[a{slot}][m{slot}]"
         )
+
+    # Every tile, including the silent filler a missing shooter
+    # contributes -- see :data:`MIX_NORMALIZE` for why the level is left
+    # to pay for that. Built here rather than at the stitch so the
+    # concat stays a stream copy of video over PCM it never has to
+    # understand.
+    mix_inputs = "".join(f"[m{slot}]" for slot in range(len(plan.tiles)))
+    parts.append(f"{mix_inputs}amix=inputs={len(plan.tiles)}:normalize={MIX_NORMALIZE}[amix]")
 
     return ";".join(parts)
 
@@ -676,7 +744,6 @@ def build_concat_command(
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
     audio_labels: Sequence[str] = (),
-    default_audio_label: str | None = None,
 ) -> tuple[str, ...]:
     """Stitch the per-stage temps, copying video and encoding audio once.
 
@@ -694,11 +761,16 @@ def build_concat_command(
     at the very last step, after every stage has been encoded (verified
     against ffmpeg 7.0.2).
 
-    ``audio_labels`` / ``default_audio_label`` restore the track names
-    and the default flag on the stitched file. Stream copy does not
-    carry them across the concat demuxer: the muxer re-derives the
-    default flag and lands it on the first audio track, which would
-    play the alphabetically-first shooter instead of the audio source.
+    ``audio_labels`` is the *shooters*, in slot order; the mix is
+    prepended here, so the one rule about which track is which lives in
+    :func:`audio_track_labels` and the segments and the stitch cannot
+    drift apart on it. Passing nothing restates nothing, which is what a
+    caller stitching segments it did not build wants.
+
+    Restating is not optional. Stream copy carries neither the track
+    names nor the disposition across the concat demuxer: the names come
+    back out as plain ``SoundHandler``, so a four-shooter file would
+    offer five anonymous tracks with no way to tell whose is whose.
     """
     args: list[str] = [
         ffmpeg_binary,
@@ -719,14 +791,10 @@ def build_concat_command(
         "-b:a",
         OUTPUT_AUDIO_BITRATE,
     ]
-    args += list(_track_naming_args(audio_labels))
-    if default_audio_label is not None:
-        if default_audio_label not in audio_labels:
-            raise ValueError(
-                f"default_audio_label={default_audio_label!r} is not in audio_labels: "
-                f"{', '.join(audio_labels) or '(none given)'}"
-            )
-        args += list(_disposition_args(audio_labels, list(audio_labels).index(default_audio_label)))
+    if audio_labels:
+        track_labels = audio_track_labels(audio_labels)
+        args += list(_track_naming_args(track_labels))
+        args += list(_disposition_args(track_labels, 0))
     args += ["-movflags", "+faststart", str(output_path)]
     return tuple(args)
 
@@ -833,10 +901,11 @@ def render_grid_mp4(
 
     # The concat demuxer rejects segments whose stream layout differs, and
     # skipping a failed stage means the stitch list is not simply "all of
-    # them". Every plan from ``build_stage_plans`` carries one tile per
-    # label, so this holds today; check it anyway rather than discover a
-    # future planner change at the stitch, after the whole match has been
-    # encoded.
+    # them". Every segment carries the mix plus one track per label, so
+    # matching labels across plans is what pins the N+1 count. Every plan
+    # from ``build_stage_plans`` carries one tile per label, so this holds
+    # today; check it anyway rather than discover a future planner change
+    # at the stitch, after the whole match has been encoded.
     labels = tuple(tile.label for tile in plans[0].tiles)
     for plan in plans[1:]:
         other = tuple(tile.label for tile in plan.tiles)
@@ -882,15 +951,13 @@ def render_grid_mp4(
         encoding="utf-8",
     )
     # The labels and the default flag have to be restated here: stream
-    # copy does not carry them across the concat demuxer, and the muxer's
-    # own default lands on the first audio track -- the alphabetically
-    # first shooter, not the one the caller chose.
+    # copy carries neither across the concat demuxer, so without this the
+    # finished file offers N+1 anonymous tracks.
     concat_cmd = build_concat_command(
         list_path=list_path,
         output_path=output_path,
         ffmpeg_binary=binary,
         audio_labels=labels,
-        default_audio_label=plans[0].audio_label,
     )
     completed = _run_ffmpeg(concat_cmd, runner=runner)
     if completed.returncode != 0:
@@ -904,6 +971,8 @@ __all__ = [
     "DEFAULT_CANVAS_WIDTH",
     "FALLBACK_FRAME_RATE_DEN",
     "FALLBACK_FRAME_RATE_NUM",
+    "MIX_NORMALIZE",
+    "MIX_TRACK_LABEL",
     "OUTPUT_AUDIO_BITRATE",
     "OUTPUT_AUDIO_CODEC",
     "SEGMENT_AUDIO_CODEC",
@@ -914,6 +983,7 @@ __all__ = [
     "GridStagePlan",
     "GridTile",
     "StageOutcome",
+    "audio_track_labels",
     "build_concat_command",
     "build_stage_command",
     "build_stage_plans",

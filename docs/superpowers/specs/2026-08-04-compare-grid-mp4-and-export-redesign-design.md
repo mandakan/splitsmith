@@ -205,12 +205,15 @@ discard the whole run.
 
 ### Multi-track audio
 
-MP4 only. Every shooter ships as a separate audio track; the chosen one
-is the default. QuickTime, VLC and Final Cut all switch tracks.
+MP4 only. Every shooter ships as a separate audio track. QuickTime, VLC
+and Final Cut all switch tracks.
 
-Known limitation to surface in the UI: YouTube, browser `<video>` and
-social players read track 1 only. The audio-source choice therefore
-still matters for anything published, and is not merely a default.
+Phase 0 shipped with the `--audio-from` shooter's track as the default
+and nothing else, which left YouTube, browser `<video>` and social
+players -- all of which read track 1 only -- playing exactly one
+shooter. **Phase 1b supersedes that**: a mix of every shooter is always
+track 1 and always the default, and the per-shooter tracks follow as
+2..N+1. See "Phase 1b -- merged audio track" below.
 
 The FCPXML grid keeps its existing `-96dB` mute on non-audio tiles.
 
@@ -341,8 +344,8 @@ Changes:
 - **ffmpeg command construction** is pure: assert the filter graph and
   the `-map` arguments without shelling out, matching `mp4_render`'s
   existing test pattern.
-- **Track mapping**: assert N audio tracks and that the default
-  disposition lands on the chosen shooter.
+- **Track mapping**: assert N+1 audio tracks -- the mix first, carrying
+  the default disposition, then the shooters in alphabetical order.
 - **Filler**: a shooter missing one stage's trim produces a black tile
   in a stable slot, and the other slots do not move.
 - **One integration test** (`@pytest.mark.integration`) renders a short

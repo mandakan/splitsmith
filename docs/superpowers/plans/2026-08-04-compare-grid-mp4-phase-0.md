@@ -1568,6 +1568,13 @@ def test_renders_a_real_grid_with_four_audio_tracks(tmp_path, four_shooter_bundl
     assert audio[3]["disposition"]["default"] == 1, "audio source is the default track"
 ```
 
+> **Superseded by phase 1b.** The renderer now always ships a mix of every
+> shooter as track 1, carrying the `default` disposition, with the
+> per-shooter tracks as 2..N+1. So a four-shooter render has **five** audio
+> streams and the default is on index 0, not on the `--audio-from` shooter.
+> The current checklist is
+> `docs/superpowers/plans/2026-08-04-compare-grid-mp4-phase-0-handoff.md`.
+
 **Note for the implementer:** build the `four_shooter_bundles` fixture from real short clips already in `tests/fixtures/`. Per the project's rules, **do not generate fake fixtures** -- if four suitable clips do not exist, ask the user for a sample rather than synthesising audio. `tests/test_trims_to_compare_e2e.py:118`'s `chained_match` fixture shows how a merged match is seeded on disk; `CompareShooterBundle`s can be loaded from it with `project_loader.load_shooter`.
 
 - [ ] **Step 2: Run it**
@@ -1587,7 +1594,9 @@ uv run splitsmith compare export <match-folder> --format mp4 --audio-from <shoot
 
 Open `/tmp/grid.mp4`. Confirm by eye, not by exit code:
 - four tiles, all playing, beep-aligned (shots line up across tiles)
-- audio switchable between four tracks, defaulting to the chosen shooter
+- audio switchable between five tracks -- the mix, then the four shooters --
+  defaulting to the mix (phase 1b; this line originally said four tracks
+  defaulting to the chosen shooter)
 - no black tile where a trim exists; black tiles only where one genuinely does not
 
 Per the project's review practice, a green suite is not evidence the user sees anything. **Watch the file.**

@@ -15,7 +15,8 @@ per-stage trims into one grid video:
 
 - 4K canvas (3840x2160); each tile in a 2x2 gets 1920x1080
 - Frame rate follows the audio-source shooter's footage
-- One audio track per shooter, named, with the chosen shooter as the default track
+- A mix of every shooter as track 1 (the default track), then one named track
+  per shooter as tracks 2..N+1
 - A shooter missing a stage's trim becomes a black tile that keeps its cell
 - A stage whose render fails is reported and skipped; the rest still stitch
 
@@ -83,10 +84,12 @@ uv run splitsmith compare export <MATCH_PATH> \
     -o ~/grid.mp4
 ```
 
-`--audio-from` chooses whose audio is the **default** track. Every shooter still
-ships as a separate selectable track; the choice decides which one plays first.
-It matters for anything published, because YouTube, browser `<video>` and social
-players read track 1 only.
+`--audio-from` no longer chooses which track plays. Track 1 is always a mix of
+every shooter and always the default, so anything that reads track 1 only --
+YouTube, browser `<video>`, every social player -- hears the whole squad. What
+`--audio-from` still does on this path is set the render's frame rate, which is
+taken from that shooter's lowest-numbered stage. (On the FCPXML path it is also
+the one unmuted tile.)
 
 Optional: `--camera "<shooter>=chest"` (repeatable) to pick a specific camera per
 shooter, by mount or by role.
@@ -109,10 +112,34 @@ ffprobe -v error -select_streams a \
   -of csv=p=0 ~/grid.mp4
 ```
 
-Expect: `3840,2160,<the footage's rate>`, then one audio line per shooter, named,
-with `default=1` on exactly the shooter passed to `--audio-from` -- **not** the
-alphabetically-first one. A single audio track, or the default landing on the
-wrong shooter, is a regression of a defect already fixed once.
+Expect: `3840,2160,<the footage's rate>`, then **N+1** audio lines for an
+N-shooter match:
+
+```
+0,Mix,1
+1,<alphabetically first shooter>,0
+...
+N,<alphabetically last shooter>,0
+```
+
+The mix must be index 0 and must be the only one with `default=1`; the shooters
+must follow in alphabetical order, each with its own `handler_name`. A mix in
+any later slot is a mix nobody outside an NLE will hear. `SoundHandler` instead
+of a name means the stitch stopped restating the metadata -- stream copy does
+not carry it across the concat demuxer. A single audio track is a regression of
+a defect already fixed once.
+
+Then check the mix is a mix of *everyone*, which the track list cannot show:
+
+```bash
+ffmpeg -hide_banner -i ~/grid.mp4 -map 0:a:0 -af volumedetect -f null - 2>&1 | grep volume
+ffmpeg -hide_banner -i ~/grid.mp4 -map 0:a:1 -af volumedetect -f null - 2>&1 | grep volume
+```
+
+The mix's `mean_volume` should sit roughly 10*log10(N)/2 dB under a single
+shooter's track -- about -6 dB at N=4 -- and its `max_volume` must stay below
+0 dB. A mix *louder* than a single shooter means the `normalize=1` on `amix` was
+lost and the track is clipping.
 
 ### 2. Watch it
 
@@ -126,8 +153,12 @@ Open the file. Check, in order:
   must occupy the same cell in every stage.
 - **Is any cell black that should not be?** Black means no trim for that
   shooter on that stage. Verify that matches reality rather than a lookup bug.
-- **Switch audio tracks.** In QuickTime, VLC or Final Cut. Each should be the
-  corresponding shooter's audio.
+- **Listen to track 1 without switching anything.** This is what a viewer on
+  YouTube or a phone gets. Every shooter's shots should be audible in it; one
+  shooter's mic dominating, or a shooter missing entirely, is the defect this
+  track exists to prevent.
+- **Then switch audio tracks.** In QuickTime, VLC or Final Cut. Track 1 is
+  "Mix"; each of the rest should be the corresponding shooter's audio alone.
 
 ## Known issues -- all fixed, listed so you can spot a regression
 
@@ -141,8 +172,9 @@ to a passing test suite:
   and was never affected. Now filled with black inputs per
   `layout.GridLayout.empty_slots`, matching what `emitter.py` already did.
   Verified on a 3-shooter render: empty quadrant RGB(0,0,0), canvas still
-  3840x2160, audio track count still 3 (empty cells add video only -- an extra
-  audio track there would break the concat stitch).
+  3840x2160, audio track count still 3 shooters plus the mix (empty cells add
+  video only -- an extra audio track there would break the concat stitch, and
+  would drag a silent input into the mix and cost the real tiles level).
 - **A selected stage no shooter had a trim for was silently dropped and reported
   as complete success.** Requesting stages 1-3 with trims for 1 and 2 returned
   "Rendered all 2 stages" with a green tick. Counts are now against the

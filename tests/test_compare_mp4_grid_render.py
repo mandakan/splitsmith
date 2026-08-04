@@ -213,8 +213,11 @@ def test_a_cell_no_shooter_reaches_renders_black_not_raw_frame_buffer(tmp_path: 
     # The three real tiles are still where they belong.
     assert _patch_colour(out, at=1.0, x=cell_w // 2, y=cell_h // 2)[0] > 200  # red
     assert _patch_colour(out, at=1.0, x=cell_w + cell_w // 2, y=cell_h // 2)[2] > 200  # blue
-    # The empty cell is not a shooter: three audio tracks, not four.
-    assert len(_audio_streams(out)) == 3
+    # The empty cell is not a shooter: three shooter tracks plus the mix,
+    # not four. An empty cell that grew a track would also drag a silent
+    # input into the mix and cost the three real tiles a quarter of their
+    # level.
+    assert len(_audio_streams(out)) == 4
     assert _video_size(out) == (CANVAS.width, CANVAS.height)
 
 
@@ -239,7 +242,182 @@ def test_a_partly_filled_grid_keeps_the_whole_canvas(tmp_path: Path):
     cell_w, cell_h = 320, 180
     for col in range(3):
         assert _patch_colour(out, at=1.0, x=col * cell_w + 4, y=2 * cell_h + cell_h // 2) == (0, 0, 0)
-    assert len(_audio_streams(out)) == 6
+    assert len(_audio_streams(out)) == 7  # six shooters plus the mix
+
+
+# --- the merged track -----------------------------------------------------
+#
+# Track 1 is a mix of every shooter, because YouTube, browser ``<video>``
+# and every social embed play audio stream 0 and nothing else -- so a grid
+# that ships only per-shooter tracks plays exactly one shooter for anyone
+# it is sent to.
+#
+# Counting tracks cannot see whether the mix is *of* anything. A mix that
+# silently dropped a shooter, or that carried the same shooter four times,
+# has the right stream count, the right duration and the right
+# disposition. So the shooters are given distinct tones and the finished
+# mix is asked, per frequency, whether it contains each of them.
+
+#: One tone per tile, far enough apart that a 40 Hz bandpass separates
+#: them cleanly. Well inside the band a 48 kHz stream carries.
+TONES = (220, 440, 880, 1760)
+
+#: A frequency no tile emits. Without it the presence assertions would
+#: pass against a mix of broadband noise, or against a bandpass that had
+#: stopped filtering.
+ABSENT_TONE = 3520
+
+#: A tone is "in the mix" above this and "not in the mix" below
+#: :data:`TONE_ABSENT_CEILING`. Measured on ffmpeg 6.1.1: a present tone
+#: lands at -42.2 dB and an absent one at -91.0 dB, so the gap this has to
+#: resolve is nearly 50 dB wide.
+TONE_PRESENT_FLOOR = -55.0
+TONE_ABSENT_CEILING = -60.0
+
+
+def _tone_source(path: Path, *, frequency: int, seconds: float = 4.0) -> Path:
+    """A clip whose audio is one steady tone, so the mix can be told apart."""
+    cmd = [
+        FFMPEG, "-hide_banner", "-y",
+        "-f", "lavfi", "-t", str(seconds), "-i", "color=c=red:s=160x120:r=30",
+        "-f", "lavfi", "-t", str(seconds), "-i",
+        f"sine=frequency={frequency}:sample_rate=48000,volume=0.5",
+        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "pcm_s16le", "-shortest", str(path),
+    ]  # fmt: skip
+    done = subprocess.run(cmd, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr[-2000:]
+    return path
+
+
+def _mean_volume_db(path: Path, slot: int, *, bandpass: int | None = None) -> float:
+    """RMS of one audio track in dBFS, optionally through a narrow bandpass.
+
+    The bandpass is applied three times over. One biquad rejects a tone an
+    octave away by only ~24 dB, which is not enough to tell "this shooter
+    is in the mix" from "the shooter next to him is loud" -- measured on
+    ffmpeg 6.1.1, a 220 Hz track read through a single 440 Hz bandpass
+    came back at -54.5 dB against a -42.2 dB genuine hit. Three in series
+    put the same reading at -90.3.
+    """
+    chain = [] if bandpass is None else [f"bandpass=f={bandpass}:width_type=h:w=40"] * 3
+    done = subprocess.run(
+        [
+            FFMPEG, "-hide_banner", "-i", str(path), "-map", f"0:a:{slot}",
+            "-af", ",".join(chain + ["volumedetect"]), "-f", "null", "-",
+        ],  # fmt: skip
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr[-2000:]
+    found = re.search(r"mean_volume: (-?[\d.]+) dB", done.stderr)
+    assert found, done.stderr[-3000:]
+    return float(found.group(1))
+
+
+def _max_volume_db(path: Path, slot: int) -> float:
+    done = subprocess.run(
+        [
+            FFMPEG, "-hide_banner", "-i", str(path), "-map", f"0:a:{slot}",
+            "-af", "volumedetect", "-f", "null", "-",
+        ],  # fmt: skip
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr[-2000:]
+    found = re.search(r"max_volume: (-?[\d.]+) dB", done.stderr)
+    assert found, done.stderr[-3000:]
+    return float(found.group(1))
+
+
+def _toned_grid(tmp_path: Path, *, real: int, name: str) -> Path:
+    """A 2x2 stage whose first ``real`` tiles carry a tone, rest are filler."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    tiles = tuple(
+        _grid_tile(
+            f"S{index}",
+            _tone_source(tmp_path / f"tone{index}.mov", frequency=TONES[index]) if index < real else None,
+            row=index // 2,
+            col=index % 2,
+        )
+        for index in range(len(TONES))
+    )
+    return _render(tmp_path, tiles, name, rows=2, cols=2)
+
+
+@integration
+@needs_ffmpeg
+def test_the_mix_carries_every_shooter(tmp_path: Path):
+    # The assertion no stream count can make. Each shooter emits its own
+    # tone; the mix is then asked, one bandpass at a time, whether it
+    # contains each of them -- and whether it contains a frequency nobody
+    # emitted, which is what catches a bandpass that stopped filtering.
+    out = _toned_grid(tmp_path, real=4, name="tones_full.mov")
+
+    for index, frequency in enumerate(TONES):
+        level = _mean_volume_db(out, 0, bandpass=frequency)
+        assert level > TONE_PRESENT_FLOOR, (
+            f"S{index}'s {frequency} Hz tone is at {level:.1f} dB in the mix -- that shooter is "
+            "missing from the track everyone who is not in an NLE will hear"
+        )
+    absent = _mean_volume_db(out, 0, bandpass=ABSENT_TONE)
+    assert absent < TONE_ABSENT_CEILING, absent
+
+    # And each shooter's own track still carries only their own tone, so
+    # the mix was added beside the per-shooter tracks rather than over
+    # them. Slot 0 is the mix, so shooter N is slot N+1.
+    for index, frequency in enumerate(TONES):
+        own = _mean_volume_db(out, index + 1, bandpass=frequency)
+        assert own > TONE_PRESENT_FLOOR, (index, own)
+        other = _mean_volume_db(out, index + 1, bandpass=TONES[(index + 1) % len(TONES)])
+        assert other < TONE_ABSENT_CEILING, (index, other)
+
+
+@integration
+@needs_ffmpeg
+def test_the_mix_is_averaged_not_summed_so_it_cannot_clip(tmp_path: Path):
+    # ``normalize=1`` scales the sum by 1/inputs. Four uncorrelated
+    # sources sum as sqrt(4) against a divisor of 4, so the mix lands
+    # 6 dB under one shooter's own track -- quieter, never clipped.
+    # ``normalize=0`` would instead put it ~6 dB *over*, into the ceiling,
+    # and a gunshot recording is nothing but transients that would clip.
+    out = _toned_grid(tmp_path, real=4, name="tones_full.mov")
+
+    mix = _mean_volume_db(out, 0)
+    single = _mean_volume_db(out, 1)
+    assert mix - single == pytest.approx(-6.0, abs=1.0), (
+        f"mix sits {mix - single:+.1f} dB against a single shooter; "
+        "normalize=1 puts four uncorrelated sources at -6"
+    )
+    assert _max_volume_db(out, 0) < -1.0
+
+
+@integration
+@needs_ffmpeg
+def test_a_shooter_with_no_trim_is_mixed_in_as_silence(tmp_path: Path):
+    # The deliberate trade, pinned so it cannot be "fixed" by accident.
+    # ``amix``'s normalize divides by the number of *inputs*, not the
+    # number carrying signal, so a stage where half the roster has no
+    # trim comes out 3 dB quieter than a fully-covered one. Mixing only
+    # the tiles that have footage would even that out -- and make the
+    # level step up and down between stages as coverage changes, which is
+    # far more noticeable across a match-length video than a level that
+    # is consistently conservative.
+    full = _toned_grid(tmp_path / "full", real=4, name="tones_full.mov")
+    half = _toned_grid(tmp_path / "half", real=2, name="tones_half.mov")
+
+    full_delta = _mean_volume_db(full, 0) - _mean_volume_db(full, 1)
+    half_delta = _mean_volume_db(half, 0) - _mean_volume_db(half, 1)
+    assert full_delta == pytest.approx(-6.0, abs=1.0), full_delta
+    assert half_delta == pytest.approx(-9.0, abs=1.0), half_delta
+
+    # Each present shooter is weighted identically either way -- the
+    # missing pair costs level, not balance.
+    for path in (full, half):
+        for frequency in TONES[:2]:
+            assert _mean_volume_db(path, 0, bandpass=frequency) > TONE_PRESENT_FLOOR
+    # And the absent pair really is absent from the half-covered mix.
+    for frequency in TONES[2:]:
+        assert _mean_volume_db(half, 0, bandpass=frequency) < TONE_ABSENT_CEILING
 
 
 # --- driver ---------------------------------------------------------------
@@ -314,10 +492,10 @@ def test_renders_each_stage_then_concats(tmp_path: Path):
 
 
 def test_the_stitch_keeps_every_audio_track_and_the_chosen_default(tmp_path: Path):
-    # Stream copy drops the track names and re-derives the default flag
-    # onto the first audio track, so the stitch has to restate both. Get
-    # the labels wrong here and the file plays the alphabetically-first
-    # shooter -- silently, after the whole match has been encoded.
+    # Stream copy drops the track names and re-derives the default flag,
+    # so the stitch has to restate both. Get the offset wrong here and
+    # every shooter is relabelled by one -- silently, after the whole
+    # match has been encoded.
     calls, runner = _recorder()
 
     mp4_grid.render_grid_mp4(
@@ -333,12 +511,14 @@ def test_the_stitch_keeps_every_audio_track_and_the_chosen_default(tmp_path: Pat
     concat = calls[-1]
     pairs = _pairs(concat)
     assert ("-map", "0") in pairs
-    # Alphabetical slots: Anders is 0, Mathias is 1.
-    assert ("-metadata:s:a:0", "title=Anders") in pairs
-    assert ("-metadata:s:a:0", "handler_name=Anders") in pairs
-    assert ("-metadata:s:a:1", "title=Mathias") in pairs
-    assert ("-disposition:a:0", "0") in pairs
-    assert ("-disposition:a:1", "default") in pairs
+    # The mix is stream 0; alphabetical shooters follow, Anders then Mathias.
+    assert ("-metadata:s:a:0", "handler_name=Mix") in pairs
+    assert ("-metadata:s:a:1", "title=Anders") in pairs
+    assert ("-metadata:s:a:1", "handler_name=Anders") in pairs
+    assert ("-metadata:s:a:2", "title=Mathias") in pairs
+    assert ("-disposition:a:0", "default") in pairs
+    assert ("-disposition:a:1", "0") in pairs
+    assert ("-disposition:a:2", "0") in pairs
 
 
 def test_the_concat_list_names_only_the_segments_that_rendered(tmp_path: Path):
@@ -628,8 +808,12 @@ def test_the_driver_renders_and_stitches_a_playable_grid(tmp_path: Path):
     assert result.output_path.exists()
     # head 1.0 + post-beep 1.5 + tail 0.5 = 3.0 per stage, stitched.
     assert _stream_seconds(result.output_path, "0:v:0") == pytest.approx(6.0, abs=0.2)
-    assert _audio_streams(result.output_path) == [("Anders", False), ("Mathias", True)]
-    for slot in range(2):
+    assert _audio_streams(result.output_path) == [
+        ("Mix", True),
+        ("Anders", False),
+        ("Mathias", False),
+    ]
+    for slot in range(3):
         assert _stream_seconds(result.output_path, f"0:a:{slot}") == pytest.approx(6.0, abs=0.2)
 
 
@@ -651,7 +835,11 @@ def test_a_stage_whose_source_is_gone_is_skipped_and_the_rest_still_stitches(tmp
     assert "No such file" in result.failed[0].error
     assert result.output_path.exists()
     assert _stream_seconds(result.output_path, "0:v:0") == pytest.approx(3.0, abs=0.2)
-    assert _audio_streams(result.output_path) == [("Anders", False), ("Mathias", True)]
+    assert _audio_streams(result.output_path) == [
+        ("Mix", True),
+        ("Anders", False),
+        ("Mathias", False),
+    ]
 
 
 @integration
@@ -673,9 +861,10 @@ def test_a_three_shooter_match_stitches_with_its_empty_quadrant_black(tmp_path: 
     assert result.failed == ()
     assert _video_size(result.output_path) == (CANVAS.width, CANVAS.height)
     assert _audio_streams(result.output_path) == [
+        ("Mix", True),
         ("Anders", False),
         ("Bea", False),
-        ("Mathias", True),
+        ("Mathias", False),
     ]
     cell_w, cell_h = CANVAS.width // 2, CANVAS.height // 2
     for at in (1.0, 4.0):
@@ -987,7 +1176,10 @@ def test_a_long_stitch_does_not_drift_audio_late_against_video(tmp_path: Path):
             expected, abs=2 * FRAME_SECONDS
         ), f"stage {index + 1}: picture cuts at {cut:.4f}s, the grid put it at {expected:.4f}s"
 
-    for slot in range(len(shooters)):
+    # Slot 0 is the mix, then one per shooter: the mix is measured for
+    # drift on exactly the same terms, because it is the track anything
+    # that is not an NLE will actually play.
+    for slot in range(len(shooters) + 1):
         presented = _presented_audio_seconds(result.output_path, slot)
         assert presented - video == pytest.approx(0.0, abs=AAC_TAIL_SLACK_SECONDS), (
             f"track {slot} presents {presented - video:+.3f}s of audio against its video; "
@@ -1213,7 +1405,11 @@ def test_a_mixed_rate_match_still_stitches_at_the_audio_sources_rate(tmp_path: P
     for segment in ("stage1.mov", "stage2.mov"):
         assert _video_fps(tmp_path / "work" / segment) == pytest.approx(30.0, abs=0.01)
     assert _stream_seconds(result.output_path, "0:v:0") == pytest.approx(6.0, abs=0.2)
-    assert _audio_streams(result.output_path) == [("Anders", False), ("Mathias", True)]
+    assert _audio_streams(result.output_path) == [
+        ("Mix", True),
+        ("Anders", False),
+        ("Mathias", False),
+    ]
 
 
 @integration
