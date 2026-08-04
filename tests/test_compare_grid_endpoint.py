@@ -174,6 +174,19 @@ def test_reports_missing_trims_rather_than_rendering_filler_for_everyone(
     assert "trim" in detail.lower()
 
 
+def test_rejects_an_unresolvable_camera_selector(match_client: _MatchClient) -> None:
+    """A ``cameras`` override that matches no mount or role anywhere in
+    the shooter's project is a typo -- it must 400 with an actionable
+    message, not bubble up as an unhandled 500.
+    """
+    response = match_client.post(
+        "/api/match/compare-export",
+        json={"stage_numbers": [1], "audio_from": "mathias", "cameras": {"mathias": "drone"}},
+    )
+    assert response.status_code == 400
+    assert "drone" in response.json()["detail"]
+
+
 # --- queueing -----------------------------------------------------------------
 
 
