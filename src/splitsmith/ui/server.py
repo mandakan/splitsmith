@@ -9126,10 +9126,17 @@ def create_app(
         Result order is descending floor (most aggressive cut first)
         so the most-trusted model sorts to the top; ties broken
         alphabetically.
+
+        Reads the calibration JSON directly rather than going through
+        ``_get_ensemble_runtime`` (issue #667): this is a metadata read,
+        and building the full runtime would make a dropdown fetch pay
+        for the CLAP/PANN/voter-C session loads it never touches -- and
+        would turn a missing model artifact into a 500 on a camera list
+        that does not depend on any model.
         """
-        runtime = _get_ensemble_runtime()
-        floors = runtime.calibration.amp_floor_by_camera_model or {}
-        displays = runtime.calibration.camera_model_metadata or {}
+        calibration = ensemble_module.load_calibration()
+        floors = calibration.amp_floor_by_camera_model or {}
+        displays = calibration.camera_model_metadata or {}
         rows: list[dict[str, Any]] = []
         for key, floor in floors.items():
             meta = displays.get(key) or {}
