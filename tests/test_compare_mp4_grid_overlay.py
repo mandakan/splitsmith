@@ -1,0 +1,665 @@
+"""The overlay half of the grid's filter graph.
+
+Kept apart from the three existing grid test files so a regression in
+the no-overlay path stays unambiguous.
+
+Two assertions differ from the task brief on purpose. The brief asserted
+``graph.endswith("[grid]format=yuv420p[final]")``; the graph has always
+ended with the ``amix`` chain, because the audio half is appended after
+the video half. Reordering it to satisfy the brief would change the
+no-overlay filter string, which is exactly what this task must not do,
+so the assertion is ``in`` rather than ``endswith`` and the ordering is
+pinned separately by :func:`test_the_video_chain_ends_at_format_yuv420p`.
+"""
+
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from splitsmith.compare import mp4_grid
+from splitsmith.compare.mp4_grid import GridCanvas, GridStagePlan, GridTile
+from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
+
+CANVAS = GridCanvas(width=1920, height=1080, frame_rate_num=60000, frame_rate_den=1001)
+
+
+def _tile(label, row, col, *, present=True):
+    return GridTile(
+        label=label,
+        trim_path=Path(f"/tmp/{label}.mov") if present else None,
+        beep_offset_in_clip=1.0,
+        seek_seconds=0.0,
+        lead_pad_seconds=0.0,
+        row=row,
+        col=col,
+    )
+
+
+def _plan(tiles, *, rows=2, cols=2, duration=10.0):
+    return GridStagePlan(
+        stage_number=1,
+        stage_name="Stage 1",
+        tiles=tuple(tiles),
+        duration_seconds=duration,
+        audio_label=tiles[0].label,
+        rows=rows,
+        cols=cols,
+    )
+
+
+def _overlay(tmp_path, clocks=()):
+    list_path = tmp_path / "sprites.txt"
+    list_path.write_text("file '/tmp/a.png'\nduration 10\nfile '/tmp/a.png'\n")
+    return mp4_grid.StageOverlayPlan(
+        sprite_list_path=list_path,
+        font_path=tmp_path / "font.ttf",
+        font_size=64,
+        clocks=tuple(clocks),
+    )
+
+
+def _graph(cmd):
+    return cmd[cmd.index("-filter_complex") + 1]
+
+
+def _video_parts(graph):
+    """The video half: everything up to and including ``[final]``.
+
+    The audio chains are appended after it, so ``endswith`` on the whole
+    graph cannot see the video tail.
+    """
+    parts = graph.split(";")
+    return parts[: [i for i, p in enumerate(parts) if p.endswith("[final]")][0] + 1]
+
+
+def test_without_overlay_the_graph_is_untouched(tmp_path):
+    cmd = mp4_grid.build_stage_command(
+        _plan([_tile("ann", 0, 0), _tile("bo", 0, 1)]),
+        canvas=CANVAS,
+        output_path=tmp_path / "out.mov",
+    )
+    graph = _graph(cmd)
+    assert "overlay=" not in graph
+    assert "drawtext" not in graph
+    assert "[grid]format=yuv420p[final]" in graph
+    assert "-f" not in cmd[cmd.index("-filter_complex") :]
+
+
+def test_the_video_chain_ends_at_format_yuv420p(tmp_path):
+    """``[final]`` is the last video node with the overlay on or off."""
+    for overlay in (None, _overlay(tmp_path)):
+        graph = _graph(
+            mp4_grid.build_stage_command(
+                _plan([_tile("ann", 0, 0)]),
+                canvas=CANVAS,
+                output_path=tmp_path / "o.mov",
+                overlay=overlay,
+            )
+        )
+        assert _video_parts(graph)[-1].endswith("format=yuv420p[final]")
+
+
+def test_overlay_defaults_to_off(tmp_path):
+    plain = mp4_grid.build_stage_command(
+        _plan([_tile("ann", 0, 0)]), canvas=CANVAS, output_path=tmp_path / "o.mov"
+    )
+    explicit = mp4_grid.build_stage_command(
+        _plan([_tile("ann", 0, 0)]),
+        canvas=CANVAS,
+        output_path=tmp_path / "o.mov",
+        overlay=None,
+    )
+    assert plain == explicit
+
+
+def test_sprite_input_is_appended_after_every_other_input(tmp_path):
+    # A filler tile takes two inputs and an unreached cell takes one, so
+    # the sprite must land last or every index behind it shifts.
+    plan = _plan([_tile("ann", 0, 0), _tile("bo", 0, 1, present=False), _tile("cy", 1, 0)])
+    cmd = mp4_grid.build_stage_command(
+        plan, canvas=CANVAS, output_path=tmp_path / "o.mov", overlay=_overlay(tmp_path)
+    )
+    inputs = [i for i, a in enumerate(cmd) if a == "-i"]
+    assert cmd[inputs[-1] + 1] == str(tmp_path / "sprites.txt")
+    assert cmd[inputs[-1] - 4 : inputs[-1]] == ("-f", "concat", "-safe", "0")
+    # ann(1) + bo filler(2) + cy(1) + one unreached cell(1) + sprite(1).
+    assert len(inputs) == 6
+
+
+def test_the_sprite_stream_index_is_the_last_one(tmp_path):
+    """The graph must read the sprite from the index the argv gave it.
+
+    Off-by-one here is the failure the ordering rule exists to prevent:
+    the graph would take a shooter's video as the overlay and that
+    shooter's audio would end up under someone else's label.
+    """
+    plan = _plan([_tile("ann", 0, 0), _tile("bo", 0, 1, present=False), _tile("cy", 1, 0)])
+    cmd = mp4_grid.build_stage_command(
+        plan, canvas=CANVAS, output_path=tmp_path / "o.mov", overlay=_overlay(tmp_path)
+    )
+    inputs = [i for i, a in enumerate(cmd) if a == "-i"]
+    sprite_stream = len(inputs) - 1
+    graph = _graph(cmd)
+    chain = next(p for p in graph.split(";") if p.endswith("[ovl]"))
+    assert chain.startswith(f"[{sprite_stream}:v]")
+    # ...and nothing else in the graph claims that index.
+    assert f"[{sprite_stream}:a]" not in graph
+    assert graph.count(f"[{sprite_stream}:v]") == 1
+
+
+def test_sprite_input_uses_the_concat_demuxer(tmp_path):
+    cmd = mp4_grid.build_stage_command(
+        _plan([_tile("ann", 0, 0)]),
+        canvas=CANVAS,
+        output_path=tmp_path / "o.mov",
+        overlay=_overlay(tmp_path),
+    )
+    joined = " ".join(cmd)
+    assert "-f concat -safe 0 -i" in joined
+
+
+def test_tile_input_indices_do_not_move_when_the_overlay_is_added(tmp_path):
+    plan = _plan([_tile("ann", 0, 0), _tile("bo", 0, 1, present=False), _tile("cy", 1, 0)])
+    plain = _graph(mp4_grid.build_stage_command(plan, canvas=CANVAS, output_path=tmp_path / "o.mov"))
+    with_overlay = _graph(
+        mp4_grid.build_stage_command(
+            plan, canvas=CANVAS, output_path=tmp_path / "o.mov", overlay=_overlay(tmp_path)
+        )
+    )
+    tile_chains = [p for p in plain.split(";") if p.endswith(("[t0]", "[t1]", "[t2]"))]
+    assert len(tile_chains) == 3
+    for chain in tile_chains:
+        assert chain in with_overlay, f"tile chain changed: {chain}"
+
+
+def test_the_beep_alignment_filter_order_survives_the_overlay(tmp_path):
+    """Invariant 2: ``tpad`` before ``setpts``, and nothing between them.
+
+    This broke once by reordering. The overlay composites after
+    ``xstack``, so a tile chain that has moved at all is a defect.
+    """
+    tile = GridTile(
+        label="ann",
+        trim_path=Path("/tmp/ann.mov"),
+        beep_offset_in_clip=0.2,
+        seek_seconds=0.0,
+        lead_pad_seconds=0.8,
+        row=0,
+        col=0,
+    )
+    graph = _graph(
+        mp4_grid.build_stage_command(
+            _plan([tile]),
+            canvas=CANVAS,
+            output_path=tmp_path / "o.mov",
+            overlay=_overlay(tmp_path),
+        )
+    )
+    chain = next(p for p in graph.split(";") if p.endswith("[t0]"))
+    assert chain.startswith("[0:v]tpad=start_duration=0.8:start_mode=add:color=black,setpts=PTS-STARTPTS,")
+    assert chain.endswith("trim=0:10[t0]")
+
+
+def test_audio_graph_is_identical_with_the_overlay_on(tmp_path):
+    plan = _plan([_tile("ann", 0, 0), _tile("bo", 0, 1)])
+    plain = _graph(mp4_grid.build_stage_command(plan, canvas=CANVAS, output_path=tmp_path / "o.mov"))
+    with_overlay = _graph(
+        mp4_grid.build_stage_command(
+            plan, canvas=CANVAS, output_path=tmp_path / "o.mov", overlay=_overlay(tmp_path)
+        )
+    )
+
+    def audio_of(graph):
+        return [p for p in graph.split(";") if (p.startswith("[") and ":a]" in p) or "amix" in p]
+
+    assert audio_of(plain) == audio_of(with_overlay)
+    assert len(audio_of(plain)) == 3  # two tiles + the mix
+
+
+def test_track_count_and_maps_are_unchanged_with_the_overlay_on(tmp_path):
+    plan = _plan([_tile("ann", 0, 0), _tile("bo", 0, 1)])
+    plain = mp4_grid.build_stage_command(plan, canvas=CANVAS, output_path=tmp_path / "o.mov")
+    with_overlay = mp4_grid.build_stage_command(
+        plan, canvas=CANVAS, output_path=tmp_path / "o.mov", overlay=_overlay(tmp_path)
+    )
+
+    def maps(cmd):
+        return [cmd[i + 1] for i, a in enumerate(cmd) if a == "-map"]
+
+    assert maps(plain) == maps(with_overlay)
+    assert maps(plain) == ["[final]", "[amix]", "[a0]", "[a1]"]
+
+
+def test_the_overlay_leaves_the_stream_layout_and_codecs_alone(tmp_path):
+    """Invariants 1, 3 and 4: everything after ``-filter_complex``.
+
+    The stitch's ``-c copy`` refuses segments that disagree on any of
+    it, and it refuses at the very last step.
+    """
+    plan = _plan([_tile("ann", 0, 0), _tile("bo", 0, 1)])
+    plain = mp4_grid.build_stage_command(plan, canvas=CANVAS, output_path=tmp_path / "o.mov")
+    with_overlay = mp4_grid.build_stage_command(
+        plan, canvas=CANVAS, output_path=tmp_path / "o.mov", overlay=_overlay(tmp_path)
+    )
+    tail = plain[plain.index("-filter_complex") + 2 :]
+    assert tail == with_overlay[with_overlay.index("-filter_complex") + 2 :]
+    assert "handler_name=ann" in tail
+    assert mp4_grid.SEGMENT_AUDIO_CODEC in tail
+
+
+def test_sprite_chain_is_rgba_and_covers_the_whole_stage(tmp_path):
+    graph = _graph(
+        mp4_grid.build_stage_command(
+            _plan([_tile("ann", 0, 0)]),
+            canvas=CANVAS,
+            output_path=tmp_path / "o.mov",
+            overlay=_overlay(tmp_path),
+        )
+    )
+    chain = next(p for p in graph.split(";") if p.endswith("[ovl]"))
+    assert "format=rgba" in chain
+    assert "stop_mode=clone" in chain
+    assert "trim=0:10" in chain
+    assert "fps=60000/1001" in chain
+
+
+def test_overlay_composites_onto_the_stacked_grid_then_converts(tmp_path):
+    graph = _graph(
+        mp4_grid.build_stage_command(
+            _plan([_tile("ann", 0, 0)]),
+            canvas=CANVAS,
+            output_path=tmp_path / "o.mov",
+            overlay=_overlay(tmp_path),
+        )
+    )
+    assert "[grid][ovl]overlay=0:0" in graph
+    assert _video_parts(graph)[-1].endswith("format=yuv420p[final]")
+    assert graph.index("xstack") < graph.index("overlay=0:0")
+
+
+def test_a_clock_is_drawn_for_each_tile_that_has_one(tmp_path):
+    clocks = (
+        mp4_grid.TileClock(row=0, col=0, start_seconds=1.0, freeze_seconds=6.0, final_text="5.00"),
+        mp4_grid.TileClock(row=0, col=1, start_seconds=1.0, freeze_seconds=None, final_text=None),
+    )
+    graph = _graph(
+        mp4_grid.build_stage_command(
+            _plan([_tile("ann", 0, 0), _tile("bo", 0, 1)]),
+            canvas=CANVAS,
+            output_path=tmp_path / "o.mov",
+            overlay=_overlay(tmp_path, clocks),
+        )
+    )
+    # ann: ticking + static hold. bo: ticking only.
+    assert graph.count("drawtext") == 3
+    assert "5.00" in graph
+
+
+def test_the_clocks_hang_off_the_composited_grid_not_the_bare_one(tmp_path):
+    clocks = (mp4_grid.TileClock(row=0, col=0, start_seconds=1.0, freeze_seconds=6.0, final_text="5.00"),)
+    graph = _graph(
+        mp4_grid.build_stage_command(
+            _plan([_tile("ann", 0, 0)]),
+            canvas=CANVAS,
+            output_path=tmp_path / "o.mov",
+            overlay=_overlay(tmp_path, clocks),
+        )
+    )
+    assert graph.index("overlay=0:0") < graph.index("drawtext")
+    drawn = next(p for p in graph.split(";") if "drawtext" in p)
+    assert drawn.startswith("[ovlgrid]")
+
+
+def test_no_clocks_means_no_drawtext(tmp_path):
+    graph = _graph(
+        mp4_grid.build_stage_command(
+            _plan([_tile("ann", 0, 0)]),
+            canvas=CANVAS,
+            output_path=tmp_path / "o.mov",
+            overlay=_overlay(tmp_path),
+        )
+    )
+    assert "drawtext" not in graph
+
+
+def test_the_ticking_clock_stops_where_the_static_one_starts(tmp_path):
+    clocks = (mp4_grid.TileClock(row=0, col=0, start_seconds=1.0, freeze_seconds=6.0, final_text="5.00"),)
+    graph = _graph(
+        mp4_grid.build_stage_command(
+            _plan([_tile("ann", 0, 0)]),
+            canvas=CANVAS,
+            output_path=tmp_path / "o.mov",
+            overlay=_overlay(tmp_path, clocks),
+        )
+    )
+    assert "between(t" in graph
+    assert "gte(t" in graph
+    assert graph.count("6") >= 2  # the freeze time bounds both filters
+    assert r"enable='between(t\,1\,6)'" in graph
+    assert r"enable='gte(t\,6)'" in graph
+
+
+def test_an_open_ended_clock_ticks_to_the_end_with_no_static_hold(tmp_path):
+    clocks = (mp4_grid.TileClock(row=0, col=0, start_seconds=1.5, freeze_seconds=None, final_text=None),)
+    graph = _graph(
+        mp4_grid.build_stage_command(
+            _plan([_tile("ann", 0, 0)]),
+            canvas=CANVAS,
+            output_path=tmp_path / "o.mov",
+            overlay=_overlay(tmp_path, clocks),
+        )
+    )
+    assert graph.count("drawtext") == 1
+    assert "gte(t" not in graph
+    assert "between(t" not in graph
+    assert r"trunc(t-1.5)" in graph
+
+
+def test_clock_is_positioned_inside_its_own_cell(tmp_path):
+    clocks = (mp4_grid.TileClock(row=1, col=1, start_seconds=1.0, freeze_seconds=None, final_text=None),)
+    graph = _graph(
+        mp4_grid.build_stage_command(
+            _plan([_tile("ann", 0, 0), _tile("bo", 0, 1), _tile("cy", 1, 0), _tile("dee", 1, 1)]),
+            canvas=CANVAS,
+            output_path=tmp_path / "o.mov",
+            overlay=_overlay(tmp_path, clocks),
+        )
+    )
+    # cell is 960x540 on a 1920x1080 canvas; the bottom-right cell starts
+    # at x=960, y=540.
+    assert "960" in graph
+    assert "540" in graph
+    drawn = next(p for p in graph.split(";") if "drawtext" in p)
+    assert ":x=960+960-tw-" in drawn
+    assert ":y=540+" in drawn
+
+
+def test_the_clock_uses_the_font_and_size_the_plan_names(tmp_path):
+    clocks = (mp4_grid.TileClock(row=0, col=0, start_seconds=0.0, freeze_seconds=None, final_text=None),)
+    overlay = _overlay(tmp_path, clocks)
+    graph = _graph(
+        mp4_grid.build_stage_command(
+            _plan([_tile("ann", 0, 0)]),
+            canvas=CANVAS,
+            output_path=tmp_path / "o.mov",
+            overlay=overlay,
+        )
+    )
+    assert f"fontfile='{overlay.font_path}'" in graph
+    assert "fontsize=64" in graph
+
+
+# --- the graph ffmpeg actually accepts ------------------------------------
+
+
+FFMPEG_MISSING = subprocess.run(["which", "ffmpeg"], capture_output=True).returncode != 0
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(FFMPEG_MISSING, reason="needs a real ffmpeg on PATH")
+def test_ffmpeg_parses_the_clock_filters(tmp_path):
+    """A string test cannot see ``drawtext`` escaping. ffmpeg can.
+
+    ``-f null`` over a two-frame lavfi source: this proves the filter
+    description parses and runs, which is the half of the clock no unit
+    test reaches. Costs milliseconds and needs no media.
+    """
+    from splitsmith.overlay_text import materialize_font
+
+    font = materialize_font("splitsmith-mono", tmp_path)
+    clocks = (
+        mp4_grid.TileClock(row=0, col=0, start_seconds=1.0, freeze_seconds=3.0, final_text="2.00"),
+        mp4_grid.TileClock(row=1, col=1, start_seconds=1.0, freeze_seconds=None, final_text=None),
+    )
+    overlay = mp4_grid.StageOverlayPlan(
+        sprite_list_path=tmp_path / "unused.txt",
+        font_path=font,
+        font_size=48,
+        clocks=clocks,
+    )
+    plan = _plan([_tile("ann", 0, 0), _tile("bo", 1, 1)])
+    graph = ";".join(mp4_grid._clock_filters(plan, CANVAS, overlay))
+    done = subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-y",
+            "-f", "lavfi", "-t", "0.1", "-i", "color=c=gray:s=1920x1080:r=30",
+            "-filter_complex", graph.replace("[ovlgrid]", "[0:v]"),
+            "-map", "[final]", "-f", "null", "-",
+        ],  # fmt: skip
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr[-3000:]
+
+
+# --- render driver wiring -------------------------------------------------
+
+
+def _stage_bundle(n: int, tmp_path: Path, label: str) -> CompareStageBundle:
+    return CompareStageBundle(
+        stage_number=n,
+        stage_name=f"Stage {n}",
+        trim_path=tmp_path / f"{label}-{n}.mov",
+        audit_path=tmp_path / f"{label}-{n}.json",
+        beep_offset_in_clip=2.0,
+        duration_seconds=12.0,
+        width=1920,
+        height=1080,
+        frame_rate_num=30,
+        frame_rate_den=1,
+    )
+
+
+def _audit(path: Path, times: list[float]) -> None:
+    """An audit file in the real on-disk shape: ``ms_after_beep``, not seconds.
+
+    The task brief's fixture used a ``time_seconds`` key, which
+    ``audit_shots_to_engine_shots`` ignores -- every tile came back with
+    no shots and the clock assertions could not fail for the right
+    reason.
+    """
+    import json
+
+    path.write_text(
+        json.dumps(
+            {
+                "shots": [
+                    {"shot_number": i + 1, "candidate_number": i + 1, "ms_after_beep": round(t * 1000)}
+                    for i, t in enumerate(times)
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def _shooters(tmp_path: Path, *, shots: dict[str, list[float]] | None = None):
+    shots = shots or {"Anders": [0.9, 1.4, 2.1], "Mathias": [1.0, 1.6, 2.4]}
+    bundles = []
+    for label, times in shots.items():
+        stage = _stage_bundle(1, tmp_path, label)
+        _audit(stage.audit_path, times)
+        bundles.append(
+            CompareShooterBundle(
+                label=label,
+                project_root=tmp_path / label,
+                stages_by_number={1: stage},
+            )
+        )
+    return bundles
+
+
+def _recorder():
+    calls: list[tuple[str, ...]] = []
+
+    def runner(cmd, **kwargs):
+        calls.append(tuple(str(c) for c in cmd))
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    return calls, runner
+
+
+def test_render_without_overlay_writes_no_sprites(tmp_path):
+    calls, runner = _recorder()
+    work = tmp_path / "work"
+    mp4_grid.render_grid_mp4(
+        _shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        work_dir=work,
+        ffmpeg_binary="ffmpeg",
+    )
+    assert not (work / "sprites").exists()
+    assert list(work.glob("sprites-stage*.txt")) == []
+    assert not any("overlay=0:0" in " ".join(cmd) for cmd in calls)
+
+
+def test_render_with_overlay_writes_sprites_and_uses_them(tmp_path):
+    calls, runner = _recorder()
+    work = tmp_path / "work"
+    mp4_grid.render_grid_mp4(
+        _shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        work_dir=work,
+        ffmpeg_binary="ffmpeg",
+        overlay=True,
+    )
+    list_path = work / "sprites-stage1.txt"
+    assert list_path.exists()
+    sprites = sorted((work / "sprites").glob("*.png"))
+    assert sprites, "no sprite PNGs were rendered"
+    stage_cmd = calls[0]
+    assert str(list_path) in stage_cmd
+    assert "overlay=0:0" in " ".join(stage_cmd)
+    # The font must be a real file drawtext can open.
+    graph = _graph(stage_cmd)
+    font = graph.split("fontfile='")[1].split("'")[0]
+    assert Path(font).is_file()
+
+
+def test_the_stage_slice_reaches_the_sprites_rather_than_blanking_them(tmp_path):
+    """``load_overlay_data`` is keyed by ``(label, stage)``; the sprite
+    builder is keyed by label. Passing the wrong one through blanks every
+    panel with no crash and no warning, so assert on the panels."""
+    from splitsmith.compare.overlay_data import load_overlay_data
+    from splitsmith.compare.overlay_sprites import TilePlacement, build_overlay_states
+
+    shooters = _shooters(tmp_path)
+    data = load_overlay_data(shooters)
+    assert set(data) == {("Anders", 1), ("Mathias", 1)}
+
+    placements = (
+        TilePlacement(label="Anders", row=0, col=0, present=True),
+        TilePlacement(label="Mathias", row=0, col=1, present=True),
+    )
+    sliced = mp4_grid._overlay_data_for_stage(data, 1)
+    assert set(sliced) == {"Anders", "Mathias"}
+    states = build_overlay_states(placements, sliced, head_pad_seconds=1.0, duration_seconds=12.0)
+    assert len(states) > 1, "no shot events reached the state builder"
+    assert any(p.shots_fired > 0 for s in states for p in s.panels)
+    assert any(p.last_split is not None for s in states for p in s.panels)
+    assert any(p.rank is not None for s in states for p in s.panels)
+
+
+def test_a_tuple_keyed_mapping_is_rejected_rather_than_blanking(tmp_path):
+    from splitsmith.compare.overlay_data import load_overlay_data
+    from splitsmith.compare.overlay_sprites import TilePlacement, build_overlay_states
+
+    data = load_overlay_data(_shooters(tmp_path))
+    with pytest.raises(ValueError, match="keyed by tile label"):
+        build_overlay_states(
+            (TilePlacement(label="Anders", row=0, col=0, present=True),),
+            data,  # type: ignore[arg-type]
+            head_pad_seconds=1.0,
+            duration_seconds=12.0,
+        )
+
+
+def test_the_clock_freezes_at_the_shooters_last_shot(tmp_path):
+    """The clock stops where the shooter stops, on the stage timeline."""
+    calls, runner = _recorder()
+    mp4_grid.render_grid_mp4(
+        _shooters(tmp_path, shots={"Anders": [0.9, 2.5], "Mathias": [1.0]}),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="ffmpeg",
+        overlay=True,
+        head_pad_seconds=1.0,
+    )
+    graph = _graph(calls[0])
+    # head_pad 1.0 + last shot 2.5 -> freeze at 3.5, holding "2.50".
+    assert r"enable='gte(t\,3.5)'" in graph
+    assert "text='2.50'" in graph
+    # Mathias fired once, at 1.0 -> freeze at 2.0, holding "1.00".
+    assert r"enable='gte(t\,2)'" in graph
+    assert "text='1.00'" in graph
+    assert graph.count("drawtext") == 4
+
+
+def test_a_tile_with_no_shots_gets_no_clock(tmp_path):
+    calls, runner = _recorder()
+    mp4_grid.render_grid_mp4(
+        _shooters(tmp_path, shots={"Anders": [0.9, 2.5], "Mathias": []}),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="ffmpeg",
+        overlay=True,
+    )
+    graph = _graph(calls[0])
+    assert graph.count("drawtext") == 2  # Anders only: ticking + hold
+
+
+def test_the_head_pad_is_threaded_into_the_clock_not_hardcoded(tmp_path):
+    calls, runner = _recorder()
+    mp4_grid.render_grid_mp4(
+        _shooters(tmp_path, shots={"Anders": [1.0]}),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="ffmpeg",
+        overlay=True,
+        head_pad_seconds=2.5,
+    )
+    graph = _graph(calls[0])
+    assert r"trunc(t-2.5)" in graph
+    assert r"enable='between(t\,2.5\,3.5)'" in graph
+
+
+def test_the_sprite_cache_is_shared_across_stages(tmp_path):
+    """One cache dir for the run, so an unchanged state is drawn once."""
+    calls, runner = _recorder()
+    work = tmp_path / "work"
+    shooters = _shooters(tmp_path)
+    for bundle in shooters:
+        stage2 = _stage_bundle(2, tmp_path, bundle.label)
+        _audit(stage2.audit_path, [0.9, 1.4, 2.1])
+        bundle.stages_by_number[2] = stage2
+
+    mp4_grid.render_grid_mp4(
+        shooters,
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        work_dir=work,
+        ffmpeg_binary="ffmpeg",
+        overlay=True,
+    )
+    assert (work / "sprites-stage1.txt").exists()
+    assert (work / "sprites-stage2.txt").exists()
+    assert len(list((work / "sprites").glob("*.png"))) >= 1
+    assert len(calls) == 3  # two stages + the stitch

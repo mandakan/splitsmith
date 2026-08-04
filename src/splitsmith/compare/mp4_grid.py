@@ -8,9 +8,12 @@ track 1 and each shooter's own audio as tracks 2..N+1 -- then stitches
 the per-stage temps with the ``concat`` demuxer, copying the video and
 encoding the audio exactly once (see :data:`SEGMENT_SUFFIX`).
 
-Phase 0 scope: no overlay, no transitions, no title cards. The overlay
-lands in phase 1 as pre-rendered sprite PNGs; nothing here should make
-that harder.
+Phase 1 adds an opt-in splits overlay: canvas-sized RGBA sprite PNGs
+stepped on shot events (see :mod:`splitsmith.compare.overlay_sprites`)
+plus a ``drawtext`` clock per tile. It is composited *after* ``xstack``
+and touches neither the tile chains nor the audio half of the graph, so
+a render with ``overlay=False`` is byte-for-byte the phase 0 render.
+Transitions and title cards are still out of scope.
 
 Determinism / testability: command construction is split into pure
 functions (:func:`build_stage_command` / :func:`build_concat_command`)
@@ -21,12 +24,22 @@ with an injectable runner, mirroring :mod:`splitsmith.mp4_render` and
 from __future__ import annotations
 
 import subprocess
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from ..overlay_text import materialize_font
+from ..overlay_theme import ThemeName, load_theme
 from ..runtime import runtime
 from .layout import Layout2Up, choose_grid, grid_shape
+from .overlay_data import TileStageData, load_overlay_data
+from .overlay_sprites import (
+    SpriteGeometry,
+    TilePlacement,
+    build_overlay_states,
+    write_concat_list,
+    write_sprite_sequence,
+)
 from .project_loader import CompareShooterBundle
 
 Runner = Callable[..., subprocess.CompletedProcess]
@@ -131,6 +144,15 @@ MIX_TRACK_LABEL = "Mix"
 #: more noticeable across a match-length video than a level that is
 #: consistently conservative. A predictable 3 dB is the better trade.
 MIX_NORMALIZE = 1
+
+#: Bundled face the ``drawtext`` clock is drawn with.
+#:
+#: Always the bundled mono, never a system-discovered one: ``drawtext``
+#: needs ``fontfile=`` to name a real path (see
+#: :func:`splitsmith.overlay_text.materialize_font`), and a packaged app
+#: cannot count on any particular face being installed. It matches what
+#: ``overlay_sprites.render_state`` picks for the ``splitsmith`` theme.
+OVERLAY_CLOCK_FONT = "splitsmith-mono"
 
 
 class GridRenderError(RuntimeError):
@@ -459,12 +481,124 @@ def _unreached_cells(plan: GridStagePlan) -> tuple[tuple[int, int], ...]:
     )
 
 
+@dataclass(frozen=True)
+class TileClock:
+    """One tile's running clock, in *segment* time.
+
+    ``start_seconds`` is when the clock starts counting -- the grid's
+    head pad, since that is where every tile's beep lands. It is not
+    zero: the pre-beep pad is not part of anyone's run.
+
+    ``freeze_seconds`` is where the clock stops, i.e. the shooter's last
+    shot on the segment timeline (``head_pad + last_shot_time``), and
+    ``final_text`` is what it holds from then on. Both are ``None``
+    together for a run with no known end, which leaves the clock ticking
+    to the end of the stage with nothing held after it. A tile with no
+    shot data at all gets no ``TileClock`` -- a clock over a tile with no
+    counters implies a timed run that was never measured.
+    """
+
+    row: int
+    col: int
+    start_seconds: float
+    freeze_seconds: float | None
+    final_text: str | None
+
+
+@dataclass(frozen=True)
+class StageOverlayPlan:
+    """Everything the overlay half of one stage's filter graph needs.
+
+    ``sprite_list_path`` is a concat-demuxer list of RGBA PNGs written by
+    :func:`splitsmith.compare.overlay_sprites.write_concat_list`; it is
+    read as an extra input, always appended after every tile and every
+    unreached-cell input so no existing stream index moves.
+
+    ``font_path`` must be a real file that outlives the render --
+    ``drawtext`` opens it itself, so a temp file from
+    ``importlib.resources.as_file`` will not do. See
+    :func:`splitsmith.overlay_text.materialize_font`.
+    """
+
+    sprite_list_path: Path
+    font_path: Path
+    font_size: int
+    clocks: tuple[TileClock, ...] = ()
+
+
+def _ffmpeg_quote(value: str) -> str:
+    """Quote one filter option value for a ``filter_complex`` string.
+
+    Inside ``'...'`` every character is literal, so quoting is all that
+    is needed for the ``:`` and ``,`` an absolute path can contain. A
+    literal ``'`` cannot appear inside the quotes at all -- the quote is
+    closed, the character escaped outside it, and the quote reopened,
+    which is the form ffmpeg's escaping rules prescribe.
+    """
+    return "'" + value.replace("'", r"'\''") + "'"
+
+
+def _clock_pad(cell_height: int) -> int:
+    """Inset from the cell edge, mirroring ``overlay_sprites._draw_panel``.
+
+    The sprite draws its shot counter at ``(x0 + pad, y0 + pad)`` with
+    this same formula. The clock sits at the opposite top corner of the
+    same cell, so sharing the pad is what makes the two line up.
+    """
+    return max(24, cell_height // 36)
+
+
+def _clock_filters(plan: GridStagePlan, canvas: GridCanvas, overlay: StageOverlayPlan) -> list[str]:
+    """The ``drawtext`` chain hanging off ``[ovlgrid]``, or the passthrough.
+
+    Two filters per clock, made mutually exclusive by their ``enable``
+    expressions: one ticking, one holding the final time. That is two
+    filters for a whole stage instead of a per-frame text rasterizer, and
+    it stops the clock where the shooter stopped rather than running it
+    on to the end of the longest tile.
+
+    The escaping is not negotiable and was established against ffmpeg
+    6.1.1 rather than reasoned about: inside ``text='...'`` the ``:`` and
+    ``,`` separators of ``%{eif:...}`` still have to be backslash-escaped
+    or the filtergraph parser splits the option on them.
+    ``%{eif:...:d:2}`` zero-pads, so 0.05s renders ``0.05`` and not
+    ``0.5``.
+    """
+    cell_w, cell_h = _cell_size(canvas, plan)
+    pad = _clock_pad(cell_h)
+    font = _ffmpeg_quote(str(overlay.font_path))
+    filters: list[str] = []
+    for clock in overlay.clocks:
+        common = (
+            f"fontfile={font}:fontsize={overlay.font_size}:fontcolor=white:"
+            f"borderw={max(2, overlay.font_size // 18)}:bordercolor=black:"
+            f"x={clock.col * cell_w}+{cell_w}-tw-{pad}:y={clock.row * cell_h}+{pad}"
+        )
+        start = f"{clock.start_seconds:g}"
+        elapsed = (
+            f"text='%{{eif\\:trunc(t-{start})\\:d}}." f"%{{eif\\:trunc(mod((t-{start})*100\\,100))\\:d\\:2}}'"
+        )
+        if clock.freeze_seconds is None:
+            # No known end: tick to the end of the stage, hold nothing.
+            filters.append(f"drawtext={common}:{elapsed}")
+            continue
+        freeze = f"{clock.freeze_seconds:g}"
+        filters.append(f"drawtext={common}:{elapsed}:enable='between(t\\,{start}\\,{freeze})'")
+        if clock.final_text is not None:
+            held = _ffmpeg_quote(clock.final_text)
+            filters.append(f"drawtext={common}:text={held}:enable='gte(t\\,{freeze})'")
+    if not filters:
+        return ["[ovlgrid]format=yuv420p[final]"]
+    return ["[ovlgrid]" + ",".join(filters) + "[ovltext]", "[ovltext]format=yuv420p[final]"]
+
+
 def build_stage_command(
     plan: GridStagePlan,
     *,
     canvas: GridCanvas,
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
+    overlay: StageOverlayPlan | None = None,
 ) -> tuple[str, ...]:
     """Build the ffmpeg invocation rendering one grid stage.
 
@@ -480,6 +614,17 @@ def build_stage_command(
     black ``color`` source too, but *video only*: an empty cell is not a
     shooter, and giving it a track would take the audio count away from
     the roster size plus one -- the very thing the paragraph above pins.
+
+    ``overlay`` is opt-in and defaults to ``None``, which produces
+    exactly the argv this produced before the overlay existed. When it is
+    given, the sprite sequence is read as one extra input **appended
+    after every other input** and composited after ``xstack``. Appending
+    last is the whole rule: a filler tile already takes two inputs where
+    a real tile takes one, so inserting the sprite anywhere earlier would
+    shift every index behind it and put a shooter's audio in another
+    shooter's track -- silently, and only audible in the finished file.
+    Nothing about the audio graph, the ``-map`` arguments or the tile
+    chains changes either way.
     """
     cell_w, cell_h = _cell_size(canvas, plan)
     rate = canvas.rate_string
@@ -546,9 +691,25 @@ def build_stage_command(
         empty_index.append(next_index)
         next_index += 1
 
+    # Dead last, after the tiles *and* after the unreached cells. See the
+    # docstring: anything else renumbers the streams behind it.
+    sprite_index: int | None = None
+    if overlay is not None:
+        args += ["-f", "concat", "-safe", "0", "-i", str(overlay.sprite_list_path)]
+        sprite_index = next_index
+        next_index += 1
+
     args += [
         "-filter_complex",
-        _build_filter_graph(plan, canvas, video_index, audio_index, empty_index),
+        _build_filter_graph(
+            plan,
+            canvas,
+            video_index,
+            audio_index,
+            empty_index,
+            overlay=overlay,
+            sprite_index=sprite_index,
+        ),
     ]
 
     # The mix is mapped first so it lands as audio stream 0. Everything
@@ -635,6 +796,9 @@ def _build_filter_graph(
     video_index: list[int],
     audio_index: list[int],
     empty_index: Sequence[int] = (),
+    *,
+    overlay: StageOverlayPlan | None = None,
+    sprite_index: int | None = None,
 ) -> str:
     """Scale + pad every tile to a uniform cell, then ``xstack`` the grid.
 
@@ -647,6 +811,13 @@ def _build_filter_graph(
     tile reaches. They run the same chain as a tile so ``xstack`` sees
     one uniform set of inputs, and they are stacked after the tiles, at
     their own cell offsets.
+
+    The overlay, when there is one, is composited onto ``[grid]`` --
+    **after** the stack, never inside a tile chain. A tile chain's
+    ``tpad`` / ``setpts`` / ``scale`` / ``pad`` / ``setsar`` / ``fps`` /
+    ``tpad`` / ``trim`` order is what puts every beep on ``head_pad``;
+    reordering it once already cost a silently desynced grid, and the
+    overlay has no business anywhere near it.
     """
     cell_w, cell_h = _cell_size(canvas, plan)
     rate = canvas.rate_string
@@ -701,7 +872,23 @@ def _build_filter_graph(
     placements += list(empty_cells[: len(empty_index)])
     offsets = "|".join(f"{col * cell_w}_{row * cell_h}" for row, col in placements)
     parts.append(f"{stack_inputs}xstack=inputs={len(placements)}:layout={offsets}[grid]")
-    parts.append("[grid]format=yuv420p[final]")
+    if overlay is None:
+        parts.append("[grid]format=yuv420p[final]")
+    else:
+        if sprite_index is None:
+            raise ValueError("an overlay plan needs the input index its sprite sequence was added at")
+        # ``stop_mode=clone`` holds the last state's *alpha*; the default
+        # ``add`` would pad with opaque black and paint the grid out at
+        # the end. The explicit ``trim`` means the segment's length never
+        # depends on ``overlay``'s ``eof_action`` default, which is what
+        # the concat stitch's uniform-stream rule ultimately rests on.
+        parts.append(
+            f"[{sprite_index}:v]format=rgba,fps={rate},setpts=PTS-STARTPTS,"
+            f"tpad=stop_duration={plan.duration_seconds:g}:stop_mode=clone,"
+            f"trim=0:{plan.duration_seconds:g}[ovl]"
+        )
+        parts.append("[grid][ovl]overlay=0:0:format=auto[ovlgrid]")
+        parts.extend(_clock_filters(plan, canvas, overlay))
 
     for slot, tile in enumerate(plan.tiles):
         # ``aresample=async=1`` keeps a track that starts short from
@@ -824,6 +1011,96 @@ class GridRenderResult:
         return tuple(s for s in self.stages if not s.ok)
 
 
+def _overlay_data_for_stage(
+    data: Mapping[tuple[str, int], TileStageData],
+    stage_number: int,
+) -> dict[str, TileStageData]:
+    """Narrow the whole-match overlay data to one stage, keyed by label.
+
+    :func:`splitsmith.compare.overlay_data.load_overlay_data` is keyed by
+    ``(label, stage_number)`` and
+    :func:`splitsmith.compare.overlay_sprites.build_overlay_states` is
+    keyed by label alone. Handing the wrong one over matches no tile, so
+    every panel falls back to empty and the whole overlay renders blank
+    -- no crash, no warning. The key-type guard on the far side catches
+    the tuple, but not a ``str``-keyed mapping sliced on the wrong stage,
+    so the slice lives in one named place rather than inline.
+    """
+    return {label: tile for (label, number), tile in data.items() if number == stage_number}
+
+
+def _stage_overlay_plan(
+    plan: GridStagePlan,
+    canvas: GridCanvas,
+    data: Mapping[tuple[str, int], TileStageData],
+    *,
+    theme_name: ThemeName,
+    font_path: Path,
+    head_pad_seconds: float,
+    work: Path,
+) -> StageOverlayPlan:
+    """Render one stage's sprites and describe its clocks."""
+    stage_data = _overlay_data_for_stage(data, plan.stage_number)
+    placements = tuple(
+        TilePlacement(label=tile.label, row=tile.row, col=tile.col, present=tile.trim_path is not None)
+        for tile in plan.tiles
+    )
+    geometry = SpriteGeometry(
+        canvas_width=canvas.width,
+        canvas_height=canvas.height,
+        rows=plan.rows,
+        cols=plan.cols,
+    )
+    states = build_overlay_states(
+        placements,
+        stage_data,
+        head_pad_seconds=head_pad_seconds,
+        duration_seconds=plan.duration_seconds,
+    )
+    # One cache directory for the whole run, not one per stage: the cache
+    # is content-addressed, so stages that share a state share a PNG.
+    sequence = write_sprite_sequence(
+        states,
+        geometry,
+        theme=load_theme(theme_name),
+        cache_dir=work / "sprites",
+    )
+    list_path = write_concat_list(sequence, work / f"sprites-stage{plan.stage_number}.txt")
+
+    clocks: list[TileClock] = []
+    for tile in plan.tiles:
+        if tile.trim_path is None:
+            continue
+        tile_data = stage_data.get(tile.label)
+        last = tile_data.last_shot_time if tile_data is not None else None
+        if last is None:
+            # No shots read for this tile. A clock here would imply a
+            # timed run that was never measured.
+            continue
+        clocks.append(
+            TileClock(
+                row=tile.row,
+                col=tile.col,
+                # Every tile's beep is at the head pad, so that is where
+                # every clock starts. Threaded from the caller, never
+                # assumed to be 1.0.
+                start_seconds=head_pad_seconds,
+                freeze_seconds=head_pad_seconds + last,
+                final_text=f"{last:.2f}",
+            )
+        )
+
+    _cell_w, cell_h = _cell_size(canvas, plan)
+    return StageOverlayPlan(
+        sprite_list_path=list_path,
+        font_path=font_path,
+        # Matches ``overlay_sprites.render_state``'s ``big``, so the clock
+        # and the sprite's shot counter are the same size in the cell.
+        font_size=max(48, cell_h // 14),
+        clocks=tuple(clocks),
+    )
+
+
 def _run_ffmpeg(cmd: tuple[str, ...], *, runner: Runner) -> subprocess.CompletedProcess:
     """Invoke ffmpeg, turning a missing binary into a clear error.
 
@@ -857,6 +1134,8 @@ def render_grid_mp4(
     head_pad_seconds: float = 1.0,
     tail_pad_seconds: float = 0.5,
     layout_2up: Layout2Up = "horizontal",
+    overlay: bool = False,
+    overlay_theme: ThemeName = "splitsmith",
     ffmpeg_binary: str | None = None,
     runner: Runner = subprocess.run,
     work_dir: Path | None = None,
@@ -873,6 +1152,13 @@ def render_grid_mp4(
     ``ffmpeg_binary`` defaults to :func:`splitsmith.runtime.runtime`'s
     resolution rather than the literal ``"ffmpeg"``: the binary is not
     on PATH in a packaged app, and ``SPLITSMITH_FFMPEG`` has to win.
+
+    ``overlay`` is off by default and turning it on changes nothing but
+    the video half of each stage's filter graph: the shot data is read
+    once for the whole run, rendered to sprite PNGs under
+    ``work_dir/sprites`` and composited after ``xstack``. The stream
+    layout, the track names and the audio graph are identical either way,
+    which is what lets the stitch stream-copy the video.
 
     ``work_dir`` holds the per-stage segments and the concat list. It
     defaults to a directory beside the output -- same filesystem, so a
@@ -920,11 +1206,41 @@ def render_grid_mp4(
     work = work_dir or output_path.parent / ".compare-grid-work"
     work.mkdir(parents=True, exist_ok=True)
 
+    # Read once for the whole run, not per stage: every read opens the
+    # shooter's project.json and each stage's audit, and a 12-stage
+    # 4-shooter match would otherwise re-parse the same projects 12 times.
+    overlay_data: Mapping[tuple[str, int], TileStageData] = {}
+    font_path: Path | None = None
+    if overlay:
+        overlay_data = load_overlay_data(shooters)
+        # ``drawtext`` opens this path itself, long after this call, so it
+        # has to be a real file on disk rather than a resource handle.
+        font_path = materialize_font(OVERLAY_CLOCK_FONT, work)
+
     outcomes: list[StageOutcome] = []
     segments: list[Path] = []
     for plan in plans:
         segment = work / f"stage{plan.stage_number}{SEGMENT_SUFFIX}"
-        cmd = build_stage_command(plan, canvas=canvas, output_path=segment, ffmpeg_binary=binary)
+        stage_overlay: StageOverlayPlan | None = None
+        # ``font_path`` is set exactly when ``overlay`` is; naming both
+        # keeps that obvious rather than asserting it.
+        if overlay and font_path is not None:
+            stage_overlay = _stage_overlay_plan(
+                plan,
+                canvas,
+                overlay_data,
+                theme_name=overlay_theme,
+                font_path=font_path,
+                head_pad_seconds=head_pad_seconds,
+                work=work,
+            )
+        cmd = build_stage_command(
+            plan,
+            canvas=canvas,
+            output_path=segment,
+            ffmpeg_binary=binary,
+            overlay=stage_overlay,
+        )
         completed = _run_ffmpeg(cmd, runner=runner)
         if completed.returncode != 0:
             outcomes.append(
@@ -975,6 +1291,7 @@ __all__ = [
     "MIX_TRACK_LABEL",
     "OUTPUT_AUDIO_BITRATE",
     "OUTPUT_AUDIO_CODEC",
+    "OVERLAY_CLOCK_FONT",
     "SEGMENT_AUDIO_CODEC",
     "SEGMENT_SUFFIX",
     "GridCanvas",
@@ -983,6 +1300,8 @@ __all__ = [
     "GridStagePlan",
     "GridTile",
     "StageOutcome",
+    "StageOverlayPlan",
+    "TileClock",
     "audio_track_labels",
     "build_concat_command",
     "build_stage_command",
