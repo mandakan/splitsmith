@@ -9,7 +9,6 @@ real binary in development.
 from __future__ import annotations
 
 import json
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -19,6 +18,7 @@ from PIL import Image
 
 from splitsmith import overlay_render
 from splitsmith.config import VideoMetadata
+from tests.synthetic_media import ffmpeg_available
 
 
 def _meta_30fps(duration: float = 2.0) -> VideoMetadata:
@@ -416,8 +416,11 @@ def test_render_overlay_raises_when_ffmpeg_returns_nonzero(
 @pytest.mark.integration
 def test_render_overlay_writes_real_prores_4444_alpha(tmp_path: Path) -> None:
     """End-to-end: real ffmpeg writes a parseable ProRes 4444 alpha MOV.
-    Skipped when ffmpeg / ffprobe aren't on PATH (e.g. CI without them)."""
-    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+
+    Skipped when ffmpeg / ffprobe aren't on PATH. CI installs them and
+    sets ``SPLITSMITH_REQUIRE_INTEGRATION``, which turns that skip into
+    a failure (#670)."""
+    if not ffmpeg_available():
         pytest.skip("ffmpeg/ffprobe not available")
     audit = tmp_path / "stage1.json"
     audit.write_text(

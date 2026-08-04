@@ -1,5 +1,6 @@
 """Shared pytest fixtures."""
 
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 # needing per-test-file imports (which trigger ruff F811 redefinition
 # warnings when the fixture name also appears as a function parameter).
 from tests.hosted_helpers import hosted_app, hosted_env  # noqa: F401
+from tests.synthetic_media import build_synthetic_video, ffmpeg_available
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -26,6 +28,119 @@ _MATCH_TRIMS_STAGE_DEFS: list[tuple[int, str]] = [
 @pytest.fixture
 def fixtures_dir() -> Path:
     return FIXTURES_DIR
+
+
+@pytest.fixture(scope="session")
+def synthetic_source_video(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A real H.264 + AAC MP4, encoded once per session by ffmpeg.
+
+    See ``tests/synthetic_media`` for why the integration tests build
+    their own media rather than depending on the gitignored 4K
+    ``stage_sample.mp4``. Skips when ffmpeg is absent -- and under
+    ``SPLITSMITH_REQUIRE_INTEGRATION`` that skip is escalated to a
+    failure by the hooks below, so CI cannot quietly lose it.
+    """
+    if not ffmpeg_available():
+        pytest.skip("ffmpeg/ffprobe not available")
+    return build_synthetic_video(tmp_path_factory.mktemp("synthetic-media") / "source.mp4")
+
+
+# --- integration-suite skip gate (#670) -------------------------------------
+#
+# A skipped integration test reports as success. That is how the
+# compare-grid renderer shipped six defects past a green suite: the only
+# tests that render a file and measure it never ran in CI, because
+# ffmpeg was not installed and the video fixture is gitignored.
+#
+# Installing ffmpeg fixes half of it. The other half is that nothing
+# would have noticed if it silently stopped working -- a skip and a pass
+# are the same colour. So when ``SPLITSMITH_REQUIRE_INTEGRATION`` is
+# set (CI does), the environment is asserting it can run integration
+# tests, and any integration test that skips anyway is a failure.
+
+_REQUIRE_INTEGRATION_ENV = "SPLITSMITH_REQUIRE_INTEGRATION"
+_FALSEY = frozenset({"", "0", "false", "no", "off"})
+
+# nodeid -> reason, for every integration test that skipped this session.
+_skipped_integration: dict[str, str] = {}
+_integration_selected = 0
+
+
+def _require_integration() -> bool:
+    return os.environ.get(_REQUIRE_INTEGRATION_ENV, "").strip().lower() not in _FALSEY
+
+
+def _skip_reason(report: pytest.TestReport) -> str:
+    longrepr = report.longrepr
+    # A skip's longrepr is (path, lineno, "Skipped: <reason>").
+    if isinstance(longrepr, tuple) and len(longrepr) == 3:
+        return str(longrepr[2])
+    return str(longrepr)
+
+
+def pytest_collection_modifyitems(
+    session: pytest.Session,
+    config: pytest.Config,
+    items: list[pytest.Item],
+) -> None:
+    global _integration_selected
+    _integration_selected = sum(1 for item in items if "integration" in item.keywords)
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    if not _require_integration():
+        return
+    # ``wasxfail`` rides on skipped reports for xfail; those are a
+    # deliberate expectation, not a silently-missing test.
+    if not report.skipped or hasattr(report, "wasxfail"):
+        return
+    if "integration" not in report.keywords:
+        return
+    _skipped_integration.setdefault(report.nodeid, _skip_reason(report))
+
+
+def _integration_gate_failures() -> list[str]:
+    """Reasons the integration gate should fail the session, if any."""
+    if not _require_integration():
+        return []
+    problems: list[str] = []
+    if _integration_selected == 0:
+        problems.append(
+            f"{_REQUIRE_INTEGRATION_ENV} is set but no test carrying the "
+            "'integration' marker was selected -- the suite this gate "
+            "exists to protect did not run at all."
+        )
+    for nodeid, reason in sorted(_skipped_integration.items()):
+        problems.append(f"{nodeid} SKIPPED: {reason}")
+    return problems
+
+
+def pytest_terminal_summary(
+    terminalreporter: pytest.TerminalReporter,
+    exitstatus: int,
+    config: pytest.Config,
+) -> None:
+    if not _require_integration():
+        return
+    problems = _integration_gate_failures()
+    ran = _integration_selected - len(_skipped_integration)
+    if problems:
+        terminalreporter.section("integration gate FAILED", sep="=", red=True, bold=True)
+        for line in problems:
+            terminalreporter.write_line(line, red=True)
+        terminalreporter.write_line(
+            f"\n{_REQUIRE_INTEGRATION_ENV} promises this environment can run the "
+            "integration suite. Install the missing tool, or provide the missing "
+            "media -- do not re-add the skip."
+        )
+    else:
+        terminalreporter.section("integration gate", sep="=")
+        terminalreporter.write_line(f"{ran} integration test(s) ran, 0 skipped")
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    if _integration_gate_failures():
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
 
 def submit_fn(backend, *, kind: str, fn, **kwargs):

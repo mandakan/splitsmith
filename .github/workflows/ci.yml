@@ -15,7 +15,7 @@ on:
 
 jobs:
   test:
-    name: lint + format + unit tests
+    name: lint + format + unit + integration tests
     runs-on: ubuntu-latest
 
     steps:
@@ -28,6 +28,19 @@ jobs:
 
       - name: Install Python 3.11
         run: uv python install 3.11
+
+      - name: Install ffmpeg + ffprobe
+        # The tests marked ``integration`` are the only ones that render
+        # a file and measure it. Without ffmpeg they skipped, and a
+        # skipped test reports as success -- which is how six defects in
+        # the compare-grid MP4 renderer reached a green suite (#670).
+        # Every one of them was found by running ffmpeg, none by reading
+        # code or asserting on command strings.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -version | head -1
+          ffprobe -version | head -1
 
       - name: Sync dependencies
         # --all-groups so the dev group (torch / transformers /
@@ -42,9 +55,19 @@ jobs:
       - name: Format check (black)
         run: uv run black --check src tests scripts
 
-      - name: Run unit tests
-        # Integration tests are skipped: they need ffmpeg + the full source video,
-        # neither of which lives in the repo.
+      - name: Run unit + integration tests
+        env:
+          # Asserts this environment really can run the integration
+          # suite: any test carrying the ``integration`` marker that
+          # skips anyway fails the run, and so does an empty selection.
+          # Installing ffmpeg is only half the fix -- without this gate
+          # nothing notices when the suite silently stops running again,
+          # because a skip and a pass are the same colour (#670).
+          SPLITSMITH_REQUIRE_INTEGRATION: "1"
+        # ``integration`` is not deselected by ``addopts``, so the one
+        # invocation covers both suites. The source video the integration
+        # tests used to need is gitignored 4K footage; they now build
+        # their own clip with ffmpeg (see ``tests/synthetic_media.py``).
         run: uv run pytest -q
 
   spa:
