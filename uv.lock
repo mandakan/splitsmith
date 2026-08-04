@@ -3400,6 +3400,19 @@ wheels = [
 ]
 
 [[package]]
+name = "skl2onnx"
+version = "1.20.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "onnx" },
+    { name = "scikit-learn" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cb/39/a5015fefb613d5172541740540851a301c53392b57051cf4d313cb6d5718/skl2onnx-1.20.0.tar.gz", hash = "sha256:c74ea827d92ba186fe659695e8fc989cd97bfc320edce3d32b9936a5878da10a", size = 956369, upload-time = "2026-01-30T10:52:07.694Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/24/d3/b0db77025a4683ec1b9aafc301b78c7e2e2059a1e2543e918435f3d03582/skl2onnx-1.20.0-py3-none-any.whl", hash = "sha256:30cac34803d1776c14b336ae945e48ef28debfc339215acde1cc04b963ed3f7b", size = 317169, upload-time = "2026-01-30T10:52:05.824Z" },
+]
+
+[[package]]
 name = "soundfile"
 version = "0.13.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3446,13 +3459,12 @@ wheels = [
 
 [[package]]
 name = "splitsmith"
-version = "0.14.0"
+version = "0.15.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "huggingface-hub" },
-    { name = "joblib" },
     { name = "librosa" },
     { name = "mcp" },
     { name = "numpy" },
@@ -3463,7 +3475,6 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "rich" },
-    { name = "scikit-learn" },
     { name = "scipy" },
     { name = "soundfile" },
     { name = "typer" },
@@ -3486,6 +3497,7 @@ hosted = [
 [package.dev-dependencies]
 dev = [
     { name = "black" },
+    { name = "joblib" },
     { name = "matplotlib" },
     { name = "moto", extra = ["s3"] },
     { name = "mypy" },
@@ -3498,6 +3510,8 @@ dev = [
     { name = "pytest-cov" },
     { name = "respx" },
     { name = "ruff" },
+    { name = "scikit-learn" },
+    { name = "skl2onnx" },
     { name = "splitsmith", extra = ["hosted"] },
     { name = "torch" },
     { name = "transformers" },
@@ -3512,7 +3526,6 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "huggingface-hub", specifier = ">=0.26.0" },
-    { name = "joblib", specifier = ">=1.4.0" },
     { name = "librosa", specifier = ">=0.10.2" },
     { name = "mcp", specifier = ">=1.0.0" },
     { name = "numpy", specifier = ">=1.26.0" },
@@ -3526,7 +3539,6 @@ requires-dist = [
     { name = "python-ulid", marker = "extra == 'hosted'", specifier = ">=3.0.0" },
     { name = "pyyaml", specifier = ">=6.0.1" },
     { name = "rich", specifier = ">=13.7.0" },
-    { name = "scikit-learn", specifier = ">=1.8.0,<1.9" },
     { name = "scipy", specifier = ">=1.13.0" },
     { name = "sentry-sdk", extras = ["fastapi"], marker = "extra == 'hosted'", specifier = ">=2.0.0" },
     { name = "soundfile", specifier = ">=0.12.1" },
@@ -3539,6 +3551,7 @@ provides-extras = ["hosted"]
 [package.metadata.requires-dev]
 dev = [
     { name = "black", specifier = ">=24.0.0" },
+    { name = "joblib", specifier = ">=1.4.0" },
     { name = "matplotlib", specifier = ">=3.9.0" },
     { name = "moto", extras = ["s3"], specifier = ">=5.0.0" },
     { name = "mypy", specifier = ">=1.10.0" },
@@ -3551,6 +3564,8 @@ dev = [
     { name = "pytest-cov", specifier = ">=5.0.0" },
     { name = "respx", specifier = ">=0.21.1" },
     { name = "ruff", specifier = ">=0.4.0" },
+    { name = "scikit-learn", specifier = ">=1.8.0" },
+    { name = "skl2onnx", specifier = ">=1.17" },
     { name = "splitsmith", extras = ["hosted"] },
     { name = "torch", specifier = ">=2.11.0" },
     { name = "transformers", specifier = ">=5.7.0" },

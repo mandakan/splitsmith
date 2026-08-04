@@ -195,6 +195,9 @@ class EnsembleRuntime:
     """Loaded heavy state. Build once via ``load_ensemble_runtime``; reuse."""
 
     calibration: EnsembleCalibration
+    # Values are ``calibration.OnnxProbaModel`` in production, but the
+    # field stays duck-typed on ``predict_proba`` so tests can inject a
+    # stub without building an ONNX graph.
     voter_c_model: dict[str, Any]
     clap: feat.ClapRuntime
     pann: feat.PannRuntime
@@ -212,7 +215,7 @@ def load_ensemble_runtime(*, with_voter_e: bool = True) -> EnsembleRuntime:
     when the probe artifact is missing or the calibration predates it.
     """
     calibration = load_calibration()
-    voter_c_model = load_voter_c_model()
+    voter_c_model = load_voter_c_model(calibration.voter_c_onnx_artifacts)
     if tuple(calibration.clap_prompts) != feat.CLAP_PROMPTS:
         raise RuntimeError(
             "ensemble calibration prompt bank does not match the package's "

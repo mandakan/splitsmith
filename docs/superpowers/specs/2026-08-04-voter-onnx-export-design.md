@@ -130,6 +130,32 @@ The reference files are only written when the `tests/` directory exists,
 so a wheel-context run of `build_artifacts` (the dev retrain endpoint)
 does not fail.
 
+### How this PR's artifacts were produced
+
+The build script's new export path is for *future* rebuilds. The
+artifacts committed here were converted from the existing estimators
+instead, because a rebuild would not have been a format migration:
+`fixture_stems()` returns 78 fixtures today while the shipped
+calibration was trained on 64, so retraining would have produced a
+different model and changed detection behaviour under cover of an
+ONNX change.
+
+So the CLAP + PANN feature caches were regenerated, the voter C
+universe was rebuilt over the 64 fixtures the shipped calibration
+names, and the existing `GradientBoostingClassifier` / `LogisticRegression`
+objects were converted directly. The universe reproduced the shipped
+calibration exactly -- 3181 candidates, 1296 positives -- which is what
+licenses treating the regenerated caches as identical to the originals.
+`ensemble_calibration.json` changes by three lines: the two artifact
+pointers. No threshold moves.
+
+The voter E reference is the one place real data was not available:
+its `_visual.npz` cache needs the source videos, which live on an
+external drive not mounted on this machine. Its matrix is 256
+deterministic unit-norm 512-d vectors, matching the geometry of a
+normalised CLIP embedding. The probe is linear, so parity does not vary
+across the input space the way a tree ensemble's can.
+
 ## Parity test
 
 `tests/test_onnx_parity.py` gains three always-on tests -- unlike the
@@ -171,6 +197,22 @@ so they run on every CI job:
   references to the joblib artifacts.
 - `src/splitsmith/ui_static/src/pages/dev/DevRetrain.tsx:47` -- the step
   label "Save calibration JSON + joblib".
+
+## Measured result
+
+Over the real 3181-row calibration matrix, ONNX vs the sklearn
+estimators it was exported from:
+
+| Voter | L_inf | Vote flips at the calibrated threshold |
+| --- | ---: | ---: |
+| C `headcam` | 1.131e-07 | 0 / 3181 |
+| C `handheld` | 1.188e-07 | 0 / 3181 |
+| E | 1.731e-07 | -- |
+
+A fresh `uv pip install` of the built wheel resolves scikit-learn
+**1.9.0** -- the version that broke #648 -- and both voters load and
+predict. The retired pickle, loaded in that same venv, still dies with
+`ModuleNotFoundError: No module named '_loss'`.
 
 ## Out of scope
 

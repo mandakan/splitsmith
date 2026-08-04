@@ -151,51 +151,57 @@ echo "==> fetch-models (downloads if missing)"
 
 # --- ensemble artifacts ----------------------------------------------
 #
-# The joblib artifacts are pickled sklearn estimators, so they are coupled
-# to the sklearn version the *installing user* resolves -- not the one in
-# uv.lock. ``splitsmith detect`` below exercises the envelope detector
-# (voter A) and never touches them, so it cannot catch a break here: that
-# is exactly how a sklearn 1.9 incompatibility reached a release. Load
-# them explicitly, in the slim venv, with whatever sklearn a fresh resolve
-# produced.
+# Voters C and E ship as ONNX graphs (#649). They used to be pickled
+# sklearn estimators, which coupled them to the sklearn version the
+# *installing user* resolved rather than the one in uv.lock -- that is
+# how a sklearn 1.9 incompatibility reached a release. ``splitsmith
+# detect`` below exercises the envelope detector (voter A) and never
+# touches these artifacts, so it cannot catch a break here either. Load
+# them explicitly, in the slim venv, under whatever onnxruntime a fresh
+# resolve produced.
+#
+# This sentinel deliberately does NOT assert scikit-learn is absent from
+# the slim venv: librosa depends on it, so it is installed regardless.
+# The claim being tested is narrower -- the shot-detect path unpickles
+# nothing, so no sklearn version can break it.
 
-echo "==> sentinel: ensemble joblib artifacts must load under the resolved sklearn"
+echo "==> sentinel: ensemble ONNX artifacts must load under the resolved onnxruntime"
 "$SMOKE_VENV/bin/python" - <<'PY'
 import sys
-import warnings
 
-import sklearn
-from sklearn.exceptions import InconsistentVersionWarning
+import onnxruntime
 
-from splitsmith.ensemble.calibration import load_voter_c_model
-from splitsmith.runtime import runtime
+from splitsmith.ensemble.calibration import load_calibration, load_voter_c_model, load_voter_e_probe
 
-print(f"    sklearn {sklearn.__version__}")
+print(f"    onnxruntime {onnxruntime.__version__}")
 
-# A cross-version unpickle that sklearn itself calls possibly-invalid is a
-# failure here, not a warning -- silently wrong detection is worse than a
-# crash.
-with warnings.catch_warnings():
-    warnings.simplefilter("error", InconsistentVersionWarning)
+cal = load_calibration()
+
+try:
+    models = load_voter_c_model()
+except Exception as exc:
+    sys.exit(f"    FAIL: voter C artifacts did not load: {type(exc).__name__}: {exc}")
+
+if not models:
+    sys.exit("    FAIL: voter C loaded no per-camera-class models")
+
+for camera_class, model in sorted(models.items()):
+    n = getattr(model, "n_features", None)
+    if n is not None and n != cal.voter_c_feature_dim:
+        sys.exit(
+            f"    FAIL: voter C ({camera_class}) takes {n} features; "
+            f"calibration says {cal.voter_c_feature_dim}"
+        )
+
+# The probe is optional -- artifacts built without Voter E name no file,
+# and ``load_voter_e_probe`` returns None rather than raising.
+if cal.voter_e_probe_artifact:
     try:
-        load_voter_c_model()
-    except InconsistentVersionWarning as exc:
-        sys.exit(f"    FAIL: voter C artifact is cross-version: {exc}")
+        load_voter_e_probe(cal.voter_e_probe_artifact)
     except Exception as exc:
-        sys.exit(f"    FAIL: voter C artifact did not load: {type(exc).__name__}: {exc}")
+        sys.exit(f"    FAIL: voter E probe did not load: {type(exc).__name__}: {exc}")
 
-    probe = runtime().artifact("voter_e_visual_probe.joblib")
-    if probe.exists():
-        import joblib
-
-        try:
-            joblib.load(probe)
-        except InconsistentVersionWarning as exc:
-            sys.exit(f"    FAIL: voter E probe is cross-version: {exc}")
-        except Exception as exc:
-            sys.exit(f"    FAIL: voter E probe did not load: {type(exc).__name__}: {exc}")
-
-print("    ok: ensemble artifacts load clean")
+print(f"    ok: ensemble ONNX artifacts load clean ({len(models)} voter C classes)")
 PY
 
 # --- detection smoke -------------------------------------------------

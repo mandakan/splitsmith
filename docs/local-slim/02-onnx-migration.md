@@ -21,17 +21,42 @@ panns_inference:
 3. **CLIP-ViT-Base-Patch32** (Voter E).
    Loaded by `ensemble/visual.py::load_visual_runtime`.
 
-Two model artifacts stay where they are:
+Two more artifacts were planned to stay as joblib pickles and did
+not: the voter C GBDT and the voter E linear probe head both moved to
+ONNX in #649. What shipped:
 
-- **Voter C GBDT** (`src/splitsmith/data/voter_c_gbdt.joblib`). The
-  joblib file is under 2 MB and `sklearn` + `joblib` are already
-  default dependencies. v2 may export to ONNX via `sklearn-onnx` for
-  shared SaaS-worker reasons; doc 00's open-questions section
-  flagged this. Not v1.
-- **Voter E linear probe head** (`voter_e_visual_probe.joblib`).
-  Same logic. The probe runs against the CLIP embedding output, so
-  the migration question is "is the embedding source ONNX or torch";
-  the linear head itself stays sklearn.
+- **Voter C GBDT** exports per camera class to
+  `src/splitsmith/data/voter_c_gbdt_headcam.onnx` and
+  `src/splitsmith/data/voter_c_gbdt_handheld.onnx`.
+- **Voter E linear probe head** exports to
+  `src/splitsmith/data/voter_e_visual_probe.onnx`. This is the head
+  only -- the CLIP backbone in front of it is still torch-only (see
+  the CLIP-ViT section below).
+
+All three ship in the wheel next to `ensemble_calibration.json`
+rather than through the R2 registry: they are ~110 KB, ~106 KB and
+~5.5 KB, small enough that content-addressed delivery would cost more
+than it saves. The calibration names them in a
+`voter_c_onnx_artifacts` map plus a `voter_e_probe_artifact` field,
+so adding a camera class needs no code change and a hand-assembled
+`SPLITSMITH_ARTIFACTS_DIR` set can name files freely.
+
+Measured parity against the sklearn estimators over 2048 rows: L_inf
+~2e-7, against the 5e-4 `voter_c_predict_proba` tolerance doc 05
+sets -- four orders of magnitude of headroom.
+
+Input tensors must be declared `FloatTensorType`. `DoubleTensorType`
+converts, but the session then fails to instantiate: onnxruntime
+reports `Type (tensor(double)) of output arg (probabilities) ... does
+not match expected type (tensor(float))` for
+`TreeEnsembleClassifier`.
+
+The point of the move was never install size -- librosa pulls
+scikit-learn in transitively either way. It was the version coupling:
+a pickled estimator binds to whatever sklearn the installing user
+resolves, and sklearn 1.9 broke the GBDT unpickle outright (#648).
+`scikit-learn` and `joblib` are now `[dev]`-only, used by the
+training and export scripts.
 
 ## Target ONNX file inventory
 
@@ -221,6 +246,20 @@ This:
 
 5. Optionally (`--upload`) pushes the ONNX files to the R2 bucket
    under their content-addressed keys (see doc 03).
+
+The voter C and voter E exports are not part of that flow. They come
+out of every run, not just `--onnx`, because they are the calibration
+the run just produced: `_export_onnx_proba` writes
+`voter_c_gbdt_<class>.onnx` for each camera class and
+`voter_e_visual_probe.onnx` straight into `src/splitsmith/data/`, and
+the calibration JSON records their filenames rather than SHAs -- they
+ship in the wheel, so there is nothing to fetch and nothing to verify
+against a remote. The same run freezes the sklearn probabilities into
+`tests/data/voter_c_parity_reference.npz` and
+`tests/data/voter_e_parity_reference.npz` -- only when the `tests/`
+directory exists, so a wheel-context run from the dev retrain
+endpoint skips them -- which is what lets the parity test run without
+scikit-learn installed.
 
 The slim runtime never re-runs the build script. It only reads the
 `model_artifacts` block from the bundled `ensemble_calibration.json`
