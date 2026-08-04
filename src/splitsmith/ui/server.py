@@ -6306,6 +6306,39 @@ def create_app(
             raise HTTPException(status_code=500, detail=f"could not abort upload: {exc}") from exc
         return JSONResponse({"ok": True})
 
+    def _raw_video_owners() -> dict[str, list[str]]:
+        """Map each claimed ``storage_path`` to the shooters holding it.
+
+        The single source of truth for hosted raw-object ownership (#562).
+        On desktop a raw video is a file under one shooter's project dir,
+        so the filesystem enforced one owner for free; the hosted port put
+        the bytes in a shared per-user ``raw/`` pool and kept attachment as
+        a manifest entry, losing that invariant. The settled model is
+        option C -- shared pool, attachment is an explicit single-owner
+        claim, and ``move-shooter`` is the only thing that reassigns it.
+
+        The list values are almost always 0 or 1 slugs. They are lists
+        rather than a single slug because matches predating the claim
+        guard can genuinely hold one object on two shooters -- the prod
+        failure #562 was filed about -- and collapsing that to one owner
+        here would let the caller read "I am *an* owner" as permission and
+        silently normalise the corruption.
+
+        Slugs follow ``match.shooters`` order, so the first entry is the
+        stable first claimant. Best-effort by design: outside a match
+        context (legacy single-shooter layouts, bare/legacy calls) there
+        are no siblings to conflict with, and the map is empty.
+        """
+        try:
+            _, match = _resolve_match_context()
+        except HTTPException:
+            return {}
+        owners: dict[str, list[str]] = {}
+        for sh_slug in match.shooters:
+            for rv in state.shooter_project(sh_slug).raw_videos:
+                owners.setdefault(rv.storage_path, []).append(sh_slug)
+        return owners
+
     @app.get("/api/me/raw/list")
     def list_raw_uploads(user: User = Depends(get_current_user)) -> JSONResponse:
         """List every object the operator has uploaded under their
@@ -6343,21 +6376,12 @@ def create_app(
                     "local mode keeps videos on disk under the project root"
                 ),
             )
-        # Map each already-attached storage path to the shooter that claims
-        # it, so the ingest "available uploads" list can hide/grey objects a
-        # shooter in this match already owns (#562). Best-effort: only under a
-        # match context (the SPA routes this through /api/matches/{id}/...);
-        # bare/legacy calls leave ``attached_to`` null. First claimant wins so
-        # the label is stable.
-        attached_by: dict[str, str] = {}
-        try:
-            _, match = _resolve_match_context()
-        except HTTPException:
-            match = None
-        if match is not None:
-            for sh_slug in match.shooters:
-                for rv in state.shooter_project(sh_slug).raw_videos:
-                    attached_by.setdefault(rv.storage_path, sh_slug)
+        # Label each already-claimed object with its owning shooter, so the
+        # ingest "available uploads" list can hide/grey what a shooter in
+        # this match already owns (#562). First claimant wins, so the label
+        # is stable; the attach guard reads the same map.
+        owners = _raw_video_owners()
+        attached_by = {path: slugs[0] for path, slugs in owners.items() if slugs}
 
         entries: list[dict[str, Any]] = []
         for obj in storage.list("raw/"):
@@ -6656,28 +6680,24 @@ def create_app(
 
         # A raw object is one shooter's footage. The hosted ``raw/`` pool is
         # shared per-user with no filesystem-enforced owner (unlike the
-        # desktop layout), so guard here against attaching an object that
-        # another shooter in this match already claims, otherwise the same
-        # upload gets duplicated across shooters (#562). Legacy single-shooter
-        # layouts raise ``not_a_match`` and have no siblings, so treat the
-        # match lookup as best-effort.
-        try:
-            _, match = _resolve_match_context()
-        except HTTPException:
-            match = None
-        if match is not None:
-            for other_slug in match.shooters:
-                if other_slug == slug:
-                    continue
-                if state.shooter_project(other_slug).find_raw_video(storage_path) is not None:
-                    raise HTTPException(
-                        status_code=409,
-                        detail={
-                            "error": "already_attached_to_shooter",
-                            "shooter": other_slug,
-                            "storage_path": storage_path,
-                        },
-                    )
+        # desktop layout), so refuse an object another shooter in this match
+        # already claims -- otherwise the same upload gets duplicated across
+        # shooters (#562). Same map the available-uploads list labels from,
+        # so what the SPA hides and what this refuses cannot disagree.
+        #
+        # Any *other* owner is a conflict, not just the first: a match from
+        # before this guard can hold one object on two shooters, and letting
+        # a caller through because it is one of them would entrench that.
+        claimed_by_other = next((s for s in _raw_video_owners().get(storage_path, []) if s != slug), None)
+        if claimed_by_other is not None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "already_attached_to_shooter",
+                    "shooter": claimed_by_other,
+                    "storage_path": storage_path,
+                },
+            )
 
         # Preserve the caller's declared order; remove duplicates but do not sort.
         covers = list(dict.fromkeys(body.covers_stages or []))
