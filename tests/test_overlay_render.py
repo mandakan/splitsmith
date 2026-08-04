@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 from PIL import Image
 
-from splitsmith import overlay_render
+from splitsmith import overlay_render, overlay_text
 from splitsmith.config import VideoMetadata
 from tests.synthetic_media import ffmpeg_available
 
@@ -216,13 +216,13 @@ def test_load_font_pil_default_fallback_warns(
     warning so a packaged Linux user sees *why* their overlays look low-res."""
     # Keep "dejavu-mono" as a known preset name (so the unknown-name guard
     # doesn't raise) but give it no candidate paths -- forces the full walk.
-    monkeypatch.setattr(overlay_render, "_FONT_PRESETS", {"dejavu-mono": ()})
-    monkeypatch.setattr(overlay_render, "_FONT_FALLBACKS", ())
+    monkeypatch.setattr(overlay_text, "_FONT_PRESETS", {"dejavu-mono": ()})
+    monkeypatch.setattr(overlay_text, "_FONT_FALLBACKS", ())
     # Force bundled lookup to miss so we walk the full fallback chain.
-    monkeypatch.setattr(overlay_render, "_load_bundled_font", lambda *_args, **_kw: None)
+    monkeypatch.setattr(overlay_text, "_load_bundled_font", lambda *_args, **_kw: None)
     overlay_render.reset_font_log_cache()
 
-    with caplog.at_level("WARNING", logger="splitsmith.overlay_render"):
+    with caplog.at_level("WARNING", logger="splitsmith.overlay_text"):
         font = overlay_render._load_font(None, 24, font_name="dejavu-mono")
     assert font is not None
     assert any("PIL's built-in bitmap font" in rec.message for rec in caplog.records)
@@ -233,7 +233,7 @@ def test_load_font_bundled_emits_debug_only(
 ) -> None:
     """The happy path (bundled font in the wheel) must not warn."""
     overlay_render.reset_font_log_cache()
-    with caplog.at_level("WARNING", logger="splitsmith.overlay_render"):
+    with caplog.at_level("WARNING", logger="splitsmith.overlay_text"):
         overlay_render._load_font(None, 24, font_name="splitsmith-mono")
     assert not [rec for rec in caplog.records if rec.levelname == "WARNING"]
 
