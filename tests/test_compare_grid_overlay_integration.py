@@ -123,7 +123,19 @@ T_AFTER_FIRST_SHOT = 2.0
 NOISE_FLOOR_MEAN_ABS_DIFF = 2.0  # measured 0.06-1.04 where nothing is drawn
 FIRING_QUADRANT_MIN_MEAN_ABS_DIFF = 5.0  # measured 16.79 with the counter+clock drawn
 UNREACHED_QUADRANT_MAX_MEAN_ABS_DIFF = NOISE_FLOOR_MEAN_ABS_DIFF
-PRE_BEEP_MAX_MEAN_ABS_DIFF = NOISE_FLOOR_MEAN_ABS_DIFF
+
+#: The pre-beep check gets its own, wider ceiling rather than sharing the
+#: noise floor. It covers the whole canvas minus the strip band, so it
+#: pools every moving pixel of the source clip, and it used to fail about
+#: 4% of full-suite runs at 4.29 against a 2.0 ceiling calibrated on 1.04.
+#: Measured on this fixture (640x360, testsrc2, ffmpeg 6.1.1):
+#:   - same frame, both renders, nothing drawn:      1.02-1.04
+#:   - one frame apart (the flake, now impossible):  3.89-4.17
+#:   - the overlay actually drawing on a tile:       16.8-35.1
+#: 8.0 -- the same figure the sprite and clock sub-boxes use -- sits
+#: 8x above the real noise and half an order of magnitude below the
+#: smallest genuine draw signal. It is a gate, not a calibration.
+PRE_BEEP_MAX_MEAN_ABS_DIFF = 8.0
 
 # --- sprite-vs-clock sub-boxes ------------------------------------------
 #
@@ -312,12 +324,32 @@ def _decoded_audio_seconds(path: Path, stream: str) -> float:
 
 
 def _frame(path: Path, at: float, tmp_path: Path, tag: str) -> Image.Image:
-    """Decode exactly one frame at ``at`` seconds to a PNG and load it."""
+    """Decode the frame covering ``at`` seconds to a PNG and load it.
+
+    Selected by *frame index*, never by seeking to a timestamp. Both
+    sample points this test uses land exactly on a frame boundary (0.3s
+    and 2.0s are frames 9 and 60 of a 30fps canvas, whose pts are
+    ``0.300000`` and ``2.000000`` to the tick), so a seek that keeps the
+    first frame with ``pts >= target`` is deciding a tie: any sub-tick
+    rounding anywhere in the seek path picks the neighbouring frame
+    instead. Measured on this fixture, the two renders sampled at the
+    same index differ by 1.02-1.04, and one frame apart by 3.89-4.17 --
+    so a tie broken differently for the plain and the overlaid file is
+    indistinguishable from the overlay drawing something. A ~4% failure
+    rate of the pre-beep check at 4.29 is exactly that band.
+
+    ``select=eq(n,N)`` compares integers and cannot tie. The index is
+    derived from the pinned canvas rate, which every tile chain applies
+    with its own ``fps=`` filter, so it is the rate of the file being
+    probed rather than of any source clip.
+    """
     png = tmp_path / f"frame-{tag}-{at:g}.png"
+    index = round(at * CANVAS.frame_rate_num / CANVAS.frame_rate_den)
     done = subprocess.run(
         [
-            FFMPEG, "-hide_banner", "-y", "-v", "error", "-ss", str(at),
-            "-i", str(path), "-frames:v", "1", str(png),
+            FFMPEG, "-hide_banner", "-y", "-v", "error", "-i", str(path),
+            "-vf", f"select=eq(n\\,{index})", "-fps_mode", "passthrough",
+            "-frames:v", "1", str(png),
         ],  # fmt: skip
         capture_output=True,
         text=True,
