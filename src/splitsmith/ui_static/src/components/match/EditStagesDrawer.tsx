@@ -481,6 +481,40 @@ function EditStageRow({
   );
 }
 
+/** The entries of ``summary.errors`` that no per-shooter row already shows.
+ *
+ *  The server's contract (documented on ``StageEditSummary.errors`` in
+ *  ``stage_edit.py``): whenever a shooter row carries a non-null ``error``,
+ *  the matching ``summary.errors`` entry is exactly `${slug}: ${error}` --
+ *  for BOTH failure paths. The outer per-shooter failure sets
+ *  ``error = str(exc)``; the per-stage cleanup failure sets
+ *  ``error = "stage N: ..."``. Neither string equals its general-list entry
+ *  on its own, which is why this rebuilds the prefixed form rather than
+ *  comparing ``error`` verbatim -- doing that dedupped only the path whose
+ *  ``error`` happened to already carry the slug, and rendered the other
+ *  failed shooter twice.
+ *
+ *  What must survive the filter: best-effort purge failures (a cache file
+ *  or storage object that would not delete). Those land in
+ *  ``summary.errors`` as `${slug}: ${detail}` with NO shooter row behind
+ *  them -- the shooter can report ``error: null`` -- so this list is the
+ *  only place they are ever shown. That is also why filtering by slug
+ *  instead of by the full string would be wrong: it would hide them.
+ *
+ *  Exported only so it can be unit-tested (there is no React testing
+ *  library here, and adding one for this is not worth it), which costs the
+ *  file its fast-refresh boundary -- same trade as
+ *  ``StageReferenceDrawer.tsx``. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function generalErrors(summary: StageEditSummary): string[] {
+  const accountedFor = new Set(
+    summary.shooters
+      .filter((s) => s.error != null)
+      .map((s) => `${s.slug}: ${s.error}`),
+  );
+  return summary.errors.filter((e) => !accountedFor.has(e));
+}
+
 /** Post-save panel for a summary that carries cleanup errors. The edit
  *  itself committed -- ``removed``/``added``/``renamed`` reflect what
  *  actually changed -- so this reads as "saved, with some issues" (amber,
@@ -498,17 +532,9 @@ function EditStageRow({
 function SaveResult({ result }: { result: StageEditSummary }) {
   const notSaved = result.shooters.filter((s) => !s.saved);
   const cleanupIssues = result.shooters.filter((s) => s.saved && s.error != null);
-  // Every per-shooter ``error`` the server sets is ALSO appended to
-  // ``summary.errors``, so rendering both lists verbatim showed the same
-  // sentence twice. Keep the per-shooter lists (they carry the saved /
-  // not-saved distinction) and show only the errors no shooter row
-  // already accounts for -- purge object failures, cancel failures.
-  const shooterMessages = new Set(
-    result.shooters
-      .map((s) => s.error)
-      .filter((e): e is string => e != null),
-  );
-  const generalErrors = result.errors.filter((e) => !shooterMessages.has(e));
+  // Keep the per-shooter lists (they carry the saved / not-saved
+  // distinction) and show only what no shooter row already accounts for.
+  const general = generalErrors(result);
   return (
     <div className="space-y-3">
       <div className="flex items-start gap-2 rounded-md border border-status-warning/40 bg-status-warning/10 p-3 text-sm text-ink">
@@ -524,9 +550,9 @@ function SaveResult({ result }: { result: StageEditSummary }) {
         </div>
       </div>
 
-      {generalErrors.length > 0 ? (
+      {general.length > 0 ? (
         <ul className="list-disc space-y-1 pl-5 text-xs text-muted">
-          {generalErrors.map((e, i) => (
+          {general.map((e, i) => (
             <li key={i}>{e}</li>
           ))}
         </ul>

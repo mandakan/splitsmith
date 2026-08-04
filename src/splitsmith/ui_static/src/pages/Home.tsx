@@ -36,6 +36,7 @@ import { EditStagesDrawer } from "@/components/match/EditStagesDrawer";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import {
   api,
+  apiErrorText,
   type MatchProject,
   type MatchStageDefinition,
   type ShooterListEntry,
@@ -164,9 +165,14 @@ export function Home() {
       setMatchStages(r.stages);
       setEditStagesOpen(true);
     } catch (e) {
-      setStagesError(
-        e instanceof Error ? e.message : "Could not load the stage list.",
-      );
+      // Not ``e.message``: on an ApiError that is ``${status}: ${detail}``,
+      // and ``detail`` is JSON.stringify'd whenever the server sent a
+      // structured body -- so a 409 ``no_project`` would drop a raw JSON
+      // blob inline in the page. (That 409 also dispatches
+      // ``splitsmith:no-project``, so the user is redirected to /pick
+      // regardless; this only decides what is on screen until then.)
+      // ``apiErrorText`` shows the server's sentence when there is one.
+      setStagesError(apiErrorText(e, "Could not load the stage list."));
     } finally {
       setStagesLoading(false);
     }
