@@ -6,8 +6,8 @@
  * mode has sat hard-disabled with a `#328` badge ever since, because a
  * 4-shooter grid can't be configured from inside one shooter's page.
  * This page is the match-scoped surface `/export` needed -- it renders
- * every shooter on the match, lets the operator pick which one supplies
- * the audio track, which stages to render, and at what canvas size, then
+ * every shooter on the match, lets the operator pick the reference
+ * shooter, which stages to render, and at what canvas size, then
  * queues the same `POST /api/match/compare-export` job the CLI's
  * `compare export --format mp4` submits and polls it to completion.
  *
@@ -200,8 +200,9 @@ export function MatchExport() {
         </h1>
         <p className="max-w-[40rem] text-sm text-muted">
           Render every shooter on {matchName || "this match"} into one grid
-          MP4 for the selected stages, beep-aligned, with the chosen
-          shooter's audio.
+          MP4 for the selected stages, beep-aligned. The default audio
+          track is a mix of the whole squad; each shooter also gets a
+          selectable track of their own.
         </p>
       </div>
 
@@ -216,8 +217,8 @@ export function MatchExport() {
         <div className="flex min-w-0 flex-col gap-5">
           <Section
             number={1}
-            title="Audio source"
-            help="Which shooter's microphone feeds the grid's sound track."
+            title="Reference shooter"
+            help="Sets the render's frame rate, from this shooter's footage. Every shooter is in the mixed track either way."
           >
             {(shooters ?? []).length === 0 ? (
               <p className="text-sm text-muted">No shooters on this match yet.</p>
@@ -327,7 +328,7 @@ export function MatchExport() {
                 </span>
               </div>
               <div className="flex items-baseline justify-between gap-3">
-                <span>Audio</span>
+                <span>Reference</span>
                 <span className="font-bold text-ink">
                   {shooters?.find((s) => s.slug === audioFrom)?.name ?? "--"}
                 </span>
