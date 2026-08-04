@@ -78,3 +78,6 @@ tests/fixtures/full/*
 # stays reproducible across CI / contributors -- only ignore node_modules.
 node_modules/
 .worktrees/
+
+# Subagent-driven-development scratch (ledger, briefs, review packages)
+.superpowers/
