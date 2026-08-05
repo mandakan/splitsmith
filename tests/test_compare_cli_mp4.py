@@ -493,3 +493,173 @@ def test_mp4_render_prints_per_stage_progress(tmp_path: Path, monkeypatch: pytes
     assert stage1 < stage2
     assert "1 of 2" in result.output
     assert "2 of 2" in result.output
+
+
+# --- reporting a degraded overlay -----------------------------------------
+
+
+def _degraded_result(output_path: Path) -> mp4_grid.GridRenderResult:
+    """What the engine returns on an ffmpeg with no ``drawtext``."""
+    return mp4_grid.GridRenderResult(
+        output_path=output_path,
+        stages=(
+            mp4_grid.StageOutcome(stage_number=1, stage_name="Stage 1", ok=True),
+            mp4_grid.StageOutcome(stage_number=2, stage_name="Stage 2", ok=True),
+        ),
+        degradations=(
+            mp4_grid.OverlayDegradation(
+                summary=mp4_grid.OVERLAY_CLOCK_OMITTED_SUMMARY,
+                detail="ffmpeg has no usable drawtext filter -- use --enable-libfreetype.",
+            ),
+        ),
+    )
+
+
+def test_a_dropped_clock_is_on_the_last_line_the_run_prints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A note at the top of a 40-minute render scrolls away; this does not."""
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=2)
+    output = tmp_path / "out.mp4"
+    _patch_probe(monkeypatch)
+
+    def fake_render(*_args: Any, **kwargs: Any) -> mp4_grid.GridRenderResult:
+        return _degraded_result(kwargs["output_path"])
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", fake_render)
+
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "--overlay",
+            "-o",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    # Flattened, because rich hard-wraps the console to the terminal
+    # width -- it wraps the clause rather than ellipsizing it, so nothing
+    # is lost, but the clause spans two physical lines at 80 columns.
+    flat = " ".join(strip_ansi(result.output).split())
+    assert "Wrote" in flat
+    assert flat.endswith(f"(2/2 stages, {mp4_grid.OVERLAY_CLOCK_OMITTED_SUMMARY})"), flat
+
+
+def test_the_engines_notice_is_printed_before_the_encode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The CLI does not decide anything; it renders what the engine says."""
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=2)
+    output = tmp_path / "out.mp4"
+    _patch_probe(monkeypatch)
+
+    def fake_render(*_args: Any, **kwargs: Any) -> mp4_grid.GridRenderResult:
+        kwargs["on_notice"]("this ffmpeg cannot draw the clock; --enable-libfreetype")
+        return _degraded_result(kwargs["output_path"])
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", fake_render)
+
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "--overlay",
+            "-o",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    text = strip_ansi(result.output)
+    assert "--enable-libfreetype" in text
+    assert text.index("--enable-libfreetype") < text.index("Wrote")
+
+
+def test_an_undegraded_run_says_nothing_extra(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=2)
+    output = tmp_path / "out.mp4"
+    _patch_probe(monkeypatch)
+
+    def fake_render(*_args: Any, **kwargs: Any) -> mp4_grid.GridRenderResult:
+        return mp4_grid.GridRenderResult(
+            output_path=kwargs["output_path"],
+            stages=(mp4_grid.StageOutcome(stage_number=1, stage_name="Stage 1", ok=True),),
+        )
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", fake_render)
+
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "--overlay",
+            "-o",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    flat = " ".join(strip_ansi(result.output).split())
+    assert flat.endswith("(1/1 stages)"), flat
+
+
+def test_a_refused_overlay_exits_non_zero_with_the_engines_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The concat-``option`` refusal, seen from the CLI.
+
+    ``GridRenderError`` is already the CLI's fatal path; what matters is
+    that the reason survives to the terminal, because "re-run without
+    --overlay" is the whole point of refusing early.
+    """
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    output = tmp_path / "out.mp4"
+    _patch_probe(monkeypatch)
+
+    def fake_render(*_args: Any, **_kwargs: Any) -> mp4_grid.GridRenderResult:
+        raise mp4_grid.GridRenderError(
+            "--overlay needs the concat demuxer's 'option' keyword ... "
+            "Re-run without --overlay for the plain grid."
+        )
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", fake_render)
+
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "--overlay",
+            "-o",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 1
+    flat = " ".join(strip_ansi(result.output).split())
+    assert "Re-run without --overlay for the plain grid." in flat, flat

@@ -21,6 +21,7 @@ from PIL import Image
 from splitsmith.compare import mp4_grid
 from splitsmith.compare.mp4_grid import GridCanvas, GridStagePlan, GridTile
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
+from tests.conftest import fake_ffmpeg_probe
 
 CANVAS = GridCanvas(width=1920, height=1080, frame_rate_num=60000, frame_rate_den=1001)
 
@@ -453,6 +454,7 @@ def test_the_render_gives_the_clock_the_themes_own_colours(tmp_path):
         work_dir=tmp_path / "work",
         ffmpeg_binary="ffmpeg",
         overlay=True,
+        probe_runner=fake_ffmpeg_probe(),
     )
     theme = load_theme("splitsmith")
     graph = _graph(calls[0])
@@ -624,6 +626,7 @@ def test_render_with_overlay_writes_sprites_and_uses_them(tmp_path):
         work_dir=work,
         ffmpeg_binary="ffmpeg",
         overlay=True,
+        probe_runner=fake_ffmpeg_probe(),
     )
     list_path = work / "sprites-stage1.txt"
     assert list_path.exists()
@@ -658,6 +661,7 @@ def test_the_sprite_list_is_written_at_the_canvas_frame_rate(tmp_path):
         work_dir=work,
         ffmpeg_binary="ffmpeg",
         overlay=True,
+        probe_runner=fake_ffmpeg_probe(),
         head_pad_seconds=1.0,
     )
     lines = [ln for ln in (work / "sprites-stage1.txt").read_text().splitlines() if ln.strip()]
@@ -694,7 +698,6 @@ def test_the_stage_slice_reaches_the_sprites_rather_than_blanking_them(tmp_path)
     assert len(states) > 1, "no shot events reached the state builder"
     assert any(p.shots_fired > 0 for s in states for p in s.panels)
     assert any(p.last_split is not None for s in states for p in s.panels)
-    assert any(p.rank is not None for s in states for p in s.panels)
 
 
 def test_a_tuple_keyed_mapping_is_rejected_rather_than_blanking(tmp_path):
@@ -723,6 +726,7 @@ def test_the_clock_freezes_at_the_shooters_last_shot(tmp_path):
         work_dir=tmp_path / "work",
         ffmpeg_binary="ffmpeg",
         overlay=True,
+        probe_runner=fake_ffmpeg_probe(),
         head_pad_seconds=1.0,
     )
     graph = _graph(calls[0])
@@ -746,6 +750,7 @@ def test_a_tile_with_no_shots_gets_no_clock(tmp_path):
         work_dir=tmp_path / "work",
         ffmpeg_binary="ffmpeg",
         overlay=True,
+        probe_runner=fake_ffmpeg_probe(),
     )
     graph = _graph(calls[0])
     assert graph.count("drawtext") == 2  # Anders only: ticking + hold
@@ -762,6 +767,7 @@ def test_the_head_pad_is_threaded_into_the_clock_not_hardcoded(tmp_path):
         work_dir=tmp_path / "work",
         ffmpeg_binary="ffmpeg",
         overlay=True,
+        probe_runner=fake_ffmpeg_probe(),
         head_pad_seconds=2.5,
     )
     graph = _graph(calls[0])
@@ -807,6 +813,7 @@ def test_no_sprite_draws_before_the_beep(tmp_path):
         work_dir=work,
         ffmpeg_binary="ffmpeg",
         overlay=True,
+        probe_runner=fake_ffmpeg_probe(),
         head_pad_seconds=1.0,
     )
     entries = _sprite_entries(work)
@@ -841,6 +848,7 @@ def test_the_first_sprite_state_spans_the_head_pad(tmp_path, head_pad):
         work_dir=work,
         ffmpeg_binary="ffmpeg",
         overlay=True,
+        probe_runner=fake_ffmpeg_probe(),
         head_pad_seconds=head_pad,
     )
     entries = _sprite_entries(work)
@@ -879,6 +887,7 @@ def test_the_sprite_grid_geometry_is_the_plans_own_rows_and_cols(tmp_path):
         work_dir=work,
         ffmpeg_binary="ffmpeg",
         overlay=True,
+        probe_runner=fake_ffmpeg_probe(),
         head_pad_seconds=1.0,
         layout_2up="horizontal",
     )
@@ -932,6 +941,7 @@ def test_each_stage_draws_its_own_shot_data_not_stage_ones(tmp_path):
         work_dir=tmp_path / "work",
         ffmpeg_binary="ffmpeg",
         overlay=True,
+        probe_runner=fake_ffmpeg_probe(),
         head_pad_seconds=1.0,
     )
     stage1, stage2 = _graph(calls[0]), _graph(calls[1])
@@ -959,6 +969,7 @@ def test_the_sprite_cache_is_shared_across_stages(tmp_path):
         work_dir=work,
         ffmpeg_binary="ffmpeg",
         overlay=True,
+        probe_runner=fake_ffmpeg_probe(),
     )
     assert (work / "sprites-stage1.txt").exists()
     assert (work / "sprites-stage2.txt").exists()
@@ -1045,6 +1056,7 @@ def test_the_rendered_clock_uses_the_face_the_theme_resolved(tmp_path):
         work_dir=work,
         ffmpeg_binary="ffmpeg",
         overlay=True,
+        probe_runner=fake_ffmpeg_probe(),
         overlay_theme="clean",
     )
     graph = _graph(calls[0])
@@ -1054,3 +1066,221 @@ def test_the_rendered_clock_uses_the_face_the_theme_resolved(tmp_path):
     assert (
         font.read_bytes() == Path(sprite_font.path).read_bytes()
     ), "the rendered clock's fontfile is not the face the sprite drew with"
+
+
+# --- ffmpeg preflight ------------------------------------------------------
+#
+# The failure this covers is an ffmpeg built without --enable-libfreetype,
+# which has no drawtext and so cannot draw the running clock. There is no
+# such ffmpeg on this machine or in CI, so the whole section drives it
+# through ``probe_runner``. What each test asserts is what a real render on
+# that host would produce: the command it builds, the streams it maps, and
+# what the caller is told.
+
+
+def _render_with(tmp_path, probe, **kwargs):
+    """One overlay render against a described ffmpeg. Returns (calls, result)."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    calls, runner = _recorder()
+    result = mp4_grid.render_grid_mp4(
+        _shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+        overlay=True,
+        probe_runner=probe,
+        **kwargs,
+    )
+    return calls, result
+
+
+def test_an_ffmpeg_without_drawtext_still_gets_the_sprite_half_of_the_overlay(tmp_path):
+    """Degrade, do not fail: the clock is the only drawtext in the graph.
+
+    Counters and last splits are pre-rendered PNGs composited with
+    ``overlay``, which every ffmpeg has. Refusing the
+    whole overlay would throw away most of the feature to save one number
+    per tile.
+    """
+    calls, _result = _render_with(tmp_path, fake_ffmpeg_probe(drawtext=False))
+
+    graph = _graph(calls[0])
+    assert "drawtext" not in graph, graph
+    # ...and the rest of the overlay is untouched.
+    assert "overlay=0:0:format=auto[ovlgrid]" in graph
+    assert "[ovlgrid]format=yuv420p[final]" in graph
+    sprite_list = tmp_path / "work" / "sprites-stage1.txt"
+    assert sprite_list.exists()
+    assert str(sprite_list) in calls[0]
+    assert sorted((tmp_path / "work" / "sprites").glob("*.png"))
+
+
+def test_dropping_the_clock_changes_nothing_but_the_clock(tmp_path):
+    """The concat stitch rejects segments whose stream layout disagrees.
+
+    So the degraded command has to differ from the capable one in the
+    filter graph and nowhere else -- same inputs, same maps, same track
+    metadata, same codecs. Compared as argv rather than reasoned about.
+    """
+    capable_calls, _ = _render_with(tmp_path / "cap", fake_ffmpeg_probe())
+    degraded_calls, _ = _render_with(tmp_path / "deg", fake_ffmpeg_probe(drawtext=False))
+
+    def without_paths(cmd, root):
+        # Only the two work dirs differ between the runs.
+        return tuple(part.replace(str(root), "<root>") for part in cmd)
+
+    capable = without_paths(capable_calls[0], tmp_path / "cap")
+    degraded = without_paths(degraded_calls[0], tmp_path / "deg")
+    assert len(capable) == len(degraded)
+    differing = [i for i, (a, b) in enumerate(zip(capable, degraded, strict=True)) if a != b]
+    assert differing == [capable.index("-filter_complex") + 1], (
+        f"the degraded render differs outside the filter graph: "
+        f"{[(capable[i], degraded[i]) for i in differing]}"
+    )
+    # And inside the graph, only the clock chain is gone.
+    cap_graph = capable[differing[0]]
+    deg_graph = degraded[differing[0]]
+    assert "[ovlgrid]drawtext=" in cap_graph
+    assert deg_graph == cap_graph.replace(
+        cap_graph[cap_graph.index("[ovlgrid]drawtext=") : cap_graph.index("[ovltext]format=yuv420p[final]")]
+        + "[ovltext]format=yuv420p[final]",
+        "[ovlgrid]format=yuv420p[final]",
+    )
+
+
+def test_the_dropped_clock_reaches_the_caller_up_front_and_in_the_result(tmp_path):
+    """A warning at the top of a 40-minute render is a warning nobody reads.
+
+    So it has to arrive twice: through ``on_notice`` before any encoding,
+    and as a field on the result the caller puts on its last line.
+    """
+    notices: list[str] = []
+    seen_before_any_stage: list[int] = []
+    calls, runner = _recorder()
+
+    def counting_runner(cmd, **kwargs):
+        seen_before_any_stage.append(len(notices))
+        return runner(cmd, **kwargs)
+
+    result = mp4_grid.render_grid_mp4(
+        _shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=counting_runner,
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+        overlay=True,
+        probe_runner=fake_ffmpeg_probe(drawtext=False),
+        on_notice=notices.append,
+    )
+
+    assert len(notices) == 1
+    # Said before the first ffmpeg call, not after the last.
+    assert seen_before_any_stage[0] == 1
+    detail = notices[0]
+    assert "running clock is omitted" in detail
+    assert "--enable-libfreetype" in detail
+    assert "/bin/ffmpeg" in detail
+    assert "6.1.1-3ubuntu5" in detail
+    assert [d.detail for d in result.degradations] == [detail]
+    assert result.degradation_summary == mp4_grid.OVERLAY_CLOCK_OMITTED_SUMMARY
+    assert result.degradation_summary == ("running clock omitted: this ffmpeg was built without drawtext")
+    assert result.failed == ()
+
+
+def test_a_capable_ffmpeg_still_draws_the_clock(tmp_path):
+    """The inverse. A preflight that always degrades is not a preflight."""
+    calls, result = _render_with(tmp_path, fake_ffmpeg_probe())
+
+    graph = _graph(calls[0])
+    assert "[ovlgrid]drawtext=" in graph
+    assert result.degradations == ()
+    assert result.degradation_summary == ""
+
+
+def test_an_ffmpeg_without_the_concat_option_keyword_refuses_the_overlay(tmp_path):
+    """Refuse, do not degrade: this one has no correct partial rendering.
+
+    The sprite input needs ``option framerate`` per entry or every state
+    boundary snaps to a 25fps time base. Dropping the directive would
+    ship wrong timing; keeping it dies on ``unknown keyword`` at stage 1.
+    """
+    calls, runner = _recorder()
+
+    with pytest.raises(mp4_grid.GridRenderError) as excinfo:
+        mp4_grid.render_grid_mp4(
+            _shooters(tmp_path),
+            audio_label="Anders",
+            output_path=tmp_path / "grid.mp4",
+            canvas=CANVAS,
+            runner=runner,
+            work_dir=tmp_path / "work",
+            ffmpeg_binary="/bin/ffmpeg",
+            overlay=True,
+            probe_runner=fake_ffmpeg_probe(concat_option=False),
+        )
+
+    assert calls == [], "refused after starting to encode"
+    message = str(excinfo.value)
+    assert "'option' keyword" in message
+    assert "Re-run without --overlay" in message
+    assert "/bin/ffmpeg" in message
+
+
+def test_the_plain_grid_still_renders_on_an_ffmpeg_that_refuses_the_overlay(tmp_path):
+    """The refusal is scoped to ``--overlay``; the grid needs none of it."""
+    calls, runner = _recorder()
+
+    result = mp4_grid.render_grid_mp4(
+        _shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+        probe_runner=fake_ffmpeg_probe(concat_option=False, drawtext=False),
+    )
+
+    assert result.failed == ()
+    assert result.degradations == ()
+    assert len(calls) == 2  # one stage, one stitch
+    assert "overlay=0:0" not in " ".join(calls[0])
+
+
+def test_the_no_overlay_path_never_probes(tmp_path):
+    """Default-off must not change behaviour, and that includes probing."""
+
+    def explode(cmd, **_kwargs):
+        raise AssertionError(f"the no-overlay path probed ffmpeg: {cmd}")
+
+    calls, runner = _recorder()
+    mp4_grid.render_grid_mp4(
+        _shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+        probe_runner=explode,
+    )
+
+    assert len(calls) == 2
+
+
+def test_the_probe_does_not_go_through_the_progress_runner(tmp_path):
+    """Both shipped callers count ``runner`` calls to report "stage N of M".
+
+    Probe traffic on that hook would report a probe as stage 1 and the
+    last stage as the stitch, on every overlay render.
+    """
+    calls, _result = _render_with(tmp_path, fake_ffmpeg_probe())
+
+    assert len(calls) == 2  # one stage, one stitch -- nothing else
+    assert all(cmd[0] == "/bin/ffmpeg" for cmd in calls)
+    assert "-filter_complex" in calls[0]

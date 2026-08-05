@@ -34,6 +34,26 @@ trims only.
    ffmpeg -hide_banner -encoders | grep -E 'libx264|aac |pcm_s16le'
    ```
 
+   **`--overlay` asks for two more things**, and this is where a host that
+   renders the plain grid perfectly can still come up short. A version number
+   does not answer either question -- both depend on how the binary was
+   configured -- so the renderer probes the resolved binary before it encodes
+   anything. You can run the same checks by hand:
+
+   ```bash
+   ffmpeg -hide_banner -h filter=drawtext | head -2   # the running clock
+   printf "file '/nonexistent.png'\noption framerate 30/1\n" > /tmp/p.txt
+   ffmpeg -hide_banner -f concat -safe 0 -i /tmp/p.txt -f null -   # the sprite timing
+   ```
+
+   - `Unknown filter 'drawtext'` means the build has no `--enable-libfreetype`.
+     Common on distro and static builds. **The render still runs**; see
+     "Degraded output" below.
+   - `Line 2: unknown keyword 'option'` (exit 183) means the concat demuxer is
+     too old for the overlay's sprite input. `--overlay` is **refused up front**
+     with that reason; the plain grid is unaffected and still renders. The
+     second command failing on the missing file instead is the healthy answer.
+
 2. **Python 3.11+** and **`uv`** (never `pip` in this repo).
 3. **Disk headroom.** The renderer writes per-stage segments to a temp work
    directory beside the output before stitching. Budget roughly the size of the
@@ -96,6 +116,83 @@ shooter, by mount or by role.
 
 Progress prints per stage. If the terminal goes quiet for many minutes with no
 stage line, that is a hang, not slowness.
+
+## Degraded output: an ffmpeg with no `drawtext`
+
+Only the overlay's **running clock** is `drawtext`. The per-tile shot counters
+and last splits are pre-rendered PNGs composited with `overlay`, which every
+ffmpeg has. So a build without `--enable-libfreetype`
+loses one number per tile rather than the whole feature, and the render says so
+twice -- once before it starts encoding, and once on the last line:
+
+```
+Note: /usr/bin/ffmpeg (ffmpeg 6.1.1) has no usable drawtext filter, so the
+overlay's running clock is omitted. The per-tile shot counters and last splits
+still render. For the clock, use an ffmpeg built with
+--enable-libfreetype, and point both SPLITSMITH_FFMPEG and SPLITSMITH_FFPROBE
+at it -- a mismatched pair is its own source of confusing failures.
+...
+Wrote ~/grid.mp4 (12/12 stages, running clock omitted: this ffmpeg was built
+without drawtext)
+```
+
+What that file looks like: every tile's top-**left** corner still carries its
+shot counter and the bottom-center of each cell still carries the last split --
+and each tile's top-**right** corner, where the elapsed time would tick, is
+empty. Nothing else changes: same canvas, same frame
+rate, same N+1 audio tracks, same duration. A file whose counters are *also*
+missing is a different bug, not this degradation.
+
+If you want the clock, the fix is an ffmpeg built with `--enable-libfreetype`
+(most static builds from johnvansickle / BtbN have it), with **both** env vars
+pointed at the same install:
+
+```bash
+SPLITSMITH_FFMPEG=/opt/ffmpeg/bin/ffmpeg \
+SPLITSMITH_FFPROBE=/opt/ffmpeg/bin/ffprobe \
+uv run splitsmith compare export ...
+```
+
+If the run **refuses** `--overlay` outright with a message about the concat
+demuxer's `option` keyword, that is the other check from the prerequisites, and
+the same fix applies. Re-running without `--overlay` gets the plain grid on that
+host in the meantime.
+
+### macOS: Homebrew's default `ffmpeg` has no `drawtext`
+
+Hit for real by a user running this exact export on macOS: every stage failed.
+Root cause is the formula, not the host. Homebrew's default `ffmpeg` (the 8.x
+formula as of this writing) is a slimmed build with no freetype/harfbuzz, so
+`drawtext` does not exist -- not "misconfigured", not present-but-broken, the
+filter is compiled out. `brew install ffmpeg` alone will not fix this; it is
+the formula that lacks the feature, not the version.
+
+The fix is the sibling formula that keeps the full feature set:
+
+```bash
+brew install ffmpeg-full
+```
+
+`ffmpeg-full` is **keg-only** -- Homebrew will not link it over the default
+`ffmpeg`, on purpose, because the two formulae conflict. That means installing
+it changes nothing about what `ffmpeg` on `PATH` resolves to; you have to point
+splitsmith at it explicitly, and **both** variables, because they are a matched
+pair from the same keg:
+
+```bash
+export SPLITSMITH_FFMPEG="$(brew --prefix ffmpeg-full)/bin/ffmpeg"
+export SPLITSMITH_FFPROBE="$(brew --prefix ffmpeg-full)/bin/ffprobe"
+```
+
+Confirm before re-running the export:
+
+```bash
+"$SPLITSMITH_FFMPEG" -hide_banner -h filter=drawtext | head -2   # must not say "Unknown filter"
+```
+
+"Use a build with `--enable-libfreetype`" is not, by itself, actionable advice
+on macOS -- there is no `./configure` step in a Homebrew install. The formula
+name is what closes the loop.
 
 ## Verifying the result -- this is the actual deliverable
 
@@ -193,8 +290,10 @@ Per-stage failures are isolated: the run continues and reports which stages
 failed with trimmed ffmpeg stderr. That output is the diagnostic -- capture it.
 
 If *every* stage fails, the run raises rather than writing a zero-byte file.
-The usual causes are a missing or feature-poor ffmpeg, or trims that are not
-actually on disk.
+The usual cause is trims that are not actually on disk. A feature-poor ffmpeg
+used to land here too -- every stage failing the same way, an hour in, with
+nothing to show for it. That is what the pre-flight above exists to catch, so if
+you see it, capture the stderr: it means a capability nothing probes for.
 
 Capture and bring back:
 
@@ -208,8 +307,10 @@ is the one thing no log captures and the only thing that closes Task 8.
 
 ## What is deliberately not in this branch
 
-Phase 0 only. No splits overlay, no transitions, no title cards, no hosted-mode
-support, and no FCPXML from the new UI surface. The FCPXML grid
+Phase 0 only, plus the `--overlay` pre-flight documented above (added later,
+after this runbook's host hit exactly the failure it prevents). No transitions,
+no title cards, no hosted-mode support, and no FCPXML from the new UI surface.
+The FCPXML grid
 (`splitsmith compare export <match> -o out.fcpxml`, the default `--format`) is
 untouched and behaves exactly as before.
 

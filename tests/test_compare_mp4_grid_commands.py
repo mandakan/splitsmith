@@ -550,3 +550,135 @@ def test_concat_names_nothing_when_it_is_given_no_roster():
     # naming nothing.
     cmd = mp4_grid.build_concat_command(list_path=Path("/tmp/list.txt"), output_path=Path("/out/grid.mp4"))
     assert not [a for a in cmd if a.startswith("-metadata:s:a:") or a.startswith("-disposition:a:")]
+
+
+# --- the default-off baseline ---------------------------------------------
+
+
+#: sha256 over the argv of the matrix below, measured on ``ec32be2`` --
+#: the last commit before the ffmpeg preflight existed.
+#:
+#: The overlay and now the capability probe are both opt-in, and the one
+#: thing neither may do is move an argument on the path a user gets with
+#: no flags: the stitch stream-copies video across segments and rejects
+#: any disagreement, and it does so at the very last step, after the
+#: whole match has been encoded. So this pins the argv rather than
+#: reasoning about it.
+#:
+#: To regenerate after a *deliberate* change, print
+#: ``_default_off_fingerprint()`` and read the diff against the previous
+#: value in the commit that changes it. A surprise here is a regression.
+DEFAULT_OFF_ARGV_SHA256 = "94be2bea08809578634b32d709967ca46180639ee2312ee109f3a676663c2544"
+
+
+def _matrix_tile(label: str, row: int, col: int, present: bool, lead: float) -> mp4_grid.GridTile:
+    return mp4_grid.GridTile(
+        label=label,
+        trim_path=Path(f"/trims/{label}.mov") if present else None,
+        beep_offset_in_clip=1.25,
+        seek_seconds=0.25 if present else 0.0,
+        lead_pad_seconds=lead,
+        row=row,
+        col=col,
+    )
+
+
+def _matrix_plan(labels: tuple[str, ...], fillers: int, rows: int, cols: int) -> mp4_grid.GridStagePlan:
+    tiles = []
+    for index, label in enumerate(labels):
+        row, col = divmod(index, cols)
+        tiles.append(
+            _matrix_tile(label, row, col, index >= fillers, 0.5 if index == len(labels) - 1 else 0.0)
+        )
+    return mp4_grid.GridStagePlan(
+        stage_number=3,
+        stage_name="Stage 3",
+        tiles=tuple(tiles),
+        duration_seconds=12.5,
+        audio_label=labels[0],
+        rows=rows,
+        cols=cols,
+    )
+
+
+#: Rosters x grid shapes. 3 and 5 leave an unreached cell (which takes a
+#: black input of its own); 2 and 6 are the shapes where a rows/cols swap
+#: is not a no-op. Squares alone would hide both.
+_MATRIX_ROSTERS: dict[int, tuple] = {
+    2: (("Ann", "Bo"), (1, 2), (2, 1)),
+    3: (("Ann", "Bo", "Cy"), (2, 2)),
+    5: (("Ann", "Bo", "Cy", "Di", "Ed"), (3, 3)),
+    6: (("Ann", "Bo", "Cy", "Di", "Ed", "Fi"), (3, 3), (2, 3)),
+}
+
+
+def _default_off_commands() -> list[tuple[str, ...]]:
+    out: list[tuple[str, ...]] = []
+    for spec in _MATRIX_ROSTERS.values():
+        labels = spec[0]
+        for rows, cols in spec[1:]:
+            for fillers in (0, 1, 2):
+                plan = _matrix_plan(labels, fillers, rows, cols)
+                for canvas in (
+                    mp4_grid.GridCanvas(3840, 2160, 30000, 1001),
+                    mp4_grid.GridCanvas(1920, 1080, 25, 1),
+                ):
+                    out.append(
+                        mp4_grid.build_stage_command(
+                            plan,
+                            canvas=canvas,
+                            output_path=Path("/w/s3.mov"),
+                            ffmpeg_binary="/bin/ffmpeg",
+                        )
+                    )
+            out.append(
+                mp4_grid.build_concat_command(
+                    list_path=Path("/w/c.txt"),
+                    output_path=Path("/o/g.mp4"),
+                    ffmpeg_binary="/bin/ffmpeg",
+                    audio_labels=labels,
+                )
+            )
+    return out
+
+
+def _default_off_fingerprint() -> str:
+    import hashlib
+    import json
+
+    return hashlib.sha256(json.dumps(_default_off_commands(), indent=0).encode()).hexdigest()
+
+
+def test_the_default_off_argv_is_unchanged_since_the_preflight_landed():
+    commands = _default_off_commands()
+    assert len(commands) == 42  # 36 stage commands + 6 stitches
+    assert _default_off_fingerprint() == DEFAULT_OFF_ARGV_SHA256, (
+        "the no-flags argv moved. Nothing opt-in may change it: the stitch "
+        "stream-copies video and refuses segments that disagree, hours in."
+    )
+
+
+def test_the_default_off_stage_command_names_no_overlay_machinery():
+    """The readable half of the fingerprint above.
+
+    A hash catches drift but says nothing about what drifted, so name the
+    things that must never appear when no flag was passed.
+    """
+    cmd = mp4_grid.build_stage_command(
+        _matrix_plan(("Ann", "Bo", "Cy"), 1, 2, 2),
+        canvas=mp4_grid.GridCanvas(1920, 1080, 25, 1),
+        output_path=Path("/w/s3.mov"),
+        ffmpeg_binary="/bin/ffmpeg",
+    )
+    joined = " ".join(cmd)
+
+    assert "drawtext" not in joined
+    assert "overlay=" not in joined
+    assert "-f concat" not in joined
+    # two real tiles, one filler (video + audio), one unreached cell
+    assert cmd.count("-i") == 5
+    assert "[grid]format=yuv420p[final]" in _graph_of(cmd)
+
+
+def _graph_of(cmd: tuple[str, ...]) -> str:
+    return cmd[cmd.index("-filter_complex") + 1]

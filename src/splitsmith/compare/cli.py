@@ -400,6 +400,13 @@ def _render_grid_mp4(
     once up front -- pure planning, no ffmpeg -- purely to learn the stage
     count and names for the "N of M" messages; ``render_grid_mp4`` plans
     again internally with the same inputs and so sees the same stages.
+
+    The engine decides what a feature-poor ffmpeg means for ``--overlay``
+    (architecture rule 1: the CLI orchestrates, it does not own that);
+    this only renders the answer. Twice, deliberately -- once through
+    ``on_notice`` before the encode starts, and again as a clause on the
+    "Wrote ..." line, because the last line on screen is the one the
+    user actually reads after a 40-minute render.
     """
     plans = mp4_grid.build_stage_plans(
         bundles,
@@ -424,6 +431,9 @@ def _render_grid_mp4(
             console.print(f"[cyan]Stitching[/] {total} stage(s) into {output}...")
         return subprocess.run(cmd, **kwargs)  # type: ignore[arg-type]
 
+    def _notice(message: str) -> None:
+        console.print(f"[yellow]Note:[/] {message}")
+
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=output.parent, prefix=".compare-grid-work-") as tmp:
         try:
@@ -434,6 +444,7 @@ def _render_grid_mp4(
                 overlay=overlay,
                 overlay_theme=overlay_theme,
                 runner=_reporting_runner,
+                on_notice=_notice,
                 work_dir=Path(tmp),
             )
         except mp4_grid.GridRenderError as exc:
@@ -445,7 +456,8 @@ def _render_grid_mp4(
             f"[yellow]Stage {outcome.stage_number} ({outcome.stage_name}) failed:[/] {outcome.error}"
         )
     rendered = len(result.stages) - len(result.failed)
-    console.print(f"[green]Wrote[/] {output} ({rendered}/{len(result.stages)} stages)")
+    note = f", {result.degradation_summary}" if result.degradations else ""
+    console.print(f"[green]Wrote[/] {output} ({rendered}/{len(result.stages)} stages{note})")
 
 
 def _resolve_shooter_slug(match: Match, match_root: Path, name_or_slug: str) -> str | None:
