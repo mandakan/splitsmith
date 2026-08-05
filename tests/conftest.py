@@ -88,9 +88,13 @@ def fake_ffmpeg_probe(
             if not concat_option:
                 return subprocess.CompletedProcess(argv, 183, b"", UNKNOWN_KEYWORD_STDERR.encode())
             # Supported: the run still fails, on the file the probe list
-            # deliberately names and never creates.
+            # deliberately names and never creates. Exit 254, not 183 --
+            # measured on ffmpeg 6.1.1, ``Error opening input file``, not
+            # the parse-time ``unknown keyword``. Nothing branches on the
+            # code (the signal is the stderr text), but the fake should
+            # still answer the way a real ffmpeg does.
             return subprocess.CompletedProcess(
-                argv, 183, b"", b"[concat @ 0x0] Impossible to open 'splitsmith-capability-probe.png'\n"
+                argv, 254, b"", b"[concat @ 0x0] Impossible to open 'splitsmith-capability-probe.png'\n"
             )
         raise AssertionError(f"unexpected ffmpeg probe command: {argv}")
 
