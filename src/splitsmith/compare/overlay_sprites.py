@@ -19,7 +19,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-from ..overlay_text import _draw_text_with_shadow, _load_font
+from ..overlay_text import OverlayFace, _draw_text_with_shadow, load_face, resolve_overlay_face
 from ..overlay_theme import OverlayTheme
 from .overlay_data import TileShot, TileStageData
 
@@ -332,29 +332,41 @@ def render_state(state: OverlayState, geometry: SpriteGeometry, *, theme: Overla
 
 
 @lru_cache(maxsize=256)
-def _font_at(font_name: str | None, size: int):
+def _font_at(face: OverlayFace, size: int):
     """One :class:`PIL.ImageFont.FreeTypeFont` per ``(face, size)``.
 
-    ``_load_font`` re-reads the bundled TTF off disk every call, and the
-    width-fitting loops call it once per size step per panel per state.
-    At 3840x2160 / 3x3 that dominated ``render_state``, which a 12-stage
-    9-shooter match pays a few hundred times before ffmpeg starts.
+    Loading re-reads the TTF off disk every call, and the width-fitting
+    loops call it once per size step per panel per state. At 3840x2160 /
+    3x3 that dominated ``render_state``, which a 12-stage 9-shooter match
+    pays a few hundred times before ffmpeg starts.
 
     Fonts are only measured and drawn from here, never mutated, so one
-    instance is safe to share. The key is the face *name* rather than the
-    theme, so an unhashable theme object can never break the cache and
-    two themes resolving to the same face share one font.
+    instance is safe to share. The key is the resolved *face* rather than
+    the theme, so an unhashable theme object can never break the cache
+    and two themes resolving to the same face share one font.
     """
-    return _load_font(None, size, font_name=font_name)
+    return load_face(face, size)
+
+
+def theme_font_face(theme: OverlayTheme) -> OverlayFace:
+    """The one face this theme's overlay is drawn with, both halves of it.
+
+    The sprite (PIL) and the running clock (ffmpeg ``drawtext``) are two
+    different font loaders, and this is the single point that decides
+    what either of them draws -- ``mp4_grid`` resolves it once per render
+    and hands the same answer to both, so they cannot pick up different
+    typefaces. Face selection still matches ``DefaultTemplate``: the
+    bundled mono for the splitsmith theme, generic system discovery
+    otherwise, except that discovery now ends at the bundled face rather
+    than PIL's bitmap default (see
+    :func:`splitsmith.overlay_text.resolve_overlay_face`).
+    """
+    return resolve_overlay_face("splitsmith-mono" if theme.name == "splitsmith" else None)
 
 
 def _scaled_font(theme: OverlayTheme, size: int):
-    """Load a font at ``size`` using the same default-face selection
-    ``DefaultTemplate`` uses: the bundled mono face for the splitsmith
-    theme (deterministic across hosts), generic system discovery
-    otherwise."""
-    font_name = "splitsmith-mono" if theme.name == "splitsmith" else None
-    return _font_at(font_name, size)
+    """Load this theme's face at ``size``."""
+    return _font_at(theme_font_face(theme), size)
 
 
 def _text_width(draw: ImageDraw.ImageDraw, text: str, font) -> int:

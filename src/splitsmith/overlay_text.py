@@ -193,6 +193,81 @@ def materialize_font(font_name: str, dest_dir: Path) -> Path:
     return dest_path
 
 
+#: Face used when nothing else resolves to a real font file. Bundled, so
+#: it exists on every host including one with no system fonts at all.
+FALLBACK_BUNDLED_FONT = "splitsmith-mono"
+
+#: A resolved face: a bundled font's name, or a path to a real file.
+#: Both are loadable by PIL; only the second is directly usable by
+#: ffmpeg's ``drawtext`` (see :func:`overlay_font_file`).
+OverlayFace = str | Path
+
+
+def resolve_overlay_face(font_name: str | None) -> OverlayFace:
+    """Resolve ``font_name`` to one face, for *both* halves of an overlay.
+
+    The multi-shooter grid draws its counters and splits with PIL and its
+    running clock with ffmpeg ``drawtext``. Those are two different font
+    loaders, and left to themselves they disagreed: the sprite fell
+    through to system discovery on the ``clean`` theme while the clock
+    was pinned to the bundled mono, so the two halves of one overlay used
+    two typefaces. Worse, on a host with no DejaVu the sprite dropped to
+    PIL's bitmap default beside a TrueType clock.
+
+    So resolution happens once, here, and both halves consume the result.
+    The order matches :func:`_load_font` -- bundled name, then preset,
+    then the generic discovery list -- with one difference that is the
+    point of this function: it never ends at PIL's bitmap default. A host
+    with nothing installed gets the bundled face, which is a real file
+    ffmpeg can open and PIL can rasterize.
+    """
+    if font_name is not None:
+        key = font_name.lower()
+        if key in _BUNDLED_FONTS:
+            resource = files("splitsmith.data").joinpath("fonts").joinpath(_BUNDLED_FONTS[key].filename)
+            if resource.is_file():
+                _log_font_choice(font_name, "bundled", key)
+                return key
+        elif key not in _FONT_PRESETS:
+            raise OverlayRenderError(
+                f"unknown font_name {font_name!r}; available: {', '.join(available_font_names())}"
+            )
+        for candidate in _FONT_PRESETS.get(key, ()):
+            path = Path(candidate)
+            if path.exists():
+                _log_font_choice(font_name, "preset-found", str(path))
+                return path
+    for candidate in _FONT_FALLBACKS:
+        path = Path(candidate)
+        if path.exists():
+            _log_font_choice(font_name, "fallback", str(path))
+            return path
+    _log_font_choice(font_name, "bundled", FALLBACK_BUNDLED_FONT)
+    return FALLBACK_BUNDLED_FONT
+
+
+def load_face(face: OverlayFace, size: int) -> ImageFont.FreeTypeFont:
+    """A PIL font for a face from :func:`resolve_overlay_face`."""
+    if isinstance(face, Path):
+        return ImageFont.truetype(str(face), size=size)
+    font = _load_bundled_font(face, size)
+    if font is None:
+        raise OverlayRenderError(f"bundled font {face!r} resolved but could not be loaded")
+    return font
+
+
+def overlay_font_file(face: OverlayFace, dest_dir: Path) -> Path:
+    """A real filesystem path for a face, for ffmpeg's ``drawtext``.
+
+    A discovered face is already a path. A bundled one is materialized
+    (see :func:`materialize_font`), because ``drawtext`` opens the file
+    itself long after this call.
+    """
+    if isinstance(face, Path):
+        return face
+    return materialize_font(face, dest_dir)
+
+
 def _load_font(
     font_path: Path | None,
     size: int,

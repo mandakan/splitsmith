@@ -28,7 +28,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from ..overlay_text import materialize_font
+from ..overlay_text import FALLBACK_BUNDLED_FONT, overlay_font_file
 from ..overlay_theme import ThemeName, load_theme
 from ..runtime import runtime
 from .layout import Layout2Up, choose_grid, grid_shape
@@ -37,6 +37,7 @@ from .overlay_sprites import (
     SpriteGeometry,
     TilePlacement,
     build_overlay_states,
+    theme_font_face,
     write_concat_list,
     write_sprite_sequence,
 )
@@ -145,14 +146,16 @@ MIX_TRACK_LABEL = "Mix"
 #: consistently conservative. A predictable 3 dB is the better trade.
 MIX_NORMALIZE = 1
 
-#: Bundled face the ``drawtext`` clock is drawn with.
+#: Face the ``drawtext`` clock falls back to when a theme resolves to no
+#: real font file. It is bundled, so it exists on every host.
 #:
-#: Always the bundled mono, never a system-discovered one: ``drawtext``
-#: needs ``fontfile=`` to name a real path (see
-#: :func:`splitsmith.overlay_text.materialize_font`), and a packaged app
-#: cannot count on any particular face being installed. It matches what
-#: ``overlay_sprites.render_state`` picks for the ``splitsmith`` theme.
-OVERLAY_CLOCK_FONT = "splitsmith-mono"
+#: The clock does not choose its own face: it draws whatever
+#: :func:`splitsmith.compare.overlay_sprites.theme_font_face` resolved
+#: for the sprite beside it, materialized to a real path because
+#: ``drawtext`` opens ``fontfile=`` itself. Pinning this constant here
+#: instead is what let the ``clean`` theme render a system-discovered
+#: sprite next to a bundled-mono clock -- two typefaces in one overlay.
+OVERLAY_CLOCK_FALLBACK_FONT = FALLBACK_BUNDLED_FONT
 
 
 class GridRenderError(RuntimeError):
@@ -1270,9 +1273,11 @@ def render_grid_mp4(
     font_path: Path | None = None
     if overlay:
         overlay_data = load_overlay_data(shooters)
+        # One face for the whole overlay: the clock draws whatever the
+        # sprite beside it resolved, so the two halves cannot diverge.
         # ``drawtext`` opens this path itself, long after this call, so it
         # has to be a real file on disk rather than a resource handle.
-        font_path = materialize_font(OVERLAY_CLOCK_FONT, work)
+        font_path = overlay_font_file(theme_font_face(load_theme(overlay_theme)), work)
 
     outcomes: list[StageOutcome] = []
     segments: list[Path] = []
@@ -1348,7 +1353,7 @@ __all__ = [
     "MIX_TRACK_LABEL",
     "OUTPUT_AUDIO_BITRATE",
     "OUTPUT_AUDIO_CODEC",
-    "OVERLAY_CLOCK_FONT",
+    "OVERLAY_CLOCK_FALLBACK_FONT",
     "SEGMENT_AUDIO_CODEC",
     "SEGMENT_SUFFIX",
     "GridCanvas",

@@ -971,3 +971,86 @@ def test_the_sprite_cache_is_shared_across_stages(tmp_path):
     # stage number cannot hide behind a shared cache.
     assert "text='2.50'" in _graph(calls[0])
     assert "text='4.00'" in _graph(calls[1])
+
+
+# --- one face for both halves of the overlay ------------------------------
+#
+# The sprite (PIL) and the running clock (ffmpeg drawtext) are two
+# different font loaders. They used to choose independently: the clock
+# was unconditionally the bundled mono, while the sprite fell through to
+# system discovery for any theme other than ``splitsmith``. On this
+# machine that renders a DejaVu sprite beside a JetBrains Mono clock in
+# the same cell, and on a host with no DejaVu at all the sprite drops to
+# PIL's bitmap default beside a TrueType clock.
+
+
+@pytest.mark.parametrize("theme_name", ["splitsmith", "clean"])
+def test_the_clock_and_the_sprite_resolve_to_the_same_face(theme_name, tmp_path):
+    from splitsmith import overlay_text
+    from splitsmith.compare import overlay_sprites
+    from splitsmith.overlay_theme import load_theme
+
+    theme = load_theme(theme_name)
+    face = overlay_sprites.theme_font_face(theme)
+    sprite_font = overlay_sprites._scaled_font(theme, 48)
+    clock_path = overlay_text.overlay_font_file(face, tmp_path)
+    # Compare the font *files*, not the face descriptor: a bundled face
+    # reaches PIL through importlib.resources and ffmpeg through a
+    # materialized copy, so the two paths differ while the typeface must
+    # not.
+    assert (
+        Path(sprite_font.path).read_bytes() == clock_path.read_bytes()
+    ), f"the {theme_name} theme draws its sprite and its clock with different typefaces"
+
+
+def test_a_host_with_no_system_fonts_still_gets_one_real_face(monkeypatch, tmp_path):
+    from PIL import ImageFont
+
+    from splitsmith import overlay_text
+    from splitsmith.compare import overlay_sprites
+    from splitsmith.overlay_theme import load_theme
+
+    # Patch where the names are *read* -- ``resolve_overlay_face`` reads
+    # them out of overlay_text's globals, so patching anywhere else
+    # silently patches nothing (the Task 1 monkeypatch trap).
+    monkeypatch.setattr(overlay_text, "_FONT_PRESETS", {})
+    monkeypatch.setattr(overlay_text, "_FONT_FALLBACKS", ())
+    overlay_sprites._font_at.cache_clear()
+    try:
+        theme = load_theme("clean")
+        face = overlay_sprites.theme_font_face(theme)
+        sprite_font = overlay_sprites._scaled_font(theme, 48)
+        assert isinstance(
+            sprite_font, ImageFont.FreeTypeFont
+        ), "the sprite fell back to PIL's bitmap font while the clock stayed TrueType"
+        clock_path = overlay_text.overlay_font_file(face, tmp_path)
+        assert Path(sprite_font.path).read_bytes() == clock_path.read_bytes()
+    finally:
+        overlay_sprites._font_at.cache_clear()
+
+
+def test_the_rendered_clock_uses_the_face_the_theme_resolved(tmp_path):
+    """The seam: what render_grid_mp4 actually puts in ``fontfile=``."""
+    from splitsmith.compare import overlay_sprites
+    from splitsmith.overlay_theme import load_theme
+
+    calls, runner = _recorder()
+    work = tmp_path / "work"
+    mp4_grid.render_grid_mp4(
+        _shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=runner,
+        work_dir=work,
+        ffmpeg_binary="ffmpeg",
+        overlay=True,
+        overlay_theme="clean",
+    )
+    graph = _graph(calls[0])
+    font = Path(graph.split("fontfile='")[1].split("'")[0])
+    assert font.is_file()
+    sprite_font = overlay_sprites._scaled_font(load_theme("clean"), 48)
+    assert (
+        font.read_bytes() == Path(sprite_font.path).read_bytes()
+    ), "the rendered clock's fontfile is not the face the sprite drew with"
