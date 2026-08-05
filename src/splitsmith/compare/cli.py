@@ -11,6 +11,7 @@ from rich.console import Console
 
 from .. import camera_select
 from ..match_model import Match, is_match_folder
+from ..overlay_theme import THEME_NAMES, ThemeName
 from ..ui.match_exports import _slugify
 from . import emitter as emitter_mod
 from . import manifest as manifest_mod
@@ -79,6 +80,22 @@ def export(
             "merged match folder."
         ),
     ),
+    overlay: bool = typer.Option(
+        False,
+        "--overlay/--no-overlay",
+        help=(
+            "Composite a splits overlay -- per-tile shot counter and last "
+            "split, a bottom delta-strip ranking, and a running clock -- "
+            "onto the rendered grid. --format mp4 only: the FCPXML grid "
+            "ships clean tiles by decision, so --overlay with --format "
+            "fcpxml is refused rather than a silent no-op."
+        ),
+    ),
+    overlay_theme: str = typer.Option(
+        "splitsmith",
+        "--overlay-theme",
+        help=f"Palette for --overlay. One of: {', '.join(THEME_NAMES)}.",
+    ),
 ) -> None:
     """Render a multi-shooter comparison FCPXML.
 
@@ -104,6 +121,23 @@ def export(
             "[red]Error:[/] --format mp4 requires SOURCE to be a merged match folder, not a manifest."
         )
         raise typer.Exit(code=2)
+    if overlay and output_format != "mp4":
+        console.print(
+            "[red]Error:[/] --overlay requires --format mp4 -- the FCPXML grid ships clean "
+            "tiles by decision, so --overlay with --format fcpxml would silently do nothing."
+        )
+        raise typer.Exit(code=2)
+    # Validated whether or not --overlay is on. A typo'd theme with no
+    # --overlay used to be accepted in silence, so the next run -- the one
+    # that adds --overlay and re-encodes the whole match -- is where the
+    # user finds out. Rejecting a name that is never a valid theme costs
+    # nothing and fails at the point the typo was made.
+    if overlay_theme not in THEME_NAMES:
+        console.print(
+            f"[red]Error:[/] --overlay-theme must be one of {', '.join(THEME_NAMES)}, "
+            f"got {overlay_theme!r}."
+        )
+        raise typer.Exit(code=2)
 
     if source.is_dir() and is_match_folder(source):
         if audio_from is None:
@@ -123,6 +157,8 @@ def export(
             output=output,
             cameras=cameras,
             output_format=output_format,
+            overlay=overlay,
+            overlay_theme=overlay_theme,  # type: ignore[arg-type]  # validated above against THEME_NAMES
         )
         return
 
@@ -252,6 +288,8 @@ def _export_from_match(
     output: Path,
     cameras: dict[str, str] | None = None,
     output_format: str = "fcpxml",
+    overlay: bool = False,
+    overlay_theme: ThemeName = "splitsmith",
 ) -> None:
     """Render the compare export directly from a merged Match."""
     match = Match.load(match_root)
@@ -313,7 +351,13 @@ def _export_from_match(
     _warn_missing_trims(bundles)
 
     if output_format == "mp4":
-        _render_grid_mp4(bundles, audio_label=audio_label, output=output)
+        _render_grid_mp4(
+            bundles,
+            audio_label=audio_label,
+            output=output,
+            overlay=overlay,
+            overlay_theme=overlay_theme,
+        )
         return
 
     # Synthesize a manifest the emitter can consume. ``layout_2up`` matches
@@ -330,7 +374,12 @@ def _export_from_match(
 
 
 def _render_grid_mp4(
-    bundles: list[project_loader.CompareShooterBundle], *, audio_label: str, output: Path
+    bundles: list[project_loader.CompareShooterBundle],
+    *,
+    audio_label: str,
+    output: Path,
+    overlay: bool = False,
+    overlay_theme: ThemeName = "splitsmith",
 ) -> None:
     """Render the grid straight to MP4, owning the scratch work dir.
 
@@ -382,6 +431,8 @@ def _render_grid_mp4(
                 bundles,
                 audio_label=audio_label,
                 output_path=output,
+                overlay=overlay,
+                overlay_theme=overlay_theme,
                 runner=_reporting_runner,
                 work_dir=Path(tmp),
             )
