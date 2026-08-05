@@ -97,8 +97,14 @@ plus `_overlay_data_for_stage`, `_stage_overlay_plan`, `_clock_filters`.
 
 | | |
 |---|---|
-| Unit | 2617 passed / 20 skipped |
-| Integration | 26 passed / **0 skipped** |
+| Unit + integration, one run | 2645 passed / 20 skipped |
+| Of which integration | 27 ran / **0 skipped** |
+
+The suite runs in parallel by default (`addopts` carries `-n auto --dist
+load`), so a full run is ~1m40s rather than ~4m35s. `-n0` restores serial
+execution for debugging. Serial and parallel must report **identical**
+counts -- a parallel run that passes while collecting fewer tests is a
+silent regression, so check the counts, not just the colour.
 
 ```bash
 uv run pytest -m "not integration" --ignore=tests/test_hosted_docker_smoke.py -q
@@ -106,13 +112,78 @@ SPLITSMITH_REQUIRE_INTEGRATION=1 uv run pytest -m integration --ignore=tests/tes
 uv run ruff check src tests && uv run black --check src tests
 ```
 
-Both measured after the delta-strip removal on `fix/overlay-ffmpeg-preflight`. `tests/test_hosted_docker_smoke.py` may fail
+Measured on `main` at `94b0559`. `tests/test_hosted_docker_smoke.py` may fail
 locally on a MinIO port conflict; unrelated, hence the ignore.
 **Integration must stay at 0 skipped** -- CI fails the build on a skip.
 
 CLI tests that assert on `--help` must use `strip_ansi()` from
 `tests/conftest.py` and be run under `GITHUB_ACTIONS=true` too; rich
 interleaves ANSI escapes when it detects CI.
+
+## Amendments to Tasks 7-9
+
+The plan's task bodies were written before Milestone A shipped. They are
+still the contract, with these corrections. Read them together.
+
+### Task 8 gains a ranking. The plan has none.
+
+Task 8 as written is per-shooter only. The user has since decided **the
+stage summary ranks shooters against each other** -- it is where the
+live delta strip's job went after that strip was removed.
+
+- Rank by **`stage_pct`**, never `stage_points`. Raw points are
+  meaningless across stages and divisions and `stage_pct` is already
+  persisted on `TileStageData.scorecard`.
+- Each shooter's placing draws on **their own cell**, beside the figures
+  Task 8 already specifies, so the numbers land where the viewer has been
+  watching that shooter.
+- Rank only tiles that have a `scorecard` with a `stage_pct`. A tile with
+  no scorecard, a filler tile, and a DQ'd shooter are three different
+  absences; none of them gets an invented placing.
+- **Do not** reintroduce `TilePanel.rank` or `TilePanel.delta_to_leader`.
+  Those were the live strip's per-event elapsed-time computation and were
+  deleted with it. The summary's ranking is a different thing computed
+  from the scorecard at the freeze.
+- **Whether the summary also shows a time delta is deliberately open.**
+  Build the ranking first, render it on real footage, then decide. The
+  strip's problem was only visible once rendered.
+
+### Task 9: the clock will bleed into the hold. Verified, not theoretical.
+
+Task 9 says to check that the live overlay stops at the freeze. It does
+not, as the code now stands. Both filters in `_clock_filters`
+(`src/splitsmith/compare/mp4_grid.py`) are unbounded above:
+
+- the open-ended ticking clock, `enable='gte(t,{start})'`
+- the static hold, `enable='gte(t,{freeze})'`
+
+Either will run straight through the summary. A clock ticking over a
+blurred, dimmed summary -- or frozen beside it -- is precisely the "reads
+as a stall rather than a conclusion" failure the spec calls out. Cap both
+at the action's end (`duration_seconds`), and prove it by extracting a
+frame from inside the hold and confirming no clock glyphs are present,
+not by reading the expressions.
+
+The sprite chain's `trim` already ends at `duration_seconds`, so the
+sprite half stops correctly on its own. Only the `drawtext` half needs
+the cap.
+
+### What else moved under these tasks
+
+- **`SpriteGeometry` has no `strip_height`.** Any layout arithmetic in
+  Task 8 that reserved room for a bottom band should use the full cell.
+- **A sprite state can be fully transparent** now that nothing draws
+  outside the cells. Assertions that "the overlay reached the pixels"
+  must sample a moment where a counter, split or summary figure genuinely
+  exists.
+- **The summary is pure PIL**, so unlike the running clock it needs no
+  `drawtext` and survives an ffmpeg built without libfreetype untouched.
+  A host that loses the clock still gets full summaries. Say so in the
+  degradation notice if the wording still fits.
+- **`render_grid_mp4` now probes ffmpeg capabilities before rendering.**
+  Freeze-frame extraction is `-frames:v 1`, which needs nothing special,
+  but the hold must not break the `option framerate` concat contract the
+  sprite input depends on.
 
 ## What Milestone B is
 
