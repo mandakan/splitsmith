@@ -2,6 +2,8 @@
 
 import os
 import re
+import subprocess
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -30,6 +32,69 @@ _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 def strip_ansi(text: str) -> str:
     """Remove ANSI escape sequences so CLI help assertions are colour-independent."""
     return _ANSI_ESCAPE_RE.sub("", text)
+
+
+#: Exactly what ffmpeg 6.1.1 answers when asked for a filter it does not have.
+#: The whole ``drawtext``-missing story is built on this string, and there is
+#: no ffmpeg on this machine that lacks ``drawtext`` -- so the one place the
+#: fake could drift from reality is pinned by an integration test
+#: (``test_runtime_ffmpeg_capabilities.py``) that asks a real ffmpeg for a
+#: filter that genuinely does not exist.
+UNKNOWN_FILTER_STDERR = "Unknown filter 'drawtext'.\n"
+
+#: And what it answers for a concat-list keyword it does not know. Same
+#: reasoning: the local ffmpeg supports ``option``, so the shape of the
+#: refusal is pinned against a keyword no ffmpeg will ever support.
+UNKNOWN_KEYWORD_STDERR = (
+    "[concat @ 0x0] Line 2: unknown keyword 'option'\n"
+    "[in#0 @ 0x0] Error opening input: Invalid data found when processing input\n"
+)
+
+
+def fake_ffmpeg_probe(
+    *,
+    drawtext: bool = True,
+    concat_option: bool = True,
+    version: str = "6.1.1-3ubuntu5",
+) -> Callable[..., subprocess.CompletedProcess]:
+    """A ``probe_runner`` for :func:`splitsmith.runtime.ffmpeg_capabilities`.
+
+    Answers the three probe commands the way a real ffmpeg with the
+    requested build flags would, so a unit test can render against an
+    ffmpeg that does not exist on any machine here -- which is the only
+    way the ``--enable-libfreetype``-less host gets covered at all --
+    without shelling out.
+    """
+
+    def runner(cmd, **_kwargs: object) -> subprocess.CompletedProcess:
+        argv = [str(part) for part in cmd]
+        joined = " ".join(argv)
+        if "-version" in argv:
+            return subprocess.CompletedProcess(
+                argv, 0, f"ffmpeg version {version} Copyright (c) 2000-2023\n".encode(), b""
+            )
+        if "filter=drawtext" in argv:
+            if not drawtext:
+                return subprocess.CompletedProcess(argv, 0, b"", UNKNOWN_FILTER_STDERR.encode())
+            return subprocess.CompletedProcess(
+                argv,
+                0,
+                b"Filter drawtext\n  Draw text on top of video frames using libfreetype.\n",
+                b"",
+            )
+        if "drawtext=" in joined:  # the one-frame exercise render
+            return subprocess.CompletedProcess(argv, 0 if drawtext else 1, b"", b"")
+        if "concat" in argv:
+            if not concat_option:
+                return subprocess.CompletedProcess(argv, 183, b"", UNKNOWN_KEYWORD_STDERR.encode())
+            # Supported: the run still fails, on the file the probe list
+            # deliberately names and never creates.
+            return subprocess.CompletedProcess(
+                argv, 183, b"", b"[concat @ 0x0] Impossible to open 'splitsmith-capability-probe.png'\n"
+            )
+        raise AssertionError(f"unexpected ffmpeg probe command: {argv}")
+
+    return runner
 
 
 _MATCH_TRIMS_STAGE_DEFS: list[tuple[int, str]] = [
