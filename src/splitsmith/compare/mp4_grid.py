@@ -23,6 +23,7 @@ with an injectable runner, mirroring :mod:`splitsmith.mp4_render` and
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -30,7 +31,7 @@ from pathlib import Path
 
 from ..overlay_text import FALLBACK_BUNDLED_FONT, overlay_font_file
 from ..overlay_theme import ThemeName, load_theme
-from ..runtime import runtime
+from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, runtime
 from .layout import Layout2Up, choose_grid, grid_shape
 from .overlay_data import TileStageData, load_overlay_data
 from .overlay_sprites import (
@@ -43,7 +44,19 @@ from .overlay_sprites import (
 )
 from .project_loader import CompareShooterBundle
 
+logger = logging.getLogger(__name__)
+
 Runner = Callable[..., subprocess.CompletedProcess]
+
+#: Called once, before any encoding, with each degradation's ``detail``.
+#:
+#: The engine decides what to do about a feature-poor ffmpeg; a notice
+#: hook is how a CLI or a UI gets to *say* it at the point the decision
+#: was made rather than 40 minutes later. It is not the ``runner`` hook:
+#: both existing callers count ``runner`` invocations to report "stage N
+#: of M", so putting probe or notice traffic through it would misreport
+#: every stage.
+NoticeHook = Callable[[str], None]
 
 DEFAULT_CANVAS_WIDTH = 3840
 DEFAULT_CANVAS_HEIGHT = 2160
@@ -160,6 +173,67 @@ OVERLAY_CLOCK_FALLBACK_FONT = FALLBACK_BUNDLED_FONT
 
 class GridRenderError(RuntimeError):
     """ffmpeg refused to render a grid stage or the final stitch."""
+
+
+@dataclass(frozen=True)
+class OverlayDegradation:
+    """One part of the overlay this ffmpeg build cannot render.
+
+    Two spellings on purpose. ``detail`` is the whole story including
+    what to do about it, printed once before the encode starts.
+    ``summary`` is the clause that goes on the *last* line the run
+    prints, because a warning at the top of a 40-minute render is a
+    warning nobody reads:
+
+        Wrote grid.mp4 (12/12 stages, running clock omitted: this
+        ffmpeg was built without drawtext)
+    """
+
+    summary: str
+    detail: str
+
+
+#: Short form of the drawtext degradation, for the final summary line.
+OVERLAY_CLOCK_OMITTED_SUMMARY = "running clock omitted: this ffmpeg was built without drawtext"
+
+
+def _drawtext_degradation(capabilities: FFmpegCapabilities) -> OverlayDegradation:
+    """The overlay minus its clock is most of the overlay, so degrade.
+
+    Only the running clock is ``drawtext``. The counters, the last
+    splits and the delta strip are pre-rendered PNGs composited with
+    ``overlay``, which every ffmpeg has -- so a build without freetype
+    loses one number per tile rather than the whole feature.
+    """
+    return OverlayDegradation(
+        summary=OVERLAY_CLOCK_OMITTED_SUMMARY,
+        detail=(
+            f"{capabilities.binary} (ffmpeg {capabilities.version}) has no usable drawtext "
+            "filter, so the overlay's running clock is omitted. The shot counters, last "
+            "splits and delta strip still render. For the clock, use an ffmpeg built with "
+            "--enable-libfreetype, or point SPLITSMITH_FFMPEG at one."
+        ),
+    )
+
+
+def _concat_option_refusal(capabilities: FFmpegCapabilities) -> str:
+    """Why ``--overlay`` is refused outright on this ffmpeg.
+
+    The sprite input is a concat-demuxer list carrying an ``option
+    framerate`` directive per entry. Without that keyword the demuxer
+    takes image2's default 25fps as its time base and every state
+    boundary snaps to the 1/25s grid, so the overlay would step on the
+    wrong frames -- and the run would die on ``unknown keyword`` at the
+    first stage anyway. Refusing here costs nothing and leaves the plain
+    grid, which needs none of this, working on the same host.
+    """
+    return (
+        f"--overlay needs the concat demuxer's 'option' keyword, which {capabilities.binary} "
+        f"(ffmpeg {capabilities.version}) does not support: without it every overlay state "
+        "snaps to a 25fps time base and the counters step on the wrong frames. Re-run "
+        "without --overlay for the plain grid, or use an ffmpeg whose concat demuxer "
+        "accepts 'option' (verified on 6.1.1 and 7.0.2)."
+    )
 
 
 @dataclass(frozen=True)
@@ -1071,14 +1145,27 @@ class StageOutcome:
 
 @dataclass(frozen=True)
 class GridRenderResult:
-    """Result of a whole grid render, including partial failures."""
+    """Result of a whole grid render, including partial failures.
+
+    ``degradations`` is what the render *did not* do: parts of the
+    overlay this host's ffmpeg cannot draw, decided before any encoding
+    (see :func:`render_grid_mp4`). It is a returned field and not only a
+    log line so every caller -- the CLI today, a UI later -- can put it
+    in front of the user without re-deriving the decision.
+    """
 
     output_path: Path
     stages: tuple[StageOutcome, ...]
+    degradations: tuple[OverlayDegradation, ...] = ()
 
     @property
     def failed(self) -> tuple[StageOutcome, ...]:
         return tuple(s for s in self.stages if not s.ok)
+
+    @property
+    def degradation_summary(self) -> str:
+        """The degradations as one clause, or ``""``. For the final line."""
+        return ", ".join(d.summary for d in self.degradations)
 
 
 def _overlay_data_for_stage(
@@ -1220,6 +1307,8 @@ def render_grid_mp4(
     overlay_theme: ThemeName = "splitsmith",
     ffmpeg_binary: str | None = None,
     runner: Runner = subprocess.run,
+    probe_runner: Runner = subprocess.run,
+    on_notice: NoticeHook | None = None,
     work_dir: Path | None = None,
 ) -> GridRenderResult:
     """Render every stage as a grid, then stitch them into one MP4.
@@ -1241,6 +1330,28 @@ def render_grid_mp4(
     ``work_dir/sprites`` and composited after ``xstack``. The stream
     layout, the track names and the audio graph are identical either way,
     which is what lets the stitch stream-copy the video.
+
+    With ``overlay`` on, the ffmpeg that will do the work is asked what
+    it can do *before any encoding starts*, because on a 12-stage 4K
+    match the alternative is finding out an hour in with nothing to show
+    for it. Two capabilities, two different answers:
+
+    * **No ``drawtext``** (an ffmpeg built without ``--enable-libfreetype``,
+      which many distro and static builds are) costs the running clock
+      and nothing else -- the rest of the overlay is pre-rendered PNGs.
+      So the clock is dropped, the overlay is kept, and the loss is
+      reported through ``on_notice`` and in
+      :attr:`GridRenderResult.degradations`.
+    * **No concat ``option`` keyword** costs the overlay's timing
+      outright, so ``--overlay`` is refused with
+      :class:`GridRenderError` instead. The plain grid needs none of it
+      and still renders on the same host.
+
+    ``probe_runner`` is deliberately not ``runner``: both shipped
+    callers count ``runner`` invocations to report "stage N of M", so
+    probe traffic through it would misreport every stage. ``on_notice``
+    is how a caller says the degradation out loud at the moment it is
+    decided; the same text is logged at warning level either way.
 
     ``work_dir`` holds the per-stage segments and the concat list. It
     defaults to a directory beside the output -- same filesystem, so a
@@ -1293,6 +1404,8 @@ def render_grid_mp4(
     # 4-shooter match would otherwise re-parse the same projects 12 times.
     overlay_data: Mapping[tuple[str, int], TileStageData] = {}
     font_path: Path | None = None
+    degradations: tuple[OverlayDegradation, ...] = ()
+    draw_clock = True
     if overlay:
         overlay_data = load_overlay_data(shooters)
         # One face for the whole overlay: the clock draws whatever the
@@ -1300,6 +1413,20 @@ def render_grid_mp4(
         # ``drawtext`` opens this path itself, long after this call, so it
         # has to be a real file on disk rather than a resource handle.
         font_path = overlay_font_file(theme_font_face(load_theme(overlay_theme)), work)
+        # Everything above this line is pure planning and a file copy --
+        # no ffmpeg has encoded anything yet, which is the whole point of
+        # probing here. The font exists by now on purpose: it lets the
+        # drawtext probe draw with the exact file the render would use.
+        capabilities = ffmpeg_capabilities(binary, font_path=font_path, runner=probe_runner)
+        if not capabilities.concat_option_keyword:
+            raise GridRenderError(_concat_option_refusal(capabilities))
+        if not capabilities.drawtext:
+            draw_clock = False
+            degradation = _drawtext_degradation(capabilities)
+            degradations = (degradation,)
+            logger.warning("%s", degradation.detail)
+            if on_notice is not None:
+                on_notice(degradation.detail)
 
     outcomes: list[StageOutcome] = []
     segments: list[Path] = []
@@ -1318,6 +1445,11 @@ def render_grid_mp4(
                 head_pad_seconds=head_pad_seconds,
                 work=work,
             )
+            if not draw_clock:
+                # Dropping the clocks is what removes ``drawtext`` from
+                # the command: ``_clock_filters`` emits one filter per
+                # clock and the plain passthrough when there are none.
+                stage_overlay = replace(stage_overlay, clocks=())
         cmd = build_stage_command(
             plan,
             canvas=canvas,
@@ -1363,7 +1495,11 @@ def render_grid_mp4(
     if completed.returncode != 0:
         raise GridRenderError(f"concat stitch failed: {_stderr_text(completed)}")
 
-    return GridRenderResult(output_path=output_path, stages=tuple(outcomes))
+    return GridRenderResult(
+        output_path=output_path,
+        stages=tuple(outcomes),
+        degradations=degradations,
+    )
 
 
 __all__ = [
@@ -1376,6 +1512,7 @@ __all__ = [
     "OUTPUT_AUDIO_BITRATE",
     "OUTPUT_AUDIO_CODEC",
     "OVERLAY_CLOCK_FALLBACK_FONT",
+    "OVERLAY_CLOCK_OMITTED_SUMMARY",
     "SEGMENT_AUDIO_CODEC",
     "SEGMENT_SUFFIX",
     "GridCanvas",
@@ -1383,6 +1520,8 @@ __all__ = [
     "GridRenderResult",
     "GridStagePlan",
     "GridTile",
+    "NoticeHook",
+    "OverlayDegradation",
     "StageOutcome",
     "StageOverlayPlan",
     "TileClock",

@@ -582,3 +582,101 @@ def test_overlay_reaches_the_rendered_pixels(tmp_path: Path, synthetic_source_vi
             f"audio track {slot} decoded to a different length with the overlay on: "
             f"{plain_audio:.4f}s vs {overlaid_audio:.4f}s"
         )
+
+
+@integration
+@needs_ffmpeg
+def test_an_ffmpeg_without_drawtext_keeps_the_sprites_and_loses_only_the_clock(
+    tmp_path: Path, synthetic_source_video: Path
+):
+    """The degradation, rendered by a real ffmpeg and read off the pixels.
+
+    The host that reported this has an ffmpeg built without
+    ``--enable-libfreetype``; no ffmpeg here is, so the *decision* is
+    driven by a probe runner that answers the way that host's binary
+    would. Everything after the decision is real: real filter graph, real
+    encode, real decoded frames.
+
+    What "degrade, do not fail" has to mean in pixels, against the same
+    no-overlay baseline the test above uses:
+
+      - the counter and the split label are still drawn (sprite PNGs
+        composited with ``overlay``, which needs no freetype);
+      - the clock corner is back at the noise floor (the one thing lost);
+      - the stream layout and the duration are untouched, because a
+        degraded segment still has to stitch against a normal one.
+    """
+    from tests.conftest import fake_ffmpeg_probe
+
+    shooters = _roster(tmp_path, synthetic_source_video)
+    plain = _render(shooters, tmp_path, overlay=False, name="plain-nodt.mp4")
+    capable = _render(shooters, tmp_path, overlay=True, name="capable-nodt.mp4")
+
+    degraded_path = tmp_path / "degraded.mp4"
+    result = mp4_grid.render_grid_mp4(
+        shooters,
+        audio_label="Mathias",
+        output_path=degraded_path,
+        canvas=CANVAS,
+        head_pad_seconds=HEAD_PAD_SECONDS,
+        tail_pad_seconds=TAIL_PAD_SECONDS,
+        overlay=True,
+        ffmpeg_binary=FFMPEG,
+        probe_runner=fake_ffmpeg_probe(drawtext=False),
+        # A work dir of its own: the sprite cache is content-addressed, so
+        # sharing one would serve PNGs another render already made.
+        work_dir=tmp_path / "work-degraded",
+    )
+
+    assert result.failed == (), result.failed
+    assert result.degradation_summary == mp4_grid.OVERLAY_CLOCK_OMITTED_SUMMARY
+    assert degraded_path.exists()
+
+    # The stitch refuses segments whose stream layout disagrees, so a
+    # degraded stage has to look exactly like a normal one to concat.
+    assert _stream_counts(degraded_path) == _stream_counts(capable)
+    assert _stream_counts(degraded_path) == (1, 4)
+
+    cell_w, cell_h = CANVAS.width // 2, CANVAS.height // 2
+    counter_box = (0, 0, cell_w // 2, cell_h // 2)
+    clock_box = (cell_w // 2, 0, cell_w, cell_h // 2)
+    split_box = (cell_w // 4, cell_h // 2, 3 * cell_w // 4, cell_h)
+
+    after_plain = _frame(plain, T_AFTER_FIRST_SHOT, tmp_path, "plain-nodt-post")
+    after_capable = _frame(capable, T_AFTER_FIRST_SHOT, tmp_path, "capable-nodt-post")
+    after_degraded = _frame(degraded_path, T_AFTER_FIRST_SHOT, tmp_path, "degraded-post")
+
+    # Against the no-overlay baseline: sprites present, clock absent.
+    counter_diff = _mean_abs_diff(after_plain, after_degraded, counter_box)
+    assert counter_diff >= FIRING_COUNTER_MIN_MEAN_ABS_DIFF, (
+        f"the shot counter went missing along with the clock: mean abs diff "
+        f"{counter_diff:.2f} (threshold {FIRING_COUNTER_MIN_MEAN_ABS_DIFF})"
+    )
+    split_diff = _mean_abs_diff(after_plain, after_degraded, split_box)
+    assert split_diff >= FIRING_SPLIT_MIN_MEAN_ABS_DIFF, (
+        f"the split label went missing along with the clock: mean abs diff "
+        f"{split_diff:.2f} (threshold {FIRING_SPLIT_MIN_MEAN_ABS_DIFF})"
+    )
+    clock_diff = _mean_abs_diff(after_plain, after_degraded, clock_box)
+    assert clock_diff <= NOISE_FLOOR_MEAN_ABS_DIFF, (
+        f"a clock was drawn on an ffmpeg reported to have no drawtext: mean abs diff "
+        f"{clock_diff:.2f} against the no-overlay render (threshold "
+        f"{NOISE_FLOOR_MEAN_ABS_DIFF})"
+    )
+
+    # And against the capable render: the clock corner is the *only*
+    # thing that differs. Without this pair, a degradation that also
+    # silently blanked the sprites would pass everything above.
+    assert (
+        _mean_abs_diff(after_capable, after_degraded, clock_box) >= FIRING_CLOCK_MIN_MEAN_ABS_DIFF
+    ), "the capable and degraded renders agree in the clock corner -- neither drew a clock"
+    assert (
+        _mean_abs_diff(after_capable, after_degraded, counter_box) <= NOISE_FLOOR_MEAN_ABS_DIFF
+    ), "dropping the clock moved the shot counter too"
+
+    plain_seconds = _video_seconds(plain)
+    degraded_seconds = _video_seconds(degraded_path)
+    assert abs(plain_seconds - degraded_seconds) <= FRAME_SECONDS, (
+        f"the degraded overlay changed the rendered duration: {plain_seconds:.3f}s vs "
+        f"{degraded_seconds:.3f}s (one frame is {FRAME_SECONDS:.4f}s)"
+    )
