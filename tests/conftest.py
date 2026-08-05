@@ -147,10 +147,40 @@ _FALSEY = frozenset({"", "0", "false", "no", "off"})
 # nodeid -> reason, for every integration test that skipped this session.
 _skipped_integration: dict[str, str] = {}
 _integration_selected = 0
+#: Every integration nodeid the session reported on, from any worker.
+#:
+#: Under ``pytest-xdist`` the controller never collects -- ``DSession``
+#: short-circuits ``pytest_collection`` before a single item exists -- so
+#: ``pytest_collection_modifyitems`` does not fire in the process that
+#: later runs ``pytest_terminal_summary``. A collection-derived count
+#: reads 0 there and the gate fails a run in which every integration test
+#: passed. Reports *are* forwarded from every worker to the controller,
+#: so counting them is the one source that answers the same serially and
+#: under ``-n``. Kept alongside the collection count rather than
+#: replacing it: serially the two agree, and the collection count still
+#: catches a marker rename that empties the selection before anything
+#: could report.
+_reported_integration: set[str] = set()
 
 
 def _require_integration() -> bool:
     return os.environ.get(_REQUIRE_INTEGRATION_ENV, "").strip().lower() not in _FALSEY
+
+
+def _integration_seen() -> int:
+    """How many integration tests this session selected or reported on."""
+    return max(_integration_selected, len(_reported_integration))
+
+
+def _is_xdist_worker(config: pytest.Config) -> bool:
+    """True in an xdist worker process.
+
+    The gate is a whole-session verdict, and a worker only ever sees its
+    own slice: with ``-n 12`` most workers are handed zero integration
+    tests, so a worker-side verdict would fail every run. Only the
+    controller -- which receives every worker's reports -- may judge.
+    """
+    return hasattr(config, "workerinput")
 
 
 def _skip_reason(report: pytest.TestReport) -> str:
@@ -173,11 +203,12 @@ def pytest_collection_modifyitems(
 def pytest_runtest_logreport(report: pytest.TestReport) -> None:
     if not _require_integration():
         return
+    if "integration" not in report.keywords:
+        return
+    _reported_integration.add(report.nodeid)
     # ``wasxfail`` rides on skipped reports for xfail; those are a
     # deliberate expectation, not a silently-missing test.
     if not report.skipped or hasattr(report, "wasxfail"):
-        return
-    if "integration" not in report.keywords:
         return
     _skipped_integration.setdefault(report.nodeid, _skip_reason(report))
 
@@ -187,7 +218,7 @@ def _integration_gate_failures() -> list[str]:
     if not _require_integration():
         return []
     problems: list[str] = []
-    if _integration_selected == 0:
+    if _integration_seen() == 0:
         problems.append(
             f"{_REQUIRE_INTEGRATION_ENV} is set but no test carrying the "
             "'integration' marker was selected -- the suite this gate "
@@ -203,10 +234,10 @@ def pytest_terminal_summary(
     exitstatus: int,
     config: pytest.Config,
 ) -> None:
-    if not _require_integration():
+    if not _require_integration() or _is_xdist_worker(config):
         return
     problems = _integration_gate_failures()
-    ran = _integration_selected - len(_skipped_integration)
+    ran = _integration_seen() - len(_skipped_integration)
     if problems:
         terminalreporter.section("integration gate FAILED", sep="=", red=True, bold=True)
         for line in problems:
@@ -222,6 +253,8 @@ def pytest_terminal_summary(
 
 
 def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    if _is_xdist_worker(session.config):
+        return
     if _integration_gate_failures():
         session.exitstatus = pytest.ExitCode.TESTS_FAILED
 
@@ -432,6 +465,39 @@ def empty_match(tmp_path: Path) -> Path:
     return match_root
 
 
+#: Every env var that steers a splitsmith process at a directory it may
+#: write to. All of them are redirected per test by
+#: :func:`_isolate_user_config`.
+#:
+#: ``SPLITSMITH_CONFIG_DIR`` is deliberately NOT in this list, and the
+#: reason is worth keeping written down. It looks like it belongs:
+#: ``runtime.resolve_runtime`` reads it independently of
+#: ``SPLITSMITH_HOME``, so ``user_config_dir`` resolves to the real
+#: ``~/.config/splitsmith`` during tests, and that is where the model
+#: registry caches its ONNX artifacts behind a single ``O_EXCL``
+#: lockfile -- which reads like a cross-process hazard once a dozen xdist
+#: workers exist.
+#:
+#: Pinning it to a tmp dir makes things much worse. The registry then
+#: sees a *cold* cache, and ``create_app`` starts its artifact-fetch job
+#: -- a 327 MB download from models.splitsmith.app -- in almost every
+#: server test. ``test_ui_shutdown.py`` fails outright, because the
+#: shutdown drain waits on that job. The real cache is warm on any
+#: machine that has run the app, and a warm read takes no lock at all,
+#: so the hazard the pin was aimed at does not exist in practice.
+#:
+#: ``SPLITSMITH_CACHE_DIR`` is left alone for the same reason: it is
+#: where ``resolve_runtime`` points HF_HOME / TORCH_HOME.
+#:
+#: ``HF_HOME`` / ``TORCH_HOME`` are snapshotted because ``resolve_runtime``
+#: ``setdefault``s them and never restores them: whichever test happened
+#: to resolve the runtime first pinned them for the rest of the process.
+#: Restoring them per test makes that order-independent without
+#: redirecting anything.
+_ISOLATED_DIR_ENV: tuple[str, ...] = ("SPLITSMITH_HOME",)
+_ISOLATED_PASSTHROUGH_ENV = ("HF_HOME", "TORCH_HOME")
+
+
 @pytest.fixture(autouse=True)
 def _isolate_user_config(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Redirect ``~/.splitsmith/`` to a per-test tmp dir for every test.
@@ -451,12 +517,14 @@ def _isolate_user_config(tmp_path_factory: pytest.TempPathFactory) -> Path:
     import os
 
     home = tmp_path_factory.mktemp("user-config")
-    prev = os.environ.get("SPLITSMITH_HOME")
-    os.environ["SPLITSMITH_HOME"] = str(home)
+    prev = {key: os.environ.get(key) for key in _ISOLATED_DIR_ENV + _ISOLATED_PASSTHROUGH_ENV}
+    for key in _ISOLATED_DIR_ENV:
+        os.environ[key] = str(home)
     try:
         yield home
     finally:
-        if prev is None:
-            os.environ.pop("SPLITSMITH_HOME", None)
-        else:
-            os.environ["SPLITSMITH_HOME"] = prev
+        for key, value in prev.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value

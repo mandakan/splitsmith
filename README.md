@@ -151,6 +151,17 @@ uv run pytest -q                                 # unit tests
 uv run pytest -q -m integration                  # ffmpeg/ffprobe-backed tests
 ```
 
+The suite runs in parallel by default -- `addopts` carries `-n auto`, which
+takes the full run from ~3m45s to ~1m on a 12-core box. Add `-n0` to any
+invocation to go back to a single process, which is what you want when
+debugging one test: same collection, same order, readable tracebacks, and no
+worker startup on a focused run. `--pdb` needs no flag, since xdist turns
+itself off when it sees one.
+
+```bash
+uv run pytest -q -n0 tests/test_beep_detect.py   # serial, for debugging
+```
+
 ## Runtime backends (slim ONNX vs dev torch)
 
 The shipped runtime uses [ONNX Runtime](https://onnxruntime.ai/) for Voter B (CLAP) and Voter D (PANN gunshot probability, folded into Voter C). The slim install carries no torch, no transformers, no panns_inference. Artifacts (~440 MB) auto-download from `models.splitsmith.app` into `~/.splitsmith/models/` as a background job the moment `splitsmith ui` boots; `splitsmith fetch-models` is still around for scripted prefetch (CI, metered connections).

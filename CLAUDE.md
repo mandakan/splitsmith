@@ -32,6 +32,12 @@ Personal tool for an IPSC competitor to extract shot splits from head-mounted ca
 ## Testing approach
 
 - `pytest` for everything
+- The suite runs in parallel by default (`addopts` carries `-n auto --dist load`).
+  `-n0` restores serial execution and is the right thing when debugging a single
+  test — worker startup dominates a focused run, and tracebacks are cleaner.
+  New tests must not depend on execution order or share mutable state outside
+  `tmp_path`: a worker's process-global caches are its own, but the filesystem,
+  ports, and `~/` are not.
 - Fixtures live in `tests/fixtures/` — short audio clips with hand-labeled ground truth in adjacent JSON files
 - Detection tests assert within tolerance (e.g., ±15ms for shot times)
 - Mock ffmpeg in trim tests; don't actually shell out during unit tests

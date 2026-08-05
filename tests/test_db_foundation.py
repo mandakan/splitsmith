@@ -163,6 +163,7 @@ def test_migration_creates_users_table_on_clean_sqlite(tmp_path) -> None:
     """
     import os
     import subprocess
+    import sys
     from pathlib import Path
 
     db_path = tmp_path / "smoke.sqlite"
@@ -173,8 +174,15 @@ def test_migration_creates_users_table_on_clean_sqlite(tmp_path) -> None:
     # not a hard-coded ``/Users/mathias/work/splitsmith``.
     repo_root = Path(__file__).resolve().parent.parent
     env = {**os.environ, "SPLITSMITH_DATABASE_URL": url}
+    # ``sys.executable -m alembic``, not ``uv run alembic``: ``uv run``
+    # re-syncs the project environment before it execs, and this suite
+    # runs under ``-n`` with a dozen workers importing out of that same
+    # ``.venv``. Nothing else in the suite mutates the interpreter it is
+    # running on, and this test does not need to either -- it already
+    # gets what it wants (Alembic in its own process, opening its own
+    # connection to the file-backed sqlite) from the plain subprocess.
     result = subprocess.run(
-        ["uv", "run", "alembic", "upgrade", "head"],
+        [sys.executable, "-m", "alembic", "upgrade", "head"],
         env=env,
         cwd=repo_root,
         capture_output=True,
