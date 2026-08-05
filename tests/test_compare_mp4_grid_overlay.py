@@ -698,7 +698,6 @@ def test_the_stage_slice_reaches_the_sprites_rather_than_blanking_them(tmp_path)
     assert len(states) > 1, "no shot events reached the state builder"
     assert any(p.shots_fired > 0 for s in states for p in s.panels)
     assert any(p.last_split is not None for s in states for p in s.panels)
-    assert any(p.rank is not None for s in states for p in s.panels)
 
 
 def test_a_tuple_keyed_mapping_is_rejected_rather_than_blanking(tmp_path):
@@ -1101,8 +1100,8 @@ def _render_with(tmp_path, probe, **kwargs):
 def test_an_ffmpeg_without_drawtext_still_gets_the_sprite_half_of_the_overlay(tmp_path):
     """Degrade, do not fail: the clock is the only drawtext in the graph.
 
-    Counters, last splits and the delta strip are pre-rendered PNGs
-    composited with ``overlay``, which every ffmpeg has. Refusing the
+    Counters and last splits are pre-rendered PNGs composited with
+    ``overlay``, which every ffmpeg has. Refusing the
     whole overlay would throw away most of the feature to save one number
     per tile.
     """

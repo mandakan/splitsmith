@@ -46,7 +46,7 @@ class TilePlacement:
     """Where one shooter's tile sits in the grid.
 
     ``present=False`` is a filler tile -- the shooter has no trim for this
-    stage. It is drawn as nothing and never enters the ranking.
+    stage. It is drawn as nothing at all.
     """
 
     label: str
@@ -60,9 +60,13 @@ class TilePanel:
     """One tile's overlay content for the duration of one state.
 
     Every numeric field is optional because absent data stays absent: a
-    tile that has not fired has no split, no rank and no delta, and a
-    stage with no round count has no ``expected_shots``. None of them
-    degrade to zero -- a zero split reads as a real number to a viewer.
+    tile that has not fired has no split, and a stage with no round count
+    has no ``expected_shots``. Neither degrades to zero -- a zero split
+    reads as a real number to a viewer.
+
+    Content is strictly per tile. Cross-shooter comparison used to live
+    here as ``rank``/``delta_to_leader``, feeding a bottom delta strip;
+    both are gone (see :func:`render_state`).
     """
 
     label: str
@@ -72,8 +76,6 @@ class TilePanel:
     shots_fired: int
     expected_shots: int | None
     last_split: float | None
-    rank: int | None
-    delta_to_leader: float | None
 
 
 @dataclass(frozen=True)
@@ -202,8 +204,6 @@ def _panels_at(
         shots = data.get(placement.label, _EMPTY).shots
         fired[placement.label] = tuple(s for s in shots if s.time_from_beep <= event_time + _EPSILON)
 
-    ranks, deltas = _rank(placements, fired)
-
     panels: list[TilePanel] = []
     for placement in placements:
         shots = fired.get(placement.label, ())
@@ -224,42 +224,9 @@ def _panels_at(
                 # the screen. Treat ``split`` as given; do not recompute
                 # it here from ``time_from_beep``.
                 last_split=shots[-1].split if shots else None,
-                rank=ranks.get(placement.label),
-                delta_to_leader=deltas.get(placement.label),
             )
         )
     return tuple(panels)
-
-
-def _rank(
-    placements: Sequence[TilePlacement],
-    fired: Mapping[str, tuple[TileShot, ...]],
-) -> tuple[dict[str, int], dict[str, float]]:
-    """Rank the tiles that have fired, and time each against the leader.
-
-    Further along wins, then faster to get there: sort by shot count
-    descending, then by the time of that shot ascending. Ties keep grid
-    order, since ``sorted`` is stable over ``placements``.
-
-    The delta compares like with like -- a tile on shot ``k`` is measured
-    against the leader's time at shot ``k``, never the leader's latest
-    shot. Comparing a shooter on shot 3 to a leader's shot-8 elapsed time
-    would show a lead that means nothing. The leader holds the highest
-    shot count, so its shot ``k`` always exists.
-    """
-    contenders = [p.label for p in placements if p.present and fired.get(p.label)]
-    if not contenders:
-        return {}, {}
-    ordered = sorted(contenders, key=lambda label: (-len(fired[label]), fired[label][-1].time_from_beep))
-
-    leader = fired[ordered[0]]
-    ranks: dict[str, int] = {}
-    deltas: dict[str, float] = {}
-    for position, label in enumerate(ordered):
-        shots = fired[label]
-        ranks[label] = position + 1
-        deltas[label] = shots[-1].time_from_beep - leader[len(shots) - 1].time_from_beep
-    return ranks, deltas
 
 
 # --- rendering --------------------------------------------------------
@@ -288,10 +255,6 @@ class SpriteGeometry:
     def cell_height(self) -> int:
         return self.canvas_height // self.rows
 
-    @property
-    def strip_height(self) -> int:
-        return max(48, self.canvas_height // 20)
-
 
 def render_state(state: OverlayState, geometry: SpriteGeometry, *, theme: OverlayTheme) -> Image.Image:
     """Rasterize one :class:`OverlayState` to a canvas-sized RGBA sprite.
@@ -310,13 +273,26 @@ def render_state(state: OverlayState, geometry: SpriteGeometry, *, theme: Overla
     fired. The split label therefore persists at full alpha until the
     next shot replaces it.
 
-    All text -- per-cell counter/split and each delta-strip entry -- is
-    fit to the space it actually has (cell width, strip slot width) before
-    it is drawn: 3x3 and 4x4 are first-class grid kinds
+    All text is fit to the space it actually has (the cell's own width)
+    before it is drawn: 3x3 and 4x4 are first-class grid kinds
     (``compare/layout.py`` routes 5-16 shooters there), and a font size
-    picked from ``cell_height``/``strip_height`` alone overflows a narrow
-    cell or collides with a neighbouring strip entry once there are more
-    than a handful of columns or entries.
+    picked from ``cell_height`` alone overflows a narrow cell once there
+    are more than a handful of columns.
+
+    **Everything drawn here is per tile.** A full-width delta strip
+    ranking the shooters used to run across the bottom of the canvas; it
+    was removed after watching it on real footage. A beep-aligned grid
+    already *is* the race -- the tiles are synchronised, so who is ahead
+    reads straight off the picture -- and a ranked list competes with the
+    thing it describes while its band overlaps the bottom row of tiles.
+    Cross-shooter comparison belongs to the Milestone B stage summary,
+    where the run is over and the ranking is ``stage_pct`` off the
+    scorecard rather than live elapsed time. Do not put it back.
+
+    A consequence: a state where nobody has fired yet draws *nothing*, so
+    ``render_state`` legitimately returns a fully transparent canvas. Any
+    test claiming the sprite reached the pixels has to sample a moment
+    where a counter or a split genuinely exists.
     """
     canvas = Image.new("RGBA", (geometry.canvas_width, geometry.canvas_height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
@@ -327,7 +303,6 @@ def render_state(state: OverlayState, geometry: SpriteGeometry, *, theme: Overla
     for panel in state.panels:
         _draw_panel(canvas, draw, panel, geometry, theme=theme, pad=pad, base_size=big)
 
-    _draw_strip(canvas, draw, state, geometry, theme=theme)
     return canvas
 
 
@@ -376,8 +351,7 @@ def _text_width(draw: ImageDraw.ImageDraw, text: str, font) -> int:
 
 # Font sizes never shrink below this floor. Still legible at typical
 # viewing distances; below it a further shrink reads as noise rather
-# than smaller text, so entries that still don't fit at the floor get
-# their label truncated instead of the font shrunk further.
+# than smaller text.
 _MIN_FONT_SIZE = 12
 
 
@@ -424,10 +398,10 @@ def _draw_panel(
 
     x0 = panel.col * geometry.cell_width
     y0 = panel.row * geometry.cell_height
-    # The strip sits over the bottom of the whole canvas, which can
-    # overlap a bottom-row tile's nominal cell. Bottom-anchored content
-    # must clear it or the split label would render under the strip.
-    content_bottom = min(y0 + geometry.cell_height, geometry.canvas_height - geometry.strip_height)
+    # Bottom-anchored content runs to the cell's own bottom edge. It used
+    # to stop short of a full-width delta strip; that strip is gone, so
+    # the whole cell is the tile's again.
+    content_bottom = y0 + geometry.cell_height
     ink = (*theme.ink, 255)
     width_budget = max(1, geometry.cell_width - 2 * pad)
 
@@ -474,269 +448,6 @@ def _draw_panel(
         )
 
 
-def _strip_entry_parts(panel: TilePanel) -> tuple[str | None, str, str | None]:
-    """Rank / label / delta tokens for one strip entry, before fitting.
-
-    The leader's elapsed time at their last shot is not known to the
-    sprite (only per-tile shot data crosses into ``render_state``), so
-    the leader gets rank + label only -- never a fabricated number. Every
-    other ranked tile gets a signed delta; ``delta_to_leader`` can be
-    negative (a tile behind on shot count but faster to its own shot k),
-    so the sign must come from ``:+.2f`` formatting, never a hardcoded
-    ``+`` prefix, or a negative delta would render as ``+-0.10``. A tile
-    that hasn't fired yet gets its label with no rank number at all.
-    """
-    label = panel.label.upper()
-    if panel.rank is None:
-        return None, label, None
-    if panel.rank == 1 or panel.delta_to_leader is None:
-        return str(panel.rank), label, None
-    return str(panel.rank), label, f"{panel.delta_to_leader:+.2f}"
-
-
-def _join_strip_parts(rank: str | None, label: str, delta: str | None) -> str:
-    return " ".join(token for token in (rank, label, delta) if token)
-
-
-def _strip_entry_text(panel: TilePanel) -> str:
-    """One shooter's full, untruncated label in the delta strip. See
-    :func:`_strip_entry_parts` for the leader / sign-formatting rules;
-    :func:`_fit_strip_entry` shortens this for tight layouts."""
-    return _join_strip_parts(*_strip_entry_parts(panel))
-
-
-def _fit_strip_entry(
-    draw: ImageDraw.ImageDraw,
-    panel: TilePanel,
-    font,
-    budget: float,
-) -> str:
-    """This entry's text, shortened to fit ``budget`` pixels if the full
-    text doesn't. The label is truncated character by character first --
-    it is the least essential token, and an abbreviated name still reads
-    as that shooter. The delta is dropped only if even a single-character
-    label doesn't fit; the rank number is never dropped, since a bare
-    label is still meaningfully different from a ranked one. This is the
-    fallback for an already-shrunk font -- see :func:`_draw_strip`, which
-    picks the font size from the tightest slot before reaching here.
-    """
-    rank, label, delta = _strip_entry_parts(panel)
-    text = _join_strip_parts(rank, label, delta)
-    if _text_width(draw, text, font) <= budget:
-        return text
-    trimmed = label
-    while len(trimmed) > 1:
-        trimmed = trimmed[:-1]
-        text = _join_strip_parts(rank, trimmed, delta)
-        if _text_width(draw, text, font) <= budget:
-            return text
-    if delta is not None:
-        text = _join_strip_parts(rank, trimmed, None)
-        if _text_width(draw, text, font) <= budget:
-            return text
-    return text
-
-
-def _fit_labelled_entry(
-    draw: ImageDraw.ImageDraw,
-    panel: TilePanel,
-    label: str,
-    suffix: str,
-    font,
-    budget: float,
-) -> str:
-    """Like :func:`_fit_strip_entry`, but with ``suffix`` welded to the
-    label and kept whatever else has to go. The suffix is what makes two
-    otherwise-identical entries distinguishable, so the label shrinks
-    around it -- and if even a bare suffix does not fit, it is still
-    drawn: an entry that overhangs its slot by a character is a smaller
-    failure than two shooters rendered under one name.
-    """
-    rank, _, delta = _strip_entry_parts(panel)
-    trimmed = label
-    while trimmed:
-        text = _join_strip_parts(rank, trimmed + suffix, delta)
-        if _text_width(draw, text, font) <= budget:
-            return text
-        trimmed = trimmed[:-1]
-    text = _join_strip_parts(rank, suffix, delta)
-    if _text_width(draw, text, font) <= budget:
-        return text
-    return _join_strip_parts(rank, suffix, None)
-
-
-def _strip_texts(
-    draw: ImageDraw.ImageDraw,
-    entries: Sequence[TilePanel],
-    font,
-    budget: float,
-) -> list[str]:
-    """Every entry's fitted text, with no two entries reading alike.
-
-    :func:`_fit_strip_entry` truncates each entry blind to its
-    neighbours, so two shooters sharing a long prefix collapse onto the
-    same string: at a 4x4 grid's 88px slot ``CHRISTOPHERSEN`` and
-    ``CHRISTOPHERSON`` both cut to ``CHRISTOPHERS``, and the strip then
-    shows one name for two people -- a worse failure than the entry
-    overlap this truncation was introduced to prevent. Ranked entries
-    cannot collide, since the rank number is retained and unique; an
-    entry that has not fired carries only its label.
-
-    Colliding entries get a deterministic ``#n`` ordinal welded to the
-    label, numbered by strip position, with the label shrinking to make
-    room. Entries that do not collide are left exactly as they were, so
-    the ordinary case -- distinct names, or names that differ inside the
-    budget -- renders identically to before.
-
-    Two approaches were considered and dropped. Re-cutting the group to
-    the shortest prefix that tells its labels apart cannot work *here*:
-    :func:`_fit_strip_entry` already keeps the longest prefix that fits,
-    and prefix width grows strictly with length (measured: 12 characters
-    of CHRISTOPHERSEN is 86px against an 88px budget, 13 is 94px), so a
-    prefix long enough to distinguish is by construction too wide. Any
-    such pass would be a branch that can never run. Eliding the middle to
-    keep the diverging tail reads better than an ordinal, but it is not
-    injective in general, so it would need this fallback underneath it
-    anyway -- two code paths for a case that needs a 12-character shared
-    prefix between two shooters who have both yet to fire, at the
-    tightest supported slot.
-    """
-    texts = [_fit_strip_entry(draw, panel, font, budget) for panel in entries]
-    groups: dict[str, list[int]] = {}
-    for index, text in enumerate(texts):
-        groups.setdefault(text, []).append(index)
-
-    for indexes in groups.values():
-        if len(indexes) == 1:
-            continue
-        for ordinal, index in enumerate(indexes, start=1):
-            texts[index] = _fit_labelled_entry(
-                draw, entries[index], entries[index].label.upper(), f"#{ordinal}", font, budget
-            )
-    return texts
-
-
-def _strip_entries(state: OverlayState) -> list[TilePanel]:
-    """The strip's entries in slot order: ranked tiles first, then those
-    that have not fired. Empty when nobody has fired -- there is no
-    ranking to show yet, and a band of bare labels is only noise the
-    viewer has already seen on the tiles above."""
-    present = [p for p in state.panels if p.present]
-    ranked = sorted((p for p in present if p.rank is not None), key=lambda p: p.rank)
-    if not ranked:
-        return []
-    return ranked + [p for p in present if p.rank is None]
-
-
-def _strip_font(
-    draw: ImageDraw.ImageDraw,
-    entries: Sequence[TilePanel],
-    geometry: SpriteGeometry,
-    *,
-    theme: OverlayTheme,
-) -> tuple[object, int, float]:
-    """``(font, size, budget)`` for one strip's entries.
-
-    The size comes from the *tightest* slot: entry count and canvas width
-    drive it, not ``strip_height`` alone, which is what let a 3x3 with 8+
-    shooters collide (a rank digit printing on top of the previous
-    entry's delta). ``budget`` is the width one entry has inside its own
-    slot at the chosen size.
-
-    Split out of :func:`_draw_strip` so a test can ask for the same font
-    and budget a render would use instead of re-deriving them and
-    drifting from it.
-    """
-    slot_width = geometry.canvas_width / len(entries)
-    base_size = max(20, geometry.strip_height * 2 // 3)
-
-    # The margin has to absorb not just the glyph bbox but the stroke and
-    # blurred drop shadow drawn around it (see the ``pad`` computation
-    # inside ``_draw_text_with_shadow``) -- a size picked to fit the bare
-    # text could still let the shadow halo of one entry touch the next.
-    def margin_for(size: int) -> float:
-        stroke = max(2, size // 18)
-        offset = max(2, size // 24)
-        blur = max(3, size // 12)
-        return max(6, geometry.strip_height // 12) + blur * 2 + offset + stroke
-
-    size = base_size
-    while size > _MIN_FONT_SIZE:
-        budget = slot_width - 2 * margin_for(size)
-        font = _scaled_font(theme, size)
-        if budget > 0 and all(_text_width(draw, _strip_entry_text(p), font) <= budget for p in entries):
-            break
-        size -= 2
-    else:
-        font = _scaled_font(theme, _MIN_FONT_SIZE)
-        size = _MIN_FONT_SIZE
-    return font, size, max(1.0, slot_width - 2 * margin_for(size))
-
-
-def _draw_strip(
-    canvas: Image.Image,
-    draw: ImageDraw.ImageDraw,
-    state: OverlayState,
-    geometry: SpriteGeometry,
-    *,
-    theme: OverlayTheme,
-) -> None:
-    """The bottom band: one entry per present tile, ranked tiles first.
-
-    Nothing is drawn until at least one present tile has fired -- before
-    the first shot there is no ranking to show, and a band of bare labels
-    would just be noise the viewer has already seen on the tiles above.
-
-    Entries live in disjoint, equal-width slots. As long as every entry's
-    rendered width (plus a safety margin covering its stroke and shadow)
-    fits inside its own slot, centering it there guarantees no two
-    entries' ink can ever touch -- the slots themselves don't overlap.
-    The font size is picked from the *tightest* slot -- entry count and
-    canvas width both drive it, not ``strip_height`` alone, which is what
-    let a 3x3 with 8+ shooters collide (one rank digit printing on top of
-    the previous entry's delta). Any entry that still doesn't fit at the
-    size floor gets its label truncated by :func:`_fit_strip_entry`
-    rather than left to collide with its neighbour, and
-    :func:`_strip_texts` then guarantees no two of those truncations read
-    the same -- one name over two shooters is worse than either
-    collision.
-    """
-    entries = _strip_entries(state)
-    if not entries:
-        return
-
-    slot_width = geometry.canvas_width / len(entries)
-    font, size, budget = _strip_font(draw, entries, geometry, theme=theme)
-    texts = _strip_texts(draw, entries, font, budget)
-
-    stroke_width = max(2, size // 18)
-    shadow_offset = max(2, size // 24)
-    shadow_blur = max(3, size // 12)
-    ink = (*theme.ink, 255)
-
-    y0 = geometry.canvas_height - geometry.strip_height
-    for index, text in enumerate(texts):
-        bbox = draw.textbbox((0, 0), text, font=font)
-        tw = bbox[2] - bbox[0]
-        th = bbox[3] - bbox[1]
-        cx = slot_width * index + slot_width / 2
-        x = int(cx - tw / 2)
-        y = y0 + (geometry.strip_height - th) // 2
-        _draw_text_with_shadow(
-            draw,
-            canvas,
-            (x, y),
-            text,
-            font,
-            ink,
-            stroke_width=stroke_width,
-            shadow_offset=shadow_offset,
-            shadow_blur=shadow_blur,
-            stroke_color=theme.stroke,
-            shadow_color=theme.shadow,
-        )
-
-
 def _cache_key(geometry: SpriteGeometry, theme: OverlayTheme, panels: tuple[TilePanel, ...]) -> str:
     """SHA-256 over a stable JSON dump of the render *inputs* -- never the
     rendered bytes. Two states with identical geometry/theme/panels hash
@@ -759,8 +470,6 @@ def _cache_key(geometry: SpriteGeometry, theme: OverlayTheme, panels: tuple[Tile
                 "shots_fired": p.shots_fired,
                 "expected_shots": p.expected_shots,
                 "last_split": p.last_split,
-                "rank": p.rank,
-                "delta_to_leader": p.delta_to_leader,
             }
             for p in panels
         ],

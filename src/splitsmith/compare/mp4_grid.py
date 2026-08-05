@@ -200,17 +200,17 @@ OVERLAY_CLOCK_OMITTED_SUMMARY = "running clock omitted: this ffmpeg was built wi
 def _drawtext_degradation(capabilities: FFmpegCapabilities) -> OverlayDegradation:
     """The overlay minus its clock is most of the overlay, so degrade.
 
-    Only the running clock is ``drawtext``. The counters, the last
-    splits and the delta strip are pre-rendered PNGs composited with
-    ``overlay``, which every ffmpeg has -- so a build without freetype
-    loses one number per tile rather than the whole feature.
+    Only the running clock is ``drawtext``. The counters and the last
+    splits are pre-rendered PNGs composited with ``overlay``, which every
+    ffmpeg has -- so a build without freetype loses one number per tile
+    rather than the whole feature.
     """
     return OverlayDegradation(
         summary=OVERLAY_CLOCK_OMITTED_SUMMARY,
         detail=(
             f"{capabilities.binary} (ffmpeg {capabilities.version}) has no usable drawtext "
-            "filter, so the overlay's running clock is omitted. The shot counters, last "
-            "splits and delta strip still render. For the clock, use an ffmpeg built with "
+            "filter, so the overlay's running clock is omitted. The per-tile shot counters "
+            "and last splits still render. For the clock, use an ffmpeg built with "
             "--enable-libfreetype, and point both SPLITSMITH_FFMPEG and SPLITSMITH_FFPROBE "
             "at it -- a mismatched pair is its own source of confusing failures."
         ),

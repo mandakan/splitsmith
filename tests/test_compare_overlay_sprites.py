@@ -125,46 +125,6 @@ def test_expected_shot_count_is_none_without_stage_rounds():
     assert _panel(states[-1], "ann").expected_shots is None
 
 
-def test_rank_orders_by_shots_fired_then_by_time():
-    # At t=1.6: ann has 2 shots, bo has 2 shots but slower, cy has 1.
-    data = {
-        "ann": _tile("ann", [1.0, 1.5]),
-        "bo": _tile("bo", [1.1, 1.6]),
-        "cy": _tile("cy", [1.2]),
-    }
-    states = _states(_placements("ann", "bo", "cy"), data)
-    last = states[-1]
-    assert _panel(last, "ann").rank == 1
-    assert _panel(last, "bo").rank == 2
-    assert _panel(last, "cy").rank == 3
-
-
-def test_delta_compares_the_same_shot_number():
-    # cy is on shot 1 at 1.2s; the leader's shot 1 was at 1.0s -> +0.2,
-    # NOT cy's 1.2 against the leader's shot-2 time of 1.5.
-    data = {
-        "ann": _tile("ann", [1.0, 1.5]),
-        "cy": _tile("cy", [1.2]),
-    }
-    states = _states(_placements("ann", "cy"), data)
-    last = states[-1]
-    assert _panel(last, "ann").delta_to_leader == pytest.approx(0.0)
-    assert _panel(last, "cy").delta_to_leader == pytest.approx(0.2)
-
-
-def test_delta_is_negative_for_a_tile_behind_but_faster_to_its_own_shot():
-    # cy is a shot behind ann, so cy ranks second -- but cy's shot 1 came at
-    # 0.9s against ann's 1.0s, so like-for-like cy is 0.1s AHEAD. The delta
-    # is signed and genuinely goes negative; a renderer must not hardcode a
-    # leading "+" or clamp this to zero.
-    data = {"ann": _tile("ann", [1.0, 1.5]), "cy": _tile("cy", [0.9])}
-    states = _states(_placements("ann", "cy"), data)
-    last = states[-1]
-    assert _panel(last, "cy").rank == 2
-    assert _panel(last, "cy").delta_to_leader == pytest.approx(-0.1)
-    assert _panel(last, "ann").delta_to_leader == pytest.approx(0.0)
-
-
 def test_shots_a_millisecond_apart_stay_separate_states():
     # 1.000 and 1.001 are adjacent millisecond slots, not the same one.
     # Scaling the key to an int bucket truncates them together.
@@ -181,30 +141,32 @@ def test_a_whole_match_mapping_is_rejected_rather_than_rendered_blank():
         _states(_placements("ann"), data)
 
 
-def test_a_tile_that_has_not_fired_has_no_rank_and_no_delta():
+def test_a_tile_shows_nothing_until_its_own_first_shot():
+    # bo does not fire until 5.0s, so at ann's shot bo's panel is still
+    # empty -- a tile's content is its own, never borrowed from whoever
+    # has already fired.
     data = {"ann": _tile("ann", [1.0]), "bo": _tile("bo", [5.0])}
     states = _states(_placements("ann", "bo"), data)
     at_first_shot = states[1]
-    assert _panel(at_first_shot, "bo").rank is None
-    assert _panel(at_first_shot, "bo").delta_to_leader is None
+    assert _panel(at_first_shot, "ann").shots_fired == 1
+    assert _panel(at_first_shot, "bo").shots_fired == 0
+    assert _panel(at_first_shot, "bo").last_split is None
 
 
-def test_filler_tiles_never_rank_and_never_fire():
+def test_filler_tiles_never_fire():
     data = {"ann": _tile("ann", [1.0]), "bo": _tile("bo", [1.1])}
     placements = _placements("ann", "bo", absent=("bo",))
     states = _states(placements, data)
     last = states[-1]
     assert _panel(last, "bo").present is False
     assert _panel(last, "bo").shots_fired == 0
-    assert _panel(last, "bo").rank is None
-    # ann is alone in the ranking, so ann leads
-    assert _panel(last, "ann").rank == 1
+    assert _panel(last, "ann").shots_fired == 1
 
 
 def test_a_filler_tile_with_shots_on_disk_is_still_drawn_as_nothing():
     # bo has a full audit but no trim for this stage, and fired *first*.
-    # A ranking that forgot to skip fillers would hand bo rank 1, and the
-    # filler's shots would punch extra states into the timeline.
+    # A state builder that forgot to skip fillers would punch bo's shots
+    # into the timeline as extra states nothing on screen accounts for.
     data = {"ann": _tile("ann", [1.0]), "bo": _tile("bo", [0.5], expected=12)}
     placements = _placements("ann", "bo", absent=("bo",))
     states = _states(placements, data)
@@ -212,10 +174,8 @@ def test_a_filler_tile_with_shots_on_disk_is_still_drawn_as_nothing():
     last = states[-1]
     assert _panel(last, "bo").shots_fired == 0
     assert _panel(last, "bo").last_split is None
-    assert _panel(last, "bo").rank is None
-    assert _panel(last, "bo").delta_to_leader is None
     assert _panel(last, "bo").expected_shots is None
-    assert _panel(last, "ann").rank == 1
+    assert _panel(last, "ann").shots_fired == 1
 
 
 def test_a_tile_with_no_audit_still_gets_a_panel_in_every_state():

@@ -1,7 +1,6 @@
 """Sprite rendering: where the ink lands, and the cache key."""
 
 import pytest
-from PIL import Image, ImageDraw
 
 from splitsmith import overlay_text
 from splitsmith.compare import overlay_sprites
@@ -24,8 +23,6 @@ def _panel(label, row, col, **kwargs):
         "shots_fired": 0,
         "expected_shots": None,
         "last_split": None,
-        "rank": None,
-        "delta_to_leader": None,
     }
     base.update(kwargs)
     return overlay_sprites.TilePanel(**base)
@@ -36,12 +33,11 @@ def _state(panels, start=0.0, duration=1.0):
 
 
 def _quadrant(image, geometry, row, col):
-    """The tile's own cell, excluding the bottom delta strip."""
+    """The tile's own cell. Every pixel of it belongs to that tile: the
+    sprite draws nothing outside the cells at all."""
     x0 = col * geometry.cell_width
     y0 = row * geometry.cell_height
-    x1 = x0 + geometry.cell_width
-    y1 = min(y0 + geometry.cell_height, geometry.canvas_height - geometry.strip_height)
-    return image.crop((x0, y0, x1, y1))
+    return image.crop((x0, y0, x0 + geometry.cell_width, y0 + geometry.cell_height))
 
 
 def _has_ink(image) -> bool:
@@ -56,7 +52,7 @@ def test_sprite_is_canvas_sized_rgba():
 
 def test_ink_lands_in_the_firing_tiles_own_cell():
     panels = [
-        _panel("ann", 0, 0, shots_fired=3, last_split=0.25, rank=1, delta_to_leader=0.0),
+        _panel("ann", 0, 0, shots_fired=3, last_split=0.25),
         _panel("bo", 0, 1),
         _panel("cy", 1, 0),
         _panel("dee", 1, 1),
@@ -69,7 +65,7 @@ def test_ink_lands_in_the_firing_tiles_own_cell():
 
 def test_a_filler_tile_draws_nothing_in_its_cell():
     panels = [
-        _panel("ann", 0, 0, shots_fired=2, rank=1, delta_to_leader=0.0),
+        _panel("ann", 0, 0, shots_fired=2),
         _panel("bo", 0, 1, present=False, shots_fired=0),
     ]
     image = overlay_sprites.render_state(_state(panels), GEOMETRY, theme=THEME)
@@ -85,29 +81,32 @@ def test_a_tile_that_has_not_fired_draws_no_counter():
     assert not _has_ink(_quadrant(unfired, GEOMETRY, 0, 0))
 
 
-def test_the_delta_strip_draws_across_the_bottom_band():
-    panels = [
-        _panel("ann", 0, 0, shots_fired=2, rank=1, delta_to_leader=0.0),
-        _panel("bo", 0, 1, shots_fired=1, rank=2, delta_to_leader=0.31),
-    ]
-    image = overlay_sprites.render_state(_state(panels), GEOMETRY, theme=THEME)
-    strip = image.crop(
-        (0, GEOMETRY.canvas_height - GEOMETRY.strip_height, GEOMETRY.canvas_width, GEOMETRY.canvas_height)
-    )
-    assert _has_ink(strip)
-
-
-def test_no_strip_ink_before_anyone_fires():
+def test_the_whole_canvas_is_blank_before_anyone_fires():
+    # With the delta strip gone there is no canvas-level furniture left:
+    # a state where nobody has fired draws nothing anywhere, so the
+    # sprite is a fully transparent PNG. That is the intended behaviour,
+    # and it is why every "the sprite reached the pixels" assertion has
+    # to sample a state where a counter or a split actually exists.
     panels = [_panel("ann", 0, 0), _panel("bo", 0, 1)]
     image = overlay_sprites.render_state(_state(panels), GEOMETRY, theme=THEME)
-    strip = image.crop(
-        (0, GEOMETRY.canvas_height - GEOMETRY.strip_height, GEOMETRY.canvas_width, GEOMETRY.canvas_height)
+    assert not _has_ink(image)
+
+
+def test_the_split_label_is_drawn_inside_the_bottom_row_cell():
+    # The strip used to reserve a band across the bottom of the canvas
+    # and bottom-anchored cell content was pushed up to clear it. Nothing
+    # reserves that band now, so a bottom-row tile's split label must
+    # land inside the lower part of its own cell.
+    panels = [_panel("cy", 1, 0, shots_fired=4, last_split=0.31)]
+    image = overlay_sprites.render_state(_state(panels), GEOMETRY, theme=THEME)
+    cell_bottom_half = image.crop(
+        (0, GEOMETRY.cell_height + GEOMETRY.cell_height // 2, GEOMETRY.cell_width, GEOMETRY.canvas_height)
     )
-    assert not _has_ink(strip)
+    assert _has_ink(cell_bottom_half)
 
 
 def test_identical_panels_reuse_one_file(tmp_path):
-    panels = [_panel("ann", 0, 0, shots_fired=1, last_split=1.0, rank=1, delta_to_leader=0.0)]
+    panels = [_panel("ann", 0, 0, shots_fired=1, last_split=1.0)]
     states = [_state(panels, 0.0, 1.0), _state(panels, 1.0, 2.0)]
     sequence = overlay_sprites.write_sprite_sequence(states, GEOMETRY, theme=THEME, cache_dir=tmp_path)
     assert len(sequence) == 2
@@ -368,62 +367,6 @@ def test_materialize_font_writes_a_readable_file(tmp_path):
     assert path.parent == tmp_path
 
 
-# --- strip entry text: none of the pixel-based tests above distinguish
-# "+0.10" from "+-0.10" or "1 ANN" from "1 ANN +0.00", so these exercise
-# the formatting helper directly.
-
-
-def test_strip_entry_text_negative_delta_uses_explicit_sign():
-    panel = _panel("ann", 0, 0, rank=2, delta_to_leader=-0.10)
-    text = overlay_sprites._strip_entry_text(panel)
-    assert text == "2 ANN -0.10"
-    assert "+-" not in text
-
-
-def test_strip_entry_text_positive_delta_uses_explicit_sign():
-    panel = _panel("bo", 0, 1, rank=2, delta_to_leader=0.21)
-    text = overlay_sprites._strip_entry_text(panel)
-    assert text == "2 BO +0.21"
-
-
-def test_strip_entry_text_leader_has_no_number():
-    panel = _panel("ann", 0, 0, rank=1, delta_to_leader=0.0)
-    assert overlay_sprites._strip_entry_text(panel) == "1 ANN"
-
-
-def test_strip_entry_text_unranked_has_no_number():
-    panel = _panel("cy", 1, 0, rank=None, delta_to_leader=None)
-    assert overlay_sprites._strip_entry_text(panel) == "CY"
-
-
-def test_negative_delta_through_render_state_does_not_collide_with_the_leader():
-    # Finding 2 (review): the string-level tests above exercise
-    # _strip_entry_text directly, which would miss a positioning or
-    # encoding bug specific to the render path. Drive a negative delta
-    # through the real render_state -> pixels path instead.
-    panels = [
-        _panel("ann", 0, 0, shots_fired=2, rank=1, delta_to_leader=0.0),
-        _panel("bo", 0, 1, shots_fired=1, rank=2, delta_to_leader=-0.10),
-    ]
-    image = overlay_sprites.render_state(_state(panels), GEOMETRY, theme=THEME)
-    strip = image.crop(
-        (0, GEOMETRY.canvas_height - GEOMETRY.strip_height, GEOMETRY.canvas_width, GEOMETRY.canvas_height)
-    )
-    slot_width = GEOMETRY.canvas_width // 2
-    ann_slot = strip.crop((0, 0, slot_width, strip.height))
-    bo_slot = strip.crop((slot_width, 0, slot_width * 2, strip.height))
-    assert _has_ink(ann_slot)
-    assert _has_ink(bo_slot)
-    # The two entries are drawn in the same call and could in principle
-    # bleed into each other's slot; confirm each stays inside its own,
-    # which a stray extra glyph from a "+-0.10" formatting bug would be
-    # likely to break given how tight two entries make the budget.
-    ann_extent = _ink_extent(ann_slot)
-    bo_extent = _ink_extent(bo_slot)
-    assert ann_extent[1] < ann_slot.width
-    assert bo_extent[0] > 0
-
-
 # --- layout stress: 3x3 and 4x4 are first-class grid kinds
 # (compare/layout.py routes 5-16 shooters to them), not extremes. A
 # fixture has to actually pack a grid that size with present, firing
@@ -453,14 +396,12 @@ CANVAS_SIZES = [(1920, 1080), (3840, 2160)]
 
 
 def _full_grid_state(rows: int, cols: int):
-    """Every cell present and fired, with a mix of delta signs and
-    magnitudes -- the shape that broke 3x3/4x4 in review, where a rank
-    digit printed on top of the previous entry's delta."""
+    """Every cell present and fired, so every cell has a counter and a
+    split label to fit -- the shape a narrow cell has to survive."""
     n = rows * cols
     panels = []
     for i in range(n):
         row, col = divmod(i, cols)
-        delta = 0.0 if i == 0 else round((i - n / 2) * 0.13, 2)
         panels.append(
             overlay_sprites.TilePanel(
                 label=FULL_GRID_LABELS[i],
@@ -470,8 +411,6 @@ def _full_grid_state(rows: int, cols: int):
                 shots_fired=i + 1,
                 expected_shots=32,
                 last_split=round(0.15 + 0.01 * i, 2),
-                rank=i + 1,
-                delta_to_leader=delta,
             )
         )
     return _state(panels), n
@@ -489,41 +428,6 @@ def _ink_extent(crop):
 
 @pytest.mark.parametrize("rows,cols", GRID_SIZES)
 @pytest.mark.parametrize("canvas_width,canvas_height", CANVAS_SIZES)
-def test_strip_entries_never_overlap_on_a_full_grid(canvas_width, canvas_height, rows, cols):
-    geometry = overlay_sprites.SpriteGeometry(
-        canvas_width=canvas_width, canvas_height=canvas_height, rows=rows, cols=cols
-    )
-    state, n = _full_grid_state(rows, cols)
-    image = overlay_sprites.render_state(state, geometry, theme=SPLITSMITH_THEME)
-    strip = image.crop((0, canvas_height - geometry.strip_height, canvas_width, canvas_height))
-    slot_width = canvas_width / n
-
-    # Entries live in disjoint, contiguous slots. An entry whose ink
-    # never reaches its own slot's edges cannot touch its neighbour's
-    # ink either -- that containment is what "no two entries overlap"
-    # reduces to when slots themselves are checked to tile the canvas
-    # with no gaps and no overlap (true here: slot_width * n ==
-    # canvas_width by construction).
-    for index in range(n):
-        slot = strip.crop((int(index * slot_width), 0, int((index + 1) * slot_width), strip.height))
-        extent = _ink_extent(slot)
-        assert extent is not None, (
-            f"strip slot {index} of {n} has no ink at all "
-            f"({rows}x{cols} grid, {canvas_width}x{canvas_height})"
-        )
-        left, right = extent
-        assert left > 0, (
-            f"strip slot {index} of {n} touches its left edge -- collides with the "
-            f"previous entry ({rows}x{cols} grid, {canvas_width}x{canvas_height})"
-        )
-        assert right < slot.width, (
-            f"strip slot {index} of {n} touches its right edge -- collides with the "
-            f"next entry ({rows}x{cols} grid, {canvas_width}x{canvas_height})"
-        )
-
-
-@pytest.mark.parametrize("rows,cols", GRID_SIZES)
-@pytest.mark.parametrize("canvas_width,canvas_height", CANVAS_SIZES)
 def test_cell_text_stays_inside_its_own_cell_on_a_full_grid(canvas_width, canvas_height, rows, cols):
     geometry = overlay_sprites.SpriteGeometry(
         canvas_width=canvas_width, canvas_height=canvas_height, rows=rows, cols=cols
@@ -533,8 +437,7 @@ def test_cell_text_stays_inside_its_own_cell_on_a_full_grid(canvas_width, canvas
     for panel in state.panels:
         x0 = panel.col * geometry.cell_width
         y0 = panel.row * geometry.cell_height
-        y1 = min(y0 + geometry.cell_height, canvas_height - geometry.strip_height)
-        cell = image.crop((x0, y0, x0 + geometry.cell_width, y1))
+        cell = image.crop((x0, y0, x0 + geometry.cell_width, y0 + geometry.cell_height))
         extent = _ink_extent(cell)
         assert extent is not None, (
             f"cell ({panel.row},{panel.col}) has no ink at all "
@@ -549,89 +452,6 @@ def test_cell_text_stays_inside_its_own_cell_on_a_full_grid(canvas_width, canvas
             f"cell ({panel.row},{panel.col}) text touches its right edge -- spills into "
             f"the next cell ({rows}x{cols} grid, {canvas_width}x{canvas_height})"
         )
-
-
-# --- strip labels have to stay injective ------------------------------
-#
-# The truncation that stops entries colliding is per entry and blind to
-# its neighbours, so two shooters sharing a long prefix can be cut to the
-# same string. Rendering two competitors under one name is a worse
-# failure than the overlap the truncation replaced. 4x4 at 1920x1080 is
-# where the slot is tightest (16 entries, 120px slots, an 88px budget at
-# the 12px font floor) and is a shape compare/layout.py routes to.
-
-NEAR_NAME_GEOMETRY = overlay_sprites.SpriteGeometry(canvas_width=1920, canvas_height=1080, rows=4, cols=4)
-
-
-def _unfired_roster_state(labels):
-    """One shooter on shot 1; everyone else yet to fire, so every other
-    strip entry carries its bare label -- the only entries that can
-    collide, since a rank number is unique by construction."""
-    panels = []
-    for index, label in enumerate(labels):
-        row, col = divmod(index, 4)
-        panels.append(
-            _panel(
-                label,
-                row,
-                col,
-                shots_fired=1 if index == 0 else 0,
-                last_split=0.25 if index == 0 else None,
-                rank=1 if index == 0 else None,
-                delta_to_leader=0.0 if index == 0 else None,
-            )
-        )
-    return _state(panels)
-
-
-def _strip_setup(state, geometry=NEAR_NAME_GEOMETRY, theme=SPLITSMITH_THEME):
-    """``(entries, font, budget)`` exactly as a render would derive them."""
-    image = Image.new("RGBA", (geometry.canvas_width, geometry.canvas_height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(image)
-    entries = overlay_sprites._strip_entries(state)
-    font, _size, budget = overlay_sprites._strip_font(draw, entries, geometry, theme=theme)
-    return draw, entries, font, budget
-
-
-NEAR_NAMES = ["Aaron", "Christophersen", "Christopherson"] + [f"Shooter{i}" for i in range(13)]
-DISTINCT_NAMES = ["Aaron", "Bennett", "Carlsson"] + [f"Shooter{i}" for i in range(13)]
-
-
-def test_two_shooters_sharing_a_long_prefix_do_not_render_as_one_name():
-    # CHRISTOPHERSEN and CHRISTOPHERSON both truncate to CHRISTOPHERS at
-    # an 88px budget: the names diverge at character 13, past what fits.
-    state = _unfired_roster_state(NEAR_NAMES)
-    draw, entries, font, budget = _strip_setup(state)
-    texts = overlay_sprites._strip_texts(draw, entries, font, budget)
-    assert len(set(texts)) == len(texts), f"two strip entries read the same: {texts}"
-
-
-def test_colliding_strip_entries_differ_in_the_rendered_pixels():
-    # The same claim through the real render: the two shooters sit in
-    # adjacent, equal-width slots, so identical text means byte-identical
-    # crops. Nothing about font metrics is assumed here.
-    state = _unfired_roster_state(NEAR_NAMES)
-    image = overlay_sprites.render_state(state, NEAR_NAME_GEOMETRY, theme=SPLITSMITH_THEME)
-    count = len(overlay_sprites._strip_entries(state))
-    slot_width = NEAR_NAME_GEOMETRY.canvas_width // count
-    y0 = NEAR_NAME_GEOMETRY.canvas_height - NEAR_NAME_GEOMETRY.strip_height
-
-    def slot(index):
-        x0 = index * slot_width
-        return image.crop((x0, y0, x0 + slot_width, NEAR_NAME_GEOMETRY.canvas_height))
-
-    # entries are [ranked..., unranked in panel order], so the two
-    # near-identical names are slots 1 and 2.
-    assert slot(1).tobytes() != slot(2).tobytes(), "two shooters' strip entries render as identical pixels"
-
-
-def test_ordinary_distinct_names_are_left_exactly_as_they_were():
-    # The disambiguation must cost the common case nothing: no ordinals,
-    # no extra truncation, no reordering.
-    state = _unfired_roster_state(DISTINCT_NAMES)
-    draw, entries, font, budget = _strip_setup(state)
-    texts = overlay_sprites._strip_texts(draw, entries, font, budget)
-    assert texts == ["1 AARON", "BENNETT", "CARLSSON"] + [f"SHOOTER{i}" for i in range(13)]
 
 
 def test_present_false_draws_nothing_even_with_shots_fired_and_split():
@@ -649,8 +469,6 @@ def test_present_false_draws_nothing_even_with_shots_fired_and_split():
             shots_fired=5,
             expected_shots=12,
             last_split=0.5,
-            rank=1,
-            delta_to_leader=0.0,
         )
     ]
     image = overlay_sprites.render_state(_state(panels), GEOMETRY, theme=THEME)
