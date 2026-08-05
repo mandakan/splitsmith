@@ -153,6 +153,31 @@ def test_a_binary_that_will_not_run_never_degrades_anything():
     assert caps.probed is False
 
 
+def test_a_wedged_binary_never_degrades_anything_either():
+    """``subprocess.TimeoutExpired`` joins the same "unanswerable" bucket.
+
+    ``TimeoutExpired`` is not an ``OSError``, so a probe that hangs (a
+    genuinely wedged binary, not just a missing one) needs its own catch
+    or it escapes ``_probe`` uncaught into ``render_grid_mp4`` and takes
+    the whole overlay render down before a single stage runs. The rule
+    is the same as a missing binary: an unanswerable probe must read as
+    "capability available", never "capability missing" -- a false
+    "missing" would silently strip the clock for everyone on a host
+    where the probe merely timed out once.
+    """
+
+    def runner(cmd, **kwargs):
+        assert kwargs.get("timeout"), "the probe must be bounded"
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=kwargs["timeout"])
+
+    caps = ffmpeg_capabilities("/wedged/ffmpeg", runner=runner)
+
+    assert caps.drawtext is True
+    assert caps.concat_option_keyword is True
+    assert caps.version == "unknown"
+    assert caps.probed is False
+
+
 def test_unrecognised_help_output_is_not_read_as_a_missing_filter():
     """A shape this does not understand must not be read as an answer."""
 

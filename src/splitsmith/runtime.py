@@ -318,12 +318,32 @@ class FFmpegCapabilities:
     probed: bool = True
 
 
+#: Bounded so a wedged binary cannot hang the overlay render before a
+#: single line is printed. Every probe here is trivial work -- a
+#: ``-version`` print, a filter listing, one 32x32 frame, a concat list
+#: that never opens a real file -- so this is generous headroom, not a
+#: tuned budget.
+_PROBE_TIMEOUT_S = 10.0
+
+
 def _probe(runner: Runner, cmd: list[str]) -> subprocess.CompletedProcess | None:
-    """Run one probe command, or ``None`` if it could not be run at all."""
+    """Run one probe command, or ``None`` if it could not be run or answer in time.
+
+    ``None`` joins a timeout to every other "could not be answered" case
+    (see :class:`FFmpegCapabilities`), which is what keeps the affected
+    capability reading ``True`` rather than ``False`` -- a probe that
+    never returns says nothing about the build, and must never degrade a
+    render that would have worked. ``subprocess.TimeoutExpired`` is not
+    an ``OSError``, so it needs its own arm here rather than falling out
+    of this function uncaught into :func:`render_grid_mp4`.
+    """
     try:
-        return runner(list(cmd), capture_output=True)
+        return runner(list(cmd), capture_output=True, timeout=_PROBE_TIMEOUT_S)
     except OSError as exc:  # missing binary, not executable, ...
         logger.debug("ffmpeg capability probe %r could not run: %s", cmd, exc)
+        return None
+    except subprocess.TimeoutExpired as exc:
+        logger.debug("ffmpeg capability probe %r timed out: %s", cmd, exc)
         return None
 
 
