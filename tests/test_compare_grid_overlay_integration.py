@@ -132,18 +132,34 @@ NOISE_FLOOR_MEAN_ABS_DIFF = 2.0  # measured 0.06-1.04 where nothing is drawn
 FIRING_QUADRANT_MIN_MEAN_ABS_DIFF = 5.0  # measured 16.79 with the counter+clock drawn
 UNREACHED_QUADRANT_MAX_MEAN_ABS_DIFF = NOISE_FLOOR_MEAN_ABS_DIFF
 
-#: The pre-beep check gets its own, wider ceiling rather than sharing the
-#: noise floor. It covers the whole canvas minus the strip band, so it
-#: pools every moving pixel of the source clip, and it used to fail about
-#: 4% of full-suite runs at 4.29 against a 2.0 ceiling calibrated on 1.04.
-#: Measured on this fixture (640x360, testsrc2, ffmpeg 6.1.1):
-#:   - same frame, both renders, nothing drawn:      1.02-1.04
-#:   - one frame apart (the flake, now impossible):  3.89-4.17
-#:   - the overlay actually drawing on a tile:       16.8-35.1
-#: 8.0 -- the same figure the sprite and clock sub-boxes use -- sits
-#: 8x above the real noise and half an order of magnitude below the
-#: smallest genuine draw signal. It is a gate, not a calibration.
-PRE_BEEP_MAX_MEAN_ABS_DIFF = 8.0
+#: The pre-beep check gets its own ceiling rather than sharing the noise
+#: floor, because it guards a different crop: the whole canvas minus the
+#: strip band. That crop pools every moving pixel of the source clip and
+#: dilutes anything the overlay draws into one corner of one cell, so its
+#: numbers are much smaller than the per-element ones below.
+#:
+#: Every band here was measured on *this* crop (640x360, testsrc2,
+#: ffmpeg 6.1.1). An earlier revision of this comment quoted a
+#: "16.8-35.1 the overlay actually drawing" band that had been measured
+#: on the firing shooter's quadrant and on the sub-boxes further down --
+#: not on the box this constant guards:
+#:   - same frame, both renders, nothing drawn:              1.04-1.08
+#:   - head pad no longer threaded into the sprite builder,
+#:     so Anders' counter and split label draw at t=0.9:      4.00
+#:   - one frame apart (the old flake, now impossible since
+#:     ``_frame`` selects by index):                          3.89-4.82
+#:   - a whole quadrant of overlay drawing -- this same crop
+#:     sampled at T_AFTER_FIRST_SHOT instead:                 7.06
+#: This was 8.0, which sat *above* every one of those: a full quadrant of
+#: pre-beep overlay cleared it. 2.5 is the tightest defensible value --
+#: ~2.3x over the noise band, and below both the real pre-beep mutant at
+#: 4.00 and the 7.06 whole-quadrant draw.
+#:
+#: It stays a gross gate even so. The instrument that actually holds this
+#: line is the counter-corner check further down, whose crop is small
+#: enough for a single counter to move it: 1.18 clean against 7.96 under
+#: the same head-pad mutation.
+PRE_BEEP_MAX_MEAN_ABS_DIFF = 2.5
 
 # --- sprite-vs-clock sub-boxes ------------------------------------------
 #
@@ -163,21 +179,30 @@ PRE_BEEP_MAX_MEAN_ABS_DIFF = 8.0
 #   - CLOCK_BOX: top-right quarter of the cell.
 #   - SPLIT_BOX: bottom half of the cell, inset from both edges.
 #
+# The counter and the split label are asserted *separately*, never
+# pooled into one mean. They are regions of very unequal signal -- the
+# split label is a bigger glyph run against a busier part of the frame
+# and reads 4x the counter -- so averaging them lets the larger mask the
+# smaller: with the counter silently dead the pooled figure is still
+# 18.2, comfortably over any threshold the pooled measure could carry,
+# while the reverse (split dead) drops to 4.8 and fails. One of the two
+# partial failures would ship green. Separate boxes, separate
+# thresholds, each measured.
+#
 # Measured against this fixture (same render as above, T_AFTER_FIRST_SHOT):
-#   real render                    counter 8.19   clock 22.63   split 35.08
-#   real render, sprite+split pooled                            21.63
-#   overlay_sprites._draw_panel blanked (``if True: return`` in place of
-#   ``if not panel.present: return`` -- draws nothing for any tile, ever)
-#                                   counter 1.35   clock 22.68   split 1.41
-#                                   sprite+split pooled            1.38
-# The clock box is unmoved by the mutation (confirms it is drawn by a
-# separate code path); the sprite-only pooled figure drops from 21.63 to
-# 1.38, below NOISE_FLOOR_MEAN_ABS_DIFF -- so a broken sprite renderer
-# now fails FIRING_SPRITE_MIN_MEAN_ABS_DIFF while a broken clock alone
-# would fail FIRING_CLOCK_MIN_MEAN_ABS_DIFF, each independently of the
-# other. See task-6-report.md, "Finding 1", for the full mutation record.
-FIRING_SPRITE_MIN_MEAN_ABS_DIFF = 8.0  # measured 21.63 real, 1.38 with the sprite panel blanked
-FIRING_CLOCK_MIN_MEAN_ABS_DIFF = 8.0  # measured 22.63 real, 22.68 with the sprite panel blanked
+#                                       counter   clock   split
+#   real render                            8.16   22.62   35.10
+#   counter drawing removed from
+#   ``overlay_sprites._draw_panel``        1.33   22.71   35.11
+#   split-label drawing removed instead    8.16   22.55    1.45
+# The clock box is unmoved by either mutation, which is what confirms it
+# is drawn by a separate code path (``mp4_grid._clock_filters``) rather
+# than by the sprite. Each threshold sits between its own dead and live
+# figures: 4.0 is 3x the dead counter and half the live one; 8.0 is 5.5x
+# the dead split label and a quarter of the live one.
+FIRING_COUNTER_MIN_MEAN_ABS_DIFF = 4.0  # measured 8.16 real, 1.33 with the counter not drawn
+FIRING_SPLIT_MIN_MEAN_ABS_DIFF = 8.0  # measured 35.10 real, 1.45 with the split label not drawn
+FIRING_CLOCK_MIN_MEAN_ABS_DIFF = 8.0  # measured 22.62 real, unmoved by either sprite mutation
 
 #: One AAC frame, the unit ``nb_read_frames * 1024 / sample_rate``
 #: resolves to. The two renders' audio graphs are byte-for-byte
@@ -335,9 +360,10 @@ def _frame(path: Path, at: float, tmp_path: Path, tag: str) -> Image.Image:
     """Decode the frame covering ``at`` seconds to a PNG and load it.
 
     Selected by *frame index*, never by seeking to a timestamp. Both
-    sample points this test uses land exactly on a frame boundary (0.3s
-    and 2.0s are frames 9 and 60 of a 30fps canvas, whose pts are
-    ``0.300000`` and ``2.000000`` to the tick), so a seek that keeps the
+    sample points this test uses land exactly on a frame boundary
+    (``T_BEFORE_BEEP`` 0.9s and ``T_AFTER_FIRST_SHOT`` 2.0s are frames 27
+    and 60 of a 30fps canvas, whose pts are ``0.900000`` and
+    ``2.000000`` to the tick), so a seek that keeps the
     first frame with ``pts >= target`` is deciding a tie: any sub-tick
     rounding anywhere in the seek path picks the neighbouring frame
     instead. Measured on this fixture, the two renders sampled at the
@@ -370,18 +396,6 @@ def _mean_abs_diff(a: Image.Image, b: Image.Image, box: tuple[int, int, int, int
     """Mean absolute per-channel pixel difference over ``box`` (PIL crop coords)."""
     ca = np.asarray(a.crop(box), dtype=np.int16)
     cb = np.asarray(b.crop(box), dtype=np.int16)
-    return float(np.abs(ca - cb).mean())
-
-
-def _mean_abs_diff_multi(a: Image.Image, b: Image.Image, boxes: list[tuple[int, int, int, int]]) -> float:
-    """Mean absolute per-channel pixel difference pooled over several
-    (possibly non-contiguous) boxes -- e.g. the sprite's counter and
-    split-label regions, which sit in different corners of the same
-    cell and cannot be expressed as one rectangular crop."""
-    parts_a = [np.asarray(a.crop(box), dtype=np.int16).reshape(-1, 3) for box in boxes]
-    parts_b = [np.asarray(b.crop(box), dtype=np.int16).reshape(-1, 3) for box in boxes]
-    ca = np.concatenate(parts_a, axis=0)
-    cb = np.concatenate(parts_b, axis=0)
     return float(np.abs(ca - cb).mean())
 
 
@@ -517,15 +531,23 @@ def test_overlay_reaches_the_rendered_pixels(tmp_path: Path, synthetic_source_vi
     # average. Split it into the sprite's own regions (counter,
     # top-left quarter; split label, bottom half) versus the clock's
     # (top-right quarter) and require each to independently show real
-    # content. See the module-level comment above FIRING_SPRITE_MIN_MEAN_ABS_DIFF.
+    # content. The two sprite regions get one assertion each rather than
+    # one pooled mean: see the comment above FIRING_COUNTER_MIN_MEAN_ABS_DIFF
+    # for why pooling lets a dead counter ride in on the split label.
     counter_box = (0, 0, cell_w // 2, cell_h // 2)
     clock_box = (cell_w // 2, 0, cell_w, cell_h // 2)
     split_box = (cell_w // 4, cell_h // 2, 3 * cell_w // 4, cell_h)
 
-    sprite_diff = _mean_abs_diff_multi(after_plain, after_overlaid, [counter_box, split_box])
-    assert sprite_diff >= FIRING_SPRITE_MIN_MEAN_ABS_DIFF, (
-        f"no visible sprite content (counter + split label) in the firing shooter's "
-        f"quadrant: mean abs diff {sprite_diff:.2f} (threshold {FIRING_SPRITE_MIN_MEAN_ABS_DIFF})"
+    counter_diff = _mean_abs_diff(after_plain, after_overlaid, counter_box)
+    assert counter_diff >= FIRING_COUNTER_MIN_MEAN_ABS_DIFF, (
+        f"no visible shot counter in the firing shooter's quadrant: mean abs diff "
+        f"{counter_diff:.2f} (threshold {FIRING_COUNTER_MIN_MEAN_ABS_DIFF})"
+    )
+
+    split_diff = _mean_abs_diff(after_plain, after_overlaid, split_box)
+    assert split_diff >= FIRING_SPLIT_MIN_MEAN_ABS_DIFF, (
+        f"no visible split label in the firing shooter's quadrant: mean abs diff "
+        f"{split_diff:.2f} (threshold {FIRING_SPLIT_MIN_MEAN_ABS_DIFF})"
     )
 
     clock_diff = _mean_abs_diff(after_plain, after_overlaid, clock_box)
