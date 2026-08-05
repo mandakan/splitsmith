@@ -1,6 +1,7 @@
 """Sprite rendering: where the ink lands, and the cache key."""
 
 import pytest
+from PIL import Image, ImageDraw
 
 from splitsmith import overlay_text
 from splitsmith.compare import overlay_sprites
@@ -548,6 +549,89 @@ def test_cell_text_stays_inside_its_own_cell_on_a_full_grid(canvas_width, canvas
             f"cell ({panel.row},{panel.col}) text touches its right edge -- spills into "
             f"the next cell ({rows}x{cols} grid, {canvas_width}x{canvas_height})"
         )
+
+
+# --- strip labels have to stay injective ------------------------------
+#
+# The truncation that stops entries colliding is per entry and blind to
+# its neighbours, so two shooters sharing a long prefix can be cut to the
+# same string. Rendering two competitors under one name is a worse
+# failure than the overlap the truncation replaced. 4x4 at 1920x1080 is
+# where the slot is tightest (16 entries, 120px slots, an 88px budget at
+# the 12px font floor) and is a shape compare/layout.py routes to.
+
+NEAR_NAME_GEOMETRY = overlay_sprites.SpriteGeometry(canvas_width=1920, canvas_height=1080, rows=4, cols=4)
+
+
+def _unfired_roster_state(labels):
+    """One shooter on shot 1; everyone else yet to fire, so every other
+    strip entry carries its bare label -- the only entries that can
+    collide, since a rank number is unique by construction."""
+    panels = []
+    for index, label in enumerate(labels):
+        row, col = divmod(index, 4)
+        panels.append(
+            _panel(
+                label,
+                row,
+                col,
+                shots_fired=1 if index == 0 else 0,
+                last_split=0.25 if index == 0 else None,
+                rank=1 if index == 0 else None,
+                delta_to_leader=0.0 if index == 0 else None,
+            )
+        )
+    return _state(panels)
+
+
+def _strip_setup(state, geometry=NEAR_NAME_GEOMETRY, theme=SPLITSMITH_THEME):
+    """``(entries, font, budget)`` exactly as a render would derive them."""
+    image = Image.new("RGBA", (geometry.canvas_width, geometry.canvas_height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    entries = overlay_sprites._strip_entries(state)
+    font, _size, budget = overlay_sprites._strip_font(draw, entries, geometry, theme=theme)
+    return draw, entries, font, budget
+
+
+NEAR_NAMES = ["Aaron", "Christophersen", "Christopherson"] + [f"Shooter{i}" for i in range(13)]
+DISTINCT_NAMES = ["Aaron", "Bennett", "Carlsson"] + [f"Shooter{i}" for i in range(13)]
+
+
+def test_two_shooters_sharing_a_long_prefix_do_not_render_as_one_name():
+    # CHRISTOPHERSEN and CHRISTOPHERSON both truncate to CHRISTOPHERS at
+    # an 88px budget: the names diverge at character 13, past what fits.
+    state = _unfired_roster_state(NEAR_NAMES)
+    draw, entries, font, budget = _strip_setup(state)
+    texts = overlay_sprites._strip_texts(draw, entries, font, budget)
+    assert len(set(texts)) == len(texts), f"two strip entries read the same: {texts}"
+
+
+def test_colliding_strip_entries_differ_in_the_rendered_pixels():
+    # The same claim through the real render: the two shooters sit in
+    # adjacent, equal-width slots, so identical text means byte-identical
+    # crops. Nothing about font metrics is assumed here.
+    state = _unfired_roster_state(NEAR_NAMES)
+    image = overlay_sprites.render_state(state, NEAR_NAME_GEOMETRY, theme=SPLITSMITH_THEME)
+    count = len(overlay_sprites._strip_entries(state))
+    slot_width = NEAR_NAME_GEOMETRY.canvas_width // count
+    y0 = NEAR_NAME_GEOMETRY.canvas_height - NEAR_NAME_GEOMETRY.strip_height
+
+    def slot(index):
+        x0 = index * slot_width
+        return image.crop((x0, y0, x0 + slot_width, NEAR_NAME_GEOMETRY.canvas_height))
+
+    # entries are [ranked..., unranked in panel order], so the two
+    # near-identical names are slots 1 and 2.
+    assert slot(1).tobytes() != slot(2).tobytes(), "two shooters' strip entries render as identical pixels"
+
+
+def test_ordinary_distinct_names_are_left_exactly_as_they_were():
+    # The disambiguation must cost the common case nothing: no ordinals,
+    # no extra truncation, no reordering.
+    state = _unfired_roster_state(DISTINCT_NAMES)
+    draw, entries, font, budget = _strip_setup(state)
+    texts = overlay_sprites._strip_texts(draw, entries, font, budget)
+    assert texts == ["1 AARON", "BENNETT", "CARLSSON"] + [f"SHOOTER{i}" for i in range(13)]
 
 
 def test_present_false_draws_nothing_even_with_shots_fired_and_split():

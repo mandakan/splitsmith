@@ -525,6 +525,142 @@ def _fit_strip_entry(
     return text
 
 
+def _fit_labelled_entry(
+    draw: ImageDraw.ImageDraw,
+    panel: TilePanel,
+    label: str,
+    suffix: str,
+    font,
+    budget: float,
+) -> str:
+    """Like :func:`_fit_strip_entry`, but with ``suffix`` welded to the
+    label and kept whatever else has to go. The suffix is what makes two
+    otherwise-identical entries distinguishable, so the label shrinks
+    around it -- and if even a bare suffix does not fit, it is still
+    drawn: an entry that overhangs its slot by a character is a smaller
+    failure than two shooters rendered under one name.
+    """
+    rank, _, delta = _strip_entry_parts(panel)
+    trimmed = label
+    while trimmed:
+        text = _join_strip_parts(rank, trimmed + suffix, delta)
+        if _text_width(draw, text, font) <= budget:
+            return text
+        trimmed = trimmed[:-1]
+    text = _join_strip_parts(rank, suffix, delta)
+    if _text_width(draw, text, font) <= budget:
+        return text
+    return _join_strip_parts(rank, suffix, None)
+
+
+def _strip_texts(
+    draw: ImageDraw.ImageDraw,
+    entries: Sequence[TilePanel],
+    font,
+    budget: float,
+) -> list[str]:
+    """Every entry's fitted text, with no two entries reading alike.
+
+    :func:`_fit_strip_entry` truncates each entry blind to its
+    neighbours, so two shooters sharing a long prefix collapse onto the
+    same string: at a 4x4 grid's 88px slot ``CHRISTOPHERSEN`` and
+    ``CHRISTOPHERSON`` both cut to ``CHRISTOPHERS``, and the strip then
+    shows one name for two people -- a worse failure than the entry
+    overlap this truncation was introduced to prevent. Ranked entries
+    cannot collide, since the rank number is retained and unique; an
+    entry that has not fired carries only its label.
+
+    Colliding entries get a deterministic ``#n`` ordinal welded to the
+    label, numbered by strip position, with the label shrinking to make
+    room. Entries that do not collide are left exactly as they were, so
+    the ordinary case -- distinct names, or names that differ inside the
+    budget -- renders identically to before.
+
+    Two approaches were considered and dropped. Re-cutting the group to
+    the shortest prefix that tells its labels apart cannot work *here*:
+    :func:`_fit_strip_entry` already keeps the longest prefix that fits,
+    and prefix width grows strictly with length (measured: 12 characters
+    of CHRISTOPHERSEN is 86px against an 88px budget, 13 is 94px), so a
+    prefix long enough to distinguish is by construction too wide. Any
+    such pass would be a branch that can never run. Eliding the middle to
+    keep the diverging tail reads better than an ordinal, but it is not
+    injective in general, so it would need this fallback underneath it
+    anyway -- two code paths for a case that needs a 12-character shared
+    prefix between two shooters who have both yet to fire, at the
+    tightest supported slot.
+    """
+    texts = [_fit_strip_entry(draw, panel, font, budget) for panel in entries]
+    groups: dict[str, list[int]] = {}
+    for index, text in enumerate(texts):
+        groups.setdefault(text, []).append(index)
+
+    for indexes in groups.values():
+        if len(indexes) == 1:
+            continue
+        for ordinal, index in enumerate(indexes, start=1):
+            texts[index] = _fit_labelled_entry(
+                draw, entries[index], entries[index].label.upper(), f"#{ordinal}", font, budget
+            )
+    return texts
+
+
+def _strip_entries(state: OverlayState) -> list[TilePanel]:
+    """The strip's entries in slot order: ranked tiles first, then those
+    that have not fired. Empty when nobody has fired -- there is no
+    ranking to show yet, and a band of bare labels is only noise the
+    viewer has already seen on the tiles above."""
+    present = [p for p in state.panels if p.present]
+    ranked = sorted((p for p in present if p.rank is not None), key=lambda p: p.rank)
+    if not ranked:
+        return []
+    return ranked + [p for p in present if p.rank is None]
+
+
+def _strip_font(
+    draw: ImageDraw.ImageDraw,
+    entries: Sequence[TilePanel],
+    geometry: SpriteGeometry,
+    *,
+    theme: OverlayTheme,
+) -> tuple[object, int, float]:
+    """``(font, size, budget)`` for one strip's entries.
+
+    The size comes from the *tightest* slot: entry count and canvas width
+    drive it, not ``strip_height`` alone, which is what let a 3x3 with 8+
+    shooters collide (a rank digit printing on top of the previous
+    entry's delta). ``budget`` is the width one entry has inside its own
+    slot at the chosen size.
+
+    Split out of :func:`_draw_strip` so a test can ask for the same font
+    and budget a render would use instead of re-deriving them and
+    drifting from it.
+    """
+    slot_width = geometry.canvas_width / len(entries)
+    base_size = max(20, geometry.strip_height * 2 // 3)
+
+    # The margin has to absorb not just the glyph bbox but the stroke and
+    # blurred drop shadow drawn around it (see the ``pad`` computation
+    # inside ``_draw_text_with_shadow``) -- a size picked to fit the bare
+    # text could still let the shadow halo of one entry touch the next.
+    def margin_for(size: int) -> float:
+        stroke = max(2, size // 18)
+        offset = max(2, size // 24)
+        blur = max(3, size // 12)
+        return max(6, geometry.strip_height // 12) + blur * 2 + offset + stroke
+
+    size = base_size
+    while size > _MIN_FONT_SIZE:
+        budget = slot_width - 2 * margin_for(size)
+        font = _scaled_font(theme, size)
+        if budget > 0 and all(_text_width(draw, _strip_entry_text(p), font) <= budget for p in entries):
+            break
+        size -= 2
+    else:
+        font = _scaled_font(theme, _MIN_FONT_SIZE)
+        size = _MIN_FONT_SIZE
+    return font, size, max(1.0, slot_width - 2 * margin_for(size))
+
+
 def _draw_strip(
     canvas: Image.Image,
     draw: ImageDraw.ImageDraw,
@@ -548,42 +684,18 @@ def _draw_strip(
     let a 3x3 with 8+ shooters collide (one rank digit printing on top of
     the previous entry's delta). Any entry that still doesn't fit at the
     size floor gets its label truncated by :func:`_fit_strip_entry`
-    rather than left to collide with its neighbour.
+    rather than left to collide with its neighbour, and
+    :func:`_strip_texts` then guarantees no two of those truncations read
+    the same -- one name over two shooters is worse than either
+    collision.
     """
-    present = [p for p in state.panels if p.present]
-    ranked = sorted((p for p in present if p.rank is not None), key=lambda p: p.rank)
-    if not ranked:
+    entries = _strip_entries(state)
+    if not entries:
         return
-    unranked = [p for p in present if p.rank is None]
-    entries = ranked + unranked
 
-    n = len(entries)
-    slot_width = geometry.canvas_width / n
-    base_size = max(20, geometry.strip_height * 2 // 3)
-
-    # The margin has to absorb not just the glyph bbox but the stroke and
-    # blurred drop shadow drawn around it (see the ``pad`` computation
-    # inside ``_draw_text_with_shadow``) -- a size picked to fit the bare
-    # text could still let the shadow halo of one entry touch the next.
-    def margin_for(size: int) -> float:
-        stroke = max(2, size // 18)
-        offset = max(2, size // 24)
-        blur = max(3, size // 12)
-        return max(6, geometry.strip_height // 12) + blur * 2 + offset + stroke
-
-    size = base_size
-    while size > _MIN_FONT_SIZE:
-        budget = slot_width - 2 * margin_for(size)
-        font = _scaled_font(theme, size)
-        if budget > 0 and all(_text_width(draw, _strip_entry_text(p), font) <= budget for p in entries):
-            break
-        size -= 2
-    else:
-        font = _scaled_font(theme, _MIN_FONT_SIZE)
-        size = _MIN_FONT_SIZE
-    budget = max(1.0, slot_width - 2 * margin_for(size))
-
-    texts = [_fit_strip_entry(draw, p, font, budget) for p in entries]
+    slot_width = geometry.canvas_width / len(entries)
+    font, size, budget = _strip_font(draw, entries, geometry, theme=theme)
+    texts = _strip_texts(draw, entries, font, budget)
 
     stroke_width = max(2, size // 18)
     shadow_offset = max(2, size // 24)
