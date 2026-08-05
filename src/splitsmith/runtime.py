@@ -392,10 +392,16 @@ def _probe_drawtext(binary: str, font_path: Path | None, runner: Runner) -> bool
 
     Then, when the caller has a ``font_path`` -- the compare grid
     materializes one before it renders anything -- actually draw with it:
-    one 32x32 frame through ``lavfi``, ~50ms, once per run. That is the
-    only form that catches a listed filter that cannot initialise and a
-    font file this freetype refuses to open, both of which otherwise
-    surface as every stage failing after the encode has started.
+    one 32x32 frame through ``lavfi``, ~50ms, once per run. This step
+    catches a listed filter that cannot initialise, which otherwise
+    surfaces as every stage failing after the encode has started.
+
+    It does **not** reliably catch a bad ``font_path``. Measured on
+    ffmpeg 6.1.1: a nonexistent path (``fontfile='/nope/missing.ttf'``)
+    and a 2 KB random-bytes ``.ttf`` both exit ``0`` -- ``drawtext``
+    silently falls back to fontconfig's ``Sans`` rather than failing the
+    frame. The exercise only turns that into a failure when the host is
+    *also* fontless, which is not the case this probe exists for.
     """
     completed = _probe(runner, [binary, "-hide_banner", "-h", "filter=drawtext"])
     if completed is None:
