@@ -109,7 +109,8 @@ T_AFTER_FIRST_SHOT = 2.0
 
 # --- pixel-diff thresholds --------------------------------------------
 #
-# Measured against this exact fixture (testsrc2 synthetic clip, 640x360
+# Every number below was re-measured after the bottom delta strip was
+# removed, against this exact fixture (testsrc2 synthetic clip, 640x360
 # CANVAS above, ffmpeg 6.1.1) by rendering both files and diffing them
 # with the same helpers this test uses. Re-measure if the canvas size,
 # theme or fixture clip changes -- these are not derived from first
@@ -123,56 +124,61 @@ T_AFTER_FIRST_SHOT = 2.0
 # ``format=yuv420p`` round trip through the whole frame even where the
 # composited sprite is fully transparent, which shows up as roughly a
 # 1-LSB rounding difference:
-#   - pre-beep, full canvas minus the strip band: 1.04
-#   - post-first-shot, the unreached (row1,col1) quadrant minus the
-#     strip band: 0.06
+#   - pre-beep, the whole canvas: 1.01
+#   - post-first-shot, the unreached (row1,col1) quadrant, whole: 0.04
 #   - post-first-shot, Anders' own (row0,col0) quadrant, where the
-#     counter + clock are actually drawn: 16.79
-NOISE_FLOOR_MEAN_ABS_DIFF = 2.0  # measured 0.06-1.04 where nothing is drawn
-FIRING_QUADRANT_MIN_MEAN_ABS_DIFF = 5.0  # measured 16.79 with the counter+clock drawn
+#     counter + clock are actually drawn: 16.73
+#
+# The strip is gone, so a state where nobody has fired composites a
+# fully transparent sprite and every crop here is the round-trip figure
+# alone. That is exactly why the pre-beep gate below can no longer be
+# the only instrument: it now passes trivially against a renderer that
+# draws nothing ever. The post-shot sub-box checks are what carry that.
+NOISE_FLOOR_MEAN_ABS_DIFF = 2.0  # measured 0.04-1.18 where nothing is drawn
+FIRING_QUADRANT_MIN_MEAN_ABS_DIFF = 5.0  # measured 16.73 with the counter+clock drawn
 UNREACHED_QUADRANT_MAX_MEAN_ABS_DIFF = NOISE_FLOOR_MEAN_ABS_DIFF
 
 #: The pre-beep check gets its own ceiling rather than sharing the noise
-#: floor, because it guards a different crop: the whole canvas minus the
-#: strip band. That crop pools every moving pixel of the source clip and
-#: dilutes anything the overlay draws into one corner of one cell, so its
-#: numbers are much smaller than the per-element ones below.
+#: floor, because it guards a different crop: the whole canvas. That crop
+#: pools every moving pixel of the source clip and dilutes anything the
+#: overlay draws into one corner of one cell, so its numbers are much
+#: smaller than the per-element ones below. It used to exclude a strip
+#: band across the bottom; nothing is drawn outside the cells now, so it
+#: takes the whole frame.
 #:
-#: Every band here was measured on *this* crop (640x360, testsrc2,
-#: ffmpeg 6.1.1). An earlier revision of this comment quoted a
-#: "16.8-35.1 the overlay actually drawing" band that had been measured
-#: on the firing shooter's quadrant and on the sub-boxes further down --
-#: not on the box this constant guards:
-#:   - same frame, both renders, nothing drawn:              1.04-1.08
-#:   - head pad no longer threaded into the sprite builder,
-#:     so Anders' counter and split label draw at t=0.9:      4.00
-#:   - one frame apart (the old flake, now impossible since
-#:     ``_frame`` selects by index):                          3.89-4.82
+#: Every band here was re-measured on *this* crop (640x360, testsrc2,
+#: ffmpeg 6.1.1):
+#:   - same frame, both renders, nothing drawn:              1.01
+#:   - head pad no longer threaded into the sprite builder
+#:     (``_stage_overlay_plan`` passing ``head_pad_seconds=0.0``),
+#:     so Anders' counter and split label draw at t=0.9:      3.55
 #:   - a whole quadrant of overlay drawing -- this same crop
-#:     sampled at T_AFTER_FIRST_SHOT instead:                 7.06
-#: This was 8.0, which sat *above* every one of those: a full quadrant of
-#: pre-beep overlay cleared it. 2.5 is the tightest defensible value --
-#: ~2.3x over the noise band, and below both the real pre-beep mutant at
-#: 4.00 and the 7.06 whole-quadrant draw.
+#:     sampled at T_AFTER_FIRST_SHOT instead:                 6.20
+#: 2.0 sits ~2x over the clean figure and ~1.8x under the real pre-beep
+#: mutant. (One frame apart on this crop measures 4.23-4.27, above the
+#: mutant -- which is why ``_frame`` selects by index and never seeks:
+#: no threshold could separate a mis-tied frame from real drawing.)
 #:
 #: It stays a gross gate even so. The instrument that actually holds this
 #: line is the counter-corner check further down, whose crop is small
-#: enough for a single counter to move it: 1.18 clean against 7.96 under
+#: enough for a single counter to move it: 1.18 clean against 8.00 under
 #: the same head-pad mutation.
-PRE_BEEP_MAX_MEAN_ABS_DIFF = 2.5
+PRE_BEEP_MAX_MEAN_ABS_DIFF = 2.0
 
 # --- sprite-vs-clock sub-boxes ------------------------------------------
 #
 # The whole-quadrant checks above prove *something* from the overlay
 # landed in the right cell, but a fully-blanked ``overlay_sprites``
 # renderer (counter + split label drawn nowhere at all) still clears
-# FIRING_QUADRANT_MIN_MEAN_ABS_DIFF, because the per-tile clock is a
-# separate ``drawtext`` chain in ``mp4_grid.py`` that keeps drawing on
-# its own. A fully broken sprite panel would ship green under that
-# check alone. So the quadrant is additionally split into three coarse,
-# non-overlapping quarter/half boxes -- no font-metric precision needed,
-# since the sprite panel (``overlay_sprites._draw_panel``: counter at
-# the cell's top-left corner, split label bottom-center) and the clock
+# FIRING_QUADRANT_MIN_MEAN_ABS_DIFF -- measured 6.60 against a 5.0
+# threshold with ``_draw_panel`` returning immediately -- because the
+# per-tile clock is a separate ``drawtext`` chain in ``mp4_grid.py`` that
+# keeps drawing on its own. A fully broken sprite panel would ship green
+# under that check alone. So the quadrant is additionally split into
+# three coarse, non-overlapping quarter/half boxes -- no font-metric
+# precision needed, since the sprite panel
+# (``overlay_sprites._draw_panel``: counter at the cell's top-left
+# corner, split label bottom-center) and the clock
 # (``mp4_grid._clock_filters``: top-right corner) are non-overlapping by
 # construction:
 #   - COUNTER_BOX: top-left quarter of the cell.
@@ -183,26 +189,23 @@ PRE_BEEP_MAX_MEAN_ABS_DIFF = 2.5
 # pooled into one mean. They are regions of very unequal signal -- the
 # split label is a bigger glyph run against a busier part of the frame
 # and reads 4x the counter -- so averaging them lets the larger mask the
-# smaller: with the counter silently dead the pooled figure is still
-# 18.2, comfortably over any threshold the pooled measure could carry,
-# while the reverse (split dead) drops to 4.8 and fails. One of the two
-# partial failures would ship green. Separate boxes, separate
-# thresholds, each measured.
+# smaller. Separate boxes, separate thresholds, each measured.
 #
-# Measured against this fixture (same render as above, T_AFTER_FIRST_SHOT):
-#                                       counter   clock   split
-#   real render                            8.16   22.62   35.10
+# Re-measured against this fixture at T_AFTER_FIRST_SHOT, post-removal:
+#                                       counter   clock   split  quadrant
+#   real render                            8.23   22.61   35.06     16.73
 #   counter drawing removed from
-#   ``overlay_sprites._draw_panel``        1.33   22.71   35.11
-#   split-label drawing removed instead    8.16   22.55    1.45
-# The clock box is unmoved by either mutation, which is what confirms it
-# is drawn by a separate code path (``mp4_grid._clock_filters``) rather
-# than by the sprite. Each threshold sits between its own dead and live
-# figures: 4.0 is 3x the dead counter and half the live one; 8.0 is 5.5x
-# the dead split label and a quarter of the live one.
-FIRING_COUNTER_MIN_MEAN_ABS_DIFF = 4.0  # measured 8.16 real, 1.33 with the counter not drawn
-FIRING_SPLIT_MIN_MEAN_ABS_DIFF = 8.0  # measured 35.10 real, 1.45 with the split label not drawn
-FIRING_CLOCK_MIN_MEAN_ABS_DIFF = 8.0  # measured 22.62 real, unmoved by either sprite mutation
+#   ``overlay_sprites._draw_panel``        1.37   22.59   35.10     15.01
+#   split-label drawing removed instead    8.16   22.56    1.42      8.29
+#   the whole panel blanked                1.33   22.65    1.43      6.60
+# The clock box is unmoved by any of them, which is what confirms it is
+# drawn by a separate code path (``mp4_grid._clock_filters``) rather than
+# by the sprite. Each threshold sits between its own dead and live
+# figures: 4.0 is ~3x the dead counter and half the live one; 8.0 is
+# ~5.6x the dead split label and a quarter of the live one.
+FIRING_COUNTER_MIN_MEAN_ABS_DIFF = 4.0  # measured 8.23 real, 1.37 with the counter not drawn
+FIRING_SPLIT_MIN_MEAN_ABS_DIFF = 8.0  # measured 35.06 real, 1.42 with the split label not drawn
+FIRING_CLOCK_MIN_MEAN_ABS_DIFF = 8.0  # measured 22.61 real, unmoved by any sprite mutation
 
 #: One AAC frame, the unit ``nb_read_frames * 1024 / sample_rate``
 #: resolves to. The two renders' audio graphs are byte-for-byte
@@ -434,8 +437,6 @@ def test_sprite_states_decode_at_the_boundaries_they_were_written_at(tmp_path: P
                     shots_fired=i,
                     expected_shots=None,
                     last_split=None,
-                    rank=1 if i else None,
-                    delta_to_leader=0.0 if i else None,
                 ),
             ),
         )
@@ -483,23 +484,20 @@ def test_overlay_reaches_the_rendered_pixels(tmp_path: Path, synthetic_source_vi
     assert _stream_counts(overlaid) == (1, 4)
 
     cell_w, cell_h = CANVAS.width // 2, CANVAS.height // 2
-    strip_h = max(48, CANVAS.height // 20)
 
     anders_quadrant = (0, 0, cell_w, cell_h)
-    # Row 1 (Mathias / the unreached cell) touches the strip band; row 0
-    # (Anders / Bea) sits entirely above it, so Anders' quadrant needs
-    # no band exclusion.
-    assert cell_h < CANVAS.height - strip_h, "fixture assumption: row 0 must clear the strip band"
-    unreached_quadrant_no_strip = (cell_w, cell_h, 2 * cell_w, CANVAS.height - strip_h)
+    # Nothing is drawn outside the cells any more, so the unreached cell
+    # is checked whole -- no band to carve out of it.
+    unreached_quadrant = (cell_w, cell_h, 2 * cell_w, CANVAS.height)
 
     # --- before the beep: nothing drawn anywhere -------------------
     before_plain = _frame(plain, T_BEFORE_BEEP, tmp_path, "plain-pre")
     before_overlaid = _frame(overlaid, T_BEFORE_BEEP, tmp_path, "overlay-pre")
-    pre_beep_box = (0, 0, CANVAS.width, CANVAS.height - strip_h)
+    pre_beep_box = (0, 0, CANVAS.width, CANVAS.height)
     pre_beep_diff = _mean_abs_diff(before_plain, before_overlaid, pre_beep_box)
     assert pre_beep_diff <= PRE_BEEP_MAX_MEAN_ABS_DIFF, (
         f"overlay drew something before the beep: mean abs diff {pre_beep_diff:.2f} "
-        f"outside the strip band (threshold {PRE_BEEP_MAX_MEAN_ABS_DIFF})"
+        f"over the whole canvas (threshold {PRE_BEEP_MAX_MEAN_ABS_DIFF})"
     )
 
     # The whole-canvas check above is a gate against gross pre-beep
@@ -556,10 +554,10 @@ def test_overlay_reaches_the_rendered_pixels(tmp_path: Path, synthetic_source_vi
         f"mean abs diff {clock_diff:.2f} (threshold {FIRING_CLOCK_MIN_MEAN_ABS_DIFF})"
     )
 
-    unreached_diff = _mean_abs_diff(after_plain, after_overlaid, unreached_quadrant_no_strip)
+    unreached_diff = _mean_abs_diff(after_plain, after_overlaid, unreached_quadrant)
     assert unreached_diff <= UNREACHED_QUADRANT_MAX_MEAN_ABS_DIFF, (
         f"the overlay drew into an empty cell -- an empty cell is not a shooter: "
-        f"mean abs diff {unreached_diff:.2f} outside the strip band "
+        f"mean abs diff {unreached_diff:.2f} over the whole cell "
         f"(threshold {UNREACHED_QUADRANT_MAX_MEAN_ABS_DIFF})"
     )
 
