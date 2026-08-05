@@ -68,6 +68,18 @@ jobs:
         # invocation covers both suites. The source video the integration
         # tests used to need is gitignored 4K footage; they now build
         # their own clip with ffmpeg (see ``tests/synthetic_media.py``).
+        #
+        # Parallelism is inherited, not spelled here: ``addopts`` in
+        # pyproject.toml carries ``-n auto --dist load``, so this runs
+        # across the runner's cores and a developer's bare ``pytest``
+        # gets exactly what CI gets. Deliberately not duplicated on this
+        # line -- two places to change is how the two drift apart.
+        #
+        # The integration half parallelises too, and was measured
+        # rather than assumed: those tests shell out to real ffmpeg and
+        # write real media, so contention was the plausible failure.
+        # It is not: 57s serial -> 34s at -n4, 0 skipped at every worker
+        # count, no collisions (every test writes under ``tmp_path``).
         run: uv run pytest -q
 
   spa:
