@@ -234,6 +234,54 @@ def test_two_events_inside_one_frame_collapse_the_superseded_state():
     assert durations[0] > 0.0 and durations[2] > 0.0
 
 
+def test_the_final_state_never_gets_a_negative_duration():
+    # 0.99s falls inside the *last* frame of a 0.991s segment at 30fps,
+    # so rounding its boundary up names frame 30 -- a frame the segment
+    # does not contain. The final duration came out -0.009, which
+    # write_concat_list drops silently: the last state's sprite is never
+    # written, the trailing repeat shows the previous one, and that
+    # shot's counter increment never reaches the screen.
+    durations = overlay_sprites.quantize_durations([0.99, 0.001], frame_rate=(30, 1))
+    assert durations[-1] > 0.0, f"final state has a non-positive duration: {durations}"
+    assert sum(durations) == pytest.approx(0.991, abs=1e-9)
+
+
+def test_the_final_state_is_clamped_to_the_last_frame_that_exists():
+    # Same shape, a different pair: the boundary is pulled back to frame
+    # 29 (the last one a 0.985s segment at 30fps has) rather than pushed
+    # to frame 30, which nothing would ever render.
+    durations = overlay_sprites.quantize_durations([0.98, 0.005], frame_rate=(30, 1))
+    assert durations[-1] > 0.0, f"final state has a non-positive duration: {durations}"
+    assert sum(durations) == pytest.approx(0.985, abs=1e-9)
+    assert _boundaries(durations)[1] == pytest.approx(29 / 30, abs=1e-9)
+
+
+def test_a_shot_in_the_last_frame_still_reaches_the_concat_list(tmp_path):
+    # The pixels half of the two tests above: the surviving entry has to
+    # be the state carrying the *second* shot, not the first.
+    two_shots = overlay_sprites.write_sprite_sequence(
+        [_state([_panel("ann", 0, 0, shots_fired=2)], 0.0, 1.0)],
+        GEOMETRY,
+        theme=THEME,
+        cache_dir=tmp_path,
+    )
+    sequence = overlay_sprites.write_sprite_sequence(
+        [
+            _state([_panel("ann", 0, 0, shots_fired=1)], 0.0, 0.99),
+            _state([_panel("ann", 0, 0, shots_fired=2)], 0.99, 0.001),
+        ],
+        GEOMETRY,
+        theme=THEME,
+        cache_dir=tmp_path,
+    )
+    list_path = overlay_sprites.write_concat_list(sequence, tmp_path / "s.txt", frame_rate=(30, 1))
+    files = [ln for ln in list_path.read_text().splitlines() if ln.startswith("file ")]
+    assert (
+        files[-1] == f"file '{two_shots[0][0].resolve()}'"
+    ), "the last shot's sprite is not the one left on screen at the end of the segment"
+    assert files[-2] == files[-1]
+
+
 def test_a_collapsed_state_is_dropped_from_the_list_not_written_as_zero(tmp_path):
     # A ``duration 0`` entry is a state no frame can ever show, and the
     # demuxer's handling of it is not something to rely on.

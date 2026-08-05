@@ -697,19 +697,42 @@ def quantize_durations(
     Rounding up costs at most one frame of lag and can never show a shot
     early.
 
-    Only the boundaries move; the total is preserved exactly, since the
-    last state runs to the end of the segment either way.
+    The one exception is the segment's own last frame, and it is forced.
+    A shot inside that frame has no later frame to round up to: the
+    rounded boundary names a frame the segment does not contain, the
+    final duration comes out *negative*, and :func:`write_concat_list`
+    drops the entry -- so the last state's sprite is never written, the
+    trailing repeat holds the previous one, and that shot's counter
+    increment never reaches the screen at all. Boundaries are therefore
+    clamped to the last frame that exists. Showing a shot up to one frame
+    early, on the last frame of the segment, is strictly better than
+    never showing it; losing it would break the invariant that a shot is
+    never lost.
 
-    Two events closer together than one frame land on the same boundary.
-    The earlier state then has zero length and is dropped by
-    :func:`write_concat_list` -- a *display* is skipped, never a shot:
-    every state's ``shots_fired`` counts all shots up to its own event,
-    so the surviving state already accounts for both.
+    Only the boundaries move; the total is preserved exactly, since the
+    last state runs to the end of the segment either way, and the final
+    duration is always positive for a segment longer than nothing.
+
+    Two events closer together than one frame land on the same boundary,
+    as do two clamped to the last frame. The earlier state then has zero
+    length and is dropped by :func:`write_concat_list` -- a *display* is
+    skipped, never a shot: every state's ``shots_fired`` counts all shots
+    up to its own event, so the surviving state already accounts for
+    both. Collapsing always keeps the *later* state, which is the one
+    whose display supersedes the other; the final state can never be the
+    one dropped.
     """
     num, den = frame_rate
     if num <= 0 or den <= 0:
         raise ValueError(f"frame rate must be positive, got {num}/{den}")
     total = math.fsum(durations)
+    if not durations:
+        return ()
+    # The last frame the segment actually contains. ``total`` need not sit
+    # on a frame itself, so this is the last frame *started* before the
+    # end, and no state may begin after it.
+    last_frame = max(0, math.ceil(total * num / den - _FRAME_EPSILON) - 1)
+    ceiling = last_frame * den / num
     boundaries: list[float] = []
     elapsed = 0.0
     for duration in durations:
@@ -717,7 +740,7 @@ def quantize_durations(
         # a frame there: ``8.3 * 30`` is ``249.00000000000003`` in binary
         # floating point, and a bare ceil would push it a whole frame late.
         frame = math.ceil(elapsed * num / den - _FRAME_EPSILON)
-        boundaries.append(frame * den / num)
+        boundaries.append(min(frame * den / num, ceiling))
         elapsed += duration
     return tuple(
         (boundaries[index + 1] if index + 1 < len(boundaries) else total) - start
