@@ -97,7 +97,7 @@ plus `_overlay_data_for_stage`, `_stage_overlay_plan`, `_clock_filters`.
 
 | | |
 |---|---|
-| Unit | 2616 passed / 20 skipped |
+| Unit | 2617 passed / 20 skipped |
 | Integration | 26 passed / **0 skipped** |
 
 ```bash
