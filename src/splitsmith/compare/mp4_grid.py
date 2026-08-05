@@ -1424,9 +1424,19 @@ def render_grid_mp4(
             draw_clock = False
             degradation = _drawtext_degradation(capabilities)
             degradations = (degradation,)
-            logger.warning("%s", degradation.detail)
+            # Said once, not twice. Measured: the CLI configures no
+            # logging, so Python's last-resort handler sends WARNING and
+            # above straight to stderr -- a ``logger.warning`` here as
+            # well printed the whole paragraph twice, immediately above
+            # the CLI's own "Note:". So the hook is the user-facing
+            # channel when there is one and the log keeps the record;
+            # with no hook the log has to raise its voice, because
+            # nothing else is going to say it.
             if on_notice is not None:
+                logger.info("%s", degradation.detail)
                 on_notice(degradation.detail)
+            else:
+                logger.warning("%s", degradation.detail)
 
     outcomes: list[StageOutcome] = []
     segments: list[Path] = []
