@@ -129,7 +129,8 @@ twice -- once before it starts encoding, and once on the last line:
 Note: /usr/bin/ffmpeg (ffmpeg 6.1.1) has no usable drawtext filter, so the
 overlay's running clock is omitted. The shot counters, last splits and delta
 strip still render. For the clock, use an ffmpeg built with
---enable-libfreetype, or point SPLITSMITH_FFMPEG at one.
+--enable-libfreetype, and point both SPLITSMITH_FFMPEG and SPLITSMITH_FFPROBE
+at it -- a mismatched pair is its own source of confusing failures.
 ...
 Wrote ~/grid.mp4 (12/12 stages, running clock omitted: this ffmpeg was built
 without drawtext)
@@ -143,16 +144,55 @@ rate, same N+1 audio tracks, same duration. A file whose counters are *also*
 missing is a different bug, not this degradation.
 
 If you want the clock, the fix is an ffmpeg built with `--enable-libfreetype`
-(most static builds from johnvansickle / BtbN have it):
+(most static builds from johnvansickle / BtbN have it), with **both** env vars
+pointed at the same install:
 
 ```bash
-SPLITSMITH_FFMPEG=/opt/ffmpeg/bin/ffmpeg uv run splitsmith compare export ...
+SPLITSMITH_FFMPEG=/opt/ffmpeg/bin/ffmpeg \
+SPLITSMITH_FFPROBE=/opt/ffmpeg/bin/ffprobe \
+uv run splitsmith compare export ...
 ```
 
 If the run **refuses** `--overlay` outright with a message about the concat
 demuxer's `option` keyword, that is the other check from the prerequisites, and
 the same fix applies. Re-running without `--overlay` gets the plain grid on that
 host in the meantime.
+
+### macOS: Homebrew's default `ffmpeg` has no `drawtext`
+
+Hit for real by a user running this exact export on macOS: every stage failed.
+Root cause is the formula, not the host. Homebrew's default `ffmpeg` (the 8.x
+formula as of this writing) is a slimmed build with no freetype/harfbuzz, so
+`drawtext` does not exist -- not "misconfigured", not present-but-broken, the
+filter is compiled out. `brew install ffmpeg` alone will not fix this; it is
+the formula that lacks the feature, not the version.
+
+The fix is the sibling formula that keeps the full feature set:
+
+```bash
+brew install ffmpeg-full
+```
+
+`ffmpeg-full` is **keg-only** -- Homebrew will not link it over the default
+`ffmpeg`, on purpose, because the two formulae conflict. That means installing
+it changes nothing about what `ffmpeg` on `PATH` resolves to; you have to point
+splitsmith at it explicitly, and **both** variables, because they are a matched
+pair from the same keg:
+
+```bash
+export SPLITSMITH_FFMPEG="$(brew --prefix ffmpeg-full)/bin/ffmpeg"
+export SPLITSMITH_FFPROBE="$(brew --prefix ffmpeg-full)/bin/ffprobe"
+```
+
+Confirm before re-running the export:
+
+```bash
+"$SPLITSMITH_FFMPEG" -hide_banner -h filter=drawtext | head -2   # must not say "Unknown filter"
+```
+
+"Use a build with `--enable-libfreetype`" is not, by itself, actionable advice
+on macOS -- there is no `./configure` step in a Homebrew install. The formula
+name is what closes the loop.
 
 ## Verifying the result -- this is the actual deliverable
 

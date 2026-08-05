@@ -211,7 +211,8 @@ def _drawtext_degradation(capabilities: FFmpegCapabilities) -> OverlayDegradatio
             f"{capabilities.binary} (ffmpeg {capabilities.version}) has no usable drawtext "
             "filter, so the overlay's running clock is omitted. The shot counters, last "
             "splits and delta strip still render. For the clock, use an ffmpeg built with "
-            "--enable-libfreetype, or point SPLITSMITH_FFMPEG at one."
+            "--enable-libfreetype, and point both SPLITSMITH_FFMPEG and SPLITSMITH_FFPROBE "
+            "at it -- a mismatched pair is its own source of confusing failures."
         ),
     )
 
@@ -231,8 +232,9 @@ def _concat_option_refusal(capabilities: FFmpegCapabilities) -> str:
         f"--overlay needs the concat demuxer's 'option' keyword, which {capabilities.binary} "
         f"(ffmpeg {capabilities.version}) does not support: without it every overlay state "
         "snaps to a 25fps time base and the counters step on the wrong frames. Re-run "
-        "without --overlay for the plain grid, or use an ffmpeg whose concat demuxer "
-        "accepts 'option' (verified on 6.1.1 and 7.0.2)."
+        "without --overlay for the plain grid, or point both SPLITSMITH_FFMPEG and "
+        "SPLITSMITH_FFPROBE at an ffmpeg whose concat demuxer accepts 'option' "
+        "(verified on 6.1.1 and 7.0.2)."
     )
 
 
