@@ -167,6 +167,12 @@ dev = [
     "splitsmith[hosted]",
     "pytest>=8.0.0",
     "pytest-cov>=5.0.0",
+    # Parallel test execution. The unit suite has no hot spot -- the 25
+    # slowest tests are 12% of the wall clock -- so the only way to cut
+    # the ~3m45s single-threaded run is to use the other cores.
+    # ``addopts`` carries ``-n auto``; ``-n0`` restores serial execution
+    # for debugging (``-x``, ``--pdb``, readable tracebacks).
+    "pytest-xdist>=3.6.0",
     "ruff>=0.4.0",
     "black>=24.0.0",
     "mypy>=1.10.0",
@@ -264,7 +270,26 @@ testpaths = ["tests"]
 # smoke pulls images + builds a container, which is a 30-60s setup
 # we don't want CI / dev runs to pay for. Opt in with
 # ``pytest -m docker`` when validating hosted-mode locally.
-addopts = "-m 'not docker'"
+#
+# ``-n auto`` runs the suite across every core. There is no hot spot to
+# delete -- the 25 slowest tests are 12% of the wall clock and the
+# slowest single test is 2.4s -- so parallelism is the only lever.
+# Measured on a 12-core box: unit suite 224s -> 63s, unit + integration
+# 279s -> 88s. ``--dist load`` (the default) beat ``loadfile`` and
+# ``loadscope`` by ~35s: the expensive fixtures in the hosted/server
+# files are function-scoped, so grouping by file buys no reuse and
+# instead hands one worker the 7k-line ``test_ui_server.py`` to chew on
+# alone while the rest idle.
+#
+# Costs, both deliberate:
+#   * A focused run pays worker startup -- one file goes 1.4s -> 5.4s.
+#     ``pytest -n0 <target>`` restores serial execution exactly (same
+#     collection, same order, readable tracebacks) and is the right
+#     thing to reach for when a single test is being debugged.
+#   * ``-x`` still stops the run, but workers finish the tests already
+#     in flight, so more than one failure can be reported.
+# ``--pdb`` needs no flag: xdist disables itself when it sees it.
+addopts = "-m 'not docker' -n auto --dist load"
 markers = [
     "integration: integration tests requiring external tools (ffmpeg, etc.)",
     "docker: hosted-mode smoke tests that require docker compose. Skipped by default; run with `pytest -m docker`.",
