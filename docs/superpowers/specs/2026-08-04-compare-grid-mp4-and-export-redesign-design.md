@@ -7,8 +7,9 @@
 
 A user with a merged match of 4 shooters wants one watchable video: a
 2x2 grid, beep-aligned, with each shooter's shot count and splits burned
-in, and a live ranking so the stage reads as a race. Today they cannot
-get it.
+in, so the stage reads as a race. Today they cannot get it. (The race is
+the grid itself -- see the note on the delta strip under
+`compare/overlay_sprites.py`.)
 
 What already exists:
 
@@ -111,18 +112,16 @@ compare/layout.py          --+--> compare/mp4_grid.py   -> MP4 (new)
 
 ### `compare/overlay_sprites.py` (new)
 
-Overlay content is a **step function over shot events**. Shot counter,
-last split and ranking change only when someone fires. A 30-shot stage
-has ~30 distinct states, not ~750 frames. So states are pre-rendered
-once and reused, instead of drawing every frame.
+Overlay content is a **step function over shot events**. Shot counter
+and last split change only when someone fires. A 30-shot stage has ~30
+distinct states, not ~750 frames. So states are pre-rendered once and
+reused, instead of drawing every frame.
 
 1. Union every shooter's shot times into one event list, plus the beep
    at t=0 and each shooter's end-of-run.
 2. Per event, PIL-draw **one grid-sized RGBA PNG** covering the whole
-   frame: each tile's shot counter and last split, plus the ranking
-   strip. A single drawing pass sees every shooter's data at once,
-   which is the only reason a cross-shooter leaderboard is possible --
-   four independent per-tile overlays structurally cannot compare.
+   frame: each tile's shot counter and last split, drawn inside that
+   tile's own cell.
 3. Return an ordered list of `(png_path, duration_seconds)`.
 
 This is ~30 PIL draws per stage instead of ~750, and produces no ProRes
@@ -130,8 +129,19 @@ intermediate. Sprite filenames are content-addressed from a hash of
 layout, theme and shot data, so repeat exports and theme comparisons
 read from cache.
 
-**Overlay content:** per-tile shot counter and last split, plus a live
-delta strip ranking shooters by elapsed time at the current event.
+**Overlay content:** per-tile shot counter and last split. Nothing else.
+
+**No live delta strip.** A band across the bottom of the canvas, ranking
+the shooters by elapsed time at the current event, was built and then
+removed after watching it on real match footage. A beep-aligned tiled
+composite already *is* the race -- the tiles are synchronised, so who is
+ahead reads straight off the picture -- and a ranked list competes with
+the thing it describes while its full-width band overlaps the bottom row
+of tiles. Cross-shooter comparison moves to the phase 2 stage summary,
+where the picture has frozen, the run is complete and the ranking is
+`stage_pct` off the scorecard rather than live elapsed time. Do not
+re-propose it. (`TilePanel` correspondingly carries no `rank` or
+`delta_to_leader`: every field on it is that one tile's own.)
 
 **Elapsed time is not in the sprites.** It ticks continuously, so
 putting it there would defeat the whole design. It is drawn by ffmpeg
@@ -394,6 +404,10 @@ phases fold the shooter export into this page rather than replacing it.
 5. `overlay_sprites.py` with unit tests.
 6. Wire sprites + `drawtext` clock into `mp4_grid.py` behind an
    `--overlay` flag that defaults to off.
+
+What shipped: per-tile shot counter, per-tile last split, per-tile
+running clock. The delta strip built alongside them was removed before
+the phase closed -- see `compare/overlay_sprites.py` above for why.
 
 ### Phase 1b -- merged audio track (requested after phase 0 shipped)
 

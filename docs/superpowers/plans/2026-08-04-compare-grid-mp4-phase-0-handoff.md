@@ -119,16 +119,16 @@ stage line, that is a hang, not slowness.
 
 ## Degraded output: an ffmpeg with no `drawtext`
 
-Only the overlay's **running clock** is `drawtext`. The shot counters, the last
-splits and the bottom delta strip are pre-rendered PNGs composited with
-`overlay`, which every ffmpeg has. So a build without `--enable-libfreetype`
+Only the overlay's **running clock** is `drawtext`. The per-tile shot counters
+and last splits are pre-rendered PNGs composited with `overlay`, which every
+ffmpeg has. So a build without `--enable-libfreetype`
 loses one number per tile rather than the whole feature, and the render says so
 twice -- once before it starts encoding, and once on the last line:
 
 ```
 Note: /usr/bin/ffmpeg (ffmpeg 6.1.1) has no usable drawtext filter, so the
-overlay's running clock is omitted. The shot counters, last splits and delta
-strip still render. For the clock, use an ffmpeg built with
+overlay's running clock is omitted. The per-tile shot counters and last splits
+still render. For the clock, use an ffmpeg built with
 --enable-libfreetype, and point both SPLITSMITH_FFMPEG and SPLITSMITH_FFPROBE
 at it -- a mismatched pair is its own source of confusing failures.
 ...
@@ -137,9 +137,9 @@ without drawtext)
 ```
 
 What that file looks like: every tile's top-**left** corner still carries its
-shot counter, the bottom-center of each cell still carries the last split, the
-delta strip is still there -- and each tile's top-**right** corner, where the
-elapsed time would tick, is empty. Nothing else changes: same canvas, same frame
+shot counter and the bottom-center of each cell still carries the last split --
+and each tile's top-**right** corner, where the elapsed time would tick, is
+empty. Nothing else changes: same canvas, same frame
 rate, same N+1 audio tracks, same duration. A file whose counters are *also*
 missing is a different bug, not this degradation.
 

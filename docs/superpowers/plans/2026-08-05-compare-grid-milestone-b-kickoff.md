@@ -22,8 +22,21 @@ splitsmith compare export <match> --format mp4 --overlay \
 ```
 
 On top of the bare 4K grid (phase 0) and its merged audio track (phase
-1b), an **opt-in** live overlay: per-tile shot counter and last split,
-a per-tile running clock, and a bottom delta strip ranking the shooters.
+1b), an **opt-in** live overlay: per-tile shot counter, per-tile last
+split, per-tile running clock. Everything it draws is per tile.
+
+**There is no live delta strip, and there must not be one.** A
+full-width band ranking the shooters was built and then removed after
+the user watched it on real match footage: a beep-aligned tiled
+composite already shows the race -- the tiles are synchronised, so who
+is ahead is visible directly -- and a ranked list competes with the
+thing it describes while its band overlaps the bottom row of tiles.
+**Cross-shooter ranking is Milestone B's job**, in the stage summary
+below, where the picture has frozen and the run is complete, and it
+ranks by `stage_pct` off the scorecard -- a different computation, not a
+relocation of the strip's live per-event elapsed time. `TilePanel`
+carries no `rank` or `delta_to_leader` for the same reason; do not
+reintroduce them for the summary.
 
 Overlay content is a **step function over shot events**. States are
 pre-rendered once as canvas-sized RGBA PNGs (content-addressed, so
@@ -68,6 +81,12 @@ for the network.
 `SpriteGeometry`, `render_state`, `write_sprite_sequence`,
 `quantize_durations`, `write_concat_list`.
 
+`render_state` draws inside the cells and nowhere else, so a state where
+nobody has fired yet returns a **fully transparent** canvas. Any
+assertion that "the sprite reached the pixels" therefore has to sample a
+moment where a counter or a split genuinely exists, or it passes against
+a renderer that draws nothing at all.
+
 `src/splitsmith/compare/mp4_grid.py` --
 `TileClock`, `StageOverlayPlan(sprite_list_path, font_path, font_size,
 clocks, ink, stroke)`, `build_stage_command(..., overlay=None)`,
@@ -78,8 +97,8 @@ plus `_overlay_data_for_stage`, `_stage_overlay_plan`, `_clock_filters`.
 
 | | |
 |---|---|
-| Unit | 2600 passed / 20 skipped |
-| Integration | 22 passed / **0 skipped** |
+| Unit | 2616 passed / 20 skipped |
+| Integration | 26 passed / **0 skipped** |
 
 ```bash
 uv run pytest -m "not integration" --ignore=tests/test_hosted_docker_smoke.py -q
@@ -87,7 +106,7 @@ SPLITSMITH_REQUIRE_INTEGRATION=1 uv run pytest -m integration --ignore=tests/tes
 uv run ruff check src tests && uv run black --check src tests
 ```
 
-Both measured on `ef51e06`. `tests/test_hosted_docker_smoke.py` may fail
+Both measured after the delta-strip removal on `fix/overlay-ffmpeg-preflight`. `tests/test_hosted_docker_smoke.py` may fail
 locally on a MinIO port conflict; unrelated, hence the ignore.
 **Integration must stay at 0 skipped** -- CI fails the build on a skip.
 
@@ -158,11 +177,10 @@ measuring, several by mutation, **none by reading**.
   that was 372ms out. Measure decoded samples honouring the edit list.
   `silencedetect` trusts the same table.
 - **Choose fixture dimensions that can express the failure.** A 2x2
-  preview hid a delta strip that rendered `4 DEE +0.165 EVE` -- a
-  fabricated number belonging to neither shooter -- at 3x3 and 4x4.
-  Rows/cols swaps are no-ops on square grids. Use a **3-shooter** roster
-  (one unreached cell), at least one shooter with **no audit**, and a
-  non-square grid.
+  preview once hid a delta-strip defect that only appeared at 3x3 and
+  4x4 (the strip is gone now, but the lesson stands). Rows/cols swaps
+  are no-ops on square grids. Use a **3-shooter** roster (one unreached
+  cell), at least one shooter with **no audit**, and a non-square grid.
 - **Sample frames by index, not by seeking.** `-ss` fast-seeking to a
   timestamp that equals a frame's pts breaks the tie unpredictably and
   produced a 4% flaky test. Use `select=eq(n,N)`.
