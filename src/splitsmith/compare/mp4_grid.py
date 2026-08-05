@@ -390,9 +390,11 @@ class GridStagePlan:
     Defaulted rather than required because every caller that predates
     Milestone B constructs a plan without it, and the no-flags argv is
     pinned by test: nothing opt-in may move an argument on the path a
-    user gets with no flags, because the stitch stream-copies video
-    across segments and refuses any disagreement -- at the last step,
-    after the whole match has been encoded.
+    user gets with no flags. The stitch stream-copies video across
+    segments and refuses segments whose stream *layout* disagrees --
+    count, codec, parameters -- at the last step, after the whole match
+    has been encoded. Stream *lengths* within a segment are a different
+    and quieter problem; see :attr:`total_seconds`.
     """
 
     def __post_init__(self) -> None:
@@ -400,8 +402,11 @@ class GridStagePlan:
             raise ValueError(
                 f"hold_seconds must not be negative: got {self.hold_seconds}. A negative hold "
                 "puts total_seconds below the action, so the segment's audio would end before "
-                "its video and the concat stitch would refuse the segment -- at the last step, "
-                "after every stage has been encoded."
+                "its video. Measured on ffmpeg 6.1.1: the stitch does not refuse that -- it "
+                "exits 0 without a warning, the missing audio time collapses at the AAC "
+                "re-encode, and every later stage's sound arrives early by the shortfall, "
+                "accumulating (3s short per segment measured -3000ms after one segment and "
+                "-9000ms after three)."
             )
 
     @property
@@ -419,6 +424,29 @@ class GridStagePlan:
         dumb ``concat -c copy``: a separate hold segment would have to
         match the stream layout exactly anyway and would double the
         number of segments to keep uniform.
+
+        **What the stitch actually does with a length mismatch, measured
+        on ffmpeg 6.1.1 rather than reasoned about** -- it does not
+        refuse one, in either direction. It exits 0 and prints no
+        warning, and the two directions then behave completely
+        differently, because the video is ``-c copy``'d (timestamps
+        preserved exactly) while the audio is re-encoded (a gap in the
+        samples simply collapses):
+
+        * **Audio longer than video** -- what this hold does. The mov
+          muxer holds the segment's last coded frame for the surplus, so
+          the picture freezes and every later stage starts that much
+          later on *both* halves. Measured across four segments each 3s
+          over: A/V offset ``+0.1ms`` at every marker, i.e. no drift, and
+          a 33.0s file from four 6s actions and three 3s holds. That is
+          why a Task-9 mistake here is dangerous rather than loud: the
+          freeze happens anyway, of the right length, in the right place
+          -- just on the raw last frame with no summary drawn on it.
+        * **Audio shorter than video** -- what a negative hold would do,
+          and the reason ``__post_init__`` rejects one. The missing time
+          collapses at the re-encode and every later stage's audio
+          arrives *early*, accumulating with segment count: ``-3000ms``
+          after one 3s-short segment, ``-9000ms`` after three.
         """
         return self.duration_seconds + self.hold_seconds
 
@@ -1020,9 +1048,17 @@ def _build_filter_graph(
     graph, argument for argument. A non-zero hold currently produces a
     segment whose audio outlasts its video by exactly the hold: that is
     the room the frozen summary goes in, and filling it with the still
-    is the *next* piece of work. Until it lands, do not hand a non-zero
-    hold to a real render -- the segment would be internally
-    inconsistent, and the concat demuxer says so only at the stitch.
+    is the *next* piece of work.
+
+    Until it lands, do not hand a non-zero hold to a real render, and
+    understand what you would get if you did, because it is not an
+    error. Measured on ffmpeg 6.1.1: the stitch accepts such a segment,
+    exits 0, prints no warning, and holds the segment's last coded frame
+    for the surplus, with A/V staying locked to ``+0.1ms``. So the
+    render would come out the right length with a freeze in the right
+    place, on an unblurred frame with no summary on it -- plausible
+    enough to ship by accident. See :attr:`GridStagePlan.total_seconds`
+    for the numbers and for the opposite direction, which does drift.
 
     The overlay, when there is one, is composited onto ``[grid]`` --
     **after** the stack, never inside a tile chain. A tile chain's
@@ -1112,9 +1148,12 @@ def _build_filter_graph(
         # it pads until something downstream stops it -- so ``atrim`` is
         # the only place the length is stated, and every track states the
         # same one whether it carries a trim or the filler's
-        # ``anullsrc``. Extend one and not the rest and the concat
-        # demuxer refuses the segment, at the last step, after the whole
-        # match has been encoded.
+        # ``anullsrc``. Extend one and not the rest and nothing complains:
+        # measured on ffmpeg 6.1.1, the stitch accepts unequal lengths and
+        # exits 0, and the short track's shortfall then collapses at the
+        # AAC re-encode so that one shooter's audio runs early from the
+        # next stage on -- and further early with every stage after that.
+        # A viewer hears one track out of sync and no log says why.
         # ``adelay`` mirrors the video's ``tpad`` so a lead-padded tile's
         # audio stays locked to its picture.
         # ``aformat`` is the audio half of the concat invariant: a mono

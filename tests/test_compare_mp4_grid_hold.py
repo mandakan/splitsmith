@@ -14,10 +14,19 @@ The whole thing turns on two durations that must not be confused:
 
 ``total_seconds``
     the **segment**: ``duration_seconds + hold_seconds``. Every audio
-    chain runs this long, carrying silence through the hold, because a
-    segment whose audio is shorter than its video is exactly what
-    ``concat -c copy`` refuses -- at the last step, after every stage has
-    been encoded.
+    chain runs this long, carrying silence through the hold.
+
+The reason every chain must agree is not that ``concat -c copy`` would
+refuse a segment whose streams disagree in *length*. Measured on ffmpeg
+6.1.1, it does not: it exits 0 with no warning in either direction. What
+it refuses is a disagreement in stream *layout* -- count, codec,
+parameters -- and that is a separate, pre-existing invariant. A length
+mismatch is the quiet failure instead: audio short of its video
+collapses at the AAC re-encode and runs every later stage early,
+accumulating (-3000ms after one 3s-short segment, -9000ms after three),
+while audio *longer* than its video freezes the last coded frame and
+stays in sync (+0.1ms across four segments). See
+``GridStagePlan.total_seconds`` for the full measurement.
 
 Extending the tile chains to ``total_seconds`` instead would run the
 footage on underneath the summary rather than freezing it, and would
@@ -109,12 +118,28 @@ def _bundle(label: str, stages: dict[int, CompareStageBundle]) -> CompareShooter
     return CompareShooterBundle(label=label, project_root=Path(f"/p/{label}"), stages_by_number=stages)
 
 
-def _command(plan: mp4_grid.GridStagePlan) -> tuple[str, ...]:
+def _command(
+    plan: mp4_grid.GridStagePlan, *, overlay: mp4_grid.StageOverlayPlan | None = None
+) -> tuple[str, ...]:
     return mp4_grid.build_stage_command(
         plan,
         canvas=mp4_grid.GridCanvas(1920, 1080, 25, 1),
         output_path=Path("/w/s3.mov"),
         ffmpeg_binary="/bin/ffmpeg",
+        overlay=overlay,
+    )
+
+
+def _overlay_plan(
+    tmp_path: Path, *, clocks: tuple[mp4_grid.TileClock, ...] = ()
+) -> mp4_grid.StageOverlayPlan:
+    list_path = tmp_path / "sprites.txt"
+    list_path.write_text("file '/tmp/a.png'\nduration 12.5\nfile '/tmp/a.png'\n")
+    return mp4_grid.StageOverlayPlan(
+        sprite_list_path=list_path,
+        font_path=tmp_path / "font.ttf",
+        font_size=64,
+        clocks=clocks,
     )
 
 
@@ -206,8 +231,10 @@ def test_hold_defaults_to_zero_through_build_stage_plans():
 
 def test_negative_hold_is_rejected():
     # A negative hold makes the segment shorter than its own action, so the
-    # audio ends before the video and the stitch refuses the segment --
-    # hours in, with every stage already encoded.
+    # audio ends before the video. Measured: the stitch does not refuse
+    # that, it accepts it silently and the shortfall becomes accumulating
+    # A/V drift, so nothing downstream will ever catch it. This guard is
+    # the only thing that does.
     #
     # Matched on the planner's own spelling of the message, not just on
     # "negative": ``GridStagePlan.__post_init__`` rejects it too, so a
@@ -505,9 +532,44 @@ def test_tile_chains_still_run_only_the_action():
     assert f"{TOTAL:g}" not in _input_durations(cmd)
 
 
+def test_the_sprite_chain_still_ends_at_the_action(tmp_path: Path):
+    """The live overlay stops at the freeze and hands off to the summary.
+
+    A shot counter and a last split still stepping over a blurred, dimmed
+    summary is the "reads as a stall rather than a conclusion" failure the
+    freeze exists to prevent. The sprite chain's own ``trim`` is what
+    stops it, so the hold must not extend it.
+    """
+    graph = _graph_of(_command(_plan(hold=HOLD), overlay=_overlay_plan(tmp_path)))
+    (sprite_chain,) = _chains(graph, r"\[ovl\]$")
+
+    assert f"tpad=stop_duration={ACTION:g}:stop_mode=clone" in sprite_chain, sprite_chain
+    assert f"trim=0:{ACTION:g}[ovl]" in sprite_chain, sprite_chain
+    assert f"{TOTAL:g}" not in sprite_chain, sprite_chain
+
+
+def test_the_overlay_does_not_change_what_the_hold_extends(tmp_path: Path):
+    # The overlay touches the video half only. With it on, the tile chains
+    # must still stop at the action and the audio must still run the whole
+    # segment -- the hold and the overlay are independent.
+    graph = _graph_of(_command(_plan(hold=HOLD), overlay=_overlay_plan(tmp_path)))
+
+    for chain in _chains(graph, r"\[[te]\d+\]$"):
+        assert f"trim=0:{ACTION:g}[" in chain, chain
+        assert f"{TOTAL:g}" not in chain, chain
+    for chain in _chains(graph, r"\[a\d+\]\[m\d+\]$"):
+        assert f"atrim=0:{TOTAL:g}" in chain, chain
+    # And the extra sprite input did not disturb the stream layout.
+    cmd = _command(_plan(hold=HOLD), overlay=_overlay_plan(tmp_path))
+    maps = [value for flag, value in zip(cmd, cmd[1:], strict=False) if flag == "-map"]
+    assert maps == ["[final]", "[amix]", "[a0]", "[a1]", "[a2]"]
+
+
 def test_every_audio_track_is_the_same_length_as_every_other():
-    # Invariant 1, the half the hold can break: extending some streams and
-    # not others is what ``concat -c copy`` rejects at the last step.
+    # Invariant 1, the half the hold can break. Extending some tracks and
+    # not others is *not* rejected by the stitch -- measured, it exits 0 --
+    # so the short track just runs early from the next stage on, further
+    # early with each stage after. This assertion is the only alarm.
     for hold in (0.0, 0.25, HOLD):
         graph = _graph_of(_command(_plan(hold=hold)))
         lengths = set(re.findall(r"atrim=0:([\d.]+)", graph))
