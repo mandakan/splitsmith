@@ -41,19 +41,24 @@ def _path_without_ffmpeg() -> str:
     return os.pathsep.join(kept)
 
 
-def _run_nested_pytest(*, require: bool) -> subprocess.CompletedProcess[str]:
-    env = {**os.environ, "PATH": _path_without_ffmpeg()}
+def _run_nested_pytest(
+    *,
+    require: bool,
+    with_ffmpeg: bool = False,
+    numprocesses: int | None = None,
+) -> subprocess.CompletedProcess[str]:
+    env = {**os.environ}
+    if not with_ffmpeg:
+        env["PATH"] = _path_without_ffmpeg()
     if require:
         env["SPLITSMITH_REQUIRE_INTEGRATION"] = "1"
     else:
         env.pop("SPLITSMITH_REQUIRE_INTEGRATION", None)
-    return subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", _TARGET, "-m", "integration"],
-        cwd=REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    argv = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", _TARGET, "-m", "integration"]
+    # ``-n0`` and not "omit the flag": the repo's ``addopts`` carries
+    # ``-n auto``, so a nested run inherits it unless it is overridden.
+    argv += ["-n", "0" if numprocesses is None else str(numprocesses)]
+    return subprocess.run(argv, cwd=REPO_ROOT, env=env, capture_output=True, text=True)
 
 
 def test_skipped_integration_test_passes_the_build_without_the_gate() -> None:
@@ -77,6 +82,25 @@ def test_gate_fails_the_build_when_an_integration_test_skips() -> None:
     assert "ffmpeg/ffprobe not available" in result.stdout
 
 
+@pytest.mark.integration
+def test_gate_passes_a_green_run_under_xdist() -> None:
+    """The gate must reach the same verdict serially and under ``-n``.
+
+    ``pytest-xdist``'s controller never collects -- ``DSession``
+    short-circuits ``pytest_collection`` -- so a gate that counts
+    selected items reads 0 in the only process that renders the summary
+    and fails a run where every integration test passed. That is a
+    permanently red CI, not a flake, so it is pinned here with a real
+    parallel session rather than by asserting on the hooks.
+    """
+    result = _run_nested_pytest(require=True, with_ffmpeg=True, numprocesses=2)
+    assert result.returncode == 0, result.stdout
+    assert "integration gate FAILED" not in result.stdout
+    # And it counts what actually ran, rather than reporting a green
+    # gate over zero tests.
+    assert "1 integration test(s) ran, 0 skipped" in result.stdout
+
+
 # --- gate decision logic ----------------------------------------------------
 #
 # The subprocess tests cover the skip path end to end. These cover the
@@ -88,6 +112,7 @@ def gate_state(monkeypatch: pytest.MonkeyPatch):
     """Reset the gate's module-level accumulators around each test."""
     monkeypatch.setattr(gate, "_skipped_integration", {})
     monkeypatch.setattr(gate, "_integration_selected", 0)
+    monkeypatch.setattr(gate, "_reported_integration", set())
     return gate
 
 
@@ -115,6 +140,21 @@ def test_gate_fails_when_no_integration_test_was_selected(
     problems = gate._integration_gate_failures()
     assert len(problems) == 1
     assert "no test carrying the 'integration' marker was selected" in problems[0]
+
+
+def test_reported_tests_satisfy_the_gate_when_collection_counted_nothing(
+    gate_state, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The xdist shape: the judging process collected nothing but saw reports.
+
+    ``_integration_selected`` is 0 in an xdist controller because it
+    never collects. If the gate reads only that counter, a passing
+    parallel run is reported as "no integration test was selected".
+    """
+    monkeypatch.setenv("SPLITSMITH_REQUIRE_INTEGRATION", "1")
+    monkeypatch.setattr(gate, "_integration_selected", 0)
+    monkeypatch.setattr(gate, "_reported_integration", {"tests/test_proxy.py::t"})
+    assert gate._integration_gate_failures() == []
 
 
 def test_gate_passes_when_every_selected_integration_test_ran(
