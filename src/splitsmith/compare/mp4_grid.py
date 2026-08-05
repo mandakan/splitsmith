@@ -350,12 +350,23 @@ class GridTile:
 
 @dataclass(frozen=True)
 class GridStagePlan:
-    """Everything one ffmpeg invocation needs for one stage."""
+    """Everything one ffmpeg invocation needs for one stage.
+
+    Two durations, and confusing them is the expensive mistake. See
+    :attr:`duration_seconds`, :attr:`hold_seconds` and
+    :attr:`total_seconds`.
+    """
 
     stage_number: int
     stage_name: str
     tiles: tuple[GridTile, ...]
     duration_seconds: float
+    """The **action**: head pad + the longest post-beep span + tail pad.
+
+    The footage, the tile chains and ``xstack`` run for exactly this
+    long and no longer. That is what the end-of-stage freeze *is* -- the
+    picture stops here and the still takes over.
+    """
 
     audio_label: str
     """The ``--audio-from`` shooter. Not "whose track plays": the mix does.
@@ -369,6 +380,48 @@ class GridStagePlan:
     rows: int
     cols: int
 
+    hold_seconds: float = 0.0
+    """How long the frozen stage summary is held after the action.
+
+    ``0.0``, the default, is the render this module has always produced:
+    :attr:`total_seconds` collapses onto :attr:`duration_seconds` and
+    every argument comes out byte-identical to the pre-hold argv.
+
+    Defaulted rather than required because every caller that predates
+    Milestone B constructs a plan without it, and the no-flags argv is
+    pinned by test: nothing opt-in may move an argument on the path a
+    user gets with no flags, because the stitch stream-copies video
+    across segments and refuses any disagreement -- at the last step,
+    after the whole match has been encoded.
+    """
+
+    def __post_init__(self) -> None:
+        if self.hold_seconds < 0:
+            raise ValueError(
+                f"hold_seconds must not be negative: got {self.hold_seconds}. A negative hold "
+                "puts total_seconds below the action, so the segment's audio would end before "
+                "its video and the concat stitch would refuse the segment -- at the last step, "
+                "after every stage has been encoded."
+            )
+
+    @property
+    def total_seconds(self) -> float:
+        """The whole segment: the action followed by the hold.
+
+        **Every audio stream in the segment runs this long**, carrying
+        silence through the hold; the video is the action followed by the
+        still. Extending the *tile* chains to this instead would run the
+        footage on underneath the summary rather than freezing it --
+        which looks almost right in a thumbnail and wrong in motion.
+
+        The hold lives inside the stage's own segment rather than
+        becoming a segment of its own so the cross-stage stitch stays a
+        dumb ``concat -c copy``: a separate hold segment would have to
+        match the stream layout exactly anyway and would double the
+        number of segments to keep uniform.
+        """
+        return self.duration_seconds + self.hold_seconds
+
 
 def build_stage_plans(
     shooters: Sequence[CompareShooterBundle],
@@ -377,6 +430,7 @@ def build_stage_plans(
     head_pad_seconds: float,
     tail_pad_seconds: float,
     layout_2up: Layout2Up = "horizontal",
+    hold_seconds: float = 0.0,
 ) -> tuple[GridStagePlan, ...]:
     """Plan one grid stage per stage number present on any shooter.
 
@@ -386,6 +440,11 @@ def build_stage_plans(
     Stage names follow the emitter too: the audio-source shooter's
     spelling wins, so the FCPXML and MP4 exports of one match cannot
     label the same stage differently.
+
+    ``hold_seconds`` is the end-of-stage summary hold and reaches every
+    plan unchanged -- it is a whole-render setting, not a per-stage one,
+    so no stage may come out with a different one. It does not touch the
+    pads or the action; see :attr:`GridStagePlan.total_seconds`.
     """
     if not shooters:
         raise ValueError("no shooters to render: build_stage_plans needs at least one loaded shooter")
@@ -405,6 +464,12 @@ def build_stage_plans(
             "pads must not be negative: got "
             f"head_pad_seconds={head_pad_seconds}, tail_pad_seconds={tail_pad_seconds}"
         )
+
+    # Checked here as well as in ``GridStagePlan.__post_init__`` so the
+    # caller is told which argument it passed, not which field it never
+    # named. See that guard for what a negative hold would cost.
+    if hold_seconds < 0:
+        raise ValueError(f"hold_seconds must not be negative: got hold_seconds={hold_seconds}")
 
     if audio_label not in labels:
         raise ValueError(f"audio_label={audio_label!r} matches no shooter. Labels: {', '.join(labels)}")
@@ -484,6 +549,7 @@ def build_stage_plans(
                 audio_label=audio_label,
                 rows=rows,
                 cols=cols,
+                hold_seconds=hold_seconds,
             )
         )
     return tuple(plans)
@@ -946,6 +1012,18 @@ def _build_filter_graph(
     one uniform set of inputs, and they are stacked after the tiles, at
     their own cell offsets.
 
+    The video half of this graph runs the **action**
+    (``plan.duration_seconds``) and the audio half runs the whole
+    **segment** (``plan.total_seconds``). With ``hold_seconds=0.0`` --
+    every shipped caller today, since :func:`render_grid_mp4` takes no
+    hold yet -- those are the same number and this graph is the pre-hold
+    graph, argument for argument. A non-zero hold currently produces a
+    segment whose audio outlasts its video by exactly the hold: that is
+    the room the frozen summary goes in, and filling it with the still
+    is the *next* piece of work. Until it lands, do not hand a non-zero
+    hold to a real render -- the segment would be internally
+    inconsistent, and the concat demuxer says so only at the stitch.
+
     The overlay, when there is one, is composited onto ``[grid]`` --
     **after** the stack, never inside a tile chain. A tile chain's
     ``tpad`` / ``setpts`` / ``scale`` / ``pad`` / ``setsar`` / ``fps`` /
@@ -1027,7 +1105,16 @@ def _build_filter_graph(
     for slot, tile in enumerate(plan.tiles):
         # ``aresample=async=1`` keeps a track that starts short from
         # drifting; ``apad`` + ``atrim`` guarantee every track is exactly
-        # the stage duration so the segment's streams end together.
+        # the segment length so the segment's streams end together.
+        # That length is ``total_seconds`` and not ``duration_seconds``:
+        # the audio runs silent through the end-of-stage hold while the
+        # picture is a frozen still. ``apad`` is unbounded on purpose --
+        # it pads until something downstream stops it -- so ``atrim`` is
+        # the only place the length is stated, and every track states the
+        # same one whether it carries a trim or the filler's
+        # ``anullsrc``. Extend one and not the rest and the concat
+        # demuxer refuses the segment, at the last step, after the whole
+        # match has been encoded.
         # ``adelay`` mirrors the video's ``tpad`` so a lead-padded tile's
         # audio stays locked to its picture.
         # ``aformat`` is the audio half of the concat invariant: a mono
@@ -1045,7 +1132,7 @@ def _build_filter_graph(
         parts.append(
             f"[{audio_index[slot]}:a]asetpts=PTS-STARTPTS,{lead}aresample=async=1,"
             f"aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
-            f"apad,atrim=0:{plan.duration_seconds:g},asplit=2[a{slot}][m{slot}]"
+            f"apad,atrim=0:{plan.total_seconds:g},asplit=2[a{slot}][m{slot}]"
         )
 
     # Every tile, including the silent filler a missing shooter
