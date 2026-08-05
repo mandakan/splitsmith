@@ -22,9 +22,11 @@ from pathlib import Path
 import pytest
 
 from splitsmith import runtime as runtime_mod
+from splitsmith.compare import mp4_grid as mp4_grid_mod
 from splitsmith.runtime import (
     _clear_ffmpeg_capabilities_cache,
     ffmpeg_capabilities,
+    quote_filter_value,
 )
 from tests.conftest import fake_ffmpeg_probe
 
@@ -132,6 +134,46 @@ def test_a_font_path_with_a_colon_is_quoted_into_the_exercise(tmp_path: Path):
 
     assert seen, "the exercise render never ran"
     assert f"fontfile='{weird}'" in seen[0], seen
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (":", "':'"),
+        (",", "','"),
+        ("[", "'['"),
+        ("]", "']'"),
+        ("'", r"''\'''"),
+        ("\\", "'\\'"),
+        (" ", "' '"),
+        ("a:b,c[d]e'f\\g h", r"'a:b,c[d]e'\''f\g h'"),
+    ],
+)
+def test_quote_filter_value_matches_ffmpegs_escaping_rule(value: str, expected: str) -> None:
+    """The quoting table this probe and the renderer both depend on.
+
+    ``mp4_grid``'s ``drawtext``/``text=`` filters and this module's
+    drawtext exercise used to carry two hand-written copies of this
+    rule. A drift between them would mean the probe exercises a string
+    the renderer never actually emits, so the whole probe would stop
+    being a proxy for what the render does. They are one function now
+    (see ``test_mp4_grid_imports_the_one_quote_filter_value``); this
+    pins its behaviour on the awkward characters a filter option value
+    can carry: ``:`` and ``,`` separate options, ``[``/``]`` name pads,
+    ``'`` has to be escaped without leaving the quotes, ``\\`` and a
+    literal space must pass through untouched.
+    """
+    assert quote_filter_value(value) == expected
+
+
+def test_mp4_grid_imports_the_one_quote_filter_value() -> None:
+    """``mp4_grid`` uses this module's quoting rule, not a copy of it.
+
+    Asserting object identity is the strongest form of "these agree":
+    there is exactly one function for the two callers to disagree
+    about, so they cannot drift apart by editing only one of them.
+    """
+    assert mp4_grid_mod.quote_filter_value is quote_filter_value
 
 
 def test_a_binary_that_will_not_run_never_degrades_anything():

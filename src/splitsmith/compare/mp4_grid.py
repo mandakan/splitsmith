@@ -31,7 +31,7 @@ from pathlib import Path
 
 from ..overlay_text import FALLBACK_BUNDLED_FONT, overlay_font_file
 from ..overlay_theme import ThemeName, load_theme
-from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, runtime
+from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, quote_filter_value, runtime
 from .layout import Layout2Up, choose_grid, grid_shape
 from .overlay_data import TileStageData, load_overlay_data
 from .overlay_sprites import (
@@ -633,18 +633,6 @@ def _clock_text(seconds: float) -> str:
     return f"{hundredths // 100}.{hundredths % 100:02d}"
 
 
-def _ffmpeg_quote(value: str) -> str:
-    """Quote one filter option value for a ``filter_complex`` string.
-
-    Inside ``'...'`` every character is literal, so quoting is all that
-    is needed for the ``:`` and ``,`` an absolute path can contain. A
-    literal ``'`` cannot appear inside the quotes at all -- the quote is
-    closed, the character escaped outside it, and the quote reopened,
-    which is the form ffmpeg's escaping rules prescribe.
-    """
-    return "'" + value.replace("'", r"'\''") + "'"
-
-
 def _clock_pad(cell_height: int) -> int:
     """Inset from the cell edge, mirroring ``overlay_sprites._draw_panel``.
 
@@ -707,7 +695,7 @@ def _clock_filters(plan: GridStagePlan, canvas: GridCanvas, overlay: StageOverla
     """
     cell_w, cell_h = _cell_size(canvas, plan)
     pad = _clock_pad(cell_h)
-    font = _ffmpeg_quote(str(overlay.font_path))
+    font = quote_filter_value(str(overlay.font_path))
     filters: list[str] = []
     for clock in overlay.clocks:
         common = (
@@ -729,7 +717,7 @@ def _clock_filters(plan: GridStagePlan, canvas: GridCanvas, overlay: StageOverla
         freeze = f"{clock.freeze_seconds:g}"
         filters.append(f"drawtext={common}:{elapsed}:enable='gte(t\\,{start})*lt(t\\,{freeze})'")
         if clock.final_text is not None:
-            held = _ffmpeg_quote(clock.final_text)
+            held = quote_filter_value(clock.final_text)
             filters.append(f"drawtext={common}:text={held}:enable='gte(t\\,{freeze})'")
     if not filters:
         return ["[ovlgrid]format=yuv420p[final]"]

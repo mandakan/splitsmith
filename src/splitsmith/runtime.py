@@ -363,11 +363,20 @@ def _probe_text(completed: subprocess.CompletedProcess) -> str:
     return "\n".join(parts).lower()
 
 
-def _quote_filter_value(value: str) -> str:
-    """Quote one filter option value. Mirrors ``mp4_grid._ffmpeg_quote``.
+def quote_filter_value(value: str) -> str:
+    """Quote one ``filter_complex`` option value the way ffmpeg's escaping rules want.
 
-    Copied rather than imported: ``mp4_grid`` imports this module, and a
-    four-line quoting rule is a cheaper duplication than an import cycle.
+    Inside ``'...'`` every character is literal, so quoting is all that is
+    needed for the ``:`` and ``,`` an absolute path can contain. A literal
+    ``'`` cannot appear inside the quotes at all -- the quote is closed,
+    the character escaped outside it, and the quote reopened.
+
+    Shared, not copied: this probe's drawtext exercise and
+    ``compare.mp4_grid``'s own ``drawtext``/``text=`` filters both need
+    it, and a diverging copy would mean the probe exercises a string the
+    renderer never actually emits. ``mp4_grid`` imports this module (not
+    the other way around), so there is no cycle to avoid by duplicating
+    it -- ``mp4_grid`` imports this function instead.
     """
     return "'" + value.replace("'", r"'\''") + "'"
 
@@ -426,7 +435,7 @@ def _probe_drawtext(binary: str, font_path: Path | None, runner: Runner) -> bool
             "-i",
             "color=c=black:s=32x32:r=25",
             "-vf",
-            f"drawtext=fontfile={_quote_filter_value(str(font_path))}:text=0:fontsize=12",
+            f"drawtext=fontfile={quote_filter_value(str(font_path))}:text=0:fontsize=12",
             "-frames:v",
             "1",
             "-f",
