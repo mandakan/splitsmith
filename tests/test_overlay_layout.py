@@ -10,6 +10,8 @@ from splitsmith.overlay_layout import (
     Flow,
     Group,
     Role,
+    anchor_ffmpeg_expr,
+    anchor_origin,
 )
 
 
@@ -79,3 +81,44 @@ def test_elements_and_groups_are_frozen():
     group = Group(anchor=Anchor.TOP_LEFT, flow=Flow.ROW, elements=(element,))
     with pytest.raises(AttributeError):
         group.anchor = Anchor.TOP_RIGHT
+
+
+def test_top_left_origin_is_inset_by_the_pad():
+    x, y = anchor_origin(Anchor.TOP_LEFT, cell_x=640, cell_y=360, cell_w=640, cell_h=360, pad=24)
+    assert (x, y) == (664, 384)
+
+
+def test_bottom_right_origin_is_the_far_corner_inset():
+    x, y = anchor_origin(Anchor.BOTTOM_RIGHT, cell_x=0, cell_y=0, cell_w=640, cell_h=360, pad=24)
+    assert (x, y) == (616, 336)
+
+
+def test_center_anchors_land_on_the_cells_horizontal_middle():
+    x, _ = anchor_origin(Anchor.BOTTOM_CENTER, cell_x=0, cell_y=0, cell_w=640, cell_h=360, pad=24)
+    assert x == 320
+
+
+def test_the_clock_expression_is_character_for_character_what_it_is_today():
+    """``mp4_grid._clock_filters`` builds this string inline today.
+
+    The two argv fingerprint tests hash whole commands, so any drift here
+    -- an added space, a reordered term, ``-tw`` moving -- fails them and
+    can make ``concat -c copy`` refuse a segment mid-render. This asserts
+    the literal rather than recomputing it, so a "harmless tidy" of the
+    expression has to change this test deliberately.
+    """
+    x_expr, y_expr = anchor_ffmpeg_expr(Anchor.TOP_RIGHT, col=2, row=1, cell_w=1280, cell_h=720, pad=24)
+    assert x_expr == "2560+1280-tw-24"
+    assert y_expr == "720+24"
+
+
+def test_a_left_anchor_needs_no_text_width_term():
+    x_expr, y_expr = anchor_ffmpeg_expr(Anchor.TOP_LEFT, col=0, row=0, cell_w=1280, cell_h=720, pad=24)
+    assert x_expr == "0+24"
+    assert y_expr == "0+24"
+
+
+def test_bottom_anchors_measure_up_from_the_cells_own_bottom_edge():
+    x_expr, y_expr = anchor_ffmpeg_expr(Anchor.BOTTOM_LEFT, col=0, row=1, cell_w=1280, cell_h=720, pad=24)
+    assert x_expr == "0+24"
+    assert y_expr == "720+720-th-24"

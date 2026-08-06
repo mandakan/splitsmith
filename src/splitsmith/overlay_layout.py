@@ -205,3 +205,71 @@ class CellScale:
             Role.DETAIL: self.detail,
             Role.LIVE_PRIMARY: self.live_primary,
         }[role]
+
+
+def anchor_origin(
+    anchor: Anchor,
+    *,
+    cell_x: int,
+    cell_y: int,
+    cell_w: int,
+    cell_h: int,
+    pad: int,
+) -> tuple[int, int]:
+    """The origin corner of a group at ``anchor``, in canvas pixels.
+
+    ``cell_x`` / ``cell_y`` are the cell's own top-left on the canvas, so
+    a caller passes ``col * cell_w`` and ``row * cell_h``. The returned
+    point is the corner the group grows *away* from: a bottom anchor
+    returns its bottom edge and the caller stacks upward, a right anchor
+    returns its right edge and the caller runs leftward. Converting that
+    into a text position needs the text's measured box, which only the
+    renderer has.
+
+    Centre anchors return the cell's horizontal middle rather than an
+    inset edge -- there is nothing to inset from.
+    """
+    if anchor.is_center:
+        x = cell_x + cell_w // 2
+    elif anchor.is_right:
+        x = cell_x + cell_w - pad
+    else:
+        x = cell_x + pad
+    y = cell_y + cell_h - pad if anchor.is_bottom else cell_y + pad
+    return x, y
+
+
+def anchor_ffmpeg_expr(
+    anchor: Anchor,
+    *,
+    col: int,
+    row: int,
+    cell_w: int,
+    cell_h: int,
+    pad: int,
+) -> tuple[str, str]:
+    """``(x, y)`` expressions for a ``drawtext`` filter at ``anchor``.
+
+    ``drawtext`` positions text by expression, and ``tw`` / ``th`` (text
+    width and height) are only known to ffmpeg at draw time -- which is
+    exactly why the clock cannot share the PIL path. So a right or bottom
+    anchor subtracts ``tw`` / ``th`` inside the expression rather than in
+    Python.
+
+    The ``TOP_RIGHT`` form is what ``mp4_grid._clock_filters`` built
+    inline before this function existed and it is reproduced character
+    for character. Both argv fingerprint tests hash whole commands, so
+    any drift here fails them --
+    ``test_the_clock_expression_is_character_for_character_what_it_is_today``
+    exists so that a drift is a deliberate act rather than a surprise.
+    """
+    left = col * cell_w
+    top = row * cell_h
+    if anchor.is_center:
+        x_expr = f"{left}+({cell_w}-tw)/2"
+    elif anchor.is_right:
+        x_expr = f"{left}+{cell_w}-tw-{pad}"
+    else:
+        x_expr = f"{left}+{pad}"
+    y_expr = f"{top}+{cell_h}-th-{pad}" if anchor.is_bottom else f"{top}+{pad}"
+    return x_expr, y_expr
