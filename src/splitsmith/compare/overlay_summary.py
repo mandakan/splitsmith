@@ -436,21 +436,51 @@ def _lay_out_block(
     return kept
 
 
-def _hit_count_line(scorecard) -> str | None:
-    """``A7 C2 D1 M0 NS0``, omitting any field that is ``None``. Returns
-    ``None`` (draw nothing) when every field is ``None``."""
-    parts: list[str] = []
-    if scorecard.alphas is not None:
-        parts.append(f"A{scorecard.alphas}")
-    if scorecard.charlies is not None:
-        parts.append(f"C{scorecard.charlies}")
-    if scorecard.deltas is not None:
-        parts.append(f"D{scorecard.deltas}")
-    if scorecard.misses is not None:
-        parts.append(f"M{scorecard.misses}")
-    if scorecard.no_shoots is not None:
-        parts.append(f"NS{scorecard.no_shoots}")
+def _accuracy_line(scorecard) -> str | None:
+    """``A7 C2 D1``, omitting any field that is ``None``.
+
+    Accuracy only. Misses and no-shoots used to share this line, which
+    made them impossible to emphasise separately from the hits -- and
+    procedurals were on neither, so they never reached the screen at all.
+    See :func:`_faults_line`.
+    """
+    return _counts(scorecard, (("alphas", "A"), ("charlies", "C"), ("deltas", "D")))
+
+
+def _faults_line(scorecard) -> str | None:
+    """``M0 NS0 P2``, omitting any field that is ``None``.
+
+    What went wrong, as opposed to how well the shooter shot. A recorded
+    zero is drawn: a scoreboard row that says the shooter took no
+    procedurals is a fact worth stating, and it is a different fact from
+    a row that carried no procedural column at all -- which draws nothing
+    here. Those two must stay distinguishable, which is the same rule the
+    rest of this module follows.
+
+    ``P`` is the one this function exists for. ``StageScorecard`` has
+    carried ``procedurals`` all along and the old merged line never read
+    it, so two procedurals -- 20 points -- rendered as nothing.
+    """
+    return _counts(scorecard, (("misses", "M"), ("no_shoots", "NS"), ("procedurals", "P")))
+
+
+def _counts(scorecard, fields: tuple[tuple[str, str], ...]) -> str | None:
+    """``"<tag><value>"`` per field that is not ``None``, space-joined.
+
+    Returns ``None`` -- draw nothing -- when every field is ``None``.
+    """
+    parts = [f"{tag}{value}" for name, tag in fields if (value := getattr(scorecard, name)) is not None]
     return " ".join(parts) if parts else None
+
+
+def has_faults(scorecard) -> bool:
+    """Did anything actually go wrong?
+
+    Drives *emphasis*, not presence: a clean run still states ``M0 NS0
+    P0``, it just does not light an accent plate to do it. Presence is a
+    fact; emphasis is a judgement.
+    """
+    return any(bool(getattr(scorecard, name)) for name in ("misses", "no_shoots", "procedurals"))
 
 
 def _cell_lines(
@@ -497,9 +527,12 @@ def _cell_lines(
                 lines.append((f"HF {scorecard.hit_factor:.2f}", stat_size, ink))
             if scorecard.stage_pct is not None:
                 lines.append((f"Stage {scorecard.stage_pct:.1f}%", stat_size, ink))
-            hits = _hit_count_line(scorecard)
-            if hits is not None:
-                lines.append((hits, stat_size, ink))
+            accuracy = _accuracy_line(scorecard)
+            if accuracy is not None:
+                lines.append((accuracy, stat_size, ink))
+            faults = _faults_line(scorecard)
+            if faults is not None:
+                lines.append((faults, stat_size, accent if has_faults(scorecard) else ink))
 
     if tile.has_shots:
         rest = [shot.split for shot in tile.shots[1:]]

@@ -367,15 +367,78 @@ def test_stage_points_never_appears_and_stage_pct_does(monkeypatch):
 def test_none_hit_counts_are_omitted_not_zeroed(monkeypatch):
     drawn = _capture(monkeypatch)
     # charlies and misses are genuinely unread (None); no_shoots is a real
-    # zero. The line must show the real zero and skip the unread fields --
-    # not print a fabricated 0 for a count nobody read.
+    # zero. The lines must show the real zero and skip the unread fields --
+    # not print a fabricated 0 for a count nobody read. Accuracy and faults
+    # are separate lines now, so the zero lands on the faults one.
     scorecard = StageScorecard(alphas=7, charlies=None, deltas=1, misses=None, no_shoots=0)
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
     placements = [_placement("Ann", 0, 0)]
     summ.build_hold_still(placements, {"Ann": tile}, {}, GEOMETRY, theme=THEME)
 
-    hit_lines = [t for t in drawn if t.startswith("A") and "of" not in t and t != "Ann"]
-    assert hit_lines == ["A7 D1 NS0"]
+    assert "A7 D1" in drawn
+    assert "NS0" in drawn
+
+
+def test_procedurals_reach_the_screen():
+    """The defect this task exists for.
+
+    ``StageScorecard`` carries ``procedurals`` and it survives into
+    ``TileStageData``, but ``_hit_count_line`` read alphas, charlies,
+    deltas, misses and no-shoots and never read it. Two procedurals is 20
+    points off a stage; the shooter saw a hit factor that did not follow
+    from the hits above it and no explanation anywhere on screen.
+    """
+    scorecard = StageScorecard(alphas=10, charlies=1, deltas=1, misses=0, no_shoots=0, procedurals=2)
+    assert summ._faults_line(scorecard) == "M0 NS0 P2"
+
+
+def test_accuracy_and_faults_are_separate_lines():
+    """A/C/D says how well the shooter shot; M/NS/P says what went wrong.
+    One line mixing them cannot give the faults their own emphasis."""
+    scorecard = StageScorecard(alphas=10, charlies=1, deltas=1, misses=1, no_shoots=0, procedurals=2)
+    assert summ._accuracy_line(scorecard) == "A10 C1 D1"
+    assert summ._faults_line(scorecard) == "M1 NS0 P2"
+
+
+def test_a_recorded_zero_is_drawn_and_an_unread_field_is_not():
+    """Zero and absent are different facts and must stay distinguishable.
+
+    A scoreboard row that recorded zero misses draws ``M0``. A row that
+    carried no penalty column at all draws nothing for it -- and a row
+    with no penalty columns whatsoever draws no faults line.
+    """
+    recorded = StageScorecard(misses=0, no_shoots=0, procedurals=0)
+    assert summ._faults_line(recorded) == "M0 NS0 P0"
+
+    partial = StageScorecard(misses=0, no_shoots=None, procedurals=None)
+    assert summ._faults_line(partial) == "M0"
+
+    unread = StageScorecard(misses=None, no_shoots=None, procedurals=None)
+    assert summ._faults_line(unread) is None
+
+
+def test_an_all_none_accuracy_draws_nothing():
+    assert summ._accuracy_line(StageScorecard(alphas=None, charlies=None, deltas=None)) is None
+
+
+def test_both_lines_are_drawn_for_a_penalised_tile(monkeypatch):
+    drawn = _capture(monkeypatch)
+    scorecard = StageScorecard(
+        hit_factor=12.17,
+        stage_pct=78.5,
+        alphas=10,
+        charlies=1,
+        deltas=1,
+        misses=1,
+        no_shoots=0,
+        procedurals=2,
+    )
+    tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
+    placements = [_placement("Ann", 0, 0)]
+    summ.build_hold_still(placements, {"Ann": tile}, {}, GEOMETRY, theme=THEME)
+
+    assert "A10 C1 D1" in drawn
+    assert "M1 NS0 P2" in drawn
 
 
 def test_manual_time_is_marked_as_manual(monkeypatch):
