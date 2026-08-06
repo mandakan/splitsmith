@@ -99,7 +99,13 @@ def _build_backend_for_new_user(
     inline: bool = True,
 ) -> tuple[PostgresJobBackend, sessionmaker, str]:
     db_path = tmp_path / db_name
-    engine = create_engine(f"sqlite+aiosqlite:///{db_path}")
+    # NullPool: this file drives the backend through many short-lived event
+    # loops (asyncio.run per call, plus the worker thread's own runs). A
+    # pooled aiosqlite connection created in one loop and reused in a later
+    # one intermittently dies with "Event loop is closed" (seen on CI); a
+    # fresh connection per session sidesteps it, same as the hosted boot
+    # path does via pool_disabled.
+    engine = create_engine(f"sqlite+aiosqlite:///{db_path}", pool_disabled=True)
     session_factory = sessionmaker(engine)
 
     async def _setup() -> str:
@@ -667,3 +673,24 @@ def test_wire_and_rehydrate_round_trip_a_pydantic_req() -> None:
     assert rehydrated["req"] == req
     # Pass-through kinds are returned untouched (no ``req`` to rebuild).
     assert _rehydrate_args("trim", {"video_id": "v1"}) == {"video_id": "v1"}
+
+
+def test_find_active_scopes_by_shooter_slug(tmp_path) -> None:
+    """Issue #664: the dedupe key includes the owning shooter's slug -
+    stage numbers collide across every shooter in a match by definition.
+    The slug also persists on the row and rides the Job snapshot."""
+    backend, _, _ = _build_backend_for_new_user(tmp_path, inline=False)
+    _register(backend, "shot_detect", lambda _h: None)
+
+    job = asyncio.run(backend.submit(kind="shot_detect", stage_number=3, shooter_slug="anders"))
+    assert job.shooter_slug == "anders"
+    assert asyncio.run(backend.get(job.id)).shooter_slug == "anders"
+
+    found = asyncio.run(backend.find_active(kind="shot_detect", stage_number=3, shooter_slug="anders"))
+    assert found is not None and found.id == job.id
+    # Same kind + stage, different shooter: not a duplicate.
+    assert (
+        asyncio.run(backend.find_active(kind="shot_detect", stage_number=3, shooter_slug="mathias")) is None
+    )
+    # A slug-less lookup must not adopt a shooter-scoped job either.
+    assert asyncio.run(backend.find_active(kind="shot_detect", stage_number=3)) is None

@@ -728,6 +728,10 @@ def test_run_threads_timer_and_persists_timings_and_emits_completed(caplog) -> N
     with caplog.at_level(logging.INFO, logger="splitsmith.ui.jobs"):
         job = reg.submit(kind="trim", fn=work)
         assert _wait_until(lambda: reg.get(job.id).status == JobStatus.SUCCEEDED)
+        # The terminal event is emitted after the status flip, on the worker
+        # thread - keep capturing until it lands or the record is silently
+        # dropped when this block exits first.
+        assert _wait_until(lambda: any(getattr(r, "event", None) == "job.completed" for r in caplog.records))
 
     snap = reg.get(job.id)
     assert snap.timings is not None
@@ -751,6 +755,8 @@ def test_run_failed_emits_job_failed_with_partial_timings(caplog) -> None:
     with caplog.at_level(logging.INFO, logger="splitsmith.ui.jobs"):
         job = reg.submit(kind="trim", fn=boom)
         assert _wait_until(lambda: reg.get(job.id).status == JobStatus.FAILED)
+        # Same status-flip-before-emit race as the succeeded-path test above.
+        assert _wait_until(lambda: any(getattr(r, "event", None) == "job.failed" for r in caplog.records))
 
     snap = reg.get(job.id)
     assert snap.timings is not None
@@ -761,3 +767,27 @@ def test_run_failed_emits_job_failed_with_partial_timings(caplog) -> None:
     assert len(failed) == 1
     assert failed[0].status == JobStatus.FAILED.value
     assert failed[0].job_error == "crash"
+
+
+def test_find_active_scopes_by_shooter_slug() -> None:
+    """Issue #664: two shooters share every stage number, so a dedupe on
+    (kind, stage_number) alone adopts the other shooter's job. The slug
+    is part of the match key and rides the Job snapshot."""
+    reg = _Sync(JobRegistry(max_concurrent=1))
+    release = threading.Event()
+
+    def work(_handle):
+        release.wait(timeout=5.0)
+
+    try:
+        job = reg.submit(kind="shot_detect", fn=work, stage_number=3, shooter_slug="anders")
+        assert job.shooter_slug == "anders"
+
+        found = reg.find_active(kind="shot_detect", stage_number=3, shooter_slug="anders")
+        assert found is not None and found.id == job.id
+        # Same kind + stage, different shooter: not a duplicate.
+        assert reg.find_active(kind="shot_detect", stage_number=3, shooter_slug="mathias") is None
+        # A slug-less lookup must not adopt a shooter-scoped job either.
+        assert reg.find_active(kind="shot_detect", stage_number=3) is None
+    finally:
+        release.set()

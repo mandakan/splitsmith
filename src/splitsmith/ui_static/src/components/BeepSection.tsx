@@ -168,6 +168,7 @@ export function BeepSection({
         const active = jobs.find(
           (j) =>
             j.kind === "detect_beep" &&
+            j.shooter_slug === slug &&
             j.stage_number === stageNumber &&
             j.video_id === videoId &&
             (j.status === "pending" || j.status === "running"),
@@ -193,7 +194,7 @@ export function BeepSection({
     return () => {
       cancelled = true;
     };
-  }, [stageNumber, videoId, onProjectUpdate, setError]);
+  }, [slug, stageNumber, videoId, onProjectUpdate, setError]);
 
   const detect = async (force: boolean) => {
     setBusy(true);

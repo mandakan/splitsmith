@@ -8713,3 +8713,41 @@ def test_beep_queue_proxy_ready_local_mode_always_true(tmp_path: Path) -> None:
     items = [item for stage in body["stages"] for item in stage["items"]]
     assert len(items) == 1, f"expected 1 beep-queue item, got {len(items)}"
     assert items[0]["proxy_ready"] is True, "local mode must always report proxy_ready=True"
+
+
+def test_shot_detect_does_not_adopt_other_shooters_job(two_shooter_match: Path) -> None:
+    """Issue #664: with shooter A's shot-detect still in flight on stage 1,
+    shooter B's POST for stage 1 must start B's own job - the dedupe used
+    to match on (kind, stage_number) alone and handed B a snapshot of A's
+    job, so B's detection could never start."""
+    app = _match_create_app(project_root=two_shooter_match)
+    client = _MatchClient(app)
+    state = app.state.splitsmith_state
+
+    release = threading.Event()
+
+    def _blocked(_handle, **_args) -> None:
+        release.wait(timeout=10.0)
+
+    state.jobs.bodies.register("shot_detect", _blocked)
+
+    try:
+        resp_a = client.post("/api/shooters/anders/stages/1/shot-detect")
+        assert resp_a.status_code == 200, resp_a.text
+        job_a = resp_a.json()
+
+        resp_b = client.post("/api/shooters/mathias/stages/1/shot-detect")
+        assert resp_b.status_code == 200, resp_b.text
+        job_b = resp_b.json()
+        assert job_b["id"] != job_a["id"], "shooter B adopted shooter A's job"
+        assert job_a["shooter_slug"] == "anders"
+        assert job_b["shooter_slug"] == "mathias"
+
+        # The same shooter resubmitting still adopts their own active job.
+        resp_a2 = client.post("/api/shooters/anders/stages/1/shot-detect")
+        assert resp_a2.status_code == 200, resp_a2.text
+        assert resp_a2.json()["id"] == job_a["id"]
+    finally:
+        release.set()
+    _wait_for_job(client, job_a["id"])
+    _wait_for_job(client, job_b["id"])
