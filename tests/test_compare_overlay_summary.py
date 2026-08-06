@@ -2,10 +2,12 @@
 
 Freeze extraction goes through a fake runner -- no ffmpeg is ever shelled
 out to here, per CLAUDE.md. Text presence/absence is asserted by
-monkeypatching ``_draw_text_with_shadow`` to record what was drawn, rather
-than by pixel-diffing rendered glyphs: it is exactly what
-``overlay_summary`` calls to put ink on the canvas, so this is the same
-seam the module already uses, not a new one invented for the test.
+monkeypatching ``_draw_text_with_shadow`` and ``_plate`` to record what
+was drawn, rather than by pixel-diffing rendered glyphs: those are
+exactly what ``overlay_summary`` calls to put ink on the canvas -- plain
+text through the former, ``PLATE``-emphasis text through the latter --
+so this is the same pair of seams the module already uses, not a new one
+invented for the test.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from splitsmith.compare import overlay_summary as summ
 from splitsmith.compare.mp4_grid import GridStagePlan, GridTile
 from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
+from splitsmith.overlay_layout import Anchor, Emphasis, Role
 from splitsmith.overlay_theme import load_theme
 from splitsmith.ui.project import StageScorecard
 
@@ -293,6 +296,97 @@ def test_blur_is_applied_once_per_tile_not_per_frame(tmp_path, monkeypatch):
     assert len(calls) == 2
 
 
+# --- cell composition: declared groups -------------------------------------
+
+
+def _groups_by_anchor(groups):
+    out: dict[Anchor, list] = {}
+    for group in groups:
+        out.setdefault(group.anchor, []).append(group)
+    return out
+
+
+def test_the_name_and_the_placing_share_the_top_left():
+    tile = _full_stat_tile("Ann")
+    groups = summ._cell_groups(tile, summ.StagePlacing(rank=2, total_ranked=5), "Ann")
+    top_left = _groups_by_anchor(groups)[Anchor.TOP_LEFT][0]
+    assert [e.text for e in top_left.elements] == ["Ann", "#2"]
+    assert top_left.elements[0].role is Role.IDENTITY
+    assert top_left.elements[1].role is Role.VERDICT
+    assert top_left.elements[1].emphasis is Emphasis.PLATE
+
+
+def test_the_band_carries_three_captioned_headlines():
+    scorecard = StageScorecard(hit_factor=12.0, stage_pct=100.0)
+    tile = TileStageData(label="Ann", stage_number=1, stage_time_seconds=4.5, scorecard=scorecard)
+    groups = summ._cell_groups(tile, None, "Ann")
+    band = _groups_by_anchor(groups)[Anchor.BOTTOM_LEFT][0]
+    assert [e.caption for e in band.elements] == ["TIME", "HF", "STAGE"]
+    assert [e.text for e in band.elements] == ["4.50", "12.00", "100.0%"]
+    assert all(e.role is Role.HEADLINE for e in band.elements)
+
+
+def test_a_clean_run_states_its_zeros_without_a_plate():
+    """Presence is a fact; emphasis is a judgement. Drawing an accent
+    plate on every clean cell in the grid would make the plate mean
+    nothing when a real penalty turns up."""
+    scorecard = StageScorecard(alphas=10, misses=0, no_shoots=0, procedurals=0)
+    tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
+    groups = summ._cell_groups(tile, None, "Ann")
+    faults = [e for g in groups for e in g.elements if e.text == "M0 NS0 P0"]
+    assert len(faults) == 1
+    assert faults[0].emphasis is Emphasis.MUTED
+
+
+def test_a_penalised_run_lights_the_plate():
+    scorecard = StageScorecard(alphas=10, misses=1, no_shoots=0, procedurals=2)
+    tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
+    groups = summ._cell_groups(tile, None, "Ann")
+    faults = [e for g in groups for e in g.elements if e.text == "M1 NS0 P2"]
+    assert len(faults) == 1
+    assert faults[0].emphasis is Emphasis.PLATE
+
+
+def test_split_statistics_take_the_clocks_old_corner():
+    """Nothing jumps across the action-to-hold cut that does not have to.
+    The running clock lived at top-right; the figures that replace it
+    stay there."""
+    tile = _full_stat_tile("Ann")
+    groups = summ._cell_groups(tile, None, "Ann")
+    top_right = _groups_by_anchor(groups)[Anchor.TOP_RIGHT][0]
+    texts = [e.text for e in top_right.elements]
+    assert any("Best" in t for t in texts)
+    assert any(t.startswith("Draw") for t in texts)
+    assert all(e.emphasis is Emphasis.MUTED for e in top_right.elements)
+
+
+def test_a_dq_takes_the_placings_slot_and_suppresses_the_scoring():
+    scorecard = StageScorecard(hit_factor=5.12, stage_pct=80.0, alphas=7, dq=True)
+    tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
+    groups = summ._cell_groups(tile, None, "Ann")
+    texts = [e.text for g in groups for e in g.elements]
+    assert "DQ" in texts
+    assert not any("5.12" in t for t in texts)
+    assert not any("80.0" in t for t in texts)
+
+
+def test_a_tile_with_nothing_declares_only_its_label():
+    """The control cell. A tile with no audit and no scorecard renders
+    its name and nothing else -- which is what the pixel checks measure
+    "is the hold blurred" against."""
+    groups = summ._cell_groups(None, None, "Ann")
+    assert [e.text for g in groups for e in g.elements] == ["Ann"]
+
+
+def test_the_band_is_declared_before_the_faults_row():
+    """Groups sharing an anchor stack away from its edge in declaration
+    order, and the band sits on the cell's bottom edge."""
+    tile = _full_stat_tile("Ann")
+    groups = summ._cell_groups(tile, None, "Ann")
+    bottom = _groups_by_anchor(groups)[Anchor.BOTTOM_LEFT]
+    assert bottom[0].elements[0].role is Role.HEADLINE
+
+
 # --- composition ------------------------------------------------------------
 
 
@@ -323,18 +417,32 @@ def test_each_cell_draws_over_its_own_freeze_frame(tmp_path):
     assert bo_pixel[2] > bo_pixel[0]  # blue-ish, not red-ish
 
 
-# --- text content: capture what _draw_text_with_shadow was asked to draw --
+# --- text content: capture what was drawn to the canvas -------------------
 
 
 def _capture(monkeypatch):
+    """Record every string put on the canvas, plain or plated.
+
+    A ``PLATE``-emphasis element (a placing, a DQ, a lit faults line)
+    draws through ``_plate`` -- ink on a filled rectangle -- rather than
+    ``_draw_text_with_shadow``'s stroke, so both are recorded here. It is
+    still the same seam the module uses to put ink down, just two calls
+    instead of one now that a second rendering path exists.
+    """
     drawn: list[str] = []
-    original = summ._draw_text_with_shadow
+    original_shadow = summ._draw_text_with_shadow
+    original_plate = summ._plate
 
-    def recorder(draw, canvas, xy, text, font, fill, **kwargs):
+    def shadow_recorder(draw, canvas, xy, text, font, fill, **kwargs):
         drawn.append(text)
-        return original(draw, canvas, xy, text, font, fill, **kwargs)
+        return original_shadow(draw, canvas, xy, text, font, fill, **kwargs)
 
-    monkeypatch.setattr(summ, "_draw_text_with_shadow", recorder)
+    def plate_recorder(canvas, xy, text, font, *, theme, size):
+        drawn.append(text)
+        return original_plate(canvas, xy, text, font, theme=theme, size=size)
+
+    monkeypatch.setattr(summ, "_draw_text_with_shadow", shadow_recorder)
+    monkeypatch.setattr(summ, "_plate", plate_recorder)
     return drawn
 
 
@@ -346,9 +454,12 @@ def test_missing_scorecard_omits_the_scoring_lines(monkeypatch):
     summ.build_hold_still(placements, {"Ann": tile}, {}, GEOMETRY, theme=THEME)
 
     assert any("shots" in t for t in drawn)
-    assert any(t.startswith("Time") for t in drawn)
-    assert not any(t.startswith("HF") for t in drawn)
-    assert not any(t.startswith("Stage") for t in drawn)
+    # TIME is now a captioned headline: the caption carries the word and
+    # the value is bare ("12.34"), not a "Time 12.34" line.
+    assert "TIME" in drawn
+    assert "12.34" in drawn
+    assert "HF" not in drawn
+    assert "STAGE" not in drawn
     assert not any(t.startswith("A") and t[1:2].isdigit() for t in drawn)
     assert "DQ" not in drawn
 
@@ -586,52 +697,117 @@ def _full_stat_tile(label: str) -> TileStageData:
 
 
 def _drawn_boxes(monkeypatch):
-    """Record ``(xy, bbox)`` for every line the summary draws."""
+    """Record ``(xy, bbox)`` for every line the summary draws, plain or
+    plated -- a plate (a placing, a DQ, a lit faults line) is ink on a
+    filled rectangle drawn through ``_plate`` rather than
+    ``_draw_text_with_shadow``, and the bound this records against must
+    cover both paths or an overflowing plate would go unnoticed."""
     boxes: list[tuple[tuple[int, int], tuple[int, int, int, int]]] = []
-    original = summ._draw_text_with_shadow
+    original_shadow = summ._draw_text_with_shadow
+    original_plate = summ._plate
 
-    def recorder(draw, canvas, xy, text, font, fill, **kwargs):
+    def shadow_recorder(draw, canvas, xy, text, font, fill, **kwargs):
         boxes.append((xy, draw.textbbox(xy, text, font=font)))
-        return original(draw, canvas, xy, text, font, fill, **kwargs)
+        return original_shadow(draw, canvas, xy, text, font, fill, **kwargs)
 
-    monkeypatch.setattr(summ, "_draw_text_with_shadow", recorder)
+    def plate_recorder(canvas, xy, text, font, *, theme, size):
+        plate_w, plate_h = original_plate(canvas, xy, text, font, theme=theme, size=size)
+        x, y = xy
+        boxes.append((xy, (x, y, x + plate_w, y + plate_h)))
+        return plate_w, plate_h
+
+    monkeypatch.setattr(summ, "_draw_text_with_shadow", shadow_recorder)
+    monkeypatch.setattr(summ, "_plate", plate_recorder)
+    return boxes
+
+
+def _drawn_labeled_boxes(monkeypatch):
+    """Record ``(text, xy, bbox)`` for every line the summary draws,
+    plain or plated.
+
+    Text-tagged, unlike :func:`_drawn_boxes`, so a caller can attribute a
+    drawn box to its own shooter by what it *says* rather than by where
+    it landed. Position is exactly what
+    ``test_a_short_cell_keeps_its_summary_inside_its_own_cell`` is
+    checking, so filtering by position would silently discard the very
+    overflow that test exists to catch.
+    """
+    boxes: list[tuple[str, tuple[int, int], tuple[int, int, int, int]]] = []
+    original_shadow = summ._draw_text_with_shadow
+    original_plate = summ._plate
+
+    def shadow_recorder(draw, canvas, xy, text, font, fill, **kwargs):
+        boxes.append((text, xy, draw.textbbox(xy, text, font=font)))
+        return original_shadow(draw, canvas, xy, text, font, fill, **kwargs)
+
+    def plate_recorder(canvas, xy, text, font, *, theme, size):
+        plate_w, plate_h = original_plate(canvas, xy, text, font, theme=theme, size=size)
+        x, y = xy
+        boxes.append((text, xy, (x, y, x + plate_w, y + plate_h)))
+        return plate_w, plate_h
+
+    monkeypatch.setattr(summ, "_draw_text_with_shadow", shadow_recorder)
+    monkeypatch.setattr(summ, "_plate", plate_recorder)
     return boxes
 
 
 def test_a_short_cell_keeps_its_summary_inside_its_own_cell(monkeypatch):
-    """A cell too short for the block must not spill into the one below.
+    """A cell too short for its groups must not spill into a neighbour.
 
-    Nothing bounded the block's height: ``_fit_font`` budgets width only,
-    and the block ran to a roughly constant 207-247px whatever the cell
-    was. Every cell shorter than that -- 90px here -- wrote its shooter's
-    figures over the shooter underneath, which does not merely look
-    untidy: it attributes one competitor's numbers to another, and the
-    cell receiving them has no way to disown them.
+    Nothing bounds a group's height by itself: :func:`_fit_font` budgets
+    width only. A short cell -- 75px here -- can overflow *either*
+    direction now that content is anchored on more than one edge:
+    top-left and top-right grow downward, away from the cell's top edge,
+    while the bottom-left band and the counts row stacked above it grow
+    upward, away from the bottom edge. Either direction attributes one
+    competitor's numbers to another, who has no way to disown them.
+
+    Ann sits in the *middle* row of three, not the top, so both
+    directions of crossing are observable in one fixture -- a fixture
+    with Ann in row 0 can only ever show the downward defect, because
+    there is nothing above row 0 to spill into, which is exactly why an
+    earlier version of this test kept passing when the height bound
+    behind it was deliberately gutted for a manual check: the fixture
+    could only see one of the two ways this can now break.
+
+    Boxes are attributed to Ann by their own drawn text, not by where
+    they landed -- position is what is under test, so filtering on it
+    would drop precisely the overflowing box the test needs to see.
     """
-    geometry = SpriteGeometry(canvas_width=360, canvas_height=180, rows=2, cols=1)
-    assert geometry.cell_height == 90
-    placements = [_placement("Ann", 0, 0), _placement("Bo", 1, 0)]
-    data = {"Ann": _full_stat_tile("Ann"), "Bo": TileStageData(label="Bo", stage_number=1)}
+    geometry = SpriteGeometry(canvas_width=360, canvas_height=225, rows=3, cols=1)
+    assert geometry.cell_height == 75
+    placements = [
+        _placement("Above", 0, 0),
+        _placement("Ann", 1, 0),
+        _placement("Below", 2, 0),
+    ]
+    data = {
+        "Above": TileStageData(label="Above", stage_number=1),
+        "Ann": _full_stat_tile("Ann"),
+        "Below": TileStageData(label="Below", stage_number=1),
+    }
 
-    boxes = _drawn_boxes(monkeypatch)
+    boxes = _drawn_labeled_boxes(monkeypatch)
     summ.build_hold_still(placements, data, {}, geometry, theme=THEME)
 
-    assert boxes, "the summary drew nothing at all"
-    in_ann = [box for xy, box in boxes if xy[1] < geometry.cell_height]
-    assert in_ann, "the top cell drew nothing"
-    overflow = max(box[3] for box in in_ann)
-    assert overflow <= geometry.cell_height, (
-        f"the top cell's summary block reaches {overflow}px, past its own {geometry.cell_height}px "
-        "cell and into the shooter below"
-    )
+    ann_boxes = [(xy, box) for text, xy, box in boxes if text not in ("Above", "Below")]
+    assert ann_boxes, "Ann's own cell drew nothing"
+    cell_top, cell_bottom = geometry.cell_height, 2 * geometry.cell_height
+    assert (
+        min(box[1] for _xy, box in ann_boxes) >= cell_top
+    ), "Ann's summary reaches above her own cell, into the shooter above"
+    assert (
+        max(box[3] for _xy, box in ann_boxes) <= cell_bottom
+    ), "Ann's summary reaches below her own cell, into the shooter below"
     # Bounding it must not empty it: the label at least still lands, and
-    # a bound that simply stopped drawing would pass the check above.
-    assert len(in_ann) >= 2, f"the bound left only {len(in_ann)} line(s) in the top cell"
+    # a bound that simply stopped drawing would pass the checks above.
+    assert len(ann_boxes) >= 2, f"the bound left only {len(ann_boxes)} line(s) in Ann's cell"
 
 
 def test_a_tall_cell_lays_the_block_out_unshrunk(monkeypatch):
-    """The shipped 3840x2160 default has 540-1080px cells, so the bound
-    added above must be inert there -- same sizes, same positions."""
+    """The shipped 3840x2160 default has 540-1080px cells, so the group
+    bounding introduced by this task must be inert there -- same sizes,
+    same anchored positions."""
     geometry = SpriteGeometry(canvas_width=3840, canvas_height=2160, rows=3, cols=3)
     placements = [_placement("Ann", 0, 0)]
     data = {"Ann": _full_stat_tile("Ann")}
@@ -639,12 +815,16 @@ def test_a_tall_cell_lays_the_block_out_unshrunk(monkeypatch):
     boxes = _drawn_boxes(monkeypatch)
     summ.build_hold_still(placements, data, {}, geometry, theme=THEME)
 
-    pad = max(20, geometry.cell_height // 40)
-    label_size = max(32, geometry.cell_height // 16)
-    assert boxes[0][0] == (pad, pad)
-    # The first line is the label at its unshrunk size: a block that had
+    scale = summ.CellScale.for_cell(geometry.cell_height)
+    # The identity group's origin: the label lands at the cell's own
+    # top-left inset by the shared pad on the x axis. (Its y is offset
+    # from the pad by the font's own ascent metric -- the bbox[1]
+    # correction _draw_text_with_shadow's caller applies -- not the raw
+    # pad itself.)
+    assert boxes[0][0][0] == scale.pad
+    # The first line is the label at its unshrunk size: a group that had
     # been scaled down would draw it smaller than this.
-    assert boxes[0][1][3] - boxes[0][1][1] >= label_size // 2
+    assert boxes[0][1][3] - boxes[0][1][1] >= scale.identity // 2
     assert max(box[3] for _xy, box in boxes) <= geometry.cell_height
 
 

@@ -38,6 +38,16 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFilter
 
+from ..overlay_layout import (
+    Anchor,
+    CellScale,
+    Element,
+    Emphasis,
+    Flow,
+    Group,
+    Role,
+    anchor_origin,
+)
 from ..overlay_text import _draw_text_with_shadow, _load_font
 from ..overlay_theme import OverlayTheme
 from .mp4_grid import GridStagePlan, Runner
@@ -374,66 +384,12 @@ def _fit_font(
     return font, size
 
 
-#: Scales :func:`_lay_out_block` tries, in order, before giving up and
-#: clipping. Each step is a 15% cut, which is coarse enough that a block
-#: needing a real shrink gets there in a handful of measurements and fine
-#: enough that a block that barely overflows does not end up half-size.
-_BLOCK_SCALES = (1.0, 0.85, 0.72, 0.61, 0.52, 0.44, 0.37, 0.32, 0.27, 0.23)
-
-
-def _lay_out_block(
-    draw: ImageDraw.ImageDraw,
-    lines: Sequence[tuple[str, int, tuple[int, int, int, int]]],
-    theme: OverlayTheme,
-    *,
-    width_budget: float,
-    height_budget: float,
-) -> list[tuple[str, object, int, tuple[int, int, int, int], int]]:
-    """Place ``lines`` inside a cell, bounded on *both* axes.
-
-    :func:`_fit_font` bounds the width of one line. Nothing bounded the
-    height of the stack of them, so a cell shorter than the block --
-    measured at a constant 207-247px, which is every cell below about
-    250px tall -- spilled its shooter's figures down into the cell of the
-    shooter underneath. That is worse than losing a line: it attributes
-    one competitor's numbers to another, and the neighbour has no way to
-    tell them apart.
-
-    So the whole block is scaled down until it fits (floored at
-    :data:`_MIN_FONT_SIZE`, the same floor per-line width fitting uses),
-    and if it still does not fit at the floor, the lines that would cross
-    the cell's bottom edge are dropped. Both bounds are hard; neither
-    draws outside the cell. A cell with room for the block at full size
-    -- which is every cell of the shipped 3840x2160 default, at 540-1080px
-    tall -- lays out exactly as before, because the first scale tried is
-    ``1.0``.
-
-    Returns ``(text, font, fitted_size, color, y_offset)`` per drawn line,
-    with ``y_offset`` relative to the block's top.
-    """
-    placed: list[tuple[str, object, int, tuple[int, int, int, int], int]] = []
-    for scale in _BLOCK_SCALES:
-        placed = []
-        y = 0
-        at_floor = True
-        for text, size, color in lines:
-            scaled = max(_MIN_FONT_SIZE, round(size * scale))
-            font, fitted = _fit_font(draw, text, theme, base_size=scaled, budget=width_budget)
-            at_floor = at_floor and fitted <= _MIN_FONT_SIZE
-            placed.append((text, font, fitted, color, y))
-            bbox = draw.textbbox((0, y), text, font=font)
-            y += (bbox[3] - bbox[1]) + max(6, fitted // 6)
-        if y <= height_budget or at_floor:
-            break
-    # Still over budget at the floor: drop whole lines from the bottom
-    # rather than let them cross into the next shooter's cell.
-    kept: list[tuple[str, object, int, tuple[int, int, int, int], int]] = []
-    for text, font, fitted, color, y in placed:
-        bbox = draw.textbbox((0, y), text, font=font)
-        if bbox[3] > height_budget and kept:
-            break
-        kept.append((text, font, fitted, color, y))
-    return kept
+#: Scales :func:`_fit_group_scale` tries, in order, before giving up and
+#: accepting whatever the floor gives it. Each step is a 15% cut, which is
+#: coarse enough that a group needing a real shrink gets there in a
+#: handful of measurements and fine enough that a group that barely
+#: overflows does not end up half-size.
+_GROUP_SCALE_STEPS = (1.0, 0.85, 0.72, 0.61, 0.52, 0.44, 0.37, 0.32, 0.27, 0.23)
 
 
 def _accuracy_line(scorecard) -> str | None:
@@ -483,70 +439,294 @@ def has_faults(scorecard) -> bool:
     return any(bool(getattr(scorecard, name)) for name in ("misses", "no_shoots", "procedurals"))
 
 
-def _cell_lines(
+def _cell_groups(
     tile: TileStageData | None,
     placing: StagePlacing | None,
     label: str,
-    *,
-    label_size: int,
-    stat_size: int,
-    ink: tuple[int, int, int, int],
-    accent: tuple[int, int, int, int],
-) -> list[tuple[str, int, tuple[int, int, int, int]]]:
-    """Every line this cell draws, in order, each with its own size and
-    color. A tile with no audit and no scorecard yields just the label."""
-    lines: list[tuple[str, int, tuple[int, int, int, int]]] = [(label, label_size, ink)]
-    if placing is not None:
+) -> tuple[Group, ...]:
+    """What one cell says, as anchored groups rather than an ordered list.
+
+    This used to be a ``list`` of ``(text, size, colour)`` built in a
+    fixed sequence, which meant every new figure was an insertion into
+    that sequence and every layout assumption around it shifted. Declaring
+    position and role instead lets an element be absent without the ones
+    around it moving.
+
+    A tile with no audit and no scorecard yields just the label -- that
+    cell is the control the hold's pixel checks measure against, so it
+    must stay text-free apart from the name.
+    """
+    scorecard = tile.scorecard if tile is not None else None
+    groups: list[Group] = []
+
+    # Top-left: who this is, and how they placed.
+    identity: list[Element] = [Element(role=Role.IDENTITY, text=label)]
+    if scorecard is not None and scorecard.dq:
+        # A DQ takes the placing's slot rather than sitting beside it: a
+        # DQ'd run has no rankable finish, so there is no placing to show.
+        identity.append(Element(role=Role.VERDICT, text="DQ", emphasis=Emphasis.PLATE))
+    elif placing is not None:
         # Bare "#2", not "#2 of 4": only scorecard-carrying tiles enter
-        # the ranked pool, so a stage a 7-shooter roster ran would show
-        # "of 4" against 3 legitimately un-ranked shooters (DQ'd, no
-        # scorecard, no audit) still on screen -- reading as a smaller
-        # field than actually shot. The grid itself already shows the
-        # field size; the placing only needs to say where this shooter
-        # landed in it.
-        lines.append((f"#{placing.rank}", stat_size, accent))
+        # the ranked pool, so "of 4" on a stage a 7-shooter roster ran
+        # would read as a smaller field than actually shot. The grid
+        # itself already shows the field size.
+        identity.append(Element(role=Role.VERDICT, text=f"#{placing.rank}", emphasis=Emphasis.PLATE))
+    groups.append(Group(anchor=Anchor.TOP_LEFT, flow=Flow.ROW, elements=tuple(identity)))
 
     if tile is None:
-        return lines
+        return tuple(groups)
 
+    # Top-right: the running clock's old corner. The shooter's own shot
+    # detail settles here so nothing jumps across the action-to-hold cut.
+    detail: list[Element] = []
     if tile.has_shots:
-        lines.append((f"{tile.shot_count} shots", stat_size, ink))
-
-    if tile.stage_time_seconds is not None:
-        text = f"Time {tile.stage_time_seconds:.2f}"
-        if tile.stage_time_is_manual:
-            text += " (manual)"
-        lines.append((text, stat_size, ink))
-
-    scorecard = tile.scorecard
-    if scorecard is not None:
-        if scorecard.dq:
-            lines.append(("DQ", stat_size, accent))
-        else:
-            if scorecard.hit_factor is not None:
-                lines.append((f"HF {scorecard.hit_factor:.2f}", stat_size, ink))
-            if scorecard.stage_pct is not None:
-                lines.append((f"Stage {scorecard.stage_pct:.1f}%", stat_size, ink))
-            accuracy = _accuracy_line(scorecard)
-            if accuracy is not None:
-                lines.append((accuracy, stat_size, ink))
-            faults = _faults_line(scorecard)
-            if faults is not None:
-                lines.append((faults, stat_size, accent if has_faults(scorecard) else ink))
-
-    if tile.has_shots:
+        detail.append(Element(role=Role.DETAIL, text=f"{tile.shot_count} shots", emphasis=Emphasis.MUTED))
         rest = [shot.split for shot in tile.shots[1:]]
         if rest:
-            lines.append(
-                (
-                    f"Best {min(rest):.2f}  Avg {sum(rest) / len(rest):.2f}  Worst {max(rest):.2f}",
-                    stat_size,
-                    ink,
+            best_avg_worst = f"Best {min(rest):.2f}  Avg {sum(rest) / len(rest):.2f}  Worst {max(rest):.2f}"
+            detail.append(Element(role=Role.DETAIL, text=best_avg_worst, emphasis=Emphasis.MUTED))
+        detail.append(
+            Element(role=Role.DETAIL, text=f"Draw {tile.shots[0].split:.2f}", emphasis=Emphasis.MUTED)
+        )
+    if detail:
+        groups.append(Group(anchor=Anchor.TOP_RIGHT, flow=Flow.COLUMN, elements=tuple(detail)))
+
+    # Bottom-left, declared first so it sits on the cell's bottom edge:
+    # the three figures the viewer reads first.
+    band: list[Element] = []
+    if tile.stage_time_seconds is not None:
+        text = f"{tile.stage_time_seconds:.2f}"
+        if tile.stage_time_is_manual:
+            text += " (manual)"
+        band.append(Element(role=Role.HEADLINE, text=text, caption="TIME"))
+    if scorecard is not None and not scorecard.dq:
+        if scorecard.hit_factor is not None:
+            band.append(Element(role=Role.HEADLINE, text=f"{scorecard.hit_factor:.2f}", caption="HF"))
+        if scorecard.stage_pct is not None:
+            band.append(Element(role=Role.HEADLINE, text=f"{scorecard.stage_pct:.1f}%", caption="STAGE"))
+    if band:
+        groups.append(Group(anchor=Anchor.BOTTOM_LEFT, flow=Flow.ROW, elements=tuple(band)))
+
+    # Then, stacked above it: how well they shot, and what went wrong.
+    if scorecard is not None and not scorecard.dq:
+        counts: list[Element] = []
+        accuracy = _accuracy_line(scorecard)
+        if accuracy is not None:
+            counts.append(Element(role=Role.DETAIL, text=accuracy, emphasis=Emphasis.MUTED))
+        faults = _faults_line(scorecard)
+        if faults is not None:
+            counts.append(
+                Element(
+                    role=Role.VERDICT,
+                    text=faults,
+                    emphasis=Emphasis.PLATE if has_faults(scorecard) else Emphasis.MUTED,
                 )
             )
-        lines.append((f"Draw {tile.shots[0].split:.2f}", stat_size, ink))
+        if counts:
+            groups.append(Group(anchor=Anchor.BOTTOM_LEFT, flow=Flow.ROW, elements=tuple(counts)))
 
-    return lines
+    return tuple(groups)
+
+
+def _plate(
+    canvas: Image.Image,
+    xy: tuple[int, int],
+    text: str,
+    font,
+    *,
+    theme: OverlayTheme,
+    size: int,
+) -> tuple[int, int]:
+    """Ink on a filled accent rectangle, returning the plate's size.
+
+    Not decoration. Measured on a shipped frame, the accent placing drew
+    7.1% accent pixels against 33.9% stroke pixels and its reddest pixel
+    was ``(201, 8, 10)`` against a theme accent of ``(255, 45, 45)``: a
+    stroke around thin glyphs is a halo that eats the glyph, and it eats
+    most of it at the smallest size in the cell. The footage underneath
+    an overlay is always arbitrary, so the only reliable contrast is one
+    that brings its own ground.
+    """
+    draw = ImageDraw.Draw(canvas)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    pad_x, pad_y = max(8, size // 3), max(5, size // 5)
+    plate_w, plate_h = text_w + 2 * pad_x, text_h + 2 * pad_y
+    x, y = xy
+    canvas.alpha_composite(Image.new("RGBA", (plate_w, plate_h), (*theme.accent, 235)), (int(x), int(y)))
+    draw.text((x + pad_x - bbox[0], y + pad_y - bbox[1]), text, font=font, fill=(*theme.ink, 255))
+    return plate_w, plate_h
+
+
+def _fit_group_scale(
+    draw: ImageDraw.ImageDraw,
+    group: Group,
+    theme: OverlayTheme,
+    scale: CellScale,
+    *,
+    width_budget: float,
+    height_budget: float,
+) -> float:
+    """The largest uniform scale factor (from :data:`_GROUP_SCALE_STEPS`)
+    that lays ``group`` out within ``height_budget``.
+
+    Mirrors the old whole-cell block shrink, but scoped to one group
+    instead of the whole cell: a column of DETAIL lines (top-right's shot
+    count / Best-Avg-Worst / Draw) is exactly the shape that used to spill
+    one shooter's figures into the cell below, so it is measured and
+    shrunk on its own rather than trusting per-element width-fitting alone
+    to keep it inside the cell.
+
+    A ``ROW`` group's height is its tallest single line (elements run
+    side by side, not stacked); a ``COLUMN`` group's height is the sum of
+    its lines. Returns the smallest step in the ladder once every element
+    is already at the font floor, even if the group still does not fit --
+    :func:`_draw_group` is the one that decides what to do about that
+    (drop trailing lines for a column, draw a tight row anyway).
+    """
+    for factor in _GROUP_SCALE_STEPS:
+        extent = 0.0
+        row_extent = 0.0
+        at_floor = True
+        for element in group.elements:
+            base = max(_MIN_FONT_SIZE, round(scale.size_for(element.role) * factor))
+            font, fitted = _fit_font(draw, element.text, theme, base_size=base, budget=width_budget)
+            at_floor = at_floor and fitted <= _MIN_FONT_SIZE
+            text_h = draw.textbbox((0, 0), element.text, font=font)[3]
+            caption_h = 0
+            if element.caption is not None:
+                cap_base = max(_MIN_FONT_SIZE, round(scale.caption * factor))
+                caption_font, cap_fitted = _fit_font(
+                    draw, element.caption, theme, base_size=cap_base, budget=width_budget
+                )
+                at_floor = at_floor and cap_fitted <= _MIN_FONT_SIZE
+                caption_h = draw.textbbox((0, 0), element.caption, font=caption_font)[3] + max(
+                    4, scale.caption // 3
+                )
+            block_h = text_h + caption_h
+            if group.flow is Flow.COLUMN:
+                extent += block_h + max(6, fitted // 6)
+            else:
+                row_extent = max(row_extent, block_h)
+        total = extent if group.flow is Flow.COLUMN else row_extent
+        if total <= height_budget or at_floor:
+            return factor
+    return _GROUP_SCALE_STEPS[-1]
+
+
+def _draw_group(
+    canvas: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    group: Group,
+    *,
+    theme: OverlayTheme,
+    scale: CellScale,
+    origin: tuple[int, int],
+    width_budget: float,
+    height_budget: float,
+) -> int:
+    """Draw one group from its anchor origin. Returns the height used.
+
+    The return value is what lets two groups share an anchor without
+    overlapping -- the caller offsets the next one by it.
+
+    Bounded on both axes, the invariant the old whole-cell
+    ``_lay_out_block`` used to hold: the group is scaled down first (via
+    :func:`_fit_group_scale`, in the same coarse steps that function used
+    to shrink the whole cell), and a ``COLUMN`` group still too tall at the
+    floor has its trailing elements dropped rather than drawn across the
+    cell's edge -- always keeping at least the first, the same trade-off
+    the old block-level bound made. A ``ROW`` group never drops an
+    element -- dropping one would not reduce its height, since a row's
+    height is its tallest single line, not a sum -- so it is the caller's
+    job (:func:`_draw_cell`) to withhold a *second* group sharing an
+    anchor entirely when the first has already used the available space.
+    """
+    ink = (*theme.ink, 255)
+    muted = (*theme.ink, 170)
+    factor = _fit_group_scale(
+        draw, group, theme, scale, width_budget=width_budget, height_budget=height_budget
+    )
+
+    origin_x, origin_y = origin
+    cursor_x, cursor_y = origin_x, origin_y
+    tallest = 0
+    consumed = 0
+
+    for index, element in enumerate(group.elements):
+        base_size = max(_MIN_FONT_SIZE, round(scale.size_for(element.role) * factor))
+        font, fitted = _fit_font(draw, element.text, theme, base_size=base_size, budget=width_budget)
+        bbox = draw.textbbox((0, 0), element.text, font=font)
+        text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+        caption_h = 0
+        caption_font = None
+        caption_bbox = None
+        if element.caption is not None:
+            cap_base = max(_MIN_FONT_SIZE, round(scale.caption * factor))
+            caption_font, _ = _fit_font(draw, element.caption, theme, base_size=cap_base, budget=width_budget)
+            caption_bbox = draw.textbbox((0, 0), element.caption, font=caption_font)
+            caption_h = (caption_bbox[3] - caption_bbox[1]) + max(4, scale.caption // 3)
+
+        block_h = text_h + caption_h
+
+        if group.flow is Flow.COLUMN and index > 0 and consumed + block_h > height_budget:
+            # Would cross the cell edge: drop this line and every one
+            # after it rather than draw over the shooter in the next
+            # cell. The first element always draws -- an empty group
+            # reads as no data, not as "there was no room".
+            break
+
+        x = cursor_x - text_w if group.anchor.is_right else cursor_x
+        if group.anchor.is_center:
+            x = cursor_x - text_w // 2
+        y = cursor_y - block_h if group.anchor.is_bottom else cursor_y
+
+        if element.caption is not None:
+            _draw_text_with_shadow(
+                draw,
+                canvas,
+                (x, y - caption_bbox[1]),
+                element.caption,
+                caption_font,
+                muted,
+                stroke_width=max(2, scale.caption // 16),
+                shadow_offset=max(2, scale.caption // 20),
+                shadow_blur=max(3, scale.caption // 10),
+                stroke_color=theme.stroke,
+                shadow_color=theme.shadow,
+            )
+
+        text_y = y + caption_h
+        if element.emphasis is Emphasis.PLATE:
+            plate_w, plate_h = _plate(canvas, (x, text_y), element.text, font, theme=theme, size=fitted)
+            advance_w, block_h = plate_w, caption_h + plate_h
+        else:
+            _draw_text_with_shadow(
+                draw,
+                canvas,
+                (x, text_y - bbox[1]),
+                element.text,
+                font,
+                muted if element.emphasis is Emphasis.MUTED else ink,
+                stroke_width=max(2, fitted // 16),
+                shadow_offset=max(2, fitted // 20),
+                shadow_blur=max(3, fitted // 10),
+                stroke_color=theme.stroke,
+                shadow_color=theme.shadow,
+            )
+            advance_w = text_w
+
+        gap = max(6, fitted // 6)
+        if group.flow is Flow.ROW:
+            cursor_x += -(advance_w + gap) if group.anchor.is_right else advance_w + gap
+            tallest = max(tallest, block_h)
+        else:
+            cursor_y += -(block_h + gap) if group.anchor.is_bottom else block_h + gap
+            tallest += block_h + gap
+            consumed += block_h + gap
+
+    return tallest + max(6, scale.detail // 2)
 
 
 def _draw_cell(
@@ -559,48 +739,65 @@ def _draw_cell(
     *,
     theme: OverlayTheme,
 ) -> None:
-    """Draw one present tile's summary text over its own cell. A filler
-    tile (``present`` False) draws nothing, matching the live sprite's
-    treatment of an empty slot."""
+    """Draw one present tile's declared groups over its own cell.
+
+    A filler tile (``present`` False) draws nothing, matching the live
+    sprite's treatment of an empty slot: it is not a shooter, so text
+    over black would imply a competitor who isn't there.
+
+    Groups sharing an anchor stack away from that anchor's edge in
+    declaration order. Each group is height-bounded on its own rather
+    than the cell being bounded once, so a long ``Best/Avg/Worst`` line
+    at top-right cannot push the name around. A *second* group sharing an
+    anchor (the faults/accuracy row stacked above the TIME/HF/STAGE band)
+    is skipped entirely, not drawn undersized, once the first has used up
+    the space available on that side -- the band it stacks above is the
+    figure the viewer reads first and must not be crowded to make room
+    for the quieter line above it.
+    """
     if not placement.present:
         return
 
-    x0 = placement.col * geometry.cell_width
-    y0 = placement.row * geometry.cell_height
-    pad = max(20, geometry.cell_height // 40)
-    width_budget = max(1, geometry.cell_width - 2 * pad)
-    label_size = max(32, geometry.cell_height // 16)
-    stat_size = max(18, geometry.cell_height // 32)
-    ink = (*theme.ink, 255)
-    accent = (*theme.accent, 255)
+    scale = CellScale.for_cell(geometry.cell_height)
+    cell_x = placement.col * geometry.cell_width
+    cell_y = placement.row * geometry.cell_height
+    width_budget = max(1, geometry.cell_width - 2 * scale.pad)
+    height_budget = max(1, geometry.cell_height - 2 * scale.pad)
 
-    lines = _cell_lines(
-        tile,
-        placing,
-        placement.label,
-        label_size=label_size,
-        stat_size=stat_size,
-        ink=ink,
-        accent=accent,
-    )
+    groups = _cell_groups(tile, placing, placement.label)
+    consumed: dict[Anchor, int] = {}
+    for group in groups:
+        offset = consumed.get(group.anchor, 0)
+        remaining = height_budget - offset
+        if remaining <= 0 and offset > 0:
+            # No room left for a *second* group at this anchor: leave it
+            # off rather than draw it over the group that already claimed
+            # the space (see the docstring). The first group at an anchor
+            # (offset == 0) always gets a real attempt.
+            continue
 
-    height_budget = max(1, geometry.cell_height - 2 * pad)
-    for text, font, fitted_size, color, offset in _lay_out_block(
-        draw, lines, theme, width_budget=width_budget, height_budget=height_budget
-    ):
-        _draw_text_with_shadow(
-            draw,
-            canvas,
-            (x0 + pad, y0 + pad + offset),
-            text,
-            font,
-            color,
-            stroke_width=max(2, fitted_size // 16),
-            shadow_offset=max(2, fitted_size // 20),
-            shadow_blur=max(3, fitted_size // 10),
-            stroke_color=theme.stroke,
-            shadow_color=theme.shadow,
+        origin_x, origin_y = anchor_origin(
+            group.anchor,
+            cell_x=cell_x,
+            cell_y=cell_y,
+            cell_w=geometry.cell_width,
+            cell_h=geometry.cell_height,
+            pad=scale.pad,
         )
+        # Groups grow away from their own edge, so a bottom anchor's
+        # second group moves *up* by what the first consumed.
+        origin_y += -offset if group.anchor.is_bottom else offset
+        used = _draw_group(
+            canvas,
+            draw,
+            group,
+            theme=theme,
+            scale=scale,
+            origin=(origin_x, origin_y),
+            width_budget=width_budget,
+            height_budget=max(1, remaining),
+        )
+        consumed[group.anchor] = offset + used
 
 
 def build_hold_still(
