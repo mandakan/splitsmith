@@ -63,6 +63,7 @@ from PIL import Image
 
 from splitsmith.compare import mp4_grid
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
+from splitsmith.overlay_raster import RasterizerUnavailableError
 from tests.conftest import fake_ffmpeg_probe
 
 ACTION = 12.5
@@ -1104,3 +1105,80 @@ def test_a_stage_whose_summary_still_fails_is_skipped_not_fatal(tmp_path: Path):
     # Stage 1 never reached ffmpeg; stage 2 rendered and the stitch ran.
     assert len(calls) == 2
     assert calls[-1][calls[-1].index("-f") + 1] == "concat"
+
+
+class _AlwaysUnavailableRasterizer:
+    """Stands in for :class:`~splitsmith.overlay_raster.ChromiumRasterizer`
+    at the ``render_grid_mp4`` call site: ``__enter__`` always raises
+    :class:`~splitsmith.overlay_raster.RasterizerUnavailableError`, so the
+    degradation test below never needs a real browser -- it is monkeypatched
+    over the name ``mp4_grid.render_grid_mp4`` resolves when the caller
+    leaves ``rasterizer`` at its default (``None``) and a hold needs one.
+    """
+
+    def __enter__(self) -> _AlwaysUnavailableRasterizer:
+        raise RasterizerUnavailableError(
+            "stage summary omitted: no usable Chromium",
+            "fake: simulated missing browser for this test",
+        )
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
+        return False  # pragma: no cover -- __enter__ always raises first
+
+
+def test_no_usable_chromium_degrades_the_hold_instead_of_crashing(tmp_path: Path):
+    """No usable browser must not crash a render.
+
+    Verified by hand during the original task; this pins it. Two stages
+    (mirroring the test above) so "the notice fires once, not once per
+    stage" is an actual claim rather than trivially true of a one-stage
+    fixture -- a notice per stage on a 12-stage match would be miserable
+    to read. Both stages must still succeed: a missing browser costs the
+    summary's text, never the render.
+    """
+    calls: list[tuple[str, ...]] = []
+    stills: list[tuple[str, ...]] = []
+    notices: list[str] = []
+
+    def runner(cmd, **_kwargs):
+        calls.append(tuple(str(c) for c in cmd))
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    shooters = _driver_shooters(tmp_path)
+    for bundle in shooters:
+        bundle.stages_by_number[2] = dataclasses.replace(bundle.stages_by_number[1], stage_number=2)
+
+    real_chromium_rasterizer = mp4_grid.ChromiumRasterizer
+    mp4_grid.ChromiumRasterizer = _AlwaysUnavailableRasterizer  # type: ignore[assignment,misc]
+    try:
+        result = mp4_grid.render_grid_mp4(
+            shooters,
+            audio_label="Anders",
+            output_path=tmp_path / "grid.mp4",
+            canvas=mp4_grid.GridCanvas(640, 360, 25, 1),
+            overlay=True,
+            summary_hold_seconds=2.0,
+            runner=runner,
+            probe_runner=fake_ffmpeg_probe(),
+            still_runner=_still_runner(stills),
+            on_notice=notices.append,
+            work_dir=tmp_path / "work",
+            ffmpeg_binary="/bin/ffmpeg",
+        )
+    finally:
+        mp4_grid.ChromiumRasterizer = real_chromium_rasterizer  # type: ignore[assignment,misc]
+
+    # No crash, and neither stage is penalised for the missing browser.
+    assert [(o.stage_number, o.ok) for o in result.stages] == [(1, True), (2, True)]
+    assert len(result.degradations) == 1
+    assert result.degradations[0].summary == "stage summary omitted: no usable Chromium"
+    assert result.degradations[0].detail == "fake: simulated missing browser for this test"
+    # Exactly once for the whole render, not once per stage.
+    assert notices == ["fake: simulated missing browser for this test"]
+    # Both holds still composed -- freeze/blur/dim, just with no summary
+    # text -- rather than the stage being skipped outright.
+    for stage_number in (1, 2):
+        still_path = tmp_path / "work" / f"summary-stage{stage_number}.png"
+        assert still_path.exists()
+        with Image.open(still_path) as image:
+            assert image.size == (640, 360)

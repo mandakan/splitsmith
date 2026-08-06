@@ -30,12 +30,19 @@ they existed to prove did not leak -- see the amendment's "What is
 deleted". The invariant they protected (no shooter's figures cross into
 a neighbour's cell) is now structural: ``overflow: hidden`` is asserted
 once, on the shared stylesheet, in ``tests/test_overlay_html.py``, and
-proven against real rendered pixels by
+proven against real rendered pixels two ways -- by
 ``tests/test_compare_grid_overlay_integration.py``'s hold check, which
 this task's brief singles out as the boundary assertion that must carry
-over unmodified. What remains this file's own job is the layer below
-both of those: that ``build_hold_still`` attributes each placement's own
-data to that placement's own cell and no other's (see
+over unmodified, and by this file's own
+``test_a_long_names_ink_never_crosses_its_own_cell_in_a_real_render``
+(``@pytest.mark.integration``, real Chromium, measuring the rasterized
+PNG's own alpha channel against the target cell's rectangle -- added in
+this task's fix round after a review noted the load-bearing claim
+otherwise rested on a CSS-text assertion plus an argument about CSS
+semantics, with nobody having actually watched Chromium honour it).
+What remains this file's own job below the pixel layer is that
+``build_hold_still`` attributes each placement's own data to that
+placement's own cell and no other's (see
 ``test_summary_cells_never_attributes_one_placements_content_to_another``).
 """
 
@@ -53,6 +60,7 @@ from splitsmith.compare.mp4_grid import GridStagePlan, GridTile
 from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
 from splitsmith.overlay_layout import Anchor, Emphasis, Role
+from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
 from splitsmith.overlay_theme import load_theme
 from splitsmith.ui.project import StageScorecard
 
@@ -950,6 +958,100 @@ def test_a_long_names_figures_never_reach_a_neighboring_cells_markup():
     for figure in (label, "12.34", "87.4"):
         assert figure not in left_cell, f"{figure!r} reached the cell to the left"
         assert figure not in right_cell, f"{figure!r} reached the cell to the right"
+
+
+# --- integration: real Chromium, measured on pixels, not markup ------------
+#
+# Everything above either asks the pure declaration layer
+# (``_cell_groups``/``_rank_placings``) what a cell *should* say, or asks a
+# fake rasterizer what HTML ``build_hold_still`` handed it -- neither
+# observes whether a real browser actually honours ``overflow: hidden``.
+# ``tests/test_overlay_html.py`` asserts the CSS text is present; this test
+# is the one that renders it through real Chromium and measures the result.
+
+
+class _CapturingRealRasterizer:
+    """Wraps a real :class:`~splitsmith.overlay_raster.ChromiumRasterizer`
+    and remembers the exact PNG bytes it returned.
+
+    ``build_hold_still`` immediately alpha-composites the rasterizer's
+    result over the canvas and only returns the composited RGB image, so
+    a test that wants the rasterizer's own raw (alpha-carrying) output --
+    to measure exactly what Chromium painted, not what it looks like
+    sitting on a black background -- needs to intercept it here rather
+    than inspect ``build_hold_still``'s return value.
+    """
+
+    def __init__(self, real: ChromiumRasterizer) -> None:
+        self._real = real
+        self.last_png: bytes | None = None
+
+    def png(self, html: str, *, width: int, height: int) -> bytes:
+        self.last_png = self._real.png(html, width=width, height=height)
+        return self.last_png
+
+
+@pytest.mark.integration
+def test_a_long_names_ink_never_crosses_its_own_cell_in_a_real_render():
+    """The pixel-level proof the whole pivot was justified by.
+
+    Reproduces the shape that broke the old PIL fitter -- a 23-character
+    competitor name with a full stat block (identity + placing chip,
+    shot detail, TIME/HF/STAGE band, accuracy/faults row) -- in a cell
+    small enough that content genuinely wants to overflow: 160x90, a 4x4
+    grid on a 640x360 canvas. Every other placement in the grid is a
+    filler (``present=False``), which ``overlay_html.summary_html``
+    forces empty regardless of what it is handed (see
+    ``tests/test_overlay_html.py::test_a_filler_tile_cell_is_empty_of_text``),
+    so the target is the *only* placement with any content at all --
+    which means any non-transparent pixel anywhere outside its own
+    rectangle can only be its own content escaping, not another cell's
+    legitimate ink. That is what makes a single whole-image alpha bounding
+    box a sufficient check here, rather than needing to attribute pixels
+    to a shooter.
+    """
+    label = "Mathias Axell-Lindstrom"
+    geometry = SpriteGeometry(canvas_width=640, canvas_height=360, rows=4, cols=4)
+    assert (geometry.cell_width, geometry.cell_height) == (160, 90)
+    target_row, target_col = 1, 2
+    placements = [
+        _placement(
+            label if (row, col) == (target_row, target_col) else f"filler-{row}-{col}",
+            row,
+            col,
+            present=(row, col) == (target_row, target_col),
+        )
+        for row in range(geometry.rows)
+        for col in range(geometry.cols)
+    ]
+    data = {label: _full_stat_tile(label)}
+
+    try:
+        with ChromiumRasterizer() as real:
+            wrapper = _CapturingRealRasterizer(real)
+            summ.build_hold_still(placements, data, {}, geometry, theme=THEME, rasterizer=wrapper)
+    except RasterizerUnavailableError as exc:
+        pytest.skip(str(exc))
+
+    assert wrapper.last_png is not None
+    image = Image.open(io.BytesIO(wrapper.last_png)).convert("RGBA")
+    alpha = image.split()[-1]
+    bbox = alpha.getbbox()
+    assert bbox is not None, "expected the target cell to paint something -- the render is blank"
+
+    cell_left = target_col * geometry.cell_width
+    cell_top = target_row * geometry.cell_height
+    cell_right = cell_left + geometry.cell_width
+    cell_bottom = cell_top + geometry.cell_height
+
+    assert bbox[0] >= cell_left, f"ink starts at x={bbox[0]}, left of the cell's own left edge {cell_left}"
+    assert bbox[1] >= cell_top, f"ink starts at y={bbox[1]}, above the cell's own top edge {cell_top}"
+    assert (
+        bbox[2] <= cell_right
+    ), f"ink extends to x={bbox[2]}, right of the cell's own right edge {cell_right}"
+    assert (
+        bbox[3] <= cell_bottom
+    ), f"ink extends to y={bbox[3]}, below the cell's own bottom edge {cell_bottom}"
 
 
 def test_build_hold_still_rejects_whole_match_keyed_data():
