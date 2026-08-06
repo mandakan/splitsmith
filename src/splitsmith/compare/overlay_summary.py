@@ -528,6 +528,17 @@ def _cell_groups(
     return tuple(groups)
 
 
+def _plate_size(draw: ImageDraw.ImageDraw, text: str, font, *, size: int) -> tuple[int, int]:
+    """The ``(width, height)`` a :func:`_plate` of ``text`` would occupy,
+    without drawing it. Used by :func:`_element_footprint` to account for
+    a plate's own padding before anything is bounded or drawn.
+    """
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    pad_x, pad_y = max(8, size // 3), max(5, size // 5)
+    return text_w + 2 * pad_x, text_h + 2 * pad_y
+
+
 def _plate(
     canvas: Image.Image,
     xy: tuple[int, int],
@@ -549,13 +560,39 @@ def _plate(
     """
     draw = ImageDraw.Draw(canvas)
     bbox = draw.textbbox((0, 0), text, font=font)
-    text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    plate_w, plate_h = _plate_size(draw, text, font, size=size)
     pad_x, pad_y = max(8, size // 3), max(5, size // 5)
-    plate_w, plate_h = text_w + 2 * pad_x, text_h + 2 * pad_y
     x, y = xy
     canvas.alpha_composite(Image.new("RGBA", (plate_w, plate_h), (*theme.accent, 235)), (int(x), int(y)))
     draw.text((x + pad_x - bbox[0], y + pad_y - bbox[1]), text, font=font, fill=(*theme.ink, 255))
     return plate_w, plate_h
+
+
+def _element_footprint(
+    draw: ImageDraw.ImageDraw, element: Element, font, *, fitted: int
+) -> tuple[int, int, int]:
+    """``(text_w, text_h, footprint_w)`` for one element at font ``font``.
+
+    ``footprint_w`` is what the element actually occupies horizontally --
+    a plate's padded width for a ``PLATE`` element (a placing chip, a
+    ``DQ``, a lit faults line), the bare text width otherwise. A plate is
+    wider than its own text by ``2 * pad_x`` (see :func:`_plate_size`),
+    and neither the group's scale ladder nor its width bound saw that
+    padding until this existed: every element's footprint used to be
+    measured as its bare text width, so a plated element could still
+    cross a cell edge the bare-text measurement said it would not.
+
+    Both :func:`_fit_group_scale` and :func:`_draw_group` need the same
+    number for the same element, so it is computed once here rather than
+    twice.
+    """
+    bbox = draw.textbbox((0, 0), element.text, font=font)
+    text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    if element.emphasis is Emphasis.PLATE:
+        footprint_w, _plate_h = _plate_size(draw, element.text, font, size=fitted)
+    else:
+        footprint_w = text_w
+    return text_w, text_h, footprint_w
 
 
 def _fit_group_scale(
@@ -568,7 +605,8 @@ def _fit_group_scale(
     height_budget: float,
 ) -> float:
     """The largest uniform scale factor (from :data:`_GROUP_SCALE_STEPS`)
-    that lays ``group`` out within ``height_budget``.
+    that lays ``group`` out within both ``width_budget`` and
+    ``height_budget``.
 
     Mirrors the old whole-cell block shrink, but scoped to one group
     instead of the whole cell: a column of DETAIL lines (top-right's shot
@@ -577,22 +615,29 @@ def _fit_group_scale(
     shrunk on its own rather than trusting per-element width-fitting alone
     to keep it inside the cell.
 
-    A ``ROW`` group's height is its tallest single line (elements run
-    side by side, not stacked); a ``COLUMN`` group's height is the sum of
-    its lines. Returns the smallest step in the ladder once every element
-    is already at the font floor, even if the group still does not fit --
+    A ``ROW`` group's height is its tallest single line and its width is
+    the sum of every element's footprint plus the gaps between them
+    (elements run side by side, not stacked, but they still share one
+    horizontal budget). A ``COLUMN`` group's height is the sum of its
+    lines and its width is its widest single line (elements each get
+    their own line, so they do not compete for width the way a row's
+    do). Returns the smallest step in the ladder once every element is
+    already at the font floor, even if the group still does not fit --
     :func:`_draw_group` is the one that decides what to do about that
-    (drop trailing lines for a column, draw a tight row anyway).
+    (drop trailing elements for a column height overrun or a row width
+    overrun; drop an individual column line that still will not fit its
+    own width at the floor, since shrinking the row's shared font size
+    further cannot rescue only one line).
     """
     for factor in _GROUP_SCALE_STEPS:
-        extent = 0.0
-        row_extent = 0.0
+        extent_h, row_h = 0.0, 0.0
+        extent_w, col_w = 0.0, 0.0
         at_floor = True
         for element in group.elements:
             base = max(_MIN_FONT_SIZE, round(scale.size_for(element.role) * factor))
             font, fitted = _fit_font(draw, element.text, theme, base_size=base, budget=width_budget)
             at_floor = at_floor and fitted <= _MIN_FONT_SIZE
-            text_h = draw.textbbox((0, 0), element.text, font=font)[3]
+            _text_w, text_h, footprint_w = _element_footprint(draw, element, font, fitted=fitted)
             caption_h = 0
             if element.caption is not None:
                 cap_base = max(_MIN_FONT_SIZE, round(scale.caption * factor))
@@ -600,16 +645,19 @@ def _fit_group_scale(
                     draw, element.caption, theme, base_size=cap_base, budget=width_budget
                 )
                 at_floor = at_floor and cap_fitted <= _MIN_FONT_SIZE
-                caption_h = draw.textbbox((0, 0), element.caption, font=caption_font)[3] + max(
-                    4, scale.caption // 3
-                )
+                caption_bbox = draw.textbbox((0, 0), element.caption, font=caption_font)
+                caption_h = (caption_bbox[3] - caption_bbox[1]) + max(4, scale.caption // 3)
             block_h = text_h + caption_h
+            gap = max(6, fitted // 6)
             if group.flow is Flow.COLUMN:
-                extent += block_h + max(6, fitted // 6)
+                extent_h += block_h + gap
+                col_w = max(col_w, footprint_w)
             else:
-                row_extent = max(row_extent, block_h)
-        total = extent if group.flow is Flow.COLUMN else row_extent
-        if total <= height_budget or at_floor:
+                row_h = max(row_h, block_h)
+                extent_w += footprint_w + gap
+        total_h = extent_h if group.flow is Flow.COLUMN else row_h
+        total_w = col_w if group.flow is Flow.COLUMN else extent_w
+        if (total_h <= height_budget and total_w <= width_budget) or at_floor:
             return factor
     return _GROUP_SCALE_STEPS[-1]
 
@@ -633,14 +681,29 @@ def _draw_group(
     Bounded on both axes, the invariant the old whole-cell
     ``_lay_out_block`` used to hold: the group is scaled down first (via
     :func:`_fit_group_scale`, in the same coarse steps that function used
-    to shrink the whole cell), and a ``COLUMN`` group still too tall at the
-    floor has its trailing elements dropped rather than drawn across the
-    cell's edge -- always keeping at least the first, the same trade-off
-    the old block-level bound made. A ``ROW`` group never drops an
-    element -- dropping one would not reduce its height, since a row's
-    height is its tallest single line, not a sum -- so it is the caller's
-    job (:func:`_draw_cell`) to withhold a *second* group sharing an
-    anchor entirely when the first has already used the available space.
+    to shrink the whole cell, now checking width as well as height), and
+    whatever the scale ladder cannot fix on its own is handled per
+    element:
+
+    - A ``COLUMN`` group still too *tall* at the floor has its trailing
+      elements dropped rather than drawn across the cell's bottom or top
+      edge -- always keeping at least the first, the same trade-off the
+      old block-level bound made (an empty group reads as no data, which
+      is worse than one line that could not be shrunk any further).
+    - A ``COLUMN`` element that is still too *wide* at the floor -- a
+      long ``Best/Avg/Worst`` line in a narrow cell, measured by review
+      to run past the cell's edge even after every other line in the
+      same column fit -- is skipped in place rather than dropped along
+      with everything after it: unlike a height overrun, one line being
+      too wide says nothing about whether the *next* line (typically
+      shorter) will be too, so a column keeps every line that fits and
+      loses only the ones that do not, including possibly the first.
+    - A ``ROW`` group cannot drop an element to recover height -- its
+      height is one shared line, not a sum -- but it *can* drop trailing
+      elements to recover width, the same way a column drops trailing
+      elements to recover height: elements run left-to-right (or
+      right-to-left off a right anchor) along one shared budget, so once
+      it is spent nothing placed after the first overrun will fit either.
     """
     ink = (*theme.ink, 255)
     muted = (*theme.ink, 170)
@@ -651,13 +714,18 @@ def _draw_group(
     origin_x, origin_y = origin
     cursor_x, cursor_y = origin_x, origin_y
     tallest = 0
-    consumed = 0
+    consumed_h = 0
+    consumed_w = 0
+    drawn = 0  # count of elements actually drawn, not the loop index -- a
+    # COLUMN element skipped for width (below) must not count as "the
+    # first" for the height-drop's own leniency, or a group whose first
+    # element happens to be too wide could lose its real first line too.
 
-    for index, element in enumerate(group.elements):
+    for element in group.elements:
         base_size = max(_MIN_FONT_SIZE, round(scale.size_for(element.role) * factor))
         font, fitted = _fit_font(draw, element.text, theme, base_size=base_size, budget=width_budget)
+        text_w, text_h, footprint_w = _element_footprint(draw, element, font, fitted=fitted)
         bbox = draw.textbbox((0, 0), element.text, font=font)
-        text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
 
         caption_h = 0
         caption_font = None
@@ -669,13 +737,33 @@ def _draw_group(
             caption_h = (caption_bbox[3] - caption_bbox[1]) + max(4, scale.caption // 3)
 
         block_h = text_h + caption_h
+        gap = max(6, fitted // 6)
 
-        if group.flow is Flow.COLUMN and index > 0 and consumed + block_h > height_budget:
-            # Would cross the cell edge: drop this line and every one
-            # after it rather than draw over the shooter in the next
-            # cell. The first element always draws -- an empty group
-            # reads as no data, not as "there was no room".
-            break
+        if group.flow is Flow.COLUMN:
+            if footprint_w > width_budget:
+                # This line alone -- independent of the others, since a
+                # column's lines do not share a width budget -- is still
+                # too wide even at the font floor. Skip just this one and
+                # keep going: a shorter line later in the same column may
+                # still fit, and dropping it too would lose information
+                # a width overrun does not force losing.
+                continue
+            if drawn > 0 and consumed_h + block_h > height_budget:
+                # Would cross the cell's top or bottom edge: drop this
+                # line and every one after it, since height accumulates
+                # -- once the budget is spent nothing later fits either.
+                # The first *drawn* element always draws (see the
+                # docstring) -- not necessarily element 0 of the group,
+                # if that one was itself skipped for width just above.
+                break
+        else:
+            if drawn > 0 and consumed_w + footprint_w + gap > width_budget:
+                # Would cross the cell's left or right edge: elements in
+                # a row share one horizontal budget and run in a fixed
+                # order, so once it is spent nothing after the first
+                # overrun fits either. Same trade-off as the column's
+                # height drop, on the other axis.
+                break
 
         x = cursor_x - text_w if group.anchor.is_right else cursor_x
         if group.anchor.is_center:
@@ -717,16 +805,25 @@ def _draw_group(
             )
             advance_w = text_w
 
-        gap = max(6, fitted // 6)
         if group.flow is Flow.ROW:
             cursor_x += -(advance_w + gap) if group.anchor.is_right else advance_w + gap
             tallest = max(tallest, block_h)
+            consumed_w += footprint_w + gap
         else:
             cursor_y += -(block_h + gap) if group.anchor.is_bottom else block_h + gap
             tallest += block_h + gap
-            consumed += block_h + gap
+            consumed_h += block_h + gap
+        drawn += 1
 
-    return tallest + max(6, scale.detail // 2)
+    # A ``COLUMN`` group's ``tallest`` already ends with one trailing gap
+    # baked in (every drawn element adds ``block_h + gap``, including the
+    # last), which is exactly the breathing room the next thing needs --
+    # adding a second one here double-counted it. A ``ROW`` group's
+    # ``tallest`` is just its tallest single block with no gap in it at
+    # all, so it still needs one added.
+    if group.flow is Flow.ROW:
+        return tallest + max(6, scale.detail // 2)
+    return tallest
 
 
 def _draw_cell(
@@ -746,14 +843,17 @@ def _draw_cell(
     over black would imply a competitor who isn't there.
 
     Groups sharing an anchor stack away from that anchor's edge in
-    declaration order. Each group is height-bounded on its own rather
-    than the cell being bounded once, so a long ``Best/Avg/Worst`` line
-    at top-right cannot push the name around. A *second* group sharing an
-    anchor (the faults/accuracy row stacked above the TIME/HF/STAGE band)
-    is skipped entirely, not drawn undersized, once the first has used up
-    the space available on that side -- the band it stacks above is the
-    figure the viewer reads first and must not be crowded to make room
-    for the quieter line above it.
+    declaration order. Each group is bounded on its own, on both axes,
+    rather than the cell being bounded once (see :func:`_draw_group`), so
+    a long ``Best/Avg/Worst`` line at top-right cannot push the name
+    around and a long name cannot push a placing chip into the next
+    cell. A *second* group sharing an anchor (the faults/accuracy row
+    stacked above the TIME/HF/STAGE band) is left off, not attempted,
+    only once there is *strictly no room at all* left on that side
+    (``remaining <= 0``) -- a merely small remaining budget still gets a
+    real attempt, and :func:`_draw_group`'s own bounding is what keeps
+    that attempt inside the cell even when the budget it is given is
+    tiny, down to drawing nothing at all if nothing fits.
     """
     if not placement.present:
         return

@@ -16,13 +16,13 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from splitsmith.compare import overlay_summary as summ
 from splitsmith.compare.mp4_grid import GridStagePlan, GridTile
 from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
-from splitsmith.overlay_layout import Anchor, Emphasis, Role
+from splitsmith.overlay_layout import Anchor, CellScale, Element, Emphasis, Flow, Group, Role
 from splitsmith.overlay_theme import load_theme
 from splitsmith.ui.project import StageScorecard
 
@@ -817,15 +817,274 @@ def test_a_tall_cell_lays_the_block_out_unshrunk(monkeypatch):
 
     scale = summ.CellScale.for_cell(geometry.cell_height)
     # The identity group's origin: the label lands at the cell's own
-    # top-left inset by the shared pad on the x axis. (Its y is offset
-    # from the pad by the font's own ascent metric -- the bbox[1]
-    # correction _draw_text_with_shadow's caller applies -- not the raw
-    # pad itself.)
-    assert boxes[0][0][0] == scale.pad
+    # top-left inset by the shared pad on the x axis. The y axis is not
+    # the raw pad -- `_draw_group` offsets it by the font's own ascent
+    # (`text_y - bbox[1]`) so the glyph's *ink* starts at the pad, not
+    # its nominal baseline box -- so the expected y is derived the same
+    # way `_draw_group` derives it, from the same font, rather than
+    # dropping the axis (a prior version of this assertion checked only
+    # `boxes[0][0][0]`, which is what let that offset go unverified).
+    scratch_draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    ann_font, _fitted = summ._fit_font(scratch_draw, "Ann", THEME, base_size=scale.identity, budget=10_000)
+    ann_bbox = scratch_draw.textbbox((0, 0), "Ann", font=ann_font)
+    assert boxes[0][0] == (scale.pad, scale.pad - ann_bbox[1])
     # The first line is the label at its unshrunk size: a group that had
     # been scaled down would draw it smaller than this.
     assert boxes[0][1][3] - boxes[0][1][1] >= scale.identity // 2
     assert max(box[3] for _xy, box in boxes) <= geometry.cell_height
+
+
+def test_a_long_name_keeps_its_summary_inside_its_own_cell_horizontally(monkeypatch):
+    """No box may cross a *vertical* cell edge either -- reachable at any
+    canvas size a caller asks for, not just a pathologically small one.
+
+    ``src/splitsmith/ui/server.py`` builds ``GridCanvas`` straight from
+    the request's ``canvas_width`` / ``canvas_height``, and #692 is about
+    to make 1080p and 2.7K first-class outputs -- 1080p at 5+ shooters
+    routes to a 4x4 grid, a 480x270 cell, well inside the range this
+    bug reached. An ordinary 23-character IPSC name (``_fit_font``
+    shrinks each element on its own, but nothing summed a *row's* several
+    elements against the cell width before this fix) crossed at every
+    geometry from a 3x3 3840x2160 canvas down, including this file's own
+    640x360 ``GEOMETRY``.
+
+    Middle *column* of three, mirroring
+    ``test_a_short_cell_keeps_its_summary_inside_its_own_cell``'s middle
+    *row*: a crossing can go either left or right once there is a real
+    neighbour on both sides, and a name is exactly as likely to push a
+    trailing placing chip rightward as a long band value is to push
+    itself leftward off a right anchor.
+    """
+    label = "Mathias Axell-Lindstrom"
+    geometry = SpriteGeometry(canvas_width=960, canvas_height=180, rows=1, cols=3)
+    assert (geometry.cell_width, geometry.cell_height) == (320, 180)
+    placements = [
+        _placement("Left", 0, 0),
+        _placement(label, 0, 1),
+        _placement("Right", 0, 2),
+    ]
+    data = {
+        "Left": TileStageData(label="Left", stage_number=1),
+        label: _full_stat_tile(label),
+        "Right": TileStageData(label="Right", stage_number=1),
+    }
+
+    boxes = _drawn_labeled_boxes(monkeypatch)
+    summ.build_hold_still(placements, data, {}, geometry, theme=THEME)
+
+    mid_boxes = [(xy, box) for text, xy, box in boxes if text not in ("Left", "Right")]
+    assert mid_boxes, "the middle cell drew nothing"
+    cell_left, cell_right = geometry.cell_width, 2 * geometry.cell_width
+    assert (
+        min(box[0] for _xy, box in mid_boxes) >= cell_left
+    ), "the middle shooter's summary reaches left of her own cell, into the shooter to her left"
+    assert (
+        max(box[2] for _xy, box in mid_boxes) <= cell_right
+    ), "the middle shooter's summary reaches right of her own cell, into the shooter to her right"
+    assert len(mid_boxes) >= 2, f"the bound left only {len(mid_boxes)} box(es) in the middle cell"
+
+
+# --- each bounding lever is individually load-bearing (fix round 2) -------
+#
+# The suite above stays green with any *one* of the levers below removed,
+# because the other two on the same axis (plus, on the height axis, the
+# second-group skip) compensate for most geometries -- it takes all of
+# them gone at once, which is what the short/long-name tests above
+# happen to do, for the fixture and cell sizes they use. That is how a
+# regression in one lever alone shipped unnoticed: a test that only ever
+# breaks in combination is not proof any one piece is load-bearing on its
+# own. Each test below calls :func:`summ._draw_group` (or, for the
+# second-group skip, :func:`summ.build_hold_still`) directly with a
+# ``width_budget`` / ``height_budget`` / cell size picked so that *only*
+# the one lever under test can prevent the crossing -- verified by
+# breaking each lever in isolation (see task-6-report.md's fix-round-2
+# section for the transcripts) and confirming the specific test below,
+# and only that one, goes red.
+
+
+def _run_draw_group(monkeypatch, group, *, scale, width_budget, height_budget, origin=(1000, 1000)):
+    """Call ``_draw_group`` directly and capture what it drew, without
+    going through a whole cell/tile/geometry. Precise and fast: these
+    tests are about one function's own bounding, not the composition
+    around it."""
+    boxes = _drawn_labeled_boxes(monkeypatch)
+    canvas = Image.new("RGBA", (4000, 4000), (0, 0, 0, 255))
+    draw = ImageDraw.Draw(canvas)
+    used = summ._draw_group(
+        canvas, draw, group, theme=THEME, scale=scale, origin=origin,
+        width_budget=width_budget, height_budget=height_budget,
+    )  # fmt: skip
+    return boxes, used, origin
+
+
+def test_the_height_scale_ladder_shrinks_an_oversized_first_line(monkeypatch):
+    """The height-clamp lever (``_fit_group_scale``'s height comparison).
+
+    A COLUMN's first element always draws even if it will not fit (see
+    the drop-lever test below) -- so the *only* thing standing between
+    an over-tall first line and a crossing is shrinking it to fit in the
+    first place. ``height_budget=10`` is far below ``AAA``'s unshrunk
+    height at ``CellScale.for_cell(1000).detail`` (25px), but well above
+    the font floor's, so a working clamp fits it and a disabled one does
+    not.
+    """
+    scale = CellScale.for_cell(1000)
+    group = Group(
+        anchor=Anchor.TOP_LEFT,
+        flow=Flow.COLUMN,
+        elements=(Element(role=Role.DETAIL, text="AAA", emphasis=Emphasis.MUTED),),
+    )
+    boxes, _used, (ox, oy) = _run_draw_group(
+        monkeypatch, group, scale=scale, width_budget=2000, height_budget=10
+    )
+    assert boxes, "the group drew nothing at all"
+    assert all(box[1] >= oy and box[3] - oy <= 10 for _t, _xy, box in boxes), boxes
+
+
+def test_the_column_height_drop_keeps_a_six_line_group_inside_a_tiny_budget(monkeypatch):
+    scale = CellScale.for_cell(1000)
+    group = Group(
+        anchor=Anchor.TOP_LEFT,
+        flow=Flow.COLUMN,
+        elements=tuple(Element(role=Role.DETAIL, text=f"L{i}", emphasis=Emphasis.MUTED) for i in range(6)),
+    )
+    boxes, _used, (ox, oy) = _run_draw_group(
+        monkeypatch, group, scale=scale, width_budget=2000, height_budget=46
+    )
+    assert boxes, "the group drew nothing at all"
+    assert all(box[1] >= oy and box[3] - oy <= 46 for _t, _xy, box in boxes), boxes
+    # Bounding it must not empty it.
+    assert len(boxes) >= 1
+
+
+def test_the_second_group_skip_keeps_the_faults_row_off_when_the_band_used_the_room(monkeypatch):
+    """The second-group-skip lever (``_draw_cell``).
+
+    A cell height (56px) picked so that, with every other lever active,
+    the band (declared first, TIME/HF/STAGE) uses close enough to the
+    whole height budget that the faults/accuracy row stacked above it --
+    a *second* BOTTOM_LEFT group -- has no room left. If the skip is
+    disabled the second group is still attempted at whatever budget
+    remains and crosses into the cell above (the row above Ann's, in
+    this three-row middle fixture).
+    """
+    geometry = SpriteGeometry(canvas_width=360, canvas_height=56 * 3, rows=3, cols=1)
+    assert geometry.cell_height == 56
+    placements = [
+        _placement("Above", 0, 0),
+        _placement("Ann", 1, 0),
+        _placement("Below", 2, 0),
+    ]
+    data = {
+        "Above": TileStageData(label="Above", stage_number=1),
+        "Ann": _full_stat_tile("Ann"),
+        "Below": TileStageData(label="Below", stage_number=1),
+    }
+
+    boxes = _drawn_labeled_boxes(monkeypatch)
+    summ.build_hold_still(placements, data, {}, geometry, theme=THEME)
+
+    ann_boxes = [(xy, box) for text, xy, box in boxes if text not in ("Above", "Below")]
+    assert ann_boxes, "Ann's own cell drew nothing"
+    cell_top, cell_bottom = geometry.cell_height, 2 * geometry.cell_height
+    assert min(box[1] for _xy, box in ann_boxes) >= cell_top, (
+        "Ann's summary reaches above her own cell -- the second BOTTOM_LEFT group was drawn when "
+        "there was no room left for it"
+    )
+    assert max(box[3] for _xy, box in ann_boxes) <= cell_bottom
+
+
+def test_the_width_scale_ladder_shrinks_a_row_to_keep_both_its_elements(monkeypatch):
+    """The width-clamp lever (``_fit_group_scale``'s width comparison, ROW).
+
+    Unlike the height axis, this lever's absence cannot itself produce a
+    crossing here -- the trailing-drop lever below already guarantees
+    that on its own, for any ROW, by dropping whatever would not fit.
+    What the width clamp buys is *content*: at ``width_budget=200``,
+    ``CellScale.for_cell(1000)``, both ``"Best 0.30"`` and ``"Avg 0.30"``
+    individually fit ``_fit_font``'s own per-element floor, so neither
+    forces a shrink on its own, but their combined width at full size
+    does not fit -- so a width-blind ladder still picks the unshrunk
+    scale, the trailing-drop then has to sacrifice the second element to
+    stay inside the budget, and only one of two lines survives where a
+    width-aware ladder keeps both, shrunk to fit together. (Verified by
+    disabling the width comparison and confirming this specific test
+    goes red -- see task-6-report.md's fix-round-2 section.)
+    """
+    scale = CellScale.for_cell(1000)
+    group = Group(
+        anchor=Anchor.TOP_LEFT,
+        flow=Flow.ROW,
+        elements=(
+            Element(role=Role.DETAIL, text="Best 0.30", emphasis=Emphasis.MUTED),
+            Element(role=Role.DETAIL, text="Avg 0.30", emphasis=Emphasis.MUTED),
+        ),
+    )
+    boxes, _used, (ox, oy) = _run_draw_group(
+        monkeypatch, group, scale=scale, width_budget=200, height_budget=1000
+    )
+    texts = [text for text, _xy, _box in boxes]
+    assert texts == ["Best 0.30", "Avg 0.30"], (
+        f"expected both elements to survive, shrunk to fit together, got {texts!r} -- a width-blind "
+        "scale ladder would draw only the first at full size and let the trailing-drop sacrifice "
+        "the second"
+    )
+    assert all(box[0] >= ox and box[2] - ox <= 200 for _t, _xy, box in boxes), boxes
+
+
+def test_the_row_width_drop_keeps_an_eight_element_row_inside_a_tiny_budget(monkeypatch):
+    """The ROW width-drop lever.
+
+    Eight short elements at ``CellScale.for_cell(1000)``: even shrunk to
+    the font floor, eight do not fit ``width_budget=85`` (four do).
+    Nothing left to shrink -- only dropping the trailing elements that do
+    not fit can still prevent a crossing here.
+    """
+    scale = CellScale.for_cell(1000)
+    group = Group(
+        anchor=Anchor.TOP_LEFT,
+        flow=Flow.ROW,
+        elements=tuple(Element(role=Role.DETAIL, text=f"X{i}", emphasis=Emphasis.MUTED) for i in range(8)),
+    )
+    boxes, _used, (ox, oy) = _run_draw_group(
+        monkeypatch, group, scale=scale, width_budget=85, height_budget=1000
+    )
+    assert boxes, "the group drew nothing at all"
+    assert len(boxes) < 8, "all eight elements survived -- the trailing-drop never engaged"
+    assert all(box[0] >= ox and box[2] - ox <= 85 for _t, _xy, box in boxes), boxes
+
+
+def test_the_column_width_skip_drops_only_the_line_that_does_not_fit(monkeypatch):
+    """The COLUMN width-skip lever.
+
+    A long ``Best/Avg/Worst``-shaped line and a short ``Draw`` line, top
+    right, ``CellScale.for_cell(1000)``, ``width_budget=120``: the long
+    line does not fit even at the font floor (this is the exact shape
+    review found running left out of its cell), but the short one does.
+    Unlike a height overrun, one column line being too wide says nothing
+    about the next one, so the skip is per element -- it must drop only
+    the line that does not fit and keep the one that does, not drop
+    everything from that point on the way the height/width *drop* levers
+    do.
+    """
+    scale = CellScale.for_cell(1000)
+    group = Group(
+        anchor=Anchor.TOP_RIGHT,
+        flow=Flow.COLUMN,
+        elements=(
+            Element(role=Role.DETAIL, text="Best 0.30  Avg 0.30  Worst 0.30", emphasis=Emphasis.MUTED),
+            Element(role=Role.DETAIL, text="Draw 0.30", emphasis=Emphasis.MUTED),
+        ),
+    )
+    boxes, _used, (ox, oy) = _run_draw_group(
+        monkeypatch, group, scale=scale, width_budget=120, height_budget=1000, origin=(3000, 1000)
+    )
+    texts = [text for text, _xy, _box in boxes]
+    assert texts == ["Draw 0.30"], (
+        f"expected only the line that fits to survive, got {texts!r} -- a disabled per-element "
+        "width skip would draw the long line anyway and cross the cell's left edge"
+    )
+    assert all(ox - box[0] <= 120 and box[2] <= ox for _t, _xy, box in boxes), boxes
 
 
 def test_build_hold_still_rejects_whole_match_keyed_data():

@@ -8,11 +8,14 @@ sprite (``overlay_sprites.render_state``) and the clock
 (``mp4_grid._clock_pad`` / ``mp4_grid._stage_overlay_plan``) each wrote out
 the same byte-identical ``max(48, h // 14)`` / ``max(24, h // 36)`` pair
 independently -- two copies of one formula. The frozen stage summary
-(``overlay_summary._draw_cell``) sizes itself with its own, differently
-shaped constants (``max(20, h // 40)`` pad, ``max(32, h // 16)`` and
-``max(18, h // 32)`` sizes) -- a separate formula, not a third copy of
-the same one -- and its composition was a hardcoded list of lines that
-every new figure had to be inserted into.
+(``overlay_summary._draw_cell``) used to size itself with its own,
+differently shaped constants (``max(20, h // 40)`` pad, ``max(32, h //
+16)`` and ``max(18, h // 32)`` sizes) -- a separate formula, not a third
+copy of the same one -- and its composition was a hardcoded list of
+lines that every new figure had to be inserted into. It now resolves its
+own sizes through this module's :class:`CellScale` like the other two
+renderers do, and composes :class:`Group`/:class:`Element` declarations
+instead of that hardcoded list.
 
 This module owns two things and deliberately nothing else:
 
@@ -38,16 +41,18 @@ MIN_FONT_SIZE = 12
 class Anchor(Enum):
     """Which corner or edge-centre of a cell an element group sits in.
 
-    Six rather than nine, not all live yet. Three are drawn today: the
+    Six rather than nine, not all live yet. Five are drawn today: the
     live sprite's counter sits at ``TOP_LEFT`` and its last split at
-    ``BOTTOM_CENTER``, and the clock draws at ``TOP_RIGHT``. The summary
-    (``overlay_summary._draw_cell``) currently draws a single stack
-    anchored at ``TOP_LEFT`` only -- a ``TOP_RIGHT`` / ``BOTTOM_LEFT``
-    arrangement is what a later task in this plan gives it, not what
-    exists now. ``BOTTOM_LEFT`` and ``BOTTOM_RIGHT`` are declared for
-    that composition and are not yet drawn by anything. Adding a middle
-    row would mean inventing a vertical-centring rule nothing has asked
-    for.
+    ``BOTTOM_CENTER``, the clock draws at ``TOP_RIGHT``, and the frozen
+    stage summary (``overlay_summary._draw_cell``) composes a shooter's
+    identity and placing at ``TOP_LEFT``, split statistics at
+    ``TOP_RIGHT`` (the clock's own corner -- the two never draw at the
+    same time, since the clock belongs to the action and the summary to
+    the hold after it), and its TIME/HF/STAGE band plus the
+    accuracy/faults row stacked above it at ``BOTTOM_LEFT``.
+    ``BOTTOM_RIGHT`` is declared and not yet drawn by anything. Adding a
+    middle row would mean inventing a vertical-centring rule nothing has
+    asked for.
     """
 
     TOP_LEFT = "top-left"
