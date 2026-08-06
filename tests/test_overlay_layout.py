@@ -122,3 +122,21 @@ def test_bottom_anchors_measure_up_from_the_cells_own_bottom_edge():
     x_expr, y_expr = anchor_ffmpeg_expr(Anchor.BOTTOM_LEFT, col=0, row=1, cell_w=1280, cell_h=720, pad=24)
     assert x_expr == "0+24"
     assert y_expr == "720+720-th-24"
+
+
+def test_top_center_origin_is_inset_from_the_top_edge():
+    """The one ``Anchor`` member no other test in this file reaches."""
+    x, y = anchor_origin(Anchor.TOP_CENTER, cell_x=0, cell_y=0, cell_w=640, cell_h=360, pad=24)
+    assert (x, y) == (320, 24)
+
+
+def test_top_center_ffmpeg_expr_halves_the_leftover_text_width():
+    x_expr, y_expr = anchor_ffmpeg_expr(Anchor.TOP_CENTER, col=1, row=0, cell_w=640, cell_h=360, pad=24)
+    assert x_expr == "640+(640-tw)/2"
+    assert y_expr == "0+24"
+
+
+def test_bottom_center_ffmpeg_expr_halves_the_leftover_text_width():
+    x_expr, y_expr = anchor_ffmpeg_expr(Anchor.BOTTOM_CENTER, col=0, row=1, cell_w=640, cell_h=360, pad=24)
+    assert x_expr == "0+(640-tw)/2"
+    assert y_expr == "360+360-th-24"
