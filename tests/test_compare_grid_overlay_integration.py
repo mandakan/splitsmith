@@ -379,13 +379,58 @@ SUMMARY_INK_MIN_MEAN_ABS_DIFF = 5.0
 TILE_SUMMARY_MIN_HF_ENERGY = 2.0
 UNREACHED_CELL_MAX_HF_ENERGY = 0.2
 
-#: Anders' clock corner against Bea's, within one frame. Anders has a
-#: clock during the action and Bea (no audit, no shots) never has one,
-#: so this reads large while the clock is drawn and ~0 when it is not.
-#: Measured 33.67 on the last action frame, 0.11 inside the hold.
-#: Self-referential within a single frame, so encode noise cancels.
+#: Anders' clock corner against Bea's, on the last *action* frame only.
+#: Anders has a clock during the action and Bea (no audit, no shots)
+#: never has one, so this reads large while the clock is drawn --
+#: confirming the corner genuinely carries a clock during the action, so
+#: the hold check below (a different measure -- see
+#: :data:`HOLD_CLOCK_MAX_MEAN_ABS_DIFF`) is checking something real.
+#: Measured 40.91. Self-referential within a single frame, so encode
+#: noise cancels; this one is not confounded by Task 6's per-tile detail
+#: group because that group only exists in the *hold's* composited
+#: still, never during the action.
 ACTION_CLOCK_MIN_MEAN_ABS_DIFF = 8.0
-HOLD_CLOCK_MAX_MEAN_ABS_DIFF = 1.0
+
+#: Anders' clock-corner crop of the in-hold frame against the *same crop
+#: of the still* ``write_hold_still`` actually composed for that hold --
+#: not against Bea's corner in the same frame.
+#:
+#: The Anders-vs-Bea version of this check (kept through 682/683, retired
+#: here) compared the two shooters' corners within one hold frame and
+#: read ~0 on the theory that neither carries anything there once the
+#: clock stops. Task 6 broke that theory: the corner it read is
+#: ``Anchor.TOP_RIGHT``, which during the hold now legitimately carries
+#: Anders' own split-detail group (shot count, Best/Avg/Worst, Draw) --
+#: real content Bea (no audit, no shots) still does not get, for the same
+#: underlying reason a clock ever differed between them. Comparing the
+#: two shooters' corners can no longer isolate "is a clock still here"
+#: from "does this shooter have a detail group here", so it stopped
+#: proving anything at all: it read 23.65 on a hold with no clock in it,
+#: comfortably over the old 1.0 threshold, purely from the detail group's
+#: own ink.
+#:
+#: Comparing against the composed still sidesteps that: the still is the
+#: literal PNG :func:`splitsmith.compare.overlay_summary.write_hold_still`
+#: wrote to become this hold, drawn by pure PIL with no `drawtext` filter
+#: anywhere near it (see that module's docstring). Whatever is in the
+#: still's corner -- the detail group, or nothing, for a tile with none
+#: -- is the *correct* answer for that corner, by construction. So this
+#: measures one thing: did the rendered hold show anything the still did
+#: not. A ticking clock, a frozen one, or anything else composited on top
+#: would all show up here, because none of them are in the still no
+#: matter what pixels legitimately belong there.
+#:
+#: Measured (this fixture, no defect): 2.41 -- higher than
+#: :data:`HOLD_MATCHES_ITS_STILL_MAX`'s whole-canvas 1.32-1.36, because
+#: this crop is Anders' own busy detail-group text rather than an
+#: average over the whole frame, so it carries more of the libx264
+#: round-trip's own residue. Confirmed by deliberately compositing a
+#: filled box over the joined stream instead of concatenating the hold
+#: (see task-6-report.md's fix-round section): that reads 166.49, about
+#: 69x the clean baseline, so 6.0 -- matching
+#: :data:`HOLD_MATCHES_ITS_STILL_MAX` -- leaves comfortable headroom on
+#: both sides rather than being tuned to just clear the observed failure.
+HOLD_CLOCK_MAX_MEAN_ABS_DIFF = 6.0
 
 #: Bea's own cell, stage 1's hold against stage 2's.
 #:
@@ -1118,21 +1163,30 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, shooter_cl
         f"high-frequency energy {unreached_hf:.2f} (threshold {UNREACHED_CELL_MAX_HF_ENERGY})"
     )
 
-    # --- no clock survives into the hold ---------------------------------
-    # Anders has a running clock; Bea, with no audit, never gets one. So
-    # comparing their clock corners inside one frame says whether a clock
-    # is being drawn, with the shared background and the encode noise
-    # cancelling out.
+    # --- no clock (or anything else) survives into the hold --------------
+    # First: the corner genuinely carries a clock during the action, on
+    # Anders and not on Bea (no audit, no shots) -- otherwise the check
+    # below proves nothing.
     action_clock = _crop_diff(last_action, anders_clock, bea_clock)
     assert (
         action_clock >= ACTION_CLOCK_MIN_MEAN_ABS_DIFF
     ), f"no clock during the action, so the hold check below proves nothing: {action_clock:.2f}"
-    hold_clock = _crop_diff(in_hold, anders_clock, bea_clock)
-    assert hold_clock <= HOLD_CLOCK_MAX_MEAN_ABS_DIFF, (
-        f"a clock is still on screen over the summary: Anders' clock corner differs from Bea's "
-        f"by {hold_clock:.2f} inside the hold, against {action_clock:.2f} during the action "
-        f"(threshold {HOLD_CLOCK_MAX_MEAN_ABS_DIFF}). A frozen clock beside a blurred summary "
-        "reads as a stall rather than a conclusion."
+    # Then: Anders' clock corner in the hold, against the *same corner of
+    # the still that was actually composed for it* -- not against Bea's
+    # corner in the same frame. See HOLD_CLOCK_MAX_MEAN_ABS_DIFF's
+    # docstring for why the Anders-vs-Bea comparison stopped isolating a
+    # clock once Task 6 gave that corner legitimate per-tile content.
+    # Whatever the still's own corner shows is correct by construction --
+    # it is what `write_hold_still` drew, with no drawtext filter
+    # anywhere near it -- so any difference here is something composited
+    # over the hold that the still never had, a clock included.
+    hold_vs_still_corner = _mean_abs_diff(in_hold, still, anders_clock)
+    assert hold_vs_still_corner <= HOLD_CLOCK_MAX_MEAN_ABS_DIFF, (
+        f"something is on screen over the summary that the composed still does not have: "
+        f"Anders' clock corner in the hold differs from the same corner of the still by "
+        f"{hold_vs_still_corner:.2f} (threshold {HOLD_CLOCK_MAX_MEAN_ABS_DIFF}), against "
+        f"{action_clock:.2f} for the clock during the action. A frozen clock beside a blurred "
+        "summary reads as a stall rather than a conclusion."
     )
 
     # --- stage 2's hold carries stage 2's figures ------------------------
