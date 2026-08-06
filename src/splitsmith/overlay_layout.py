@@ -3,10 +3,16 @@
 Both overlay renderers draw the same kinds of thing in the same cells:
 the compare grid's live sprite (PIL, stepped on shot events), its running
 clock (an ffmpeg ``drawtext`` filter, genuinely per frame) and its frozen
-stage summary (PIL, once per stage). Until this module existed each of
-them computed its own type sizes from cell height, writing the same
-formula out in three files, and the summary's composition was a hardcoded
-list of lines that every new figure had to be inserted into.
+stage summary (PIL, once per stage). Until this module existed, the live
+sprite (``overlay_sprites.render_state``) and the clock
+(``mp4_grid._clock_pad`` / ``mp4_grid._stage_overlay_plan``) each wrote out
+the same byte-identical ``max(48, h // 14)`` / ``max(24, h // 36)`` pair
+independently -- two copies of one formula. The frozen stage summary
+(``overlay_summary._draw_cell``) sizes itself with its own, differently
+shaped constants (``max(20, h // 40)`` pad, ``max(32, h // 16)`` and
+``max(18, h // 32)`` sizes) -- a separate formula, not a third copy of
+the same one -- and its composition was a hardcoded list of lines that
+every new figure had to be inserted into.
 
 This module owns two things and deliberately nothing else:
 
@@ -32,12 +38,16 @@ MIN_FONT_SIZE = 12
 class Anchor(Enum):
     """Which corner or edge-centre of a cell an element group sits in.
 
-    Six rather than nine: these are the positions the two renderers
-    actually use. The live sprite draws its counter at ``TOP_LEFT`` and
-    its last split at ``BOTTOM_CENTER``, the clock draws at ``TOP_RIGHT``,
-    and the summary uses ``TOP_LEFT`` / ``TOP_RIGHT`` / ``BOTTOM_LEFT``.
-    Adding a middle row would mean inventing a vertical-centring rule
-    nothing has asked for.
+    Six rather than nine, not all live yet. Three are drawn today: the
+    live sprite's counter sits at ``TOP_LEFT`` and its last split at
+    ``BOTTOM_CENTER``, and the clock draws at ``TOP_RIGHT``. The summary
+    (``overlay_summary._draw_cell``) currently draws a single stack
+    anchored at ``TOP_LEFT`` only -- a ``TOP_RIGHT`` / ``BOTTOM_LEFT``
+    arrangement is what a later task in this plan gives it, not what
+    exists now. ``BOTTOM_LEFT`` and ``BOTTOM_RIGHT`` are declared for
+    that composition and are not yet drawn by anything. Adding a middle
+    row would mean inventing a vertical-centring rule nothing has asked
+    for.
     """
 
     TOP_LEFT = "top-left"
