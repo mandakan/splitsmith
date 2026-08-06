@@ -80,6 +80,7 @@ def _tile(label: str, row: int, col: int, present: bool, lead: float) -> mp4_gri
         beep_offset_in_clip=1.25,
         seek_seconds=0.25 if present else 0.0,
         lead_pad_seconds=lead,
+        source_duration_seconds=6.0 if present else 0.0,
         row=row,
         col=col,
     )
@@ -1018,7 +1019,7 @@ def test_freeze_extraction_does_not_go_through_the_progress_runner(tmp_path: Pat
     assert len(calls) == 2
     # Two present tiles, so two freeze frames, all on the other hook.
     assert len(stills) == 2
-    assert all("-frames:v" in cmd for cmd in stills)
+    assert all("-update" in cmd for cmd in stills)
 
 
 def test_no_hold_writes_no_still_and_changes_no_command(tmp_path: Path):

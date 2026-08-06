@@ -354,6 +354,26 @@ class GridTile:
     clip to shift and this stays ``0.0``.
     """
 
+    source_duration_seconds: float
+    """How long ``trim_path`` itself runs, in clip time.
+
+    Straight off the loader's probe
+    (``CompareStageBundle.duration_seconds``) and ``0.0`` on a filler
+    tile, which has no source.
+
+    Nothing in the filter graph reads this -- the tile chain pads and
+    trims to the *stage's* length and never needs to know where one
+    clip's footage stops. :func:`overlay_summary.extract_freeze_frames`
+    does, and it is the only thing that does: the stage runs until the
+    *longest* tile's post-beep span is done plus a tail pad, so every
+    tile's window ends past its own footage and "the last frame of the
+    action" is black on every tile. The last frame with a picture in it
+    is this tile's own, at this time. Required rather than defaulted
+    because a tile that silently reported ``0.0`` would freeze on its
+    first frame instead of its last, which looks like footage and is
+    the wrong footage.
+    """
+
     row: int
     col: int
 
@@ -557,6 +577,7 @@ def build_stage_plans(
                         beep_offset_in_clip=0.0,
                         seek_seconds=0.0,
                         lead_pad_seconds=0.0,
+                        source_duration_seconds=0.0,
                         row=row,
                         col=col,
                     )
@@ -573,6 +594,7 @@ def build_stage_plans(
                     beep_offset_in_clip=bundle.beep_offset_in_clip,
                     seek_seconds=max(0.0, bundle.beep_offset_in_clip - head_pad_seconds),
                     lead_pad_seconds=max(0.0, head_pad_seconds - bundle.beep_offset_in_clip),
+                    source_duration_seconds=bundle.duration_seconds,
                     row=row,
                     col=col,
                 )
@@ -1559,9 +1581,9 @@ def _stage_hold_still(
     there is exactly one place that slice is written.
 
     Imported inside the function on purpose:
-    :mod:`splitsmith.compare.overlay_summary` imports ``GridCanvas``,
-    ``GridStagePlan`` and ``Runner`` from this module, so a module-level
-    import in either direction is a cycle.
+    :mod:`splitsmith.compare.overlay_summary` imports ``GridStagePlan``
+    and ``Runner`` from this module, so a module-level import in either
+    direction is a cycle.
     """
     from .overlay_summary import write_hold_still
 
@@ -1575,7 +1597,6 @@ def _stage_hold_still(
             cols=plan.cols,
         ),
         theme=load_theme(theme_name),
-        canvas=canvas,
         work_dir=work,
         ffmpeg_binary=ffmpeg_binary,
         runner=runner,

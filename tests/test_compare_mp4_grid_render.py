@@ -89,6 +89,7 @@ def _tile(label: str, trim: Path | None, *, col: int, lead_pad: float = 0.0) -> 
         beep_offset_in_clip=0.0,
         seek_seconds=0.0,
         lead_pad_seconds=lead_pad,
+        source_duration_seconds=6.0 if trim is not None else 0.0,
         row=0,
         col=col,
     )
@@ -134,6 +135,7 @@ def _grid_tile(label: str, trim: Path | None, *, row: int, col: int) -> mp4_grid
         beep_offset_in_clip=0.0,
         seek_seconds=0.0,
         lead_pad_seconds=0.0,
+        source_duration_seconds=6.0 if trim is not None else 0.0,
         row=row,
         col=col,
     )
@@ -668,6 +670,7 @@ def test_segments_whose_stream_layouts_disagree_are_never_stitched(tmp_path: Pat
                     beep_offset_in_clip=0.0,
                     seek_seconds=0.0,
                     lead_pad_seconds=0.0,
+                    source_duration_seconds=3.0,
                     row=0,
                     col=col,
                 )

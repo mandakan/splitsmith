@@ -17,7 +17,7 @@ import pytest
 from PIL import Image
 
 from splitsmith.compare import overlay_summary as summ
-from splitsmith.compare.mp4_grid import GridCanvas, GridStagePlan, GridTile
+from splitsmith.compare.mp4_grid import GridStagePlan, GridTile
 from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
 from splitsmith.overlay_theme import load_theme
@@ -25,16 +25,25 @@ from splitsmith.ui.project import StageScorecard
 
 THEME = load_theme("clean")
 GEOMETRY = SpriteGeometry(canvas_width=640, canvas_height=360, rows=2, cols=2)
-CANVAS = GridCanvas(width=640, height=360, frame_rate_num=30, frame_rate_den=1)
 
 
-def _tile(label: str, row: int, col: int, *, trim: Path | None, seek: float = 0.0, lead_pad: float = 0.0):
+def _tile(
+    label: str,
+    row: int,
+    col: int,
+    *,
+    trim: Path | None,
+    seek: float = 0.0,
+    lead_pad: float = 0.0,
+    source_duration: float = 8.0,
+):
     return GridTile(
         label=label,
         trim_path=trim,
         beep_offset_in_clip=0.0,
         seek_seconds=seek,
         lead_pad_seconds=lead_pad,
+        source_duration_seconds=0.0 if trim is None else source_duration,
         row=row,
         col=col,
     )
@@ -57,14 +66,28 @@ def _placement(label, row, col, *, present=True):
 
 
 class _Recorder:
-    """A fake runner: records every argv, returns a scripted result."""
+    """A fake runner: records every argv, returns a scripted result.
 
-    def __init__(self, returncode: int = 0):
+    ``writes`` says what the fake ffmpeg leaves on disk, because that is
+    the thing the returncode does not tell you. Real ffmpeg asked for a
+    frame past the end of a clip exits **0** and writes nothing, which is
+    the ``"nothing"`` mode; ``"empty"`` is the same lie with a zero-byte
+    file created. ``"frame"`` is the honest success.
+    """
+
+    def __init__(self, returncode: int = 0, writes: str = "frame"):
         self.calls: list[list[str]] = []
         self.returncode = returncode
+        self.writes = writes
 
     def __call__(self, cmd, **kwargs):
         self.calls.append(list(cmd))
+        out = Path(cmd[-1])
+        if self.returncode == 0:
+            if self.writes == "frame":
+                Image.new("RGB", (16, 9), (7, 9, 11)).save(out)
+            elif self.writes == "empty":
+                out.write_bytes(b"")
         return subprocess.CompletedProcess(cmd, self.returncode, b"", b"")
 
 
@@ -76,31 +99,79 @@ def _solid_png(path: Path, size: tuple[int, int], color: tuple[int, int, int]) -
 # --- freeze extraction --------------------------------------------------
 
 
-def test_freeze_extraction_asks_for_one_frame_at_the_last_action_moment(tmp_path):
+def _seek_of(cmd: list[str]) -> float:
+    assert "-ss" in cmd, cmd
+    return float(cmd[cmd.index("-ss") + 1])
+
+
+def test_the_freeze_seek_lands_inside_the_tiles_own_footage(tmp_path):
+    """The seek must be a time this clip actually has a frame at.
+
+    Production geometry, which is what makes this the test the shipped
+    formula could not pass: the stage runs ``head_pad`` + the longest
+    tile's post-beep span + ``tail_pad``, so ``plan.duration_seconds``
+    (7.5 here) exceeds what this tile's own 6.0s clip can supply from its
+    2.0s seek. Any target derived from the action's length is therefore
+    past this clip's end -- ffmpeg returns no frame there and the cell
+    renders black.
+
+    Asserted against the clip's own bounds rather than against a repeat
+    of the implementation's arithmetic. The previous version of this test
+    computed ``2.0 + 5.0 - 0.0 - 1/fps`` and compared it to the same
+    expression the module evaluated, so it held whatever the module did.
+    """
     trim = tmp_path / "ann.mp4"
-    tile = _tile("Ann", 0, 0, trim=trim, seek=2.0, lead_pad=0.0)
-    plan = _plan([tile], duration=5.0)
+    tile = _tile("Ann", 0, 0, trim=trim, seek=2.0, lead_pad=0.0, source_duration=6.0)
+    plan = _plan([tile], duration=7.5)
     runner = _Recorder()
 
     freezes = summ.extract_freeze_frames(
-        plan, canvas=CANVAS, work_dir=tmp_path / "work", ffmpeg_binary="ffmpeg", runner=runner
+        plan, work_dir=tmp_path / "work", ffmpeg_binary="ffmpeg", runner=runner
     )
 
     assert "Ann" in freezes
     assert len(runner.calls) == 1
     cmd = runner.calls[0]
     assert cmd[0] == "ffmpeg"
-    assert "-ss" in cmd
-    seek_value = float(cmd[cmd.index("-ss") + 1])
-    expected = 2.0 + 5.0 - 0.0 - (1.0 / CANVAS.fps)
-    # ``:g`` formats to 6 significant digits, which can round the last
-    # digit of a value like 6.9666... by a few micro-seconds -- nowhere
-    # near a frame, so a generous absolute tolerance is still meaningful.
-    assert seek_value == pytest.approx(expected, abs=1e-4)
-    assert "-i" in cmd
+    seek = _seek_of(cmd)
+    assert 0.0 <= seek < 6.0, f"seek {seek} is not inside the tile's own 6.0s clip"
+    # And near its end, not merely inside it: a target that drifted to the
+    # front of the clip would freeze on footage from before the shooter
+    # started, which still looks like a picture.
+    assert seek >= 6.0 - 1.0, f"seek {seek} is not near the end of the tile's own 6.0s clip"
+    # Nothing about the action's length may reach the seek.
+    assert seek < plan.duration_seconds - 1.0
     assert cmd[cmd.index("-i") + 1] == str(trim)
-    assert "-frames:v" in cmd
-    assert cmd[cmd.index("-frames:v") + 1] == "1"
+    assert cmd[cmd.index("-update") + 1] == "1"
+
+
+def test_each_tile_freezes_on_its_own_clips_end_not_the_longest_ones(tmp_path):
+    """Two tiles of different lengths get two different seeks.
+
+    A stage's tiles rarely run the same length: the action ends when the
+    *longest* post-beep span does, and every shorter tile has been black
+    for a while by then. So "the end of the footage" is a per-tile fact,
+    and a fix that clamped one shared action-derived target into range
+    would give both tiles the same seek and freeze the short one on black.
+    """
+    plan = _plan(
+        [
+            _tile("Ann", 0, 0, trim=tmp_path / "ann.mp4", seek=2.0, source_duration=6.0),
+            _tile("Bo", 0, 1, trim=tmp_path / "bo.mp4", seek=2.0, source_duration=3.25),
+        ],
+        duration=7.5,
+    )
+    runner = _Recorder()
+
+    summ.extract_freeze_frames(plan, work_dir=tmp_path / "work", ffmpeg_binary="ffmpeg", runner=runner)
+
+    ann_seek, bo_seek = (_seek_of(cmd) for cmd in runner.calls)
+    assert 0.0 <= bo_seek < 3.25, f"the short tile's seek {bo_seek} is past its own 3.25s clip"
+    assert bo_seek >= 3.25 - 1.0
+    assert ann_seek > bo_seek, (
+        f"both tiles were asked for the same moment ({ann_seek} / {bo_seek}); the seek is not "
+        "following each tile's own footage"
+    )
 
 
 def test_freeze_extraction_skips_filler_tiles(tmp_path):
@@ -110,11 +181,70 @@ def test_freeze_extraction_skips_filler_tiles(tmp_path):
     runner = _Recorder()
 
     freezes = summ.extract_freeze_frames(
-        plan, canvas=CANVAS, work_dir=tmp_path / "work", ffmpeg_binary="ffmpeg", runner=runner
+        plan, work_dir=tmp_path / "work", ffmpeg_binary="ffmpeg", runner=runner
     )
 
     assert set(freezes) == {"Ann"}
     assert len(runner.calls) == 1
+
+
+def test_an_exit_zero_that_wrote_no_frame_is_not_a_success(tmp_path, caplog):
+    """rc=0 with no output file is the shipped failure, exactly.
+
+    ``ffmpeg -ss <past EOF> -i clip -frames:v 1 out.png`` exits 0, reports
+    ``frame= 0`` and writes nothing. A returncode-only check returns a
+    path to that missing file and calls it a freeze frame, so the fault
+    reappears two layers away as an unexplained black cell.
+    """
+    tile = _tile("Ann", 0, 0, trim=tmp_path / "ann.mp4")
+    plan = _plan([tile])
+    runner = _Recorder(returncode=0, writes="nothing")
+
+    with caplog.at_level("WARNING"):
+        freezes = summ.extract_freeze_frames(
+            plan, work_dir=tmp_path / "work", ffmpeg_binary="ffmpeg", runner=runner
+        )
+
+    assert freezes == {}
+    assert "wrote no freeze frame" in caplog.text
+    assert "Ann" in caplog.text
+
+
+def test_a_zero_byte_freeze_frame_is_not_a_success(tmp_path):
+    tile = _tile("Ann", 0, 0, trim=tmp_path / "ann.mp4")
+    plan = _plan([tile])
+    runner = _Recorder(returncode=0, writes="empty")
+
+    freezes = summ.extract_freeze_frames(
+        plan, work_dir=tmp_path / "work", ffmpeg_binary="ffmpeg", runner=runner
+    )
+    assert freezes == {}
+
+
+def test_a_stale_png_in_a_reused_work_dir_is_not_mistaken_for_this_runs_frame(tmp_path):
+    """The work dir survives between renders when the caller names one.
+
+    Without clearing the target first, an extraction that wrote nothing
+    would find the *previous* render's PNG sitting there and report
+    success -- the same lie the existence check exists to catch, wearing
+    the last render's picture.
+    """
+    work = tmp_path / "work"
+    work.mkdir()
+    stale = work / "freeze-stage1-r0c0.png"
+    _solid_png(stale, (16, 9), (200, 10, 10))
+    tile = _tile("Ann", 0, 0, trim=tmp_path / "ann.mp4")
+    plan = _plan([tile])
+
+    freezes = summ.extract_freeze_frames(
+        plan,
+        work_dir=work,
+        ffmpeg_binary="ffmpeg",
+        runner=_Recorder(returncode=0, writes="nothing"),
+    )
+
+    assert freezes == {}
+    assert not stale.exists()
 
 
 def test_a_failed_extraction_degrades_to_a_black_cell(tmp_path):
@@ -123,7 +253,7 @@ def test_a_failed_extraction_degrades_to_a_black_cell(tmp_path):
     runner = _Recorder(returncode=1)
 
     freezes = summ.extract_freeze_frames(
-        plan, canvas=CANVAS, work_dir=tmp_path / "work", ffmpeg_binary="ffmpeg", runner=runner
+        plan, work_dir=tmp_path / "work", ffmpeg_binary="ffmpeg", runner=runner
     )
     assert freezes == {}
 
@@ -395,7 +525,6 @@ def test_write_hold_still_saves_a_png(tmp_path):
         data,
         GEOMETRY,
         theme=THEME,
-        canvas=CANVAS,
         work_dir=tmp_path / "work",
         ffmpeg_binary="ffmpeg",
         runner=runner,

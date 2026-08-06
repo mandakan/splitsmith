@@ -18,6 +18,7 @@ def _plan(*, missing: str | None = None, lead_padded: str | None = None) -> mp4_
                 beep_offset_in_clip=2.0,
                 seek_seconds=1.0,
                 lead_pad_seconds=0.5 if label == lead_padded else 0.0,
+                source_duration_seconds=0.0 if label == missing else 8.0,
                 row=row,
                 col=col,
             )
@@ -43,6 +44,7 @@ def _plan_1x3() -> mp4_grid.GridStagePlan:
             beep_offset_in_clip=2.0,
             seek_seconds=1.0,
             lead_pad_seconds=0.0,
+            source_duration_seconds=8.0,
             row=0,
             col=index,
         )
@@ -287,6 +289,7 @@ def _partial_plan(*, roster: int, rows: int, cols: int) -> mp4_grid.GridStagePla
             beep_offset_in_clip=2.0,
             seek_seconds=1.0,
             lead_pad_seconds=0.0,
+            source_duration_seconds=8.0,
             row=index // cols,
             col=index % cols,
         )
@@ -578,6 +581,7 @@ def _matrix_tile(label: str, row: int, col: int, present: bool, lead: float) -> 
         beep_offset_in_clip=1.25,
         seek_seconds=0.25 if present else 0.0,
         lead_pad_seconds=lead,
+        source_duration_seconds=8.0 if present else 0.0,
         row=row,
         col=col,
     )

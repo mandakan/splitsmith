@@ -18,7 +18,7 @@ change to add a blur ever looks tempting, that is Task 9's territory and
 this module already did the work.
 
 **This module is pure PIL.** It draws no ``drawtext`` and shells out to
-ffmpeg only for the one-frame still extraction, through an injected
+ffmpeg only to extract each tile's freeze frame, through an injected
 :data:`splitsmith.compare.mp4_grid.Runner` so unit tests never shell out.
 A host whose ffmpeg lacks libfreetype loses the running clock elsewhere in
 the graph but gets a complete summary here, untouched.
@@ -40,7 +40,7 @@ from PIL import Image, ImageDraw, ImageFilter
 
 from ..overlay_text import _draw_text_with_shadow, _load_font
 from ..overlay_theme import OverlayTheme
-from .mp4_grid import GridCanvas, GridStagePlan, Runner
+from .mp4_grid import GridStagePlan, Runner
 from .overlay_data import TileStageData
 from .overlay_sprites import SpriteGeometry, TilePlacement
 
@@ -55,6 +55,28 @@ _MIN_FONT_SIZE = 12
 #: summary text is legible over any footage without crushing the picture
 #: to nothing -- it is still recognisably the shooter's own frame.
 DEFAULT_DIM = 0.45
+
+#: How far before a tile's own footage end the freeze extraction starts
+#: reading, in seconds.
+#:
+#: The seek cannot be the last frame's exact timestamp. ``-ss`` keeps the
+#: first frame at or after the requested time, and the duration the loader
+#: probed is the *container's* (``format=duration``), which on a real
+#: trim runs past the last video frame: measured on the 24s synthetic
+#: fixture, ``format=duration`` 24.000 against a last video pts of
+#: 23.9573 and a video-stream duration of 23.9906. Asking for
+#: ``duration - one_frame`` (23.9666) returns nothing at all -- and so
+#: does asking for 23.9573, the last pts itself, because any rounding in
+#: the seek path lands past it. Both exit **0** having written no file.
+#:
+#: So the read starts a window before the end and ``-update 1`` lets each
+#: decoded frame overwrite the last, which leaves the true final frame in
+#: the file. The window is what bounds the work (measured at 3840x2160:
+#: 1.23s against 0.82s for a single-frame extraction) and how far the
+#: container's duration may overstate the video's before the extraction
+#: comes up empty -- at which point :func:`extract_freeze_frames` reports
+#: it rather than returning a path to a file that was never written.
+_FREEZE_TAIL_WINDOW_SECONDS = 0.5
 
 
 def _check_stage_keys(data: Mapping[str, TileStageData]) -> None:
@@ -89,42 +111,51 @@ def _placements_for_plan(plan: GridStagePlan) -> tuple[TilePlacement, ...]:
 def extract_freeze_frames(
     plan: GridStagePlan,
     *,
-    canvas: GridCanvas,
     work_dir: Path,
     ffmpeg_binary: str,
     runner: Runner,
 ) -> dict[str, Path]:
-    """One still per present tile, taken at the stage's last action frame.
+    """One still per present tile: the last frame of *that tile's* footage.
 
-    The seek target is the tile's own *source* time for that frame: the
-    tile chain in ``mp4_grid.build_stage_command`` reads
-    ``-ss tile.seek_seconds -t (plan.duration_seconds - tile.lead_pad_seconds)``,
-    so the last frame that chain shows sits one frame before the end of
-    that window, i.e. at
-    ``tile.seek_seconds + plan.duration_seconds - tile.lead_pad_seconds -
-    one_frame``. A lead-padded tile (whose chain starts with synthesised
-    black rather than real footage) still resolves to a source time inside
-    its real footage, because ``lead_pad_seconds`` shrinks the ``-t`` window
-    by exactly the pad it added at the front.
+    **Not the last frame of the action.** The stage runs for
+    ``head_pad + the longest tile's post-beep span + tail_pad``, and every
+    tile chain in ``mp4_grid.build_stage_command`` is ``tpad``-ed with
+    black across that whole span. So the action's final frames are black
+    on every tile -- on the longest one for the tail pad's worth, and on
+    every shorter one for longer than that. A seek derived from
+    ``plan.duration_seconds`` therefore lands past the end of the tile's
+    own clip, where there is no frame to take at all: that is what put
+    text on pure black in every cell of the shipped default render.
+
+    The target is ``tile.source_duration_seconds`` instead, which is that
+    clip's own length in its own time -- no beep, seek or lead pad enters
+    into it, because the tile is being read directly rather than through
+    the graph. See :data:`_FREEZE_TAIL_WINDOW_SECONDS` for why the read
+    starts a window short of that and takes the last frame it decodes
+    rather than seeking straight to the final timestamp.
 
     Filler tiles (``trim_path is None``) are skipped -- there is no source
-    to seek into. A tile whose extraction fails (a bad runner exit, a
-    missing binary, a corrupt trim) is logged and skipped rather than
-    raised: one unreadable trim must not lose the whole stage's summary,
-    it should just leave that one cell black in
-    :func:`build_hold_still`.
+    to seek into. A tile whose extraction fails is logged and skipped
+    rather than raised: one unreadable trim must not lose the whole
+    stage's summary, it should just leave that one cell black in
+    :func:`build_hold_still`. "Fails" includes the quiet case, which is
+    the one that shipped: ``ffmpeg -ss <past EOF> -i clip -frames:v 1``
+    exits **0**, reports ``frame= 0`` and writes nothing, so a returncode
+    check alone hands back a path to a file that does not exist and the
+    fault only surfaces two layers later, in :func:`_prepare_cell`, as a
+    cell that renders black for no stated reason.
     """
     work_dir.mkdir(parents=True, exist_ok=True)
-    one_frame = 1.0 / canvas.fps
     freezes: dict[str, Path] = {}
     for tile in plan.tiles:
         if tile.trim_path is None:
             continue
-        seek_seconds = max(
-            0.0,
-            tile.seek_seconds + plan.duration_seconds - tile.lead_pad_seconds - one_frame,
-        )
+        seek_seconds = max(0.0, tile.source_duration_seconds - _FREEZE_TAIL_WINDOW_SECONDS)
         out_path = work_dir / f"freeze-stage{plan.stage_number}-r{tile.row}c{tile.col}.png"
+        # A stale PNG from an earlier render into a reused work dir would
+        # otherwise pass the existence check below without this run having
+        # written anything, which is the same lie in a different disguise.
+        out_path.unlink(missing_ok=True)
         cmd = [
             ffmpeg_binary,
             "-hide_banner",
@@ -133,7 +164,8 @@ def extract_freeze_frames(
             f"{seek_seconds:g}",
             "-i",
             str(tile.trim_path),
-            "-frames:v",
+            "-an",
+            "-update",
             "1",
             str(out_path),
         ]
@@ -155,8 +187,34 @@ def extract_freeze_frames(
                 tile.label,
             )
             continue
+        if not _wrote_a_frame(out_path):
+            logger.warning(
+                "compare overlay summary: ffmpeg exited 0 but wrote no freeze frame for %s "
+                "(seek %.3fs into a %.3fs clip, %s); that tile's summary cell will render black",
+                tile.label,
+                seek_seconds,
+                tile.source_duration_seconds,
+                tile.trim_path,
+            )
+            continue
         freezes[tile.label] = out_path
     return freezes
+
+
+def _wrote_a_frame(out_path: Path) -> bool:
+    """Did the extraction actually leave a frame behind?
+
+    ffmpeg's exit code does not answer this. Asked for a frame past the
+    end of a clip it exits 0, prints ``frame= 0`` and creates no file, so
+    without this check :func:`extract_freeze_frames` returns a path to
+    nothing and reports success. A zero-byte file is the same failure with
+    the file created (an interrupted or out-of-space write), so size is
+    checked too rather than existence alone.
+    """
+    try:
+        return out_path.stat().st_size > 0
+    except OSError:
+        return False
 
 
 def _letterbox(frame: Image.Image, cell_width: int, cell_height: int) -> Image.Image:
@@ -512,7 +570,6 @@ def write_hold_still(
     geometry: SpriteGeometry,
     *,
     theme: OverlayTheme,
-    canvas: GridCanvas,
     work_dir: Path,
     ffmpeg_binary: str,
     runner: Runner,
@@ -532,7 +589,6 @@ def write_hold_still(
     placements = _placements_for_plan(plan)
     freezes = extract_freeze_frames(
         plan,
-        canvas=canvas,
         work_dir=work_dir,
         ffmpeg_binary=ffmpeg_binary,
         runner=runner,
