@@ -67,7 +67,6 @@ still has a clock on it.
 
 from __future__ import annotations
 
-import json
 import re
 import shutil
 import subprocess
@@ -78,9 +77,15 @@ import pytest
 from PIL import Image, ImageFilter
 
 from splitsmith.compare import mp4_grid
-from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
+from splitsmith.compare.project_loader import CompareShooterBundle
 from splitsmith.overlay_theme import load_theme
-from tests.synthetic_media import SYNTHETIC_FPS_DEN, SYNTHETIC_FPS_NUM
+from tests.compare_fixture import (
+    HEAD_PAD_SECONDS,
+    SEGMENT_SECONDS,
+    TAIL_PAD_SECONDS,
+    build_clips,
+    build_roster,
+)
 
 FFMPEG = shutil.which("ffmpeg")
 FFPROBE = shutil.which("ffprobe")
@@ -98,50 +103,24 @@ needs_ffmpeg = pytest.mark.skipif(
 CANVAS = mp4_grid.GridCanvas(width=640, height=360, frame_rate_num=30, frame_rate_den=1)
 FRAME_SECONDS = 1 / 30
 
-HEAD_PAD_SECONDS = 1.0
-TAIL_PAD_SECONDS = 0.5
-
-# --- clip lengths: declared == what the media actually is ---------------
+# --- fixture geometry and scoring ---------------------------------------
 #
-# This used to declare ``STAGE_DURATION_SECONDS = 9.0`` while handing
-# every tile the shared 24.0s source clip. Fifteen seconds of slack, and
-# it was the only reason the freeze-frame seek landed inside the media at
-# all: the extraction targets a time derived from the clip's declared
-# length, and in production that length comes off an ffprobe of the trim
-# itself (``project_loader``), so it is exact and the seek had nowhere to
-# overrun into. The whole stage summary rendered on pure black under
-# shipped defaults and this fixture could not express it.
+# Clip lengths, the beep offset, the pads, the shot times and the roster's
+# scoring all live in ``tests/compare_fixture.py``, shared with
+# ``scripts/render_grid_frames.py`` so the fixture that has to catch a
+# defect is also the one a design pass looks at.
 #
-# So each shooter now gets a real clip of its own, cut to an exact frame
-# count, and the bundle is handed that clip's *probed* duration --
-# ``_probe_seconds`` below asserts the two agree, so the slack cannot
-# quietly come back.
-#
-# The frame counts are chosen to keep the segment arithmetic in whole
-# 1/30s canvas frames: 270 source frames at 30000/1001 is 9.009s, and a
-# beep 3.009s in leaves a post-beep span of exactly 6.0s.
-STAGE_FRAMES = 270
-STAGE_DURATION_SECONDS = STAGE_FRAMES * SYNTHETIC_FPS_DEN / SYNTHETIC_FPS_NUM  # 9.009
-
-#: Mathias's clip, deliberately shorter than the other two.
-#:
-#: The stage runs until the *longest* tile's post-beep span is done, so
-#: his cell is ``tpad`` black for the last ~1.5s of every action. That is
-#: what separates "freeze on this tile's own last frame" from "freeze on
-#: the action's last frame": the second reads black in his cell, and with
-#: three equal-length clips no assertion here could tell them apart.
-SHORT_STAGE_FRAMES = 225
-SHORT_STAGE_DURATION_SECONDS = SHORT_STAGE_FRAMES * SYNTHETIC_FPS_DEN / SYNTHETIC_FPS_NUM  # 7.5075
-
-BEEP_OFFSET_SECONDS = STAGE_DURATION_SECONDS - 6.0  # 3.009s in; seek clamps to beep - head_pad
-
-# Segment layout: head pad (1.0s) + longest post-beep span (6.0s) +
-# tail pad (0.5s) = 7.5s per the whole-driver stitch.
-SEGMENT_SECONDS = HEAD_PAD_SECONDS + (STAGE_DURATION_SECONDS - BEEP_OFFSET_SECONDS) + TAIL_PAD_SECONDS
-
-#: When Mathias's footage stops, in segment time: his beep is at the head
-#: pad like everyone's, and his own post-beep span is shorter.
-MATHIAS_FOOTAGE_ENDS = HEAD_PAD_SECONDS + (SHORT_STAGE_DURATION_SECONDS - BEEP_OFFSET_SECONDS)
+# The part of it this module depends on most: each shooter is handed a
+# real clip of its own, cut to an exact frame count, and the bundle
+# carries that clip's *probed* duration -- ``build_clips`` asserts the two
+# agree. This module used to declare a 9.0s stage while handing every tile
+# the shared 24.0s source clip, and those fifteen seconds of slack were
+# the only reason the freeze-frame seek landed inside the media at all:
+# the extraction targets a time derived from the clip's declared length,
+# and in production that length comes off an ffprobe of the trim itself
+# (``project_loader``), so it is exact and the seek has nowhere to overrun
+# into. The whole stage summary rendered on pure black under shipped
+# defaults and this fixture could not express it.
 
 # Every tile's beep lands at the segment's head pad (1.0s -- see
 # ``_stage_overlay_plan``'s comment on ``start_seconds``), so absolute
@@ -152,8 +131,6 @@ MATHIAS_FOOTAGE_ENDS = HEAD_PAD_SECONDS + (SHORT_STAGE_DURATION_SECONDS - BEEP_O
 # after Anders' first shot but before Mathias's -- nobody but Anders has
 # any overlay content yet, a clean single-shooter-fired state with no
 # confound from another tile changing at the same instant.
-ANDERS_SHOTS_MS = [500, 3000]
-MATHIAS_SHOTS_MS = [1200, 2000]  # absolute 2.2s / 3.0s
 
 #: Sampled inside the head pad -- before the beep, nothing has fired and
 #: nothing should be drawn anywhere.
@@ -410,6 +387,32 @@ UNREACHED_CELL_MAX_HF_ENERGY = 0.2
 ACTION_CLOCK_MIN_MEAN_ABS_DIFF = 8.0
 HOLD_CLOCK_MAX_MEAN_ABS_DIFF = 1.0
 
+#: Bea's own cell, stage 1's hold against stage 2's.
+#:
+#: The instrument for "the scoring reached the pixels", and the one thing
+#: this module could not say at all before #682. Bea has no audit in
+#: either stage, so nothing about shots, splits or a clock differs between
+#: them; she reads the same clip at the same seek in both, so her frozen
+#: picture is identical by construction. The *only* difference is her
+#: ``project.json``: stage 1 gives her no scorecard and no stage time, so
+#: her cell is her label alone, and stage 2 gives her a scorecard, so it
+#: carries a placing, a stage time, a hit factor, a stage percentage and
+#: a hit-count line.
+#:
+#: So this reads large exactly when a scorecard on disk becomes ink on
+#: screen. Measured 9.24. A renderer that stopped finding ``project.json``
+#: -- which is what every shooter in this fixture used to do, silently --
+#: draws the same label in both stages and reads ~0.
+SCORECARD_INK_MIN_MEAN_ABS_DIFF = 4.0
+
+#: The unreached cell, same two frames, as the control for the above.
+#:
+#: Nothing is ever drawn there, so this is what the two hold frames share:
+#: if it were not ~0 the frames would differ in their background and the
+#: measure above would be reading something other than drawn text.
+#: Measured 0.00 -- the two frames are bit-identical in that cell.
+STAGE_BACKGROUND_MAX_MEAN_ABS_DIFF = 1.0
+
 #: Stage 1's composed still against stage 2's, over the two cells that
 #: carry figures, PNG to PNG with no encode in between. Measured 0.687:
 #: stage 2 has three more shots, so its cells differ by a shot count and
@@ -424,129 +427,19 @@ HOLD_CLOCK_MAX_MEAN_ABS_DIFF = 1.0
 STILLS_DIFFER_MIN_MEAN_ABS_DIFF = 0.3
 
 
-def _cut_clip(source: Path, destination: Path, frames: int) -> Path:
-    """Re-encode the first ``frames`` frames of ``source`` to ``destination``.
-
-    ``-frames:v`` rather than ``-t`` so the clip's length is an exact
-    frame count and its container duration is exactly
-    ``frames * 1001/30000`` -- ``-shortest`` carries the same bound to the
-    audio, so ``format=duration`` (which is what ``project_loader``
-    probes) agrees with the video stream instead of overhanging it.
-    """
-    done = subprocess.run(
-        [
-            FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
-            "-frames:v", str(frames),
-            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
-            "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
-            "-c:a", "aac", "-b:a", "128k", "-shortest", str(destination),
-        ],  # fmt: skip
-        capture_output=True,
-        text=True,
-    )
-    assert done.returncode == 0, done.stderr[-2000:]
-    return destination
-
-
-def _probe_seconds(path: Path) -> float:
-    """``format=duration``, the field ``project_loader`` reads."""
-    done = subprocess.run(
-        [FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
-        capture_output=True,
-        text=True,
-    )
-    assert done.returncode == 0, done.stderr[-2000:]
-    return float(done.stdout.strip())
-
-
 @pytest.fixture(scope="module")
 def shooter_clips(tmp_path_factory, synthetic_source_video: Path) -> dict[str, tuple[Path, float]]:
-    """One real clip per shooter, with its probed duration beside it.
+    """The roster's clips, each with its probed duration beside it.
 
     Module-scoped: three tests share the roster and the encode is the
-    expensive part. Each entry is ``(path, probed duration)``, and the
-    probe is asserted against the frame count the clip was cut to -- a
-    fixture whose declared length drifts from its media is exactly the
-    condition that hid the blocker this test now covers.
+    expensive part. ``tests.compare_fixture.build_clips`` asserts each
+    probe against the frame count the clip was cut to, which is what stops
+    the fixture drifting back to declaring a length its media has not got.
     """
     if FFMPEG is None or FFPROBE is None:
         pytest.skip("needs a real ffmpeg and ffprobe on PATH")
     root = tmp_path_factory.mktemp("shooter-clips")
-    clips: dict[str, tuple[Path, float]] = {}
-    for label, frames, nominal in (
-        ("full", STAGE_FRAMES, STAGE_DURATION_SECONDS),
-        ("short", SHORT_STAGE_FRAMES, SHORT_STAGE_DURATION_SECONDS),
-    ):
-        path = _cut_clip(synthetic_source_video, root / f"{label}.mp4", frames)
-        probed = _probe_seconds(path)
-        assert probed == pytest.approx(nominal, abs=FRAME_SECONDS), (
-            f"the {label} clip declares {nominal:.4f}s but its media probes at {probed:.4f}s -- "
-            "the fixture's declared duration has to match its media or the freeze-frame seek "
-            "gets slack production never has"
-        )
-        clips[label] = (path, probed)
-    return clips
-
-
-def _write_audit(path: Path, ms_after_beep: list[int]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(
-            {
-                "shots": [
-                    {"shot_number": i + 1, "candidate_number": i + 1, "ms_after_beep": ms}
-                    for i, ms in enumerate(ms_after_beep)
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-
-
-def _shooter(
-    label: str,
-    *,
-    root: Path,
-    trim: Path,
-    duration_seconds: float,
-    shots_ms: list[int] | None,
-    stages: int = 1,
-) -> CompareShooterBundle:
-    """One shooter with ``stages`` stages, all reading the same clip.
-
-    ``shots_ms is None`` is the no-audit shooter: ``audit_path`` names a
-    file that is never written, so ``ui.exports.read_audit_data`` hits
-    its "missing file" branch and the overlay degrades to no shots for
-    that tile -- on the rendered path, not just in ``overlay_data``'s
-    own unit tests.
-
-    Each later stage adds three more shots than the one before, so a
-    per-stage summary sliced on the wrong stage draws a different shot
-    count *and* different split figures -- visibly wrong rather than
-    plausibly wrong. Three rather than one because a few extra glyphs
-    average away over a 640x360 canvas, and a discriminator that lands
-    within the encode's own residue discriminates nothing. Every added
-    shot stays inside the post-beep span the trims give the stage.
-    """
-    by_number: dict[int, CompareStageBundle] = {}
-    for number in range(1, stages + 1):
-        audit_path = root / label / "audit" / f"stage{number}.json"
-        if shots_ms is not None:
-            extra = [3500 + 300 * index for index in range(3 * (number - 1))]
-            _write_audit(audit_path, [*shots_ms, *extra])
-        by_number[number] = CompareStageBundle(
-            stage_number=number,
-            stage_name=f"Stage {number}",
-            trim_path=trim,
-            audit_path=audit_path,
-            beep_offset_in_clip=BEEP_OFFSET_SECONDS,
-            duration_seconds=duration_seconds,
-            width=1280,
-            height=720,
-            frame_rate_num=SYNTHETIC_FPS_NUM,
-            frame_rate_den=SYNTHETIC_FPS_DEN,
-        )
-    return CompareShooterBundle(label=label, project_root=root / label, stages_by_number=by_number)
+    return build_clips(synthetic_source_video, root, ffmpeg=FFMPEG, ffprobe=FFPROBE)
 
 
 def _roster(
@@ -560,47 +453,27 @@ def _roster(
     Anders and Bea read the *same* clip and Mathias reads a shorter one,
     and both facts are load-bearing.
 
-    Bea having no audit makes her cell the control: she draws her label
-    and nothing else, over a blurred freeze that is pixel-identical to
-    Anders' (same clip, same seek, no lead pad). So her quadrant settles
-    both "is the still blurred" and "did the summary's ink land in the
-    right cell", with the background subtracted out by construction
-    rather than by a threshold.
+    Bea having no audit makes her cell the control for anything about the
+    running clock and the blurred picture: she never gets a clock, and she
+    reads the same clip at the same seek as Anders, so their freezes are
+    pixel-identical by construction and the background subtracts out
+    rather than having to be absorbed by a threshold.
 
     Mathias's clip is shorter, so his tile is black for the last stretch
     of every action while the other two still have picture. Freezing on
     "the last frame of the action" instead of "the last frame of this
     tile's footage" therefore shows up in his cell and nowhere else --
     with three equal clips the two are indistinguishable.
+
+    Each of the three also carries a ``project.json`` with a real
+    ``StageScorecard``, which is what puts a placing, a hit factor, a
+    stage percentage and hit counts into the rendered summary at all. See
+    ``tests.compare_fixture.ROSTER`` for the per-stage table: stage 1 is
+    the ranked stage (a tie at the top, and raw points ordered differently
+    from stage percentage), stage 2 is the degradations (a DQ, a shooter
+    with neither scorecard nor audit, and a manually timed stage).
     """
-    full, full_seconds = clips["full"]
-    short, short_seconds = clips["short"]
-    return [
-        _shooter(
-            "Anders",
-            root=tmp_path,
-            trim=full,
-            duration_seconds=full_seconds,
-            shots_ms=ANDERS_SHOTS_MS,
-            stages=stages,
-        ),
-        _shooter(
-            "Bea",
-            root=tmp_path,
-            trim=full,
-            duration_seconds=full_seconds,
-            shots_ms=None,
-            stages=stages,
-        ),
-        _shooter(
-            "Mathias",
-            root=tmp_path,
-            trim=short,
-            duration_seconds=short_seconds,
-            shots_ms=MATHIAS_SHOTS_MS,
-            stages=stages,
-        ),
-    ]
+    return build_roster(tmp_path, clips, count=3, stages=stages)
 
 
 def _render(
@@ -1290,6 +1163,45 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, shooter_cl
         f"stage 2's hold is no closer to stage 2's summary ({to_own:.2f}) than to stage 1's "
         f"({to_stage1:.2f}) -- the per-stage slice is not reaching the segment"
     )
+
+    # --- the scoring on disk reaches the rendered summary -----------------
+    #
+    # The gap #682 was filed for. Every shooter in this fixture used to
+    # have no ``project.json`` at all, so ``TileStageData.scorecard`` was
+    # ``None`` for all of them and the summary silently omitted the hit
+    # factor, the stage percentage, the hit counts and the placing -- none
+    # of which had ever appeared in a rendered frame.
+    #
+    # Bea is the measurement. She has no audit in either stage, so shots,
+    # splits and the clock are identical between them, and she reads the
+    # same clip at the same seek, so her frozen picture is identical too.
+    # Stage 1 gives her no scorecard and no stage time (label only); stage
+    # 2 gives her a scorecard. Anything that differs between these two
+    # frames in her cell came off ``project.json``.
+    background = _mean_abs_diff(in_hold, stage2_hold, unreached_cell)
+    assert background <= STAGE_BACKGROUND_MAX_MEAN_ABS_DIFF, (
+        f"the two hold frames differ by {background:.2f} in the cell nothing is ever drawn in "
+        f"(threshold {STAGE_BACKGROUND_MAX_MEAN_ABS_DIFF}) -- they do not share a background, so "
+        "the per-cell comparison below would be measuring something other than drawn text"
+    )
+    scorecard_ink = _mean_abs_diff(in_hold, stage2_hold, bea_cell)
+    assert scorecard_ink >= SCORECARD_INK_MIN_MEAN_ABS_DIFF, (
+        f"the no-audit shooter's cell is the same in both holds ({scorecard_ink:.2f}, threshold "
+        f"{SCORECARD_INK_MIN_MEAN_ABS_DIFF}). She has a scorecard on stage 2 and none on stage 1, "
+        "and nothing else about her differs -- so her placing, stage time, hit factor, stage "
+        "percentage and hit counts are not reaching the pixels. Check that project.json is being "
+        "read at all before touching this threshold."
+    )
+
+    # And every scored cell carries sharp text of its own, not just the
+    # one that also has an audit: a summary that drew the shooter with
+    # shots and skipped the rest would pass the measure above.
+    for label, box in (("Anders", anders_cell), ("Bea", bea_cell), ("Mathias", mathias_cell)):
+        cell_hf = _hf_energy(stage2_hold, box)
+        assert cell_hf >= TILE_SUMMARY_MIN_HF_ENERGY, (
+            f"nothing sharp in {label}'s cell during stage 2's hold: {cell_hf:.2f} (threshold "
+            f"{TILE_SUMMARY_MIN_HF_ENERGY}) -- that shooter's scored summary was not drawn"
+        )
 
     # --- audio runs the whole segment, every track equally ---------------
     lengths = [_decoded_audio_seconds(held, f"a:{slot}") for slot in range(4)]
