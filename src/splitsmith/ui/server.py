@@ -171,6 +171,7 @@ from . import export_storage, stage_edit
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from . import shooter_move as shooter_move_module
+from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
 from .jobs import (
     Job,
     JobBackend,
@@ -5462,8 +5463,25 @@ def create_app(
     # projects refresh below -- that call goes through ``state.matches``
     # which itself reads from ``state.recent_projects`` (the local
     # JSON file in local mode; Postgres in hosted mode).
+    local_journal: JobJournal | None = None
     if _hosted_mode_active():
         _apply_hosted_mode_wiring(state)
+    else:
+        # Local mode mirrors active jobs into a SQLite crash-recovery
+        # journal (issue #665) so a killed process's queue is re-enqueued
+        # below, after ``register_job_bodies``. ``None`` (user config
+        # disabled / uncreatable) keeps the in-memory-only behaviour.
+        journal_path = default_journal_path()
+        if journal_path is not None:
+            local_journal = JobJournal(journal_path)
+            journaled_registry = JobRegistry(journal=local_journal)
+            # Re-point at the shared process-level body map, exactly as
+            # ``AppState.__post_init__`` does for the default registry -
+            # otherwise ``state.job_bodies`` (read by the dev routes and
+            # the take-detect tests) diverges from the registry that
+            # actually dispatches.
+            journaled_registry.bodies = state.job_bodies
+            state._jobs = journaled_registry
     # Populate the match-id registry from recent projects so id -> path
     # lookups resolve without waiting for a picker bind. Cheap (one
     # match.json read per recent entry; legacy projects are skipped).
@@ -5523,6 +5541,12 @@ def create_app(
     # per-user one -- so skip it there entirely rather than route an
     # ownerless job through the per-tenant ``state.jobs`` property.
     if not _hosted_mode_active():
+        # Re-enqueue whatever a dead process left in the crash-recovery
+        # journal (issue #665). Must follow ``register_job_bodies`` so
+        # kinds resolve; rows for still-unregistered dev-only kinds are
+        # dropped with a warning.
+        if local_journal is not None:
+            asyncio.run(resume_journaled_jobs(state.jobs, local_journal))
         asyncio.run(_maybe_submit_model_download(state))
 
     async def get_current_user(request: Request) -> User:
