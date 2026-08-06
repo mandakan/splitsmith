@@ -595,6 +595,35 @@ def test_build_hold_still_rejects_whole_match_keyed_data():
 # --- write_hold_still: the extraction + composition + save wrapper --------
 
 
+def test_the_roster_carries_a_nonzero_penalty_somewhere():
+    """A fixture that cannot express a failure cannot catch it.
+
+    Procedurals reach the summary's tile data and were silently dropped
+    on the way to the screen. No assertion could have caught that while
+    every roster entry set them to 0 or None, which is the same trap #682
+    was filed for in a field #682 did not cover.
+    """
+    from tests.compare_fixture import ROSTER
+
+    penalised = [
+        (spec.label, stage_number, scoring.scorecard)
+        for spec in ROSTER
+        for stage_number, scoring in enumerate(spec.scoring, start=1)
+        if scoring.scorecard is not None
+        and not scoring.scorecard.dq
+        and any(
+            bool(v)
+            for v in (
+                scoring.scorecard.misses,
+                scoring.scorecard.no_shoots,
+                scoring.scorecard.procedurals,
+            )
+        )
+    ]
+    assert penalised, "no roster entry carries a nonzero penalty"
+    assert any(card.procedurals for _, _, card in penalised), "no entry carries a procedural"
+
+
 def test_write_hold_still_saves_a_png(tmp_path):
     tile = _tile("Ann", 0, 0, trim=tmp_path / "ann.mp4")
     plan = _plan([tile])

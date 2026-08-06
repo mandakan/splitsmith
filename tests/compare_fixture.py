@@ -411,9 +411,36 @@ ROSTER: tuple[ShooterSpec, ...] = (
                     scoring="major",
                     stage_number=2,
                     time_seconds=4.60,
-                    alphas=10,
+                    # 16 alphas rather than 10: the 6 extra (30 points at
+                    # 5/alpha) exactly cancel the penalty below, landing
+                    # back on the same 56 points / 78.5% this card held
+                    # before the penalty was added -- so the tie, the
+                    # placing and the points-vs-percentage story the table
+                    # above documents are all unchanged. (This does push
+                    # his total hit-zone rounds to 19 against the stage's
+                    # declared 12 -- unlike the filler cards, this one no
+                    # longer totals the round count. Nothing reads that
+                    # total, but flagging it as a known trade-off: the
+                    # penalty is only expressible above the tie on 5-point
+                    # alphas within a 12-round budget by overshooting it --
+                    # max achievable points_after within budget is 25.)
+                    alphas=16,
                     charlies=1,
                     deltas=1,
+                    # A real penalised run. Nothing else in the roster
+                    # carries a nonzero penalty, so without this the
+                    # summary could drop procedurals entirely -- as it
+                    # did -- and no assertion would move.
+                    #
+                    # Stage 2 rather than stage 1 because stage 1 has no
+                    # non-DQ scorecard-carrying tile to hang it on, and
+                    # Mathias rather than Anders or Bea because those two
+                    # tie at 100% and this must not disturb the tie.
+                    # ``_card`` subtracts penalties from points and
+                    # recomputes hit factor and stage_pct together, so
+                    # everything stays self-consistent.
+                    misses=1,
+                    procedurals=2,
                 ),
             ),
         ),
