@@ -158,6 +158,7 @@ export function PrereqGate({
         const active = jobs.find(
           (j) =>
             j.kind === jobKind &&
+            j.shooter_slug === slug &&
             j.stage_number === stageNumber &&
             (j.status === "pending" || j.status === "running"),
         );

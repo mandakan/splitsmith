@@ -1987,10 +1987,11 @@ async def _advance_sequential_chain(
         next_primary = next_stg.primary()
         if next_primary is None or next_primary.beep_time is not None:
             continue
-        if await state.jobs.find_active(kind="detect_beep", stage_number=next_n) is None:
+        if await state.jobs.find_active(kind="detect_beep", stage_number=next_n, shooter_slug=slug) is None:
             await state.jobs.submit(
                 kind="detect_beep",
                 stage_number=next_n,
+                shooter_slug=slug,
                 video_id=next_primary.video_id,
                 args={
                     "slug": slug,
@@ -2419,12 +2420,16 @@ def register_job_bodies(state: AppState) -> None:
             # ``asyncio.run``.
             if (
                 resolved.settings.shot_detect_on_beep_verified
-                and asyncio.run(state.jobs.find_active(kind="shot_detect", stage_number=stage_number)) is None
+                and asyncio.run(
+                    state.jobs.find_active(kind="shot_detect", stage_number=stage_number, shooter_slug=slug)
+                )
+                is None
             ):
                 asyncio.run(
                     state.jobs.submit(
                         kind="shot_detect",
                         stage_number=stage_number,
+                        shooter_slug=slug,
                         args={"slug": slug, "stage_number": stage_number},
                     )
                 )
@@ -2533,7 +2538,10 @@ def register_job_bodies(state: AppState) -> None:
             chain_shot_detect
             and video.role == "primary"
             and beep_reviewed_now
-            and asyncio.run(state.jobs.find_active(kind="shot_detect", stage_number=stage_number)) is None
+            and asyncio.run(
+                state.jobs.find_active(kind="shot_detect", stage_number=stage_number, shooter_slug=slug)
+            )
+            is None
         ):
             # Same gate as the detect-then-trim path (#71): don't burn
             # CLAP / GBDT / PANN cycles on a beep the user hasn't
@@ -2553,6 +2561,7 @@ def register_job_bodies(state: AppState) -> None:
                     state.jobs.submit(
                         kind="shot_detect",
                         stage_number=stage_number,
+                        shooter_slug=slug,
                         args={"slug": slug, "stage_number": stage_number},
                     )
                 )
@@ -6819,6 +6828,7 @@ def create_app(
                     state.jobs.find_active(
                         kind="detect_beep",
                         stage_number=sv.stage_number,
+                        shooter_slug=slug,
                         video_id=sv.video_id,
                     )
                 )
@@ -6827,6 +6837,7 @@ def create_app(
                         state.jobs.submit(
                             kind="detect_beep",
                             stage_number=sv.stage_number,
+                            shooter_slug=slug,
                             video_id=sv.video_id,
                             args={
                                 "slug": slug,
@@ -6850,7 +6861,12 @@ def create_app(
                 if primary.beep_time is not None:
                     continue
                 existing = asyncio.run(
-                    state.jobs.find_active(kind="detect_beep", stage_number=n, video_id=primary.video_id)
+                    state.jobs.find_active(
+                        kind="detect_beep",
+                        stage_number=n,
+                        shooter_slug=slug,
+                        video_id=primary.video_id,
+                    )
                 )
                 if existing is not None:
                     break  # chain already started
@@ -6858,6 +6874,7 @@ def create_app(
                     state.jobs.submit(
                         kind="detect_beep",
                         stage_number=n,
+                        shooter_slug=slug,
                         video_id=primary.video_id,
                         args={"slug": slug, "stage_number": n, "video_id": primary.video_id},
                     )
@@ -7209,7 +7226,8 @@ def create_app(
                 logger.info("take peaks: storage pull failed: %s", exc)
             if not pulled:
                 active_job = any(
-                    asyncio.run(state.jobs.find_active(kind="detect_beep", stage_number=n)) is not None
+                    asyncio.run(state.jobs.find_active(kind="detect_beep", stage_number=n, shooter_slug=slug))
+                    is not None
                     for n in rv.covers_stages
                 )
                 return JSONResponse({"pending": True, "active_job": active_job}, status_code=202)
@@ -8305,13 +8323,14 @@ def create_app(
         pre-flight checks.
         """
         existing = await state.jobs.find_active(
-            kind="detect_beep", stage_number=stage_number, video_id=video.video_id
+            kind="detect_beep", stage_number=stage_number, shooter_slug=slug, video_id=video.video_id
         )
         if existing is not None:
             return JSONResponse(existing.model_dump(mode="json"))
         job = await state.jobs.submit(
             kind="detect_beep",
             stage_number=stage_number,
+            shooter_slug=slug,
             video_id=video.video_id,
             args={"slug": slug, "stage_number": stage_number, "video_id": video.video_id},
         )
@@ -8384,7 +8403,7 @@ def create_app(
         if body.start_s < 0 or body.end_s <= body.start_s:
             raise HTTPException(status_code=422, detail="end_s must be greater than start_s >= 0")
         in_flight = await state.jobs.find_active(
-            kind="detect_beep", stage_number=stage_number, video_id=video_id
+            kind="detect_beep", stage_number=stage_number, shooter_slug=slug, video_id=video_id
         )
         if in_flight is not None:
             raise HTTPException(
@@ -8529,13 +8548,14 @@ def create_app(
                 ),
             )
         existing = await state.jobs.find_active(
-            kind="trim", stage_number=stage_number, video_id=video.video_id
+            kind="trim", stage_number=stage_number, shooter_slug=slug, video_id=video.video_id
         )
         if existing is not None:
             return JSONResponse(existing.model_dump(mode="json"))
         job = await state.jobs.submit(
             kind="trim",
             stage_number=stage_number,
+            shooter_slug=slug,
             video_id=video.video_id,
             args={"slug": slug, "stage_number": stage_number, "video_id": video.video_id},
         )
@@ -8577,13 +8597,16 @@ def create_app(
             if stage.time_seconds <= 0:
                 skipped.append({"stage_number": stage_number, "reason": "no_time_seconds"})
                 continue
-            existing = await state.jobs.find_active(kind="shot_detect", stage_number=stage_number)
+            existing = await state.jobs.find_active(
+                kind="shot_detect", stage_number=stage_number, shooter_slug=slug
+            )
             if existing is not None:
                 jobs.append(existing.model_dump(mode="json"))
                 continue
             job = await state.jobs.submit(
                 kind="shot_detect",
                 stage_number=stage_number,
+                shooter_slug=slug,
                 args={"slug": slug, "stage_number": stage_number, "reset": reset},
             )
             jobs.append(job.model_dump(mode="json"))
@@ -8625,12 +8648,15 @@ def create_app(
                 ),
             )
 
-        existing = await state.jobs.find_active(kind="shot_detect", stage_number=stage_number)
+        existing = await state.jobs.find_active(
+            kind="shot_detect", stage_number=stage_number, shooter_slug=slug
+        )
         if existing is not None:
             return JSONResponse(existing.model_dump(mode="json"))
         job = await state.jobs.submit(
             kind="shot_detect",
             stage_number=stage_number,
+            shooter_slug=slug,
             args={"slug": slug, "stage_number": stage_number, "reset": reset},
         )
         return JSONResponse(job.model_dump(mode="json"))
@@ -8890,7 +8916,7 @@ def create_app(
             return
         if (
             await state.jobs.find_active(
-                kind="trim", stage_number=stage.stage_number, video_id=video.video_id
+                kind="trim", stage_number=stage.stage_number, shooter_slug=slug, video_id=video.video_id
             )
             is not None
         ):
@@ -8898,6 +8924,7 @@ def create_app(
         await state.jobs.submit(
             kind="trim",
             stage_number=stage.stage_number,
+            shooter_slug=slug,
             video_id=video.video_id,
             args={
                 "slug": slug,
@@ -9193,11 +9220,13 @@ def create_app(
             req.reviewed
             and video.role == "primary"
             and video.processed.get("trim")
-            and await state.jobs.find_active(kind="shot_detect", stage_number=stage_number) is None
+            and await state.jobs.find_active(kind="shot_detect", stage_number=stage_number, shooter_slug=slug)
+            is None
         ):
             await state.jobs.submit(
                 kind="shot_detect",
                 stage_number=stage_number,
+                shooter_slug=slug,
                 args={"slug": slug, "stage_number": stage_number},
             )
 
@@ -10833,12 +10862,13 @@ def create_app(
             if not project.source_present(root, primary.path):
                 _ensure_source_reachable(stage_number, root / primary.path)
 
-        existing = await state.jobs.find_active(kind="export", stage_number=stage_number)
+        existing = await state.jobs.find_active(kind="export", stage_number=stage_number, shooter_slug=slug)
         if existing is not None:
             return JSONResponse(existing.model_dump(mode="json"))
         job = await state.jobs.submit(
             kind="export",
             stage_number=stage_number,
+            shooter_slug=slug,
             args={"slug": slug, "stage_number": stage_number, "req": req},
         )
         return JSONResponse(job.model_dump(mode="json"))
@@ -10943,11 +10973,12 @@ def create_app(
                     state.shooter_root(slug) / primary.path,
                 )
 
-        existing = await state.jobs.find_active(kind="match_export")
+        existing = await state.jobs.find_active(kind="match_export", shooter_slug=slug)
         if existing is not None:
             return JSONResponse(existing.model_dump(mode="json"))
         job = await state.jobs.submit(
             kind="match_export",
+            shooter_slug=slug,
             args={"slug": slug, "req": req},
         )
         return JSONResponse(job.model_dump(mode="json"))
@@ -12003,13 +12034,10 @@ def create_app(
             targets, stage_skips = _audit_trim_targets(proj, shooter_root, stage)
             skipped.extend(stage_skips)
             for video in targets:
-                # video_id is a hash of the source path so it's unique across
-                # shooters -- the JobRegistry dedup key (kind, stage, video_id)
-                # won't collide with the same stage on a different shooter,
-                # nor with a sibling angle on this one.
                 existing = await state.jobs.find_active(
                     kind="trim",
                     stage_number=stage.stage_number,
+                    shooter_slug=slug,
                     video_id=video.video_id,
                 )
                 if existing is not None:
@@ -12018,6 +12046,7 @@ def create_app(
                 job = await state.jobs.submit(
                     kind="trim",
                     stage_number=stage.stage_number,
+                    shooter_slug=slug,
                     video_id=video.video_id,
                     args={
                         "slug": slug,

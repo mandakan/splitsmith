@@ -492,7 +492,10 @@ def _setup_hosted_peaks(tmp_path: Path, project_subdir: str = "match", filename:
     state_ref = app.state.splitsmith_state
     deadline = time.time() + 5.0
     while time.time() < deadline:
-        if asyncio.run(state_ref.jobs.find_active(kind="detect_beep", stage_number=1)) is None:
+        if (
+            asyncio.run(state_ref.jobs.find_active(kind="detect_beep", stage_number=1, shooter_slug="me"))
+            is None
+        ):
             break
         time.sleep(0.05)
 
@@ -549,6 +552,7 @@ def test_take_peaks_hosted_mode_active_job_true(tmp_path: Path) -> None:
             kind="detect_beep",
             fn=_blocking_worker,
             stage_number=1,
+            shooter_slug="me",
         )
     )
     assert job_id is not None
@@ -594,6 +598,7 @@ def test_set_beep_window_409_when_detect_in_flight(tmp_path: Path) -> None:
             kind="detect_beep",
             fn=_blocking_body,
             stage_number=1,
+            shooter_slug="me",
             video_id=video_id,
         )
     )

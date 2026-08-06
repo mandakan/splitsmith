@@ -462,6 +462,11 @@ class ComputeJobRow(Base):
     kind: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, index=True)
     stage_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Owning shooter's slug; part of the dedupe key in ``find_active``
+    # because stage numbers repeat across every shooter in a match
+    # (issue #664). NULL for jobs with no owning shooter
+    # (model_download, generate_proxy, compare-grid, lab jobs).
+    shooter_slug: Mapped[str | None] = mapped_column(String, nullable=True)
     video_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     progress: Mapped[float | None] = mapped_column(Float, nullable=True)

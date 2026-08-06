@@ -89,10 +89,17 @@ class _FakeJobBackend:
         kind: str,
         args: dict[str, Any] | None = None,
         stage_number: int | None = None,
+        shooter_slug: str | None = None,
         video_id: str | None = None,
     ) -> None:
         self.submitted.append(
-            {"kind": kind, "args": args, "stage_number": stage_number, "video_id": video_id}
+            {
+                "kind": kind,
+                "args": args,
+                "stage_number": stage_number,
+                "shooter_slug": shooter_slug,
+                "video_id": video_id,
+            }
         )
 
     async def find_active(
@@ -100,6 +107,7 @@ class _FakeJobBackend:
         *,
         kind: str | None = None,
         stage_number: int | None = None,
+        shooter_slug: str | None = None,
         video_id: str | None = None,
     ) -> None:
         return None

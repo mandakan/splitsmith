@@ -1203,6 +1203,12 @@ export interface Job {
   id: string;
   kind: string;
   stage_number: number | null;
+  /** The shooter this job belongs to. Stage numbers repeat across every
+   *  shooter in a match, so any per-stage predicate over the jobs list
+   *  must also match on this slug or it collides across shooters
+   *  (issue #664). Null only for jobs with no owning shooter
+   *  (model_download, generate_proxy, compare-grid). */
+  shooter_slug: string | null;
   /** Targets a specific StageVideo when the operation is per-camera
    *  (multi-cam beep / trim). Null for stage-level jobs (shot_detect,
    *  export). The SPA disambiguates concurrent per-camera jobs in

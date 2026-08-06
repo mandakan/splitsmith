@@ -443,6 +443,7 @@ function ExportInner({ slug }: { slug: string }) {
           .filter(
             (j) =>
               j.kind === "export" &&
+              j.shooter_slug === slug &&
               j.stage_number !== null &&
               (j.status === "pending" || j.status === "running"),
           )

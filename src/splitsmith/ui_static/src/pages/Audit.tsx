@@ -2396,6 +2396,7 @@ function DetectShotsBadge({
         const active = jobs.find(
           (j) =>
             j.kind === "shot_detect" &&
+            j.shooter_slug === slug &&
             j.stage_number === stageNumber &&
             (j.status === "pending" || j.status === "running"),
         );
@@ -2415,7 +2416,7 @@ function DetectShotsBadge({
     return () => {
       cancelled = true;
     };
-  }, [stageNumber, onComplete]);
+  }, [slug, stageNumber, onComplete]);
 
   const runDetect = useCallback(
     async (reset: boolean) => {
@@ -2701,6 +2702,7 @@ function TrimNowBadge({
         const active = jobs.find(
           (j) =>
             j.kind === "trim" &&
+            j.shooter_slug === slug &&
             j.stage_number === stageNumber &&
             (j.status === "pending" || j.status === "running"),
         );
@@ -2721,7 +2723,7 @@ function TrimNowBadge({
     return () => {
       cancelled = true;
     };
-  }, [stageNumber, onProjectUpdate]);
+  }, [slug, stageNumber, onProjectUpdate]);
 
   const onClick = useCallback(async () => {
     setError(null);
@@ -2742,7 +2744,7 @@ function TrimNowBadge({
     } finally {
       setJob(null);
     }
-  }, [stageNumber, onProjectUpdate]);
+  }, [slug, stageNumber, onProjectUpdate]);
 
   const pct = job?.progress != null ? Math.round(job.progress * 100) : null;
 

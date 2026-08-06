@@ -188,6 +188,13 @@ class Job(BaseModel):
     id: str
     kind: str  # "detect_beep" | "trim" | etc; used for SPA copy + filtering
     stage_number: int | None = None
+    # The shooter this job belongs to. Stage numbers are shared across
+    # every shooter in a match by definition, so any per-stage matching
+    # (dedupe in ``find_active``, the SPA's "is detection running here?"
+    # predicates) must include the slug or it collides across shooters
+    # (issue #664). ``None`` only for jobs with no owning shooter
+    # (model_download, generate_proxy, compare-grid, lab jobs).
+    shooter_slug: str | None = None
     # Targets a specific ``StageVideo`` when the operation is per-video
     # (multi-cam beep detect / trim). ``None`` for stage-level jobs that
     # are intrinsically primary-bound (shot_detect, export). The SPA
@@ -384,6 +391,7 @@ class JobBackend(Protocol):
         kind: str,
         args: dict[str, Any] | None = None,
         stage_number: int | None = None,
+        shooter_slug: str | None = None,
         video_id: str | None = None,
     ) -> Job: ...
 
@@ -404,6 +412,7 @@ class JobBackend(Protocol):
         *,
         kind: str | None = None,
         stage_number: int | None = None,
+        shooter_slug: str | None = None,
         video_id: str | None = None,
     ) -> Job | None: ...
 
@@ -498,6 +507,7 @@ class JobRegistry:
         kind: str,
         args: dict[str, Any] | None = None,
         stage_number: int | None = None,
+        shooter_slug: str | None = None,
         video_id: str | None = None,
     ) -> Job:
         """Schedule the body registered for ``kind`` to run on the thread
@@ -529,6 +539,7 @@ class JobRegistry:
             id=uuid.uuid4().hex,
             kind=kind,
             stage_number=stage_number,
+            shooter_slug=shooter_slug,
             video_id=video_id,
             status=JobStatus.PENDING,
             created_at=now,
@@ -670,6 +681,7 @@ class JobRegistry:
         *,
         kind: str,
         stage_number: int | None = None,
+        shooter_slug: str | None = None,
         video_id: str | None | _Unset = _UNSET,
     ) -> Job | None:
         """Return the first PENDING/RUNNING job matching the keys.
@@ -677,6 +689,12 @@ class JobRegistry:
         Used to dedupe submissions: a second click of "Trim now" while the
         first job is still running should adopt the existing job instead
         of spawning a parallel ffmpeg that races on the same output file.
+
+        ``shooter_slug`` is matched strictly, like ``stage_number``: a
+        shooter-scoped lookup only adopts that shooter's jobs, and a
+        slug-less lookup only matches slug-less jobs (issue #664 - stage
+        numbers collide across shooters, so (kind, stage) alone handed
+        shooter B a snapshot of shooter A's job).
 
         ``video_id`` is matched only when explicitly passed; legacy callers
         that don't know about per-video jobs keep their previous behaviour
@@ -691,6 +709,8 @@ class JobRegistry:
                 if j.status not in (JobStatus.PENDING, JobStatus.RUNNING):
                     continue
                 if j.kind != kind or j.stage_number != stage_number:
+                    continue
+                if j.shooter_slug != shooter_slug:
                     continue
                 if not isinstance(video_id, _Unset) and j.video_id != video_id:
                     continue

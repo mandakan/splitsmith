@@ -87,6 +87,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
     id: "job-1",
     kind: "compare-grid",
     stage_number: null,
+    shooter_slug: null,
     video_id: null,
     status: "succeeded",
     progress: 1,

@@ -80,6 +80,7 @@ _ROW_TO_JOB_FIELDS = (
     "id",
     "kind",
     "stage_number",
+    "shooter_slug",
     "video_id",
     "status",
     "progress",
@@ -204,6 +205,7 @@ class PostgresJobBackend:
         kind: str,
         args: dict[str, Any] | None = None,
         stage_number: int | None = None,
+        shooter_slug: str | None = None,
         video_id: str | None = None,
     ) -> Job:
         if self._shutting_down:
@@ -229,6 +231,7 @@ class PostgresJobBackend:
             user_id=self._user_id,
             kind=kind,
             stage_number=stage_number,
+            shooter_slug=shooter_slug,
             video_id=video_id,
             status=JobStatus.PENDING.value,
             cancel_requested=False,
@@ -405,6 +408,7 @@ class PostgresJobBackend:
         *,
         kind: str,
         stage_number: int | None = None,
+        shooter_slug: str | None = None,
         video_id: Any = None,
     ) -> Job | None:
         # ``video_id`` defaults to ``None``: callers that omit it want
@@ -414,6 +418,9 @@ class PostgresJobBackend:
         # here ``None`` is sufficient because the row's ``video_id``
         # column is itself nullable and callers don't currently rely
         # on "match rows where video_id IS NULL specifically".)
+        # ``shooter_slug`` is strict like ``stage_number``: ``None``
+        # compiles to IS NULL, so slug-less lookups only match slug-less
+        # jobs and never adopt another shooter's work (issue #664).
         async with self._session_factory() as session:
             stmt = (
                 select(ComputeJobRow)
@@ -421,6 +428,7 @@ class PostgresJobBackend:
                     ComputeJobRow.user_id == self._user_id,
                     ComputeJobRow.kind == kind,
                     ComputeJobRow.stage_number == stage_number,
+                    ComputeJobRow.shooter_slug == shooter_slug,
                     ComputeJobRow.status.in_([JobStatus.PENDING.value, JobStatus.RUNNING.value]),
                 )
                 .order_by(ComputeJobRow.created_at)
