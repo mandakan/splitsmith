@@ -20,6 +20,7 @@ import { NavLink, useLocation } from "react-router-dom";
 
 import { JobsSurface } from "@/components/Jobs";
 import { type StageStatus } from "@/lib/api";
+import { type JobsState } from "@/lib/jobs";
 import { countsAsDone } from "@/lib/stageStatus";
 import { StageDot } from "@/components/ui/StageDot";
 import { cn } from "@/lib/utils";
@@ -47,6 +48,10 @@ export interface MatchSidebarStage {
 }
 
 interface MatchSidebarProps {
+  /** Jobs state owned by MatchShell - the shell polls once and both
+   *  reacts to completions and feeds the footer rail from the same
+   *  data (#663). */
+  jobsState: JobsState;
   matchName: string;
   matchSubtitle?: ReactNode;
   matchKicker?: string;
@@ -98,6 +103,7 @@ export const SIDEBAR_EXPANDED_WIDTH = 240;
 export const SIDEBAR_COLLAPSED_WIDTH = 56;
 
 export function MatchSidebar({
+  jobsState,
   matchName,
   matchSubtitle,
   matchKicker = "Active match",
@@ -320,6 +326,7 @@ export function MatchSidebar({
       <div className="flex-1" />
 
       <JobsSurface
+        state={jobsState}
         collapsed={collapsed}
         sidebarExpandedWidth={SIDEBAR_EXPANDED_WIDTH}
         sidebarCollapsedWidth={SIDEBAR_COLLAPSED_WIDTH}
