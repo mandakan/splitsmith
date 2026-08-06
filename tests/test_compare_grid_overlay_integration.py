@@ -39,12 +39,23 @@ because the picture underneath is identical by construction.
 
 Task 9 adds ``--summary-hold`` and its test is the reason this module
 matters more than it looks. A hold whose still never reached the filter
-graph renders at exit 0, stitches at exit 0, comes out the right length,
-freezes at the right instant and stays A/V-locked -- so **every** cheap
-check passes against it and only decoding a frame from inside the hold
-and inspecting its pixels tells the two apart. Verified: with the still
-input removed, that frame reads 55.2 against the composed summary where
-a correct render reads 1.3, is unblurred, and still has a clock on it.
+graph renders at exit 0, stitches at exit 0, declares the right length in
+its container, freezes at the right instant and stays A/V-locked -- so
+the stitch succeeding, the stream layout and the A/V measurement all pass
+against it. Two things do not, and they cover different faults:
+
+- **Decoded** duration catches a *missing* still. The muxer's stretch is
+  a longer duration on the last coded frame, not extra frames, so a
+  frame-accurate measurement comes up short by the final segment's hold
+  (16.99s against 19.00s on the two-stage fixture). A duration read off
+  the container does not notice.
+- **The pixels** catch a still that is there but *wrong*: blank,
+  unblurred, the wrong stage's, drawn into the wrong cell, or with a
+  clock left on it. Nothing else can.
+
+Verified with the still input removed: that frame reads 55.2 against the
+composed summary where a correct render reads 1.3, is unblurred, and
+still has a clock on it.
 """
 
 from __future__ import annotations
@@ -233,12 +244,18 @@ AAC_FRAME_SECONDS = 1024 / 48000
 # Read ``mp4_grid.GridStagePlan.total_seconds`` before touching any of
 # this. The failure these numbers exist to catch does not announce
 # itself: a segment whose audio outlasts its video stitches at exit 0
-# with no warning, comes out exactly the right total length, freezes at
+# with no warning, declares the right length in its container, freezes at
 # exactly the right instant and stays A/V-locked to +0.1ms -- on the raw
 # last action frame, unblurred, with no summary drawn on it. So the
-# stitch succeeding, the duration being right and A/V being in sync all
-# pass against a completely missing summary. **Only decoding a frame from
-# inside the hold and looking at its pixels separates the two cases.**
+# stitch succeeding, the stream layout and the A/V measurement all pass
+# against a completely missing summary.
+#
+# Two measures below do not, and they are not interchangeable. The
+# **decoded** duration catches a missing still, because the muxer stretch
+# is a duration on the last coded frame rather than extra frames, so a
+# frame-accurate read comes up short by the last segment's hold. Only the
+# **pixels** catch a still that is present but wrong -- blank, unblurred,
+# the wrong stage's, or with a clock left on it.
 HOLD_SECONDS = 2.0
 
 #: Frames of action per segment, then frames of hold. Whole numbers on
@@ -859,15 +876,24 @@ def test_an_ffmpeg_without_drawtext_keeps_the_sprites_and_loses_only_the_clock(
 def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, synthetic_source_video: Path):
     """Two stages with a summary hold, measured from decoded frames.
 
-    Everything cheap passes against a hold with **no still in it**. That
-    was measured, not assumed (``GridStagePlan.total_seconds``): a
+    Most of what is cheap passes against a hold with **no still in it**.
+    That was measured, not assumed (``GridStagePlan.total_seconds``): a
     segment whose audio outlasts its video stitches at exit 0 with no
-    warning, comes out the right length, freezes at the right instant and
-    stays A/V-locked to +0.1ms -- holding the raw last action frame,
-    unblurred, with no summary on it. So the duration check, the stream
-    layout check, the A/V check and the successful stitch below are all
-    necessary and *none* of them is the instrument. The instrument is the
-    frame decoded from inside the hold and the pixels in it.
+    warning, declares the right length in its container, freezes at the
+    right instant and stays A/V-locked to +0.1ms -- holding the raw last
+    action frame, unblurred, with no summary on it. So the stream layout
+    check, the A/V check and the successful stitch below all pass against
+    it and none of them is an instrument.
+
+    Two things below are. The duration check is one, because it reads
+    **decoded** frames: the muxer's stretch is a duration on the last
+    coded frame rather than extra frames, so a missing still shows up as
+    16.99s where 19.00s was asked for. But it only catches a still that
+    is *absent*. A still that is present and **wrong** -- blank,
+    unblurred, the wrong stage's, drawn into the wrong cell, or with a
+    clock left on it -- passes the duration check exactly. That is what
+    the frame decoded from inside the hold is for, and nothing cheaper
+    substitutes for it.
 
     Two stages rather than one, because a per-stage still that was sliced
     on the wrong stage, or a drift that accumulates per segment, needs a

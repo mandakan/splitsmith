@@ -40,16 +40,18 @@ look almost right in a thumbnail. Hence
 **What no test in this module can tell you.** Every assertion here is
 over an argv string. The failure the hold is most exposed to -- a
 segment built with no still in it -- produces a *valid* argv, a render
-that exits 0, a stitch that exits 0, the right total duration and a
-freeze at the right instant, on the raw last action frame with no
-summary drawn on it. ``build_stage_command`` refusing that shape (see
-:func:`test_a_hold_with_no_still_is_refused_rather_than_built`) is the
-structural guard; the only *evidence* is a frame decoded from inside the
-hold, which lives in the integration module.
+that exits 0, a stitch that exits 0, a container declaring the right
+length and a freeze at the right instant, on the raw last action frame
+with no summary drawn on it. ``build_stage_command`` refusing that shape
+(see :func:`test_a_hold_with_no_still_is_refused_rather_than_built`) is
+the structural guard. The *evidence* lives in the integration module,
+where a decoded duration catches a still that is missing and a frame
+sampled from inside the hold catches one that is merely wrong.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import re
@@ -681,15 +683,17 @@ def test_the_hold_does_not_move_the_beep():
 
 
 def test_a_hold_with_no_still_is_refused_rather_than_built():
-    """The one segment shape nothing downstream reports.
+    """The segment shape almost nothing downstream reports.
 
     Measured on ffmpeg 6.1.1: a segment whose audio outlasts its video
-    stitches at exit 0 with no warning, the right total duration, the
-    freeze starting at exactly the right moment and A/V within +0.1ms --
-    the picture simply holds the raw last action frame, unblurred, with
-    no summary on it. A green render, a correct duration and an in-sync
-    A/V measurement all pass against it. So it is refused where it is
-    still cheap to refuse, before the encode.
+    stitches at exit 0 with no warning, declares the right length in its
+    container, freezes at exactly the right moment and stays A/V-locked
+    within +0.1ms -- the picture simply holds the raw last action frame,
+    unblurred, with no summary on it. A green render, a correct declared
+    duration and an in-sync A/V measurement all pass against it. What
+    does not is a duration counted from decoded frames, and the pixels of
+    a held frame; both live in the integration module and both cost a
+    real encode. This refusal costs nothing and runs first.
     """
     with pytest.raises(ValueError, match=r"hold_seconds=3 but no hold_still_path"):
         _command(_plan(hold=HOLD), hold_still_path=None)
@@ -764,45 +768,47 @@ def test_the_sprite_overlay_does_not_reach_the_hold(tmp_path: Path):
     assert join.startswith("[ovlgrid][hold]") or join.startswith("[ovltext][hold]"), join
 
 
-def test_clock_enable_windows_end_before_the_hold_begins(tmp_path: Path):
-    """Both open-ended ``enable`` guards get an upper bound at the action.
+def test_the_hold_does_not_touch_the_clock_windows(tmp_path: Path):
+    """A hold changes the graph's *shape*, never the clock expressions.
 
-    Belt and braces, and labelled as such: the ``drawtext`` filters sit
-    ahead of the ``concat``, so their ``t`` is the action's own timeline
-    and could not reach a hold frame even uncapped. The cap is here so a
-    graph rewrite that ever composited the still instead of joining it
-    does not silently become the "frozen clock beside a blurred summary"
-    failure. ``test_no_clock_survives_into_the_hold`` in
-    ``test_compare_grid_overlay_integration.py`` is what actually proves
-    no clock reaches the pixels.
+    The ``drawtext`` filters hang off ``[ovlgrid]``, which is the action;
+    the summary is joined after them. So their ``t`` is the action's own
+    timeline and cannot reach a hold frame, and the open-ended windows
+    stay open-ended.
+
+    An earlier revision added ``*lt(t,duration)`` to the two unbounded
+    ones. It changed no pixel of a rendered hold -- the in-hold frame came
+    out byte-identical either way -- while making the same ``--overlay``
+    render emit different ``enable`` text depending on an unrelated
+    field. This test is the guard against that coming back. What stops a
+    clock reaching the summary is
+    :func:`test_hold_is_concatenated_after_the_action_not_composited_over_it`,
+    and the pixels are checked in
+    ``test_the_summary_hold_reaches_the_rendered_pixels``
+    (``test_compare_grid_overlay_integration.py``), which samples a frame
+    inside the hold and compares the clock corner of a shooter who has a
+    clock against one who never does.
     """
     clocks = (
-        # Ticking to a known freeze: already bounded above, must not gain
-        # a second bound.
+        # Ticking to a known freeze: bounded above by the freeze itself.
         mp4_grid.TileClock(row=0, col=0, start_seconds=1.0, freeze_seconds=6.0, final_text="5.00"),
-        # No known end: the open-ended spelling, which had no bound at all.
+        # No known end: the open-ended spelling, with no bound at all.
         mp4_grid.TileClock(row=1, col=0, start_seconds=1.0, freeze_seconds=None, final_text=None),
     )
+
+    def _drawtext(hold: float) -> list[str]:
+        graph = _graph_of(_command(_plan(hold=hold), overlay=_overlay_plan(tmp_path, clocks=clocks)))
+        return [part for part in graph.split(",") if "drawtext=" in part or "enable=" in part]
+
+    assert _drawtext(HOLD) == _drawtext(0.0)
+
     graph = _graph_of(_command(_plan(hold=HOLD), overlay=_overlay_plan(tmp_path, clocks=clocks)))
-
-    assert r"enable='gte(t\,1)*lt(t\,6)'" in graph  # unchanged
-    assert rf"enable='gte(t\,6)*lt(t\,{ACTION:g})'" in graph  # the static hold
-    assert rf"enable='gte(t\,1)*lt(t\,{ACTION:g})'" in graph  # the open-ended tick
-    # No guard runs past the action.
-    assert r"enable='gte(t\,6)'" not in graph
-    assert r"enable='gte(t\,1)'" not in graph
-
-
-def test_a_zero_hold_leaves_the_clock_windows_exactly_as_they_were(tmp_path: Path):
-    # The cap is stated only where it could ever matter. With no hold the
-    # stream ends at the action anyway, and the no-flags argv -- which
-    # includes every --overlay render shipped before Milestone B -- must
-    # not move.
-    clocks = (mp4_grid.TileClock(row=0, col=0, start_seconds=1.0, freeze_seconds=None, final_text=None),)
-    graph = _graph_of(_command(_plan(hold=0.0), overlay=_overlay_plan(tmp_path, clocks=clocks)))
-
-    assert r"enable='gte(t\,1)'" in graph
-    assert "lt(t" not in graph
+    assert r"enable='gte(t\,1)*lt(t\,6)'" in graph  # the ticking half
+    assert r"enable='gte(t\,6)'" in graph  # the static hold, open above
+    assert r"enable='gte(t\,1)'" in graph  # the open-ended tick
+    # The freeze is the only upper bound any clock window carries.
+    assert graph.count("lt(t\\,") == 1
+    assert f"lt(t\\,{ACTION:g})" not in graph
 
 
 def test_zero_hold_emits_no_still_input_and_no_concat(tmp_path: Path):
@@ -1041,3 +1047,59 @@ def test_no_hold_writes_no_still_and_changes_no_command(tmp_path: Path):
     assert list(work.glob("summary-*.png")) == []
     assert "-loop" not in calls[0]
     assert "concat=n=2" not in calls[0][calls[0].index("-filter_complex") + 1]
+
+
+def test_a_stage_whose_summary_still_fails_is_skipped_not_fatal(tmp_path: Path):
+    """One bad stage is reported and skipped; the rest still stitch.
+
+    That is the rule the whole stage loop follows -- a full-match 4K
+    re-encode is far too long to lose to one stage -- and composing the
+    still was the one step in it that could take the run down. The
+    per-tile cases already degrade to a black cell inside
+    ``overlay_summary``; what is left is whole-stage (a font that will
+    not load, a disk that will not take the PNG).
+    """
+    calls: list[tuple[str, ...]] = []
+
+    def runner(cmd, **_kwargs):
+        calls.append(tuple(str(c) for c in cmd))
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    def exploding_still(*_args, **_kwargs):
+        raise OSError("no space left on device")
+
+    shooters = _driver_shooters(tmp_path)
+    # Two stages, so there is something left to stitch after the bad one.
+    for bundle in shooters:
+        bundle.stages_by_number[2] = dataclasses.replace(bundle.stages_by_number[1], stage_number=2)
+
+    _real_still = mp4_grid._stage_hold_still
+
+    def maybe_explode(plan, *args, **kwargs):
+        if plan.stage_number == 1:
+            exploding_still()
+        return _real_still(plan, *args, **kwargs)
+
+    mp4_grid._stage_hold_still = maybe_explode  # type: ignore[assignment]
+    try:
+        result = mp4_grid.render_grid_mp4(
+            shooters,
+            audio_label="Anders",
+            output_path=tmp_path / "grid.mp4",
+            canvas=mp4_grid.GridCanvas(640, 360, 25, 1),
+            overlay=True,
+            summary_hold_seconds=2.0,
+            runner=runner,
+            probe_runner=fake_ffmpeg_probe(),
+            still_runner=_still_runner([]),
+            work_dir=tmp_path / "work",
+            ffmpeg_binary="/bin/ffmpeg",
+        )
+    finally:
+        mp4_grid._stage_hold_still = _real_still  # type: ignore[assignment]
+
+    assert [(o.stage_number, o.ok) for o in result.stages] == [(1, False), (2, True)]
+    assert "no space left on device" in (result.failed[0].error or "")
+    # Stage 1 never reached ffmpeg; stage 2 rendered and the stitch ran.
+    assert len(calls) == 2
+    assert calls[-1][calls[-1].index("-f") + 1] == "concat"

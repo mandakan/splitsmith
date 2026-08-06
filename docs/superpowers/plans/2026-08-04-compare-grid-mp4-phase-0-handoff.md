@@ -145,8 +145,6 @@ Three things to know before running it on a real match:
 **This changes the durations below**, which is why they are stated as formulas
 rather than numbers.
 
-## Verifying the result -- this is the actual deliverable
-
 ## Degraded output: an ffmpeg with no `drawtext`
 
 Only the overlay's **running clock** is `drawtext`. The per-tile shot counters
@@ -224,8 +222,10 @@ Confirm before re-running the export:
 on macOS -- there is no `./configure` step in a Homebrew install. The formula
 name is what closes the loop.
 
+## Verifying the result -- this is the actual deliverable
+
 A green test suite is not evidence the video is right. Every genuine defect on
-this branch was found by rendering and measuring. Do both of the following.
+this branch was found by rendering and measuring. Do all of the following.
 
 ### 1. Probe the container
 

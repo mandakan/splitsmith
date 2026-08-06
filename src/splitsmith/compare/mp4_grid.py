@@ -450,11 +450,20 @@ class GridStagePlan:
           first three segments each ran 3s over: A/V offset ``+0.1ms`` at
           every marker, i.e. no drift, and a 33.0s file from four 6s
           actions and three 3s holds. That is why getting the video half
-          wrong is dangerous rather than loud: the freeze happens anyway,
-          of the right length, in the right place -- just on the raw last
-          frame with no summary drawn on it. Hence the precondition in
-          :func:`build_stage_command`, which refuses to build a segment
-          with a hold and no still to put in it.
+          wrong is quiet rather than loud: the freeze happens anyway, in
+          the right place, with the sound still locked to it -- just on
+          the raw last frame with no summary drawn on it. Hence the
+          precondition in :func:`build_stage_command`, which refuses to
+          build a segment with a hold and no still to put in it.
+
+          The *stretch* is the muxer's, not the encoder's, and that is
+          worth knowing when measuring: the surplus is expressed as a
+          longer duration on the last coded frame, never as extra coded
+          frames. So a decoded frame count comes up short by exactly the
+          final segment's hold while the container's declared duration
+          reads correct. Measured on a two-stage render with the still
+          dropped: 450 coded frames and a last pts of 16.967 where a
+          correct render has 570 and 18.967.
         * **Audio shorter than video** -- what a negative hold would do,
           and the reason ``__post_init__`` rejects one. The missing time
           collapses at the re-encode and every later stage's audio
@@ -838,32 +847,31 @@ def _clock_filters(
     hundredth on a minority of frames; do not "tidy" this expression into
     a third form without re-measuring both numbers above.
 
-    **The cap at the action's end, and what it is worth.** Two of these
-    ``enable`` windows have no natural upper bound -- the open-ended tick
-    (``gte(t,start)`` on a run whose end is unknown) and the static hold
-    (``gte(t,freeze)``) -- so with a summary hold following, both get
-    ``*lt(t,duration)`` as well. A clock ticking over a blurred summary,
-    or frozen beside it, reads as a stall rather than a conclusion.
+    **Two of these windows are open-ended above, and that is correct.**
+    The open-ended tick (``gte(t,start)`` for a run whose end is unknown)
+    and the static hold (``gte(t,freeze)``) both run to the end of the
+    stream they are attached to, with no ``lt``. A summary hold does not
+    change that and must not: these filters hang off ``[ovlgrid]``, which
+    is the *action*, and the frozen summary is a second segment joined
+    after them by ``concat`` (see :func:`_video_tail`). Their ``t`` is
+    the action's own timeline and cannot reach a hold frame.
 
-    Be clear about what that cap does and does not do, because it is easy
-    to mistake for the fix. It is **not** load-bearing: these filters sit
-    ahead of the ``concat`` in :func:`_video_tail`, so their ``t`` is the
-    action's own timeline and cannot reach a hold frame whatever the
-    expression says. Removing the cap changes no pixel of a rendered hold
-    (verified by rendering with it removed and diffing the in-hold frame:
-    identical). It is here because a graph rewrite that ever composited
-    the still over one continuous stream instead of concatenating it
-    would make it load-bearing overnight, and a bound that is already
-    stated cannot be forgotten at that point. It is omitted with no hold
-    only to keep the no-hold argv byte-identical to the pre-hold one.
+    A ``*lt(t,duration)`` cap was written here first, on the assumption
+    that a clock would otherwise tick over the summary, and then removed:
+    it changed no pixel of a rendered hold (the in-hold frame came out
+    byte-identical with and without it), while costing a behaviour-free
+    branch and making the same ``--overlay`` render emit different
+    ``enable`` text depending on an unrelated field. What actually stops
+    a clock reaching the summary is the graph's shape, and that shape is
+    pinned by
+    ``test_hold_is_concatenated_after_the_action_not_composited_over_it``
+    -- if a rewrite ever composites the still over one continuous stream
+    instead of joining it, that test is what fails, and re-bounding these
+    windows is part of what such a rewrite would owe.
     """
     cell_w, cell_h = _cell_size(canvas, plan)
     pad = _clock_pad(cell_h)
     font = quote_filter_value(str(overlay.font_path))
-    # See the docstring: stated, not relied on. The ticking-to-a-freeze
-    # window already carries its own ``lt``, so only the two open-ended
-    # spellings need it.
-    cap = f"*lt(t\\,{plan.duration_seconds:g})" if plan.hold_seconds > 0 else ""
     filters: list[str] = []
     for clock in overlay.clocks:
         common = (
@@ -880,13 +888,13 @@ def _clock_filters(
         if clock.freeze_seconds is None:
             # No known end: tick from the beep to the end of the action,
             # hold nothing after it.
-            filters.append(f"drawtext={common}:{elapsed}:enable='gte(t\\,{start}){cap}'")
+            filters.append(f"drawtext={common}:{elapsed}:enable='gte(t\\,{start})'")
             continue
         freeze = f"{clock.freeze_seconds:g}"
         filters.append(f"drawtext={common}:{elapsed}:enable='gte(t\\,{start})*lt(t\\,{freeze})'")
         if clock.final_text is not None:
             held = quote_filter_value(clock.final_text)
-            filters.append(f"drawtext={common}:text={held}:enable='gte(t\\,{freeze}){cap}'")
+            filters.append(f"drawtext={common}:text={held}:enable='gte(t\\,{freeze})'")
     if not filters:
         return _video_tail("ovlgrid", hold_label)
     return ["[ovlgrid]" + ",".join(filters) + "[ovltext]", *_video_tail("ovltext", hold_label)]
@@ -930,14 +938,23 @@ def build_stage_command(
     ``hold_still_path`` is the frozen stage summary (one canvas-sized PNG,
     written by :mod:`splitsmith.compare.overlay_summary`) and is
     **required whenever** ``plan.hold_seconds`` is non-zero. A hold with
-    no still is refused here rather than built, because that segment is
-    the one shape nothing downstream complains about: measured on ffmpeg
-    6.1.1, its audio simply outlasts its video, the stitch exits 0 without
-    a warning, the mov muxer holds the last coded frame for the surplus,
-    and the finished file comes out the right length with the freeze in
-    the right place -- on the raw last action frame, unblurred, with no
-    summary on it. Nothing but looking at the pixels tells the two apart,
-    so the only safe place to catch it is before the encode.
+    no still is refused here rather than built, because almost nothing
+    downstream complains about that segment: measured on ffmpeg 6.1.1,
+    its audio simply outlasts its video, the stitch exits 0 without a
+    warning, the mov muxer holds the last coded frame for the surplus,
+    the container declares the length it should, and the freeze lands in
+    the right place with the sound still locked to it -- on the raw last
+    action frame, unblurred, with no summary on it.
+
+    Two things do catch it, and knowing which is which matters when
+    something looks wrong. A **decoded** frame count comes up short by
+    the last segment's hold, because the muxer's stretch is a duration on
+    the final coded frame rather than extra frames (see
+    :attr:`GridStagePlan.total_seconds`) -- so a duration measured by
+    decoding, unlike one read off the container, does notice a *missing*
+    still. Only the pixels notice a still that is there but **wrong**:
+    blank, unblurred, the wrong stage's, or with a clock left on it. This
+    precondition is cheaper than either, and runs before the encode.
 
     The still is one more input appended after the sprite input, for the
     same reason the sprite goes last, and it is video-only: the hold
@@ -1029,10 +1046,11 @@ def build_stage_command(
             raise ValueError(
                 f"stage {plan.stage_number} has hold_seconds={plan.hold_seconds:g} but no "
                 f"hold_still_path. That segment would carry {plan.total_seconds:g}s of audio "
-                f"against {plan.duration_seconds:g}s of video, which nothing "
-                "downstream reports: the stitch exits 0, the picture freezes on the raw last "
-                "action frame with no summary drawn on it, and the file is the right length. "
-                "Pass the still overlay_summary.write_hold_still wrote, or leave the hold at 0."
+                f"against {plan.duration_seconds:g}s of video, which almost nothing downstream "
+                "reports: the stitch exits 0, the container declares the right length, and the "
+                "picture freezes in the right place on the raw last action frame with no summary "
+                "drawn on it. Pass the still overlay_summary.write_hold_still wrote, or leave "
+                "the hold at 0."
             )
         # ``-framerate`` is the image2 demuxer's own rate; without it a
         # looped still arrives at its 25fps default and the chain's
@@ -1790,15 +1808,39 @@ def render_grid_mp4(
                 # A missing ``drawtext`` costs the summary nothing: it is
                 # pure PIL, so a host that lost the clock still gets full
                 # summaries.
-                hold_still = _stage_hold_still(
-                    plan,
-                    canvas,
-                    overlay_data,
-                    theme_name=overlay_theme,
-                    work=work,
-                    ffmpeg_binary=binary,
-                    runner=still_runner,
-                )
+                #
+                # Caught, not raised, and for the same reason a failed
+                # ffmpeg call below is: one bad stage is reported and
+                # skipped so the rest still stitch. ``overlay_summary``
+                # already degrades an unreadable trim or a bad freeze to
+                # a black cell, so what reaches here is the whole-stage
+                # kind -- a font that will not load, a disk that will not
+                # take the PNG. Building the segment anyway is not an
+                # option: without the still the stage's audio would
+                # outlast its video, which is the one fault nothing
+                # downstream reports.
+                try:
+                    hold_still = _stage_hold_still(
+                        plan,
+                        canvas,
+                        overlay_data,
+                        theme_name=overlay_theme,
+                        work=work,
+                        ffmpeg_binary=binary,
+                        runner=still_runner,
+                    )
+                except Exception as exc:  # noqa: BLE001 -- one bad stage must not lose the match
+                    detail = f"could not compose the stage summary still: {exc}"
+                    logger.warning("compare grid stage %d: %s", plan.stage_number, detail)
+                    outcomes.append(
+                        StageOutcome(
+                            stage_number=plan.stage_number,
+                            stage_name=plan.stage_name,
+                            ok=False,
+                            error=detail,
+                        )
+                    )
+                    continue
         cmd = build_stage_command(
             plan,
             canvas=canvas,
