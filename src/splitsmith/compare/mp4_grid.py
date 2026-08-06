@@ -794,9 +794,11 @@ def _video_tail(source_label: str, hold_label: str | None) -> list[str]:
     what makes the live overlay stop at the freeze for free: every
     ``drawtext`` and the sprite ``overlay`` run on ``source_label``, which
     ends at the action, so nothing that draws on the action can reach a
-    frame of the hold -- there is no expression to get wrong. See
-    :func:`_clock_filters` for the belt-and-braces ``enable`` cap that
-    states the same bound explicitly.
+    frame of the hold -- there is no expression to get wrong. That
+    structural bound is the only one there is: the ``enable`` cap
+    :func:`_clock_filters` used to carry alongside it was deleted in
+    ``9ab2156`` once it was shown to restate what the graph already
+    guarantees.
 
     ``concat`` demands its inputs agree on size, SAR and frame rate (it
     refuses at graph-config time, not silently), which is why the still's

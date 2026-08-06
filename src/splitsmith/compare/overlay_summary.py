@@ -374,6 +374,68 @@ def _fit_font(
     return font, size
 
 
+#: Scales :func:`_lay_out_block` tries, in order, before giving up and
+#: clipping. Each step is a 15% cut, which is coarse enough that a block
+#: needing a real shrink gets there in a handful of measurements and fine
+#: enough that a block that barely overflows does not end up half-size.
+_BLOCK_SCALES = (1.0, 0.85, 0.72, 0.61, 0.52, 0.44, 0.37, 0.32, 0.27, 0.23)
+
+
+def _lay_out_block(
+    draw: ImageDraw.ImageDraw,
+    lines: Sequence[tuple[str, int, tuple[int, int, int, int]]],
+    theme: OverlayTheme,
+    *,
+    width_budget: float,
+    height_budget: float,
+) -> list[tuple[str, object, int, tuple[int, int, int, int], int]]:
+    """Place ``lines`` inside a cell, bounded on *both* axes.
+
+    :func:`_fit_font` bounds the width of one line. Nothing bounded the
+    height of the stack of them, so a cell shorter than the block --
+    measured at a constant 207-247px, which is every cell below about
+    250px tall -- spilled its shooter's figures down into the cell of the
+    shooter underneath. That is worse than losing a line: it attributes
+    one competitor's numbers to another, and the neighbour has no way to
+    tell them apart.
+
+    So the whole block is scaled down until it fits (floored at
+    :data:`_MIN_FONT_SIZE`, the same floor per-line width fitting uses),
+    and if it still does not fit at the floor, the lines that would cross
+    the cell's bottom edge are dropped. Both bounds are hard; neither
+    draws outside the cell. A cell with room for the block at full size
+    -- which is every cell of the shipped 3840x2160 default, at 540-1080px
+    tall -- lays out exactly as before, because the first scale tried is
+    ``1.0``.
+
+    Returns ``(text, font, fitted_size, color, y_offset)`` per drawn line,
+    with ``y_offset`` relative to the block's top.
+    """
+    placed: list[tuple[str, object, int, tuple[int, int, int, int], int]] = []
+    for scale in _BLOCK_SCALES:
+        placed = []
+        y = 0
+        at_floor = True
+        for text, size, color in lines:
+            scaled = max(_MIN_FONT_SIZE, round(size * scale))
+            font, fitted = _fit_font(draw, text, theme, base_size=scaled, budget=width_budget)
+            at_floor = at_floor and fitted <= _MIN_FONT_SIZE
+            placed.append((text, font, fitted, color, y))
+            bbox = draw.textbbox((0, y), text, font=font)
+            y += (bbox[3] - bbox[1]) + max(6, fitted // 6)
+        if y <= height_budget or at_floor:
+            break
+    # Still over budget at the floor: drop whole lines from the bottom
+    # rather than let them cross into the next shooter's cell.
+    kept: list[tuple[str, object, int, tuple[int, int, int, int], int]] = []
+    for text, font, fitted, color, y in placed:
+        bbox = draw.textbbox((0, y), text, font=font)
+        if bbox[3] > height_budget and kept:
+            break
+        kept.append((text, font, fitted, color, y))
+    return kept
+
+
 def _hit_count_line(scorecard) -> str | None:
     """``A7 C2 D1 M0 NS0``, omitting any field that is ``None``. Returns
     ``None`` (draw nothing) when every field is ``None``."""
@@ -489,13 +551,14 @@ def _draw_cell(
         accent=accent,
     )
 
-    y = y0 + pad
-    for text, size, color in lines:
-        font, fitted_size = _fit_font(draw, text, theme, base_size=size, budget=width_budget)
+    height_budget = max(1, geometry.cell_height - 2 * pad)
+    for text, font, fitted_size, color, offset in _lay_out_block(
+        draw, lines, theme, width_budget=width_budget, height_budget=height_budget
+    ):
         _draw_text_with_shadow(
             draw,
             canvas,
-            (x0 + pad, y),
+            (x0 + pad, y0 + pad + offset),
             text,
             font,
             color,
@@ -505,9 +568,6 @@ def _draw_cell(
             stroke_color=theme.stroke,
             shadow_color=theme.shadow,
         )
-        bbox = draw.textbbox((x0 + pad, y), text, font=font)
-        line_height = bbox[3] - bbox[1]
-        y += line_height + max(6, fitted_size // 6)
 
 
 def build_hold_still(

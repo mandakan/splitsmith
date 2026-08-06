@@ -504,6 +504,87 @@ def test_dq_missing_scorecard_and_filler_get_no_placing(monkeypatch):
     assert placing_lines == ["#1"]
 
 
+# --- the block is bounded on both axes ------------------------------------
+
+
+def _full_stat_tile(label: str) -> TileStageData:
+    """A tile with every line the summary can draw: label, placing, shot
+    count, time, HF, stage pct, hit counts, split stats, draw."""
+    shots = tuple(TileShot(time_from_beep=1.0 + 0.3 * i, split=0.3) for i in range(6))
+    return TileStageData(
+        label=label,
+        stage_number=1,
+        shots=shots,
+        stage_time_seconds=12.34,
+        scorecard=StageScorecard(
+            hit_factor=5.12, stage_pct=87.4, alphas=7, charlies=2, deltas=1, misses=0, no_shoots=0
+        ),
+    )
+
+
+def _drawn_boxes(monkeypatch):
+    """Record ``(xy, bbox)`` for every line the summary draws."""
+    boxes: list[tuple[tuple[int, int], tuple[int, int, int, int]]] = []
+    original = summ._draw_text_with_shadow
+
+    def recorder(draw, canvas, xy, text, font, fill, **kwargs):
+        boxes.append((xy, draw.textbbox(xy, text, font=font)))
+        return original(draw, canvas, xy, text, font, fill, **kwargs)
+
+    monkeypatch.setattr(summ, "_draw_text_with_shadow", recorder)
+    return boxes
+
+
+def test_a_short_cell_keeps_its_summary_inside_its_own_cell(monkeypatch):
+    """A cell too short for the block must not spill into the one below.
+
+    Nothing bounded the block's height: ``_fit_font`` budgets width only,
+    and the block ran to a roughly constant 207-247px whatever the cell
+    was. Every cell shorter than that -- 90px here -- wrote its shooter's
+    figures over the shooter underneath, which does not merely look
+    untidy: it attributes one competitor's numbers to another, and the
+    cell receiving them has no way to disown them.
+    """
+    geometry = SpriteGeometry(canvas_width=360, canvas_height=180, rows=2, cols=1)
+    assert geometry.cell_height == 90
+    placements = [_placement("Ann", 0, 0), _placement("Bo", 1, 0)]
+    data = {"Ann": _full_stat_tile("Ann"), "Bo": TileStageData(label="Bo", stage_number=1)}
+
+    boxes = _drawn_boxes(monkeypatch)
+    summ.build_hold_still(placements, data, {}, geometry, theme=THEME)
+
+    assert boxes, "the summary drew nothing at all"
+    in_ann = [box for xy, box in boxes if xy[1] < geometry.cell_height]
+    assert in_ann, "the top cell drew nothing"
+    overflow = max(box[3] for box in in_ann)
+    assert overflow <= geometry.cell_height, (
+        f"the top cell's summary block reaches {overflow}px, past its own {geometry.cell_height}px "
+        "cell and into the shooter below"
+    )
+    # Bounding it must not empty it: the label at least still lands, and
+    # a bound that simply stopped drawing would pass the check above.
+    assert len(in_ann) >= 2, f"the bound left only {len(in_ann)} line(s) in the top cell"
+
+
+def test_a_tall_cell_lays_the_block_out_unshrunk(monkeypatch):
+    """The shipped 3840x2160 default has 540-1080px cells, so the bound
+    added above must be inert there -- same sizes, same positions."""
+    geometry = SpriteGeometry(canvas_width=3840, canvas_height=2160, rows=3, cols=3)
+    placements = [_placement("Ann", 0, 0)]
+    data = {"Ann": _full_stat_tile("Ann")}
+
+    boxes = _drawn_boxes(monkeypatch)
+    summ.build_hold_still(placements, data, {}, geometry, theme=THEME)
+
+    pad = max(20, geometry.cell_height // 40)
+    label_size = max(32, geometry.cell_height // 16)
+    assert boxes[0][0] == (pad, pad)
+    # The first line is the label at its unshrunk size: a block that had
+    # been scaled down would draw it smaller than this.
+    assert boxes[0][1][3] - boxes[0][1][1] >= label_size // 2
+    assert max(box[3] for _xy, box in boxes) <= geometry.cell_height
+
+
 def test_build_hold_still_rejects_whole_match_keyed_data():
     placements = [_placement("Ann", 0, 0)]
     data = {("Ann", 1): TileStageData(label="Ann", stage_number=1)}
