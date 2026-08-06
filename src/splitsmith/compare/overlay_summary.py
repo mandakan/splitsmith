@@ -225,9 +225,13 @@ def _prepare_cell(
 class StagePlacing:
     """One shooter's cross-shooter rank for the stage, by ``stage_pct``.
 
-    ``total_ranked`` is the size of the ranked pool, not the roster --
-    it lets the drawn text read "#1 of 3" rather than an unqualified "#1"
-    when only 3 of 5 tiles had a scorable run.
+    ``total_ranked`` is the size of the *ranked pool*, not the roster.
+    It is computed but deliberately not drawn: "#1 of 3" on a stage a
+    7-shooter roster ran (DQ'd, no scorecard and no audit each excluded
+    from the pool) reads as a 3-shooter field when 7 people actually shot
+    it. The grid itself already shows the field size; the bare "#1" says
+    only where this shooter landed in it. Kept on the dataclass in case a
+    future caller needs the pool size for something other than display.
     """
 
     rank: int
@@ -343,7 +347,14 @@ def _cell_lines(
     color. A tile with no audit and no scorecard yields just the label."""
     lines: list[tuple[str, int, tuple[int, int, int, int]]] = [(label, label_size, ink)]
     if placing is not None:
-        lines.append((f"#{placing.rank} of {placing.total_ranked}", stat_size, accent))
+        # Bare "#2", not "#2 of 4": only scorecard-carrying tiles enter
+        # the ranked pool, so a stage a 7-shooter roster ran would show
+        # "of 4" against 3 legitimately un-ranked shooters (DQ'd, no
+        # scorecard, no audit) still on screen -- reading as a smaller
+        # field than actually shot. The grid itself already shows the
+        # field size; the placing only needs to say where this shooter
+        # landed in it.
+        lines.append((f"#{placing.rank}", stat_size, accent))
 
     if tile is None:
         return lines

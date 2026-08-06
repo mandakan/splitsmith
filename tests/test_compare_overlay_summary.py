@@ -322,8 +322,8 @@ def test_placing_drawn_for_ranked_tiles(monkeypatch):
     }
     summ.build_hold_still(placements, data, {}, GEOMETRY, theme=THEME)
 
-    assert "#1 of 2" in drawn
-    assert "#2 of 2" in drawn
+    assert "#1" in drawn
+    assert "#2" in drawn
 
 
 def test_ranking_follows_stage_pct_even_when_stage_points_disagree(monkeypatch):
@@ -344,13 +344,13 @@ def test_ranking_follows_stage_pct_even_when_stage_points_disagree(monkeypatch):
     }
     summ.build_hold_still(placements, data, {}, GEOMETRY, theme=THEME)
 
-    assert "#1 of 2" in drawn
+    assert "#1" in drawn
     ann_index = drawn.index("Ann")
     bo_index = drawn.index("Bo")
     ann_placing = drawn[ann_index + 1]
     bo_placing = drawn[bo_index + 1]
-    assert bo_placing == "#1 of 2", f"Bo has the higher stage_pct and must rank #1, got {bo_placing!r}"
-    assert ann_placing == "#2 of 2", f"Ann has the lower stage_pct and must rank #2, got {ann_placing!r}"
+    assert bo_placing == "#1", f"Bo has the higher stage_pct and must rank #1, got {bo_placing!r}"
+    assert ann_placing == "#2", f"Ann has the lower stage_pct and must rank #2, got {ann_placing!r}"
 
 
 def test_dq_missing_scorecard_and_filler_get_no_placing(monkeypatch):
@@ -371,7 +371,7 @@ def test_dq_missing_scorecard_and_filler_get_no_placing(monkeypatch):
     placing_lines = [t for t in drawn if t.startswith("#")]
     # The only rankable tile is Cy (DQ'd Ann and scorecard-less Bo are
     # excluded, filler Dee draws nothing at all) -- alone in the pool.
-    assert placing_lines == ["#1 of 1"]
+    assert placing_lines == ["#1"]
 
 
 def test_build_hold_still_rejects_whole_match_keyed_data():
