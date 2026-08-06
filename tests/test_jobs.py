@@ -728,6 +728,10 @@ def test_run_threads_timer_and_persists_timings_and_emits_completed(caplog) -> N
     with caplog.at_level(logging.INFO, logger="splitsmith.ui.jobs"):
         job = reg.submit(kind="trim", fn=work)
         assert _wait_until(lambda: reg.get(job.id).status == JobStatus.SUCCEEDED)
+        # The terminal event is emitted after the status flip, on the worker
+        # thread - keep capturing until it lands or the record is silently
+        # dropped when this block exits first.
+        assert _wait_until(lambda: any(getattr(r, "event", None) == "job.completed" for r in caplog.records))
 
     snap = reg.get(job.id)
     assert snap.timings is not None
@@ -751,6 +755,8 @@ def test_run_failed_emits_job_failed_with_partial_timings(caplog) -> None:
     with caplog.at_level(logging.INFO, logger="splitsmith.ui.jobs"):
         job = reg.submit(kind="trim", fn=boom)
         assert _wait_until(lambda: reg.get(job.id).status == JobStatus.FAILED)
+        # Same status-flip-before-emit race as the succeeded-path test above.
+        assert _wait_until(lambda: any(getattr(r, "event", None) == "job.failed" for r in caplog.records))
 
     snap = reg.get(job.id)
     assert snap.timings is not None

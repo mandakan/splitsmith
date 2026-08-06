@@ -99,7 +99,13 @@ def _build_backend_for_new_user(
     inline: bool = True,
 ) -> tuple[PostgresJobBackend, sessionmaker, str]:
     db_path = tmp_path / db_name
-    engine = create_engine(f"sqlite+aiosqlite:///{db_path}")
+    # NullPool: this file drives the backend through many short-lived event
+    # loops (asyncio.run per call, plus the worker thread's own runs). A
+    # pooled aiosqlite connection created in one loop and reused in a later
+    # one intermittently dies with "Event loop is closed" (seen on CI); a
+    # fresh connection per session sidesteps it, same as the hosted boot
+    # path does via pool_disabled.
+    engine = create_engine(f"sqlite+aiosqlite:///{db_path}", pool_disabled=True)
     session_factory = sessionmaker(engine)
 
     async def _setup() -> str:
