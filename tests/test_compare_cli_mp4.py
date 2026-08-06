@@ -663,3 +663,149 @@ def test_a_refused_overlay_exits_non_zero_with_the_engines_reason(
     assert result.exit_code == 1
     flat = " ".join(strip_ansi(result.output).split())
     assert "Re-run without --overlay for the plain grid." in flat, flat
+
+
+# --- the summary hold -----------------------------------------------------
+
+
+def _invoke_mp4(match_root: Path, output: Path, *flags: str):
+    return runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "--format",
+            "mp4",
+            "-o",
+            str(output),
+            *flags,
+        ],
+    )
+
+
+def test_summary_hold_flag_is_documented(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Run under CI's own environment too: rich interleaves ANSI escapes
+    # into --help when it detects GITHUB_ACTIONS, so a literal substring
+    # check can pass locally and fail on CI.
+    for ci in ("", "true"):
+        monkeypatch.setenv("GITHUB_ACTIONS", ci)
+        result = runner.invoke(app, ["compare", "export", "--help"])
+        assert result.exit_code == 0
+        text = strip_ansi(result.output)
+        assert "--summary-hold" in text, ci
+        assert "--overlay" in text, ci
+
+
+def test_summary_hold_defaults_to_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    output = tmp_path / "out.mp4"
+    _patch_probe(monkeypatch)
+
+    captured: dict[str, Any] = {}
+
+    def fake_render(*args: Any, **kwargs: Any) -> mp4_grid.GridRenderResult:
+        captured.update(kwargs)
+        return mp4_grid.GridRenderResult(output_path=kwargs["output_path"], stages=())
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", fake_render)
+
+    result = _invoke_mp4(match_root, output)
+    assert result.exit_code == 0, result.output
+    assert captured["summary_hold_seconds"] == 0.0
+
+
+def test_summary_hold_reaches_the_renderer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    output = tmp_path / "out.mp4"
+    _patch_probe(monkeypatch)
+
+    captured: dict[str, Any] = {}
+
+    def fake_render(*args: Any, **kwargs: Any) -> mp4_grid.GridRenderResult:
+        captured.update(kwargs)
+        return mp4_grid.GridRenderResult(output_path=kwargs["output_path"], stages=())
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", fake_render)
+
+    result = _invoke_mp4(match_root, output, "--overlay", "--summary-hold", "2.5")
+    assert result.exit_code == 0, result.output
+    assert captured["summary_hold_seconds"] == 2.5
+    assert captured["overlay"] is True
+
+
+def test_summary_hold_without_the_overlay_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A design contradiction, refused by name rather than accepted.
+
+    The summary is the overlay's own shot data in the overlay's own
+    typography, so a hold on a clean grid would freeze on a blurred still
+    with nothing written on it. The message has to name --overlay: that
+    is the one-word fix.
+    """
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    output = tmp_path / "out.mp4"
+    _patch_probe(monkeypatch)
+
+    # The stand-in returns a real result rather than None on purpose: a
+    # guard removed from the CLI must fail this test on its own
+    # ``exit_code`` assertion, not on an incidental AttributeError from a
+    # fake that cannot stand in for the thing it replaces.
+    called: list[int] = []
+
+    def fake_render(*args: Any, **kwargs: Any) -> mp4_grid.GridRenderResult:
+        called.append(1)
+        return mp4_grid.GridRenderResult(output_path=kwargs["output_path"], stages=())
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", fake_render)
+
+    result = _invoke_mp4(match_root, output, "--summary-hold", "2.0")
+    assert result.exit_code == 2, result.output
+    flat = strip_ansi(result.output)
+    assert "--overlay" in flat, flat
+    assert "--summary-hold" in flat, flat
+    # Refused before anything was rendered, not after.
+    assert called == []
+
+
+def test_a_negative_summary_hold_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    output = tmp_path / "out.mp4"
+    _patch_probe(monkeypatch)
+
+    result = _invoke_mp4(match_root, output, "--overlay", "--summary-hold", "-1")
+    assert result.exit_code == 2
+    assert "summary-hold" in strip_ansi(result.output).lower()
+
+
+def test_an_implausibly_long_hold_warns_but_still_renders(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Accept and say so. Refusing a legal value because it is unusual is
+    worse than a warning, but a hold is charged per stage and the bill
+    only arrives when a 40-minute render finishes."""
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    output = tmp_path / "out.mp4"
+    _patch_probe(monkeypatch)
+
+    captured: dict[str, Any] = {}
+
+    def fake_render(*args: Any, **kwargs: Any) -> mp4_grid.GridRenderResult:
+        captured.update(kwargs)
+        return mp4_grid.GridRenderResult(output_path=kwargs["output_path"], stages=())
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", fake_render)
+
+    over = mp4_grid.SUMMARY_HOLD_WARN_SECONDS + 1
+    result = _invoke_mp4(match_root, output, "--overlay", "--summary-hold", str(over))
+    assert result.exit_code == 0, result.output
+    assert captured["summary_hold_seconds"] == over
+    flat = strip_ansi(result.output)
+    assert "unusually long" in flat, flat
+
+    # ...and the threshold itself does not warn.
+    at = mp4_grid.SUMMARY_HOLD_WARN_SECONDS
+    result = _invoke_mp4(match_root, output, "--overlay", "--summary-hold", str(at))
+    assert result.exit_code == 0, result.output
+    assert "unusually long" not in strip_ansi(result.output)

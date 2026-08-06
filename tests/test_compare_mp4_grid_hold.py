@@ -1,9 +1,13 @@
-"""The post-stage hold's duration model.
+"""The post-stage hold: its duration model and its video half.
 
 Milestone B freezes every tile at the end of a stage and draws that
-shooter's summary over their own cell. This module covers only the
-*arithmetic* that makes room for it -- the composition (task 8) and the
-filter graph's video half (task 9) are separate.
+shooter's summary over their own cell. This module covers the
+*arithmetic* that makes room for it and the *argv* that fills it -- the
+still's input, the ``concat`` that joins it to the action, and the clock
+windows either side. Composing the still itself is
+``test_compare_overlay_summary.py``; whether any of this reaches the
+pixels is ``test_compare_grid_overlay_integration.py``, and that is the
+only place it can be answered (see below).
 
 The whole thing turns on two durations that must not be confused:
 
@@ -32,6 +36,16 @@ Extending the tile chains to ``total_seconds`` instead would run the
 footage on underneath the summary rather than freezing it, and would
 look almost right in a thumbnail. Hence
 :func:`test_tile_chains_still_run_only_the_action`.
+
+**What no test in this module can tell you.** Every assertion here is
+over an argv string. The failure the hold is most exposed to -- a
+segment built with no still in it -- produces a *valid* argv, a render
+that exits 0, a stitch that exits 0, the right total duration and a
+freeze at the right instant, on the raw last action frame with no
+summary drawn on it. ``build_stage_command`` refusing that shape (see
+:func:`test_a_hold_with_no_still_is_refused_rather_than_built`) is the
+structural guard; the only *evidence* is a frame decoded from inside the
+hold, which lives in the integration module.
 """
 
 from __future__ import annotations
@@ -39,12 +53,15 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from splitsmith.compare import mp4_grid
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
+from tests.conftest import fake_ffmpeg_probe
 
 ACTION = 12.5
 HOLD = 3.0
@@ -118,15 +135,35 @@ def _bundle(label: str, stages: dict[int, CompareStageBundle]) -> CompareShooter
     return CompareShooterBundle(label=label, project_root=Path(f"/p/{label}"), stages_by_number=stages)
 
 
+#: Where the frozen summary still would be, for a plan carrying a hold.
+#:
+#: ``build_stage_command`` is pure, so this never has to exist on disk.
+HOLD_STILL = Path("/w/summary-stage3.png")
+
+
 def _command(
-    plan: mp4_grid.GridStagePlan, *, overlay: mp4_grid.StageOverlayPlan | None = None
+    plan: mp4_grid.GridStagePlan,
+    *,
+    overlay: mp4_grid.StageOverlayPlan | None = None,
+    hold_still_path: Path | None = HOLD_STILL,
 ) -> tuple[str, ...]:
+    """One stage command, with the still supplied whenever the plan holds.
+
+    Supplied by default rather than per-test because a hold with no still
+    is not a configuration this module is testing -- it is the one
+    ``build_stage_command`` refuses outright, since it is the segment
+    whose audio outlasts its video and whose wrongness nothing downstream
+    reports. ``hold_still_path=None`` opts back out to pin that refusal.
+    A zero-hold plan ignores it either way, which is what keeps the
+    no-flags argv assertions below meaningful.
+    """
     return mp4_grid.build_stage_command(
         plan,
         canvas=mp4_grid.GridCanvas(1920, 1080, 25, 1),
         output_path=Path("/w/s3.mov"),
         ffmpeg_binary="/bin/ffmpeg",
         overlay=overlay,
+        hold_still_path=hold_still_path,
     )
 
 
@@ -592,15 +629,415 @@ def test_stream_counts_are_unchanged_by_the_hold():
 
 
 def test_the_hold_does_not_move_the_beep():
-    # Invariant 2. Every tile's beep lands on the head pad, and the hold is
-    # appended after the action, so nothing about the front of a tile --
-    # its seek, its lead pad, its ``tpad``/``setpts`` order -- may change.
+    """Invariant 2, restated exactly for Task 9's still input.
+
+    Every tile's beep lands on the head pad, and the hold is appended
+    after the action, so nothing about the front of a tile -- its seek,
+    its lead pad, its ``tpad``/``setpts`` order -- may change.
+
+    Narrowed rather than loosened. Task 7 could say "the two commands are
+    identical but for the audio lengths"; Task 9 legitimately adds one
+    input and two filter chains, so the equalities below name **exactly**
+    what a hold is allowed to add and still compare everything else
+    whole. A weaker spelling (`in`, or a prefix comparison) would stop
+    noticing a tile input that moved.
+    """
     plain = _command(_plan(hold=None))
     held = _command(_plan(hold=HOLD))
 
-    assert _input_durations(plain) == _input_durations(held)
+    # Every input the tiles read is untouched, and the still went after
+    # all of them -- so no tile's stream index moved.
+    assert held[: held.index("-loop")] == plain[: plain.index("-filter_complex")]
+    assert held[held.index("-loop") : held.index("-filter_complex")] == (
+        "-loop",
+        "1",
+        "-framerate",
+        "25/1",
+        "-t",
+        f"{HOLD:g}",
+        "-i",
+        str(HOLD_STILL),
+    )
+    # The still reads for the hold and nothing else reads any longer than
+    # it did: the footage still stops at the freeze.
+    assert _input_durations(held) == [*_input_durations(plain), f"{HOLD:g}"]
+
     lead = "tpad=start_duration=0.5:start_mode=add:color=black,setpts=PTS-STARTPTS,"
     assert lead in _graph_of(held)
     assert "adelay=500:all=1,aresample=async=1," in _graph_of(held)
-    # Only the audio lengths differ between the two graphs.
-    assert _graph_of(plain).replace(f"atrim=0:{ACTION:g}", f"atrim=0:{TOTAL:g}") == _graph_of(held)
+
+    # Two tiles + one filler + one unreached cell occupy inputs 0-4, so
+    # the still is input 5.
+    hold_chain = f"[5:v]setpts=PTS-STARTPTS,scale=1920:1080,setsar=1,fps=25/1,trim=0:{HOLD:g}[hold]"
+    expected = _graph_of(plain).replace(f"atrim=0:{ACTION:g}", f"atrim=0:{TOTAL:g}")
+    expected = expected.replace(
+        "[grid]format=yuv420p[final]",
+        f"{hold_chain};[grid][hold]concat=n=2:v=1:a=0[joined];[joined]format=yuv420p[final]",
+    )
+    assert expected == _graph_of(held)
+
+
+# --- the hold's own video half ---------------------------------------------
+
+
+def test_a_hold_with_no_still_is_refused_rather_than_built():
+    """The one segment shape nothing downstream reports.
+
+    Measured on ffmpeg 6.1.1: a segment whose audio outlasts its video
+    stitches at exit 0 with no warning, the right total duration, the
+    freeze starting at exactly the right moment and A/V within +0.1ms --
+    the picture simply holds the raw last action frame, unblurred, with
+    no summary on it. A green render, a correct duration and an in-sync
+    A/V measurement all pass against it. So it is refused where it is
+    still cheap to refuse, before the encode.
+    """
+    with pytest.raises(ValueError, match=r"hold_seconds=3 but no hold_still_path"):
+        _command(_plan(hold=HOLD), hold_still_path=None)
+
+
+def test_hold_still_input_is_appended_after_the_sprite_input(tmp_path: Path):
+    # A filler tile takes two inputs where a real tile takes one and an
+    # unreached cell adds another, so an input inserted anywhere but last
+    # renumbers the streams behind it -- which lands one shooter's audio
+    # in another shooter's track, silently.
+    cmd = _command(_plan(hold=HOLD), overlay=_overlay_plan(tmp_path))
+    inputs = [value for flag, value in zip(cmd, cmd[1:], strict=False) if flag == "-i"]
+
+    assert inputs[-1] == str(HOLD_STILL)
+    assert inputs[-2] == str(tmp_path / "sprites.txt")
+    # And the graph reads it at the index that placement implies.
+    assert f"[{len(inputs) - 1}:v]" in _graph_of(cmd)
+    assert f"[{len(inputs) - 2}:v]format=rgba" in _graph_of(cmd)
+
+
+def test_the_still_input_is_looped_for_exactly_the_hold_duration():
+    cmd = _command(_plan(hold=HOLD))
+    still = cmd[cmd.index("-loop") : cmd.index("-filter_complex")]
+
+    assert still == ("-loop", "1", "-framerate", "25/1", "-t", f"{HOLD:g}", "-i", str(HOLD_STILL))
+    # Not the segment and not the action: the still covers the hold alone.
+    assert f"{TOTAL:g}" not in still
+    assert f"{ACTION:g}" not in still
+
+
+def test_hold_is_concatenated_after_the_action_not_composited_over_it():
+    """``concat``, never ``overlay``.
+
+    Compositing the still over the tail would leave the footage running
+    underneath it and every ``drawtext`` clock ticking through it. The
+    join is what makes the action genuinely stop.
+    """
+    graph = _graph_of(_command(_plan(hold=HOLD)))
+
+    (still_chain,) = _chains(graph, r"\[hold\]$")
+    assert still_chain.endswith(f"trim=0:{HOLD:g}[hold]"), still_chain
+    # ``concat`` compares size, SAR and frame rate across its inputs.
+    assert f"scale={1920}:{1080}" in still_chain
+    assert "setsar=1" in still_chain
+    assert "fps=25/1" in still_chain
+
+    assert "[grid][hold]concat=n=2:v=1:a=0[joined]" in graph
+    assert "[joined]format=yuv420p[final]" in graph
+    # The still is joined on, not laid over the picture, and it carries
+    # no audio -- the audio chains already run the whole segment.
+    assert "[hold]overlay" not in graph
+    assert "concat=n=2:v=1:a=1" not in graph
+
+
+def test_the_sprite_overlay_does_not_reach_the_hold(tmp_path: Path):
+    """The sprite is composited onto the action, upstream of the join.
+
+    So the last shot counter and last split cannot step over the summary
+    -- there is no expression to get wrong, only the graph's shape.
+    """
+    graph = _graph_of(_command(_plan(hold=HOLD), overlay=_overlay_plan(tmp_path)))
+    chains = graph.split(";")
+
+    sprite = next(part for part in chains if part.endswith("[ovl]"))
+    composite = next(part for part in chains if part.endswith("[ovlgrid]"))
+    join = next(part for part in chains if "concat=n=2" in part)
+
+    assert f"trim=0:{ACTION:g}[ovl]" in sprite, sprite
+    assert chains.index(sprite) < chains.index(composite) < chains.index(join)
+    # The join's first input is the composited action, so the sprite is
+    # inside the half that ends at the freeze.
+    assert join.startswith("[ovlgrid][hold]") or join.startswith("[ovltext][hold]"), join
+
+
+def test_clock_enable_windows_end_before_the_hold_begins(tmp_path: Path):
+    """Both open-ended ``enable`` guards get an upper bound at the action.
+
+    Belt and braces, and labelled as such: the ``drawtext`` filters sit
+    ahead of the ``concat``, so their ``t`` is the action's own timeline
+    and could not reach a hold frame even uncapped. The cap is here so a
+    graph rewrite that ever composited the still instead of joining it
+    does not silently become the "frozen clock beside a blurred summary"
+    failure. ``test_no_clock_survives_into_the_hold`` in
+    ``test_compare_grid_overlay_integration.py`` is what actually proves
+    no clock reaches the pixels.
+    """
+    clocks = (
+        # Ticking to a known freeze: already bounded above, must not gain
+        # a second bound.
+        mp4_grid.TileClock(row=0, col=0, start_seconds=1.0, freeze_seconds=6.0, final_text="5.00"),
+        # No known end: the open-ended spelling, which had no bound at all.
+        mp4_grid.TileClock(row=1, col=0, start_seconds=1.0, freeze_seconds=None, final_text=None),
+    )
+    graph = _graph_of(_command(_plan(hold=HOLD), overlay=_overlay_plan(tmp_path, clocks=clocks)))
+
+    assert r"enable='gte(t\,1)*lt(t\,6)'" in graph  # unchanged
+    assert rf"enable='gte(t\,6)*lt(t\,{ACTION:g})'" in graph  # the static hold
+    assert rf"enable='gte(t\,1)*lt(t\,{ACTION:g})'" in graph  # the open-ended tick
+    # No guard runs past the action.
+    assert r"enable='gte(t\,6)'" not in graph
+    assert r"enable='gte(t\,1)'" not in graph
+
+
+def test_a_zero_hold_leaves_the_clock_windows_exactly_as_they_were(tmp_path: Path):
+    # The cap is stated only where it could ever matter. With no hold the
+    # stream ends at the action anyway, and the no-flags argv -- which
+    # includes every --overlay render shipped before Milestone B -- must
+    # not move.
+    clocks = (mp4_grid.TileClock(row=0, col=0, start_seconds=1.0, freeze_seconds=None, final_text=None),)
+    graph = _graph_of(_command(_plan(hold=0.0), overlay=_overlay_plan(tmp_path, clocks=clocks)))
+
+    assert r"enable='gte(t\,1)'" in graph
+    assert "lt(t" not in graph
+
+
+def test_zero_hold_emits_no_still_input_and_no_concat(tmp_path: Path):
+    for overlay in (None, _overlay_plan(tmp_path)):
+        for hold in (None, 0.0):
+            cmd = _command(_plan(hold=hold), overlay=overlay)
+            assert "-loop" not in cmd, (hold, overlay)
+            assert str(HOLD_STILL) not in cmd, (hold, overlay)
+            graph = _graph_of(cmd)
+            assert "concat=n=2" not in graph, (hold, overlay)
+            assert "[hold]" not in graph, (hold, overlay)
+            assert "[joined]" not in graph, (hold, overlay)
+
+
+def test_stream_layout_is_identical_with_and_without_the_hold(tmp_path: Path):
+    """Invariant 1. The hold extends every stream together or not at all.
+
+    ``concat -c copy`` refuses segments whose stream *layout* disagrees --
+    count, codec, parameters -- and it refuses at the very last step,
+    after the whole match has been encoded. So a held stage and an
+    unheld one have to present the same 1 video + N+1 audio, the same
+    codecs and the same track identities.
+    """
+    for overlay in (None, _overlay_plan(tmp_path)):
+        plain = _command(_plan(hold=0.0), overlay=overlay)
+        held = _command(_plan(hold=HOLD), overlay=overlay)
+
+        def layout(cmd: tuple[str, ...]) -> list[str]:
+            keep = ("-map", "-disposition:a:", "-c:v", "-c:a", "-pix_fmt", "-r")
+            return [
+                f"{flag}={value}"
+                for flag, value in zip(cmd, cmd[1:], strict=False)
+                if flag.startswith(keep) or flag.startswith("-metadata:s:a:")
+            ]
+
+        assert layout(plain) == layout(held), overlay
+        assert layout(held) == [
+            "-map=[final]",
+            "-map=[amix]",
+            "-map=[a0]",
+            "-map=[a1]",
+            "-map=[a2]",
+            "-disposition:a:0=default",
+            "-disposition:a:1=0",
+            "-disposition:a:2=0",
+            "-disposition:a:3=0",
+            "-metadata:s:a:0=title=Mix",
+            "-metadata:s:a:0=handler_name=Mix",
+            "-metadata:s:a:1=title=Ann",
+            "-metadata:s:a:1=handler_name=Ann",
+            "-metadata:s:a:2=title=Bo",
+            "-metadata:s:a:2=handler_name=Bo",
+            "-metadata:s:a:3=title=Cy",
+            "-metadata:s:a:3=handler_name=Cy",
+            "-r=25/1",
+            "-c:v=libx264",
+            "-pix_fmt=yuv420p",
+            "-c:a=pcm_s16le",
+        ], overlay
+
+
+# --- the render driver ------------------------------------------------------
+
+
+def _driver_shooters(tmp_path: Path) -> list[CompareShooterBundle]:
+    """Two shooters, one stage, one of them with an audit on disk.
+
+    The audit is what gives the summary something to write; the other
+    shooter exercises the tile that has none.
+    """
+    bundles = []
+    for label, shots in (("Anders", [0.9, 1.4]), ("Mathias", None)):
+        audit = tmp_path / f"{label}-audit.json"
+        if shots is not None:
+            audit.write_text(
+                json.dumps(
+                    {
+                        "shots": [
+                            {"shot_number": i + 1, "candidate_number": i + 1, "ms_after_beep": int(t * 1000)}
+                            for i, t in enumerate(shots)
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+        trim = tmp_path / f"{label}.mov"
+        trim.write_bytes(b"")
+        stage = CompareStageBundle(
+            stage_number=1,
+            stage_name="Stage 1",
+            trim_path=trim,
+            audit_path=audit,
+            beep_offset_in_clip=2.0,
+            duration_seconds=10.0,
+            width=1920,
+            height=1080,
+            frame_rate_num=25,
+            frame_rate_den=1,
+        )
+        bundles.append(
+            CompareShooterBundle(label=label, project_root=tmp_path / label, stages_by_number={1: stage})
+        )
+    return bundles
+
+
+def _still_runner(written: list[tuple[str, ...]]):
+    """A fake freeze-frame extractor that writes a real (tiny) PNG.
+
+    ``build_hold_still`` opens what this writes, so a runner that only
+    returns 0 would leave every cell black and the "the summary reached
+    the still" assertions would pass against nothing.
+    """
+
+    def runner(cmd, **_kwargs):
+        written.append(tuple(str(c) for c in cmd))
+        Image.new("RGB", (64, 36), (7, 9, 11)).save(cmd[-1])
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    return runner
+
+
+def test_a_hold_without_the_overlay_is_refused_by_the_engine(tmp_path: Path):
+    # The summary is the overlay's own data in the overlay's own
+    # typography; a hold on a clean grid would be a blurred still with
+    # nothing written on it. Refused, not silently accepted.
+    with pytest.raises(mp4_grid.GridRenderError, match=r"needs overlay=True \(--overlay on the CLI\)"):
+        mp4_grid.render_grid_mp4(
+            _driver_shooters(tmp_path),
+            audio_label="Anders",
+            output_path=tmp_path / "grid.mp4",
+            canvas=mp4_grid.GridCanvas(640, 360, 25, 1),
+            overlay=False,
+            summary_hold_seconds=2.0,
+            runner=lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, b"", b""),
+            work_dir=tmp_path / "work",
+            ffmpeg_binary="/bin/ffmpeg",
+        )
+
+
+def test_the_hold_reaches_the_stage_command_and_writes_a_still(tmp_path: Path):
+    calls: list[tuple[str, ...]] = []
+    stills: list[tuple[str, ...]] = []
+
+    def runner(cmd, **_kwargs):
+        calls.append(tuple(str(c) for c in cmd))
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    work = tmp_path / "work"
+    mp4_grid.render_grid_mp4(
+        _driver_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=mp4_grid.GridCanvas(640, 360, 25, 1),
+        overlay=True,
+        summary_hold_seconds=2.0,
+        runner=runner,
+        probe_runner=fake_ffmpeg_probe(),
+        still_runner=_still_runner(stills),
+        work_dir=work,
+        ffmpeg_binary="/bin/ffmpeg",
+    )
+
+    still_path = work / "summary-stage1.png"
+    assert still_path.exists()
+    with Image.open(still_path) as image:
+        assert image.size == (640, 360)
+
+    stage_cmd = calls[0]
+    assert "-loop" in stage_cmd
+    assert str(still_path) in stage_cmd
+    graph = stage_cmd[stage_cmd.index("-filter_complex") + 1]
+    assert "concat=n=2:v=1:a=0[joined]" in graph
+    assert "trim=0:2[hold]" in graph
+    # Every audio track runs the whole segment: 1.0 head + 8.0 post-beep
+    # + 0.5 tail = 9.5 action, + 2.0 hold = 11.5.
+    assert graph.count("atrim=0:11.5") == 2
+
+
+def test_freeze_extraction_does_not_go_through_the_progress_runner(tmp_path: Path):
+    """Both shipped callers count ``runner`` calls to say "stage N of M".
+
+    A freeze frame pulled through that hook would advance the counter
+    three times per stage and misreport every one of them.
+    """
+    calls: list[tuple[str, ...]] = []
+    stills: list[tuple[str, ...]] = []
+
+    def runner(cmd, **_kwargs):
+        calls.append(tuple(str(c) for c in cmd))
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    mp4_grid.render_grid_mp4(
+        _driver_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=mp4_grid.GridCanvas(640, 360, 25, 1),
+        overlay=True,
+        summary_hold_seconds=2.0,
+        runner=runner,
+        probe_runner=fake_ffmpeg_probe(),
+        still_runner=_still_runner(stills),
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+    )
+
+    # One stage + one stitch, and not one call more.
+    assert len(calls) == 2
+    # Two present tiles, so two freeze frames, all on the other hook.
+    assert len(stills) == 2
+    assert all("-frames:v" in cmd for cmd in stills)
+
+
+def test_no_hold_writes_no_still_and_changes_no_command(tmp_path: Path):
+    calls: list[tuple[str, ...]] = []
+    stills: list[tuple[str, ...]] = []
+
+    def runner(cmd, **_kwargs):
+        calls.append(tuple(str(c) for c in cmd))
+        return subprocess.CompletedProcess(cmd, 0, b"", b"")
+
+    work = tmp_path / "work"
+    mp4_grid.render_grid_mp4(
+        _driver_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=mp4_grid.GridCanvas(640, 360, 25, 1),
+        overlay=True,
+        runner=runner,
+        probe_runner=fake_ffmpeg_probe(),
+        still_runner=_still_runner(stills),
+        work_dir=work,
+        ffmpeg_binary="/bin/ffmpeg",
+    )
+
+    assert stills == []
+    assert list(work.glob("summary-*.png")) == []
+    assert "-loop" not in calls[0]
+    assert "concat=n=2" not in calls[0][calls[0].index("-filter_complex") + 1]

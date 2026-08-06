@@ -96,6 +96,18 @@ def export(
         "--overlay-theme",
         help=f"Palette for --overlay. One of: {', '.join(THEME_NAMES)}.",
     ),
+    summary_hold: float = typer.Option(
+        0.0,
+        "--summary-hold",
+        help=(
+            "Seconds to freeze on a stage summary at the end of every "
+            "stage: each tile holds its last frame, blurred and dimmed, "
+            "with that shooter's shot count, time, hit factor, stage "
+            "percentage and placing over their own cell. 0 (the default) "
+            "is off. Requires --overlay, and is charged per stage -- a "
+            "3-second hold adds 36 seconds to a 12-stage match."
+        ),
+    ),
 ) -> None:
     """Render a multi-shooter comparison FCPXML.
 
@@ -138,6 +150,31 @@ def export(
             f"got {overlay_theme!r}."
         )
         raise typer.Exit(code=2)
+    if summary_hold < 0:
+        console.print(f"[red]Error:[/] --summary-hold must not be negative, got {summary_hold:g}.")
+        raise typer.Exit(code=2)
+    # A hold with no overlay is a contradiction, not a no-op: the summary
+    # is drawn from the overlay's own shot data in the overlay's own
+    # typography, so it would come out a blurred still with nothing
+    # written on it. Refused here rather than in the engine so the message
+    # can name the flag the user would have to add.
+    if summary_hold > 0 and not overlay:
+        console.print(
+            "[red]Error:[/] --summary-hold requires --overlay. The end-of-stage summary is "
+            "drawn from the same shot data and in the same typography as the live overlay; "
+            "without it the hold would freeze on a blurred still with nothing written on it."
+        )
+        raise typer.Exit(code=2)
+    # Accepted, not refused -- someone cutting a highlight reel may
+    # genuinely want to sit on the summary. But the hold is charged per
+    # stage and the bill only arrives when a 40-minute render finishes,
+    # so an unusual value is said out loud before it starts.
+    if summary_hold > mp4_grid.SUMMARY_HOLD_WARN_SECONDS:
+        console.print(
+            f"[yellow]Warning:[/] --summary-hold={summary_hold:g}s is unusually long and is "
+            "charged once per stage -- a 12-stage match would gain "
+            f"{summary_hold * 12:g}s of frozen summaries. Rendering it anyway."
+        )
 
     if source.is_dir() and is_match_folder(source):
         if audio_from is None:
@@ -159,6 +196,7 @@ def export(
             output_format=output_format,
             overlay=overlay,
             overlay_theme=overlay_theme,  # type: ignore[arg-type]  # validated above against THEME_NAMES
+            summary_hold=summary_hold,
         )
         return
 
@@ -290,6 +328,7 @@ def _export_from_match(
     output_format: str = "fcpxml",
     overlay: bool = False,
     overlay_theme: ThemeName = "splitsmith",
+    summary_hold: float = 0.0,
 ) -> None:
     """Render the compare export directly from a merged Match."""
     match = Match.load(match_root)
@@ -357,6 +396,7 @@ def _export_from_match(
             output=output,
             overlay=overlay,
             overlay_theme=overlay_theme,
+            summary_hold=summary_hold,
         )
         return
 
@@ -380,6 +420,7 @@ def _render_grid_mp4(
     output: Path,
     overlay: bool = False,
     overlay_theme: ThemeName = "splitsmith",
+    summary_hold: float = 0.0,
 ) -> None:
     """Render the grid straight to MP4, owning the scratch work dir.
 
@@ -408,12 +449,19 @@ def _render_grid_mp4(
     "Wrote ..." line, because the last line on screen is the one the
     user actually reads after a 40-minute render.
     """
+    # ``hold_seconds`` is passed even though this copy of the plans is
+    # only counted, never rendered from: these plans and the engine's own
+    # are built from identical inputs on purpose, and a duration on this
+    # one that quietly meant "the action" while the engine's meant "the
+    # segment" is the kind of divergence that shows up much later, in a
+    # progress estimate or a duration report.
     plans = mp4_grid.build_stage_plans(
         bundles,
         audio_label=audio_label,
         head_pad_seconds=1.0,
         tail_pad_seconds=0.5,
         layout_2up="horizontal",
+        hold_seconds=summary_hold,
     )
     total = len(plans)
     progress = {"calls": 0}
@@ -443,6 +491,7 @@ def _render_grid_mp4(
                 output_path=output,
                 overlay=overlay,
                 overlay_theme=overlay_theme,
+                summary_hold_seconds=summary_hold,
                 runner=_reporting_runner,
                 on_notice=_notice,
                 work_dir=Path(tmp),
