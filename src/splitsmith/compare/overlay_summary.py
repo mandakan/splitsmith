@@ -43,14 +43,15 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from PIL import Image, ImageFilter
 
 from ..overlay_html import summary_html
-from ..overlay_layout import Anchor, CellScale, Element, Emphasis, Flow, Group, Role
+from ..overlay_layout import Anchor, CellScale, ColorToken, Element, Emphasis, Flow, Group, Role
 from ..overlay_raster import Rasterizer
 from ..overlay_theme import OverlayTheme
 from .mp4_grid import GridStagePlan, Runner
@@ -85,6 +86,74 @@ DEFAULT_DIM = 0.45
 #: comes up empty -- at which point :func:`extract_freeze_frames` reports
 #: it rather than returning a path to a file that was never written.
 _FREEZE_TAIL_WINDOW_SECONDS = 0.5
+
+#: Selects an experimental hold-still layout for a design pass (issue
+#: #683 Task 7). This is scaffolding for choosing between two proposed
+#: replacements of today's small-corner-anchored summary, not a shipped
+#: feature -- there is no CLI flag for it and it is expected to be deleted
+#: (with one variant's shape folded into the unconditional default) once
+#: the user picks one from rendered frames. Unset (or any value other
+#: than "a"/"b") renders exactly what shipped before this task, carrying
+#: only the colour-coding change, which is not gated behind this switch
+#: because it is a real fix rather than something still being decided.
+_VARIANT_ENV = "SPLITSMITH_OVERLAY_SUMMARY_VARIANT"
+
+
+def _active_variant() -> str | None:
+    """ "a", "b", or ``None`` for today's shipped layout. See
+    :data:`_VARIANT_ENV`."""
+    value = os.environ.get(_VARIANT_ENV)
+    if value is None:
+        return None
+    value = value.strip().lower()
+    return value if value in ("a", "b") else None
+
+
+def _summary_scale(cell_height: int, variant: str | None) -> CellScale:
+    """The :class:`CellScale` the hold still composes at.
+
+    Deliberately **not** a change to ``CellScale.for_cell`` itself: that
+    resolver is shared with the live sprite and the running clock
+    (``test_live_primary_and_pad_match_what_the_grid_computes_today``
+    pins it), and this task's brief is about the *hold*, which is a
+    different picture-is-content-not-background situation than the live
+    overlay is. So this derives a summary-only scale from the same base
+    numbers instead of touching the shared formula.
+
+    Multipliers below are a first cut for a design pass, not tuned
+    figures -- see ``build/variant-a`` / ``build/variant-b`` renders and
+    the task report for how they read at real cell sizes. ``pad`` scales
+    too: a bigger type size sitting on the old, small padding would read
+    as cramped against its own cell edge.
+    """
+    base = CellScale.for_cell(cell_height)
+    if variant == "a":
+        # "Scale up in place": same anchors, substantially larger type
+        # now that the frame is dimmed background rather than the
+        # content the viewer is protecting.
+        return replace(
+            base,
+            identity=round(base.identity * 1.6),
+            headline=round(base.headline * 1.9),
+            verdict=round(base.verdict * 1.6),
+            detail=round(base.detail * 1.8),
+            caption=round(base.caption * 1.5),
+            pad=round(base.pad * 1.4),
+        )
+    if variant == "b":
+        # "Recompose as a scorecard": one centred block rather than four
+        # corners, so it can afford to be slightly more modest than
+        # variant A per role while still reading larger than today.
+        return replace(
+            base,
+            identity=round(base.identity * 1.5),
+            headline=round(base.headline * 1.7),
+            verdict=round(base.verdict * 1.5),
+            detail=round(base.detail * 1.6),
+            caption=round(base.caption * 1.4),
+            pad=round(base.pad * 1.2),
+        )
+    return base
 
 
 def _check_stage_keys(data: Mapping[str, TileStageData]) -> None:
@@ -344,57 +413,70 @@ def _rank_placings(
     return placings
 
 
-def _accuracy_line(scorecard) -> str | None:
-    """``A7 C2 D1``, omitting any field that is ``None``.
+#: One entry per hit/fault count, in the fixed reading order the row
+#: draws in: accuracy first (best worth to least), then faults. Each
+#: entry is ``(scorecard attribute, drawn tag, colour token)`` -- the
+#: colour is what the count is *worth* in IPSC scoring, not a judgement
+#: about whether the shooter did well: ``A`` is full points
+#: (``split_good``), ``C`` is mid (``ink``), ``D`` is low (``split``),
+#: and ``M``/``NS``/``P`` are each a flat -10 regardless of division
+#: (``accent``) -- a procedural is a penalty by definition, so its tag is
+#: red whether or not this shooter took one. See issue #683 Task 7: the
+#: old design drew the accuracy trio at ``Role.DETAIL`` and the faults
+#: trio at ``Role.VERDICT`` (visibly bigger), which made the faults
+#: outweigh the hits even though all six -- plus time -- are inputs to
+#: the same hit-factor number. They are one role, one size now; colour
+#: carries the meaning size used to carry unevenly.
+_COUNT_FIELDS: tuple[tuple[str, str, ColorToken], ...] = (
+    ("alphas", "A", ColorToken.SPLIT_GOOD),
+    ("charlies", "C", ColorToken.INK),
+    ("deltas", "D", ColorToken.SPLIT),
+    ("misses", "M", ColorToken.ACCENT),
+    ("no_shoots", "NS", ColorToken.ACCENT),
+    ("procedurals", "P", ColorToken.ACCENT),
+)
 
-    Accuracy only. Misses and no-shoots used to share this line, which
-    made them impossible to emphasise separately from the hits -- and
-    procedurals were on neither, so they never reached the screen at all.
-    See :func:`_faults_line`.
+
+def _count_elements(scorecard) -> list[Element]:
+    """The six hit/fault counts as one equal-weight, colour-coded row.
+
+    A field that is ``None`` (the scoreboard never carried that column)
+    is omitted entirely -- the same "zero is drawn, absent is not" rule
+    the rest of this module follows, just per-field instead of per-line
+    now that there is no single joined string to omit as a whole.
+
+    A recorded zero still draws (``P0`` reads red -- a procedural is
+    always worth -10, whether or not this shooter took one -- see
+    :data:`_COUNT_FIELDS`), but an *actual* nonzero fault additionally
+    gets :attr:`~splitsmith.overlay_layout.Emphasis.PLATE`: colour alone
+    says what a count is worth, and a plate says this particular one
+    happened. Only the ``M``/``NS``/``P`` entries are eligible -- ``A``/
+    ``C``/``D`` are never a fault, so they never plate regardless of
+    value.
     """
-    return _counts(scorecard, (("alphas", "A"), ("charlies", "C"), ("deltas", "D")))
-
-
-def _faults_line(scorecard) -> str | None:
-    """``M0 NS0 P2``, omitting any field that is ``None``.
-
-    What went wrong, as opposed to how well the shooter shot. A recorded
-    zero is drawn: a scoreboard row that says the shooter took no
-    procedurals is a fact worth stating, and it is a different fact from
-    a row that carried no procedural column at all -- which draws nothing
-    here. Those two must stay distinguishable, which is the same rule the
-    rest of this module follows.
-
-    ``P`` is the one this function exists for. ``StageScorecard`` has
-    carried ``procedurals`` all along and the old merged line never read
-    it, so two procedurals -- 20 points -- rendered as nothing.
-    """
-    return _counts(scorecard, (("misses", "M"), ("no_shoots", "NS"), ("procedurals", "P")))
-
-
-def _counts(scorecard, fields: tuple[tuple[str, str], ...]) -> str | None:
-    """``"<tag><value>"`` per field that is not ``None``, space-joined.
-
-    Returns ``None`` -- draw nothing -- when every field is ``None``.
-    """
-    parts = [f"{tag}{value}" for name, tag in fields if (value := getattr(scorecard, name)) is not None]
-    return " ".join(parts) if parts else None
-
-
-def has_faults(scorecard) -> bool:
-    """Did anything actually go wrong?
-
-    Drives *emphasis*, not presence: a clean run still states ``M0 NS0
-    P0``, it just does not light an accent plate to do it. Presence is a
-    fact; emphasis is a judgement.
-    """
-    return any(bool(getattr(scorecard, name)) for name in ("misses", "no_shoots", "procedurals"))
+    elements: list[Element] = []
+    for name, tag, token in _COUNT_FIELDS:
+        value = getattr(scorecard, name)
+        if value is None:
+            continue
+        plate = token is ColorToken.ACCENT and value > 0
+        elements.append(
+            Element(
+                role=Role.DETAIL,
+                text=f"{tag}{value}",
+                emphasis=Emphasis.PLATE if plate else Emphasis.PLAIN,
+                color=token,
+            )
+        )
+    return elements
 
 
 def _cell_groups(
     tile: TileStageData | None,
     placing: StagePlacing | None,
     label: str,
+    *,
+    variant: str | None = None,
 ) -> tuple[Group, ...]:
     """What one cell says, as anchored groups rather than an ordered list.
 
@@ -407,7 +489,16 @@ def _cell_groups(
     A tile with no audit and no scorecard yields just the label -- that
     cell is the control the hold's pixel checks measure against, so it
     must stay text-free apart from the name.
+
+    ``variant`` is the issue #683 Task 7 design-pass switch (see
+    :data:`_VARIANT_ENV`). ``"b"`` composes a completely different shape
+    (:func:`_cell_groups_b`); anything else -- including ``"a"``, which
+    only changes type size via :func:`_summary_scale` -- draws through
+    this function's own, unchanged anchors.
     """
+    if variant == "b":
+        return _cell_groups_b(tile, placing, label)
+
     scorecard = tile.scorecard if tile is not None else None
     groups: list[Group] = []
 
@@ -459,23 +550,91 @@ def _cell_groups(
     if band:
         groups.append(Group(anchor=Anchor.BOTTOM_LEFT, flow=Flow.ROW, elements=tuple(band)))
 
-    # Then, stacked above it: how well they shot, and what went wrong.
+    # Then, stacked above it: the six hit/fault counts as one equal-weight,
+    # colour-coded row -- see _count_elements.
     if scorecard is not None and not scorecard.dq:
-        counts: list[Element] = []
-        accuracy = _accuracy_line(scorecard)
-        if accuracy is not None:
-            counts.append(Element(role=Role.DETAIL, text=accuracy, emphasis=Emphasis.MUTED))
-        faults = _faults_line(scorecard)
-        if faults is not None:
-            counts.append(
-                Element(
-                    role=Role.VERDICT,
-                    text=faults,
-                    emphasis=Emphasis.PLATE if has_faults(scorecard) else Emphasis.MUTED,
-                )
-            )
+        counts = _count_elements(scorecard)
         if counts:
             groups.append(Group(anchor=Anchor.BOTTOM_LEFT, flow=Flow.ROW, elements=tuple(counts)))
+
+    return tuple(groups)
+
+
+def _cell_groups_b(
+    tile: TileStageData | None,
+    placing: StagePlacing | None,
+    label: str,
+) -> tuple[Group, ...]:
+    """Variant B, "recompose as a scorecard" (issue #683 Task 7).
+
+    The hold is not an overlay: the tile underneath is already blurred
+    and dimmed to 0.45, so it is background texture and the summary is
+    the content. :func:`_cell_groups` keeps the live overlay's habit of
+    pinning content to the cell's corners and staying out of the way of a
+    picture that, during the hold, is no longer the thing being watched.
+    This function drops that habit and declares one block instead:
+    identity + placing, then shot detail, then the six-count row, then
+    TIME/HF/STAGE -- in that top-to-bottom reading order, the order a
+    printed scorecard uses.
+
+    All four groups share :attr:`~splitsmith.overlay_layout.Anchor.TOP_CENTER`
+    rather than a new anchor: multiple groups at one anchor already stack
+    in declaration order (see :class:`~splitsmith.overlay_layout.Group`'s
+    own docstring), so "one centred block" falls out of the existing
+    engine instead of inventing a seventh anchor position. ``TOP_CENTER``
+    over ``BOTTOM_CENTER`` because a bottom anchor stacks in *reverse*
+    (the first-declared group hugs the edge, see
+    ``overlay_html._anchor_classes``) -- reading the block top-to-bottom
+    would then mean declaring it bottom-to-top, which is the kind of
+    inversion this whole rewrite exists to avoid. Centred, not left- or
+    right-aligned, because a block sitting in the middle of the cell reads
+    as the cell's own content rather than as a corner label leftover from
+    the live overlay.
+    """
+    scorecard = tile.scorecard if tile is not None else None
+    groups: list[Group] = []
+
+    identity: list[Element] = [Element(role=Role.IDENTITY, text=label)]
+    if scorecard is not None and scorecard.dq:
+        identity.append(Element(role=Role.VERDICT, text="DQ", emphasis=Emphasis.PLATE))
+    elif placing is not None:
+        identity.append(Element(role=Role.VERDICT, text=f"#{placing.rank}", emphasis=Emphasis.PLATE))
+    groups.append(Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(identity)))
+
+    if tile is None:
+        return tuple(groups)
+
+    if tile.has_shots:
+        detail: list[Element] = [
+            Element(role=Role.DETAIL, text=f"{tile.shot_count} shots", emphasis=Emphasis.MUTED)
+        ]
+        rest = [shot.split for shot in tile.shots[1:]]
+        if rest:
+            best_avg_worst = f"Best {min(rest):.2f}  Avg {sum(rest) / len(rest):.2f}  Worst {max(rest):.2f}"
+            detail.append(Element(role=Role.DETAIL, text=best_avg_worst, emphasis=Emphasis.MUTED))
+        detail.append(
+            Element(role=Role.DETAIL, text=f"Draw {tile.shots[0].split:.2f}", emphasis=Emphasis.MUTED)
+        )
+        groups.append(Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(detail)))
+
+    if scorecard is not None and not scorecard.dq:
+        counts = _count_elements(scorecard)
+        if counts:
+            groups.append(Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(counts)))
+
+    band: list[Element] = []
+    if tile.stage_time_seconds is not None:
+        text = f"{tile.stage_time_seconds:.2f}"
+        if tile.stage_time_is_manual:
+            text += " (manual)"
+        band.append(Element(role=Role.HEADLINE, text=text, caption="TIME"))
+    if scorecard is not None and not scorecard.dq:
+        if scorecard.hit_factor is not None:
+            band.append(Element(role=Role.HEADLINE, text=f"{scorecard.hit_factor:.2f}", caption="HF"))
+        if scorecard.stage_pct is not None:
+            band.append(Element(role=Role.HEADLINE, text=f"{scorecard.stage_pct:.1f}%", caption="STAGE"))
+    if band:
+        groups.append(Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(band)))
 
     return tuple(groups)
 
@@ -484,6 +643,8 @@ def _summary_cells(
     placements: Sequence[TilePlacement],
     data: Mapping[str, TileStageData],
     placings: Mapping[str, StagePlacing],
+    *,
+    variant: str | None = None,
 ) -> list[tuple[TilePlacement, tuple[Group, ...]]]:
     """One ``(placement, declared groups)`` pair per placement, in
     placement order -- :func:`splitsmith.overlay_html.summary_html`'s own
@@ -501,7 +662,7 @@ def _summary_cells(
             cells.append((placement, ()))
             continue
         tile = data.get(placement.label)
-        groups = _cell_groups(tile, placings.get(placement.label), placement.label)
+        groups = _cell_groups(tile, placings.get(placement.label), placement.label, variant=variant)
         cells.append((placement, groups))
     return cells
 
@@ -553,6 +714,12 @@ def build_hold_still(
     ``blur_radius`` defaults to ``max(8, cell_height // 60)`` -- scaled
     from the cell so a 4K canvas and a small preview blur proportionally.
     ``dim`` defaults to :data:`DEFAULT_DIM`.
+
+    The composed groups and the scale they render at both read
+    :func:`_active_variant` (:data:`_VARIANT_ENV`) when a rasterizer is
+    given -- see that function's docstring. There is no parameter for it
+    here: it is a throwaway design-pass switch, not part of this
+    function's real contract.
     """
     _check_stage_keys(data)
     radius = blur_radius if blur_radius is not None else max(8, geometry.cell_height // 60)
@@ -572,9 +739,10 @@ def build_hold_still(
         canvas.paste(cell_image.convert("RGBA"), (x0, y0))
 
     if rasterizer is not None:
+        variant = _active_variant()
         placings = _rank_placings(placements, data)
-        cells = _summary_cells(placements, data, placings)
-        scale = CellScale.for_cell(geometry.cell_height)
+        cells = _summary_cells(placements, data, placings, variant=variant)
+        scale = _summary_scale(geometry.cell_height, variant)
         html = summary_html(cells, geometry=geometry, scale=scale, theme=theme)
         try:
             png_bytes = rasterizer.png(html, width=geometry.canvas_width, height=geometry.canvas_height)

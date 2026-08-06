@@ -95,12 +95,39 @@ class Role(Enum):
     #: A figure the viewer should read first -- stage time, hit factor.
     HEADLINE = "headline"
     #: A cross-shooter or disqualifying fact: placing, DQ, penalties.
-    #: The only role eligible for :attr:`Emphasis.PLATE`.
     VERDICT = "verdict"
     #: Supporting figures -- split statistics, hit counts, shot count.
+    #: Since issue #683 Task 7 this is also eligible for
+    #: :attr:`Emphasis.PLATE`: the stage summary's individual fault counts
+    #: (misses/no-shoots/procedurals) plate when genuinely nonzero, at the
+    #: same size as the rest of the equal-weight hit/fault row --
+    #: :class:`Emphasis` decides eligibility for ``PLATE`` now, not
+    #: ``Role``, because a cross-shooter fact and a same-size fault count
+    #: both need it at different type sizes.
     DETAIL = "detail"
     #: The live overlay's shot counter and running clock.
     LIVE_PRIMARY = "live-primary"
+
+
+class ColorToken(Enum):
+    """Which theme colour an element's text paints in, when it is not the
+    default ink.
+
+    Introduced for the stage summary's hit/fault counts (issue #683 Task
+    7): ``A``/``C``/``D``/``M``/``NS``/``P`` are colour-coded by the point
+    value they carry in IPSC scoring -- ``A`` full points, ``C`` mid,
+    ``D`` low, and ``M``/``NS``/``P`` each a flat -10 -- rather than by
+    role/size the way the rest of the vocabulary works. Colour is a fact
+    about the number (its worth), not a judgement about the shooter's run
+    (:class:`Emphasis` already owns that). ``None`` on :attr:`Element.color`
+    means "the emphasis's own ink", which is every element that existed
+    before this token did.
+    """
+
+    INK = "ink"
+    SPLIT = "split"
+    SPLIT_GOOD = "split_good"
+    ACCENT = "accent"
 
 
 class Emphasis(Enum):
@@ -133,6 +160,11 @@ class Element:
     #: element on its own, it always belongs to the value it labels, and
     #: its size comes from :attr:`CellScale.caption`.
     caption: str | None = None
+    #: Overrides the emphasis's own ink colour with a theme token. See
+    #: :class:`ColorToken`. ``None`` (the default) draws exactly what it
+    #: always did -- this field is additive, not a second way to spell an
+    #: existing colour.
+    color: ColorToken | None = None
 
 
 @dataclass(frozen=True)

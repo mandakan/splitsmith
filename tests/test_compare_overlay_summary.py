@@ -3,18 +3,18 @@
 Freeze extraction goes through a fake runner -- no ffmpeg is ever shelled
 out to here, per CLAUDE.md. As of issue #683's amendment (Task 6R-3),
 ``overlay_summary`` no longer hand-fits or draws text itself: it declares
-a cell's content as ``Group``/``Element`` tuples (``_cell_groups``,
-unchanged) and turns the whole canvas's declared cells into one HTML
-document composed through an injected
-:class:`splitsmith.overlay_raster.Rasterizer`
+a cell's content as ``Group``/``Element`` tuples (``_cell_groups``) and
+turns the whole canvas's declared cells into one HTML document composed
+through an injected :class:`splitsmith.overlay_raster.Rasterizer`
 (``docs/superpowers/plans/2026-08-06-overlay-composition-seam-amendment.md``).
-So this file's "what got drawn" checks split two ways:
+Task 7 (also issue #683) changed what ``_cell_groups`` declares for the
+six hit/fault counts -- see :func:`overlay_summary._count_elements` --
+but not this split; the checks below still split two ways:
 
 - Tests about *what a cell says* call :func:`overlay_summary._cell_groups`
-  (and :func:`overlay_summary._rank_placings`) directly -- both are pure
-  and unchanged by this task, so asserting against their output is more
-  direct than round-tripping through rasterization to observe the same
-  facts.
+  (and :func:`overlay_summary._rank_placings`) directly -- both are pure,
+  so asserting against their output is more direct than round-tripping
+  through rasterization to observe the same facts.
 - Tests about *how ``build_hold_still`` wires that declaration through
   the rasterizer* inject :class:`_FakeRasterizer`, a recording double
   standing in for :class:`splitsmith.overlay_raster.Rasterizer` -- unit
@@ -59,7 +59,7 @@ from splitsmith.compare import overlay_summary as summ
 from splitsmith.compare.mp4_grid import GridStagePlan, GridTile
 from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
-from splitsmith.overlay_layout import Anchor, Emphasis, Role
+from splitsmith.overlay_layout import Anchor, ColorToken, Emphasis, Role
 from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
 from splitsmith.overlay_theme import load_theme
 from splitsmith.ui.project import StageScorecard
@@ -425,22 +425,56 @@ def test_the_band_carries_three_captioned_headlines():
 def test_a_clean_run_states_its_zeros_without_a_plate():
     """Presence is a fact; emphasis is a judgement. Drawing an accent
     plate on every clean cell in the grid would make the plate mean
-    nothing when a real penalty turns up."""
+    nothing when a real penalty turns up. The counts still read as
+    "worth -10" -- coloured accent -- even at zero; only an *actual*
+    nonzero fault additionally plates (see ``test_a_penalised_run_...``).
+    """
     scorecard = StageScorecard(alphas=10, misses=0, no_shoots=0, procedurals=0)
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
     groups = summ._cell_groups(tile, None, "Ann")
-    faults = [e for g in groups for e in g.elements if e.text == "M0 NS0 P0"]
-    assert len(faults) == 1
-    assert faults[0].emphasis is Emphasis.MUTED
+    faults = [e for g in groups for e in g.elements if e.text in ("M0", "NS0", "P0")]
+    assert [e.text for e in faults] == ["M0", "NS0", "P0"]
+    assert all(e.emphasis is Emphasis.PLAIN for e in faults)
+    assert all(e.color is ColorToken.ACCENT for e in faults)
 
 
 def test_a_penalised_run_lights_the_plate():
+    """Only the counts that actually happened plate. ``NS0`` stays plain
+    (still red -- a no-shoot is worth -10 whether or not this shooter had
+    one) while ``M1``/``P2`` -- both genuinely nonzero -- plate."""
     scorecard = StageScorecard(alphas=10, misses=1, no_shoots=0, procedurals=2)
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
     groups = summ._cell_groups(tile, None, "Ann")
-    faults = [e for g in groups for e in g.elements if e.text == "M1 NS0 P2"]
-    assert len(faults) == 1
-    assert faults[0].emphasis is Emphasis.PLATE
+    by_text = {e.text: e for g in groups for e in g.elements if e.text in ("M1", "NS0", "P2")}
+    assert set(by_text) == {"M1", "NS0", "P2"}
+    assert by_text["M1"].emphasis is Emphasis.PLATE
+    assert by_text["P2"].emphasis is Emphasis.PLATE
+    assert by_text["NS0"].emphasis is Emphasis.PLAIN
+    assert all(e.color is ColorToken.ACCENT for e in by_text.values())
+
+
+def test_the_six_counts_are_one_equal_weight_colour_coded_row():
+    """Issue #683 Task 7: A/C/D used to draw at Role.DETAIL and M/NS/P at
+    the bigger Role.VERDICT, so the faults visually outweighed the hits
+    even though all six are inputs to the same hit-factor number. They
+    must now share one role (equal size) and read as a single row, with
+    colour -- not size -- carrying what each count is worth."""
+    scorecard = StageScorecard(alphas=10, charlies=1, deltas=1, misses=1, no_shoots=0, procedurals=2)
+    tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
+    groups = summ._cell_groups(tile, None, "Ann")
+    (counts_group,) = [g for g in _groups_by_anchor(groups)[Anchor.BOTTOM_LEFT] if len(g.elements) == 6]
+    texts_and_colors = [(e.text, e.color) for e in counts_group.elements]
+    assert texts_and_colors == [
+        ("A10", ColorToken.SPLIT_GOOD),
+        ("C1", ColorToken.INK),
+        ("D1", ColorToken.SPLIT),
+        ("M1", ColorToken.ACCENT),
+        ("NS0", ColorToken.ACCENT),
+        ("P2", ColorToken.ACCENT),
+    ]
+    # Equal weight: every one of the six shares a role, so none can
+    # outrank another by size the way the old accuracy/faults split did.
+    assert len({e.role for e in counts_group.elements}) == 1
 
 
 def test_split_statistics_take_the_clocks_old_corner():
@@ -632,36 +666,43 @@ def test_stage_points_never_appears_and_stage_pct_does():
 
 def test_none_hit_counts_are_omitted_not_zeroed():
     # charlies and misses are genuinely unread (None); no_shoots is a real
-    # zero. The lines must show the real zero and skip the unread fields --
-    # not print a fabricated 0 for a count nobody read. Accuracy and faults
-    # are separate lines now, so the zero lands on the faults one.
+    # zero. Each count is now its own element -- the row must draw A7 and
+    # D1 and skip charlies/misses entirely, not print a fabricated 0 for a
+    # count nobody read.
     scorecard = StageScorecard(alphas=7, charlies=None, deltas=1, misses=None, no_shoots=0)
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
     texts = _texts(summ._cell_groups(tile, None, "Ann"))
 
-    assert "A7 D1" in texts
+    assert "A7" in texts
+    assert "D1" in texts
     assert "NS0" in texts
+    assert not any(t.startswith("C") for t in texts)
+    assert not any(t.startswith("M") for t in texts)
+
+
+def _count_texts(scorecard) -> list[str]:
+    return [e.text for e in summ._count_elements(scorecard)]
 
 
 def test_procedurals_reach_the_screen():
     """The defect this task exists for.
 
     ``StageScorecard`` carries ``procedurals`` and it survives into
-    ``TileStageData``, but ``_hit_count_line`` read alphas, charlies,
+    ``TileStageData``, but the old hit-count line read alphas, charlies,
     deltas, misses and no-shoots and never read it. Two procedurals is 20
     points off a stage; the shooter saw a hit factor that did not follow
     from the hits above it and no explanation anywhere on screen.
     """
     scorecard = StageScorecard(alphas=10, charlies=1, deltas=1, misses=0, no_shoots=0, procedurals=2)
-    assert summ._faults_line(scorecard) == "M0 NS0 P2"
+    assert _count_texts(scorecard)[-3:] == ["M0", "NS0", "P2"]
 
 
-def test_accuracy_and_faults_are_separate_lines():
+def test_accuracy_and_faults_are_both_in_the_one_row():
     """A/C/D says how well the shooter shot; M/NS/P says what went wrong.
-    One line mixing them cannot give the faults their own emphasis."""
+    Both are now one equal-weight row (issue #683 Task 7) -- colour, not a
+    separate line/role, is what gives the faults their own reading."""
     scorecard = StageScorecard(alphas=10, charlies=1, deltas=1, misses=1, no_shoots=0, procedurals=2)
-    assert summ._accuracy_line(scorecard) == "A10 C1 D1"
-    assert summ._faults_line(scorecard) == "M1 NS0 P2"
+    assert _count_texts(scorecard) == ["A10", "C1", "D1", "M1", "NS0", "P2"]
 
 
 def test_a_recorded_zero_is_drawn_and_an_unread_field_is_not():
@@ -669,23 +710,23 @@ def test_a_recorded_zero_is_drawn_and_an_unread_field_is_not():
 
     A scoreboard row that recorded zero misses draws ``M0``. A row that
     carried no penalty column at all draws nothing for it -- and a row
-    with no penalty columns whatsoever draws no faults line.
+    with no penalty columns whatsoever draws no faults counts at all.
     """
     recorded = StageScorecard(misses=0, no_shoots=0, procedurals=0)
-    assert summ._faults_line(recorded) == "M0 NS0 P0"
+    assert _count_texts(recorded) == ["M0", "NS0", "P0"]
 
     partial = StageScorecard(misses=0, no_shoots=None, procedurals=None)
-    assert summ._faults_line(partial) == "M0"
+    assert _count_texts(partial) == ["M0"]
 
     unread = StageScorecard(misses=None, no_shoots=None, procedurals=None)
-    assert summ._faults_line(unread) is None
+    assert _count_texts(unread) == []
 
 
 def test_an_all_none_accuracy_draws_nothing():
-    assert summ._accuracy_line(StageScorecard(alphas=None, charlies=None, deltas=None)) is None
+    assert _count_texts(StageScorecard(alphas=None, charlies=None, deltas=None)) == []
 
 
-def test_both_lines_are_drawn_for_a_penalised_tile():
+def test_both_accuracy_and_faults_are_drawn_for_a_penalised_tile():
     scorecard = StageScorecard(
         hit_factor=12.17,
         stage_pct=78.5,
@@ -699,8 +740,8 @@ def test_both_lines_are_drawn_for_a_penalised_tile():
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
     texts = _texts(summ._cell_groups(tile, None, "Ann"))
 
-    assert "A10 C1 D1" in texts
-    assert "M1 NS0 P2" in texts
+    for count in ("A10", "C1", "D1", "M1", "NS0", "P2"):
+        assert count in texts
 
 
 def test_manual_time_is_marked_as_manual():

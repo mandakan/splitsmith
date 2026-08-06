@@ -56,6 +56,14 @@ Design rules, each answering one of the old fitter's defects:
   stroke+shadow analogue of ``overlay_text._draw_text_with_shadow``
   (``paint-order: stroke fill`` plus ``-webkit-text-stroke`` and
   ``text-shadow``), and ``MUTED`` additionally drops opacity.
+- **``Element.color`` (:class:`~splitsmith.overlay_layout.ColorToken`)
+  overrides an element's ink with a named theme colour** -- ``.tok-*``
+  classes, one per token, declared between the emphasis rules and
+  ``.emphasis-plate`` so a plate always wins its own colour back (see the
+  comment above those rules). This is how the stage summary's hit/fault
+  counts read by point value (issue #683 Task 7): green for a full-value
+  hit, amber for a low one, red for anything worth -10, all at the same
+  size -- colour carries the meaning that size used to carry unevenly.
 - **``IDENTITY`` gets ``text-overflow: ellipsis``** so a long name still
   identifies rather than spilling -- but never shrinks its box below
   ``min-width: 3ch``, so it can never ellipsize down to nothing. #617
@@ -92,7 +100,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from .compare.overlay_sprites import SpriteGeometry, TilePlacement
-from .overlay_layout import Anchor, CellScale, Element, Flow, Group, Role
+from .overlay_layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
 from .overlay_theme import OverlayTheme
 
 RGB = tuple[int, int, int]
@@ -177,6 +185,19 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     stroke = _rgb(theme.stroke)
     shadow = _rgb(theme.shadow)
     accent = _rgb(theme.accent)
+    split = _rgb(theme.split)
+    split_good = _rgb(theme.split_good)
+    # ``.group``'s row gutter used to be a flat ``0.4em``, computed against
+    # whatever font-size the browser inherits down to the flex container
+    # itself -- which no rule here ever sets, so it stayed pinned near the
+    # ~16px default regardless of how large ``scale``'s roles actually
+    # render. At ``scale.headline`` sizes that is an all but invisible
+    # gap: "4.50 12.00 100.0%" reads as one run-on number rather than
+    # three captioned columns. Deriving the gutter from ``scale.pad`` (the
+    # one number already scaled off cell height) fixes that at its root
+    # instead of hand-tuning an em value per call site.
+    row_gutter = max(8, scale.pad // 2)
+    column_gutter = max(4, scale.pad // 5)
     return f"""
 @font-face {{
   font-family: "Splitsmith Mono";
@@ -199,7 +220,7 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
 .anchor {{
   position: absolute;
   display: flex;
-  gap: 0.35em;
+  gap: {row_gutter}px;
   max-width: calc(100% - 2 * {scale.pad}px);
   min-width: 0;
 }}
@@ -214,9 +235,9 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
 .anchor.align-left   {{ align-items: flex-start; }}
 .anchor.align-center {{ align-items: center; }}
 .anchor.align-right  {{ align-items: flex-end; }}
-.group {{ display: flex; gap: 0.4em; min-width: 0; }}
-.group.flow-row    {{ flex-direction: row; align-items: baseline; }}
-.group.flow-column {{ flex-direction: column; }}
+.group {{ display: flex; min-width: 0; }}
+.group.flow-row    {{ flex-direction: row; align-items: baseline; gap: {row_gutter}px; }}
+.group.flow-column {{ flex-direction: column; gap: {column_gutter}px; }}
 .group.flow-column.align-left   {{ align-items: flex-start; }}
 .group.flow-column.align-center {{ align-items: center; }}
 .group.flow-column.align-right  {{ align-items: flex-end; }}
@@ -256,6 +277,18 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
   text-shadow: 0.06em 0.06em 0.1em rgb({shadow});
 }}
 .emphasis-muted {{ opacity: 0.68; }}
+/* Colour tokens (see ``ColorToken``) override an element's ink -- but
+   never a plate's, which always wants ink-on-accent for contrast. These
+   rules must stay between ``.emphasis-plain``/``.emphasis-muted`` (whose
+   default colour they are meant to override) and ``.emphasis-plate``
+   below (which must win back the colour property for a plated element,
+   or an accent-toned count on an accent-coloured plate would vanish).
+   Source order is the whole mechanism here: all three selectors have
+   equal specificity, so this is not optional ordering. */
+.tok-ink        {{ color: rgb({ink}); }}
+.tok-split      {{ color: rgb({split}); }}
+.tok-split-good {{ color: rgb({split_good}); }}
+.tok-accent     {{ color: rgb({accent}); }}
 .emphasis-plate {{
   background: rgb({accent});
   color: rgb({ink});
@@ -304,6 +337,18 @@ def _group_classes(group: Group) -> str:
     return " ".join(classes)
 
 
+def _color_class(color: ColorToken | None) -> str:
+    """The ``.tok-*`` class for an explicit :class:`ColorToken`, or ``""``
+    when an element draws its emphasis's own ink (the default -- see
+    :attr:`Element.color`). ``SPLIT_GOOD``'s underscore becomes a hyphen
+    because CSS class names conventionally don't carry underscores; the
+    token's own ``.value`` (used for theme attribute lookup elsewhere)
+    stays untouched."""
+    if color is None:
+        return ""
+    return f"tok-{color.value.replace('_', '-')}"
+
+
 def _element_div(element: Element) -> str:
     """One :class:`Element` as a ``.el`` block: an optional caption line
     above its value, both escaped -- a competitor's name is untrusted
@@ -311,10 +356,12 @@ def _element_div(element: Element) -> str:
     el_classes = "el el-identity" if element.role is Role.IDENTITY else "el"
     role_class = f"role-{element.role.value}"
     emphasis_class = f"emphasis-{element.emphasis.value}"
+    color_class = _color_class(element.color)
     caption_html = ""
     if element.caption is not None:
         caption_html = f'<span class="caption">{escape(element.caption)}</span>'
-    value_html = f'<span class="value {role_class} {emphasis_class}">{escape(element.text)}</span>'
+    value_classes = " ".join(c for c in ("value", role_class, emphasis_class, color_class) if c)
+    value_html = f'<span class="{value_classes}">{escape(element.text)}</span>'
     return f'<div class="{el_classes}">{caption_html}{value_html}</div>'
 
 

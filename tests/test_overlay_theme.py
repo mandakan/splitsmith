@@ -21,6 +21,12 @@ def test_clean_preset_matches_legacy_hardcoded_values() -> None:
     assert t.split == (255, 220, 80)
     assert t.stroke == (0, 0, 0)
     assert t.shadow == (0, 0, 0)
+    # split_good is new (issue #683 Task 7): no legacy value to match, but
+    # it must be distinct from every other clean token and must not be
+    # black/white (both of which would fail to read as "green").
+    assert t.split_good not in (t.ink, t.split, t.stroke, t.accent)
+    r, g, b = t.split_good
+    assert g > r and g > b, f"expected a green-dominant split_good, got {t.split_good!r}"
 
 
 def test_splitsmith_preset_loads_from_packaged_json() -> None:
@@ -33,6 +39,7 @@ def test_splitsmith_preset_loads_from_packaged_json() -> None:
     assert t.name == "splitsmith"
     assert list(t.ink) == data["colors"]["ink"]
     assert list(t.split) == data["colors"]["split"]
+    assert list(t.split_good) == data["colors"]["split_good"]
     assert list(t.stroke) == data["colors"]["stroke"]
     # Sanity: ink is light (designed for dark surfaces); stroke is dark.
     assert sum(t.ink) > 600
@@ -52,6 +59,7 @@ def test_default_template_paints_theme_ink() -> None:
         name="clean",
         ink=(255, 0, 200),
         split=(0, 200, 255),
+        split_good=(0, 255, 120),
         stroke=(0, 0, 0),
         accent=(255, 0, 0),
         font_display="Antonio",
@@ -93,6 +101,7 @@ def test_default_template_paints_theme_split_color() -> None:
         name="clean",
         ink=(255, 255, 255),
         split=(0, 220, 255),
+        split_good=(46, 204, 113),
         stroke=(0, 0, 0),
         accent=(0, 0, 0),
         font_display="Antonio",

@@ -63,6 +63,7 @@ class OverlayTheme:
     name: ThemeName
     ink: RGB
     split: RGB
+    split_good: RGB
     stroke: RGB
     accent: RGB
     font_display: str
@@ -81,6 +82,12 @@ _CLEAN = OverlayTheme(
     name="clean",
     ink=(255, 255, 255),
     split=(255, 220, 80),
+    # No brand palette to draw from here, so this is a plain, defensible
+    # "success green" -- (46, 204, 113), the Flat UI Colors "Emerald" --
+    # picked for being a common, accessible semantic-success hue that
+    # reads clearly against clean's black stroke and stays visually
+    # distinct from both split's gold and accent's red.
+    split_good=(46, 204, 113),
     stroke=(0, 0, 0),
     accent=(255, 45, 45),
     font_display="Antonio",
@@ -108,6 +115,7 @@ def _load_splitsmith() -> OverlayTheme:
             name="splitsmith",
             ink=_rgb(colors, "ink"),
             split=_rgb(colors, "split"),
+            split_good=_rgb(colors, "split_good"),
             stroke=_rgb(colors, "stroke"),
             accent=_rgb(colors, "accent"),
             font_display=str(fonts.get("display", "Antonio")),
