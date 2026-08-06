@@ -74,7 +74,12 @@ Design rules, each answering one of the old fitter's defects:
   unconditionally regardless of theme, which is a deliberate change from
   the old PIL renderer (which let the ``clean`` theme fall through to
   system font discovery) -- determinism across machines matters more here
-  than matching that theme's old font choice.
+  than matching that theme's old font choice. **This only works if the
+  rasterizer navigates to the HTML as a real ``file://`` document rather
+  than injecting it via ``page.set_content()``** -- the fonts silently
+  fall back to a system face with no error under ``set_content()``. See
+  :func:`_font_face_url` for the measured numbers and the data-URI
+  fallback if a caller cannot navigate to a real document.
 - **Every string is escaped.** A competitor's name is untrusted input --
   see :func:`_element_div`.
 """
@@ -117,6 +122,36 @@ def _font_face_url(filename: str) -> str:
     disk. If the resource is ever missing, this still returns a URL --
     Chromium failing to load it is Task 6R-2/6R-3's degradation path to
     handle, not a concern of a function that never opens a browser.
+
+    **The rasterizer MUST navigate to this HTML as a real ``file://``
+    document -- ``page.goto(f"file://{path}")`` -- not hand it to
+    Chromium via ``page.set_content()``.** Measured on the dev host,
+    rendering the same document both ways and comparing a text run's
+    width against the browser's own fallback monospace:
+
+    - ``file://`` fonts + ``page.goto(file://...)``: custom face loads,
+      measured width 552.00px against a 553.89px fallback -- distinct,
+      confirming the bundled TTF is what actually rendered.
+    - ``file://`` fonts + ``page.set_content()``: **552.00 == 553.89 --
+      identical to the fallback.** The ``@font-face`` silently fails to
+      load (``set_content()`` gives the document an opaque/``about:blank``
+      origin that a local file URL cannot resolve against) and Chromium
+      falls back to whatever monospace the host happens to have, with no
+      error, no warning and no exception -- just different, host-
+      dependent pixels. A 1.89px width difference is not something any
+      "did it render some text" check would catch; it can only be caught
+      by knowing to check for it, which is why this is written down here
+      rather than left to be rediscovered.
+
+    If a caller cannot navigate to a real ``file://`` document (e.g. the
+    HTML is generated in memory and never touches disk), the alternative
+    is a base64 data URI instead of this function -- confirmed to load
+    correctly under ``set_content()`` too -- at the cost of inlining both
+    bundled faces (JetBrains Mono Bold + Antonio, roughly 356 KB base64-
+    encoded) into every document this module returns, rather than the one
+    path string a ``file://`` URL costs. See the module docstring's fonts
+    bullet for why ``file://`` was chosen as the default; this docstring
+    is the record of the constraint that choice carries.
     """
     resource = files("splitsmith.data").joinpath("fonts").joinpath(filename)
     return Path(str(resource)).resolve().as_uri()

@@ -363,12 +363,8 @@ def test_golden_roster_structure():
     doc = summary_html(cells, geometry=geometry, scale=SCALE, theme=THEME)
 
     # Every present tile's own numbers stay attached to its own name --
-    # this is the whole point of the amendment. Cheap structural proxy:
-    # each cell's own <div class="cell"> block contains only its own
-    # figures, never the other shooter's.
-    cell_blocks = re.findall(r'grid-column:(\d);">(.*?)</div></div>', doc)
-    assert len(cell_blocks) >= 2
-
+    # this is the whole point of the amendment. The real isolation check
+    # is the per-column slicing below; it is what can actually fail.
     assert "Anders" in doc
     assert "#1" in doc
     assert "91.2%" in doc
