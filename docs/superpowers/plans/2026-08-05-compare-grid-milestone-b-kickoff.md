@@ -148,25 +148,41 @@ live delta strip's job went after that strip was removed.
   Build the ranking first, render it on real footage, then decide. The
   strip's problem was only visible once rendered.
 
-### Task 9: the clock will bleed into the hold. Verified, not theoretical.
+### Task 9: the clock does NOT bleed into the hold. Do not cap it.
 
-Task 9 says to check that the live overlay stops at the freeze. It does
-not, as the code now stands. Both filters in `_clock_filters`
-(`src/splitsmith/compare/mp4_grid.py`) are unbounded above:
+**This amendment originally said the opposite and was wrong.** It is kept
+with the correction visible, because the reasoning is the useful part.
 
-- the open-ended ticking clock, `enable='gte(t,{start})'`
-- the static hold, `enable='gte(t,{freeze})'`
+Both filters in `_clock_filters` (`src/splitsmith/compare/mp4_grid.py`)
+are unbounded above -- the open-ended ticking clock,
+`enable='gte(t,{start})'`, and the static hold, `enable='gte(t,{freeze})'`.
+That observation is true. The inference drawn from it -- that a clock
+would therefore run over the summary -- is false, and was disproved by
+rendering rather than by reading.
 
-Either will run straight through the summary. A clock ticking over a
-blurred, dimmed summary -- or frozen beside it -- is precisely the "reads
-as a stall rather than a conclusion" failure the spec calls out. Cap both
-at the action's end (`duration_seconds`), and prove it by extracting a
-frame from inside the hold and confirming no clock glyphs are present,
-not by reading the expressions.
+**The architecture already prevents it.** The hold is a separate input
+`concat`-ed onto the end of the stage's video, so every `drawtext` runs
+*upstream of the join* and cannot reach a hold frame. Removing a cap
+leaves the in-hold frame byte-identical (`bcb7cdc3…`, verified twice with
+fresh work dirs).
 
-The sprite chain's `trim` already ends at `duration_seconds`, so the
-sprite half stops correctly on its own. Only the `drawtext` half needs
-the cap.
+So **do not add a cap.** It would be a behaviour-free
+`if plan.hold_seconds > 0` branch, an asymmetry where the same
+`--overlay` render emits different `enable` text depending on an
+unrelated field, and a test that can only fail for a reason unrelated to
+what it names. `test_the_hold_does_not_touch_the_clock_windows` fails
+loudly if someone tries.
+
+The risk the cap was imagined to cover -- someone rewriting the hold to
+composite over the action instead of concatenating after it -- is owned
+by `test_hold_is_concatenated_after_the_action_not_composited_over_it`,
+which asserts `"[hold]overlay" not in graph` and pins
+`[grid][hold]concat=…`. Mutating `concat` to `overlay` turns it and three
+siblings red, plus the rendered check.
+
+The sprite chain's `trim` ends at `duration_seconds` and is pinned by
+`test_the_sprite_chain_still_ends_at_the_action`; that one is real and
+stays.
 
 ### What else moved under these tasks
 

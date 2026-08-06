@@ -33,6 +33,7 @@ def _tile(label, row, col, *, present=True):
         beep_offset_in_clip=1.0,
         seek_seconds=0.0,
         lead_pad_seconds=0.0,
+        source_duration_seconds=6.0,
         row=row,
         col=col,
     )
@@ -199,6 +200,7 @@ def test_the_beep_alignment_filter_order_survives_the_overlay(tmp_path):
         beep_offset_in_clip=0.2,
         seek_seconds=0.0,
         lead_pad_seconds=0.8,
+        source_duration_seconds=6.0,
         row=0,
         col=0,
     )

@@ -117,6 +117,34 @@ shooter, by mount or by role.
 Progress prints per stage. If the terminal goes quiet for many minutes with no
 stage line, that is a hang, not slowness.
 
+## The end-of-stage summary hold (`--summary-hold`)
+
+```bash
+uv run splitsmith compare export <MATCH_PATH> \
+    --format mp4 --audio-from "<shooter>" \
+    --overlay --summary-hold 3 \
+    -o ~/grid.mp4
+```
+
+At the end of every stage each tile freezes on its last frame, blurred and
+dimmed, and that shooter's stage summary draws over their own cell -- shot
+count, stage time, hit factor, `stage_pct`, hit counts and their placing
+against the other shooters. The live overlay stops dead at the freeze: no
+counters, no split labels, no running clock over the summary.
+
+Three things to know before running it on a real match:
+
+- **It requires `--overlay`** and is refused without it, by name. The summary
+  is the overlay's own data in the overlay's own typography.
+- **It is charged per stage.** `--summary-hold 3` on a 12-stage match adds 36
+  seconds of video and a comparable slice of encode time. Values over 30s
+  warn (and still render) because they are almost always a typo.
+- **Off by default.** With no `--summary-hold`, the ffmpeg command line is
+  byte-identical to the pre-Milestone-B one.
+
+**This changes the durations below**, which is why they are stated as formulas
+rather than numbers.
+
 ## Degraded output: an ffmpeg with no `drawtext`
 
 Only the overlay's **running clock** is `drawtext`. The per-tile shot counters
@@ -197,7 +225,7 @@ name is what closes the loop.
 ## Verifying the result -- this is the actual deliverable
 
 A green test suite is not evidence the video is right. Every genuine defect on
-this branch was found by rendering and measuring. Do both of the following.
+this branch was found by rendering and measuring. Do all of the following.
 
 ### 1. Probe the container
 
@@ -238,6 +266,41 @@ shooter's track -- about -6 dB at N=4 -- and its `max_volume` must stay below
 0 dB. A mix *louder* than a single shooter means the `normalize=1` on `amix` was
 lost and the track is clipping.
 
+### 1b. With `--summary-hold`, check the length -- from decoded frames
+
+**Do not use `ffprobe`'s `duration` field for this, and do not use its
+per-packet durations either.** On these files the mov muxer stretches the last
+coded frame of a segment rather than adding frames, and `ffprobe` reports a
+uniform packet duration straight across the join. Both lie about exactly the
+thing you are checking. Count what decodes:
+
+```bash
+# Video: frames actually decoded.
+ffmpeg -hide_banner -i ~/grid.mp4 -map 0:v:0 -f null - 2>&1 | tail -1
+# Audio: decoded AAC frames x 1024 / sample_rate, per track.
+for s in 0 1 2 3 4; do
+  ffprobe -v error -select_streams "a:$s" -count_frames \
+    -show_entries stream=nb_read_frames,sample_rate \
+    -of default=noprint_wrappers=1 ~/grid.mp4
+done
+```
+
+Expect, for S stages rendered with `--summary-hold H`:
+
+- **video frames** = `sum(action frames per stage) + S x H x fps`
+- **audio seconds** = video seconds, within one video frame plus one AAC frame
+  (~54ms at 30fps/48kHz), and **identical across every track**
+
+Two failures to look for, neither of which announces itself:
+
+- **Audio longer than video by exactly `S x H`.** That is the summary hold
+  with no summary in it -- the still never reached the filter graph. It exits
+  0, prints no warning and freezes at the right instant on the raw last action
+  frame. The only way to see it is to look at a frame inside a hold (below).
+- **Audio *shorter* than video**, growing with stage count. That is the
+  opposite fault and it drifts: every stage after the short one plays its
+  sound early, cumulatively.
+
 ### 2. Watch it
 
 Open the file. Check, in order:
@@ -256,6 +319,28 @@ Open the file. Check, in order:
   track exists to prevent.
 - **Then switch audio tracks.** In QuickTime, VLC or Final Cut. Track 1 is
   "Mix"; each of the rest should be the corresponding shooter's audio alone.
+
+If you rendered with `--summary-hold`, also check the end of a stage. This is
+the one part of the feature a passing test suite on synthetic footage cannot
+settle, because it is a judgement about whether the handoff reads as a
+conclusion or as a stall:
+
+- **Is the held picture blurred and dimmed?** A hold showing a *sharp* last
+  frame means the summary still never reached the graph -- the "audio longer
+  than video" fault above. Everything else about that file looks correct.
+- **Is the live overlay gone?** No shot counters, no split labels, and above
+  all no clock. A frozen clock beside a summary is the failure the freeze
+  exists to prevent.
+- **Are the figures each shooter's own, in their own cell?** They should sit
+  where you have been watching that shooter, not in a strip.
+- **Do the figures change from stage to stage?** Identical summaries across
+  two different stages means every segment got the same still.
+- **Is `--summary-hold 3` long enough to read on real footage?** Four lines is
+  comfortable at 3s on synthetic media at 640x360; a full scorecard is closer
+  to seven lines at 4K. If it is not, that is a value to change, not a bug.
+- **Does the next stage start cleanly?** The cut back to live footage is hard
+  -- there is no fade in either direction, by design, since transitions force
+  a re-encode at the concat seams and are deferred.
 
 ## Known issues -- all fixed, listed so you can spot a regression
 
@@ -307,9 +392,10 @@ is the one thing no log captures and the only thing that closes Task 8.
 
 ## What is deliberately not in this branch
 
-Phase 0 only, plus the `--overlay` pre-flight documented above (added later,
-after this runbook's host hit exactly the failure it prevents). No transitions,
-no title cards, no hosted-mode support, and no FCPXML from the new UI surface.
+Phase 0, plus the `--overlay` pre-flight documented above (added later, after
+this runbook's host hit exactly the failure it prevents), plus Milestone B's
+`--summary-hold`. No transitions, no title cards, no end-of-match summary, no
+hosted-mode support, and no FCPXML from the new UI surface.
 The FCPXML grid
 (`splitsmith compare export <match> -o out.fcpxml`, the default `--format`) is
 untouched and behaves exactly as before.

@@ -170,6 +170,16 @@ MIX_NORMALIZE = 1
 #: sprite next to a bundled-mono clock -- two typefaces in one overlay.
 OVERLAY_CLOCK_FALLBACK_FONT = FALLBACK_BUNDLED_FONT
 
+#: Above this many seconds, a summary hold is almost certainly a typo.
+#:
+#: Not a limit -- a caller cutting a highlight reel may genuinely want to
+#: sit on the summary, and refusing a legal value because it is unusual is
+#: worse than saying so. But a hold is charged *per stage*: 300 instead of
+#: 3 adds an hour and a half to a 12-stage match, and the render is a
+#: 40-minute job whose cost is only obvious when it finishes. So the
+#: threshold exists to be said out loud, once, before the encode starts.
+SUMMARY_HOLD_WARN_SECONDS = 30.0
+
 
 class GridRenderError(RuntimeError):
     """ffmpeg refused to render a grid stage or the final stitch."""
@@ -344,18 +354,49 @@ class GridTile:
     clip to shift and this stays ``0.0``.
     """
 
+    source_duration_seconds: float
+    """How long ``trim_path`` itself runs, in clip time.
+
+    Straight off the loader's probe
+    (``CompareStageBundle.duration_seconds``) and ``0.0`` on a filler
+    tile, which has no source.
+
+    Nothing in the filter graph reads this -- the tile chain pads and
+    trims to the *stage's* length and never needs to know where one
+    clip's footage stops. :func:`overlay_summary.extract_freeze_frames`
+    does, and it is the only thing that does: the stage runs until the
+    *longest* tile's post-beep span is done plus a tail pad, so every
+    tile's window ends past its own footage and "the last frame of the
+    action" is black on every tile. The last frame with a picture in it
+    is this tile's own, at this time. Required rather than defaulted
+    because a tile that silently reported ``0.0`` would freeze on its
+    first frame instead of its last, which looks like footage and is
+    the wrong footage.
+    """
+
     row: int
     col: int
 
 
 @dataclass(frozen=True)
 class GridStagePlan:
-    """Everything one ffmpeg invocation needs for one stage."""
+    """Everything one ffmpeg invocation needs for one stage.
+
+    Two durations, and confusing them is the expensive mistake. See
+    :attr:`duration_seconds`, :attr:`hold_seconds` and
+    :attr:`total_seconds`.
+    """
 
     stage_number: int
     stage_name: str
     tiles: tuple[GridTile, ...]
     duration_seconds: float
+    """The **action**: head pad + the longest post-beep span + tail pad.
+
+    The footage, the tile chains and ``xstack`` run for exactly this
+    long and no longer. That is what the end-of-stage freeze *is* -- the
+    picture stops here and the still takes over.
+    """
 
     audio_label: str
     """The ``--audio-from`` shooter. Not "whose track plays": the mix does.
@@ -369,6 +410,88 @@ class GridStagePlan:
     rows: int
     cols: int
 
+    hold_seconds: float = 0.0
+    """How long the frozen stage summary is held after the action.
+
+    ``0.0``, the default, is the render this module has always produced:
+    :attr:`total_seconds` collapses onto :attr:`duration_seconds` and
+    every argument comes out byte-identical to the pre-hold argv.
+
+    Defaulted rather than required because every caller that predates
+    Milestone B constructs a plan without it, and the no-flags argv is
+    pinned by test: nothing opt-in may move an argument on the path a
+    user gets with no flags. The stitch stream-copies video across
+    segments and refuses segments whose stream *layout* disagrees --
+    count, codec, parameters -- at the last step, after the whole match
+    has been encoded. Stream *lengths* within a segment are a different
+    and quieter problem; see :attr:`total_seconds`.
+    """
+
+    def __post_init__(self) -> None:
+        if self.hold_seconds < 0:
+            raise ValueError(
+                f"hold_seconds must not be negative: got {self.hold_seconds}. A negative hold "
+                "puts total_seconds below the action, so the segment's audio would end before "
+                "its video. Measured on ffmpeg 6.1.1: the stitch does not refuse that -- it "
+                "exits 0 without a warning, the missing audio time collapses at the AAC "
+                "re-encode, and every later stage's sound arrives early by the shortfall, "
+                "accumulating (3s short per segment measured -3000ms after one segment and "
+                "-9000ms after three)."
+            )
+
+    @property
+    def total_seconds(self) -> float:
+        """The whole segment: the action followed by the hold.
+
+        **Every audio stream in the segment runs this long**, carrying
+        silence through the hold; the video is the action followed by the
+        still. Extending the *tile* chains to this instead would run the
+        footage on underneath the summary rather than freezing it --
+        which looks almost right in a thumbnail and wrong in motion.
+
+        The hold lives inside the stage's own segment rather than
+        becoming a segment of its own so the cross-stage stitch stays a
+        dumb ``concat -c copy``: a separate hold segment would have to
+        match the stream layout exactly anyway and would double the
+        number of segments to keep uniform.
+
+        **What the stitch actually does with a length mismatch, measured
+        on ffmpeg 6.1.1 rather than reasoned about** -- it does not
+        refuse one, in either direction. It exits 0 and prints no
+        warning, and the two directions then behave completely
+        differently, because the video is ``-c copy``'d (timestamps
+        preserved exactly) while the audio is re-encoded (a gap in the
+        samples simply collapses):
+
+        * **Audio longer than video** -- what this hold does. The mov
+          muxer holds the segment's last coded frame for the surplus, so
+          the picture freezes and every later stage starts that much
+          later on *both* halves. Measured on a four-segment stitch whose
+          first three segments each ran 3s over: A/V offset ``+0.1ms`` at
+          every marker, i.e. no drift, and a 33.0s file from four 6s
+          actions and three 3s holds. That is why getting the video half
+          wrong is quiet rather than loud: the freeze happens anyway, in
+          the right place, with the sound still locked to it -- just on
+          the raw last frame with no summary drawn on it. Hence the
+          precondition in :func:`build_stage_command`, which refuses to
+          build a segment with a hold and no still to put in it.
+
+          The *stretch* is the muxer's, not the encoder's, and that is
+          worth knowing when measuring: the surplus is expressed as a
+          longer duration on the last coded frame, never as extra coded
+          frames. So a decoded frame count comes up short by exactly the
+          final segment's hold while the container's declared duration
+          reads correct. Measured on a two-stage render with the still
+          dropped: 450 coded frames and a last pts of 16.967 where a
+          correct render has 570 and 18.967.
+        * **Audio shorter than video** -- what a negative hold would do,
+          and the reason ``__post_init__`` rejects one. The missing time
+          collapses at the re-encode and every later stage's audio
+          arrives *early*, accumulating with segment count: ``-3000ms``
+          after one 3s-short segment, ``-9000ms`` after three.
+        """
+        return self.duration_seconds + self.hold_seconds
+
 
 def build_stage_plans(
     shooters: Sequence[CompareShooterBundle],
@@ -377,6 +500,7 @@ def build_stage_plans(
     head_pad_seconds: float,
     tail_pad_seconds: float,
     layout_2up: Layout2Up = "horizontal",
+    hold_seconds: float = 0.0,
 ) -> tuple[GridStagePlan, ...]:
     """Plan one grid stage per stage number present on any shooter.
 
@@ -386,6 +510,11 @@ def build_stage_plans(
     Stage names follow the emitter too: the audio-source shooter's
     spelling wins, so the FCPXML and MP4 exports of one match cannot
     label the same stage differently.
+
+    ``hold_seconds`` is the end-of-stage summary hold and reaches every
+    plan unchanged -- it is a whole-render setting, not a per-stage one,
+    so no stage may come out with a different one. It does not touch the
+    pads or the action; see :attr:`GridStagePlan.total_seconds`.
     """
     if not shooters:
         raise ValueError("no shooters to render: build_stage_plans needs at least one loaded shooter")
@@ -405,6 +534,12 @@ def build_stage_plans(
             "pads must not be negative: got "
             f"head_pad_seconds={head_pad_seconds}, tail_pad_seconds={tail_pad_seconds}"
         )
+
+    # Checked here as well as in ``GridStagePlan.__post_init__`` so the
+    # caller is told which argument it passed, not which field it never
+    # named. See that guard for what a negative hold would cost.
+    if hold_seconds < 0:
+        raise ValueError(f"hold_seconds must not be negative: got hold_seconds={hold_seconds}")
 
     if audio_label not in labels:
         raise ValueError(f"audio_label={audio_label!r} matches no shooter. Labels: {', '.join(labels)}")
@@ -442,6 +577,7 @@ def build_stage_plans(
                         beep_offset_in_clip=0.0,
                         seek_seconds=0.0,
                         lead_pad_seconds=0.0,
+                        source_duration_seconds=0.0,
                         row=row,
                         col=col,
                     )
@@ -458,6 +594,7 @@ def build_stage_plans(
                     beep_offset_in_clip=bundle.beep_offset_in_clip,
                     seek_seconds=max(0.0, bundle.beep_offset_in_clip - head_pad_seconds),
                     lead_pad_seconds=max(0.0, head_pad_seconds - bundle.beep_offset_in_clip),
+                    source_duration_seconds=bundle.duration_seconds,
                     row=row,
                     col=col,
                 )
@@ -484,6 +621,7 @@ def build_stage_plans(
                 audio_label=audio_label,
                 rows=rows,
                 cols=cols,
+                hold_seconds=hold_seconds,
             )
         )
     return tuple(plans)
@@ -645,7 +783,45 @@ def _clock_pad(cell_height: int) -> int:
     return max(24, cell_height // 36)
 
 
-def _clock_filters(plan: GridStagePlan, canvas: GridCanvas, overlay: StageOverlayPlan) -> list[str]:
+def _video_tail(source_label: str, hold_label: str | None) -> list[str]:
+    """Close the video half: concatenate the hold, if any, then convert.
+
+    With no hold this is the single ``format=yuv420p`` step this graph has
+    always ended on, so a zero-hold render's argv is untouched.
+
+    With a hold, the frozen summary still is a *second segment* joined
+    after the action rather than something composited over it. That is
+    what makes the live overlay stop at the freeze for free: every
+    ``drawtext`` and the sprite ``overlay`` run on ``source_label``, which
+    ends at the action, so nothing that draws on the action can reach a
+    frame of the hold -- there is no expression to get wrong. That
+    structural bound is the only one there is: the ``enable`` cap
+    :func:`_clock_filters` used to carry alongside it was deleted in
+    ``9ab2156`` once it was shown to restate what the graph already
+    guarantees.
+
+    ``concat`` demands its inputs agree on size, SAR and frame rate (it
+    refuses at graph-config time, not silently), which is why the still's
+    own chain repeats the ``scale`` / ``setsar=1`` / ``fps=`` treatment
+    every tile chain gets. Pixel format is the one parameter it does not
+    demand, because the format negotiation converts the still's RGB to
+    whatever the ``format=yuv420p`` below settles on.
+    """
+    if hold_label is None:
+        return [f"[{source_label}]format=yuv420p[final]"]
+    return [
+        f"[{source_label}][{hold_label}]concat=n=2:v=1:a=0[joined]",
+        "[joined]format=yuv420p[final]",
+    ]
+
+
+def _clock_filters(
+    plan: GridStagePlan,
+    canvas: GridCanvas,
+    overlay: StageOverlayPlan,
+    *,
+    hold_label: str | None = None,
+) -> list[str]:
     """The ``drawtext`` chain hanging off ``[ovlgrid]``, or the passthrough.
 
     Two filters per clock, made mutually exclusive by their ``enable``
@@ -694,6 +870,28 @@ def _clock_filters(plan: GridStagePlan, canvas: GridCanvas, overlay: StageOverla
     ``drawtext`` instances per stage. The two-filter design is worth one
     hundredth on a minority of frames; do not "tidy" this expression into
     a third form without re-measuring both numbers above.
+
+    **Two of these windows are open-ended above, and that is correct.**
+    The open-ended tick (``gte(t,start)`` for a run whose end is unknown)
+    and the static hold (``gte(t,freeze)``) both run to the end of the
+    stream they are attached to, with no ``lt``. A summary hold does not
+    change that and must not: these filters hang off ``[ovlgrid]``, which
+    is the *action*, and the frozen summary is a second segment joined
+    after them by ``concat`` (see :func:`_video_tail`). Their ``t`` is
+    the action's own timeline and cannot reach a hold frame.
+
+    A ``*lt(t,duration)`` cap was written here first, on the assumption
+    that a clock would otherwise tick over the summary, and then removed:
+    it changed no pixel of a rendered hold (the in-hold frame came out
+    byte-identical with and without it), while costing a behaviour-free
+    branch and making the same ``--overlay`` render emit different
+    ``enable`` text depending on an unrelated field. What actually stops
+    a clock reaching the summary is the graph's shape, and that shape is
+    pinned by
+    ``test_hold_is_concatenated_after_the_action_not_composited_over_it``
+    -- if a rewrite ever composites the still over one continuous stream
+    instead of joining it, that test is what fails, and re-bounding these
+    windows is part of what such a rewrite would owe.
     """
     cell_w, cell_h = _cell_size(canvas, plan)
     pad = _clock_pad(cell_h)
@@ -712,7 +910,7 @@ def _clock_filters(plan: GridStagePlan, canvas: GridCanvas, overlay: StageOverla
             f"text='%{{eif\\:trunc(t-{start})\\:d}}." f"%{{eif\\:trunc(mod((t-{start})*100\\,100))\\:d\\:2}}'"
         )
         if clock.freeze_seconds is None:
-            # No known end: tick from the beep to the end of the stage,
+            # No known end: tick from the beep to the end of the action,
             # hold nothing after it.
             filters.append(f"drawtext={common}:{elapsed}:enable='gte(t\\,{start})'")
             continue
@@ -722,8 +920,8 @@ def _clock_filters(plan: GridStagePlan, canvas: GridCanvas, overlay: StageOverla
             held = quote_filter_value(clock.final_text)
             filters.append(f"drawtext={common}:text={held}:enable='gte(t\\,{freeze})'")
     if not filters:
-        return ["[ovlgrid]format=yuv420p[final]"]
-    return ["[ovlgrid]" + ",".join(filters) + "[ovltext]", "[ovltext]format=yuv420p[final]"]
+        return _video_tail("ovlgrid", hold_label)
+    return ["[ovlgrid]" + ",".join(filters) + "[ovltext]", *_video_tail("ovltext", hold_label)]
 
 
 def build_stage_command(
@@ -733,6 +931,7 @@ def build_stage_command(
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
     overlay: StageOverlayPlan | None = None,
+    hold_still_path: Path | None = None,
 ) -> tuple[str, ...]:
     """Build the ffmpeg invocation rendering one grid stage.
 
@@ -759,6 +958,34 @@ def build_stage_command(
     shooter's track -- silently, and only audible in the finished file.
     Nothing about the audio graph, the ``-map`` arguments or the tile
     chains changes either way.
+
+    ``hold_still_path`` is the frozen stage summary (one canvas-sized PNG,
+    written by :mod:`splitsmith.compare.overlay_summary`) and is
+    **required whenever** ``plan.hold_seconds`` is non-zero. A hold with
+    no still is refused here rather than built, because almost nothing
+    downstream complains about that segment: measured on ffmpeg 6.1.1,
+    its audio simply outlasts its video, the stitch exits 0 without a
+    warning, the mov muxer holds the last coded frame for the surplus,
+    the container declares the length it should, and the freeze lands in
+    the right place with the sound still locked to it -- on the raw last
+    action frame, unblurred, with no summary on it.
+
+    Two things do catch it, and knowing which is which matters when
+    something looks wrong. A **decoded** frame count comes up short by
+    the last segment's hold, because the muxer's stretch is a duration on
+    the final coded frame rather than extra frames (see
+    :attr:`GridStagePlan.total_seconds`) -- so a duration measured by
+    decoding, unlike one read off the container, does notice a *missing*
+    still. Only the pixels notice a still that is there but **wrong**:
+    blank, unblurred, the wrong stage's, or with a clock left on it. This
+    precondition is cheaper than either, and runs before the encode.
+
+    The still is one more input appended after the sprite input, for the
+    same reason the sprite goes last, and it is video-only: the hold
+    extends the picture, while every audio track already runs
+    ``plan.total_seconds`` (see :attr:`GridStagePlan.total_seconds`). A
+    still handed in against a zero hold is ignored -- there is no room to
+    put it, and the no-flags argv must not move.
     """
     cell_w, cell_h = _cell_size(canvas, plan)
     rate = canvas.rate_string
@@ -833,6 +1060,39 @@ def build_stage_command(
         sprite_index = next_index
         next_index += 1
 
+    # After the sprite, for the same reason the sprite comes after the
+    # tiles: a filler tile takes two inputs where a real tile takes one
+    # and an unreached cell adds another, so the only index that is safe
+    # to occupy is the next free one.
+    hold_index: int | None = None
+    if plan.hold_seconds > 0:
+        if hold_still_path is None:
+            raise ValueError(
+                f"stage {plan.stage_number} has hold_seconds={plan.hold_seconds:g} but no "
+                f"hold_still_path. That segment would carry {plan.total_seconds:g}s of audio "
+                f"against {plan.duration_seconds:g}s of video, which almost nothing downstream "
+                "reports: the stitch exits 0, the container declares the right length, and the "
+                "picture freezes in the right place on the raw last action frame with no summary "
+                "drawn on it. Pass the still overlay_summary.write_hold_still wrote, or leave "
+                "the hold at 0."
+            )
+        # ``-framerate`` is the image2 demuxer's own rate; without it a
+        # looped still arrives at its 25fps default and the chain's
+        # ``fps=`` has to resample a still picture to reach the canvas
+        # rate ``concat`` insists on.
+        args += [
+            "-loop",
+            "1",
+            "-framerate",
+            rate,
+            "-t",
+            f"{plan.hold_seconds:g}",
+            "-i",
+            str(hold_still_path),
+        ]
+        hold_index = next_index
+        next_index += 1
+
     args += [
         "-filter_complex",
         _build_filter_graph(
@@ -843,6 +1103,7 @@ def build_stage_command(
             empty_index,
             overlay=overlay,
             sprite_index=sprite_index,
+            hold_index=hold_index,
         ),
     ]
 
@@ -933,6 +1194,7 @@ def _build_filter_graph(
     *,
     overlay: StageOverlayPlan | None = None,
     sprite_index: int | None = None,
+    hold_index: int | None = None,
 ) -> str:
     """Scale + pad every tile to a uniform cell, then ``xstack`` the grid.
 
@@ -945,6 +1207,20 @@ def _build_filter_graph(
     tile reaches. They run the same chain as a tile so ``xstack`` sees
     one uniform set of inputs, and they are stacked after the tiles, at
     their own cell offsets.
+
+    The **tile** chains run the action (``plan.duration_seconds``) and the
+    audio chains run the whole segment (``plan.total_seconds``). With
+    ``hold_seconds=0.0`` those are the same number and this graph is the
+    pre-hold graph, argument for argument.
+
+    With a hold, the video half reaches ``total_seconds`` the other way:
+    the action is joined to a still by ``concat`` (see
+    :func:`_video_tail`), so the footage genuinely stops at the freeze
+    rather than being extended. ``hold_index`` names the input the still
+    was read at; :func:`build_stage_command` refuses a hold without one,
+    because a segment whose audio outlasts its video is accepted in
+    silence by everything downstream -- see that function for the
+    measurement.
 
     The overlay, when there is one, is composited onto ``[grid]`` --
     **after** the stack, never inside a tile chain. A tile chain's
@@ -1006,8 +1282,23 @@ def _build_filter_graph(
     placements += list(empty_cells[: len(empty_index)])
     offsets = "|".join(f"{col * cell_w}_{row * cell_h}" for row, col in placements)
     parts.append(f"{stack_inputs}xstack=inputs={len(placements)}:layout={offsets}[grid]")
+
+    # The still, conformed to exactly what ``concat`` compares: size, SAR
+    # and frame rate. ``scale`` is a no-op on a still this module wrote
+    # (``build_hold_still`` composes at canvas size) and the guard against
+    # one it did not. ``trim`` restates the length the input's ``-t``
+    # already set, so the segment's video extent never depends on how
+    # ``-loop 1`` and ``concat``'s eof handling interact.
+    hold_label: str | None = None
+    if hold_index is not None:
+        parts.append(
+            f"[{hold_index}:v]setpts=PTS-STARTPTS,scale={canvas.width}:{canvas.height},"
+            f"setsar=1,fps={rate},trim=0:{plan.hold_seconds:g}[hold]"
+        )
+        hold_label = "hold"
+
     if overlay is None:
-        parts.append("[grid]format=yuv420p[final]")
+        parts.extend(_video_tail("grid", hold_label))
     else:
         if sprite_index is None:
             raise ValueError("an overlay plan needs the input index its sprite sequence was added at")
@@ -1022,12 +1313,24 @@ def _build_filter_graph(
             f"trim=0:{plan.duration_seconds:g}[ovl]"
         )
         parts.append("[grid][ovl]overlay=0:0:format=auto[ovlgrid]")
-        parts.extend(_clock_filters(plan, canvas, overlay))
+        parts.extend(_clock_filters(plan, canvas, overlay, hold_label=hold_label))
 
     for slot, tile in enumerate(plan.tiles):
         # ``aresample=async=1`` keeps a track that starts short from
         # drifting; ``apad`` + ``atrim`` guarantee every track is exactly
-        # the stage duration so the segment's streams end together.
+        # the segment length so the segment's streams end together.
+        # That length is ``total_seconds`` and not ``duration_seconds``:
+        # the audio runs silent through the end-of-stage hold while the
+        # picture is a frozen still. ``apad`` is unbounded on purpose --
+        # it pads until something downstream stops it -- so ``atrim`` is
+        # the only place the length is stated, and every track states the
+        # same one whether it carries a trim or the filler's
+        # ``anullsrc``. Extend one and not the rest and nothing complains:
+        # measured on ffmpeg 6.1.1, the stitch accepts unequal lengths and
+        # exits 0, and the short track's shortfall then collapses at the
+        # AAC re-encode so that one shooter's audio runs early from the
+        # next stage on -- and further early with every stage after that.
+        # A viewer hears one track out of sync and no log says why.
         # ``adelay`` mirrors the video's ``tpad`` so a lead-padded tile's
         # audio stays locked to its picture.
         # ``aformat`` is the audio half of the concat invariant: a mono
@@ -1045,7 +1348,7 @@ def _build_filter_graph(
         parts.append(
             f"[{audio_index[slot]}:a]asetpts=PTS-STARTPTS,{lead}aresample=async=1,"
             f"aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
-            f"apad,atrim=0:{plan.duration_seconds:g},asplit=2[a{slot}][m{slot}]"
+            f"apad,atrim=0:{plan.total_seconds:g},asplit=2[a{slot}][m{slot}]"
         )
 
     # Every tile, including the silent filler a missing shooter
@@ -1260,6 +1563,48 @@ def _stage_overlay_plan(
     )
 
 
+def _stage_hold_still(
+    plan: GridStagePlan,
+    canvas: GridCanvas,
+    data: Mapping[tuple[str, int], TileStageData],
+    *,
+    theme_name: ThemeName,
+    work: Path,
+    ffmpeg_binary: str,
+    runner: Runner,
+) -> Path:
+    """Compose this stage's frozen summary still and return its path.
+
+    ``data`` is the whole-match mapping; the slice to one stage happens
+    here, through the same :func:`_overlay_data_for_stage` the sprite half
+    uses. ``build_hold_still`` refuses a tuple-keyed mapping outright, but
+    a mapping sliced on the *wrong* stage is still str-keyed and would
+    render one stage's figures over another's picture in silence, so
+    there is exactly one place that slice is written.
+
+    Imported inside the function on purpose:
+    :mod:`splitsmith.compare.overlay_summary` imports ``GridStagePlan``
+    and ``Runner`` from this module, so a module-level import in either
+    direction is a cycle.
+    """
+    from .overlay_summary import write_hold_still
+
+    return write_hold_still(
+        plan,
+        _overlay_data_for_stage(data, plan.stage_number),
+        SpriteGeometry(
+            canvas_width=canvas.width,
+            canvas_height=canvas.height,
+            rows=plan.rows,
+            cols=plan.cols,
+        ),
+        theme=load_theme(theme_name),
+        work_dir=work,
+        ffmpeg_binary=ffmpeg_binary,
+        runner=runner,
+    )
+
+
 def _run_ffmpeg(cmd: tuple[str, ...], *, runner: Runner) -> subprocess.CompletedProcess:
     """Invoke ffmpeg, turning a missing binary into a clear error.
 
@@ -1295,9 +1640,11 @@ def render_grid_mp4(
     layout_2up: Layout2Up = "horizontal",
     overlay: bool = False,
     overlay_theme: ThemeName = "splitsmith",
+    summary_hold_seconds: float = 0.0,
     ffmpeg_binary: str | None = None,
     runner: Runner = subprocess.run,
     probe_runner: Runner = subprocess.run,
+    still_runner: Runner = subprocess.run,
     on_notice: NoticeHook | None = None,
     work_dir: Path | None = None,
 ) -> GridRenderResult:
@@ -1337,9 +1684,26 @@ def render_grid_mp4(
       :class:`GridRenderError` instead. The plain grid needs none of it
       and still renders on the same host.
 
-    ``probe_runner`` is deliberately not ``runner``: both shipped
-    callers count ``runner`` invocations to report "stage N of M", so
-    probe traffic through it would misreport every stage. ``on_notice``
+    ``summary_hold_seconds`` freezes the grid at the end of every stage
+    and holds each shooter's stage summary over their own cell for that
+    long, inside the stage's own segment so the cross-stage stitch stays
+    a stream copy. ``0.0``, the default, is the render this has always
+    produced. It **requires** ``overlay``: the summary is drawn from the
+    overlay's own shot data in the overlay's own typography, so a hold on
+    a clean grid would be a blurred still with nothing written on it, and
+    that is refused rather than rendered. See
+    :data:`SUMMARY_HOLD_WARN_SECONDS` for the value a caller has almost
+    certainly typo'd.
+
+    ``probe_runner`` and ``still_runner`` are deliberately not ``runner``:
+    both shipped callers count ``runner`` invocations to report "stage N
+    of M", so anything else going through it misreports every stage.
+    ``probe_runner`` asks the binary what it can do; ``still_runner``
+    pulls one freeze frame per tile per stage for the summary. They are
+    two parameters rather than one because a caller faking a capability
+    probe is answering a completely different question from a caller
+    faking a frame grab, and a fake that answers only the first would
+    leave every summary cell black without saying so. ``on_notice``
     is how a caller says the degradation out loud at the moment it is
     decided; the same text is logged at warning level either way.
 
@@ -1351,6 +1715,17 @@ def render_grid_mp4(
     deleting a caller's own directory. Callers that want it gone should
     pass a path they own.
     """
+    # Before the canvas, the binary or anything else: this is a caller
+    # error, not a render outcome, and it costs nothing to say so first.
+    if summary_hold_seconds > 0 and not overlay:
+        raise GridRenderError(
+            f"summary_hold_seconds={summary_hold_seconds:g} needs overlay=True (--overlay on the "
+            "CLI). The end-of-stage hold freezes every tile and draws that shooter's stage "
+            "summary over their own cell, which is the overlay's own shot data and typography; "
+            "without it the hold is a blurred still with nothing written on it. Turn the overlay "
+            "on, or leave summary_hold_seconds at 0."
+        )
+
     canvas = canvas or GridCanvas()
     # Derivation keys off the rate fields, not off "no canvas given": a
     # caller who pinned only the geometry must still get the footage's
@@ -1364,6 +1739,7 @@ def render_grid_mp4(
         head_pad_seconds=head_pad_seconds,
         tail_pad_seconds=tail_pad_seconds,
         layout_2up=layout_2up,
+        hold_seconds=summary_hold_seconds,
     )
     if not plans:
         raise GridRenderError("no stages to render -- no shooter has an exported trim")
@@ -1433,6 +1809,7 @@ def render_grid_mp4(
     for plan in plans:
         segment = work / f"stage{plan.stage_number}{SEGMENT_SUFFIX}"
         stage_overlay: StageOverlayPlan | None = None
+        hold_still: Path | None = None
         # ``font_path`` is set exactly when ``overlay`` is; naming both
         # keeps that obvious rather than asserting it.
         if overlay and font_path is not None:
@@ -1450,12 +1827,50 @@ def render_grid_mp4(
                 # the command: ``_clock_filters`` emits one filter per
                 # clock and the plain passthrough when there are none.
                 stage_overlay = replace(stage_overlay, clocks=())
+            if plan.hold_seconds > 0:
+                # A missing ``drawtext`` costs the summary nothing: it is
+                # pure PIL, so a host that lost the clock still gets full
+                # summaries.
+                #
+                # Caught, not raised, and for the same reason a failed
+                # ffmpeg call below is: one bad stage is reported and
+                # skipped so the rest still stitch. ``overlay_summary``
+                # already degrades an unreadable trim or a bad freeze to
+                # a black cell, so what reaches here is the whole-stage
+                # kind -- a font that will not load, a disk that will not
+                # take the PNG. Building the segment anyway is not an
+                # option: without the still the stage's audio would
+                # outlast its video, which is the one fault nothing
+                # downstream reports.
+                try:
+                    hold_still = _stage_hold_still(
+                        plan,
+                        canvas,
+                        overlay_data,
+                        theme_name=overlay_theme,
+                        work=work,
+                        ffmpeg_binary=binary,
+                        runner=still_runner,
+                    )
+                except Exception as exc:  # noqa: BLE001 -- one bad stage must not lose the match
+                    detail = f"could not compose the stage summary still: {exc}"
+                    logger.warning("compare grid stage %d: %s", plan.stage_number, detail)
+                    outcomes.append(
+                        StageOutcome(
+                            stage_number=plan.stage_number,
+                            stage_name=plan.stage_name,
+                            ok=False,
+                            error=detail,
+                        )
+                    )
+                    continue
         cmd = build_stage_command(
             plan,
             canvas=canvas,
             output_path=segment,
             ffmpeg_binary=binary,
             overlay=stage_overlay,
+            hold_still_path=hold_still,
         )
         completed = _run_ffmpeg(cmd, runner=runner)
         if completed.returncode != 0:
@@ -1515,6 +1930,7 @@ __all__ = [
     "OVERLAY_CLOCK_OMITTED_SUMMARY",
     "SEGMENT_AUDIO_CODEC",
     "SEGMENT_SUFFIX",
+    "SUMMARY_HOLD_WARN_SECONDS",
     "GridCanvas",
     "GridRenderError",
     "GridRenderResult",
