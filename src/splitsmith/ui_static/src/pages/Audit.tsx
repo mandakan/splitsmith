@@ -1113,15 +1113,19 @@ export function Audit() {
   const visibleKinds = useMemo(() => {
     const kinds = visibleKindsFromFilters(filters);
     if (peeking) kinds.add("rejected");
-    // Keep a keyboard-focused rejected marker visible even when the
-    // rejected filter is off, so `n`-stepping onto it never focuses
-    // an invisible marker (the user can then K it back to kept).
-    if (focusedMarkerId) {
-      const f = markers.find((x) => x.id === focusedMarkerId);
-      if (f?.kind === "rejected") kinds.add("rejected");
-    }
     return kinds;
-  }, [filters, peeking, focusedMarkerId, markers]);
+  }, [filters, peeking]);
+
+  // Keep the focused marker visible even when its kind's filter is off,
+  // so `n`-stepping onto a rejected marker never focuses an invisible
+  // one (the user can then K it back to kept). Per-marker, not per-kind:
+  // promoting the whole kind made the first click-to-reject unhide every
+  // discarded detection and left the legend pill looking dead (#666).
+  const forcedVisibleId = useMemo(() => {
+    if (!focusedMarkerId) return null;
+    const f = markers.find((x) => x.id === focusedMarkerId);
+    return f && !visibleKinds.has(f.kind) ? f.id : null;
+  }, [focusedMarkerId, markers, visibleKinds]);
 
   // Markers in time order, filtered to currently-visible kinds. N and
   // K-auto-progress walk this list -- a marker that's filtered out of
@@ -1130,10 +1134,10 @@ export function Audit() {
   const visibleMarkersSorted = useMemo(
     () =>
       markers
-        .filter((m) => visibleKinds.has(m.kind))
+        .filter((m) => visibleKinds.has(m.kind) || m.id === forcedVisibleId)
         .slice()
         .sort((a, b) => a.time - b.time || a.id.localeCompare(b.id)),
-    [markers, visibleKinds],
+    [markers, visibleKinds, forcedVisibleId],
   );
 
   const stepAnyMarker = useCallback(
@@ -2008,6 +2012,7 @@ export function Audit() {
                       onTimeChangeBegin={handleMarkerTimeChangeBegin}
                       onTimeChangeCommit={handleMarkerTimeChangeCommit}
                       visibleKinds={visibleKinds}
+                      forcedVisibleId={forcedVisibleId}
                       snapPeaks={snapPeaks ?? undefined}
                     />
                   </Waveform>

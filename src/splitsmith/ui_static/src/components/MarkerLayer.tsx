@@ -93,6 +93,11 @@ export interface MarkerLayerProps {
    *  rejected markers in the model -- they just don't render. The save
    *  flow still serializes them via the audit JSON. */
   visibleKinds?: Set<MarkerKind>;
+  /** Single marker rendered regardless of ``visibleKinds`` - the parent's
+   *  focused marker, which must stay visible (and interactive) even when
+   *  its kind's filter is off so focus never lands on an invisible
+   *  marker (#666). */
+  forcedVisibleId?: string | null;
   /** High-resolution peaks used to snap a drag-drop onto the nearest audio
    *  transient (#28). Absent = no peak snapping (grid snap only). Shift
    *  held at drop always bypasses. */
@@ -115,6 +120,7 @@ function MarkerLayerInner({
   onTimeChangeBegin,
   onTimeChangeCommit,
   visibleKinds,
+  forcedVisibleId,
   snapPeaks,
 }: MarkerLayerProps) {
   // Drag state lives in a ref so re-renders driven by external time
@@ -168,7 +174,9 @@ function MarkerLayerInner({
   // or appear in keyboard tab order.
   const sorted = markers
     .slice()
-    .filter((m) => (visibleKinds ? visibleKinds.has(m.kind) : true))
+    .filter((m) =>
+      visibleKinds ? visibleKinds.has(m.kind) || m.id === forcedVisibleId : true,
+    )
     .sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
 
   const timeFromClientX = useCallback(
