@@ -92,6 +92,7 @@ class _RecordingBrowser:
     def __init__(self, *, page_factory=_RecordingPage) -> None:
         self._page_factory = page_factory
         self.contexts: list[_RecordingContext] = []
+        self.closed = False
 
     def new_context(self, *, viewport: dict, device_scale_factor: int) -> _RecordingContext:
         ctx = _RecordingContext(page_factory=self._page_factory)
@@ -99,6 +100,9 @@ class _RecordingBrowser:
         ctx.device_scale_factor = device_scale_factor
         self.contexts.append(ctx)
         return ctx
+
+    def close(self) -> None:
+        self.closed = True
 
 
 # --- Rasterizer.png(): structure, determinism, the font-loading contract --
@@ -254,6 +258,48 @@ def test_enter_stops_the_playwright_driver_when_chromium_launch_fails(monkeypatc
     assert "Executable doesn't exist" in excinfo.value.detail
 
 
+class _RecordingLaunchDriver:
+    """Stands in for the object ``sync_playwright().start()`` returns,
+    whose ``.chromium.launch()`` succeeds and records the kwargs it was
+    called with -- unlike ``_RecordingBrowser``, which is only ever
+    installed *after* ``__enter__`` in the other unit tests above and so
+    never sees a real ``launch()`` call at all."""
+
+    def __init__(self, browser: object) -> None:
+        self._browser = browser
+        self.launch_kwargs: dict[str, object] | None = None
+        self.chromium = self
+
+    def launch(self, *, channel: str, headless: bool) -> object:
+        self.launch_kwargs = {"channel": channel, "headless": headless}
+        return self._browser
+
+    def stop(self) -> None:
+        pass
+
+
+def test_enter_launches_the_headless_shell_channel_not_the_full_browser(monkeypatch) -> None:
+    """A wrong implementation that launched the full ``chromium`` browser
+    (377M) rather than the intended ``chromium-headless-shell`` (260M)
+    would still produce working screenshots -- the two channels are the
+    same rendering engine -- so nothing about *behaviour* catches the
+    substitution. Only an assertion on what ``launch()`` was actually
+    called with does. Found missing by review: the other unit tests in
+    this file install ``_RecordingBrowser`` directly onto ``_browser``
+    and bypass ``__enter__`` entirely, so none of them ever observe a
+    ``launch()`` call or its kwargs."""
+    driver = _RecordingLaunchDriver(_RecordingBrowser())
+    fake_module = types.SimpleNamespace(start=lambda: driver)
+    monkeypatch.setattr(overlay_raster, "sync_playwright", lambda: fake_module)
+    rasterizer = ChromiumRasterizer()
+
+    with rasterizer:
+        pass
+
+    assert driver.launch_kwargs == {"channel": "chromium-headless-shell", "headless": True}
+    assert driver.launch_kwargs["channel"] == overlay_raster.CHROMIUM_CHANNEL
+
+
 class _StoppableDriver:
     def __init__(self) -> None:
         self.stopped = False
@@ -371,11 +417,27 @@ def test_bundled_font_face_actually_loads_not_the_browsers_fallback() -> None:
     ``ChromiumRasterizer.png`` from ``page.goto(file://...)`` to
     ``page.set_content()`` collapses this measurement to a width
     difference of exactly 0 -- both documents fall back to the same
-    browser-chosen monospace, because ``set_content()``'s opaque
-    origin cannot resolve either document's ``file://`` font URL. With
-    real navigation the measured difference on the dev host was 15px
-    at a 3200x200 canvas, 72px font, 48-character string -- comfortably
-    above the 5px threshold asserted below.
+    browser-chosen monospace, because ``set_content()``'s opaque origin
+    cannot resolve either document's ``file://`` font URL.
+
+    **The assertion below checks zero-vs-nonzero, not a magnitude
+    threshold.** An earlier version asserted ``> 5px``, chosen against a
+    15px difference measured on the dev host's ``chromium-headless-shell``
+    channel. Review found that fragile: mutating the launch channel to
+    the full ``chromium`` browser (a substitution nothing else in this
+    file catches -- see
+    ``test_enter_launches_the_headless_shell_channel_not_the_full_browser``
+    below, added in the same round) reproduced a genuine, correctly-loaded
+    bundled face, but the two Chromium builds' text shaping differed just
+    enough that the measured difference dropped to exactly 5px -- tripping
+    a ``> 5`` comparison by coincidence, on a passing scenario, for reasons
+    having nothing to do with whether the font loaded. Any magnitude
+    threshold is hostage to that kind of build-to-build shaping noise. The
+    zero case has no such noise: under the bug both documents render
+    through the identical fallback code path in the identical browser
+    process, so the measured difference is exactly 0, not "close to 0" --
+    there is nothing to threshold against. A real difference, however
+    small, is real; only "no difference at all" indicates the bug.
     """
     text = "0123456789OIl.:," * 3
     font_size = 72
@@ -399,10 +461,11 @@ def test_bundled_font_face_actually_loads_not_the_browsers_fallback() -> None:
     bundled_width = _painted_width(bundled_png)
     fallback_width = _painted_width(fallback_png)
 
-    assert abs(bundled_width - fallback_width) > 5, (
-        f"bundled face width {bundled_width}px vs fallback width {fallback_width}px -- these "
-        "should differ measurably if the bundled @font-face genuinely loaded. An equal (or "
-        "near-equal) width means the custom face silently failed and both documents rendered "
-        "in the browser's own fallback monospace -- the exact failure mode "
-        "page.set_content() causes and page.goto(file://...) fixes."
+    assert bundled_width != fallback_width, (
+        f"bundled face width {bundled_width}px == fallback face width {fallback_width}px -- these "
+        "should never come out exactly equal if the bundled @font-face genuinely loaded, since "
+        "the bundled and fallback fonts have different glyph metrics. An exact match means the "
+        "custom face silently failed and both documents rendered in the browser's own fallback "
+        "monospace -- the exact failure mode page.set_content() causes and "
+        "page.goto(file://...) fixes."
     )
