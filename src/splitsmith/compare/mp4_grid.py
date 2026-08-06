@@ -29,6 +29,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from ..overlay_layout import Anchor, CellScale, anchor_ffmpeg_expr
 from ..overlay_text import FALLBACK_BUNDLED_FONT, overlay_font_file
 from ..overlay_theme import ThemeName, load_theme
 from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, quote_filter_value, runtime
@@ -780,7 +781,7 @@ def _clock_pad(cell_height: int) -> int:
     this same formula. The clock sits at the opposite top corner of the
     same cell, so sharing the pad is what makes the two line up.
     """
-    return max(24, cell_height // 36)
+    return CellScale.for_cell(cell_height).pad
 
 
 def _video_tail(source_label: str, hold_label: str | None) -> list[str]:
@@ -898,12 +899,20 @@ def _clock_filters(
     font = quote_filter_value(str(overlay.font_path))
     filters: list[str] = []
     for clock in overlay.clocks:
+        x_expr, y_expr = anchor_ffmpeg_expr(
+            Anchor.TOP_RIGHT,
+            col=clock.col,
+            row=clock.row,
+            cell_w=cell_w,
+            cell_h=cell_h,
+            pad=pad,
+        )
         common = (
             f"fontfile={font}:fontsize={overlay.font_size}:"
             f"fontcolor={_ffmpeg_color(overlay.ink)}:"
             f"borderw={max(2, overlay.font_size // 18)}:"
             f"bordercolor={_ffmpeg_color(overlay.stroke)}:"
-            f"x={clock.col * cell_w}+{cell_w}-tw-{pad}:y={clock.row * cell_h}+{pad}"
+            f"x={x_expr}:y={y_expr}"
         )
         start = f"{clock.start_seconds:g}"
         elapsed = (
@@ -1554,9 +1563,9 @@ def _stage_overlay_plan(
     return StageOverlayPlan(
         sprite_list_path=list_path,
         font_path=font_path,
-        # Matches ``overlay_sprites.render_state``'s ``big``, so the clock
-        # and the sprite's shot counter are the same size in the cell.
-        font_size=max(48, cell_h // 14),
+        # Same resolver the sprite uses, so the clock and the shot counter
+        # beside it cannot pick up different sizes.
+        font_size=CellScale.for_cell(cell_h).live_primary,
         clocks=tuple(clocks),
         ink=theme.ink,
         stroke=theme.stroke,
