@@ -1,33 +1,121 @@
 """The frozen post-stage summary still: freeze extraction, blur-once, compose.
 
 Freeze extraction goes through a fake runner -- no ffmpeg is ever shelled
-out to here, per CLAUDE.md. Text presence/absence is asserted by
-monkeypatching ``_draw_text_with_shadow`` and ``_plate`` to record what
-was drawn, rather than by pixel-diffing rendered glyphs: those are
-exactly what ``overlay_summary`` calls to put ink on the canvas -- plain
-text through the former, ``PLATE``-emphasis text through the latter --
-so this is the same pair of seams the module already uses, not a new one
-invented for the test.
+out to here, per CLAUDE.md. As of issue #683's amendment (Task 6R-3),
+``overlay_summary`` no longer hand-fits or draws text itself: it declares
+a cell's content as ``Group``/``Element`` tuples (``_cell_groups``,
+unchanged) and turns the whole canvas's declared cells into one HTML
+document composed through an injected
+:class:`splitsmith.overlay_raster.Rasterizer`
+(``docs/superpowers/plans/2026-08-06-overlay-composition-seam-amendment.md``).
+So this file's "what got drawn" checks split two ways:
+
+- Tests about *what a cell says* call :func:`overlay_summary._cell_groups`
+  (and :func:`overlay_summary._rank_placings`) directly -- both are pure
+  and unchanged by this task, so asserting against their output is more
+  direct than round-tripping through rasterization to observe the same
+  facts.
+- Tests about *how ``build_hold_still`` wires that declaration through
+  the rasterizer* inject :class:`_FakeRasterizer`, a recording double
+  standing in for :class:`splitsmith.overlay_raster.Rasterizer` -- unit
+  tests never launch a browser, the same seam
+  ``compare.mp4_grid.Runner`` gives ``subprocess.run``. It records the
+  HTML it was asked to render (inspected for the right substrings) and
+  returns a real PNG so the compositing step has something genuine to
+  alpha-composite.
+
+The old fitter's own bounding tests (six "lever" tests plus the harness
+that drove ``_draw_group`` directly) are gone along with the machinery
+they existed to prove did not leak -- see the amendment's "What is
+deleted". The invariant they protected (no shooter's figures cross into
+a neighbour's cell) is now structural: ``overflow: hidden`` is asserted
+once, on the shared stylesheet, in ``tests/test_overlay_html.py``, and
+proven against real rendered pixels by
+``tests/test_compare_grid_overlay_integration.py``'s hold check, which
+this task's brief singles out as the boundary assertion that must carry
+over unmodified. What remains this file's own job is the layer below
+both of those: that ``build_hold_still`` attributes each placement's own
+data to that placement's own cell and no other's (see
+``test_summary_cells_never_attributes_one_placements_content_to_another``).
 """
 
 from __future__ import annotations
 
+import io
 import subprocess
 from pathlib import Path
 
 import pytest
-from PIL import Image, ImageDraw
+from PIL import Image
 
 from splitsmith.compare import overlay_summary as summ
 from splitsmith.compare.mp4_grid import GridStagePlan, GridTile
 from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
-from splitsmith.overlay_layout import Anchor, CellScale, Element, Emphasis, Flow, Group, Role
+from splitsmith.overlay_layout import Anchor, Emphasis, Role
 from splitsmith.overlay_theme import load_theme
 from splitsmith.ui.project import StageScorecard
 
 THEME = load_theme("clean")
 GEOMETRY = SpriteGeometry(canvas_width=640, canvas_height=360, rows=2, cols=2)
+
+
+class _FakeRasterizer:
+    """Records every HTML document handed to :meth:`png` and returns a
+    real (tiny, fully transparent) PNG, so ``build_hold_still``'s
+    alpha-composite step has genuine bytes to work with rather than a
+    stub that would mask a wiring bug in the compositing itself.
+
+    Stands in for :class:`splitsmith.overlay_raster.Rasterizer` -- see
+    the module docstring.
+    """
+
+    def __init__(self, *, fill: tuple[int, int, int, int] = (0, 0, 0, 0)) -> None:
+        self.calls: list[tuple[str, int, int]] = []
+        self._fill = fill
+
+    def png(self, html: str, *, width: int, height: int) -> bytes:
+        self.calls.append((html, width, height))
+        buf = io.BytesIO()
+        Image.new("RGBA", (width, height), self._fill).save(buf, format="PNG")
+        return buf.getvalue()
+
+
+class _BoomRasterizer:
+    """A rasterizer that always fails -- the "a live browser exists but
+    this particular call went wrong" case, distinct from
+    ``RasterizerUnavailableError`` (no browser at all), which is
+    ``mp4_grid``'s render-wide preflight's job, not ``build_hold_still``'s.
+    """
+
+    def png(self, html: str, *, width: int, height: int) -> bytes:
+        raise RuntimeError("rasterize boom")
+
+
+def _rendered_html(placements, data, *, geometry=GEOMETRY, freezes=None, **kwargs) -> str:
+    """Render once through a :class:`_FakeRasterizer` and return the one
+    HTML document it was asked to rasterize."""
+    fake = _FakeRasterizer()
+    summ.build_hold_still(placements, data, freezes or {}, geometry, theme=THEME, rasterizer=fake, **kwargs)
+    assert len(fake.calls) == 1, "expected exactly one rasterize call for the whole canvas"
+    html, width, height = fake.calls[0]
+    assert (width, height) == (geometry.canvas_width, geometry.canvas_height)
+    return html
+
+
+def _cell_markup(html: str, row: int, col: int) -> str:
+    """The one placement's own ``<div style="grid-row:...">...</div>``
+    fragment, isolated so a test can assert what is and is not present in
+    exactly that cell's own markup -- not merely somewhere in the whole
+    document (which carries the shared ``<style>`` block, font names and
+    all), which would pass even if a shooter's figures landed in a
+    neighbour's wrapper instead of their own.
+    """
+    marker = f"grid-row:{row + 1};grid-column:{col + 1};"
+    start = html.index(marker)
+    next_marker = html.find('<div style="grid-row:', start + len(marker))
+    end = next_marker if next_marker != -1 else html.index("</div></body>")
+    return html[start:end]
 
 
 def _tile(
@@ -417,77 +505,134 @@ def test_each_cell_draws_over_its_own_freeze_frame(tmp_path):
     assert bo_pixel[2] > bo_pixel[0]  # blue-ish, not red-ish
 
 
-# --- text content: capture what was drawn to the canvas -------------------
+# --- the rasterizer seam: build_hold_still's own wiring --------------------
 
 
-def _capture(monkeypatch):
-    """Record every string put on the canvas, plain or plated.
+def test_no_rasterizer_composes_the_freezes_with_no_summary_text():
+    """``rasterizer=None`` (the default) is also the degradation path a
+    caller with no usable Chromium falls back to (see
+    ``mp4_grid.render_grid_mp4``'s preflight) -- so this doubles as "a
+    missing browser must not crash a render, just omit the text".
 
-    A ``PLATE``-emphasis element (a placing, a DQ, a lit faults line)
-    draws through ``_plate`` -- ink on a filled rectangle -- rather than
-    ``_draw_text_with_shadow``'s stroke, so both are recorded here. It is
-    still the same seam the module uses to put ink down, just two calls
-    instead of one now that a second rendering path exists.
+    No freeze frame is supplied either, so the canvas stays pure black
+    unless something composited over it -- a `_full_stat_tile`'s worth of
+    figures would light plenty of non-black pixels if the summary text
+    reached the canvas despite no rasterizer being given.
     """
-    drawn: list[str] = []
-    original_shadow = summ._draw_text_with_shadow
-    original_plate = summ._plate
-
-    def shadow_recorder(draw, canvas, xy, text, font, fill, **kwargs):
-        drawn.append(text)
-        return original_shadow(draw, canvas, xy, text, font, fill, **kwargs)
-
-    def plate_recorder(canvas, xy, text, font, *, theme, size):
-        drawn.append(text)
-        return original_plate(canvas, xy, text, font, theme=theme, size=size)
-
-    monkeypatch.setattr(summ, "_draw_text_with_shadow", shadow_recorder)
-    monkeypatch.setattr(summ, "_plate", plate_recorder)
-    return drawn
+    placements = [_placement("Ann", 0, 0)]
+    data = {"Ann": _full_stat_tile("Ann")}
+    image = summ.build_hold_still(placements, data, {}, GEOMETRY, theme=THEME)
+    assert image.getextrema() == ((0, 0), (0, 0), (0, 0))
 
 
-def test_missing_scorecard_omits_the_scoring_lines(monkeypatch):
-    drawn = _capture(monkeypatch)
+def test_the_rasterizer_is_called_once_for_the_whole_canvas_and_its_result_is_composited():
+    placements = [_placement("Ann", 0, 0)]
+    data = {"Ann": TileStageData(label="Ann", stage_number=1)}
+    fake = _FakeRasterizer(fill=(200, 10, 10, 255))
+
+    image = summ.build_hold_still(placements, data, {}, GEOMETRY, theme=THEME, rasterizer=fake)
+
+    assert len(fake.calls) == 1
+    _html, width, height = fake.calls[0]
+    assert (width, height) == (GEOMETRY.canvas_width, GEOMETRY.canvas_height)
+    # The fake's opaque red PNG covers the whole canvas, so compositing it
+    # must have actually happened -- a wiring bug that built the HTML but
+    # never called ``alpha_composite`` would leave this pixel black.
+    assert image.getpixel((10, 10)) == (200, 10, 10)
+
+
+def test_a_rasterizer_that_raises_degrades_to_no_text_not_a_crash(caplog):
+    """Distinct from ``RasterizerUnavailableError`` (no browser at all,
+    caught once per render by ``mp4_grid``'s preflight): this is a live
+    rasterizer whose one call for this stage went wrong. One bad
+    rasterization must not cost the whole stage the way letting the
+    exception propagate out of ``build_hold_still`` would -- mirroring
+    ``_prepare_cell``'s and ``extract_freeze_frames``'s own per-tile
+    degradation elsewhere in this module.
+    """
+    placements = [_placement("Ann", 0, 0)]
+    data = {"Ann": _full_stat_tile("Ann")}
+
+    with caplog.at_level("WARNING"):
+        image = summ.build_hold_still(
+            placements, data, {}, GEOMETRY, theme=THEME, rasterizer=_BoomRasterizer()
+        )
+
+    assert image.mode == "RGB"
+    assert image.size == (GEOMETRY.canvas_width, GEOMETRY.canvas_height)
+    assert image.getextrema() == ((0, 0), (0, 0), (0, 0))
+    assert "rasterize boom" in caplog.text
+
+
+def test_write_hold_still_forwards_the_rasterizer(tmp_path):
+    tile = _tile("Ann", 0, 0, trim=tmp_path / "ann.mp4")
+    plan = _plan([tile])
+    fake = _FakeRasterizer()
+    data = {"Ann": TileStageData(label="Ann", stage_number=1)}
+
+    summ.write_hold_still(
+        plan,
+        data,
+        GEOMETRY,
+        theme=THEME,
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="ffmpeg",
+        runner=_Recorder(returncode=1),
+        rasterizer=fake,
+    )
+
+    assert len(fake.calls) == 1
+
+
+# --- text content: what a cell's declared groups say -----------------------
+#
+# ``_cell_groups`` is unchanged by this task (see the module docstring), so
+# these ask it directly for the same facts the old tests round-tripped
+# through PIL drawing to observe.
+
+
+def _texts(groups) -> list[str]:
+    return [e.text for g in groups for e in g.elements]
+
+
+def test_missing_scorecard_omits_the_scoring_lines():
     shots = (TileShot(time_from_beep=1.0, split=1.0), TileShot(time_from_beep=1.3, split=0.3))
     tile = TileStageData(label="Ann", stage_number=1, shots=shots, stage_time_seconds=12.34, scorecard=None)
-    placements = [_placement("Ann", 0, 0)]
-    summ.build_hold_still(placements, {"Ann": tile}, {}, GEOMETRY, theme=THEME)
+    groups = summ._cell_groups(tile, None, "Ann")
+    texts = _texts(groups)
+    captions = [e.caption for g in groups for e in g.elements if e.caption is not None]
 
-    assert any("shots" in t for t in drawn)
+    assert any("shots" in t for t in texts)
     # TIME is now a captioned headline: the caption carries the word and
     # the value is bare ("12.34"), not a "Time 12.34" line.
-    assert "TIME" in drawn
-    assert "12.34" in drawn
-    assert "HF" not in drawn
-    assert "STAGE" not in drawn
-    assert not any(t.startswith("A") and t[1:2].isdigit() for t in drawn)
-    assert "DQ" not in drawn
+    assert "TIME" in captions
+    assert "12.34" in texts
+    assert "HF" not in captions
+    assert "STAGE" not in captions
+    assert not any(t.startswith("A") and t[1:2].isdigit() for t in texts)
+    assert "DQ" not in texts
 
 
-def test_stage_points_never_appears_and_stage_pct_does(monkeypatch):
-    drawn = _capture(monkeypatch)
+def test_stage_points_never_appears_and_stage_pct_does():
     scorecard = StageScorecard(stage_points=143.2, stage_pct=87.4)
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
-    placements = [_placement("Ann", 0, 0)]
-    summ.build_hold_still(placements, {"Ann": tile}, {}, GEOMETRY, theme=THEME)
+    texts = _texts(summ._cell_groups(tile, None, "Ann"))
 
-    assert any("87.4" in t for t in drawn)
-    assert not any("143.2" in t for t in drawn)
+    assert any("87.4" in t for t in texts)
+    assert not any("143.2" in t for t in texts)
 
 
-def test_none_hit_counts_are_omitted_not_zeroed(monkeypatch):
-    drawn = _capture(monkeypatch)
+def test_none_hit_counts_are_omitted_not_zeroed():
     # charlies and misses are genuinely unread (None); no_shoots is a real
     # zero. The lines must show the real zero and skip the unread fields --
     # not print a fabricated 0 for a count nobody read. Accuracy and faults
     # are separate lines now, so the zero lands on the faults one.
     scorecard = StageScorecard(alphas=7, charlies=None, deltas=1, misses=None, no_shoots=0)
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
-    placements = [_placement("Ann", 0, 0)]
-    summ.build_hold_still(placements, {"Ann": tile}, {}, GEOMETRY, theme=THEME)
+    texts = _texts(summ._cell_groups(tile, None, "Ann"))
 
-    assert "A7 D1" in drawn
-    assert "NS0" in drawn
+    assert "A7 D1" in texts
+    assert "NS0" in texts
 
 
 def test_procedurals_reach_the_screen():
@@ -532,8 +677,7 @@ def test_an_all_none_accuracy_draws_nothing():
     assert summ._accuracy_line(StageScorecard(alphas=None, charlies=None, deltas=None)) is None
 
 
-def test_both_lines_are_drawn_for_a_penalised_tile(monkeypatch):
-    drawn = _capture(monkeypatch)
+def test_both_lines_are_drawn_for_a_penalised_tile():
     scorecard = StageScorecard(
         hit_factor=12.17,
         stage_pct=78.5,
@@ -545,37 +689,33 @@ def test_both_lines_are_drawn_for_a_penalised_tile(monkeypatch):
         procedurals=2,
     )
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
-    placements = [_placement("Ann", 0, 0)]
-    summ.build_hold_still(placements, {"Ann": tile}, {}, GEOMETRY, theme=THEME)
+    texts = _texts(summ._cell_groups(tile, None, "Ann"))
 
-    assert "A10 C1 D1" in drawn
-    assert "M1 NS0 P2" in drawn
+    assert "A10 C1 D1" in texts
+    assert "M1 NS0 P2" in texts
 
 
-def test_manual_time_is_marked_as_manual(monkeypatch):
-    drawn = _capture(monkeypatch)
+def test_manual_time_is_marked_as_manual():
     tile = TileStageData(label="Ann", stage_number=1, stage_time_seconds=12.34, stage_time_is_manual=True)
-    placements = [_placement("Ann", 0, 0)]
-    summ.build_hold_still(placements, {"Ann": tile}, {}, GEOMETRY, theme=THEME)
+    texts = _texts(summ._cell_groups(tile, None, "Ann"))
 
-    assert any("12.34" in t and "manual" in t for t in drawn)
+    assert any("12.34" in t and "manual" in t for t in texts)
 
 
-def test_dq_replaces_the_scoring_lines(monkeypatch):
-    drawn = _capture(monkeypatch)
+def test_dq_replaces_the_scoring_lines():
     scorecard = StageScorecard(hit_factor=5.12, stage_pct=80.0, alphas=7, dq=True)
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
-    placements = [_placement("Ann", 0, 0)]
-    summ.build_hold_still(placements, {"Ann": tile}, {}, GEOMETRY, theme=THEME)
+    groups = summ._cell_groups(tile, None, "Ann")
+    texts = _texts(groups)
+    captions = [e.caption for g in groups for e in g.elements if e.caption is not None]
 
-    assert "DQ" in drawn
-    assert not any(t.startswith("HF") for t in drawn)
-    assert not any(t.startswith("Stage") for t in drawn)
-    assert not any("A7" in t for t in drawn)
+    assert "DQ" in texts
+    assert "HF" not in captions
+    assert "STAGE" not in captions
+    assert not any("A7" in t for t in texts)
 
 
-def test_splits_exclude_the_draw_from_best_average_worst(monkeypatch):
-    drawn = _capture(monkeypatch)
+def test_splits_exclude_the_draw_from_best_average_worst():
     shots = (
         TileShot(time_from_beep=1.5, split=1.5),  # the draw
         TileShot(time_from_beep=1.7, split=0.2),
@@ -583,55 +723,57 @@ def test_splits_exclude_the_draw_from_best_average_worst(monkeypatch):
         TileShot(time_from_beep=2.4, split=0.4),
     )
     tile = TileStageData(label="Ann", stage_number=1, shots=shots)
-    placements = [_placement("Ann", 0, 0)]
-    summ.build_hold_still(placements, {"Ann": tile}, {}, GEOMETRY, theme=THEME)
+    texts = _texts(summ._cell_groups(tile, None, "Ann"))
 
-    stats_lines = [t for t in drawn if t.startswith("Best")]
+    stats_lines = [t for t in texts if t.startswith("Best")]
     assert len(stats_lines) == 1
     assert "0.20" in stats_lines[0]
     assert "0.30" in stats_lines[0]
     assert "0.40" in stats_lines[0]
     assert "1.50" not in stats_lines[0]
-    assert any(t == "Draw 1.50" for t in drawn)
+    assert any(t == "Draw 1.50" for t in texts)
 
 
-def test_a_tile_with_no_audit_shows_only_its_label(monkeypatch):
-    drawn = _capture(monkeypatch)
+def test_a_tile_with_no_audit_shows_only_its_label():
     tile = TileStageData(label="Ann", stage_number=1)
-    placements = [_placement("Ann", 0, 0)]
-    summ.build_hold_still(placements, {"Ann": tile}, {}, GEOMETRY, theme=THEME)
-
-    assert drawn == ["Ann"]
+    assert _texts(summ._cell_groups(tile, None, "Ann")) == ["Ann"]
 
 
-def test_a_filler_tile_is_black_with_no_text(monkeypatch):
-    drawn = _capture(monkeypatch)
+def test_a_filler_tile_is_black_with_no_text():
+    """The control at the ``build_hold_still`` layer: a filler placement
+    must reach neither a freeze frame nor any rasterized content, matching
+    the live sprite's own treatment of an empty slot."""
     placements = [_placement("Bo", 0, 1, present=False)]
+    html = _rendered_html(placements, {})
     image = summ.build_hold_still(placements, {}, {}, GEOMETRY, theme=THEME)
 
-    assert drawn == []
+    assert "Bo" not in _cell_markup(html, 0, 1)
     extrema = image.getextrema()
     assert extrema == ((0, 0), (0, 0), (0, 0))
 
 
 # --- ranking (Task 8's addition -- not in the stale brief) ----------------
+#
+# ``_rank_placings`` is unchanged by this task, so the ranking arithmetic
+# itself is asked for directly rather than round-tripped through
+# rasterization to read the same facts back off drawn strings. A separate
+# wiring test below confirms the ranking this function returns actually
+# reaches the rendered HTML through ``build_hold_still``/``_summary_cells``.
 
 
-def test_placing_drawn_for_ranked_tiles(monkeypatch):
-    drawn = _capture(monkeypatch)
+def test_placing_drawn_for_ranked_tiles():
     placements = [_placement("Ann", 0, 0), _placement("Bo", 0, 1)]
     data = {
         "Ann": TileStageData(label="Ann", stage_number=1, scorecard=StageScorecard(stage_pct=95.0)),
         "Bo": TileStageData(label="Bo", stage_number=1, scorecard=StageScorecard(stage_pct=60.0)),
     }
-    summ.build_hold_still(placements, data, {}, GEOMETRY, theme=THEME)
+    placings = summ._rank_placings(placements, data)
 
-    assert "#1" in drawn
-    assert "#2" in drawn
+    assert placings["Ann"].rank == 1
+    assert placings["Bo"].rank == 2
 
 
-def test_ranking_follows_stage_pct_even_when_stage_points_disagree(monkeypatch):
-    drawn = _capture(monkeypatch)
+def test_ranking_follows_stage_pct_even_when_stage_points_disagree():
     placements = [_placement("Ann", 0, 0), _placement("Bo", 0, 1)]
     # Ann has more raw points but the lower stage_pct; Bo has fewer points
     # but the higher stage_pct. If ranking ever sorted by stage_points, Ann
@@ -646,19 +788,13 @@ def test_ranking_follows_stage_pct_even_when_stage_points_disagree(monkeypatch):
             label="Bo", stage_number=1, scorecard=StageScorecard(stage_pct=90.0, stage_points=100.0)
         ),
     }
-    summ.build_hold_still(placements, data, {}, GEOMETRY, theme=THEME)
+    placings = summ._rank_placings(placements, data)
 
-    assert "#1" in drawn
-    ann_index = drawn.index("Ann")
-    bo_index = drawn.index("Bo")
-    ann_placing = drawn[ann_index + 1]
-    bo_placing = drawn[bo_index + 1]
-    assert bo_placing == "#1", f"Bo has the higher stage_pct and must rank #1, got {bo_placing!r}"
-    assert ann_placing == "#2", f"Ann has the lower stage_pct and must rank #2, got {ann_placing!r}"
+    assert placings["Bo"].rank == 1, f"Bo has the higher stage_pct and must rank #1, got {placings['Bo']!r}"
+    assert placings["Ann"].rank == 2, f"Ann has the lower stage_pct and must rank #2, got {placings['Ann']!r}"
 
 
-def test_dq_missing_scorecard_and_filler_get_no_placing(monkeypatch):
-    drawn = _capture(monkeypatch)
+def test_dq_missing_scorecard_and_filler_get_no_placing():
     placements = [
         _placement("Ann", 0, 0),
         _placement("Bo", 0, 1),
@@ -670,15 +806,52 @@ def test_dq_missing_scorecard_and_filler_get_no_placing(monkeypatch):
         "Bo": TileStageData(label="Bo", stage_number=1, scorecard=None),
         "Cy": TileStageData(label="Cy", stage_number=1, scorecard=StageScorecard(stage_pct=70.0)),
     }
-    summ.build_hold_still(placements, data, {}, GEOMETRY, theme=THEME)
+    placings = summ._rank_placings(placements, data)
 
-    placing_lines = [t for t in drawn if t.startswith("#")]
     # The only rankable tile is Cy (DQ'd Ann and scorecard-less Bo are
-    # excluded, filler Dee draws nothing at all) -- alone in the pool.
-    assert placing_lines == ["#1"]
+    # excluded, filler Dee never enters the pool at all) -- alone in it.
+    assert set(placings) == {"Cy"}
+    assert placings["Cy"].rank == 1
 
 
-# --- the block is bounded on both axes ------------------------------------
+def test_the_ranking_reaches_the_rendered_html():
+    """The wiring test: ``build_hold_still`` must actually thread
+    ``_rank_placings``'s output into each placement's own declared groups
+    (via ``_summary_cells``) and on into the rasterized HTML -- the three
+    tests above only prove the ranking function itself is correct."""
+    placements = [_placement("Ann", 0, 0), _placement("Bo", 0, 1)]
+    data = {
+        "Ann": TileStageData(label="Ann", stage_number=1, scorecard=StageScorecard(stage_pct=95.0)),
+        "Bo": TileStageData(label="Bo", stage_number=1, scorecard=StageScorecard(stage_pct=60.0)),
+    }
+    html = _rendered_html(placements, data)
+
+    assert "#1" in html
+    assert "#2" in html
+
+
+# --- content attribution: one placement's data never reaches another's ----
+#
+# The old fitter-era boundary tests here (``test_a_short_cell_keeps_its_
+# summary_inside_its_own_cell``, ``test_a_long_name_keeps_its_summary_
+# inside_its_own_cell_horizontally``) proved a *pixel* never crossed a
+# cell edge by recording PIL draw calls -- there is no PIL drawing left in
+# this module to record. That guarantee is now structural (``overflow:
+# hidden``, asserted once in ``tests/test_overlay_html.py`` and proven
+# against real rendered pixels by ``tests/test_compare_grid_overlay_
+# integration.py``'s hold check -- see this task's brief, which singles
+# that check out as the boundary assertion that must carry over
+# unmodified; it does, unchanged, per the task report).
+#
+# ``test_a_tall_cell_lays_the_block_out_unshrunk`` is also gone rather
+# than adapted: it asserted PIL font-metric positions were "inert" at a
+# large cell size, which is meaningless once there is no shrink-fitter to
+# be inert. CSS has no equivalent failure mode to guard here.
+#
+# What is still this module's own job -- and still worth a direct test --
+# is that ``build_hold_still``/``_summary_cells`` attribute each
+# placement's own data to that placement's own cell and never to a
+# neighbour's, *before* any of it reaches HTML or CSS.
 
 
 def _full_stat_tile(label: str) -> TileStageData:
@@ -696,86 +869,7 @@ def _full_stat_tile(label: str) -> TileStageData:
     )
 
 
-def _drawn_boxes(monkeypatch):
-    """Record ``(xy, bbox)`` for every line the summary draws, plain or
-    plated -- a plate (a placing, a DQ, a lit faults line) is ink on a
-    filled rectangle drawn through ``_plate`` rather than
-    ``_draw_text_with_shadow``, and the bound this records against must
-    cover both paths or an overflowing plate would go unnoticed."""
-    boxes: list[tuple[tuple[int, int], tuple[int, int, int, int]]] = []
-    original_shadow = summ._draw_text_with_shadow
-    original_plate = summ._plate
-
-    def shadow_recorder(draw, canvas, xy, text, font, fill, **kwargs):
-        boxes.append((xy, draw.textbbox(xy, text, font=font)))
-        return original_shadow(draw, canvas, xy, text, font, fill, **kwargs)
-
-    def plate_recorder(canvas, xy, text, font, *, theme, size):
-        plate_w, plate_h = original_plate(canvas, xy, text, font, theme=theme, size=size)
-        x, y = xy
-        boxes.append((xy, (x, y, x + plate_w, y + plate_h)))
-        return plate_w, plate_h
-
-    monkeypatch.setattr(summ, "_draw_text_with_shadow", shadow_recorder)
-    monkeypatch.setattr(summ, "_plate", plate_recorder)
-    return boxes
-
-
-def _drawn_labeled_boxes(monkeypatch):
-    """Record ``(text, xy, bbox)`` for every line the summary draws,
-    plain or plated.
-
-    Text-tagged, unlike :func:`_drawn_boxes`, so a caller can attribute a
-    drawn box to its own shooter by what it *says* rather than by where
-    it landed. Position is exactly what
-    ``test_a_short_cell_keeps_its_summary_inside_its_own_cell`` is
-    checking, so filtering by position would silently discard the very
-    overflow that test exists to catch.
-    """
-    boxes: list[tuple[str, tuple[int, int], tuple[int, int, int, int]]] = []
-    original_shadow = summ._draw_text_with_shadow
-    original_plate = summ._plate
-
-    def shadow_recorder(draw, canvas, xy, text, font, fill, **kwargs):
-        boxes.append((text, xy, draw.textbbox(xy, text, font=font)))
-        return original_shadow(draw, canvas, xy, text, font, fill, **kwargs)
-
-    def plate_recorder(canvas, xy, text, font, *, theme, size):
-        plate_w, plate_h = original_plate(canvas, xy, text, font, theme=theme, size=size)
-        x, y = xy
-        boxes.append((text, xy, (x, y, x + plate_w, y + plate_h)))
-        return plate_w, plate_h
-
-    monkeypatch.setattr(summ, "_draw_text_with_shadow", shadow_recorder)
-    monkeypatch.setattr(summ, "_plate", plate_recorder)
-    return boxes
-
-
-def test_a_short_cell_keeps_its_summary_inside_its_own_cell(monkeypatch):
-    """A cell too short for its groups must not spill into a neighbour.
-
-    Nothing bounds a group's height by itself: :func:`_fit_font` budgets
-    width only. A short cell -- 75px here -- can overflow *either*
-    direction now that content is anchored on more than one edge:
-    top-left and top-right grow downward, away from the cell's top edge,
-    while the bottom-left band and the counts row stacked above it grow
-    upward, away from the bottom edge. Either direction attributes one
-    competitor's numbers to another, who has no way to disown them.
-
-    Ann sits in the *middle* row of three, not the top, so both
-    directions of crossing are observable in one fixture -- a fixture
-    with Ann in row 0 can only ever show the downward defect, because
-    there is nothing above row 0 to spill into, which is exactly why an
-    earlier version of this test kept passing when the height bound
-    behind it was deliberately gutted for a manual check: the fixture
-    could only see one of the two ways this can now break.
-
-    Boxes are attributed to Ann by their own drawn text, not by where
-    they landed -- position is what is under test, so filtering on it
-    would drop precisely the overflowing box the test needs to see.
-    """
-    geometry = SpriteGeometry(canvas_width=360, canvas_height=225, rows=3, cols=1)
-    assert geometry.cell_height == 75
+def test_summary_cells_never_attributes_one_placements_content_to_another():
     placements = [
         _placement("Above", 0, 0),
         _placement("Ann", 1, 0),
@@ -786,78 +880,55 @@ def test_a_short_cell_keeps_its_summary_inside_its_own_cell(monkeypatch):
         "Ann": _full_stat_tile("Ann"),
         "Below": TileStageData(label="Below", stage_number=1),
     }
+    placings = summ._rank_placings(placements, data)
 
-    boxes = _drawn_labeled_boxes(monkeypatch)
-    summ.build_hold_still(placements, data, {}, geometry, theme=THEME)
+    cells = summ._summary_cells(placements, data, placings)
+    by_label = {placement.label: groups for placement, groups in cells}
 
-    ann_boxes = [(xy, box) for text, xy, box in boxes if text not in ("Above", "Below")]
-    assert ann_boxes, "Ann's own cell drew nothing"
-    cell_top, cell_bottom = geometry.cell_height, 2 * geometry.cell_height
-    assert (
-        min(box[1] for _xy, box in ann_boxes) >= cell_top
-    ), "Ann's summary reaches above her own cell, into the shooter above"
-    assert (
-        max(box[3] for _xy, box in ann_boxes) <= cell_bottom
-    ), "Ann's summary reaches below her own cell, into the shooter below"
-    # Bounding it must not empty it: the label at least still lands, and
-    # a bound that simply stopped drawing would pass the checks above.
-    assert len(ann_boxes) >= 2, f"the bound left only {len(ann_boxes)} line(s) in Ann's cell"
+    ann_texts = {e.text for g in by_label["Ann"] for e in g.elements}
+    assert "12.34" in ann_texts
+    assert "87.4%" in ann_texts
+    # Neighbours have no audit and no scorecard: their own declared
+    # groups must carry nothing but their own label -- not a trace of
+    # Ann's figures, which a naive "reuse the previous groups" bug could
+    # otherwise leak in.
+    assert _texts(by_label["Above"]) == ["Above"]
+    assert _texts(by_label["Below"]) == ["Below"]
 
 
-def test_a_tall_cell_lays_the_block_out_unshrunk(monkeypatch):
-    """The shipped 3840x2160 default has 540-1080px cells, so the group
-    bounding introduced by this task must be inert there -- same sizes,
-    same anchored positions."""
-    geometry = SpriteGeometry(canvas_width=3840, canvas_height=2160, rows=3, cols=3)
-    placements = [_placement("Ann", 0, 0)]
-    data = {"Ann": _full_stat_tile("Ann")}
+def test_a_full_stat_tiles_figures_never_reach_a_neighboring_cells_markup():
+    """The vertical case: Ann sits in the *middle* row of three, so a
+    figure landing in either neighbour (not just the one below) would be
+    caught."""
+    geometry = SpriteGeometry(canvas_width=360, canvas_height=225, rows=3, cols=1)
+    placements = [
+        _placement("Above", 0, 0),
+        _placement("Ann", 1, 0),
+        _placement("Below", 2, 0),
+    ]
+    data = {
+        "Above": TileStageData(label="Above", stage_number=1),
+        "Ann": _full_stat_tile("Ann"),
+        "Below": TileStageData(label="Below", stage_number=1),
+    }
+    html = _rendered_html(placements, data, geometry=geometry)
 
-    boxes = _drawn_boxes(monkeypatch)
-    summ.build_hold_still(placements, data, {}, geometry, theme=THEME)
+    ann_cell = _cell_markup(html, 1, 0)
+    above_cell = _cell_markup(html, 0, 0)
+    below_cell = _cell_markup(html, 2, 0)
 
-    scale = summ.CellScale.for_cell(geometry.cell_height)
-    # The identity group's origin: the label lands at the cell's own
-    # top-left inset by the shared pad on the x axis. The y axis is not
-    # the raw pad -- `_draw_group` offsets it by the font's own ascent
-    # (`text_y - bbox[1]`) so the glyph's *ink* starts at the pad, not
-    # its nominal baseline box -- so the expected y is derived the same
-    # way `_draw_group` derives it, from the same font, rather than
-    # dropping the axis (a prior version of this assertion checked only
-    # `boxes[0][0][0]`, which is what let that offset go unverified).
-    scratch_draw = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
-    ann_font, _fitted = summ._fit_font(scratch_draw, "Ann", THEME, base_size=scale.identity, budget=10_000)
-    ann_bbox = scratch_draw.textbbox((0, 0), "Ann", font=ann_font)
-    assert boxes[0][0] == (scale.pad, scale.pad - ann_bbox[1])
-    # The first line is the label at its unshrunk size: a group that had
-    # been scaled down would draw it smaller than this.
-    assert boxes[0][1][3] - boxes[0][1][1] >= scale.identity // 2
-    assert max(box[3] for _xy, box in boxes) <= geometry.cell_height
+    assert "12.34" in ann_cell
+    assert "87.4" in ann_cell
+    for figure in ("12.34", "87.4", "5.12"):
+        assert figure not in above_cell, f"{figure!r} reached the cell above Ann's"
+        assert figure not in below_cell, f"{figure!r} reached the cell below Ann's"
 
 
-def test_a_long_name_keeps_its_summary_inside_its_own_cell_horizontally(monkeypatch):
-    """No box may cross a *vertical* cell edge either -- reachable at any
-    canvas size a caller asks for, not just a pathologically small one.
-
-    ``src/splitsmith/ui/server.py`` builds ``GridCanvas`` straight from
-    the request's ``canvas_width`` / ``canvas_height``, and #692 is about
-    to make 1080p and 2.7K first-class outputs -- 1080p at 5+ shooters
-    routes to a 4x4 grid, a 480x270 cell, well inside the range this
-    bug reached. An ordinary 23-character IPSC name (``_fit_font``
-    shrinks each element on its own, but nothing summed a *row's* several
-    elements against the cell width before this fix) crossed at every
-    geometry from a 3x3 3840x2160 canvas down, including this file's own
-    640x360 ``GEOMETRY``.
-
-    Middle *column* of three, mirroring
-    ``test_a_short_cell_keeps_its_summary_inside_its_own_cell``'s middle
-    *row*: a crossing can go either left or right once there is a real
-    neighbour on both sides, and a name is exactly as likely to push a
-    trailing placing chip rightward as a long band value is to push
-    itself leftward off a right anchor.
-    """
+def test_a_long_names_figures_never_reach_a_neighboring_cells_markup():
+    """The horizontal case, mirroring the vertical one above: a long
+    identity label sits in the *middle* column of three."""
     label = "Mathias Axell-Lindstrom"
     geometry = SpriteGeometry(canvas_width=960, canvas_height=180, rows=1, cols=3)
-    assert (geometry.cell_width, geometry.cell_height) == (320, 180)
     placements = [
         _placement("Left", 0, 0),
         _placement(label, 0, 1),
@@ -868,223 +939,17 @@ def test_a_long_name_keeps_its_summary_inside_its_own_cell_horizontally(monkeypa
         label: _full_stat_tile(label),
         "Right": TileStageData(label="Right", stage_number=1),
     }
+    html = _rendered_html(placements, data, geometry=geometry)
 
-    boxes = _drawn_labeled_boxes(monkeypatch)
-    summ.build_hold_still(placements, data, {}, geometry, theme=THEME)
+    mid_cell = _cell_markup(html, 0, 1)
+    left_cell = _cell_markup(html, 0, 0)
+    right_cell = _cell_markup(html, 0, 2)
 
-    mid_boxes = [(xy, box) for text, xy, box in boxes if text not in ("Left", "Right")]
-    assert mid_boxes, "the middle cell drew nothing"
-    cell_left, cell_right = geometry.cell_width, 2 * geometry.cell_width
-    assert (
-        min(box[0] for _xy, box in mid_boxes) >= cell_left
-    ), "the middle shooter's summary reaches left of her own cell, into the shooter to her left"
-    assert (
-        max(box[2] for _xy, box in mid_boxes) <= cell_right
-    ), "the middle shooter's summary reaches right of her own cell, into the shooter to her right"
-    assert len(mid_boxes) >= 2, f"the bound left only {len(mid_boxes)} box(es) in the middle cell"
-
-
-# --- each bounding lever is individually load-bearing (fix round 2) -------
-#
-# The suite above stays green with any *one* of the levers below removed,
-# because the other two on the same axis (plus, on the height axis, the
-# second-group skip) compensate for most geometries -- it takes all of
-# them gone at once, which is what the short/long-name tests above
-# happen to do, for the fixture and cell sizes they use. That is how a
-# regression in one lever alone shipped unnoticed: a test that only ever
-# breaks in combination is not proof any one piece is load-bearing on its
-# own. Each test below calls :func:`summ._draw_group` (or, for the
-# second-group skip, :func:`summ.build_hold_still`) directly with a
-# ``width_budget`` / ``height_budget`` / cell size picked so that *only*
-# the one lever under test can prevent the crossing -- verified by
-# breaking each lever in isolation (see task-6-report.md's fix-round-2
-# section for the transcripts) and confirming the specific test below,
-# and only that one, goes red.
-
-
-def _run_draw_group(monkeypatch, group, *, scale, width_budget, height_budget, origin=(1000, 1000)):
-    """Call ``_draw_group`` directly and capture what it drew, without
-    going through a whole cell/tile/geometry. Precise and fast: these
-    tests are about one function's own bounding, not the composition
-    around it."""
-    boxes = _drawn_labeled_boxes(monkeypatch)
-    canvas = Image.new("RGBA", (4000, 4000), (0, 0, 0, 255))
-    draw = ImageDraw.Draw(canvas)
-    used = summ._draw_group(
-        canvas, draw, group, theme=THEME, scale=scale, origin=origin,
-        width_budget=width_budget, height_budget=height_budget,
-    )  # fmt: skip
-    return boxes, used, origin
-
-
-def test_the_height_scale_ladder_shrinks_an_oversized_first_line(monkeypatch):
-    """The height-clamp lever (``_fit_group_scale``'s height comparison).
-
-    A COLUMN's first element always draws even if it will not fit (see
-    the drop-lever test below) -- so the *only* thing standing between
-    an over-tall first line and a crossing is shrinking it to fit in the
-    first place. ``height_budget=10`` is far below ``AAA``'s unshrunk
-    height at ``CellScale.for_cell(1000).detail`` (25px), but well above
-    the font floor's, so a working clamp fits it and a disabled one does
-    not.
-    """
-    scale = CellScale.for_cell(1000)
-    group = Group(
-        anchor=Anchor.TOP_LEFT,
-        flow=Flow.COLUMN,
-        elements=(Element(role=Role.DETAIL, text="AAA", emphasis=Emphasis.MUTED),),
-    )
-    boxes, _used, (ox, oy) = _run_draw_group(
-        monkeypatch, group, scale=scale, width_budget=2000, height_budget=10
-    )
-    assert boxes, "the group drew nothing at all"
-    assert all(box[1] >= oy and box[3] - oy <= 10 for _t, _xy, box in boxes), boxes
-
-
-def test_the_column_height_drop_keeps_a_six_line_group_inside_a_tiny_budget(monkeypatch):
-    scale = CellScale.for_cell(1000)
-    group = Group(
-        anchor=Anchor.TOP_LEFT,
-        flow=Flow.COLUMN,
-        elements=tuple(Element(role=Role.DETAIL, text=f"L{i}", emphasis=Emphasis.MUTED) for i in range(6)),
-    )
-    boxes, _used, (ox, oy) = _run_draw_group(
-        monkeypatch, group, scale=scale, width_budget=2000, height_budget=46
-    )
-    assert boxes, "the group drew nothing at all"
-    assert all(box[1] >= oy and box[3] - oy <= 46 for _t, _xy, box in boxes), boxes
-    # Bounding it must not empty it.
-    assert len(boxes) >= 1
-
-
-def test_the_second_group_skip_keeps_the_faults_row_off_when_the_band_used_the_room(monkeypatch):
-    """The second-group-skip lever (``_draw_cell``).
-
-    A cell height (56px) picked so that, with every other lever active,
-    the band (declared first, TIME/HF/STAGE) uses close enough to the
-    whole height budget that the faults/accuracy row stacked above it --
-    a *second* BOTTOM_LEFT group -- has no room left. If the skip is
-    disabled the second group is still attempted at whatever budget
-    remains and crosses into the cell above (the row above Ann's, in
-    this three-row middle fixture).
-    """
-    geometry = SpriteGeometry(canvas_width=360, canvas_height=56 * 3, rows=3, cols=1)
-    assert geometry.cell_height == 56
-    placements = [
-        _placement("Above", 0, 0),
-        _placement("Ann", 1, 0),
-        _placement("Below", 2, 0),
-    ]
-    data = {
-        "Above": TileStageData(label="Above", stage_number=1),
-        "Ann": _full_stat_tile("Ann"),
-        "Below": TileStageData(label="Below", stage_number=1),
-    }
-
-    boxes = _drawn_labeled_boxes(monkeypatch)
-    summ.build_hold_still(placements, data, {}, geometry, theme=THEME)
-
-    ann_boxes = [(xy, box) for text, xy, box in boxes if text not in ("Above", "Below")]
-    assert ann_boxes, "Ann's own cell drew nothing"
-    cell_top, cell_bottom = geometry.cell_height, 2 * geometry.cell_height
-    assert min(box[1] for _xy, box in ann_boxes) >= cell_top, (
-        "Ann's summary reaches above her own cell -- the second BOTTOM_LEFT group was drawn when "
-        "there was no room left for it"
-    )
-    assert max(box[3] for _xy, box in ann_boxes) <= cell_bottom
-
-
-def test_the_width_scale_ladder_shrinks_a_row_to_keep_both_its_elements(monkeypatch):
-    """The width-clamp lever (``_fit_group_scale``'s width comparison, ROW).
-
-    Unlike the height axis, this lever's absence cannot itself produce a
-    crossing here -- the trailing-drop lever below already guarantees
-    that on its own, for any ROW, by dropping whatever would not fit.
-    What the width clamp buys is *content*: at ``width_budget=200``,
-    ``CellScale.for_cell(1000)``, both ``"Best 0.30"`` and ``"Avg 0.30"``
-    individually fit ``_fit_font``'s own per-element floor, so neither
-    forces a shrink on its own, but their combined width at full size
-    does not fit -- so a width-blind ladder still picks the unshrunk
-    scale, the trailing-drop then has to sacrifice the second element to
-    stay inside the budget, and only one of two lines survives where a
-    width-aware ladder keeps both, shrunk to fit together. (Verified by
-    disabling the width comparison and confirming this specific test
-    goes red -- see task-6-report.md's fix-round-2 section.)
-    """
-    scale = CellScale.for_cell(1000)
-    group = Group(
-        anchor=Anchor.TOP_LEFT,
-        flow=Flow.ROW,
-        elements=(
-            Element(role=Role.DETAIL, text="Best 0.30", emphasis=Emphasis.MUTED),
-            Element(role=Role.DETAIL, text="Avg 0.30", emphasis=Emphasis.MUTED),
-        ),
-    )
-    boxes, _used, (ox, oy) = _run_draw_group(
-        monkeypatch, group, scale=scale, width_budget=200, height_budget=1000
-    )
-    texts = [text for text, _xy, _box in boxes]
-    assert texts == ["Best 0.30", "Avg 0.30"], (
-        f"expected both elements to survive, shrunk to fit together, got {texts!r} -- a width-blind "
-        "scale ladder would draw only the first at full size and let the trailing-drop sacrifice "
-        "the second"
-    )
-    assert all(box[0] >= ox and box[2] - ox <= 200 for _t, _xy, box in boxes), boxes
-
-
-def test_the_row_width_drop_keeps_an_eight_element_row_inside_a_tiny_budget(monkeypatch):
-    """The ROW width-drop lever.
-
-    Eight short elements at ``CellScale.for_cell(1000)``: even shrunk to
-    the font floor, eight do not fit ``width_budget=85`` (four do).
-    Nothing left to shrink -- only dropping the trailing elements that do
-    not fit can still prevent a crossing here.
-    """
-    scale = CellScale.for_cell(1000)
-    group = Group(
-        anchor=Anchor.TOP_LEFT,
-        flow=Flow.ROW,
-        elements=tuple(Element(role=Role.DETAIL, text=f"X{i}", emphasis=Emphasis.MUTED) for i in range(8)),
-    )
-    boxes, _used, (ox, oy) = _run_draw_group(
-        monkeypatch, group, scale=scale, width_budget=85, height_budget=1000
-    )
-    assert boxes, "the group drew nothing at all"
-    assert len(boxes) < 8, "all eight elements survived -- the trailing-drop never engaged"
-    assert all(box[0] >= ox and box[2] - ox <= 85 for _t, _xy, box in boxes), boxes
-
-
-def test_the_column_width_skip_drops_only_the_line_that_does_not_fit(monkeypatch):
-    """The COLUMN width-skip lever.
-
-    A long ``Best/Avg/Worst``-shaped line and a short ``Draw`` line, top
-    right, ``CellScale.for_cell(1000)``, ``width_budget=120``: the long
-    line does not fit even at the font floor (this is the exact shape
-    review found running left out of its cell), but the short one does.
-    Unlike a height overrun, one column line being too wide says nothing
-    about the next one, so the skip is per element -- it must drop only
-    the line that does not fit and keep the one that does, not drop
-    everything from that point on the way the height/width *drop* levers
-    do.
-    """
-    scale = CellScale.for_cell(1000)
-    group = Group(
-        anchor=Anchor.TOP_RIGHT,
-        flow=Flow.COLUMN,
-        elements=(
-            Element(role=Role.DETAIL, text="Best 0.30  Avg 0.30  Worst 0.30", emphasis=Emphasis.MUTED),
-            Element(role=Role.DETAIL, text="Draw 0.30", emphasis=Emphasis.MUTED),
-        ),
-    )
-    boxes, _used, (ox, oy) = _run_draw_group(
-        monkeypatch, group, scale=scale, width_budget=120, height_budget=1000, origin=(3000, 1000)
-    )
-    texts = [text for text, _xy, _box in boxes]
-    assert texts == ["Draw 0.30"], (
-        f"expected only the line that fits to survive, got {texts!r} -- a disabled per-element "
-        "width skip would draw the long line anyway and cross the cell's left edge"
-    )
-    assert all(ox - box[0] <= 120 and box[2] <= ox for _t, _xy, box in boxes), boxes
+    assert label in mid_cell
+    assert "12.34" in mid_cell
+    for figure in (label, "12.34", "87.4"):
+        assert figure not in left_cell, f"{figure!r} reached the cell to the left"
+        assert figure not in right_cell, f"{figure!r} reached the cell to the right"
 
 
 def test_build_hold_still_rejects_whole_match_keyed_data():

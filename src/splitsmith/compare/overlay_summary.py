@@ -17,11 +17,21 @@ orders of magnitude more for an identical result -- if a filter graph
 change to add a blur ever looks tempting, that is Task 9's territory and
 this module already did the work.
 
-**This module is pure PIL.** It draws no ``drawtext`` and shells out to
-ffmpeg only to extract each tile's freeze frame, through an injected
-:data:`splitsmith.compare.mp4_grid.Runner` so unit tests never shell out.
-A host whose ffmpeg lacks libfreetype loses the running clock elsewhere in
-the graph but gets a complete summary here, untouched.
+**The summary text is composed through the box engine, not hand-drawn.**
+See ``docs/superpowers/plans/2026-08-06-overlay-composition-seam-amendment.md``
+(Task 6R-3). ``_cell_groups`` still *declares* what one cell says; turning
+that declaration into pixels is now ``overlay_html.summary_html`` (pure
+HTML) plus an injected :class:`splitsmith.overlay_raster.Rasterizer`
+(HTML -> PNG, via headless Chromium), composited once over the whole
+canvas rather than drawn per cell with hand-fitted PIL text. This module
+still shells out to ffmpeg only to extract each tile's freeze frame,
+through an injected :data:`splitsmith.compare.mp4_grid.Runner` so unit
+tests never shell out, and never launches a browser directly -- that is
+entirely the injected :class:`~splitsmith.overlay_raster.Rasterizer`'s
+job. A host whose ffmpeg lacks libfreetype loses the running clock
+elsewhere in the graph but gets a complete summary here, untouched. A host
+with no usable Chromium loses the summary's text (see ``build_hold_still``)
+but still gets the blurred, dimmed freeze -- degradation, not a crash.
 
 Never draws a number that is absent. ``scorecard`` is ``None`` for
 placeholder stages and pre-scorecard projects; a manually-timed stage
@@ -31,35 +41,23 @@ audit at all. Each of those renders less, never a zero and never a guess.
 
 from __future__ import annotations
 
+import io
 import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageFilter
 
-from ..overlay_layout import (
-    Anchor,
-    CellScale,
-    Element,
-    Emphasis,
-    Flow,
-    Group,
-    Role,
-    anchor_origin,
-)
-from ..overlay_text import _draw_text_with_shadow, _load_font
+from ..overlay_html import summary_html
+from ..overlay_layout import Anchor, CellScale, Element, Emphasis, Flow, Group, Role
+from ..overlay_raster import Rasterizer
 from ..overlay_theme import OverlayTheme
 from .mp4_grid import GridStagePlan, Runner
 from .overlay_data import TileStageData
 from .overlay_sprites import SpriteGeometry, TilePlacement
 
 logger = logging.getLogger(__name__)
-
-#: Font sizes never shrink below this floor -- matches
-#: ``overlay_sprites._MIN_FONT_SIZE``'s reasoning: below it a further
-#: shrink reads as noise rather than smaller text.
-_MIN_FONT_SIZE = 12
 
 #: Default fraction of black composited over a tile's still. Chosen so the
 #: summary text is legible over any footage without crushing the picture
@@ -346,52 +344,6 @@ def _rank_placings(
     return placings
 
 
-def _theme_font_name(theme: OverlayTheme) -> str | None:
-    """The ``_load_font`` preset name for this theme's face.
-
-    Mirrors ``overlay_sprites.theme_font_face``'s choice (bundled mono for
-    ``splitsmith``, system discovery otherwise) so the summary's typography
-    matches the sprite's, but goes through ``_load_font`` directly per this
-    module's interface rather than ``load_face`` -- ``_load_font`` does its
-    own bundled/preset/fallback resolution and needs no font object cache
-    at this call volume (once per stage, not per frame).
-    """
-    return "splitsmith-mono" if theme.name == "splitsmith" else None
-
-
-def _text_width(draw: ImageDraw.ImageDraw, text: str, font) -> int:
-    bbox = draw.textbbox((0, 0), text, font=font)
-    return bbox[2] - bbox[0]
-
-
-def _fit_font(
-    draw: ImageDraw.ImageDraw,
-    text: str,
-    theme: OverlayTheme,
-    *,
-    base_size: int,
-    budget: float,
-):
-    """The largest font at or below ``base_size`` (steps of 2) that draws
-    ``text`` no wider than ``budget`` pixels, floored at
-    :data:`_MIN_FONT_SIZE`. Returns ``(font, size)``."""
-    font_name = _theme_font_name(theme)
-    size = base_size
-    font = _load_font(None, size, font_name=font_name)
-    while size > _MIN_FONT_SIZE and _text_width(draw, text, font) > budget:
-        size -= 2
-        font = _load_font(None, size, font_name=font_name)
-    return font, size
-
-
-#: Scales :func:`_fit_group_scale` tries, in order, before giving up and
-#: accepting whatever the floor gives it. Each step is a 15% cut, which is
-#: coarse enough that a group needing a real shrink gets there in a
-#: handful of measurements and fine enough that a group that barely
-#: overflows does not end up half-size.
-_GROUP_SCALE_STEPS = (1.0, 0.85, 0.72, 0.61, 0.52, 0.44, 0.37, 0.32, 0.27, 0.23)
-
-
 def _accuracy_line(scorecard) -> str | None:
     """``A7 C2 D1``, omitting any field that is ``None``.
 
@@ -528,376 +480,30 @@ def _cell_groups(
     return tuple(groups)
 
 
-def _plate_size(draw: ImageDraw.ImageDraw, text: str, font, *, size: int) -> tuple[int, int]:
-    """The ``(width, height)`` a :func:`_plate` of ``text`` would occupy,
-    without drawing it. Used by :func:`_element_footprint` to account for
-    a plate's own padding before anything is bounded or drawn.
+def _summary_cells(
+    placements: Sequence[TilePlacement],
+    data: Mapping[str, TileStageData],
+    placings: Mapping[str, StagePlacing],
+) -> list[tuple[TilePlacement, tuple[Group, ...]]]:
+    """One ``(placement, declared groups)`` pair per placement, in
+    placement order -- :func:`splitsmith.overlay_html.summary_html`'s own
+    input shape.
+
+    A filler tile's groups are never computed: ``summary_html`` already
+    treats ``present=False`` as an empty cell regardless of what groups it
+    is handed (the same defensive posture ``_draw_cell`` used to take),
+    but computing them anyway would be pointless work for a cell nothing
+    will render text into.
     """
-    bbox = draw.textbbox((0, 0), text, font=font)
-    text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    pad_x, pad_y = max(8, size // 3), max(5, size // 5)
-    return text_w + 2 * pad_x, text_h + 2 * pad_y
-
-
-def _plate(
-    canvas: Image.Image,
-    xy: tuple[int, int],
-    text: str,
-    font,
-    *,
-    theme: OverlayTheme,
-    size: int,
-) -> tuple[int, int]:
-    """Ink on a filled accent rectangle, returning the plate's size.
-
-    Not decoration. Measured on a shipped frame, the accent placing drew
-    7.1% accent pixels against 33.9% stroke pixels and its reddest pixel
-    was ``(201, 8, 10)`` against a theme accent of ``(255, 45, 45)``: a
-    stroke around thin glyphs is a halo that eats the glyph, and it eats
-    most of it at the smallest size in the cell. The footage underneath
-    an overlay is always arbitrary, so the only reliable contrast is one
-    that brings its own ground.
-    """
-    draw = ImageDraw.Draw(canvas)
-    bbox = draw.textbbox((0, 0), text, font=font)
-    plate_w, plate_h = _plate_size(draw, text, font, size=size)
-    pad_x, pad_y = max(8, size // 3), max(5, size // 5)
-    x, y = xy
-    canvas.alpha_composite(Image.new("RGBA", (plate_w, plate_h), (*theme.accent, 235)), (int(x), int(y)))
-    draw.text((x + pad_x - bbox[0], y + pad_y - bbox[1]), text, font=font, fill=(*theme.ink, 255))
-    return plate_w, plate_h
-
-
-def _element_footprint(
-    draw: ImageDraw.ImageDraw, element: Element, font, *, fitted: int
-) -> tuple[int, int, int]:
-    """``(text_w, text_h, footprint_w)`` for one element at font ``font``.
-
-    ``footprint_w`` is what the element actually occupies horizontally --
-    a plate's padded width for a ``PLATE`` element (a placing chip, a
-    ``DQ``, a lit faults line), the bare text width otherwise. A plate is
-    wider than its own text by ``2 * pad_x`` (see :func:`_plate_size`),
-    and neither the group's scale ladder nor its width bound saw that
-    padding until this existed: every element's footprint used to be
-    measured as its bare text width, so a plated element could still
-    cross a cell edge the bare-text measurement said it would not.
-
-    Both :func:`_fit_group_scale` and :func:`_draw_group` need the same
-    number for the same element, so it is computed once here rather than
-    twice.
-    """
-    bbox = draw.textbbox((0, 0), element.text, font=font)
-    text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    if element.emphasis is Emphasis.PLATE:
-        footprint_w, _plate_h = _plate_size(draw, element.text, font, size=fitted)
-    else:
-        footprint_w = text_w
-    return text_w, text_h, footprint_w
-
-
-def _fit_group_scale(
-    draw: ImageDraw.ImageDraw,
-    group: Group,
-    theme: OverlayTheme,
-    scale: CellScale,
-    *,
-    width_budget: float,
-    height_budget: float,
-) -> float:
-    """The largest uniform scale factor (from :data:`_GROUP_SCALE_STEPS`)
-    that lays ``group`` out within both ``width_budget`` and
-    ``height_budget``.
-
-    Mirrors the old whole-cell block shrink, but scoped to one group
-    instead of the whole cell: a column of DETAIL lines (top-right's shot
-    count / Best-Avg-Worst / Draw) is exactly the shape that used to spill
-    one shooter's figures into the cell below, so it is measured and
-    shrunk on its own rather than trusting per-element width-fitting alone
-    to keep it inside the cell.
-
-    A ``ROW`` group's height is its tallest single line and its width is
-    the sum of every element's footprint plus the gaps between them
-    (elements run side by side, not stacked, but they still share one
-    horizontal budget). A ``COLUMN`` group's height is the sum of its
-    lines and its width is its widest single line (elements each get
-    their own line, so they do not compete for width the way a row's
-    do). Returns the smallest step in the ladder once every element is
-    already at the font floor, even if the group still does not fit --
-    :func:`_draw_group` is the one that decides what to do about that
-    (drop trailing elements for a column height overrun or a row width
-    overrun; drop an individual column line that still will not fit its
-    own width at the floor, since shrinking the row's shared font size
-    further cannot rescue only one line).
-    """
-    for factor in _GROUP_SCALE_STEPS:
-        extent_h, row_h = 0.0, 0.0
-        extent_w, col_w = 0.0, 0.0
-        at_floor = True
-        for element in group.elements:
-            base = max(_MIN_FONT_SIZE, round(scale.size_for(element.role) * factor))
-            font, fitted = _fit_font(draw, element.text, theme, base_size=base, budget=width_budget)
-            at_floor = at_floor and fitted <= _MIN_FONT_SIZE
-            _text_w, text_h, footprint_w = _element_footprint(draw, element, font, fitted=fitted)
-            caption_h = 0
-            if element.caption is not None:
-                cap_base = max(_MIN_FONT_SIZE, round(scale.caption * factor))
-                caption_font, cap_fitted = _fit_font(
-                    draw, element.caption, theme, base_size=cap_base, budget=width_budget
-                )
-                at_floor = at_floor and cap_fitted <= _MIN_FONT_SIZE
-                caption_bbox = draw.textbbox((0, 0), element.caption, font=caption_font)
-                caption_h = (caption_bbox[3] - caption_bbox[1]) + max(4, scale.caption // 3)
-            block_h = text_h + caption_h
-            gap = max(6, fitted // 6)
-            if group.flow is Flow.COLUMN:
-                extent_h += block_h + gap
-                col_w = max(col_w, footprint_w)
-            else:
-                row_h = max(row_h, block_h)
-                extent_w += footprint_w + gap
-        total_h = extent_h if group.flow is Flow.COLUMN else row_h
-        total_w = col_w if group.flow is Flow.COLUMN else extent_w
-        if (total_h <= height_budget and total_w <= width_budget) or at_floor:
-            return factor
-    return _GROUP_SCALE_STEPS[-1]
-
-
-def _draw_group(
-    canvas: Image.Image,
-    draw: ImageDraw.ImageDraw,
-    group: Group,
-    *,
-    theme: OverlayTheme,
-    scale: CellScale,
-    origin: tuple[int, int],
-    width_budget: float,
-    height_budget: float,
-) -> int:
-    """Draw one group from its anchor origin. Returns the height used.
-
-    The return value is what lets two groups share an anchor without
-    overlapping -- the caller offsets the next one by it.
-
-    Bounded on both axes, the invariant the old whole-cell
-    ``_lay_out_block`` used to hold: the group is scaled down first (via
-    :func:`_fit_group_scale`, in the same coarse steps that function used
-    to shrink the whole cell, now checking width as well as height), and
-    whatever the scale ladder cannot fix on its own is handled per
-    element:
-
-    - A ``COLUMN`` group still too *tall* at the floor has its trailing
-      elements dropped rather than drawn across the cell's bottom or top
-      edge -- always keeping at least the first, the same trade-off the
-      old block-level bound made (an empty group reads as no data, which
-      is worse than one line that could not be shrunk any further).
-    - A ``COLUMN`` element that is still too *wide* at the floor -- a
-      long ``Best/Avg/Worst`` line in a narrow cell, measured by review
-      to run past the cell's edge even after every other line in the
-      same column fit -- is skipped in place rather than dropped along
-      with everything after it: unlike a height overrun, one line being
-      too wide says nothing about whether the *next* line (typically
-      shorter) will be too, so a column keeps every line that fits and
-      loses only the ones that do not, including possibly the first.
-    - A ``ROW`` group cannot drop an element to recover height -- its
-      height is one shared line, not a sum -- but it *can* drop trailing
-      elements to recover width, the same way a column drops trailing
-      elements to recover height: elements run left-to-right (or
-      right-to-left off a right anchor) along one shared budget, so once
-      it is spent nothing placed after the first overrun will fit either.
-    """
-    ink = (*theme.ink, 255)
-    muted = (*theme.ink, 170)
-    factor = _fit_group_scale(
-        draw, group, theme, scale, width_budget=width_budget, height_budget=height_budget
-    )
-
-    origin_x, origin_y = origin
-    cursor_x, cursor_y = origin_x, origin_y
-    tallest = 0
-    consumed_h = 0
-    consumed_w = 0
-    drawn = 0  # count of elements actually drawn, not the loop index -- a
-    # COLUMN element skipped for width (below) must not count as "the
-    # first" for the height-drop's own leniency, or a group whose first
-    # element happens to be too wide could lose its real first line too.
-
-    for element in group.elements:
-        base_size = max(_MIN_FONT_SIZE, round(scale.size_for(element.role) * factor))
-        font, fitted = _fit_font(draw, element.text, theme, base_size=base_size, budget=width_budget)
-        text_w, text_h, footprint_w = _element_footprint(draw, element, font, fitted=fitted)
-        bbox = draw.textbbox((0, 0), element.text, font=font)
-
-        caption_h = 0
-        caption_font = None
-        caption_bbox = None
-        if element.caption is not None:
-            cap_base = max(_MIN_FONT_SIZE, round(scale.caption * factor))
-            caption_font, _ = _fit_font(draw, element.caption, theme, base_size=cap_base, budget=width_budget)
-            caption_bbox = draw.textbbox((0, 0), element.caption, font=caption_font)
-            caption_h = (caption_bbox[3] - caption_bbox[1]) + max(4, scale.caption // 3)
-
-        block_h = text_h + caption_h
-        gap = max(6, fitted // 6)
-
-        if group.flow is Flow.COLUMN:
-            if footprint_w > width_budget:
-                # This line alone -- independent of the others, since a
-                # column's lines do not share a width budget -- is still
-                # too wide even at the font floor. Skip just this one and
-                # keep going: a shorter line later in the same column may
-                # still fit, and dropping it too would lose information
-                # a width overrun does not force losing.
-                continue
-            if drawn > 0 and consumed_h + block_h > height_budget:
-                # Would cross the cell's top or bottom edge: drop this
-                # line and every one after it, since height accumulates
-                # -- once the budget is spent nothing later fits either.
-                # The first *drawn* element always draws (see the
-                # docstring) -- not necessarily element 0 of the group,
-                # if that one was itself skipped for width just above.
-                break
-        else:
-            if drawn > 0 and consumed_w + footprint_w + gap > width_budget:
-                # Would cross the cell's left or right edge: elements in
-                # a row share one horizontal budget and run in a fixed
-                # order, so once it is spent nothing after the first
-                # overrun fits either. Same trade-off as the column's
-                # height drop, on the other axis.
-                break
-
-        x = cursor_x - text_w if group.anchor.is_right else cursor_x
-        if group.anchor.is_center:
-            x = cursor_x - text_w // 2
-        y = cursor_y - block_h if group.anchor.is_bottom else cursor_y
-
-        if element.caption is not None:
-            _draw_text_with_shadow(
-                draw,
-                canvas,
-                (x, y - caption_bbox[1]),
-                element.caption,
-                caption_font,
-                muted,
-                stroke_width=max(2, scale.caption // 16),
-                shadow_offset=max(2, scale.caption // 20),
-                shadow_blur=max(3, scale.caption // 10),
-                stroke_color=theme.stroke,
-                shadow_color=theme.shadow,
-            )
-
-        text_y = y + caption_h
-        if element.emphasis is Emphasis.PLATE:
-            plate_w, plate_h = _plate(canvas, (x, text_y), element.text, font, theme=theme, size=fitted)
-            advance_w, block_h = plate_w, caption_h + plate_h
-        else:
-            _draw_text_with_shadow(
-                draw,
-                canvas,
-                (x, text_y - bbox[1]),
-                element.text,
-                font,
-                muted if element.emphasis is Emphasis.MUTED else ink,
-                stroke_width=max(2, fitted // 16),
-                shadow_offset=max(2, fitted // 20),
-                shadow_blur=max(3, fitted // 10),
-                stroke_color=theme.stroke,
-                shadow_color=theme.shadow,
-            )
-            advance_w = text_w
-
-        if group.flow is Flow.ROW:
-            cursor_x += -(advance_w + gap) if group.anchor.is_right else advance_w + gap
-            tallest = max(tallest, block_h)
-            consumed_w += footprint_w + gap
-        else:
-            cursor_y += -(block_h + gap) if group.anchor.is_bottom else block_h + gap
-            tallest += block_h + gap
-            consumed_h += block_h + gap
-        drawn += 1
-
-    # A ``COLUMN`` group's ``tallest`` already ends with one trailing gap
-    # baked in (every drawn element adds ``block_h + gap``, including the
-    # last), which is exactly the breathing room the next thing needs --
-    # adding a second one here double-counted it. A ``ROW`` group's
-    # ``tallest`` is just its tallest single block with no gap in it at
-    # all, so it still needs one added.
-    if group.flow is Flow.ROW:
-        return tallest + max(6, scale.detail // 2)
-    return tallest
-
-
-def _draw_cell(
-    canvas: Image.Image,
-    draw: ImageDraw.ImageDraw,
-    placement: TilePlacement,
-    tile: TileStageData | None,
-    placing: StagePlacing | None,
-    geometry: SpriteGeometry,
-    *,
-    theme: OverlayTheme,
-) -> None:
-    """Draw one present tile's declared groups over its own cell.
-
-    A filler tile (``present`` False) draws nothing, matching the live
-    sprite's treatment of an empty slot: it is not a shooter, so text
-    over black would imply a competitor who isn't there.
-
-    Groups sharing an anchor stack away from that anchor's edge in
-    declaration order. Each group is bounded on its own, on both axes,
-    rather than the cell being bounded once (see :func:`_draw_group`), so
-    a long ``Best/Avg/Worst`` line at top-right cannot push the name
-    around and a long name cannot push a placing chip into the next
-    cell. A *second* group sharing an anchor (the faults/accuracy row
-    stacked above the TIME/HF/STAGE band) is left off, not attempted,
-    only once there is *strictly no room at all* left on that side
-    (``remaining <= 0``) -- a merely small remaining budget still gets a
-    real attempt, and :func:`_draw_group`'s own bounding is what keeps
-    that attempt inside the cell even when the budget it is given is
-    tiny, down to drawing nothing at all if nothing fits.
-    """
-    if not placement.present:
-        return
-
-    scale = CellScale.for_cell(geometry.cell_height)
-    cell_x = placement.col * geometry.cell_width
-    cell_y = placement.row * geometry.cell_height
-    width_budget = max(1, geometry.cell_width - 2 * scale.pad)
-    height_budget = max(1, geometry.cell_height - 2 * scale.pad)
-
-    groups = _cell_groups(tile, placing, placement.label)
-    consumed: dict[Anchor, int] = {}
-    for group in groups:
-        offset = consumed.get(group.anchor, 0)
-        remaining = height_budget - offset
-        if remaining <= 0 and offset > 0:
-            # No room left for a *second* group at this anchor: leave it
-            # off rather than draw it over the group that already claimed
-            # the space (see the docstring). The first group at an anchor
-            # (offset == 0) always gets a real attempt.
+    cells: list[tuple[TilePlacement, tuple[Group, ...]]] = []
+    for placement in placements:
+        if not placement.present:
+            cells.append((placement, ()))
             continue
-
-        origin_x, origin_y = anchor_origin(
-            group.anchor,
-            cell_x=cell_x,
-            cell_y=cell_y,
-            cell_w=geometry.cell_width,
-            cell_h=geometry.cell_height,
-            pad=scale.pad,
-        )
-        # Groups grow away from their own edge, so a bottom anchor's
-        # second group moves *up* by what the first consumed.
-        origin_y += -offset if group.anchor.is_bottom else offset
-        used = _draw_group(
-            canvas,
-            draw,
-            group,
-            theme=theme,
-            scale=scale,
-            origin=(origin_x, origin_y),
-            width_budget=width_budget,
-            height_budget=max(1, remaining),
-        )
-        consumed[group.anchor] = offset + used
+        tile = data.get(placement.label)
+        groups = _cell_groups(tile, placings.get(placement.label), placement.label)
+        cells.append((placement, groups))
+    return cells
 
 
 def build_hold_still(
@@ -907,17 +513,41 @@ def build_hold_still(
     geometry: SpriteGeometry,
     *,
     theme: OverlayTheme,
+    rasterizer: Rasterizer | None = None,
     blur_radius: int | None = None,
     dim: float = DEFAULT_DIM,
 ) -> Image.Image:
     """Compose the canvas-sized RGB stage summary still.
 
     Each present tile's blurred, dimmed freeze frame is pasted into its
-    cell first, then that shooter's summary text is drawn over it -- so a
-    cell with no freeze frame (extraction failed, or the tile has no
-    trim) is simply the canvas's own black background with the text drawn
-    over it, never a crash. A filler tile (``present=False``) draws
-    nothing at all: it is not a shooter, so text over black would imply a
+    cell first (never a crash: a cell with no freeze frame, extraction
+    failed or the tile has no trim, is simply the canvas's own black
+    background). Every shooter's summary text is then composed in one
+    pass: the whole canvas's declared cells (see :func:`_summary_cells`)
+    become one HTML document (``overlay_html.summary_html``), rasterized
+    to one canvas-sized PNG by the injected ``rasterizer``, and
+    alpha-composited over the freezes in a single call -- not drawn per
+    cell. This is what makes ``overflow: hidden`` (declared once, in the
+    HTML's own stylesheet) the thing that keeps one shooter's figures out
+    of another's cell, rather than arithmetic bounding checked here. See
+    the module docstring and
+    ``docs/superpowers/plans/2026-08-06-overlay-composition-seam-amendment.md``.
+
+    ``rasterizer`` is ``None`` by default -- no text is composed and the
+    still is just the blurred, dimmed freezes, which is also the
+    degradation path a caller with no usable Chromium falls back to (see
+    :mod:`splitsmith.compare.mp4_grid`'s preflight around
+    :class:`~splitsmith.overlay_raster.ChromiumRasterizer`). A rasterizer
+    that *is* given but fails on this call -- as opposed to failing to
+    launch at all, which is the caller's preflight's job to catch once
+    per render -- degrades the same way: logged and skipped, so one bad
+    stage's rasterization does not cost the whole render the way raising
+    out of this function would (mirroring :func:`_prepare_cell` and
+    :func:`extract_freeze_frames`'s own per-tile degradation elsewhere in
+    this module).
+
+    A filler tile (``present=False``) gets no freeze and no summary text
+    at all: it is not a shooter, so text over black would imply a
     competitor who isn't there.
 
     ``blur_radius`` defaults to ``max(8, cell_height // 60)`` -- scaled
@@ -927,10 +557,6 @@ def build_hold_still(
     _check_stage_keys(data)
     radius = blur_radius if blur_radius is not None else max(8, geometry.cell_height // 60)
 
-    # RGBA throughout the compose, not RGB: ``_draw_text_with_shadow``
-    # alpha-composites its drop shadow onto the canvas, which PIL requires
-    # to be RGBA (or LA). Converted to RGB only on the way out, matching
-    # this function's documented return type.
     canvas = Image.new("RGBA", (geometry.canvas_width, geometry.canvas_height), (0, 0, 0, 255))
     for placement in placements:
         if not placement.present:
@@ -945,11 +571,23 @@ def build_hold_still(
         y0 = placement.row * geometry.cell_height
         canvas.paste(cell_image.convert("RGBA"), (x0, y0))
 
-    placings = _rank_placings(placements, data)
-    draw = ImageDraw.Draw(canvas)
-    for placement in placements:
-        tile = data.get(placement.label)
-        _draw_cell(canvas, draw, placement, tile, placings.get(placement.label), geometry, theme=theme)
+    if rasterizer is not None:
+        placings = _rank_placings(placements, data)
+        cells = _summary_cells(placements, data, placings)
+        scale = CellScale.for_cell(geometry.cell_height)
+        html = summary_html(cells, geometry=geometry, scale=scale, theme=theme)
+        try:
+            png_bytes = rasterizer.png(html, width=geometry.canvas_width, height=geometry.canvas_height)
+            with Image.open(io.BytesIO(png_bytes)) as overlay_image:
+                overlay_rgba = overlay_image.convert("RGBA")
+        except Exception as exc:  # noqa: BLE001 -- one bad rasterization must not lose the stage
+            logger.warning(
+                "compare overlay summary: could not rasterize the stage summary (%s); "
+                "the still composes without any text",
+                exc,
+            )
+        else:
+            canvas.alpha_composite(overlay_rgba)
 
     return canvas.convert("RGB")
 
@@ -963,6 +601,7 @@ def write_hold_still(
     work_dir: Path,
     ffmpeg_binary: str,
     runner: Runner,
+    rasterizer: Rasterizer | None = None,
     blur_radius: int | None = None,
     dim: float = DEFAULT_DIM,
     output_path: Path | None = None,
@@ -972,9 +611,9 @@ def write_hold_still(
     contract as :func:`build_hold_still` and
     ``overlay_sprites.build_overlay_states``.
 
-    Convenience wrapper only: Task 9 wires the frame it produces into the
-    ffmpeg graph as one more static input, the same way the sprite
-    sequence already is. Nothing here touches that graph.
+    Convenience wrapper only: ``mp4_grid`` wires the frame it produces
+    into the ffmpeg graph as one more static input, the same way the
+    sprite sequence already is. Nothing here touches that graph.
     """
     placements = _placements_for_plan(plan)
     freezes = extract_freeze_frames(
@@ -984,7 +623,14 @@ def write_hold_still(
         runner=runner,
     )
     still = build_hold_still(
-        placements, data, freezes, geometry, theme=theme, blur_radius=blur_radius, dim=dim
+        placements,
+        data,
+        freezes,
+        geometry,
+        theme=theme,
+        rasterizer=rasterizer,
+        blur_radius=blur_radius,
+        dim=dim,
     )
     out_path = output_path or work_dir / f"summary-stage{plan.stage_number}.png"
     out_path.parent.mkdir(parents=True, exist_ok=True)

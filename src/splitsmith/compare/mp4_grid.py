@@ -30,6 +30,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..overlay_layout import Anchor, CellScale, anchor_ffmpeg_expr
+from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..overlay_text import FALLBACK_BUNDLED_FONT, overlay_font_file
 from ..overlay_theme import ThemeName, load_theme
 from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, quote_filter_value, runtime
@@ -1581,6 +1582,7 @@ def _stage_hold_still(
     work: Path,
     ffmpeg_binary: str,
     runner: Runner,
+    rasterizer: Rasterizer | None,
 ) -> Path:
     """Compose this stage's frozen summary still and return its path.
 
@@ -1590,6 +1592,15 @@ def _stage_hold_still(
     a mapping sliced on the *wrong* stage is still str-keyed and would
     render one stage's figures over another's picture in silence, so
     there is exactly one place that slice is written.
+
+    ``rasterizer`` is threaded straight through to
+    ``overlay_summary.write_hold_still``/``build_hold_still``: ``None``
+    means the summary composes with no text (either no rasterizer was
+    ever requested, or :func:`render_grid_mp4`'s own preflight already
+    degraded and said so once for the whole render), a live one means the
+    box-engine summary renders through it, and this function does not
+    itself decide which -- see :func:`render_grid_mp4`'s rasterizer
+    preflight, which mirrors its drawtext capability preflight.
 
     Imported inside the function on purpose:
     :mod:`splitsmith.compare.overlay_summary` imports ``GridStagePlan``
@@ -1611,6 +1622,7 @@ def _stage_hold_still(
         work_dir=work,
         ffmpeg_binary=ffmpeg_binary,
         runner=runner,
+        rasterizer=rasterizer,
     )
 
 
@@ -1654,6 +1666,7 @@ def render_grid_mp4(
     runner: Runner = subprocess.run,
     probe_runner: Runner = subprocess.run,
     still_runner: Runner = subprocess.run,
+    rasterizer: Rasterizer | None = None,
     on_notice: NoticeHook | None = None,
     work_dir: Path | None = None,
 ) -> GridRenderResult:
@@ -1715,6 +1728,26 @@ def render_grid_mp4(
     leave every summary cell black without saying so. ``on_notice``
     is how a caller says the degradation out loud at the moment it is
     decided; the same text is logged at warning level either way.
+
+    ``rasterizer`` is the box-engine summary's own seam
+    (:mod:`splitsmith.overlay_raster`), mirroring the ``Runner`` pattern
+    above rather than a new one: a caller injects a fake here for the
+    same reason it injects a fake ``still_runner``. Left ``None`` (the
+    default), a hold that needs one gets a real
+    :class:`~splitsmith.overlay_raster.ChromiumRasterizer`, opened once
+    for the whole render -- not once per stage, since a 12-stage match
+    would otherwise pay Chromium's process startup 12 times for an
+    identical result -- and preflighted the same way the ffmpeg
+    capability probe above is: attempting the real launch before any
+    stage encodes, so a missing browser is found in the first second
+    rather than after 11 stages have already rendered. A caller who
+    passes their own ``rasterizer`` owns its lifecycle; this function
+    only manages the one it creates itself. No usable Chromium degrades
+    the same way no ``drawtext`` does -- reported through ``on_notice``
+    and :attr:`GridRenderResult.degradations`, the render proceeds, and
+    every hold still composes with the blurred freeze but no summary
+    text, rather than failing the run. It never falls back to a second
+    rendering engine.
 
     ``work_dir`` holds the per-stage segments and the concat list. It
     defaults to a directory beside the output -- same filesystem, so a
@@ -1813,87 +1846,124 @@ def render_grid_mp4(
             else:
                 logger.warning("%s", degradation.detail)
 
+    # The rasterizer preflight, mirroring the drawtext capability probe
+    # above: only relevant once a hold is actually requested (the guard
+    # at the top of this function already refused a hold without
+    # ``overlay``), and attempted once for the whole render rather than
+    # once per stage -- both for cost (a 12-stage match would otherwise
+    # pay Chromium's process startup 12 times) and so a missing browser
+    # is found before any stage has encoded anything, the same reason the
+    # drawtext probe runs up front. A caller-supplied ``rasterizer`` is
+    # used as-is and its lifecycle is the caller's, not managed here.
+    active_rasterizer: Rasterizer | None = rasterizer
+    owned_rasterizer: ChromiumRasterizer | None = None
+    if summary_hold_seconds > 0 and rasterizer is None:
+        owned_rasterizer = ChromiumRasterizer()
+        try:
+            active_rasterizer = owned_rasterizer.__enter__()
+        except RasterizerUnavailableError as exc:
+            owned_rasterizer = None
+            active_rasterizer = None
+            degradations = degradations + (OverlayDegradation(summary=exc.summary, detail=exc.detail),)
+            if on_notice is not None:
+                logger.info("%s", exc.detail)
+                on_notice(exc.detail)
+            else:
+                logger.warning("%s", exc.detail)
+
     outcomes: list[StageOutcome] = []
     segments: list[Path] = []
-    for plan in plans:
-        segment = work / f"stage{plan.stage_number}{SEGMENT_SUFFIX}"
-        stage_overlay: StageOverlayPlan | None = None
-        hold_still: Path | None = None
-        # ``font_path`` is set exactly when ``overlay`` is; naming both
-        # keeps that obvious rather than asserting it.
-        if overlay and font_path is not None:
-            stage_overlay = _stage_overlay_plan(
-                plan,
-                canvas,
-                overlay_data,
-                theme_name=overlay_theme,
-                font_path=font_path,
-                head_pad_seconds=head_pad_seconds,
-                work=work,
-            )
-            if not draw_clock:
-                # Dropping the clocks is what removes ``drawtext`` from
-                # the command: ``_clock_filters`` emits one filter per
-                # clock and the plain passthrough when there are none.
-                stage_overlay = replace(stage_overlay, clocks=())
-            if plan.hold_seconds > 0:
-                # A missing ``drawtext`` costs the summary nothing: it is
-                # pure PIL, so a host that lost the clock still gets full
-                # summaries.
-                #
-                # Caught, not raised, and for the same reason a failed
-                # ffmpeg call below is: one bad stage is reported and
-                # skipped so the rest still stitch. ``overlay_summary``
-                # already degrades an unreadable trim or a bad freeze to
-                # a black cell, so what reaches here is the whole-stage
-                # kind -- a font that will not load, a disk that will not
-                # take the PNG. Building the segment anyway is not an
-                # option: without the still the stage's audio would
-                # outlast its video, which is the one fault nothing
-                # downstream reports.
-                try:
-                    hold_still = _stage_hold_still(
-                        plan,
-                        canvas,
-                        overlay_data,
-                        theme_name=overlay_theme,
-                        work=work,
-                        ffmpeg_binary=binary,
-                        runner=still_runner,
-                    )
-                except Exception as exc:  # noqa: BLE001 -- one bad stage must not lose the match
-                    detail = f"could not compose the stage summary still: {exc}"
-                    logger.warning("compare grid stage %d: %s", plan.stage_number, detail)
-                    outcomes.append(
-                        StageOutcome(
-                            stage_number=plan.stage_number,
-                            stage_name=plan.stage_name,
-                            ok=False,
-                            error=detail,
-                        )
-                    )
-                    continue
-        cmd = build_stage_command(
-            plan,
-            canvas=canvas,
-            output_path=segment,
-            ffmpeg_binary=binary,
-            overlay=stage_overlay,
-            hold_still_path=hold_still,
-        )
-        completed = _run_ffmpeg(cmd, runner=runner)
-        if completed.returncode != 0:
-            outcomes.append(
-                StageOutcome(
-                    stage_number=plan.stage_number,
-                    stage_name=plan.stage_name,
-                    ok=False,
-                    error=_stderr_text(completed),
+    try:
+        for plan in plans:
+            segment = work / f"stage{plan.stage_number}{SEGMENT_SUFFIX}"
+            stage_overlay: StageOverlayPlan | None = None
+            hold_still: Path | None = None
+            # ``font_path`` is set exactly when ``overlay`` is; naming both
+            # keeps that obvious rather than asserting it.
+            if overlay and font_path is not None:
+                stage_overlay = _stage_overlay_plan(
+                    plan,
+                    canvas,
+                    overlay_data,
+                    theme_name=overlay_theme,
+                    font_path=font_path,
+                    head_pad_seconds=head_pad_seconds,
+                    work=work,
                 )
+                if not draw_clock:
+                    # Dropping the clocks is what removes ``drawtext`` from
+                    # the command: ``_clock_filters`` emits one filter per
+                    # clock and the plain passthrough when there are none.
+                    stage_overlay = replace(stage_overlay, clocks=())
+                if plan.hold_seconds > 0:
+                    # A missing ``drawtext`` costs the summary nothing: it is
+                    # pure PIL, so a host that lost the clock still gets full
+                    # summaries. A missing rasterizer (see the preflight
+                    # above) costs the summary its text but not the still
+                    # itself -- ``build_hold_still`` composes the blurred
+                    # freeze either way.
+                    #
+                    # Caught, not raised, and for the same reason a failed
+                    # ffmpeg call below is: one bad stage is reported and
+                    # skipped so the rest still stitch. ``overlay_summary``
+                    # already degrades an unreadable trim or a bad freeze to
+                    # a black cell, so what reaches here is the whole-stage
+                    # kind -- a font that will not load, a disk that will not
+                    # take the PNG. Building the segment anyway is not an
+                    # option: without the still the stage's audio would
+                    # outlast its video, which is the one fault nothing
+                    # downstream reports.
+                    try:
+                        hold_still = _stage_hold_still(
+                            plan,
+                            canvas,
+                            overlay_data,
+                            theme_name=overlay_theme,
+                            work=work,
+                            ffmpeg_binary=binary,
+                            runner=still_runner,
+                            rasterizer=active_rasterizer,
+                        )
+                    except Exception as exc:  # noqa: BLE001 -- one bad stage must not lose the match
+                        detail = f"could not compose the stage summary still: {exc}"
+                        logger.warning("compare grid stage %d: %s", plan.stage_number, detail)
+                        outcomes.append(
+                            StageOutcome(
+                                stage_number=plan.stage_number,
+                                stage_name=plan.stage_name,
+                                ok=False,
+                                error=detail,
+                            )
+                        )
+                        continue
+            cmd = build_stage_command(
+                plan,
+                canvas=canvas,
+                output_path=segment,
+                ffmpeg_binary=binary,
+                overlay=stage_overlay,
+                hold_still_path=hold_still,
             )
-            continue
-        segments.append(segment)
-        outcomes.append(StageOutcome(stage_number=plan.stage_number, stage_name=plan.stage_name, ok=True))
+            completed = _run_ffmpeg(cmd, runner=runner)
+            if completed.returncode != 0:
+                outcomes.append(
+                    StageOutcome(
+                        stage_number=plan.stage_number,
+                        stage_name=plan.stage_name,
+                        ok=False,
+                        error=_stderr_text(completed),
+                    )
+                )
+                continue
+            segments.append(segment)
+            outcomes.append(StageOutcome(stage_number=plan.stage_number, stage_name=plan.stage_name, ok=True))
+    finally:
+        # Closed as soon as the stage loop is done, not held open through
+        # the final concat/stitch below -- the stitch is ffmpeg-only and
+        # never touches the rasterizer. A caller-supplied ``rasterizer``
+        # is left alone: its lifecycle was never this function's to manage.
+        if owned_rasterizer is not None:
+            owned_rasterizer.__exit__(None, None, None)
 
     if not segments:
         raise GridRenderError(
