@@ -27,15 +27,22 @@ that both:
   runs through the whole pipeline -- loader, sprite builder, filter
   graph, ffmpeg -- instead of only through ``test_compare_overlay_data.py``.
 
-Every video-derived clip is built once by ``tests/synthetic_media.py``
-(the shared ``synthetic_source_video`` session fixture) and read three
-times as independent ffmpeg inputs -- there is no need for the three
-tiles to look different from each other, since every assertion below
-compares the *same* footage rendered with and without the overlay, not
-the tiles against one another. It is load-bearing that they are the
-same clip: the summary-hold test below compares one tile's cell against
-another's *within a single frame*, which only isolates drawn text
-because the picture underneath is identical by construction.
+The media comes from ``tests/synthetic_media.py``'s session clip, cut by
+``shooter_clips`` into one file per shooter whose container duration is
+exactly the length the bundle declares. That equality is the point: in
+production the declared length is an ffprobe of the trim, so anything
+reading "the end of this clip" has no slack to overrun into, and a
+fixture that declares 9s while handing over 24s of media cannot express
+what happens when it does.
+
+Anders and Bea read the *same* cut, which is load-bearing for the
+summary-hold test below: it compares one tile's cell against another's
+within a single frame, and that only isolates drawn text because the
+picture underneath is identical by construction. Mathias reads a shorter
+cut, which is load-bearing for the opposite reason -- his cell is black
+while the other two still have picture, so anything that confuses "the
+end of the action" with "the end of this tile's footage" shows up in his
+cell and nowhere else.
 
 Task 9 adds ``--summary-hold`` and its test is the reason this module
 matters more than it looks. A hold whose still never reached the filter
@@ -93,12 +100,48 @@ FRAME_SECONDS = 1 / 30
 
 HEAD_PAD_SECONDS = 1.0
 TAIL_PAD_SECONDS = 0.5
-BEEP_OFFSET_SECONDS = 3.0  # into the clip; seek clamps to beep - head_pad = 2.0s
-STAGE_DURATION_SECONDS = 9.0  # per-shooter clip length handed to the bundle
 
-# Segment layout: head pad (1.0s) + post-beep span (9.0 - 3.0 = 6.0s) +
+# --- clip lengths: declared == what the media actually is ---------------
+#
+# This used to declare ``STAGE_DURATION_SECONDS = 9.0`` while handing
+# every tile the shared 24.0s source clip. Fifteen seconds of slack, and
+# it was the only reason the freeze-frame seek landed inside the media at
+# all: the extraction targets a time derived from the clip's declared
+# length, and in production that length comes off an ffprobe of the trim
+# itself (``project_loader``), so it is exact and the seek had nowhere to
+# overrun into. The whole stage summary rendered on pure black under
+# shipped defaults and this fixture could not express it.
+#
+# So each shooter now gets a real clip of its own, cut to an exact frame
+# count, and the bundle is handed that clip's *probed* duration --
+# ``_probe_seconds`` below asserts the two agree, so the slack cannot
+# quietly come back.
+#
+# The frame counts are chosen to keep the segment arithmetic in whole
+# 1/30s canvas frames: 270 source frames at 30000/1001 is 9.009s, and a
+# beep 3.009s in leaves a post-beep span of exactly 6.0s.
+STAGE_FRAMES = 270
+STAGE_DURATION_SECONDS = STAGE_FRAMES * SYNTHETIC_FPS_DEN / SYNTHETIC_FPS_NUM  # 9.009
+
+#: Mathias's clip, deliberately shorter than the other two.
+#:
+#: The stage runs until the *longest* tile's post-beep span is done, so
+#: his cell is ``tpad`` black for the last ~1.5s of every action. That is
+#: what separates "freeze on this tile's own last frame" from "freeze on
+#: the action's last frame": the second reads black in his cell, and with
+#: three equal-length clips no assertion here could tell them apart.
+SHORT_STAGE_FRAMES = 225
+SHORT_STAGE_DURATION_SECONDS = SHORT_STAGE_FRAMES * SYNTHETIC_FPS_DEN / SYNTHETIC_FPS_NUM  # 7.5075
+
+BEEP_OFFSET_SECONDS = STAGE_DURATION_SECONDS - 6.0  # 3.009s in; seek clamps to beep - head_pad
+
+# Segment layout: head pad (1.0s) + longest post-beep span (6.0s) +
 # tail pad (0.5s) = 7.5s per the whole-driver stitch.
 SEGMENT_SECONDS = HEAD_PAD_SECONDS + (STAGE_DURATION_SECONDS - BEEP_OFFSET_SECONDS) + TAIL_PAD_SECONDS
+
+#: When Mathias's footage stops, in segment time: his beep is at the head
+#: pad like everyone's, and his own post-beep span is shorter.
+MATHIAS_FOOTAGE_ENDS = HEAD_PAD_SECONDS + (SHORT_STAGE_DURATION_SECONDS - BEEP_OFFSET_SECONDS)
 
 # Every tile's beep lands at the segment's head pad (1.0s -- see
 # ``_stage_overlay_plan``'s comment on ``start_seconds``), so absolute
@@ -269,6 +312,18 @@ SEGMENT_FRAMES = ACTION_FRAMES + HOLD_FRAMES
 #: on which side of a boundary a tie falls).
 LAST_ACTION_INDEX = ACTION_FRAMES - 1
 MID_HOLD_INDEX = ACTION_FRAMES + HOLD_FRAMES // 2
+
+#: Late in the action but before any tile's own footage has run out.
+#:
+#: Not the same frame as :data:`LAST_ACTION_INDEX`, and the difference is
+#: the whole blocker. The action runs a tail pad past the longest tile's
+#: footage and every tile chain is ``tpad``-ed black across it, so the
+#: last *action* frame has no picture in it on any tile -- Anders and Bea
+#: end around 6.97s, Mathias at 5.50s, and the action runs to 7.5s. This
+#: index (6.833s) is where Anders and Bea still have footage and Mathias
+#: does not, which is what lets the two "end of the footage" readings be
+#: told apart in pixels.
+PICTURE_INDEX = 205
 #: The same point in stage 2's hold, which must carry stage 2's figures.
 STAGE2_MID_HOLD_INDEX = SEGMENT_FRAMES + MID_HOLD_INDEX
 
@@ -287,13 +342,49 @@ HOLD_MATCHES_ITS_STILL_MAX = 6.0
 #: bottom half of Bea's cell -- her label is at the top, so this crop is
 #: pure picture with no glyphs in either frame.
 #:
-#: Measured on this fixture: 2.07 on the last action frame (live
+#: Measured on this fixture: 1.99 at :data:`PICTURE_INDEX` (live
 #: testsrc2, whose colour-bar edges are all the high frequency it has)
-#: against 0.18 inside the hold. An 11x drop, and the thresholds sit
-#: between: a hold showing the raw last action frame instead of the
-#: blurred still reads the action figure.
+#: against 0.20 inside the hold. A 10x drop, and the thresholds sit
+#: between: a hold showing raw footage instead of the blurred still reads
+#: the action figure.
 BLURRED_MAX_HF_ENERGY = 0.8
 ACTION_MIN_HF_ENERGY = 1.5
+
+# --- is there a picture in the summary at all --------------------------
+#
+# The measure that names the blocker. A stage summary whose freeze frames
+# were never extracted is text on the canvas's own black background, and
+# the text is a few percent of a cell. Measured on this fixture with the
+# fix in place: every shooter's cell is 0.0000 pure black at mean luma
+# 69-70 inside the hold. The reviewer's failing baseline, a 5-shooter 3x3
+# render at shipped CLI defaults, wrote zero freeze PNGs and produced a
+# hold frame that was 84.0% pure black at mean luma 10.1.
+#
+# Per cell rather than over the whole canvas, because the unreached cell
+# is legitimately black and pools ~25% of a 2x2 canvas into any
+# whole-frame figure -- which is most of the distance between a correct
+# render and a broken one.
+HOLD_CELL_MAX_BLACK_FRACTION = 0.15
+HOLD_CELL_MIN_MEAN_LUMA = 30.0
+
+#: The unreached cell, which is *supposed* to be black, as the control:
+#: without it a summary that had gone uniformly grey would satisfy the two
+#: thresholds above. Measured 0.98 (the shortfall is encode ringing at the
+#: cell edges).
+EMPTY_CELL_MIN_BLACK_FRACTION = 0.9
+
+#: A picture crop on the last *action* frame, which is inside the tail pad
+#: and therefore black on every tile. Measured 1.000 in Bea's bottom half,
+#: which carries no glyphs in any frame. This is what makes "freeze on the
+#: end of the action" an unsound target, stated as a measurement rather
+#: than as an argument.
+TAIL_PAD_MIN_BLACK_FRACTION = 0.95
+
+#: Mathias's cell at :data:`PICTURE_INDEX`, where his shorter clip has
+#: already run out while Anders and Bea still have footage. Measured 0.804
+#: for him against 0.000 for Anders. The residue below 1.0 is his own shot
+#: counter, clock and split label, still drawn over the black.
+SHORT_TILE_MIN_BLACK_FRACTION = 0.6
 
 #: Anders' quadrant against Bea's, in the same hold frame.
 #:
@@ -333,6 +424,70 @@ HOLD_CLOCK_MAX_MEAN_ABS_DIFF = 1.0
 STILLS_DIFFER_MIN_MEAN_ABS_DIFF = 0.3
 
 
+def _cut_clip(source: Path, destination: Path, frames: int) -> Path:
+    """Re-encode the first ``frames`` frames of ``source`` to ``destination``.
+
+    ``-frames:v`` rather than ``-t`` so the clip's length is an exact
+    frame count and its container duration is exactly
+    ``frames * 1001/30000`` -- ``-shortest`` carries the same bound to the
+    audio, so ``format=duration`` (which is what ``project_loader``
+    probes) agrees with the video stream instead of overhanging it.
+    """
+    done = subprocess.run(
+        [
+            FFMPEG, "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
+            "-frames:v", str(frames),
+            "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
+            "-c:a", "aac", "-b:a", "128k", "-shortest", str(destination),
+        ],  # fmt: skip
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr[-2000:]
+    return destination
+
+
+def _probe_seconds(path: Path) -> float:
+    """``format=duration``, the field ``project_loader`` reads."""
+    done = subprocess.run(
+        [FFPROBE, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+        capture_output=True,
+        text=True,
+    )
+    assert done.returncode == 0, done.stderr[-2000:]
+    return float(done.stdout.strip())
+
+
+@pytest.fixture(scope="module")
+def shooter_clips(tmp_path_factory, synthetic_source_video: Path) -> dict[str, tuple[Path, float]]:
+    """One real clip per shooter, with its probed duration beside it.
+
+    Module-scoped: three tests share the roster and the encode is the
+    expensive part. Each entry is ``(path, probed duration)``, and the
+    probe is asserted against the frame count the clip was cut to -- a
+    fixture whose declared length drifts from its media is exactly the
+    condition that hid the blocker this test now covers.
+    """
+    if FFMPEG is None or FFPROBE is None:
+        pytest.skip("needs a real ffmpeg and ffprobe on PATH")
+    root = tmp_path_factory.mktemp("shooter-clips")
+    clips: dict[str, tuple[Path, float]] = {}
+    for label, frames, nominal in (
+        ("full", STAGE_FRAMES, STAGE_DURATION_SECONDS),
+        ("short", SHORT_STAGE_FRAMES, SHORT_STAGE_DURATION_SECONDS),
+    ):
+        path = _cut_clip(synthetic_source_video, root / f"{label}.mp4", frames)
+        probed = _probe_seconds(path)
+        assert probed == pytest.approx(nominal, abs=FRAME_SECONDS), (
+            f"the {label} clip declares {nominal:.4f}s but its media probes at {probed:.4f}s -- "
+            "the fixture's declared duration has to match its media or the freeze-frame seek "
+            "gets slack production never has"
+        )
+        clips[label] = (path, probed)
+    return clips
+
+
 def _write_audit(path: Path, ms_after_beep: list[int]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -353,6 +508,7 @@ def _shooter(
     *,
     root: Path,
     trim: Path,
+    duration_seconds: float,
     shots_ms: list[int] | None,
     stages: int = 1,
 ) -> CompareShooterBundle:
@@ -384,7 +540,7 @@ def _shooter(
             trim_path=trim,
             audit_path=audit_path,
             beep_offset_in_clip=BEEP_OFFSET_SECONDS,
-            duration_seconds=STAGE_DURATION_SECONDS,
+            duration_seconds=duration_seconds,
             width=1280,
             height=720,
             frame_rate_num=SYNTHETIC_FPS_NUM,
@@ -393,28 +549,56 @@ def _shooter(
     return CompareShooterBundle(label=label, project_root=root / label, stages_by_number=by_number)
 
 
-def _roster(tmp_path: Path, synthetic_source_video: Path, *, stages: int = 1) -> list[CompareShooterBundle]:
+def _roster(
+    tmp_path: Path, clips: dict[str, tuple[Path, float]], *, stages: int = 1
+) -> list[CompareShooterBundle]:
     """Anders / Bea / Mathias -- alphabetical order fixes the 2x2 slots.
 
     index0 Anders (row0,col0), index1 Bea (row0,col1), index2 Mathias
     (row1,col0); index3 (row1,col1) is the roster's unreached cell.
-    Every tile reads the same synthesized clip; nothing here depends on
-    the tiles looking different from one another.
 
-    Bea having no audit is load-bearing twice over for the summary hold:
-    her cell draws her label and nothing else, over a blurred freeze that
-    is pixel-identical to Anders' (same clip, same seek, no lead pad). So
-    her quadrant is the control for both "is the still blurred" and "did
-    the summary's ink land in the right cell", with the background
-    subtracted out by construction rather than by a threshold.
+    Anders and Bea read the *same* clip and Mathias reads a shorter one,
+    and both facts are load-bearing.
+
+    Bea having no audit makes her cell the control: she draws her label
+    and nothing else, over a blurred freeze that is pixel-identical to
+    Anders' (same clip, same seek, no lead pad). So her quadrant settles
+    both "is the still blurred" and "did the summary's ink land in the
+    right cell", with the background subtracted out by construction
+    rather than by a threshold.
+
+    Mathias's clip is shorter, so his tile is black for the last stretch
+    of every action while the other two still have picture. Freezing on
+    "the last frame of the action" instead of "the last frame of this
+    tile's footage" therefore shows up in his cell and nowhere else --
+    with three equal clips the two are indistinguishable.
     """
+    full, full_seconds = clips["full"]
+    short, short_seconds = clips["short"]
     return [
         _shooter(
-            "Anders", root=tmp_path, trim=synthetic_source_video, shots_ms=ANDERS_SHOTS_MS, stages=stages
+            "Anders",
+            root=tmp_path,
+            trim=full,
+            duration_seconds=full_seconds,
+            shots_ms=ANDERS_SHOTS_MS,
+            stages=stages,
         ),
-        _shooter("Bea", root=tmp_path, trim=synthetic_source_video, shots_ms=None, stages=stages),
         _shooter(
-            "Mathias", root=tmp_path, trim=synthetic_source_video, shots_ms=MATHIAS_SHOTS_MS, stages=stages
+            "Bea",
+            root=tmp_path,
+            trim=full,
+            duration_seconds=full_seconds,
+            shots_ms=None,
+            stages=stages,
+        ),
+        _shooter(
+            "Mathias",
+            root=tmp_path,
+            trim=short,
+            duration_seconds=short_seconds,
+            shots_ms=MATHIAS_SHOTS_MS,
+            stages=stages,
         ),
     ]
 
@@ -578,6 +762,25 @@ def _crop_diff(image: Image.Image, left: tuple[int, ...], right: tuple[int, ...]
     return float(np.abs(a - b).mean())
 
 
+def _black_fraction(image: Image.Image, box: tuple[int, int, int, int]) -> float:
+    """Fraction of pixels in ``box`` that are pure black on all channels.
+
+    The measure that names the blocker directly. A summary composed over
+    a freeze frame that was never extracted is the canvas's own black
+    background with text on it, and text is a few percent of a cell -- so
+    this reads near 1.0 there and well under it over any real picture,
+    however dark. Mean luma alone does not separate the two nearly as
+    cleanly: a dim night-time frame and an empty cell can share a mean.
+    """
+    pixels = np.asarray(image.crop(box), dtype=np.int16)
+    return float((pixels.max(axis=2) == 0).mean())
+
+
+def _mean_luma(image: Image.Image, box: tuple[int, int, int, int]) -> float:
+    """Mean luma over ``box``, 0-255."""
+    return float(np.asarray(image.crop(box).convert("L"), dtype=np.int16).mean())
+
+
 def _hf_energy(image: Image.Image, box: tuple[int, int, int, int]) -> float:
     """Mean |pixel - its own 3x3 box blur| over ``box``, in luma.
 
@@ -658,11 +861,11 @@ def test_sprite_states_decode_at_the_boundaries_they_were_written_at(tmp_path: P
 
 @integration
 @needs_ffmpeg
-def test_overlay_reaches_the_rendered_pixels(tmp_path: Path, synthetic_source_video: Path):
+def test_overlay_reaches_the_rendered_pixels(tmp_path: Path, shooter_clips):
     """Render the same stage twice, with and without --overlay, and
     compare decoded frames. A command-string assertion cannot tell you
     the viewer sees anything."""
-    shooters = _roster(tmp_path, synthetic_source_video)
+    shooters = _roster(tmp_path, shooter_clips)
     plain = _render(shooters, tmp_path, overlay=False, name="plain.mp4")
     overlaid = _render(shooters, tmp_path, overlay=True, name="overlaid.mp4")
 
@@ -775,9 +978,7 @@ def test_overlay_reaches_the_rendered_pixels(tmp_path: Path, synthetic_source_vi
 
 @integration
 @needs_ffmpeg
-def test_an_ffmpeg_without_drawtext_keeps_the_sprites_and_loses_only_the_clock(
-    tmp_path: Path, synthetic_source_video: Path
-):
+def test_an_ffmpeg_without_drawtext_keeps_the_sprites_and_loses_only_the_clock(tmp_path: Path, shooter_clips):
     """The degradation, rendered by a real ffmpeg and read off the pixels.
 
     The host that reported this has an ffmpeg built without
@@ -797,7 +998,7 @@ def test_an_ffmpeg_without_drawtext_keeps_the_sprites_and_loses_only_the_clock(
     """
     from tests.conftest import fake_ffmpeg_probe
 
-    shooters = _roster(tmp_path, synthetic_source_video)
+    shooters = _roster(tmp_path, shooter_clips)
     plain = _render(shooters, tmp_path, overlay=False, name="plain-nodt.mp4")
     capable = _render(shooters, tmp_path, overlay=True, name="capable-nodt.mp4")
 
@@ -873,7 +1074,7 @@ def test_an_ffmpeg_without_drawtext_keeps_the_sprites_and_loses_only_the_clock(
 
 @integration
 @needs_ffmpeg
-def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, synthetic_source_video: Path):
+def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, shooter_clips):
     """Two stages with a summary hold, measured from decoded frames.
 
     Most of what is cheap passes against a hold with **no still in it**.
@@ -899,7 +1100,7 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, synthetic_
     on the wrong stage, or a drift that accumulates per segment, needs a
     second segment to show up in.
     """
-    shooters = _roster(tmp_path, synthetic_source_video, stages=2)
+    shooters = _roster(tmp_path, shooter_clips, stages=2)
     held = _render(shooters, tmp_path, overlay=True, name="held.mp4", hold=HOLD_SECONDS)
     unheld = _render(shooters, tmp_path, overlay=True, name="unheld.mp4")
 
@@ -935,11 +1136,71 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, synthetic_
     anders_clock = (3 * cell_w // 4, 0, cell_w, cell_h // 4)
     bea_clock = (cell_w + 3 * cell_w // 4, 0, 2 * cell_w, cell_h // 4)
 
+    mathias_cell = (0, cell_h, cell_w, 2 * cell_h)
+
     last_action = _frame_at_index(held, LAST_ACTION_INDEX, tmp_path, "held-action")
+    with_picture = _frame_at_index(held, PICTURE_INDEX, tmp_path, "held-picture")
     in_hold = _frame_at_index(held, MID_HOLD_INDEX, tmp_path, "held-hold")
 
+    # --- there is a picture in the summary, and it is each tile's own ----
+    #
+    # The check the shipped render failed outright: every cell was text on
+    # pure black because the freeze seek was derived from the *action's*
+    # length and landed past the end of every clip. Asserted as pure-black
+    # fraction plus mean luma, per cell, with the deliberately-empty cell
+    # as the control.
+    for label, box in (("Anders", anders_cell), ("Bea", bea_cell), ("Mathias", mathias_cell)):
+        black = _black_fraction(in_hold, box)
+        luma = _mean_luma(in_hold, box)
+        assert black <= HOLD_CELL_MAX_BLACK_FRACTION, (
+            f"{label}'s summary cell is {black:.1%} pure black inside the hold (threshold "
+            f"{HOLD_CELL_MAX_BLACK_FRACTION:.0%}) -- the freeze frame never reached it and the "
+            "cell is the canvas's own background with text on it"
+        )
+        assert luma >= HOLD_CELL_MIN_MEAN_LUMA, (
+            f"{label}'s summary cell has mean luma {luma:.1f} inside the hold (threshold "
+            f"{HOLD_CELL_MIN_MEAN_LUMA}) -- there is no picture under the figures"
+        )
+    empty_black = _black_fraction(in_hold, unreached_cell)
+    assert empty_black >= EMPTY_CELL_MIN_BLACK_FRACTION, (
+        f"the unreached cell is only {empty_black:.1%} black inside the hold -- either something "
+        "was drawn into a cell that is not a shooter, or the two thresholds above are being "
+        f"cleared by a uniformly grey frame (threshold {EMPTY_CELL_MIN_BLACK_FRACTION:.0%})"
+    )
+
+    # --- and it cannot have come from the end of the action --------------
+    # The action's last frame is inside the tail pad, so it is black on
+    # every tile: a freeze taken there is the thing this test caught.
+    tail_black = _black_fraction(last_action, bea_picture)
+    assert tail_black >= TAIL_PAD_MIN_BLACK_FRACTION, (
+        f"the last action frame is only {tail_black:.1%} black in a picture crop -- the fixture "
+        "has stopped exercising the tail pad, and 'freeze on the last action frame' would look "
+        "correct here while failing in production"
+    )
+    # Nor from the *longest* tile's footage end: at PICTURE_INDEX Mathias
+    # has already run out while Anders still has picture, so one shared
+    # seek clamped into range would freeze his cell on black.
+    short_black = _black_fraction(with_picture, mathias_cell)
+    assert short_black >= SHORT_TILE_MIN_BLACK_FRACTION, (
+        f"the short tile is only {short_black:.1%} black at frame {PICTURE_INDEX} -- the fixture "
+        "has stopped giving one shooter a shorter clip, so 'each tile's own footage end' is no "
+        "longer distinguishable from 'the longest tile's'"
+    )
+    assert _black_fraction(with_picture, anders_cell) <= HOLD_CELL_MAX_BLACK_FRACTION
+
+    # --- one freeze frame per present tile, per stage --------------------
+    # Three present tiles over two stages. Cheap, and it says which layer
+    # failed when the pixel checks below go red: no PNGs means the
+    # extraction never produced one, and everything after this is a
+    # summary drawn on the canvas's own background.
+    work_dir = tmp_path / "work-held.mp4"
+    for stage in (1, 2):
+        frames = sorted(work_dir.glob(f"freeze-stage{stage}-*.png"))
+        assert len(frames) == 3, f"stage {stage} wrote {len(frames)} freeze frames, expected 3"
+        assert all(path.stat().st_size > 0 for path in frames)
+
     # --- THE instrument: the hold shows the composed summary and only it -
-    still = Image.open(tmp_path / "work-held.mp4" / "summary-stage1.png").convert("RGB")
+    still = Image.open(work_dir / "summary-stage1.png").convert("RGB")
     assert still.size == (CANVAS.width, CANVAS.height)
     whole = (0, 0, CANVAS.width, CANVAS.height)
     to_still = _mean_abs_diff(in_hold, still, whole)
@@ -952,12 +1213,16 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, synthetic_
     )
 
     # --- the held frame is blurred ---------------------------------------
-    action_hf = _hf_energy(last_action, bea_picture)
+    # Against PICTURE_INDEX, not the last action frame: the last action
+    # frame is tail-pad black, and "blurrier than black" is not a claim
+    # about a blur.
+    action_hf = _hf_energy(with_picture, bea_picture)
     hold_hf = _hf_energy(in_hold, bea_picture)
     assert action_hf >= ACTION_MIN_HF_ENERGY, f"the action frame is not sharp: {action_hf:.2f}"
     assert hold_hf <= BLURRED_MAX_HF_ENERGY, (
         f"the held frame is not blurred: high-frequency energy {hold_hf:.2f} against "
-        f"{action_hf:.2f} on the last action frame (threshold {BLURRED_MAX_HF_ENERGY})"
+        f"{action_hf:.2f} on the last frame with a picture in it (threshold "
+        f"{BLURRED_MAX_HF_ENERGY})"
     )
 
     # --- and it carries the summary's ink, in each tile's own cell -------
@@ -1004,7 +1269,7 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, synthetic_
     # a few glyphs are a small fraction of a cell, and a fixed number
     # there would be indistinguishable from the encode's own residue.
     stage2_hold = _frame_at_index(held, STAGE2_MID_HOLD_INDEX, tmp_path, "held-hold2")
-    stage2_still = Image.open(tmp_path / "work-held.mp4" / "summary-stage2.png").convert("RGB")
+    stage2_still = Image.open(work_dir / "summary-stage2.png").convert("RGB")
     # The left column: Anders' and Mathias's cells, the two that carry
     # figures. Bea's cell and the unreached one are identical between the
     # stages by construction, so including them only dilutes the signal.
