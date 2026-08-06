@@ -17,8 +17,11 @@ whole duration. Two consequences fell out of that:
 The job registry decouples submission from completion. Endpoints submit
 a callable, get a ``Job`` handle back immediately, and the SPA polls
 ``/api/jobs/{id}`` until the job finishes. The registry survives across
-HTTP requests for the lifetime of the server process; restart still
-loses jobs (which is fine for v1 -- they'll just need to be re-run).
+HTTP requests for the lifetime of the server process; active jobs are
+additionally mirrored into an optional crash-recovery journal
+(:class:`splitsmith.ui.job_journal.JobJournal`, issue #665) so a killed
+process's queue is re-enqueued on the next boot. Finished-job history is
+still in-memory only and dies with the process.
 
 Design notes
 ------------
@@ -345,6 +348,21 @@ class JobHandle:
         self._registry._detach_subprocess(self._job_id)
 
 
+class JobJournalSink(Protocol):
+    """What :class:`JobRegistry` needs from a crash-recovery journal.
+
+    Implemented by :class:`splitsmith.ui.job_journal.JobJournal`. Kept as
+    a Protocol here so this module stays a general-purpose job pump with
+    zero knowledge of the pipeline or of SQLite. Both methods MUST be
+    best-effort (never raise): the journal mirrors job state, it does not
+    gate it.
+    """
+
+    def record(self, job: Job, args: dict[str, Any]) -> None: ...
+
+    def discard(self, job_id: str) -> None: ...
+
+
 class JobBackend(Protocol):
     """The slice of :class:`JobRegistry` that handlers and the SPA
     actually depend on.
@@ -431,8 +449,18 @@ class JobRegistry:
     because workers live in separate processes.
     """
 
-    def __init__(self, *, max_concurrent: int = 2, retain_recent: int = 50) -> None:
+    def __init__(
+        self,
+        *,
+        max_concurrent: int = 2,
+        retain_recent: int = 50,
+        journal: JobJournalSink | None = None,
+    ) -> None:
         self.bodies = JobBodyRegistry()
+        # Optional crash-recovery mirror (issue #665). ``None`` keeps the
+        # pre-#665 in-memory-only behaviour (hosted mode's default
+        # registry slot, and most tests).
+        self._journal = journal
         self._jobs: dict[str, Job] = {}
         self._order: list[str] = []
         self._lock = threading.RLock()
@@ -554,6 +582,12 @@ class JobRegistry:
             self._jobs[job.id] = job
             self._order.append(job.id)
             self._pending.append((job.id, _ctx_fn))
+            # Journal before dispatch: once the executor has the job a
+            # fast body could reach its terminal discard before a
+            # post-dispatch record, leaving an orphan row that would
+            # resurrect an already-finished job on the next boot.
+            if self._journal is not None:
+                self._journal.record(job, call_args)
             self._trim_retained_locked()
             # Snapshot before releasing the lock + dispatching to the
             # executor; otherwise the worker may have already flipped
@@ -592,6 +626,13 @@ class JobRegistry:
                 return None
             if j.status in (JobStatus.SUCCEEDED, JobStatus.FAILED, JobStatus.CANCELLED):
                 return j.model_copy(deep=True)
+            # Drop the journal row at cancel-request time, inside the lock
+            # and before any status flip: a job the user aborted must not
+            # resurrect on the next boot even if the process dies right
+            # after this call returns, and no observer may see a terminal
+            # status while the row still exists. Idempotent with the
+            # terminal-path discard in ``_run``.
+            self._journal_discard(job_id)
             j.cancel_requested = True
             j.updated_at = datetime.now(UTC)
             proc_to_kill = self._subprocs.pop(job_id, None)
@@ -734,6 +775,7 @@ class JobRegistry:
                 # this branch still covers the race where cancel() fires
                 # after dispatch and before _run acquires the lock.
                 if j.cancel_requested:
+                    self._journal_discard(job_id)
                     j.status = JobStatus.CANCELLED
                     j.finished_at = datetime.now(UTC)
                     j.updated_at = j.finished_at
@@ -752,6 +794,11 @@ class JobRegistry:
                 fn(JobHandle(self, job_id, timer=timer))
             except JobCancelled:
                 with self._lock:
+                    # Discard inside the lock, before the status flip: no
+                    # observer may see a terminal status while the row is
+                    # still journaled, and a crash right here must not
+                    # resurrect a job whose body already finished.
+                    self._journal_discard(job_id)
                     j = self._jobs.get(job_id)
                     if j is not None:
                         j.status = JobStatus.CANCELLED
@@ -768,6 +815,7 @@ class JobRegistry:
             except Exception as exc:  # noqa: BLE001 -- worker exceptions become job state
                 logger.exception("job %s failed", job_id)
                 with self._lock:
+                    self._journal_discard(job_id)
                     j = self._jobs.get(job_id)
                     if j is not None:
                         # If a cancel arrived mid-flight and the worker
@@ -794,6 +842,7 @@ class JobRegistry:
                 self._emit_terminal_event(job_id, kind, final_status, timer, error=final_error)
                 return
             with self._lock:
+                self._journal_discard(job_id)
                 j = self._jobs.get(job_id)
                 final_status = None
                 if j is not None and j.status == JobStatus.RUNNING:
@@ -812,6 +861,21 @@ class JobRegistry:
                 self._running_count = max(0, self._running_count - 1)
                 self._dispatch_locked()
                 self._signal_drain_if_complete_locked()
+
+    def _journal_discard(self, job_id: str) -> None:
+        """Drop the crash-recovery row for a job that must not resurrect.
+
+        Called from every terminal path of :meth:`_run` and from
+        :meth:`cancel`, always under ``self._lock`` and BEFORE the
+        in-memory status flip - so no observer that sees a terminal
+        status can find the row still journaled, and a crash between
+        the two writes loses nothing (the body had already finished).
+        Idempotent, and a no-op without a journal. The sink is
+        best-effort by contract, so this never raises into the worker
+        or the cancel handler.
+        """
+        if self._journal is not None:
+            self._journal.discard(job_id)
 
     def _emit_terminal_event(
         self,

@@ -286,20 +286,15 @@ def register_compute_task(app: procrastinate.App, state: Any) -> None:
 
 def _rehydrate_args(kind: str, args: dict[str, Any]) -> dict[str, Any]:
     """Rebuild the typed ``req`` Pydantic model dropped to a dict by
-    :func:`splitsmith.db.job_backend._to_wire_args` for the queue.
+    :func:`splitsmith.ui.job_journal.to_wire_args` for the queue.
 
-    Only ``export`` / ``match_export`` carry a ``req``; every other kind
-    passes through. Importing the request models lazily keeps this module
-    free of a server import at load time (it stays lazy-importable behind
-    ``_hosted_mode_active()``)."""
-    if kind not in ("export", "match_export") or "req" not in args:
-        return args
-    from .ui.server import ExportStageRequest, MatchExportRequest
+    Delegates to the shared :func:`~splitsmith.ui.job_journal.rehydrate_args`
+    (also used by the local crash-recovery resume, issue #665) so the
+    wire-args projection has one source of truth. Imported lazily to keep
+    this module's import graph unchanged."""
+    from .ui.job_journal import rehydrate_args
 
-    model = ExportStageRequest if kind == "export" else MatchExportRequest
-    out = dict(args)
-    out["req"] = model.model_validate(args["req"])
-    return out
+    return rehydrate_args(kind, args)
 
 
 def _attach_procrastinate_logging() -> None:

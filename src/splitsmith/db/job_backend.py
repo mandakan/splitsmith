@@ -38,11 +38,11 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from ..observability import PhaseTimer, capture_job_exception, emit_job_event
+from ..ui.job_journal import to_wire_args
 from ..ui.jobs import (
     Job,
     JobBodyRegistry,
@@ -64,16 +64,11 @@ logger = logging.getLogger(__name__)
 JobDeferrer = Callable[..., Awaitable[None]]
 
 
-def _to_wire_args(args: dict[str, Any]) -> dict[str, Any]:
-    """Project ``args`` to a JSON-serialisable dict for the queue.
-
-    Pydantic models (the ``req`` carried by ``export`` / ``match_export``)
-    become ``model_dump(mode="json")`` dicts; the worker rehydrates them
-    to the typed request before calling the body. Everything else
-    (slug, stage_number, flags) is already JSON-native and passes
-    through untouched.
-    """
-    return {k: (v.model_dump(mode="json") if isinstance(v, BaseModel) else v) for k, v in args.items()}
+# Shared with the local crash-recovery journal (issue #665): one source
+# of truth for how a Pydantic ``req`` is projected across a persistence
+# boundary. The worker rehydrates via the matching
+# ``job_journal.rehydrate_args`` before calling the body.
+_to_wire_args = to_wire_args
 
 
 _ROW_TO_JOB_FIELDS = (
