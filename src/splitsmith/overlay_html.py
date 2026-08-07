@@ -414,7 +414,7 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
 .emphasis-plain, .emphasis-muted {{
   color: rgb({ink});
   paint-order: stroke fill;
-  -webkit-text-stroke: 0.09em rgb({stroke});
+  -webkit-text-stroke: {scale.stroke_width}px rgb({stroke});
   text-shadow: 0.06em 0.06em 0.1em rgb({shadow});
 }}
 .emphasis-muted {{ opacity: 0.68; }}

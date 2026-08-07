@@ -294,6 +294,17 @@ class CellScale:
     caption: int
     live_primary: int
     pad: int
+    #: Text-stroke width in pixels, uniform across every size in the cell.
+    #:
+    #: Flat pixels rather than an em, and that is the whole point. An
+    #: em-relative stroke scales with each element's own font size, so a
+    #: 90px figure gets a ~8px halo while a 26px count gets ~2px -- the
+    #: large numerals come out chunky and slightly muddied while the small
+    #: ones stay crisp, which is backwards. Measured against the approved
+    #: mock, the em version put 15-18% of a glyph box in stroke against
+    #: the flat version's 8.9%. One stroke weight per cell keeps the
+    #: separation from the footage constant and the numerals sharp.
+    stroke_width: int
 
     @classmethod
     def for_cell(cls, cell_height: int) -> CellScale:
@@ -335,6 +346,7 @@ class CellScale:
             # ``headline`` -- see the class docstring.
             live_primary=max(48, cell_height // 14),
             pad=max(24, cell_height // 36),
+            stroke_width=max(1, cell_height // 540),
         )
 
     def size_for(self, role: Role) -> int:

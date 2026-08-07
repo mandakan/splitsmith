@@ -30,6 +30,7 @@ SCALE = CellScale(
     caption=13,
     live_primary=71,
     pad=9,
+    stroke_width=3,
 )
 
 
@@ -102,7 +103,16 @@ def test_a_different_scale_moves_the_same_role_class():
     """If a role's font-size were hardcoded rather than read from the
     ``scale`` argument, this would fail: a second, distinct CellScale
     must produce a distinct font-size for the same role."""
-    other = CellScale(identity=99, headline=98, verdict=97, detail=96, caption=95, live_primary=94, pad=93)
+    other = CellScale(
+        identity=99,
+        headline=98,
+        verdict=97,
+        detail=96,
+        caption=95,
+        live_primary=94,
+        pad=93,
+        stroke_width=92,
+    )
     html_a = cell_html((), scale=SCALE, theme=THEME)
     html_b = cell_html((), scale=other, theme=THEME)
     assert f"font-size: {SCALE.identity}px" in _rule(html_a, ".role-identity")

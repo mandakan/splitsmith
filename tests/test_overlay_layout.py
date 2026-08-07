@@ -143,3 +143,30 @@ def test_bottom_center_ffmpeg_expr_halves_the_leftover_text_width():
     x_expr, y_expr = anchor_ffmpeg_expr(Anchor.BOTTOM_CENTER, col=0, row=1, cell_w=640, cell_h=360, pad=24)
     assert x_expr == "0+(640-tw)/2"
     assert y_expr == "360+360-th-24"
+
+
+@pytest.mark.parametrize(
+    "cell_height,expected",
+    [(360, 1), (540, 1), (720, 1), (1080, 2), (2160, 4)],
+)
+def test_stroke_width_is_flat_pixels_not_an_em(cell_height, expected):
+    """One stroke weight per cell, uniform across every size in it.
+
+    An em-relative stroke scales with each element's own font size, so a
+    90px figure gets a ~8px halo while a 26px count gets ~2px. That makes
+    the large numerals chunky while the small ones stay crisp, which is
+    the wrong way round -- measured against the approved mock, the em
+    version put 15-18% of a glyph box in stroke against the flat
+    version's 8.9%.
+
+    Pinned as a number rather than derived, so a change to the formula
+    has to be a deliberate edit to this test as well.
+    """
+    assert CellScale.for_cell(cell_height).stroke_width == expected
+
+
+def test_stroke_width_never_vanishes_at_small_cells():
+    """The stroke is what separates text from arbitrary footage. A cell
+    small enough to floor every font size must still get a stroke."""
+    for cell_height in (60, 90, 120, 180):
+        assert CellScale.for_cell(cell_height).stroke_width >= 1
