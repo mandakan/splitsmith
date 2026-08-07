@@ -38,12 +38,17 @@ Cases:
   9. ``PushReport``'s new fields default to empty/zero so pre-Task-13
      callers that construct one directly (without the new kwargs) still
      work.
+ 10. Concurrent part PUTs (#713): parts overlap in flight, ``complete``
+     receives them sorted by part_number with per-part etags, and a
+     multi-part failure still aborts exactly once.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import threading
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
@@ -112,9 +117,14 @@ class _FakeHosted:
         self.calls: list[str] = []
         self.doc_puts: list[tuple[str, dict]] = []
         self.aborts: list[tuple[str, str]] = []  # (key, upload_id)
+        self.completes: list[tuple[str, list[dict]]] = []  # (key, parts)
         self.match_status = 200
         self.fail_keys: set[str] = set()  # remote keys whose part PUT 500s
         self.abort_status = 200
+        #: Optional (key, part_number) callback invoked inside each part
+        #: PUT handler, before the response is built - lets a test block
+        #: one part until another is in flight to prove concurrency (#713).
+        self.media_put_hook: Callable[[str, str], None] | None = None
         self._upload_counter = 0
 
     def clients(self) -> HostedSyncClient:
@@ -157,6 +167,7 @@ class _FakeHosted:
 
         if method == "POST" and path.endswith("/media/complete"):
             self.calls.append(f"media_complete:{body['key']}")
+            self.completes.append((body["key"], body["parts"]))
             return httpx.Response(200, json={"size": 0})
 
         if method == "POST" and path.endswith("/media/abort"):
@@ -175,10 +186,13 @@ class _FakeHosted:
 
     def _media_handler(self, request: httpx.Request) -> httpx.Response:
         key = request.url.path.lstrip("/")
+        part = request.url.params.get("part", "")
         self.calls.append(f"media_put:{key}")
+        if self.media_put_hook is not None:
+            self.media_put_hook(key, part)
         if key in self.fail_keys:
             return httpx.Response(500, text="upload failed")
-        return httpx.Response(200, headers={"ETag": f'"etag-{key}"'})
+        return httpx.Response(200, headers={"ETag": f'"etag-{key}-{part}"'})
 
 
 # ---------------------------------------------------------------------------
@@ -390,15 +404,61 @@ def test_upload_media_chunks_across_multiple_parts_and_returns_correct_sha256(tm
     sha256 = client.upload_media("m1", item, progress=progress_calls.append)
 
     assert sha256 == hashlib.sha256(data).hexdigest()
-    assert progress_calls == [1000, 1000, 560]
+    # Parts upload concurrently (#713), so per-part progress and part-url
+    # ordering are nondeterministic; the totals and the set of parts are not.
+    assert sorted(progress_calls) == [560, 1000, 1000]
     part_url_calls = [c for c in fake.calls if c.startswith("media_part_url")]
-    assert part_url_calls == [
+    assert sorted(part_url_calls) == [
         f"media_part_url:{item.remote_key}:1",
         f"media_part_url:{item.remote_key}:2",
         f"media_part_url:{item.remote_key}:3",
     ]
     put_calls = [c for c in fake.calls if c.startswith("media_put")]
     assert put_calls == [f"media_put:{item.remote_key}"] * 3
+
+
+def test_parts_upload_concurrently_and_complete_stays_ordered(tmp_path: Path) -> None:
+    """Part PUTs overlap in flight (#713) and ``complete`` still receives
+    parts sorted by part_number with each part's own etag.
+
+    Part 1's PUT handler blocks until part 2's has run: a sequential
+    uploader deadlocks there (surfacing as the 10s timeout error below),
+    a concurrent one sails through - and completes part 2 before part 1,
+    proving the sort before ``complete`` is load-bearing.
+    """
+    data = bytes(range(256)) * 10  # 2560 bytes
+    local_path = tmp_path / "clip.mp4"
+    local_path.write_bytes(data)
+
+    fake = _FakeHosted(part_size=1000)  # 3 parts: 1000, 1000, 560
+    part2_done = threading.Event()
+
+    def hook(key: str, part: str) -> None:
+        if part == "2":
+            part2_done.set()
+        if part == "1" and not part2_done.wait(timeout=10):
+            raise AssertionError("part 2 never started while part 1 was in flight - uploads are sequential")
+
+    fake.media_put_hook = hook
+    client = fake.clients()
+
+    item = MediaItem(
+        local_path=local_path,
+        remote_key="matches/m1/shooters/alice/trimmed/clip.mp4",
+        size=len(data),
+        mtime_ns=0,
+    )
+    sha256 = client.upload_media("m1", item)
+
+    assert sha256 == hashlib.sha256(data).hexdigest()
+    assert len(fake.completes) == 1
+    key, parts = fake.completes[0]
+    assert key == item.remote_key
+    assert parts == [
+        {"part_number": 1, "etag": f'"etag-{item.remote_key}-1"'},
+        {"part_number": 2, "etag": f'"etag-{item.remote_key}-2"'},
+        {"part_number": 3, "etag": f'"etag-{item.remote_key}-3"'},
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +483,27 @@ def test_part_put_failure_triggers_one_abort_with_matching_key_and_upload_id(tmp
     abort_calls = [c for c in fake.calls if c.startswith("media_abort")]
     assert abort_calls == [f"media_abort:{remote_key}"]
     assert fake.aborts == [(remote_key, "upload-1")]
+
+
+def test_multipart_failure_under_concurrency_still_aborts_exactly_once(tmp_path: Path) -> None:
+    """Several concurrent part PUTs failing at once (#713) must produce one
+    propagated error and exactly one abort call, not one abort per part."""
+    data = b"x" * 2560
+    local_path = tmp_path / "clip.mp4"
+    local_path.write_bytes(data)
+    remote_key = "matches/m1/shooters/alice/trimmed/clip.mp4"
+
+    fake = _FakeHosted(part_size=1000)  # 3 parts, every PUT 500s
+    fake.fail_keys = {remote_key}
+    client = fake.clients()
+
+    item = MediaItem(local_path=local_path, remote_key=remote_key, size=len(data), mtime_ns=0)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        client.upload_media("m1", item)
+
+    assert fake.aborts == [(remote_key, "upload-1")]
+    assert not any(c.startswith("media_complete") for c in fake.calls)
 
 
 def test_abort_failing_does_not_mask_the_original_part_put_error(tmp_path: Path) -> None:
