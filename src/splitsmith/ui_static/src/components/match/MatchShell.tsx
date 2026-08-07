@@ -11,7 +11,7 @@
  * sidebar footer rail (v2 audit chrome -- no more floating FAB).
  */
 
-import { Menu, Repeat } from "lucide-react";
+import { Menu, MonitorSmartphone, Repeat } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Navigate,
@@ -35,6 +35,8 @@ import {
 } from "@/components/match/MatchSidebar";
 import {
   api,
+  READ_ONLY_MIRROR_MESSAGE,
+  type MatchOrigin,
   type MatchProject,
   type ScoreboardIdentity,
   type ServerHealth,
@@ -55,6 +57,12 @@ export interface MatchShellOutletContext {
   health: ServerHealth | null;
   shooters: ShooterListEntry[];
   refresh: () => void;
+  /** Null until the shooter list has loaded once. A "desktop" match is a
+   *  read-only mirror - outlet pages should hide their own write CTAs
+   *  (add-shooter, stage editor, ...) when this is "desktop" (#631 Task 10).
+   *  The shell itself already renders the persistent banner and relies on
+   *  the server's 403 as the enforcement backstop. */
+  origin: MatchOrigin | null;
 }
 
 export function MatchShell() {
@@ -163,6 +171,10 @@ export function MatchShell() {
   const [health, setHealth] = useState<ServerHealth | null>(null);
   const [project, setProject] = useState<MatchProject | null>(null);
   const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
+  // Null until the first listMatchShooters resolves - the banner only
+  // renders once we actually know the match is a desktop mirror, not on
+  // every load by default (#631 Task 10).
+  const [origin, setOrigin] = useState<MatchOrigin | null>(null);
   const [identity, setIdentity] = useState<ScoreboardIdentity | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [beepReviewPending, setBeepReviewPending] = useState<number>(0);
@@ -248,6 +260,7 @@ export function MatchShell() {
       .then((r) => {
         if (!alive) return;
         setShooters(r.shooters);
+        setOrigin(r.origin);
         setMatchValid(true);
         // No URL slug -> fall back to the footage-bearing default shooter
         // (same rule the nav links use) so the sidebar + Overview base
@@ -268,6 +281,7 @@ export function MatchShell() {
       .catch(() => {
         if (!alive) return;
         setShooters([]);
+        setOrigin(null);
         // Unknown match_id (alias middleware 404) -- bounce to picker.
         // Other failures (409 no_match for legacy single-shooter
         // projects) also land here; the picker handles both.
@@ -511,6 +525,16 @@ export function MatchShell() {
         )}
       </header>
 
+      {origin === "desktop" ? (
+        <div
+          role="status"
+          className="flex items-center gap-2.5 border-b border-amber-400/40 bg-amber-400/10 px-4 py-2 font-mono text-xs uppercase tracking-[0.06em] text-amber-600 sm:px-7"
+        >
+          <MonitorSmartphone className="size-3.5 shrink-0" aria-hidden="true" />
+          <span>{READ_ONLY_MIRROR_MESSAGE}</span>
+        </div>
+      ) : null}
+
       {isMobile ? (
         <MobileNav
           open={navOpen}
@@ -591,6 +615,7 @@ export function MatchShell() {
               health,
               shooters,
               refresh: () => setRefreshKey((k) => k + 1),
+              origin,
             }}
           />
         </div>

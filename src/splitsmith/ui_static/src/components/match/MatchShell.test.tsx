@@ -11,7 +11,7 @@
  * Real timers: useJobs polls at 1s while anything is active, so the
  * transition lands within ~1.2s of render.
  */
-import { render, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -258,5 +258,63 @@ describe("MatchShell job settlement (#663)", () => {
       timeout: 4000,
     });
     expect(api.getProject).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("MatchShell mirror banner (#631 Task 10)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    stubMatchMedia();
+    window.ResizeObserver =
+      ResizeObserverStub as unknown as typeof window.ResizeObserver;
+  });
+
+  function setUpApiWithOrigin(origin: "hosted" | "desktop" | "local") {
+    vi.mocked(api.getHealth).mockResolvedValue(HEALTH);
+    vi.mocked(api.getScoreboardIdentity).mockResolvedValue(null);
+    vi.mocked(api.getServerFeatures).mockResolvedValue({
+      lab: false,
+      mode: "hosted",
+    });
+    vi.mocked(api.getMe).mockResolvedValue({
+      id: "u1",
+      email: "m@thias.se",
+      display_name: null,
+      is_admin: false,
+    });
+    vi.mocked(api.listMatchShooters).mockResolvedValue({
+      match_root: "/root",
+      match_name: "Bromma Classic 2026",
+      shooters: [makeShooter("mathias", "Mathias")],
+      origin,
+    });
+    vi.mocked(api.getProject).mockResolvedValue(makeProject());
+    vi.mocked(api.getBeepQueue).mockResolvedValue({
+      total_items: 0,
+      pending_count: 0,
+      confirmed_count: 0,
+      stages: [],
+    });
+    vi.mocked(api.listJobs).mockResolvedValue([]);
+  }
+
+  it('shows the read-only mirror banner when origin is "desktop"', async () => {
+    setUpApiWithOrigin("desktop");
+    renderShell();
+
+    expect(
+      await screen.findByText(/synced from a desktop install/i),
+    ).toBeInTheDocument();
+  });
+
+  it('does not show the mirror banner when origin is "hosted"', async () => {
+    setUpApiWithOrigin("hosted");
+    renderShell();
+
+    // Wait for the shooter list to resolve so we know the origin was read.
+    await waitFor(() => expect(api.listMatchShooters).toHaveBeenCalled());
+    expect(
+      screen.queryByText(/synced from a desktop install/i),
+    ).not.toBeInTheDocument();
   });
 });

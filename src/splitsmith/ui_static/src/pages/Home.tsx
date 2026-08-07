@@ -78,6 +78,11 @@ export function Home() {
   const href = useMatchHref();
   const ctx = useOutletContext<MatchShellOutletContext>();
   const project = ctx?.project ?? null;
+  // A desktop-origin mirror is read-only here (#631 Task 10): the server
+  // 403s every mutation except share management and match deletion, so
+  // the add-shooter and stage-editor entry points this page renders are
+  // hidden rather than left as dead ends that just bounce off a 403.
+  const readOnlyMirror = ctx?.origin === "desktop";
   const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
   // The stage editor's read model is the MATCH's stage list, not
   // ``project.stages``. Those are different documents and they diverge
@@ -292,16 +297,18 @@ export function Home() {
               Export Match
             </span>
           </Button>
-          <Button
-            variant="outline"
-            onClick={openEditStages}
-            disabled={stagesLoading}
-          >
-            <Layers className="size-3.5" />
-            <span className="font-display uppercase tracking-[0.08em]">
-              {stagesLoading ? "Loading Stages" : "Edit Stages"}
-            </span>
-          </Button>
+          {readOnlyMirror ? null : (
+            <Button
+              variant="outline"
+              onClick={openEditStages}
+              disabled={stagesLoading}
+            >
+              <Layers className="size-3.5" />
+              <span className="font-display uppercase tracking-[0.08em]">
+                {stagesLoading ? "Loading Stages" : "Edit Stages"}
+              </span>
+            </Button>
+          )}
         </div>
         {stagesError ? (
           <p role="alert" className="mt-2.5 text-xs text-destructive">
@@ -318,6 +325,7 @@ export function Home() {
             shooters={shooters}
             navSlug={navSlug}
             onEditStages={openEditStages}
+            readOnlyMirror={readOnlyMirror}
           />
         ) : (
           <ActiveVariant
@@ -325,11 +333,12 @@ export function Home() {
             rows={stageRows}
             totals={totals}
             shooters={shooters}
+            readOnlyMirror={readOnlyMirror}
           />
         )}
       </div>
 
-      {matchStages ? (
+      {matchStages && !readOnlyMirror ? (
         <EditStagesDrawer
           open={editStagesOpen}
           onClose={() => setEditStagesOpen(false)}
@@ -351,11 +360,13 @@ function ActiveVariant({
   rows,
   totals,
   shooters,
+  readOnlyMirror,
 }: {
   project: MatchProject;
   rows: StageMatrixRow[];
   totals: MatchTotals;
   shooters: ShooterListEntry[];
+  readOnlyMirror: boolean;
 }) {
   const navigate = useNavigate();
   const href = useMatchHref();
@@ -514,7 +525,9 @@ function ActiveVariant({
             }
           />
         )}
-        <AddShooterCard onClick={() => navigate(href("shooters"))} />
+        {readOnlyMirror ? null : (
+          <AddShooterCard onClick={() => navigate(href("shooters"))} />
+        )}
       </div>
 
       <SectionHead
@@ -553,12 +566,14 @@ function EmptyVariant({
   shooters,
   navSlug,
   onEditStages,
+  readOnlyMirror,
 }: {
   project: MatchProject;
   stageViews: StageView[];
   shooters: ShooterListEntry[];
   navSlug: string | null;
   onEditStages: () => void;
+  readOnlyMirror: boolean;
 }) {
   const navigate = useNavigate();
   const href = useMatchHref();
@@ -656,19 +671,21 @@ function EmptyVariant({
             onAddLink={() => navigate(ingestHref)}
           />
         )}
-        <div
-          className="flex items-center gap-3.5 rounded-xl border border-dashed border-rule-strong bg-transparent px-4 py-4 text-led"
-          role="button"
-          aria-label="Add a squadmate"
-          onClick={() => navigate(href("shooters"))}
-        >
-          <span className="inline-flex size-11 items-center justify-center rounded-full border border-dashed border-rule-strong bg-surface-3 text-led">
-            <Plus className="size-5" />
-          </span>
-          <span className="font-display text-[0.8125rem] font-semibold uppercase tracking-[0.1em] text-led">
-            Add a squadmate
-          </span>
-        </div>
+        {readOnlyMirror ? null : (
+          <div
+            className="flex items-center gap-3.5 rounded-xl border border-dashed border-rule-strong bg-transparent px-4 py-4 text-led"
+            role="button"
+            aria-label="Add a squadmate"
+            onClick={() => navigate(href("shooters"))}
+          >
+            <span className="inline-flex size-11 items-center justify-center rounded-full border border-dashed border-rule-strong bg-surface-3 text-led">
+              <Plus className="size-5" />
+            </span>
+            <span className="font-display text-[0.8125rem] font-semibold uppercase tracking-[0.1em] text-led">
+              Add a squadmate
+            </span>
+          </div>
+        )}
       </div>
 
       <SectionHead
@@ -695,20 +712,24 @@ function EmptyVariant({
           cta="Start ingest"
           onClick={() => navigate(ingestHref)}
         />
-        <HelpCard
-          icon={<Users className="size-4" />}
-          title="Bring squadmates"
-          desc="Add up to 4 shooters' footage for multi-shooter compare grids and side-by-side exports."
-          cta="Add shooter"
-          onClick={() => navigate(href("shooters"))}
-        />
-        <HelpCard
-          icon={<Layers className="size-4" />}
-          title="Adjust the stage list"
-          desc="Reality differs from scoreboard? Add, remove, or rename stages without losing audit progress."
-          cta="Edit stages"
-          onClick={onEditStages}
-        />
+        {readOnlyMirror ? null : (
+          <HelpCard
+            icon={<Users className="size-4" />}
+            title="Bring squadmates"
+            desc="Add up to 4 shooters' footage for multi-shooter compare grids and side-by-side exports."
+            cta="Add shooter"
+            onClick={() => navigate(href("shooters"))}
+          />
+        )}
+        {readOnlyMirror ? null : (
+          <HelpCard
+            icon={<Layers className="size-4" />}
+            title="Adjust the stage list"
+            desc="Reality differs from scoreboard? Add, remove, or rename stages without losing audit progress."
+            cta="Edit stages"
+            onClick={onEditStages}
+          />
+        )}
       </div>
     </>
   );
