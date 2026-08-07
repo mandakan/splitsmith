@@ -1186,9 +1186,10 @@ describe("DeveloperShell chrome (#550)", () => {
   it("does not render its own mode switch", async () => {
     renderDev();
     await screen.findByText(/corpus/i);
-    expect(
-      screen.getAllByRole("group", { name: /workspace mode/i }),
-    ).toHaveLength(1);
+    // ModeSwitch ships role="radiogroup" aria-label="Mode" -- confirmed
+    // against src/components/ui/ModeSwitch.tsx in Task 2. Exactly one:
+    // the global bar's. DeveloperShell's own copy is deleted here.
+    expect(screen.getAllByRole("radiogroup", { name: /mode/i })).toHaveLength(1);
   });
 });
 ```
