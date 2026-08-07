@@ -8,8 +8,9 @@
  * renders, which pushed the sidebar's Jobs rail below the viewport.
  *
  * This hook measures the actual header and publishes it as the
- * ``--shell-header-h`` CSS custom property (set it on the shell root via
- * the returned style); layout reads the variable instead of guessing.
+ * ``--shell-header-h`` CSS custom property (set it on the header root via
+ * the returned style). Called once, by RootLayout, over the whole header
+ * stack; shells consume the published --shell-header-h variable.
  */
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
