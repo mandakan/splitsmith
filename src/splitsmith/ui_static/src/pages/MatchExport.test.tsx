@@ -140,7 +140,9 @@ describe("MatchExport", () => {
     const stageTwo = screen.getByRole("button", { name: /Stage Two/i });
     const stageThree = screen.getByRole("button", { name: /Stage Three/i });
 
-    expect(stageOne).toHaveAttribute("aria-pressed", "true");
+    // The buttons exist before the load effect applies the pre-selection,
+    // so wait for the pressed state rather than mere existence (CI flake).
+    await waitFor(() => expect(stageOne).toHaveAttribute("aria-pressed", "true"));
     expect(stageTwo).toHaveAttribute("aria-pressed", "true");
     // Skipped stage: not selected and not clickable.
     expect(stageThree).toHaveAttribute("aria-pressed", "false");
