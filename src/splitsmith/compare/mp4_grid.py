@@ -36,13 +36,13 @@ from ..overlay_theme import ThemeName, load_theme
 from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, quote_filter_value, runtime
 from .layout import Layout2Up, choose_grid, grid_shape
 from .overlay_data import TileStageData, load_overlay_data
+from .overlay_live import write_absent_sprite_sequence, write_sprite_sequence
 from .overlay_sprites import (
     SpriteGeometry,
     TilePlacement,
     build_overlay_states,
     theme_font_face,
     write_concat_list,
-    write_sprite_sequence,
 )
 from .project_loader import CompareShooterBundle
 
@@ -776,11 +776,14 @@ def _clock_text(seconds: float) -> str:
 
 
 def _clock_pad(cell_height: int) -> int:
-    """Inset from the cell edge, mirroring ``overlay_sprites._draw_panel``.
+    """Inset from the cell edge, shared with the sprite's own anchors.
 
-    The sprite draws its shot counter at ``(x0 + pad, y0 + pad)`` with
-    this same formula. The clock sits at the opposite top corner of the
-    same cell, so sharing the pad is what makes the two line up.
+    The sprite insets its shot counter by this same number -- since issue
+    #693 as ``overlay_html``'s ``.anchor-top-left { top: pad; left: pad }``
+    rather than as a PIL draw at ``(x0 + pad, y0 + pad)``, off the same
+    :class:`~splitsmith.overlay_layout.CellScale` field either way. The
+    clock sits at the opposite top corner of the same cell, so sharing
+    the pad is what makes the two line up.
     """
     return CellScale.for_cell(cell_height).pad
 
@@ -1498,8 +1501,20 @@ def _stage_overlay_plan(
     font_path: Path,
     head_pad_seconds: float,
     work: Path,
+    rasterizer: Rasterizer | None,
 ) -> StageOverlayPlan:
-    """Render one stage's sprites and describe its clocks."""
+    """Render one stage's sprites and describe its clocks.
+
+    ``rasterizer`` is the seam issue #693 put under the sprites: they are
+    an HTML document rasterized by headless Chromium rather than a PIL
+    draw. ``None`` is the degradation path, decided once up front by
+    :func:`render_grid_mp4`'s preflight rather than per stage -- the
+    sprite stream is still written, and still an input to the filter
+    graph, but every state paints nothing (see
+    :func:`splitsmith.compare.overlay_live.write_absent_sprite_sequence`).
+    The clocks are unaffected either way: ``drawtext`` is ffmpeg's own and
+    owes the browser nothing.
+    """
     theme = load_theme(theme_name)
     stage_data = _overlay_data_for_stage(data, plan.stage_number)
     placements = tuple(
@@ -1519,13 +1534,19 @@ def _stage_overlay_plan(
         duration_seconds=plan.duration_seconds,
     )
     # One cache directory for the whole run, not one per stage: the cache
-    # is content-addressed, so stages that share a state share a PNG.
-    sequence = write_sprite_sequence(
-        states,
-        geometry,
-        theme=theme,
-        cache_dir=work / "sprites",
-    )
+    # is content-addressed, so stages that share a state share a PNG. That
+    # dedup matters roughly five times more since #693 -- a repeat now
+    # skips a browser render rather than a PIL draw.
+    if rasterizer is None:
+        sequence = write_absent_sprite_sequence(states, geometry, cache_dir=work / "sprites")
+    else:
+        sequence = write_sprite_sequence(
+            states,
+            geometry,
+            theme=theme,
+            cache_dir=work / "sprites",
+            rasterizer=rasterizer,
+        )
     # The canvas rate, not a guess: the list writer quantises every state
     # boundary onto a whole output frame and pins the demuxer's own time
     # base to it, so the sprite steps on the same frame the clock does.
@@ -1847,17 +1868,22 @@ def render_grid_mp4(
                 logger.warning("%s", degradation.detail)
 
     # The rasterizer preflight, mirroring the drawtext capability probe
-    # above: only relevant once a hold is actually requested (the guard
-    # at the top of this function already refused a hold without
-    # ``overlay``), and attempted once for the whole render rather than
-    # once per stage -- both for cost (a 12-stage match would otherwise
-    # pay Chromium's process startup 12 times) and so a missing browser
-    # is found before any stage has encoded anything, the same reason the
+    # above: attempted once for the whole render rather than once per
+    # stage -- both for cost (a 12-stage match would otherwise pay
+    # Chromium's process startup 12 times) and so a missing browser is
+    # found before any stage has encoded anything, the same reason the
     # drawtext probe runs up front. A caller-supplied ``rasterizer`` is
     # used as-is and its lifecycle is the caller's, not managed here.
+    #
+    # Gated on ``overlay``, not on ``summary_hold_seconds``: since issue
+    # #693 the per-tile sprites are rasterized through the same browser
+    # the summary is, so ``--overlay`` alone needs one even with no hold
+    # requested. Getting this gate wrong is silent -- a hold-less render
+    # would simply find ``rasterizer is None`` per stage and degrade every
+    # sprite to a blank canvas without anything having failed.
     active_rasterizer: Rasterizer | None = rasterizer
     owned_rasterizer: ChromiumRasterizer | None = None
-    if summary_hold_seconds > 0 and rasterizer is None:
+    if overlay and rasterizer is None:
         owned_rasterizer = ChromiumRasterizer()
         try:
             active_rasterizer = owned_rasterizer.__enter__()
@@ -1889,6 +1915,7 @@ def render_grid_mp4(
                     font_path=font_path,
                     head_pad_seconds=head_pad_seconds,
                     work=work,
+                    rasterizer=active_rasterizer,
                 )
                 if not draw_clock:
                     # Dropping the clocks is what removes ``drawtext`` from

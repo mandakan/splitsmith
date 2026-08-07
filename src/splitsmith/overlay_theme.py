@@ -32,11 +32,13 @@ The stage summary itself moved off PIL to headless Chromium rasterizing
 real CSS (issue #683's amendment) specifically to get a genuine box
 model and, as a side effect, proper text shaping (kerning, ligatures,
 condensed-face width control) for exactly the reason this paragraph used
-to describe as a hypothetical Skia swap. The live sprite
-(``overlay_sprites.render_state``) stays PIL -- it draws two elements
-and has no reported overflow or shaping defect (see the amendment's
-"Explicitly out of scope") -- so a PIL-to-something-else swap remains
-live territory there, tracked as #693/#684 rather than this file.
+to describe as a hypothetical Skia swap. Issue #693 then took the live
+per-tile sprites the same way (``compare/overlay_live.py``), so **no
+renderer in this pipeline is PIL any more** and every colour token here
+reaches the picture as CSS. The one remaining non-CSS consumer is the
+running clock, an ffmpeg ``drawtext`` filter that reads only ``ink`` and
+``stroke`` (see ``mp4_grid._clock_filters``) -- a token added here for
+CSS alone will not reach it.
 """
 
 from __future__ import annotations

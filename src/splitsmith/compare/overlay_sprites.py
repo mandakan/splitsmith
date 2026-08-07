@@ -3,24 +3,32 @@
 Overlay content changes only when someone fires. A 30-shot stage
 therefore has ~30 distinct states rather than one per frame, and each
 state is rendered once and held -- that is the whole reason this path
-costs draws in the tens rather than the hundreds.
+costs draws in the tens rather than the hundreds. Since issue #693 a
+sprite is a browser render rather than a PIL draw (roughly 4-5x the cost
+each), which makes stepping on events instead of frames the thing that
+keeps the whole approach affordable rather than merely tidy.
 
-Pure computation: states in seconds, no rasterizer, no file I/O. Turning
-a state into pixels belongs to the sprite renderer, not here.
+Pure computation: states in seconds, no rasterizer, no file I/O, no font.
+Turning a state into pixels is ``compare/overlay_live.py``'s job -- it
+declares what a tile says as ``Group``/``Element`` objects and hands them
+to ``overlay_html.grid_html`` plus an injected rasterizer. This module
+used to draw them itself with PIL and its own width fitter; issue #693
+removed that, so there is one text-fitting mechanism in the overlay
+pipeline instead of two.
+
+:func:`theme_font_face` is the one rendering-adjacent thing that stayed,
+and deliberately: the running clock is still an ffmpeg ``drawtext``
+filter, a genuinely per-frame element no rasterizer choice touches, and
+it has to resolve the same typeface the sprites do or the two halves of
+the overlay stop matching.
 """
 
-import hashlib
-import json
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 
-from PIL import Image, ImageDraw
-
-from ..overlay_layout import CellScale
-from ..overlay_text import OverlayFace, _draw_text_with_shadow, load_face, resolve_overlay_face
+from ..overlay_text import OverlayFace, resolve_overlay_face
 from ..overlay_theme import OverlayTheme
 from .overlay_data import TileShot, TileStageData
 
@@ -66,8 +74,16 @@ class TilePanel:
     reads as a real number to a viewer.
 
     Content is strictly per tile. Cross-shooter comparison used to live
-    here as ``rank``/``delta_to_leader``, feeding a bottom delta strip;
-    both are gone (see :func:`render_state`).
+    here as ``rank``/``delta_to_leader``, feeding a bottom delta strip
+    across the full canvas width; both are gone. A beep-aligned grid
+    already *is* the race -- the tiles are synchronised, so who is ahead
+    reads straight off the picture -- and a ranked list competes with the
+    thing it describes while its band overlaps the bottom row of tiles.
+    Cross-shooter comparison belongs to the stage summary, where the run
+    is over and nothing is moving. Do not put it back.
+
+    What a panel says once it reaches the screen is
+    :func:`splitsmith.compare.overlay_live.panel_groups`.
     """
 
     label: str
@@ -230,7 +246,7 @@ def _panels_at(
     return tuple(panels)
 
 
-# --- rendering --------------------------------------------------------
+# --- geometry, typeface, and the sequence's own time base --------------
 
 
 @dataclass(frozen=True)
@@ -257,261 +273,37 @@ class SpriteGeometry:
         return self.canvas_height // self.rows
 
 
-def render_state(state: OverlayState, geometry: SpriteGeometry, *, theme: OverlayTheme) -> Image.Image:
-    """Rasterize one :class:`OverlayState` to a canvas-sized RGBA sprite.
-
-    Layout mirrors ``overlay_render.DefaultTemplate`` cell-for-cell so the
-    single-shooter alpha overlay and this grid overlay read as one
-    product: top-left counter, bottom-center last split, same padding and
-    type-size formulas driven by the cell (not the canvas).
-
-    Deliberate divergence from ``DefaultTemplate``: the single-shooter
-    overlay fades the last split out after ``split_hold_seconds``. This is
-    a step function over discrete states, not a per-frame loop, so it
-    cannot fade without inventing extra states purely to animate an alpha
-    ramp. In a grid the viewer also wants to glance at any moment and read
-    what a shooter's last split was, not just the instant after they
-    fired. The split label therefore persists at full alpha until the
-    next shot replaces it.
-
-    All text is fit to the space it actually has (the cell's own width)
-    before it is drawn: 3x3 and 4x4 are first-class grid kinds
-    (``compare/layout.py`` routes 5-16 shooters there), and a font size
-    picked from ``cell_height`` alone overflows a narrow cell once there
-    are more than a handful of columns.
-
-    **Everything drawn here is per tile.** A full-width delta strip
-    ranking the shooters used to run across the bottom of the canvas; it
-    was removed after watching it on real footage. A beep-aligned grid
-    already *is* the race -- the tiles are synchronised, so who is ahead
-    reads straight off the picture -- and a ranked list competes with the
-    thing it describes while its band overlaps the bottom row of tiles.
-    Cross-shooter comparison belongs to the Milestone B stage summary,
-    where the run is over and the ranking is ``stage_pct`` off the
-    scorecard rather than live elapsed time. Do not put it back.
-
-    A consequence: a state where nobody has fired yet draws *nothing*, so
-    ``render_state`` legitimately returns a fully transparent canvas. Any
-    test claiming the sprite reached the pixels has to sample a moment
-    where a counter or a split genuinely exists.
-    """
-    canvas = Image.new("RGBA", (geometry.canvas_width, geometry.canvas_height), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(canvas)
-
-    # One resolver for the whole overlay. These two values used to be
-    # written out here, in ``mp4_grid._clock_pad`` and in
-    # ``_stage_overlay_plan`` independently; ``CellScale`` is the single
-    # place that decides them, and it reproduces both exactly.
-    scale = CellScale.for_cell(geometry.cell_height)
-    pad = scale.pad
-    big = scale.live_primary
-
-    for panel in state.panels:
-        _draw_panel(canvas, draw, panel, geometry, theme=theme, pad=pad, base_size=big)
-
-    return canvas
-
-
-@lru_cache(maxsize=256)
-def _font_at(face: OverlayFace, size: int):
-    """One :class:`PIL.ImageFont.FreeTypeFont` per ``(face, size)``.
-
-    Loading re-reads the TTF off disk every call, and the width-fitting
-    loops call it once per size step per panel per state. At 3840x2160 /
-    3x3 that dominated ``render_state``, which a 12-stage 9-shooter match
-    pays a few hundred times before ffmpeg starts.
-
-    Fonts are only measured and drawn from here, never mutated, so one
-    instance is safe to share. The key is the resolved *face* rather than
-    the theme, so an unhashable theme object can never break the cache
-    and two themes resolving to the same face share one font.
-    """
-    return load_face(face, size)
-
-
 def theme_font_face(theme: OverlayTheme) -> OverlayFace:
-    """The one face this theme's overlay is drawn with, both halves of it.
+    """The one face the overlay is drawn with, both halves of it.
 
-    The sprite (PIL) and the running clock (ffmpeg ``drawtext``) are two
-    different font loaders, and this is the single point that decides
-    what either of them draws -- ``mp4_grid`` resolves it once per render
-    and hands the same answer to both, so they cannot pick up different
-    typefaces. Face selection still matches ``DefaultTemplate``: the
-    bundled mono for the splitsmith theme, generic system discovery
-    otherwise, except that discovery now ends at the bundled face rather
-    than PIL's bitmap default (see
-    :func:`splitsmith.overlay_text.resolve_overlay_face`).
+    Only one consumer is left in Python: the running clock's ffmpeg
+    ``drawtext`` filter, which ``mp4_grid`` materializes a TTF for via
+    :func:`splitsmith.overlay_text.overlay_font_file`. The sprites used to
+    be the other, loading the same face through PIL; since issue #693 they
+    are a browser render and take their typeface from ``overlay_html``'s
+    ``@font-face`` rules.
+
+    **That is why this no longer branches on the theme.** ``overlay_html``
+    declares the bundled faces unconditionally regardless of theme -- it
+    chose determinism across machines over matching the ``clean`` theme's
+    old system-font discovery (see
+    :func:`splitsmith.overlay_html._font_face_url`). Keeping the *old*
+    branch here would have meant the counter and the clock drawing in two
+    different typefaces inside the same cell on that theme, with the
+    clock's own face varying by host: measured on the dev box, ``clean``
+    resolved to ``/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf``
+    against the sprite's bundled JetBrains Mono. A theme still decides
+    every colour in the overlay; it no longer decides the typeface,
+    because only one of the two halves was ever able to honour that
+    choice deterministically.
+
+    ``theme`` stays in the signature rather than being dropped: it is the
+    honest place for a future theme to reintroduce a face (both halves
+    can express one now -- a bundled face and an ``@font-face`` rule
+    naming it), and every caller already has a theme in hand.
     """
-    return resolve_overlay_face("splitsmith-mono" if theme.name == "splitsmith" else None)
-
-
-def _scaled_font(theme: OverlayTheme, size: int):
-    """Load this theme's face at ``size``."""
-    return _font_at(theme_font_face(theme), size)
-
-
-def _text_width(draw: ImageDraw.ImageDraw, text: str, font) -> int:
-    bbox = draw.textbbox((0, 0), text, font=font)
-    return bbox[2] - bbox[0]
-
-
-# Font sizes never shrink below this floor. Still legible at typical
-# viewing distances; below it a further shrink reads as noise rather
-# than smaller text.
-_MIN_FONT_SIZE = 12
-
-
-def _fit_font_by_width(
-    draw: ImageDraw.ImageDraw,
-    text: str,
-    theme: OverlayTheme,
-    *,
-    base_size: int,
-    budget: float,
-) -> tuple[object, int]:
-    """The largest font at or below ``base_size`` (in steps of 2) that
-    draws ``text`` no wider than ``budget`` pixels, floored at
-    :data:`_MIN_FONT_SIZE`. Returns ``(font, size)`` -- the caller derives
-    stroke/shadow parameters from ``size`` so they scale down with it."""
-    size = base_size
-    font = _scaled_font(theme, size)
-    while size > _MIN_FONT_SIZE and _text_width(draw, text, font) > budget:
-        size -= 2
-        font = _scaled_font(theme, size)
-    return font, size
-
-
-def _draw_panel(
-    canvas: Image.Image,
-    draw: ImageDraw.ImageDraw,
-    panel: TilePanel,
-    geometry: SpriteGeometry,
-    *,
-    theme: OverlayTheme,
-    pad: int,
-    base_size: int,
-) -> None:
-    """One tile's counter + last split. A filler tile (``present`` False)
-    draws nothing at all -- it is not a shooter, so drawing "--/12" over
-    black would imply a competitor who isn't there.
-
-    Each text is sized to the cell's own width, not just ``base_size``
-    off ``cell_height`` -- a narrow cell (many columns) can't fit a
-    "16/16" counter at the height-driven size, and the text must never
-    spill past the tile it belongs to."""
-    if not panel.present:
-        return
-
-    x0 = panel.col * geometry.cell_width
-    y0 = panel.row * geometry.cell_height
-    # Bottom-anchored content runs to the cell's own bottom edge. It used
-    # to stop short of a full-width delta strip; that strip is gone, so
-    # the whole cell is the tile's again.
-    content_bottom = y0 + geometry.cell_height
-    ink = (*theme.ink, 255)
-    width_budget = max(1, geometry.cell_width - 2 * pad)
-
-    if panel.shots_fired > 0:
-        if panel.expected_shots is not None:
-            counter_text = f"{panel.shots_fired}/{panel.expected_shots}"
-        else:
-            counter_text = f"{panel.shots_fired}"
-        font, size = _fit_font_by_width(draw, counter_text, theme, base_size=base_size, budget=width_budget)
-        _draw_text_with_shadow(
-            draw,
-            canvas,
-            (x0 + pad, y0 + pad),
-            counter_text,
-            font,
-            ink,
-            stroke_width=max(2, size // 18),
-            shadow_offset=max(2, size // 24),
-            shadow_blur=max(3, size // 12),
-            stroke_color=theme.stroke,
-            shadow_color=theme.shadow,
-        )
-
-    if panel.last_split is not None:
-        split_text = f"{panel.last_split:.2f}s"
-        font, size = _fit_font_by_width(draw, split_text, theme, base_size=base_size, budget=width_budget)
-        bbox = draw.textbbox((0, 0), split_text, font=font)
-        tw = bbox[2] - bbox[0]
-        th = bbox[3] - bbox[1]
-        x = x0 + (geometry.cell_width - tw) // 2
-        y = content_bottom - th - pad * 2
-        _draw_text_with_shadow(
-            draw,
-            canvas,
-            (x, y),
-            split_text,
-            font,
-            (*theme.split, 255),
-            stroke_width=max(2, size // 18),
-            shadow_offset=max(2, size // 24),
-            shadow_blur=max(3, size // 12),
-            stroke_color=theme.stroke,
-            shadow_color=theme.shadow,
-        )
-
-
-def _cache_key(geometry: SpriteGeometry, theme: OverlayTheme, panels: tuple[TilePanel, ...]) -> str:
-    """SHA-256 over a stable JSON dump of the render *inputs* -- never the
-    rendered bytes. Two states with identical geometry/theme/panels hash
-    to the same key regardless of timing, so a stage where nothing
-    changes between two shot events writes one PNG, not two."""
-    payload = {
-        "geometry": {
-            "canvas_width": geometry.canvas_width,
-            "canvas_height": geometry.canvas_height,
-            "rows": geometry.rows,
-            "cols": geometry.cols,
-        },
-        "theme": theme.name,
-        "panels": [
-            {
-                "label": p.label,
-                "row": p.row,
-                "col": p.col,
-                "present": p.present,
-                "shots_fired": p.shots_fired,
-                "expected_shots": p.expected_shots,
-                "last_split": p.last_split,
-            }
-            for p in panels
-        ],
-    }
-    blob = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(blob).hexdigest()
-
-
-def write_sprite_sequence(
-    states: Sequence[OverlayState],
-    geometry: SpriteGeometry,
-    *,
-    theme: OverlayTheme,
-    cache_dir: Path,
-) -> tuple[tuple[Path, float], ...]:
-    """Render every state, content-addressed, and return ``(png_path,
-    duration_seconds)`` per state in order.
-
-    States with identical ``(geometry, theme.name, panels)`` share one
-    file -- a 30-shot stage where nothing changes between two events
-    writes one PNG, not two, which is the whole point of stepping on
-    events instead of frames.
-    """
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    written: dict[str, Path] = {}
-    sequence: list[tuple[Path, float]] = []
-    for state in states:
-        key = _cache_key(geometry, theme, state.panels)
-        path = written.get(key)
-        if path is None:
-            path = cache_dir / f"sprite-{key[:16]}.png"
-            if not path.exists():
-                render_state(state, geometry, theme=theme).save(path)
-            written[key] = path
-        sequence.append((path, state.duration_seconds))
-    return tuple(sequence)
+    del theme  # see the docstring: one bundled face, both halves, every theme
+    return resolve_overlay_face("splitsmith-mono")
 
 
 def quantize_durations(

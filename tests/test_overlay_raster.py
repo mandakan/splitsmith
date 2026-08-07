@@ -178,7 +178,7 @@ def test_png_waits_for_fonts_before_screenshotting() -> None:
 
 def test_png_screenshots_with_omit_background_for_an_alpha_result() -> None:
     """The rasterizer returns an alpha PNG, not an opaque one:
-    ``overlay_html.summary_html`` leaves its document background
+    ``overlay_html.grid_html`` leaves its document background
     transparent because the result is alpha-composited over an
     already-composed freeze-frame still (Task 6R-3). If this ever
     flipped to an opaque screenshot without also changing the CSS side

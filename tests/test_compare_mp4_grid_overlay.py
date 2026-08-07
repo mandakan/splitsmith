@@ -12,18 +12,74 @@ so the assertion is ``in`` rather than ``endswith`` and the ordering is
 pinned separately by :func:`test_the_video_chain_ends_at_format_yuv420p`.
 """
 
+import io
 import subprocess
 from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 import pytest
 from PIL import Image
 
+from splitsmith import overlay_html
 from splitsmith.compare import mp4_grid
 from splitsmith.compare.mp4_grid import GridCanvas, GridStagePlan, GridTile
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
 from tests.conftest import fake_ffmpeg_probe
 
 CANVAS = GridCanvas(width=1920, height=1080, frame_rate_num=60000, frame_rate_den=1001)
+
+
+class _StubRasterizer:
+    """A ``Rasterizer`` that returns a real, canvas-sized transparent PNG
+    without launching a browser.
+
+    Since issue #693 the per-tile sprites are rasterized through Chromium,
+    so ``render_grid_mp4``'s preflight now runs for *any* ``overlay=True``
+    render rather than only when a summary hold was requested. Every test
+    in this file would otherwise launch a real browser -- slow, and worse,
+    silently degrading to blank sprites on a host with no Chromium
+    installed, which would quietly change what these tests measure without
+    failing anything.
+
+    A real PNG rather than a byte string: the sprites are written to disk
+    as ``.png`` and the filter-graph assertions below are about the paths
+    and durations around them, so an unreadable file would be a fixture
+    that cannot express a real failure.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int, int]] = []
+
+    def png(self, html: str, *, width: int, height: int) -> bytes:
+        self.calls.append((html, width, height))
+        buffer = io.BytesIO()
+        Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    def __enter__(self) -> "_StubRasterizer":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+@pytest.fixture(autouse=True)
+def _stub_the_browser(request, monkeypatch):
+    """No *unit* test in this file launches Chromium.
+
+    Patched at ``mp4_grid``'s own name, which is where the preflight
+    reads it -- patching ``overlay_raster.ChromiumRasterizer`` would
+    silently patch nothing, since ``mp4_grid`` bound the class at import.
+
+    An ``integration``-marked test opts out and gets the real browser: a
+    test that asserts on *pixels* cannot be served by a stub that paints
+    none, and stubbing one anyway is how a fixture ends up unable to
+    express the failure it claims to cover.
+    """
+    if "integration" in request.keywords:
+        return
+    monkeypatch.setattr(mp4_grid, "ChromiumRasterizer", _StubRasterizer)
 
 
 def _tile(label, row, col, *, present=True):
@@ -859,8 +915,16 @@ def test_the_first_sprite_state_spans_the_head_pad(tmp_path, head_pad):
     assert entries[0][1] == pytest.approx(head_pad + 0.5, abs=frame)
 
 
+@pytest.mark.integration
 def test_the_sprite_grid_geometry_is_the_plans_own_rows_and_cols(tmp_path):
     """A 1x2 head-to-head is where a rows/cols swap becomes visible.
+
+    Integration-marked since issue #693: this asserts on ink in a
+    rendered sprite, and a sprite is now a Chromium render. It is
+    deliberately *not* rewritten as a markup assertion -- checking that
+    the HTML says ``grid-column:2`` would pass just as happily if CSS
+    never put the second cell there, and the whole argument for a real
+    box model is that the browser is the thing that decides.
 
     Every other overlay fixture is 2x2, where swapping the two is a
     no-op. ``choose_grid(2, "horizontal")`` is one row of two -- the most
@@ -988,13 +1052,30 @@ def test_the_sprite_cache_is_shared_across_stages(tmp_path):
 
 # --- one face for both halves of the overlay ------------------------------
 #
-# The sprite (PIL) and the running clock (ffmpeg drawtext) are two
-# different font loaders. They used to choose independently: the clock
-# was unconditionally the bundled mono, while the sprite fell through to
+# The sprite and the running clock (ffmpeg drawtext) are two different
+# font loaders. They used to choose independently: the clock was
+# unconditionally the bundled mono, while the sprite fell through to
 # system discovery for any theme other than ``splitsmith``. On this
-# machine that renders a DejaVu sprite beside a JetBrains Mono clock in
-# the same cell, and on a host with no DejaVu at all the sprite drops to
+# machine that rendered a DejaVu sprite beside a JetBrains Mono clock in
+# the same cell, and on a host with no DejaVu at all the sprite dropped to
 # PIL's bitmap default beside a TrueType clock.
+#
+# Since issue #693 the sprite's loader is not PIL at all: it is Chromium
+# resolving ``overlay_html``'s ``@font-face`` rules, which name a bundled
+# TTF unconditionally regardless of theme. So the thing to compare the
+# clock against is that file -- ``_scaled_font`` (the PIL loader these
+# tests used to reach for) no longer exists, and asserting against
+# ``theme_font_face`` alone would only prove the clock agrees with
+# itself.
+
+
+def _sprite_face_file() -> Path:
+    """The TTF Chromium actually paints a sprite with -- read back out of
+    the ``@font-face`` URL ``overlay_html`` emits, not from a constant
+    this test declares. A test carrying its own copy of the filename
+    would keep passing after the stylesheet started naming a different
+    one, which is the whole failure this section exists to catch."""
+    return Path(url2pathname(urlparse(overlay_html._font_face_url(overlay_html._FONT_FILES["mono"])).path))
 
 
 @pytest.mark.parametrize("theme_name", ["splitsmith", "clean"])
@@ -1003,22 +1084,18 @@ def test_the_clock_and_the_sprite_resolve_to_the_same_face(theme_name, tmp_path)
     from splitsmith.compare import overlay_sprites
     from splitsmith.overlay_theme import load_theme
 
-    theme = load_theme(theme_name)
-    face = overlay_sprites.theme_font_face(theme)
-    sprite_font = overlay_sprites._scaled_font(theme, 48)
+    face = overlay_sprites.theme_font_face(load_theme(theme_name))
     clock_path = overlay_text.overlay_font_file(face, tmp_path)
     # Compare the font *files*, not the face descriptor: a bundled face
-    # reaches PIL through importlib.resources and ffmpeg through a
-    # materialized copy, so the two paths differ while the typeface must
-    # not.
+    # reaches Chromium as a file:// URL into the installed package and
+    # ffmpeg as a materialized copy, so the two paths differ while the
+    # typeface must not.
     assert (
-        Path(sprite_font.path).read_bytes() == clock_path.read_bytes()
+        _sprite_face_file().read_bytes() == clock_path.read_bytes()
     ), f"the {theme_name} theme draws its sprite and its clock with different typefaces"
 
 
 def test_a_host_with_no_system_fonts_still_gets_one_real_face(monkeypatch, tmp_path):
-    from PIL import ImageFont
-
     from splitsmith import overlay_text
     from splitsmith.compare import overlay_sprites
     from splitsmith.overlay_theme import load_theme
@@ -1028,25 +1105,16 @@ def test_a_host_with_no_system_fonts_still_gets_one_real_face(monkeypatch, tmp_p
     # silently patches nothing (the Task 1 monkeypatch trap).
     monkeypatch.setattr(overlay_text, "_FONT_PRESETS", {})
     monkeypatch.setattr(overlay_text, "_FONT_FALLBACKS", ())
-    overlay_sprites._font_at.cache_clear()
-    try:
-        theme = load_theme("clean")
-        face = overlay_sprites.theme_font_face(theme)
-        sprite_font = overlay_sprites._scaled_font(theme, 48)
-        assert isinstance(
-            sprite_font, ImageFont.FreeTypeFont
-        ), "the sprite fell back to PIL's bitmap font while the clock stayed TrueType"
-        clock_path = overlay_text.overlay_font_file(face, tmp_path)
-        assert Path(sprite_font.path).read_bytes() == clock_path.read_bytes()
-    finally:
-        overlay_sprites._font_at.cache_clear()
+    face = overlay_sprites.theme_font_face(load_theme("clean"))
+    clock_path = overlay_text.overlay_font_file(face, tmp_path)
+    assert clock_path.is_file()
+    assert (
+        clock_path.read_bytes() == _sprite_face_file().read_bytes()
+    ), "a host with no system fonts drew its clock with something other than the bundled face"
 
 
-def test_the_rendered_clock_uses_the_face_the_theme_resolved(tmp_path):
+def test_the_rendered_clock_uses_the_face_the_sprite_draws_with(tmp_path):
     """The seam: what render_grid_mp4 actually puts in ``fontfile=``."""
-    from splitsmith.compare import overlay_sprites
-    from splitsmith.overlay_theme import load_theme
-
     calls, runner = _recorder()
     work = tmp_path / "work"
     mp4_grid.render_grid_mp4(
@@ -1060,14 +1128,14 @@ def test_the_rendered_clock_uses_the_face_the_theme_resolved(tmp_path):
         overlay=True,
         probe_runner=fake_ffmpeg_probe(),
         overlay_theme="clean",
+        rasterizer=_StubRasterizer(),
     )
     graph = _graph(calls[0])
     font = Path(graph.split("fontfile='")[1].split("'")[0])
     assert font.is_file()
-    sprite_font = overlay_sprites._scaled_font(load_theme("clean"), 48)
     assert (
-        font.read_bytes() == Path(sprite_font.path).read_bytes()
-    ), "the rendered clock's fontfile is not the face the sprite drew with"
+        font.read_bytes() == _sprite_face_file().read_bytes()
+    ), "the rendered clock's fontfile is not the face the sprite draws with"
 
 
 # --- ffmpeg preflight ------------------------------------------------------
