@@ -244,27 +244,38 @@ class ShooterSpec:
         return self.scoring[(stage_number - 1) % len(self.scoring)]
 
 
-#: ``(alphas, charlies, deltas, misses, time)`` per filler shooter, per
-#: stage. Hits total the stage's round count (12 on stage 1, 8 on stage 2,
-#: counting a miss as a round fired) and every time sits inside the
-#: post-beep span the trims give the stage, so nothing here describes a
-#: run the media could not hold.
-_FILLER_SCORES: dict[int, tuple[tuple[int, int, int, int, float], ...]] = {
+#: ``(alphas, charlies, deltas, misses, procedurals, time)`` per filler
+#: shooter, per stage. Hit-zone rounds (alphas+charlies+deltas+misses)
+#: total the stage's round count (12 on stage 1, 8 on stage 2, counting a
+#: miss as a round fired) and every time sits inside the post-beep span
+#: the trims give the stage, so nothing here describes a run the media
+#: could not hold. Procedurals are a rule-violation penalty, not a round
+#: fired at a target, so they sit outside that budget -- Sanna's stage-2
+#: procedural below is the one nonzero value in that column, and it costs
+#: her nothing in round count.
+_FILLER_SCORES: dict[int, tuple[tuple[int, int, int, int, int, float], ...]] = {
     1: (
-        (5, 2, 1, 0, 4.20),  # Nils
-        (4, 3, 1, 0, 4.50),  # Olof
-        (3, 4, 1, 0, 4.40),  # Petra
-        (7, 1, 0, 0, 4.75),  # Rikard -- winner
-        (2, 4, 1, 1, 4.30),  # Sanna
-        (6, 2, 0, 0, 4.50),  # Tove -- ties Rikard
+        (5, 2, 1, 0, 0, 4.20),  # Nils
+        (4, 3, 1, 0, 0, 4.50),  # Olof
+        (3, 4, 1, 0, 0, 4.40),  # Petra
+        (7, 1, 0, 0, 0, 4.75),  # Rikard -- winner
+        (2, 4, 1, 1, 0, 4.30),  # Sanna
+        (6, 2, 0, 0, 0, 4.50),  # Tove -- ties Rikard
     ),
     2: (
-        (7, 4, 1, 0, 4.20),  # Nils
-        (6, 5, 1, 0, 4.50),  # Olof
-        (5, 5, 2, 0, 4.40),  # Petra
-        (11, 1, 0, 0, 4.90),  # Rikard
-        (4, 4, 2, 2, 4.30),  # Sanna
-        (9, 3, 0, 0, 4.50),  # Tove -- lands on the winning hit factor
+        (7, 4, 1, 0, 0, 4.20),  # Nils
+        (6, 5, 1, 0, 0, 4.50),  # Olof
+        (5, 5, 2, 0, 0, 4.40),  # Petra
+        (11, 1, 0, 0, 0, 4.90),  # Rikard
+        # Sanna carries the roster's one nonzero procedural. She is a
+        # filler shooter that nothing else depends on -- unlike Anders
+        # (the tie), Bea (the no-penalty-columns case) or Mathias (the
+        # points-vs-percentage divergence), none of whom can absorb a
+        # penalty without disturbing a load-bearing property. A
+        # procedural costs no round, so her hit-zone total stays at 12
+        # even though she already carries misses=2.
+        (4, 4, 2, 2, 1, 4.30),  # Sanna
+        (9, 3, 0, 0, 0, 4.50),  # Tove -- lands on the winning hit factor
     ),
 }
 
@@ -279,7 +290,7 @@ def _filler(index: int, stage_number: int) -> StageScoring:
     All of them shoot Production Optics, so nothing about the
     points-versus-percentage divergence depends on them.
     """
-    alphas, charlies, deltas, misses, time_seconds = _FILLER_SCORES[
+    alphas, charlies, deltas, misses, procedurals, time_seconds = _FILLER_SCORES[
         (stage_number - 1) % len(_FILLER_SCORES) + 1
     ][index % 6]
     return StageScoring(
@@ -292,6 +303,7 @@ def _filler(index: int, stage_number: int) -> StageScoring:
             charlies=charlies,
             deltas=deltas,
             misses=misses,
+            procedurals=procedurals,
         ),
     )
 

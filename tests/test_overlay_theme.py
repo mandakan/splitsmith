@@ -21,6 +21,28 @@ def test_clean_preset_matches_legacy_hardcoded_values() -> None:
     assert t.split == (255, 220, 80)
     assert t.stroke == (0, 0, 0)
     assert t.shadow == (0, 0, 0)
+    # split_good is new (issue #683 Task 7): no legacy value to match, but
+    # it must be distinct from every other clean token and must not be
+    # black/white (both of which would fail to read as "green").
+    assert t.split_good not in (t.ink, t.split, t.stroke, t.accent)
+    r, g, b = t.split_good
+    assert g > r and g > b, f"expected a green-dominant split_good, got {t.split_good!r}"
+    # issue #683 Task 7c: the three-reds discipline. accent_fill is the
+    # PLATE background (darker than accent, for AA-large contrast with
+    # ink text on top); accent_text is body-size unplated red text
+    # (lighter than accent -- the raw identity red is too thin at small
+    # sizes). Neither may just be accent again wearing a new name.
+    assert t.accent_fill != t.accent
+    assert t.accent_text != t.accent
+    assert sum(t.accent_fill) < sum(t.accent), "accent_fill must be darker than accent"
+    assert sum(t.accent_text) > sum(t.accent), "accent_text must be lighter than accent"
+    # rule and muted are real tokens now, not an alpha hack on ink.
+    assert t.rule not in (t.ink, t.stroke)
+    assert t.muted not in (t.ink, t.stroke)
+    # ink_2 (issue #683 Task 8): a step down from ink, a step up from
+    # muted -- distinct from both, and from stroke/accent.
+    assert t.ink_2 not in (t.ink, t.muted, t.stroke, t.accent)
+    assert sum(t.muted) < sum(t.ink_2) < sum(t.ink)
 
 
 def test_splitsmith_preset_loads_from_packaged_json() -> None:
@@ -33,7 +55,13 @@ def test_splitsmith_preset_loads_from_packaged_json() -> None:
     assert t.name == "splitsmith"
     assert list(t.ink) == data["colors"]["ink"]
     assert list(t.split) == data["colors"]["split"]
+    assert list(t.split_good) == data["colors"]["split_good"]
     assert list(t.stroke) == data["colors"]["stroke"]
+    assert list(t.accent_fill) == data["colors"]["accent_fill"]
+    assert list(t.accent_text) == data["colors"]["accent_text"]
+    assert list(t.rule) == data["colors"]["rule"]
+    assert list(t.muted) == data["colors"]["muted"]
+    assert list(t.ink_2) == data["colors"]["ink_2"]
     # Sanity: ink is light (designed for dark surfaces); stroke is dark.
     assert sum(t.ink) > 600
     assert sum(t.stroke) < 100
@@ -52,8 +80,14 @@ def test_default_template_paints_theme_ink() -> None:
         name="clean",
         ink=(255, 0, 200),
         split=(0, 200, 255),
+        split_good=(0, 255, 120),
         stroke=(0, 0, 0),
         accent=(255, 0, 0),
+        accent_fill=(200, 0, 0),
+        accent_text=(255, 150, 150),
+        rule=(60, 60, 60),
+        muted=(150, 150, 150),
+        ink_2=(205, 205, 205),
         font_display="Antonio",
         font_mono="JetBrains Mono",
     )
@@ -93,8 +127,14 @@ def test_default_template_paints_theme_split_color() -> None:
         name="clean",
         ink=(255, 255, 255),
         split=(0, 220, 255),
+        split_good=(46, 204, 113),
         stroke=(0, 0, 0),
         accent=(0, 0, 0),
+        accent_fill=(0, 0, 0),
+        accent_text=(255, 150, 150),
+        rule=(60, 60, 60),
+        muted=(150, 150, 150),
+        ink_2=(205, 205, 205),
         font_display="Antonio",
         font_mono="JetBrains Mono",
     )

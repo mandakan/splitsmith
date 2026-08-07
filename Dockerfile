@@ -180,6 +180,31 @@ WORKDIR /app
 COPY --from=builder --chown=splitsmith:splitsmith /app/.venv /app/.venv
 COPY --from=builder --chown=splitsmith:splitsmith /app/src /app/src
 
+# Playwright's Chromium (issue #683 amendment): overlay_raster
+# .ChromiumRasterizer needs the headless-shell browser Playwright's own
+# package never vendors -- the same one-time step CI takes (see
+# .github/workflows/ci.yml's "Install Chromium for the overlay
+# rasterizer"). ``playwright install``'s default browser cache
+# (``~/.cache/ms-playwright``) would land under /root here, since this
+# runs before ``USER splitsmith`` below and root has no other home to
+# write to -- unreadable once the process actually runs as the non-root
+# ``splitsmith`` user. ``PLAYWRIGHT_BROWSERS_PATH`` is pinned to a
+# location outside any user's home instead, exported as a build-time
+# ``ENV`` (not just this one ``RUN``'s shell) so the same path is what
+# ``ChromiumRasterizer.__enter__`` resolves at runtime too -- installing
+# to one path and looking in another is the exact silent-miss failure
+# mode a pinned env var exists to rule out. ``--with-deps`` apt-get
+# installs the OS libraries Chromium needs to run at all, which this
+# slim base image does not carry; ``--only-shell`` fetches the
+# headless-shell build ``overlay_raster.CHROMIUM_CHANNEL`` launches
+# (260M vs the full browser's 377M, verified byte-identical screenshot
+# output -- see the amendment's "Dependency change, stated plainly").
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN apt-get update \
+ && /app/.venv/bin/playwright install --with-deps chromium --only-shell \
+ && rm -rf /var/lib/apt/lists/* \
+ && chown -R splitsmith:splitsmith /opt/ms-playwright
+
 # Alembic migrations: ``splitsmith serve`` runs ``alembic upgrade head`` on
 # boot (unless --skip-migrations) with cwd=/app (the repo root in the
 # editable layout), so alembic.ini + the versions tree must live at /app.

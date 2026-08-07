@@ -17,17 +17,26 @@ parser as a runtime dep, and the overlay only needs a handful of tokens.
 Re-run the build script after touching ``index.css``.
 
 Bundled fonts (Antonio + JetBrains Mono, SIL OFL 1.1) live under
-``src/splitsmith/data/fonts/`` so the ``splitsmith`` theme renders
-deterministic typography without depending on whatever the host machine
-happens to have installed. The numeric readouts use JetBrains Mono Bold
-today; Antonio is bundled for future templates that mix in display
-labels.
+``src/splitsmith/data/fonts/`` so overlay text renders deterministic
+typography without depending on whatever the host machine happens to
+have installed. The numeric readouts (both the live sprite's PIL text
+and the stage summary's ``@font-face``-declared CSS -- see
+``overlay_html.py``) use JetBrains Mono Bold; Antonio is
+``.role-identity``'s live condensed face for the stage summary's
+shooter-name row (issue #683 Task 7b), not a placeholder waiting on a
+future consumer -- a competitor's name is the one string in a cell that
+is not a number, and condensed genuinely matters where names run long
+and cells run narrow.
 
-Down the line, swapping PIL for a Skia-based renderer would buy proper
-HarfBuzz shaping (kerning, ligatures, condensed-face width control)
-which only starts to matter once the template grows real label content.
-The font names already live in the JSON so that swap doesn't need new
-tokens.
+The stage summary itself moved off PIL to headless Chromium rasterizing
+real CSS (issue #683's amendment) specifically to get a genuine box
+model and, as a side effect, proper text shaping (kerning, ligatures,
+condensed-face width control) for exactly the reason this paragraph used
+to describe as a hypothetical Skia swap. The live sprite
+(``overlay_sprites.render_state``) stays PIL -- it draws two elements
+and has no reported overflow or shaping defect (see the amendment's
+"Explicitly out of scope") -- so a PIL-to-something-else swap remains
+live territory there, tracked as #693/#684 rather than this file.
 """
 
 from __future__ import annotations
@@ -63,8 +72,38 @@ class OverlayTheme:
     name: ThemeName
     ink: RGB
     split: RGB
+    split_good: RGB
     stroke: RGB
     accent: RGB
+    #: The filled-plate variant of :attr:`accent` -- darker, so ink text
+    #: on top of it reaches AA-large contrast (mirrors the web UI's
+    #: ``--color-led-fill``: "slightly darker than --color-led so cream
+    #: text reaches AA-large + survives red-green colorblindness"). Every
+    #: :attr:`~splitsmith.overlay_layout.Emphasis.PLATE` background reads
+    #: this, not :attr:`accent` -- see issue #683 Task 7c.
+    accent_fill: RGB
+    #: Body-size red text (10-14px) -- an unplated fault count reads
+    #: this, not :attr:`accent`. The web UI's own comment on
+    #: ``--color-led-text`` names the exact failure this token exists to
+    #: avoid: "the saturated identity red is too thin for 10-12px running
+    #: text". Measured on this branch before the fix: a small unplated
+    #: accent glyph read 7.1% accent-coloured pixels against 33.9% stroke
+    #: -- the stroke was eating the glyph.
+    accent_text: RGB
+    #: A hairline rule's own colour.
+    rule: RGB
+    #: Secondary/tertiary text -- what a caller used to fake by applying
+    #: an arbitrary opacity to :attr:`ink` instead of reading a real
+    #: token.
+    muted: RGB
+    #: A step down from :attr:`ink`, a step up from :attr:`muted` -- the
+    #: web UI's own text ramp is ink / ink-2 / muted / subtle / whisper.
+    #: Issue #683 Task 8's stage-summary labels ("SCORING", "SPLITS",
+    #: "BEST", ...) want exactly this middle tone: bright enough to read
+    #: as a real label with no text-stroke (the design drops the stroke
+    #: for labels, text-shadow only), dim enough not to compete with the
+    #: figure it sits above or beside.
+    ink_2: RGB
     font_display: str
     font_mono: str
 
@@ -81,8 +120,32 @@ _CLEAN = OverlayTheme(
     name="clean",
     ink=(255, 255, 255),
     split=(255, 220, 80),
+    # No brand palette to draw from here, so this is a plain, defensible
+    # "success green" -- (46, 204, 113), the Flat UI Colors "Emerald" --
+    # picked for being a common, accessible semantic-success hue that
+    # reads clearly against clean's black stroke and stays visually
+    # distinct from both split's gold and accent's red.
+    split_good=(46, 204, 113),
     stroke=(0, 0, 0),
     accent=(255, 45, 45),
+    # No brand palette here either, so these mirror the *relationship*
+    # the splitsmith theme's own three reds carry (a darker fill, a
+    # lighter body-text tint) applied to clean's own accent hue rather
+    # than inventing an unrelated one -- clean's accent already happens
+    # to equal the brand's led red, so the same fill/text pair the brand
+    # theme resolved from --color-led-fill/--color-led-text is reused
+    # verbatim rather than re-derived.
+    accent_fill=(220, 38, 38),
+    accent_text=(255, 180, 180),
+    # Brand-neutral dark and mid greys -- no hue borrowed from accent,
+    # split or split_good, so a hairline or a muted label doesn't quietly
+    # read as "for" one of those semantics.
+    rule=(60, 60, 60),
+    muted=(150, 150, 150),
+    # Sits between ink (255,255,255) and muted (150,150,150) -- no hue
+    # borrowed from accent/split/split_good, same discipline as rule/muted
+    # above.
+    ink_2=(205, 205, 205),
     font_display="Antonio",
     font_mono="JetBrains Mono",
 )
@@ -108,8 +171,14 @@ def _load_splitsmith() -> OverlayTheme:
             name="splitsmith",
             ink=_rgb(colors, "ink"),
             split=_rgb(colors, "split"),
+            split_good=_rgb(colors, "split_good"),
             stroke=_rgb(colors, "stroke"),
             accent=_rgb(colors, "accent"),
+            accent_fill=_rgb(colors, "accent_fill"),
+            accent_text=_rgb(colors, "accent_text"),
+            rule=_rgb(colors, "rule"),
+            muted=_rgb(colors, "muted"),
+            ink_2=_rgb(colors, "ink_2"),
             font_display=str(fonts.get("display", "Antonio")),
             font_mono=str(fonts.get("mono", "JetBrains Mono")),
         )
