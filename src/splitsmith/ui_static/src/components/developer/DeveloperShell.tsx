@@ -8,6 +8,12 @@
  * Renders the 4-step workflow stepper sidebar (Corpus / Review queue /
  * Validate / Retrain). Step state derives from the active route + counts
  * pulled from `/api/dev/model`.
+ *
+ * RootLayout's header slot -- DeveloperShell portals its context row there
+ * instead of rendering its own <header> (#550). Unlike MatchShell it has no
+ * nav drawer, so it does not claim the mobile account menu: on a phone it
+ * wants the global bar's account chip like every other surface. That also
+ * means hosted /dev/* gains a sign-out path it never had before.
  */
 
 import {
@@ -23,14 +29,18 @@ import {
   Zap,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { JobsSurface } from "@/components/Jobs";
+import {
+  useShellAccent,
+  useShellContextSlot,
+} from "@/components/layout/shellChromeContext";
 import { useJobs } from "@/lib/jobs";
-import { Brand, IconButton, ModeSwitch } from "@/components/ui";
+import { IconButton } from "@/components/ui";
 import { api, type DeveloperModelInfo } from "@/lib/api";
 import { useMode } from "@/lib/mode";
-import { useShellHeaderHeight } from "@/lib/shellChrome";
 import { cn } from "@/lib/utils";
 
 export interface DeveloperShellOutletContext {
@@ -96,9 +106,54 @@ export function DeveloperShell() {
     return STEPS.findIndex((s) => pathname.startsWith(s.to));
   }, [pathname]);
 
-  // Measured header height as --shell-header-h; sidebar layout reads it
-  // instead of hard-coding a guess (see lib/shellChrome.ts).
-  const { headerRef, headerStyle } = useShellHeaderHeight();
+  // RootLayout's header slot -- see the file header comment. Header height
+  // and the accent hairline are RootLayout's job now; this shell just
+  // declares which accent it wants.
+  const slot = useShellContextSlot();
+  useShellAccent("beep");
+
+  const contextRow = (
+    <div className="flex items-center gap-6 border-t border-rule bg-bg px-7 py-2.5">
+      <span
+        aria-hidden
+        className="size-1.5 shrink-0 rounded-full bg-beep"
+        style={{
+          boxShadow: "0 0 8px rgba(6,182,212,0.4)",
+          animation: "splitsmith-heartbeat 2.4s ease-in-out infinite",
+        }}
+      />
+      <div className="flex items-center gap-3 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-subtle">
+        <button
+          type="button"
+          // Replace: clicking the home breadcrumb also flips mode
+          // back to match (the shell remount triggers it). A push
+          // would leave /dev/corpus in history with the mode state
+          // already flipped, so back would land somewhere weird.
+          onClick={() => navigate("/", { replace: true })}
+          className="text-subtle hover:text-ink-2"
+        >
+          Splitsmith
+        </button>
+        <span className="text-whisper">/</span>
+        <span className="text-subtle">Developer</span>
+        <span className="text-whisper">/</span>
+        <span className="font-bold text-ink">
+          {activeIdx >= 0 ? STEPS[activeIdx].label : "Workspace"}
+        </span>
+      </div>
+      <ModelChip model={model} />
+      <div className="flex-1" />
+      <IconButton variant="subtle" size="md" label="Help">
+        <HelpCircle className="size-[18px]" />
+      </IconButton>
+      <IconButton variant="subtle" size="md" label="Notifications">
+        <Bell className="size-[18px]" />
+      </IconButton>
+      <IconButton variant="subtle" size="md" label="Settings">
+        <Settings className="size-[18px]" />
+      </IconButton>
+    </div>
+  );
 
   return (
     <div
@@ -107,69 +162,9 @@ export function DeveloperShell() {
         backgroundImage:
           "radial-gradient(1400px 600px at 50% -100px, rgba(6,182,212,0.05), transparent 60%), linear-gradient(to bottom, var(--color-bg-glow), var(--color-bg))",
         backgroundAttachment: "fixed",
-        ...headerStyle,
       }}
     >
-      <header
-        ref={headerRef}
-        className="sticky top-0 z-chrome border-b border-rule bg-gradient-to-b from-surface to-bg"
-      >
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 -bottom-px h-px"
-          style={{
-            background:
-              "linear-gradient(to right, transparent, var(--color-beep) 18%, var(--color-beep) 22%, var(--color-rule-strong) 30%, var(--color-rule-strong) 70%, var(--color-beep) 78%, var(--color-beep) 82%, transparent)",
-            opacity: 0.55,
-          }}
-        />
-        <div className="flex items-center gap-6 px-7 py-3.5">
-          <div className="flex items-center gap-2.5">
-            <Brand variant="compact" />
-            <span
-              aria-hidden
-              className="size-1.5 rounded-full bg-beep"
-              style={{
-                boxShadow: "0 0 8px rgba(6,182,212,0.4)",
-                animation: "splitsmith-heartbeat 2.4s ease-in-out infinite",
-              }}
-            />
-          </div>
-          <ModeSwitch size="sm" />
-          <ModelChip model={model} />
-          <div className="flex-1" />
-          <IconButton variant="subtle" size="md" label="Help">
-            <HelpCircle className="size-[18px]" />
-          </IconButton>
-          <IconButton variant="subtle" size="md" label="Notifications">
-            <Bell className="size-[18px]" />
-          </IconButton>
-          <IconButton variant="subtle" size="md" label="Settings">
-            <Settings className="size-[18px]" />
-          </IconButton>
-        </div>
-        <div className="border-t border-rule bg-bg">
-          <div className="flex items-center gap-3 px-7 py-2.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-subtle">
-            <button
-              type="button"
-              // Replace: clicking the home breadcrumb also flips mode
-              // back to match (the shell remount triggers it). A push
-              // would leave /dev/corpus in history with the mode state
-              // already flipped, so back would land somewhere weird.
-              onClick={() => navigate("/", { replace: true })}
-              className="text-subtle hover:text-ink-2"
-            >
-              Splitsmith
-            </button>
-            <span className="text-whisper">/</span>
-            <span className="text-subtle">Developer</span>
-            <span className="text-whisper">/</span>
-            <span className="font-bold text-ink">
-              {activeIdx >= 0 ? STEPS[activeIdx].label : "Workspace"}
-            </span>
-          </div>
-        </div>
-      </header>
+      {slot ? createPortal(contextRow, slot) : null}
 
       <div className="flex min-h-[calc(100dvh-var(--shell-header-h,86px))]">
         <DeveloperSidebar model={model} activeIdx={activeIdx} />
