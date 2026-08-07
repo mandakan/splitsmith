@@ -32,10 +32,17 @@ jsdom.
   `z-chrome`, ...). Do not introduce raw hex values.
 - The app is a committed dark UI. There is no light theme to support.
 - `useIsMobile()` is the single breakpoint source (`max-width: 767px`).
-- Decision from the design session, binding on every task: **on mobile the
-  global bar does not render.** `MatchShell`'s mobile header and nav drawer
-  keep their own account menu. Two stacked rows on a phone costs too much
-  vertical space.
+- Decision from the design session, refined by the pre-flight scan and
+  binding on every task: **on mobile the global bar renders unless the
+  mounted shell has declared that it carries its own account menu.**
+  `MatchShell` declares it -- its nav drawer already has one, and two
+  stacked rows on a phone costs too much vertical space. No other shell
+  declares it, so `/pick` keeps the mobile account menu it has today, and
+  `/dev/*` and `/admin/workers` gain one they never had.
+
+  The naive rule ("never render the bar on mobile") was rejected because
+  `Pick.tsx` has no mobile gating at all today: its `AccountChip` renders
+  on a phone, and suppressing the bar there would be a silent regression.
 
 ---
 
@@ -53,11 +60,14 @@ colour the hairline should be.
 - Consumes: nothing.
 - Produces:
   - `type ShellAccent = "led" | "beep"`
-  - `interface ShellChromeValue { contextSlot: HTMLElement | null; setAccent: (a: ShellAccent) => void }`
+  - `interface ShellChromeValue { contextSlot: HTMLElement | null; setAccent: (a: ShellAccent) => void; setOwnsMobileAccount: (owns: boolean) => void }`
   - `ShellChromeProvider({ value, children }: { value: ShellChromeValue; children: ReactNode })`
   - `useShellContextSlot(): HTMLElement | null`
   - `useShellAccent(accent: ShellAccent): void` -- registers on mount,
     resets to `"led"` on unmount.
+  - `useShellOwnsMobileAccount(): void` -- called by a shell that carries
+    its own account menu on mobile. Registers `true` on mount, `false` on
+    unmount. Only `MatchShell` calls it (Task 5).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -91,8 +101,18 @@ function AccentDeclarer({ accent }: { accent: "led" | "beep" }) {
   return null;
 }
 
+function OwnsMobileDeclarer() {
+  useShellOwnsMobileAccount();
+  return null;
+}
+
 function makeValue(over: Partial<ShellChromeValue> = {}): ShellChromeValue {
-  return { contextSlot: null, setAccent: vi.fn(), ...over };
+  return {
+    contextSlot: null,
+    setAccent: vi.fn(),
+    setOwnsMobileAccount: vi.fn(),
+    ...over,
+  };
 }
 
 describe("ShellChrome context", () => {
@@ -133,8 +153,23 @@ describe("ShellChrome context", () => {
     unmount();
     expect(setAccent).toHaveBeenCalledWith("led");
   });
+
+  it("lets a shell claim the mobile account menu, and releases it", () => {
+    const setOwnsMobileAccount = vi.fn();
+    const { unmount } = render(
+      <ShellChromeProvider value={makeValue({ setOwnsMobileAccount })}>
+        <OwnsMobileDeclarer />
+      </ShellChromeProvider>,
+    );
+    expect(setOwnsMobileAccount).toHaveBeenCalledWith(true);
+    setOwnsMobileAccount.mockClear();
+    unmount();
+    expect(setOwnsMobileAccount).toHaveBeenCalledWith(false);
+  });
 });
 ```
+
+Add `useShellOwnsMobileAccount` to the import block at the top of the file.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -184,6 +219,9 @@ export interface ShellChromeValue {
    *  first paint, before RootLayout's ref callback has run. */
   contextSlot: HTMLElement | null;
   setAccent: (accent: ShellAccent) => void;
+  /** Declared true by a shell that already carries an account menu on
+   *  mobile, so RootLayout can suppress the global bar there. */
+  setOwnsMobileAccount: (owns: boolean) => void;
 }
 
 const ShellChromeContext = createContext<ShellChromeValue | null>(null);
@@ -217,12 +255,26 @@ export function useShellAccent(accent: ShellAccent): void {
     return () => setAccent("led");
   }, [accent, setAccent]);
 }
+
+/** Declare that this shell carries its own account menu on mobile, so
+ *  RootLayout suppresses the global bar there rather than stacking a
+ *  second one. Only MatchShell does -- its nav drawer has one. Every
+ *  other surface wants the global bar on a phone: Pick has an account
+ *  menu today and must not lose it, and /dev + /admin never had one. */
+export function useShellOwnsMobileAccount(): void {
+  const setOwns = useContext(ShellChromeContext)?.setOwnsMobileAccount;
+  useEffect(() => {
+    if (!setOwns) return;
+    setOwns(true);
+    return () => setOwns(false);
+  }, [setOwns]);
+}
 ```
 
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `pnpm exec vitest run src/components/layout/shellChromeContext.test.tsx`
-Expected: PASS, 4 tests.
+Expected: PASS, 5 tests.
 
 - [ ] **Step 5: Typecheck and lint**
 
@@ -524,15 +576,63 @@ describe("RootLayout", () => {
     ).toBeInTheDocument();
   });
 
-  it("omits the global bar on mobile", async () => {
+  it("still renders the global bar on mobile for a shell that has not claimed it", async () => {
     mobile.value = true;
     renderAt();
+    await screen.findByTestId("ctx-row");
+    expect(
+      screen.getByRole("navigation", { name: /global/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("omits the global bar on mobile when the shell owns the account menu", async () => {
+    mobile.value = true;
+    render(
+      <MemoryRouter initialEntries={["/x"]}>
+        <Routes>
+          <Route element={<RootLayout />}>
+            <Route path="x" element={<FakeShell accent="led" ownsMobile />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
     await screen.findByTestId("ctx-row");
     expect(
       screen.queryByRole("navigation", { name: /global/i }),
     ).not.toBeInTheDocument();
   });
 });
+```
+
+Extend `FakeShell` to take an optional `ownsMobile` prop and call
+`useShellOwnsMobileAccount()` when it is set. A hook cannot be called
+conditionally, so branch inside a child component rather than around the
+hook call:
+
+```tsx
+function OwnsMobile() {
+  useShellOwnsMobileAccount();
+  return null;
+}
+
+function FakeShell({
+  accent,
+  ownsMobile = false,
+}: {
+  accent: "led" | "beep";
+  ownsMobile?: boolean;
+}) {
+  useShellAccent(accent);
+  const slot = useShellContextSlot();
+  return (
+    <>
+      {ownsMobile ? <OwnsMobile /> : null}
+      {slot
+        ? createPortal(<div data-testid="ctx-row">breadcrumbs</div>, slot)
+        : null}
+    </>
+  );
+}
 ```
 
 - [ ] **Step 2: Run the test to verify it fails**
@@ -587,12 +687,19 @@ export function RootLayout() {
   const isMobile = useIsMobile();
   const [contextSlot, setContextSlot] = useState<HTMLElement | null>(null);
   const [accent, setAccent] = useState<ShellAccent>("led");
+  const [ownsMobileAccount, setOwnsMobileAccount] = useState(false);
   const { headerRef, headerStyle } = useShellHeaderHeight();
 
   const value = useMemo<ShellChromeValue>(
-    () => ({ contextSlot, setAccent }),
+    () => ({ contextSlot, setAccent, setOwnsMobileAccount }),
     [contextSlot],
   );
+
+  // Suppressed on mobile only when the mounted shell says it already has
+  // an account menu there -- MatchShell's nav drawer. Everything else
+  // wants the bar on a phone: Pick has an account menu today and must not
+  // lose it, /dev and /admin never had one.
+  const showGlobalBar = !isMobile || !ownsMobileAccount;
 
   return (
     <ShellChromeProvider value={value}>
@@ -604,7 +711,7 @@ export function RootLayout() {
             "bg-gradient-to-b from-surface to-bg",
           )}
         >
-          {isMobile ? null : <GlobalBar />}
+          {showGlobalBar ? <GlobalBar /> : null}
           <div ref={setContextSlot} />
           <div
             data-testid="shell-hairline"
@@ -624,7 +731,7 @@ export function RootLayout() {
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `pnpm exec vitest run src/components/layout/RootLayout.test.tsx`
-Expected: PASS, 5 tests.
+Expected: PASS, 6 tests.
 
 - [ ] **Step 5: Update the shellChrome.ts docstring**
 
@@ -905,6 +1012,9 @@ bar on mobile:
 ```tsx
 const slot = useShellContextSlot();
 useShellAccent("led");
+// The nav drawer below carries the account menu on a phone, so RootLayout
+// suppresses the global bar there rather than stacking a second one.
+useShellOwnsMobileAccount();
 
 const contextRow = isMobile ? (
   <div className="flex items-center gap-3 px-4 py-3">
