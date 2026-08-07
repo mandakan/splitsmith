@@ -357,8 +357,7 @@ class CellScale:
         lining up.
 
         The other five formulas are issue #683 Task 8's approved design,
-        exactly (``.superpowers/sdd/2026-08-06-overlay-composition-seam/
-        APPROVED-bands-mock.py``): the shooter's name at ``cell_h/7``, the
+        exactly (``scripts/mock_summary_cell.py``): the shooter's name at ``cell_h/7``, the
         one figure size both bands' rows draw at (hit factor, time, and
         each split statistic) at ``cell_h/8``, the six hit/fault counts at
         ``cell_h/14``, and every label (the band headers, and each split
