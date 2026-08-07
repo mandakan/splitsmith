@@ -192,47 +192,52 @@ export function DesktopTokensDialog({ onClose }: DesktopTokensDialogProps) {
             ) : null}
 
             {/* One-time raw-token reveal, announced to assistive tech. */}
-            {justCreated ? (
-              <div
-                aria-live="polite"
-                className="space-y-2 rounded-md border border-amber-400/40 bg-amber-400/10 p-3"
-              >
-                <div className="flex items-start gap-2 text-xs text-amber-600">
-                  <AlertTriangle
-                    className="size-4 shrink-0"
-                    aria-hidden="true"
-                  />
-                  <span>
-                    Copy this token now - you will not see this again.
-                    "{justCreated.record.name}" is otherwise identical to
-                    every other token in the list below.
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    readOnly
-                    value={justCreated.token}
-                    aria-label="New desktop token"
-                    className="min-w-0 flex-1 rounded border border-rule bg-bg px-2 py-1 font-mono text-xs"
-                    onFocus={(e) => e.currentTarget.select()}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    aria-label={
-                      copied
-                        ? "Token copied to clipboard"
-                        : "Copy token to clipboard"
-                    }
-                    onClick={() => void handleCopy(justCreated.token)}
-                  >
-                    {copied ? "Copied" : "Copy"}
-                  </Button>
-                </div>
-              </div>
-            ) : null}
+            {/* Single aria-live region for the token reveal. We render the container
+            - unconditionally so screen readers can pick up the token announcement; only
+            - the inner content is conditional. */}
+            <div
+              aria-live="polite"
+              className="space-y-2 rounded-md border border-amber-400/40 bg-amber-400/10 p-3"
+            >
+              {justCreated ? (
+                <>
+                  <div className="flex items-start gap-2 text-xs text-amber-600">
+                    <AlertTriangle
+                      className="size-4 shrink-0"
+                      aria-hidden="true"
+                    />
+                    <span>
+                      Copy this token now - you will not see this again.
+                      "{justCreated.record.name}" is otherwise identical to
+                      every other token in the list below.
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      readOnly
+                      value={justCreated.token}
+                      aria-label="New desktop token"
+                      className="min-w-0 flex-1 rounded border border-rule bg-bg px-2 py-1 font-mono text-xs"
+                      onFocus={(e) => e.currentTarget.select()}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      aria-label={
+                        copied
+                          ? "Token copied to clipboard"
+                          : "Copy token to clipboard"
+                      }
+                      onClick={() => void handleCopy(justCreated.token)}
+                    >
+                      {copied ? "Copied" : "Copy"}
+                    </Button>
+                  </div>
+                </>
+              ) : null}
+            </div>
 
             {/* Create form. */}
             <div className="space-y-2">
