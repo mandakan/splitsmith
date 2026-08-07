@@ -95,6 +95,7 @@ if TYPE_CHECKING:
     # Hosted-only; imported lazily at runtime inside _apply_hosted_mode_wiring
     # so local mode stays free of the db (procrastinate/psycopg) dependency.
     from ..db import PostgresMatchStore, ProjectStateStore
+    from ..db.desktop_tokens import DesktopTokenRecord, DesktopTokenStore
     from ..db.share_tokens import ResolvedShare, ShareTokenStore
     from ..db.workers import WorkersStore
     from ..worker_channel import WakeChannelRegistry
@@ -1006,6 +1007,13 @@ class TenantContext:
     # query - but the tenant factory is still correct here because the GUC is
     # inert on a non-RLS table and the store filters by user_id explicitly.
     share_tokens: ShareTokenStore | None
+    # Per-user desktop-sync bearer token store (desktop-to-hosted sync MVP,
+    # #631). None in local mode; in hosted mode built per-request with the
+    # tenant factory, same rationale as share_tokens directly above -
+    # desktop_tokens is not under RLS either (see DesktopTokenRow), so the
+    # store's own user_id filter is the real isolation boundary, but the
+    # tenant factory is still the established construction pattern here.
+    desktop_tokens: DesktopTokenStore | None
 
 
 # Per-request / per-job tenant resolved by the hosted-mode auth gate
@@ -1235,6 +1243,13 @@ class AppState:
         # hosted-only feature. Returns None when no tenant is pinned.
         tenant = current_tenant.get()
         return tenant.share_tokens if tenant is not None else None
+
+    @property
+    def desktop_tokens(self) -> DesktopTokenStore | None:
+        # Local mode has no per-user desktop-token store - desktop sync is a
+        # hosted-only feature. Returns None when no tenant is pinned.
+        tenant = current_tenant.get()
+        return tenant.desktop_tokens if tenant is not None else None
 
     def build_tenant(self, user_id: str) -> TenantContext:
         """Build the :class:`TenantContext` for ``user_id`` (hosted mode).
@@ -4020,6 +4035,66 @@ class MultipartAbortRequest(BaseModel):
     upload_id: str
 
 
+class DesktopTokenInfo(BaseModel):
+    """One desktop token as the owner-management routes return it (#631).
+
+    Mirrors ``DesktopTokenRecord`` (db layer) field-for-field. Kept as a
+    separate model here - not imported directly - because the db layer is
+    hosted-only and lazily imported (see ``_apply_hosted_mode_wiring``);
+    this module must stay importable without the ``[hosted]`` extra. Same
+    split as ``ShareInfo`` next to ``ShareTokenStore``. Never carries the
+    token hash or the raw value."""
+
+    id: str
+    name: str
+    created_at: datetime
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+
+
+def _desktop_token_info(record: DesktopTokenRecord) -> DesktopTokenInfo:
+    return DesktopTokenInfo(
+        id=record.id,
+        name=record.name,
+        created_at=record.created_at,
+        last_used_at=record.last_used_at,
+        revoked_at=record.revoked_at,
+    )
+
+
+class DesktopTokenListResponse(BaseModel):
+    """Response body for GET /api/me/desktop-tokens (#631)."""
+
+    tokens: list[DesktopTokenInfo]
+
+
+class DesktopTokenCreateRequest(BaseModel):
+    """Body for POST /api/me/desktop-tokens (#631)."""
+
+    name: str
+
+
+class DesktopTokenCreateResponse(BaseModel):
+    """Response body for POST /api/me/desktop-tokens (#631).
+
+    ``token`` is the raw bearer value - it appears here and only here;
+    every other response (including this token's own future GET/DELETE
+    entries) carries just the ``DesktopTokenInfo`` record."""
+
+    token: str
+    record: DesktopTokenInfo
+
+
+class DesktopTokenRevokeResponse(BaseModel):
+    """Response body for DELETE /api/me/desktop-tokens/{token_id} (#631).
+
+    ``revoked`` is False for both an unknown id and one owned by another
+    user - the two cases are indistinguishable by design, same as the
+    share-token store's revoke()."""
+
+    revoked: bool
+
+
 class ScoreboardIdentityRequest(BaseModel):
     """Body for PUT /api/user/scoreboard-identity (#75).
 
@@ -5026,7 +5101,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         sessionmaker,
         tenant_session_factory,
     )
-    from ..db.desktop_tokens import DesktopTokenAuth
+    from ..db.desktop_tokens import DesktopTokenAuth, DesktopTokenStore
     from ..db.share_tokens import ShareTokenStore
     from ..db.share_tokens import resolve_share_token as _resolve_share_token_fn
     from ..db.workers import WorkersStore
@@ -5176,6 +5251,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             project_state=ProjectStateStore(tenant_factory, user_id=user_id),
             storage=_tenant_s3_storage(s3_client, s3_bucket, user_id),
             share_tokens=ShareTokenStore(tenant_factory, user_id=user_id),
+            desktop_tokens=DesktopTokenStore(tenant_factory, user_id=user_id),
         )
 
     state._build_tenant = _build_tenant
@@ -12611,6 +12687,59 @@ def create_app(
     async def delete_scoreboard_identity(user: User = Depends(get_current_user)) -> JSONResponse:
         await state.scoreboard_identity.clear()
         return JSONResponse({"ok": True})
+
+    # ----------------------------------------------------------------------
+    # Desktop-token management routes (desktop-to-hosted sync MVP, #631)
+    # Hosted-only: raise 404 in local mode (same mechanism as share links -
+    # desktop sync has no meaning against an ephemeral local install). The
+    # store is resolved per-request from state.desktop_tokens, which reads
+    # the authenticated user's TenantContext (built with the tenant-scoped
+    # session factory - see _apply_hosted_mode_wiring / TenantContext).
+    # ----------------------------------------------------------------------
+
+    @app.get("/api/me/desktop-tokens", response_model=DesktopTokenListResponse)
+    async def list_desktop_tokens(
+        user: User = Depends(get_current_user),
+    ) -> DesktopTokenListResponse:
+        """List this user's desktop tokens. Never includes the hash or raw value."""
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        store = state.desktop_tokens
+        if store is None:
+            raise HTTPException(status_code=500, detail="desktop token store unavailable")
+        records = await store.list()
+        return DesktopTokenListResponse(tokens=[_desktop_token_info(r) for r in records])
+
+    @app.post("/api/me/desktop-tokens", response_model=DesktopTokenCreateResponse, status_code=201)
+    async def create_desktop_token(
+        req: DesktopTokenCreateRequest,
+        user: User = Depends(get_current_user),
+    ) -> DesktopTokenCreateResponse:
+        """Mint a new desktop token. The raw value is returned here, once."""
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        store = state.desktop_tokens
+        if store is None:
+            raise HTTPException(status_code=500, detail="desktop token store unavailable")
+        record, raw = await store.create(req.name)
+        return DesktopTokenCreateResponse(token=raw, record=_desktop_token_info(record))
+
+    @app.delete("/api/me/desktop-tokens/{token_id}", response_model=DesktopTokenRevokeResponse)
+    async def revoke_desktop_token(
+        token_id: str,
+        user: User = Depends(get_current_user),
+    ) -> DesktopTokenRevokeResponse:
+        """Revoke a desktop token. ``revoked`` is False for an unknown id or
+        one owned by another user - the two are indistinguishable to the
+        caller by design (mirrors the share-token revoke route's ownership
+        handling)."""
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        store = state.desktop_tokens
+        if store is None:
+            raise HTTPException(status_code=500, detail="desktop token store unavailable")
+        revoked = await store.revoke(token_id)
+        return DesktopTokenRevokeResponse(revoked=revoked)
 
     @app.get("/api/server/features")
     def server_features() -> JSONResponse:
