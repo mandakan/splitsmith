@@ -309,7 +309,7 @@ class MatchRow(Base):
     storage_prefix: Mapped[str] = mapped_column(String, nullable=False)
     # "hosted" (native, created directly in the hosted app) or "desktop"
     # (mirrored down from a desktop-to-hosted sync push, doc 2026-08-07).
-    # Set once at INSERT and never changed by a later upsert -- see
+    # Set once at INSERT and never changed by a later upsert - see
     # ``PostgresMatchStore.upsert``.
     origin: Mapped[str] = mapped_column(String, nullable=False, server_default="hosted")
     created_at: Mapped[datetime] = mapped_column(
@@ -596,7 +596,7 @@ class DesktopTokenRow(Base):
     Account-scoped credential: the desktop app presents the raw token as a
     bearer secret when pushing a match up to the user's hosted account. We
     store only its SHA-256 hash (``token_hash``, ``sessions``/``workers``
-    precedent, not the raw ``share_tokens`` one) -- a DB leak must not yield
+    precedent, not the raw ``share_tokens`` one) - a DB leak must not yield
     a usable token. One row per issued token, so a user can name and revoke
     individual desktop installs independently (``name`` is user-chosen,
     e.g. "MacBook Pro").
@@ -608,7 +608,7 @@ class DesktopTokenRow(Base):
     (list/revoke from the account settings UI) filter by ``user_id``
     explicitly once the caller is already authenticated by session cookie.
 
-    Revocation sets ``revoked_at`` instead of deleting the row -- same as
+    Revocation sets ``revoked_at`` instead of deleting the row - same as
     ``share_tokens``, the settings UI keeps showing revoked tokens as an
     audit trail rather than losing the record entirely.
     """

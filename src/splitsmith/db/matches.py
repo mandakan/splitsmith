@@ -35,7 +35,7 @@ class MatchRecord(BaseModel):
     ``origin`` distinguishes a natively-created hosted match ("hosted")
     from one mirrored down by a desktop-to-hosted sync push ("desktop",
     doc 2026-08-07). It is set once at INSERT time and ``upsert`` never
-    changes it on an existing row -- see :meth:`PostgresMatchStore.upsert`.
+    changes it on an existing row - see :meth:`PostgresMatchStore.upsert`.
     """
 
     model_config = ConfigDict(from_attributes=True)
@@ -90,7 +90,7 @@ class PostgresMatchStore:
         duplicate (the unique constraint would reject one anyway).
 
         ``origin`` is only applied on INSERT. An existing row's ``origin``
-        is never changed by a later upsert -- a routine re-registration
+        is never changed by a later upsert - a routine re-registration
         (e.g. the hosted UI resaving a match's name) must not reclassify a
         match that a desktop sync push originally created, or vice versa.
         """

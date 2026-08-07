@@ -2,11 +2,11 @@
 
 Desktop-synced mirrors are tagged distinctly from natively-created hosted
 matches, and re-registering an already-known match must never flip the
-origin it was created with -- otherwise a routine upsert from the desktop
+origin it was created with - otherwise a routine upsert from the desktop
 sync path could silently reclassify a native hosted match, or vice versa.
 
 Runs against SQLite in-memory via aiosqlite, same pattern as
-``test_matches_store.py`` -- the store has no Postgres-specific behaviour
+``test_matches_store.py`` - the store has no Postgres-specific behaviour
 here, so SQLite proves the SQL shape.
 """
 
