@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.17.0](https://github.com/mandakan/splitsmith/compare/v0.16.0...v0.17.0) (2026-08-07)
+
+
+### Features
+
+* **sync:** concurrent part PUTs in upload_media ([#713](https://github.com/mandakan/splitsmith/issues/713)) ([#715](https://github.com/mandakan/splitsmith/issues/715)) ([34f243e](https://github.com/mandakan/splitsmith/commit/34f243ec8b0d6185c1cb331c2c87e97229cda06d))
+* **sync:** desktop-to-hosted match push MVP ([#631](https://github.com/mandakan/splitsmith/issues/631)) ([#707](https://github.com/mandakan/splitsmith/issues/707)) ([379c545](https://github.com/mandakan/splitsmith/commit/379c5454a4b3e749e729ee04dfde26af936a3570))
+* **sync:** phase timings + per-item upload metrics on push ([#631](https://github.com/mandakan/splitsmith/issues/631)) ([#710](https://github.com/mandakan/splitsmith/issues/710)) ([ae7edea](https://github.com/mandakan/splitsmith/commit/ae7edea7f702e0af4d05cc0c3a2f11c4c546c6c3))
+
+
+### Bug Fixes
+
+* **hosted:** magic-link log line reaches Railway with an empty message ([#711](https://github.com/mandakan/splitsmith/issues/711)) ([#714](https://github.com/mandakan/splitsmith/issues/714)) ([765bc58](https://github.com/mandakan/splitsmith/commit/765bc589f0850842652957b431d4ade2a82e995c))
+* **sync:** HostedSyncClient owns the /api/sync prefix; base_url is the bare origin ([#712](https://github.com/mandakan/splitsmith/issues/712)) ([c347053](https://github.com/mandakan/splitsmith/commit/c3470533b43be17bfac43a1d65adbdbe499fb11e))
+* **ui:** deselect the pre-selection race in the MatchExport stage test ([#718](https://github.com/mandakan/splitsmith/issues/718)) ([de25775](https://github.com/mandakan/splitsmith/commit/de25775d64dd83a41731bd134f936b9b241ac12a))
+
+
+### Documentation
+
+* **observability:** correct the [#711](https://github.com/mandakan/splitsmith/issues/711) comments after the live post-deploy check ([#717](https://github.com/mandakan/splitsmith/issues/717)) ([b4b26d6](https://github.com/mandakan/splitsmith/commit/b4b26d66c3a415d5e54280ca14661c5ca43e3785))
+* **overlay:** kickoff for [#684](https://github.com/mandakan/splitsmith/issues/684), with the issue's stale premises corrected ([#709](https://github.com/mandakan/splitsmith/issues/709)) ([276aad5](https://github.com/mandakan/splitsmith/commit/276aad5ecc92868f97b345ebf30ad3c1343cf573))
+* **testing:** document -n0 for multi-file pytest -m docker runs ([#716](https://github.com/mandakan/splitsmith/issues/716)) ([d9e054d](https://github.com/mandakan/splitsmith/commit/d9e054dbd6e383424a175996c2763216968e06d7))
+
 ## [0.16.0](https://github.com/mandakan/splitsmith/compare/v0.15.0...v0.16.0) (2026-08-07)
 
 
