@@ -124,9 +124,9 @@ def test_structured_json_formatter_plain_record_is_valid_json() -> None:
         exc_info=None,
     )
     parsed = json.loads(formatter.format(record))
-    # "message", not "msg": Railway's realtime stream and unfiltered tails
-    # serve records pre-normalization, where a "msg" key is dropped and
-    # "message" is empty (#711); only filtered queries map msg -> message.
+    # "message" is the key Railway's parsed format documents; note the raw
+    # stream/tail surfaces swallow it anyway - only attribute-filtered
+    # queries return parsed-JSON message text (#711).
     assert parsed["message"] == "just a line here"
     assert parsed["level"] == "INFO"
     assert "event" not in parsed

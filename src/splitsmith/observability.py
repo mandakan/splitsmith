@@ -168,12 +168,13 @@ class StructuredJsonFormatter(logging.Formatter):
             "ts": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            # "message", not "msg": Railway's filtered log queries return
-            # normalized records (msg -> message), but its realtime stream
-            # and unfiltered tails serve the record pre-normalization, where
-            # a "msg" key vanishes and "message" arrives empty (#711).
-            # Emitting the parsed-format key directly makes every surface
-            # carry the text.
+            # "message" is the key Railway's parsed format documents ("msg"
+            # relies on normalization). Post-#714 live check: this alignment
+            # is NOT sufficient on its own - Railway's realtime stream and
+            # unfiltered tails swallow the message of ANY parsed-JSON record
+            # (message or msg alike) and only the attribute-filtered query
+            # surface (e.g. --filter '@logger:...') returns the text (#711).
+            # Anything scraping these logs must use a filtered query.
             "message": record.getMessage(),
         }
         if hasattr(record, "event"):
