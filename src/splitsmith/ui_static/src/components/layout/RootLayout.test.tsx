@@ -42,15 +42,6 @@ vi.mock("@/lib/useIsMobile", () => ({
   useIsMobile: () => mobile.value,
 }));
 
-// jsdom has no ResizeObserver; RootLayout measures the header via
-// useShellHeaderHeight, same stub MatchShell.test.tsx uses for the same
-// hook.
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
 function OwnsMobile() {
   useShellOwnsMobileAccount();
   return null;
@@ -95,8 +86,6 @@ function renderAt(accent: "led" | "beep" = "led") {
 describe("RootLayout", () => {
   beforeEach(() => {
     mobile.value = false;
-    window.ResizeObserver =
-      ResizeObserverStub as unknown as typeof window.ResizeObserver;
   });
 
   it("renders a shell's portalled context row inside the header", async () => {

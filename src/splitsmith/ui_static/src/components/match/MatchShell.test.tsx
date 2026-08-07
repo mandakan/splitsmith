@@ -138,12 +138,6 @@ const HEALTH: ServerHealth = {
   schema_version: 1,
 };
 
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
 function stubMatchMedia() {
   window.matchMedia = ((query: string) => ({
     matches: false,
@@ -206,8 +200,6 @@ describe("MatchShell job settlement (#663)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     stubMatchMedia();
-    window.ResizeObserver =
-      ResizeObserverStub as unknown as typeof window.ResizeObserver;
   });
 
   it("refetches the project and beep queue when a job leaves the active set", async () => {
@@ -265,8 +257,6 @@ describe("MatchShell mirror banner (#631 Task 10)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     stubMatchMedia();
-    window.ResizeObserver =
-      ResizeObserverStub as unknown as typeof window.ResizeObserver;
   });
 
   function setUpApiWithOrigin(origin: "hosted" | "desktop" | "local") {

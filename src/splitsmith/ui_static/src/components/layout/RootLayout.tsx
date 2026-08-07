@@ -43,6 +43,10 @@ export function RootLayout() {
   const [ownsMobileAccount, setOwnsMobileAccount] = useState(false);
   const { headerRef, headerStyle } = useShellHeaderHeight();
 
+  // setAccent/setOwnsMobileAccount are useState setters, so React keeps
+  // them referentially stable (exhaustive-deps exempts them below for the
+  // same reason) -- don't rewrite as inline arrows, or useShellAccent's
+  // and useShellOwnsMobileAccount's unmount cleanup will fire every render.
   const value = useMemo<ShellChromeValue>(
     () => ({ contextSlot, setAccent, setOwnsMobileAccount }),
     [contextSlot],
