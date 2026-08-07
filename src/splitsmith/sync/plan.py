@@ -88,7 +88,16 @@ def build_push_plan(match_root: Path, *, sync_state: SyncState) -> PushPlan:
     """Plan what ``match_root`` should push, skipping unchanged media per ``sync_state``."""
     match, shooter_roots = load_match_or_legacy(match_root)
     if not match.match_id:
-        raise ValueError(f"match at {match_root} has no match_id")
+        return PushPlan(
+            match_id="",
+            match_name=match.name,
+            docs=[],
+            media=[],
+            errors=[
+                "this is a legacy single-shooter project without a match id - open it in "
+                "the app to convert it to a match before syncing"
+            ],
+        )
 
     docs: list[DocItem] = [DocItem(kind="match", body=match.model_dump(mode="json"))]
     media: list[MediaItem] = []
@@ -119,6 +128,10 @@ def build_push_plan(match_root: Path, *, sync_state: SyncState) -> PushPlan:
                 try:
                     body = json.loads(audit_file.read_text(encoding="utf-8"))
                 except (OSError, json.JSONDecodeError):
+                    errors.append(
+                        f"shooter {slug!r} stage {stage_number}: audit file "
+                        f"{audit_file.name} failed to parse and will not sync"
+                    )
                     continue
                 docs.append(DocItem(kind="audit", slug=slug, stage_number=stage_number, body=body))
 

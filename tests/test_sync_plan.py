@@ -18,6 +18,11 @@ Cases:
   5. A corrupt ``sync_state.json`` loads as a fresh ``SyncState`` (not a
      crash), and a plan built against it is the full, unfiltered plan.
   6. ``save_sync_state`` / ``load_sync_state`` round-trip.
+  7. A legacy single-shooter project directory (bare ``project.json``, no
+     ``match.json``) is reported, not crashed: an empty plan with one
+     ``errors`` entry explaining the project needs conversion.
+  8. A corrupt ``audit/stage2.json`` is skipped but named in ``errors``;
+     the good audit doc alongside it still plans normally.
 """
 
 from __future__ import annotations
@@ -220,3 +225,48 @@ def test_save_and_load_sync_state_round_trip(tmp_path: Path) -> None:
 
     loaded = load_sync_state(root)
     assert loaded == state
+
+
+# ---------------------------------------------------------------------------
+# Case 7: legacy single-shooter project -> reported, not a crash
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_project_is_reported_not_crashed(tmp_path: Path) -> None:
+    root = tmp_path / "legacyproj"
+    MatchProject.init(root, name="Old Match")
+
+    # This is a bare legacy project.json with no match.json - confirm it
+    # actually takes the legacy branch of load_match_or_legacy rather than
+    # asserting against a fixture that happens to look right.
+    kind, _ = match_model.from_path(root)
+    assert kind == "legacy"
+
+    plan = build_push_plan(root, sync_state=SyncState())
+
+    assert plan.match_id == ""
+    assert plan.docs == []
+    assert plan.media == []
+    assert len(plan.errors) == 1
+    assert "legacy" in plan.errors[0]
+
+
+# ---------------------------------------------------------------------------
+# Case 8: corrupt audit file -> named in errors, good audit still planned
+# ---------------------------------------------------------------------------
+
+
+def test_corrupt_audit_file_is_named_in_errors_and_skipped(tmp_path: Path) -> None:
+    root, slug = _build_basic_match(tmp_path)
+    audit_dir = match_model.Match.shooter_root(root, slug) / "audit"
+    (audit_dir / "stage2.json").write_bytes(b"{not json")
+
+    plan = build_push_plan(root, sync_state=SyncState())
+
+    audit_docs = [d for d in plan.docs if d.kind == "audit"]
+    assert len(audit_docs) == 1
+    assert audit_docs[0].stage_number == 1
+
+    assert len(plan.errors) == 1
+    assert "2" in plan.errors[0]
+    assert slug in plan.errors[0]
