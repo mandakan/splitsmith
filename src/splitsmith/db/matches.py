@@ -21,11 +21,31 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from .models import MatchRow
+
+
+class MatchRecord(BaseModel):
+    """Pydantic view of a :class:`MatchRow` returned across the store boundary.
+
+    ``origin`` distinguishes a natively-created hosted match ("hosted")
+    from one mirrored down by a desktop-to-hosted sync push ("desktop",
+    doc 2026-08-07). It is set once at INSERT time and ``upsert`` never
+    changes it on an existing row -- see :meth:`PostgresMatchStore.upsert`.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    match_id: str
+    name: str
+    storage_prefix: str
+    origin: str
+    created_at: datetime
+    updated_at: datetime
 
 
 class PostgresMatchStore:
@@ -60,12 +80,19 @@ class PostgresMatchStore:
         self._session_factory = session_factory
         self._user_id = user_id
 
-    async def upsert(self, match_id: str, name: str, storage_prefix: str) -> None:
+    async def upsert(
+        self, match_id: str, name: str, storage_prefix: str, *, origin: str = "hosted"
+    ) -> MatchRecord:
         """Insert or refresh the row for ``(user_id, match_id)``.
 
         Idempotent: re-registering an existing match updates its name +
         storage_prefix and bumps ``updated_at`` instead of inserting a
         duplicate (the unique constraint would reject one anyway).
+
+        ``origin`` is only applied on INSERT. An existing row's ``origin``
+        is never changed by a later upsert -- a routine re-registration
+        (e.g. the hosted UI resaving a match's name) must not reclassify a
+        match that a desktop sync push originally created, or vice versa.
         """
         async with self._session_factory() as session:
             existing = (
@@ -77,16 +104,15 @@ class PostgresMatchStore:
                 )
             ).scalar_one_or_none()
             if existing is not None:
-                await self._apply_update(session, existing, name, storage_prefix)
-                return
-            session.add(
-                MatchRow(
-                    user_id=self._user_id,
-                    match_id=match_id,
-                    name=name,
-                    storage_prefix=storage_prefix,
-                )
+                return await self._apply_update(session, existing, name, storage_prefix)
+            row = MatchRow(
+                user_id=self._user_id,
+                match_id=match_id,
+                name=name,
+                storage_prefix=storage_prefix,
+                origin=origin,
             )
+            session.add(row)
             try:
                 await session.commit()
             except IntegrityError:
@@ -96,7 +122,7 @@ class PostgresMatchStore:
                 # uq_matches_user_match constraint rejected our row. Roll
                 # back and apply as an update so the open path doesn't 500.
                 await session.rollback()
-                row = (
+                existing = (
                     await session.execute(
                         select(MatchRow).where(
                             MatchRow.user_id == self._user_id,
@@ -104,14 +130,18 @@ class PostgresMatchStore:
                         )
                     )
                 ).scalar_one()
-                await self._apply_update(session, row, name, storage_prefix)
+                return await self._apply_update(session, existing, name, storage_prefix)
+            await session.refresh(row)
+            return MatchRecord.model_validate(row)
 
     @staticmethod
-    async def _apply_update(session, row: MatchRow, name: str, storage_prefix: str) -> None:
+    async def _apply_update(session, row: MatchRow, name: str, storage_prefix: str) -> MatchRecord:
         row.name = name
         row.storage_prefix = storage_prefix
         row.updated_at = datetime.now(UTC)
         await session.commit()
+        await session.refresh(row)
+        return MatchRecord.model_validate(row)
 
     async def get(self, match_id: str) -> MatchRow | None:
         """Return the user's match row for ``match_id``, or ``None``."""

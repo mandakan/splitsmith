@@ -307,6 +307,11 @@ class MatchRow(Base):
     match_id: Mapped[str] = mapped_column(String, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     storage_prefix: Mapped[str] = mapped_column(String, nullable=False)
+    # "hosted" (native, created directly in the hosted app) or "desktop"
+    # (mirrored down from a desktop-to-hosted sync push, doc 2026-08-07).
+    # Set once at INSERT and never changed by a later upsert -- see
+    # ``PostgresMatchStore.upsert``.
+    origin: Mapped[str] = mapped_column(String, nullable=False, server_default="hosted")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -319,7 +324,7 @@ class MatchRow(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<MatchRow user_id={self.user_id!r} match_id={self.match_id!r}>"
+        return f"<MatchRow user_id={self.user_id!r} match_id={self.match_id!r} origin={self.origin!r}>"
 
 
 class StateDocRow(Base):
@@ -583,3 +588,52 @@ class WorkerRow(Base):
 
     def __repr__(self) -> str:
         return f"<WorkerRow id={self.id!r} name={self.name!r} kind={self.kind!r}>"
+
+
+class DesktopTokenRow(Base):
+    """One row per issued desktop-to-hosted sync credential (doc 2026-08-07).
+
+    Account-scoped credential: the desktop app presents the raw token as a
+    bearer secret when pushing a match up to the user's hosted account. We
+    store only its SHA-256 hash (``token_hash``, ``sessions``/``workers``
+    precedent, not the raw ``share_tokens`` one) -- a DB leak must not yield
+    a usable token. One row per issued token, so a user can name and revoke
+    individual desktop installs independently (``name`` is user-chosen,
+    e.g. "MacBook Pro").
+
+    Resolved pre-tenant via the raw session factory, same rationale as
+    ``share_tokens`` resolution: the sync-push endpoint authenticates the
+    request from the bearer token alone, before any ``app.user_id`` GUC
+    exists, so this table is **not** under RLS. Owner-management queries
+    (list/revoke from the account settings UI) filter by ``user_id``
+    explicitly once the caller is already authenticated by session cookie.
+
+    Revocation sets ``revoked_at`` instead of deleting the row -- same as
+    ``share_tokens``, the settings UI keeps showing revoked tokens as an
+    audit trail rather than losing the record entirely.
+    """
+
+    __tablename__ = "desktop_tokens"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
+    user_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"<DesktopTokenRow id={self.id!r} user_id={self.user_id!r} "
+            f"name={self.name!r} revoked={self.revoked_at is not None}>"
+        )
