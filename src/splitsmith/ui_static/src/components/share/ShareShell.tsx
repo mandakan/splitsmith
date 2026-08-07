@@ -53,7 +53,10 @@ function ShareFrame({ children }: { children: ReactNode }) {
           </a>
         </div>
       </header>
-      <div className="flex-1">{children}</div>
+      {/* flex column (not a plain block): the dead/error cards center
+          themselves with flex-1 + place-items-center, which needs a
+          flex parent - a percentage min-height would resolve to 0 here. */}
+      <div className="flex flex-1 flex-col">{children}</div>
       <footer className="border-t border-rule">
         <div className="mx-auto w-full max-w-[1100px] px-4 py-4 md:px-7">
           <a
@@ -150,7 +153,7 @@ export function ShareShell() {
  *  Distinct from ShareUnavailable - this one is retryable. */
 function ShareLoadError({ onRetry }: { onRetry: () => void }) {
   return (
-    <div className="grid min-h-full place-items-center px-6 py-10">
+    <div className="grid flex-1 place-items-center px-6 py-10">
       <div className="flex max-w-sm flex-col items-center gap-4 text-center">
         <span className="font-mono text-[0.625rem] uppercase tracking-[0.14em] text-subtle">
           Share link
@@ -179,7 +182,7 @@ function ShareLoadError({ onRetry }: { onRetry: () => void }) {
  *  expired, or never valid. Instrument-panel aesthetic; no login CTA. */
 function ShareUnavailable() {
   return (
-    <div className="grid min-h-full place-items-center px-6 py-10">
+    <div className="grid flex-1 place-items-center px-6 py-10">
       <div className="flex max-w-sm flex-col items-center gap-4 text-center">
         <Link2Off className="size-8 text-subtle" aria-hidden />
         <span className="font-mono text-[0.625rem] uppercase tracking-[0.14em] text-subtle">
