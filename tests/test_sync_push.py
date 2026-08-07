@@ -27,6 +27,11 @@ Cases:
      version, and ``upload_media`` chunks a file across multiple parts
      (not just the single-part case the push tests exercise) and returns
      the correct sha256.
+  7. A part PUT failure triggers exactly one abort call carrying the
+     matching key + upload_id, and the original error still propagates -
+     even when the abort call itself fails (a 500 from the abort route
+     must not mask the original error). The happy path makes no abort
+     call at all.
 """
 
 from __future__ import annotations
@@ -99,8 +104,10 @@ class _FakeHosted:
         self.part_size = part_size
         self.calls: list[str] = []
         self.doc_puts: list[tuple[str, dict]] = []
+        self.aborts: list[tuple[str, str]] = []  # (key, upload_id)
         self.match_status = 200
         self.fail_keys: set[str] = set()  # remote keys whose part PUT 500s
+        self.abort_status = 200
         self._upload_counter = 0
 
     def clients(self) -> HostedSyncClient:
@@ -145,6 +152,13 @@ class _FakeHosted:
             self.calls.append(f"media_complete:{body['key']}")
             return httpx.Response(200, json={"size": 0})
 
+        if method == "POST" and path.endswith("/media/abort"):
+            self.calls.append(f"media_abort:{body['key']}")
+            self.aborts.append((body["key"], body["upload_id"]))
+            if self.abort_status != 200:
+                return httpx.Response(self.abort_status, json={"detail": "could not abort"})
+            return httpx.Response(200, json={})
+
         if method == "PUT" and "/docs/" in path:
             self.calls.append(f"doc_put:{path}")
             self.doc_puts.append((path, body))
@@ -184,6 +198,7 @@ def test_happy_path_pushes_media_before_docs_and_reports_correctly(tmp_path: Pat
     assert max(media_indices) < min(doc_indices), fake.calls
 
     assert fake.calls[0] == "ensure_match"
+    assert not any(c.startswith("media_abort") for c in fake.calls), "happy path must not abort"
 
     doc_paths = {path for path, _ in fake.doc_puts}
     assert doc_paths == {
@@ -240,8 +255,12 @@ def test_mid_push_part_failure_leaves_prior_items_recorded_and_rerun_only_retrie
         run_push(root, client=fake.clients())
 
     # Docs never reached; the clip (processed before the sidecar - sorted
-    # glob order) is recorded, the sidecar is not.
+    # glob order) is recorded, the sidecar is not; the sidecar's half-open
+    # multipart upload was aborted rather than left orphaned on R2.
     assert not any(c.startswith("doc_put") for c in fake.calls)
+    assert [c for c in fake.calls if c.startswith("media_abort")] == [f"media_abort:{sidecar_key}"]
+    assert len(fake.aborts) == 1
+    assert fake.aborts[0][0] == sidecar_key
     state = load_sync_state(root)
     assert set(state.items) == {clip_key}
 
@@ -342,6 +361,52 @@ def test_upload_media_chunks_across_multiple_parts_and_returns_correct_sha256(tm
     ]
     put_calls = [c for c in fake.calls if c.startswith("media_put")]
     assert put_calls == [f"media_put:{item.remote_key}"] * 3
+
+
+# ---------------------------------------------------------------------------
+# Case 7: a failed multipart upload is aborted, never left orphaned on R2
+# ---------------------------------------------------------------------------
+
+
+def test_part_put_failure_triggers_one_abort_with_matching_key_and_upload_id(tmp_path: Path) -> None:
+    local_path = tmp_path / "clip.mp4"
+    local_path.write_bytes(b"x" * 1024)
+    remote_key = "matches/m1/shooters/alice/trimmed/clip.mp4"
+
+    fake = _FakeHosted()
+    fake.fail_keys = {remote_key}
+    client = fake.clients()
+
+    item = MediaItem(local_path=local_path, remote_key=remote_key, size=1024, mtime_ns=0)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        client.upload_media("m1", item)
+
+    abort_calls = [c for c in fake.calls if c.startswith("media_abort")]
+    assert abort_calls == [f"media_abort:{remote_key}"]
+    assert fake.aborts == [(remote_key, "upload-1")]
+
+
+def test_abort_failing_does_not_mask_the_original_part_put_error(tmp_path: Path) -> None:
+    local_path = tmp_path / "clip.mp4"
+    local_path.write_bytes(b"x" * 1024)
+    remote_key = "matches/m1/shooters/alice/trimmed/clip.mp4"
+
+    fake = _FakeHosted()
+    fake.fail_keys = {remote_key}
+    fake.abort_status = 500  # the abort route itself is broken too
+    client = fake.clients()
+
+    item = MediaItem(local_path=local_path, remote_key=remote_key, size=1024, mtime_ns=0)
+
+    with pytest.raises(httpx.HTTPStatusError) as exc_info:
+        client.upload_media("m1", item)
+
+    # The propagated error is the original part-PUT 500, not anything
+    # about the abort call - the client never calls .raise_for_status()
+    # on the abort response, so a broken abort route can't surface here.
+    assert exc_info.value.request.url.path == f"/{remote_key}"
+    assert fake.aborts == [(remote_key, "upload-1")]
 
 
 # ---------------------------------------------------------------------------

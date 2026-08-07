@@ -84,36 +84,52 @@ class HostedSyncClient:
         upload_id = create_body["upload_id"]
         part_size = create_body["part_size"]
 
-        digest = hashlib.sha256()
-        parts: list[dict[str, int | str]] = []
-        with item.local_path.open("rb") as fh:
-            part_number = 1
-            while True:
-                part_bytes = _read_part(fh, part_size)
-                if not part_bytes:
-                    break
-                digest.update(part_bytes)
+        try:
+            digest = hashlib.sha256()
+            parts: list[dict[str, int | str]] = []
+            with item.local_path.open("rb") as fh:
+                part_number = 1
+                while True:
+                    part_bytes = _read_part(fh, part_size)
+                    if not part_bytes:
+                        break
+                    digest.update(part_bytes)
 
-                url_resp = self._http.post(
-                    f"/matches/{match_id}/media/part-url",
-                    json={"key": item.remote_key, "upload_id": upload_id, "part_number": part_number},
+                    url_resp = self._http.post(
+                        f"/matches/{match_id}/media/part-url",
+                        json={"key": item.remote_key, "upload_id": upload_id, "part_number": part_number},
+                    )
+                    self._raise_for_status(url_resp)
+                    part_url = url_resp.json()["url"]
+
+                    put_resp = self._media.put(part_url, content=part_bytes)
+                    self._raise_for_status(put_resp)
+                    parts.append({"part_number": part_number, "etag": put_resp.headers["ETag"]})
+
+                    if progress is not None:
+                        progress(len(part_bytes))
+                    part_number += 1
+
+            complete_resp = self._http.post(
+                f"/matches/{match_id}/media/complete",
+                json={"key": item.remote_key, "upload_id": upload_id, "parts": parts},
+            )
+            self._raise_for_status(complete_resp)
+        except Exception:
+            # Best-effort cleanup: a half-open multipart upload is orphaned
+            # on R2 forever (no lifecycle rules configured anywhere), so
+            # always try to abort it. This is cleanup, not the operation
+            # the caller asked for - swallow any failure of the abort call
+            # itself (network error, 401, 500, ...) and let the original
+            # exception propagate unchanged below.
+            try:
+                self._http.post(
+                    f"/matches/{match_id}/media/abort",
+                    json={"key": item.remote_key, "upload_id": upload_id},
                 )
-                self._raise_for_status(url_resp)
-                part_url = url_resp.json()["url"]
-
-                put_resp = self._media.put(part_url, content=part_bytes)
-                self._raise_for_status(put_resp)
-                parts.append({"part_number": part_number, "etag": put_resp.headers["ETag"]})
-
-                if progress is not None:
-                    progress(len(part_bytes))
-                part_number += 1
-
-        complete_resp = self._http.post(
-            f"/matches/{match_id}/media/complete",
-            json={"key": item.remote_key, "upload_id": upload_id, "parts": parts},
-        )
-        self._raise_for_status(complete_resp)
+            except Exception:  # noqa: BLE001 - deliberately swallow, see above
+                pass
+            raise
         return digest.hexdigest()
 
     @staticmethod
