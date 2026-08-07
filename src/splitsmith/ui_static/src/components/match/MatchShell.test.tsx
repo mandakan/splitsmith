@@ -174,6 +174,7 @@ function setUpApi(listJobsImpl: () => Promise<Job[]>) {
     match_root: "/root",
     match_name: "Bromma Classic 2026",
     shooters: [makeShooter("mathias", "Mathias")],
+    origin: "local",
   });
   vi.mocked(api.getProject).mockResolvedValue(makeProject());
   vi.mocked(api.getBeepQueue).mockResolvedValue({

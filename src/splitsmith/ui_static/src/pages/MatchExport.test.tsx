@@ -116,6 +116,7 @@ function setUpLoad() {
     match_root: "/root",
     match_name: "Bromma Classic 2026",
     shooters: SHOOTERS,
+    origin: "local",
   });
   vi.mocked(api.getProject).mockResolvedValue(PROJECT);
 }

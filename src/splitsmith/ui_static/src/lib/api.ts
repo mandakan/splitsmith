@@ -1425,6 +1425,9 @@ export interface RecentProjectDetail {
     | "unknown";
   manual: boolean;
   shooter_names: string[];
+  /** "hosted" | "desktop" | "local" (#631). A "desktop" match is a
+   *  read-only mirror synced down from the desktop app. */
+  origin: "hosted" | "desktop" | "local";
 }
 
 export interface CreateMatchStageDraft {
@@ -1525,6 +1528,9 @@ export interface ShooterListResponse {
   match_root: string;
   match_name: string;
   shooters: ShooterListEntry[];
+  /** "hosted" | "desktop" | "local" (#631). A "desktop" match is a
+   *  read-only mirror synced down from the desktop app. */
+  origin: "hosted" | "desktop" | "local";
 }
 
 /** One uploaded raw video in the operator's hosted-mode object

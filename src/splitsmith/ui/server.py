@@ -966,6 +966,12 @@ def _no_project_error() -> HTTPException:
 # go away entirely once every endpoint is exercised under the new prefix.
 current_match_root: ContextVar[Path | None] = ContextVar("splitsmith_current_match_root", default=None)
 current_match_id: ContextVar[str | None] = ContextVar("splitsmith_current_match_id", default=None)
+# The bound match's origin ("hosted" | "desktop" | "local"), set by the
+# alias middleware from the same row it already fetched for the ownership
+# check (#631 Task 6) - so handlers that need to expose origin (e.g. the
+# shooter list) don't issue a second matches_store query. ``None`` outside
+# an aliased request (e.g. legacy bare-path traffic).
+current_match_origin: ContextVar[str | None] = ContextVar("splitsmith_current_match_origin", default=None)
 # Set True by _share_alias for anonymous read requests so handlers can
 # strip server-local fields (e.g. match_root, last_scanned_dir) from their
 # response payloads before returning them to anonymous viewers.
@@ -3476,6 +3482,11 @@ class RecentProjectDetail(BaseModel):
     # Human-readable shooter names in match order so the picker can
     # render real initials in avatar stacks instead of stubs.
     shooter_names: list[str] = []
+    # "hosted" | "desktop" | "local" (#631 Task 6): "local" is the
+    # filesystem-enricher default (single-operator desktop use); hosted
+    # enrichment overrides it from the tenant's ``matches_store`` row so
+    # the picker can flag a desktop-synced match as a read-only mirror.
+    origin: str = "local"
 
 
 class CreateMatchStageDraft(BaseModel):
@@ -3662,6 +3673,10 @@ class ShooterListResponse(BaseModel):
     match_root: str
     match_name: str
     shooters: list[ShooterListEntry]
+    # "hosted" | "desktop" | "local" (#631 Task 6). Lets the SPA tell a
+    # desktop-synced read-only mirror apart from a natively-hosted or
+    # local match so it can gate write affordances client-side.
+    origin: str = "local"
 
 
 class AddShooterRequest(BaseModel):
@@ -4917,6 +4932,14 @@ async def _enrich_recent_project_hosted(
         kind="match",
     )
     detail.match_id = rp.match_id
+    # ``matches_store`` is the tenant's authoritative registry of hosted vs.
+    # mirrored ownership (#631 Task 6); ``None`` only if a match doc exists
+    # without ever having been registered there, which shouldn't happen for
+    # a real hosted match -- fall back to "hosted" rather than mislabel it
+    # a mirror.
+    if state.matches_store is not None:
+        match_row = await state.matches_store.get(rp.match_id)
+        detail.origin = match_row.origin if match_row is not None else "hosted"
     shooters = match_doc.get("shooters") or []
     detail.shooter_count = len(shooters)
     detail.stage_count = len(match_doc.get("stages") or [])
@@ -5927,7 +5950,8 @@ def create_app(
             # restarts + replicas. A match the tenant doesn't own returns
             # None -> the same 404 an unknown id gets (existence and
             # ownership stay indistinguishable).
-            if await owner_store.get(match_id) is None:
+            owner_row = await owner_store.get(match_id)
+            if owner_row is None:
                 return JSONResponse(
                     status_code=404,
                     content={
@@ -5937,6 +5961,19 @@ def create_app(
                         }
                     },
                 )
+            # Read-only mirror gate (#631 Task 6). A ``desktop``-origin row
+            # is a mirror of a match desktop still owns - only ``/api/sync/*``
+            # (not alias-routed, so this middleware never sees it) may write
+            # to it. Every non-safe method through this alias 403s, except
+            # share management: creating/revoking a share link on a mirror
+            # is the whole point of exposing it hosted-side, so
+            # ``match/shares`` stays writable.
+            if (
+                owner_row.origin == "desktop"
+                and request.method not in ("GET", "HEAD", "OPTIONS")
+                and not rest.startswith("match/shares")
+            ):
+                return JSONResponse(status_code=403, content={"detail": "read_only_mirror"})
             work_root = (
                 Path(
                     os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT
@@ -5946,6 +5983,7 @@ def create_app(
             work_root.mkdir(parents=True, exist_ok=True)
             state.matches.register(match_id, work_root)
             match_root = work_root.resolve()
+            match_origin = owner_row.origin
         else:
             # Local mode: one operator, no tenancy. Resolve via the local
             # recent-projects scan (the registry's miss_resolver is None).
@@ -5961,16 +5999,19 @@ def create_app(
                         }
                     },
                 )
+            match_origin = "local"
         rewritten = "/api/" + rest
         request.scope["path"] = rewritten
         request.scope["raw_path"] = rewritten.encode("utf-8")
         root_token = current_match_root.set(match_root)
         id_token = current_match_id.set(match_id)
+        origin_token = current_match_origin.set(match_origin)
         try:
             return await call_next(request)
         finally:
             current_match_root.reset(root_token)
             current_match_id.reset(id_token)
+            current_match_origin.reset(origin_token)
 
     # ----------------------------------------------------------------------
     # Share-link anonymous read middleware (issue #349)
@@ -11809,6 +11850,7 @@ def create_app(
             match_root="" if current_share_request.get() else str(match_root),
             match_name=match.name,
             shooters=entries,
+            origin=current_match_origin.get() or "local",
         )
 
     @app.post("/api/match/shooters", response_model=ShooterListResponse)
