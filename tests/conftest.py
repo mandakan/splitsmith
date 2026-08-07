@@ -18,6 +18,7 @@ from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 # warnings when the fixture name also appears as a function parameter).
 from tests.hosted_helpers import hosted_app, hosted_env  # noqa: F401
 from tests.synthetic_media import build_synthetic_video, ffmpeg_available
+from tests.test_hosted_docker_smoke import hosted_stack  # noqa: F401
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
