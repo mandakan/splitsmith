@@ -7,7 +7,7 @@ centred stack of two equal-weight bands -- **Scoring** (the six
 colour-coded hit/fault counts, then hit factor and stage time) and
 **Splits** (Best/Avg/Worst/Draw as a captioned four-column grid). This is
 issue #683 Task 8's approved design
-(``.superpowers/sdd/2026-08-06-overlay-composition-seam/APPROVED-bands-mock.py``),
+(``scripts/mock_summary_cell.py``),
 replacing the three-rail layout Task 7b shipped: the stage percentage and
 the cross-shooter placing that rail carried are gone entirely, not merely
 resized or moved -- see the task report for what stayed behind
@@ -540,8 +540,7 @@ def _cell_groups(
 ) -> tuple[Group, ...]:
     """What one cell says, as anchored groups rather than an ordered list.
 
-    Issue #683 Task 8's approved design (``.superpowers/sdd/
-    2026-08-06-overlay-composition-seam/APPROVED-bands-mock.py``),
+    Issue #683 Task 8's approved design (``scripts/mock_summary_cell.py``),
     exactly: the shooter's name (with a DQ chip beside it when DQ'd) at
     :attr:`~splitsmith.overlay_layout.Anchor.TOP_CENTER`, left-aligned;
     below it, a vertically centred stack of two equal-weight bands at
