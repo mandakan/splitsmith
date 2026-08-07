@@ -1,7 +1,8 @@
 """Hosted sync HTTP client for the desktop-to-hosted sync push (#631).
 
 ``HostedSyncClient`` wraps the two httpx clients a push needs: ``http``
-talks to the splitsmith API (base_url + bearer auth, built by the
+talks to the splitsmith API (base_url is the bare hosted origin - the
+client owns the /api/sync path prefix - plus bearer auth, built by the
 caller) for match adoption, the three doc-upsert routes, and the
 presign/complete legs of the multipart media protocol (see
 ``splitsmith.ui.sync_api``); ``media_http`` is a plain client that PUTs
@@ -55,7 +56,7 @@ class HostedSyncClient:
 
     def ensure_match(self, match_id: str, name: str) -> None:
         """Adopt (or refresh the name of) the hosted mirror row for ``match_id``."""
-        resp = self._http.post("/matches", json={"match_id": match_id, "name": name})
+        resp = self._http.post("/api/sync/matches", json={"match_id": match_id, "name": name})
         self._raise_for_status(resp, on_409="a hosted match with this id already exists and is not a mirror")
 
     def put_doc(self, match_id: str, item: DocItem) -> int:
@@ -78,7 +79,9 @@ class HostedSyncClient:
         ``progress`` with the number of newly-uploaded bytes after each
         part lands. Returns the hex sha256 digest of the whole file.
         """
-        create_resp = self._http.post(f"/matches/{match_id}/media/create", json={"key": item.remote_key})
+        create_resp = self._http.post(
+            f"/api/sync/matches/{match_id}/media/create", json={"key": item.remote_key}
+        )
         self._raise_for_status(create_resp)
         create_body = create_resp.json()
         upload_id = create_body["upload_id"]
@@ -96,7 +99,7 @@ class HostedSyncClient:
                     digest.update(part_bytes)
 
                     url_resp = self._http.post(
-                        f"/matches/{match_id}/media/part-url",
+                        f"/api/sync/matches/{match_id}/media/part-url",
                         json={"key": item.remote_key, "upload_id": upload_id, "part_number": part_number},
                     )
                     self._raise_for_status(url_resp)
@@ -111,7 +114,7 @@ class HostedSyncClient:
                     part_number += 1
 
             complete_resp = self._http.post(
-                f"/matches/{match_id}/media/complete",
+                f"/api/sync/matches/{match_id}/media/complete",
                 json={"key": item.remote_key, "upload_id": upload_id, "parts": parts},
             )
             self._raise_for_status(complete_resp)
@@ -124,7 +127,7 @@ class HostedSyncClient:
             # exception propagate unchanged below.
             try:
                 self._http.post(
-                    f"/matches/{match_id}/media/abort",
+                    f"/api/sync/matches/{match_id}/media/abort",
                     json={"key": item.remote_key, "upload_id": upload_id},
                 )
             except Exception:  # noqa: BLE001 - deliberately swallow, see above
@@ -135,10 +138,10 @@ class HostedSyncClient:
     @staticmethod
     def _doc_url(match_id: str, item: DocItem) -> str:
         if item.kind == "match":
-            return f"/matches/{match_id}/docs/match"
+            return f"/api/sync/matches/{match_id}/docs/match"
         if item.kind == "project":
-            return f"/matches/{match_id}/docs/project/{item.slug}"
-        return f"/matches/{match_id}/docs/audit/{item.slug}/{item.stage_number}"
+            return f"/api/sync/matches/{match_id}/docs/project/{item.slug}"
+        return f"/api/sync/matches/{match_id}/docs/audit/{item.slug}/{item.stage_number}"
 
     @staticmethod
     def _raise_for_status(resp: httpx.Response, *, on_409: str | None = None) -> None:

@@ -170,7 +170,7 @@ def test_desktop_push_then_anonymous_share_stream_round_trip(
     # cookie-carrying client would never exercise).
     sync_http = TestClient(
         client.app,
-        base_url="http://testserver/api/sync",
+        base_url="http://testserver",
         headers={"Authorization": f"Bearer {raw_token}"},
         follow_redirects=False,
     )
