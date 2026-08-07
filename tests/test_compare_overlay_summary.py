@@ -402,24 +402,38 @@ def _groups_by_anchor(groups):
     return out
 
 
-def test_the_name_and_the_placing_share_the_top_left():
+def test_the_name_and_the_placing_share_the_top_center():
+    """Issue #683 Task 7b: the top rail is centred, not corner-anchored --
+    a corner label was a leftover habit from the live overlay staying out
+    of the picture's way, and the hold's picture is background texture,
+    not content to stay clear of."""
     tile = _full_stat_tile("Ann")
     groups = summ._cell_groups(tile, summ.StagePlacing(rank=2, total_ranked=5), "Ann")
-    top_left = _groups_by_anchor(groups)[Anchor.TOP_LEFT][0]
-    assert [e.text for e in top_left.elements] == ["Ann", "#2"]
-    assert top_left.elements[0].role is Role.IDENTITY
-    assert top_left.elements[1].role is Role.VERDICT
-    assert top_left.elements[1].emphasis is Emphasis.PLATE
+    top = _groups_by_anchor(groups)[Anchor.TOP_CENTER][0]
+    assert [e.text for e in top.elements] == ["Ann", "#2"]
+    assert top.elements[0].role is Role.IDENTITY
+    assert top.elements[1].role is Role.VERDICT
+    assert top.elements[1].emphasis is Emphasis.PLATE
 
 
-def test_the_band_carries_three_captioned_headlines():
+def test_the_hero_pct_and_its_working_hf_and_time_are_declared():
+    """Issue #683 Task 7b: units attach to their own value now (no more
+    separate TIME/HF/STAGE captions), and the three are not drawn as
+    equal-weight peers -- stage percentage is the hero (the only figure
+    comparable across the whole grid), hit factor and time are its
+    smaller "working"."""
     scorecard = StageScorecard(hit_factor=12.0, stage_pct=100.0)
     tile = TileStageData(label="Ann", stage_number=1, stage_time_seconds=4.5, scorecard=scorecard)
     groups = summ._cell_groups(tile, None, "Ann")
-    band = _groups_by_anchor(groups)[Anchor.BOTTOM_LEFT][0]
-    assert [e.caption for e in band.elements] == ["TIME", "HF", "STAGE"]
-    assert [e.text for e in band.elements] == ["4.50", "12.00", "100.0%"]
-    assert all(e.role is Role.HEADLINE for e in band.elements)
+    middle = _groups_by_anchor(groups)[Anchor.MIDDLE_CENTER]
+
+    hero_group = next(g for g in middle if any(e.role is Role.HERO for e in g.elements))
+    working_group = next(g for g in middle if any(e.role is Role.HEADLINE for e in g.elements))
+
+    assert [e.text for e in hero_group.elements] == ["100.0%"]
+    assert [e.text for e in working_group.elements] == ["4.50s", "12.00 HF"]
+    # No captions anywhere -- the unit is embedded in the text itself.
+    assert all(e.caption is None for e in (*hero_group.elements, *working_group.elements))
 
 
 def test_a_clean_run_states_its_zeros_without_a_plate():
@@ -462,7 +476,7 @@ def test_the_six_counts_are_one_equal_weight_colour_coded_row():
     scorecard = StageScorecard(alphas=10, charlies=1, deltas=1, misses=1, no_shoots=0, procedurals=2)
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
     groups = summ._cell_groups(tile, None, "Ann")
-    (counts_group,) = [g for g in _groups_by_anchor(groups)[Anchor.BOTTOM_LEFT] if len(g.elements) == 6]
+    (counts_group,) = [g for g in _groups_by_anchor(groups)[Anchor.MIDDLE_CENTER] if len(g.elements) == 6]
     texts_and_colors = [(e.text, e.color) for e in counts_group.elements]
     assert texts_and_colors == [
         ("A10", ColorToken.SPLIT_GOOD),
@@ -477,17 +491,21 @@ def test_the_six_counts_are_one_equal_weight_colour_coded_row():
     assert len({e.role for e in counts_group.elements}) == 1
 
 
-def test_split_statistics_take_the_clocks_old_corner():
-    """Nothing jumps across the action-to-hold cut that does not have to.
-    The running clock lived at top-right; the figures that replace it
-    stay there."""
+def test_split_statistics_sit_quiet_and_small_on_the_bottom_rail():
+    """Issue #683 Task 7b moved this group from the running clock's old
+    top-right corner to the bottom rail: the three-rail redesign uses the
+    whole cell (top identity, middle scored result, bottom split
+    detail), and split statistics are explicitly the quiet, small figures
+    -- last in the reading order, not competing with the hero for the
+    top of the cell."""
     tile = _full_stat_tile("Ann")
     groups = summ._cell_groups(tile, None, "Ann")
-    top_right = _groups_by_anchor(groups)[Anchor.TOP_RIGHT][0]
-    texts = [e.text for e in top_right.elements]
+    bottom = _groups_by_anchor(groups)[Anchor.BOTTOM_CENTER][0]
+    texts = [e.text for e in bottom.elements]
     assert any("Best" in t for t in texts)
     assert any(t.startswith("Draw") for t in texts)
-    assert all(e.emphasis is Emphasis.MUTED for e in top_right.elements)
+    assert all(e.emphasis is Emphasis.MUTED for e in bottom.elements)
+    assert all(e.role is Role.DETAIL for e in bottom.elements)
 
 
 def test_a_dq_takes_the_placings_slot_and_suppresses_the_scoring():
@@ -500,6 +518,35 @@ def test_a_dq_takes_the_placings_slot_and_suppresses_the_scoring():
     assert not any("80.0" in t for t in texts)
 
 
+def test_a_dq_with_a_stage_time_promotes_it_to_hero_with_no_divider():
+    """A DQ suppresses the counts entirely (see the test above), so there
+    is nothing above a rule to separate from -- and nothing left to show
+    in the middle rail except the collapsed time, promoted to the hero's
+    own visual weight so the cell's biggest slot is not simply empty."""
+    scorecard = StageScorecard(hit_factor=5.12, stage_pct=80.0, alphas=7, dq=True)
+    tile = TileStageData(label="Ann", stage_number=1, stage_time_seconds=9.87, scorecard=scorecard)
+    groups = summ._cell_groups(tile, None, "Ann")
+    middle = _groups_by_anchor(groups).get(Anchor.MIDDLE_CENTER, [])
+
+    assert not any(g.divider for g in middle)
+    (hero_group,) = middle
+    assert [e.text for e in hero_group.elements] == ["9.87s"]
+    assert [e.role for e in hero_group.elements] == [Role.HERO]
+
+
+def test_no_divider_when_nothing_is_computed_below_the_counts():
+    """A rule with nothing below it to divide from would be a stray line
+    for no reason -- it must only appear when both sides of it are real."""
+    scorecard = StageScorecard(alphas=5)  # no hit factor, no stage_pct
+    tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)  # no stage_time either
+    groups = summ._cell_groups(tile, None, "Ann")
+    middle = _groups_by_anchor(groups)[Anchor.MIDDLE_CENTER]
+
+    assert not any(g.divider for g in middle)
+    assert len(middle) == 1
+    assert [e.text for e in middle[0].elements] == ["A5"]
+
+
 def test_a_tile_with_nothing_declares_only_its_label():
     """The control cell. A tile with no audit and no scorecard renders
     its name and nothing else -- which is what the pixel checks measure
@@ -508,13 +555,24 @@ def test_a_tile_with_nothing_declares_only_its_label():
     assert [e.text for g in groups for e in g.elements] == ["Ann"]
 
 
-def test_the_band_is_declared_before_the_faults_row():
-    """Groups sharing an anchor stack away from its edge in declaration
-    order, and the band sits on the cell's bottom edge."""
+def test_the_middle_rail_declares_counts_then_a_divider_then_working_then_the_hero():
+    """Groups sharing MIDDLE_CENTER stack top to bottom in declaration
+    order (it is not a bottom anchor, so no reversal), and that order is
+    the equation itself: what the shooter did, a rule, what it produced,
+    what it's worth."""
     tile = _full_stat_tile("Ann")
     groups = summ._cell_groups(tile, None, "Ann")
-    bottom = _groups_by_anchor(groups)[Anchor.BOTTOM_LEFT]
-    assert bottom[0].elements[0].role is Role.HEADLINE
+    middle = _groups_by_anchor(groups)[Anchor.MIDDLE_CENTER]
+
+    assert len(middle) == 4
+    counts, divider, working, hero = middle
+    # ``_full_stat_tile`` carries alphas/charlies/deltas/misses/no_shoots
+    # but not procedurals (unread, not zero) -- five counts, not six.
+    assert len(counts.elements) == 5
+    assert divider.divider is True
+    assert divider.elements == ()
+    assert {e.role for e in working.elements} == {Role.HEADLINE}
+    assert [e.role for e in hero.elements] == [Role.HERO]
 
 
 # --- composition ------------------------------------------------------------
@@ -637,22 +695,27 @@ def _texts(groups) -> list[str]:
     return [e.text for g in groups for e in g.elements]
 
 
-def test_missing_scorecard_omits_the_scoring_lines():
+def test_missing_scorecard_collapses_to_the_time_as_the_hero():
+    """No scorecard means no counts, no hit factor and no stage
+    percentage -- but the tile still has a stage time, and issue #683
+    Task 7b's collapse rule promotes it into the hero's own visual
+    weight rather than leaving that slot empty."""
     shots = (TileShot(time_from_beep=1.0, split=1.0), TileShot(time_from_beep=1.3, split=0.3))
     tile = TileStageData(label="Ann", stage_number=1, shots=shots, stage_time_seconds=12.34, scorecard=None)
     groups = summ._cell_groups(tile, None, "Ann")
     texts = _texts(groups)
-    captions = [e.caption for g in groups for e in g.elements if e.caption is not None]
 
     assert any("shots" in t for t in texts)
-    # TIME is now a captioned headline: the caption carries the word and
-    # the value is bare ("12.34"), not a "Time 12.34" line.
-    assert "TIME" in captions
-    assert "12.34" in texts
-    assert "HF" not in captions
-    assert "STAGE" not in captions
+    # The unit is embedded in the value now -- no separate caption.
+    assert "12.34s" in texts
+    assert not any(e.caption is not None for g in groups for e in g.elements)
+    assert not any("%" in t for t in texts)
+    assert not any(" HF" in t for t in texts)
     assert not any(t.startswith("A") and t[1:2].isdigit() for t in texts)
     assert "DQ" not in texts
+
+    hero_group = next(g for g in groups if any(e.role is Role.HERO for e in g.elements))
+    assert [e.text for e in hero_group.elements] == ["12.34s"]
 
 
 def test_stage_points_never_appears_and_stage_pct_does():
@@ -935,7 +998,7 @@ def test_summary_cells_never_attributes_one_placements_content_to_another():
     by_label = {placement.label: groups for placement, groups in cells}
 
     ann_texts = {e.text for g in by_label["Ann"] for e in g.elements}
-    assert "12.34" in ann_texts
+    assert "12.34s" in ann_texts
     assert "87.4%" in ann_texts
     # Neighbours have no audit and no scorecard: their own declared
     # groups must carry nothing but their own label -- not a trace of

@@ -43,7 +43,6 @@ from __future__ import annotations
 
 import io
 import logging
-import os
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -87,73 +86,43 @@ DEFAULT_DIM = 0.45
 #: it rather than returning a path to a file that was never written.
 _FREEZE_TAIL_WINDOW_SECONDS = 0.5
 
-#: Selects an experimental hold-still layout for a design pass (issue
-#: #683 Task 7). This is scaffolding for choosing between two proposed
-#: replacements of today's small-corner-anchored summary, not a shipped
-#: feature -- there is no CLI flag for it and it is expected to be deleted
-#: (with one variant's shape folded into the unconditional default) once
-#: the user picks one from rendered frames. Unset (or any value other
-#: than "a"/"b") renders exactly what shipped before this task, carrying
-#: only the colour-coding change, which is not gated behind this switch
-#: because it is a real fix rather than something still being decided.
-_VARIANT_ENV = "SPLITSMITH_OVERLAY_SUMMARY_VARIANT"
 
-
-def _active_variant() -> str | None:
-    """ "a", "b", or ``None`` for today's shipped layout. See
-    :data:`_VARIANT_ENV`."""
-    value = os.environ.get(_VARIANT_ENV)
-    if value is None:
-        return None
-    value = value.strip().lower()
-    return value if value in ("a", "b") else None
-
-
-def _summary_scale(cell_height: int, variant: str | None) -> CellScale:
+def _summary_scale(cell_height: int) -> CellScale:
     """The :class:`CellScale` the hold still composes at.
 
     Deliberately **not** a change to ``CellScale.for_cell`` itself: that
     resolver is shared with the live sprite and the running clock
     (``test_live_primary_and_pad_match_what_the_grid_computes_today``
-    pins it), and this task's brief is about the *hold*, which is a
-    different picture-is-content-not-background situation than the live
-    overlay is. So this derives a summary-only scale from the same base
-    numbers instead of touching the shared formula.
+    pins it), and the hold is a different picture-is-content-not-
+    background situation than the live overlay is. So this derives a
+    summary-only scale from the same base numbers instead of touching the
+    shared formula.
 
-    Multipliers below are a first cut for a design pass, not tuned
-    figures -- see ``build/variant-a`` / ``build/variant-b`` renders and
-    the task report for how they read at real cell sizes. ``pad`` scales
-    too: a bigger type size sitting on the old, small padding would read
-    as cramped against its own cell edge.
+    Issue #683 Task 7 rendered two candidate layouts side by side (an
+    env-var switch, ``SPLITSMITH_OVERLAY_SUMMARY_VARIANT``) to choose
+    between them from real frames; Task 7b picked the "recompose as a
+    scorecard" shape, folded it into the only layout ``_cell_groups``
+    produces, and deleted the switch -- there is no live decision left to
+    A/B. The multipliers below carry that variant's numbers forward,
+    tuned further for the new ``hero``/``headline`` split (the old single
+    ``headline`` band is now two roles at different weights, so the two
+    get their own multipliers rather than sharing one).
     """
     base = CellScale.for_cell(cell_height)
-    if variant == "a":
-        # "Scale up in place": same anchors, substantially larger type
-        # now that the frame is dimmed background rather than the
-        # content the viewer is protecting.
-        return replace(
-            base,
-            identity=round(base.identity * 1.6),
-            headline=round(base.headline * 1.9),
-            verdict=round(base.verdict * 1.6),
-            detail=round(base.detail * 1.8),
-            caption=round(base.caption * 1.5),
-            pad=round(base.pad * 1.4),
-        )
-    if variant == "b":
-        # "Recompose as a scorecard": one centred block rather than four
-        # corners, so it can afford to be slightly more modest than
-        # variant A per role while still reading larger than today.
-        return replace(
-            base,
-            identity=round(base.identity * 1.5),
-            headline=round(base.headline * 1.7),
-            verdict=round(base.verdict * 1.5),
-            detail=round(base.detail * 1.6),
-            caption=round(base.caption * 1.4),
-            pad=round(base.pad * 1.2),
-        )
-    return base
+    return replace(
+        base,
+        identity=round(base.identity * 1.5),
+        # The "working" tier -- hit factor and time, subordinate to the
+        # hero percentage below them.
+        headline=round(base.headline * 1.3),
+        # The hero: the largest figure in the cell, and the only one
+        # comparable across the whole grid regardless of division.
+        hero=round(base.hero * 1.7),
+        verdict=round(base.verdict * 1.4),
+        detail=round(base.detail * 1.5),
+        caption=round(base.caption * 1.4),
+        pad=round(base.pad * 1.3),
+    )
 
 
 def _check_stage_keys(data: Mapping[str, TileStageData]) -> None:
@@ -471,42 +440,73 @@ def _count_elements(scorecard) -> list[Element]:
     return elements
 
 
+def _time_text(tile: TileStageData) -> str | None:
+    """The stage time with its unit attached (``"4.50s"``, optionally
+    ``" (manual)"``), or ``None`` if there is no time to show. Units
+    attach to the value itself now -- see :func:`_cell_groups`'s
+    docstring for why a bare number with a floating caption above it is
+    exactly the defect this redesign exists to fix."""
+    if tile.stage_time_seconds is None:
+        return None
+    text = f"{tile.stage_time_seconds:.2f}s"
+    if tile.stage_time_is_manual:
+        text += " (manual)"
+    return text
+
+
 def _cell_groups(
     tile: TileStageData | None,
     placing: StagePlacing | None,
     label: str,
-    *,
-    variant: str | None = None,
 ) -> tuple[Group, ...]:
     """What one cell says, as anchored groups rather than an ordered list.
 
-    This used to be a ``list`` of ``(text, size, colour)`` built in a
-    fixed sequence, which meant every new figure was an insertion into
-    that sequence and every layout assumption around it shifted. Declaring
-    position and role instead lets an element be absent without the ones
-    around it moving.
+    Three rails using the whole cell (issue #683 Task 7b), not four
+    corners crowded into the top third: identity and placing at
+    :attr:`~splitsmith.overlay_layout.Anchor.TOP_CENTER`, the scored
+    result at :attr:`~splitsmith.overlay_layout.Anchor.MIDDLE_CENTER`,
+    and split statistics -- quiet, small, the old running-clock corner's
+    content -- at :attr:`~splitsmith.overlay_layout.Anchor.BOTTOM_CENTER`.
+    Each anchor is independently positioned (top-pinned, vertically
+    centred, bottom-pinned), so the three rails do not depend on one
+    another's height to land in the right place.
+
+    **Stage time, hit factor and stage percentage are not three peers.**
+    They are an equation: hits and penalties make points, points over
+    time make a hit factor, and a hit factor over the stage winner's own
+    makes the percentage -- the only one of the three comparable across
+    the whole grid, since hit factor is only comparable within a
+    division and raw points are comparable to nothing. The middle rail
+    reads top to bottom in that order: the colour-coded hit/fault counts
+    (what the shooter did), a hairline rule (the one decorative element
+    this redesign allows itself -- see
+    :class:`~splitsmith.overlay_layout.Group`'s ``divider``), then hit
+    factor and time as the smaller "working" figures that produced the
+    result, then the hero stage percentage, the largest figure in the
+    cell. A DQ or any tile without a rankable ``stage_pct`` has no hero to
+    show -- rather than leaving the cell's biggest slot empty, whatever
+    the tile *does* have (the stage time) is promoted into that slot
+    instead, so the DQ plate up in the identity rail carries the verdict
+    and the middle rail never shows a hole where the hero was.
+
+    Units attach to their own value now (``"4.50s"``, ``"12.00 HF"``,
+    ``"100.0%"``) instead of a separate caption row above a bare number --
+    two adjacent bare figures read as one run-on string at any size, and a
+    unit is the smallest label that still tells them apart at a glance.
 
     A tile with no audit and no scorecard yields just the label -- that
     cell is the control the hold's pixel checks measure against, so it
     must stay text-free apart from the name.
-
-    ``variant`` is the issue #683 Task 7 design-pass switch (see
-    :data:`_VARIANT_ENV`). ``"b"`` composes a completely different shape
-    (:func:`_cell_groups_b`); anything else -- including ``"a"``, which
-    only changes type size via :func:`_summary_scale` -- draws through
-    this function's own, unchanged anchors.
     """
-    if variant == "b":
-        return _cell_groups_b(tile, placing, label)
-
     scorecard = tile.scorecard if tile is not None else None
+    scorecard_active = scorecard is not None and not scorecard.dq
     groups: list[Group] = []
 
-    # Top-left: who this is, and how they placed.
+    # Top rail: who this is, and how they placed (or DQ, which takes the
+    # placing's slot rather than sitting beside it -- a DQ'd run has no
+    # rankable finish, so there is no placing to show).
     identity: list[Element] = [Element(role=Role.IDENTITY, text=label)]
     if scorecard is not None and scorecard.dq:
-        # A DQ takes the placing's slot rather than sitting beside it: a
-        # DQ'd run has no rankable finish, so there is no placing to show.
         identity.append(Element(role=Role.VERDICT, text="DQ", emphasis=Emphasis.PLATE))
     elif placing is not None:
         # Bare "#2", not "#2 of 4": only scorecard-carrying tiles enter
@@ -514,13 +514,65 @@ def _cell_groups(
         # would read as a smaller field than actually shot. The grid
         # itself already shows the field size.
         identity.append(Element(role=Role.VERDICT, text=f"#{placing.rank}", emphasis=Emphasis.PLATE))
-    groups.append(Group(anchor=Anchor.TOP_LEFT, flow=Flow.ROW, elements=tuple(identity)))
+    groups.append(Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(identity)))
 
     if tile is None:
         return tuple(groups)
 
-    # Top-right: the running clock's old corner. The shooter's own shot
-    # detail settles here so nothing jumps across the action-to-hold cut.
+    # Middle rail: the scored result. Built bottom-up in code (counts,
+    # then whatever sits below the rule) but declared top-down, since
+    # groups sharing MIDDLE_CENTER stack in declaration order.
+    middle: list[Group] = []
+    counts = _count_elements(scorecard) if scorecard_active else []
+    if counts:
+        middle.append(Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=tuple(counts)))
+
+    time_text = _time_text(tile)
+    hf_text = None
+    if scorecard_active and scorecard.hit_factor is not None:
+        hf_text = f"{scorecard.hit_factor:.2f} HF"
+    hero_text = (
+        f"{scorecard.stage_pct:.1f}%" if scorecard_active and scorecard.stage_pct is not None else None
+    )
+
+    working: list[Element] = []
+    if hero_text is not None:
+        # The ordinary case: hit factor and time are the working beneath
+        # the hero percentage.
+        if time_text is not None:
+            working.append(Element(role=Role.HEADLINE, text=time_text))
+        if hf_text is not None:
+            working.append(Element(role=Role.HEADLINE, text=hf_text))
+    else:
+        # Collapse: no rankable percentage (DQ, no scorecard, or a
+        # scorecard without one). The time -- if this tile has one --
+        # takes the hero's own weight instead of leaving that slot empty.
+        # Hit factor never becomes the hero -- the brief names the stage
+        # time specifically as what a DQ collapses to -- but it still
+        # draws at the smaller working size if this rare, partial-data
+        # tile carries one anyway (a hit factor with no percentage).
+        if time_text is not None:
+            hero_text = time_text
+        if hf_text is not None:
+            working.append(Element(role=Role.HEADLINE, text=hf_text))
+
+    if counts and (hero_text is not None or working):
+        middle.append(Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=(), divider=True))
+    if working:
+        middle.append(Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=tuple(working)))
+    if hero_text is not None:
+        middle.append(
+            Group(
+                anchor=Anchor.MIDDLE_CENTER,
+                flow=Flow.ROW,
+                elements=(Element(role=Role.HERO, text=hero_text),),
+            )
+        )
+    groups.extend(middle)
+
+    # Bottom rail: split statistics, quiet and small. The running clock's
+    # old corner during the action; nothing jumps across the
+    # action-to-hold cut that does not have to.
     detail: list[Element] = []
     if tile.has_shots:
         detail.append(Element(role=Role.DETAIL, text=f"{tile.shot_count} shots", emphasis=Emphasis.MUTED))
@@ -532,109 +584,7 @@ def _cell_groups(
             Element(role=Role.DETAIL, text=f"Draw {tile.shots[0].split:.2f}", emphasis=Emphasis.MUTED)
         )
     if detail:
-        groups.append(Group(anchor=Anchor.TOP_RIGHT, flow=Flow.COLUMN, elements=tuple(detail)))
-
-    # Bottom-left, declared first so it sits on the cell's bottom edge:
-    # the three figures the viewer reads first.
-    band: list[Element] = []
-    if tile.stage_time_seconds is not None:
-        text = f"{tile.stage_time_seconds:.2f}"
-        if tile.stage_time_is_manual:
-            text += " (manual)"
-        band.append(Element(role=Role.HEADLINE, text=text, caption="TIME"))
-    if scorecard is not None and not scorecard.dq:
-        if scorecard.hit_factor is not None:
-            band.append(Element(role=Role.HEADLINE, text=f"{scorecard.hit_factor:.2f}", caption="HF"))
-        if scorecard.stage_pct is not None:
-            band.append(Element(role=Role.HEADLINE, text=f"{scorecard.stage_pct:.1f}%", caption="STAGE"))
-    if band:
-        groups.append(Group(anchor=Anchor.BOTTOM_LEFT, flow=Flow.ROW, elements=tuple(band)))
-
-    # Then, stacked above it: the six hit/fault counts as one equal-weight,
-    # colour-coded row -- see _count_elements.
-    if scorecard is not None and not scorecard.dq:
-        counts = _count_elements(scorecard)
-        if counts:
-            groups.append(Group(anchor=Anchor.BOTTOM_LEFT, flow=Flow.ROW, elements=tuple(counts)))
-
-    return tuple(groups)
-
-
-def _cell_groups_b(
-    tile: TileStageData | None,
-    placing: StagePlacing | None,
-    label: str,
-) -> tuple[Group, ...]:
-    """Variant B, "recompose as a scorecard" (issue #683 Task 7).
-
-    The hold is not an overlay: the tile underneath is already blurred
-    and dimmed to 0.45, so it is background texture and the summary is
-    the content. :func:`_cell_groups` keeps the live overlay's habit of
-    pinning content to the cell's corners and staying out of the way of a
-    picture that, during the hold, is no longer the thing being watched.
-    This function drops that habit and declares one block instead:
-    identity + placing, then shot detail, then the six-count row, then
-    TIME/HF/STAGE -- in that top-to-bottom reading order, the order a
-    printed scorecard uses.
-
-    All four groups share :attr:`~splitsmith.overlay_layout.Anchor.TOP_CENTER`
-    rather than a new anchor: multiple groups at one anchor already stack
-    in declaration order (see :class:`~splitsmith.overlay_layout.Group`'s
-    own docstring), so "one centred block" falls out of the existing
-    engine instead of inventing a seventh anchor position. ``TOP_CENTER``
-    over ``BOTTOM_CENTER`` because a bottom anchor stacks in *reverse*
-    (the first-declared group hugs the edge, see
-    ``overlay_html._anchor_classes``) -- reading the block top-to-bottom
-    would then mean declaring it bottom-to-top, which is the kind of
-    inversion this whole rewrite exists to avoid. Centred, not left- or
-    right-aligned, because a block sitting in the middle of the cell reads
-    as the cell's own content rather than as a corner label leftover from
-    the live overlay.
-    """
-    scorecard = tile.scorecard if tile is not None else None
-    groups: list[Group] = []
-
-    identity: list[Element] = [Element(role=Role.IDENTITY, text=label)]
-    if scorecard is not None and scorecard.dq:
-        identity.append(Element(role=Role.VERDICT, text="DQ", emphasis=Emphasis.PLATE))
-    elif placing is not None:
-        identity.append(Element(role=Role.VERDICT, text=f"#{placing.rank}", emphasis=Emphasis.PLATE))
-    groups.append(Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(identity)))
-
-    if tile is None:
-        return tuple(groups)
-
-    if tile.has_shots:
-        detail: list[Element] = [
-            Element(role=Role.DETAIL, text=f"{tile.shot_count} shots", emphasis=Emphasis.MUTED)
-        ]
-        rest = [shot.split for shot in tile.shots[1:]]
-        if rest:
-            best_avg_worst = f"Best {min(rest):.2f}  Avg {sum(rest) / len(rest):.2f}  Worst {max(rest):.2f}"
-            detail.append(Element(role=Role.DETAIL, text=best_avg_worst, emphasis=Emphasis.MUTED))
-        detail.append(
-            Element(role=Role.DETAIL, text=f"Draw {tile.shots[0].split:.2f}", emphasis=Emphasis.MUTED)
-        )
-        groups.append(Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(detail)))
-
-    if scorecard is not None and not scorecard.dq:
-        counts = _count_elements(scorecard)
-        if counts:
-            groups.append(Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(counts)))
-
-    band: list[Element] = []
-    if tile.stage_time_seconds is not None:
-        text = f"{tile.stage_time_seconds:.2f}"
-        if tile.stage_time_is_manual:
-            text += " (manual)"
-        band.append(Element(role=Role.HEADLINE, text=text, caption="TIME"))
-    if scorecard is not None and not scorecard.dq:
-        if scorecard.hit_factor is not None:
-            band.append(Element(role=Role.HEADLINE, text=f"{scorecard.hit_factor:.2f}", caption="HF"))
-        if scorecard.stage_pct is not None:
-            band.append(Element(role=Role.HEADLINE, text=f"{scorecard.stage_pct:.1f}%", caption="STAGE"))
-    if band:
-        groups.append(Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(band)))
+        groups.append(Group(anchor=Anchor.BOTTOM_CENTER, flow=Flow.COLUMN, elements=tuple(detail)))
 
     return tuple(groups)
 
@@ -643,8 +593,6 @@ def _summary_cells(
     placements: Sequence[TilePlacement],
     data: Mapping[str, TileStageData],
     placings: Mapping[str, StagePlacing],
-    *,
-    variant: str | None = None,
 ) -> list[tuple[TilePlacement, tuple[Group, ...]]]:
     """One ``(placement, declared groups)`` pair per placement, in
     placement order -- :func:`splitsmith.overlay_html.summary_html`'s own
@@ -662,7 +610,7 @@ def _summary_cells(
             cells.append((placement, ()))
             continue
         tile = data.get(placement.label)
-        groups = _cell_groups(tile, placings.get(placement.label), placement.label, variant=variant)
+        groups = _cell_groups(tile, placings.get(placement.label), placement.label)
         cells.append((placement, groups))
     return cells
 
@@ -714,12 +662,6 @@ def build_hold_still(
     ``blur_radius`` defaults to ``max(8, cell_height // 60)`` -- scaled
     from the cell so a 4K canvas and a small preview blur proportionally.
     ``dim`` defaults to :data:`DEFAULT_DIM`.
-
-    The composed groups and the scale they render at both read
-    :func:`_active_variant` (:data:`_VARIANT_ENV`) when a rasterizer is
-    given -- see that function's docstring. There is no parameter for it
-    here: it is a throwaway design-pass switch, not part of this
-    function's real contract.
     """
     _check_stage_keys(data)
     radius = blur_radius if blur_radius is not None else max(8, geometry.cell_height // 60)
@@ -739,10 +681,9 @@ def build_hold_still(
         canvas.paste(cell_image.convert("RGBA"), (x0, y0))
 
     if rasterizer is not None:
-        variant = _active_variant()
         placings = _rank_placings(placements, data)
-        cells = _summary_cells(placements, data, placings, variant=variant)
-        scale = _summary_scale(geometry.cell_height, variant)
+        cells = _summary_cells(placements, data, placings)
+        scale = _summary_scale(geometry.cell_height)
         html = summary_html(cells, geometry=geometry, scale=scale, theme=theme)
         try:
             png_bytes = rasterizer.png(html, width=geometry.canvas_width, height=geometry.canvas_height)

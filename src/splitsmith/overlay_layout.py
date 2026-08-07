@@ -23,7 +23,7 @@ This module owns two things and deliberately nothing else:
   :class:`Emphasis`. Not a size and not a colour.
 - **What a size is** -- :class:`CellScale`, resolved once per cell.
 
-It is not a plugin system. Five roles, six anchors, one product.
+It is not a plugin system. Six roles, seven anchors, one product.
 """
 
 from __future__ import annotations
@@ -39,25 +39,33 @@ MIN_FONT_SIZE = 12
 
 
 class Anchor(Enum):
-    """Which corner or edge-centre of a cell an element group sits in.
+    """Which corner, edge-centre, or the true centre of a cell an element
+    group sits in.
 
-    Six rather than nine, not all live yet. Five are drawn today: the
-    live sprite's counter sits at ``TOP_LEFT`` and its last split at
-    ``BOTTOM_CENTER``, the clock draws at ``TOP_RIGHT``, and the frozen
-    stage summary (``overlay_summary._draw_cell``) composes a shooter's
-    identity and placing at ``TOP_LEFT``, split statistics at
-    ``TOP_RIGHT`` (the clock's own corner -- the two never draw at the
-    same time, since the clock belongs to the action and the summary to
-    the hold after it), and its TIME/HF/STAGE band plus the
-    accuracy/faults row stacked above it at ``BOTTOM_LEFT``.
-    ``BOTTOM_RIGHT`` is declared and not yet drawn by anything. Adding a
-    middle row would mean inventing a vertical-centring rule nothing has
-    asked for.
+    Seven rather than nine, not all live yet. The redesigned stage summary
+    (issue #683 Task 7b, ``overlay_summary._cell_groups``) is a three-rail
+    composition using the whole cell rather than a single top-anchored
+    block: identity and placing at ``TOP_CENTER``, the scored result
+    (counts, a hairline rule, hit factor/time, and the hero stage
+    percentage) at ``MIDDLE_CENTER``, and split statistics at
+    ``BOTTOM_CENTER``. The live sprite's counter sits at ``TOP_LEFT`` and
+    its last split at ``BOTTOM_CENTER``, and the clock draws at
+    ``TOP_RIGHT`` -- the summary and the live overlay never draw at the
+    same time, since the clock and counter belong to the action and the
+    summary to the hold after it, so ``BOTTOM_CENTER`` serving both is not
+    a collision. ``TOP_LEFT``/``TOP_RIGHT``/``BOTTOM_LEFT``/``BOTTOM_RIGHT``
+    stay corner anchors for the live overlay's own use; ``BOTTOM_RIGHT`` is
+    declared and not yet drawn by anything.
+
+    ``MIDDLE_CENTER`` is vertically centred rather than edge-pinned --
+    unlike every other anchor, it has no ``pad`` inset on either side,
+    since there is no edge to be inset from.
     """
 
     TOP_LEFT = "top-left"
     TOP_CENTER = "top-center"
     TOP_RIGHT = "top-right"
+    MIDDLE_CENTER = "middle-center"
     BOTTOM_LEFT = "bottom-left"
     BOTTOM_CENTER = "bottom-center"
     BOTTOM_RIGHT = "bottom-right"
@@ -72,7 +80,13 @@ class Anchor(Enum):
 
     @property
     def is_center(self) -> bool:
-        return self in (Anchor.TOP_CENTER, Anchor.BOTTOM_CENTER)
+        return self in (Anchor.TOP_CENTER, Anchor.MIDDLE_CENTER, Anchor.BOTTOM_CENTER)
+
+    @property
+    def is_middle(self) -> bool:
+        """Vertically centred rather than pinned to the top or bottom
+        edge. Only :attr:`MIDDLE_CENTER` today."""
+        return self is Anchor.MIDDLE_CENTER
 
 
 class Flow(Enum):
@@ -92,8 +106,18 @@ class Role(Enum):
 
     #: The shooter's name.
     IDENTITY = "identity"
-    #: A figure the viewer should read first -- stage time, hit factor.
+    #: A figure that fed into the hero result but is not the hero itself
+    #: -- hit factor and stage time, the "working" beneath the stage
+    #: percentage (issue #683 Task 7b). Distinctly smaller than
+    #: :attr:`HERO`, distinctly larger than :attr:`DETAIL`.
     HEADLINE = "headline"
+    #: The single most important figure in the cell -- the stage
+    #: percentage, the only number comparable across every shooter in the
+    #: grid regardless of division. The largest role. A DQ or a tile with
+    #: no rankable finish collapses this to whatever figure the tile does
+    #: have (the stage time) rather than leaving the cell's biggest slot
+    #: empty -- see ``overlay_summary._cell_groups``.
+    HERO = "hero"
     #: A cross-shooter or disqualifying fact: placing, DQ, penalties.
     VERDICT = "verdict"
     #: Supporting figures -- split statistics, hit counts, shot count.
@@ -175,11 +199,21 @@ class Group:
     anchor's edge in declaration order -- the first declared sits closest
     to the edge. Groups do not nest; sharing an anchor is what that would
     otherwise have been for.
+
+    ``divider`` marks a group as the one decorative element the redesigned
+    stage summary allows itself (issue #683 Task 7b): a hairline rule
+    between what a shooter did (the hit/fault counts) and what it is worth
+    (hit factor, time, the hero percentage), borrowed from a printed IPSC
+    score slip. A divider group carries no elements (``flow`` is present
+    only because the dataclass needs one and is ignored) -- it renders as
+    a plain line stretched to the width of the widest group sharing its
+    anchor, not as text.
     """
 
     anchor: Anchor
     flow: Flow
     elements: tuple[Element, ...]
+    divider: bool = False
 
 
 @dataclass(frozen=True)
@@ -199,6 +233,9 @@ class CellScale:
 
     identity: int
     headline: int
+    #: The largest role -- the stage summary's hero percentage. See
+    #: :attr:`Role.HERO`.
+    hero: int
     verdict: int
     detail: int
     caption: int
@@ -220,6 +257,7 @@ class CellScale:
         return cls(
             identity=max(30, cell_height // 17),
             headline=max(30, cell_height // 14),
+            hero=max(36, cell_height // 10),
             verdict=max(24, cell_height // 17),
             detail=max(14, cell_height // 40),
             caption=max(floor, cell_height // 44),
@@ -238,6 +276,7 @@ class CellScale:
         return {
             Role.IDENTITY: self.identity,
             Role.HEADLINE: self.headline,
+            Role.HERO: self.hero,
             Role.VERDICT: self.verdict,
             Role.DETAIL: self.detail,
             Role.LIVE_PRIMARY: self.live_primary,
@@ -264,7 +303,9 @@ def anchor_origin(
     renderer has.
 
     Centre anchors return the cell's horizontal middle rather than an
-    inset edge -- there is nothing to inset from.
+    inset edge -- there is nothing to inset from. :attr:`Anchor.MIDDLE_CENTER`
+    additionally returns the cell's *vertical* middle, uninset by ``pad``
+    on that axis for the same reason.
     """
     if anchor.is_center:
         x = cell_x + cell_w // 2
@@ -272,7 +313,12 @@ def anchor_origin(
         x = cell_x + cell_w - pad
     else:
         x = cell_x + pad
-    y = cell_y + cell_h - pad if anchor.is_bottom else cell_y + pad
+    if anchor.is_middle:
+        y = cell_y + cell_h // 2
+    elif anchor.is_bottom:
+        y = cell_y + cell_h - pad
+    else:
+        y = cell_y + pad
     return x, y
 
 

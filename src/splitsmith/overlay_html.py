@@ -198,6 +198,11 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     # instead of hand-tuning an em value per call site.
     row_gutter = max(8, scale.pad // 2)
     column_gutter = max(4, scale.pad // 5)
+    # The scorecard rule's own breathing room -- deliberately its own
+    # number rather than reusing ``column_gutter``: it separates two
+    # whole groups (counts from the hero result), not two elements inside
+    # one group, and it must read as a pause, not just another row gap.
+    rule_margin = max(6, scale.pad // 3)
     return f"""
 @font-face {{
   font-family: "Splitsmith Mono";
@@ -216,20 +221,62 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
   overflow: hidden;
   box-sizing: border-box;
   font-family: "Splitsmith Mono", monospace;
+  /* The three-rail stage summary (issue #683 Task 7b) needs the whole
+     cell height distributed between an auto-height top band, a middle
+     band that takes whatever is left over, and an auto-height bottom
+     band -- exactly ``grid-template-rows: auto 1fr auto``. This is a
+     *default* on every cell, not something only the summary opts into:
+     ``TOP_LEFT``/``TOP_RIGHT``/``BOTTOM_LEFT``/``BOTTOM_RIGHT`` (the
+     live overlay's own corner anchors, never actually drawn through
+     this module -- see the module docstring) stay ``position: absolute``
+     below, which removes them from grid flow entirely, so this costs
+     them nothing. See ``.anchor-top-center`` / ``.anchor-middle-center``
+     / ``.anchor-bottom-center`` for why this replaces the middle rail's
+     old ``top: 50%; transform: translateY(-50%)``: that centred on the
+     cell's own geometry with no regard for its neighbours, so a cell
+     with a tall enough middle rail could paint over the bottom rail's
+     split statistics -- measured on a rendered 640x360 cell with a full
+     ranked stat block. A grid row can never overlap another one; a
+     middle rail that outgrows its ``1fr`` track is clipped by
+     ``overflow: hidden`` above instead, never drawn on top of a sibling.
+  */
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: auto 1fr auto;
 }}
 .anchor {{
-  position: absolute;
   display: flex;
   gap: {row_gutter}px;
   max-width: calc(100% - 2 * {scale.pad}px);
   min-width: 0;
 }}
-.anchor-top-left      {{ top: {scale.pad}px; left: {scale.pad}px; }}
-.anchor-top-center    {{ top: {scale.pad}px; left: 50%; transform: translateX(-50%); }}
-.anchor-top-right     {{ top: {scale.pad}px; right: {scale.pad}px; }}
-.anchor-bottom-left   {{ bottom: {scale.pad}px; left: {scale.pad}px; }}
-.anchor-bottom-center {{ bottom: {scale.pad}px; left: 50%; transform: translateX(-50%); }}
-.anchor-bottom-right  {{ bottom: {scale.pad}px; right: {scale.pad}px; }}
+.anchor-top-left      {{ position: absolute; top: {scale.pad}px; left: {scale.pad}px; }}
+.anchor-top-right     {{ position: absolute; top: {scale.pad}px; right: {scale.pad}px; }}
+.anchor-bottom-left   {{ position: absolute; bottom: {scale.pad}px; left: {scale.pad}px; }}
+.anchor-bottom-right  {{ position: absolute; bottom: {scale.pad}px; right: {scale.pad}px; }}
+/* The three-rail summary's own anchors: real grid items (not
+   ``position: absolute``), one per row, so the browser -- not this
+   module's Python -- guarantees they never overlap. */
+.anchor-top-center {{
+  grid-row: 1;
+  grid-column: 1;
+  justify-self: center;
+  align-self: start;
+  padding-top: {scale.pad}px;
+}}
+.anchor-middle-center {{
+  grid-row: 2;
+  grid-column: 1;
+  justify-self: center;
+  align-self: center;
+}}
+.anchor-bottom-center {{
+  grid-row: 3;
+  grid-column: 1;
+  justify-self: center;
+  align-self: end;
+  padding-bottom: {scale.pad}px;
+}}
 .stack-normal  {{ flex-direction: column; }}
 .stack-reverse {{ flex-direction: column-reverse; }}
 .anchor.align-left   {{ align-items: flex-start; }}
@@ -241,6 +288,23 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
 .group.flow-column.align-left   {{ align-items: flex-start; }}
 .group.flow-column.align-center {{ align-items: center; }}
 .group.flow-column.align-right  {{ align-items: flex-end; }}
+/* The scorecard hairline (see ``Group.divider``): a plain line, not
+   text. ``align-self: stretch`` overrides the anchor's own
+   ``align-items: center`` for this one flex item, so it is stretched to
+   the width the anchor's column already resolved from its *other*
+   (unstretched, text-sized) children -- the widest row above or below it
+   -- rather than carrying any width of its own. This is the one
+   decorative element the redesign allows itself; nothing else here
+   draws a second divider. */
+.group.divider {{
+  display: block;
+  align-self: stretch;
+  height: 2px;
+  background: rgba({ink}, 0.35);
+  margin: {rule_margin}px 0;
+  border: none;
+  padding: 0;
+}}
 .el {{
   display: flex;
   flex-direction: column;
@@ -265,8 +329,18 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
   -webkit-text-stroke: 0.08em rgb({stroke});
   text-shadow: 0.05em 0.05em 0.09em rgb({shadow});
 }}
-.role-identity     {{ font-size: {scale.identity}px; text-overflow: ellipsis; }}
+.role-identity     {{
+  font-size: {scale.identity}px;
+  text-overflow: ellipsis;
+  /* The one place ``Antonio`` (condensed display) draws instead of the
+     mono figure face: a competitor's name is the one string on the
+     cell that is not a number, and condensed genuinely matters here --
+     names run long and cells run narrow. */
+  font-family: "Splitsmith Display", "Splitsmith Mono", sans-serif;
+  font-weight: 600;
+}}
 .role-headline      {{ font-size: {scale.headline}px; }}
+.role-hero              {{ font-size: {scale.hero}px; }}
 .role-verdict        {{ font-size: {scale.verdict}px; }}
 .role-detail           {{ font-size: {scale.detail}px; }}
 .role-live-primary      {{ font-size: {scale.live_primary}px; }}
@@ -366,6 +440,14 @@ def _element_div(element: Element) -> str:
 
 
 def _group_div(group: Group) -> str:
+    """One :class:`Group` as a ``.group`` block -- or, when
+    ``group.divider`` is set, the hairline rule instead of an
+    elements-mapped block. A divider has no elements to render (see
+    :class:`~splitsmith.overlay_layout.Group`'s docstring) so it skips
+    :func:`_group_classes`/:func:`_element_div` entirely rather than
+    mapping an empty ``elements`` tuple through them."""
+    if group.divider:
+        return '<div class="group divider"></div>'
     elements_html = "".join(_element_div(element) for element in group.elements)
     return f'<div class="{_group_classes(group)}">{elements_html}</div>'
 

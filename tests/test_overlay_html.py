@@ -25,6 +25,7 @@ THEME = load_theme("clean")
 SCALE = CellScale(
     identity=31,
     headline=41,
+    hero=81,
     verdict=51,
     detail=61,
     caption=13,
@@ -80,6 +81,7 @@ def test_a_filler_tile_cell_is_empty_of_text():
     [
         (Role.IDENTITY, SCALE.identity),
         (Role.HEADLINE, SCALE.headline),
+        (Role.HERO, SCALE.hero),
         (Role.VERDICT, SCALE.verdict),
         (Role.DETAIL, SCALE.detail),
         (Role.LIVE_PRIMARY, SCALE.live_primary),
@@ -101,7 +103,9 @@ def test_a_different_scale_moves_the_same_role_class():
     """If a role's font-size were hardcoded rather than read from the
     ``scale`` argument, this would fail: a second, distinct CellScale
     must produce a distinct font-size for the same role."""
-    other = CellScale(identity=99, headline=98, verdict=97, detail=96, caption=95, live_primary=94, pad=93)
+    other = CellScale(
+        identity=99, headline=98, hero=100, verdict=97, detail=96, caption=95, live_primary=94, pad=93
+    )
     html_a = cell_html((), scale=SCALE, theme=THEME)
     html_b = cell_html((), scale=other, theme=THEME)
     assert f"font-size: {SCALE.identity}px" in _rule(html_a, ".role-identity")
@@ -208,6 +212,18 @@ def test_both_bundled_fonts_are_declared_via_font_face():
     assert "file://" in html
 
 
+def test_identity_draws_in_the_condensed_display_face_not_the_mono_one():
+    """Both bundled faces are declared, but until issue #683 Task 7b only
+    ``Splitsmith Mono`` was ever assigned to anything -- ``Splitsmith
+    Display`` (Antonio, condensed) sat in the stylesheet unused. A
+    competitor's name is the one string in a cell that is not a number
+    and genuinely wants a condensed face: names run long, cells run
+    narrow."""
+    html = cell_html((), scale=SCALE, theme=THEME)
+    rule = _rule(html, ".role-identity")
+    assert '"Splitsmith Display"' in rule
+
+
 def test_the_cell_font_family_is_the_bundled_face():
     html = cell_html((), scale=SCALE, theme=THEME)
     rule = _rule(html, ".cell")
@@ -292,6 +308,7 @@ def test_top_anchor_stacks_normally():
         (Anchor.TOP_LEFT, "align-left"),
         (Anchor.TOP_CENTER, "align-center"),
         (Anchor.TOP_RIGHT, "align-right"),
+        (Anchor.MIDDLE_CENTER, "align-center"),
         (Anchor.BOTTOM_LEFT, "align-left"),
         (Anchor.BOTTOM_CENTER, "align-center"),
         (Anchor.BOTTOM_RIGHT, "align-right"),
@@ -305,12 +322,106 @@ def test_anchor_alignment_class_follows_is_right_and_is_center(anchor, expected_
     assert anchor_div.group(1) == expected_align
 
 
+def test_middle_center_is_a_grid_row_not_absolutely_positioned():
+    """The one anchor the redesigned stage summary needed and the old
+    four-corner model did not have: it fills the flexible middle row of
+    the cell's ``auto 1fr auto`` grid rather than pinning to an edge or
+    centring on the cell's raw geometry -- see the ``.cell`` rule's own
+    comment for why: a ``position: absolute`` centre ignores its
+    neighbours and can be outgrown into an overlap, a grid row cannot."""
+    html = cell_html((), scale=SCALE, theme=THEME)
+    rule = _rule(html, ".anchor-middle-center")
+    assert "grid-row: 2" in rule
+    assert "position" not in rule, f"middle-center must not be position:absolute: {rule}"
+
+
+def test_the_cell_is_a_three_row_grid():
+    """``auto 1fr auto`` is what makes the three rails use the cell's
+    whole height without any of them able to overlap another."""
+    html = cell_html((), scale=SCALE, theme=THEME)
+    rule = _rule(html, ".cell")
+    assert "grid-template-rows: auto 1fr auto" in rule
+
+
+def test_top_and_bottom_center_are_also_grid_rows_not_absolute():
+    """The whole three-rail trio moves off ``position: absolute`` --
+    only the live overlay's corner anchors (never actually drawn through
+    this module) keep it."""
+    html = cell_html((), scale=SCALE, theme=THEME)
+    top_rule = _rule(html, ".anchor-top-center")
+    bottom_rule = _rule(html, ".anchor-bottom-center")
+    assert "grid-row: 1" in top_rule
+    assert "grid-row: 3" in bottom_rule
+    assert "position" not in top_rule
+    assert "position" not in bottom_rule
+
+
+@pytest.mark.parametrize(
+    "anchor", [Anchor.TOP_LEFT, Anchor.TOP_RIGHT, Anchor.BOTTOM_LEFT, Anchor.BOTTOM_RIGHT]
+)
+def test_corner_anchors_stay_absolutely_positioned(anchor):
+    """The live overlay's own corners are untouched by the three-rail
+    grid -- they stay ``position: absolute``, out of grid flow
+    entirely, so the grid costs them nothing."""
+    html = cell_html((), scale=SCALE, theme=THEME)
+    rule = _rule(html, f".anchor-{anchor.value}")
+    assert "position: absolute" in rule
+
+
+def test_middle_center_stacks_normally_top_to_bottom():
+    """Not a bottom anchor, so declaration order is reading order --
+    the middle rail's groups (counts, rule, working, hero) must not need
+    to be declared in reverse the way ``BOTTOM_LEFT`` does. The shared
+    stylesheet always declares both ``.stack-normal``/``.stack-reverse``
+    rules regardless of what any one cell uses, so this checks which
+    class the anchor *div* itself carries, not whether the word appears
+    anywhere in the document."""
+    group = Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=(Element(Role.HERO, "100.0%"),))
+    html = cell_html((group,), scale=SCALE, theme=THEME)
+    anchor_div = re.search(r'<div class="anchor anchor-middle-center (\S+)', html)
+    assert anchor_div is not None
+    assert anchor_div.group(1) == "stack-normal"
+
+
 def test_flow_maps_to_flex_direction():
     row = Group(anchor=Anchor.TOP_LEFT, flow=Flow.ROW, elements=(Element(Role.DETAIL, "x"),))
     column = Group(anchor=Anchor.TOP_RIGHT, flow=Flow.COLUMN, elements=(Element(Role.DETAIL, "y"),))
     html = cell_html((row, column), scale=SCALE, theme=THEME)
     assert "flex-direction: row" in _rule(html, ".group.flow-row")
     assert "flex-direction: column" in _rule(html, ".group.flow-column")
+
+
+# --- the hairline scorecard rule (issue #683 Task 7b) ---------------------
+
+
+def test_a_divider_group_renders_as_a_line_not_text():
+    """A divider group carries no elements and must not be mapped through
+    the normal elements-to-spans pipeline -- it is a plain rule, not a
+    caption-less value."""
+    divider = Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=(), divider=True)
+    html = cell_html((divider,), scale=SCALE, theme=THEME)
+    assert '<div class="group divider"></div>' in html
+    assert "<span" not in html
+
+
+def test_the_divider_stretches_to_its_siblings_width_not_its_own():
+    """The rule has no content of its own to size itself by -- it must
+    override the anchor's own horizontal centring with ``align-self:
+    stretch`` so it spans whatever width the counts/hero rows around it
+    actually resolve to."""
+    html = cell_html((), scale=SCALE, theme=THEME)
+    rule = _rule(html, ".group.divider")
+    assert "align-self: stretch" in rule
+
+
+def test_the_divider_is_a_hairline_not_a_second_heavy_element():
+    """Restrained: a thin line, no border box, no stroke/shadow
+    treatment -- everything else in the redesign stays quiet around it."""
+    html = cell_html((), scale=SCALE, theme=THEME)
+    rule = _rule(html, ".group.divider")
+    match = re.search(r"height:\s*(\d+)px", rule)
+    assert match is not None, f"no explicit height on the divider rule: {rule}"
+    assert int(match.group(1)) <= 3, f"the divider is not a hairline: {match.group(1)}px"
 
 
 # --- a small self-built roster, rendered structurally (no browser) -------
