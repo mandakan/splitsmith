@@ -39,6 +39,10 @@ def test_clean_preset_matches_legacy_hardcoded_values() -> None:
     # rule and muted are real tokens now, not an alpha hack on ink.
     assert t.rule not in (t.ink, t.stroke)
     assert t.muted not in (t.ink, t.stroke)
+    # ink_2 (issue #683 Task 8): a step down from ink, a step up from
+    # muted -- distinct from both, and from stroke/accent.
+    assert t.ink_2 not in (t.ink, t.muted, t.stroke, t.accent)
+    assert sum(t.muted) < sum(t.ink_2) < sum(t.ink)
 
 
 def test_splitsmith_preset_loads_from_packaged_json() -> None:
@@ -57,6 +61,7 @@ def test_splitsmith_preset_loads_from_packaged_json() -> None:
     assert list(t.accent_text) == data["colors"]["accent_text"]
     assert list(t.rule) == data["colors"]["rule"]
     assert list(t.muted) == data["colors"]["muted"]
+    assert list(t.ink_2) == data["colors"]["ink_2"]
     # Sanity: ink is light (designed for dark surfaces); stroke is dark.
     assert sum(t.ink) > 600
     assert sum(t.stroke) < 100
@@ -82,6 +87,7 @@ def test_default_template_paints_theme_ink() -> None:
         accent_text=(255, 150, 150),
         rule=(60, 60, 60),
         muted=(150, 150, 150),
+        ink_2=(205, 205, 205),
         font_display="Antonio",
         font_mono="JetBrains Mono",
     )
@@ -128,6 +134,7 @@ def test_default_template_paints_theme_split_color() -> None:
         accent_text=(255, 150, 150),
         rule=(60, 60, 60),
         muted=(150, 150, 150),
+        ink_2=(205, 205, 205),
         font_display="Antonio",
         font_mono="JetBrains Mono",
     )

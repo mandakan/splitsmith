@@ -47,7 +47,10 @@ def test_sizes_are_ordered_by_prominence():
     scale = CellScale.for_cell(360)
     assert scale.headline > scale.detail
     assert scale.identity > scale.detail
-    assert scale.verdict > scale.detail
+    # verdict (the DQ chip) is deliberately close to counts weight in the
+    # approved bands design (issue #683 Task 8) -- half the name's own
+    # size, not a dominant accent the way the old placing/DQ role was, so
+    # there is no "verdict must outrank detail" invariant left to assert.
     assert scale.caption <= scale.detail
 
 

@@ -182,11 +182,15 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     mono_url = _font_face_url(_FONT_FILES["mono"])
     display_url = _font_face_url(_FONT_FILES["display"])
     ink = _rgb(theme.ink)
+    ink_2 = _rgb(theme.ink_2)
     stroke = _rgb(theme.stroke)
     shadow = _rgb(theme.shadow)
     accent = _rgb(theme.accent)
+    accent_fill = _rgb(theme.accent_fill)
+    accent_text = _rgb(theme.accent_text)
     split = _rgb(theme.split)
     split_good = _rgb(theme.split_good)
+    muted = _rgb(theme.muted)
     # ``.group``'s row gutter used to be a flat ``0.4em``, computed against
     # whatever font-size the browser inherits down to the flex container
     # itself -- which no rule here ever sets, so it stayed pinned near the
@@ -202,7 +206,16 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     # number rather than reusing ``column_gutter``: it separates two
     # whole groups (counts from the hero result), not two elements inside
     # one group, and it must read as a pause, not just another row gap.
+    # The divider itself is unused by the current (bands) design -- see
+    # ``Group.divider``'s docstring -- but stays live infrastructure for
+    # any future caller that wants it.
     rule_margin = max(6, scale.pad // 3)
+    # The gap between the cell's top row (identity) and the vertically
+    # centred stack below it (issue #683 Task 8's two bands). The mock's
+    # own ``.cell`` sets this as a flex ``gap``; a CSS grid needs the
+    # equivalent ``row-gap`` on the same three rows the rest of this
+    # stylesheet already lays out as ``grid-template-rows``.
+    top_row_gap = scale.pad
     return f"""
 @font-face {{
   font-family: "Splitsmith Mono";
@@ -243,6 +256,7 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
   display: grid;
   grid-template-columns: 1fr;
   grid-template-rows: auto 1fr auto;
+  row-gap: {top_row_gap}px;
 }}
 .anchor {{
   display: flex;
@@ -277,17 +291,47 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
   align-self: end;
   padding-bottom: {scale.pad}px;
 }}
+/* Issue #683 Task 8's two-band stage summary reuses TOP_CENTER's and
+   MIDDLE_CENTER's *rows* -- the grid-row placement that keeps the three
+   rails from ever overlapping -- but left-aligned and spanning the
+   cell's full width rather than shrink-wrapped and centred (the Splits
+   band's four-column grid in particular needs the width). ``justify-self:
+   stretch`` plus an explicit ``padding-left``/``padding-right`` replaces
+   the base rule's ``justify-self: center`` and its shared, shrink-wrap-
+   oriented ``max-width`` -- higher specificity (two classes) wins over
+   the single-class base rules above. */
+.anchor-top-center.align-left,
+.anchor-middle-center.align-left {{
+  justify-self: stretch;
+  max-width: none;
+  box-sizing: border-box;
+  padding-left: {scale.pad}px;
+  padding-right: {scale.pad}px;
+}}
 .stack-normal  {{ flex-direction: column; }}
 .stack-reverse {{ flex-direction: column-reverse; }}
 .anchor.align-left   {{ align-items: flex-start; }}
 .anchor.align-center {{ align-items: center; }}
 .anchor.align-right  {{ align-items: flex-end; }}
 .group {{ display: flex; min-width: 0; }}
-.group.flow-row    {{ flex-direction: row; align-items: baseline; gap: {row_gutter}px; }}
+.group.flow-row    {{ flex-direction: row; align-items: baseline; gap: {row_gutter}px; flex-wrap: wrap; }}
 .group.flow-column {{ flex-direction: column; gap: {column_gutter}px; }}
 .group.flow-column.align-left   {{ align-items: flex-start; }}
 .group.flow-column.align-center {{ align-items: center; }}
 .group.flow-column.align-right  {{ align-items: flex-end; }}
+/* The split-statistics band (issue #683 Task 8): Best/Avg/Worst/Draw as
+   an evenly spaced row across the whole cell width, not shrink-wrapped
+   to the left like every other group. ``align-self: stretch`` overrides
+   the anchor's own ``align-items: flex-start`` for this one flex item,
+   the same trick the divider rule below uses for the same reason.
+   ``grid-template-columns`` is set inline per group (``_group_div``) --
+   the column count is the number of elements, which this shared rule
+   cannot know. */
+.group.flow-grid {{
+  display: grid;
+  align-self: stretch;
+  gap: {column_gutter}px;
+}}
 /* The scorecard hairline (see ``Group.divider``): a plain line, not
    text. ``align-self: stretch`` overrides the anchor's own
    ``align-items: center`` for this one flex item, so it is stretched to
@@ -320,14 +364,38 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
   white-space: nowrap;
   overflow: hidden;
 }}
+/* A value's smaller, muted inline suffix (see ``Element.unit`` --
+   ``"12.00"`` plus a smaller ``"HF"``). ``em`` here resolves against the
+   ``.value`` span it is nested inside, so it scales with whatever role
+   that value actually draws at rather than needing its own size input. */
+.unit {{
+  font-size: 0.45em;
+  color: rgb({muted});
+  -webkit-text-stroke: 0;
+  margin-left: 0.25em;
+}}
+/* Labels (issue #683 Task 8: "SCORING"/"SPLITS" band headers, and each
+   split statistic's own "BEST"/"AVG"/"WORST"/"DRAW" caption) are
+   deliberately the one text in the cell with **no stroke** -- a stroke
+   around glyphs this thin at this size is a halo that eats them (the
+   same lesson ``Emphasis.PLATE`` already learned about accent text at
+   small sizes) -- text-shadow only, plus the design's own uppercase /
+   letter-spacing treatment and the ``ink_2`` token instead of an opacity
+   hack on ``ink``. ``.caption`` (a label drawn *above* a value) never
+   carries an ``.emphasis-*`` class at all, so it needs no override; a
+   standalone ``Role.LABEL`` element goes through the same value pipeline
+   every other role does and so *does* carry ``.emphasis-plain``'s own
+   stroke -- ``.role-label`` must therefore be declared after
+   ``.emphasis-plain``/``.emphasis-muted`` below to win the property back
+   (same source-order mechanism the ``.tok-*`` block's own comment
+   documents). */
 .caption {{
   display: block;
   font-size: {scale.caption}px;
-  color: rgb({ink});
-  opacity: 0.7;
-  paint-order: stroke fill;
-  -webkit-text-stroke: 0.08em rgb({stroke});
-  text-shadow: 0.05em 0.05em 0.09em rgb({shadow});
+  color: rgb({ink_2});
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  text-shadow: 0 1px 2px rgb({stroke});
 }}
 .role-identity     {{
   font-size: {scale.identity}px;
@@ -340,7 +408,6 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
   font-weight: 600;
 }}
 .role-headline      {{ font-size: {scale.headline}px; }}
-.role-hero              {{ font-size: {scale.hero}px; }}
 .role-verdict        {{ font-size: {scale.verdict}px; }}
 .role-detail           {{ font-size: {scale.detail}px; }}
 .role-live-primary      {{ font-size: {scale.live_primary}px; }}
@@ -351,20 +418,39 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
   text-shadow: 0.06em 0.06em 0.1em rgb({shadow});
 }}
 .emphasis-muted {{ opacity: 0.68; }}
+/* See the ``.caption`` comment above: this must win back "no stroke,
+   ink_2, no shadow-via-emphasis" over ``.emphasis-plain``'s stroke,
+   which is why it is declared here rather than beside ``.role-*``
+   above. */
+.role-label {{
+  font-size: {scale.caption}px;
+  color: rgb({ink_2});
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  -webkit-text-stroke: 0;
+  text-shadow: 0 1px 2px rgb({stroke});
+}}
 /* Colour tokens (see ``ColorToken``) override an element's ink -- but
    never a plate's, which always wants ink-on-accent for contrast. These
    rules must stay between ``.emphasis-plain``/``.emphasis-muted`` (whose
    default colour they are meant to override) and ``.emphasis-plate``
    below (which must win back the colour property for a plated element,
    or an accent-toned count on an accent-coloured plate would vanish).
-   Source order is the whole mechanism here: all three selectors have
+   Source order is the whole mechanism here: all these selectors have
    equal specificity, so this is not optional ordering. */
 .tok-ink        {{ color: rgb({ink}); }}
 .tok-split      {{ color: rgb({split}); }}
 .tok-split-good {{ color: rgb({split_good}); }}
 .tok-accent     {{ color: rgb({accent}); }}
+.tok-accent-text {{ color: rgb({accent_text}); }}
 .emphasis-plate {{
-  background: rgb({accent});
+  /* Issue #683 Task 8: the plate's own background reads ``accent_fill``
+     (the darker fill token, AA-large with ink text on top) -- not
+     ``accent``, the raw identity red the theme reserves for structural
+     use. ``accent_fill``/``accent_text`` existed on the theme since
+     c25bb64 but this rule (and ``.tok-accent-text`` above) were never
+     wired to either until now. */
+  background: rgb({accent_fill});
   color: rgb({ink});
   padding: 0.15em 0.35em;
   border-radius: 0.15em;
@@ -373,24 +459,31 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
 """.strip()
 
 
-def _anchor_classes(anchor: Anchor) -> str:
+def _anchor_classes(anchor: Anchor, align: str | None) -> str:
     """Positioning + stacking classes for one anchor wrapper.
 
-    Driven entirely by ``Anchor.is_bottom`` / ``is_right`` / ``is_center``
-    per the amendment: ``stack-reverse`` on a bottom anchor makes the
-    *first declared* group render nearest the bottom edge with later
-    groups stacking upward (flex ``column-reverse`` with source order
-    achieves exactly that), and the ``align-*`` class centers or
-    right-aligns each group's own box within the stack.
+    Driven by ``Anchor.is_bottom`` / ``is_right`` / ``is_center`` per the
+    amendment: ``stack-reverse`` on a bottom anchor makes the *first
+    declared* group render nearest the bottom edge with later groups
+    stacking upward (flex ``column-reverse`` with source order achieves
+    exactly that), and the ``align-*`` class centers or right-aligns each
+    group's own box within the stack.
+
+    ``align`` (issue #683 Task 8, see ``Group.align``) overrides what the
+    anchor alone would imply -- ``None`` falls back to that default, which
+    is the only thing every anchor did before this parameter existed.
     """
     classes = ["anchor", f"anchor-{anchor.value}"]
     classes.append("stack-reverse" if anchor.is_bottom else "stack-normal")
-    if anchor.is_right:
-        classes.append("align-right")
-    elif anchor.is_center:
-        classes.append("align-center")
-    else:
-        classes.append("align-left")
+    resolved = align
+    if resolved is None:
+        if anchor.is_right:
+            resolved = "right"
+        elif anchor.is_center:
+            resolved = "center"
+        else:
+            resolved = "left"
+    classes.append(f"align-{resolved}")
     return " ".join(classes)
 
 
@@ -425,8 +518,9 @@ def _color_class(color: ColorToken | None) -> str:
 
 def _element_div(element: Element) -> str:
     """One :class:`Element` as a ``.el`` block: an optional caption line
-    above its value, both escaped -- a competitor's name is untrusted
-    input and may contain ``<``, ``&`` or quotes."""
+    above its value and an optional unit suffix nested inside it, all
+    escaped -- a competitor's name is untrusted input and may contain
+    ``<``, ``&`` or quotes."""
     el_classes = "el el-identity" if element.role is Role.IDENTITY else "el"
     role_class = f"role-{element.role.value}"
     emphasis_class = f"emphasis-{element.emphasis.value}"
@@ -434,9 +528,30 @@ def _element_div(element: Element) -> str:
     caption_html = ""
     if element.caption is not None:
         caption_html = f'<span class="caption">{escape(element.caption)}</span>'
+    unit_html = ""
+    if element.unit is not None:
+        unit_html = f'<span class="unit">{escape(element.unit)}</span>'
     value_classes = " ".join(c for c in ("value", role_class, emphasis_class, color_class) if c)
-    value_html = f'<span class="{value_classes}">{escape(element.text)}</span>'
+    value_html = f'<span class="{value_classes}">{escape(element.text)}{unit_html}</span>'
     return f'<div class="{el_classes}">{caption_html}{value_html}</div>'
+
+
+def _group_style(group: Group) -> str:
+    """The inline ``style`` attribute for one group's overrides (issue
+    #683 Task 8: ``Group.gap`` / ``Group.margin_top``, and a ``GRID``
+    flow's column count) -- ``""`` when nothing overrides the shared
+    stylesheet, so a group with no overrides renders exactly the markup
+    it always did."""
+    parts: list[str] = []
+    if group.flow is Flow.GRID:
+        parts.append(f"grid-template-columns: repeat({max(1, len(group.elements))}, 1fr)")
+    if group.gap is not None:
+        parts.append(f"gap: {group.gap}px")
+    if group.margin_top is not None:
+        parts.append(f"margin-top: {group.margin_top}px")
+    if not parts:
+        return ""
+    return f' style="{"; ".join(parts)}"'
 
 
 def _group_div(group: Group) -> str:
@@ -449,12 +564,19 @@ def _group_div(group: Group) -> str:
     if group.divider:
         return '<div class="group divider"></div>'
     elements_html = "".join(_element_div(element) for element in group.elements)
-    return f'<div class="{_group_classes(group)}">{elements_html}</div>'
+    return f'<div class="{_group_classes(group)}"{_group_style(group)}>{elements_html}</div>'
 
 
 def _anchor_div(anchor: Anchor, members: Sequence[Group]) -> str:
+    # Every group sharing one anchor must agree on any alignment override
+    # -- they render inside the same wrapper div and CSS has one
+    # ``align-*`` class to give it. The first override found wins; in
+    # practice ``overlay_summary._cell_groups`` sets the same ``align`` on
+    # every group it declares for a given anchor, so this is just how the
+    # (single, agreeing) value reaches the wrapper.
+    align = next((g.align for g in members if g.align is not None), None)
     groups_html = "".join(_group_div(group) for group in members)
-    return f'<div class="{_anchor_classes(anchor)}">{groups_html}</div>'
+    return f'<div class="{_anchor_classes(anchor, align)}">{groups_html}</div>'
 
 
 def _cell_div(groups: Sequence[Group]) -> str:

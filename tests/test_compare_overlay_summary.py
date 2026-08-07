@@ -59,7 +59,7 @@ from splitsmith.compare import overlay_summary as summ
 from splitsmith.compare.mp4_grid import GridStagePlan, GridTile
 from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
-from splitsmith.overlay_layout import Anchor, ColorToken, Emphasis, Role
+from splitsmith.overlay_layout import Anchor, ColorToken, Emphasis, Flow, Role
 from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
 from splitsmith.overlay_theme import load_theme
 from splitsmith.ui.project import StageScorecard
@@ -402,54 +402,77 @@ def _groups_by_anchor(groups):
     return out
 
 
-def test_the_name_and_the_placing_share_the_top_center():
-    """Issue #683 Task 7b: the top rail is centred, not corner-anchored --
-    a corner label was a leftover habit from the live overlay staying out
-    of the picture's way, and the hold's picture is background texture,
-    not content to stay clear of."""
-    tile = _full_stat_tile("Ann")
-    groups = summ._cell_groups(tile, summ.StagePlacing(rank=2, total_ranked=5), "Ann")
+#: Fixed cell geometry for tests that call ``_cell_groups`` directly --
+#: only the gaps computed from it change with cell size, never the shape
+#: of what is declared, so one size is enough to assert content against.
+_CELL_W, _CELL_H = 320, 180
+_SCALE = summ._summary_scale(_CELL_H)
+
+
+def _cg(tile, label="Ann"):
+    return summ._cell_groups(tile, label, scale=_SCALE, cell_width=_CELL_W, cell_height=_CELL_H)
+
+
+def test_the_name_and_the_dq_chip_share_the_top_center():
+    """Issue #683 Task 8: the identity row is left-aligned (see
+    ``Group.align``), not centred -- the approved design's whole cell
+    reads flush-left, not the old three-rail design's centred rails."""
+    scorecard = StageScorecard(dq=True)
+    tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
+    groups = _cg(tile)
     top = _groups_by_anchor(groups)[Anchor.TOP_CENTER][0]
-    assert [e.text for e in top.elements] == ["Ann", "#2"]
+    assert [e.text for e in top.elements] == ["Ann", "DQ"]
     assert top.elements[0].role is Role.IDENTITY
     assert top.elements[1].role is Role.VERDICT
     assert top.elements[1].emphasis is Emphasis.PLATE
+    assert top.align == "left"
 
 
-def test_the_hero_pct_and_its_working_hf_and_time_are_declared():
-    """Issue #683 Task 7b: units attach to their own value now (no more
-    separate TIME/HF/STAGE captions), and the three are not drawn as
-    equal-weight peers -- stage percentage is the hero (the only figure
-    comparable across the whole grid), hit factor and time are its
-    smaller "working"."""
-    scorecard = StageScorecard(hit_factor=12.0, stage_pct=100.0)
+def test_a_clean_tile_has_no_dq_chip():
+    tile = _full_stat_tile("Ann")
+    groups = _cg(tile)
+    top = _groups_by_anchor(groups)[Anchor.TOP_CENTER][0]
+    assert [e.text for e in top.elements] == ["Ann"]
+
+
+def test_scoring_band_declares_a_label_the_counts_then_hf_and_time():
+    """Issue #683 Task 8: both bands draw their figures at the same
+    role/size (``Role.HEADLINE``) -- neither the hit factor/time row nor
+    the split statistics outrank the other, which is the whole point of
+    the redesign. Hit factor carries a smaller inline "HF" unit
+    (``Element.unit``); time's unit is embedded in the text itself."""
+    scorecard = StageScorecard(hit_factor=12.0, stage_pct=100.0, alphas=10)
     tile = TileStageData(label="Ann", stage_number=1, stage_time_seconds=4.5, scorecard=scorecard)
-    groups = summ._cell_groups(tile, None, "Ann")
+    groups = _cg(tile)
     middle = _groups_by_anchor(groups)[Anchor.MIDDLE_CENTER]
 
-    hero_group = next(g for g in middle if any(e.role is Role.HERO for e in g.elements))
-    working_group = next(g for g in middle if any(e.role is Role.HEADLINE for e in g.elements))
+    label_group = next(g for g in middle if any(e.text == "Scoring" for e in g.elements))
+    assert label_group.elements[0].role is Role.LABEL
 
-    assert [e.text for e in hero_group.elements] == ["100.0%"]
-    assert [e.text for e in working_group.elements] == ["4.50s", "12.00 HF"]
-    # No captions anywhere -- the unit is embedded in the text itself.
-    assert all(e.caption is None for e in (*hero_group.elements, *working_group.elements))
+    working_group = next(g for g in middle if any(e.text == "12.00" for e in g.elements))
+    assert [e.text for e in working_group.elements] == ["12.00", "4.50s"]
+    assert {e.role for e in working_group.elements} == {Role.HEADLINE}
+    assert working_group.elements[0].unit == "HF"
+    assert working_group.elements[1].unit is None
+    # No captions on the scoring figures -- units attach to the value
+    # itself, unlike the split statistics' captioned grid below.
+    assert all(e.caption is None for e in working_group.elements)
 
 
 def test_a_clean_run_states_its_zeros_without_a_plate():
     """Presence is a fact; emphasis is a judgement. Drawing an accent
     plate on every clean cell in the grid would make the plate mean
     nothing when a real penalty turns up. The counts still read as
-    "worth -10" -- coloured accent -- even at zero; only an *actual*
+    "worth -10" -- coloured accent_text -- even at zero; only an *actual*
     nonzero fault additionally plates (see ``test_a_penalised_run_...``).
     """
     scorecard = StageScorecard(alphas=10, misses=0, no_shoots=0, procedurals=0)
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
-    groups = summ._cell_groups(tile, None, "Ann")
+    groups = _cg(tile)
     faults = [e for g in groups for e in g.elements if e.text in ("M0", "NS0", "P0")]
     assert [e.text for e in faults] == ["M0", "NS0", "P0"]
     assert all(e.emphasis is Emphasis.PLAIN for e in faults)
-    assert all(e.color is ColorToken.ACCENT for e in faults)
+    assert all(e.color is ColorToken.ACCENT_TEXT for e in faults)
 
 
 def test_a_penalised_run_lights_the_plate():
@@ -458,13 +481,13 @@ def test_a_penalised_run_lights_the_plate():
     one) while ``M1``/``P2`` -- both genuinely nonzero -- plate."""
     scorecard = StageScorecard(alphas=10, misses=1, no_shoots=0, procedurals=2)
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
-    groups = summ._cell_groups(tile, None, "Ann")
+    groups = _cg(tile)
     by_text = {e.text: e for g in groups for e in g.elements if e.text in ("M1", "NS0", "P2")}
     assert set(by_text) == {"M1", "NS0", "P2"}
     assert by_text["M1"].emphasis is Emphasis.PLATE
     assert by_text["P2"].emphasis is Emphasis.PLATE
     assert by_text["NS0"].emphasis is Emphasis.PLAIN
-    assert all(e.color is ColorToken.ACCENT for e in by_text.values())
+    assert all(e.color is ColorToken.ACCENT_TEXT for e in by_text.values())
 
 
 def test_the_six_counts_are_one_equal_weight_colour_coded_row():
@@ -475,104 +498,85 @@ def test_the_six_counts_are_one_equal_weight_colour_coded_row():
     colour -- not size -- carrying what each count is worth."""
     scorecard = StageScorecard(alphas=10, charlies=1, deltas=1, misses=1, no_shoots=0, procedurals=2)
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
-    groups = summ._cell_groups(tile, None, "Ann")
+    groups = _cg(tile)
     (counts_group,) = [g for g in _groups_by_anchor(groups)[Anchor.MIDDLE_CENTER] if len(g.elements) == 6]
     texts_and_colors = [(e.text, e.color) for e in counts_group.elements]
     assert texts_and_colors == [
         ("A10", ColorToken.SPLIT_GOOD),
         ("C1", ColorToken.INK),
         ("D1", ColorToken.SPLIT),
-        ("M1", ColorToken.ACCENT),
-        ("NS0", ColorToken.ACCENT),
-        ("P2", ColorToken.ACCENT),
+        ("M1", ColorToken.ACCENT_TEXT),
+        ("NS0", ColorToken.ACCENT_TEXT),
+        ("P2", ColorToken.ACCENT_TEXT),
     ]
     # Equal weight: every one of the six shares a role, so none can
     # outrank another by size the way the old accuracy/faults split did.
     assert len({e.role for e in counts_group.elements}) == 1
 
 
-def test_split_statistics_sit_quiet_and_small_on_the_bottom_rail():
-    """Issue #683 Task 7b moved this group from the running clock's old
-    top-right corner to the bottom rail: the three-rail redesign uses the
-    whole cell (top identity, middle scored result, bottom split
-    detail), and split statistics are explicitly the quiet, small figures
-    -- last in the reading order, not competing with the hero for the
-    top of the cell."""
+def test_split_statistics_are_a_captioned_four_column_grid():
+    """Issue #683 Task 8: Best/Avg/Worst/Draw is its own band -- a
+    ``Flow.GRID`` group spanning the cell's full width -- equal weight to
+    the Scoring band above it, not a quiet trailing line."""
     tile = _full_stat_tile("Ann")
-    groups = summ._cell_groups(tile, None, "Ann")
-    bottom = _groups_by_anchor(groups)[Anchor.BOTTOM_CENTER][0]
-    texts = [e.text for e in bottom.elements]
-    assert any("Best" in t for t in texts)
-    assert any(t.startswith("Draw") for t in texts)
-    assert all(e.emphasis is Emphasis.MUTED for e in bottom.elements)
-    assert all(e.role is Role.DETAIL for e in bottom.elements)
+    groups = _cg(tile)
+    splits_groups = [
+        g
+        for g in _groups_by_anchor(groups)[Anchor.MIDDLE_CENTER]
+        if any(e.caption in ("Best", "Avg", "Worst", "Draw") for e in g.elements)
+    ]
+    (grid_group,) = splits_groups
+    assert grid_group.flow is Flow.GRID
+    assert [e.caption for e in grid_group.elements] == ["Best", "Avg", "Worst", "Draw"]
+    assert all(e.role is Role.HEADLINE for e in grid_group.elements)
+    assert grid_group.align == "left"
 
 
-def test_a_dq_takes_the_placings_slot_and_suppresses_the_scoring():
+def test_a_dq_chip_suppresses_the_scoring_figures():
     scorecard = StageScorecard(hit_factor=5.12, stage_pct=80.0, alphas=7, dq=True)
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
-    groups = summ._cell_groups(tile, None, "Ann")
+    groups = _cg(tile)
     texts = [e.text for g in groups for e in g.elements]
     assert "DQ" in texts
     assert not any("5.12" in t for t in texts)
-    assert not any("80.0" in t for t in texts)
+    assert not any("A7" in t for t in texts)
 
 
-def test_a_dq_with_a_stage_time_promotes_it_to_hero_with_no_divider():
-    """A DQ suppresses the counts entirely (see the test above), so there
-    is nothing above a rule to separate from -- and nothing left to show
-    in the middle rail except the collapsed time, promoted to the hero's
-    own visual weight so the cell's biggest slot is not simply empty."""
+def test_a_dq_with_a_stage_time_still_shows_the_scoring_band():
+    """A DQ suppresses the counts and hit factor (see the test above),
+    but the mock's own DQ reference cell still shows the "Scoring" label
+    with just the stage time -- the band is not dropped outright, only
+    what it can no longer show is."""
     scorecard = StageScorecard(hit_factor=5.12, stage_pct=80.0, alphas=7, dq=True)
     tile = TileStageData(label="Ann", stage_number=1, stage_time_seconds=9.87, scorecard=scorecard)
-    groups = summ._cell_groups(tile, None, "Ann")
+    groups = _cg(tile)
     middle = _groups_by_anchor(groups).get(Anchor.MIDDLE_CENTER, [])
 
-    assert not any(g.divider for g in middle)
-    (hero_group,) = middle
-    assert [e.text for e in hero_group.elements] == ["9.87s"]
-    assert [e.role for e in hero_group.elements] == [Role.HERO]
-
-
-def test_no_divider_when_nothing_is_computed_below_the_counts():
-    """A rule with nothing below it to divide from would be a stray line
-    for no reason -- it must only appear when both sides of it are real."""
-    scorecard = StageScorecard(alphas=5)  # no hit factor, no stage_pct
-    tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)  # no stage_time either
-    groups = summ._cell_groups(tile, None, "Ann")
-    middle = _groups_by_anchor(groups)[Anchor.MIDDLE_CENTER]
-
-    assert not any(g.divider for g in middle)
-    assert len(middle) == 1
-    assert [e.text for e in middle[0].elements] == ["A5"]
+    label_group = next(g for g in middle if any(e.text == "Scoring" for e in g.elements))
+    assert label_group is not None
+    working_group = next(g for g in middle if any(e.text == "9.87s" for e in g.elements))
+    assert [e.text for e in working_group.elements] == ["9.87s"]
+    assert [e.role for e in working_group.elements] == [Role.HEADLINE]
 
 
 def test_a_tile_with_nothing_declares_only_its_label():
     """The control cell. A tile with no audit and no scorecard renders
     its name and nothing else -- which is what the pixel checks measure
     "is the hold blurred" against."""
-    groups = summ._cell_groups(None, None, "Ann")
+    groups = _cg(None)
     assert [e.text for g in groups for e in g.elements] == ["Ann"]
 
 
-def test_the_middle_rail_declares_counts_then_a_divider_then_working_then_the_hero():
-    """Groups sharing MIDDLE_CENTER stack top to bottom in declaration
-    order (it is not a bottom anchor, so no reversal), and that order is
-    the equation itself: what the shooter did, a rule, what it produced,
-    what it's worth."""
-    tile = _full_stat_tile("Ann")
-    groups = summ._cell_groups(tile, None, "Ann")
+def test_a_tile_with_no_scorecard_but_shots_still_declares_splits():
+    """No scorecard at all (not even a DQ) but real shots: the scoring
+    band is skipped entirely (nothing to show), but split statistics --
+    computed off the shots themselves, not the scorecard -- still draw."""
+    shots = (TileShot(time_from_beep=1.0, split=1.0), TileShot(time_from_beep=1.3, split=0.3))
+    tile = TileStageData(label="Ann", stage_number=1, shots=shots)
+    groups = _cg(tile)
     middle = _groups_by_anchor(groups)[Anchor.MIDDLE_CENTER]
-
-    assert len(middle) == 4
-    counts, divider, working, hero = middle
-    # ``_full_stat_tile`` carries alphas/charlies/deltas/misses/no_shoots
-    # but not procedurals (unread, not zero) -- five counts, not six.
-    assert len(counts.elements) == 5
-    assert divider.divider is True
-    assert divider.elements == ()
-    assert {e.role for e in working.elements} == {Role.HEADLINE}
-    assert [e.role for e in hero.elements] == [Role.HERO]
+    assert not any(e.text == "Scoring" for g in middle for e in g.elements)
+    assert any(e.text == "Splits" for g in middle for e in g.elements)
 
 
 # --- composition ------------------------------------------------------------
@@ -685,45 +689,45 @@ def test_write_hold_still_forwards_the_rasterizer(tmp_path):
 
 
 # --- text content: what a cell's declared groups say -----------------------
-#
-# ``_cell_groups`` is unchanged by this task (see the module docstring), so
-# these ask it directly for the same facts the old tests round-tripped
-# through PIL drawing to observe.
 
 
 def _texts(groups) -> list[str]:
     return [e.text for g in groups for e in g.elements]
 
 
-def test_missing_scorecard_collapses_to_the_time_as_the_hero():
-    """No scorecard means no counts, no hit factor and no stage
-    percentage -- but the tile still has a stage time, and issue #683
-    Task 7b's collapse rule promotes it into the hero's own visual
-    weight rather than leaving that slot empty."""
+def test_missing_scorecard_still_shows_stage_time_and_shot_stats():
+    """No scorecard means no counts, no hit factor -- but the tile still
+    has a stage time, and it still draws (in the Scoring band, at the same
+    weight it always draws at) rather than being dropped for want of a
+    scorecard. Splits still draw too, computed off the shots themselves."""
     shots = (TileShot(time_from_beep=1.0, split=1.0), TileShot(time_from_beep=1.3, split=0.3))
     tile = TileStageData(label="Ann", stage_number=1, shots=shots, stage_time_seconds=12.34, scorecard=None)
-    groups = summ._cell_groups(tile, None, "Ann")
+    groups = _cg(tile)
     texts = _texts(groups)
 
-    assert any("shots" in t for t in texts)
-    # The unit is embedded in the value now -- no separate caption.
+    # The unit is embedded in the value now -- no separate caption for it.
     assert "12.34s" in texts
-    assert not any(e.caption is not None for g in groups for e in g.elements)
     assert not any("%" in t for t in texts)
     assert not any(" HF" in t for t in texts)
     assert not any(t.startswith("A") and t[1:2].isdigit() for t in texts)
     assert "DQ" not in texts
+    assert "Scoring" in texts
+    assert "Splits" in texts
+    assert "0.30" in texts  # the one non-draw split, as Best/Avg/Worst
 
-    hero_group = next(g for g in groups if any(e.role is Role.HERO for e in g.elements))
-    assert [e.text for e in hero_group.elements] == ["12.34s"]
+    working_group = next(g for g in groups if any(e.text == "12.34s" for e in g.elements))
+    assert [e.role for e in working_group.elements] == [Role.HEADLINE]
 
 
-def test_stage_points_never_appears_and_stage_pct_does():
-    scorecard = StageScorecard(stage_points=143.2, stage_pct=87.4)
+def test_stage_pct_and_stage_points_never_appear():
+    """Issue #683 Task 8: the stage percentage is gone entirely, not
+    merely resized or moved -- along with stage_points, which never drew
+    to begin with."""
+    scorecard = StageScorecard(stage_points=143.2, stage_pct=87.4, alphas=10)
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
-    texts = _texts(summ._cell_groups(tile, None, "Ann"))
+    texts = _texts(_cg(tile))
 
-    assert any("87.4" in t for t in texts)
+    assert not any("87.4" in t for t in texts)
     assert not any("143.2" in t for t in texts)
 
 
@@ -734,7 +738,7 @@ def test_none_hit_counts_are_omitted_not_zeroed():
     # count nobody read.
     scorecard = StageScorecard(alphas=7, charlies=None, deltas=1, misses=None, no_shoots=0)
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
-    texts = _texts(summ._cell_groups(tile, None, "Ann"))
+    texts = _texts(_cg(tile))
 
     assert "A7" in texts
     assert "D1" in texts
@@ -801,7 +805,7 @@ def test_both_accuracy_and_faults_are_drawn_for_a_penalised_tile():
         procedurals=2,
     )
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
-    texts = _texts(summ._cell_groups(tile, None, "Ann"))
+    texts = _texts(_cg(tile))
 
     for count in ("A10", "C1", "D1", "M1", "NS0", "P2"):
         assert count in texts
@@ -809,7 +813,7 @@ def test_both_accuracy_and_faults_are_drawn_for_a_penalised_tile():
 
 def test_manual_time_is_marked_as_manual():
     tile = TileStageData(label="Ann", stage_number=1, stage_time_seconds=12.34, stage_time_is_manual=True)
-    texts = _texts(summ._cell_groups(tile, None, "Ann"))
+    texts = _texts(_cg(tile))
 
     assert any("12.34" in t and "manual" in t for t in texts)
 
@@ -817,13 +821,11 @@ def test_manual_time_is_marked_as_manual():
 def test_dq_replaces_the_scoring_lines():
     scorecard = StageScorecard(hit_factor=5.12, stage_pct=80.0, alphas=7, dq=True)
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)
-    groups = summ._cell_groups(tile, None, "Ann")
+    groups = _cg(tile)
     texts = _texts(groups)
-    captions = [e.caption for g in groups for e in g.elements if e.caption is not None]
 
     assert "DQ" in texts
-    assert "HF" not in captions
-    assert "STAGE" not in captions
+    assert not any("5.12" in t for t in texts)
     assert not any("A7" in t for t in texts)
 
 
@@ -835,20 +837,15 @@ def test_splits_exclude_the_draw_from_best_average_worst():
         TileShot(time_from_beep=2.4, split=0.4),
     )
     tile = TileStageData(label="Ann", stage_number=1, shots=shots)
-    texts = _texts(summ._cell_groups(tile, None, "Ann"))
+    groups = _cg(tile)
+    by_caption = {e.caption: e.text for g in groups for e in g.elements if e.caption is not None}
 
-    stats_lines = [t for t in texts if t.startswith("Best")]
-    assert len(stats_lines) == 1
-    assert "0.20" in stats_lines[0]
-    assert "0.30" in stats_lines[0]
-    assert "0.40" in stats_lines[0]
-    assert "1.50" not in stats_lines[0]
-    assert any(t == "Draw 1.50" for t in texts)
+    assert by_caption == {"Best": "0.20", "Avg": "0.30", "Worst": "0.40", "Draw": "1.50"}
 
 
 def test_a_tile_with_no_audit_shows_only_its_label():
     tile = TileStageData(label="Ann", stage_number=1)
-    assert _texts(summ._cell_groups(tile, None, "Ann")) == ["Ann"]
+    assert _texts(_cg(tile)) == ["Ann"]
 
 
 def test_a_filler_tile_is_black_with_no_text():
@@ -926,11 +923,14 @@ def test_dq_missing_scorecard_and_filler_get_no_placing():
     assert placings["Cy"].rank == 1
 
 
-def test_the_ranking_reaches_the_rendered_html():
-    """The wiring test: ``build_hold_still`` must actually thread
-    ``_rank_placings``'s output into each placement's own declared groups
-    (via ``_summary_cells``) and on into the rasterized HTML -- the three
-    tests above only prove the ranking function itself is correct."""
+def test_ranking_no_longer_reaches_the_rendered_html():
+    """Issue #683 Task 8: the placing is gone from the rendered summary
+    entirely, along with the stage percentage it was ranked by.
+    ``_rank_placings``/``StagePlacing`` stay in the module (kept for a
+    possible future caller -- see the task report) but ``build_hold_still``
+    no longer threads their output into ``_cell_groups``, so no
+    ``"#1"``/``"#2"`` chip reaches the HTML even though the ranking itself
+    is still directly computable (see the tests above)."""
     placements = [_placement("Ann", 0, 0), _placement("Bo", 0, 1)]
     data = {
         "Ann": TileStageData(label="Ann", stage_number=1, scorecard=StageScorecard(stage_pct=95.0)),
@@ -938,8 +938,8 @@ def test_the_ranking_reaches_the_rendered_html():
     }
     html = _rendered_html(placements, data)
 
-    assert "#1" in html
-    assert "#2" in html
+    assert "#1" not in html
+    assert "#2" not in html
 
 
 # --- content attribution: one placement's data never reaches another's ----
@@ -967,8 +967,10 @@ def test_the_ranking_reaches_the_rendered_html():
 
 
 def _full_stat_tile(label: str) -> TileStageData:
-    """A tile with every line the summary can draw: label, placing, shot
-    count, time, HF, stage pct, hit counts, split stats, draw."""
+    """A tile with every line the summary can draw: label, shot count,
+    time, HF, hit counts, split stats, draw. ``stage_pct`` is set on the
+    scorecard for realism (a real audit would carry it) but is never
+    drawn -- issue #683 Task 8 removed it entirely."""
     shots = tuple(TileShot(time_from_beep=1.0 + 0.3 * i, split=0.3) for i in range(6))
     return TileStageData(
         label=label,
@@ -992,14 +994,14 @@ def test_summary_cells_never_attributes_one_placements_content_to_another():
         "Ann": _full_stat_tile("Ann"),
         "Below": TileStageData(label="Below", stage_number=1),
     }
-    placings = summ._rank_placings(placements, data)
 
-    cells = summ._summary_cells(placements, data, placings)
+    cells = summ._summary_cells(placements, data, scale=_SCALE, cell_width=_CELL_W, cell_height=_CELL_H)
     by_label = {placement.label: groups for placement, groups in cells}
 
     ann_texts = {e.text for g in by_label["Ann"] for e in g.elements}
     assert "12.34s" in ann_texts
-    assert "87.4%" in ann_texts
+    assert "5.12" in ann_texts
+    assert not any("87.4" in t for t in ann_texts)
     # Neighbours have no audit and no scorecard: their own declared
     # groups must carry nothing but their own label -- not a trace of
     # Ann's figures, which a naive "reuse the previous groups" bug could
@@ -1030,8 +1032,8 @@ def test_a_full_stat_tiles_figures_never_reach_a_neighboring_cells_markup():
     below_cell = _cell_markup(html, 2, 0)
 
     assert "12.34" in ann_cell
-    assert "87.4" in ann_cell
-    for figure in ("12.34", "87.4", "5.12"):
+    assert "5.12" in ann_cell
+    for figure in ("12.34", "5.12"):
         assert figure not in above_cell, f"{figure!r} reached the cell above Ann's"
         assert figure not in below_cell, f"{figure!r} reached the cell below Ann's"
 

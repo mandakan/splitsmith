@@ -2,13 +2,17 @@
 
 At the end of a stage's action the grid holds on a still frame per tile,
 blurred and dimmed, with that shooter's stage summary drawn over their own
-cell -- shot count, stage time, hit factor, ``stage_pct``, hit counts, and
-(the one thing the pre-Milestone-A brief did not have) a cross-shooter
-placing ranked by ``stage_pct``. See
-``docs/superpowers/plans/2026-08-05-compare-grid-milestone-b-kickoff.md``,
-"Amendments to Tasks 7-9", for why the ranking exists and what it must
-never become: it is not the deleted live delta strip relocated, and it
-does not reintroduce ``TilePanel.rank`` / ``delta_to_leader``.
+cell: their name (with a DQ chip beside it when DQ'd), then a vertically
+centred stack of two equal-weight bands -- **Scoring** (the six
+colour-coded hit/fault counts, then hit factor and stage time) and
+**Splits** (Best/Avg/Worst/Draw as a captioned four-column grid). This is
+issue #683 Task 8's approved design
+(``.superpowers/sdd/2026-08-06-overlay-composition-seam/APPROVED-bands-mock.py``),
+replacing the three-rail layout Task 7b shipped: the stage percentage and
+the cross-shooter placing that rail carried are gone entirely, not merely
+resized or moved -- see the task report for what stayed behind
+(``_rank_placings``/``StagePlacing``, unused by this module now but kept
+for a possible future caller) and why.
 
 **The blur happens once, not per frame.** The tile is a still: one PIL
 ``GaussianBlur`` call, held for the whole hold duration. Applying ``gblur``
@@ -93,36 +97,23 @@ def _summary_scale(cell_height: int) -> CellScale:
     Deliberately **not** a change to ``CellScale.for_cell`` itself: that
     resolver is shared with the live sprite and the running clock
     (``test_live_primary_and_pad_match_what_the_grid_computes_today``
-    pins it), and the hold is a different picture-is-content-not-
-    background situation than the live overlay is. So this derives a
-    summary-only scale from the same base numbers instead of touching the
-    shared formula.
+    pins ``live_primary``/``pad``), so a summary-only need still derives
+    its own scale from the same base rather than touching the shared
+    formula.
 
-    Issue #683 Task 7 rendered two candidate layouts side by side (an
-    env-var switch, ``SPLITSMITH_OVERLAY_SUMMARY_VARIANT``) to choose
-    between them from real frames; Task 7b picked the "recompose as a
-    scorecard" shape, folded it into the only layout ``_cell_groups``
-    produces, and deleted the switch -- there is no live decision left to
-    A/B. The multipliers below carry that variant's numbers forward,
-    tuned further for the new ``hero``/``headline`` split (the old single
-    ``headline`` band is now two roles at different weights, so the two
-    get their own multipliers rather than sharing one).
+    As of issue #683 Task 8, that need is down to one field: ``pad``.
+    Every other formula ``CellScale.for_cell`` resolves (``identity``,
+    ``headline``, ``verdict``, ``detail``, ``caption``) *is* the approved
+    bands design's own numbers now (``cell_h/7``, ``cell_h/8``, ...) --
+    the stage summary is the only caller that reads any of them, so there
+    is no other consumer's needs weighing against the mock's own. ``pad``
+    stays a summary-only override because it is also the live overlay's
+    own inset (the sprite's counter position, the clock's ``drawtext``
+    expression) and cannot move -- the mock's own cell padding
+    (``max(16, cell_h // 22)``) is a different number entirely.
     """
     base = CellScale.for_cell(cell_height)
-    return replace(
-        base,
-        identity=round(base.identity * 1.5),
-        # The "working" tier -- hit factor and time, subordinate to the
-        # hero percentage below them.
-        headline=round(base.headline * 1.3),
-        # The hero: the largest figure in the cell, and the only one
-        # comparable across the whole grid regardless of division.
-        hero=round(base.hero * 1.7),
-        verdict=round(base.verdict * 1.4),
-        detail=round(base.detail * 1.5),
-        caption=round(base.caption * 1.4),
-        pad=round(base.pad * 1.3),
-    )
+    return replace(base, pad=max(16, cell_height // 22))
 
 
 def _check_stage_keys(data: Mapping[str, TileStageData]) -> None:
@@ -329,13 +320,19 @@ def _prepare_cell(
 class StagePlacing:
     """One shooter's cross-shooter rank for the stage, by ``stage_pct``.
 
+    **Unused by this module's own output as of issue #683 Task 8.** The
+    bare ``"#N"`` chip this fed was removed along with the stage
+    percentage it was ranked by -- the approved bands design carries no
+    cross-shooter placing at all, only the DQ chip, which is a status,
+    not a rank. Kept, with :func:`_rank_placings`, because the ranking
+    logic has its own tests and may be wanted again by a future caller;
+    see the issue #683 Task 8 report for the decision not to delete it.
+
     ``total_ranked`` is the size of the *ranked pool*, not the roster.
-    It is computed but deliberately not drawn: "#1 of 3" on a stage a
-    7-shooter roster ran (DQ'd, no scorecard and no audit each excluded
-    from the pool) reads as a 3-shooter field when 7 people actually shot
-    it. The grid itself already shows the field size; the bare "#1" says
-    only where this shooter landed in it. Kept on the dataclass in case a
-    future caller needs the pool size for something other than display.
+    It was computed but deliberately never drawn even when this was
+    wired up: "#1 of 3" on a stage a 7-shooter roster ran (DQ'd, no
+    scorecard and no audit each excluded from the pool) reads as a
+    3-shooter field when 7 people actually shot it.
     """
 
     rank: int
@@ -400,9 +397,9 @@ _COUNT_FIELDS: tuple[tuple[str, str, ColorToken], ...] = (
     ("alphas", "A", ColorToken.SPLIT_GOOD),
     ("charlies", "C", ColorToken.INK),
     ("deltas", "D", ColorToken.SPLIT),
-    ("misses", "M", ColorToken.ACCENT),
-    ("no_shoots", "NS", ColorToken.ACCENT),
-    ("procedurals", "P", ColorToken.ACCENT),
+    ("misses", "M", ColorToken.ACCENT_TEXT),
+    ("no_shoots", "NS", ColorToken.ACCENT_TEXT),
+    ("procedurals", "P", ColorToken.ACCENT_TEXT),
 )
 
 
@@ -414,7 +411,9 @@ def _count_elements(scorecard) -> list[Element]:
     the rest of this module follows, just per-field instead of per-line
     now that there is no single joined string to omit as a whole.
 
-    A recorded zero still draws (``P0`` reads red -- a procedural is
+    A recorded zero still draws (``P0`` reads body-size red --
+    :attr:`~splitsmith.overlay_layout.ColorToken.ACCENT_TEXT`, not the raw
+    identity red, which is too thin at this size -- a procedural is
     always worth -10, whether or not this shooter took one -- see
     :data:`_COUNT_FIELDS`), but an *actual* nonzero fault additionally
     gets :attr:`~splitsmith.overlay_layout.Emphasis.PLATE`: colour alone
@@ -428,7 +427,7 @@ def _count_elements(scorecard) -> list[Element]:
         value = getattr(scorecard, name)
         if value is None:
             continue
-        plate = token is ColorToken.ACCENT and value > 0
+        plate = token is ColorToken.ACCENT_TEXT and value > 0
         elements.append(
             Element(
                 role=Role.DETAIL,
@@ -454,145 +453,179 @@ def _time_text(tile: TileStageData) -> str | None:
     return text
 
 
+#: Gap (px) between the six hit/fault counts, matching the approved
+#: mock's ``.counts { gap: .5em }`` -- an ``em`` that resolves against the
+#: counts row's own font-size (``scale.detail``), which is exactly what
+#: multiplying by 0.5 here reproduces without needing a live em context.
+def _counts_gap(scale: CellScale) -> int:
+    return max(2, round(scale.detail * 0.5))
+
+
+#: Gap (px) between hit factor and time, matching the mock's
+#: ``.figrow { gap: cw // 12 }`` -- deliberately wide (cell-width-driven,
+#: not font-driven): these are two distinct figures, not a run of digits.
+def _figrow_gap(cell_width: int) -> int:
+    return max(8, cell_width // 12)
+
+
+#: Gap (px) between the four split-statistic columns, matching the
+#: mock's ``.sgrid { gap: cw // 24 }``.
+def _sgrid_gap(cell_width: int) -> int:
+    return max(4, cell_width // 24)
+
+
+#: Extra space (px) added before the "Splits" label, on top of the
+#: anchor's own between-groups gap (``_style_rules``' ``row_gutter``,
+#: which approximates the mock's tighter ``.band { gap: ch // 40 }``
+#: within-band line spacing) -- so the two bands read as visually equal,
+#: separated blocks (mock: ``.stack { gap: ch // 22 }``) rather than one
+#: unbroken list of lines.
+def _band_gap_extra(cell_height: int) -> int:
+    between_bands = max(4, cell_height // 22)
+    within_band = max(2, cell_height // 40)
+    return max(0, between_bands - within_band)
+
+
 def _cell_groups(
     tile: TileStageData | None,
-    placing: StagePlacing | None,
     label: str,
+    *,
+    scale: CellScale,
+    cell_width: int,
+    cell_height: int,
 ) -> tuple[Group, ...]:
     """What one cell says, as anchored groups rather than an ordered list.
 
-    Three rails using the whole cell (issue #683 Task 7b), not four
-    corners crowded into the top third: identity and placing at
-    :attr:`~splitsmith.overlay_layout.Anchor.TOP_CENTER`, the scored
-    result at :attr:`~splitsmith.overlay_layout.Anchor.MIDDLE_CENTER`,
-    and split statistics -- quiet, small, the old running-clock corner's
-    content -- at :attr:`~splitsmith.overlay_layout.Anchor.BOTTOM_CENTER`.
-    Each anchor is independently positioned (top-pinned, vertically
-    centred, bottom-pinned), so the three rails do not depend on one
-    another's height to land in the right place.
+    Issue #683 Task 8's approved design (``.superpowers/sdd/
+    2026-08-06-overlay-composition-seam/APPROVED-bands-mock.py``),
+    exactly: the shooter's name (with a DQ chip beside it when DQ'd) at
+    :attr:`~splitsmith.overlay_layout.Anchor.TOP_CENTER`, left-aligned;
+    below it, a vertically centred stack of two equal-weight bands at
+    :attr:`~splitsmith.overlay_layout.Anchor.MIDDLE_CENTER`, also
+    left-aligned -- **Scoring** (its own label, the six colour-coded
+    hit/fault counts, then hit factor and stage time) and **Splits**
+    (its own label, then Best/Avg/Worst/Draw as a four-column grid
+    spanning the cell's full width). Neither band outranks the other --
+    both draw their figures at the same size
+    (:attr:`~splitsmith.overlay_layout.Role.HEADLINE`) -- which is the
+    whole point of this design and the third attempt at it: the stage
+    percentage and the cross-shooter placing this summary used to carry
+    are gone entirely (issue #683 Task 8), not merely resized or moved.
+    A DQ is not a placing; it stays, as the identity row's chip.
 
-    **Stage time, hit factor and stage percentage are not three peers.**
-    They are an equation: hits and penalties make points, points over
-    time make a hit factor, and a hit factor over the stage winner's own
-    makes the percentage -- the only one of the three comparable across
-    the whole grid, since hit factor is only comparable within a
-    division and raw points are comparable to nothing. The middle rail
-    reads top to bottom in that order: the colour-coded hit/fault counts
-    (what the shooter did), a hairline rule (the one decorative element
-    this redesign allows itself -- see
-    :class:`~splitsmith.overlay_layout.Group`'s ``divider``), then hit
-    factor and time as the smaller "working" figures that produced the
-    result, then the hero stage percentage, the largest figure in the
-    cell. A DQ or any tile without a rankable ``stage_pct`` has no hero to
-    show -- rather than leaving the cell's biggest slot empty, whatever
-    the tile *does* have (the stage time) is promoted into that slot
-    instead, so the DQ plate up in the identity rail carries the verdict
-    and the middle rail never shows a hole where the hero was.
+    Units attach to their own value (``"4.50s"``, ``"12.00"`` plus a
+    smaller ``"HF"`` suffix -- see :attr:`~splitsmith.overlay_layout.Element.unit`)
+    rather than a separate caption row above a bare number.
 
-    Units attach to their own value now (``"4.50s"``, ``"12.00 HF"``,
-    ``"100.0%"``) instead of a separate caption row above a bare number --
-    two adjacent bare figures read as one run-on string at any size, and a
-    unit is the smallest label that still tells them apart at a glance.
-
-    A tile with no audit and no scorecard yields just the label -- that
-    cell is the control the hold's pixel checks measure against, so it
-    must stay text-free apart from the name.
+    A tile with no audit and no scorecard yields just the identity group
+    -- that cell is the control the hold's pixel checks measure against,
+    so it must stay text-free apart from the name.
     """
     scorecard = tile.scorecard if tile is not None else None
     scorecard_active = scorecard is not None and not scorecard.dq
     groups: list[Group] = []
 
-    # Top rail: who this is, and how they placed (or DQ, which takes the
-    # placing's slot rather than sitting beside it -- a DQ'd run has no
-    # rankable finish, so there is no placing to show).
+    # Top row: who this is, and the DQ chip beside the name when DQ'd.
+    # The placing this once shared the slot with is gone (issue #683 Task
+    # 8) -- a DQ is a status, not a placing, so it keeps the slot alone.
     identity: list[Element] = [Element(role=Role.IDENTITY, text=label)]
     if scorecard is not None and scorecard.dq:
         identity.append(Element(role=Role.VERDICT, text="DQ", emphasis=Emphasis.PLATE))
-    elif placing is not None:
-        # Bare "#2", not "#2 of 4": only scorecard-carrying tiles enter
-        # the ranked pool, so "of 4" on a stage a 7-shooter roster ran
-        # would read as a smaller field than actually shot. The grid
-        # itself already shows the field size.
-        identity.append(Element(role=Role.VERDICT, text=f"#{placing.rank}", emphasis=Emphasis.PLATE))
-    groups.append(Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(identity)))
+    groups.append(Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(identity), align="left"))
 
     if tile is None:
         return tuple(groups)
 
-    # Middle rail: the scored result. Built bottom-up in code (counts,
-    # then whatever sits below the rule) but declared top-down, since
+    # The vertically centred stack of two bands. Declared top to bottom;
     # groups sharing MIDDLE_CENTER stack in declaration order.
-    middle: list[Group] = []
+    stack: list[Group] = []
+
     counts = _count_elements(scorecard) if scorecard_active else []
-    if counts:
-        middle.append(Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=tuple(counts)))
-
     time_text = _time_text(tile)
-    hf_text = None
-    if scorecard_active and scorecard.hit_factor is not None:
-        hf_text = f"{scorecard.hit_factor:.2f} HF"
-    hero_text = (
-        f"{scorecard.stage_pct:.1f}%" if scorecard_active and scorecard.stage_pct is not None else None
-    )
+    hf_text = f"{scorecard.hit_factor:.2f}" if scorecard_active and scorecard.hit_factor is not None else None
+    # A DQ's own scoring is suppressed (``scorecard_active`` above), but a
+    # DQ'd tile can still carry a stage time -- the mock's own DQ cell
+    # shows "Scoring" with just the time, no counts, no hit factor.
+    scoring_present = bool(counts) or hf_text is not None or time_text is not None
 
-    working: list[Element] = []
-    if hero_text is not None:
-        # The ordinary case: hit factor and time are the working beneath
-        # the hero percentage.
-        if time_text is not None:
-            working.append(Element(role=Role.HEADLINE, text=time_text))
-        if hf_text is not None:
-            working.append(Element(role=Role.HEADLINE, text=hf_text))
-    else:
-        # Collapse: no rankable percentage (DQ, no scorecard, or a
-        # scorecard without one). The time -- if this tile has one --
-        # takes the hero's own weight instead of leaving that slot empty.
-        # Hit factor never becomes the hero -- the brief names the stage
-        # time specifically as what a DQ collapses to -- but it still
-        # draws at the smaller working size if this rare, partial-data
-        # tile carries one anyway (a hit factor with no percentage).
-        if time_text is not None:
-            hero_text = time_text
-        if hf_text is not None:
-            working.append(Element(role=Role.HEADLINE, text=hf_text))
-
-    if counts and (hero_text is not None or working):
-        middle.append(Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=(), divider=True))
-    if working:
-        middle.append(Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=tuple(working)))
-    if hero_text is not None:
-        middle.append(
+    if scoring_present:
+        stack.append(
             Group(
                 anchor=Anchor.MIDDLE_CENTER,
                 flow=Flow.ROW,
-                elements=(Element(role=Role.HERO, text=hero_text),),
+                elements=(Element(role=Role.LABEL, text="Scoring"),),
+                align="left",
             )
         )
-    groups.extend(middle)
+        if counts:
+            stack.append(
+                Group(
+                    anchor=Anchor.MIDDLE_CENTER,
+                    flow=Flow.ROW,
+                    elements=tuple(counts),
+                    align="left",
+                    gap=_counts_gap(scale),
+                )
+            )
+        working: list[Element] = []
+        if hf_text is not None:
+            working.append(Element(role=Role.HEADLINE, text=hf_text, unit="HF"))
+        if time_text is not None:
+            working.append(Element(role=Role.HEADLINE, text=time_text))
+        if working:
+            stack.append(
+                Group(
+                    anchor=Anchor.MIDDLE_CENTER,
+                    flow=Flow.ROW,
+                    elements=tuple(working),
+                    align="left",
+                    gap=_figrow_gap(cell_width),
+                )
+            )
 
-    # Bottom rail: split statistics, quiet and small. The running clock's
-    # old corner during the action; nothing jumps across the
-    # action-to-hold cut that does not have to.
-    detail: list[Element] = []
+    # Splits: Best/Avg/Worst/Draw, only what can actually be computed --
+    # "Best"/"Avg"/"Worst" need at least one non-draw shot; "Draw" needs
+    # only the draw itself. Never invented, per the module's own rule.
+    splits: list[Element] = []
     if tile.has_shots:
-        detail.append(Element(role=Role.DETAIL, text=f"{tile.shot_count} shots", emphasis=Emphasis.MUTED))
         rest = [shot.split for shot in tile.shots[1:]]
         if rest:
-            best_avg_worst = f"Best {min(rest):.2f}  Avg {sum(rest) / len(rest):.2f}  Worst {max(rest):.2f}"
-            detail.append(Element(role=Role.DETAIL, text=best_avg_worst, emphasis=Emphasis.MUTED))
-        detail.append(
-            Element(role=Role.DETAIL, text=f"Draw {tile.shots[0].split:.2f}", emphasis=Emphasis.MUTED)
-        )
-    if detail:
-        groups.append(Group(anchor=Anchor.BOTTOM_CENTER, flow=Flow.COLUMN, elements=tuple(detail)))
+            splits.append(Element(role=Role.HEADLINE, text=f"{min(rest):.2f}", caption="Best"))
+            splits.append(Element(role=Role.HEADLINE, text=f"{sum(rest) / len(rest):.2f}", caption="Avg"))
+            splits.append(Element(role=Role.HEADLINE, text=f"{max(rest):.2f}", caption="Worst"))
+        splits.append(Element(role=Role.HEADLINE, text=f"{tile.shots[0].split:.2f}", caption="Draw"))
 
+    if splits:
+        stack.append(
+            Group(
+                anchor=Anchor.MIDDLE_CENTER,
+                flow=Flow.ROW,
+                elements=(Element(role=Role.LABEL, text="Splits"),),
+                align="left",
+                margin_top=_band_gap_extra(cell_height) if scoring_present else None,
+            )
+        )
+        stack.append(
+            Group(
+                anchor=Anchor.MIDDLE_CENTER,
+                flow=Flow.GRID,
+                elements=tuple(splits),
+                align="left",
+                gap=_sgrid_gap(cell_width),
+            )
+        )
+
+    groups.extend(stack)
     return tuple(groups)
 
 
 def _summary_cells(
     placements: Sequence[TilePlacement],
     data: Mapping[str, TileStageData],
-    placings: Mapping[str, StagePlacing],
+    *,
+    scale: CellScale,
+    cell_width: int,
+    cell_height: int,
 ) -> list[tuple[TilePlacement, tuple[Group, ...]]]:
     """One ``(placement, declared groups)`` pair per placement, in
     placement order -- :func:`splitsmith.overlay_html.summary_html`'s own
@@ -610,7 +643,9 @@ def _summary_cells(
             cells.append((placement, ()))
             continue
         tile = data.get(placement.label)
-        groups = _cell_groups(tile, placings.get(placement.label), placement.label)
+        groups = _cell_groups(
+            tile, placement.label, scale=scale, cell_width=cell_width, cell_height=cell_height
+        )
         cells.append((placement, groups))
     return cells
 
@@ -681,9 +716,14 @@ def build_hold_still(
         canvas.paste(cell_image.convert("RGBA"), (x0, y0))
 
     if rasterizer is not None:
-        placings = _rank_placings(placements, data)
-        cells = _summary_cells(placements, data, placings)
         scale = _summary_scale(geometry.cell_height)
+        cells = _summary_cells(
+            placements,
+            data,
+            scale=scale,
+            cell_width=geometry.cell_width,
+            cell_height=geometry.cell_height,
+        )
         html = summary_html(cells, geometry=geometry, scale=scale, theme=theme)
         try:
             png_bytes = rasterizer.png(html, width=geometry.canvas_width, height=geometry.canvas_height)

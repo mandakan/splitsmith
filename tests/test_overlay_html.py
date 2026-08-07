@@ -15,7 +15,7 @@ import pytest
 
 from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
-from splitsmith.compare.overlay_summary import StagePlacing, _cell_groups
+from splitsmith.compare.overlay_summary import _cell_groups
 from splitsmith.overlay_html import cell_html, summary_html
 from splitsmith.overlay_layout import Anchor, CellScale, Element, Flow, Group, Role
 from splitsmith.overlay_theme import load_theme
@@ -25,7 +25,6 @@ THEME = load_theme("clean")
 SCALE = CellScale(
     identity=31,
     headline=41,
-    hero=81,
     verdict=51,
     detail=61,
     caption=13,
@@ -81,9 +80,9 @@ def test_a_filler_tile_cell_is_empty_of_text():
     [
         (Role.IDENTITY, SCALE.identity),
         (Role.HEADLINE, SCALE.headline),
-        (Role.HERO, SCALE.hero),
         (Role.VERDICT, SCALE.verdict),
         (Role.DETAIL, SCALE.detail),
+        (Role.LABEL, SCALE.caption),
         (Role.LIVE_PRIMARY, SCALE.live_primary),
     ],
 )
@@ -103,9 +102,7 @@ def test_a_different_scale_moves_the_same_role_class():
     """If a role's font-size were hardcoded rather than read from the
     ``scale`` argument, this would fail: a second, distinct CellScale
     must produce a distinct font-size for the same role."""
-    other = CellScale(
-        identity=99, headline=98, hero=100, verdict=97, detail=96, caption=95, live_primary=94, pad=93
-    )
+    other = CellScale(identity=99, headline=98, verdict=97, detail=96, caption=95, live_primary=94, pad=93)
     html_a = cell_html((), scale=SCALE, theme=THEME)
     html_b = cell_html((), scale=other, theme=THEME)
     assert f"font-size: {SCALE.identity}px" in _rule(html_a, ".role-identity")
@@ -117,10 +114,14 @@ def test_a_different_scale_moves_the_same_role_class():
 
 
 def test_plate_renders_a_filled_background():
+    """Issue #683 Task 8: a plate's background reads ``accent_fill`` (the
+    darker fill token, AA-large with ink text on top) -- not ``accent``,
+    the raw identity red the theme reserves for structural use."""
     html = cell_html((), scale=SCALE, theme=THEME)
     rule = _rule(html, ".emphasis-plate")
-    r, g, b = THEME.accent
+    r, g, b = THEME.accent_fill
     assert f"background: rgb({r},{g},{b})" in rule
+    assert THEME.accent_fill != THEME.accent, "fixture theme must distinguish the two tokens"
 
 
 def test_muted_is_reduced_opacity_and_plain_is_not():
@@ -171,7 +172,7 @@ def test_identity_never_shrinks_below_its_floor():
 
 
 def test_a_tile_with_no_audit_and_no_scorecard_emits_only_its_label():
-    groups = _cell_groups(None, None, "Zoe")
+    groups = _cell_groups(None, "Zoe", scale=SCALE, cell_width=640, cell_height=360)
     html = cell_html(groups, scale=SCALE, theme=THEME)
     values = re.findall(r'<span class="value[^"]*">([^<]*)</span>', html)
     assert values == ["Zoe"]
@@ -369,14 +370,14 @@ def test_corner_anchors_stay_absolutely_positioned(anchor):
 
 
 def test_middle_center_stacks_normally_top_to_bottom():
-    """Not a bottom anchor, so declaration order is reading order --
-    the middle rail's groups (counts, rule, working, hero) must not need
-    to be declared in reverse the way ``BOTTOM_LEFT`` does. The shared
+    """Not a bottom anchor, so declaration order is reading order -- the
+    stage summary's two bands (issue #683 Task 8) must not need to be
+    declared in reverse the way ``BOTTOM_LEFT`` does. The shared
     stylesheet always declares both ``.stack-normal``/``.stack-reverse``
     rules regardless of what any one cell uses, so this checks which
     class the anchor *div* itself carries, not whether the word appears
     anywhere in the document."""
-    group = Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=(Element(Role.HERO, "100.0%"),))
+    group = Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=(Element(Role.HEADLINE, "12.00"),))
     html = cell_html((group,), scale=SCALE, theme=THEME)
     anchor_div = re.search(r'<div class="anchor anchor-middle-center (\S+)', html)
     assert anchor_div is not None
@@ -458,33 +459,46 @@ def test_golden_roster_structure():
     Chromium."""
     clean = _fixture_tile(label="Anders")
     dq_scorecard = StageScorecard(dq=True)
-    dq_tile = TileStageData(label="Bea", stage_number=1, scorecard=dq_scorecard)
+    dq_tile = TileStageData(label="Bea", stage_number=1, stage_time_seconds=9.87, scorecard=dq_scorecard)
 
     placements = (
         TilePlacement(label="Anders", row=0, col=0, present=True),
         TilePlacement(label="Bea", row=0, col=1, present=True),
         TilePlacement(label="Ghost", row=0, col=2, present=False),
     )
+    geometry = SpriteGeometry(canvas_width=960, canvas_height=540, rows=1, cols=3)
     cells = (
-        (placements[0], _cell_groups(clean, StagePlacing(rank=1, total_ranked=2), "Anders")),
-        (placements[1], _cell_groups(dq_tile, None, "Bea")),
+        (
+            placements[0],
+            _cell_groups(
+                clean, "Anders", scale=SCALE, cell_width=geometry.cell_width, cell_height=geometry.cell_height
+            ),
+        ),
+        (
+            placements[1],
+            _cell_groups(
+                dq_tile, "Bea", scale=SCALE, cell_width=geometry.cell_width, cell_height=geometry.cell_height
+            ),
+        ),
         (placements[2], ()),
     )
-    geometry = SpriteGeometry(canvas_width=960, canvas_height=540, rows=1, cols=3)
     doc = summary_html(cells, geometry=geometry, scale=SCALE, theme=THEME)
 
     # Every present tile's own numbers stay attached to its own name --
     # this is the whole point of the amendment. The real isolation check
     # is the per-column slicing below; it is what can actually fail.
     assert "Anders" in doc
-    assert "#1" in doc
-    assert "91.2%" in doc
+    assert "91.2" not in doc  # stage_pct is gone entirely (issue #683 Task 8)
+    assert "6.10" in doc  # Anders's hit factor
     assert "Bea" in doc
     assert "DQ" in doc
+    assert "9.87s" in doc  # Bea's stage time, still drawn even though her scoring is suppressed by the DQ
     # The DQ tile must not carry Anders's scoring, and vice versa.
     bea_section = doc[doc.index('grid-column:2;">') : doc.index('grid-column:3;">')]
-    assert "91.2%" not in bea_section
+    assert "6.10" not in bea_section
     assert "Anders" not in bea_section
+    anders_section = doc[doc.index('grid-column:1;">') : doc.index('grid-column:2;">')]
+    assert "9.87" not in anders_section
 
     # The filler tile (col 3) is empty.
     ghost_section = doc[doc.index('grid-column:3;">') :]

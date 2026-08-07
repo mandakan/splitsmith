@@ -87,6 +87,14 @@ class OverlayTheme:
     #: an arbitrary opacity to :attr:`ink` instead of reading a real
     #: token.
     muted: RGB
+    #: A step down from :attr:`ink`, a step up from :attr:`muted` -- the
+    #: web UI's own text ramp is ink / ink-2 / muted / subtle / whisper.
+    #: Issue #683 Task 8's stage-summary labels ("SCORING", "SPLITS",
+    #: "BEST", ...) want exactly this middle tone: bright enough to read
+    #: as a real label with no text-stroke (the design drops the stroke
+    #: for labels, text-shadow only), dim enough not to compete with the
+    #: figure it sits above or beside.
+    ink_2: RGB
     font_display: str
     font_mono: str
 
@@ -125,6 +133,10 @@ _CLEAN = OverlayTheme(
     # read as "for" one of those semantics.
     rule=(60, 60, 60),
     muted=(150, 150, 150),
+    # Sits between ink (255,255,255) and muted (150,150,150) -- no hue
+    # borrowed from accent/split/split_good, same discipline as rule/muted
+    # above.
+    ink_2=(205, 205, 205),
     font_display="Antonio",
     font_mono="JetBrains Mono",
 )
@@ -157,6 +169,7 @@ def _load_splitsmith() -> OverlayTheme:
             accent_text=_rgb(colors, "accent_text"),
             rule=_rgb(colors, "rule"),
             muted=_rgb(colors, "muted"),
+            ink_2=_rgb(colors, "ink_2"),
             font_display=str(fonts.get("display", "Antonio")),
             font_mono=str(fonts.get("mono", "JetBrains Mono")),
         )

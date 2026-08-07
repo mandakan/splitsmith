@@ -30,6 +30,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Literal
 
 #: Font sizes never shrink below this. Matches
 #: ``overlay_sprites._MIN_FONT_SIZE`` and
@@ -93,11 +94,16 @@ class Flow(Enum):
     """How the elements of one group run.
 
     ``COLUMN`` stacks them away from the anchored edge; ``ROW`` runs them
-    along it.
+    along it. ``GRID`` is the stage summary's split-statistics band
+    (issue #683 Task 8): an evenly spaced row that -- unlike ``ROW``,
+    which shrink-wraps to its own content -- always stretches to the full
+    width its anchor has, so ``Best`` / ``Avg`` / ``Worst`` / ``Draw``
+    land at even quarters of the cell rather than clustered on the left.
     """
 
     COLUMN = "column"
     ROW = "row"
+    GRID = "grid"
 
 
 class Role(Enum):
@@ -106,21 +112,17 @@ class Role(Enum):
 
     #: The shooter's name.
     IDENTITY = "identity"
-    #: A figure that fed into the hero result but is not the hero itself
-    #: -- hit factor and stage time, the "working" beneath the stage
-    #: percentage (issue #683 Task 7b). Distinctly smaller than
-    #: :attr:`HERO`, distinctly larger than :attr:`DETAIL`.
+    #: A figure both bands' rows draw at (issue #683 Task 8): hit factor,
+    #: stage time, and each split statistic (Best/Avg/Worst/Draw). The
+    #: whole point of the redesign is that neither band -- and no figure
+    #: within a band -- outranks another by size; colour and position
+    #: carry meaning that a size ladder used to carry unevenly.
     HEADLINE = "headline"
-    #: The single most important figure in the cell -- the stage
-    #: percentage, the only number comparable across every shooter in the
-    #: grid regardless of division. The largest role. A DQ or a tile with
-    #: no rankable finish collapses this to whatever figure the tile does
-    #: have (the stage time) rather than leaving the cell's biggest slot
-    #: empty -- see ``overlay_summary._cell_groups``.
-    HERO = "hero"
-    #: A cross-shooter or disqualifying fact: placing, DQ, penalties.
+    #: A cross-shooter or disqualifying fact: today, only the DQ chip
+    #: beside the shooter's name. (The placing this once shared the role
+    #: with is gone -- issue #683 Task 8.)
     VERDICT = "verdict"
-    #: Supporting figures -- split statistics, hit counts, shot count.
+    #: Supporting figures -- the six colour-coded hit/fault counts.
     #: Since issue #683 Task 7 this is also eligible for
     #: :attr:`Emphasis.PLATE`: the stage summary's individual fault counts
     #: (misses/no-shoots/procedurals) plate when genuinely nonzero, at the
@@ -129,6 +131,13 @@ class Role(Enum):
     #: ``Role``, because a cross-shooter fact and a same-size fault count
     #: both need it at different type sizes.
     DETAIL = "detail"
+    #: A small caption-weight string that stands on its own rather than
+    #: labelling a value above it (issue #683 Task 8's band headers,
+    #: "Scoring" / "Splits") -- the same visual weight and treatment as
+    #: :attr:`CellScale.caption`, which is why ``size_for`` reads the same
+    #: field for both rather than carrying a second number that could
+    #: drift from it.
+    LABEL = "label"
     #: The live overlay's shot counter and running clock.
     LIVE_PRIMARY = "live-primary"
 
@@ -152,6 +161,14 @@ class ColorToken(Enum):
     SPLIT = "split"
     SPLIT_GOOD = "split_good"
     ACCENT = "accent"
+    #: Body-size red text (see :attr:`~splitsmith.overlay_theme.OverlayTheme.accent_text`)
+    #: -- what an *unplated* fault count (a genuine zero: ``M0``, ``NS0``)
+    #: draws instead of the raw, too-thin-at-small-sizes identity red.
+    #: Introduced alongside :attr:`Emphasis.PLATE` reading ``accent_fill``
+    #: instead of :attr:`ACCENT` for its own background (issue #683 Task
+    #: 8): the plate/fill/text split the theme already carried was never
+    #: wired into the renderer until now.
+    ACCENT_TEXT = "accent_text"
 
 
 class Emphasis(Enum):
@@ -189,6 +206,13 @@ class Element:
     #: always did -- this field is additive, not a second way to spell an
     #: existing colour.
     color: ColorToken | None = None
+    #: A smaller, muted suffix drawn immediately after ``text`` on the
+    #: same baseline (issue #683 Task 8: ``"12.00"`` plus a smaller
+    #: ``"HF"``) -- distinct from :attr:`caption`, which sits on its own
+    #: line *above* the value. Most units attach directly into ``text``
+    #: instead (``"4.50s"``): this field exists only for the one case the
+    #: approved design draws at two type sizes on one line.
+    unit: str | None = None
 
 
 @dataclass(frozen=True)
@@ -214,6 +238,35 @@ class Group:
     flow: Flow
     elements: tuple[Element, ...]
     divider: bool = False
+    #: Overrides the anchor's own horizontal alignment for every group
+    #: sharing this anchor (issue #683 Task 8). ``None`` (the default)
+    #: keeps whatever the anchor itself implies -- see
+    #: :attr:`Anchor.is_center` / :attr:`Anchor.is_right` -- which is what
+    #: every anchor did before this field existed. The redesigned stage
+    #: summary needs ``TOP_CENTER``'s and ``MIDDLE_CENTER``'s *rows*
+    #: (their grid-row placement, not their centring) for its identity
+    #: row and its two-band stack, but left-aligned, filling the cell's
+    #: width rather than shrink-wrapped and centred -- reusing the row is
+    #: the point; a fourth/fifth anchor for "the same row, left-aligned"
+    #: would just be the same information spelled two ways.
+    align: Literal["left", "center", "right"] | None = None
+    #: Overrides this group's own internal gap -- between a ``ROW``'s
+    #: elements, or a ``GRID``'s columns -- in pixels. ``None`` keeps the
+    #: shared default (``CellScale``-derived). Introduced for issue #683
+    #: Task 8: the stage summary's hit/fault counts, its hit-factor/time
+    #: row and its split-statistics grid each want a visually distinct
+    #: gap, and forcing one shared constant across all three read as
+    #: either a cramped counts row or the working figures crowded
+    #: together, whichever value won.
+    gap: int | None = None
+    #: Extra space (pixels) added *before* this group, on top of
+    #: whatever gap the anchor already places between stacked groups.
+    #: Issue #683 Task 8's two bands ("Scoring", "Splits") are otherwise
+    #: an unbroken stack of same-weight lines -- the gap between a band's
+    #: own lines and the gap *between* the two bands need to differ for
+    #: them to read as two bands rather than one long list, and this is
+    #: the one boundary in that stack that wants the bigger of the two.
+    margin_top: int | None = None
 
 
 @dataclass(frozen=True)
@@ -233,11 +286,11 @@ class CellScale:
 
     identity: int
     headline: int
-    #: The largest role -- the stage summary's hero percentage. See
-    #: :attr:`Role.HERO`.
-    hero: int
     verdict: int
     detail: int
+    #: Also :attr:`Role.LABEL`'s size -- see that role's docstring for why
+    #: a caption (a label *above* a value) and a standalone band header
+    #: read the same field rather than two numbers that could drift apart.
     caption: int
     live_primary: int
     pad: int
@@ -252,15 +305,32 @@ class CellScale:
         and are not free to drift: the sprite and the clock have to land
         on the same cell geometry or the two halves of the overlay stop
         lining up.
+
+        The other five formulas are issue #683 Task 8's approved design,
+        exactly (``.superpowers/sdd/2026-08-06-overlay-composition-seam/
+        APPROVED-bands-mock.py``): the shooter's name at ``cell_h/7``, the
+        one figure size both bands' rows draw at (hit factor, time, and
+        each split statistic) at ``cell_h/8``, the six hit/fault counts at
+        ``cell_h/14``, and every label (the band headers, and each split
+        statistic's own caption) at ``cell_h/20`` floored at 13px. The DQ
+        chip is sized off ``identity`` directly (half the name's own
+        size) rather than as an independent formula, matching the mock's
+        ``int(name_px * .5)`` -- nothing else in the cell is a "cross-
+        shooter verdict" today, so there is no design pressure pushing it
+        to a different weight than "smaller than the name, roughly
+        counts-sized". Only the stage summary reads any of these five
+        today (the live overlay reads only ``live_primary``/``pad``), so
+        there is no other consumer's needs to balance against the mock's
+        own numbers.
         """
         floor = MIN_FONT_SIZE
+        identity = max(floor, cell_height // 7)
         return cls(
-            identity=max(30, cell_height // 17),
-            headline=max(30, cell_height // 14),
-            hero=max(36, cell_height // 10),
-            verdict=max(24, cell_height // 17),
-            detail=max(14, cell_height // 40),
-            caption=max(floor, cell_height // 44),
+            identity=identity,
+            headline=max(floor, cell_height // 8),
+            verdict=max(floor, identity // 2),
+            detail=max(floor, cell_height // 14),
+            caption=max(13, cell_height // 20),
             # Pinned to today's live overlay. Do not "tidy" toward
             # ``headline`` -- see the class docstring.
             live_primary=max(48, cell_height // 14),
@@ -270,15 +340,14 @@ class CellScale:
     def size_for(self, role: Role) -> int:
         """The font size for ``role``.
 
-        ``caption`` has no matching role and is read directly off the
-        dataclass -- a caption is never an element on its own.
+        ``Role.LABEL`` reads ``caption`` -- see that role's docstring.
         """
         return {
             Role.IDENTITY: self.identity,
             Role.HEADLINE: self.headline,
-            Role.HERO: self.hero,
             Role.VERDICT: self.verdict,
             Role.DETAIL: self.detail,
+            Role.LABEL: self.caption,
             Role.LIVE_PRIMARY: self.live_primary,
         }[role]
 

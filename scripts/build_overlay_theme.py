@@ -58,6 +58,15 @@ TOKEN_MAP: dict[str, str] = {
     # Secondary/tertiary text -- what used to be faked with
     # ``opacity: 0.68`` on top of the primary ink colour.
     "muted": "--color-muted",
+    # The stage summary's band/value labels ("SCORING", "SPLITS", "BEST",
+    # ...; issue #683 Task 8) want something between --color-ink (too
+    # bright -- it would compete with the figures the label sits above)
+    # and --color-muted (too dim once the stroke is dropped, per the
+    # design's "no text-stroke, text-shadow only" rule for labels).
+    # --color-ink-2 is exactly that middle tone and already exists in the
+    # design system's own text ramp (ink / ink-2 / muted / subtle /
+    # whisper) for this job.
+    "ink_2": "--color-ink-2",
 }
 
 FONT_MAP: dict[str, str] = {
