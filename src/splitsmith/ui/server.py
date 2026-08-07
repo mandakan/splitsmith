@@ -4935,7 +4935,7 @@ async def _enrich_recent_project_hosted(
     # ``matches_store`` is the tenant's authoritative registry of hosted vs.
     # mirrored ownership (#631 Task 6); ``None`` only if a match doc exists
     # without ever having been registered there, which shouldn't happen for
-    # a real hosted match -- fall back to "hosted" rather than mislabel it
+    # a real hosted match - fall back to "hosted" rather than mislabel it
     # a mirror.
     if state.matches_store is not None:
         match_row = await state.matches_store.get(rp.match_id)
@@ -5971,7 +5971,7 @@ def create_app(
             if (
                 owner_row.origin == "desktop"
                 and request.method not in ("GET", "HEAD", "OPTIONS")
-                and not rest.startswith("match/shares")
+                and not (rest == "match/shares" or rest.startswith("match/shares/"))
             ):
                 return JSONResponse(status_code=403, content={"detail": "read_only_mirror"})
             work_root = (

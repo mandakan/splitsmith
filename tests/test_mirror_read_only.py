@@ -70,7 +70,7 @@ def _seed_match_doc(db_url: str, user_email: str, match_id: str, name: str) -> N
 def _seed_recent_project(db_url: str, user_email: str, *, path: str, match_id: str, name: str) -> None:
     """Insert a picker row pointing at ``match_id`` (raw SQL, like
     ``seed_match``) so ``POST /api/me/recent-projects/delete`` can resolve
-    the match to delete -- sync's create route never touches the picker."""
+    the match to delete - sync's create route never touches the picker."""
 
     engine = create_engine(db_url)
     sf = sessionmaker(engine)
@@ -139,7 +139,7 @@ def test_mirror_get_shooters_reports_origin_desktop(
     assert resp.json()["origin"] == "desktop"
 
 
-# Share management stays writable on a mirror -- that's the feature.
+# Share management stays writable on a mirror - that's the feature.
 
 
 def test_mirror_create_share_allowed(
@@ -153,6 +153,24 @@ def test_mirror_create_share_allowed(
     resp = client.post(_alias_url("mirror3", "match/shares"))
     assert resp.status_code == 201, resp.text
     assert resp.json()["revoked_at"] is None
+
+
+def test_mirror_share_exemption_is_segment_anchored(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """A rest path that merely extends the "match/shares" string is NOT exempt.
+
+    The exemption must cover match/shares and match/shares/... only - a
+    future route like match/shares-report must stay read-only gated.
+    """
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed_mirror(client, "mirror5", "Mirror Match 5")
+
+    resp = client.post(_alias_url("mirror5", "match/shares-report"))
+    assert resp.status_code == 403, resp.text
+    assert resp.json() == {"detail": "read_only_mirror"}
 
 
 # A native hosted match is unaffected by the gate.
@@ -174,7 +192,7 @@ def test_native_match_add_shooter_unchanged(
     assert [s["name"] for s in body["shooters"]] == ["Bob"]
 
 
-# Deleting a mirror still works -- delete-match is a non-alias-routed
+# Deleting a mirror still works - delete-match is a non-alias-routed
 # picker action (POST /api/me/recent-projects/delete), untouched by the
 # gate, but covered here so the exemption stays honest.
 
@@ -189,7 +207,7 @@ def test_mirror_delete_match_succeeds(
     _seed_mirror(client, "mirror4", "Mirror Match 4")
 
     # Hosted delete never touches this path on disk (ephemeral container
-    # fs) -- it's only the picker-row key the delete route resolves
+    # fs) - it's only the picker-row key the delete route resolves
     # match_id from.
     path = str((tmp_path / "picker-entry" / "mirror4").resolve())
     _seed_recent_project(
