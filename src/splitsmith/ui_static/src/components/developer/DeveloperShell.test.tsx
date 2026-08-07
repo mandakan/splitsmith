@@ -7,7 +7,7 @@
  */
 import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider } from "@/lib/auth";
 import { ModeProvider } from "@/lib/mode";
@@ -33,7 +33,14 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/useIsMobile", () => ({ useIsMobile: () => false }));
+// Mutable so a single test can flip the breakpoint -- same pattern as
+// RootLayout.test.tsx's `mobile` object. DeveloperShell has no nav drawer
+// (unlike MatchShell), so it must NOT call useShellOwnsMobileAccount();
+// the mobile test below is what actually proves that source-level fact,
+// since useIsMobile()=false alone would pass whether or not the shell
+// wrongly claimed the mobile account menu.
+const mobile = vi.hoisted(() => ({ value: false }));
+vi.mock("@/lib/useIsMobile", () => ({ useIsMobile: () => mobile.value }));
 
 function renderDev() {
   return render(
@@ -54,6 +61,10 @@ function renderDev() {
 }
 
 describe("DeveloperShell chrome (#550)", () => {
+  beforeEach(() => {
+    mobile.value = false;
+  });
+
   // Every test waits on the outlet's exact placeholder text rather than a
   // /developer/i or /corpus/i substring match: both substrings are
   // legitimately ambiguous once mounted under a real RootLayout --
@@ -95,5 +106,21 @@ describe("DeveloperShell chrome (#550)", () => {
     // against src/components/ui/ModeSwitch.tsx in Task 2. Exactly one:
     // the global bar's. DeveloperShell's own copy is deleted here.
     expect(screen.getAllByRole("radiogroup", { name: /mode/i })).toHaveLength(1);
+  });
+
+  it("does not claim the mobile account menu -- the global bar still carries it on a phone", async () => {
+    // DeveloperShell has no nav drawer (unlike MatchShell), so it must
+    // never call useShellOwnsMobileAccount(). With useIsMobile()=false
+    // (every other test in this file) RootLayout's
+    // `!isMobile || !ownsMobileAccount` shows the global bar regardless
+    // of what DeveloperShell declares -- that gap is exactly why this
+    // needs its own mobile-breakpoint assertion (#550 review).
+    mobile.value = true;
+    renderDev();
+    await screen.findByText("corpus page");
+    expect(
+      screen.getByRole("navigation", { name: /global/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("account-chip")).toBeInTheDocument();
   });
 });
