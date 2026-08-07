@@ -29,6 +29,7 @@ function makeShot(n: number, timeFromBeep: number): CoachShot {
     improvement_flag: false,
     coaching_note: null,
     stale: false,
+    reload_hint: false,
   };
 }
 
