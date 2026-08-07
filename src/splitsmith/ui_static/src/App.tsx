@@ -11,6 +11,7 @@ import {
 import { AppShell } from "@/components/AppShell";
 import { DesktopGate } from "@/components/DesktopOnlyNotice";
 import { DeveloperShell } from "@/components/developer/DeveloperShell";
+import { RootLayout } from "@/components/layout/RootLayout";
 import { MatchShell } from "@/components/match/MatchShell";
 import { ShareShell } from "@/components/share/ShareShell";
 import { DefaultShooterRedirect } from "@/components/match/DefaultShooterRedirect";
@@ -138,12 +139,31 @@ export function App() {
             <AuthGate>
             <Routes>
               <Route path="login" element={<Login />} />
-          {/* Picker lives outside any shell -- it has its own header and
-              runs whether or not a project is bound. MatchShell redirects
-              here when it sees /api/health.bound === false. */}
+          {/* Public share surface (#349): token-authorized, read-only,
+              mobile-friendly. Mirrors the match results subtree shape so
+              useMatchHref("results", ...) round-trips inside the share.
+              Deliberately outside RootLayout (#550) -- an anonymous
+              share visitor must never see an account menu or mode
+              switch. */}
+          <Route path="share/:token" element={<ShareShell />}>
+            <Route index element={<Navigate to="results" replace />} />
+            <Route path="results" element={<Results />} />
+            <Route path="results/:slug/:stage" element={<ResultsStage />} />
+          </Route>
+
+          <Route element={<RootLayout />}>
+          {/* Picker: no context sidebar, inherits the global bar.
+              MatchShell redirects here when it sees
+              /api/health.bound === false. */}
           <Route path="pick" element={<Pick />} />
           <Route path="pick/new" element={<DesktopGate screen="Match creation" links={false}><CreateMatch /></DesktopGate>} />
           <Route path="pick/merge" element={<DesktopGate screen="Match merge" links={false}><MergeMatches /></DesktopGate>} />
+          {/* Admin surfaces are server-wide, not project-scoped. They
+              used to route through AppShell purely because it was the
+              only shell left that would take them, which meant no
+              account menu and an empty sidebar. They nest directly
+              under RootLayout now (#550). */}
+          <Route path="admin/workers" element={<AdminWorkers />} />
           {/* Canonical match-scoped surfaces (#353 Phase 3 PR C). All
               shooter / stage / overview / picker-within-match routes
               live under ``/match/:matchId/...``. Bare match-scoped paths
@@ -208,14 +228,6 @@ export function App() {
               />
             </Route>
           </Route>
-          {/* Public share surface (#349): token-authorized, read-only,
-              mobile-friendly. Mirrors the match results subtree shape so
-              useMatchHref("results", ...) round-trips inside the share. */}
-          <Route path="share/:token" element={<ShareShell />}>
-            <Route index element={<Navigate to="results" replace />} />
-            <Route path="results" element={<Results />} />
-            <Route path="results/:slug/:stage" element={<ResultsStage />} />
-          </Route>
           {/* Developer mode (#331). All four workflow steps + the
               retired Lab + fixture-editor surfaces sit under the
               cyan-accented DeveloperShell. */}
@@ -236,10 +248,10 @@ export function App() {
             <Route path="review" element={<DesktopGate screen="Fixture editor" links={false}><Review /></DesktopGate>} />
             <Route path="promote-review" element={<DesktopGate screen="Promote review" links={false}><PromoteReview /></DesktopGate>} />
             <Route path="_design" element={<DesktopGate screen="Design system" links={false}><Design /></DesktopGate>} />
-            <Route path="admin/workers" element={<AdminWorkers />} />
             {/* Legacy redirects so old bookmarks don't 404. */}
             <Route path="lab" element={<Navigate to="/dev/legacy/lab" replace />} />
             <Route path="lab/:slug" element={<RedirectLabSlug />} />
+          </Route>
           </Route>
           {/* Bare match-scoped paths -- caught here and bounced into the
               ``/match/:matchId/`` prefix via LegacyMatchRedirect. ``/``
