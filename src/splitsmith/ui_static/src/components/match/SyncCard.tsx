@@ -100,6 +100,13 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Optimistic local echo of the job startSync() just created. The
+  // jobs prop comes from MatchShell's useJobs(), which idle-polls
+  // every 5s - without this, the button re-enables for up to 5s after
+  // a click while the sync_match job is genuinely pending server-side
+  // (double-submit window). Cleared once the poller's jobs list shows
+  // this job id has left the active set.
+  const [startedJob, setStartedJob] = useState<Job | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -120,8 +127,22 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
     void load();
   }, [local, load]);
 
-  const syncing = jobs.some((j) => j.kind === "sync_match" && isJobActive(j));
+  const jobsSyncing = jobs.some((j) => j.kind === "sync_match" && isJobActive(j));
   const runningJob = jobs.find((j) => j.kind === "sync_match" && isJobActive(j)) ?? null;
+
+  // startedJob has settled once the poller's jobs list carries its id
+  // in a terminal (non-active) state. Until then - including while
+  // the poller hasn't picked the job up at all yet - treat it as
+  // still in flight.
+  const startedJobSettled =
+    startedJob != null && jobs.some((j) => j.id === startedJob.id && !isJobActive(j));
+  const syncing = jobsSyncing || (startedJob != null && !startedJobSettled);
+
+  // Drop the optimistic echo once the poller confirms settlement, so
+  // a later click can set a fresh one.
+  useEffect(() => {
+    if (startedJobSettled) setStartedJob(null);
+  }, [startedJobSettled]);
 
   // Refetch status once the sync job settles (succeeded / failed), same
   // active-set-departure idiom MatchShell uses for its own job-derived
@@ -141,7 +162,8 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
     setStartError(null);
     setStarting(true);
     try {
-      await api.startSync();
+      const job = await api.startSync();
+      setStartedJob(job);
     } catch (e) {
       setStartError(apiErrorText(e, "Could not start sync."));
     } finally {
@@ -156,7 +178,7 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
 
   const hasErrors = (status?.errors.length ?? 0) > 0;
   const notConfigured = status != null && !status.configured;
-  const buttonDisabled = starting || syncing || hasErrors || notConfigured;
+  const buttonDisabled = starting || syncing || hasErrors;
 
   return (
     <section className="mb-6 rounded-xl border border-rule-strong bg-surface p-5">
@@ -232,7 +254,10 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
       </div>
 
       {hasErrors ? (
-        <ul className="mt-3 space-y-1.5 rounded-md border border-destructive/40 bg-destructive/10 p-2.5">
+        <ul
+          aria-live="polite"
+          className="mt-3 space-y-1.5 rounded-md border border-destructive/40 bg-destructive/10 p-2.5"
+        >
           {status?.errors.map((e, i) => (
             <li
               key={i}

@@ -145,4 +145,47 @@ describe("SyncCard", () => {
 
     await waitFor(() => expect(api.startSync).toHaveBeenCalled());
   });
+
+  it("keeps the button disabled after startSync resolves, before the jobs poller catches up", async () => {
+    // Regression for the double-submit window: the jobs prop only
+    // updates on MatchShell's poller (idle = 5s), so a naive
+    // `starting`-only disable would re-enable the button for that
+    // whole window while the sync_match job is genuinely pending
+    // server-side. Against pre-fix code (no startedJob state) this
+    // test fails: `starting` clears in the `finally` and nothing
+    // else disables the button since the jobs prop is still [].
+    vi.mocked(api.getSyncStatus).mockResolvedValue(
+      makeStatus({ stale: true, pending_media: 1, errors: [] }),
+    );
+    vi.mocked(api.startSync).mockResolvedValue({
+      id: "job-1",
+      kind: "sync_match",
+      stage_number: null,
+      shooter_slug: null,
+      video_id: null,
+      status: "pending",
+      progress: null,
+      message: null,
+      error: null,
+      cancel_requested: false,
+      acknowledged: false,
+      result: null,
+      created_at: "2026-08-07T00:00:00Z",
+      updated_at: "2026-08-07T00:00:00Z",
+      started_at: null,
+      finished_at: null,
+    } satisfies Job);
+
+    render(<SyncCard jobs={[]} matchId="m1" />);
+
+    const button = await screen.findByRole("button", { name: /sync now/i });
+    expect(button).not.toBeDisabled();
+    fireEvent.click(button);
+
+    // Wait for startSync to resolve and the component to settle -
+    // `jobs` is still [] here, exactly as it would be before the
+    // shell's next poll tick.
+    await waitFor(() => expect(api.startSync).toHaveBeenCalled());
+    await waitFor(() => expect(button).toBeDisabled());
+  });
 });
