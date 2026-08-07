@@ -2,13 +2,17 @@
 
 At the end of a stage's action the grid holds on a still frame per tile,
 blurred and dimmed, with that shooter's stage summary drawn over their own
-cell -- shot count, stage time, hit factor, ``stage_pct``, hit counts, and
-(the one thing the pre-Milestone-A brief did not have) a cross-shooter
-placing ranked by ``stage_pct``. See
-``docs/superpowers/plans/2026-08-05-compare-grid-milestone-b-kickoff.md``,
-"Amendments to Tasks 7-9", for why the ranking exists and what it must
-never become: it is not the deleted live delta strip relocated, and it
-does not reintroduce ``TilePanel.rank`` / ``delta_to_leader``.
+cell: their name (with a DQ chip beside it when DQ'd), then a vertically
+centred stack of two equal-weight bands -- **Scoring** (the six
+colour-coded hit/fault counts, then hit factor and stage time) and
+**Splits** (Best/Avg/Worst/Draw as a captioned four-column grid). This is
+issue #683 Task 8's approved design
+(``.superpowers/sdd/2026-08-06-overlay-composition-seam/APPROVED-bands-mock.py``),
+replacing the three-rail layout Task 7b shipped: the stage percentage and
+the cross-shooter placing that rail carried are gone entirely, not merely
+resized or moved -- see the task report for what stayed behind
+(``_rank_placings``/``StagePlacing``, unused by this module now but kept
+for a possible future caller) and why.
 
 **The blur happens once, not per frame.** The tile is a still: one PIL
 ``GaussianBlur`` call, held for the whole hold duration. Applying ``gblur``
@@ -17,11 +21,21 @@ orders of magnitude more for an identical result -- if a filter graph
 change to add a blur ever looks tempting, that is Task 9's territory and
 this module already did the work.
 
-**This module is pure PIL.** It draws no ``drawtext`` and shells out to
-ffmpeg only to extract each tile's freeze frame, through an injected
-:data:`splitsmith.compare.mp4_grid.Runner` so unit tests never shell out.
-A host whose ffmpeg lacks libfreetype loses the running clock elsewhere in
-the graph but gets a complete summary here, untouched.
+**The summary text is composed through the box engine, not hand-drawn.**
+See ``docs/superpowers/plans/2026-08-06-overlay-composition-seam-amendment.md``
+(Task 6R-3). ``_cell_groups`` still *declares* what one cell says; turning
+that declaration into pixels is now ``overlay_html.summary_html`` (pure
+HTML) plus an injected :class:`splitsmith.overlay_raster.Rasterizer`
+(HTML -> PNG, via headless Chromium), composited once over the whole
+canvas rather than drawn per cell with hand-fitted PIL text. This module
+still shells out to ffmpeg only to extract each tile's freeze frame,
+through an injected :data:`splitsmith.compare.mp4_grid.Runner` so unit
+tests never shell out, and never launches a browser directly -- that is
+entirely the injected :class:`~splitsmith.overlay_raster.Rasterizer`'s
+job. A host whose ffmpeg lacks libfreetype loses the running clock
+elsewhere in the graph but gets a complete summary here, untouched. A host
+with no usable Chromium loses the summary's text (see ``build_hold_still``)
+but still gets the blurred, dimmed freeze -- degradation, not a crash.
 
 Never draws a number that is absent. ``scorecard`` is ``None`` for
 placeholder stages and pre-scorecard projects; a manually-timed stage
@@ -31,25 +45,24 @@ audit at all. Each of those renders less, never a zero and never a guess.
 
 from __future__ import annotations
 
+import io
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageFilter
 
-from ..overlay_text import _draw_text_with_shadow, _load_font
+from ..overlay_html import summary_html
+from ..overlay_layout import Anchor, CellScale, ColorToken, Element, Emphasis, Flow, Group, Role
+from ..overlay_raster import Rasterizer
 from ..overlay_theme import OverlayTheme
+from ..ui.project import StageScorecard
 from .mp4_grid import GridStagePlan, Runner
 from .overlay_data import TileStageData
 from .overlay_sprites import SpriteGeometry, TilePlacement
 
 logger = logging.getLogger(__name__)
-
-#: Font sizes never shrink below this floor -- matches
-#: ``overlay_sprites._MIN_FONT_SIZE``'s reasoning: below it a further
-#: shrink reads as noise rather than smaller text.
-_MIN_FONT_SIZE = 12
 
 #: Default fraction of black composited over a tile's still. Chosen so the
 #: summary text is legible over any footage without crushing the picture
@@ -77,6 +90,31 @@ DEFAULT_DIM = 0.45
 #: comes up empty -- at which point :func:`extract_freeze_frames` reports
 #: it rather than returning a path to a file that was never written.
 _FREEZE_TAIL_WINDOW_SECONDS = 0.5
+
+
+def _summary_scale(cell_height: int) -> CellScale:
+    """The :class:`CellScale` the hold still composes at.
+
+    Deliberately **not** a change to ``CellScale.for_cell`` itself: that
+    resolver is shared with the live sprite and the running clock
+    (``test_live_primary_and_pad_match_what_the_grid_computes_today``
+    pins ``live_primary``/``pad``), so a summary-only need still derives
+    its own scale from the same base rather than touching the shared
+    formula.
+
+    As of issue #683 Task 8, that need is down to one field: ``pad``.
+    Every other formula ``CellScale.for_cell`` resolves (``identity``,
+    ``headline``, ``verdict``, ``detail``, ``caption``) *is* the approved
+    bands design's own numbers now (``cell_h/7``, ``cell_h/8``, ...) --
+    the stage summary is the only caller that reads any of them, so there
+    is no other consumer's needs weighing against the mock's own. ``pad``
+    stays a summary-only override because it is also the live overlay's
+    own inset (the sprite's counter position, the clock's ``drawtext``
+    expression) and cannot move -- the mock's own cell padding
+    (``max(16, cell_h // 22)``) is a different number entirely.
+    """
+    base = CellScale.for_cell(cell_height)
+    return replace(base, pad=max(16, cell_height // 22))
 
 
 def _check_stage_keys(data: Mapping[str, TileStageData]) -> None:
@@ -283,13 +321,19 @@ def _prepare_cell(
 class StagePlacing:
     """One shooter's cross-shooter rank for the stage, by ``stage_pct``.
 
+    **Unused by this module's own output as of issue #683 Task 8.** The
+    bare ``"#N"`` chip this fed was removed along with the stage
+    percentage it was ranked by -- the approved bands design carries no
+    cross-shooter placing at all, only the DQ chip, which is a status,
+    not a rank. Kept, with :func:`_rank_placings`, because the ranking
+    logic has its own tests and may be wanted again by a future caller;
+    see the issue #683 Task 8 report for the decision not to delete it.
+
     ``total_ranked`` is the size of the *ranked pool*, not the roster.
-    It is computed but deliberately not drawn: "#1 of 3" on a stage a
-    7-shooter roster ran (DQ'd, no scorecard and no audit each excluded
-    from the pool) reads as a 3-shooter field when 7 people actually shot
-    it. The grid itself already shows the field size; the bare "#1" says
-    only where this shooter landed in it. Kept on the dataclass in case a
-    future caller needs the pool size for something other than display.
+    It was computed but deliberately never drawn even when this was
+    wired up: "#1 of 3" on a stage a 7-shooter roster ran (DQ'd, no
+    scorecard and no audit each excluded from the pool) reads as a
+    3-shooter field when 7 people actually shot it.
     """
 
     rank: int
@@ -336,238 +380,340 @@ def _rank_placings(
     return placings
 
 
-def _theme_font_name(theme: OverlayTheme) -> str | None:
-    """The ``_load_font`` preset name for this theme's face.
+#: One entry per hit/fault count, in the fixed reading order the row
+#: draws in: accuracy first (best worth to least), then faults. Each
+#: entry is ``(scorecard attribute, drawn tag, colour token)`` -- the
+#: colour is what the count is *worth* in IPSC scoring, not a judgement
+#: about whether the shooter did well: ``A`` is full points
+#: (``split_good``), ``C`` is mid (``ink``), ``D`` is low (``split``),
+#: and ``M``/``NS``/``P`` are each a flat -10 regardless of division
+#: (``accent``) -- a procedural is a penalty by definition, so its tag is
+#: red whether or not this shooter took one. See issue #683 Task 7: the
+#: old design drew the accuracy trio at ``Role.DETAIL`` and the faults
+#: trio at ``Role.VERDICT`` (visibly bigger), which made the faults
+#: outweigh the hits even though all six -- plus time -- are inputs to
+#: the same hit-factor number. They are one role, one size now; colour
+#: carries the meaning size used to carry unevenly.
+_COUNT_FIELDS: tuple[tuple[str, str, ColorToken], ...] = (
+    ("alphas", "A", ColorToken.SPLIT_GOOD),
+    ("charlies", "C", ColorToken.INK),
+    ("deltas", "D", ColorToken.SPLIT),
+    ("misses", "M", ColorToken.ACCENT_TEXT),
+    ("no_shoots", "NS", ColorToken.ACCENT_TEXT),
+    ("procedurals", "P", ColorToken.ACCENT_TEXT),
+)
 
-    Mirrors ``overlay_sprites.theme_font_face``'s choice (bundled mono for
-    ``splitsmith``, system discovery otherwise) so the summary's typography
-    matches the sprite's, but goes through ``_load_font`` directly per this
-    module's interface rather than ``load_face`` -- ``_load_font`` does its
-    own bundled/preset/fallback resolution and needs no font object cache
-    at this call volume (once per stage, not per frame).
+
+#: Drop-priority tiers within the counts row (issue #683 F1). Lower drops
+#: first. A zero-valued (unlit) fault carries no information a viewer
+#: would miss -- it is the same "worth -10, didn't happen" fact every
+#: clean cell in the grid repeats -- so it goes before everything else in
+#: Scoring. A genuinely nonzero (lit) fault is the opposite: Tasks 4 and
+#: 5 existed specifically to put a real penalty on screen, so it is the
+#: LAST thing in Scoring this module will ever drop, and F1's own rule 3
+#: ("a lit penalty plate must never be dropped while a zero-valued count
+#: survives") falls out of this ordering for free -- by the time a lit
+#: element's turn comes up, every zero-valued one is already gone.
+#: Accuracy (A/C/D) sits between the two: never a fault regardless of
+#: value, so it never plates, but it is still live scoring data and
+#: outranks an admittedly-empty fault slot.
+_TIER_UNLIT_FAULT = 0
+_TIER_ACCURACY = 1
+_TIER_LIT_FAULT = 2
+
+
+def _count_elements(scorecard: StageScorecard) -> list[Element]:
+    """The six hit/fault counts as one equal-weight, colour-coded row.
+
+    A field that is ``None`` (the scoreboard never carried that column)
+    is omitted entirely -- the same "zero is drawn, absent is not" rule
+    the rest of this module follows, just per-field instead of per-line
+    now that there is no single joined string to omit as a whole.
+
+    A recorded zero still draws (``P0`` reads body-size red --
+    :attr:`~splitsmith.overlay_layout.ColorToken.ACCENT_TEXT`, not the raw
+    identity red, which is too thin at this size -- a procedural is
+    always worth -10, whether or not this shooter took one -- see
+    :data:`_COUNT_FIELDS`), but an *actual* nonzero fault additionally
+    gets :attr:`~splitsmith.overlay_layout.Emphasis.PLATE`: colour alone
+    says what a count is worth, and a plate says this particular one
+    happened. Only the ``M``/``NS``/``P`` entries are eligible -- ``A``/
+    ``C``/``D`` are never a fault, so they never plate regardless of
+    value.
+
+    Each element also carries a ``drop_priority`` (issue #683 F1's fit
+    policy -- see :attr:`~splitsmith.overlay_layout.Element.drop_priority`
+    and ``overlay_html._fit_script``), assigned by tier
+    (:data:`_TIER_UNLIT_FAULT` / ``_TIER_ACCURACY`` / ``_TIER_LIT_FAULT``)
+    and, within a tier, by this row's own reading order -- **not**
+    reordered in the returned list**, which stays ``_COUNT_FIELDS``
+    order regardless: the priority is metadata for a browser to consult
+    under space pressure, not a second way to spell the row's own layout.
     """
-    return "splitsmith-mono" if theme.name == "splitsmith" else None
+    entries: list[tuple[str, str, ColorToken, bool]] = []
+    for name, tag, token in _COUNT_FIELDS:
+        value = getattr(scorecard, name)
+        if value is None:
+            continue
+        plate = token is ColorToken.ACCENT_TEXT and value > 0
+        entries.append((tag, str(value), token, plate))
+
+    def _tier(entry: tuple[str, str, ColorToken, bool]) -> int:
+        _tag, _value, token, plate = entry
+        if plate:
+            return _TIER_LIT_FAULT
+        if token is ColorToken.ACCENT_TEXT:
+            return _TIER_UNLIT_FAULT
+        return _TIER_ACCURACY
+
+    drop_order = sorted(range(len(entries)), key=lambda i: (_tier(entries[i]), i))
+    priorities = {index: rank for rank, index in enumerate(drop_order)}
+
+    elements: list[Element] = []
+    for index, (tag, value_text, token, plate) in enumerate(entries):
+        elements.append(
+            Element(
+                role=Role.DETAIL,
+                text=f"{tag}{value_text}",
+                emphasis=Emphasis.PLATE if plate else Emphasis.PLAIN,
+                color=token,
+                drop_priority=priorities[index],
+            )
+        )
+    return elements
 
 
-def _text_width(draw: ImageDraw.ImageDraw, text: str, font) -> int:
-    bbox = draw.textbbox((0, 0), text, font=font)
-    return bbox[2] - bbox[0]
+def _time_text(tile: TileStageData) -> str | None:
+    """The stage time with its unit attached (``"4.50s"``, optionally
+    ``" (manual)"``), or ``None`` if there is no time to show. Units
+    attach to the value itself now -- see :func:`_cell_groups`'s
+    docstring for why a bare number with a floating caption above it is
+    exactly the defect this redesign exists to fix."""
+    if tile.stage_time_seconds is None:
+        return None
+    text = f"{tile.stage_time_seconds:.2f}s"
+    if tile.stage_time_is_manual:
+        text += " (manual)"
+    return text
 
 
-def _fit_font(
-    draw: ImageDraw.ImageDraw,
-    text: str,
-    theme: OverlayTheme,
-    *,
-    base_size: int,
-    budget: float,
-):
-    """The largest font at or below ``base_size`` (steps of 2) that draws
-    ``text`` no wider than ``budget`` pixels, floored at
-    :data:`_MIN_FONT_SIZE`. Returns ``(font, size)``."""
-    font_name = _theme_font_name(theme)
-    size = base_size
-    font = _load_font(None, size, font_name=font_name)
-    while size > _MIN_FONT_SIZE and _text_width(draw, text, font) > budget:
-        size -= 2
-        font = _load_font(None, size, font_name=font_name)
-    return font, size
+#: Gap (px) between the six hit/fault counts, matching the approved
+#: mock's ``.counts { gap: .5em }`` -- an ``em`` that resolves against the
+#: counts row's own font-size (``scale.detail``), which is exactly what
+#: multiplying by 0.5 here reproduces without needing a live em context.
+def _counts_gap(scale: CellScale) -> int:
+    return max(2, round(scale.detail * 0.5))
 
 
-#: Scales :func:`_lay_out_block` tries, in order, before giving up and
-#: clipping. Each step is a 15% cut, which is coarse enough that a block
-#: needing a real shrink gets there in a handful of measurements and fine
-#: enough that a block that barely overflows does not end up half-size.
-_BLOCK_SCALES = (1.0, 0.85, 0.72, 0.61, 0.52, 0.44, 0.37, 0.32, 0.27, 0.23)
+#: Gap (px) between hit factor and time, matching the mock's
+#: ``.figrow { gap: cw // 12 }`` -- deliberately wide (cell-width-driven,
+#: not font-driven): these are two distinct figures, not a run of digits.
+def _figrow_gap(cell_width: int) -> int:
+    return max(8, cell_width // 12)
 
 
-def _lay_out_block(
-    draw: ImageDraw.ImageDraw,
-    lines: Sequence[tuple[str, int, tuple[int, int, int, int]]],
-    theme: OverlayTheme,
-    *,
-    width_budget: float,
-    height_budget: float,
-) -> list[tuple[str, object, int, tuple[int, int, int, int], int]]:
-    """Place ``lines`` inside a cell, bounded on *both* axes.
-
-    :func:`_fit_font` bounds the width of one line. Nothing bounded the
-    height of the stack of them, so a cell shorter than the block --
-    measured at a constant 207-247px, which is every cell below about
-    250px tall -- spilled its shooter's figures down into the cell of the
-    shooter underneath. That is worse than losing a line: it attributes
-    one competitor's numbers to another, and the neighbour has no way to
-    tell them apart.
-
-    So the whole block is scaled down until it fits (floored at
-    :data:`_MIN_FONT_SIZE`, the same floor per-line width fitting uses),
-    and if it still does not fit at the floor, the lines that would cross
-    the cell's bottom edge are dropped. Both bounds are hard; neither
-    draws outside the cell. A cell with room for the block at full size
-    -- which is every cell of the shipped 3840x2160 default, at 540-1080px
-    tall -- lays out exactly as before, because the first scale tried is
-    ``1.0``.
-
-    Returns ``(text, font, fitted_size, color, y_offset)`` per drawn line,
-    with ``y_offset`` relative to the block's top.
-    """
-    placed: list[tuple[str, object, int, tuple[int, int, int, int], int]] = []
-    for scale in _BLOCK_SCALES:
-        placed = []
-        y = 0
-        at_floor = True
-        for text, size, color in lines:
-            scaled = max(_MIN_FONT_SIZE, round(size * scale))
-            font, fitted = _fit_font(draw, text, theme, base_size=scaled, budget=width_budget)
-            at_floor = at_floor and fitted <= _MIN_FONT_SIZE
-            placed.append((text, font, fitted, color, y))
-            bbox = draw.textbbox((0, y), text, font=font)
-            y += (bbox[3] - bbox[1]) + max(6, fitted // 6)
-        if y <= height_budget or at_floor:
-            break
-    # Still over budget at the floor: drop whole lines from the bottom
-    # rather than let them cross into the next shooter's cell.
-    kept: list[tuple[str, object, int, tuple[int, int, int, int], int]] = []
-    for text, font, fitted, color, y in placed:
-        bbox = draw.textbbox((0, y), text, font=font)
-        if bbox[3] > height_budget and kept:
-            break
-        kept.append((text, font, fitted, color, y))
-    return kept
+#: Gap (px) between the four split-statistic columns, matching the
+#: mock's ``.sgrid { gap: cw // 24 }``.
+def _sgrid_gap(cell_width: int) -> int:
+    return max(4, cell_width // 24)
 
 
-def _hit_count_line(scorecard) -> str | None:
-    """``A7 C2 D1 M0 NS0``, omitting any field that is ``None``. Returns
-    ``None`` (draw nothing) when every field is ``None``."""
-    parts: list[str] = []
-    if scorecard.alphas is not None:
-        parts.append(f"A{scorecard.alphas}")
-    if scorecard.charlies is not None:
-        parts.append(f"C{scorecard.charlies}")
-    if scorecard.deltas is not None:
-        parts.append(f"D{scorecard.deltas}")
-    if scorecard.misses is not None:
-        parts.append(f"M{scorecard.misses}")
-    if scorecard.no_shoots is not None:
-        parts.append(f"NS{scorecard.no_shoots}")
-    return " ".join(parts) if parts else None
+#: Extra space (px) added before the "Splits" label, on top of the
+#: anchor's own between-groups gap (``_style_rules``' ``row_gutter``,
+#: which approximates the mock's tighter ``.band { gap: ch // 40 }``
+#: within-band line spacing) -- so the two bands read as visually equal,
+#: separated blocks (mock: ``.stack { gap: ch // 22 }``) rather than one
+#: unbroken list of lines.
+def _band_gap_extra(cell_height: int) -> int:
+    between_bands = max(4, cell_height // 22)
+    within_band = max(2, cell_height // 40)
+    return max(0, between_bands - within_band)
 
 
-def _cell_lines(
+def _cell_groups(
     tile: TileStageData | None,
-    placing: StagePlacing | None,
     label: str,
     *,
-    label_size: int,
-    stat_size: int,
-    ink: tuple[int, int, int, int],
-    accent: tuple[int, int, int, int],
-) -> list[tuple[str, int, tuple[int, int, int, int]]]:
-    """Every line this cell draws, in order, each with its own size and
-    color. A tile with no audit and no scorecard yields just the label."""
-    lines: list[tuple[str, int, tuple[int, int, int, int]]] = [(label, label_size, ink)]
-    if placing is not None:
-        # Bare "#2", not "#2 of 4": only scorecard-carrying tiles enter
-        # the ranked pool, so a stage a 7-shooter roster ran would show
-        # "of 4" against 3 legitimately un-ranked shooters (DQ'd, no
-        # scorecard, no audit) still on screen -- reading as a smaller
-        # field than actually shot. The grid itself already shows the
-        # field size; the placing only needs to say where this shooter
-        # landed in it.
-        lines.append((f"#{placing.rank}", stat_size, accent))
+    scale: CellScale,
+    cell_width: int,
+    cell_height: int,
+) -> tuple[Group, ...]:
+    """What one cell says, as anchored groups rather than an ordered list.
+
+    Issue #683 Task 8's approved design (``.superpowers/sdd/
+    2026-08-06-overlay-composition-seam/APPROVED-bands-mock.py``),
+    exactly: the shooter's name (with a DQ chip beside it when DQ'd) at
+    :attr:`~splitsmith.overlay_layout.Anchor.TOP_CENTER`, left-aligned;
+    below it, a vertically centred stack of two equal-weight bands at
+    :attr:`~splitsmith.overlay_layout.Anchor.MIDDLE_CENTER`, also
+    left-aligned -- **Scoring** (its own label, the six colour-coded
+    hit/fault counts, then hit factor and stage time) and **Splits**
+    (its own label, then Best/Avg/Worst/Draw as a four-column grid
+    spanning the cell's full width). Neither band outranks the other --
+    both draw their figures at the same size
+    (:attr:`~splitsmith.overlay_layout.Role.HEADLINE`) -- which is the
+    whole point of this design and the third attempt at it: the stage
+    percentage and the cross-shooter placing this summary used to carry
+    are gone entirely (issue #683 Task 8), not merely resized or moved.
+    A DQ is not a placing; it stays, as the identity row's chip.
+
+    Units attach to their own value (``"4.50s"``, ``"12.00"`` plus a
+    smaller ``"HF"`` suffix -- see :attr:`~splitsmith.overlay_layout.Element.unit`)
+    rather than a separate caption row above a bare number.
+
+    A tile with no audit and no scorecard yields just the identity group
+    -- that cell is the control the hold's pixel checks measure against,
+    so it must stay text-free apart from the name.
+    """
+    scorecard = tile.scorecard if tile is not None else None
+    # Narrowed to a real ``StageScorecard`` (not just a bool) so the reads
+    # below -- ``_count_elements``, ``.hit_factor`` -- type-check without
+    # an ``assert``/``# type: ignore``: a bare ``bool`` flag doesn't let
+    # mypy re-narrow ``scorecard`` itself back from ``StageScorecard |
+    # None``, but an ``is not None`` check on this variable directly does.
+    active_scorecard: StageScorecard | None = (
+        scorecard if scorecard is not None and not scorecard.dq else None
+    )
+    groups: list[Group] = []
+
+    # Top row: who this is, and the DQ chip beside the name when DQ'd.
+    # The placing this once shared the slot with is gone (issue #683 Task
+    # 8) -- a DQ is a status, not a placing, so it keeps the slot alone.
+    identity: list[Element] = [Element(role=Role.IDENTITY, text=label)]
+    if scorecard is not None and scorecard.dq:
+        identity.append(Element(role=Role.VERDICT, text="DQ", emphasis=Emphasis.PLATE))
+    groups.append(Group(anchor=Anchor.TOP_CENTER, flow=Flow.ROW, elements=tuple(identity), align="left"))
 
     if tile is None:
-        return lines
+        return tuple(groups)
 
-    if tile.has_shots:
-        lines.append((f"{tile.shot_count} shots", stat_size, ink))
+    # The vertically centred stack of two bands. Declared top to bottom;
+    # groups sharing MIDDLE_CENTER stack in declaration order.
+    stack: list[Group] = []
 
-    if tile.stage_time_seconds is not None:
-        text = f"Time {tile.stage_time_seconds:.2f}"
-        if tile.stage_time_is_manual:
-            text += " (manual)"
-        lines.append((text, stat_size, ink))
+    counts = _count_elements(active_scorecard) if active_scorecard is not None else []
+    time_text = _time_text(tile)
+    hf_text = (
+        f"{active_scorecard.hit_factor:.2f}"
+        if active_scorecard is not None and active_scorecard.hit_factor is not None
+        else None
+    )
+    # A DQ's own scoring is suppressed (``active_scorecard`` above is
+    # ``None`` for a DQ'd tile), but a DQ'd tile can still carry a stage
+    # time -- the mock's own DQ cell shows "Scoring" with just the time,
+    # no counts, no hit factor.
+    scoring_present = bool(counts) or hf_text is not None or time_text is not None
 
-    scorecard = tile.scorecard
-    if scorecard is not None:
-        if scorecard.dq:
-            lines.append(("DQ", stat_size, accent))
-        else:
-            if scorecard.hit_factor is not None:
-                lines.append((f"HF {scorecard.hit_factor:.2f}", stat_size, ink))
-            if scorecard.stage_pct is not None:
-                lines.append((f"Stage {scorecard.stage_pct:.1f}%", stat_size, ink))
-            hits = _hit_count_line(scorecard)
-            if hits is not None:
-                lines.append((hits, stat_size, ink))
+    if scoring_present:
+        # Drop-priority continues past the counts row's own tiers (issue
+        # #683 F1): the whole counts row is exhausted before the fit
+        # policy ever reaches hit factor/time, and the "Scoring" label
+        # itself is the last thing this module will ever offer to drop
+        # on the Scoring side -- see ``overlay_html._fit_script``. Never
+        # assigned to anything in the Splits band; F1's rule 2 is "never
+        # the splits", so nothing below this block ever sets one.
+        next_priority = len(counts)
+        working: list[Element] = []
+        if hf_text is not None:
+            working.append(Element(role=Role.HEADLINE, text=hf_text, unit="HF", drop_priority=next_priority))
+            next_priority += 1
+        if time_text is not None:
+            working.append(Element(role=Role.HEADLINE, text=time_text, drop_priority=next_priority))
+            next_priority += 1
+        stack.append(
+            Group(
+                anchor=Anchor.MIDDLE_CENTER,
+                flow=Flow.ROW,
+                elements=(Element(role=Role.LABEL, text="Scoring", drop_priority=next_priority),),
+                align="left",
+            )
+        )
+        if counts:
+            stack.append(
+                Group(
+                    anchor=Anchor.MIDDLE_CENTER,
+                    flow=Flow.ROW,
+                    elements=tuple(counts),
+                    align="left",
+                    gap=_counts_gap(scale),
+                )
+            )
+        if working:
+            stack.append(
+                Group(
+                    anchor=Anchor.MIDDLE_CENTER,
+                    flow=Flow.ROW,
+                    elements=tuple(working),
+                    align="left",
+                    gap=_figrow_gap(cell_width),
+                )
+            )
 
+    # Splits: Best/Avg/Worst/Draw, only what can actually be computed --
+    # "Best"/"Avg"/"Worst" need at least one non-draw shot; "Draw" needs
+    # only the draw itself. Never invented, per the module's own rule.
+    splits: list[Element] = []
     if tile.has_shots:
         rest = [shot.split for shot in tile.shots[1:]]
         if rest:
-            lines.append(
-                (
-                    f"Best {min(rest):.2f}  Avg {sum(rest) / len(rest):.2f}  Worst {max(rest):.2f}",
-                    stat_size,
-                    ink,
-                )
+            splits.append(Element(role=Role.HEADLINE, text=f"{min(rest):.2f}", caption="Best"))
+            splits.append(Element(role=Role.HEADLINE, text=f"{sum(rest) / len(rest):.2f}", caption="Avg"))
+            splits.append(Element(role=Role.HEADLINE, text=f"{max(rest):.2f}", caption="Worst"))
+        splits.append(Element(role=Role.HEADLINE, text=f"{tile.shots[0].split:.2f}", caption="Draw"))
+
+    if splits:
+        stack.append(
+            Group(
+                anchor=Anchor.MIDDLE_CENTER,
+                flow=Flow.ROW,
+                elements=(Element(role=Role.LABEL, text="Splits"),),
+                align="left",
+                margin_top=_band_gap_extra(cell_height) if scoring_present else None,
             )
-        lines.append((f"Draw {tile.shots[0].split:.2f}", stat_size, ink))
-
-    return lines
-
-
-def _draw_cell(
-    canvas: Image.Image,
-    draw: ImageDraw.ImageDraw,
-    placement: TilePlacement,
-    tile: TileStageData | None,
-    placing: StagePlacing | None,
-    geometry: SpriteGeometry,
-    *,
-    theme: OverlayTheme,
-) -> None:
-    """Draw one present tile's summary text over its own cell. A filler
-    tile (``present`` False) draws nothing, matching the live sprite's
-    treatment of an empty slot."""
-    if not placement.present:
-        return
-
-    x0 = placement.col * geometry.cell_width
-    y0 = placement.row * geometry.cell_height
-    pad = max(20, geometry.cell_height // 40)
-    width_budget = max(1, geometry.cell_width - 2 * pad)
-    label_size = max(32, geometry.cell_height // 16)
-    stat_size = max(18, geometry.cell_height // 32)
-    ink = (*theme.ink, 255)
-    accent = (*theme.accent, 255)
-
-    lines = _cell_lines(
-        tile,
-        placing,
-        placement.label,
-        label_size=label_size,
-        stat_size=stat_size,
-        ink=ink,
-        accent=accent,
-    )
-
-    height_budget = max(1, geometry.cell_height - 2 * pad)
-    for text, font, fitted_size, color, offset in _lay_out_block(
-        draw, lines, theme, width_budget=width_budget, height_budget=height_budget
-    ):
-        _draw_text_with_shadow(
-            draw,
-            canvas,
-            (x0 + pad, y0 + pad + offset),
-            text,
-            font,
-            color,
-            stroke_width=max(2, fitted_size // 16),
-            shadow_offset=max(2, fitted_size // 20),
-            shadow_blur=max(3, fitted_size // 10),
-            stroke_color=theme.stroke,
-            shadow_color=theme.shadow,
         )
+        stack.append(
+            Group(
+                anchor=Anchor.MIDDLE_CENTER,
+                flow=Flow.GRID,
+                elements=tuple(splits),
+                align="left",
+                gap=_sgrid_gap(cell_width),
+            )
+        )
+
+    groups.extend(stack)
+    return tuple(groups)
+
+
+def _summary_cells(
+    placements: Sequence[TilePlacement],
+    data: Mapping[str, TileStageData],
+    *,
+    scale: CellScale,
+    cell_width: int,
+    cell_height: int,
+) -> list[tuple[TilePlacement, tuple[Group, ...]]]:
+    """One ``(placement, declared groups)`` pair per placement, in
+    placement order -- :func:`splitsmith.overlay_html.summary_html`'s own
+    input shape.
+
+    A filler tile's groups are never computed: ``summary_html`` already
+    treats ``present=False`` as an empty cell regardless of what groups it
+    is handed (the same defensive posture ``_draw_cell`` used to take),
+    but computing them anyway would be pointless work for a cell nothing
+    will render text into.
+    """
+    cells: list[tuple[TilePlacement, tuple[Group, ...]]] = []
+    for placement in placements:
+        if not placement.present:
+            cells.append((placement, ()))
+            continue
+        tile = data.get(placement.label)
+        groups = _cell_groups(
+            tile, placement.label, scale=scale, cell_width=cell_width, cell_height=cell_height
+        )
+        cells.append((placement, groups))
+    return cells
 
 
 def build_hold_still(
@@ -577,17 +723,41 @@ def build_hold_still(
     geometry: SpriteGeometry,
     *,
     theme: OverlayTheme,
+    rasterizer: Rasterizer | None = None,
     blur_radius: int | None = None,
     dim: float = DEFAULT_DIM,
 ) -> Image.Image:
     """Compose the canvas-sized RGB stage summary still.
 
     Each present tile's blurred, dimmed freeze frame is pasted into its
-    cell first, then that shooter's summary text is drawn over it -- so a
-    cell with no freeze frame (extraction failed, or the tile has no
-    trim) is simply the canvas's own black background with the text drawn
-    over it, never a crash. A filler tile (``present=False``) draws
-    nothing at all: it is not a shooter, so text over black would imply a
+    cell first (never a crash: a cell with no freeze frame, extraction
+    failed or the tile has no trim, is simply the canvas's own black
+    background). Every shooter's summary text is then composed in one
+    pass: the whole canvas's declared cells (see :func:`_summary_cells`)
+    become one HTML document (``overlay_html.summary_html``), rasterized
+    to one canvas-sized PNG by the injected ``rasterizer``, and
+    alpha-composited over the freezes in a single call -- not drawn per
+    cell. This is what makes ``overflow: hidden`` (declared once, in the
+    HTML's own stylesheet) the thing that keeps one shooter's figures out
+    of another's cell, rather than arithmetic bounding checked here. See
+    the module docstring and
+    ``docs/superpowers/plans/2026-08-06-overlay-composition-seam-amendment.md``.
+
+    ``rasterizer`` is ``None`` by default -- no text is composed and the
+    still is just the blurred, dimmed freezes, which is also the
+    degradation path a caller with no usable Chromium falls back to (see
+    :mod:`splitsmith.compare.mp4_grid`'s preflight around
+    :class:`~splitsmith.overlay_raster.ChromiumRasterizer`). A rasterizer
+    that *is* given but fails on this call -- as opposed to failing to
+    launch at all, which is the caller's preflight's job to catch once
+    per render -- degrades the same way: logged and skipped, so one bad
+    stage's rasterization does not cost the whole render the way raising
+    out of this function would (mirroring :func:`_prepare_cell` and
+    :func:`extract_freeze_frames`'s own per-tile degradation elsewhere in
+    this module).
+
+    A filler tile (``present=False``) gets no freeze and no summary text
+    at all: it is not a shooter, so text over black would imply a
     competitor who isn't there.
 
     ``blur_radius`` defaults to ``max(8, cell_height // 60)`` -- scaled
@@ -597,10 +767,6 @@ def build_hold_still(
     _check_stage_keys(data)
     radius = blur_radius if blur_radius is not None else max(8, geometry.cell_height // 60)
 
-    # RGBA throughout the compose, not RGB: ``_draw_text_with_shadow``
-    # alpha-composites its drop shadow onto the canvas, which PIL requires
-    # to be RGBA (or LA). Converted to RGB only on the way out, matching
-    # this function's documented return type.
     canvas = Image.new("RGBA", (geometry.canvas_width, geometry.canvas_height), (0, 0, 0, 255))
     for placement in placements:
         if not placement.present:
@@ -615,11 +781,28 @@ def build_hold_still(
         y0 = placement.row * geometry.cell_height
         canvas.paste(cell_image.convert("RGBA"), (x0, y0))
 
-    placings = _rank_placings(placements, data)
-    draw = ImageDraw.Draw(canvas)
-    for placement in placements:
-        tile = data.get(placement.label)
-        _draw_cell(canvas, draw, placement, tile, placings.get(placement.label), geometry, theme=theme)
+    if rasterizer is not None:
+        scale = _summary_scale(geometry.cell_height)
+        cells = _summary_cells(
+            placements,
+            data,
+            scale=scale,
+            cell_width=geometry.cell_width,
+            cell_height=geometry.cell_height,
+        )
+        html = summary_html(cells, geometry=geometry, scale=scale, theme=theme)
+        try:
+            png_bytes = rasterizer.png(html, width=geometry.canvas_width, height=geometry.canvas_height)
+            with Image.open(io.BytesIO(png_bytes)) as overlay_image:
+                overlay_rgba = overlay_image.convert("RGBA")
+        except Exception as exc:  # noqa: BLE001 -- one bad rasterization must not lose the stage
+            logger.warning(
+                "compare overlay summary: could not rasterize the stage summary (%s); "
+                "the still composes without any text",
+                exc,
+            )
+        else:
+            canvas.alpha_composite(overlay_rgba)
 
     return canvas.convert("RGB")
 
@@ -633,6 +816,7 @@ def write_hold_still(
     work_dir: Path,
     ffmpeg_binary: str,
     runner: Runner,
+    rasterizer: Rasterizer | None = None,
     blur_radius: int | None = None,
     dim: float = DEFAULT_DIM,
     output_path: Path | None = None,
@@ -642,9 +826,9 @@ def write_hold_still(
     contract as :func:`build_hold_still` and
     ``overlay_sprites.build_overlay_states``.
 
-    Convenience wrapper only: Task 9 wires the frame it produces into the
-    ffmpeg graph as one more static input, the same way the sprite
-    sequence already is. Nothing here touches that graph.
+    Convenience wrapper only: ``mp4_grid`` wires the frame it produces
+    into the ffmpeg graph as one more static input, the same way the
+    sprite sequence already is. Nothing here touches that graph.
     """
     placements = _placements_for_plan(plan)
     freezes = extract_freeze_frames(
@@ -654,7 +838,14 @@ def write_hold_still(
         runner=runner,
     )
     still = build_hold_still(
-        placements, data, freezes, geometry, theme=theme, blur_radius=blur_radius, dim=dim
+        placements,
+        data,
+        freezes,
+        geometry,
+        theme=theme,
+        rasterizer=rasterizer,
+        blur_radius=blur_radius,
+        dim=dim,
     )
     out_path = output_path or work_dir / f"summary-stage{plan.stage_number}.png"
     out_path.parent.mkdir(parents=True, exist_ok=True)

@@ -19,6 +19,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
+from ..overlay_layout import CellScale
 from ..overlay_text import OverlayFace, _draw_text_with_shadow, load_face, resolve_overlay_face
 from ..overlay_theme import OverlayTheme
 from .overlay_data import TileShot, TileStageData
@@ -297,8 +298,13 @@ def render_state(state: OverlayState, geometry: SpriteGeometry, *, theme: Overla
     canvas = Image.new("RGBA", (geometry.canvas_width, geometry.canvas_height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(canvas)
 
-    pad = max(24, geometry.cell_height // 36)
-    big = max(48, geometry.cell_height // 14)
+    # One resolver for the whole overlay. These two values used to be
+    # written out here, in ``mp4_grid._clock_pad`` and in
+    # ``_stage_overlay_plan`` independently; ``CellScale`` is the single
+    # place that decides them, and it reproduces both exactly.
+    scale = CellScale.for_cell(geometry.cell_height)
+    pad = scale.pad
+    big = scale.live_primary
 
     for panel in state.panels:
         _draw_panel(canvas, draw, panel, geometry, theme=theme, pad=pad, base_size=big)

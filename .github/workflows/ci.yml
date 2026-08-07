@@ -49,6 +49,26 @@ jobs:
         # is still slim; CI has to exercise both backends.
         run: uv sync --frozen --all-groups
 
+      - name: Install Chromium for the overlay rasterizer
+        # splitsmith.overlay_raster.ChromiumRasterizer (issue #683
+        # amendment) is Playwright-backed, and Playwright's own browser
+        # is a separate download that is never vendored by the
+        # ``playwright`` package or this repo's wheel -- every
+        # environment that rasterizes an overlay needs this step once,
+        # the same way every environment needs ffmpeg above. Without it,
+        # tests/test_overlay_raster.py's integration tests would skip
+        # for "no usable Chromium", and SPLITSMITH_REQUIRE_INTEGRATION
+        # turns that skip into a failure (see the ffmpeg step's own
+        # comment and #670 for why that gate exists).
+        #
+        # ``--only-shell`` fetches the headless-shell build
+        # ``overlay_raster.CHROMIUM_CHANNEL`` launches (260M vs the full
+        # browser's 377M; verified byte-identical screenshot output).
+        # ``--with-deps`` additionally apt-get installs the OS libraries
+        # Chromium needs to run at all, which a bare runner image is not
+        # guaranteed to carry.
+        run: uv run playwright install --with-deps chromium --only-shell
+
       - name: Lint (ruff)
         run: uv run ruff check src tests scripts
 

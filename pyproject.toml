@@ -53,6 +53,40 @@ dependencies = [
     # HTTP / library APIs as tools any MCP-aware client can drive.
     # Stdio transport is the default; SSE comes for free.
     "mcp>=1.0.0",
+    # Headless-Chromium driver for splitsmith.overlay_raster (issue #683
+    # amendment, Task 6R-2) -- the box-engine stage summary rasterizes
+    # declared HTML through this rather than hand-fitting text, and
+    # ``ChromiumRasterizer`` is the only production caller. Promoted out
+    # of [dev] (where it lived for UI walkthroughs / screenshots only)
+    # because a compare-grid render now needs it at runtime, not just in
+    # a contributor's venv.
+    #
+    # Pinning to Playwright's own bundled Chromium build is a feature,
+    # not a cost: there is no system package, no apt or brew, and no
+    # distro drift, so the rasterizer produces the same pixels on the
+    # dev host, in CI, on the hosted deployment and on every self-hosted
+    # worker -- bound by uv.lock like everything else. A *system*
+    # browser would be the risky choice, because its version moves under
+    # you and rendered pixels move with it.
+    #
+    # The browser itself is NOT vendored in this wheel or in the
+    # ``playwright`` package -- it is a separate ~260 MB download. Every
+    # environment that rasterizes an overlay needs the one-time install
+    # step once per environment: ``uv run playwright install chromium
+    # --only-shell`` (the hosted image's Dockerfile, the self-hosted
+    # worker's provisioning, the Railway fallback, and CI all need this
+    # run once, independently). ``--only-shell`` fetches the
+    # headless-shell build ``overlay_raster.CHROMIUM_CHANNEL`` launches
+    # -- 260M against the full browser's 377M -- verified to render the
+    # same screenshot byte for byte, so nothing is given up for the
+    # smaller download.
+    #
+    # A Playwright version bump can move which Chromium build gets
+    # pinned, and a different Chromium build can move rendered pixels.
+    # Treat a playwright bump the way this repo already treats an ffmpeg
+    # change (see CLAUDE.md): re-render the fixture frames and look at
+    # them before merging the bump.
+    "playwright>=1.60.0",
 ]
 
 [project.scripts]
@@ -181,11 +215,6 @@ dev = [
     # ``test_hosted_raw_upload.py``. Dev-only; production never
     # imports moto.
     "moto[s3]>=5.0.0",
-    # Headless-browser driver for UI walkthroughs / screenshots of the
-    # hosted SPA (e.g. the magic-link login flow). Dev-only; needs a
-    # one-time ``uv run playwright install chromium`` to fetch the browser
-    # binary (not vendored in the repo or the wheel).
-    "playwright>=1.60.0",
     # Ensemble sweep analysis (issue #281 follow-up). pyarrow for the
     # signals/runs parquet store, matplotlib for the PNG plot layer.
     # Dev-only: the production API does not read these files.
