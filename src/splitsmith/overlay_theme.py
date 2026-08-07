@@ -66,6 +66,27 @@ class OverlayTheme:
     split_good: RGB
     stroke: RGB
     accent: RGB
+    #: The filled-plate variant of :attr:`accent` -- darker, so ink text
+    #: on top of it reaches AA-large contrast (mirrors the web UI's
+    #: ``--color-led-fill``: "slightly darker than --color-led so cream
+    #: text reaches AA-large + survives red-green colorblindness"). Every
+    #: :attr:`~splitsmith.overlay_layout.Emphasis.PLATE` background reads
+    #: this, not :attr:`accent` -- see issue #683 Task 7c.
+    accent_fill: RGB
+    #: Body-size red text (10-14px) -- an unplated fault count reads
+    #: this, not :attr:`accent`. The web UI's own comment on
+    #: ``--color-led-text`` names the exact failure this token exists to
+    #: avoid: "the saturated identity red is too thin for 10-12px running
+    #: text". Measured on this branch before the fix: a small unplated
+    #: accent glyph read 7.1% accent-coloured pixels against 33.9% stroke
+    #: -- the stroke was eating the glyph.
+    accent_text: RGB
+    #: A hairline rule's own colour.
+    rule: RGB
+    #: Secondary/tertiary text -- what a caller used to fake by applying
+    #: an arbitrary opacity to :attr:`ink` instead of reading a real
+    #: token.
+    muted: RGB
     font_display: str
     font_mono: str
 
@@ -90,6 +111,20 @@ _CLEAN = OverlayTheme(
     split_good=(46, 204, 113),
     stroke=(0, 0, 0),
     accent=(255, 45, 45),
+    # No brand palette here either, so these mirror the *relationship*
+    # the splitsmith theme's own three reds carry (a darker fill, a
+    # lighter body-text tint) applied to clean's own accent hue rather
+    # than inventing an unrelated one -- clean's accent already happens
+    # to equal the brand's led red, so the same fill/text pair the brand
+    # theme resolved from --color-led-fill/--color-led-text is reused
+    # verbatim rather than re-derived.
+    accent_fill=(220, 38, 38),
+    accent_text=(255, 180, 180),
+    # Brand-neutral dark and mid greys -- no hue borrowed from accent,
+    # split or split_good, so a hairline or a muted label doesn't quietly
+    # read as "for" one of those semantics.
+    rule=(60, 60, 60),
+    muted=(150, 150, 150),
     font_display="Antonio",
     font_mono="JetBrains Mono",
 )
@@ -118,6 +153,10 @@ def _load_splitsmith() -> OverlayTheme:
             split_good=_rgb(colors, "split_good"),
             stroke=_rgb(colors, "stroke"),
             accent=_rgb(colors, "accent"),
+            accent_fill=_rgb(colors, "accent_fill"),
+            accent_text=_rgb(colors, "accent_text"),
+            rule=_rgb(colors, "rule"),
+            muted=_rgb(colors, "muted"),
             font_display=str(fonts.get("display", "Antonio")),
             font_mono=str(fonts.get("mono", "JetBrains Mono")),
         )

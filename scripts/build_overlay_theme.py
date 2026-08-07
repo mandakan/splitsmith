@@ -39,6 +39,25 @@ TOKEN_MAP: dict[str, str] = {
     "split_slow": "--color-led",
     "stroke": "--color-bg",
     "accent": "--color-led",
+    # The three-reds discipline the UI's own @theme block documents
+    # (index.css: "Three reds, three roles"): --color-led is identity/
+    # structural use only (dots, focus rings, hairlines) and is too thin
+    # for running text at overlay sizes -- --color-led-text exists
+    # specifically for 10-14px body-size red, and --color-led-fill is the
+    # darker filled-background variant used behind a PLATE. Splitting
+    # these into their own overlay roles (rather than reusing "accent"
+    # for all three jobs) is issue #683 Task 7c: the small unplated fault
+    # counts (``M0``/``NS0``/``P0``) and a PLATE's own background were
+    # both drawing the raw identity red, which is exactly the misuse the
+    # design system's own comment warns against.
+    "accent_fill": "--color-led-fill",
+    "accent_text": "--color-led-text",
+    # A hairline's own colour -- distinct from a semi-transparent ink
+    # hack, which was covering for this token not being mirrored here.
+    "rule": "--color-rule",
+    # Secondary/tertiary text -- what used to be faked with
+    # ``opacity: 0.68`` on top of the primary ink colour.
+    "muted": "--color-muted",
 }
 
 FONT_MAP: dict[str, str] = {
