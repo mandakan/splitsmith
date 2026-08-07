@@ -55,26 +55,46 @@ def begin_login(email: str) -> None:
             raise SystemExit(f"auth/begin returned HTTP {resp.status}")
 
 
-def fish_link(railway: str, email: str, attempts: int = 6, log_window_s: int = 15) -> str | None:
+def fish_link(railway: str, email: str, attempts: int = 6) -> str | None:
     """Scan staging serve logs for the newest MAGIC_LINK line for ``email``.
 
-    ``railway logs`` streams and never exits on its own; each attempt
-    lets it run for ``log_window_s`` seconds and recovers whatever it
-    printed from the TimeoutExpired exception.
+    Uses a *filtered* historical fetch, not streaming: Railway serves
+    pre-normalization records (where the app's ``msg`` key is dropped and
+    ``message`` arrives empty, #711) on both the realtime stream and plain
+    ``--lines`` tails. Only attribute-filtered queries go through the
+    normalized index that carries the full message text. The command also
+    exits on its own instead of needing a streaming-window timeout.
     """
     for _ in range(attempts):
-        try:
-            proc = subprocess.run(
-                [railway, "logs", "--service", "serve", "--environment", "staging"],
-                capture_output=True,
-                text=True,
-                timeout=log_window_s,
-                check=False,
-            )
-            out = proc.stdout or ""
-        except subprocess.TimeoutExpired as exc:
-            out = exc.stdout.decode() if isinstance(exc.stdout, bytes) else (exc.stdout or "")
-        hits = [line for line in out.splitlines() if MARKER in line and email in line]
+        proc = subprocess.run(
+            [
+                railway,
+                "logs",
+                "--service",
+                "serve",
+                "--environment",
+                "staging",
+                "--json",
+                "--since",
+                "15m",
+                "--lines",
+                "200",
+                "--filter",
+                "@logger:splitsmith.db.email",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        hits: list[str] = []
+        for line in (proc.stdout or "").splitlines():
+            try:
+                message = json.loads(line).get("message", "")
+            except ValueError:
+                message = line
+            if MARKER in message and email in message:
+                hits.append(message)
         if hits:
             match = LINK_RE.search(hits[-1])
             if match:

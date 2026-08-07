@@ -28,14 +28,17 @@ curl -fsS -X POST "$HOST/api/v1/auth/begin" \
 sleep 3
 
 echo "Fetching the link from the staging serve logs ..."
-LINK="$(railway logs -d --lines 200 -s serve -e staging 2>/dev/null \
+# The @logger filter is load-bearing: unfiltered tails serve records
+# pre-normalization, where the structured line's message is empty (#711).
+LINK="$(railway logs -d --lines 200 --since 15m -s serve -e staging \
+    --filter '@logger:splitsmith.db.email' 2>/dev/null \
   | grep "MAGIC_LINK $EMAIL " \
   | tail -1 \
   | grep -oE 'https://[^ ]+/auth/callback\?token=[^ ]+' || true)"
 
 if [ -z "$LINK" ]; then
   echo "No link found in the logs yet. Re-run in a few seconds, or check:"
-  echo "  railway logs -d -s serve -e staging | grep MAGIC_LINK"
+  echo "  railway logs -d --lines 200 -s serve -e staging --filter '@logger:splitsmith.db.email'"
   exit 1
 fi
 
