@@ -81,7 +81,9 @@ from splitsmith.compare.project_loader import CompareShooterBundle
 from splitsmith.overlay_theme import load_theme
 from tests.compare_fixture import (
     HEAD_PAD_SECONDS,
+    POST_BEEP_SECONDS,
     SEGMENT_SECONDS,
+    SHORT_FOOTAGE_ENDS,
     TAIL_PAD_SECONDS,
     build_clips,
     build_roster,
@@ -300,7 +302,22 @@ MID_HOLD_INDEX = ACTION_FRAMES + HOLD_FRAMES // 2
 #: index (6.833s) is where Anders and Bea still have footage and Mathias
 #: does not, which is what lets the two "end of the footage" readings be
 #: told apart in pixels.
-PICTURE_INDEX = 205
+#:
+#: Derived from the boundary it depends on, not hardcoded (#689): the
+#: full clips' footage runs out at ``HEAD_PAD + POST_BEEP`` (7.0s, frame
+#: 210), and the measured HF-energy sweep across the valid window found a
+#: stable plateau (1.91-2.00 against the 1.5 threshold) at frames
+#: 197-208 with a cliff at 209, where Anders' cell goes black. Five
+#: frames of clearance keeps the read inside that plateau -- and moves
+#: with the geometry, so a change to pads or clip lengths shifts this
+#: index instead of silently moving the cliff underneath a bare literal.
+PICTURE_INDEX = round((HEAD_PAD_SECONDS + POST_BEEP_SECONDS) * 30) - 5
+
+# The frame has to satisfy both of its conditions at once -- the short
+# clip already out of footage, the full clips not yet. Checked here so a
+# geometry change that breaks the window fails as "the fixture geometry
+# changed", not as a baffling HF-energy assertion mid-test.
+assert round(SHORT_FOOTAGE_ENDS * 30) < PICTURE_INDEX < round((HEAD_PAD_SECONDS + POST_BEEP_SECONDS) * 30)
 #: The same point in stage 2's hold, which must carry stage 2's figures.
 STAGE2_MID_HOLD_INDEX = SEGMENT_FRAMES + MID_HOLD_INDEX
 
@@ -517,24 +534,30 @@ def _stream_counts(path: Path) -> tuple[int, int]:
     return kinds.count("video"), kinds.count("audio")
 
 
-def _video_seconds(path: Path) -> float:
-    """How long the video stream actually decodes to, not what it claims.
+def _video_frames(path: Path) -> int:
+    """How many video frames actually decode, not what the file claims.
 
-    Read from the timestamp ffmpeg reports as it decodes the last
-    frame, the same technique ``test_compare_mp4_grid_render.py`` uses
-    -- not ``ffprobe``'s ``duration``, which is exactly the field the
-    module docstring above warns is unreliable on these files.
+    ``-count_frames`` decodes the stream and counts -- not ``ffprobe``'s
+    ``duration``, which is exactly the field the module docstring above
+    warns is unreliable on these files, and not the last ``time=`` of
+    ffmpeg's decode progress, which this helper parsed before #689: that
+    line reported the last frame's *pts* up to ffmpeg 7 and the
+    end-of-stream position from ffmpeg 8, a version-dependent ambiguity
+    of exactly one frame -- the tolerance these assertions run at. A
+    frame count means the same thing everywhere, and it is the unit
+    ``mp4_grid.GridStagePlan.total_seconds`` states its own measured
+    failure modes in.
     """
     done = subprocess.run(
-        [FFMPEG, "-hide_banner", "-i", str(path), "-map", "0:v:0", "-f", "null", "-"],
+        [
+            FFPROBE, "-v", "error", "-select_streams", "v:0", "-count_frames",
+            "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0", str(path),
+        ],  # fmt: skip
         capture_output=True,
         text=True,
     )
     assert done.returncode == 0, done.stderr[-2000:]
-    stamps = re.findall(r"time=(\d+):(\d+):(\d+\.\d+)", done.stderr)
-    assert stamps, done.stderr[-2000:]
-    hours, minutes, seconds = stamps[-1]
-    return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+    return int(done.stdout.strip())
 
 
 def _decoded_audio_seconds(path: Path, stream: str) -> float:
@@ -829,12 +852,11 @@ def test_overlay_reaches_the_rendered_pixels(tmp_path: Path, shooter_clips):
     )
 
     # --- invariant: the overlay must not extend or shrink the segment --
-    plain_seconds = _video_seconds(plain)
-    overlaid_seconds = _video_seconds(overlaid)
-    assert abs(plain_seconds - overlaid_seconds) <= FRAME_SECONDS, (
-        f"overlay changed the rendered duration: {plain_seconds:.3f}s vs {overlaid_seconds:.3f}s "
-        f"(one frame is {FRAME_SECONDS:.4f}s)"
-    )
+    plain_frames = _video_frames(plain)
+    overlaid_frames = _video_frames(overlaid)
+    assert (
+        plain_frames == overlaid_frames
+    ), f"overlay changed the rendered duration: {plain_frames} frames vs {overlaid_frames}"
 
     # --- invariant: decoded audio sample counts match, honouring the
     # edit list -- not ffprobe's declared duration (see module
@@ -937,11 +959,10 @@ def test_an_ffmpeg_without_drawtext_keeps_the_sprites_and_loses_only_the_clock(t
         _mean_abs_diff(after_capable, after_degraded, counter_box) <= NOISE_FLOOR_MEAN_ABS_DIFF
     ), "dropping the clock moved the shot counter too"
 
-    plain_seconds = _video_seconds(plain)
-    degraded_seconds = _video_seconds(degraded_path)
-    assert abs(plain_seconds - degraded_seconds) <= FRAME_SECONDS, (
-        f"the degraded overlay changed the rendered duration: {plain_seconds:.3f}s vs "
-        f"{degraded_seconds:.3f}s (one frame is {FRAME_SECONDS:.4f}s)"
+    plain_frames = _video_frames(plain)
+    degraded_frames = _video_frames(degraded_path)
+    assert plain_frames == degraded_frames, (
+        f"the degraded overlay changed the rendered duration: {plain_frames} frames vs " f"{degraded_frames}"
     )
 
 
@@ -959,10 +980,11 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, shooter_cl
     check, the A/V check and the successful stitch below all pass against
     it and none of them is an instrument.
 
-    Two things below are. The duration check is one, because it reads
+    Two things below are. The duration check is one, because it counts
     **decoded** frames: the muxer's stretch is a duration on the last
     coded frame rather than extra frames, so a missing still shows up as
-    16.99s where 19.00s was asked for. But it only catches a still that
+    450 decoded frames where 570 were asked for, while the container's
+    declared duration reads correct. But it only catches a still that
     is *absent*. A still that is present and **wrong** -- blank,
     unblurred, the wrong stage's, drawn into the wrong cell, or with a
     clock left on it -- passes the duration check exactly. That is what
@@ -986,17 +1008,28 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, shooter_cl
     assert _stream_counts(held) == _stream_counts(unheld)
 
     # --- the segment is the action plus the hold, twice ------------------
-    # From decoded frames: ``_video_seconds`` reads the timestamp ffmpeg
-    # reports for the last frame it decoded, which is one frame short of
-    # the stream's extent.
-    expected = 2 * (SEGMENT_SECONDS + HOLD_SECONDS)
-    held_seconds = _video_seconds(held) + FRAME_SECONDS
-    assert held_seconds == pytest.approx(expected, abs=FRAME_SECONDS), (
-        f"held render is {held_seconds:.3f}s, expected {expected:.3f}s "
-        f"(2 x {SEGMENT_SECONDS}s action + 2 x {HOLD_SECONDS}s hold)"
+    # Decoded frame counts, asserted exactly: the segments are cut to
+    # exact frame counts and the stitch is ``-c copy``, so there is no
+    # legitimate source of a one-frame slack -- and a one-frame tolerance
+    # is precisely the width of the measurement ambiguity that hid #689's
+    # instrument defect.
+    held_frames = _video_frames(held)
+    assert held_frames == 2 * SEGMENT_FRAMES, (
+        f"held render is {held_frames} frames, expected {2 * SEGMENT_FRAMES} "
+        f"(2 x {ACTION_FRAMES} action + 2 x {HOLD_FRAMES} hold)"
     )
-    unheld_seconds = _video_seconds(unheld) + FRAME_SECONDS
-    assert unheld_seconds == pytest.approx(2 * SEGMENT_SECONDS, abs=FRAME_SECONDS)
+    unheld_frames = _video_frames(unheld)
+    assert (
+        unheld_frames == 2 * ACTION_FRAMES
+    ), f"unheld render is {unheld_frames} frames, expected {2 * ACTION_FRAMES}"
+    # The video durations the A/V checks below compare audio against,
+    # derived from the counted frames -- frames x frame duration is the
+    # stream's exact extent, where the decode-progress parse this file
+    # used before #689 was off by one frame in a version-dependent
+    # direction.
+    expected = 2 * (SEGMENT_SECONDS + HOLD_SECONDS)
+    held_seconds = held_frames * FRAME_SECONDS
+    unheld_seconds = unheld_frames * FRAME_SECONDS
 
     cell_w, cell_h = CANVAS.width // 2, CANVAS.height // 2
     anders_cell = (0, 0, cell_w, cell_h)

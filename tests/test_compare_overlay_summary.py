@@ -523,12 +523,18 @@ def _full_stat_tile(label: str) -> TileStageData:
 
 
 def _drawn_boxes(monkeypatch):
-    """Record ``(xy, bbox)`` for every line the summary draws."""
-    boxes: list[tuple[tuple[int, int], tuple[int, int, int, int]]] = []
+    """Record ``(xy, bbox, font size)`` for every line the summary draws.
+
+    The size is the *fitted* size the layout actually drew at -- the
+    direct observable for "unshrunk", where a bbox height is only a
+    font-dependent proxy of it (issue #689: a ``>= label_size // 2``
+    bbox check tolerated a 39% shrink while reading as "same sizes").
+    """
+    boxes: list[tuple[tuple[int, int], tuple[int, int, int, int], int]] = []
     original = summ._draw_text_with_shadow
 
     def recorder(draw, canvas, xy, text, font, fill, **kwargs):
-        boxes.append((xy, draw.textbbox(xy, text, font=font)))
+        boxes.append((xy, draw.textbbox(xy, text, font=font), font.size))
         return original(draw, canvas, xy, text, font, fill, **kwargs)
 
     monkeypatch.setattr(summ, "_draw_text_with_shadow", recorder)
@@ -554,7 +560,7 @@ def test_a_short_cell_keeps_its_summary_inside_its_own_cell(monkeypatch):
     summ.build_hold_still(placements, data, {}, geometry, theme=THEME)
 
     assert boxes, "the summary drew nothing at all"
-    in_ann = [box for xy, box in boxes if xy[1] < geometry.cell_height]
+    in_ann = [box for xy, box, _size in boxes if xy[1] < geometry.cell_height]
     assert in_ann, "the top cell drew nothing"
     overflow = max(box[3] for box in in_ann)
     assert overflow <= geometry.cell_height, (
@@ -579,10 +585,13 @@ def test_a_tall_cell_lays_the_block_out_unshrunk(monkeypatch):
     pad = max(20, geometry.cell_height // 40)
     label_size = max(32, geometry.cell_height // 16)
     assert boxes[0][0] == (pad, pad)
-    # The first line is the label at its unshrunk size: a block that had
-    # been scaled down would draw it smaller than this.
-    assert boxes[0][1][3] - boxes[0][1][1] >= label_size // 2
-    assert max(box[3] for _xy, box in boxes) <= geometry.cell_height
+    # The label draws at *exactly* its unshrunk size. Equality rather
+    # than a bbox-height floor: the first scale step below 1.0 is a 15%
+    # cut, and the previous ``>= label_size // 2`` proxy only tripped at
+    # a 39% one -- it read as "same sizes" and tolerated every shipped
+    # summary rendering visibly smaller than designed (#689).
+    assert boxes[0][2] == label_size
+    assert max(box[3] for _xy, box, _size in boxes) <= geometry.cell_height
 
 
 def test_build_hold_still_rejects_whole_match_keyed_data():
