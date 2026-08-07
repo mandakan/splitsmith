@@ -20,7 +20,7 @@ def _url(token_id: str) -> str:
     return f"{URL}/{token_id}"
 
 
-# -- anonymous requests are rejected -------------------------------------
+# anonymous requests are rejected
 
 
 def test_anonymous_get_rejected(hosted_app: tuple[TestClient, _CapturingSender]) -> None:
@@ -38,7 +38,7 @@ def test_anonymous_delete_rejected(hosted_app: tuple[TestClient, _CapturingSende
     assert client.delete(_url("no-such-id")).status_code == 401
 
 
-# -- create: raw token returned once, record has no hash/raw -------------
+# create: raw token returned once, record has no hash/raw
 
 
 def test_post_creates_token_and_returns_raw_once(
@@ -63,7 +63,7 @@ def test_post_creates_token_and_returns_raw_once(
     assert "token" not in record
 
 
-# -- list: shows the record, never the hash/raw ---------------------------
+# list: shows the record, never the hash/raw
 
 
 def test_get_lists_the_created_token_without_hash_or_raw(
@@ -87,7 +87,7 @@ def test_get_lists_the_created_token_without_hash_or_raw(
     assert "token" not in tokens[0]
 
 
-# -- revoke: true, and the bearer stops authenticating afterward ---------
+# revoke: true, and the bearer stops authenticating afterward
 
 
 def test_revoke_returns_true_and_bearer_stops_authenticating(
@@ -142,7 +142,7 @@ def test_revoke_unknown_id_returns_false(
     assert resp.json() == {"revoked": False}
 
 
-# -- cross-user isolation --------------------------------------------------
+# cross-user isolation
 
 
 def test_second_user_cannot_list_or_revoke_first_users_token(
@@ -172,7 +172,7 @@ def test_second_user_cannot_list_or_revoke_first_users_token(
     assert a_tokens[0]["revoked_at"] is None
 
 
-# -- local mode: no desktop-token surface ----------------------------------
+# local mode: no desktop-token surface
 
 
 def test_local_mode_404() -> None:
