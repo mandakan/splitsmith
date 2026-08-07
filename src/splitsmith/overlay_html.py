@@ -100,7 +100,7 @@ from importlib.resources import files
 from pathlib import Path
 
 from .compare.overlay_sprites import SpriteGeometry, TilePlacement
-from .overlay_layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
+from .overlay_layout import MIN_FONT_SIZE, Anchor, CellScale, ColorToken, Element, Flow, Group, Role
 from .overlay_theme import OverlayTheme
 
 RGB = tuple[int, int, int]
@@ -170,6 +170,25 @@ def _rgb(color: RGB) -> str:
     return f"{r},{g},{b}"
 
 
+def _fit(px: int) -> str:
+    """A length that shrinks with the cell's ``--fit-scale`` custom
+    property (issue #683 F1's fit policy) instead of a bare pixel value.
+
+    ``--fit-scale`` is unset (falls back to ``1``) everywhere except
+    ``.anchor-middle-center``, where the fit-policy script (see
+    :func:`_fit_script`) sets it directly once, after the browser lays
+    the cell out once at full size and finds it does not fit its
+    ``minmax(0, 1fr)`` track. Every font-size and gap inside that one
+    subtree that calls this instead of writing ``{px}px`` shrinks
+    together, uniformly, when that happens -- one CSS variable rather
+    than Python recomputing each of them. Elements outside that subtree
+    (the identity row, the live overlay's own corner anchors) never see
+    the property set, so ``calc(var(--fit-scale, 1) * ...)`` resolves to
+    exactly ``{px}px`` for them, unchanged.
+    """
+    return f"calc(var(--fit-scale, 1) * {px}px)"
+
+
 def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     """The shared stylesheet for one cell's declared content.
 
@@ -183,6 +202,7 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     display_url = _font_face_url(_FONT_FILES["display"])
     ink = _rgb(theme.ink)
     ink_2 = _rgb(theme.ink_2)
+    rule_color = _rgb(theme.rule)
     stroke = _rgb(theme.stroke)
     shadow = _rgb(theme.shadow)
     accent = _rgb(theme.accent)
@@ -196,10 +216,11 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     # itself -- which no rule here ever sets, so it stayed pinned near the
     # ~16px default regardless of how large ``scale``'s roles actually
     # render. At ``scale.headline`` sizes that is an all but invisible
-    # gap: "4.50 12.00 100.0%" reads as one run-on number rather than
-    # three captioned columns. Deriving the gutter from ``scale.pad`` (the
-    # one number already scaled off cell height) fixes that at its root
-    # instead of hand-tuning an em value per call site.
+    # gap: the Scoring band's hit-factor/time row, "5.12HF 12.34s", read
+    # as one run-on number rather than two figures with daylight between
+    # them. Deriving the gutter from ``scale.pad`` (the one number
+    # already scaled off cell height) fixes that at its root instead of
+    # hand-tuning an em value per call site.
     row_gutter = max(8, scale.pad // 2)
     column_gutter = max(4, scale.pad // 5)
     # The scorecard rule's own breathing room -- deliberately its own
@@ -234,33 +255,53 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
   overflow: hidden;
   box-sizing: border-box;
   font-family: "Splitsmith Mono", monospace;
-  /* The three-rail stage summary (issue #683 Task 7b) needs the whole
-     cell height distributed between an auto-height top band, a middle
-     band that takes whatever is left over, and an auto-height bottom
-     band -- exactly ``grid-template-rows: auto 1fr auto``. This is a
-     *default* on every cell, not something only the summary opts into:
-     ``TOP_LEFT``/``TOP_RIGHT``/``BOTTOM_LEFT``/``BOTTOM_RIGHT`` (the
-     live overlay's own corner anchors, never actually drawn through
-     this module -- see the module docstring) stay ``position: absolute``
-     below, which removes them from grid flow entirely, so this costs
-     them nothing. See ``.anchor-top-center`` / ``.anchor-middle-center``
-     / ``.anchor-bottom-center`` for why this replaces the middle rail's
+  /* The bands stage summary (issue #683 Task 8) needs the whole cell
+     height distributed between an auto-height identity row, a middle
+     band that takes whatever is left over, and an auto-height (today,
+     empty) bottom row -- ``grid-template-rows: auto minmax(0, 1fr)
+     auto``. This is a *default* on every cell, not something only the
+     summary opts into: ``TOP_LEFT``/``TOP_RIGHT``/``BOTTOM_LEFT``/
+     ``BOTTOM_RIGHT`` (the live overlay's own corner anchors, never
+     actually drawn through this module -- see the module docstring)
+     stay ``position: absolute`` below, which removes them from grid
+     flow entirely, so this costs them nothing. See
+     ``.anchor-top-center`` / ``.anchor-middle-center`` /
+     ``.anchor-bottom-center`` for why this replaces the middle rail's
      old ``top: 50%; transform: translateY(-50%)``: that centred on the
      cell's own geometry with no regard for its neighbours, so a cell
-     with a tall enough middle rail could paint over the bottom rail's
-     split statistics -- measured on a rendered 640x360 cell with a full
-     ranked stat block. A grid row can never overlap another one; a
-     middle rail that outgrows its ``1fr`` track is clipped by
-     ``overflow: hidden`` above instead, never drawn on top of a sibling.
+     with a tall enough middle rail could paint over a row below it. A
+     grid row can never overlap another one.
+
+     ``minmax(0, 1fr)`` rather than a bare ``1fr``: a grid track's
+     automatic minimum size defaults to ``auto`` -- effectively the
+     content's own min-content size -- which means a bare ``1fr`` track
+     GROWS to fit whatever its content wants before the ``fr`` unit ever
+     applies, and only THEN does this rule's own ``overflow: hidden``
+     clip the excess against the cell's fixed 100% height. That grow-
+     then-clip sequence is issue #683 F1: nothing ever measured whether
+     the middle band's content fit its fair share of the cell, so
+     ``overflow: hidden`` always clipped whatever painted lowest --
+     which, by ``_cell_groups``'s own declaration order, was always the
+     Splits band and a lit penalty plate, while the zero-valued counts
+     above them survived. ``minmax(0, 1fr)`` pins the *automatic*
+     minimum to ``0`` instead of ``auto``, so the track's resolved height
+     is genuinely the leftover space -- fixed, independent of how much
+     the middle band wants -- and ``.anchor-middle-center``'s own
+     ``min-height: 0`` makes that item honour it rather than reasserting
+     the same auto-minimum one level down. Only with a *fixed* track can
+     ``overlay_html``'s fit-policy script (below) tell overflowing from
+     fitting by comparing the band's ``scrollHeight`` against that fixed
+     height, and shrink or drop content accordingly instead of always
+     clipping the bottom of an ever-growing box.
   */
   display: grid;
   grid-template-columns: 1fr;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   row-gap: {top_row_gap}px;
 }}
 .anchor {{
   display: flex;
-  gap: {row_gutter}px;
+  gap: {_fit(row_gutter)};
   max-width: calc(100% - 2 * {scale.pad}px);
   min-width: 0;
 }}
@@ -268,9 +309,12 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
 .anchor-top-right     {{ position: absolute; top: {scale.pad}px; right: {scale.pad}px; }}
 .anchor-bottom-left   {{ position: absolute; bottom: {scale.pad}px; left: {scale.pad}px; }}
 .anchor-bottom-right  {{ position: absolute; bottom: {scale.pad}px; right: {scale.pad}px; }}
-/* The three-rail summary's own anchors: real grid items (not
-   ``position: absolute``), one per row, so the browser -- not this
-   module's Python -- guarantees they never overlap. */
+/* The bands summary's own anchors (issue #683 Task 8): real grid items
+   (not ``position: absolute``), one per row, so the browser -- not this
+   module's Python -- guarantees they never overlap. Only ``TOP_CENTER``
+   and ``MIDDLE_CENTER`` are ever declared by ``_cell_groups`` today;
+   ``BOTTOM_CENTER`` stays live infrastructure for a possible future
+   caller. */
 .anchor-top-center {{
   grid-row: 1;
   grid-column: 1;
@@ -283,6 +327,16 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
   grid-column: 1;
   justify-self: center;
   align-self: center;
+  /* See the ``.cell`` rule's own comment on ``minmax(0, 1fr)``: without
+     this, a flex/grid item's automatic minimum size defaults to its
+     content's own size, which would let this item re-assert the exact
+     grow-before-clip behaviour the track fix above exists to stop, one
+     level down. ``overflow: hidden`` here is defence in depth -- ``.cell``
+     already clips at its own boundary -- so a caller measuring this
+     element directly (the fit-policy script below, or a future one)
+     sees the same fixed box the cell's own clip enforces. */
+  min-height: 0;
+  overflow: hidden;
 }}
 .anchor-bottom-center {{
   grid-row: 3;
@@ -292,10 +346,10 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
   padding-bottom: {scale.pad}px;
 }}
 /* Issue #683 Task 8's two-band stage summary reuses TOP_CENTER's and
-   MIDDLE_CENTER's *rows* -- the grid-row placement that keeps the three
-   rails from ever overlapping -- but left-aligned and spanning the
-   cell's full width rather than shrink-wrapped and centred (the Splits
-   band's four-column grid in particular needs the width). ``justify-self:
+   MIDDLE_CENTER's *rows* -- the grid-row placement that keeps them from
+   ever overlapping -- but left-aligned and spanning the cell's full
+   width rather than shrink-wrapped and centred (the Splits band's
+   four-column grid in particular needs the width). ``justify-self:
    stretch`` plus an explicit ``padding-left``/``padding-right`` replaces
    the base rule's ``justify-self: center`` and its shared, shrink-wrap-
    oriented ``max-width`` -- higher specificity (two classes) wins over
@@ -314,8 +368,8 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
 .anchor.align-center {{ align-items: center; }}
 .anchor.align-right  {{ align-items: flex-end; }}
 .group {{ display: flex; min-width: 0; }}
-.group.flow-row    {{ flex-direction: row; align-items: baseline; gap: {row_gutter}px; flex-wrap: wrap; }}
-.group.flow-column {{ flex-direction: column; gap: {column_gutter}px; }}
+.group.flow-row    {{ flex-direction: row; align-items: baseline; gap: {_fit(row_gutter)}; flex-wrap: wrap; }}
+.group.flow-column {{ flex-direction: column; gap: {_fit(column_gutter)}; }}
 .group.flow-column.align-left   {{ align-items: flex-start; }}
 .group.flow-column.align-center {{ align-items: center; }}
 .group.flow-column.align-right  {{ align-items: flex-end; }}
@@ -330,21 +384,25 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
 .group.flow-grid {{
   display: grid;
   align-self: stretch;
-  gap: {column_gutter}px;
+  gap: {_fit(column_gutter)};
 }}
 /* The scorecard hairline (see ``Group.divider``): a plain line, not
    text. ``align-self: stretch`` overrides the anchor's own
    ``align-items: center`` for this one flex item, so it is stretched to
    the width the anchor's column already resolved from its *other*
    (unstretched, text-sized) children -- the widest row above or below it
-   -- rather than carrying any width of its own. This is the one
-   decorative element the redesign allows itself; nothing else here
-   draws a second divider. */
+   -- rather than carrying any width of its own. Not currently drawn by
+   ``overlay_summary._cell_groups`` -- the approved bands design (issue
+   #683 Task 8) uses band headers instead of a rule -- but kept live for
+   a future caller, reading ``theme.rule`` (the design system's own
+   dedicated hairline token, ``--color-rule`` -- see
+   ``scripts/build_overlay_theme.py``) rather than a semi-transparent
+   ink hack now that this module has somewhere to put it. */
 .group.divider {{
   display: block;
   align-self: stretch;
   height: 2px;
-  background: rgba({ink}, 0.35);
+  background: rgb({rule_color});
   margin: {rule_margin}px 0;
   border: none;
   padding: 0;
@@ -391,7 +449,7 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
    documents). */
 .caption {{
   display: block;
-  font-size: {scale.caption}px;
+  font-size: {_fit(scale.caption)};
   color: rgb({ink_2});
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -407,14 +465,45 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
   font-family: "Splitsmith Display", "Splitsmith Mono", sans-serif;
   font-weight: 600;
 }}
-.role-headline      {{ font-size: {scale.headline}px; }}
+/* ``.role-headline`` and ``.role-detail`` -- the two roles the middle
+   band ever draws a bare value at -- read their size through
+   :func:`_fit`, not a literal ``{{scale.headline}}px``: issue #683 F1's
+   fit-policy script shrinks them (and ``.caption``/``.role-label``
+   above, and every gap in this subtree) together via ``--fit-scale``
+   when the band does not fit its ``minmax(0, 1fr)`` track at full size.
+   ``.role-identity``/``.role-verdict``/``.role-live-primary`` stay
+   literal pixels: the identity row and the live overlay's own corner
+   anchors sit outside ``.anchor-middle-center`` and the fit policy never
+   touches them. */
+.role-headline      {{ font-size: {_fit(scale.headline)}; }}
 .role-verdict        {{ font-size: {scale.verdict}px; }}
-.role-detail           {{ font-size: {scale.detail}px; }}
+.role-detail           {{ font-size: {_fit(scale.detail)}; }}
 .role-live-primary      {{ font-size: {scale.live_primary}px; }}
 .emphasis-plain, .emphasis-muted {{
   color: rgb({ink});
   paint-order: stroke fill;
   -webkit-text-stroke: {scale.stroke_width}px rgb({stroke});
+  /* NOT converted to a flat px shadow the way -webkit-text-stroke was
+     (161b174, one stroke weight per cell rather than one per font
+     size -- see CellScale.stroke_width). The mock's own flat reference
+     is ``0 {{cell_h//360}}px {{cell_h//180}}px``, and doing the same
+     here honestly is a real API change, not a formula tweak: this
+     function only receives ``scale: CellScale``, which does not carry
+     the raw cell height (it exists only as a component baked into
+     several already-divided fields), and this rule is shared by
+     ``cell_html`` -- which never receives a cell height at all -- and
+     ``summary_html``, which does (``geometry.cell_height``). Backing a
+     height out of e.g. ``scale.pad`` is unreliable: ``_summary_scale``
+     and ``CellScale.for_cell`` derive ``pad`` with two DIFFERENT
+     formulas depending on the caller, so which one produced a given
+     ``scale`` is not recoverable here. Left em-relative rather than
+     threading a new required parameter through a public function
+     (``cell_html``) other modules and tests already call by this
+     signature, for a shadow that is already small relative to the
+     stroke fix's own halo-eating problem -- the stroke, not the shadow,
+     was what the mock measurement (8.4%/8.9% vs 15-18%, see
+     ``CellScale.stroke_width``) was actually about.
+  */
   text-shadow: 0.06em 0.06em 0.1em rgb({shadow});
 }}
 .emphasis-muted {{ opacity: 0.68; }}
@@ -423,7 +512,7 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
    which is why it is declared here rather than beside ``.role-*``
    above. */
 .role-label {{
-  font-size: {scale.caption}px;
+  font-size: {_fit(scale.caption)};
   color: rgb({ink_2});
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -520,7 +609,18 @@ def _element_div(element: Element) -> str:
     """One :class:`Element` as a ``.el`` block: an optional caption line
     above its value and an optional unit suffix nested inside it, all
     escaped -- a competitor's name is untrusted input and may contain
-    ``<``, ``&`` or quotes."""
+    ``<``, ``&`` or quotes.
+
+    Carries ``data-drop-priority`` when :attr:`Element.drop_priority` is
+    set (issue #683 F1's fit policy) -- the fit-policy script (see
+    :func:`_fit_script`) reads this attribute to decide what to hide, in
+    ascending order, once shrinking the whole band to the legibility
+    floor still does not make it fit. Absent entirely for an element
+    whose ``drop_priority`` is ``None`` (every split statistic, and the
+    identity row), so that script can never select it no matter what it
+    queries for -- the same "the invariant is structural, not trusted"
+    posture the rest of this module takes.
+    """
     el_classes = "el el-identity" if element.role is Role.IDENTITY else "el"
     role_class = f"role-{element.role.value}"
     emphasis_class = f"emphasis-{element.emphasis.value}"
@@ -533,7 +633,10 @@ def _element_div(element: Element) -> str:
         unit_html = f'<span class="unit">{escape(element.unit)}</span>'
     value_classes = " ".join(c for c in ("value", role_class, emphasis_class, color_class) if c)
     value_html = f'<span class="{value_classes}">{escape(element.text)}{unit_html}</span>'
-    return f'<div class="{el_classes}">{caption_html}{value_html}</div>'
+    priority_attr = ""
+    if element.drop_priority is not None:
+        priority_attr = f' data-drop-priority="{element.drop_priority}"'
+    return f'<div class="{el_classes}"{priority_attr}>{caption_html}{value_html}</div>'
 
 
 def _group_style(group: Group) -> str:
@@ -541,14 +644,21 @@ def _group_style(group: Group) -> str:
     #683 Task 8: ``Group.gap`` / ``Group.margin_top``, and a ``GRID``
     flow's column count) -- ``""`` when nothing overrides the shared
     stylesheet, so a group with no overrides renders exactly the markup
-    it always did."""
+    it always did.
+
+    ``gap``/``margin_top`` go through :func:`_fit` like every other
+    length in the middle band (issue #683 F1): a group-specific gap that
+    stayed a literal pixel value here would not shrink when the fit
+    policy scales everything else down, which would just move the
+    overflow from font-size to whitespace instead of closing it.
+    """
     parts: list[str] = []
     if group.flow is Flow.GRID:
         parts.append(f"grid-template-columns: repeat({max(1, len(group.elements))}, 1fr)")
     if group.gap is not None:
-        parts.append(f"gap: {group.gap}px")
+        parts.append(f"gap: {_fit(group.gap)}")
     if group.margin_top is not None:
-        parts.append(f"margin-top: {group.margin_top}px")
+        parts.append(f"margin-top: {_fit(group.margin_top)}")
     if not parts:
         return ""
     return f' style="{"; ".join(parts)}"'
@@ -599,16 +709,133 @@ def _cell_div(groups: Sequence[Group]) -> str:
     return f'<div class="cell">{anchors_html}</div>'
 
 
+def _fit_script() -> str:
+    """The one piece of *measurement* this pipeline hands to the browser
+    instead of doing in Python (issue #683 F1's fit policy).
+
+    Everything else in this module is arithmetic on :class:`CellScale`:
+    read once, in Python, off a cell height that never changes. A fit
+    policy cannot work that way -- "does this band's declared content
+    fit the space CSS actually gave it" is a question only a real layout
+    engine can answer, and the answer depends on what a *shooter's data*
+    puts in the band (a full stat block versus a bare name), not just
+    the cell's geometry. So this measures, in the one place that can:
+    ``.anchor-middle-center``'s ``scrollHeight`` (what the band wants)
+    against its ``minmax(0, 1fr)`` track's own fixed height (what it
+    gets -- see the ``.cell`` rule's own comment for why that track no
+    longer grows to fit content the way a bare ``1fr`` would).
+
+    Two-step policy, run once per cell, in priority order -- the order
+    issue #683's F1 finding asked for, because the previous behaviour
+    (no policy at all, just ``overflow: hidden`` clipping whatever
+    painted lowest) discarded the Splits band and a lit penalty plate
+    first, which is backwards for an app whose whole product is splits:
+
+    1. **Shrink.** ``--fit-scale`` (see :func:`_fit`) is binary-searched
+       from ``1`` down to the largest factor that fits, floored so no
+       font in the band drops below
+       :data:`~splitsmith.overlay_layout.MIN_FONT_SIZE` -- the same
+       legibility floor the live sprite's own PIL fitter already
+       enforces. Losing nothing is always better than losing something,
+       and this step touches the whole band uniformly, Scoring and
+       Splits alike -- unlike step 2, it does not favour one over the
+       other.
+    2. **Drop.** Only if the band still does not fit at the floor:
+       elements carrying ``data-drop-priority`` (see :func:`_element_div`)
+       are hidden one at a time, lowest number first, rechecking after
+       each, until it fits or nothing is left to drop.
+       ``overlay_summary._cell_groups`` is the only caller that assigns
+       a priority, and only to the Scoring band's own elements -- a
+       split statistic's ``drop_priority`` is always ``None``, so
+       nothing this loop does can ever select one, no matter how the
+       band's content changes. Within Scoring, the priorities it assigns
+       keep a genuinely nonzero (lit) fault count on screen for as long
+       as any zero-valued count is still there to drop in its place
+       instead, and empty the whole counts row before this loop ever
+       reaches hit factor or time.
+
+    Called by :mod:`splitsmith.overlay_raster` after
+    ``document.fonts.ready`` resolves, never before: a shrink measured
+    against the browser's fallback system font's metrics would pick the
+    wrong factor the instant the bundled face actually loads and
+    reflows everything under it.
+    """
+    return f"""
+<script>
+window.__splitsmithFit = function () {{
+  function fits(stack, available) {{
+    return stack.scrollHeight <= available + 0.5;
+  }}
+  function availableHeight(cell) {{
+    var rows = getComputedStyle(cell).gridTemplateRows.split(' ').map(parseFloat);
+    return rows.length > 1 ? rows[1] : cell.clientHeight;
+  }}
+  function floorFactor(stack) {{
+    var min = Infinity;
+    stack.querySelectorAll('.value, .caption').forEach(function (el) {{
+      var size = parseFloat(getComputedStyle(el).fontSize);
+      if (size > 0 && size < min) {{ min = size; }}
+    }});
+    return min === Infinity ? 1 : Math.min(1, {MIN_FONT_SIZE} / min);
+  }}
+  function shrinkToFit(stack, available) {{
+    var lo = floorFactor(stack);
+    var hi = 1;
+    stack.style.setProperty('--fit-scale', String(hi));
+    if (fits(stack, available)) {{ return; }}
+    stack.style.setProperty('--fit-scale', String(lo));
+    if (!fits(stack, available)) {{ return; }}
+    for (var i = 0; i < 14; i++) {{
+      var mid = (lo + hi) / 2;
+      stack.style.setProperty('--fit-scale', String(mid));
+      if (fits(stack, available)) {{ lo = mid; }} else {{ hi = mid; }}
+    }}
+    stack.style.setProperty('--fit-scale', String(lo));
+  }}
+  function dropUntilFit(stack, available) {{
+    var candidates = Array.prototype.slice.call(stack.querySelectorAll('[data-drop-priority]'));
+    candidates.sort(function (a, b) {{
+      var ap = parseInt(a.getAttribute('data-drop-priority'), 10);
+      var bp = parseInt(b.getAttribute('data-drop-priority'), 10);
+      return ap - bp;
+    }});
+    for (var i = 0; i < candidates.length; i++) {{
+      if (fits(stack, available)) {{ return; }}
+      candidates[i].style.display = 'none';
+    }}
+  }}
+  document.querySelectorAll('.cell').forEach(function (cell) {{
+    var stack = cell.querySelector('.anchor-middle-center');
+    if (!stack) {{ return; }}
+    var available = availableHeight(cell);
+    if (!(available > 0)) {{ return; }}
+    if (fits(stack, available)) {{ return; }}
+    shrinkToFit(stack, available);
+    if (fits(stack, available)) {{ return; }}
+    dropUntilFit(stack, available);
+  }});
+}};
+</script>
+""".strip()
+
+
 def cell_html(groups: Sequence[Group], *, scale: CellScale, theme: OverlayTheme) -> str:
     """One cell's declared content as a self-contained HTML fragment.
 
-    Includes its own ``<style>`` block, so this is valid to drop anywhere
-    (a test, a future single-shooter port) without also needing a whole
+    Includes its own ``<style>`` block and the fit-policy ``<script>``
+    (see :func:`_fit_script`), so this is valid to drop anywhere (a
+    test, a future single-shooter port) without also needing a whole
     document -- :func:`summary_html` calls the same building blocks but
-    emits the stylesheet once for the whole grid instead of once per
-    cell.
+    emits the stylesheet and script once for the whole grid instead of
+    once per cell. The script only *defines* ``window.__splitsmithFit``
+    here; nothing in this module calls it -- see
+    :mod:`splitsmith.overlay_raster` for where and why it is invoked.
     """
-    return f"<style>{_style_rules(scale=scale, theme=theme)}</style>\n{_cell_div(groups)}"
+    return (
+        f"<style>{_style_rules(scale=scale, theme=theme)}</style>\n"
+        f"{_fit_script()}\n"
+        f"{_cell_div(groups)}"
+    )
 
 
 def summary_html(
@@ -637,6 +864,12 @@ def summary_html(
     background-transparent: the rasterizer (Task 6R-2/6R-3) alpha-
     composites the resulting screenshot over an already-composed still,
     so an opaque background here would paint over that footage.
+
+    Carries the fit-policy ``<script>`` (see :func:`_fit_script`) in
+    ``<head>``, once for the whole document -- it only defines
+    ``window.__splitsmithFit``; :mod:`splitsmith.overlay_raster` is what
+    actually calls it, after webfonts are loaded and before the
+    screenshot.
     """
     style = _style_rules(scale=scale, theme=theme)
     grid_style = (
@@ -661,6 +894,7 @@ def summary_html(
         "<!doctype html>\n"
         '<html><head><meta charset="utf-8"><title>stage summary</title>'
         f"<style>{style}\n{grid_style}</style>"
+        f"{_fit_script()}"
         "</head>"
         f'<body><div class="grid">{"".join(body_cells)}</div></body></html>'
     )

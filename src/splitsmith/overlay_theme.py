@@ -17,17 +17,26 @@ parser as a runtime dep, and the overlay only needs a handful of tokens.
 Re-run the build script after touching ``index.css``.
 
 Bundled fonts (Antonio + JetBrains Mono, SIL OFL 1.1) live under
-``src/splitsmith/data/fonts/`` so the ``splitsmith`` theme renders
-deterministic typography without depending on whatever the host machine
-happens to have installed. The numeric readouts use JetBrains Mono Bold
-today; Antonio is bundled for future templates that mix in display
-labels.
+``src/splitsmith/data/fonts/`` so overlay text renders deterministic
+typography without depending on whatever the host machine happens to
+have installed. The numeric readouts (both the live sprite's PIL text
+and the stage summary's ``@font-face``-declared CSS -- see
+``overlay_html.py``) use JetBrains Mono Bold; Antonio is
+``.role-identity``'s live condensed face for the stage summary's
+shooter-name row (issue #683 Task 7b), not a placeholder waiting on a
+future consumer -- a competitor's name is the one string in a cell that
+is not a number, and condensed genuinely matters where names run long
+and cells run narrow.
 
-Down the line, swapping PIL for a Skia-based renderer would buy proper
-HarfBuzz shaping (kerning, ligatures, condensed-face width control)
-which only starts to matter once the template grows real label content.
-The font names already live in the JSON so that swap doesn't need new
-tokens.
+The stage summary itself moved off PIL to headless Chromium rasterizing
+real CSS (issue #683's amendment) specifically to get a genuine box
+model and, as a side effect, proper text shaping (kerning, ligatures,
+condensed-face width control) for exactly the reason this paragraph used
+to describe as a hypothetical Skia swap. The live sprite
+(``overlay_sprites.render_state``) stays PIL -- it draws two elements
+and has no reported overflow or shaping defect (see the amendment's
+"Explicitly out of scope") -- so a PIL-to-something-else swap remains
+live territory there, tracked as #693/#684 rather than this file.
 """
 
 from __future__ import annotations

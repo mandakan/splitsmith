@@ -34,6 +34,22 @@ SCALE = CellScale(
 )
 
 
+#: Matches a ``/* ... */`` CSS comment, including one that spans several
+#: lines (``_style_rules`` writes several such blocks -- the ``.cell``
+#: rule alone carries one that is over 20 lines and, not by coincidence,
+#: quotes the very declarations the rule below it makes: ``overflow:
+#: hidden`` and ``grid-template-rows: auto 1fr auto``). ``[^}]*`` used to
+#: swallow those comments whole, so a rule's "body" as ``_rule`` returned
+#: it could contain those literal strings even if the real declaration
+#: list never did -- proven by setting ``overflow: visible`` on the real
+#: declaration and watching ``test_every_cell_carries_overflow_hidden``
+#: pass anyway, because the comment above it still said "hidden". Comments
+#: are stripped from the whole document before any rule is looked up, so
+#: what a test inspects is only ever the declaration list a browser would
+#: actually apply.
+_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+
 def _rule(html: str, selector: str) -> str:
     """The body of the CSS rule whose selector line is exactly
     ``selector`` (a literal class name, e.g. ``".cell"``), or raise if
@@ -44,8 +60,9 @@ def _rule(html: str, selector: str) -> str:
     ``.emphasis-plain, .emphasis-muted { ... }`` line, which also ends in
     that literal text.
     """
-    match = re.search(r"^\s*" + re.escape(selector) + r"\s*\{([^}]*)\}", html, re.MULTILINE)
-    assert match is not None, f"no standalone CSS rule for {selector!r} in:\n{html}"
+    stripped = _COMMENT_RE.sub("", html)
+    match = re.search(r"^\s*" + re.escape(selector) + r"\s*\{([^}]*)\}", stripped, re.MULTILINE)
+    assert match is not None, f"no standalone CSS rule for {selector!r} in:\n{stripped}"
     return match.group(1)
 
 
@@ -75,6 +92,20 @@ def test_a_filler_tile_cell_is_empty_of_text():
 
 # --- role sizes come from CellScale, not from Python arithmetic ---------
 
+#: Roles the fit-policy script (issue #683 F1) can shrink -- the ones
+#: that only ever draw inside ``.anchor-middle-center`` -- read their
+#: size through ``calc(var(--fit-scale, 1) * ...))`` rather than a bare
+#: pixel value; see ``overlay_html._fit``. ``IDENTITY``/``VERDICT``/
+#: ``LIVE_PRIMARY`` live in the identity row or the live overlay's own
+#: corner anchors, outside that subtree, and stay literal pixels.
+_FIT_SCALED_ROLES = {Role.HEADLINE, Role.DETAIL, Role.LABEL}
+
+
+def _expected_font_size(px: int, *, fit_scaled: bool) -> str:
+    if fit_scaled:
+        return f"calc(var(--fit-scale, 1) * {px}px)"
+    return f"{px}px"
+
 
 @pytest.mark.parametrize(
     "role,expected",
@@ -90,13 +121,14 @@ def test_a_filler_tile_cell_is_empty_of_text():
 def test_each_role_class_carries_its_cellscale_size(role, expected):
     html = cell_html((), scale=SCALE, theme=THEME)
     rule = _rule(html, f".role-{role.value}")
-    assert f"font-size: {expected}px" in rule
+    size = _expected_font_size(expected, fit_scaled=role in _FIT_SCALED_ROLES)
+    assert f"font-size: {size}" in rule
 
 
 def test_caption_size_is_read_off_the_scale_not_the_role():
     html = cell_html((), scale=SCALE, theme=THEME)
     rule = _rule(html, ".caption")
-    assert f"font-size: {SCALE.caption}px" in rule
+    assert f"font-size: {_expected_font_size(SCALE.caption, fit_scaled=True)}" in rule
 
 
 def test_a_different_scale_moves_the_same_role_class():
@@ -192,10 +224,22 @@ def test_a_tile_with_no_audit_and_no_scorecard_emits_only_its_label():
 
 
 def test_a_name_containing_a_script_tag_is_escaped():
+    """A hostile name must never reach the document as a live, executable
+    ``<script>`` tag. This can no longer assert "no ``<script>`` tag
+    anywhere in the document" wholesale -- issue #683 F1's fit-policy
+    script (see ``overlay_html._fit_script``) is now a legitimate,
+    always-present ``<script>`` in every document this module emits, and
+    it carries no shooter data. The precise thing to check is that the
+    hostile *payload* itself never appears unescaped -- which is a
+    strictly narrower, not weaker, assertion than "no script tag at
+    all": it still fails if ``escape()`` were ever dropped from
+    :func:`~splitsmith.overlay_html._element_div`, and it no longer
+    false-fails on the module's own, harmless script.
+    """
     hostile = "<script>alert(1)</script>"
     groups = (Group(anchor=Anchor.TOP_LEFT, flow=Flow.ROW, elements=(Element(Role.IDENTITY, hostile),)),)
     html = cell_html(groups, scale=SCALE, theme=THEME)
-    assert "<script>" not in html
+    assert hostile not in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
 
 
@@ -281,8 +325,12 @@ def test_a_tile_lands_in_its_declared_grid_row_and_column():
 
 
 def test_two_groups_sharing_an_anchor_land_in_one_stacking_wrapper():
-    """The identity/placing row and the counts row both anchor at
-    BOTTOM_LEFT in real usage (see ``_cell_groups``). They must share one
+    """Uses ``BOTTOM_LEFT`` as a stand-in anchor to exercise the general
+    stacking mechanism -- in real usage (``_cell_groups``) it is
+    ``MIDDLE_CENTER`` that shares one anchor across several groups (the
+    "Scoring"/"Splits" band-header labels, the counts row, the hit
+    factor/time row, and the split-statistics grid, five groups deep).
+    Whichever anchor is used, two groups sharing it must land in one
     ``.anchor`` wrapper -- not two independent absolutely-positioned
     wrappers -- because only a shared flex container lets CSS compute
     their stacking offset instead of Python doing it by hand, which is
@@ -347,17 +395,28 @@ def test_middle_center_is_a_grid_row_not_absolutely_positioned():
 
 
 def test_the_cell_is_a_three_row_grid():
-    """``auto 1fr auto`` is what makes the three rails use the cell's
-    whole height without any of them able to overlap another."""
+    """``auto minmax(0, 1fr) auto`` is what makes the top/middle/bottom
+    rows use the cell's whole height without any of them able to overlap
+    another. Not a bare ``1fr``: issue #683 F1 -- a bare ``1fr`` track's
+    automatic minimum size is its content's own size, so it grows before
+    the ``fr`` unit ever applies and only THEN gets clipped by
+    ``overflow: hidden``, which is exactly what let a full stat block
+    grow the middle row and lose whatever painted lowest. ``minmax(0,
+    1fr)`` pins that automatic minimum to zero, so the track is a fixed
+    fraction of the cell regardless of content -- the fit-policy script
+    (``overlay_html._fit_script``) depends on that fixed size to tell
+    overflowing from fitting at all."""
     html = cell_html((), scale=SCALE, theme=THEME)
     rule = _rule(html, ".cell")
-    assert "grid-template-rows: auto 1fr auto" in rule
+    assert "grid-template-rows: auto minmax(0, 1fr) auto" in rule
 
 
 def test_top_and_bottom_center_are_also_grid_rows_not_absolute():
-    """The whole three-rail trio moves off ``position: absolute`` --
-    only the live overlay's corner anchors (never actually drawn through
-    this module) keep it."""
+    """The whole TOP_CENTER/MIDDLE_CENTER/BOTTOM_CENTER trio of grid rows
+    moves off ``position: absolute`` -- only the live overlay's corner
+    anchors (never actually drawn through this module) keep it. Today
+    only TOP_CENTER (identity) and MIDDLE_CENTER (the two bands) are
+    used by ``_cell_groups``; BOTTOM_CENTER stays live infrastructure."""
     html = cell_html((), scale=SCALE, theme=THEME)
     top_rule = _rule(html, ".anchor-top-center")
     bottom_rule = _rule(html, ".anchor-bottom-center")
@@ -371,7 +430,7 @@ def test_top_and_bottom_center_are_also_grid_rows_not_absolute():
     "anchor", [Anchor.TOP_LEFT, Anchor.TOP_RIGHT, Anchor.BOTTOM_LEFT, Anchor.BOTTOM_RIGHT]
 )
 def test_corner_anchors_stay_absolutely_positioned(anchor):
-    """The live overlay's own corners are untouched by the three-rail
+    """The live overlay's own corners are untouched by the three-row
     grid -- they stay ``position: absolute``, out of grid flow
     entirely, so the grid costs them nothing."""
     html = cell_html((), scale=SCALE, theme=THEME)

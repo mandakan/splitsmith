@@ -240,6 +240,21 @@ class ChromiumRasterizer:
                 # or failed to. The same idiom is already used by
                 # ``scripts/capture_hero_og.py`` for the same reason.
                 page.evaluate("document.fonts.ready")
+                # ``overlay_html.summary_html``'s fit policy (issue #683
+                # F1) only *defines* ``window.__splitsmithFit`` --
+                # nothing in that module calls it, because it has to run
+                # after fonts are loaded (a shrink/drop decision made
+                # against fallback-font metrics would be wrong the
+                # instant the bundled face reflows everything under it)
+                # and before the screenshot. This is that one call. A
+                # document with no cell needing to fit (every band fits
+                # its track at full size) still defines the function, so
+                # calling it unconditionally costs nothing on the common
+                # path -- ``window.__splitsmithFit &&`` guards only
+                # against a caller handing this rasterizer HTML that
+                # never went through ``overlay_html`` at all (e.g. a
+                # test's own hand-built document).
+                page.evaluate("window.__splitsmithFit && window.__splitsmithFit()")
                 return page.screenshot(type="png", omit_background=True)
             finally:
                 context.close()

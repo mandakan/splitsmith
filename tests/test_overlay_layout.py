@@ -33,8 +33,9 @@ def test_live_primary_and_pad_match_what_the_grid_computes_today(cell_height):
 @pytest.mark.parametrize("cell_height", [90, 360, 1080])
 def test_every_size_is_at_least_the_legibility_floor(cell_height):
     """Below 12px a further shrink reads as noise rather than smaller
-    text -- the same floor ``overlay_sprites._MIN_FONT_SIZE`` and
-    ``overlay_summary._MIN_FONT_SIZE`` already enforce."""
+    text -- the same floor ``overlay_sprites._MIN_FONT_SIZE`` already
+    enforces, and ``overlay_html``'s in-cell ``--fit-scale`` policy reads
+    directly off ``MIN_FONT_SIZE`` itself (issue #683 F1)."""
     scale = CellScale.for_cell(cell_height)
     for role in Role:
         assert scale.size_for(role) >= 12
@@ -156,8 +157,12 @@ def test_stroke_width_is_flat_pixels_not_an_em(cell_height, expected):
     90px figure gets a ~8px halo while a 26px count gets ~2px. That makes
     the large numerals chunky while the small ones stay crisp, which is
     the wrong way round -- measured against the approved mock, the em
-    version put 15-18% of a glyph box in stroke against the flat
-    version's 8.9%.
+    version put 15-18% of a glyph box in stroke. This (production) flat
+    formula measures 8.4% -- not the mock's own flat-px reference
+    implementation's 8.9%, since that used a float ``cell_h / 540`` where
+    this uses integer floor division; see :attr:`CellScale.stroke_width`'s
+    own docstring for the exact numbers. Both are comfortably under the
+    em-relative version's 15-18% either way.
 
     Pinned as a number rather than derived, so a change to the formula
     has to be a deliberate edit to this test as well.

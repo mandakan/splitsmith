@@ -158,8 +158,12 @@ def test_png_waits_for_fonts_before_screenshotting() -> None:
     """A screenshot taken before webfonts settle renders in the fallback
     face -- the same silent failure the file:// constraint guards
     against, by a different route. This asserts the exact call order:
-    navigate, then wait for ``document.fonts.ready``, then screenshot --
-    not just that all three happened somewhere."""
+    navigate, then wait for ``document.fonts.ready``, then run the
+    fit-policy script (issue #683 F1's ``overlay_html._fit_script`` --
+    also font-dependent: a shrink/drop decision made against fallback
+    metrics would be wrong the instant the bundled face reflows
+    everything under it, so this must run after fonts settle too), then
+    screenshot -- not just that all four happened somewhere."""
     rasterizer = ChromiumRasterizer()
     rasterizer._browser = _RecordingBrowser()
 
@@ -167,8 +171,9 @@ def test_png_waits_for_fonts_before_screenshotting() -> None:
 
     page = rasterizer._browser.contexts[0].pages[0]
     call_names = [call[0] for call in page.calls]
-    assert call_names == ["goto", "evaluate", "screenshot"], page.calls
+    assert call_names == ["goto", "evaluate", "evaluate", "screenshot"], page.calls
     assert page.calls[1] == ("evaluate", "document.fonts.ready")
+    assert page.calls[2] == ("evaluate", "window.__splitsmithFit && window.__splitsmithFit()")
 
 
 def test_png_screenshots_with_omit_background_for_an_alpha_result() -> None:

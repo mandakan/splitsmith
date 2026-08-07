@@ -52,8 +52,11 @@ TOKEN_MAP: dict[str, str] = {
     # design system's own comment warns against.
     "accent_fill": "--color-led-fill",
     "accent_text": "--color-led-text",
-    # A hairline's own colour -- distinct from a semi-transparent ink
-    # hack, which was covering for this token not being mirrored here.
+    # A hairline's own colour. ``overlay_html``'s ``.group.divider`` rule
+    # (``Group.divider``, currently unused by ``overlay_summary
+    # ._cell_groups`` -- see that field's own docstring) reads this token
+    # directly now, rather than covering for it with a semi-transparent
+    # ink hack.
     "rule": "--color-rule",
     # Secondary/tertiary text -- what used to be faked with
     # ``opacity: 0.68`` on top of the primary ink colour.

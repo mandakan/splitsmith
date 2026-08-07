@@ -50,17 +50,26 @@ from __future__ import annotations
 
 import io
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
 from PIL import Image
+from playwright.sync_api import Error as PlaywrightError
+from playwright.sync_api import sync_playwright
 
 from splitsmith.compare import overlay_summary as summ
 from splitsmith.compare.mp4_grid import GridStagePlan, GridTile
 from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
+from splitsmith.overlay_html import summary_html
 from splitsmith.overlay_layout import Anchor, ColorToken, Emphasis, Flow, Role
-from splitsmith.overlay_raster import ChromiumRasterizer, RasterizerUnavailableError
+from splitsmith.overlay_raster import (
+    CHROMIUM_CHANNEL,
+    DEVICE_SCALE_FACTOR,
+    ChromiumRasterizer,
+    RasterizerUnavailableError,
+)
 from splitsmith.overlay_theme import load_theme
 from splitsmith.ui.project import StageScorecard
 
@@ -870,7 +879,7 @@ def test_a_filler_tile_is_black_with_no_text():
 # reaches the rendered HTML through ``build_hold_still``/``_summary_cells``.
 
 
-def test_placing_drawn_for_ranked_tiles():
+def test_placing_computed_for_ranked_tiles():
     placements = [_placement("Ann", 0, 0), _placement("Bo", 0, 1)]
     data = {
         "Ann": TileStageData(label="Ann", stage_number=1, scorecard=StageScorecard(stage_pct=95.0)),
@@ -967,10 +976,20 @@ def test_ranking_no_longer_reaches_the_rendered_html():
 
 
 def _full_stat_tile(label: str) -> TileStageData:
-    """A tile with every line the summary can draw: label, shot count,
-    time, HF, hit counts, split stats, draw. ``stage_pct`` is set on the
-    scorecard for realism (a real audit would carry it) but is never
-    drawn -- issue #683 Task 8 removed it entirely."""
+    """A tile with every line the summary can draw: label, 6 shots, time,
+    HF, hit counts including a genuinely nonzero (lit) procedural, and
+    split stats. ``stage_pct`` is set on the scorecard for realism (a
+    real audit would carry it) but is never drawn -- issue #683 Task 8
+    removed it entirely.
+
+    ``procedurals=1`` (issue #683 F1) is load-bearing, not incidental:
+    the whole-branch review found that a fixture with no lit penalty
+    plate could not express the defect it was reviewing -- a lit plate
+    is, by declaration order, the first thing an unbounded middle band
+    clips. Without it here, this fixture would have the same blind spot
+    ``tests.compare_fixture.ROSTER`` had before
+    ``test_the_roster_carries_a_nonzero_penalty_somewhere`` closed it.
+    """
     shots = tuple(TileShot(time_from_beep=1.0 + 0.3 * i, split=0.3) for i in range(6))
     return TileStageData(
         label=label,
@@ -978,7 +997,14 @@ def _full_stat_tile(label: str) -> TileStageData:
         shots=shots,
         stage_time_seconds=12.34,
         scorecard=StageScorecard(
-            hit_factor=5.12, stage_pct=87.4, alphas=7, charlies=2, deltas=1, misses=0, no_shoots=0
+            hit_factor=5.12,
+            stage_pct=87.4,
+            alphas=7,
+            charlies=2,
+            deltas=1,
+            misses=0,
+            no_shoots=0,
+            procedurals=1,
         ),
     )
 
@@ -1097,13 +1123,117 @@ class _CapturingRealRasterizer:
         return self.last_png
 
 
+def _declared_content_survived_the_fit_policy(html: str, *, width: int, height: int) -> dict:
+    """DOM-level proof for issue #683 F1: not "did ink stay inside the
+    cell" (guaranteed by ``overflow: hidden`` alone, even when almost
+    everything a cell was declared to say has been clipped away) but "is
+    what ``_cell_groups`` declared actually there, unclipped".
+
+    Navigates a real Chromium to ``html`` (mirroring
+    :meth:`~splitsmith.overlay_raster.ChromiumRasterizer.png`'s own
+    ``page.goto(file://...)`` + ``document.fonts.ready`` sequence, since
+    a shrink/drop decision made before the bundled face loads and reflows
+    everything under it would be measuring the wrong metrics) and calls
+    ``window.__splitsmithFit`` the same way that method does, then reads
+    back, for the *first* (only, in every caller of this helper) cell in
+    the document:
+
+    - each Splits caption (``Best``/``Avg``/``Worst``/``Draw``): whether
+      it was declared at all, whether the fit policy left it visible
+      (not ``display: none``), and whether its rendered rectangle is
+      fully inside the cell's own rectangle -- a dropped-but-still-
+      laid-out element could be "in the DOM" while sitting well outside
+      the visible, clipped area, which is exactly what pre-fix HEAD did.
+    - whether ``P1`` (the fixture's one genuinely nonzero -- lit --
+      fault) and ``M0``/``NS0`` (zero-valued faults) are each visible,
+      so a caller can check F1's rule 3: a lit plate must never be
+      dropped while a zero-valued count survives.
+
+    Raises :class:`playwright.sync_api.Error` (never catches it) if no
+    usable Chromium can be launched -- every caller is responsible for
+    its own ``pytest.skip``, matching how this suite's other real-browser
+    tests treat :class:`~splitsmith.overlay_raster.RasterizerUnavailableError`.
+    """
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch(channel=CHROMIUM_CHANNEL, headless=True)
+        try:
+            with tempfile.TemporaryDirectory(prefix="splitsmith-f1-test-") as tmp:
+                html_path = Path(tmp) / "summary.html"
+                html_path.write_text(html, encoding="utf-8")
+                context = browser.new_context(
+                    viewport={"width": width, "height": height},
+                    device_scale_factor=DEVICE_SCALE_FACTOR,
+                )
+                try:
+                    page = context.new_page()
+                    page.goto(html_path.resolve().as_uri(), wait_until="load")
+                    page.evaluate("document.fonts.ready")
+                    page.evaluate("window.__splitsmithFit && window.__splitsmithFit()")
+                    return page.evaluate("""
+                        () => {
+                          const cell = document.querySelector('.cell');
+                          const cellRect = cell.getBoundingClientRect();
+                          function within(rect) {
+                            return rect.top >= cellRect.top - 0.5 && rect.bottom <= cellRect.bottom + 0.5
+                              && rect.left >= cellRect.left - 0.5 && rect.right <= cellRect.right + 0.5
+                              && rect.width > 0 && rect.height > 0;
+                          }
+                          function elFor(text) {
+                            return Array.from(cell.querySelectorAll('.value'))
+                              .find(el => el.textContent.trim() === text);
+                          }
+                          function visible(el) {
+                            if (!el) { return false; }
+                            return getComputedStyle(el.closest('.el')).display !== 'none';
+                          }
+                          const captions = ['Best', 'Avg', 'Worst', 'Draw'].map(function (cap) {
+                            const el = Array.from(cell.querySelectorAll('.caption'))
+                              .find(c => c.textContent.trim() === cap);
+                            const shown = visible(el);
+                            const rect = shown ? el.getBoundingClientRect() : null;
+                            return {
+                              caption: cap, present: !!el, visible: shown,
+                              within: shown ? within(rect) : null,
+                            };
+                          });
+                          const p1 = elFor('P1');
+                          const m0 = elFor('M0');
+                          const ns0 = elFor('NS0');
+                          return {
+                            captions: captions,
+                            p1Visible: visible(p1),
+                            m0Visible: visible(m0),
+                            ns0Visible: visible(ns0),
+                          };
+                        }
+                        """)
+                finally:
+                    context.close()
+        finally:
+            browser.close()
+
+
+def _assert_splits_and_penalty_priority_held(result: dict) -> None:
+    """Shared assertions over :func:`_declared_content_survived_the_fit_policy`'s
+    result -- issue #683 F1's rules 2 and 3."""
+    for entry in result["captions"]:
+        assert entry["present"], f"{entry['caption']!r} was never declared at all"
+        assert entry["visible"], f"{entry['caption']!r} was dropped by the fit policy"
+        assert entry["within"], f"{entry['caption']!r} rendered outside the cell's own rectangle"
+    if result["m0Visible"]:
+        assert result["p1Visible"], "M0 (a zero count) survived while P1 (a lit penalty) was dropped"
+    if result["ns0Visible"]:
+        assert result["p1Visible"], "NS0 (a zero count) survived while P1 (a lit penalty) was dropped"
+
+
 @pytest.mark.integration
 def test_a_long_names_ink_never_crosses_its_own_cell_in_a_real_render():
     """The pixel-level proof the whole pivot was justified by.
 
     Reproduces the shape that broke the old PIL fitter -- a 23-character
-    competitor name with a full stat block (identity + placing chip,
-    shot detail, TIME/HF/STAGE band, accuracy/faults row) -- in a cell
+    competitor name with a full stat block (identity, the six colour-coded
+    hit/fault counts including a lit procedural, hit factor, stage time,
+    and split statistics -- see :func:`_full_stat_tile`) -- in a cell
     small enough that content genuinely wants to overflow: 160x90, a 4x4
     grid on a 640x360 canvas. Every other placement in the grid is a
     filler (``present=False``), which ``overlay_html.summary_html``
@@ -1115,6 +1245,20 @@ def test_a_long_names_ink_never_crosses_its_own_cell_in_a_real_render():
     legitimate ink. That is what makes a single whole-image alpha bounding
     box a sufficient check here, rather than needing to attribute pixels
     to a shooter.
+
+    **This alone is not proof the cell says anything.** An empty cell
+    also never crosses its own boundary, and issue #683's whole-branch
+    review found that this check passed *most comfortably* exactly when
+    the fit-less middle band had clipped away the most content: measured
+    against the pre-fix code, this test's own bounding box was 70px tall
+    out of the cell's 90 (78%) -- comfortably "inside the cell" -- while
+    every one of the Splits band's declared captions was laid out *below*
+    the visible, clipped area. A whole-image alpha bounding box cannot
+    tell "ink from Scoring, clipped" apart from "ink from Splits, intact"
+    -- both paint pixels somewhere inside the same 160x90 rectangle. The
+    companion assertion below can, because it asks the DOM directly which
+    declared element is which, rather than reading pixels back and
+    guessing.
     """
     label = "Mathias Axell-Lindstrom"
     geometry = SpriteGeometry(canvas_width=640, canvas_height=360, rows=4, cols=4)
@@ -1158,6 +1302,96 @@ def test_a_long_names_ink_never_crosses_its_own_cell_in_a_real_render():
     assert (
         bbox[3] <= cell_bottom
     ), f"ink extends to y={bbox[3]}, below the cell's own bottom edge {cell_bottom}"
+
+    # Companion assertion (issue #683 F1): the same fixture, the same
+    # 160x90 stress geometry -- but a real DOM read for the *specific*
+    # declared content (Splits, and the lit-vs-zero fault ordering)
+    # rather than the whole cell's alpha bounding box. Rebuilds the exact
+    # single-cell document ``build_hold_still`` composed above (a filler
+    # tile renders an empty ``.cell`` with nothing to query, so
+    # reproducing just the one real cell is equivalent and lets
+    # ``_declared_content_survived_the_fit_policy`` find it with a bare
+    # ``.cell`` selector).
+    scale = summ._summary_scale(geometry.cell_height)
+    cells = summ._summary_cells(
+        [_placement(label, 0, 0)],
+        data,
+        scale=scale,
+        cell_width=geometry.cell_width,
+        cell_height=geometry.cell_height,
+    )
+    solo_geometry = SpriteGeometry(
+        canvas_width=geometry.cell_width, canvas_height=geometry.cell_height, rows=1, cols=1
+    )
+    solo_html = summary_html(cells, geometry=solo_geometry, scale=scale, theme=THEME)
+    try:
+        result = _declared_content_survived_the_fit_policy(
+            solo_html, width=solo_geometry.canvas_width, height=solo_geometry.canvas_height
+        )
+    except PlaywrightError as exc:  # pragma: no cover - environment-dependent
+        pytest.skip(f"no usable Chromium: {exc}")
+    _assert_splits_and_penalty_priority_held(result)
+
+
+@pytest.mark.integration
+def test_a_full_stat_block_survives_the_fit_policy_in_a_real_render():
+    """THE regression test for issue #683 F1: "the summary has no fit
+    policy."
+
+    Renders a single ``_full_stat_tile`` (6 shots, a genuinely nonzero --
+    lit -- procedural) at 160x90, the exact geometry
+    ``test_a_long_names_ink_never_crosses_its_own_cell_in_a_real_render``
+    (this branch's own flagship pixel proof) already runs at, and reached
+    into the DOM after the fit-policy script runs (see
+    ``overlay_html._fit_script``, invoked here the same way
+    :meth:`~splitsmith.overlay_raster.ChromiumRasterizer.png` invokes it
+    in production) to check something a pixel bounding box cannot: not
+    just "did ink stay inside the cell" but "is the *declared* content
+    actually there, unclipped".
+
+    At HEAD before F1's fix, ``.cell`` was a bare ``grid-template-rows:
+    auto 1fr auto`` with no fit policy at all: the 1fr track grows to fit
+    whatever content wants (CSS's automatic minimum size for a bare
+    ``1fr`` track is its content's own size), and only THEN does
+    ``overflow: hidden`` clip the excess -- always from the bottom, which
+    by ``_cell_groups``' declaration order is always the Splits band and
+    a lit penalty plate, while the zero-valued counts above them survive.
+    So at 160x90 with this fixture, Best/Avg/Worst/Draw were entirely
+    missing and, worse for an app whose product IS splits, silently so:
+    every check that only measured "did ink cross the cell boundary" kept
+    passing. This test fails against that behaviour (see the fix-round
+    report for the transcript) and passes once the ``minmax(0, 1fr)``
+    track fix plus the shrink/drop fit policy land.
+    """
+    label = "Ann"
+    geometry = SpriteGeometry(canvas_width=640, canvas_height=360, rows=4, cols=4)
+    assert (geometry.cell_width, geometry.cell_height) == (160, 90)
+    scale = summ._summary_scale(geometry.cell_height)
+    data = {label: _full_stat_tile(label)}
+    cells = summ._summary_cells(
+        [_placement(label, 0, 0)],
+        data,
+        scale=scale,
+        cell_width=geometry.cell_width,
+        cell_height=geometry.cell_height,
+    )
+    # A single-cell canvas exactly the size of the stress cell: the whole
+    # document's ``.cell`` IS the target, so
+    # ``_declared_content_survived_the_fit_policy`` needs no placement
+    # bookkeeping to find the right one.
+    solo_geometry = SpriteGeometry(
+        canvas_width=geometry.cell_width, canvas_height=geometry.cell_height, rows=1, cols=1
+    )
+    html = summary_html(cells, geometry=solo_geometry, scale=scale, theme=THEME)
+
+    try:
+        result = _declared_content_survived_the_fit_policy(
+            html, width=solo_geometry.canvas_width, height=solo_geometry.canvas_height
+        )
+    except PlaywrightError as exc:  # pragma: no cover - environment-dependent
+        pytest.skip(f"no usable Chromium: {exc}")
+
+    _assert_splits_and_penalty_priority_held(result)
 
 
 def test_build_hold_still_rejects_whole_match_keyed_data():

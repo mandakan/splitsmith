@@ -1896,12 +1896,17 @@ def render_grid_mp4(
                     # clock and the plain passthrough when there are none.
                     stage_overlay = replace(stage_overlay, clocks=())
                 if plan.hold_seconds > 0:
-                    # A missing ``drawtext`` costs the summary nothing: it is
-                    # pure PIL, so a host that lost the clock still gets full
-                    # summaries. A missing rasterizer (see the preflight
-                    # above) costs the summary its text but not the still
-                    # itself -- ``build_hold_still`` composes the blurred
-                    # freeze either way.
+                    # A missing ``drawtext`` costs the summary nothing: the
+                    # clock is a separate ffmpeg filter-graph chain (see
+                    # ``_clock_filters``) that no longer draws once the
+                    # action ends, and the summary's own text is composed
+                    # through headless Chromium rasterizing CSS
+                    # (``overlay_html``/``overlay_raster``, issue #683's
+                    # amendment -- neither PIL nor drawtext), so a host that
+                    # lost the clock still gets full summaries. A missing
+                    # rasterizer (see the preflight above) costs the summary
+                    # its text but not the still itself -- ``build_hold_still``
+                    # composes the blurred freeze either way.
                     #
                     # Caught, not raised, and for the same reason a failed
                     # ffmpeg call below is: one bad stage is reported and

@@ -398,32 +398,44 @@ ACTION_CLOCK_MIN_MEAN_ABS_DIFF = 8.0
 #: The Anders-vs-Bea version of this check (kept through 682/683, retired
 #: here) compared the two shooters' corners within one hold frame and
 #: read ~0 on the theory that neither carries anything there once the
-#: clock stops. Task 6 broke that theory: the corner it read is
-#: ``Anchor.TOP_RIGHT``, which during the hold now legitimately carries
-#: Anders' own split-detail group (shot count, Best/Avg/Worst, Draw) --
-#: real content Bea (no audit, no shots) still does not get, for the same
-#: underlying reason a clock ever differed between them. Comparing the
-#: two shooters' corners can no longer isolate "is a clock still here"
-#: from "does this shooter have a detail group here", so it stopped
-#: proving anything at all: it read 23.65 on a hold with no clock in it,
-#: comfortably over the old 1.0 threshold, purely from the detail group's
-#: own ink.
+#: clock stops. Task 6's three-rail design briefly broke that theory: the
+#: corner it read is ``Anchor.TOP_RIGHT``, which during the hold used to
+#: legitimately carry Anders' own split-detail group (shot count,
+#: Best/Avg/Worst, Draw) -- real content Bea (no audit, no shots) did not
+#: get, for the same underlying reason a clock ever differed between
+#: them. That made the two shooters' corners stop isolating "is a clock
+#: still here" from "does this shooter have a detail group here" -- it
+#: read 23.65 on a hold with no clock in it, comfortably over the old 1.0
+#: threshold, purely from the detail group's own ink. Task 8's approved
+#: bands design (issue #683) deleted the three-rail layout entirely,
+#: ``TOP_RIGHT`` included -- the summary draws only at ``TOP_CENTER``
+#: (identity) and ``MIDDLE_CENTER`` (the two bands) now, so this specific
+#: confound is gone. The comparison against the composed still, below,
+#: was kept anyway rather than reverted: it is strictly more precise than
+#: an Anders-vs-Bea comparison regardless of what either corner carries,
+#: since it checks *this* corner against its own known-correct answer
+#: instead of against a different cell's.
 #:
-#: Comparing against the composed still sidesteps that: the still is the
-#: literal PNG :func:`splitsmith.compare.overlay_summary.write_hold_still`
-#: wrote to become this hold, drawn by pure PIL with no `drawtext` filter
-#: anywhere near it (see that module's docstring). Whatever is in the
-#: still's corner -- the detail group, or nothing, for a tile with none
-#: -- is the *correct* answer for that corner, by construction. So this
-#: measures one thing: did the rendered hold show anything the still did
-#: not. A ticking clock, a frozen one, or anything else composited on top
-#: would all show up here, because none of them are in the still no
-#: matter what pixels legitimately belong there.
+#: Comparing against the composed still: the still is the literal PNG
+#: :func:`splitsmith.compare.overlay_summary.write_hold_still` wrote to
+#: become this hold. Its text is composed through headless Chromium
+#: rasterizing CSS (``overlay_html``/``overlay_raster``, issue #683's
+#: amendment) -- not PIL, and not ``drawtext`` either; no ``drawtext``
+#: filter sits anywhere near this still (see that module's docstring for
+#: the actual composition path). Whatever is in the still's corner --
+#: nothing, today, since ``TOP_RIGHT`` is unused -- is the *correct*
+#: answer for that corner, by construction. So this measures one thing:
+#: did the rendered hold show anything the still did not. A ticking
+#: clock, a frozen one, or anything else composited on top would all show
+#: up here, because none of them are in the still no matter what pixels
+#: legitimately belong there.
 #:
-#: Measured (this fixture, no defect): 2.41 on Anders' corner -- higher
-#: than :data:`HOLD_MATCHES_ITS_STILL_MAX`'s whole-canvas 1.32-1.36,
-#: because this crop is a shooter's own busy detail-group text rather
-#: than an average over the whole frame, so it carries more of the
+#: Measured (this fixture, no defect, re-measured after issue #683's F1
+#: fit-policy fix): 1.40 on Anders' corner -- lower than
+#: :data:`HOLD_MATCHES_ITS_STILL_MAX`'s whole-canvas 1.32-1.36 would
+#: suggest as a floor, but still nonzero: this crop is a small, text-free
+#: region of the cell today (``TOP_RIGHT`` draws nothing), so it is
+#: mostly picture, and even a blurred picture crop carries some of the
 #: libx264 round-trip's own residue.
 #:
 #: Confirmed against the defect this constant is actually named for, not
@@ -431,13 +443,14 @@ ACTION_CLOCK_MIN_MEAN_ABS_DIFF = 8.0
 #: (post-``concat``, action+hold) stream instead of the action alone, so
 #: a frozen clock paints over both stages' holds -- exactly the failure
 #: mode ``test_hold_is_concatenated_after_the_action_not_composited_over_it``
-#: exists to keep out of the graph, reproduced here on purpose. That
-#: reads 35.48 on Anders' corner (task-6-report.md's fix-round-2 section
-#: has the transcript), against the clean 2.41 -- a 5.9x margin at
-#: threshold 6.0, not the ~69x an earlier, harsher-looking but less
-#: representative injection (a plain filled box, not a clock) had
-#: suggested. 6.0 still matches :data:`HOLD_MATCHES_ITS_STILL_MAX` rather
-#: than being tuned to just clear either number.
+#: exists to keep out of the graph, reproduced here on purpose. That read
+#: 35.48 on Anders' corner (task-6-report.md's fix-round-2 section has
+#: the transcript, from before Task 8's redesign and F1's fit-policy fix)
+#: -- a 5.9x margin over the 6.0 threshold, not the ~69x an earlier,
+#: harsher-looking but less representative injection (a plain filled
+#: box, not a clock) had suggested. That injection was not re-run for
+#: this measurement pass; 6.0 still comfortably clears the current clean
+#: baseline (1.40) by more than 4x and was not tuned to just clear it.
 HOLD_CLOCK_MAX_MEAN_ABS_DIFF = 6.0
 
 #: Bea's own cell, stage 1's hold against stage 2's.
@@ -449,8 +462,9 @@ HOLD_CLOCK_MAX_MEAN_ABS_DIFF = 6.0
 #: picture is identical by construction. The *only* difference is her
 #: ``project.json``: stage 1 gives her no scorecard and no stage time, so
 #: her cell is her label alone, and stage 2 gives her a scorecard, so it
-#: carries a placing, a stage time, a hit factor, a stage percentage and
-#: a hit-count line.
+#: carries the Scoring band -- the six colour-coded hit/fault counts,
+#: hit factor and stage time (issue #683 Task 8's approved design draws
+#: no placing and no stage percentage at all, on any stage).
 #:
 #: So this reads large exactly when a scorecard on disk becomes ink on
 #: screen. Measured 9.24. A renderer that stopped finding ``project.json``
@@ -467,15 +481,24 @@ SCORECARD_INK_MIN_MEAN_ABS_DIFF = 4.0
 STAGE_BACKGROUND_MAX_MEAN_ABS_DIFF = 1.0
 
 #: Stage 1's composed still against stage 2's, over the two cells that
-#: carry figures, PNG to PNG with no encode in between. Measured 0.687:
-#: stage 2 has three more shots, so its cells differ by a shot count and
-#: a line of split statistics.
+#: carry figures, PNG to PNG with no encode in between. Re-measured after
+#: issue #683's Task 8 redesign and F1 fit-policy fix: 9.04 (was 0.687
+#: under the earlier three-rail design). No standalone shot count is ever
+#: drawn -- issue #683 Task 8's approved bands design has no figure for
+#: it -- so this is not "a shot count and a line of split statistics"
+#: differing as the number literally used to be justified; it is every
+#: figure the two stages' scorecards actually diverge on: the six
+#: hit/fault counts, hit factor, stage time, and Best/Avg/Worst/Draw,
+#: since stage 2 carries more rounds and different splits throughout.
+#: The order-of-magnitude jump from 0.687 reflects the bands design using
+#: much more of the cell's width and height than the three-rail one did,
+#: not a change in what differs between the stages.
 #:
 #: A guard on the *fixture*, not on the code. If the two stages ever
 #: composed the same summary, the "stage 2's hold carries stage 2's
 #: figures" comparison below would be vacuous and would pass against a
-#: renderer that put stage 1's still in every segment. Measured
-#: separation on that comparison: 1.92 against its own still, 2.55
+#: renderer that put stage 1's still in every segment. Re-measured
+#: separation on that comparison: 1.98 against its own still, 10.45
 #: against the other stage's.
 STILLS_DIFFER_MIN_MEAN_ABS_DIFF = 0.3
 
@@ -519,12 +542,16 @@ def _roster(
     with three equal clips the two are indistinguishable.
 
     Each of the three also carries a ``project.json`` with a real
-    ``StageScorecard``, which is what puts a placing, a hit factor, a
-    stage percentage and hit counts into the rendered summary at all. See
+    ``StageScorecard``, which is what puts the Scoring band -- hit
+    factor, stage time, and the six colour-coded hit/fault counts -- into
+    the rendered summary at all (issue #683 Task 8's approved design
+    draws no placing and no stage percentage on either stage). See
     ``tests.compare_fixture.ROSTER`` for the per-stage table: stage 1 is
-    the ranked stage (a tie at the top, and raw points ordered differently
-    from stage percentage), stage 2 is the degradations (a DQ, a shooter
-    with neither scorecard nor audit, and a manually timed stage).
+    the degradations (a DQ, a shooter with neither scorecard nor audit,
+    and a manually timed stage), stage 2 is the ranked stage (a tie at
+    the top, and raw points ordered differently from stage percentage --
+    unused by the rendered summary, but exercised by ``_rank_placings``'
+    own tests).
     """
     return build_roster(tmp_path, clips, count=3, stages=stages)
 
@@ -1245,9 +1272,11 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, shooter_cl
     #
     # The gap #682 was filed for. Every shooter in this fixture used to
     # have no ``project.json`` at all, so ``TileStageData.scorecard`` was
-    # ``None`` for all of them and the summary silently omitted the hit
-    # factor, the stage percentage, the hit counts and the placing -- none
-    # of which had ever appeared in a rendered frame.
+    # ``None`` for all of them and the summary silently omitted every
+    # scored figure it can draw -- the hit factor, stage time and the six
+    # colour-coded hit/fault counts (issue #683 Task 8's design; no
+    # placing or stage percentage has been drawn since) -- none of which
+    # had ever appeared in a rendered frame.
     #
     # Bea is the measurement. She has no audit in either stage, so shots,
     # splits and the clock are identical between them, and she reads the
@@ -1265,9 +1294,9 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, shooter_cl
     assert scorecard_ink >= SCORECARD_INK_MIN_MEAN_ABS_DIFF, (
         f"the no-audit shooter's cell is the same in both holds ({scorecard_ink:.2f}, threshold "
         f"{SCORECARD_INK_MIN_MEAN_ABS_DIFF}). She has a scorecard on stage 2 and none on stage 1, "
-        "and nothing else about her differs -- so her placing, stage time, hit factor, stage "
-        "percentage and hit counts are not reaching the pixels. Check that project.json is being "
-        "read at all before touching this threshold."
+        "and nothing else about her differs -- so her stage time, hit factor and hit counts are "
+        "not reaching the pixels. Check that project.json is being read at all before touching "
+        "this threshold."
     )
 
     # And every scored cell carries sharp text of its own, not just the

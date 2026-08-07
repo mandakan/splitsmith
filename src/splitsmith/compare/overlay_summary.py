@@ -57,6 +57,7 @@ from ..overlay_html import summary_html
 from ..overlay_layout import Anchor, CellScale, ColorToken, Element, Emphasis, Flow, Group, Role
 from ..overlay_raster import Rasterizer
 from ..overlay_theme import OverlayTheme
+from ..ui.project import StageScorecard
 from .mp4_grid import GridStagePlan, Runner
 from .overlay_data import TileStageData
 from .overlay_sprites import SpriteGeometry, TilePlacement
@@ -403,7 +404,25 @@ _COUNT_FIELDS: tuple[tuple[str, str, ColorToken], ...] = (
 )
 
 
-def _count_elements(scorecard) -> list[Element]:
+#: Drop-priority tiers within the counts row (issue #683 F1). Lower drops
+#: first. A zero-valued (unlit) fault carries no information a viewer
+#: would miss -- it is the same "worth -10, didn't happen" fact every
+#: clean cell in the grid repeats -- so it goes before everything else in
+#: Scoring. A genuinely nonzero (lit) fault is the opposite: Tasks 4 and
+#: 5 existed specifically to put a real penalty on screen, so it is the
+#: LAST thing in Scoring this module will ever drop, and F1's own rule 3
+#: ("a lit penalty plate must never be dropped while a zero-valued count
+#: survives") falls out of this ordering for free -- by the time a lit
+#: element's turn comes up, every zero-valued one is already gone.
+#: Accuracy (A/C/D) sits between the two: never a fault regardless of
+#: value, so it never plates, but it is still live scoring data and
+#: outranks an admittedly-empty fault slot.
+_TIER_UNLIT_FAULT = 0
+_TIER_ACCURACY = 1
+_TIER_LIT_FAULT = 2
+
+
+def _count_elements(scorecard: StageScorecard) -> list[Element]:
     """The six hit/fault counts as one equal-weight, colour-coded row.
 
     A field that is ``None`` (the scoreboard never carried that column)
@@ -421,19 +440,44 @@ def _count_elements(scorecard) -> list[Element]:
     happened. Only the ``M``/``NS``/``P`` entries are eligible -- ``A``/
     ``C``/``D`` are never a fault, so they never plate regardless of
     value.
+
+    Each element also carries a ``drop_priority`` (issue #683 F1's fit
+    policy -- see :attr:`~splitsmith.overlay_layout.Element.drop_priority`
+    and ``overlay_html._fit_script``), assigned by tier
+    (:data:`_TIER_UNLIT_FAULT` / ``_TIER_ACCURACY`` / ``_TIER_LIT_FAULT``)
+    and, within a tier, by this row's own reading order -- **not**
+    reordered in the returned list**, which stays ``_COUNT_FIELDS``
+    order regardless: the priority is metadata for a browser to consult
+    under space pressure, not a second way to spell the row's own layout.
     """
-    elements: list[Element] = []
+    entries: list[tuple[str, str, ColorToken, bool]] = []
     for name, tag, token in _COUNT_FIELDS:
         value = getattr(scorecard, name)
         if value is None:
             continue
         plate = token is ColorToken.ACCENT_TEXT and value > 0
+        entries.append((tag, str(value), token, plate))
+
+    def _tier(entry: tuple[str, str, ColorToken, bool]) -> int:
+        _tag, _value, token, plate = entry
+        if plate:
+            return _TIER_LIT_FAULT
+        if token is ColorToken.ACCENT_TEXT:
+            return _TIER_UNLIT_FAULT
+        return _TIER_ACCURACY
+
+    drop_order = sorted(range(len(entries)), key=lambda i: (_tier(entries[i]), i))
+    priorities = {index: rank for rank, index in enumerate(drop_order)}
+
+    elements: list[Element] = []
+    for index, (tag, value_text, token, plate) in enumerate(entries):
         elements.append(
             Element(
                 role=Role.DETAIL,
-                text=f"{tag}{value}",
+                text=f"{tag}{value_text}",
                 emphasis=Emphasis.PLATE if plate else Emphasis.PLAIN,
                 color=token,
+                drop_priority=priorities[index],
             )
         )
     return elements
@@ -522,7 +566,14 @@ def _cell_groups(
     so it must stay text-free apart from the name.
     """
     scorecard = tile.scorecard if tile is not None else None
-    scorecard_active = scorecard is not None and not scorecard.dq
+    # Narrowed to a real ``StageScorecard`` (not just a bool) so the reads
+    # below -- ``_count_elements``, ``.hit_factor`` -- type-check without
+    # an ``assert``/``# type: ignore``: a bare ``bool`` flag doesn't let
+    # mypy re-narrow ``scorecard`` itself back from ``StageScorecard |
+    # None``, but an ``is not None`` check on this variable directly does.
+    active_scorecard: StageScorecard | None = (
+        scorecard if scorecard is not None and not scorecard.dq else None
+    )
     groups: list[Group] = []
 
     # Top row: who this is, and the DQ chip beside the name when DQ'd.
@@ -540,20 +591,40 @@ def _cell_groups(
     # groups sharing MIDDLE_CENTER stack in declaration order.
     stack: list[Group] = []
 
-    counts = _count_elements(scorecard) if scorecard_active else []
+    counts = _count_elements(active_scorecard) if active_scorecard is not None else []
     time_text = _time_text(tile)
-    hf_text = f"{scorecard.hit_factor:.2f}" if scorecard_active and scorecard.hit_factor is not None else None
-    # A DQ's own scoring is suppressed (``scorecard_active`` above), but a
-    # DQ'd tile can still carry a stage time -- the mock's own DQ cell
-    # shows "Scoring" with just the time, no counts, no hit factor.
+    hf_text = (
+        f"{active_scorecard.hit_factor:.2f}"
+        if active_scorecard is not None and active_scorecard.hit_factor is not None
+        else None
+    )
+    # A DQ's own scoring is suppressed (``active_scorecard`` above is
+    # ``None`` for a DQ'd tile), but a DQ'd tile can still carry a stage
+    # time -- the mock's own DQ cell shows "Scoring" with just the time,
+    # no counts, no hit factor.
     scoring_present = bool(counts) or hf_text is not None or time_text is not None
 
     if scoring_present:
+        # Drop-priority continues past the counts row's own tiers (issue
+        # #683 F1): the whole counts row is exhausted before the fit
+        # policy ever reaches hit factor/time, and the "Scoring" label
+        # itself is the last thing this module will ever offer to drop
+        # on the Scoring side -- see ``overlay_html._fit_script``. Never
+        # assigned to anything in the Splits band; F1's rule 2 is "never
+        # the splits", so nothing below this block ever sets one.
+        next_priority = len(counts)
+        working: list[Element] = []
+        if hf_text is not None:
+            working.append(Element(role=Role.HEADLINE, text=hf_text, unit="HF", drop_priority=next_priority))
+            next_priority += 1
+        if time_text is not None:
+            working.append(Element(role=Role.HEADLINE, text=time_text, drop_priority=next_priority))
+            next_priority += 1
         stack.append(
             Group(
                 anchor=Anchor.MIDDLE_CENTER,
                 flow=Flow.ROW,
-                elements=(Element(role=Role.LABEL, text="Scoring"),),
+                elements=(Element(role=Role.LABEL, text="Scoring", drop_priority=next_priority),),
                 align="left",
             )
         )
@@ -567,11 +638,6 @@ def _cell_groups(
                     gap=_counts_gap(scale),
                 )
             )
-        working: list[Element] = []
-        if hf_text is not None:
-            working.append(Element(role=Role.HEADLINE, text=hf_text, unit="HF"))
-        if time_text is not None:
-            working.append(Element(role=Role.HEADLINE, text=time_text))
         if working:
             stack.append(
                 Group(

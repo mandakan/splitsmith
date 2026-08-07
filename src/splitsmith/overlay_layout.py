@@ -3,7 +3,10 @@
 Both overlay renderers draw the same kinds of thing in the same cells:
 the compare grid's live sprite (PIL, stepped on shot events), its running
 clock (an ffmpeg ``drawtext`` filter, genuinely per frame) and its frozen
-stage summary (PIL, once per stage). Until this module existed, the live
+stage summary -- headless Chromium rasterizing CSS built by
+``overlay_html.py`` from this module's own declarations, once per stage
+(``docs/superpowers/plans/2026-08-06-overlay-composition-seam-amendment.md``;
+it was PIL before that pivot). Until this module existed, the live
 sprite (``overlay_sprites.render_state``) and the clock
 (``mp4_grid._clock_pad`` / ``mp4_grid._stage_overlay_plan``) each wrote out
 the same byte-identical ``max(48, h // 14)`` / ``max(24, h // 36)`` pair
@@ -32,10 +35,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Literal
 
-#: Font sizes never shrink below this. Matches
-#: ``overlay_sprites._MIN_FONT_SIZE`` and
-#: ``overlay_summary._MIN_FONT_SIZE``: below it a further shrink reads as
-#: noise rather than as smaller text.
+#: Font sizes never shrink below this. Matches ``overlay_sprites.
+#: _MIN_FONT_SIZE`` (the live sprite's own PIL fitter) and is read
+#: directly -- not copied into a second constant -- by ``overlay_html``'s
+#: in-cell ``--fit-scale`` policy (issue #683 F1): below it a further
+#: shrink reads as noise rather than as smaller text, on both renderers.
 MIN_FONT_SIZE = 12
 
 
@@ -43,20 +47,24 @@ class Anchor(Enum):
     """Which corner, edge-centre, or the true centre of a cell an element
     group sits in.
 
-    Seven rather than nine, not all live yet. The redesigned stage summary
-    (issue #683 Task 7b, ``overlay_summary._cell_groups``) is a three-rail
-    composition using the whole cell rather than a single top-anchored
-    block: identity and placing at ``TOP_CENTER``, the scored result
-    (counts, a hairline rule, hit factor/time, and the hero stage
-    percentage) at ``MIDDLE_CENTER``, and split statistics at
-    ``BOTTOM_CENTER``. The live sprite's counter sits at ``TOP_LEFT`` and
-    its last split at ``BOTTOM_CENTER``, and the clock draws at
-    ``TOP_RIGHT`` -- the summary and the live overlay never draw at the
-    same time, since the clock and counter belong to the action and the
-    summary to the hold after it, so ``BOTTOM_CENTER`` serving both is not
-    a collision. ``TOP_LEFT``/``TOP_RIGHT``/``BOTTOM_LEFT``/``BOTTOM_RIGHT``
-    stay corner anchors for the live overlay's own use; ``BOTTOM_RIGHT`` is
-    declared and not yet drawn by anything.
+    Seven rather than nine, not all live yet. The stage summary (issue
+    #683 Task 8, ``overlay_summary._cell_groups``) is the "approved
+    bands" design, and uses exactly two of the seven: the shooter's name
+    (with a DQ chip beside it, when DQ'd -- a status, not a placing) at
+    ``TOP_CENTER``, and a vertically centred stack of two equal-weight
+    bands -- Scoring, then Splits -- at ``MIDDLE_CENTER``. Earlier designs
+    on this branch used a three-rail layout with a hairline rule, a hero
+    stage percentage and a cross-shooter placing at ``BOTTOM_CENTER``;
+    all of that was deleted, not merely resized or moved (see the issue
+    #683 Task 8 report for why). The live sprite's counter sits at
+    ``TOP_LEFT`` and its last split at ``BOTTOM_CENTER``, and the clock
+    draws at ``TOP_RIGHT`` -- the summary and the live overlay never draw
+    at the same time, since the clock and counter belong to the action
+    and the summary to the hold after it, so ``BOTTOM_CENTER`` serving
+    both is not a collision. ``TOP_LEFT``/``TOP_RIGHT``/``BOTTOM_LEFT``/
+    ``BOTTOM_RIGHT`` stay corner anchors for the live overlay's own use;
+    ``BOTTOM_CENTER`` and ``BOTTOM_RIGHT`` are declared and not currently
+    drawn by anything.
 
     ``MIDDLE_CENTER`` is vertically centred rather than edge-pinned --
     unlike every other anchor, it has no ``pad`` inset on either side,
@@ -213,6 +221,20 @@ class Element:
     #: instead (``"4.50s"``): this field exists only for the one case the
     #: approved design draws at two type sizes on one line.
     unit: str | None = None
+    #: This element's place in the cell's drop order when its group's
+    #: content still does not fit after the whole group has been
+    #: shrunk to the legibility floor (see :data:`MIN_FONT_SIZE` and
+    #: ``overlay_html``'s ``--fit-scale`` fit policy, issue #683 F1).
+    #: Lower drops first. ``None`` (the default) means "never drop this
+    #: element" -- every split statistic keeps this default; only the
+    #: scoring-side elements (``overlay_summary._cell_groups``) assign
+    #: one, in an order that never removes a genuinely nonzero (lit)
+    #: fault count while a zero-valued one still survives. The number
+    #: itself carries no other meaning -- it is a total order over
+    #: "least important to keep on screen", declared once by the module
+    #: that already knows which counts are real, not computed from any
+    #: rendered size.
+    drop_priority: int | None = None
 
 
 @dataclass(frozen=True)
@@ -224,14 +246,20 @@ class Group:
     to the edge. Groups do not nest; sharing an anchor is what that would
     otherwise have been for.
 
-    ``divider`` marks a group as the one decorative element the redesigned
-    stage summary allows itself (issue #683 Task 7b): a hairline rule
-    between what a shooter did (the hit/fault counts) and what it is worth
-    (hit factor, time, the hero percentage), borrowed from a printed IPSC
-    score slip. A divider group carries no elements (``flow`` is present
-    only because the dataclass needs one and is ignored) -- it renders as
-    a plain line stretched to the width of the widest group sharing its
-    anchor, not as text.
+    ``divider`` marks a group as a hairline rule rather than text -- a
+    group with ``divider=True`` carries no elements (``flow`` is present
+    only because the dataclass needs one and is ignored) and renders as a
+    plain line stretched to the width of the widest group sharing its
+    anchor. Introduced for issue #683 Task 7b's three-rail design (a rule
+    between what a shooter did and what it was worth, borrowed from a
+    printed IPSC score slip); Task 8's approved bands design that
+    replaced it draws no divider anywhere -- ``overlay_summary._cell_groups``
+    never sets this field, and the "SCORING"/"SPLITS" band headers do the
+    job a rule used to. Kept as live infrastructure (``overlay_html``
+    still renders ``.group.divider`` correctly) for a future caller that
+    wants one, not as something currently drawn -- see
+    ``scripts/build_overlay_theme.py``'s ``rule`` comment for the same
+    situation on the theme-token side.
     """
 
     anchor: Anchor
@@ -302,8 +330,19 @@ class CellScale:
     #: large numerals come out chunky and slightly muddied while the small
     #: ones stay crisp, which is backwards. Measured against the approved
     #: mock, the em version put 15-18% of a glyph box in stroke against
-    #: the flat version's 8.9%. One stroke weight per cell keeps the
-    #: separation from the footage constant and the numerals sharp.
+    #: the mock's OWN flat-px reference implementation at 8.9% -- this
+    #: (production) formula measures 8.4%, not that number: the mock used
+    #: a float ``cell_h / 540``, this uses integer floor division
+    #: (``cell_h // 540``), which is a deliberately different, smaller
+    #: value at some heights -- e.g. at ``cell_h=720`` the mock's flat
+    #: reference wants 1.3px, this gives exactly 1px. Every other length
+    #: this module's formulas produce is already an integer CSS pixel
+    #: value (see ``for_cell``'s other fields), so keeping ``stroke_width``
+    #: an ``int`` too -- rounding a fraction of a pixel of stroke down
+    #: rather than introducing the only float-valued field in this
+    #: dataclass -- was the deliberate choice, not an oversight. Target
+    #: still dominates either way: both numbers are well under the
+    #: em-relative version's 15-18%.
     stroke_width: int
 
     @classmethod
