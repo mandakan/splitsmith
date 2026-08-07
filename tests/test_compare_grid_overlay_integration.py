@@ -19,7 +19,7 @@ Roster is three shooters, not two or four. Three is the smallest roster
 that both:
 
 - leaves one cell of the 2x2 grid unreached, so "an empty cell is not a
-  shooter" (``overlay_sprites._draw_panel``'s ``present`` guard) is
+  shooter" (``overlay_live.panel_groups``'s ``present`` guard) is
   exercised on the rendered path, not just in a unit test that
   constructs a ``TilePlacement(present=False)`` by hand; and
 - lets one shooter go without an audit file, so the no-data
@@ -216,13 +216,13 @@ PRE_BEEP_MAX_MEAN_ABS_DIFF = 2.0
 # landed in the right cell, but a fully-blanked ``overlay_sprites``
 # renderer (counter + split label drawn nowhere at all) still clears
 # FIRING_QUADRANT_MIN_MEAN_ABS_DIFF -- measured 6.60 against a 5.0
-# threshold with ``_draw_panel`` returning immediately -- because the
+# threshold with ``panel_groups`` returning no groups -- because the
 # per-tile clock is a separate ``drawtext`` chain in ``mp4_grid.py`` that
 # keeps drawing on its own. A fully broken sprite panel would ship green
 # under that check alone. So the quadrant is additionally split into
 # three coarse, non-overlapping quarter/half boxes -- no font-metric
 # precision needed, since the sprite panel
-# (``overlay_sprites._draw_panel``: counter at the cell's top-left
+# (``overlay_live.panel_groups``: counter at the cell's top-left
 # corner, split label bottom-center) and the clock
 # (``mp4_grid._clock_filters``: top-right corner) are non-overlapping by
 # construction:
@@ -240,7 +240,7 @@ PRE_BEEP_MAX_MEAN_ABS_DIFF = 2.0
 #                                       counter   clock   split  quadrant
 #   real render                            8.23   22.61   35.06     16.73
 #   counter drawing removed from
-#   ``overlay_sprites._draw_panel``        1.37   22.59   35.10     15.01
+#   ``overlay_live.panel_groups``       1.37   22.59   35.10     15.01
 #   split-label drawing removed instead    8.16   22.56    1.42      8.29
 #   the whole panel blanked                1.33   22.65    1.43      6.60
 # The clock box is unmoved by any of them, which is what confirms it is
@@ -791,7 +791,8 @@ def test_sprite_states_decode_at_the_boundaries_they_were_written_at(tmp_path: P
     boundaries are not expressible on a 1/25s grid at all, so no amount
     of arithmetic on this side fixes it; only the demuxer's own rate does.
     """
-    from splitsmith.compare import overlay_sprites
+    from splitsmith.compare import overlay_live, overlay_sprites
+    from splitsmith.overlay_raster import ChromiumRasterizer
 
     geometry = overlay_sprites.SpriteGeometry(canvas_width=320, canvas_height=180, rows=2, cols=2)
     theme = load_theme("splitsmith")
@@ -817,9 +818,14 @@ def test_sprite_states_decode_at_the_boundaries_they_were_written_at(tmp_path: P
         )
         for i, start in enumerate(starts)
     ]
-    sequence = overlay_sprites.write_sprite_sequence(
-        states, geometry, theme=theme, cache_dir=tmp_path / "sprites"
-    )
+    # A real browser, because ffmpeg has to decode what comes out: this
+    # test is about the demuxer's time base, so the sprites must be
+    # genuine PNGs and each state's must differ from its neighbour's or
+    # ``showinfo`` has no distinct frames to report boundaries for.
+    with ChromiumRasterizer() as rasterizer:
+        sequence = overlay_live.write_sprite_sequence(
+            states, geometry, theme=theme, cache_dir=tmp_path / "sprites", rasterizer=rasterizer
+        )
     list_path = overlay_sprites.write_concat_list(sequence, tmp_path / "s.txt", frame_rate=(30, 1))
 
     done = subprocess.run(

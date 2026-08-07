@@ -38,7 +38,7 @@ Design rules, each answering one of the old fitter's defects:
   exactly the integer boundaries the ffmpeg ``xstack`` graph uses.
 - **A filler tile (``present=False``) gets an empty cell.** It is not a
   shooter; text over black would imply a competitor who isn't there.
-  Enforced in :func:`summary_html` regardless of what groups a caller
+  Enforced in :func:`grid_html` regardless of what groups a caller
   hands it for a filler placement -- the same defensive posture as
   ``overlay_summary._draw_cell``'s own ``if not placement.present:
   return``.
@@ -192,7 +192,7 @@ def _fit(px: int) -> str:
 def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     """The shared stylesheet for one cell's declared content.
 
-    Emitted once per document by :func:`summary_html` (all cells in one
+    Emitted once per document by :func:`grid_html` (all cells in one
     grid share one ``CellScale``, resolved from one shared cell height)
     and once per call by :func:`cell_html`, so a single cell's fragment
     is independently valid HTML a test can inspect without also holding
@@ -487,7 +487,7 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
      the raw cell height (it exists only as a component baked into
      several already-divided fields), and this rule is shared by
      ``cell_html`` -- which never receives a cell height at all -- and
-     ``summary_html``, which does (``geometry.cell_height``). Backing a
+     ``grid_html``, which does (``geometry.cell_height``). Backing a
      height out of e.g. ``scale.pad`` is unreliable: ``_summary_scale``
      and ``CellScale.for_cell`` derive ``pad`` with two DIFFERENT
      formulas depending on the caller, so which one produced a given
@@ -688,7 +688,7 @@ def _cell_div(groups: Sequence[Group]) -> str:
     """The ``<div class="cell">...</div>`` markup for one present tile,
     with no wrapping ``<style>`` -- shared by :func:`cell_html` (which
     wraps it with its own stylesheet so a single cell is independently
-    testable) and :func:`summary_html` (which emits the stylesheet once
+    testable) and :func:`grid_html` (which emits the stylesheet once
     for the whole document rather than once per cell).
 
     Groups are bucketed by anchor, preserving each anchor's first
@@ -865,7 +865,7 @@ def cell_html(groups: Sequence[Group], *, scale: CellScale, theme: OverlayTheme)
     Includes its own ``<style>`` block and the fit-policy ``<script>``
     (see :func:`_fit_script`), so this is valid to drop anywhere (a
     test, a future single-shooter port) without also needing a whole
-    document -- :func:`summary_html` calls the same building blocks but
+    document -- :func:`grid_html` calls the same building blocks but
     emits the stylesheet and script once for the whole grid instead of
     once per cell. The script only *defines* ``window.__splitsmithFit``
     here; nothing in this module calls it -- see
@@ -878,14 +878,21 @@ def cell_html(groups: Sequence[Group], *, scale: CellScale, theme: OverlayTheme)
     )
 
 
-def summary_html(
+def grid_html(
     cells: Sequence[tuple[TilePlacement, Sequence[Group]]],
     *,
     geometry: SpriteGeometry,
     scale: CellScale,
     theme: OverlayTheme,
 ) -> str:
-    """The whole canvas-sized stage summary as one HTML document.
+    """A whole canvas-sized grid of declared cells as one HTML document.
+
+    Named for the grid rather than the stage summary because it has two
+    callers: ``compare/overlay_summary.py``'s freeze-frame summary and
+    ``compare/overlay_live.py``'s per-tile live sprites (issue #693).
+    Nothing here knows which one is calling -- a cell is a placement plus
+    a tuple of declared groups either way, and the only thing that
+    differs between the two is what those groups say.
 
     One CSS grid at canvas size, ``geometry.rows x geometry.cols``, each
     track exactly ``geometry.cell_width`` / ``cell_height`` pixels (floor
