@@ -61,6 +61,14 @@ tests/fixtures/full/*
 !tests/fixtures/full/_sources.yaml
 !tests/fixtures/full/.gitkeep
 
+# Real-footage corpus for overlay design judgement calls (#686). Cut from a
+# local match on the machine that holds it; real match video carries other
+# competitors, ROs and bystanders, so no clip may ever be committed -- LFS
+# included. The *.mp4 rule above already catches the media; this block exists
+# to state the intent and to track the README that describes the slots.
+tests/fixtures/corpus/*
+!tests/fixtures/corpus/README.md
+
 # Waveform peaks caches written by splitsmith.waveform.ensure_peaks (#15).
 # Regenerable from the WAV; sidecar JSON next to the audio file.
 *.peaks-*.json
