@@ -36,6 +36,7 @@ import {
 import {
   api,
   READ_ONLY_MIRROR_MESSAGE,
+  type Job,
   type MatchOrigin,
   type MatchProject,
   type ScoreboardIdentity,
@@ -63,6 +64,13 @@ export interface MatchShellOutletContext {
    *  The shell itself already renders the persistent banner and relies on
    *  the server's 403 as the enforcement backstop. */
   origin: MatchOrigin | null;
+  /** The shell's one jobs-poller snapshot (#631 Task 11's SyncCard reads
+   *  this for its "a sync_match job is pending/running" check rather than
+   *  running a second poller - lib/jobs.ts's "one poller per shell"
+   *  convention). Optional: ShareShell's read-only outlet context has no
+   *  poller of its own (SyncCard never mounts there - it's local-only
+   *  and share links are hosted-only) and passes none. */
+  jobs?: Job[];
 }
 
 export function MatchShell() {
@@ -616,6 +624,7 @@ export function MatchShell() {
               shooters,
               refresh: () => setRefreshKey((k) => k + 1),
               origin,
+              jobs,
             }}
           />
         </div>

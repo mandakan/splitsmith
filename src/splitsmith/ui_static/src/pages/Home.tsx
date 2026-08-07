@@ -28,12 +28,13 @@ import {
   Users,
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link, useNavigate, useOutletContext } from "react-router-dom";
+import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
 
 import { Avatar, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import { EditStagesDrawer } from "@/components/match/EditStagesDrawer";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
+import { SyncCard } from "@/components/match/SyncCard";
 import {
   api,
   apiErrorText,
@@ -43,6 +44,7 @@ import {
   type StageEntry,
   type StageStatus,
 } from "@/lib/api";
+import { useDeploymentMode } from "@/lib/features";
 import {
   deriveStageStatus,
   isNextUpCandidate,
@@ -78,6 +80,8 @@ export function Home() {
   const href = useMatchHref();
   const ctx = useOutletContext<MatchShellOutletContext>();
   const project = ctx?.project ?? null;
+  const { matchId } = useParams<{ matchId: string }>();
+  const deploymentMode = useDeploymentMode();
   // A desktop-origin mirror is read-only here (#631 Task 10): the server
   // 403s every mutation except share management and match deletion, so
   // the add-shooter and stage-editor entry points this page renders are
@@ -318,6 +322,9 @@ export function Home() {
       </div>
 
       <div className="mx-auto max-w-[1280px] px-8 pb-20 pt-6">
+        {deploymentMode === "local" ? (
+          <SyncCard jobs={ctx?.jobs ?? []} matchId={matchId} />
+        ) : null}
         {isEmpty ? (
           <EmptyVariant
             project={project}

@@ -1,0 +1,188 @@
+/**
+ * SyncSettingsDialog - configure the local install's hosted-sync target
+ * (desktop-to-hosted sync MVP, #631 Task 11).
+ *
+ * Two fields: the hosted base URL (e.g. https://splitsmith.app) and a
+ * desktop token (see DesktopTokensDialog on the hosted side, #631 Task
+ * 10, for where that token comes from). Saves via PUT
+ * /api/settings/hosted-sync - an operator-global setting, not
+ * match-scoped, so it applies to every match this install syncs.
+ *
+ * ``token_set`` from the last GET renders as a masked placeholder in
+ * the token field: leaving it blank on save keeps the stored token
+ * (backend contract: ``token: null`` keeps, ``""`` clears, anything
+ * else replaces). A first-time save with no token stored yet requires
+ * a value - there is nothing to "keep".
+ *
+ * Overlay architecture: body Portal + z-modal token + useDialogFocus
+ * (modal trap) - same skeleton as DesktopTokensDialog (PR #519
+ * convention).
+ */
+
+import { useRef, useState } from "react";
+import { AlertTriangle, CloudUpload } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Portal } from "@/components/ui/Portal";
+import { useDialogFocus } from "@/lib/dialogFocus";
+import { api, apiErrorText, type HostedSyncSettings } from "@/lib/api";
+
+interface SyncSettingsDialogProps {
+  /** Current settings, or null if the initial GET hasn't landed yet -
+   *  the form still renders with empty fields in that case. */
+  settings: HostedSyncSettings | null;
+  onClose: () => void;
+  /** Fired with the server's post-save record so the caller (SyncCard)
+   *  can update its own copy without waiting for the next poll. */
+  onSaved: (settings: HostedSyncSettings) => void;
+}
+
+export function SyncSettingsDialog({
+  settings,
+  onClose,
+  onSaved,
+}: SyncSettingsDialogProps) {
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useDialogFocus(true, panelRef, onClose);
+
+  const [baseUrl, setBaseUrl] = useState(settings?.base_url ?? "");
+  const [token, setToken] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const tokenAlreadySet = settings?.token_set ?? false;
+
+  async function handleSave() {
+    setError(null);
+    const trimmedUrl = baseUrl.trim();
+    if (!trimmedUrl) {
+      setError("Base URL is required.");
+      return;
+    }
+    const trimmedToken = token.trim();
+    if (!trimmedToken && !tokenAlreadySet) {
+      setError("Token is required.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await api.putSyncSettings(
+        trimmedUrl,
+        trimmedToken === "" ? null : trimmedToken,
+      );
+      onSaved(updated);
+      onClose();
+    } catch (e) {
+      setError(apiErrorText(e, "Could not save hosted-sync settings."));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Portal>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="sync-settings-title"
+        aria-describedby="sync-settings-desc"
+        className="fixed inset-0 z-modal flex items-center justify-center bg-bg/70 p-4"
+        onClick={onClose}
+      >
+        <Card
+          ref={panelRef}
+          tabIndex={-1}
+          className="w-full max-w-md shadow-xl outline-none"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <CardHeader>
+            <CardTitle
+              id="sync-settings-title"
+              className="flex items-center gap-2"
+            >
+              <CloudUpload className="size-5" aria-hidden="true" />
+              Hosted sync settings
+            </CardTitle>
+            <CardDescription id="sync-settings-desc">
+              Where this install pushes a match when you sync it to
+              splitsmith.app. The token comes from the account's Desktop
+              sync tokens page.
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent className="space-y-4 text-sm">
+            {error ? (
+              <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
+                <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
+                <span role="alert">{error}</span>
+              </div>
+            ) : null}
+
+            <div className="flex flex-col gap-1">
+              <label
+                htmlFor="sync-base-url"
+                className="font-mono text-xs uppercase tracking-[0.08em] text-muted"
+              >
+                Base URL
+              </label>
+              <input
+                id="sync-base-url"
+                type="url"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                disabled={saving}
+                placeholder="https://splitsmith.app"
+                className="rounded border border-rule bg-bg px-3 py-1.5 text-sm disabled:opacity-50"
+                aria-required="true"
+              />
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <label
+                htmlFor="sync-token"
+                className="font-mono text-xs uppercase tracking-[0.08em] text-muted"
+              >
+                Desktop token
+              </label>
+              <input
+                id="sync-token"
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                disabled={saving}
+                placeholder={
+                  tokenAlreadySet
+                    ? "•••••••••••• (unchanged)"
+                    : "Paste your desktop token"
+                }
+                className="rounded border border-rule bg-bg px-3 py-1.5 text-sm disabled:opacity-50"
+                aria-required={!tokenAlreadySet}
+              />
+              {tokenAlreadySet ? (
+                <p className="font-mono text-[0.6875rem] text-muted">
+                  A token is already saved. Leave blank to keep it.
+                </p>
+              ) : null}
+            </div>
+          </CardContent>
+
+          <div className="flex justify-end gap-2 border-t border-rule p-4">
+            <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void handleSave()} disabled={saving}>
+              {saving ? "Saving..." : "Save"}
+            </Button>
+          </div>
+        </Card>
+      </div>
+    </Portal>
+  );
+}

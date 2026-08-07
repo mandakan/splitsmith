@@ -3698,6 +3698,35 @@ export const api = {
       `/api/me/desktop-tokens/${encodeURIComponent(tokenId)}`,
       { method: "DELETE" },
     ),
+
+  // Hosted-sync settings + match sync trigger (desktop-to-hosted sync MVP,
+  // #631 Task 9/11). Local-only - every route 404s in hosted mode; the
+  // SPA only mounts SyncCard when useDeploymentMode() === "local", so
+  // that 404 should never be reachable from the UI. Settings are an
+  // operator-global install setting (/api/settings/...), not match-scoped;
+  // the trigger/status routes ride /api/match/... so scopeRequestPath
+  // rewrites them onto the current match, same as listShares above.
+
+  /** Read the current hosted-sync target. */
+  getSyncSettings: () => request<HostedSyncSettings>("/api/settings/hosted-sync"),
+
+  /** Save the hosted-sync target. ``token: null`` keeps whatever token is
+   *  already stored so the caller can resubmit ``baseUrl`` alone without
+   *  re-typing the secret; ``""`` clears it; any other string replaces it. */
+  putSyncSettings: (baseUrl: string, token: string | null) =>
+    request<HostedSyncSettings>("/api/settings/hosted-sync", {
+      method: "PUT",
+      json: { base_url: baseUrl, token },
+    }),
+
+  /** Poll the current match's sync status: configured?, when it last
+   *  synced, whether it's stale, and any plan errors that would block
+   *  a push. */
+  getSyncStatus: () => request<SyncStatusResponse>("/api/match/sync/status"),
+
+  /** Submit a ``sync_match`` job for the current match. 409
+   *  ``sync_not_configured`` when no hosted-sync target is saved yet. */
+  startSync: () => request<Job>("/api/match/sync", { method: "POST" }),
 };
 
 /** One compute worker row, mirrored from the backend WorkerView. */
@@ -4041,6 +4070,29 @@ export interface DesktopTokenCreateResponse {
 /** Response from DELETE /api/me/desktop-tokens/{token_id}. */
 export interface DesktopTokenRevokeResponse {
   revoked: boolean;
+}
+
+/** Response from GET/PUT /api/settings/hosted-sync (#631 Task 9). Local
+ *  install's hosted-sync target: where the desktop client pushes a
+ *  match and which desktop token it authenticates with. ``token_set``
+ *  is a boolean, never the raw token - the server never echoes a
+ *  bearer credential back over localhost HTTP. */
+export interface HostedSyncSettings {
+  base_url: string | null;
+  token_set: boolean;
+}
+
+/** Response from GET /api/match/sync/status (#631 Task 9). Cheap
+ *  size/mtime-only planning, no hashing - safe to poll. ``stale`` is
+ *  true whenever a push would have real work to do (never synced,
+ *  unpushed media, or the plan itself can't run). ``errors`` lists
+ *  the reasons a push would refuse to run right now. */
+export interface SyncStatusResponse {
+  configured: boolean;
+  last_synced_at: string | null;
+  stale: boolean;
+  pending_media: number;
+  errors: string[];
 }
 
 export { ApiError };
