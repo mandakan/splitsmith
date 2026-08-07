@@ -13956,6 +13956,16 @@ def create_app(
         done.sort(key=lambda x: x.slug)
         return DevReviewQueueResponse(pending=pending, flagged=flagged, done=done)
 
+    # Desktop-to-hosted sync router (#631). Included after every middleware
+    # above is registered so /api/sync/* passes through the same auth gate
+    # as the rest of /api/*. Its own imports are lazy where they'd pull in
+    # the hosted-only db deps, so registering it here is safe on a local-
+    # slim install too - every route just 404s outside hosted mode (see
+    # sync_api._hosted_gate).
+    from .sync_api import router as sync_router
+
+    app.include_router(sync_router)
+
     # ----------------------------------------------------------------------
     # Static asset serving (SPA)
     # ----------------------------------------------------------------------
