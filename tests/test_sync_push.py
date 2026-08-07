@@ -119,7 +119,7 @@ class _FakeHosted:
 
     def clients(self) -> HostedSyncClient:
         http = httpx.Client(
-            base_url="https://hosted.example/api/sync",
+            base_url="https://hosted.example",
             headers={"Authorization": "Bearer test-token"},
             transport=httpx.MockTransport(self._http_handler),
         )
