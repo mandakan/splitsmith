@@ -57,18 +57,19 @@ New `desktop_tokens` table modeled on the worker-token pattern but carrying
 
 ## Identity and sync state
 
-- First push calls `POST /api/sync/matches` to create the hosted `matches` row
-  and get a `match_id`. The call takes a client-supplied stable key so re-runs
-  return the same match instead of duplicating.
-- The local project gains a `sync_state.json` in the project root (never part
-  of any pushed doc): stable client key, hosted base URL, `match_id`, and
-  per-item digests from the last successful push.
-- Re-push diffs current digests against `sync_state.json` plus server-reported
-  object existence, and skips unchanged items.
-- The digests are a cache; the identity fields are the durable link. Deleting
-  `sync_state.json` severs the link: the next push creates a fresh hosted
-  mirror (the orphaned one can be deleted in the hosted UI). Losing digests
-  alone only costs a full re-upload check.
+- The stable key is the local `Match.match_id` - already a deterministic,
+  frozen id (`generate_match_id` in `match_model.py`), and the hosted
+  `matches` table is already unique on `(user_id, match_id)`. First push
+  calls `POST /api/sync/matches` with it; the call is create-or-return, so
+  re-runs never duplicate.
+- The local project gains a `sync_state.json` in the match root (never part
+  of any pushed doc): per-item digests (sha256 + size + mtime) from the last
+  successful push, plus the last-synced timestamp.
+- Re-push diffs current files against those digests and skips unchanged
+  items; size + mtime gate the expensive re-hash, rsync-style.
+- `sync_state.json` is a pure cache. Deleting it costs a full re-hash and
+  re-upload on the next push - the match link itself lives in `match_id`
+  and cannot be lost.
 
 ## Sync API
 
