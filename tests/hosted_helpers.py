@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -110,3 +111,56 @@ def seed_match(db_url: str, user_email: str, match_id: str) -> None:
             await s.commit()
 
     asyncio.run(_insert())
+
+
+# ---------------------------------------------------------------------------
+# S3 storage double (moto-backed)
+# ---------------------------------------------------------------------------
+#
+# Lifted out of test_hosted_raw_upload.py (originally file-local as
+# `hosted_client`'s inner `_stub_tenant_storage`) so any test file that
+# needs a real S3Storage against an in-memory bucket - not just the raw
+# upload surface - can reuse it without duplicating the moto plumbing.
+
+
+@contextmanager
+def moto_s3_storage(monkeypatch: pytest.MonkeyPatch, bucket: str) -> Iterator[dict[str, object]]:
+    """Stub ``splitsmith.ui.server._tenant_s3_storage`` against a moto bucket.
+
+    Sets the ``SPLITSMITH_S3_*`` env vars hosted-mode wiring needs to
+    decide storage is configured, creates ``bucket`` in an in-memory
+    moto S3 backend, and monkeypatches ``_tenant_s3_storage`` so every
+    per-tenant ``S3Storage`` the app builds is bound to that backend
+    instead of a real network client.
+
+    Callers create the app *inside* this context, then drive one
+    authenticated request so a tenant resolves - after that,
+    ``captured["storage"]`` holds the constructed ``S3Storage`` (every
+    request rebuilds an equivalent instance against the same
+    bucket/prefix/client, so any one capture is representative).
+    """
+    import boto3
+    from moto import mock_aws
+
+    from splitsmith.storage import S3Storage
+
+    monkeypatch.setenv("SPLITSMITH_S3_BUCKET", bucket)
+    monkeypatch.setenv("SPLITSMITH_S3_REGION", "us-east-1")
+    monkeypatch.setenv("SPLITSMITH_S3_ACCESS_KEY_ID", "key")
+    monkeypatch.setenv("SPLITSMITH_S3_SECRET_ACCESS_KEY", "secret")
+
+    with mock_aws():
+        s3 = boto3.client("s3", region_name="us-east-1")
+        s3.create_bucket(Bucket=bucket)
+
+        from splitsmith.ui import server as server_mod
+
+        captured: dict[str, object] = {}
+
+        def _stub_tenant_storage(client: object, _bucket: object, user_id: str) -> S3Storage:
+            storage = S3Storage(bucket=bucket, prefix=f"users/{user_id}/", client=s3)
+            captured["storage"] = storage
+            return storage
+
+        monkeypatch.setattr(server_mod, "_tenant_s3_storage", _stub_tenant_storage)
+        yield captured

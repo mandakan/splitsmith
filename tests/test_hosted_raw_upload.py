@@ -27,12 +27,12 @@ from pathlib import Path
 import pytest
 
 moto = pytest.importorskip("moto")
-import boto3  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-from moto import mock_aws  # noqa: E402
 
 from splitsmith.db import Base, create_engine  # noqa: E402
 from splitsmith.storage import S3Storage  # noqa: E402
+
+from .hosted_helpers import moto_s3_storage  # noqa: E402
 
 BUCKET = "splitsmith-uploads-test"
 
@@ -127,31 +127,14 @@ def hosted_client(
     the test to assert against (every request rebuilds an equivalent one
     against the same bucket/prefix/client).
     """
-    monkeypatch.setenv("SPLITSMITH_S3_BUCKET", BUCKET)
-    monkeypatch.setenv("SPLITSMITH_S3_ENDPOINT_URL", "http://moto")
-    monkeypatch.setenv("SPLITSMITH_S3_REGION", "us-east-1")
-    monkeypatch.setenv("SPLITSMITH_S3_ACCESS_KEY_ID", "key")
-    monkeypatch.setenv("SPLITSMITH_S3_SECRET_ACCESS_KEY", "secret")
     # The hosted match-id alias middleware establishes a local working
     # root at ``<SPLITSMITH_PROJECTS_DIR>/<match_id>`` for media. Point it
     # at a writable tmp dir; the production default (/home/splitsmith/data)
     # isn't creatable on a dev/CI box.
     monkeypatch.setenv("SPLITSMITH_PROJECTS_DIR", str(tmp_path / "hosted-root"))
 
-    with mock_aws():
-        s3 = boto3.client("s3", region_name="us-east-1")
-        s3.create_bucket(Bucket=BUCKET)
-
+    with moto_s3_storage(monkeypatch, BUCKET) as captured:
         from splitsmith.ui import server as server_mod
-
-        captured: dict[str, S3Storage] = {}
-
-        def _stub_tenant_storage(client: object, bucket: object, user_id: str) -> S3Storage:
-            storage = S3Storage(bucket=BUCKET, prefix=f"users/{user_id}/", client=s3)
-            captured["storage"] = storage
-            return storage
-
-        monkeypatch.setattr(server_mod, "_tenant_s3_storage", _stub_tenant_storage)
 
         app = server_mod.create_app()
         with TestClient(app) as client:
