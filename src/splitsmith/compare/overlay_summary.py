@@ -24,7 +24,7 @@ this module already did the work.
 **The summary text is composed through the box engine, not hand-drawn.**
 See ``docs/superpowers/plans/2026-08-06-overlay-composition-seam-amendment.md``
 (Task 6R-3). ``_cell_groups`` still *declares* what one cell says; turning
-that declaration into pixels is now ``overlay_html.summary_html`` (pure
+that declaration into pixels is now ``overlay_html.grid_html`` (pure
 HTML) plus an injected :class:`splitsmith.overlay_raster.Rasterizer`
 (HTML -> PNG, via headless Chromium), composited once over the whole
 canvas rather than drawn per cell with hand-fitted PIL text. This module
@@ -53,7 +53,7 @@ from pathlib import Path
 
 from PIL import Image, ImageFilter
 
-from ..overlay_html import summary_html
+from ..overlay_html import grid_html
 from ..overlay_layout import Anchor, CellScale, ColorToken, Element, Emphasis, Flow, Group, Role
 from ..overlay_raster import Rasterizer
 from ..overlay_theme import OverlayTheme
@@ -693,10 +693,10 @@ def _summary_cells(
     cell_height: int,
 ) -> list[tuple[TilePlacement, tuple[Group, ...]]]:
     """One ``(placement, declared groups)`` pair per placement, in
-    placement order -- :func:`splitsmith.overlay_html.summary_html`'s own
+    placement order -- :func:`splitsmith.overlay_html.grid_html`'s own
     input shape.
 
-    A filler tile's groups are never computed: ``summary_html`` already
+    A filler tile's groups are never computed: ``grid_html`` already
     treats ``present=False`` as an empty cell regardless of what groups it
     is handed (the same defensive posture ``_draw_cell`` used to take),
     but computing them anyway would be pointless work for a cell nothing
@@ -733,7 +733,7 @@ def build_hold_still(
     failed or the tile has no trim, is simply the canvas's own black
     background). Every shooter's summary text is then composed in one
     pass: the whole canvas's declared cells (see :func:`_summary_cells`)
-    become one HTML document (``overlay_html.summary_html``), rasterized
+    become one HTML document (``overlay_html.grid_html``), rasterized
     to one canvas-sized PNG by the injected ``rasterizer``, and
     alpha-composited over the freezes in a single call -- not drawn per
     cell. This is what makes ``overflow: hidden`` (declared once, in the
@@ -789,7 +789,7 @@ def build_hold_still(
             cell_width=geometry.cell_width,
             cell_height=geometry.cell_height,
         )
-        html = summary_html(cells, geometry=geometry, scale=scale, theme=theme)
+        html = grid_html(cells, geometry=geometry, scale=scale, theme=theme)
         try:
             png_bytes = rasterizer.png(html, width=geometry.canvas_width, height=geometry.canvas_height)
             with Image.open(io.BytesIO(png_bytes)) as overlay_image:

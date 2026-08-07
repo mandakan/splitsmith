@@ -6,8 +6,11 @@ clock (an ffmpeg ``drawtext`` filter, genuinely per frame) and its frozen
 stage summary -- headless Chromium rasterizing CSS built by
 ``overlay_html.py`` from this module's own declarations, once per stage
 (``docs/superpowers/plans/2026-08-06-overlay-composition-seam-amendment.md``;
-it was PIL before that pivot). Until this module existed, the live
-sprite (``overlay_sprites.render_state``) and the clock
+it was PIL before that pivot). Since issue #693 the live per-tile sprites
+go the same way -- ``compare/overlay_live.py`` declares them and the same
+``overlay_html``/Chromium pair paints them -- so the clock is the only
+non-CSS renderer left. Until this module existed, the live
+sprite (then ``overlay_sprites.render_state``) and the clock
 (``mp4_grid._clock_pad`` / ``mp4_grid._stage_overlay_plan``) each wrote out
 the same byte-identical ``max(48, h // 14)`` / ``max(24, h // 36)`` pair
 independently -- two copies of one formula. The frozen stage summary
@@ -302,10 +305,12 @@ class CellScale:
     """Every type size in one cell, resolved from its height.
 
     One object rather than a formula per caller. The formulas were
-    previously written out in ``overlay_sprites.render_state``,
-    ``mp4_grid._clock_pad``, ``mp4_grid._stage_overlay_plan`` and
-    ``overlay_summary._draw_cell`` independently, which is what the issue
-    meant by "nothing owns what size is a per-tile element".
+    previously written out in the PIL sprite renderer (then
+    ``overlay_sprites.render_state``, now ``compare/overlay_live.py``
+    reading this instead), ``mp4_grid._clock_pad``,
+    ``mp4_grid._stage_overlay_plan`` and ``overlay_summary._draw_cell``
+    independently, which is what the issue meant by "nothing owns what
+    size is a per-tile element".
 
     Sizes are driven by *cell* height, never canvas height: 3x3 and 4x4
     are first-class grid kinds (``compare/layout.py`` routes 5-16 shooters

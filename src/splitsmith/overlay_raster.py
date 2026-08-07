@@ -119,14 +119,26 @@ class RasterizerUnavailableError(RuntimeError):
 
 
 def _unavailable(exc: Exception) -> RasterizerUnavailableError:
+    """The degradation notice, naming everything that is actually lost.
+
+    Since issue #693 that is more than it used to be: the per-tile shot
+    counters and split labels are rasterized through this same browser,
+    not just the freeze-frame stage summary. Understating it here would
+    hand the operator a message that says "summary omitted" while the
+    whole composited overlay is missing from their render -- the failure
+    is already quiet enough (a finished MP4, no exception, no non-zero
+    exit) without the one line that describes it being wrong.
+    """
     return RasterizerUnavailableError(
-        summary="stage summary omitted: no usable Chromium",
+        summary="overlay content omitted: no usable Chromium",
         detail=(
-            "Playwright could not launch a Chromium browser, so the composited stage summary "
-            "is omitted; the rest of the render proceeds without it. The browser is not "
-            f"vendored in the wheel -- install it once per environment with '{INSTALL_HINT}' "
-            "(dev host, CI, the hosted image, and the self-hosted worker all need this "
-            f"separately). Original error: {exc}"
+            "Playwright could not launch a Chromium browser, so everything the overlay "
+            "composites is omitted: the per-tile shot counters and split labels, and the "
+            "stage summary's text. The running clock still draws (it is an ffmpeg drawtext "
+            "filter and needs no browser) and the rest of the render proceeds. The browser "
+            f"is not vendored in the wheel -- install it once per environment with "
+            f"'{INSTALL_HINT}' (dev host, CI, the hosted image, and the self-hosted worker "
+            f"all need this separately). Original error: {exc}"
         ),
     )
 
@@ -197,7 +209,7 @@ class ChromiumRasterizer:
     def png(self, html: str, *, width: int, height: int) -> bytes:
         """Render ``html`` to a ``width`` x ``height`` PNG with an alpha channel.
 
-        **Transparent, not opaque.** ``overlay_html.summary_html`` leaves
+        **Transparent, not opaque.** ``overlay_html.grid_html`` leaves
         ``html``/``body`` deliberately ``background: transparent``: the
         composited result is alpha-blended over an already
         blurred/dimmed freeze-frame still by
@@ -240,7 +252,7 @@ class ChromiumRasterizer:
                 # or failed to. The same idiom is already used by
                 # ``scripts/capture_hero_og.py`` for the same reason.
                 page.evaluate("document.fonts.ready")
-                # ``overlay_html.summary_html``'s fit policy (issue #683
+                # ``overlay_html.grid_html``'s fit policy (issue #683
                 # F1) only *defines* ``window.__splitsmithFit`` --
                 # nothing in that module calls it, because it has to run
                 # after fonts are loaded (a shrink/drop decision made

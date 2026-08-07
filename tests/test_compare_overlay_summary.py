@@ -62,7 +62,7 @@ from splitsmith.compare import overlay_summary as summ
 from splitsmith.compare.mp4_grid import GridStagePlan, GridTile
 from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
-from splitsmith.overlay_html import summary_html
+from splitsmith.overlay_html import grid_html
 from splitsmith.overlay_layout import Anchor, ColorToken, Emphasis, Flow, Role
 from splitsmith.overlay_raster import (
     CHROMIUM_CHANNEL,
@@ -1263,7 +1263,7 @@ def test_a_long_names_ink_never_crosses_its_own_cell_in_a_real_render():
     and split statistics -- see :func:`_full_stat_tile`) -- in a cell
     small enough that content genuinely wants to overflow: 160x90, a 4x4
     grid on a 640x360 canvas. Every other placement in the grid is a
-    filler (``present=False``), which ``overlay_html.summary_html``
+    filler (``present=False``), which ``overlay_html.grid_html``
     forces empty regardless of what it is handed (see
     ``tests/test_overlay_html.py::test_a_filler_tile_cell_is_empty_of_text``),
     so the target is the *only* placement with any content at all --
@@ -1350,7 +1350,7 @@ def test_a_long_names_ink_never_crosses_its_own_cell_in_a_real_render():
     solo_geometry = SpriteGeometry(
         canvas_width=geometry.cell_width, canvas_height=geometry.cell_height, rows=1, cols=1
     )
-    solo_html = summary_html(cells, geometry=solo_geometry, scale=scale, theme=THEME)
+    solo_html = grid_html(cells, geometry=solo_geometry, scale=scale, theme=THEME)
     try:
         result = _declared_content_survived_the_fit_policy(
             solo_html, width=solo_geometry.canvas_width, height=solo_geometry.canvas_height
@@ -1409,7 +1409,7 @@ def test_a_full_stat_block_survives_the_fit_policy_in_a_real_render():
     solo_geometry = SpriteGeometry(
         canvas_width=geometry.cell_width, canvas_height=geometry.cell_height, rows=1, cols=1
     )
-    html = summary_html(cells, geometry=solo_geometry, scale=scale, theme=THEME)
+    html = grid_html(cells, geometry=solo_geometry, scale=scale, theme=THEME)
 
     try:
         result = _declared_content_survived_the_fit_policy(

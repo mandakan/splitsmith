@@ -16,7 +16,7 @@ import pytest
 from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
 from splitsmith.compare.overlay_summary import _cell_groups
-from splitsmith.overlay_html import cell_html, summary_html
+from splitsmith.overlay_html import cell_html, grid_html
 from splitsmith.overlay_layout import Anchor, CellScale, Element, Flow, Group, Role
 from splitsmith.overlay_theme import load_theme
 from splitsmith.ui.project import StageScorecard
@@ -79,13 +79,13 @@ def test_every_cell_carries_overflow_hidden():
 def test_a_filler_tile_cell_is_empty_of_text():
     """A filler placement (``present=False``) must render an empty cell
     regardless of what groups a caller hands it -- the invariant is
-    enforced in ``summary_html`` itself, not trusted to the caller. A
+    enforced in ``grid_html`` itself, not trusted to the caller. A
     wrong implementation that just calls ``cell_html`` unconditionally
     would leak the shooter's name onto a tile they never occupied."""
     groups = (Group(anchor=Anchor.TOP_LEFT, flow=Flow.ROW, elements=(Element(Role.IDENTITY, "Ghost"),)),)
     placement = TilePlacement(label="Ghost", row=0, col=0, present=False)
     geometry = SpriteGeometry(canvas_width=320, canvas_height=180, rows=1, cols=1)
-    doc = summary_html([(placement, groups)], geometry=geometry, scale=SCALE, theme=THEME)
+    doc = grid_html([(placement, groups)], geometry=geometry, scale=SCALE, theme=THEME)
     assert "Ghost" not in doc
     assert '<div class="cell"></div>' in doc
 
@@ -296,7 +296,7 @@ def test_grid_lands_on_the_same_floor_divided_boundaries_as_xstack():
     assert geometry.cell_width == 333
     assert geometry.cell_height == 541
     placement = TilePlacement(label="A", row=0, col=0, present=True)
-    doc = summary_html([(placement, ())], geometry=geometry, scale=SCALE, theme=THEME)
+    doc = grid_html([(placement, ())], geometry=geometry, scale=SCALE, theme=THEME)
     grid_rule = _rule(doc, ".grid")
     assert "repeat(3, 333px)" in grid_rule
     assert "repeat(1, 541px)" in grid_rule
@@ -305,7 +305,7 @@ def test_grid_lands_on_the_same_floor_divided_boundaries_as_xstack():
 def test_document_body_is_sized_to_the_canvas_and_background_transparent():
     geometry = SpriteGeometry(canvas_width=640, canvas_height=360, rows=1, cols=1)
     placement = TilePlacement(label="A", row=0, col=0, present=True)
-    doc = summary_html([(placement, ())], geometry=geometry, scale=SCALE, theme=THEME)
+    doc = grid_html([(placement, ())], geometry=geometry, scale=SCALE, theme=THEME)
     body_rule = _rule(doc, "html, body")
     assert "width: 640px" in body_rule
     assert "height: 360px" in body_rule
@@ -315,7 +315,7 @@ def test_document_body_is_sized_to_the_canvas_and_background_transparent():
 def test_a_tile_lands_in_its_declared_grid_row_and_column():
     placement = TilePlacement(label="A", row=2, col=1, present=True)
     geometry = SpriteGeometry(canvas_width=900, canvas_height=900, rows=3, cols=3)
-    doc = summary_html([(placement, ())], geometry=geometry, scale=SCALE, theme=THEME)
+    doc = grid_html([(placement, ())], geometry=geometry, scale=SCALE, theme=THEME)
     # CSS grid lines are 1-indexed; a 0-indexed TilePlacement.row/col of
     # (2, 1) must land on grid-row 3 / grid-column 2.
     assert "grid-row:3;grid-column:2;" in doc
@@ -551,7 +551,7 @@ def test_golden_roster_structure():
         ),
         (placements[2], ()),
     )
-    doc = summary_html(cells, geometry=geometry, scale=SCALE, theme=THEME)
+    doc = grid_html(cells, geometry=geometry, scale=SCALE, theme=THEME)
 
     # Every present tile's own numbers stay attached to its own name --
     # this is the whole point of the amendment. The real isolation check

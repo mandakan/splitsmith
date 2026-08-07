@@ -20,10 +20,12 @@ def test_live_primary_and_pad_match_what_the_grid_computes_today(cell_height):
     """The live sprite and the drawtext clock adopt this resolver without
     changing a pixel, so these two formulas are not free to drift.
 
-    ``overlay_sprites.render_state`` computes ``big`` and ``pad`` inline
-    today and ``mp4_grid._stage_overlay_plan`` / ``_clock_pad`` repeat
-    them. If either formula changes here, the sprite moves under the
-    clock and the two halves of the overlay stop lining up.
+    The sprite reads ``live_primary`` and ``pad`` off this resolver (via
+    ``overlay_html``'s ``.role-live-primary`` font-size and its anchor
+    insets) and ``mp4_grid._stage_overlay_plan`` / ``_clock_pad`` read the
+    same two fields for the clock. If either formula changes here, the
+    sprite moves under the clock and the two halves of the overlay stop
+    lining up.
     """
     scale = CellScale.for_cell(cell_height)
     assert scale.live_primary == max(48, cell_height // 14)
