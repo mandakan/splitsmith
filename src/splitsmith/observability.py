@@ -151,7 +151,7 @@ class PhaseTimer:
 class StructuredJsonFormatter(logging.Formatter):
     """Render each record as a single JSON line.
 
-    Always emits ``ts`` / ``level`` / ``logger`` / ``msg``. When a record
+    Always emits ``ts`` / ``level`` / ``logger`` / ``message``. When a record
     carries the observability extras (``event`` etc., set by
     :func:`emit_job_event`), those are folded in. Records WITHOUT the extras
     (ordinary log lines) still produce a valid JSON line -- the hosted stdout
@@ -168,7 +168,13 @@ class StructuredJsonFormatter(logging.Formatter):
             "ts": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
             "level": record.levelname,
             "logger": record.name,
-            "msg": record.getMessage(),
+            # "message", not "msg": Railway's filtered log queries return
+            # normalized records (msg -> message), but its realtime stream
+            # and unfiltered tails serve the record pre-normalization, where
+            # a "msg" key vanishes and "message" arrives empty (#711).
+            # Emitting the parsed-format key directly makes every surface
+            # carry the text.
+            "message": record.getMessage(),
         }
         if hasattr(record, "event"):
             for field in _EVENT_EXTRA_FIELDS:

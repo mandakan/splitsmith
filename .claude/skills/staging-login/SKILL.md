@@ -25,5 +25,8 @@ read the staging logs.
 
 If the script fails after login checks out, debug from its two moving
 parts: `POST https://my.staging.splitsmith.app/api/v1/auth/begin`
-(mints the link) and `railway logs --service serve --environment
-staging` (must show a `MAGIC_LINK <email> <url>` line).
+(mints the link) and `railway logs -d --lines 200 --since 15m -s serve
+-e staging --filter '@logger:splitsmith.db.email'` (must show a
+`MAGIC_LINK <email> <url>` line). Keep the `--filter`: unfiltered tails
+and streams serve records pre-normalization, where the structured
+line's message is empty (#711).
