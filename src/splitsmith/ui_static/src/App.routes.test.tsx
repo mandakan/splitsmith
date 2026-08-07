@@ -8,7 +8,7 @@
  * account menu).
  */
 import { render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import { ApiError, api } from "@/lib/api";
 
@@ -65,6 +65,20 @@ async function renderAt(path: string) {
 }
 
 describe("route tree", () => {
+  // ``@/App`` pulls in the whole route tree -- every shell, every page.
+  // The first ``import("@/App")`` in this file pays esbuild's one-time
+  // transform cost for that entire graph (measured standalone: ~2.3s on
+  // this host, and it competes with every other test file's own
+  // transform work for the same shared pipeline). Paying that cost here,
+  // in a hook with vitest's default 10s hookTimeout, keeps it off the
+  // first ``it``'s 5s testTimeout budget -- otherwise whichever test
+  // happens to run first eats a cold-start tax the other two never pay
+  // (their own ``renderAt`` calls hit the now-warm module cache), and
+  // under enough parallel load that tax alone exceeds 5s (#550 review).
+  beforeAll(async () => {
+    await import("@/App");
+  });
+
   it("renders global chrome on the picker", async () => {
     await renderAt("/pick");
     await waitFor(() =>

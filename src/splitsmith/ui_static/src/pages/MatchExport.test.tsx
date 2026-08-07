@@ -140,8 +140,17 @@ describe("MatchExport", () => {
     const stageTwo = screen.getByRole("button", { name: /Stage Two/i });
     const stageThree = screen.getByRole("button", { name: /Stage Three/i });
 
-    expect(stageOne).toHaveAttribute("aria-pressed", "true");
-    expect(stageTwo).toHaveAttribute("aria-pressed", "true");
+    // The stage buttons mount as soon as ``project`` loads, with
+    // ``aria-pressed="false"`` -- the pre-select effect that flips
+    // eligible stages to "true" is a second, separate state update that
+    // fires after that render. Asserting via getByRole (no wait) is a
+    // race: on a loaded machine the effect's re-render can land after
+    // this line runs, not before. waitFor here waits for the actual
+    // condition instead of assuming it settled by coincidence.
+    await waitFor(() => {
+      expect(stageOne).toHaveAttribute("aria-pressed", "true");
+      expect(stageTwo).toHaveAttribute("aria-pressed", "true");
+    });
     // Skipped stage: not selected and not clickable.
     expect(stageThree).toHaveAttribute("aria-pressed", "false");
     expect(stageThree).toBeDisabled();
