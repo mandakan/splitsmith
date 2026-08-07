@@ -11,6 +11,7 @@
  * Real timers: useJobs polls at 1s while anything is active, so the
  * transition lands within ~1.2s of render.
  */
+import { useMemo, useState, type ReactNode } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,6 +25,10 @@ import {
 } from "@/lib/api";
 import { AuthProvider } from "@/lib/auth";
 import { ModeProvider } from "@/lib/mode";
+import {
+  ShellChromeProvider,
+  type ShellChromeValue,
+} from "@/components/layout/shellChromeContext";
 
 import { MatchShell } from "@/components/match/MatchShell";
 
@@ -44,6 +49,42 @@ vi.mock("@/lib/api", async (importOriginal) => {
     },
   };
 });
+
+// Task 3's pattern: mock the viewport gate directly rather than relying on
+// window.matchMedia's "matches" value, so tests can flip mobile/desktop
+// per-case. Reset before every test in this file so a mobile-only test
+// never leaks into the next.
+const mobile = vi.hoisted(() => ({ value: false }));
+vi.mock("@/lib/useIsMobile", () => ({
+  useIsMobile: () => mobile.value,
+}));
+
+beforeEach(() => {
+  mobile.value = false;
+});
+
+// MatchShell no longer renders its own header -- it portals a context row
+// into whatever slot a ShellChromeProvider publishes (#550). Outside a
+// provider that slot is null and the row renders nowhere, so every test in
+// this file needs a real (DOM-attached) slot to portal into, same as
+// RootLayout provides in the real app.
+function ShellChromeHarness({ children }: { children: ReactNode }) {
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  const value = useMemo<ShellChromeValue>(
+    () => ({
+      contextSlot: slot,
+      setAccent: () => {},
+      setOwnsMobileAccount: () => {},
+    }),
+    [slot],
+  );
+  return (
+    <ShellChromeProvider value={value}>
+      <div ref={setSlot} />
+      {children}
+    </ShellChromeProvider>
+  );
+}
 
 function makeShooter(slug: string, name: string): ShooterListEntry {
   return {
@@ -184,16 +225,57 @@ function renderShell() {
   return render(
     <ModeProvider>
       <AuthProvider>
-        <MemoryRouter initialEntries={["/audit/mathias/1"]}>
-          <Routes>
-            <Route element={<MatchShell />}>
-              <Route path="/audit/:slug/:stage" element={<div>page</div>} />
-            </Route>
-          </Routes>
-        </MemoryRouter>
+        <ShellChromeHarness>
+          <MemoryRouter initialEntries={["/audit/mathias/1"]}>
+            <Routes>
+              <Route element={<MatchShell />}>
+                <Route path="/audit/:slug/:stage" element={<div>page</div>} />
+              </Route>
+            </Routes>
+          </MemoryRouter>
+        </ShellChromeHarness>
       </AuthProvider>
     </ModeProvider>,
   );
+}
+
+/** Shared happy-path arrangement: hosted mode, one authed user, one match
+ *  with one shooter, no jobs. Used by the chrome-ownership tests below and
+ *  reused from the #631 mirror-banner describe (same shape, different
+ *  origin per test there). */
+function setUpApiWithOrigin(origin: "hosted" | "desktop" | "local") {
+  vi.mocked(api.getHealth).mockResolvedValue(HEALTH);
+  vi.mocked(api.getScoreboardIdentity).mockResolvedValue(null);
+  vi.mocked(api.getServerFeatures).mockResolvedValue({
+    lab: false,
+    mode: "hosted",
+  });
+  vi.mocked(api.getMe).mockResolvedValue({
+    id: "u1",
+    email: "m@thias.se",
+    display_name: null,
+    is_admin: false,
+  });
+  vi.mocked(api.listMatchShooters).mockResolvedValue({
+    match_root: "/root",
+    match_name: "Bromma Classic 2026",
+    shooters: [makeShooter("mathias", "Mathias")],
+    origin,
+  });
+  vi.mocked(api.getProject).mockResolvedValue(makeProject());
+  vi.mocked(api.getBeepQueue).mockResolvedValue({
+    total_items: 0,
+    pending_count: 0,
+    confirmed_count: 0,
+    stages: [],
+  });
+  vi.mocked(api.listJobs).mockResolvedValue([]);
+}
+
+function setupHappyPath() {
+  vi.clearAllMocks();
+  stubMatchMedia();
+  setUpApiWithOrigin("local");
 }
 
 describe("MatchShell job settlement (#663)", () => {
@@ -259,35 +341,6 @@ describe("MatchShell mirror banner (#631 Task 10)", () => {
     stubMatchMedia();
   });
 
-  function setUpApiWithOrigin(origin: "hosted" | "desktop" | "local") {
-    vi.mocked(api.getHealth).mockResolvedValue(HEALTH);
-    vi.mocked(api.getScoreboardIdentity).mockResolvedValue(null);
-    vi.mocked(api.getServerFeatures).mockResolvedValue({
-      lab: false,
-      mode: "hosted",
-    });
-    vi.mocked(api.getMe).mockResolvedValue({
-      id: "u1",
-      email: "m@thias.se",
-      display_name: null,
-      is_admin: false,
-    });
-    vi.mocked(api.listMatchShooters).mockResolvedValue({
-      match_root: "/root",
-      match_name: "Bromma Classic 2026",
-      shooters: [makeShooter("mathias", "Mathias")],
-      origin,
-    });
-    vi.mocked(api.getProject).mockResolvedValue(makeProject());
-    vi.mocked(api.getBeepQueue).mockResolvedValue({
-      total_items: 0,
-      pending_count: 0,
-      confirmed_count: 0,
-      stages: [],
-    });
-    vi.mocked(api.listJobs).mockResolvedValue([]);
-  }
-
   it('shows the read-only mirror banner when origin is "desktop"', async () => {
     setUpApiWithOrigin("desktop");
     renderShell();
@@ -307,4 +360,34 @@ describe("MatchShell mirror banner (#631 Task 10)", () => {
       screen.queryByText(/synced from a desktop install/i),
     ).not.toBeInTheDocument();
   });
+});
+
+describe("MatchShell chrome ownership (#550)", () => {
+  beforeEach(() => {
+    setupHappyPath();
+  });
+
+  it("does not render its own header element", async () => {
+    renderShell();
+    await screen.findByRole("navigation", { name: /breadcrumb/i });
+    expect(document.querySelector("header")).toBeNull();
+  });
+
+  it("keeps the breadcrumb, shooter chips and switch project", async () => {
+    renderShell();
+    expect(
+      await screen.findByRole("navigation", { name: /breadcrumb/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /switch project/i }),
+    ).toBeInTheDocument();
+  });
+
+  // "still mounts the account menu inside the mobile drawer" lives in
+  // MatchShell.mobileAccount.test.tsx, not here: it needs hosted mode for
+  // AccountChip to render, but the #663 describe above already resolved
+  // src/lib/features.ts's module-level getServerFeatures() cache to
+  // "local" earlier in this file, and that cache is never invalidated
+  // (see GlobalBar.hosted.test.tsx, which hit the identical issue). A
+  // fresh file gets a fresh, unpopulated cache.
 });

@@ -13,6 +13,7 @@
 
 import { Menu, MonitorSmartphone, Repeat } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Navigate,
   Outlet,
@@ -23,6 +24,11 @@ import {
 
 import { AccountChip } from "@/components/AccountChip";
 import { JobsSurface } from "@/components/Jobs";
+import {
+  useShellAccent,
+  useShellContextSlot,
+  useShellOwnsMobileAccount,
+} from "@/components/layout/shellChromeContext";
 import { MobileNav } from "@/components/match/MobileNav";
 import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { FOOTAGE_HINT, matchNavItems } from "@/components/match/navItems";
@@ -47,7 +53,6 @@ import { isJobActive, useJobs } from "@/lib/jobs";
 import { useMode } from "@/lib/mode";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 import { useIsMobile } from "@/lib/useIsMobile";
-import { useShellHeaderHeight } from "@/lib/shellChrome";
 import { deriveStageStatus, isNextUpCandidate } from "@/lib/stageStatus";
 import { cn } from "@/lib/utils";
 
@@ -150,17 +155,24 @@ export function MatchShell() {
     if (!isMobile) setNavOpen(false);
   }, [isMobile]);
 
-  // Shell geometry as CSS vars: measured header height (the header
-  // wraps, so no constant is safe) + current sidebar width. The sidebar
-  // and the fixed bottom bars (StageActionBar, session summary) read
-  // these instead of hard-coding guesses.
-  const { headerRef, headerStyle } = useShellHeaderHeight();
+  // Shell geometry as a CSS var: current sidebar width. The sidebar and
+  // the fixed bottom bars (StageActionBar, session summary) read this
+  // instead of hard-coding guesses. Header height is measured once by
+  // RootLayout over the whole header stack and published as
+  // --shell-header-h; this shell just consumes that variable.
   const shellStyle = {
-    ...headerStyle,
     "--shell-sidebar-w": isMobile
       ? "0px"
       : `${sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : SIDEBAR_EXPANDED_WIDTH}px`,
   } as React.CSSProperties;
+
+  // RootLayout's header slot -- MatchShell portals its context row there
+  // instead of rendering its own <header> (#550). The nav drawer below
+  // carries the account menu on a phone, so RootLayout suppresses the
+  // global bar there rather than stacking a second one.
+  const slot = useShellContextSlot();
+  useShellAccent("led");
+  useShellOwnsMobileAccount();
 
   const [didInitMode, setDidInitMode] = useState(false);
   useEffect(() => {
@@ -421,6 +433,92 @@ export function MatchShell() {
   const mobileNavMatchId = urlMatchId ?? health?.match_id ?? null;
   const mobileNavBase = mobileNavMatchId ? `/match/${mobileNavMatchId}` : "";
 
+  const contextRow = isMobile ? (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <button
+        type="button"
+        onClick={() => setNavOpen(true)}
+        aria-label="Open navigation"
+        className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
+      >
+        <Menu className="size-5" aria-hidden />
+      </button>
+      <Brand variant="compact" />
+      <span className="min-w-0 truncate font-display text-[0.9375rem] font-bold uppercase tracking-tight text-ink">
+        {project?.name ?? health?.project_name ?? "..."}
+      </span>
+      <div className="flex-1" />
+    </div>
+  ) : (
+    <div className="flex flex-wrap items-center gap-4 px-7 py-2.5">
+      <nav
+        aria-label="Breadcrumb"
+        className="inline-flex items-center gap-2 font-display text-[0.8125rem] font-bold uppercase tracking-[0.06em]"
+      >
+        <a
+          href="#"
+          onClick={(e) => {
+            e.preventDefault();
+            // Replace so that picking a different match in /pick
+            // and hitting back doesn't return to a stage URL whose
+            // data now belongs to a different project (confusing).
+            navigate("/pick", { replace: true });
+          }}
+          className="text-ink-2 transition-colors hover:text-ink"
+        >
+          Matches
+        </a>
+        <span aria-hidden className="text-rule-strong">
+          /
+        </span>
+        <span className="text-ink-2">
+          {project?.name ?? health?.project_name ?? "..."}
+        </span>
+        {viewLabel ? (
+          <>
+            <span aria-hidden className="text-rule-strong">
+              /
+            </span>
+            <span className="text-led">{viewLabel}</span>
+          </>
+        ) : null}
+      </nav>
+      {shooters.length > 1 ? (
+        <ShooterChipStrip
+          shooters={shooters}
+          activeSlug={slug}
+          urlBase={breadcrumbUrlBase(pathname)}
+          label={shooterStripLabel}
+          variant="inline"
+        />
+      ) : null}
+      <div className="flex-1" />
+      <button
+        type="button"
+        onClick={switchProject}
+        title="Switch project"
+        className="inline-flex min-h-10 items-center gap-2.5 rounded-full border border-rule bg-surface-2 py-1 pl-1 pr-3.5 text-[0.8125rem] text-ink-2 transition-colors hover:bg-surface-3"
+      >
+        {identity?.display_name && (
+          <span
+            aria-hidden
+            className="inline-flex size-7 items-center justify-center rounded-full font-mono text-[0.6875rem] font-bold text-ink"
+            style={{
+              background:
+                "linear-gradient(135deg, var(--color-led), var(--color-led-deep))",
+              boxShadow:
+                "0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--color-led-glow)",
+            }}
+          >
+            {userInitials(identity.display_name)}
+          </span>
+        )}
+        <span>{identity?.display_name ?? "Switch project"}</span>
+        <Repeat className="size-3.5 text-subtle" />
+      </button>
+    </div>
+  );
+
   return (
     <div
       className="min-h-screen text-ink"
@@ -431,107 +529,7 @@ export function MatchShell() {
         ...shellStyle,
       }}
     >
-      <header
-        ref={headerRef}
-        className="sticky top-0 z-chrome border-b border-rule bg-gradient-to-b from-surface to-bg"
-      >
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 -bottom-px h-px"
-          style={{
-            background:
-              "linear-gradient(to right, transparent, var(--color-led) 18%, var(--color-led) 22%, var(--color-rule-strong) 30%, var(--color-rule-strong) 70%, var(--color-led) 78%, var(--color-led) 82%, transparent)",
-            opacity: 0.55,
-          }}
-        />
-        {isMobile ? (
-          <div className="flex items-center gap-3 px-4 py-3">
-            <button
-              type="button"
-              onClick={() => setNavOpen(true)}
-              aria-label="Open navigation"
-              className="inline-flex size-11 shrink-0 items-center justify-center rounded-md text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
-            >
-              <Menu className="size-5" aria-hidden />
-            </button>
-            <Brand variant="compact" />
-            <span className="min-w-0 truncate font-display text-[0.9375rem] font-bold uppercase tracking-tight text-ink">
-              {project?.name ?? health?.project_name ?? "..."}
-            </span>
-            <div className="flex-1" />
-          </div>
-        ) : (
-        <div className="flex flex-wrap items-center gap-4 px-7 py-3">
-          <Brand variant="compact" />
-          <nav
-            aria-label="Breadcrumb"
-            className="inline-flex items-center gap-2 font-display text-[0.8125rem] font-bold uppercase tracking-[0.06em]"
-          >
-            <a
-              href="#"
-              onClick={(e) => {
-                e.preventDefault();
-                // Replace so that picking a different match in /pick
-                // and hitting back doesn't return to a stage URL whose
-                // data now belongs to a different project (confusing).
-                navigate("/pick", { replace: true });
-              }}
-              className="text-ink-2 transition-colors hover:text-ink"
-            >
-              Matches
-            </a>
-            <span aria-hidden className="text-rule-strong">
-              /
-            </span>
-            <span className="text-ink-2">
-              {project?.name ?? health?.project_name ?? "..."}
-            </span>
-            {viewLabel ? (
-              <>
-                <span aria-hidden className="text-rule-strong">
-                  /
-                </span>
-                <span className="text-led">{viewLabel}</span>
-              </>
-            ) : null}
-          </nav>
-          {shooters.length > 1 ? (
-            <ShooterChipStrip
-              shooters={shooters}
-              activeSlug={slug}
-              urlBase={breadcrumbUrlBase(pathname)}
-              label={shooterStripLabel}
-              variant="inline"
-            />
-          ) : null}
-          <div className="flex-1" />
-          <AccountChip />
-          <button
-            type="button"
-            onClick={switchProject}
-            title="Switch project"
-            className="inline-flex min-h-10 items-center gap-2.5 rounded-full border border-rule bg-surface-2 py-1 pl-1 pr-3.5 text-[0.8125rem] text-ink-2 transition-colors hover:bg-surface-3"
-          >
-            {identity?.display_name && (
-              <span
-                aria-hidden
-                className="inline-flex size-7 items-center justify-center rounded-full font-mono text-[0.6875rem] font-bold text-ink"
-                style={{
-                  background:
-                    "linear-gradient(135deg, var(--color-led), var(--color-led-deep))",
-                  boxShadow:
-                    "0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--color-led-glow)",
-                }}
-              >
-                {userInitials(identity.display_name)}
-              </span>
-            )}
-            <span>{identity?.display_name ?? "Switch project"}</span>
-            <Repeat className="size-3.5 text-subtle" />
-          </button>
-        </div>
-        )}
-      </header>
+      {slot ? createPortal(contextRow, slot) : null}
 
       {origin === "desktop" ? (
         <div
