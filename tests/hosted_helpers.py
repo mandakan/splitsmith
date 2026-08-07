@@ -71,8 +71,9 @@ def hosted_app(hosted_env: str) -> Iterator[tuple[TestClient, _CapturingSender]]
     app = create_app()
     sender = _CapturingSender()
     # Swap the console transport for the capturing double so the test can
-    # read the emitted token.
-    app.state.splitsmith_state.auth._email = sender
+    # read the emitted token. auth is a CompositeAuth; the magic-link
+    # backend is backends[0] (session cookie tried first).
+    app.state.splitsmith_state.auth.backends[0]._email = sender
     with TestClient(app, follow_redirects=False) as client:
         yield client, sender
 

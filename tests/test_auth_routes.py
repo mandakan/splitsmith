@@ -121,7 +121,7 @@ def test_is_admin_false_when_no_allowlist(hosted_env: str, monkeypatch: pytest.M
 
     app = create_app()
     sender = _CapturingSender()
-    app.state.splitsmith_state.auth._email = sender
+    app.state.splitsmith_state.auth.backends[0]._email = sender
     with TestClient(app, follow_redirects=False) as client:
         login(client, sender, "user@example.com")
         me = client.get("/api/me")
@@ -136,7 +136,7 @@ def test_is_admin_true_when_in_allowlist(hosted_env: str, monkeypatch: pytest.Mo
 
     app = create_app()
     sender = _CapturingSender()
-    app.state.splitsmith_state.auth._email = sender
+    app.state.splitsmith_state.auth.backends[0]._email = sender
     with TestClient(app, follow_redirects=False) as client:
         login(client, sender, "admin@example.com")
         me = client.get("/api/me")
@@ -151,7 +151,7 @@ def test_is_admin_case_insensitive(hosted_env: str, monkeypatch: pytest.MonkeyPa
 
     app = create_app()
     sender = _CapturingSender()
-    app.state.splitsmith_state.auth._email = sender
+    app.state.splitsmith_state.auth.backends[0]._email = sender
     with TestClient(app, follow_redirects=False) as client:
         # magic-link lowercases on sign-in, but belt-and-suspenders: the
         # stored email is lowercase; the env-var entry has mixed case.
@@ -168,7 +168,7 @@ def test_is_admin_allowlist_with_whitespace(hosted_env: str, monkeypatch: pytest
 
     app = create_app()
     sender = _CapturingSender()
-    app.state.splitsmith_state.auth._email = sender
+    app.state.splitsmith_state.auth.backends[0]._email = sender
     with TestClient(app, follow_redirects=False) as client:
         login(client, sender, "m@thias.se")
         me = client.get("/api/me")
@@ -183,7 +183,7 @@ def test_is_admin_false_for_non_admin_hosted_user(hosted_env: str, monkeypatch: 
 
     app = create_app()
     sender = _CapturingSender()
-    app.state.splitsmith_state.auth._email = sender
+    app.state.splitsmith_state.auth.backends[0]._email = sender
     with TestClient(app, follow_redirects=False) as client:
         login(client, sender, "notadmin@example.com")
         me = client.get("/api/me")

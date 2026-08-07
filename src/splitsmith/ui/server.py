@@ -142,7 +142,7 @@ from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
-from ..auth import AuthBackend, LoopbackAuth, User
+from ..auth import AuthBackend, CompositeAuth, LoopbackAuth, User
 from ..compare import mp4_grid, project_loader
 from ..compute import ComputeBackend, LocalComputeBackend
 from ..config import (
@@ -5026,6 +5026,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         sessionmaker,
         tenant_session_factory,
     )
+    from ..db.desktop_tokens import DesktopTokenAuth
     from ..db.share_tokens import ShareTokenStore
     from ..db.share_tokens import resolve_share_token as _resolve_share_token_fn
     from ..db.workers import WorkersStore
@@ -5082,7 +5083,14 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # signups to all but an allowlist via SPLITSMITH_SIGNUPS_OPEN=false +
     # SPLITSMITH_SIGNUP_ALLOWLIST. Returning users always sign in.
     signup_policy = build_signup_policy()
-    state.auth = MagicLinkAuth(session_factory, email_sender, signup_policy=signup_policy)
+    # Composite: a magic-link session cookie (browser) or a desktop bearer
+    # token (sync push, #631) either resolve to a normal tenant user - the
+    # auth gate and everything downstream of it never distinguish which
+    # backend answered. Session cookie is tried first (the common case).
+    state.auth = CompositeAuth(
+        MagicLinkAuth(session_factory, email_sender, signup_policy=signup_policy),
+        DesktopTokenAuth(session_factory),
+    )
 
     # Anonymous resolver for the share-token public path. Uses the RAW
     # session_factory (same as auth above) - share_tokens is not RLS-scoped
@@ -5607,7 +5615,12 @@ def create_app(
         email = payload.email.strip()
         if not email or "@" not in email:
             raise HTTPException(status_code=400, detail="a valid email is required")
-        await state.auth.begin_login(email, base_url=state.public_base_url)
+        # begin_login/complete_login/end_session aren't in the AuthBackend
+        # Protocol (see auth.py) - they're magic-link-specific, so reach
+        # through the composite to backends[0]. Safe: these routes 404
+        # above unless hosted mode is active, and hosted mode always
+        # installs MagicLinkAuth as backends[0].
+        await state.auth.backends[0].begin_login(email, base_url=state.public_base_url)
         return JSONResponse({"ok": True})
 
     @app.get("/auth/callback")
@@ -5623,7 +5636,7 @@ def create_app(
         from ..db import InvalidMagicLinkError
 
         try:
-            issued = await state.auth.complete_login(
+            issued = await state.auth.backends[0].complete_login(
                 token,
                 user_agent=request.headers.get("user-agent"),
                 ip=request.client.host if request.client else None,
@@ -5650,7 +5663,7 @@ def create_app(
 
         cookie = request.cookies.get(SESSION_COOKIE_NAME)
         if cookie:
-            await state.auth.end_session(cookie)
+            await state.auth.backends[0].end_session(cookie)
         response = JSONResponse({"ok": True})
         # Clear with the same attributes the cookie was set with -- stricter
         # browsers match name + path + Secure/SameSite when deleting, and a
