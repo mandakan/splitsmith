@@ -118,6 +118,14 @@ class GlobalPrefs(BaseModel):
     theme: str | None = None
     default_trim_mode: str | None = None
     last_scoreboard_url: str | None = None
+    # Desktop-to-hosted sync MVP (#631, Task 9). The hosted server this
+    # desktop install pushes matches to, and the bearer token it
+    # authenticates with. Both live here rather than in a per-project
+    # file - the hosted target is a machine-level setting, not a
+    # per-match one. ``hosted_token`` is never echoed back to the SPA
+    # verbatim; see ``GET /api/settings/hosted-sync``.
+    hosted_base_url: str | None = None
+    hosted_token: str | None = None
 
 
 # ---------------------------------------------------------------------------

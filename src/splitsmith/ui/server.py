@@ -100,6 +100,7 @@ if TYPE_CHECKING:
     from ..db.workers import WorkersStore
     from ..worker_channel import WakeChannelRegistry
 
+import httpx
 from fastapi import (
     BackgroundTasks,
     Body,
@@ -167,6 +168,10 @@ from ..match_registry import MatchRegistry
 from ..observability import StructuredJsonFormatter, init_sentry
 from ..runtime import runtime as process_runtime
 from ..storage import Storage
+from ..sync.client import HostedSyncClient, SyncClientError
+from ..sync.plan import build_push_plan
+from ..sync.push import run_push
+from ..sync.state import load_sync_state
 from . import audio as audio_helpers
 from . import export_storage, stage_edit
 from . import exports as export_helpers
@@ -3371,6 +3376,60 @@ def register_job_bodies(state: AppState) -> None:
         handle.set_result({"proxy_key": proxy_key, "size_bytes": size})
         handle.update(progress=1.0, message="Preview ready")
 
+    def _run_sync_match(handle: JobHandle) -> None:
+        """Worker for the ``sync_match`` job (desktop-to-hosted sync MVP,
+        #631 Task 9): push the current match to the configured hosted
+        server.
+
+        Takes no args - the match root comes from ``state.match_root``,
+        which resolves against the ``current_match_root`` ContextVar that
+        ``JobRegistry.submit`` captured from the submitting request and
+        replays on the worker thread (mirrors ``_run_match_export``).
+
+        Builds the bearer-authed ``httpx.Client`` from the persisted
+        hosted-sync prefs (the ``SsiHttpClient`` idiom) and delegates to
+        ``run_push``, which does the real work: plan, adopt the mirror,
+        upload changed media, upsert docs. ``SyncClientError`` and the two
+        httpx error classes a network hiccup or a bad token actually raise
+        are caught and re-raised as ``RuntimeError`` with a readable
+        message - a bare traceback in the jobs panel is not acceptable
+        UX; anything else propagates as-is.
+        """
+        handle.update(progress=0.0, message="Starting sync...")
+        match_root = state.match_root
+        prefs = user_config.load_global_prefs()
+        if not prefs.hosted_base_url or not prefs.hosted_token:
+            raise RuntimeError("hosted sync is not configured - set a base URL and token in Settings")
+        http_client = httpx.Client(
+            base_url=prefs.hosted_base_url,
+            headers={"Authorization": f"Bearer {prefs.hosted_token}"},
+            timeout=30.0,
+        )
+        try:
+            client = HostedSyncClient(http=http_client)
+            try:
+                report = run_push(
+                    match_root,
+                    client=client,
+                    on_progress=lambda p, m: handle.update(progress=p, message=m),
+                )
+            except SyncClientError as exc:
+                raise RuntimeError(str(exc)) from exc
+            except httpx.HTTPStatusError as exc:
+                raise RuntimeError(
+                    f"sync failed: {exc.request.method} {exc.request.url} returned "
+                    f"{exc.response.status_code} {exc.response.reason_phrase}"
+                ) from exc
+            except httpx.TransportError as exc:
+                raise RuntimeError(f"sync failed: could not reach the hosted server ({exc})") from exc
+        finally:
+            http_client.close()
+        handle.set_result(report.model_dump())
+        handle.update(
+            progress=1.0,
+            message=f"Synced: {report.uploaded} uploaded, {report.skipped} skipped, {report.docs} docs",
+        )
+
     state.jobs.bodies.register("model_download", _run_model_download_job)
     state.jobs.bodies.register("detect_beep", _run_detect_beep_for_video)
     state.jobs.bodies.register("trim", _run_trim)
@@ -3379,6 +3438,7 @@ def register_job_bodies(state: AppState) -> None:
     state.jobs.bodies.register("match_export", _run_match_export)
     state.jobs.bodies.register("generate_proxy", _run_generate_proxy)
     state.jobs.bodies.register("compare-grid", _run_compare_grid)
+    state.jobs.bodies.register("sync_match", _run_sync_match)
 
 
 class HealthResponse(BaseModel):
@@ -4123,6 +4183,45 @@ class ScoreboardIdentityRequest(BaseModel):
     division: str | None = None
     club: str | None = None
     base_url: str | None = None
+
+
+class HostedSyncSettings(BaseModel):
+    """Response body for GET/PUT /api/settings/hosted-sync (#631, Task 9).
+
+    ``token_set`` is a boolean, never the raw token - the desktop client
+    keeps its own copy from the moment it typed it in; the server has no
+    business echoing a bearer credential back over localhost HTTP.
+    """
+
+    base_url: str | None = None
+    token_set: bool = False
+
+
+class HostedSyncSettingsRequest(BaseModel):
+    """Body for PUT /api/settings/hosted-sync (#631, Task 9).
+
+    ``token: null`` keeps whatever token is already stored (so the SPA can
+    resubmit ``base_url`` alone without re-typing the secret); ``token:
+    ""`` clears it; any other string replaces it.
+    """
+
+    base_url: str
+    token: str | None = None
+
+
+class SyncStatusResponse(BaseModel):
+    """Response body for GET /api/match/sync/status (#631, Task 9).
+
+    Built from ``load_sync_state`` + ``build_push_plan`` - the latter is
+    the fast size/mtime-only planner (no hashing), so this stays cheap
+    enough to poll.
+    """
+
+    configured: bool
+    last_synced_at: datetime | None = None
+    stale: bool
+    pending_media: int
+    errors: list[str] = Field(default_factory=list)
 
 
 class ScoreboardUploadRequest(BaseModel):
@@ -5843,6 +5942,47 @@ def create_app(
         if not ok:
             raise HTTPException(status_code=404, detail="not found")
         return Response(status_code=204)
+
+    # ----------------------------------------------------------------------
+    # Match sync trigger/status (desktop-to-hosted sync MVP, #631 Task 9)
+    # Local-only: raise 404 in hosted mode (same inverse guard as the
+    # settings routes above). Reached via the /api/matches/{match_id}/
+    # alias prefix, same as /api/match/shares, so current_match_root is
+    # already set by the time these run.
+    # ----------------------------------------------------------------------
+
+    @app.post("/api/match/sync", response_model=Job)
+    async def post_match_sync() -> Job:
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        if not prefs.hosted_base_url or not prefs.hosted_token:
+            raise HTTPException(status_code=409, detail="sync_not_configured")
+        return await state.jobs.submit(kind="sync_match")
+
+    @app.get("/api/match/sync/status", response_model=SyncStatusResponse)
+    async def get_match_sync_status() -> SyncStatusResponse:
+        """Cheap sync status: size/mtime-only planning, no hashing.
+
+        ``stale`` is True whenever a push would have real work to do -
+        the match has never synced, there's unpushed media, or the plan
+        itself can't run (e.g. a legacy project without a match id).
+        """
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        configured = bool(prefs.hosted_base_url and prefs.hosted_token)
+        match_root = state.match_root
+        sync_state = load_sync_state(match_root)
+        plan = build_push_plan(match_root, sync_state=sync_state)
+        stale = sync_state.last_synced_at is None or bool(plan.media) or bool(plan.errors)
+        return SyncStatusResponse(
+            configured=configured,
+            last_synced_at=sync_state.last_synced_at,
+            stale=stale,
+            pending_media=len(plan.media),
+            errors=plan.errors,
+        )
 
     @app.exception_handler(ShutdownInProgressError)
     async def _shutdown_in_progress_handler(request: Request, exc: ShutdownInProgressError) -> JSONResponse:
@@ -12729,6 +12869,36 @@ def create_app(
     async def delete_scoreboard_identity(user: User = Depends(get_current_user)) -> JSONResponse:
         await state.scoreboard_identity.clear()
         return JSONResponse({"ok": True})
+
+    # ----------------------------------------------------------------------
+    # Hosted-sync settings (desktop-to-hosted sync MVP, #631 Task 9)
+    # Local-only: raise 404 in hosted mode (the inverse of the desktop-token
+    # guard below - a hosted install has no "push to hosted" target of its
+    # own). Not match-scoped: the hosted target is a per-install setting,
+    # not a per-match one, so this stays outside the /api/matches/{id}/
+    # alias.
+    # ----------------------------------------------------------------------
+
+    @app.get("/api/settings/hosted-sync", response_model=HostedSyncSettings)
+    async def get_hosted_sync_settings() -> HostedSyncSettings:
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        return HostedSyncSettings(base_url=prefs.hosted_base_url, token_set=bool(prefs.hosted_token))
+
+    @app.put("/api/settings/hosted-sync", response_model=HostedSyncSettings)
+    async def put_hosted_sync_settings(req: HostedSyncSettingsRequest) -> HostedSyncSettings:
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        prefs.hosted_base_url = req.base_url
+        # None keeps the stored token (the SPA resubmits base_url alone
+        # without re-typing the secret); "" clears it; anything else
+        # replaces it.
+        if req.token is not None:
+            prefs.hosted_token = req.token or None
+        user_config.save_global_prefs(prefs)
+        return HostedSyncSettings(base_url=prefs.hosted_base_url, token_set=bool(prefs.hosted_token))
 
     # ----------------------------------------------------------------------
     # Desktop-token management routes (desktop-to-hosted sync MVP, #631)

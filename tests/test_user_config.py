@@ -245,6 +245,19 @@ def test_global_prefs_round_trip(_isolated_user_config: Path) -> None:
     assert on_disk["theme"] == "dark"
 
 
+def test_global_prefs_round_trip_hosted_sync_fields(_isolated_user_config: Path) -> None:
+    prefs = user_config.GlobalPrefs(hosted_base_url="https://hosted.example", hosted_token="secret-token")
+    user_config.save_global_prefs(prefs)
+
+    loaded = user_config.load_global_prefs()
+    assert loaded.hosted_base_url == "https://hosted.example"
+    assert loaded.hosted_token == "secret-token"
+
+    # Defaults stay None when unset.
+    assert user_config.GlobalPrefs().hosted_base_url is None
+    assert user_config.GlobalPrefs().hosted_token is None
+
+
 def test_record_project_open_swallows_write_errors(
     _isolated_user_config: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
