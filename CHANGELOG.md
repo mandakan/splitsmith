@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/mandakan/splitsmith/compare/v0.17.0...v0.18.0) (2026-08-07)
+
+
+### Features
+
+* **ui:** share view polish - row affordance, back link, shooter switcher, timer freeze ([#720](https://github.com/mandakan/splitsmith/issues/720)) ([1464041](https://github.com/mandakan/splitsmith/commit/1464041a51bb61c2a4fe58e87fd5ff0605a4da7d))
+
 ## [0.17.0](https://github.com/mandakan/splitsmith/compare/v0.16.0...v0.17.0) (2026-08-07)
 
 
