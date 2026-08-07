@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.16.0](https://github.com/mandakan/splitsmith/compare/v0.15.0...v0.16.0) (2026-08-07)
+
+
+### Features
+
+* **compare:** burn an opt-in splits overlay into the grid MP4 ([#677](https://github.com/mandakan/splitsmith/issues/677)) ([ef51e06](https://github.com/mandakan/splitsmith/commit/ef51e0635ece6a76f084e4cb3c99fea09ad2e89a))
+* **compare:** hold a frozen stage summary at the end of each stage ([#687](https://github.com/mandakan/splitsmith/issues/687)) ([3566c54](https://github.com/mandakan/splitsmith/commit/3566c54f5e1233668c3873384eadd09293d1fa5e))
+* **compare:** render the multi-shooter grid directly to MP4 (phase 0) ([#674](https://github.com/mandakan/splitsmith/issues/674)) ([2e0370e](https://github.com/mandakan/splitsmith/commit/2e0370e11fd2869277aaa57accd87e45a6f51fda))
+* **compare:** ship a merged audio track as the grid's default ([#675](https://github.com/mandakan/splitsmith/issues/675)) ([b24f71f](https://github.com/mandakan/splitsmith/commit/b24f71f82b309d099fd981f0923de5a0d57fb7ab))
+* **ensemble:** export voters C and E to ONNX, drop the sklearn pickle coupling ([#649](https://github.com/mandakan/splitsmith/issues/649)) ([#661](https://github.com/mandakan/splitsmith/issues/661)) ([b472172](https://github.com/mandakan/splitsmith/commit/b472172d445115c8231383e3f2130ab6f20bba60))
+* **ui:** queue-level upload progress with an ETA ([#556](https://github.com/mandakan/splitsmith/issues/556)) ([#657](https://github.com/mandakan/splitsmith/issues/657)) ([84b1d4e](https://github.com/mandakan/splitsmith/commit/84b1d4e2f5c244c9f01697b20505f3b892646c10))
+
+
+### Bug Fixes
+
+* **audit:** stop a focused rejected marker from force-showing the whole rejected layer ([#685](https://github.com/mandakan/splitsmith/issues/685)) ([67416dc](https://github.com/mandakan/splitsmith/commit/67416dc73cf988f04361bbc63f74b1bb966c1315)), closes [#666](https://github.com/mandakan/splitsmith/issues/666)
+* **compare:** pre-flight the overlay's ffmpeg, and remove the live delta strip ([#678](https://github.com/mandakan/splitsmith/issues/678)) ([277acf5](https://github.com/mandakan/splitsmith/commit/277acf505a89e24267d95fb5f234985213680b0a))
+* **jobs:** jobs carry shooter identity, so one shooter's detection no longer blocks another's ([#688](https://github.com/mandakan/splitsmith/issues/688)) ([bfd804f](https://github.com/mandakan/splitsmith/commit/bfd804f0a10cae72f11270245f6b2ecaf3dff564))
+* **jobs:** journal the local job queue so a killed app re-enqueues it on restart ([#665](https://github.com/mandakan/splitsmith/issues/665)) ([#694](https://github.com/mandakan/splitsmith/issues/694)) ([cf709bc](https://github.com/mandakan/splitsmith/commit/cf709bce6c4efec52d6105bd968c038111424b6d))
+* **trim:** rebuild missing trim caches for every angle, not just the primary ([#351](https://github.com/mandakan/splitsmith/issues/351)) ([#655](https://github.com/mandakan/splitsmith/issues/655)) ([f105677](https://github.com/mandakan/splitsmith/commit/f105677da36f7a0d9a8847b6a31f1effe4040514))
+* **ui:** dedup failed-shooter errors and stop rendering raw API bodies ([#660](https://github.com/mandakan/splitsmith/issues/660)) ([5c947ef](https://github.com/mandakan/splitsmith/commit/5c947ef653410ca6c3eb60389fe06113de7d1b4b)), closes [#651](https://github.com/mandakan/splitsmith/issues/651)
+* **ui:** refresh sidebar stage status when a background job finishes ([#663](https://github.com/mandakan/splitsmith/issues/663)) ([#697](https://github.com/mandakan/splitsmith/issues/697)) ([710a674](https://github.com/mandakan/splitsmith/commit/710a674c7e69feadd10ad16f919b8bcb525f07e6))
+
+
+### Performance
+
+* **ui:** read the calibration directly for /api/calibrated-camera-models ([#667](https://github.com/mandakan/splitsmith/issues/667)) ([#669](https://github.com/mandakan/splitsmith/issues/669)) ([9aed108](https://github.com/mandakan/splitsmith/commit/9aed108bbf8b1e1b45fc5a9b1e3e8e75109f3867))
+
+
+### Refactors
+
+* **hosted:** derive raw-video ownership in one place ([#562](https://github.com/mandakan/splitsmith/issues/562)) ([#659](https://github.com/mandakan/splitsmith/issues/659)) ([ecd01ac](https://github.com/mandakan/splitsmith/commit/ecd01ac966f9c24b450d1cc71d50aca7b4dac40c))
+* **overlay:** a composition seam, a box engine, and a summary built around splits ([#683](https://github.com/mandakan/splitsmith/issues/683)) ([#703](https://github.com/mandakan/splitsmith/issues/703)) ([70a118d](https://github.com/mandakan/splitsmith/commit/70a118d1eb03b22049f9ee69b1105c706c1aa27a))
+* **overlay:** the live sprites go through the box engine too ([#693](https://github.com/mandakan/splitsmith/issues/693)) ([#706](https://github.com/mandakan/splitsmith/issues/706)) ([46b568a](https://github.com/mandakan/splitsmith/commit/46b568a0daceb40d5d8af5bce31e399104c9796e))
+
+
+### Documentation
+
+* amend milestone B for the summary ranking and the clock bleed ([b6732de](https://github.com/mandakan/splitsmith/commit/b6732ded018cf27f36689b4ce4dc5a382c87805d))
+* kickoff for the compare-grid stage summary hold (milestone B) ([ec32be2](https://github.com/mandakan/splitsmith/commit/ec32be28758624e1d4602c4349524c34b8fc46ca))
+* kickoff for the honest fixture and render-frames tool ([#682](https://github.com/mandakan/splitsmith/issues/682)) ([ea8dcf3](https://github.com/mandakan/splitsmith/commit/ea8dcf3e8e46f9f47f7c602daa3ea599a2948bb6))
+* kickoff for the overlay composition seam ([#683](https://github.com/mandakan/splitsmith/issues/683)) ([1856704](https://github.com/mandakan/splitsmith/commit/1856704d859b39455ae6e3cfbdf4a401a20bd312))
+* **overlay:** the design docstrings now cite a file that exists ([#704](https://github.com/mandakan/splitsmith/issues/704)) ([7fb4089](https://github.com/mandakan/splitsmith/commit/7fb40896b5a3cc5abd82b47f97b815ec2ca18c98))
+* phase 1 kickoff for the compare-grid splits overlay ([d5ad724](https://github.com/mandakan/splitsmith/commit/d5ad72492e9b6b4810317e5f4c05bdaa784cb20f))
+* spec how the live overlay and the stage summary share the frame ([0604426](https://github.com/mandakan/splitsmith/commit/0604426cc04167083920c0e0e119fab93b60367f))
+
+
+### Build / CI
+
+* install ffmpeg and fail the build when integration tests skip ([#670](https://github.com/mandakan/splitsmith/issues/670)) ([#671](https://github.com/mandakan/splitsmith/issues/671)) ([81d6862](https://github.com/mandakan/splitsmith/commit/81d68627014b6c3479349b7b48df9055f8319e21))
+* validate the SPA and the wheel on every PR ([#647](https://github.com/mandakan/splitsmith/issues/647)) ([#658](https://github.com/mandakan/splitsmith/issues/658)) ([e3b0230](https://github.com/mandakan/splitsmith/commit/e3b0230e9eb00552a07c341440e7c69dbcaf4df8))
+
 ## [0.15.0](https://github.com/mandakan/splitsmith/compare/v0.14.1...v0.15.0) (2026-08-03)
 
 
