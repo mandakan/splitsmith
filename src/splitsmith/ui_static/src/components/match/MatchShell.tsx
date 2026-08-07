@@ -12,7 +12,7 @@
  */
 
 import { Menu, Repeat } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Navigate,
   Outlet,
@@ -40,6 +40,7 @@ import {
   type ServerHealth,
   type ShooterListEntry,
 } from "@/lib/api";
+import { isJobActive, useJobs } from "@/lib/jobs";
 import { useMode } from "@/lib/mode";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -288,6 +289,54 @@ export function MatchShell() {
     };
   }, [refreshKey, slug, urlMatchId]);
 
+  // One jobs poller for the whole shell: it feeds the sidebar /
+  // mobile-drawer JobsSurface AND gives the shell a reason to refetch.
+  // The sidebar's stage dots render from the ``project`` snapshot
+  // above, which nothing invalidated when a background job finished
+  // (#663) - so a stage kept its stale status until a full reload.
+  const jobsState = useJobs();
+  const { jobs } = jobsState;
+  // Ids that were pending/running on the previous poll. A job leaving
+  // this set (succeeded / failed / cancelled / pruned) means some
+  // job-derived state may have changed server-side.
+  const prevActiveJobIdsRef = useRef<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    const activeNow = new Set(jobs.filter(isJobActive).map((j) => j.id));
+    const settled = [...prevActiveJobIdsRef.current].some(
+      (id) => !activeNow.has(id),
+    );
+    prevActiveJobIdsRef.current = activeNow;
+    if (!settled) return;
+    // Refetch in place (no setProject(null)) so the sidebar never
+    // flashes empty. Not filtered on the settled job's shooter: the
+    // beep queue spans shooters and the GETs are cheap, so refetching
+    // both unconditionally is simpler than proving which slice of
+    // state each job kind can touch.
+    let alive = true;
+    const target = slug ?? pickDefaultShooterSlug(shooters);
+    if (target) {
+      api
+        .getProject(target)
+        .then((p) => {
+          if (alive) setProject(p);
+        })
+        .catch(() => {
+          /* stale-but-rendered beats an error flash; next settle retries */
+        });
+    }
+    api
+      .getBeepQueue()
+      .then((q) => {
+        if (alive) setBeepReviewPending(q.pending_count);
+      })
+      .catch(() => {
+        /* keep the last known badge count */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [jobs, slug, shooters]);
+
   // Currently-viewed stage, parsed from the URL. The shell mounts
   // above several stage-bearing routes (/audit/:slug/:stage,
   // /coach/:slug/:stage, /compare/:stage); a trailing integer segment
@@ -492,7 +541,7 @@ export function MatchShell() {
                 <Repeat className="size-[15px] shrink-0" aria-hidden />
                 <span className="truncate">Switch project</span>
               </button>
-              <JobsSurface mobile />
+              <JobsSurface mobile state={jobsState} />
               {health?.version ? (
                 <div className="px-3 pb-1 pt-2 font-mono text-[0.625rem] uppercase tracking-[0.14em] text-subtle">
                   Splitsmith v{health.version}
@@ -506,6 +555,7 @@ export function MatchShell() {
       <div className="flex min-h-[calc(100dvh-var(--shell-header-h,86px))]">
         {isMobile ? null : (
         <MatchSidebar
+          jobsState={jobsState}
           matchName={project?.name ?? health?.project_name ?? "..."}
           matchSubtitle={renderMatchSubtitle(project)}
           stages={stages}

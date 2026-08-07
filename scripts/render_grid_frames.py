@@ -18,11 +18,24 @@ Run::
     # the two-shooter head-to-head, which is a different layout entirely
     uv run python scripts/render_grid_frames.py --shooters 2 --overlay
 
+    # tiles from the local real-footage corpus (#686) instead of synthetic
+    uv run python scripts/render_grid_frames.py --corpus tests/fixtures/corpus \\
+        --shooters 4 --overlay --summary-hold 3
+
 It builds its own media (``tests/synthetic_media.py``) and its own roster
 (``tests/compare_fixture.py``) -- no real match, no gitignored
 ``stage_sample.mp4``, nothing that only exists on one laptop. The roster
 is the same one the integration test measures, so a frame here and a
 failing assertion there are talking about the same render.
+
+``--corpus`` swaps only the pixels: each clip in the directory is
+normalized to the fixture's exact geometry and dealt to roster slots in
+sorted filename order, while scoring, audits and shot times stay the
+synthetic roster's. That is the shape #686 asks for -- design judgement
+calls (dim, blur, ink over busy footage) need real picture, and nothing
+else about the fixture may drift when they are made. The corpus is local
+and gitignored; see ``tests/fixtures/corpus/README.md`` for what it must
+never be used for.
 
 Frames come out at **named** moments rather than at frame indices the
 caller has to work out: ``pre-beep``, ``first-shot``, ``mid-action``,
@@ -62,11 +75,21 @@ from tests.compare_fixture import (  # noqa: E402
     ROSTER,
     SEGMENT_SECONDS,
     SHORT_FOOTAGE_ENDS,
+    SHORT_STAGE_DURATION_SECONDS,
+    SHORT_STAGE_FRAMES,
+    STAGE_DURATION_SECONDS,
+    STAGE_FRAMES,
     TAIL_PAD_SECONDS,
     build_clips,
     build_roster,
+    probe_seconds,
 )
-from tests.synthetic_media import build_synthetic_video, ffmpeg_available  # noqa: E402
+from tests.synthetic_media import (  # noqa: E402
+    SYNTHETIC_FPS_DEN,
+    SYNTHETIC_FPS_NUM,
+    build_synthetic_video,
+    ffmpeg_available,
+)
 
 DEFAULT_OUT = REPO_ROOT / "build" / "grid-frames"
 
@@ -192,6 +215,69 @@ def _extract(video: Path, index: int, destination: Path, *, ffmpeg: str) -> bool
     return destination.exists() and destination.stat().st_size > 0
 
 
+def _corpus_clips(
+    corpus: Path, root: Path, *, count: int, ffmpeg: str, ffprobe: str
+) -> dict[str, tuple[Path, float]]:
+    """Per-label clips cut from the real-footage corpus, in fixture geometry.
+
+    Corpus clips arrive at whatever rate and length they were cut at
+    (#686 says 10-15s of real match video), so each is normalized here to
+    exactly what the synthetic clip it replaces would have been: the
+    fixture's frame rate and an exact frame count -- ``STAGE_FRAMES`` for
+    a full-clip shooter, ``SHORT_STAGE_FRAMES`` for a short-clip one. The
+    probed duration is asserted the same way ``build_clips`` asserts the
+    synthetic clips, because the freeze-seek slack it guards against does
+    not care where the pixels came from.
+
+    Files are dealt to roster slots in sorted filename order, cycling
+    when the roster is longer than the corpus, so a 4-clip corpus still
+    fills a 3x3 and every background appears at least once.
+    """
+    if not corpus.is_dir():
+        raise SystemExit(f"--corpus {corpus} is not a directory")
+    sources = sorted(corpus.glob("*.mp4"))
+    if not sources:
+        raise SystemExit(
+            f"--corpus {corpus} holds no .mp4 files. See tests/fixtures/corpus/README.md "
+            "for the slots to cut, or drop the flag for synthetic media."
+        )
+    frame_seconds = SYNTHETIC_FPS_DEN / SYNTHETIC_FPS_NUM
+    clips: dict[str, tuple[Path, float]] = {}
+    for index, spec in enumerate(ROSTER[:count]):
+        source = sources[index % len(sources)]
+        frames, nominal = (
+            (SHORT_STAGE_FRAMES, SHORT_STAGE_DURATION_SECONDS)
+            if spec.clip == "short"
+            else (STAGE_FRAMES, STAGE_DURATION_SECONDS)
+        )
+        destination = root / f"{spec.label}-{source.stem}.mp4"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        done = subprocess.run(
+            [
+                ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
+                "-vf", f"fps={SYNTHETIC_FPS_NUM}/{SYNTHETIC_FPS_DEN}",
+                "-frames:v", str(frames),
+                "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+                "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
+                "-c:a", "aac", "-b:a", "128k", "-shortest", str(destination),
+            ],  # fmt: skip
+            capture_output=True,
+            text=True,
+        )
+        if done.returncode != 0:
+            raise SystemExit(f"ffmpeg failed normalizing {source.name}:\n{done.stderr[-2000:]}")
+        probed = probe_seconds(destination, ffprobe=ffprobe)
+        if abs(probed - nominal) > frame_seconds:
+            raise SystemExit(
+                f"{source.name} normalized to {probed:.4f}s where the {spec.clip} clip needs "
+                f"{nominal:.4f}s -- the source is shorter than the fixture's stage. Corpus clips "
+                "must run at least 10s (see tests/fixtures/corpus/README.md)."
+            )
+        clips[spec.label] = (destination, probed)
+        print(f"  tile {spec.label:8} <- {source.name}")
+    return clips
+
+
 def _parse_canvas(value: str) -> tuple[int, int]:
     try:
         width, height = (int(part) for part in value.lower().split("x", 1))
@@ -226,6 +312,13 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=30,
         help="canvas frame rate, a whole number so moments land on exact frames (default 30)",
+    )
+    parser.add_argument(
+        "--corpus",
+        type=Path,
+        default=None,
+        help="directory of real-footage clips to source tiles from instead of synthetic media "
+        "(#686). Local-only; see tests/fixtures/corpus/README.md.",
     )
     parser.add_argument("--overlay", action="store_true", help="burn the live overlay in")
     parser.add_argument(
@@ -296,9 +389,20 @@ def main(argv: list[str] | None = None) -> int:
     out.mkdir(parents=True)
 
     work = out / "work"
-    source = build_synthetic_video(work / "source.mp4")
-    clips = build_clips(source, work / "clips", ffmpeg=ffmpeg, ffprobe=ffprobe)
-    shooters = build_roster(work / "projects", clips, count=args.shooters, stages=args.stages)
+    if args.corpus is not None:
+        # Every rendered shooter gets a corpus tile, so the synthetic
+        # source is never built and ``clips`` is never consulted.
+        overrides = _corpus_clips(
+            args.corpus, work / "clips", count=args.shooters, ffmpeg=ffmpeg, ffprobe=ffprobe
+        )
+        clips = {}
+    else:
+        source = build_synthetic_video(work / "source.mp4")
+        clips = build_clips(source, work / "clips", ffmpeg=ffmpeg, ffprobe=ffprobe)
+        overrides = None
+    shooters = build_roster(
+        work / "projects", clips, count=args.shooters, stages=args.stages, clip_overrides=overrides
+    )
     audio_label = args.audio_from or shooters[-1].label
     if audio_label not in {bundle.label for bundle in shooters}:
         parser.error(

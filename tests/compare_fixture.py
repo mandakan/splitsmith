@@ -576,12 +576,21 @@ def build_roster(
     *,
     count: int = 3,
     stages: int = 1,
+    clip_overrides: Mapping[str, tuple[Path, float]] | None = None,
 ) -> list[CompareShooterBundle]:
     """The first ``count`` shooters of :data:`ROSTER`, over ``stages`` stages.
 
     Each gets a ``project.json`` on disk and, unless they are the no-audit
     shooter, one audit JSON per stage. Bundles carry the clip's *probed*
     duration, never a nominal one.
+
+    ``clip_overrides`` maps a shooter's *label* to a ``(path, probed
+    duration)`` pair that replaces the ``clips`` lookup for that shooter.
+    It exists for the local real-footage corpus (#686): the frame tool
+    substitutes real tiles while scoring, audits and geometry stay this
+    fixture's. The caller owns the geometry contract -- an override must
+    be cut to the same frame count and rate as the clip it replaces, or
+    the declared beep offset and every sampled moment drift off the media.
     """
     if not 1 <= count <= MAX_SHOOTERS:
         raise ValueError(f"count must be 1..{MAX_SHOOTERS}, got {count}")
@@ -590,7 +599,7 @@ def build_roster(
 
     bundles: list[CompareShooterBundle] = []
     for spec in ROSTER[:count]:
-        trim, duration_seconds = clips[spec.clip]
+        trim, duration_seconds = (clip_overrides or {}).get(spec.label) or clips[spec.clip]
         project_root = root / spec.label
         write_project(project_root, spec, stages=stages)
         by_number: dict[int, CompareStageBundle] = {}

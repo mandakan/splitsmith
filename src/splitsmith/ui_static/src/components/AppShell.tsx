@@ -9,6 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { JobsSurface } from "@/components/Jobs";
+import { useJobs } from "@/lib/jobs";
 import { ModeSwitch } from "@/components/ui/ModeSwitch";
 import { api, type ServerHealth } from "@/lib/api";
 import { useMode } from "@/lib/mode";
@@ -20,6 +21,9 @@ export function AppShell() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const { mode } = useMode();
+  // JobsSurface no longer self-hosts its poller (#663); each shell
+  // owns one jobs state and hands it down.
+  const jobsState = useJobs();
   // AppShell hosts the fixture editor + design system. Either one is
   // mode-agnostic, but flipping to Developer should take the user to
   // the dev workspace rather than leaving them on a hidden-sidebar page
@@ -159,6 +163,7 @@ export function AppShell() {
           </div>
 
           <JobsSurface
+            state={jobsState}
             collapsed={sidebarCollapsed}
             sidebarExpandedWidth={240}
             sidebarCollapsedWidth={56}

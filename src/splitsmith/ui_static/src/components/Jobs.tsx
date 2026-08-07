@@ -44,12 +44,10 @@ import {
 import { useLocation } from "react-router-dom";
 
 import { Portal } from "@/components/ui/Portal";
-import { ApiError, api, type Job } from "@/lib/api";
+import { type Job } from "@/lib/api";
 import { useDialogFocus } from "@/lib/dialogFocus";
+import { type JobsState } from "@/lib/jobs";
 import { cn } from "@/lib/utils";
-
-const ACTIVE_POLL_MS = 1000;
-const IDLE_POLL_MS = 5000;
 
 const KIND_LABEL: Record<string, string> = {
   detect_beep: "Detect beep",
@@ -77,105 +75,11 @@ function kindLabel(kind: string): string {
   return KIND_LABEL[kind] ?? kind;
 }
 
-function isActive(job: Job): boolean {
-  return job.status === "pending" || job.status === "running";
-}
-
 function jobTarget(job: Job): string {
   const bits: string[] = [];
   if (job.stage_number != null) bits.push(`stage ${pad2(job.stage_number)}`);
   if (job.video_id) bits.push(`cam ${job.video_id.slice(0, 6)}`);
   return bits.join(" · ");
-}
-
-export interface JobsState {
-  jobs: Job[];
-  running: Job[];
-  pending: Job[];
-  failed: Job[];
-  error: string | null;
-  refresh: () => Promise<void>;
-  acknowledge: (job: Job) => Promise<void>;
-  acknowledgeAll: () => Promise<void>;
-  cancel: (job: Job) => Promise<void>;
-}
-
-export function useJobs(): JobsState {
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-
-  const refresh = useCallback(async () => {
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    try {
-      const list = await api.listJobs({ signal: controller.signal });
-      setJobs(list);
-      setError(null);
-    } catch (e) {
-      if (controller.signal.aborted) return;
-      if (e instanceof ApiError) setError(e.detail);
-      else if (e instanceof Error) setError(e.message);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    return () => {
-      abortRef.current?.abort();
-    };
-  }, [refresh]);
-
-  const anyActive = jobs.some(isActive);
-  useEffect(() => {
-    const ms = anyActive ? ACTIVE_POLL_MS : IDLE_POLL_MS;
-    const id = window.setInterval(() => void refresh(), ms);
-    return () => window.clearInterval(id);
-  }, [anyActive, refresh]);
-
-  const acknowledge = useCallback(async (job: Job) => {
-    try {
-      const updated = await api.acknowledgeJob(job.id);
-      setJobs((prev) => prev.map((j) => (j.id === job.id ? updated : j)));
-    } catch {
-      /* swallow */
-    }
-  }, []);
-
-  const acknowledgeAll = useCallback(async () => {
-    try {
-      await api.acknowledgeAllFailures();
-      void refresh();
-    } catch {
-      /* swallow */
-    }
-  }, [refresh]);
-
-  const cancel = useCallback(async (job: Job) => {
-    try {
-      const updated = await api.cancelJob(job.id);
-      setJobs((prev) => prev.map((j) => (j.id === job.id ? updated : j)));
-    } catch {
-      /* swallow */
-    }
-  }, []);
-
-  const running = jobs.filter((j) => j.status === "running");
-  const pending = jobs.filter((j) => j.status === "pending");
-  const failed = jobs.filter((j) => j.status === "failed" && !j.acknowledged);
-
-  return {
-    jobs,
-    running,
-    pending,
-    failed,
-    error,
-    refresh,
-    acknowledge,
-    acknowledgeAll,
-    cancel,
-  };
 }
 
 /* -------------------------------------------------------------------------- */
@@ -620,6 +524,10 @@ function pad2(n: number): string {
 /* -------------------------------------------------------------------------- */
 
 export interface JobsSurfaceProps {
+  /** Jobs state owned by the host shell. Hosts call ``useJobs()`` and
+   *  pass it down so exactly one poller runs per shell and the shell
+   *  itself can react to job completion (#663). */
+  state: JobsState;
   collapsed?: boolean;
   /** Width of the sidebar when expanded -- the sheet anchors just past it. */
   sidebarExpandedWidth?: number;
@@ -634,12 +542,12 @@ export interface JobsSurfaceProps {
  *  bottom of any sidebar; the sheet anchors itself just past the rail.
  *  In ``mobile`` mode it drops into the nav drawer footer instead. */
 export function JobsSurface({
+  state,
   collapsed = false,
   sidebarExpandedWidth = 0,
   sidebarCollapsedWidth = 0,
   mobile = false,
 }: JobsSurfaceProps) {
-  const state = useJobs();
   const [open, setOpen] = useState(false);
   const toggle = useCallback(() => setOpen((v) => !v), []);
   const { pathname } = useLocation();

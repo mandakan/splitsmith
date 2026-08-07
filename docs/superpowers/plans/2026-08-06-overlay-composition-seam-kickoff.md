@@ -205,10 +205,15 @@ is the main reason #683 is worth doing first: #684 is where a second
 consumer arrives, and a seam is much cheaper to design with one consumer
 than to retrofit around two.
 
-**#686** -- a local, gitignored real-footage corpus for the design calls
-the synthetic fixture cannot answer: `dim=0.45`, blur radius, legibility
-over bright head-cam video with motion blur. **The repo is public; match
-footage must never enter it.**
+**#686** -- DONE on the machine that holds the footage: a local,
+gitignored real-footage corpus at `tests/fixtures/corpus/` (four 12s
+excerpts from hfo-masters-2026) for the design calls the synthetic
+fixture cannot answer: `dim=0.45`, blur radius, legibility over busy
+real picture. `render_grid_frames.py --corpus tests/fixtures/corpus`
+swaps the tiles' pixels while scoring, audits and geometry stay the
+fixture's. **The repo is public; match footage must never enter it, and
+CI must never depend on the corpus** -- the README in that directory
+carries both rules and the rebuild recipe.
 
 **#689** -- two summary-hold tests weaker than they read.
 

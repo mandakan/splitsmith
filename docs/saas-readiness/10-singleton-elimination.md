@@ -140,10 +140,15 @@ backend swaps in without touching handlers.
    `compute_jobs`, the worker picks up via Procrastinate, status
    writes land in Postgres, `list` / `get` / `cancel` read from
    Postgres.
-4. The local-mode backend stays in-memory (no Postgres dep on the
-   desktop). A SQLite-backed `PersistentLocalJobBackend` is the
-   obvious bridge if the desktop ever needs job persistence too
-   -- defer until a user actually loses work to a crash.
+4. **(done, issue #665)** The local-mode backend stays in-memory
+   for live state (no Postgres dep on the desktop) but mirrors
+   active jobs into a stdlib-SQLite crash-recovery journal
+   (`splitsmith.ui.job_journal`, `<user-config>/jobs.sqlite3`).
+   Boot re-enqueues surviving rows with the match ContextVars
+   re-bound - the local analogue of the hosted queue payload's
+   `match_id`. Rows are discarded on any terminal transition and
+   at cancel-request time; finished-job history remains in-memory
+   only.
 
 ### Tier 3 -- per-machine state
 

@@ -26,6 +26,7 @@ import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { JobsSurface } from "@/components/Jobs";
+import { useJobs } from "@/lib/jobs";
 import { Brand, IconButton, ModeSwitch } from "@/components/ui";
 import { api, type DeveloperModelInfo } from "@/lib/api";
 import { useMode } from "@/lib/mode";
@@ -215,6 +216,9 @@ function DeveloperSidebar({
   model: DeveloperModelInfo | null;
   activeIdx: number;
 }) {
+  // JobsSurface no longer self-hosts its poller (#663); this sidebar
+  // is the jobs owner for the developer shell.
+  const jobsState = useJobs();
   return (
     <aside className="sticky top-[var(--shell-header-h,86px)] flex h-[calc(100dvh-var(--shell-header-h,86px))] w-[248px] shrink-0 flex-col overflow-y-auto border-r border-rule bg-surface px-3 py-4">
       <div className="relative mb-3.5 border-b border-rule px-3 pb-4">
@@ -329,6 +333,7 @@ function DeveloperSidebar({
           width like the design kit's JobsRail. */}
       <div className="-mx-3">
         <JobsSurface
+          state={jobsState}
           collapsed={false}
           sidebarExpandedWidth={248}
           sidebarCollapsedWidth={56}
