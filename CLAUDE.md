@@ -38,6 +38,9 @@ Personal tool for an IPSC competitor to extract shot splits from head-mounted ca
   New tests must not depend on execution order or share mutable state outside
   `tmp_path`: a worker's process-global caches are its own, but the filesystem,
   ports, and `~/` are not.
+- `pytest -m docker` needs `-n0` when the run spans more than one docker-marked
+  file: the compose fixtures use fixed container names, and concurrent xdist
+  workers collide on them.
 - Fixtures live in `tests/fixtures/` — short audio clips with hand-labeled ground truth in adjacent JSON files
 - Detection tests assert within tolerance (e.g., ±15ms for shot times)
 - Mock ffmpeg in trim tests; don't actually shell out during unit tests
