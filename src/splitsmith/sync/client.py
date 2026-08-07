@@ -21,7 +21,9 @@ said.
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
+import threading
 from collections.abc import Callable
 from typing import IO
 
@@ -34,6 +36,15 @@ from .plan import DocItem, MediaItem
 #: from ``/media/create``); a read chunk only needs to be small relative
 #: to ``part_size``, never equal to it.
 _READ_CHUNK_SIZE = 8 * 1024 * 1024
+
+#: How many part PUTs one ``upload_media`` call keeps in flight (#713).
+#: The live #631 push sustained ~7.4 MB/s on a single stream with media
+#: at 89% of push wall time, so extra TCP streams are the lever when the
+#: uplink has headroom. Each in-flight part holds its bytes in memory:
+#: at the server's 16 MiB part_size, 4 workers + the read-ahead part is
+#: ~80 MiB peak - fine for a desktop push, and files smaller than one
+#: part_size (sidecars, most clips) never fan out at all.
+_PART_UPLOAD_CONCURRENCY = 4
 
 
 class SyncClientError(RuntimeError):
@@ -75,9 +86,13 @@ class HostedSyncClient:
         """Push one local file via presigned multipart upload.
 
         Streams ``item.local_path`` exactly once: every chunk both feeds
-        the running sha256 and becomes (part of) an upload part. Calls
-        ``progress`` with the number of newly-uploaded bytes after each
-        part lands. Returns the hex sha256 digest of the whole file.
+        the running sha256 and becomes (part of) an upload part. Parts
+        are read (and hashed) in order but PUT concurrently, up to
+        ``_PART_UPLOAD_CONCURRENCY`` in flight (#713); ``complete`` is
+        only sent after every part landed, with parts sorted by number.
+        Calls ``progress`` with the number of newly-uploaded bytes after
+        each part lands (serialized - implementations need no locking).
+        Returns the hex sha256 digest of the whole file.
         """
         create_resp = self._http.post(
             f"/api/sync/matches/{match_id}/media/create", json={"key": item.remote_key}
@@ -87,32 +102,55 @@ class HostedSyncClient:
         upload_id = create_body["upload_id"]
         part_size = create_body["part_size"]
 
+        progress_lock = threading.Lock()
+
+        def _upload_part(part_number: int, part_bytes: bytes) -> dict[str, int | str]:
+            url_resp = self._http.post(
+                f"/api/sync/matches/{match_id}/media/part-url",
+                json={"key": item.remote_key, "upload_id": upload_id, "part_number": part_number},
+            )
+            self._raise_for_status(url_resp)
+            part_url = url_resp.json()["url"]
+
+            put_resp = self._media.put(part_url, content=part_bytes)
+            self._raise_for_status(put_resp)
+
+            if progress is not None:
+                with progress_lock:
+                    progress(len(part_bytes))
+            return {"part_number": part_number, "etag": put_resp.headers["ETag"]}
+
         try:
             digest = hashlib.sha256()
             parts: list[dict[str, int | str]] = []
-            with item.local_path.open("rb") as fh:
+            # The executor context waits for in-flight parts on exit, so a
+            # raising part never leaves worker threads writing while the
+            # abort below runs. In-flight submissions are bounded at the
+            # worker count: each pending future holds its part's bytes, so
+            # an unbounded submit loop would buffer the whole file.
+            with (
+                item.local_path.open("rb") as fh,
+                concurrent.futures.ThreadPoolExecutor(max_workers=_PART_UPLOAD_CONCURRENCY) as pool,
+            ):
+                pending: set[concurrent.futures.Future[dict[str, int | str]]] = set()
                 part_number = 1
                 while True:
                     part_bytes = _read_part(fh, part_size)
                     if not part_bytes:
                         break
                     digest.update(part_bytes)
-
-                    url_resp = self._http.post(
-                        f"/api/sync/matches/{match_id}/media/part-url",
-                        json={"key": item.remote_key, "upload_id": upload_id, "part_number": part_number},
-                    )
-                    self._raise_for_status(url_resp)
-                    part_url = url_resp.json()["url"]
-
-                    put_resp = self._media.put(part_url, content=part_bytes)
-                    self._raise_for_status(put_resp)
-                    parts.append({"part_number": part_number, "etag": put_resp.headers["ETag"]})
-
-                    if progress is not None:
-                        progress(len(part_bytes))
+                    pending.add(pool.submit(_upload_part, part_number, part_bytes))
                     part_number += 1
+                    if len(pending) >= _PART_UPLOAD_CONCURRENCY:
+                        done, pending = concurrent.futures.wait(
+                            pending, return_when=concurrent.futures.FIRST_COMPLETED
+                        )
+                        for future in done:
+                            parts.append(future.result())
+                for future in concurrent.futures.as_completed(pending):
+                    parts.append(future.result())
 
+            parts.sort(key=lambda p: p["part_number"])
             complete_resp = self._http.post(
                 f"/api/sync/matches/{match_id}/media/complete",
                 json={"key": item.remote_key, "upload_id": upload_id, "parts": parts},
