@@ -236,7 +236,9 @@ def _validate_media_key(key: str, match_id: str) -> None:
     a *different* match than the one in the URL, so a mirror push for
     match A can never plant an object under match B's prefix.
     """
-    m = _SYNC_MEDIA_KEY_RE.match(key)
+    # fullmatch, not match: the pattern's $ would tolerate one trailing
+    # newline and mint a key with a literal \n in the object name.
+    m = _SYNC_MEDIA_KEY_RE.fullmatch(key)
     if m is None or m["match_id"] != match_id:
         raise HTTPException(status_code=422, detail="invalid media key")
 
