@@ -57,13 +57,14 @@ EMAIL = "sync-integration@example.com"
 SLUG = "alice"
 
 
-def _build_local_match(tmp_path: Path) -> tuple[Path, str]:
+def _build_local_match(tmp_path: Path) -> tuple[Path, str, str]:
     """One match, one shooter, one stage with a registered primary video
     whose trimmed clip is already on disk. Returns ``(match_root,
-    video_path)`` - ``video_path`` is the project-relative path the
+    video_path, trimmed_name)`` - ``video_path`` is the project-relative path the
     stream endpoint's ``?path=`` query needs to resolve the same
     registered ``StageVideo`` (and therefore the same ``video_id``-keyed
-    trim key) on the hosted side.
+    trim key) on the hosted side; ``trimmed_name`` is the filename
+    pushed to R2.
     """
     root = tmp_path / "match"
     match = match_model.Match.init(root, name="Integration Match")
@@ -92,7 +93,7 @@ def _build_local_match(tmp_path: Path) -> tuple[Path, str]:
         json.dumps({"detection": "ensemble", "shots": []}), encoding="utf-8"
     )
 
-    return root, video_path
+    return root, video_path, trimmed_name
 
 
 def _media_handler(storage: S3Storage):
@@ -151,7 +152,7 @@ def test_desktop_push_then_anonymous_share_stream_round_trip(
     tmp_path: Path,
 ) -> None:
     client, sender, captured = hosted_app_with_storage
-    match_root, video_path = _build_local_match(tmp_path)
+    match_root, video_path, trimmed_name = _build_local_match(tmp_path)
 
     login(client, sender, EMAIL)
     # Trigger tenant resolution so captured["storage"] is populated - every
@@ -202,7 +203,7 @@ def test_desktop_push_then_anonymous_share_stream_round_trip(
     )
     assert stream_resp.status_code == 307, stream_resp.text
     location = stream_resp.headers["location"]
-    assert f"matches/{match_id}/shooters/{SLUG}/trimmed/" in location, location
+    assert f"matches/{match_id}/shooters/{SLUG}/trimmed/{trimmed_name}" in location, location
 
     # A second push with nothing touched on disk uploads 0 media
     # (rsync-style size+mtime skip via sync_state.json).

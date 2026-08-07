@@ -19,7 +19,9 @@ production API and worker actually run as:
    the suite uses.
 2. ``matches`` and ``state_docs`` - the two tables a sync push actually
    writes to (mirror row + match/project/audit docs) - DO carry RLS
-   (migration ``4ab814cb20f5``, asserted end-to-end in
+   (migrations ``a7c4e9d21b06`` - RLS on tenant tables incl. matches,
+   and ``d1f7b25c8a3e`` - state_docs joins the tenant_isolation policy
+   family, asserted end-to-end in
    ``test_hosted_docker_smoke.test_rls_blocks_cross_tenant_reads_and_writes``).
    This file re-proves it scoped to those two tables, seeded with the
    exact row shape a sync push produces (``matches.origin = 'desktop'``).
