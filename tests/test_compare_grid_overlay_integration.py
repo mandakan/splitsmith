@@ -492,7 +492,12 @@ STAGE_BACKGROUND_MAX_MEAN_ABS_DIFF = 1.0
 #: since stage 2 carries more rounds and different splits throughout.
 #: The order-of-magnitude jump from 0.687 reflects the bands design using
 #: much more of the cell's width and height than the three-rail one did,
-#: not a change in what differs between the stages.
+#: not a change in what differs between the stages. The threshold itself
+#: is left at 0.3 -- unchanged on purpose -- but its margin against the
+#: live measurement has moved with it: 0.687 / 0.3 was about a 2x margin,
+#: 9.04 / 0.3 is about a 30x margin. Note this rather than tighten the
+#: constant so a future re-measurement has the same "how much headroom is
+#: this actually giving us" context this comment records now.
 #:
 #: A guard on the *fixture*, not on the code. If the two stages ever
 #: composed the same summary, the "stage 2's hold carries stage 2's

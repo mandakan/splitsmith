@@ -1138,12 +1138,18 @@ def _declared_content_survived_the_fit_policy(html: str, *, width: int, height: 
     back, for the *first* (only, in every caller of this helper) cell in
     the document:
 
-    - each Splits caption (``Best``/``Avg``/``Worst``/``Draw``): whether
-      it was declared at all, whether the fit policy left it visible
-      (not ``display: none``), and whether its rendered rectangle is
-      fully inside the cell's own rectangle -- a dropped-but-still-
-      laid-out element could be "in the DOM" while sitting well outside
-      the visible, clipped area, which is exactly what pre-fix HEAD did.
+    - each Splits caption (``Best``/``Avg``/``Worst``/``Draw``) AND its
+      own value (the number below it): whether each was declared at all,
+      whether the fit policy left it visible (not ``display: none``), and
+      whether its rendered rectangle is fully inside the cell's own
+      rectangle -- a dropped-but-still-laid-out element could be "in the
+      DOM" while sitting well outside the visible, clipped area, which is
+      exactly what pre-fix HEAD did. The caption and value are checked
+      separately and both matter: a caption is the top half of its ``.el``
+      and can clear the cell boundary while the value below it is cut --
+      an emptied ``.group`` still consuming a flex gap did exactly that
+      (F1's leftover-gutter defect), and a check that only ever looked at
+      ``.caption`` rects passed straight through it.
     - whether ``P1`` (the fixture's one genuinely nonzero -- lit --
       fault) and ``M0``/``NS0`` (zero-valued faults) are each visible,
       so a caller can check F1's rule 3: a lit plate must never be
@@ -1191,9 +1197,20 @@ def _declared_content_survived_the_fit_policy(html: str, *, width: int, height: 
                               .find(c => c.textContent.trim() === cap);
                             const shown = visible(el);
                             const rect = shown ? el.getBoundingClientRect() : null;
+                            // The value is the OTHER half of the same ``.el`` --
+                            // see ``overlay_html._element_div``. Checked
+                            // separately from its own caption: a caption can
+                            // clear the cell boundary while the value below it
+                            // is cut, which is exactly what an emptied
+                            // ``.group`` still consuming a flex gap does.
+                            const valueEl = el ? el.closest('.el').querySelector('.value') : null;
+                            const valueShown = visible(valueEl);
+                            const valueRect = valueShown ? valueEl.getBoundingClientRect() : null;
                             return {
                               caption: cap, present: !!el, visible: shown,
                               within: shown ? within(rect) : null,
+                              valuePresent: !!valueEl, valueVisible: valueShown,
+                              valueWithin: valueShown ? within(valueRect) : null,
                             };
                           });
                           const p1 = elFor('P1');
@@ -1220,6 +1237,16 @@ def _assert_splits_and_penalty_priority_held(result: dict) -> None:
         assert entry["present"], f"{entry['caption']!r} was never declared at all"
         assert entry["visible"], f"{entry['caption']!r} was dropped by the fit policy"
         assert entry["within"], f"{entry['caption']!r} rendered outside the cell's own rectangle"
+        # The value below the caption -- e.g. the number under "Best" --
+        # is checked separately, not assumed to follow its caption: a
+        # caption is the top half of its ``.el`` and can clear the cell
+        # boundary while the value beneath it is clipped (an emptied
+        # ``.group`` still consuming a flex gap pushes exactly the value,
+        # never the caption above it, out of the cell -- see the F1
+        # follow-up fix report).
+        assert entry["valuePresent"], f"{entry['caption']!r}'s value was never declared at all"
+        assert entry["valueVisible"], f"{entry['caption']!r}'s value was dropped by the fit policy"
+        assert entry["valueWithin"], f"{entry['caption']!r}'s value rendered outside the cell's own rectangle"
     if result["m0Visible"]:
         assert result["p1Visible"], "M0 (a zero count) survived while P1 (a lit penalty) was dropped"
     if result["ns0Visible"]:

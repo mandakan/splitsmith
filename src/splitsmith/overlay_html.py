@@ -286,9 +286,14 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
      above them survived. ``minmax(0, 1fr)`` pins the *automatic*
      minimum to ``0`` instead of ``auto``, so the track's resolved height
      is genuinely the leftover space -- fixed, independent of how much
-     the middle band wants -- and ``.anchor-middle-center``'s own
-     ``min-height: 0`` makes that item honour it rather than reasserting
-     the same auto-minimum one level down. Only with a *fixed* track can
+     the middle band wants. ``.anchor-middle-center`` itself needs no
+     matching override to honour that: it is ``align-self: center`` with
+     ``height: auto``, sized to its own content rather than stretching to
+     fill the track, so nothing about the item can reassert the track's
+     own auto-minimum one level down (measured directly: adding
+     ``min-height: 0; overflow: hidden`` to that rule changed nothing --
+     same ``scrollHeight``/``clientHeight`` either way -- which is why
+     that rule carries neither). Only with a *fixed* track can
      ``overlay_html``'s fit-policy script (below) tell overflowing from
      fitting by comparing the band's ``scrollHeight`` against that fixed
      height, and shrink or drop content accordingly instead of always
@@ -327,16 +332,6 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
   grid-column: 1;
   justify-self: center;
   align-self: center;
-  /* See the ``.cell`` rule's own comment on ``minmax(0, 1fr)``: without
-     this, a flex/grid item's automatic minimum size defaults to its
-     content's own size, which would let this item re-assert the exact
-     grow-before-clip behaviour the track fix above exists to stop, one
-     level down. ``overflow: hidden`` here is defence in depth -- ``.cell``
-     already clips at its own boundary -- so a caller measuring this
-     element directly (the fit-policy script below, or a future one)
-     sees the same fixed box the cell's own clip enforces. */
-  min-height: 0;
-  overflow: hidden;
 }}
 .anchor-bottom-center {{
   grid-row: 3;
@@ -772,7 +767,7 @@ window.__splitsmithFit = function () {{
   }}
   function floorFactor(stack) {{
     var min = Infinity;
-    stack.querySelectorAll('.value, .caption').forEach(function (el) {{
+    stack.querySelectorAll('.value, .caption, .unit').forEach(function (el) {{
       var size = parseFloat(getComputedStyle(el).fontSize);
       if (size > 0 && size < min) {{ min = size; }}
     }});
@@ -792,6 +787,30 @@ window.__splitsmithFit = function () {{
     }}
     stack.style.setProperty('--fit-scale', String(lo));
   }}
+  function normalizeLeadingMargin(stack) {{
+    // ``Group.margin_top`` (see ``overlay_summary._cell_groups``' own
+    // "Splits" label group) is baked into the HTML at Python time,
+    // before this script ever runs, to separate the Splits band from a
+    // Scoring band that Python believed would be above it. Collapsing an
+    // emptied Scoring group (below) removes its own gap but leaves that
+    // margin behind on whatever group is now the flex column's first
+    // VISIBLE child -- space meant to separate two bands from each
+    // other, now separating one band from nothing. Re-zeroing it on
+    // whichever group ends up first-visible, every time the set of
+    // hidden groups changes, is what a real box model gives for free
+    // when there is nothing above to separate from; the browser cannot
+    // do that itself because the margin is this group's own property,
+    // not the (already ``display: none``, already zero-height) group
+    // before it.
+    var seenVisible = false;
+    Array.prototype.forEach.call(stack.children, function (child) {{
+      if (getComputedStyle(child).display === 'none') {{ return; }}
+      if (!seenVisible) {{
+        seenVisible = true;
+        if (child.style.marginTop) {{ child.style.marginTop = '0px'; }}
+      }}
+    }});
+  }}
   function dropUntilFit(stack, available) {{
     var candidates = Array.prototype.slice.call(stack.querySelectorAll('[data-drop-priority]'));
     candidates.sort(function (a, b) {{
@@ -801,7 +820,28 @@ window.__splitsmithFit = function () {{
     }});
     for (var i = 0; i < candidates.length; i++) {{
       if (fits(stack, available)) {{ return; }}
-      candidates[i].style.display = 'none';
+      var el = candidates[i];
+      el.style.display = 'none';
+      // A ``.group`` with every child now hidden still sits in the
+      // ``.anchor-middle-center`` flex column and still consumes a
+      // ``row_gutter`` gap -- an emptied group is not a zero-height one.
+      // Left alone, those leftover gaps are exactly what pushed the
+      // Splits band's own values out of the cell even after this loop
+      // had correctly stopped dropping them: see the fix-round report
+      // for the measured 58px residual this closes. Hiding the group
+      // itself once nothing inside it is visible removes its gap from
+      // the flex column entirely, the same way ``display: none`` already
+      // removes each dropped ``.el``'s own space.
+      var group = el.closest('.group');
+      if (group) {{
+        var allHidden = Array.prototype.every.call(group.children, function (child) {{
+          return getComputedStyle(child).display === 'none';
+        }});
+        if (allHidden) {{
+          group.style.display = 'none';
+          normalizeLeadingMargin(stack);
+        }}
+      }}
     }}
   }}
   document.querySelectorAll('.cell').forEach(function (cell) {{
