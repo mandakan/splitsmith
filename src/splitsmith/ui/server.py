@@ -3412,6 +3412,7 @@ def register_job_bodies(state: AppState) -> None:
                     match_root,
                     client=client,
                     on_progress=lambda p, m: handle.update(progress=p, message=m),
+                    timer=handle.timer,
                 )
             except SyncClientError as exc:
                 raise RuntimeError(str(exc)) from exc

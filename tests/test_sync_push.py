@@ -32,6 +32,12 @@ Cases:
      even when the abort call itself fails (a 500 from the abort route
      must not mask the original error). The happy path makes no abort
      call at all.
+  8. Phase timings (#631 Task 13): a real ``PhaseTimer`` passed as
+     ``timer=`` records the same four phases, in order, that
+     ``PushReport.timings`` reports internally.
+  9. ``PushReport``'s new fields default to empty/zero so pre-Task-13
+     callers that construct one directly (without the new kwargs) still
+     work.
 """
 
 from __future__ import annotations
@@ -44,9 +50,10 @@ import httpx
 import pytest
 
 from splitsmith import match_model
+from splitsmith.observability import PhaseTimer
 from splitsmith.sync.client import HostedSyncClient, SyncClientError
 from splitsmith.sync.plan import DocItem, MediaItem, build_push_plan
-from splitsmith.sync.push import PushReport, run_push
+from splitsmith.sync.push import MediaItemTiming, PushReport, run_push
 from splitsmith.sync.state import SyncState, load_sync_state
 from splitsmith.ui.project import MatchProject, StageEntry
 
@@ -185,7 +192,27 @@ def test_happy_path_pushes_media_before_docs_and_reports_correctly(tmp_path: Pat
 
     report = run_push(root, client=fake.clients())
 
-    assert report == PushReport(uploaded=2, skipped=0, docs=3)
+    assert report.uploaded == 2
+    assert report.skipped == 0
+    assert report.docs == 3
+
+    # New instrumentation fields (#631 Task 13): the four phases always
+    # run on a successful push, bytes_uploaded is the sum of the two
+    # uploaded items' sizes, and media_items lists exactly those two
+    # items (skipped items - none here - are excluded).
+    assert set(report.timings) == {"plan", "ensure_match", "media", "docs"}
+    for seconds in report.timings.values():
+        assert seconds >= 0
+    trimmed_dir = root / "shooters" / "alice" / "trimmed"
+    expected_bytes = (trimmed_dir / TRIMMED_NAME).stat().st_size + (trimmed_dir / SIDECAR_NAME).stat().st_size
+    assert report.bytes_uploaded == expected_bytes
+    assert {mi.remote_key for mi in report.media_items} == {
+        f"matches/{match_id}/shooters/alice/trimmed/{TRIMMED_NAME}",
+        f"matches/{match_id}/shooters/alice/trimmed/{SIDECAR_NAME}",
+    }
+    assert sum(mi.bytes for mi in report.media_items) == expected_bytes
+    for mi in report.media_items:
+        assert mi.seconds >= 0
 
     media_indices = [
         i
@@ -230,10 +257,18 @@ def test_second_run_with_nothing_touched_uploads_zero_media(tmp_path: Path) -> N
     fake2 = _FakeHosted()
     report2 = run_push(root, client=fake2.clients())
 
-    assert report2 == PushReport(uploaded=0, skipped=2, docs=3)
+    assert report2.uploaded == 0
+    assert report2.skipped == 2
+    assert report2.docs == 3
     assert not any(c.startswith("media_") for c in fake2.calls)
     assert fake2.calls[0] == "ensure_match"
     assert sum(c.startswith("doc_put") for c in fake2.calls) == 3
+
+    # A skipped run uploads nothing: media_items is empty and
+    # bytes_uploaded is 0, even though the phases still ran.
+    assert report2.media_items == []
+    assert report2.bytes_uploaded == 0
+    assert set(report2.timings) == {"plan", "ensure_match", "media", "docs"}
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +303,10 @@ def test_mid_push_part_failure_leaves_prior_items_recorded_and_rerun_only_retrie
     fake2 = _FakeHosted()
     report2 = run_push(root, client=fake2.clients())
 
-    assert report2 == PushReport(uploaded=1, skipped=1, docs=3)
+    assert report2.uploaded == 1
+    assert report2.skipped == 1
+    assert report2.docs == 3
+    assert [mi.remote_key for mi in report2.media_items] == [sidecar_key]
     media_create_calls = [c for c in fake2.calls if c.startswith("media_create")]
     assert media_create_calls == [f"media_create:{sidecar_key}"]
 
@@ -407,6 +445,61 @@ def test_abort_failing_does_not_mask_the_original_part_put_error(tmp_path: Path)
     # on the abort response, so a broken abort route can't surface here.
     assert exc_info.value.request.url.path == f"/{remote_key}"
     assert fake.aborts == [(remote_key, "upload-1")]
+
+
+# ---------------------------------------------------------------------------
+# Case 8: phase timings mirror onto a caller-provided PhaseTimer
+# ---------------------------------------------------------------------------
+
+
+def test_provided_timer_records_the_four_phases_in_order(tmp_path: Path) -> None:
+    root, _match_id = _build_match(tmp_path)
+    fake = _FakeHosted()
+    timer = PhaseTimer()
+
+    report = run_push(root, client=fake.clients(), timer=timer)
+
+    built = timer.build()
+    assert [phase["name"] for phase in built["phases"]] == ["plan", "ensure_match", "media", "docs"]
+    for phase in built["phases"]:
+        assert phase["ms"] >= 0
+    # The internal accounting (always populated, regardless of ``timer``)
+    # reports the same four phase names.
+    assert set(report.timings) == {"plan", "ensure_match", "media", "docs"}
+
+
+def test_no_timer_still_populates_internal_timings(tmp_path: Path) -> None:
+    root, _match_id = _build_match(tmp_path)
+    fake = _FakeHosted()
+
+    report = run_push(root, client=fake.clients())
+
+    assert set(report.timings) == {"plan", "ensure_match", "media", "docs"}
+    for seconds in report.timings.values():
+        assert seconds >= 0
+
+
+# ---------------------------------------------------------------------------
+# Case 9: PushReport's new fields default to empty/zero
+# ---------------------------------------------------------------------------
+
+
+def test_push_report_new_fields_default_empty() -> None:
+    report = PushReport(uploaded=0, skipped=0, docs=0)
+    assert report.timings == {}
+    assert report.bytes_uploaded == 0
+    assert report.media_items == []
+    # Defaults are per-instance, not a shared mutable object (the
+    # pydantic default_factory footgun this guards against).
+    report.timings["x"] = 1.0
+    assert PushReport(uploaded=0, skipped=0, docs=0).timings == {}
+
+
+def test_media_item_timing_round_trips_fields() -> None:
+    item = MediaItemTiming(remote_key="matches/m1/shooters/alice/trimmed/clip.mp4", bytes=1024, seconds=0.5)
+    assert item.remote_key == "matches/m1/shooters/alice/trimmed/clip.mp4"
+    assert item.bytes == 1024
+    assert item.seconds == 0.5
 
 
 # ---------------------------------------------------------------------------
