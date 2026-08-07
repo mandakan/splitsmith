@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+from splitsmith.auth import CompositeAuth
 from splitsmith.db import (
     Base,
     MagicLinkAuth,
@@ -101,7 +102,8 @@ def test_create_app_builds_postgres_tenant_per_user(hosted_db: str) -> None:
     app = create_app()
     state = app.state.splitsmith_state
 
-    assert isinstance(state.auth, MagicLinkAuth)
+    assert isinstance(state.auth, CompositeAuth)
+    assert isinstance(state.auth.backends[0], MagicLinkAuth)
 
     uid = "01TESTUSER0000000000000001"
     tenant = state.build_tenant(uid)

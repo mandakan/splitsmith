@@ -1,5 +1,17 @@
 # 07 -- Sync and migration
 
+> **Superseded (2026-08-07).** The desktop-to-hosted push described
+> below - tus uploads, the `/api/v1/projects` / `/api/v1/uploads`
+> surface, and tarball import - was never built. The MVP that shipped
+> instead is a smaller, already-implemented design: one-way desktop
+> push over `/api/sync/*` using a bearer desktop token, presigned S3
+> multipart media upload (no tus), and no tarball importer. See
+> `docs/superpowers/specs/2026-08-07-desktop-hosted-sync-mvp-design.md`
+> for the design that actually landed. This doc's personas, sign-in
+> flow, and v2/v3 direction remain the forward-looking reference; treat
+> the "Pushing a project" / "Tarball import" sections below as the
+> pre-implementation sketch they superseded, not the current API.
+
 This doc defines **how a project moves between local mode and hosted
 mode** -- the user's first onboarding path, the "I started locally but
 want to share with my squad" flow, and the v2 ramp into bidirectional

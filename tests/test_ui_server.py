@@ -6746,6 +6746,7 @@ def test_create_match_manual_hosted_mode_synthesizes_path(
             project_state=None,
             storage=None,
             share_tokens=None,
+            desktop_tokens=None,
         )
 
     monkeypatch.setattr(server_mod, "_apply_hosted_mode_wiring", _stub_wiring)

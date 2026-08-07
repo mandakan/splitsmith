@@ -1,0 +1,460 @@
+"""Hosted-only ``/api/sync/*`` routes: desktop match adopt + state-doc
+mirror upserts (desktop-to-hosted sync MVP, doc 2026-08-07, #631).
+
+A desktop client (Tasks 5+) authenticates with a bearer token (Task 2/3's
+``DesktopTokenAuth``, which resolves to a normal tenant exactly like a
+session) and pushes one match as a read-only mirror: it adopts (or
+re-adopts, idempotently) the match row via ``POST /matches``, then
+upserts the match doc, each shooter's project doc, and each stage's
+audit doc via the three ``PUT .../docs/...`` routes below, and pushes
+trimmed clip / audit media direct to object storage via the presigned
+multipart ``.../media/...`` routes (Task 5). This module does not run
+detection - the doc routes write rows through
+``PostgresMatchStore``/``ProjectStateStore``, the same stores the hosted
+UI itself reads, and the media routes only mint/consume presigned URLs
+against ``state.storage``; no media bytes pass through this process.
+
+A mirrored row's ``origin`` is "desktop" for as long as it lives; a
+sync push can never touch a natively-created hosted match (``origin ==
+"hosted"``) - every doc route 409s ``not_a_mirror`` against one, and the
+create route 409s ``match_exists_hosted`` rather than silently adopting
+it. This is a one-way push: the hosted side never writes back to the
+desktop client.
+
+Local mode (no ``SPLITSMITH_MODE=hosted``) has no meaning for a sync
+push - a local install has no durable per-user storage to mirror into -
+so every route 404s there, same guard idiom as the desktop-token
+management routes and share links.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any
+
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
+from pydantic import BaseModel, ValidationError
+
+from .. import match_model
+from ..storage import Storage
+from .project import MatchProject
+
+if TYPE_CHECKING:
+    from ..db.matches import PostgresMatchStore
+    from ..db.project_state import ProjectStateStore
+
+router = APIRouter(prefix="/api/sync")
+
+# Containment boundary for the media presign routes below: a desktop
+# mirror push may only touch its own match's trimmed clip / audit
+# artifacts, never anything else in the tenant's bucket. The client-
+# supplied key is tenant-relative - the storage layer applies the
+# users/<uid>/ prefix, never the client - so this regex plus the
+# match_id equality check in _validate_media_key is the entire guard;
+# there is no filesystem boundary to fall back on the way local mode has.
+_SYNC_MEDIA_KEY_RE = re.compile(
+    r"^matches/(?P<match_id>[A-Za-z0-9._-]+)/shooters/[A-Za-z0-9_-]+/trimmed/[A-Za-z0-9._-]+\.(?:mp4|json)$"
+)
+
+
+# ---------------------------------------------------------------------------
+# Request / response models
+# ---------------------------------------------------------------------------
+
+
+class SyncMatchCreate(BaseModel):
+    """Body for ``POST /api/sync/matches``."""
+
+    match_id: str
+    name: str
+
+
+class SyncMatchCreateResponse(BaseModel):
+    """Response for ``POST /api/sync/matches``."""
+
+    match_id: str
+    origin: str
+
+
+class SyncDocVersionResponse(BaseModel):
+    """Response shared by all three doc-upsert routes."""
+
+    version: int
+
+
+class SyncMediaCreate(BaseModel):
+    """Body for ``POST /api/sync/matches/{match_id}/media/create``."""
+
+    key: str
+
+
+class SyncMediaCreateResponse(BaseModel):
+    """Response for ``POST /api/sync/matches/{match_id}/media/create``."""
+
+    upload_id: str
+    key: str
+    part_size: int
+
+
+class SyncMediaPartUrl(BaseModel):
+    """Body for ``POST /api/sync/matches/{match_id}/media/part-url``."""
+
+    key: str
+    upload_id: str
+    part_number: int
+
+
+class SyncMediaPartUrlResponse(BaseModel):
+    """Response for ``POST /api/sync/matches/{match_id}/media/part-url``."""
+
+    url: str
+
+
+class SyncMediaPart(BaseModel):
+    """One finished part: its 1-based number + the ETag storage returned."""
+
+    part_number: int
+    etag: str
+
+
+class SyncMediaComplete(BaseModel):
+    """Body for ``POST /api/sync/matches/{match_id}/media/complete``."""
+
+    key: str
+    upload_id: str
+    parts: list[SyncMediaPart]
+
+
+class SyncMediaCompleteResponse(BaseModel):
+    """Response for ``POST /api/sync/matches/{match_id}/media/complete``."""
+
+    size: int
+
+
+class SyncMediaAbort(BaseModel):
+    """Body for ``POST /api/sync/matches/{match_id}/media/abort``."""
+
+    key: str
+    upload_id: str
+
+
+class SyncMediaAbortResponse(BaseModel):
+    """Empty response for ``POST /api/sync/matches/{match_id}/media/abort``."""
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+
+def _hosted_gate() -> None:
+    """Raise 404 outside hosted mode.
+
+    Imported lazily so that importing this module never requires the
+    hosted-only db deps (sqlalchemy et al) - the local-slim install
+    still imports and registers this router; every route just 404s at
+    request time. Same idiom as the desktop-token management routes.
+    """
+    from .server import _hosted_mode_active
+
+    if not _hosted_mode_active():
+        raise HTTPException(status_code=404, detail="not found")
+
+
+def _current_user(request: Request) -> Any:
+    """Read the user the outer ``_auth_gate`` middleware already resolved.
+
+    Every ``/api/sync/*`` route sits behind that gate (it matches on the
+    ``/api/`` prefix), so an unauthenticated request never reaches this
+    dependency - the 401 already happened there. Kept as an explicit
+    dependency for parity with the rest of the ``/api/me/*`` surface.
+    """
+    user = getattr(request.state, "user", None)
+    if user is None:
+        raise HTTPException(status_code=401, detail="not authenticated")
+    return user
+
+
+def _matches_store(request: Request) -> PostgresMatchStore:
+    state = request.app.state.splitsmith_state
+    store = state.matches_store
+    if store is None:
+        raise HTTPException(status_code=500, detail="match store unavailable")
+    return store
+
+
+def _project_state(request: Request) -> ProjectStateStore:
+    state = request.app.state.splitsmith_state
+    store = state.project_state
+    if store is None:
+        raise HTTPException(status_code=500, detail="project state store unavailable")
+    return store
+
+
+async def _resolve_mirror(request: Request, match_id: str) -> Any:
+    """Load the match row, enforcing the shared mirror contract.
+
+    404 when the match is unknown to this tenant (also the outcome for a
+    match owned by a different user - the two are indistinguishable by
+    design, same as every other per-user lookup in this codebase). 409
+    ``not_a_mirror`` when the row exists but was never adopted by a sync
+    push - a sync can never touch a native hosted match.
+    """
+    row = await _matches_store(request).get(match_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="not found")
+    if row.origin != "desktop":
+        raise HTTPException(status_code=409, detail="not_a_mirror")
+    return row
+
+
+def _require_storage(request: Request) -> Storage:
+    """503 when hosted object storage isn't wired.
+
+    Same idiom as server.py's ``create_multipart_upload`` et al.
+    (``_require_storage()`` there) - a desktop install with no
+    ``SPLITSMITH_S3_BUCKET`` configured refuses cleanly rather than
+    hitting an ``AttributeError`` on a ``None`` storage backend.
+    """
+    state = request.app.state.splitsmith_state
+    storage = state.storage
+    if storage is None:
+        raise HTTPException(
+            status_code=503,
+            detail="media sync is hosted-mode only; storage is not configured",
+        )
+    return storage
+
+
+def _validate_media_key(key: str, match_id: str) -> None:
+    """422 unless ``key`` is a well-formed trimmed-media path scoped to
+    ``match_id``.
+
+    ``_SYNC_MEDIA_KEY_RE`` is the containment boundary (see its
+    docstring); this also rejects a syntactically valid key that names
+    a *different* match than the one in the URL, so a mirror push for
+    match A can never plant an object under match B's prefix.
+    """
+    # fullmatch, not match: the pattern's $ would tolerate one trailing
+    # newline and mint a key with a literal \n in the object name.
+    m = _SYNC_MEDIA_KEY_RE.fullmatch(key)
+    if m is None or m["match_id"] != match_id:
+        raise HTTPException(status_code=422, detail="invalid media key")
+
+
+async def _mirror_save(
+    load: Callable[[], Awaitable[tuple[dict | None, int]]],
+    save: Callable[[int], Awaitable[int]],
+) -> int:
+    """Unconditional last-write-wins upsert over the optimistic-lock store."""
+    from ..db import StateConflictError
+
+    _, version = await load()
+    try:
+        return await save(version)
+    except StateConflictError:
+        _, version = await load()
+        return await save(version)
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+
+@router.post("/matches", response_model=SyncMatchCreateResponse)
+async def create_or_adopt_match(
+    body: SyncMatchCreate,
+    request: Request,
+    user: Any = Depends(_current_user),
+) -> SyncMatchCreateResponse:
+    """Adopt ``match_id`` as a desktop mirror, or refresh its name.
+
+    Idempotent: re-posting the same ``match_id`` just updates the name
+    (``PostgresMatchStore.upsert`` never changes ``origin`` on an
+    existing row). 409 ``match_exists_hosted`` when the row already
+    exists as a natively-created hosted match - a sync push must never
+    silently reclassify one.
+    """
+    _hosted_gate()
+    store = _matches_store(request)
+    existing = await store.get(body.match_id)
+    if existing is not None and existing.origin == "hosted":
+        raise HTTPException(status_code=409, detail="match_exists_hosted")
+    record = await store.upsert(body.match_id, body.name, f"matches/{body.match_id}", origin="desktop")
+    return SyncMatchCreateResponse(match_id=record.match_id, origin=record.origin)
+
+
+@router.put("/matches/{match_id}/docs/match", response_model=SyncDocVersionResponse)
+async def put_match_doc(
+    match_id: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    user: Any = Depends(_current_user),
+) -> SyncDocVersionResponse:
+    """Upsert the match doc, validated against ``match_model.Match``."""
+    _hosted_gate()
+    await _resolve_mirror(request, match_id)
+    try:
+        match_model.Match.model_validate(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    store = _project_state(request)
+
+    async def _load() -> tuple[dict | None, int]:
+        return await store.load_match(match_id)
+
+    async def _save(version: int) -> int:
+        return await store.save_match(match_id, body, expected_version=version)
+
+    version = await _mirror_save(_load, _save)
+    return SyncDocVersionResponse(version=version)
+
+
+@router.put("/matches/{match_id}/docs/project/{slug}", response_model=SyncDocVersionResponse)
+async def put_project_doc(
+    match_id: str,
+    slug: str,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    user: Any = Depends(_current_user),
+) -> SyncDocVersionResponse:
+    """Upsert one shooter's project doc, validated against ``MatchProject``."""
+    _hosted_gate()
+    await _resolve_mirror(request, match_id)
+    try:
+        MatchProject.model_validate(body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    store = _project_state(request)
+
+    async def _load() -> tuple[dict | None, int]:
+        return await store.load_project(match_id, slug)
+
+    async def _save(version: int) -> int:
+        return await store.save_project(match_id, slug, body, expected_version=version)
+
+    version = await _mirror_save(_load, _save)
+    return SyncDocVersionResponse(version=version)
+
+
+@router.put("/matches/{match_id}/docs/audit/{slug}/{stage_number}", response_model=SyncDocVersionResponse)
+async def put_audit_doc(
+    match_id: str,
+    slug: str,
+    stage_number: int,
+    request: Request,
+    body: dict[str, Any] = Body(...),
+    user: Any = Depends(_current_user),
+) -> SyncDocVersionResponse:
+    """Upsert one stage's audit doc. Schemaless - stored as-is, no model."""
+    _hosted_gate()
+    await _resolve_mirror(request, match_id)
+    store = _project_state(request)
+
+    async def _load() -> tuple[dict | None, int]:
+        return await store.load_audit(match_id, slug, stage_number)
+
+    async def _save(version: int) -> int:
+        return await store.save_audit(match_id, slug, stage_number, body, expected_version=version)
+
+    version = await _mirror_save(_load, _save)
+    return SyncDocVersionResponse(version=version)
+
+
+# ---------------------------------------------------------------------------
+# Media routes: presigned multipart push for trimmed clips / audit media
+# ---------------------------------------------------------------------------
+#
+# Mirrors server.py's ``/api/me/raw/upload/multipart/*`` (#467) but scoped
+# to one mirror's ``trimmed/`` media rather than the shared ``raw/`` pool,
+# and keyed by the client-supplied (regex-validated) path rather than a
+# server-sanitized filename - a desktop client already knows the exact
+# tenant-relative key its trimmed output belongs at. No bytes pass through
+# this process: the desktop client PUTs parts straight to storage via the
+# presigned URLs this mints.
+
+
+@router.post("/matches/{match_id}/media/create", response_model=SyncMediaCreateResponse)
+async def create_media_upload(
+    match_id: str,
+    body: SyncMediaCreate,
+    request: Request,
+    user: Any = Depends(_current_user),
+) -> SyncMediaCreateResponse:
+    """Begin a presigned multipart upload for one trimmed-media object."""
+    _hosted_gate()
+    await _resolve_mirror(request, match_id)
+    _validate_media_key(body.key, match_id)
+    storage = _require_storage(request)
+    from .server import _RAW_UPLOAD_PART_SIZE
+
+    try:
+        upload_id = storage.create_multipart_upload(body.key)
+    except Exception as exc:  # noqa: BLE001 - surface as a clean 500
+        raise HTTPException(status_code=500, detail=f"could not start upload: {exc}") from exc
+    return SyncMediaCreateResponse(upload_id=upload_id, key=body.key, part_size=_RAW_UPLOAD_PART_SIZE)
+
+
+@router.post("/matches/{match_id}/media/part-url", response_model=SyncMediaPartUrlResponse)
+async def sign_media_part(
+    match_id: str,
+    body: SyncMediaPartUrl,
+    request: Request,
+    user: Any = Depends(_current_user),
+) -> SyncMediaPartUrlResponse:
+    """Return a presigned URL the desktop client PUTs one part to."""
+    _hosted_gate()
+    await _resolve_mirror(request, match_id)
+    _validate_media_key(body.key, match_id)
+    if body.part_number < 1:
+        raise HTTPException(status_code=422, detail="part_number must be >= 1")
+    storage = _require_storage(request)
+    try:
+        url = storage.presign_upload_part(body.key, body.upload_id, body.part_number)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"could not sign part: {exc}") from exc
+    return SyncMediaPartUrlResponse(url=url)
+
+
+@router.post("/matches/{match_id}/media/complete", response_model=SyncMediaCompleteResponse)
+async def complete_media_upload(
+    match_id: str,
+    body: SyncMediaComplete,
+    request: Request,
+    user: Any = Depends(_current_user),
+) -> SyncMediaCompleteResponse:
+    """Finalize the upload once every part has landed."""
+    _hosted_gate()
+    await _resolve_mirror(request, match_id)
+    _validate_media_key(body.key, match_id)
+    if not body.parts:
+        raise HTTPException(status_code=422, detail="parts must not be empty")
+    storage = _require_storage(request)
+    try:
+        size = storage.complete_multipart_upload(
+            body.key, body.upload_id, [(p.part_number, p.etag) for p in body.parts]
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"could not complete upload: {exc}") from exc
+    return SyncMediaCompleteResponse(size=size)
+
+
+@router.post("/matches/{match_id}/media/abort", response_model=SyncMediaAbortResponse)
+async def abort_media_upload(
+    match_id: str,
+    body: SyncMediaAbort,
+    request: Request,
+    user: Any = Depends(_current_user),
+) -> SyncMediaAbortResponse:
+    """Discard an in-progress upload (desktop client cancelled or failed)."""
+    _hosted_gate()
+    await _resolve_mirror(request, match_id)
+    _validate_media_key(body.key, match_id)
+    storage = _require_storage(request)
+    try:
+        storage.abort_multipart_upload(body.key, body.upload_id)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"could not abort upload: {exc}") from exc
+    return SyncMediaAbortResponse()

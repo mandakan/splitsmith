@@ -95,10 +95,12 @@ if TYPE_CHECKING:
     # Hosted-only; imported lazily at runtime inside _apply_hosted_mode_wiring
     # so local mode stays free of the db (procrastinate/psycopg) dependency.
     from ..db import PostgresMatchStore, ProjectStateStore
+    from ..db.desktop_tokens import DesktopTokenRecord, DesktopTokenStore
     from ..db.share_tokens import ResolvedShare, ShareTokenStore
     from ..db.workers import WorkersStore
     from ..worker_channel import WakeChannelRegistry
 
+import httpx
 from fastapi import (
     BackgroundTasks,
     Body,
@@ -142,7 +144,7 @@ from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
-from ..auth import AuthBackend, LoopbackAuth, User
+from ..auth import AuthBackend, CompositeAuth, LoopbackAuth, User
 from ..compare import mp4_grid, project_loader
 from ..compute import ComputeBackend, LocalComputeBackend
 from ..config import (
@@ -166,6 +168,10 @@ from ..match_registry import MatchRegistry
 from ..observability import StructuredJsonFormatter, init_sentry
 from ..runtime import runtime as process_runtime
 from ..storage import Storage
+from ..sync.client import HostedSyncClient, SyncClientError
+from ..sync.plan import build_push_plan
+from ..sync.push import run_push
+from ..sync.state import load_sync_state
 from . import audio as audio_helpers
 from . import export_storage, stage_edit
 from . import exports as export_helpers
@@ -965,6 +971,12 @@ def _no_project_error() -> HTTPException:
 # go away entirely once every endpoint is exercised under the new prefix.
 current_match_root: ContextVar[Path | None] = ContextVar("splitsmith_current_match_root", default=None)
 current_match_id: ContextVar[str | None] = ContextVar("splitsmith_current_match_id", default=None)
+# The bound match's origin ("hosted" | "desktop" | "local"), set by the
+# alias middleware from the same row it already fetched for the ownership
+# check (#631 Task 6) - so handlers that need to expose origin (e.g. the
+# shooter list) don't issue a second matches_store query. ``None`` outside
+# an aliased request (e.g. legacy bare-path traffic).
+current_match_origin: ContextVar[str | None] = ContextVar("splitsmith_current_match_origin", default=None)
 # Set True by _share_alias for anonymous read requests so handlers can
 # strip server-local fields (e.g. match_root, last_scanned_dir) from their
 # response payloads before returning them to anonymous viewers.
@@ -1006,6 +1018,13 @@ class TenantContext:
     # query - but the tenant factory is still correct here because the GUC is
     # inert on a non-RLS table and the store filters by user_id explicitly.
     share_tokens: ShareTokenStore | None
+    # Per-user desktop-sync bearer token store (desktop-to-hosted sync MVP,
+    # #631). None in local mode; in hosted mode built per-request with the
+    # tenant factory, same rationale as share_tokens directly above -
+    # desktop_tokens is not under RLS either (see DesktopTokenRow), so the
+    # store's own user_id filter is the real isolation boundary, but the
+    # tenant factory is still the established construction pattern here.
+    desktop_tokens: DesktopTokenStore | None
 
 
 # Per-request / per-job tenant resolved by the hosted-mode auth gate
@@ -1235,6 +1254,13 @@ class AppState:
         # hosted-only feature. Returns None when no tenant is pinned.
         tenant = current_tenant.get()
         return tenant.share_tokens if tenant is not None else None
+
+    @property
+    def desktop_tokens(self) -> DesktopTokenStore | None:
+        # Local mode has no per-user desktop-token store - desktop sync is a
+        # hosted-only feature. Returns None when no tenant is pinned.
+        tenant = current_tenant.get()
+        return tenant.desktop_tokens if tenant is not None else None
 
     def build_tenant(self, user_id: str) -> TenantContext:
         """Build the :class:`TenantContext` for ``user_id`` (hosted mode).
@@ -3350,6 +3376,60 @@ def register_job_bodies(state: AppState) -> None:
         handle.set_result({"proxy_key": proxy_key, "size_bytes": size})
         handle.update(progress=1.0, message="Preview ready")
 
+    def _run_sync_match(handle: JobHandle) -> None:
+        """Worker for the ``sync_match`` job (desktop-to-hosted sync MVP,
+        #631 Task 9): push the current match to the configured hosted
+        server.
+
+        Takes no args - the match root comes from ``state.match_root``,
+        which resolves against the ``current_match_root`` ContextVar that
+        ``JobRegistry.submit`` captured from the submitting request and
+        replays on the worker thread (mirrors ``_run_match_export``).
+
+        Builds the bearer-authed ``httpx.Client`` from the persisted
+        hosted-sync prefs (the ``SsiHttpClient`` idiom) and delegates to
+        ``run_push``, which does the real work: plan, adopt the mirror,
+        upload changed media, upsert docs. ``SyncClientError`` and the two
+        httpx error classes a network hiccup or a bad token actually raise
+        are caught and re-raised as ``RuntimeError`` with a readable
+        message - a bare traceback in the jobs panel is not acceptable
+        UX; anything else propagates as-is.
+        """
+        handle.update(progress=0.0, message="Starting sync...")
+        match_root = state.match_root
+        prefs = user_config.load_global_prefs()
+        if not prefs.hosted_base_url or not prefs.hosted_token:
+            raise RuntimeError("hosted sync is not configured - set a base URL and token in Settings")
+        http_client = httpx.Client(
+            base_url=prefs.hosted_base_url,
+            headers={"Authorization": f"Bearer {prefs.hosted_token}"},
+            timeout=30.0,
+        )
+        try:
+            client = HostedSyncClient(http=http_client)
+            try:
+                report = run_push(
+                    match_root,
+                    client=client,
+                    on_progress=lambda p, m: handle.update(progress=p, message=m),
+                )
+            except SyncClientError as exc:
+                raise RuntimeError(str(exc)) from exc
+            except httpx.HTTPStatusError as exc:
+                raise RuntimeError(
+                    f"sync failed: {exc.request.method} {exc.request.url} returned "
+                    f"{exc.response.status_code} {exc.response.reason_phrase}"
+                ) from exc
+            except httpx.TransportError as exc:
+                raise RuntimeError(f"sync failed: could not reach the hosted server ({exc})") from exc
+        finally:
+            http_client.close()
+        handle.set_result(report.model_dump())
+        handle.update(
+            progress=1.0,
+            message=f"Synced: {report.uploaded} uploaded, {report.skipped} skipped, {report.docs} docs",
+        )
+
     state.jobs.bodies.register("model_download", _run_model_download_job)
     state.jobs.bodies.register("detect_beep", _run_detect_beep_for_video)
     state.jobs.bodies.register("trim", _run_trim)
@@ -3358,6 +3438,7 @@ def register_job_bodies(state: AppState) -> None:
     state.jobs.bodies.register("match_export", _run_match_export)
     state.jobs.bodies.register("generate_proxy", _run_generate_proxy)
     state.jobs.bodies.register("compare-grid", _run_compare_grid)
+    state.jobs.bodies.register("sync_match", _run_sync_match)
 
 
 class HealthResponse(BaseModel):
@@ -3461,6 +3542,11 @@ class RecentProjectDetail(BaseModel):
     # Human-readable shooter names in match order so the picker can
     # render real initials in avatar stacks instead of stubs.
     shooter_names: list[str] = []
+    # "hosted" | "desktop" | "local" (#631 Task 6): "local" is the
+    # filesystem-enricher default (single-operator desktop use); hosted
+    # enrichment overrides it from the tenant's ``matches_store`` row so
+    # the picker can flag a desktop-synced match as a read-only mirror.
+    origin: str = "local"
 
 
 class CreateMatchStageDraft(BaseModel):
@@ -3647,6 +3733,10 @@ class ShooterListResponse(BaseModel):
     match_root: str
     match_name: str
     shooters: list[ShooterListEntry]
+    # "hosted" | "desktop" | "local" (#631 Task 6). Lets the SPA tell a
+    # desktop-synced read-only mirror apart from a natively-hosted or
+    # local match so it can gate write affordances client-side.
+    origin: str = "local"
 
 
 class AddShooterRequest(BaseModel):
@@ -4020,6 +4110,66 @@ class MultipartAbortRequest(BaseModel):
     upload_id: str
 
 
+class DesktopTokenInfo(BaseModel):
+    """One desktop token as the owner-management routes return it (#631).
+
+    Mirrors ``DesktopTokenRecord`` (db layer) field-for-field. Kept as a
+    separate model here - not imported directly - because the db layer is
+    hosted-only and lazily imported (see ``_apply_hosted_mode_wiring``);
+    this module must stay importable without the ``[hosted]`` extra. Same
+    split as ``ShareInfo`` next to ``ShareTokenStore``. Never carries the
+    token hash or the raw value."""
+
+    id: str
+    name: str
+    created_at: datetime
+    last_used_at: datetime | None
+    revoked_at: datetime | None
+
+
+def _desktop_token_info(record: DesktopTokenRecord) -> DesktopTokenInfo:
+    return DesktopTokenInfo(
+        id=record.id,
+        name=record.name,
+        created_at=record.created_at,
+        last_used_at=record.last_used_at,
+        revoked_at=record.revoked_at,
+    )
+
+
+class DesktopTokenListResponse(BaseModel):
+    """Response body for GET /api/me/desktop-tokens (#631)."""
+
+    tokens: list[DesktopTokenInfo]
+
+
+class DesktopTokenCreateRequest(BaseModel):
+    """Body for POST /api/me/desktop-tokens (#631)."""
+
+    name: str
+
+
+class DesktopTokenCreateResponse(BaseModel):
+    """Response body for POST /api/me/desktop-tokens (#631).
+
+    ``token`` is the raw bearer value - it appears here and only here;
+    every other response (including this token's own future GET/DELETE
+    entries) carries just the ``DesktopTokenInfo`` record."""
+
+    token: str
+    record: DesktopTokenInfo
+
+
+class DesktopTokenRevokeResponse(BaseModel):
+    """Response body for DELETE /api/me/desktop-tokens/{token_id} (#631).
+
+    ``revoked`` is False for both an unknown id and one owned by another
+    user - the two cases are indistinguishable by design, same as the
+    share-token store's revoke()."""
+
+    revoked: bool
+
+
 class ScoreboardIdentityRequest(BaseModel):
     """Body for PUT /api/user/scoreboard-identity (#75).
 
@@ -4033,6 +4183,45 @@ class ScoreboardIdentityRequest(BaseModel):
     division: str | None = None
     club: str | None = None
     base_url: str | None = None
+
+
+class HostedSyncSettings(BaseModel):
+    """Response body for GET/PUT /api/settings/hosted-sync (#631, Task 9).
+
+    ``token_set`` is a boolean, never the raw token - the desktop client
+    keeps its own copy from the moment it typed it in; the server has no
+    business echoing a bearer credential back over localhost HTTP.
+    """
+
+    base_url: str | None = None
+    token_set: bool = False
+
+
+class HostedSyncSettingsRequest(BaseModel):
+    """Body for PUT /api/settings/hosted-sync (#631, Task 9).
+
+    ``token: null`` keeps whatever token is already stored (so the SPA can
+    resubmit ``base_url`` alone without re-typing the secret); ``token:
+    ""`` clears it; any other string replaces it.
+    """
+
+    base_url: str
+    token: str | None = None
+
+
+class SyncStatusResponse(BaseModel):
+    """Response body for GET /api/match/sync/status (#631, Task 9).
+
+    Built from ``load_sync_state`` + ``build_push_plan`` - the latter is
+    the fast size/mtime-only planner (no hashing), so this stays cheap
+    enough to poll.
+    """
+
+    configured: bool
+    last_synced_at: datetime | None = None
+    stale: bool
+    pending_media: int
+    errors: list[str] = Field(default_factory=list)
 
 
 class ScoreboardUploadRequest(BaseModel):
@@ -4842,6 +5031,14 @@ async def _enrich_recent_project_hosted(
         kind="match",
     )
     detail.match_id = rp.match_id
+    # ``matches_store`` is the tenant's authoritative registry of hosted vs.
+    # mirrored ownership (#631 Task 6); ``None`` only if a match doc exists
+    # without ever having been registered there, which shouldn't happen for
+    # a real hosted match - fall back to "hosted" rather than mislabel it
+    # a mirror.
+    if state.matches_store is not None:
+        match_row = await state.matches_store.get(rp.match_id)
+        detail.origin = match_row.origin if match_row is not None else "hosted"
     shooters = match_doc.get("shooters") or []
     detail.shooter_count = len(shooters)
     detail.stage_count = len(match_doc.get("stages") or [])
@@ -5026,6 +5223,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         sessionmaker,
         tenant_session_factory,
     )
+    from ..db.desktop_tokens import DesktopTokenAuth, DesktopTokenStore
     from ..db.share_tokens import ShareTokenStore
     from ..db.share_tokens import resolve_share_token as _resolve_share_token_fn
     from ..db.workers import WorkersStore
@@ -5082,7 +5280,14 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # signups to all but an allowlist via SPLITSMITH_SIGNUPS_OPEN=false +
     # SPLITSMITH_SIGNUP_ALLOWLIST. Returning users always sign in.
     signup_policy = build_signup_policy()
-    state.auth = MagicLinkAuth(session_factory, email_sender, signup_policy=signup_policy)
+    # Composite: a magic-link session cookie (browser) or a desktop bearer
+    # token (sync push, #631) either resolve to a normal tenant user - the
+    # auth gate and everything downstream of it never distinguish which
+    # backend answered. Session cookie is tried first (the common case).
+    state.auth = CompositeAuth(
+        MagicLinkAuth(session_factory, email_sender, signup_policy=signup_policy),
+        DesktopTokenAuth(session_factory),
+    )
 
     # Anonymous resolver for the share-token public path. Uses the RAW
     # session_factory (same as auth above) - share_tokens is not RLS-scoped
@@ -5168,6 +5373,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             project_state=ProjectStateStore(tenant_factory, user_id=user_id),
             storage=_tenant_s3_storage(s3_client, s3_bucket, user_id),
             share_tokens=ShareTokenStore(tenant_factory, user_id=user_id),
+            desktop_tokens=DesktopTokenStore(tenant_factory, user_id=user_id),
         )
 
     state._build_tenant = _build_tenant
@@ -5607,7 +5813,12 @@ def create_app(
         email = payload.email.strip()
         if not email or "@" not in email:
             raise HTTPException(status_code=400, detail="a valid email is required")
-        await state.auth.begin_login(email, base_url=state.public_base_url)
+        # begin_login/complete_login/end_session aren't in the AuthBackend
+        # Protocol (see auth.py) - they're magic-link-specific, so reach
+        # through the composite to backends[0]. Safe: these routes 404
+        # above unless hosted mode is active, and hosted mode always
+        # installs MagicLinkAuth as backends[0].
+        await state.auth.backends[0].begin_login(email, base_url=state.public_base_url)
         return JSONResponse({"ok": True})
 
     @app.get("/auth/callback")
@@ -5623,7 +5834,7 @@ def create_app(
         from ..db import InvalidMagicLinkError
 
         try:
-            issued = await state.auth.complete_login(
+            issued = await state.auth.backends[0].complete_login(
                 token,
                 user_agent=request.headers.get("user-agent"),
                 ip=request.client.host if request.client else None,
@@ -5650,7 +5861,7 @@ def create_app(
 
         cookie = request.cookies.get(SESSION_COOKIE_NAME)
         if cookie:
-            await state.auth.end_session(cookie)
+            await state.auth.backends[0].end_session(cookie)
         response = JSONResponse({"ok": True})
         # Clear with the same attributes the cookie was set with -- stricter
         # browsers match name + path + Secure/SameSite when deleting, and a
@@ -5731,6 +5942,47 @@ def create_app(
         if not ok:
             raise HTTPException(status_code=404, detail="not found")
         return Response(status_code=204)
+
+    # ----------------------------------------------------------------------
+    # Match sync trigger/status (desktop-to-hosted sync MVP, #631 Task 9)
+    # Local-only: raise 404 in hosted mode (same inverse guard as the
+    # settings routes above). Reached via the /api/matches/{match_id}/
+    # alias prefix, same as /api/match/shares, so current_match_root is
+    # already set by the time these run.
+    # ----------------------------------------------------------------------
+
+    @app.post("/api/match/sync", response_model=Job)
+    async def post_match_sync() -> Job:
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        if not prefs.hosted_base_url or not prefs.hosted_token:
+            raise HTTPException(status_code=409, detail="sync_not_configured")
+        return await state.jobs.submit(kind="sync_match")
+
+    @app.get("/api/match/sync/status", response_model=SyncStatusResponse)
+    async def get_match_sync_status() -> SyncStatusResponse:
+        """Cheap sync status: size/mtime-only planning, no hashing.
+
+        ``stale`` is True whenever a push would have real work to do -
+        the match has never synced, there's unpushed media, or the plan
+        itself can't run (e.g. a legacy project without a match id).
+        """
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        configured = bool(prefs.hosted_base_url and prefs.hosted_token)
+        match_root = state.match_root
+        sync_state = load_sync_state(match_root)
+        plan = build_push_plan(match_root, sync_state=sync_state)
+        stale = sync_state.last_synced_at is None or bool(plan.media) or bool(plan.errors)
+        return SyncStatusResponse(
+            configured=configured,
+            last_synced_at=sync_state.last_synced_at,
+            stale=stale,
+            pending_media=len(plan.media),
+            errors=plan.errors,
+        )
 
     @app.exception_handler(ShutdownInProgressError)
     async def _shutdown_in_progress_handler(request: Request, exc: ShutdownInProgressError) -> JSONResponse:
@@ -5838,7 +6090,8 @@ def create_app(
             # restarts + replicas. A match the tenant doesn't own returns
             # None -> the same 404 an unknown id gets (existence and
             # ownership stay indistinguishable).
-            if await owner_store.get(match_id) is None:
+            owner_row = await owner_store.get(match_id)
+            if owner_row is None:
                 return JSONResponse(
                     status_code=404,
                     content={
@@ -5848,6 +6101,19 @@ def create_app(
                         }
                     },
                 )
+            # Read-only mirror gate (#631 Task 6). A ``desktop``-origin row
+            # is a mirror of a match desktop still owns - only ``/api/sync/*``
+            # (not alias-routed, so this middleware never sees it) may write
+            # to it. Every non-safe method through this alias 403s, except
+            # share management: creating/revoking a share link on a mirror
+            # is the whole point of exposing it hosted-side, so
+            # ``match/shares`` stays writable.
+            if (
+                owner_row.origin == "desktop"
+                and request.method not in ("GET", "HEAD", "OPTIONS")
+                and not (rest == "match/shares" or rest.startswith("match/shares/"))
+            ):
+                return JSONResponse(status_code=403, content={"detail": "read_only_mirror"})
             work_root = (
                 Path(
                     os.environ.get(SPLITSMITH_PROJECTS_DIR_ENV, "").strip() or SPLITSMITH_PROJECTS_DIR_DEFAULT
@@ -5857,6 +6123,7 @@ def create_app(
             work_root.mkdir(parents=True, exist_ok=True)
             state.matches.register(match_id, work_root)
             match_root = work_root.resolve()
+            match_origin = owner_row.origin
         else:
             # Local mode: one operator, no tenancy. Resolve via the local
             # recent-projects scan (the registry's miss_resolver is None).
@@ -5872,16 +6139,19 @@ def create_app(
                         }
                     },
                 )
+            match_origin = "local"
         rewritten = "/api/" + rest
         request.scope["path"] = rewritten
         request.scope["raw_path"] = rewritten.encode("utf-8")
         root_token = current_match_root.set(match_root)
         id_token = current_match_id.set(match_id)
+        origin_token = current_match_origin.set(match_origin)
         try:
             return await call_next(request)
         finally:
             current_match_root.reset(root_token)
             current_match_id.reset(id_token)
+            current_match_origin.reset(origin_token)
 
     # ----------------------------------------------------------------------
     # Share-link anonymous read middleware (issue #349)
@@ -11720,6 +11990,7 @@ def create_app(
             match_root="" if current_share_request.get() else str(match_root),
             match_name=match.name,
             shooters=entries,
+            origin=current_match_origin.get() or "local",
         )
 
     @app.post("/api/match/shooters", response_model=ShooterListResponse)
@@ -12598,6 +12869,89 @@ def create_app(
     async def delete_scoreboard_identity(user: User = Depends(get_current_user)) -> JSONResponse:
         await state.scoreboard_identity.clear()
         return JSONResponse({"ok": True})
+
+    # ----------------------------------------------------------------------
+    # Hosted-sync settings (desktop-to-hosted sync MVP, #631 Task 9)
+    # Local-only: raise 404 in hosted mode (the inverse of the desktop-token
+    # guard below - a hosted install has no "push to hosted" target of its
+    # own). Not match-scoped: the hosted target is a per-install setting,
+    # not a per-match one, so this stays outside the /api/matches/{id}/
+    # alias.
+    # ----------------------------------------------------------------------
+
+    @app.get("/api/settings/hosted-sync", response_model=HostedSyncSettings)
+    async def get_hosted_sync_settings() -> HostedSyncSettings:
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        return HostedSyncSettings(base_url=prefs.hosted_base_url, token_set=bool(prefs.hosted_token))
+
+    @app.put("/api/settings/hosted-sync", response_model=HostedSyncSettings)
+    async def put_hosted_sync_settings(req: HostedSyncSettingsRequest) -> HostedSyncSettings:
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        prefs.hosted_base_url = req.base_url
+        # None keeps the stored token (the SPA resubmits base_url alone
+        # without re-typing the secret); "" clears it; anything else
+        # replaces it.
+        if req.token is not None:
+            prefs.hosted_token = req.token or None
+        user_config.save_global_prefs(prefs)
+        return HostedSyncSettings(base_url=prefs.hosted_base_url, token_set=bool(prefs.hosted_token))
+
+    # ----------------------------------------------------------------------
+    # Desktop-token management routes (desktop-to-hosted sync MVP, #631)
+    # Hosted-only: raise 404 in local mode (same mechanism as share links -
+    # desktop sync has no meaning against an ephemeral local install). The
+    # store is resolved per-request from state.desktop_tokens, which reads
+    # the authenticated user's TenantContext (built with the tenant-scoped
+    # session factory - see _apply_hosted_mode_wiring / TenantContext).
+    # ----------------------------------------------------------------------
+
+    @app.get("/api/me/desktop-tokens", response_model=DesktopTokenListResponse)
+    async def list_desktop_tokens(
+        user: User = Depends(get_current_user),
+    ) -> DesktopTokenListResponse:
+        """List this user's desktop tokens. Never includes the hash or raw value."""
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        store = state.desktop_tokens
+        if store is None:
+            raise HTTPException(status_code=500, detail="desktop token store unavailable")
+        records = await store.list()
+        return DesktopTokenListResponse(tokens=[_desktop_token_info(r) for r in records])
+
+    @app.post("/api/me/desktop-tokens", response_model=DesktopTokenCreateResponse, status_code=201)
+    async def create_desktop_token(
+        req: DesktopTokenCreateRequest,
+        user: User = Depends(get_current_user),
+    ) -> DesktopTokenCreateResponse:
+        """Mint a new desktop token. The raw value is returned here, once."""
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        store = state.desktop_tokens
+        if store is None:
+            raise HTTPException(status_code=500, detail="desktop token store unavailable")
+        record, raw = await store.create(req.name)
+        return DesktopTokenCreateResponse(token=raw, record=_desktop_token_info(record))
+
+    @app.delete("/api/me/desktop-tokens/{token_id}", response_model=DesktopTokenRevokeResponse)
+    async def revoke_desktop_token(
+        token_id: str,
+        user: User = Depends(get_current_user),
+    ) -> DesktopTokenRevokeResponse:
+        """Revoke a desktop token. ``revoked`` is False for an unknown id or
+        one owned by another user - the two are indistinguishable to the
+        caller by design (mirrors the share-token revoke route's ownership
+        handling)."""
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        store = state.desktop_tokens
+        if store is None:
+            raise HTTPException(status_code=500, detail="desktop token store unavailable")
+        revoked = await store.revoke(token_id)
+        return DesktopTokenRevokeResponse(revoked=revoked)
 
     @app.get("/api/server/features")
     def server_features() -> JSONResponse:
@@ -13813,6 +14167,16 @@ def create_app(
         pending.sort(key=lambda x: x.age_seconds or 0)
         done.sort(key=lambda x: x.slug)
         return DevReviewQueueResponse(pending=pending, flagged=flagged, done=done)
+
+    # Desktop-to-hosted sync router (#631). Included after every middleware
+    # above is registered so /api/sync/* passes through the same auth gate
+    # as the rest of /api/*. Its own imports are lazy where they'd pull in
+    # the hosted-only db deps, so registering it here is safe on a local-
+    # slim install too - every route just 404s outside hosted mode (see
+    # sync_api._hosted_gate).
+    from .sync_api import router as sync_router
+
+    app.include_router(sync_router)
 
     # ----------------------------------------------------------------------
     # Static asset serving (SPA)

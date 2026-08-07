@@ -1277,6 +1277,27 @@ export function isNoProjectError(err: unknown): boolean {
   return (body as { code?: unknown }).code === "no_project";
 }
 
+/** Shown wherever a desktop-origin mirror match blocks a mutation -
+ *  both the persistent MatchShell banner (#631 Task 10) and, via
+ *  ``apiErrorText`` below, any 403 ``read_only_mirror`` response that
+ *  reaches a generic error path instead of the banner. Keeping one
+ *  string means the two surfaces can never say something different. */
+export const READ_ONLY_MIRROR_MESSAGE =
+  "Synced from a desktop install - read-only here.";
+
+/** True when ``err`` is the 403 the server raises for a mutation against
+ *  a desktop-origin mirror match (#631 Task 6 - every alias-routed
+ *  write except share-link management). The server sends a plain-string
+ *  ``detail`` (not the structured ``{code, ...}`` shape ``isNoProjectError``
+ *  matches), so ``err.body`` is compared directly. */
+export function isReadOnlyMirrorError(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    err.status === 403 &&
+    err.body === "read_only_mirror"
+  );
+}
+
 /** A sentence fit to render inline in the UI for an arbitrary thrown value.
  *
  *  ``ApiError.message`` is ```${status}: ${detail}` `` and ``detail`` is
@@ -1308,6 +1329,11 @@ export function isNoProjectError(err: unknown): boolean {
  */
 export function apiErrorText(err: unknown, fallback: string): string {
   if (!(err instanceof ApiError)) return fallback;
+  // read_only_mirror's raw detail is a machine-readable code, not prose
+  // ("Synced from..." is what the caller should see, not the literal
+  // string "read_only_mirror") - map it before the general string/object
+  // discriminator below, which would otherwise pass it through verbatim.
+  if (isReadOnlyMirrorError(err)) return READ_ONLY_MIRROR_MESSAGE;
   if (err.body !== null && typeof err.body !== "string") return fallback;
   const detail = err.detail?.trim();
   return detail ? detail : fallback;
@@ -1402,6 +1428,14 @@ export interface DeleteProjectOptions {
   deleteRawUploads?: boolean;
 }
 
+/** Where a match's canonical data lives (#631). A "desktop" match is a
+ *  read-only mirror synced down from the desktop app - every mutation
+ *  except share-link management and match deletion 403s
+ *  ``read_only_mirror`` (see :func:`isReadOnlyMirrorError`). "hosted"
+ *  matches are hosted-native; "local" is the desktop app's own view of
+ *  its own matches (the field is always "local" there). */
+export type MatchOrigin = "hosted" | "desktop" | "local";
+
 /** Detailed RecentProject with on-disk metadata (`?detail=true`, #322). */
 export interface RecentProjectDetail {
   path: string;
@@ -1425,6 +1459,8 @@ export interface RecentProjectDetail {
     | "unknown";
   manual: boolean;
   shooter_names: string[];
+  /** See :type:`MatchOrigin` (#631). */
+  origin: MatchOrigin;
 }
 
 export interface CreateMatchStageDraft {
@@ -1525,6 +1561,8 @@ export interface ShooterListResponse {
   match_root: string;
   match_name: string;
   shooters: ShooterListEntry[];
+  /** See :type:`MatchOrigin` (#631). */
+  origin: MatchOrigin;
 }
 
 /** One uploaded raw video in the operator's hosted-mode object
@@ -3636,6 +3674,59 @@ export const api = {
     request<void>(`/api/admin/workers/${encodeURIComponent(id)}`, {
       method: "DELETE",
     }),
+
+  // Desktop-token management (desktop-to-hosted sync MVP, #631 Task 3).
+  // Operator-global (/api/me/...), hosted-only - 404s in local mode.
+
+  /** List this account's desktop sync tokens. Never includes the raw
+   *  value or its hash. */
+  listDesktopTokens: () =>
+    request<DesktopTokenListResponse>("/api/me/desktop-tokens"),
+
+  /** Mint a new desktop sync token. The raw bearer value is returned
+   *  once, in this response only - store it or lose it. */
+  createDesktopToken: (name: string) =>
+    request<DesktopTokenCreateResponse>("/api/me/desktop-tokens", {
+      method: "POST",
+      json: { name },
+    }),
+
+  /** Revoke a desktop sync token by id. ``revoked`` is false for an
+   *  unknown id or one owned by another user. */
+  revokeDesktopToken: (tokenId: string) =>
+    request<DesktopTokenRevokeResponse>(
+      `/api/me/desktop-tokens/${encodeURIComponent(tokenId)}`,
+      { method: "DELETE" },
+    ),
+
+  // Hosted-sync settings + match sync trigger (desktop-to-hosted sync MVP,
+  // #631 Task 9/11). Local-only - every route 404s in hosted mode; the
+  // SPA only mounts SyncCard when useDeploymentMode() === "local", so
+  // that 404 should never be reachable from the UI. Settings are an
+  // operator-global install setting (/api/settings/...), not match-scoped;
+  // the trigger/status routes ride /api/match/... so scopeRequestPath
+  // rewrites them onto the current match, same as listShares above.
+
+  /** Read the current hosted-sync target. */
+  getSyncSettings: () => request<HostedSyncSettings>("/api/settings/hosted-sync"),
+
+  /** Save the hosted-sync target. ``token: null`` keeps whatever token is
+   *  already stored so the caller can resubmit ``baseUrl`` alone without
+   *  re-typing the secret; ``""`` clears it; any other string replaces it. */
+  putSyncSettings: (baseUrl: string, token: string | null) =>
+    request<HostedSyncSettings>("/api/settings/hosted-sync", {
+      method: "PUT",
+      json: { base_url: baseUrl, token },
+    }),
+
+  /** Poll the current match's sync status: configured?, when it last
+   *  synced, whether it's stale, and any plan errors that would block
+   *  a push. */
+  getSyncStatus: () => request<SyncStatusResponse>("/api/match/sync/status"),
+
+  /** Submit a ``sync_match`` job for the current match. 409
+   *  ``sync_not_configured`` when no hosted-sync target is saved yet. */
+  startSync: () => request<Job>("/api/match/sync", { method: "POST" }),
 };
 
 /** One compute worker row, mirrored from the backend WorkerView. */
@@ -3949,6 +4040,59 @@ export interface ShareInfo {
 /** Response from GET /api/match/shares. */
 export interface ShareListResponse {
   shares: ShareInfo[];
+}
+
+/** One desktop sync token as the owner-management routes return it
+ *  (#631 Task 3). Mirrors the backend ``DesktopTokenInfo``. Never
+ *  carries the token hash or the raw value. */
+export interface DesktopTokenInfo {
+  id: string;
+  name: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+/** Response from GET /api/me/desktop-tokens. */
+export interface DesktopTokenListResponse {
+  tokens: DesktopTokenInfo[];
+}
+
+/** Response from POST /api/me/desktop-tokens. ``token`` is the raw
+ *  bearer value - it appears here and only here; every other response
+ *  (including this token's own future GET/DELETE entries) carries just
+ *  the ``DesktopTokenInfo`` record. */
+export interface DesktopTokenCreateResponse {
+  token: string;
+  record: DesktopTokenInfo;
+}
+
+/** Response from DELETE /api/me/desktop-tokens/{token_id}. */
+export interface DesktopTokenRevokeResponse {
+  revoked: boolean;
+}
+
+/** Response from GET/PUT /api/settings/hosted-sync (#631 Task 9). Local
+ *  install's hosted-sync target: where the desktop client pushes a
+ *  match and which desktop token it authenticates with. ``token_set``
+ *  is a boolean, never the raw token - the server never echoes a
+ *  bearer credential back over localhost HTTP. */
+export interface HostedSyncSettings {
+  base_url: string | null;
+  token_set: boolean;
+}
+
+/** Response from GET /api/match/sync/status (#631 Task 9). Cheap
+ *  size/mtime-only planning, no hashing - safe to poll. ``stale`` is
+ *  true whenever a push would have real work to do (never synced,
+ *  unpushed media, or the plan itself can't run). ``errors`` lists
+ *  the reasons a push would refuse to run right now. */
+export interface SyncStatusResponse {
+  configured: boolean;
+  last_synced_at: string | null;
+  stale: boolean;
+  pending_media: number;
+  errors: string[];
 }
 
 export { ApiError };

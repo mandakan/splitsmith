@@ -55,7 +55,7 @@ def admin_client(
 
     app = create_app()
     sender = _CapturingSender()
-    app.state.splitsmith_state.auth._email = sender
+    app.state.splitsmith_state.auth.backends[0]._email = sender
     with TestClient(app, follow_redirects=False) as client:
         login(client, sender, ADMIN_EMAIL)
         yield client, app
@@ -122,7 +122,7 @@ def test_non_admin_gets_403(hosted_env: str, monkeypatch: pytest.MonkeyPatch) ->
 
     app = create_app()
     sender = _CapturingSender()
-    app.state.splitsmith_state.auth._email = sender
+    app.state.splitsmith_state.auth.backends[0]._email = sender
     with TestClient(app, follow_redirects=False) as client:
         login(client, sender, USER_EMAIL)
         resp = client.get("/api/admin/workers")

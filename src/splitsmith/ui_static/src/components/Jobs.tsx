@@ -26,6 +26,7 @@ import {
   ArrowDownToLine,
   ChevronRight,
   CloudDownload,
+  CloudUpload,
   Crosshair,
   Film,
   Pause,
@@ -58,6 +59,7 @@ const KIND_LABEL: Record<string, string> = {
   audio_extract: "Audio extract",
   model_download: "Download models",
   generate_proxy: "Generating preview",
+  sync_match: "Sync to hosted",
 };
 
 const KIND_ICON: Record<string, ReactNode> = {
@@ -69,6 +71,7 @@ const KIND_ICON: Record<string, ReactNode> = {
   audio_extract: <Volume2 className="size-3.5" />,
   model_download: <CloudDownload className="size-3.5" />,
   generate_proxy: <Film className="size-3.5" />,
+  sync_match: <CloudUpload className="size-3.5" />,
 };
 
 function kindLabel(kind: string): string {

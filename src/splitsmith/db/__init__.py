@@ -35,6 +35,7 @@ from .matches import PostgresMatchStore
 from .models import (
     Base,
     ComputeJobRow,
+    DesktopTokenRow,
     MagicLinkTokenRow,
     MatchRow,
     RecentProjectRow,
@@ -53,6 +54,7 @@ __all__ = [
     "Base",
     "ComputeJobRow",
     "ConsoleEmailSender",
+    "DesktopTokenRow",
     "EmailSender",
     "InvalidMagicLinkError",
     "IssuedSession",

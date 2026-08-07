@@ -6,13 +6,18 @@
  * on the desktop app. Shows the account email and a sign-out button that
  * revokes the session and drops to the login surface (the deployment-mode
  * gate redirects once the auth status flips to anonymous).
+ *
+ * Also carries the entry point to DesktopTokensDialog (#631 Task 10) -
+ * desktop token management is an account-level concern, same tier as
+ * sign-out, not match-scoped like ShareDialog.
  */
 
 import * as React from "react";
-import { LogOut, Server } from "lucide-react";
+import { KeyRound, LogOut, Server } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { IconButton, iconButtonVariants } from "@/components/ui/IconButton";
+import { DesktopTokensDialog } from "@/components/account/DesktopTokensDialog";
 import { useDeploymentMode } from "@/lib/features";
 import { useAuth } from "@/lib/auth";
 
@@ -20,6 +25,7 @@ export function AccountChip({ className }: { className?: string }) {
   const mode = useDeploymentMode();
   const { status, user, logout } = useAuth();
   const [busy, setBusy] = React.useState(false);
+  const [tokensOpen, setTokensOpen] = React.useState(false);
 
   // Hosted-only, and only once a real account is resolved.
   if (mode !== "hosted" || status !== "authed" || !user) return null;
@@ -61,12 +67,24 @@ export function AccountChip({ className }: { className?: string }) {
       <IconButton
         variant="subtle"
         size="sm"
+        label="Desktop sync tokens"
+        onClick={() => setTokensOpen(true)}
+        disabled={busy}
+      >
+        <KeyRound className="size-3.5" />
+      </IconButton>
+      <IconButton
+        variant="subtle"
+        size="sm"
         label="Sign out"
         onClick={onLogout}
         disabled={busy}
       >
         <LogOut className="size-3.5" />
       </IconButton>
+      {tokensOpen ? (
+        <DesktopTokensDialog onClose={() => setTokensOpen(false)} />
+      ) : null}
     </div>
   );
 }

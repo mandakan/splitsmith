@@ -12,6 +12,7 @@ import { Link2Off, RotateCcw } from "lucide-react";
 
 import {
   api,
+  type MatchOrigin,
   type MatchProject,
   type ShooterListEntry,
 } from "@/lib/api";
@@ -21,6 +22,10 @@ import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 export function ShareShell() {
   const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
   const [project, setProject] = useState<MatchProject | null>(null);
+  // Carried through for the outlet context's shape only - the public
+  // share surface never renders a write CTA regardless of origin, so
+  // nothing here reads it back (#631 Task 10).
+  const [origin, setOrigin] = useState<MatchOrigin | null>(null);
   const [dead, setDead] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -34,6 +39,7 @@ export function ShareShell() {
       .then((r) => {
         if (!alive) return;
         setShooters(r.shooters);
+        setOrigin(r.origin);
         const slug = pickDefaultShooterSlug(r.shooters);
         if (slug) {
           api
@@ -69,6 +75,7 @@ export function ShareShell() {
     health: null,
     shooters,
     refresh,
+    origin,
   };
   return (
     <div className="min-h-dvh bg-bg">

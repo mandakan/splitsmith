@@ -48,6 +48,27 @@ class AuthBackend(Protocol):
         """
 
 
+class CompositeAuth:
+    """Tries each backend in order; the first non-``None`` result wins.
+
+    Hosted mode authenticates two ways: a magic-link session cookie (the
+    browser) or a desktop bearer token (the sync push from the desktop
+    app). Both resolve to a normal :class:`User`, so downstream code
+    (``request.state.user``, ``current_tenant``, RLS) never distinguishes
+    which backend answered.
+    """
+
+    def __init__(self, *backends: AuthBackend) -> None:
+        self.backends = backends
+
+    async def authenticate_request(self, request: Request) -> User | None:
+        for backend in self.backends:
+            user = await backend.authenticate_request(request)
+            if user is not None:
+                return user
+        return None
+
+
 class LoopbackAuth:
     """Local-mode backend. Every request resolves to the same user.
 
