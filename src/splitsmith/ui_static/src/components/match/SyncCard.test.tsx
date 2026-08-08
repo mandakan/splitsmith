@@ -58,6 +58,7 @@ describe("SyncCard", () => {
     vi.mocked(api.getSyncSettings).mockResolvedValue({
       base_url: "https://splitsmith.app",
       token_set: true,
+      account: null,
     });
   });
 

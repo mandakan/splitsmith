@@ -106,6 +106,23 @@ class ScoreboardIdentity(BaseModel):
     base_url: str | None = None
 
 
+class HostedAccountRef(BaseModel):
+    """The hosted account this desktop install is linked to (#719).
+
+    Cached from the device-flow poll response rather than read live: the
+    sync-scoped token the flow mints cannot reach ``/api/me``, and
+    widening the scope for a cosmetic field is the wrong trade. A hosted-
+    side email change therefore will not propagate until the install
+    re-links, which is accepted.
+    """
+
+    id: str
+    email: str
+    display_name: str | None = None
+    device_name: str
+    linked_at: datetime
+
+
 class GlobalPrefs(BaseModel):
     """Global preferences read from ``config.yaml``.
 
@@ -126,6 +143,9 @@ class GlobalPrefs(BaseModel):
     # verbatim; see ``GET /api/settings/hosted-sync``.
     hosted_base_url: str | None = None
     hosted_token: str | None = None
+    # One nested model rather than five flat fields, per this model's own
+    # "add sparingly" instruction (#719).
+    hosted_account: HostedAccountRef | None = None
 
 
 # ---------------------------------------------------------------------------

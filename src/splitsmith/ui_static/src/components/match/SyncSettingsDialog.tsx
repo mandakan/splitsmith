@@ -2,17 +2,31 @@
  * SyncSettingsDialog - configure the local install's hosted-sync target
  * (desktop-to-hosted sync MVP, #631 Task 11).
  *
- * Two fields: the hosted base URL (e.g. https://splitsmith.app) and a
- * desktop token (see DesktopTokensDialog on the hosted side, #631 Task
- * 10, for where that token comes from). Saves via PUT
- * /api/settings/hosted-sync - an operator-global setting, not
- * match-scoped, so it applies to every match this install syncs.
+ * The base URL field (e.g. https://splitsmith.app) is always visible.
+ * Linking the account itself now runs through ``HostedAccountChip`` ->
+ * ``DeviceLoginDialog`` (#719) - sign in from the chip and this install
+ * gets a scoped token without a plaintext secret ever crossing the
+ * clipboard. The desktop-token field here is the escape hatch for a
+ * machine with no browser to open splitsmith.app in at all, tucked
+ * behind an "Advanced" disclosure so it reads as the fallback it is.
+ * Saves via PUT /api/settings/hosted-sync - an operator-global setting,
+ * not match-scoped, so it applies to every match this install syncs.
  *
  * ``token_set`` from the last GET renders as a masked placeholder in
  * the token field: leaving it blank on save keeps the stored token
  * (backend contract: ``token: null`` keeps, ``""`` clears, anything
- * else replaces). A first-time save with no token stored yet requires
- * a value - there is nothing to "keep".
+ * else replaces) - unchanged by the #719 demotion.
+ *
+ * The token is optional on a first save too. It used to be required
+ * when nothing was stored yet, which made this dialog unusable for its
+ * primary job: the device flow needs ``hosted_base_url`` set before it
+ * can start, this dialog is the only place that sets it, so demanding
+ * a pasted token here meant the fallback had to be performed before
+ * the path that exists to replace it. Base URL alone is a complete,
+ * valid save.
+ *
+ * Saving here also clears any linked account server-side when the
+ * token or the base URL changes (#719) - see put_hosted_sync_settings.
  *
  * Overlay architecture: body Portal + z-modal token + useDialogFocus
  * (modal trap) - same skeleton as DesktopTokensDialog (PR #519
@@ -66,11 +80,10 @@ export function SyncSettingsDialog({
       setError("Base URL is required.");
       return;
     }
+    // No token requirement, in either direction: blank keeps whatever is
+    // stored (or stores nothing at all on a fresh install, which is the
+    // normal case now that the device flow is the primary path).
     const trimmedToken = token.trim();
-    if (!trimmedToken && !tokenAlreadySet) {
-      setError("Token is required.");
-      return;
-    }
     setSaving(true);
     try {
       const updated = await api.putSyncSettings(
@@ -112,8 +125,8 @@ export function SyncSettingsDialog({
             </CardTitle>
             <CardDescription id="sync-settings-desc">
               Where this install pushes a match when you sync it to
-              splitsmith.app. The token comes from the account's Desktop
-              sync tokens page.
+              splitsmith.app. Set the URL here, then sign in from the
+              account chip to link the account.
             </CardDescription>
           </CardHeader>
 
@@ -144,33 +157,42 @@ export function SyncSettingsDialog({
               />
             </div>
 
-            <div className="flex flex-col gap-1">
-              <label
-                htmlFor="sync-token"
-                className="font-mono text-xs uppercase tracking-[0.08em] text-muted"
-              >
-                Desktop token
-              </label>
-              <input
-                id="sync-token"
-                type="password"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                disabled={saving}
-                placeholder={
-                  tokenAlreadySet
-                    ? "•••••••••••• (unchanged)"
-                    : "Paste your desktop token"
-                }
-                className="rounded border border-rule bg-bg px-3 py-1.5 text-sm disabled:opacity-50"
-                aria-required={!tokenAlreadySet}
-              />
-              {tokenAlreadySet ? (
-                <p className="font-mono text-[0.6875rem] text-muted">
-                  A token is already saved. Leave blank to keep it.
-                </p>
-              ) : null}
-            </div>
+            <details className="rounded border border-rule bg-surface-2/40 p-3">
+              <summary className="cursor-pointer text-xs uppercase tracking-[0.08em] text-muted">
+                Advanced: paste a token instead
+              </summary>
+              <p className="mt-2 text-xs text-muted">
+                Sign in from the account chip instead -- it links this
+                install through your browser. Pasting a token is for a
+                machine with no browser at all.
+              </p>
+              <div className="mt-3 flex flex-col gap-1">
+                <label
+                  htmlFor="sync-token"
+                  className="font-mono text-xs uppercase tracking-[0.08em] text-muted"
+                >
+                  Desktop token
+                </label>
+                <input
+                  id="sync-token"
+                  type="password"
+                  value={token}
+                  onChange={(e) => setToken(e.target.value)}
+                  disabled={saving}
+                  placeholder={
+                    tokenAlreadySet
+                      ? "************ (unchanged)"
+                      : "Paste your desktop token"
+                  }
+                  className="rounded border border-rule bg-bg px-3 py-1.5 text-sm disabled:opacity-50"
+                />
+                {tokenAlreadySet ? (
+                  <p className="font-mono text-[0.6875rem] text-muted">
+                    A token is already saved. Leave blank to keep it.
+                  </p>
+                ) : null}
+              </div>
+            </details>
           </CardContent>
 
           <div className="flex justify-end gap-2 border-t border-rule p-4">

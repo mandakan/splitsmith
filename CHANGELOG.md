@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.1](https://github.com/mandakan/splitsmith/compare/v0.20.0...v0.20.1) (2026-08-08)
+
+
+### Build / CI
+
+* **deps:** batch all outstanding dependabot updates ([2e2d2cd](https://github.com/mandakan/splitsmith/commit/2e2d2cdaa7751899649847b2f170d0877fc029d5))
+* **deps:** batch all outstanding dependabot updates ([f716ceb](https://github.com/mandakan/splitsmith/commit/f716ceb24c1934286da0e182c72d24bef46f9d4e))
+
 ## [0.20.0](https://github.com/mandakan/splitsmith/compare/v0.19.0...v0.20.0) (2026-08-08)
 
 

@@ -24,6 +24,7 @@ import {
 } from "react-router-dom";
 
 import { AccountChip } from "@/components/AccountChip";
+import { HostedAccountChip } from "@/components/account/HostedAccountChip";
 import { JobsSurface } from "@/components/Jobs";
 import {
   useShellAccent,
@@ -560,6 +561,7 @@ export function MatchShell() {
           extras={
             <div className="flex flex-col gap-1">
               <div className="flex items-center gap-2 px-1 py-1">
+                <HostedAccountChip />
                 <AccountChip />
                 <div className="flex-1" />
               </div>

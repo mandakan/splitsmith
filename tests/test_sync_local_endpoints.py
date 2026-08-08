@@ -54,7 +54,7 @@ def test_settings_round_trip_masks_token(tmp_path: Path) -> None:
 
     initial = client.get("/api/settings/hosted-sync")
     assert initial.status_code == 200
-    assert initial.json() == {"base_url": None, "token_set": False}
+    assert initial.json() == {"base_url": None, "token_set": False, "account": None}
 
     put = client.put(
         "/api/settings/hosted-sync",
@@ -62,7 +62,7 @@ def test_settings_round_trip_masks_token(tmp_path: Path) -> None:
     )
     assert put.status_code == 200
     body = put.json()
-    assert body == {"base_url": "https://hosted.example", "token_set": True}
+    assert body == {"base_url": "https://hosted.example", "token_set": True, "account": None}
     assert "token" not in body
     assert "secret-token" not in put.text
 
@@ -72,7 +72,28 @@ def test_settings_round_trip_masks_token(tmp_path: Path) -> None:
     assert prefs.hosted_token == "secret-token"
 
     again = client.get("/api/settings/hosted-sync")
-    assert again.json() == {"base_url": "https://hosted.example", "token_set": True}
+    assert again.json() == {"base_url": "https://hosted.example", "token_set": True, "account": None}
+
+
+def test_first_save_accepts_a_base_url_with_no_token(tmp_path: Path) -> None:
+    """A fresh install must be able to set the hosted target alone (#719).
+
+    The device flow refuses to start until ``hosted_base_url`` is set,
+    and this route is the only thing that sets it - so requiring a token
+    here would mean pasting one before the flow that exists to replace
+    pasting one could even be reached.
+    """
+    client, _ = _local_app_with_match(tmp_path)
+
+    resp = client.put(
+        "/api/settings/hosted-sync",
+        json={"base_url": "https://hosted.example", "token": None},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"base_url": "https://hosted.example", "token_set": False, "account": None}
+
+    assert user_config.load_global_prefs().hosted_base_url == "https://hosted.example"
+    assert client.get("/api/settings/hosted-sync").json()["base_url"] == "https://hosted.example"
 
 
 def test_settings_put_null_token_keeps_stored_token(tmp_path: Path) -> None:
@@ -87,7 +108,7 @@ def test_settings_put_null_token_keeps_stored_token(tmp_path: Path) -> None:
         json={"base_url": "https://hosted.example/v2", "token": None},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"base_url": "https://hosted.example/v2", "token_set": True}
+    assert resp.json() == {"base_url": "https://hosted.example/v2", "token_set": True, "account": None}
     assert user_config.load_global_prefs().hosted_token == "secret-token"
 
 
@@ -103,7 +124,7 @@ def test_settings_put_empty_token_clears_stored_token(tmp_path: Path) -> None:
         json={"base_url": "https://hosted.example", "token": ""},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"base_url": "https://hosted.example", "token_set": False}
+    assert resp.json() == {"base_url": "https://hosted.example", "token_set": False, "account": None}
     assert user_config.load_global_prefs().hosted_token is None
 
 

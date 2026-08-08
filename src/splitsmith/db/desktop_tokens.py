@@ -64,11 +64,18 @@ class DesktopTokenStore:
         self._session_factory = session_factory
         self._user_id = user_id
 
-    async def create(self, name: str) -> tuple[DesktopTokenRecord, str]:
+    async def create(self, name: str, *, scope: str = "sync") -> tuple[DesktopTokenRecord, str]:
         """Mint a new token. Returns (record, raw_token) - the raw value
-        is only ever available here; only its hash is persisted."""
+        is only ever available here; only its hash is persisted.
+
+        ``scope`` defaults to ``"sync"`` (#719): every token minted after
+        that issue lands is scoped to ``/api/sync/*``, whether it came
+        from the device flow or the account page's manual button. The
+        only ``'full'`` tokens that will ever exist are the ones already
+        issued before the column landed.
+        """
         plain, hashed = _mint()
-        row = DesktopTokenRow(user_id=self._user_id, name=name, token_hash=hashed)
+        row = DesktopTokenRow(user_id=self._user_id, name=name, token_hash=hashed, scope=scope)
         async with self._session_factory() as session:
             session.add(row)
             await session.commit()
@@ -134,4 +141,9 @@ class DesktopTokenAuth:
                 return None
             row.last_used_at = datetime.now(UTC)
             await session.commit()
-            return User(id=user_row.id, email=user_row.email, display_name=user_row.display_name)
+            return User(
+                id=user_row.id,
+                email=user_row.email,
+                display_name=user_row.display_name,
+                token_scope=row.scope,
+            )
