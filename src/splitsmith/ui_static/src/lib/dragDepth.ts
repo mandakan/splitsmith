@@ -48,13 +48,20 @@ export function useWindowFileDrag(enabled: boolean): boolean {
     };
     window.addEventListener("dragenter", onEnter);
     window.addEventListener("dragleave", onLeave);
-    window.addEventListener("drop", onEnd);
-    window.addEventListener("dragend", onEnd);
+    // Capture phase - a bounded dropzone nested inside the window (e.g.
+    // HostedUploadModal) legitimately calls e.stopPropagation() on its own
+    // drop/dragend handler to keep its bubble-phase logic self-contained.
+    // A bubble-phase listener here would never see that event and the
+    // depth counter would never reset, sticking the full-page overlay on
+    // forever. Capture runs before stopPropagation can take effect, so
+    // the reset always fires regardless of what child handlers do.
+    window.addEventListener("drop", onEnd, true);
+    window.addEventListener("dragend", onEnd, true);
     return () => {
       window.removeEventListener("dragenter", onEnter);
       window.removeEventListener("dragleave", onLeave);
-      window.removeEventListener("drop", onEnd);
-      window.removeEventListener("dragend", onEnd);
+      window.removeEventListener("drop", onEnd, true);
+      window.removeEventListener("dragend", onEnd, true);
       depth.current = 0;
       setActive(false);
     };

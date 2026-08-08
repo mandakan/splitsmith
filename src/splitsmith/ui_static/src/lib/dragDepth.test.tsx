@@ -70,6 +70,29 @@ describe("useWindowFileDrag", () => {
     });
     expect(result.current).toBe(false);
   });
+
+  it("resets even when a nested dropzone's own drop handler stops propagation", () => {
+    // Regression for the stuck hosted overlay: HostedUploadModal's
+    // dropzone calls e.stopPropagation() in its own bubble-phase drop
+    // handler. If this hook's reset listener were also bubble-phase, it
+    // would never see the event and depth would never return to zero.
+    const child = document.createElement("div");
+    document.body.appendChild(child);
+    child.addEventListener("drop", (e) => e.stopPropagation());
+
+    const { result } = renderHook(() => useWindowFileDrag(true));
+    act(() => {
+      fireEvent.dragEnter(window, fileDrag);
+    });
+    expect(result.current).toBe(true);
+
+    act(() => {
+      fireEvent.drop(child, fileDrag);
+    });
+    expect(result.current).toBe(false);
+
+    document.body.removeChild(child);
+  });
 });
 
 function Zone() {

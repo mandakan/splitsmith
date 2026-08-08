@@ -43,6 +43,7 @@ import {
   type FsListing,
   type SuggestedStart,
 } from "@/lib/api";
+import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export interface FolderPickerCommitFile {
@@ -474,11 +475,13 @@ export function FolderPicker({
                 disabled={primaryDisabled}
                 onClick={() => void handleCommit()}
                 title={
-                  !allowEmptyFolder && selectedCount === 0 && videosHere === 0
-                    ? "Select a folder that contains video files, or drill in."
-                    : path
-                      ? `Use ${path}`
-                      : undefined
+                  error != null
+                    ? "This folder could not be read"
+                    : !allowEmptyFolder && selectedCount === 0 && videosHere === 0
+                      ? "Select a folder that contains video files, or drill in."
+                      : path
+                        ? `Use ${path}`
+                        : undefined
                 }
               >
                 {committing ? (
@@ -683,9 +686,18 @@ function SidebarIcon({ kind }: { kind: PlaceEntry["kind"] }) {
   return <Home className={className} />;
 }
 
+const STORAGE_OPTIONS = [
+  ["symlink", "Reference in place"],
+  ["copy", "Copy into project"],
+] as const;
+
 /** Symlink-vs-copy storage choice, rendered in the footer for the
  *  add-footage call site only. Buttons toggle between reference-in-place
- *  and copy-into-project modes. */
+ *  and copy-into-project modes.
+ *
+ *  Roving tabindex per the APG radio group pattern: only the checked
+ *  option is in the tab order; any arrow key moves focus to (and
+ *  selects) the other option since there are exactly two. */
 function StorageToggle({
   value,
   onChange,
@@ -695,25 +707,36 @@ function StorageToggle({
   onChange: (mode: "symlink" | "copy") => void;
   disabled: boolean;
 }) {
+  const btnRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+    e.preventDefault();
+    // Only two options - every arrow direction moves to the other one.
+    const nextIndex = index === 0 ? 1 : 0;
+    onChange(STORAGE_OPTIONS[nextIndex][0]);
+    btnRefs.current[nextIndex]?.focus();
+  };
+
   return (
     <div
       role="radiogroup"
       aria-label="Storage mode"
       className="inline-flex rounded-full border border-rule bg-surface p-0.5"
     >
-      {(
-        [
-          ["symlink", "Reference in place"],
-          ["copy", "Copy into project"],
-        ] as const
-      ).map(([mode, label]) => (
+      {STORAGE_OPTIONS.map(([mode, label], index) => (
         <button
           key={mode}
+          ref={(el) => {
+            btnRefs.current[index] = el;
+          }}
           type="button"
           role="radio"
           aria-checked={value === mode}
+          tabIndex={value === mode ? 0 : -1}
           disabled={disabled}
           onClick={() => onChange(mode)}
+          onKeyDown={(e) => handleKeyDown(e, index)}
           className={cn(
             "inline-flex items-center rounded-full px-3 py-1 font-display text-[0.625rem] font-bold uppercase tracking-[0.08em] transition-colors",
             value === mode
@@ -933,18 +956,6 @@ function formatDuration(seconds: number): string {
     return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
   return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unit]}`;
 }
 
 function buildBreadcrumb(path: string | null): { label: string; path: string }[] {

@@ -6,6 +6,8 @@
  * Computer), empty-folder rules (allowEmptyFolder on/off), and the
  * single-scroll-container layout contract.
  */
+import { useState } from "react";
+
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -247,6 +249,33 @@ describe("FolderPicker", () => {
     );
     expect(await screen.findByRole("button", { name: /retry/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /add this folder/i })).toBeDisabled();
+  });
+
+  it("moves focus and selection with arrow keys on the storage toggle", async () => {
+    function ControlledPicker() {
+      const [mode, setMode] = useState<"symlink" | "copy">("symlink");
+      return (
+        <FolderPicker {...defaultProps()} storage={{ value: mode, onChange: setMode }} />
+      );
+    }
+    const user = userEvent.setup();
+    render(<ControlledPicker />);
+    await screen.findByRole("button", { name: /add this folder/i });
+
+    const checked = screen.getByRole("radio", { name: /reference in place/i });
+    const other = screen.getByRole("radio", { name: /copy into project/i });
+    expect(checked).toHaveAttribute("tabindex", "0");
+    expect(other).toHaveAttribute("tabindex", "-1");
+
+    checked.focus();
+    expect(checked).toHaveFocus();
+    await user.keyboard("{ArrowRight}");
+
+    expect(other).toHaveAttribute("aria-checked", "true");
+    expect(checked).toHaveAttribute("aria-checked", "false");
+    expect(other).toHaveAttribute("tabindex", "0");
+    expect(checked).toHaveAttribute("tabindex", "-1");
+    expect(other).toHaveFocus();
   });
 
   it("announces busy state in a polite live region, and clears it once loaded", async () => {
