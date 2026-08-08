@@ -157,7 +157,7 @@ export function DeveloperShell() {
 
   return (
     <div
-      className="min-h-screen text-ink"
+      className="min-h-[calc(100dvh-var(--shell-header-h,86px))] text-ink"
       style={{
         backgroundImage:
           "radial-gradient(1400px 600px at 50% -100px, rgba(6,182,212,0.05), transparent 60%), linear-gradient(to bottom, var(--color-bg-glow), var(--color-bg))",
