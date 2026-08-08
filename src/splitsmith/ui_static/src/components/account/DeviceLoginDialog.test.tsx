@@ -38,6 +38,7 @@ const STARTED = {
   verification_uri_complete: "https://hosted.example/desktop/approve?code=ABCD-2345",
   expires_in: 600,
   interval: 1,
+  resumed: false,
 };
 
 const ACCOUNT = {
@@ -90,20 +91,56 @@ describe("DeviceLoginDialog", () => {
     expect(screen.queryByText(/declined/i)).not.toBeInTheDocument();
   });
 
-  it("falls through to polling on an already-pending 409, no error banner", async () => {
-    // Another call (e.g. a prior dialog mount) already has a login in
-    // flight on this install. The local server never echoes the secret
-    // device_code back to us, so there is no user_code to show here --
-    // but this is explicitly not an error state (behaviour 2 in the
-    // task brief): no role="alert" banner, and polling still runs.
-    startDeviceLogin.mockRejectedValue(
-      new ApiError(409, "device_login_already_pending", "device_login_already_pending"),
-    );
+  it("shows the code and the approve link when the login is resumed", async () => {
+    // A login was already in flight on this install (the operator
+    // cancelled the dialog and signed in again, or reloaded mid-flow).
+    // ``start`` hands that flow back with resumed: true rather than
+    // refusing -- and the whole point of the fix is that this state is
+    // NOT a dead end: the code and the approve button must both be here,
+    // with no error banner, or the operator has to wait out the TTL.
+    startDeviceLogin.mockResolvedValue({ ...STARTED, resumed: true, expires_in: 412 });
     getDeviceStatus.mockResolvedValue({ status: "pending", account: null, device_name: null });
     renderDialog();
-    expect(await screen.findByText(/already in progress/i)).toBeInTheDocument();
+
+    expect(await screen.findByText("ABCD-2345")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /open splitsmith\.app to approve/i }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/already in progress on this install/i)).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     await waitFor(() => expect(getDeviceStatus).toHaveBeenCalled());
+  });
+
+  it("does not claim a resume when the login is a fresh one", async () => {
+    // The inverse of the test above -- without it, the resume note could
+    // render unconditionally and nothing would notice.
+    startDeviceLogin.mockResolvedValue(STARTED);
+    getDeviceStatus.mockResolvedValue({ status: "pending", account: null, device_name: null });
+    renderDialog();
+
+    expect(await screen.findByText("ABCD-2345")).toBeInTheDocument();
+    expect(screen.queryByText(/already in progress on this install/i)).not.toBeInTheDocument();
+  });
+
+  it("treats an idle status while waiting as terminal, not as keep-polling", async () => {
+    // The local server lost the flow (it restarted mid-login, so the
+    // device_code is gone with it). Nothing can ever change from here,
+    // so the dialog must stop and offer a fresh start -- it used to sit
+    // on "Waiting for approval..." until the operator gave up.
+    startDeviceLogin.mockResolvedValue(STARTED);
+    getDeviceStatus.mockResolvedValue({ status: "idle", account: null, device_name: null });
+    renderDialog();
+
+    expect(await screen.findByText(/no longer in progress/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /try again/i })).toBeInTheDocument();
+    expect(screen.queryByText(/waiting for approval/i)).not.toBeInTheDocument();
+
+    // And it really stopped: no further polls after the terminal verdict.
+    const callsAtTerminal = getDeviceStatus.mock.calls.length;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    });
+    expect(getDeviceStatus.mock.calls.length).toBe(callsAtTerminal);
   });
 
   it("keeps polling through a transient 502 instead of treating it as terminal", async () => {

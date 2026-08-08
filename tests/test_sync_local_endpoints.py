@@ -75,6 +75,27 @@ def test_settings_round_trip_masks_token(tmp_path: Path) -> None:
     assert again.json() == {"base_url": "https://hosted.example", "token_set": True, "account": None}
 
 
+def test_first_save_accepts_a_base_url_with_no_token(tmp_path: Path) -> None:
+    """A fresh install must be able to set the hosted target alone (#719).
+
+    The device flow refuses to start until ``hosted_base_url`` is set,
+    and this route is the only thing that sets it - so requiring a token
+    here would mean pasting one before the flow that exists to replace
+    pasting one could even be reached.
+    """
+    client, _ = _local_app_with_match(tmp_path)
+
+    resp = client.put(
+        "/api/settings/hosted-sync",
+        json={"base_url": "https://hosted.example", "token": None},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"base_url": "https://hosted.example", "token_set": False, "account": None}
+
+    assert user_config.load_global_prefs().hosted_base_url == "https://hosted.example"
+    assert client.get("/api/settings/hosted-sync").json()["base_url"] == "https://hosted.example"
+
+
 def test_settings_put_null_token_keeps_stored_token(tmp_path: Path) -> None:
     client, _ = _local_app_with_match(tmp_path)
     client.put(

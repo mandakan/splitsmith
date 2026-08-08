@@ -3720,7 +3720,9 @@ export const api = {
     }),
 
   /** Begin a browser-assisted link to the hosted account (#719). 409
-   *  ``hosted_base_url_not_set`` when no hosted target is configured. */
+   *  ``hosted_base_url_not_set`` when no hosted target is configured.
+   *  A login already in flight is not an error: the still-live flow
+   *  comes back with ``resumed: true``. */
   startDeviceLogin: () =>
     request<DeviceStartResponse>("/api/settings/hosted-sync/device/start", {
       method: "POST",
@@ -4138,13 +4140,18 @@ export interface HostedAccountInfo {
 }
 
 /** Response from POST /api/settings/hosted-sync/device/start (#719).
- *  Carries no device_code: the secret stays on the local server. */
+ *  Carries no device_code: the secret stays on the local server.
+ *  ``resumed`` means a login was already in flight on this install and
+ *  this call handed that one back rather than starting a new one -- same
+ *  user_code, same links, ``expires_in`` counting down the remainder of
+ *  the original window. */
 export interface DeviceStartResponse {
   user_code: string;
   verification_uri: string;
   verification_uri_complete: string;
   expires_in: number;
   interval: number;
+  resumed: boolean;
 }
 
 /** Response from GET /api/settings/hosted-sync/device/status (#719).

@@ -18,13 +18,18 @@
  * box, so the code has to be approved in a tab the operator is
  * actually sitting at.
  *
- * ``device_login_already_pending`` (409 from start) is not an error:
- * another call already has a login in flight on this install (e.g. a
- * second dialog mount, or a page reload mid-flow). There is no
- * ``user_code`` to show in that case - the server never echoes the
- * secret device_code back to us, and the code that started the first
- * attempt is gone - so this falls through to polling status blind,
- * with a message explaining that, instead of showing an error banner.
+ * A login already in flight on this install (a second dialog mount, a
+ * page reload mid-flow, or the operator cancelling and signing in
+ * again) is not an error and not a dead end: ``start`` hands the live
+ * flow back with ``resumed: true``, same ``user_code`` and same approve
+ * link, so this dialog renders it exactly like a fresh start plus a
+ * line saying it picked the existing login up.
+ *
+ * ``status: "idle"`` while waiting means the flow this dialog was
+ * polling for is gone - the local server restarted, or another poller
+ * consumed the terminal verdict. Terminal here, not "keep polling":
+ * the code is unrecoverable, so the operator gets a "start again"
+ * button instead of a spinner that never resolves.
  *
  * A poll that 502s (hosted side unreachable) is deliberately left
  * alive server-side, so the client keeps polling through it rather
@@ -61,23 +66,7 @@ function isBaseUrlNotSetError(err: unknown): boolean {
   return err instanceof ApiError && err.status === 409 && err.body === "hosted_base_url_not_set";
 }
 
-/** True when ``err`` is the 409 the server raises when a device login
- *  is already in flight on this install. Not an error - fall through
- *  to polling instead of showing a banner. */
-function isAlreadyPendingError(err: unknown): boolean {
-  return (
-    err instanceof ApiError && err.status === 409 && err.body === "device_login_already_pending"
-  );
-}
-
-type Phase = "loading" | "no-base-url" | "error" | "waiting" | "denied" | "expired";
-
-/** Poll interval used while a login is already pending on this install
- *  and we have no ``interval`` from a start response of our own to go
- *  on. The local server throttles the upstream forward regardless, so
- *  polling faster than the real interval just replays the cached
- *  verdict rather than tripping ``slow_down``. */
-const FALLBACK_POLL_INTERVAL_MS = 2000;
+type Phase = "loading" | "no-base-url" | "error" | "waiting" | "denied" | "expired" | "gone";
 
 export function DeviceLoginDialog({ onClose, onLinked }: DeviceLoginDialogProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -121,13 +110,6 @@ export function DeviceLoginDialog({ onClose, onLinked }: DeviceLoginDialogProps)
           setPhase("no-base-url");
           return;
         }
-        if (isAlreadyPendingError(err)) {
-          // Another attempt already has a login in flight - fall
-          // through to polling with no user_code to show.
-          setStarted(null);
-          setPhase("waiting");
-          return;
-        }
         setError("Could not start the login. Try again.");
         setPhase("error");
       }
@@ -140,9 +122,9 @@ export function DeviceLoginDialog({ onClose, onLinked }: DeviceLoginDialogProps)
   }, [attempt]);
 
   useEffect(() => {
-    if (phase !== "waiting") return;
+    if (phase !== "waiting" || !started) return;
     let alive = true;
-    const intervalMs = started ? Math.max(started.interval, 1) * 1000 : FALLBACK_POLL_INTERVAL_MS;
+    const intervalMs = Math.max(started.interval, 1) * 1000;
 
     const tick = async () => {
       try {
@@ -161,7 +143,17 @@ export function DeviceLoginDialog({ onClose, onLinked }: DeviceLoginDialogProps)
           setPhase("expired");
           return;
         }
-        // idle / pending: keep polling.
+        if (status.status === "idle") {
+          // The server has no flow for us any more (it restarted, or a
+          // concurrent poller took the terminal verdict). Nothing will
+          // ever change, so stop polling and offer a fresh start rather
+          // than spinning until the operator gives up. ``start`` sets
+          // device_flow under the same lock ``status`` reads it, so an
+          // idle here cannot be a race against our own start.
+          setPhase("gone");
+          return;
+        }
+        // pending: keep polling.
       } catch {
         // A poll failure (e.g. 502 while the hosted side is briefly
         // unreachable) is transient by design - the flow stays alive
@@ -259,14 +251,25 @@ export function DeviceLoginDialog({ onClose, onLinked }: DeviceLoginDialogProps)
                   Open splitsmith.app to approve
                 </Button>
                 <p className="text-xs text-muted">Waiting for approval...</p>
+                {started.resumed ? (
+                  <p className="text-xs text-muted">
+                    This is the login already in progress on this install --
+                    the code has not changed.
+                  </p>
+                ) : null}
               </div>
             ) : null}
 
-            {phase === "waiting" && !started ? (
-              <p className="text-xs text-muted">
-                A device login is already in progress for this install. Waiting
-                for approval...
-              </p>
+            {phase === "gone" ? (
+              <div className="space-y-3">
+                <p role="alert" className="text-sm text-destructive">
+                  That login is no longer in progress on this install. Start
+                  again.
+                </p>
+                <Button type="button" variant="outline" size="sm" onClick={tryAgain}>
+                  Try again
+                </Button>
+              </div>
             ) : null}
 
             {phase === "denied" ? (

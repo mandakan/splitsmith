@@ -1174,10 +1174,17 @@ class AppState:
     device_auth: DeviceAuthStore | None = None
     # In-flight device-flow state for the LOCAL install (#719): the
     # device code, the hosted-declared interval, when it expires, and
-    # when we last forwarded a poll. Deliberately in memory and not on
-    # disk - polling is lazy (the SPA's own poll drives it), so closing
-    # the tab leaves no orphaned poller, and restarting the local server
-    # mid-flow just means starting over inside a 10-minute window.
+    # when we last forwarded a poll. Also the non-secret half of the
+    # hosted response - ``user_code``, ``verification_uri``,
+    # ``verification_uri_complete`` - so a second ``device/start`` can
+    # hand the still-live flow back to the SPA instead of dead-ending it
+    # (the operator who cancels the dialog and signs in again must get
+    # the code and the approve link, not a ten-minute wait). Only
+    # ``device_code`` is a secret and it never leaves this process.
+    # Deliberately in memory and not on disk - polling is lazy (the
+    # SPA's own poll drives it), so closing the tab leaves no orphaned
+    # poller, and restarting the local server mid-flow just means
+    # starting over inside a 10-minute window.
     device_flow: dict[str, object] | None = None
     # Guards every read-modify-write of ``device_flow`` (#719). The three
     # local device routes each ``await`` a threadpool HTTP call in the
@@ -4264,6 +4271,12 @@ class DeviceStartResponse(BaseModel):
 
     Deliberately has no ``device_code`` field: the secret stays on this
     process. The SPA only needs the code to show and the URL to open.
+
+    ``resumed`` is True when this call did NOT start a new login: a flow
+    was already in flight on this install and is still live, so the same
+    ``user_code`` and links come back and ``expires_in`` counts down the
+    remaining part of the original window. The SPA says so rather than
+    presenting it as a fresh code.
     """
 
     user_code: str
@@ -4271,6 +4284,7 @@ class DeviceStartResponse(BaseModel):
     verification_uri_complete: str
     expires_in: int
     interval: int
+    resumed: bool = False
 
 
 class DeviceStatusResponse(BaseModel):
@@ -13028,13 +13042,31 @@ def create_app(
         if _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
         prefs = user_config.load_global_prefs()
+        base_url_changed = prefs.hosted_base_url != req.base_url
         prefs.hosted_base_url = req.base_url
         # None keeps the stored token (the SPA resubmits base_url alone
         # without re-typing the secret); "" clears it; anything else
         # replaces it.
         if req.token is not None:
             prefs.hosted_token = req.token or None
+        # The cached account belongs to the credential that earned it
+        # (#719). Pasting a token through the Advanced disclosure, or
+        # repointing this install from prod to staging, invalidates that
+        # identity - and a chip that keeps naming the old account while
+        # pushes go somewhere else is worse than no chip at all. Clear
+        # it; the next device login (or a GET after one) fills it back in.
+        if req.token is not None or base_url_changed:
+            prefs.hosted_account = None
         user_config.save_global_prefs(prefs)
+        # A device login in flight belongs to the host it was started
+        # against. Repointing the install strands it: its device_code
+        # only means something on the old host, so polling it on would
+        # at best waste requests and at worst link this install to an
+        # account on the host we just stopped pushing to. Drop it, so
+        # the next start mints a code against the new target.
+        if base_url_changed:
+            async with state.device_flow_lock:
+                state.device_flow = None
         return HostedSyncSettings(
             base_url=prefs.hosted_base_url,
             token_set=bool(prefs.hosted_token),
@@ -13050,7 +13082,17 @@ def create_app(
         ``device_flow_lock`` for the whole body (including the hosted
         round trip): a second start racing this one must not silently
         clobber the first's ``device_code`` while it's still live -
-        instead it 409s until the first one resolves or expires.
+        instead it gets that same flow handed back, with
+        ``resumed=True``.
+
+        Resuming rather than rejecting is what keeps "cancel, then sign
+        in again" from being a dead end: the local process is the only
+        holder of the live ``device_code``, so a second start that
+        refused would leave the operator with no code, no approve link
+        and no way out short of waiting out the 10-minute TTL. The
+        secret still never leaves this process - only the ``user_code``
+        and the two verification URLs, which the hosted side prints on
+        the approval screen anyway.
         """
         if _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
@@ -13059,8 +13101,16 @@ def create_app(
             raise HTTPException(status_code=409, detail="hosted_base_url_not_set")
         async with state.device_flow_lock:
             existing = state.device_flow
-            if existing is not None and time.monotonic() < float(existing["expires_at"]):
-                raise HTTPException(status_code=409, detail="device_login_already_pending")
+            now = time.monotonic()
+            if existing is not None and now < float(existing["expires_at"]):
+                return DeviceStartResponse(
+                    user_code=str(existing["user_code"]),
+                    verification_uri=str(existing["verification_uri"]),
+                    verification_uri_complete=str(existing["verification_uri_complete"]),
+                    expires_in=max(0, int(float(existing["expires_at"]) - now)),
+                    interval=int(float(existing["interval"])),
+                    resumed=True,
+                )
             client = _build_device_client(prefs.hosted_base_url)
             try:
                 started = await run_in_threadpool(client.device_authorize, socket.gethostname())
@@ -13072,6 +13122,9 @@ def create_app(
                 client.close()
             state.device_flow = {
                 "device_code": started["device_code"],
+                "user_code": started["user_code"],
+                "verification_uri": started["verification_uri"],
+                "verification_uri_complete": started["verification_uri_complete"],
                 "interval": int(started.get("interval", 5)),
                 "expires_at": time.monotonic() + int(started.get("expires_in", 600)),
                 "last_polled_at": None,
@@ -13084,6 +13137,7 @@ def create_app(
             verification_uri_complete=started["verification_uri_complete"],
             expires_in=int(started.get("expires_in", 600)),
             interval=int(started.get("interval", 5)),
+            resumed=False,
         )
 
     @app.get("/api/settings/hosted-sync/device/status", response_model=DeviceStatusResponse)

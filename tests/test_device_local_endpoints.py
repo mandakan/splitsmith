@@ -46,12 +46,14 @@ class _FakeHosted:
     def __init__(self, verdicts: list[dict], *, revoke_status: int = 200) -> None:
         self.verdicts = verdicts
         self.revoke_status = revoke_status
+        self.authorizes = 0
         self.polls = 0
         self.revokes = 0
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
         if path == "/api/device/authorize":
+            self.authorizes += 1
             return httpx.Response(
                 200,
                 json={
@@ -231,28 +233,159 @@ def test_slow_down_remaps_to_pending(tmp_path: Path, monkeypatch) -> None:
     assert client.app.state.splitsmith_state.device_flow is not None
 
 
-def test_second_start_while_one_is_pending_is_rejected(tmp_path: Path, monkeypatch) -> None:
+def test_second_start_while_one_is_pending_resumes_it(tmp_path: Path, monkeypatch) -> None:
     """A second POST .../device/start must not silently clobber a still-
     live device_code: the first flow's code stays valid on the hosted
     side, so overwriting it locally would orphan it and leave the SPA
     polling a device_code the hosted side no longer expects a poll for.
+
+    It must not dead-end either. The local process is the only holder of
+    the live device_code, so refusing here (as this route used to, with
+    409 device_login_already_pending) left an operator who cancelled the
+    dialog with no code, no approve link and no way out short of waiting
+    out the 10-minute TTL. Instead the still-live flow comes back, marked
+    ``resumed``, with no second call to the hosted side.
     """
     monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
     client = _local_app(tmp_path)
     client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
-    _install_fake(monkeypatch, _FakeHosted([]))
+    fake = _FakeHosted([])
+    _install_fake(monkeypatch, fake)
 
     first = client.post(START)
     assert first.status_code == 200, first.text
+    assert first.json()["resumed"] is False
 
     second = client.post(START)
-    assert second.status_code == 409
-    assert second.json()["detail"] == "device_login_already_pending"
+    assert second.status_code == 200, second.text
+    body = second.json()
+    assert body["resumed"] is True
+    # Same flow: the user_code and both links are the first attempt's,
+    # so the dialog can show the code and the approve button again.
+    assert body["user_code"] == first.json()["user_code"] == "ABCD-2345"
+    assert body["verification_uri"] == first.json()["verification_uri"]
+    assert body["verification_uri_complete"] == first.json()["verification_uri_complete"]
+    assert body["interval"] == 5
+    # The remaining window, not a fresh 600s one, and still positive.
+    assert 0 < body["expires_in"] <= 600
+    # The hosted side was asked for exactly one authorization.
+    assert fake.authorizes == 1
+    # The secret never appears in a resume response either.
+    assert "device_code" not in second.text
 
-    # The first flow is untouched - still the same device_code, provable
-    # only indirectly here since device_code is never returned, but the
-    # user_code (which round-trips 1:1 with it in the fake) is unchanged.
-    assert first.json()["user_code"] == "ABCD-2345"
+
+def test_start_after_the_pending_flow_expires_starts_a_fresh_one(tmp_path: Path, monkeypatch) -> None:
+    """Resuming is only for a LIVE flow. Once the window is gone the code
+    is unusable, so a start has to mint a new one rather than hand back a
+    dead code the operator would type in vain."""
+    monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
+    client = _local_app(tmp_path)
+    client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
+    fake = _FakeHosted([])
+    _install_fake(monkeypatch, fake)
+
+    client.post(START)
+    state = client.app.state.splitsmith_state
+    state.device_flow["expires_at"] = time.monotonic() - 1.0
+
+    again = client.post(START)
+    assert again.status_code == 200, again.text
+    assert again.json()["resumed"] is False
+    assert fake.authorizes == 2
+
+
+def test_repointing_the_base_url_drops_a_pending_flow(tmp_path: Path, monkeypatch) -> None:
+    """A live device_code only means something on the host it was minted
+    on. Once the install is repointed, resuming that flow would send the
+    operator to the old host's approve screen (and could link this
+    install to an account on a server it no longer pushes to), so the
+    pending flow goes with the URL."""
+    monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
+    client = _local_app(tmp_path)
+    client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
+    fake = _FakeHosted([])
+    _install_fake(monkeypatch, fake)
+    client.post(START)
+    assert client.app.state.splitsmith_state.device_flow is not None
+
+    client.put("/api/settings/hosted-sync", json={"base_url": "https://staging.hosted.example"})
+    assert client.app.state.splitsmith_state.device_flow is None
+    assert client.get(STATUS).json()["status"] == "idle"
+
+    # And the next start is a fresh authorization against the new host,
+    # not a resume of the stranded one.
+    again = client.post(START)
+    assert again.json()["resumed"] is False
+    assert fake.authorizes == 2
+
+
+def test_saving_a_pasted_token_clears_the_linked_account(tmp_path: Path, monkeypatch) -> None:
+    """The cached account belongs to the credential that earned it.
+
+    Pasting a token through the Advanced disclosure can point this
+    install at a DIFFERENT account; leaving the old account block in
+    place would make the chip assert an identity that no longer matches
+    where the pushes go.
+    """
+    monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
+    client = _local_app(tmp_path)
+    client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
+    _install_fake(monkeypatch, _FakeHosted([dict(_APPROVED)]))
+    client.post(START)
+    assert client.get(STATUS).json()["status"] == "approved"
+    assert client.get("/api/settings/hosted-sync").json()["account"] is not None
+
+    resp = client.put(
+        "/api/settings/hosted-sync",
+        json={"base_url": "https://hosted.example", "token": "someone-elses-token"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["account"] is None
+    assert client.get("/api/settings/hosted-sync").json()["account"] is None
+    assert user_config.load_global_prefs().hosted_account is None
+
+
+def test_repointing_the_base_url_clears_the_linked_account(tmp_path: Path, monkeypatch) -> None:
+    """Prod to staging is a different account namespace. Same reasoning as
+    the pasted-token case: the identity does not travel with the URL."""
+    monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
+    client = _local_app(tmp_path)
+    client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
+    _install_fake(monkeypatch, _FakeHosted([dict(_APPROVED)]))
+    client.post(START)
+    assert client.get(STATUS).json()["status"] == "approved"
+
+    resp = client.put(
+        "/api/settings/hosted-sync",
+        json={"base_url": "https://staging.hosted.example", "token": None},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["account"] is None
+    assert user_config.load_global_prefs().hosted_account is None
+    # The token itself is untouched by a base_url-only save (``token:
+    # null`` keeps): only the identity claim is dropped.
+    assert user_config.load_global_prefs().hosted_token == "sync-token-value"
+
+
+def test_resaving_the_same_base_url_keeps_the_linked_account(tmp_path: Path, monkeypatch) -> None:
+    """The other half of the clearing rule: a no-op save (the SPA
+    resubmits base_url alone) must not sign the operator out of the chip.
+    Without this, the clear above could be an unconditional wipe and no
+    test would notice."""
+    monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
+    client = _local_app(tmp_path)
+    client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
+    _install_fake(monkeypatch, _FakeHosted([dict(_APPROVED)]))
+    client.post(START)
+    assert client.get(STATUS).json()["status"] == "approved"
+
+    resp = client.put(
+        "/api/settings/hosted-sync",
+        json={"base_url": "https://hosted.example", "token": None},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["account"]["email"] == "shooter@example.com"
+    assert user_config.load_global_prefs().hosted_account is not None
 
 
 def test_sign_out_clears_prefs_and_revokes_hosted(tmp_path: Path, monkeypatch) -> None:

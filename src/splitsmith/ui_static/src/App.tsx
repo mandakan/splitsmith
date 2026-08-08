@@ -123,10 +123,20 @@ function AuthGate({ children }: { children: ReactNode }) {
   // ever saw it, silently defeating the redirect. The effect is gated on
   // the same peeked value, so its own StrictMode double-invoke (mount ->
   // cleanup -> mount) just consumes it once and then no-ops.
+  //
+  // Deliberately NOT gated on deployment mode. useDeploymentMode()
+  // starts at "local" and flips async once /api/server/features lands,
+  // so a mode check here is a race against /api/me: if auth resolves
+  // first, the local-mode early return below mounts the ordinary tree,
+  // LegacyMatchRedirect navigates off "/", and by the time mode flips
+  // the pathname no longer matches -- the only pickup window this
+  // feature gets, missed, with a dead code left to ambush a later
+  // visit. The check bought nothing anyway: sessionStorage is
+  // origin-scoped and stashApproveCode() only ever runs on the hosted
+  // anonymous path, so a local install cannot hold a stash (pinned by a
+  // test in App.routes.test.tsx).
   const pendingPickupCode =
-    mode !== "local" && status === "authed" && location.pathname === "/"
-      ? peekApproveCode()
-      : null;
+    status === "authed" && location.pathname === "/" ? peekApproveCode() : null;
 
   useEffect(() => {
     if (pendingPickupCode) takeApproveCode();
@@ -149,6 +159,12 @@ function AuthGate({ children }: { children: ReactNode }) {
       </div>
     );
   }
+  // Ahead of the local-mode early return on purpose: see the comment on
+  // pendingPickupCode. A pending pickup implies a stash, which only the
+  // hosted anonymous path can ever write.
+  if (pendingPickupCode) {
+    return <Navigate to={`/desktop/approve?code=${pendingPickupCode}`} replace />;
+  }
   // Desktop is never gated -- no login route, no redirect, whatever /api/me did.
   if (mode === "local") return <>{children}</>;
   if (status === "anon" && location.pathname !== "/login") {
@@ -160,9 +176,6 @@ function AuthGate({ children }: { children: ReactNode }) {
       if (code) stashApproveCode(code);
     }
     return <Navigate to="/login" replace />;
-  }
-  if (pendingPickupCode) {
-    return <Navigate to={`/desktop/approve?code=${pendingPickupCode}`} replace />;
   }
   return <>{children}</>;
 }

@@ -15,9 +15,18 @@
  * ``token_set`` from the last GET renders as a masked placeholder in
  * the token field: leaving it blank on save keeps the stored token
  * (backend contract: ``token: null`` keeps, ``""`` clears, anything
- * else replaces) - unchanged by the #719 demotion. A first-time save
- * with no token stored yet requires a value - there is nothing to
- * "keep".
+ * else replaces) - unchanged by the #719 demotion.
+ *
+ * The token is optional on a first save too. It used to be required
+ * when nothing was stored yet, which made this dialog unusable for its
+ * primary job: the device flow needs ``hosted_base_url`` set before it
+ * can start, this dialog is the only place that sets it, so demanding
+ * a pasted token here meant the fallback had to be performed before
+ * the path that exists to replace it. Base URL alone is a complete,
+ * valid save.
+ *
+ * Saving here also clears any linked account server-side when the
+ * token or the base URL changes (#719) - see put_hosted_sync_settings.
  *
  * Overlay architecture: body Portal + z-modal token + useDialogFocus
  * (modal trap) - same skeleton as DesktopTokensDialog (PR #519
@@ -71,11 +80,10 @@ export function SyncSettingsDialog({
       setError("Base URL is required.");
       return;
     }
+    // No token requirement, in either direction: blank keeps whatever is
+    // stored (or stores nothing at all on a fresh install, which is the
+    // normal case now that the device flow is the primary path).
     const trimmedToken = token.trim();
-    if (!trimmedToken && !tokenAlreadySet) {
-      setError("Token is required.");
-      return;
-    }
     setSaving(true);
     try {
       const updated = await api.putSyncSettings(
@@ -117,8 +125,8 @@ export function SyncSettingsDialog({
             </CardTitle>
             <CardDescription id="sync-settings-desc">
               Where this install pushes a match when you sync it to
-              splitsmith.app. The token comes from the account's Desktop
-              sync tokens page.
+              splitsmith.app. Set the URL here, then sign in from the
+              account chip to link the account.
             </CardDescription>
           </CardHeader>
 
@@ -173,11 +181,10 @@ export function SyncSettingsDialog({
                   disabled={saving}
                   placeholder={
                     tokenAlreadySet
-                      ? "•••••••••••• (unchanged)"
+                      ? "************ (unchanged)"
                       : "Paste your desktop token"
                   }
                   className="rounded border border-rule bg-bg px-3 py-1.5 text-sm disabled:opacity-50"
-                  aria-required={!tokenAlreadySet}
                 />
                 {tokenAlreadySet ? (
                   <p className="font-mono text-[0.6875rem] text-muted">
