@@ -78,7 +78,7 @@ def test_sync_token_is_403_on_the_match_surface(
     token = _seed_token(hosted_env, "owner@example.com", scope="sync")
     client.cookies.clear()  # isolate the bearer token; see comment above
 
-    resp = client.get("/api/me/matches", headers=_auth(token))
+    resp = client.get("/api/me/recent-projects", headers=_auth(token))
     assert resp.status_code == 403, resp.text
     assert resp.json()["detail"] == "token scope"
 
@@ -154,3 +154,19 @@ def test_sync_token_cannot_reach_a_sync_lookalike_prefix(
     # No such route exists; the point is that the gate answers first.
     resp = client.get("/api/syncthing/whatever", headers=_auth(token))
     assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"] == "token scope"
+
+
+def test_unrecognized_scope_is_denied_not_allowed(
+    hosted_app: tuple[TestClient, _CapturingSender], hosted_env: str
+) -> None:
+    """The gate is an allowlist of {None, "full"}, not a denylist of
+    {"sync"} - an invented or mistyped scope value must fail closed."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    token = _seed_token(hosted_env, "owner@example.com", scope="readonly")
+    client.cookies.clear()  # isolate the bearer token; see comment above
+
+    resp = client.get("/api/me", headers=_auth(token))
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"] == "token scope"

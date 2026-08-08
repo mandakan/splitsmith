@@ -5290,9 +5290,11 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # SPLITSMITH_SIGNUP_ALLOWLIST. Returning users always sign in.
     signup_policy = build_signup_policy()
     # Composite: a magic-link session cookie (browser) or a desktop bearer
-    # token (sync push, #631) either resolve to a normal tenant user - the
-    # auth gate and everything downstream of it never distinguish which
-    # backend answered. Session cookie is tried first (the common case).
+    # token (sync push, #631) either resolve to a normal tenant user, so
+    # current_tenant and RLS treat them identically. The auth gate DOES
+    # distinguish which backend answered, via User.token_scope (#719):
+    # a sync-scoped bearer is confined to /api/sync/*. Session cookie is
+    # tried first (the common case).
     state.auth = CompositeAuth(
         MagicLinkAuth(session_factory, email_sender, signup_policy=signup_policy),
         DesktopTokenAuth(session_factory),
@@ -6271,15 +6273,19 @@ def create_app(
         # lookup per request in hosted mode. The scope is shared with the
         # endpoint, so this propagates downstream.
         request.state.user = user
-        # Scope gate (#719). A device-flow desktop token is issued for the
-        # sync surface and reaches nothing else - not /api/me, not the
-        # match surface, not the token-management routes it could use to
-        # mint itself something wider. The single exception is its own
-        # sign-out, which is what lets the local UI unlink without holding
-        # a session cookie. token_scope is None for session cookies and
-        # the loopback user, and "full" for legacy pasted tokens, so both
-        # fall straight through.
-        if user.token_scope == "sync" and not path.startswith("/api/sync/") and path != "/api/device/session":
+        # Scope gate (#719). Allowlist, not a denylist: only None (session
+        # cookie, loopback user) and "full" (legacy pasted token) are
+        # unrestricted. Everything else - "sync" today, and any value a
+        # future migration or scope introduces tomorrow - is confined to
+        # the sync surface plus its own sign-out route. A typo'd or
+        # unrecognized scope is denied on purpose rather than falling
+        # open: an unrestricted-by-default reading of an unknown value
+        # would be the wrong failure mode for a credential's reach.
+        if (
+            user.token_scope not in (None, "full")
+            and not path.startswith("/api/sync/")
+            and path != "/api/device/session"
+        ):
             return JSONResponse(status_code=403, content={"detail": "token scope"})
         if not hosted:
             return await call_next(request)
