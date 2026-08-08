@@ -96,6 +96,7 @@ if TYPE_CHECKING:
     # so local mode stays free of the db (procrastinate/psycopg) dependency.
     from ..db import PostgresMatchStore, ProjectStateStore
     from ..db.desktop_tokens import DesktopTokenRecord, DesktopTokenStore
+    from ..db.device_auth import DeviceAuthStore
     from ..db.share_tokens import ResolvedShare, ShareTokenStore
     from ..db.workers import WorkersStore
     from ..worker_channel import WakeChannelRegistry
@@ -1165,6 +1166,10 @@ class AppState:
     # infrastructure shared across tenants, not per-user data (no RLS; the
     # unique token hash is the isolation boundary).
     workers_store: WorkersStore | None = None
+    # Device-flow authorizations (#719). Raw (non-tenant) session factory,
+    # same as workers_store: the poll authenticates from the device code
+    # alone, before any tenant is pinned. None in local mode.
+    device_auth: DeviceAuthStore | None = None
     # Live SSE wake channels, one asyncio.Queue per connected self-hosted
     # worker. ``None`` in local mode and on the headless worker process
     # (which must never hold launcher capabilities); set by the non-worker
@@ -5233,6 +5238,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         tenant_session_factory,
     )
     from ..db.desktop_tokens import DesktopTokenAuth, DesktopTokenStore
+    from ..db.device_auth import DeviceAuthStore
     from ..db.share_tokens import ShareTokenStore
     from ..db.share_tokens import resolve_share_token as _resolve_share_token_fn
     from ..db.workers import WorkersStore
@@ -5316,6 +5322,9 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # Operator-scoped worker registry over the RAW session factory (not a
     # tenant factory): one fleet shared by the operator, no user_id, no RLS.
     state.workers_store = WorkersStore(session_factory)
+    # Device-flow authorizations (#719): raw session factory, same
+    # rationale as workers_store above (see DeviceAuthStore's docstring).
+    state.device_auth = DeviceAuthStore(session_factory)
     # Scale-to-zero worker: only the API process is the enqueuer and the only
     # process that should be able to redeploy the worker. The worker must never
     # acquire launcher capabilities - redeploying itself would be circular and
@@ -14202,6 +14211,15 @@ def create_app(
     from .sync_api import router as sync_router
 
     app.include_router(sync_router)
+
+    # Browser-assisted device authorization router (#719). Same lazy-import
+    # / always-registered idiom as sync_router above: db imports stay
+    # inside device_auth_api.py, so a local-slim install still imports and
+    # registers this router safely, and every route 404s outside hosted
+    # mode (see device_auth_api._hosted_gate).
+    from .device_auth_api import router as device_router
+
+    app.include_router(device_router)
 
     # ----------------------------------------------------------------------
     # Static asset serving (SPA)
