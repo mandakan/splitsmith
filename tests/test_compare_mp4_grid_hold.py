@@ -792,7 +792,8 @@ def test_the_sprite_overlay_does_not_reach_the_hold(tmp_path: Path):
     So the last shot counter and last split cannot step over the summary
     -- there is no expression to get wrong, only the graph's shape.
     """
-    graph = _graph_of(_command(_plan(hold=HOLD), overlay=_overlay_plan(tmp_path)))
+    plan = _plan(hold=HOLD)
+    graph = _graph_of(_command(plan, overlay=_overlay_plan(tmp_path)))
     chains = graph.split(";")
 
     sprite = next(part for part in chains if part.endswith("[ovl]"))
@@ -801,10 +802,17 @@ def test_the_sprite_overlay_does_not_reach_the_hold(tmp_path: Path):
 
     assert f"trim=0:{ACTION:g}[ovl]" in sprite, sprite
     assert chains.index(sprite) < chains.index(composite) < chains.index(join)
-    # The join's first input is whatever the action chain ends on -- the
-    # composite, the clock, or the last early summary cell. Whichever it
-    # is, the sprite is upstream of it, so it cannot reach a hold frame.
-    assert join.split("][")[0].lstrip("[") in {"ovlgrid", "ovltext", "early0", "early1"}, join
+    # The join's first input is whatever the action chain ends on, and
+    # for this plan that is exactly one label: the *last* early summary
+    # cell, one per present tile. Derived from the plan rather than
+    # matched against a set, because a set containing ``early0`` would
+    # accept a graph that composited the first tile's cell and dropped
+    # every one after it -- the failure this ordering assertion exists to
+    # catch. Whichever label it is, the sprite is upstream of it, so it
+    # cannot reach a hold frame.
+    present = sum(1 for tile in plan.tiles if tile.trim_path is not None)
+    assert present >= 2, "this plan has to have more than one present tile for the check below to bite"
+    assert join.split("][")[0].lstrip("[") == f"early{present - 1}", join
     assert join.endswith("[hold]concat=n=2:v=1:a=0[joined]"), join
 
 
@@ -1367,6 +1375,41 @@ def test_the_filler_tile_and_the_unreached_cell_get_no_summary(tmp_path: Path):
     # a paste target.
     assert "overlay=0:0:format=auto:enable=" not in graph, graph
     assert "overlay=960:540" not in graph, graph
+
+
+def test_one_present_tile_fans_out_with_null_rather_than_split_1(tmp_path: Path):
+    """A 1-up grid is a supported render, not a degenerate one.
+
+    A stage where only one shooter of the manifest has a trim is ordinary
+    -- squadding, a DQ, a missing file -- and ``choose_grid`` gives it a
+    1x1. ``split=1`` is legal ffmpeg and would work, but it reads as a
+    mistake in a graph a human has to debug, so the single-branch case
+    emits ``null`` instead. Everything downstream of the fan-out is
+    unchanged: one crop, one overlay, one label for the join.
+    """
+    plan = _plan(labels=("Ann",), fillers=0, rows=1, cols=1, hold=HOLD)
+    assert [tile.trim_path is not None for tile in plan.tiles] == [True]
+
+    graph = _graph_of(_command(plan, overlay=_overlay_plan(tmp_path)))
+    chains = graph.split(";")
+
+    fan_out = next(part for part in chains if "[still0]" in part and "crop=" not in part)
+    assert fan_out.endswith("null[still0]"), fan_out
+    assert "split" not in fan_out, fan_out
+    # Anchored on the whole graph too, so the check survives the chain
+    # being reshaped. ``asplit`` in the audio half is why this names the
+    # video spelling rather than the substring.
+    assert "split=1" not in graph, graph
+    # The cell is the whole canvas, and the chain past the fan-out is the
+    # same shape the multi-tile case builds.
+    assert "[still0]crop=1920:1080:0:0[cell0]" in graph, graph
+    # ``_plan`` lead-pads its last tile, so Ann ends at 0.5 + 6.0 - 0.25
+    # = 6.25 and arms a 25fps frame earlier.
+    assert r"[cell0]overlay=0:0:format=auto:enable='gte(t\,6.21)'[early0]" in graph, graph
+    assert "[still1]" not in graph, graph
+    # And the join takes that one label, so the fan-out is wired into the
+    # chain rather than dangling as an unused filter output.
+    assert "[early0][hold]concat=n=2:v=1:a=0[joined]" in graph, graph
 
 
 def test_the_early_summary_is_composited_after_the_clock_and_before_the_join(tmp_path: Path):

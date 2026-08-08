@@ -311,10 +311,18 @@ MID_HOLD_INDEX = ACTION_FRAMES + HOLD_FRAMES // 2
 #:
 #: The short clip (Mathias) runs out at :data:`SHORT_FOOTAGE_ENDS`
 #: (5.4985s, frame 165); the full clips (Anders, Bea) run to ``HEAD_PAD +
-#: POST_BEEP`` (7.0s, frame 210). Every tile's early summary arms one
-#: frame before its own end, and its chain is ``tpad``-ed black from that
-#: end to :data:`LAST_ACTION_INDEX`, so these two numbers are the only
-#: boundaries any sample index below is allowed to be derived from.
+#: POST_BEEP`` (7.0s, frame 210). Each tile's chain is ``tpad``-ed black
+#: from its own end to :data:`LAST_ACTION_INDEX`, so these two numbers
+#: are the only boundaries any sample index below is allowed to be
+#: derived from.
+#:
+#: The early summary arms one frame before a tile's end only when that
+#: end is *not* on a whole canvas frame. Mathias's is not (5.4985s), so
+#: his arms at 164 and covers his last live frame. The full clips' is
+#: (7.000s), and the arm's six-significant-digit formatting rounds
+#: ``6.966666...`` up to ``6.96667``, past frame 209 -- so those cells
+#: arm at 210 and 209 stays black. Measured, not derived; see
+#: :data:`PICTURE_INDEX`.
 SHORT_FOOTAGE_END_INDEX = round(SHORT_FOOTAGE_ENDS * 30)
 FULL_FOOTAGE_END_INDEX = round((HEAD_PAD_SECONDS + POST_BEEP_SECONDS) * 30)
 
@@ -339,6 +347,15 @@ FULL_FOOTAGE_END_INDEX = round((HEAD_PAD_SECONDS + POST_BEEP_SECONDS) * 30)
 #: frames of clearance keeps the read inside that plateau -- and moves
 #: with the geometry, so a change to pads or clip lengths shifts this
 #: index instead of silently moving the cliff underneath a bare literal.
+#:
+#: **Still black at 209, and re-measured on this branch.** The early
+#: summary does not cover that frame: its arm is emitted at six
+#: significant digits, so a 7.000s end becomes ``6.96667``, which is
+#: above frame 209's own 6.966666...s, and the cell arms at 210. Read
+#: off the render: Anders' cell is 0.1% black at 205-208, 97.4% at 209
+#: and matches the composed still from 210 on. So the cliff is the raw
+#: ``tpad`` it always was, and either reading -- black or blurred still
+#: -- would put the HF energy under the threshold anyway.
 PICTURE_INDEX = FULL_FOOTAGE_END_INDEX - 5
 
 # The frame has to satisfy both of its conditions at once -- the short
@@ -365,8 +382,8 @@ BEFORE_ARM_INDEX = SHORT_FOOTAGE_END_INDEX - 5
 # summary proves nothing about a clock. Mathias binds the sample from
 # above and is five frames clear of his own arm by construction, so the
 # assertion worth making is the other one: Anders and Bea run to frame
-# :data:`FULL_FOOTAGE_END_INDEX` and arm a frame before that, and nothing
-# in the arithmetic above forces this sample below it.
+# :data:`FULL_FOOTAGE_END_INDEX` and arm no earlier than the frame before
+# it, and nothing in the arithmetic above forces this sample below that.
 assert BEFORE_ARM_INDEX > round(HEAD_PAD_SECONDS * 30)
 assert BEFORE_ARM_INDEX < FULL_FOOTAGE_END_INDEX - 1
 
@@ -1324,7 +1341,13 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, shooter_cl
         f"{_mean_abs_diff(before_arm, still, mathias_cell):.2f} is still live footage; one that "
         "is mostly black is the tpad the early summary exists to cover."
     )
-    assert _black_fraction(with_picture, mathias_cell) <= HOLD_CELL_MAX_BLACK_FRACTION
+    short_black = _black_fraction(with_picture, mathias_cell)
+    assert short_black <= HOLD_CELL_MAX_BLACK_FRACTION, (
+        f"the short tile's cell is {short_black:.1%} black at frame {PICTURE_INDEX} (threshold "
+        f"{HOLD_CELL_MAX_BLACK_FRACTION:.0%}) -- it matched the still on the reading above, so a "
+        "mostly-black cell here means the still itself has a black cell there and both readings "
+        "are agreeing on the wrong picture"
+    )
     # And Anders, whose clip has not run out, is still live footage.
     assert _black_fraction(with_picture, anders_cell) <= HOLD_CELL_MAX_BLACK_FRACTION
 
