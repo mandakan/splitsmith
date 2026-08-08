@@ -960,6 +960,75 @@ def _clock_filters(
     return ["[ovlgrid]" + ",".join(filters) + "[ovltext]"], "ovltext"
 
 
+def _early_summary_filters(
+    plan: GridStagePlan,
+    canvas: GridCanvas,
+    source_label: str,
+    early_index: int,
+) -> tuple[list[str], str]:
+    """Paint each present tile's summary cell from its own footage end.
+
+    A tile's chain is ``tpad``-ed with black from where its own clip runs
+    out to the end of the action (see :func:`tile_footage_end_seconds`),
+    so a shooter who finished first sat on a black cell until the last
+    tile was done. This paints that tile's cell of the stage summary
+    over the black instead, leaving the end-of-stage hold to take over
+    at ``duration_seconds`` with pixel-identical content -- the cut is
+    invisible because both come from the same PNG.
+
+    Cropping the composed still is exact rather than approximate.
+    ``overlay_html.grid_html`` gives every cell ``overflow: hidden`` and
+    builds its content from that label's own ``TileStageData``, so no
+    element crosses a cell boundary and no cell depends on another
+    shooter. A crop of the still is therefore the same pixels that cell
+    will show during the hold.
+
+    **One frame early**, and the direction matters. Arming late by a
+    frame shows a black frame, which is the whole defect; arming early
+    covers the tile's last footage frame with a blurred, dimmed copy of
+    itself, which nothing can see. ``source_duration_seconds`` is an
+    ffprobe reading, so disagreeing with the decoded stream by a fraction
+    of a frame is the expected case rather than the exceptional one.
+
+    Filler tiles get nothing: an empty cell is not a shooter, and
+    ``build_hold_still`` draws no summary into one either.
+
+    Returns the filters and the label the video half now ends on. The
+    caller must keep these upstream of :func:`_video_tail`'s ``concat``
+    -- that is what keeps every compositing filter on the action, which
+    is the structural bound the hold's correctness rests on.
+    """
+    present = [tile for tile in plan.tiles if tile.trim_path is not None]
+    if not present:
+        return [], source_label
+
+    cell_w, cell_h = _cell_size(canvas, plan)
+    frame_seconds = 1.0 / canvas.fps
+    branches = "".join(f"[still{index}]" for index in range(len(present)))
+    # ``split=1`` is legal but reads as a mistake; ``null`` is the same
+    # graph with one output. The scale/setsar/fps conform mirrors the
+    # hold chain: it is a no-op on a still this module composed and the
+    # guard against one it did not.
+    fan_out = f"split={len(present)}" if len(present) > 1 else "null"
+    filters = [
+        f"[{early_index}:v]setpts=PTS-STARTPTS,scale={canvas.width}:{canvas.height},"
+        f"setsar=1,fps={canvas.rate_string},{fan_out}{branches}"
+    ]
+
+    label = source_label
+    for index, tile in enumerate(present):
+        left = tile.col * cell_w
+        top = tile.row * cell_h
+        arm = max(0.0, tile_footage_end_seconds(tile) - frame_seconds)
+        filters.append(f"[still{index}]crop={cell_w}:{cell_h}:{left}:{top}[cell{index}]")
+        filters.append(
+            f"[{label}][cell{index}]overlay={left}:{top}:format=auto:"
+            f"enable='gte(t\\,{arm:g})'[early{index}]"
+        )
+        label = f"early{index}"
+    return filters, label
+
+
 def build_stage_command(
     plan: GridStagePlan,
     *,
@@ -1129,6 +1198,32 @@ def build_stage_command(
         hold_index = next_index
         next_index += 1
 
+    # After the hold's own input, for the same reason the hold went after
+    # the sprite: the only index safe to occupy is the next free one.
+    # The same PNG, opened a second time and read for the *action* -- see
+    # ``_early_summary_filters``. A second input rather than a ``split``
+    # off the hold's so each ``-t`` states one length, and so the hold
+    # chain, whose length is all that stands between this segment and an
+    # audio stream outlasting its video, is left exactly as it was.
+    #
+    # Gated on the overlay too, not just the hold. A hold with no overlay
+    # is a shape ``render_grid_mp4`` refuses outright, so it reaches no
+    # pixel test and must not grow behaviour here.
+    early_index: int | None = None
+    if hold_index is not None and overlay is not None:
+        args += [
+            "-loop",
+            "1",
+            "-framerate",
+            rate,
+            "-t",
+            f"{plan.duration_seconds:g}",
+            "-i",
+            str(hold_still_path),
+        ]
+        early_index = next_index
+        next_index += 1
+
     args += [
         "-filter_complex",
         _build_filter_graph(
@@ -1140,6 +1235,7 @@ def build_stage_command(
             overlay=overlay,
             sprite_index=sprite_index,
             hold_index=hold_index,
+            early_index=early_index,
         ),
     ]
 
@@ -1231,6 +1327,7 @@ def _build_filter_graph(
     overlay: StageOverlayPlan | None = None,
     sprite_index: int | None = None,
     hold_index: int | None = None,
+    early_index: int | None = None,
 ) -> str:
     """Scale + pad every tile to a uniform cell, then ``xstack`` the grid.
 
@@ -1264,6 +1361,12 @@ def _build_filter_graph(
     ``tpad`` / ``trim`` order is what puts every beep on ``head_pad``;
     reordering it once already cost a silently desynced grid, and the
     overlay has no business anywhere near it.
+
+    ``early_index`` names a second read of the hold still, cropped per
+    tile and composited onto the action from each tile's own footage end
+    (:func:`_early_summary_filters`). It is composited after the clock
+    and before the ``concat``, which is the only position that both
+    replaces a finished tile's held clock and stays on the action.
     """
     cell_w, cell_h = _cell_size(canvas, plan)
     rate = canvas.rate_string
@@ -1351,6 +1454,10 @@ def _build_filter_graph(
         parts.append("[grid][ovl]overlay=0:0:format=auto[ovlgrid]")
         clock_parts, video_label = _clock_filters(plan, canvas, overlay)
         parts.extend(clock_parts)
+
+    if early_index is not None:
+        early_parts, video_label = _early_summary_filters(plan, canvas, video_label, early_index)
+        parts.extend(early_parts)
 
     parts.extend(_video_tail(video_label, hold_label))
 

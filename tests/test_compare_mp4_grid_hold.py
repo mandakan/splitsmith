@@ -709,11 +709,15 @@ def test_hold_still_input_is_appended_after_the_sprite_input(tmp_path: Path):
     cmd = _command(_plan(hold=HOLD), overlay=_overlay_plan(tmp_path))
     inputs = [value for flag, value in zip(cmd, cmd[1:], strict=False) if flag == "-i"]
 
+    # The still twice -- the hold's read and the early summary's -- then
+    # the sprite before both. Nothing is inserted ahead of a tile.
     assert inputs[-1] == str(HOLD_STILL)
-    assert inputs[-2] == str(tmp_path / "sprites.txt")
-    # And the graph reads it at the index that placement implies.
+    assert inputs[-2] == str(HOLD_STILL)
+    assert inputs[-3] == str(tmp_path / "sprites.txt")
+    # And the graph reads each at the index that placement implies.
     assert f"[{len(inputs) - 1}:v]" in _graph_of(cmd)
-    assert f"[{len(inputs) - 2}:v]format=rgba" in _graph_of(cmd)
+    assert f"[{len(inputs) - 2}:v]" in _graph_of(cmd)
+    assert f"[{len(inputs) - 3}:v]format=rgba" in _graph_of(cmd)
 
 
 def test_the_still_input_is_looped_for_exactly_the_hold_duration():
@@ -765,9 +769,11 @@ def test_the_sprite_overlay_does_not_reach_the_hold(tmp_path: Path):
 
     assert f"trim=0:{ACTION:g}[ovl]" in sprite, sprite
     assert chains.index(sprite) < chains.index(composite) < chains.index(join)
-    # The join's first input is the composited action, so the sprite is
-    # inside the half that ends at the freeze.
-    assert join.startswith("[ovlgrid][hold]") or join.startswith("[ovltext][hold]"), join
+    # The join's first input is whatever the action chain ends on -- the
+    # composite, the clock, or the last early summary cell. Whichever it
+    # is, the sprite is upstream of it, so it cannot reach a hold frame.
+    assert join.split("][")[0].lstrip("[") in {"ovlgrid", "ovltext", "early0", "early1"}, join
+    assert join.endswith("[hold]concat=n=2:v=1:a=0[joined]"), join
 
 
 def test_the_hold_does_not_touch_the_clock_windows(tmp_path: Path):
@@ -800,7 +806,12 @@ def test_the_hold_does_not_touch_the_clock_windows(tmp_path: Path):
 
     def _drawtext(hold: float) -> list[str]:
         graph = _graph_of(_command(_plan(hold=hold), overlay=_overlay_plan(tmp_path, clocks=clocks)))
-        return [part for part in graph.split(",") if "drawtext=" in part or "enable=" in part]
+        # ``drawtext=`` alone, not "anything with an enable": the per-tile
+        # early summary is an ``overlay`` with its own ``enable``, and it
+        # is *supposed* to appear only under a hold. The claim here is
+        # about the clock windows, and the ``lt(t\,`` count below is what
+        # holds the line that nothing else introduced an upper bound.
+        return [part for part in graph.split(",") if "drawtext=" in part]
 
     assert _drawtext(HOLD) == _drawtext(0.0)
 
@@ -1286,3 +1297,146 @@ def test_clock_filters_hand_back_the_label_the_action_ends_on(tmp_path: Path):
     without, bare_label = mp4_grid._clock_filters(_plan(hold=HOLD), canvas, _overlay_plan(tmp_path))
     assert without == []
     assert bare_label == "ovlgrid"
+
+
+# --- the per-tile early summary ---------------------------------------------
+#
+# The plan `_plan()` builds has three tiles: Ann is filler (row0,col0),
+# Bo is present at row0,col1 with no lead pad, Cy is present at row1,col0
+# with a 0.5s lead pad. Every present tile has a 6.0s source read from a
+# 0.25s seek, so on a 1920x1080 / 25fps canvas:
+#   Bo ends at 0.0 + 6.0 - 0.25 = 5.75, arms one frame earlier at 5.71
+#   Cy ends at 0.5 + 6.0 - 0.25 = 6.25, arms at 6.21
+# The cells are 960x540 and the fourth is unreached.
+BO_ARM = "5.71"
+CY_ARM = "6.21"
+
+
+def test_each_present_tile_gets_its_summary_cell_at_its_own_footage_end(tmp_path: Path):
+    graph = _graph_of(_command(_plan(hold=HOLD), overlay=_overlay_plan(tmp_path)))
+
+    # Bo is at row0,col1 -- crop and paste at x=960, y=0.
+    assert "[still0]crop=960:540:960:0[cell0]" in graph, graph
+    assert rf"[cell0]overlay=960:0:format=auto:enable='gte(t\,{BO_ARM})'" in graph, graph
+    # Cy is at row1,col0 -- x=0, y=540, and arms later because of her lead pad.
+    assert "[still1]crop=960:540:0:540[cell1]" in graph, graph
+    assert rf"[cell1]overlay=0:540:format=auto:enable='gte(t\,{CY_ARM})'" in graph, graph
+
+
+def test_the_filler_tile_and_the_unreached_cell_get_no_summary(tmp_path: Path):
+    """Neither is a shooter. Text or a picture over either invents one."""
+    graph = _graph_of(_command(_plan(hold=HOLD), overlay=_overlay_plan(tmp_path)))
+
+    # Two present tiles, so two crops, two overlays and a two-way split.
+    assert graph.count("crop=960:540") == 2, graph
+    assert "split=2[still0][still1]" in graph, graph
+    assert "[still2]" not in graph, graph
+    # Ann's cell (row0,col0) and the unreached cell (row1,col1) are never
+    # a paste target.
+    assert "overlay=0:0:format=auto:enable=" not in graph, graph
+    assert "overlay=960:540" not in graph, graph
+
+
+def test_the_early_summary_is_composited_after_the_clock_and_before_the_join(tmp_path: Path):
+    """Order is the whole design, and both halves of it are load-bearing.
+
+    *After* the clock: a finished tile's held final time is a ``drawtext``
+    with no upper bound, so composited the other way round it would sit
+    on top of the summary cell -- which the hold itself never shows --
+    and vanish at the cut to the hold.
+
+    *Before* the join: these overlays must reach the action and nothing
+    else. ``_video_tail``'s guarantee is structural, not an expression,
+    and it only holds while every compositing filter is upstream of the
+    ``concat``.
+    """
+    clocks = (mp4_grid.TileClock(row=0, col=1, start_seconds=1.0, freeze_seconds=4.0, final_text="3.00"),)
+    graph = _graph_of(_command(_plan(hold=HOLD), overlay=_overlay_plan(tmp_path, clocks=clocks)))
+    chains = graph.split(";")
+
+    drawn = next(index for index, part in enumerate(chains) if "drawtext=" in part)
+    first_early = next(index for index, part in enumerate(chains) if "[cell0]overlay=" in part)
+    joined = next(index for index, part in enumerate(chains) if "concat=n=2" in part)
+
+    assert drawn < first_early < joined, chains
+    # The clock's own output is what the first early overlay draws onto.
+    assert chains[first_early].startswith("[ovltext][cell0]"), chains[first_early]
+    # And the join takes the last early label, so nothing skipped it.
+    assert chains[joined].startswith("[early1][hold]"), chains[joined]
+
+    # With --no-clock there is no drawtext at all, so the first early
+    # overlay draws straight onto the sprite composite instead. Same
+    # position, one less link.
+    bare = _graph_of(_command(_plan(hold=HOLD), overlay=_overlay_plan(tmp_path))).split(";")
+    assert not any("drawtext=" in part for part in bare), bare
+    first_bare = next(index for index, part in enumerate(bare) if "[cell0]overlay=" in part)
+    assert bare[first_bare].startswith("[ovlgrid][cell0]"), bare[first_bare]
+
+
+def test_the_early_still_is_a_second_input_after_the_hold_still(tmp_path: Path):
+    """Appended last, and read for the action rather than the hold.
+
+    Two inputs on the same PNG rather than one ``split``: each input's
+    ``-t`` then means exactly one thing, and the hold chain -- whose
+    length is the only thing standing between this segment and an audio
+    stream that outlasts its video -- is left untouched.
+    """
+    cmd = _command(_plan(hold=HOLD), overlay=_overlay_plan(tmp_path))
+    inputs = [value for flag, value in zip(cmd, cmd[1:], strict=False) if flag == "-i"]
+
+    assert inputs[-1] == str(HOLD_STILL)
+    assert inputs[-2] == str(HOLD_STILL)
+    assert inputs[-3] == str(tmp_path / "sprites.txt")
+    # The hold reads the hold's worth; the early summary reads the action.
+    assert _input_durations(cmd)[-2:] == [f"{HOLD:g}", f"{ACTION:g}"]
+    # And the graph reads each at the index its placement implies.
+    assert f"[{len(inputs) - 2}:v]" in _graph_of(cmd)  # the hold
+    assert f"[{len(inputs) - 1}:v]" in _graph_of(cmd)  # the early summary
+
+
+def test_no_early_summary_without_a_hold_or_without_an_overlay(tmp_path: Path):
+    """Both halves of the gate, because each fails silently on its own.
+
+    With no hold there is no still to crop -- ``render_grid_mp4`` only
+    composes one when a hold was asked for -- and an ``--overlay``-only
+    render must come out byte-identical to what shipped before this.
+    With no overlay the shape is one ``build_stage_command`` accepts but
+    ``render_grid_mp4`` refuses outright, so it has no pixel coverage and
+    must not grow behaviour.
+    """
+    for overlay in (None, _overlay_plan(tmp_path)):
+        for hold in (None, 0.0):
+            graph = _graph_of(_command(_plan(hold=hold), overlay=overlay))
+            assert "crop=960:540" not in graph, (hold, overlay)
+
+    no_overlay = _graph_of(_command(_plan(hold=HOLD), overlay=None))
+    assert "crop=960:540" not in no_overlay
+    assert "[grid][hold]concat=n=2:v=1:a=0[joined]" in no_overlay
+
+
+def test_a_tile_whose_footage_covers_the_whole_action_gets_a_cell_that_never_arms(
+    tmp_path: Path,
+):
+    """It is emitted anyway, and that is the correct render.
+
+    A tile long enough to fill the action has no black to cover, so its
+    ``enable`` simply never becomes true and ffmpeg draws nothing.
+    Emitted unconditionally rather than filtered out: skipping it would
+    make the filter *count* depend on clip lengths, which is a much
+    easier thing to get wrong -- and to fail to notice -- than an
+    expression that is never satisfied.
+    """
+    base = _plan(hold=HOLD)
+    # Bo reads a clip longer than the whole action: 20.0s against 12.5s.
+    tiles = tuple(
+        dataclasses.replace(tile, source_duration_seconds=20.0) if tile.label == "Bo" else tile
+        for tile in base.tiles
+    )
+    graph = _graph_of(_command(dataclasses.replace(base, tiles=tiles), overlay=_overlay_plan(tmp_path)))
+    arms = [float(value) for value in re.findall(r"enable='gte\(t\\,([\d.]+)\)'", graph)]
+
+    assert len(arms) == 2, graph
+    # Bo's arm is past the end of the action, so it never fires; Cy's is
+    # inside it and does.
+    assert max(arms) > base.duration_seconds
+    assert min(arms) < base.duration_seconds
