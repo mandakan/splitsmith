@@ -910,6 +910,14 @@ _PUBLIC_API_PATHS: frozenset[str] = frozenset(
         # headless box that has no cookie jar.
         "/api/workers/register",
         "/api/workers/channel",
+        # Device-flow bring-up (#719): the desktop install has no cookie
+        # jar and, by definition, no bearer yet. Same rationale already
+        # recorded above for /api/workers/register - the credential in
+        # the request IS the authorization, checked in the handlers, and
+        # an unknown device code is indistinguishable from an expired
+        # one so there is nothing to probe for.
+        "/api/device/authorize",
+        "/api/device/token",
     }
 )
 
@@ -6263,6 +6271,16 @@ def create_app(
         # lookup per request in hosted mode. The scope is shared with the
         # endpoint, so this propagates downstream.
         request.state.user = user
+        # Scope gate (#719). A device-flow desktop token is issued for the
+        # sync surface and reaches nothing else - not /api/me, not the
+        # match surface, not the token-management routes it could use to
+        # mint itself something wider. The single exception is its own
+        # sign-out, which is what lets the local UI unlink without holding
+        # a session cookie. token_scope is None for session cookies and
+        # the loopback user, and "full" for legacy pasted tokens, so both
+        # fall straight through.
+        if user.token_scope == "sync" and not path.startswith("/api/sync/") and path != "/api/device/session":
+            return JSONResponse(status_code=403, content={"detail": "token scope"})
         if not hosted:
             return await call_next(request)
         tenant_token = current_tenant.set(state.build_tenant(user.id))

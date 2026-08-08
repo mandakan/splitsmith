@@ -141,4 +141,9 @@ class DesktopTokenAuth:
                 return None
             row.last_used_at = datetime.now(UTC)
             await session.commit()
-            return User(id=user_row.id, email=user_row.email, display_name=user_row.display_name)
+            return User(
+                id=user_row.id,
+                email=user_row.email,
+                display_name=user_row.display_name,
+                token_scope=row.scope,
+            )
