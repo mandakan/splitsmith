@@ -673,6 +673,31 @@ def _cell_size(canvas: GridCanvas, plan: GridStagePlan) -> tuple[int, int]:
     return canvas.width // plan.cols, canvas.height // plan.rows
 
 
+def tile_footage_end_seconds(tile: GridTile) -> float:
+    """When this tile's own picture stops, in *segment* time.
+
+    Not the end of the action. The stage runs ``head_pad + the longest
+    tile's post-beep span + tail_pad`` and every tile chain is
+    ``tpad``-ed with black across the remainder, so this is exactly
+    where that black starts.
+
+    Both spellings of a tile's front collapse to the same answer. A tile
+    that could seek reads ``source - seek`` of picture with no lead pad;
+    one that could not seek far enough back reads its whole clip behind
+    ``lead_pad`` seconds of synthesised black. Either way the beep lands
+    on the head pad and the picture ends a post-beep span later.
+
+    ``0.0`` for a filler tile, which has no source at all -- see
+    :attr:`GridTile.source_duration_seconds`. Clamped at zero rather
+    than trusted: the duration is an ffprobe reading of the trim and can
+    disagree with the seek by a rounding error, and a negative time
+    would arm an ``enable`` expression from the first frame.
+    """
+    if tile.trim_path is None:
+        return 0.0
+    return max(0.0, tile.lead_pad_seconds + tile.source_duration_seconds - tile.seek_seconds)
+
+
 def _unreached_cells(plan: GridStagePlan) -> tuple[tuple[int, int], ...]:
     """``(row, col)`` for every cell of the grid no tile occupies.
 

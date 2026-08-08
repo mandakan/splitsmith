@@ -1182,3 +1182,82 @@ def test_no_usable_chromium_degrades_the_hold_instead_of_crashing(tmp_path: Path
         assert still_path.exists()
         with Image.open(still_path) as image:
             assert image.size == (640, 360)
+
+
+# --- where a tile's own footage ends ----------------------------------------
+
+
+def test_footage_end_is_the_head_pad_plus_this_tile_s_post_beep_span():
+    """The two spellings of a tile's front collapse to the same answer.
+
+    A tile either seeks into its clip (``seek_seconds > 0``, no lead pad)
+    or cannot seek far enough back and gets a synthesised lead pad
+    instead. Both put the beep on the head pad, so both must end at
+    ``head_pad + (source - beep)`` -- and that is where the tile chain's
+    black ``tpad`` starts.
+    """
+    # head_pad 1.0, beep 1.25 into a 6.0s clip: seeks 0.25, ends at 1.0+4.75.
+    seeking = mp4_grid.GridTile(
+        label="Bo",
+        trim_path=Path("/trims/Bo.mov"),
+        beep_offset_in_clip=1.25,
+        seek_seconds=0.25,
+        lead_pad_seconds=0.0,
+        source_duration_seconds=6.0,
+        row=0,
+        col=1,
+    )
+    assert mp4_grid.tile_footage_end_seconds(seeking) == pytest.approx(5.75)
+
+    # Same head pad, but the beep is only 0.4s in: the seek clamps at 0
+    # and 0.6s of lead pad makes up the shortfall. Ends at 1.0 + 5.6.
+    padded = mp4_grid.GridTile(
+        label="Cy",
+        trim_path=Path("/trims/Cy.mov"),
+        beep_offset_in_clip=0.4,
+        seek_seconds=0.0,
+        lead_pad_seconds=0.6,
+        source_duration_seconds=6.0,
+        row=1,
+        col=0,
+    )
+    assert mp4_grid.tile_footage_end_seconds(padded) == pytest.approx(6.6)
+
+
+def test_footage_end_of_a_filler_tile_is_zero():
+    """A filler has no source, so there is no footage to end.
+
+    Callers must not paint a summary over it -- there is no shooter --
+    and a filler that reported a positive end would arm one.
+    """
+    filler = mp4_grid.GridTile(
+        label="Ann",
+        trim_path=None,
+        beep_offset_in_clip=0.0,
+        seek_seconds=0.0,
+        lead_pad_seconds=0.0,
+        source_duration_seconds=0.0,
+        row=0,
+        col=0,
+    )
+    assert mp4_grid.tile_footage_end_seconds(filler) == 0.0
+
+
+def test_footage_end_never_goes_negative():
+    """A probe shorter than the seek is nonsense, not a negative time.
+
+    ``source_duration_seconds`` comes off an ffprobe of the trim, so it
+    can disagree with the seek by a rounding error rather than by a real
+    quantity. Clamped here so no caller has to.
+    """
+    odd = mp4_grid.GridTile(
+        label="Di",
+        trim_path=Path("/trims/Di.mov"),
+        beep_offset_in_clip=2.0,
+        seek_seconds=1.0,
+        lead_pad_seconds=0.0,
+        source_duration_seconds=0.5,
+        row=0,
+        col=0,
+    )
+    assert mp4_grid.tile_footage_end_seconds(odd) == 0.0
