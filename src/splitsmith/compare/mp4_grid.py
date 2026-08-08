@@ -849,10 +849,8 @@ def _clock_filters(
     plan: GridStagePlan,
     canvas: GridCanvas,
     overlay: StageOverlayPlan,
-    *,
-    hold_label: str | None = None,
-) -> list[str]:
-    """The ``drawtext`` chain hanging off ``[ovlgrid]``, or the passthrough.
+) -> tuple[list[str], str]:
+    """The ``drawtext`` chain hanging off ``[ovlgrid]``, and the label it ends on.
 
     Two filters per clock, made mutually exclusive by their ``enable``
     expressions: one ticking, one holding the final time. That is two
@@ -958,8 +956,8 @@ def _clock_filters(
             held = quote_filter_value(clock.final_text)
             filters.append(f"drawtext={common}:text={held}:enable='gte(t\\,{freeze})'")
     if not filters:
-        return _video_tail("ovlgrid", hold_label)
-    return ["[ovlgrid]" + ",".join(filters) + "[ovltext]", *_video_tail("ovltext", hold_label)]
+        return [], "ovlgrid"
+    return ["[ovlgrid]" + ",".join(filters) + "[ovltext]"], "ovltext"
 
 
 def build_stage_command(
@@ -1336,11 +1334,11 @@ def _build_filter_graph(
         hold_label = "hold"
 
     if overlay is None:
-        parts.extend(_video_tail("grid", hold_label))
+        video_label = "grid"
     else:
         if sprite_index is None:
             raise ValueError("an overlay plan needs the input index its sprite sequence was added at")
-        # ``stop_mode=clone`` holds the last state's *alpha*; the default
+        # ``stop_mode=clone`` holds the last state's alpha; the default
         # ``add`` would pad with opaque black and paint the grid out at
         # the end. The explicit ``trim`` means the segment's length never
         # depends on ``overlay``'s ``eof_action`` default, which is what
@@ -1351,7 +1349,10 @@ def _build_filter_graph(
             f"trim=0:{plan.duration_seconds:g}[ovl]"
         )
         parts.append("[grid][ovl]overlay=0:0:format=auto[ovlgrid]")
-        parts.extend(_clock_filters(plan, canvas, overlay, hold_label=hold_label))
+        clock_parts, video_label = _clock_filters(plan, canvas, overlay)
+        parts.extend(clock_parts)
+
+    parts.extend(_video_tail(video_label, hold_label))
 
     for slot, tile in enumerate(plan.tiles):
         # ``aresample=async=1`` keeps a track that starts short from

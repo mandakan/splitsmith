@@ -1261,3 +1261,28 @@ def test_footage_end_never_goes_negative():
         col=0,
     )
     assert mp4_grid.tile_footage_end_seconds(odd) == 0.0
+
+
+def test_clock_filters_hand_back_the_label_the_action_ends_on(tmp_path: Path):
+    """The seam a per-tile summary needs, pinned as its own contract.
+
+    ``_clock_filters`` used to close the video half itself. It now
+    returns what it drew and where the action's stream is, so a caller
+    can put something between it and the ``concat`` -- which is the only
+    place a filter may go if it is to reach the action and not the hold.
+    """
+    canvas = mp4_grid.GridCanvas(1920, 1080, 25, 1)
+    clocks = (mp4_grid.TileClock(row=0, col=0, start_seconds=1.0, freeze_seconds=6.0, final_text="5.00"),)
+
+    with_clock, label = mp4_grid._clock_filters(
+        _plan(hold=HOLD), canvas, _overlay_plan(tmp_path, clocks=clocks)
+    )
+    assert label == "ovltext"
+    assert len(with_clock) == 1
+    assert with_clock[0].startswith("[ovlgrid]drawtext=")
+    assert with_clock[0].endswith("[ovltext]")
+
+    # No clocks at all: nothing is drawn and the action is still [ovlgrid].
+    without, bare_label = mp4_grid._clock_filters(_plan(hold=HOLD), canvas, _overlay_plan(tmp_path))
+    assert without == []
+    assert bare_label == "ovlgrid"
