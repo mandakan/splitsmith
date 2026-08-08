@@ -28,7 +28,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
-import { FolderPicker } from "@/components/FolderPicker";
+import { FolderPicker, type FolderPickerCommitFile } from "@/components/FolderPicker";
 import { HostedUploadModal } from "@/components/HostedUploadModal";
 import { RelinkDialog } from "@/components/RelinkDialog";
 import { useConfirm } from "@/components/useConfirm";
@@ -77,10 +77,9 @@ function IngestInner({ slug }: { slug: string }) {
   const [project, setProject] = useState<MatchProject | null>(null);
   const [health, setHealth] = useState<ServerHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Default storage mode for the ingest modal. Transitional: FolderPicker
-  // has no storage-toggle UI yet (Task 7 restores it), so this stays
-  // fixed at "symlink" until then - the setter is intentionally unused.
-  const [storage] = useState<StorageMode>("symlink");
+  // Default storage mode for the ingest modal. Rendered as a toggle in
+  // the FolderPicker footer (add-footage call site only).
+  const [storage, setStorage] = useState<StorageMode>("symlink");
   const [showAddFootage, setShowAddFootage] = useState(false);
   const [showRelinkDialog, setShowRelinkDialog] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -228,37 +227,32 @@ function IngestInner({ slug }: { slug: string }) {
     }
   }
 
-  // One source per pass: commit runs the scan immediately, no queue.
-  // Errors land in the page-level banner for now; Task 7 moves them
-  // inline into the picker footer.
-  async function commitFolder(path: string) {
-    setShowAddFootage(false);
-    setBusy(true);
-    try {
-      const result = await api.scanVideos(slug, path, true, storage);
-      await afterImport(result.registered.length, result.registered);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
-    } finally {
-      setBusy(false);
+  // Commit runs the scan immediately; the picker footer shows progress.
+  // Throwing keeps the dialog open with the message inline - including
+  // the "success but nothing imported" case, which must not look like a
+  // silent no-op (the page behind is unchanged when 0 register).
+  async function commitFolder(path: string): Promise<void> {
+    const result = await api.scanVideos(slug, path, true, storage);
+    await afterImport(result.registered.length, result.registered);
+    if (result.registered.length === 0) {
+      throw new Error(
+        result.skipped.length > 0
+          ? `No new videos - ${result.skipped.length} skipped (already imported or unsupported)`
+          : "No video files found in this folder",
+      );
     }
   }
 
-  async function commitFiles(files: { path: string; mtime: number | null }[]) {
-    setShowAddFootage(false);
-    setBusy(true);
-    try {
-      const result = await api.scanFiles(
-        slug,
-        files.map((f) => f.path),
-        true,
-        storage,
-      );
-      await afterImport(result.registered.length, result.registered);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
-    } finally {
-      setBusy(false);
+  async function commitFiles(files: FolderPickerCommitFile[]): Promise<void> {
+    const result = await api.scanFiles(
+      slug,
+      files.map((f) => f.path),
+      true,
+      storage,
+    );
+    await afterImport(result.registered.length, result.registered);
+    if (result.registered.length === 0) {
+      throw new Error("Nothing imported - the selected files were skipped");
     }
   }
 
@@ -553,17 +547,17 @@ function IngestInner({ slug }: { slug: string }) {
           ) : (
             <FolderPicker
               slug={slug}
-              shell="modal"
-              modalTitle="Add footage"
-              modalSubtitle={
+              title="Add footage"
+              subtitle={
                 activeShooterName ? `Adding to ${activeShooterName}` : undefined
               }
               initialPath={lastScannedDir}
-              onSelect={(path) => void commitFolder(path)}
-              onSelectFiles={(files) => void commitFiles(files)}
-              onCancel={() => setShowAddFootage(false)}
-              selectLabel="Add this folder"
               allowEmptyFolder
+              folderLabel="Add this folder"
+              storage={{ value: storage, onChange: setStorage }}
+              onCommitFolder={commitFolder}
+              onCommitFiles={commitFiles}
+              onClose={() => setShowAddFootage(false)}
             />
           ))}
 

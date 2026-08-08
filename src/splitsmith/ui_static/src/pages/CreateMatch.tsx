@@ -909,17 +909,16 @@ function ScoreboardVariant({
         <FolderPicker
           unbound
           contentMode="directories"
-          shell="modal"
-          modalTitle="Pick a parent folder"
-          modalSubtitle="The project folder will be created inside the directory you choose."
+          title="Pick a parent folder"
+          subtitle="The project folder will be created inside the directory you choose."
           initialPath={parentDir.startsWith("~") ? null : parentDir}
-          onSelect={(picked) => {
-            setParentDir(picked);
-            setPickerOpen(false);
-          }}
-          onCancel={() => setPickerOpen(false)}
-          selectLabel="Use this folder"
           allowEmptyFolder
+          folderLabel="Use this folder"
+          onCommitFolder={(picked) => {
+            setParentDir(picked);
+            return Promise.resolve();
+          }}
+          onClose={() => setPickerOpen(false)}
         />
       )}
     </div>

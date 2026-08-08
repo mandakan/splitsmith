@@ -126,6 +126,9 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
     [rows],
   );
 
+  // Throws on failure - the FolderPicker commit surface renders the
+  // error inline and stays open. Dialog-level ``error`` is reserved
+  // for applyAll.
   const runScan = async (root: string) => {
     setBusy(true);
     setError(null);
@@ -135,9 +138,6 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
         prev.map((row) => {
           const found = resp.entries.find((e) => e.video_id === row.link.video_id);
           if (!found) return row;
-          // Only auto-fill ``picked`` when the row hasn't been resolved
-          // yet by a previous scan. This way iterating across multiple
-          // search roots accumulates resolutions without clobbering them.
           const picked =
             row.picked ?? (found.chosen_path && !found.ambiguous ? found.chosen_path : null);
           return { ...row, scan: found, picked };
@@ -147,9 +147,6 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
       setScannedRoots((prev) =>
         prev.includes(resp.search_root) ? prev : [...prev, resp.search_root],
       );
-    } catch (e) {
-      if (e instanceof ApiError) setError(e.message);
-      else setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -267,17 +264,13 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
           {pickerOpen ? (
             <FolderPicker
               slug={slug}
-              shell="modal"
               contentMode="directories"
-              modalTitle="Pick a search folder"
-              modalSubtitle="Scanned recursively to find the moved originals."
-              onSelect={(path) => {
-                setPickerOpen(false);
-                void runScan(path);
-              }}
-              onCancel={() => setPickerOpen(false)}
+              title="Pick a search folder"
+              subtitle="Scanned recursively to find the moved originals."
               allowEmptyFolder
-              selectLabel="Scan this folder"
+              folderLabel="Scan this folder"
+              onCommitFolder={(path) => runScan(path)}
+              onClose={() => setPickerOpen(false)}
             />
           ) : null}
 
