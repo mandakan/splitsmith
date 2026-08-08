@@ -730,6 +730,38 @@ def test_the_still_input_is_looped_for_exactly_the_hold_duration():
     assert f"{ACTION:g}" not in still
 
 
+def test_the_early_summary_input_is_looped_for_exactly_the_action(tmp_path: Path):
+    """The second read of the same PNG, pinned flag for flag.
+
+    Its own assertion rather than a rider on the test above, which builds
+    a plan with no overlay: the early input only exists when a hold and
+    an overlay are both present, so it is absent from the argv that test
+    slices and dropping ``-loop 1`` or ``-framerate`` from this block
+    leaves it green.
+
+    Both flags are as load-bearing here as on the hold's input. Without
+    ``-loop 1`` the image2 demuxer yields a single frame, so every cell's
+    ``overlay`` would have nothing to draw past the first instant it
+    arms; without ``-framerate`` the stream arrives at the demuxer's
+    25fps default and the chain's ``fps=`` resamples a still picture to
+    reach the canvas rate. ``-t`` is the action and not the hold, because
+    this read covers the tiles that finished early rather than the freeze
+    after them.
+    """
+    cmd = _command(_plan(hold=HOLD), overlay=_overlay_plan(tmp_path))
+    # Everything after the hold's own ``-i <path>``, which is the input
+    # before it -- sliced off the last two ``-i`` positions rather than
+    # off ``cmd.index("-loop")``, which finds the hold's block.
+    hold_i, early_i = [index for index, flag in enumerate(cmd) if flag == "-i"][-2:]
+    early = cmd[hold_i + 2 : cmd.index("-filter_complex")]
+
+    assert cmd[early_i + 1] == str(HOLD_STILL)
+    assert early == ("-loop", "1", "-framerate", "25/1", "-t", f"{ACTION:g}", "-i", str(HOLD_STILL))
+    # Not the hold and not the segment: this read covers the action alone.
+    assert f"{HOLD:g}" not in early
+    assert f"{TOTAL:g}" not in early
+
+
 def test_hold_is_concatenated_after_the_action_not_composited_over_it():
     """``concat``, never ``overlay``.
 
