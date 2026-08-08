@@ -316,15 +316,26 @@ MID_HOLD_INDEX = ACTION_FRAMES + HOLD_FRAMES // 2
 #: are the only boundaries any sample index below is allowed to be
 #: derived from.
 #:
-#: The early summary arms one frame before a tile's end only when that
-#: end is *not* on a whole canvas frame. Mathias's is not (5.4985s), so
-#: his arms at 164 and covers his last live frame. The full clips' is
-#: (7.000s), and the arm's six-significant-digit formatting rounds
-#: ``6.966666...`` up to ``6.96667``, past frame 209 -- so those cells
-#: arm at 210 and 209 stays black. Measured, not derived; see
-#: :data:`PICTURE_INDEX`.
+#: The early summary arms one frame before each tile's own end,
+#: whether or not that end lands on a whole canvas frame. Mathias's does
+#: not (5.4985s), so his arms at 164; the full clips' does (7.000s), so
+#: theirs arm at 209. That second case only holds because the arm is
+#: emitted floored rather than rounded to nearest -- ``{arm:g}`` used to
+#: turn 6.966666...s into ``6.96667``, above frame 209's own
+#: presentation time, and 209 rendered black. Measured, not derived; see
+#: :data:`FULL_TILE_ARM_INDEX`.
 SHORT_FOOTAGE_END_INDEX = round(SHORT_FOOTAGE_ENDS * 30)
 FULL_FOOTAGE_END_INDEX = round((HEAD_PAD_SECONDS + POST_BEEP_SECONDS) * 30)
+
+#: The full clips' own arm frame: the last frame of the action with no
+#: live picture left in the long tiles, and the frame their summary has
+#: to cover.
+#:
+#: One before :data:`FULL_FOOTAGE_END_INDEX` by construction, because
+#: that is what "armed one frame early" means. It gets its own name
+#: because it is the frame the emission rule is about, and a bare
+#: ``- 1`` at the assertion would not say so.
+FULL_TILE_ARM_INDEX = FULL_FOOTAGE_END_INDEX - 1
 
 #: Late in the action but before any tile's own footage has run out.
 #:
@@ -348,14 +359,16 @@ FULL_FOOTAGE_END_INDEX = round((HEAD_PAD_SECONDS + POST_BEEP_SECONDS) * 30)
 #: with the geometry, so a change to pads or clip lengths shifts this
 #: index instead of silently moving the cliff underneath a bare literal.
 #:
-#: **Still black at 209, and re-measured on this branch.** The early
-#: summary does not cover that frame: its arm is emitted at six
-#: significant digits, so a 7.000s end becomes ``6.96667``, which is
-#: above frame 209's own 6.966666...s, and the cell arms at 210. Read
-#: off the render: Anders' cell is 0.1% black at 205-208, 97.4% at 209
-#: and matches the composed still from 210 on. So the cliff is the raw
-#: ``tpad`` it always was, and either reading -- black or blurred still
-#: -- would put the HF energy under the threshold anyway.
+#: **Not black at 209 any more, and re-measured on this branch.** The
+#: cliff at 209 is where Anders' *footage* stops either way; what fills
+#: it changed. With the arm emitted floored (see
+#: :func:`mp4_grid._arm_seconds_string`) the summary covers 209 --
+#: measured 0.0% black there, 2.26 against the composed still, against
+#: 76.8% black and 79.81 with the old ``{arm:g}`` emission. Either
+#: reading -- raw ``tpad`` black or blurred still -- puts the HF energy
+#: under the threshold, so this index stays five frames clear of it
+#: regardless; :data:`FULL_TILE_ARM_INDEX` is where that change is
+#: asserted.
 PICTURE_INDEX = FULL_FOOTAGE_END_INDEX - 5
 
 # The frame has to satisfy both of its conditions at once -- the short
@@ -381,11 +394,11 @@ BEFORE_ARM_INDEX = SHORT_FOOTAGE_END_INDEX - 5
 # -- it is where the clock check samples, and a clock corner covered by a
 # summary proves nothing about a clock. Mathias binds the sample from
 # above and is five frames clear of his own arm by construction, so the
-# assertion worth making is the other one: Anders and Bea run to frame
-# :data:`FULL_FOOTAGE_END_INDEX` and arm no earlier than the frame before
-# it, and nothing in the arithmetic above forces this sample below that.
+# assertion worth making is the other one: Anders and Bea arm at
+# :data:`FULL_TILE_ARM_INDEX`, and nothing in the arithmetic above forces
+# this sample up to it.
 assert BEFORE_ARM_INDEX > round(HEAD_PAD_SECONDS * 30)
-assert BEFORE_ARM_INDEX < FULL_FOOTAGE_END_INDEX - 1
+assert BEFORE_ARM_INDEX < FULL_TILE_ARM_INDEX
 
 #: The same point in stage 2's hold, which must carry stage 2's figures.
 STAGE2_MID_HOLD_INDEX = SEGMENT_FRAMES + MID_HOLD_INDEX
@@ -466,6 +479,33 @@ EMPTY_CELL_MIN_BLACK_FRACTION = 0.9
 #: gap was not chased down -- it sits well inside the old 0.6 threshold
 #: either way and neither number is load-bearing any more.
 EARLY_SUMMARY_MATCHES_STILL_MAX = 6.0
+
+#: A full-length tile's cell on :data:`FULL_TILE_ARM_INDEX` against the
+#: same cell of the composed still.
+#:
+#: The one-frame-early bias, measured where it is actually at risk.
+#: Mathias's footage end is not on a whole canvas frame, so his arm
+#: survived any rounding and :data:`EARLY_SUMMARY_MATCHES_STILL_MAX`
+#: passed throughout; Anders' and Bea's end at exactly 7.000s, and with
+#: the arm emitted through ``{arm:g}`` -- six significant digits rounded
+#: to *nearest*, so ``6.96667`` for a computed 6.966666...s -- their
+#: cells armed a frame late and 209 rendered as the tile chain's black
+#: ``tpad``. One black frame, in the exact case the bias existed for.
+#:
+#: Measured on this fixture, floored emission (``6.966``): 2.26 in
+#: Anders' cell and 1.41 in Bea's, both 0.0% pure black. The failing
+#: baseline, re-rendered with the ``{arm:g}`` emission put back and
+#: nothing else changed: 79.81 and 70.11, with Anders' cell 76.8% black
+#: and Bea's 100.0%. 6.0 sits ~2.7x over the armed reading and ~11.7x
+#: under the black one, and is deliberately the same number as
+#: :data:`EARLY_SUMMARY_MATCHES_STILL_MAX` -- it is the same measure on
+#: a different tile's boundary.
+#:
+#: Frame 208 is unchanged by the fix and still live picture: 73.08 in
+#: Anders' cell in both renders. That is what the companion assertion
+#: pins, against :data:`BEFORE_ARM_MIN_DIFF_TO_STILL`, so an ``enable``
+#: that simply armed earlier could not pass this pair.
+BOUNDARY_ARM_MATCHES_STILL_MAX = 6.0
 
 #: The same crop before the summary arms, which must still be footage.
 #:
@@ -1365,6 +1405,38 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, shooter_cl
     assert (
         _black_fraction(with_picture, unreached_cell) >= EMPTY_CELL_MIN_BLACK_FRACTION
     ), "the early summary drew into the unreached cell -- an empty cell is not a shooter"
+
+    # --- and the bias survives being written into the filter string ------
+    #
+    # Anders and Bea end on a whole canvas frame, which is the case a
+    # to-nearest format spec loses the frame on -- see
+    # BOUNDARY_ARM_MATCHES_STILL_MAX. Both cells, because they arm off
+    # the same arithmetic and a fix that reached only one would be a
+    # different defect.
+    at_arm = _frame_at_index(held, FULL_TILE_ARM_INDEX, tmp_path, "held-full-arm")
+    before_full_arm = _frame_at_index(held, FULL_TILE_ARM_INDEX - 1, tmp_path, "held-full-pre-arm")
+    for label, box in (("Anders", anders_cell), ("Bea", bea_cell)):
+        armed = _mean_abs_diff(at_arm, still, box)
+        assert armed <= BOUNDARY_ARM_MATCHES_STILL_MAX, (
+            f"{label}'s cell is not showing its summary at frame {FULL_TILE_ARM_INDEX}, the frame "
+            f"its own footage runs out on: mean abs diff {armed:.2f} against the same cell of the "
+            f"composed still (threshold {BOUNDARY_ARM_MATCHES_STILL_MAX}). The arm was emitted "
+            "later than that frame's presentation time, so the cell is the tile chain's black tpad."
+        )
+        black = _black_fraction(at_arm, box)
+        assert black <= HOLD_CELL_MAX_BLACK_FRACTION, (
+            f"{label}'s cell is {black:.1%} pure black at frame {FULL_TILE_ARM_INDEX} (threshold "
+            f"{HOLD_CELL_MAX_BLACK_FRACTION:.0%}) -- the one black frame the early summary exists "
+            "to remove"
+        )
+        # And not armed a frame earlier than that, which would mean the
+        # emission had simply been biased further rather than floored.
+        not_yet = _mean_abs_diff(before_full_arm, still, box)
+        assert not_yet >= BEFORE_ARM_MIN_DIFF_TO_STILL, (
+            f"{label}'s cell is already showing its summary at frame {FULL_TILE_ARM_INDEX - 1}, "
+            f"which still has live picture in it: {not_yet:.2f} against the still (threshold "
+            f"{BEFORE_ARM_MIN_DIFF_TO_STILL})"
+        )
 
     # --- by the last action frame every tile has switched ------------------
     # So the cut to the hold is invisible: the action's final frame and
