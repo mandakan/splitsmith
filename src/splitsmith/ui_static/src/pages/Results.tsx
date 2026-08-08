@@ -269,7 +269,11 @@ export function Results() {
   }
 
   return (
-    <div className="max-w-[1100px] mx-auto px-4 md:px-7 pb-20 pt-6">
+    // w-full is load-bearing: under ShareShell this page is a direct child
+    // of a column flex container, where horizontal auto margins absorb the
+    // free space instead of centering a stretched box - without an explicit
+    // width the page shrink-wraps to its widest line (#349 mobile bug).
+    <div className="w-full max-w-[1100px] mx-auto px-4 md:px-7 pb-20 pt-6">
       {/* Match header */}
       <header className="mb-6">
         <div className="flex items-start justify-between gap-3">
@@ -368,9 +372,21 @@ export function Results() {
                   </span>
                 ) : null}
               </div>
-              {/* Shooter rows */}
+              {/* Shooter rows. Share viewers scanning for something to
+                  watch get one quiet line when a stage has nothing -
+                  repeating the full roster x "No video" is pure noise
+                  (single-shooter already renders exactly one row). */}
               <div className="divide-y divide-rule">
-                {row.cells.map((cell) => {
+                {isShare &&
+                !isSingleShooter &&
+                !row.cells.some((c) => c.status === "audited") ? (
+                  <div className="flex min-h-11 items-center px-4 py-2">
+                    <span className="font-mono text-xs uppercase tracking-[0.08em] text-subtle">
+                      No videos yet
+                    </span>
+                  </div>
+                ) : (
+                row.cells.map((cell) => {
                   const audited = cell.status === "audited";
                   if (audited) {
                     const time = cellTime(cell.shooter.slug, row.stageNumber);
@@ -461,7 +477,8 @@ export function Results() {
                       <StatusChip tone={cell.tone} status={cell.status} />
                     </div>
                   );
-                })}
+                })
+                )}
               </div>
             </section>
           );
@@ -515,8 +532,22 @@ export function Results() {
                     {row.stageName || `Stage ${row.stageNumber}`}
                   </span>
                 </div>
-                {/* Shooter cells */}
-                {row.cells.map((cell) => {
+                {/* Shooter cells. Same share-view collapse as the mobile
+                    cards: an all-unwatchable stage spans one quiet cell
+                    across the shooter columns instead of N "No video"s. */}
+                {isShare &&
+                !isSingleShooter &&
+                !row.cells.some((c) => c.status === "audited") ? (
+                  <div
+                    className="flex min-h-11 items-center bg-surface-2 px-3 py-2"
+                    style={{ gridColumn: "2 / -1" }}
+                  >
+                    <span className="font-mono text-xs uppercase tracking-[0.08em] text-subtle">
+                      No videos yet
+                    </span>
+                  </div>
+                ) : (
+                row.cells.map((cell) => {
                   const audited = cell.status === "audited";
                   if (audited) {
                     const time = cellTime(cell.shooter.slug, row.stageNumber);
@@ -576,7 +607,8 @@ export function Results() {
                       <StatusChip tone={cell.tone} status={cell.status} />
                     </div>
                   );
-                })}
+                })
+                )}
               </div>
             );
           })}
