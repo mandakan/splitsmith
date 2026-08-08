@@ -88,7 +88,7 @@ export function HostedUploadModal({
   // User-selected coverage keyed by filename.
   const [coverageByFilename, setCoverageByFilename] = useState<Record<string, number[]>>({});
 
-  // Initial list -- so the surface opens with a real "you've already
+  // Initial list - so the surface opens with a real "you've already
   // uploaded X" view instead of looking empty until the operator
   // touches something.
   useEffect(() => {
@@ -113,7 +113,7 @@ export function HostedUploadModal({
       const r = await api.listRawUploads();
       setExisting(r.uploads);
     } catch {
-      // Non-fatal -- the just-completed upload is still in the
+      // Non-fatal - the just-completed upload is still in the
       // pending list, the user knows it succeeded.
     }
   }, []);
@@ -143,7 +143,7 @@ export function HostedUploadModal({
       await api.deleteRawUpload(filename);
       await refreshExisting();
     } catch {
-      // Surface inline -- a delete failure is non-fatal; the operator
+      // Surface inline - a delete failure is non-fatal; the operator
       // can retry. We don't blow away the row.
     }
   };
@@ -290,7 +290,7 @@ export function HostedUploadModal({
               </h3>
               {/* The dock carries this readout too, but it is a fixed
                   bottom-right portal sitting behind this modal's overlay
-                  -- so without a copy here the queue looks frozen on the
+                  - so without a copy here the queue looks frozen on the
                   one surface the operator is actually looking at (#556). */}
               <UploadQueueSummary
                 queue={queue}
