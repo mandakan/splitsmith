@@ -29,6 +29,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
 import { AddFootageModal } from "@/components/AddFootageModal";
+import { HostedUploadModal } from "@/components/HostedUploadModal";
 import { RelinkDialog } from "@/components/RelinkDialog";
 import { useConfirm } from "@/components/useConfirm";
 import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
@@ -504,20 +505,31 @@ function IngestInner({ slug }: { slug: string }) {
           />
         ) : null}
 
-        {showAddFootage && (
-          <AddFootageModal
-            slug={slug}
-            initialStorage={storage}
-            initialPath={lastScannedDir}
-            onClose={() => setShowAddFootage(false)}
-            onImported={(imported, paths) => {
-              void afterImport(imported, paths);
-            }}
-            onStorageChange={setStorage}
-            shooterName={activeShooterName}
-            stages={project?.stages ?? []}
-          />
-        )}
+        {showAddFootage &&
+          modeResolved &&
+          (mode === "hosted" ? (
+            <HostedUploadModal
+              slug={slug}
+              onClose={() => setShowAddFootage(false)}
+              onImported={(imported, paths) => {
+                void afterImport(imported, paths);
+              }}
+              stages={project?.stages ?? []}
+            />
+          ) : (
+            <AddFootageModal
+              slug={slug}
+              initialStorage={storage}
+              initialPath={lastScannedDir}
+              onClose={() => setShowAddFootage(false)}
+              onImported={(imported, paths) => {
+                void afterImport(imported, paths);
+              }}
+              onStorageChange={setStorage}
+              shooterName={activeShooterName}
+              stages={project?.stages ?? []}
+            />
+          ))}
 
         {hostedDropActive && (
           <span className="sr-only" role="status" aria-live="polite">
