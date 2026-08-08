@@ -363,17 +363,22 @@ class GridTile:
     (``CompareStageBundle.duration_seconds``) and ``0.0`` on a filler
     tile, which has no source.
 
-    Nothing in the filter graph reads this -- the tile chain pads and
-    trims to the *stage's* length and never needs to know where one
-    clip's footage stops. :func:`overlay_summary.extract_freeze_frames`
-    does, and it is the only thing that does: the stage runs until the
-    *longest* tile's post-beep span is done plus a tail pad, so every
-    tile's window ends past its own footage and "the last frame of the
-    action" is black on every tile. The last frame with a picture in it
-    is this tile's own, at this time. Required rather than defaulted
-    because a tile that silently reported ``0.0`` would freeze on its
-    first frame instead of its last, which looks like footage and is
-    the wrong footage.
+    The tile chain itself never reads this -- it pads and trims to the
+    *stage's* length and does not need to know where one clip's footage
+    stops. Two things above it do, and for the same reason: the stage
+    runs until the *longest* tile's post-beep span is done plus a tail
+    pad, so every tile's window ends past its own footage and every tile
+    chain is ``tpad``-ed black from its own end to the end of the action.
+    :func:`overlay_summary.extract_freeze_frames` reads it to take each
+    tile's freeze from the last frame with a picture in it, which is this
+    tile's own, at this time; :func:`tile_footage_end_seconds` reads it to
+    place the per-tile early summary, which covers that black with the
+    tile's own cell of the stage summary from the same instant.
+
+    Required rather than defaulted because a tile that silently reported
+    ``0.0`` would freeze on its first frame instead of its last, which
+    looks like footage and is the wrong footage -- and would arm that
+    tile's summary from the head of the stage.
     """
 
     row: int
@@ -821,14 +826,14 @@ def _video_tail(source_label: str, hold_label: str | None) -> list[str]:
 
     With a hold, the frozen summary still is a *second segment* joined
     after the action rather than something composited over it. That is
-    what makes the live overlay stop at the freeze for free: every
-    ``drawtext`` and the sprite ``overlay`` run on ``source_label``, which
-    ends at the action, so nothing that draws on the action can reach a
-    frame of the hold -- there is no expression to get wrong. That
-    structural bound is the only one there is: the ``enable`` cap
-    :func:`_clock_filters` used to carry alongside it was deleted in
-    ``9ab2156`` once it was shown to restate what the graph already
-    guarantees.
+    what makes the live overlay stop at the freeze for free: the sprite
+    ``overlay``, every ``drawtext`` clock and every per-tile early summary
+    are all upstream of ``source_label``, which ends at the action, so
+    nothing that draws on the action can reach a frame of the hold --
+    there is no expression to get wrong. That structural bound is the
+    only one there is: the ``enable`` cap :func:`_clock_filters` used to
+    carry alongside it was deleted in ``9ab2156`` once it was shown to
+    restate what the graph already guarantees.
 
     ``concat`` demands its inputs agree on size, SAR and frame rate (it
     refuses at graph-config time, not silently), which is why the still's
@@ -2053,7 +2058,9 @@ def render_grid_mp4(
                 if not draw_clock:
                     # Dropping the clocks is what removes ``drawtext`` from
                     # the command: ``_clock_filters`` emits one filter per
-                    # clock and the plain passthrough when there are none.
+                    # clock and, with none, emits nothing and hands its own
+                    # input label straight back, so the rest of the video
+                    # chain composes onto ``[ovlgrid]`` unchanged.
                     stage_overlay = replace(stage_overlay, clocks=())
                 if plan.hold_seconds > 0:
                     # A missing ``drawtext`` costs the summary nothing: the

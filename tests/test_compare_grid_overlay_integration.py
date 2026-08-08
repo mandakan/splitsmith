@@ -270,17 +270,29 @@ AAC_FRAME_SECONDS = 1024 / 48000
 # this. The failure these numbers exist to catch does not announce
 # itself: a segment whose audio outlasts its video stitches at exit 0
 # with no warning, declares the right length in its container, freezes at
-# exactly the right instant and stays A/V-locked to +0.1ms -- on the raw
-# last action frame, unblurred, with no summary drawn on it. So the
-# stitch succeeding, the stream layout and the A/V measurement all pass
-# against a completely missing summary.
+# exactly the right instant and stays A/V-locked to +0.1ms. So the stitch
+# succeeding, the stream layout and the A/V measurement all pass against
+# a completely missing summary.
 #
-# Two measures below do not, and they are not interchangeable. The
-# **decoded** duration catches a missing still, because the muxer stretch
-# is a duration on the last coded frame rather than extra frames, so a
-# frame-accurate read comes up short by the last segment's hold. Only the
-# **pixels** catch a still that is present but wrong -- blank, unblurred,
-# the wrong stage's, or with a clock left on it.
+# What the *pixels* can say about that shape changed with the per-tile
+# early summary, and the change is worth knowing before trusting any
+# reading below. The freeze such a segment produces lands on the last
+# action frame, and every present tile is already carrying its own
+# summary by then: that frame reads 1.45 against the composed still
+# (:data:`LAST_ACTION_MATCHES_STILL_MAX`) where a correct hold reads 1.39
+# (:data:`HOLD_MATCHES_ITS_STILL_MAX`). The two are the same picture, so
+# no pixel measure in this module can tell a hold that froze on the last
+# action frame from a hold that played the still.
+#
+# No coverage was lost, because the pixels were never the guard for that
+# shape. ``build_stage_command`` refuses a hold with no still outright
+# (``test_a_hold_with_no_still_is_refused_rather_than_built``), and the
+# **decoded** duration below still catches an absent still: the muxer
+# stretch is a duration on the last coded frame rather than extra frames,
+# so a frame-accurate read comes up short by the last segment's hold.
+# What the pixels do catch, and nothing else does, is a still that is
+# present but **wrong** -- blank, unblurred, the wrong stage's, or with a
+# clock left on it.
 HOLD_SECONDS = 2.0
 
 #: Frames of action per segment, then frames of hold. Whole numbers on
@@ -294,6 +306,17 @@ SEGMENT_FRAMES = ACTION_FRAMES + HOLD_FRAMES
 #: on which side of a boundary a tie falls).
 LAST_ACTION_INDEX = ACTION_FRAMES - 1
 MID_HOLD_INDEX = ACTION_FRAMES + HOLD_FRAMES // 2
+
+#: Where each tile's own footage stops, in frames on the pinned canvas.
+#:
+#: The short clip (Mathias) runs out at :data:`SHORT_FOOTAGE_ENDS`
+#: (5.4985s, frame 165); the full clips (Anders, Bea) run to ``HEAD_PAD +
+#: POST_BEEP`` (7.0s, frame 210). Every tile's early summary arms one
+#: frame before its own end, and its chain is ``tpad``-ed black from that
+#: end to :data:`LAST_ACTION_INDEX`, so these two numbers are the only
+#: boundaries any sample index below is allowed to be derived from.
+SHORT_FOOTAGE_END_INDEX = round(SHORT_FOOTAGE_ENDS * 30)
+FULL_FOOTAGE_END_INDEX = round((HEAD_PAD_SECONDS + POST_BEEP_SECONDS) * 30)
 
 #: Late in the action but before any tile's own footage has run out.
 #:
@@ -316,32 +339,36 @@ MID_HOLD_INDEX = ACTION_FRAMES + HOLD_FRAMES // 2
 #: frames of clearance keeps the read inside that plateau -- and moves
 #: with the geometry, so a change to pads or clip lengths shifts this
 #: index instead of silently moving the cliff underneath a bare literal.
-PICTURE_INDEX = round((HEAD_PAD_SECONDS + POST_BEEP_SECONDS) * 30) - 5
+PICTURE_INDEX = FULL_FOOTAGE_END_INDEX - 5
 
 # The frame has to satisfy both of its conditions at once -- the short
 # clip already out of footage, the full clips not yet. Checked here so a
 # geometry change that breaks the window fails as "the fixture geometry
 # changed", not as a baffling HF-energy assertion mid-test.
-assert round(SHORT_FOOTAGE_ENDS * 30) < PICTURE_INDEX < round((HEAD_PAD_SECONDS + POST_BEEP_SECONDS) * 30)
+assert SHORT_FOOTAGE_END_INDEX < PICTURE_INDEX < FULL_FOOTAGE_END_INDEX
 
-#: The frame the short tile's summary arms on, and one safely before it.
+#: A frame safely before the short tile's summary arms.
 #:
-#: Mathias's clip runs out at :data:`SHORT_FOOTAGE_ENDS` (5.4985s, frame
-#: 165) and the summary arms one frame earlier, so frames from 164 on
-#: carry it. BEFORE_ARM_INDEX keeps five frames of clearance below that
-#: -- the same margin :data:`PICTURE_INDEX` keeps below its own cliff,
-#: and for the same reason: derived from the geometry so a change to the
-#: pads or the clip lengths moves the sample instead of silently moving
-#: the boundary underneath a literal.
-SHORT_ARM_INDEX = round(SHORT_FOOTAGE_ENDS * 30)
-BEFORE_ARM_INDEX = SHORT_ARM_INDEX - 5
+#: Named for the arm and not for the footage end because those are one
+#: frame apart: Mathias's clip runs out at
+#: :data:`SHORT_FOOTAGE_END_INDEX` (5.4985s, frame 165) and his summary
+#: arms one frame *earlier*, so frames from 164 on carry it. This keeps
+#: five frames of clearance below the footage end -- the same margin
+#: :data:`PICTURE_INDEX` keeps below its own cliff, and for the same
+#: reason: derived from the geometry so a change to the pads or the clip
+#: lengths moves the sample instead of silently moving the boundary
+#: underneath a literal.
+BEFORE_ARM_INDEX = SHORT_FOOTAGE_END_INDEX - 5
 
 # Both clocked shooters must still have live picture at BEFORE_ARM_INDEX
 # -- it is where the clock check samples, and a clock corner covered by a
-# summary proves nothing about a clock. Anders and Bea run to 7.0s;
-# Mathias is the binding one.
+# summary proves nothing about a clock. Mathias binds the sample from
+# above and is five frames clear of his own arm by construction, so the
+# assertion worth making is the other one: Anders and Bea run to frame
+# :data:`FULL_FOOTAGE_END_INDEX` and arm a frame before that, and nothing
+# in the arithmetic above forces this sample below it.
 assert BEFORE_ARM_INDEX > round(HEAD_PAD_SECONDS * 30)
-assert BEFORE_ARM_INDEX < SHORT_ARM_INDEX - 1
+assert BEFORE_ARM_INDEX < FULL_FOOTAGE_END_INDEX - 1
 
 #: The same point in stage 2's hold, which must carry stage 2's figures.
 STAGE2_MID_HOLD_INDEX = SEGMENT_FRAMES + MID_HOLD_INDEX
@@ -1307,7 +1334,7 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, shooter_cl
     not_yet = _mean_abs_diff(before_arm, still, mathias_cell)
     assert not_yet >= BEFORE_ARM_MIN_DIFF_TO_STILL, (
         f"the short tile is already showing its summary at frame {BEFORE_ARM_INDEX}, "
-        f"{SHORT_ARM_INDEX - BEFORE_ARM_INDEX} frames before its footage runs out: "
+        f"{SHORT_FOOTAGE_END_INDEX - BEFORE_ARM_INDEX} frames before its footage runs out: "
         f"{not_yet:.2f} against the still (threshold {BEFORE_ARM_MIN_DIFF_TO_STILL})"
     )
 
@@ -1338,15 +1365,18 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, shooter_cl
     )
 
     # --- the held frame is blurred ---------------------------------------
-    # Against PICTURE_INDEX, not the last action frame: the last action
-    # frame is tail-pad black, and "blurrier than black" is not a claim
-    # about a blur.
+    # Against PICTURE_INDEX, not the last action frame. The last action
+    # frame is now the composed still itself -- it reads 1.45 against it,
+    # see LAST_ACTION_MATCHES_STILL_MAX -- so "blurrier than the last
+    # action frame" would be comparing the blur against a copy of itself.
+    # PICTURE_INDEX is the late sample where Bea's crop is still live
+    # footage, which is the only thing a blur can be measured against.
     action_hf = _hf_energy(with_picture, bea_picture)
     hold_hf = _hf_energy(in_hold, bea_picture)
     assert action_hf >= ACTION_MIN_HF_ENERGY, f"the action frame is not sharp: {action_hf:.2f}"
     assert hold_hf <= BLURRED_MAX_HF_ENERGY, (
         f"the held frame is not blurred: high-frequency energy {hold_hf:.2f} against "
-        f"{action_hf:.2f} on the last frame with a picture in it (threshold "
+        f"{action_hf:.2f} on the late action frame that still has live picture in it (threshold "
         f"{BLURRED_MAX_HF_ENERGY})"
     )
 
