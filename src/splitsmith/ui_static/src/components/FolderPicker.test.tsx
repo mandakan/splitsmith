@@ -220,4 +220,48 @@ describe("FolderPicker", () => {
       ),
     );
   });
+
+  it("scopes Escape to the path editor first, and only a second Escape closes the dialog", async () => {
+    const user = userEvent.setup();
+    const props = defaultProps();
+    render(<FolderPicker {...props} />);
+    await screen.findByRole("button", { name: /add this folder/i });
+    await user.click(screen.getByRole("button", { name: /edit path/i }));
+    expect(screen.getByRole("textbox", { name: /folder path/i })).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+    // Edit mode closed, but the dialog itself is still up.
+    expect(screen.queryByRole("textbox", { name: /folder path/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(props.onClose).not.toHaveBeenCalled();
+
+    await user.keyboard("{Escape}");
+    expect(props.onClose).toHaveBeenCalled();
+  });
+
+  it("disables the primary action while the listing errored, even with allowEmptyFolder", async () => {
+    const props = defaultProps();
+    vi.mocked(api.listFolder).mockRejectedValue(new ApiError(500, "boom"));
+    render(
+      <FolderPicker {...props} allowEmptyFolder initialPath="/Users/op/Movies" />,
+    );
+    expect(await screen.findByRole("button", { name: /retry/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /add this folder/i })).toBeDisabled();
+  });
+
+  it("announces busy state in a polite live region, and clears it once loaded", async () => {
+    let resolveListing: (value: FsListing) => void = () => {};
+    const pending = new Promise<FsListing>((resolve) => {
+      resolveListing = resolve;
+    });
+    vi.mocked(api.listFolder).mockReturnValue(pending);
+    render(<FolderPicker {...defaultProps()} />);
+
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent(/reading folder/i);
+
+    resolveListing(moviesListing);
+    await screen.findByRole("button", { name: /add this folder/i });
+    await waitFor(() => expect(status.textContent?.trim()).toBe(""));
+  });
 });

@@ -222,6 +222,8 @@ export function FolderPicker({
   const primaryDisabled =
     busy ||
     committing ||
+    !listing ||
+    error != null ||
     !path ||
     (selectedCount === 0 && !allowEmptyFolder && videosHere === 0);
 
@@ -233,7 +235,12 @@ export function FolderPicker({
       if (committing) return; // a stray Escape must not abandon a running scan
       onClose();
     },
-    { disableEscape: committing },
+    // While the path editor is open, Escape belongs to it (it exits edit
+    // mode and restores the breadcrumb bar) -- the dialog-level Escape
+    // must not also fire, or the first press would close the whole
+    // dialog instead of just canceling the edit. A second Escape (once
+    // editingPath is back to false) reaches this handler normally.
+    { disableEscape: committing || editingPath },
   );
 
   return (
@@ -251,13 +258,16 @@ export function FolderPicker({
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(e) => {
             // "/" jumps to the editable path input (rare manual case).
-            if (e.key !== "/" || editingPath) return;
+            if (e.key !== "/" || editingPath || committing) return;
             const t = e.target as HTMLElement;
             if (t.tagName === "INPUT" || t.tagName === "TEXTAREA") return;
             e.preventDefault();
             setEditingPath(true);
           }}
         >
+          <span className="sr-only" role="status" aria-live="polite">
+            {committing ? commit.label : busy ? "Reading folder..." : ""}
+          </span>
           <header className="shrink-0 border-b border-rule">
             <div className="flex items-center justify-between gap-4 px-5 py-3.5">
               <div>
@@ -511,6 +521,18 @@ function BreadcrumbBar({
   }, [path, editing]);
   const crumbs = buildBreadcrumb(path);
 
+  // Restore focus to the pencil affordance whenever edit mode closes
+  // (Escape or Cancel), matching the dialog-focus restore-on-close
+  // convention instead of leaving focus stranded on an unmounted input.
+  const pencilRef = useRef<HTMLButtonElement | null>(null);
+  const wasEditingRef = useRef(editing);
+  useEffect(() => {
+    if (wasEditingRef.current && !editing) {
+      pencilRef.current?.focus();
+    }
+    wasEditingRef.current = editing;
+  }, [editing]);
+
   if (editing) {
     return (
       <form
@@ -528,8 +550,13 @@ function BreadcrumbBar({
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Escape") {
-              // Peel edit mode only - the dialog's own Escape stays
-              // one level up.
+              // Peel edit mode only - the parent gates useDialogFocus's
+              // Escape-to-close on editingPath (disableEscape), so the
+              // document-level handler is inert while we're here and
+              // this is the only thing that runs. A second Escape,
+              // pressed once editingPath is back to false, reaches the
+              // dialog's own handler and closes it.
+              e.preventDefault();
               e.stopPropagation();
               onEditEnd();
             }
@@ -569,11 +596,13 @@ function BreadcrumbBar({
         ))}
       </div>
       <button
+        ref={pencilRef}
         type="button"
         onClick={onEditStart}
         aria-label="Edit path"
         title='Type a path (or press "/")'
-        className="rounded-md p-1.5 text-subtle hover:bg-surface-2 hover:text-ink"
+        disabled={busy}
+        className="rounded-md p-1.5 text-subtle hover:bg-surface-2 hover:text-ink disabled:opacity-50"
       >
         <Pencil className="size-3.5" />
       </button>
