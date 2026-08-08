@@ -39,7 +39,7 @@ never be used for.
 
 Frames come out at **named** moments rather than at frame indices the
 caller has to work out: ``pre-beep``, ``first-shot``, ``mid-action``,
-``last-picture``, ``short-tile-black``, ``last-action``, ``hold-start``,
+``last-picture``, ``short-tile-ends``, ``last-action``, ``hold-start``,
 ``hold-mid``, ``hold-end`` and ``next-stage``. Output goes to a stable
 directory (``build/grid-frames`` by default) so two runs diff.
 
@@ -146,20 +146,29 @@ def _moments(*, fps: int, hold_seconds: float, stages: int, shooters: int) -> li
             "mid-stage, every tile still running",
         ),
         Moment(
-            "short-tile-black",
+            "short-tile-ends",
             at((SHORT_FOOTAGE_ENDS + HEAD_PAD_SECONDS + POST_BEEP_SECONDS) / 2),
-            "the short clip has run out while the others still have picture",
+            "the short clip has run out while the others still have picture"
+            + (
+                " -- with a hold, that tile is already showing its own summary"
+                if hold_frames > 0
+                else " -- with no hold, that tile is black"
+            ),
         ),
         Moment(
             "last-picture",
             at(HEAD_PAD_SECONDS + POST_BEEP_SECONDS) - 1,
-            "the last frame with any picture in it, one frame before the tail pad",
+            "the last frame with any live picture in it, one frame before the tail pad",
         ),
         Moment(
             "last-action",
             action_frames - 1,
-            f"the action's final frame -- inside the {TAIL_PAD_SECONDS:g}s tail pad, so black on "
-            "every tile",
+            f"the action's final frame -- inside the {TAIL_PAD_SECONDS:g}s tail pad"
+            + (
+                ", so every tile is already showing its summary"
+                if hold_frames > 0
+                else ", so black on every tile"
+            ),
         ),
     ]
     if hold_frames > 0:
