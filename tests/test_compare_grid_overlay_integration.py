@@ -455,9 +455,11 @@ BEFORE_ARM_MIN_DIFF_TO_STILL = 20.0
 #: change (the pre-feature ``mp4_grid`` re-rendered: raw tail-pad black
 #: against a composed summary, and Bea's picture crop 100.0% black,
 #: which is what the retired ``TAIL_PAD_MIN_BLACK_FRACTION`` asserted).
-#: 6.0 sits ~4x over the measured figure and ~40x under the pre-change
+#: 6.0 sits ~4.1x over the measured figure and ~9.7x under the pre-change
 #: one -- the same number :data:`HOLD_MATCHES_ITS_STILL_MAX` uses on the
-#: same crop one frame later, which reads 1.39.
+#: same crop one frame later, which reads 1.39. (The two measurements are
+#: 40x apart; that is not this threshold's clearance and must not be read
+#: as headroom.)
 LAST_ACTION_MATCHES_STILL_MAX = 6.0
 
 #: Anders' quadrant against Bea's, in the same hold frame.
