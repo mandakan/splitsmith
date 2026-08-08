@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.20.0](https://github.com/mandakan/splitsmith/compare/v0.19.0...v0.20.0) (2026-08-08)
+
+
+### Features
+
+* **ui:** share results full width on mobile, empty-stage collapse + hit counts ([#730](https://github.com/mandakan/splitsmith/issues/730)) ([81b5752](https://github.com/mandakan/splitsmith/commit/81b5752f7cb969db9572371bc9e8379729370f35))
+
+
+### Documentation
+
+* kickoff for [#719](https://github.com/mandakan/splitsmith/issues/719), with what moved under the spec since it was written ([#729](https://github.com/mandakan/splitsmith/issues/729)) ([e4c2552](https://github.com/mandakan/splitsmith/commit/e4c2552ce8db9491358c07aab064e0177ad4ce71))
+* record the RootLayout refactor in the 0.19.0 changelog ([#727](https://github.com/mandakan/splitsmith/issues/727)) ([0d95088](https://github.com/mandakan/splitsmith/commit/0d95088178d2631d6d8a4573a8d767a29010b9a8))
+
 ## [0.19.0](https://github.com/mandakan/splitsmith/compare/v0.18.0...v0.19.0) (2026-08-08)
 
 
