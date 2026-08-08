@@ -25,10 +25,12 @@ export function AppShell() {
   // JobsSurface no longer self-hosts its poller (#663); each shell
   // owns one jobs state and hands it down.
   const jobsState = useJobs();
-  // RootLayout's header slot -- see the contextRow declaration below.
-  // AppShell does not call useShellAccent (the "led" default is right
-  // here) or useShellOwnsMobileAccount (no nav drawer; the global bar's
-  // account chip is the only one on a phone too).
+  // RootLayout's header slot -- AppShell portals its context row (the
+  // project switcher, or the fixture-mode label; see contextRow below)
+  // there instead of rendering its own <header> (#550). It does not call
+  // useShellAccent (the "led" default is right here) or
+  // useShellOwnsMobileAccount (no nav drawer; the global bar's account
+  // chip is the only one on a phone too).
   const slot = useShellContextSlot();
   // AppShell hosts the fixture editor + design system. Either one is
   // mode-agnostic, but flipping to Developer should take the user to
@@ -101,12 +103,9 @@ export function AppShell() {
     return <Navigate to="/pick" replace />;
   }
 
-  // RootLayout's header slot -- AppShell portals its context row (the
-  // project switcher, or the fixture-mode label) there instead of
-  // rendering its own <header> (#550). The global bar already owns the
-  // mode switch, so AppShell's own copy is gone.
+  // See the ``slot`` declaration above for what this portals into.
   const contextRow = (
-    <div className="flex h-14 items-center border-t border-rule bg-bg px-6">
+    <div className="flex h-14 items-center border-t border-rule bg-bg px-7">
       {bindExempt ? (
         <div className="flex items-center gap-2 text-sm font-semibold tracking-tight">
           <Crosshair className="size-4 text-led" />
@@ -119,7 +118,7 @@ export function AppShell() {
   );
 
   return (
-    <div className="flex min-h-screen bg-bg text-ink">
+    <div className="flex min-h-[calc(100dvh-var(--shell-header-h,86px))] bg-bg text-ink">
       {bindExempt ? null : (
         <aside
           className={cn(
@@ -127,23 +126,22 @@ export function AppShell() {
             sidebarCollapsed ? "w-14" : "w-60",
           )}
         >
+          {/* Collapse toggle row. The brand mark used to live here too, but
+              RootLayout's GlobalBar now spans full width above the sidebar
+              and already renders it once (#550 review finding 2) -- a
+              second crosshair + wordmark here just duplicated it. */}
           <div
             className={cn(
-              "flex h-14 items-center gap-2 px-3 font-semibold tracking-tight",
-              sidebarCollapsed && "justify-center px-2",
+              "flex h-14 items-center px-3",
+              sidebarCollapsed ? "justify-center px-2" : "justify-end",
             )}
           >
-            <Crosshair className="size-5 shrink-0 text-led" />
-            {sidebarCollapsed ? null : <span>splitsmith</span>}
             <button
               type="button"
               onClick={toggleSidebar}
               title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className={cn(
-                "ml-auto inline-flex size-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-3 hover:text-ink",
-                sidebarCollapsed && "ml-0",
-              )}
+              className="inline-flex size-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-3 hover:text-ink"
             >
               {sidebarCollapsed ? (
                 <PanelLeftOpen className="size-4" aria-hidden />

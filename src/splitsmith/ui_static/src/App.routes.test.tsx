@@ -97,6 +97,20 @@ describe("route tree", () => {
     );
   });
 
+  // AppShell is the one surface whose own header used to carry a second
+  // brand mark once GlobalBar started spanning full width above it
+  // (#550 review finding 2). Global chrome coverage previously stopped at
+  // Pick, admin/workers and Login -- none of which mount AppShell -- so
+  // the duplicate brand shipped with a green suite.
+  it("renders global chrome on an AppShell surface (/_design)", async () => {
+    await renderAt("/_design");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("navigation", { name: /global/i }),
+      ).toBeInTheDocument(),
+    );
+  });
+
   it("does not render global chrome on the login surface", async () => {
     // Login itself redirects to "/" once useAuth's status is "authed"
     // (see src/pages/Login.tsx), and the module-level getMe mock above
