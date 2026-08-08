@@ -156,21 +156,23 @@ def _moments(*, fps: int, hold_seconds: float, stages: int, shooters: int) -> li
             ),
         ),
         # ``- 2``, not ``- 1``. The full clips' nominal footage end is
-        # ``HEAD_PAD + POST_BEEP`` (frame 210 at 30fps), but two things
-        # cost a frame there and neither is visible from the arithmetic.
-        # The decoded stream is a frame shorter than the probed duration
-        # implies, so the tile chain's black ``tpad`` starts at 209; and
-        # the early summary's arm is emitted at six significant digits
-        # (``6.96667`` for a 7.000s end), which is above frame 209's own
-        # 6.966666...s, so the summary arms at 210 rather than covering
-        # 209. Measured on this fixture at 30fps: live picture through
-        # 208, black at 209 on the full tiles, summary from 210. So 208
+        # ``HEAD_PAD + POST_BEEP`` (frame 210 at 30fps), but the decoded
+        # stream is a frame shorter than the probed duration implies, so
+        # the tile chain's black ``tpad`` actually starts at 209 -- which
+        # is not visible from the arithmetic and is why this is measured
+        # rather than derived. The early summary covers 209 (its arm is
+        # emitted floored, so a 7.000s end emits ``6.966``, under frame
+        # 209's own 6.966666...s), so nothing renders black there.
+        # Measured on this fixture at 1280x720@30 with a 2s hold: Anders'
+        # and Bea's cells read mean luma 125.7 at 207 and 208 (live
+        # testsrc2 bars) and 76.1 / 69.5 from 209 on (the dimmed,
+        # blurred summary), 0.0% pure black at every one of them. So 208
         # is the frame this moment is named for.
         Moment(
             "last-picture",
             at(HEAD_PAD_SECONDS + POST_BEEP_SECONDS) - 2,
-            "the last frame with any live picture in it -- the full tiles go black at the next "
-            "one and pick their summary up at the one after that",
+            "the last frame with any live picture in it -- the full tiles pick their own summary "
+            "up at the next one",
         ),
         Moment(
             "last-action",

@@ -92,6 +92,21 @@ with a blurred, dimmed copy of itself -- indistinguishable. And
 with what actually decodes is expected rather than exceptional; a full
 frame of margin absorbs it.
 
+**The margin only holds because of how the time is emitted.** The
+computed arm is one thing; the decimal written into the filter string is
+another, and the first shipped spelling spent the whole frame on the
+second. `{arm:g}` is six significant digits rounded to *nearest*, so a
+tile ending at 7.000s on a 30fps canvas computed 6.966666...s and emitted
+`6.96667` -- above frame 209's own presentation time, so `gte` was false
+there and the cell armed at 210. Rendered and confirmed: that tile's cell
+was 76.8% pure black at 209. The rule is therefore not "print the arm"
+but **the emitted decimal must never be greater than the computed arm**:
+floor to milliseconds (`_arm_seconds_string`), so the error is always on
+the early side. More digits would not have helped -- any to-nearest
+precision has a last digit that can round up. 1ms is sub-frame at every
+rate this renders (41.7ms at 24fps down to 8.3ms at 120fps) and deeper
+precision only lengthens the argv.
+
 `tile_end - 1/fps` is clamped at `0.0`: a tile whose whole clip is
 shorter than one frame must not arm before the segment starts.
 
