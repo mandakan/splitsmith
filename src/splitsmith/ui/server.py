@@ -78,6 +78,7 @@ import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -122,6 +123,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from pydantic import AwareDatetime, BaseModel, Field
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from .. import __version__ as splitsmith_version
 from .. import automation as automation_settings
@@ -1170,6 +1172,13 @@ class AppState:
     # same as workers_store: the poll authenticates from the device code
     # alone, before any tenant is pinned. None in local mode.
     device_auth: DeviceAuthStore | None = None
+    # In-flight device-flow state for the LOCAL install (#719): the
+    # device code, the hosted-declared interval, when it expires, and
+    # when we last forwarded a poll. Deliberately in memory and not on
+    # disk - polling is lazy (the SPA's own poll drives it), so closing
+    # the tab leaves no orphaned poller, and restarting the local server
+    # mid-flow just means starting over inside a 10-minute window.
+    device_flow: dict[str, object] | None = None
     # Live SSE wake channels, one asyncio.Queue per connected self-hosted
     # worker. ``None`` in local mode and on the headless worker process
     # (which must never hold launcher capabilities); set by the non-worker
@@ -4199,16 +4208,32 @@ class ScoreboardIdentityRequest(BaseModel):
     base_url: str | None = None
 
 
+class HostedAccountInfo(BaseModel):
+    """The linked hosted account, as the SPA renders it (#719).
+
+    Cached in ``config.yaml`` from the device-flow poll, never fetched
+    live - a sync-scoped token cannot read ``/api/me``.
+    """
+
+    id: str
+    email: str
+    display_name: str | None = None
+    device_name: str
+    linked_at: datetime
+
+
 class HostedSyncSettings(BaseModel):
     """Response body for GET/PUT /api/settings/hosted-sync (#631, Task 9).
 
     ``token_set`` is a boolean, never the raw token - the desktop client
     keeps its own copy from the moment it typed it in; the server has no
-    business echoing a bearer credential back over localhost HTTP.
+    business echoing a bearer credential back over localhost HTTP. Same
+    rule applies to ``account``: it carries identity, never a credential.
     """
 
     base_url: str | None = None
     token_set: bool = False
+    account: HostedAccountInfo | None = None
 
 
 class HostedSyncSettingsRequest(BaseModel):
@@ -4221,6 +4246,47 @@ class HostedSyncSettingsRequest(BaseModel):
 
     base_url: str
     token: str | None = None
+
+
+class DeviceStartResponse(BaseModel):
+    """Response for POST /api/settings/hosted-sync/device/start (#719).
+
+    Deliberately has no ``device_code`` field: the secret stays on this
+    process. The SPA only needs the code to show and the URL to open.
+    """
+
+    user_code: str
+    verification_uri: str
+    verification_uri_complete: str
+    expires_in: int
+    interval: int
+
+
+class DeviceStatusResponse(BaseModel):
+    """Response for GET /api/settings/hosted-sync/device/status (#719).
+
+    ``status`` is ``idle`` (no flow in progress), ``pending``, ``approved``,
+    ``denied`` or ``expired``. ``denied`` and ``expired`` are distinct on
+    purpose - "you declined this on splitsmith.app" and "the code ran out"
+    are different problems and get different copy.
+    """
+
+    status: str
+    account: HostedAccountInfo | None = None
+    device_name: str | None = None
+
+
+class DeviceUnlinkResponse(BaseModel):
+    """Response for DELETE /api/settings/hosted-sync/session (#719).
+
+    ``cleared`` is always True - the local prefs are gone either way.
+    ``hosted_revoked`` is False when the upstream revoke could not be
+    confirmed, which the UI turns into "signed out here; check your
+    account page to be sure".
+    """
+
+    cleared: bool
+    hosted_revoked: bool
 
 
 class SyncStatusResponse(BaseModel):
@@ -5195,6 +5261,17 @@ def _hosted_mode_active() -> bool:
     sets it before constructing the app.
     """
     return os.environ.get(SPLITSMITH_MODE_ENV, "").strip().lower() == "hosted"
+
+
+def _build_device_client(base_url: str, *, token: str | None = None) -> HostedSyncClient:
+    """Build a ``HostedSyncClient`` for the device-flow calls (#719).
+
+    ``token=None`` gives the unauthenticated client the two public device
+    routes need - there is no bearer to send before the flow completes.
+    The one seam tests monkeypatch to script a hosted side.
+    """
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    return HostedSyncClient(http=httpx.Client(base_url=base_url, headers=headers, timeout=30.0))
 
 
 def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
@@ -12913,12 +12990,27 @@ def create_app(
     # alias.
     # ----------------------------------------------------------------------
 
+    def _account_info(ref: user_config.HostedAccountRef | None) -> HostedAccountInfo | None:
+        if ref is None:
+            return None
+        return HostedAccountInfo(
+            id=ref.id,
+            email=ref.email,
+            display_name=ref.display_name,
+            device_name=ref.device_name,
+            linked_at=ref.linked_at,
+        )
+
     @app.get("/api/settings/hosted-sync", response_model=HostedSyncSettings)
     async def get_hosted_sync_settings() -> HostedSyncSettings:
         if _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
         prefs = user_config.load_global_prefs()
-        return HostedSyncSettings(base_url=prefs.hosted_base_url, token_set=bool(prefs.hosted_token))
+        return HostedSyncSettings(
+            base_url=prefs.hosted_base_url,
+            token_set=bool(prefs.hosted_token),
+            account=_account_info(prefs.hosted_account),
+        )
 
     @app.put("/api/settings/hosted-sync", response_model=HostedSyncSettings)
     async def put_hosted_sync_settings(req: HostedSyncSettingsRequest) -> HostedSyncSettings:
@@ -12932,7 +13024,131 @@ def create_app(
         if req.token is not None:
             prefs.hosted_token = req.token or None
         user_config.save_global_prefs(prefs)
-        return HostedSyncSettings(base_url=prefs.hosted_base_url, token_set=bool(prefs.hosted_token))
+        return HostedSyncSettings(
+            base_url=prefs.hosted_base_url,
+            token_set=bool(prefs.hosted_token),
+            account=_account_info(prefs.hosted_account),
+        )
+
+    @app.post("/api/settings/hosted-sync/device/start", response_model=DeviceStartResponse)
+    async def start_device_login() -> DeviceStartResponse:
+        """Begin a browser-assisted link. Local-only.
+
+        Names the device after the host so the operator can tell two
+        installs apart on the hosted account page.
+        """
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        if not prefs.hosted_base_url:
+            raise HTTPException(status_code=409, detail="hosted_base_url_not_set")
+        client = _build_device_client(prefs.hosted_base_url)
+        try:
+            started = await run_in_threadpool(client.device_authorize, socket.gethostname())
+        except (SyncClientError, httpx.HTTPError) as exc:
+            raise HTTPException(status_code=502, detail=f"could not reach the hosted server: {exc}") from exc
+        state.device_flow = {
+            "device_code": started["device_code"],
+            "interval": int(started.get("interval", 5)),
+            "expires_at": time.monotonic() + int(started.get("expires_in", 600)),
+            "last_polled_at": None,
+            "last_status": "pending",
+            "base_url": prefs.hosted_base_url,
+        }
+        return DeviceStartResponse(
+            user_code=started["user_code"],
+            verification_uri=started["verification_uri"],
+            verification_uri_complete=started["verification_uri_complete"],
+            expires_in=int(started.get("expires_in", 600)),
+            interval=int(started.get("interval", 5)),
+        )
+
+    @app.get("/api/settings/hosted-sync/device/status", response_model=DeviceStatusResponse)
+    async def get_device_status() -> DeviceStatusResponse:
+        """Forward one poll upstream, at most once per hosted interval.
+
+        The SPA polls faster than the hosted side wants; this throttle is
+        what stops a fast-refreshing tab from tripping ``slow_down``. In
+        between forwards it replays the cached verdict.
+        """
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        flow = state.device_flow
+        if flow is None:
+            return DeviceStatusResponse(status="idle")
+        now = time.monotonic()
+        if now >= float(flow["expires_at"]):
+            state.device_flow = None
+            return DeviceStatusResponse(status="expired")
+        last = flow["last_polled_at"]
+        if last is not None and now - float(last) < float(flow["interval"]):
+            return DeviceStatusResponse(status=str(flow["last_status"]))
+
+        client = _build_device_client(str(flow["base_url"]))
+        try:
+            verdict = await run_in_threadpool(client.device_poll, str(flow["device_code"]))
+        except (SyncClientError, httpx.HTTPError) as exc:
+            raise HTTPException(status_code=502, detail=f"could not reach the hosted server: {exc}") from exc
+        flow["last_polled_at"] = now
+        status = str(verdict.get("status", "pending"))
+        # slow_down means we polled upstream too fast despite the throttle
+        # (clock skew, a restarted hosted process). Nothing has changed for
+        # the operator, so report it as pending rather than inventing a
+        # sixth UI state.
+        if status == "slow_down":
+            status = "pending"
+        flow["last_status"] = status
+
+        if status == "approved":
+            account = verdict.get("account") or {}
+            prefs = user_config.load_global_prefs()
+            prefs.hosted_token = verdict.get("token")
+            prefs.hosted_account = user_config.HostedAccountRef(
+                id=str(account.get("id", "")),
+                email=str(account.get("email", "")),
+                display_name=account.get("display_name"),
+                device_name=str(verdict.get("device_name") or socket.gethostname()),
+                linked_at=datetime.now(UTC),
+            )
+            user_config.save_global_prefs(prefs)
+            state.device_flow = None
+            return DeviceStatusResponse(
+                status="approved",
+                account=_account_info(prefs.hosted_account),
+                device_name=prefs.hosted_account.device_name,
+            )
+        if status in ("denied", "expired"):
+            state.device_flow = None
+        return DeviceStatusResponse(status=status)
+
+    @app.delete("/api/settings/hosted-sync/session", response_model=DeviceUnlinkResponse)
+    async def unlink_hosted_account() -> DeviceUnlinkResponse:
+        """Unlink this install: revoke upstream, then clear local prefs.
+
+        The local copy is cleared even when the hosted call fails
+        (offline, or the token was already revoked from the account
+        page). Leaving a dead token in config.yaml because the network
+        was down is the worse failure; ``hosted_revoked=False`` is what
+        lets the UI say the local copy is gone and point at the account
+        page for certainty. ``hosted_base_url`` survives - it is how the
+        operator points an install at staging.
+        """
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        revoked = False
+        if prefs.hosted_base_url and prefs.hosted_token:
+            client = _build_device_client(prefs.hosted_base_url, token=prefs.hosted_token)
+            try:
+                await run_in_threadpool(client.device_revoke_session)
+                revoked = True
+            except (SyncClientError, httpx.HTTPError):
+                revoked = False
+        prefs.hosted_token = None
+        prefs.hosted_account = None
+        user_config.save_global_prefs(prefs)
+        state.device_flow = None
+        return DeviceUnlinkResponse(cleared=True, hosted_revoked=revoked)
 
     # ----------------------------------------------------------------------
     # Desktop-token management routes (desktop-to-hosted sync MVP, #631)

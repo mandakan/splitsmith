@@ -70,6 +70,29 @@ class HostedSyncClient:
         resp = self._http.post("/api/sync/matches", json={"match_id": match_id, "name": name})
         self._raise_for_status(resp, on_409="a hosted match with this id already exists and is not a mirror")
 
+    def device_authorize(self, device_name: str) -> dict:
+        """Start a device authorization on the hosted side (#719).
+
+        Public route: the client this runs on carries no bearer, by
+        definition - there is no credential yet. Full path, because
+        ``base_url`` is the bare hosted origin (#712) and this client
+        owns every prefix it uses.
+        """
+        resp = self._http.post("/api/device/authorize", json={"device_name": device_name})
+        self._raise_for_status(resp)
+        return resp.json()
+
+    def device_poll(self, device_code: str) -> dict:
+        """Poll for the outcome. Always 200; the verdict is in the body."""
+        resp = self._http.post("/api/device/token", json={"device_code": device_code})
+        self._raise_for_status(resp)
+        return resp.json()
+
+    def device_revoke_session(self) -> None:
+        """Revoke this install's own token. Needs the bearer."""
+        resp = self._http.delete("/api/device/session")
+        self._raise_for_status(resp)
+
     def put_doc(self, match_id: str, item: DocItem) -> int:
         """Upsert one doc, returning the version the hosted side assigned."""
         resp = self._http.put(self._doc_url(match_id, item), json=item.body)
