@@ -1504,6 +1504,14 @@ def _build_filter_graph(
         parts.extend(clock_parts)
 
     if early_index is not None:
+        if overlay is None:
+            # Unreachable from ``build_stage_command``, which only takes
+            # an ``early_index`` when it has an overlay. Raised rather
+            # than trusted for the same reason the sprite check above is:
+            # composited onto ``[grid]`` this would silently produce a
+            # render nothing has ever looked at, where a finished tile
+            # carries a summary and no live overlay ever ran.
+            raise ValueError("an early summary needs the overlay plan whose action chain it draws onto")
         early_parts, video_label = _early_summary_filters(plan, canvas, video_label, early_index)
         parts.extend(early_parts)
 
