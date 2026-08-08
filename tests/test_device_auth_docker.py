@@ -26,17 +26,19 @@ Things the in-process SQLite suite cannot prove:
    the second writer's commit silently overwrite the first's under READ
    COMMITTED.
 
-Both concurrency tests build their engine with ``pool_disabled=True`` and
-schedule both calls via ``asyncio.create_task`` before awaiting them.
-This is load-bearing, confirmed empirically: a pooled engine driving two
-bare coroutines through ``asyncio.gather`` resolves the first call's chain
+Both concurrency tests build their engine with ``pool_disabled=True``.
+This -- not ``asyncio.gather`` vs. an explicit ``asyncio.create_task`` pair,
+which are equivalent (``gather`` calls ``ensure_future`` ->
+``loop.create_task()`` on each argument synchronously, in argument order,
+before returning) -- is what's load bearing, confirmed empirically: a
+pooled engine driving two concurrent calls resolves the first call's chain
 of near-instant localhost round trips to completion before the event loop
 ever gives the second coroutine's first ``await`` a turn, so the two never
 actually contend for the same row -- the guard being removed still leaves
 exactly one token/one winner, because there was never a race to guard
-against. Forcing a real connection handshake per call (``NullPool``) plus
-eager task scheduling reintroduces genuine interleaving, verified by
-mutation in both directions (see the task-5 report).
+against. Forcing a real connection handshake per call (``NullPool``)
+reintroduces genuine interleaving, verified by mutation in both directions,
+with and without an explicit ``create_task`` (see the task-5 report).
 
 Run with ``PATH=~/.claude-tmp/bin:$PATH uv run pytest -m docker
 tests/test_device_auth_docker.py -n0 -v`` (docker CLI lives outside the
@@ -84,6 +86,22 @@ def test_migration_creates_device_authorizations(hosted_stack: None) -> None:
         "last_polled_at",
     }
 
+    # The two unique constraints -- not just columns. ``_is_code_collision``
+    # (src/splitsmith/db/device_auth.py:118-133) depends on Postgres
+    # reporting exactly these constraint names in its IntegrityError text;
+    # that's Postgres-only behaviour no SQLite fixture can exercise, so it
+    # has to be checked here or nowhere.
+    constraints = set(
+        _psql(
+            "SELECT constraint_name FROM information_schema.table_constraints "
+            "WHERE table_name = 'device_authorizations' AND constraint_type = 'UNIQUE'"
+        ).split()
+    )
+    assert constraints == {
+        "uq_device_authorizations_device_code_hash",
+        "uq_device_authorizations_user_code",
+    }
+
 
 def test_legacy_desktop_tokens_backfill_to_full(hosted_stack: None) -> None:
     """The property that keeps an install in the field working.
@@ -110,6 +128,12 @@ def test_device_authorizations_has_no_rls_policy(hosted_stack: None) -> None:
     authentication outright. This asserts the absence so a future
     "enable RLS everywhere" sweep has to argue with a test.
     """
+    # An explicit existence check first: querying pg_policies for a table
+    # that doesn't exist also returns zero rows with no error, so run in
+    # isolation (as the mutation workflow in this file's own tests does)
+    # the policy assertion alone would pass vacuously if the migration
+    # never ran at all.
+    assert _psql("SELECT to_regclass('device_authorizations') IS NOT NULL").strip() == "t"
     assert _psql("SELECT policyname FROM pg_policies WHERE tablename = 'device_authorizations'").strip() == ""
 
 
@@ -144,12 +168,15 @@ def test_concurrent_polls_mint_one_token_on_postgres(hosted_stack: None) -> None
     async def _run() -> list[str]:
         req = await store.authorize(f"device-{uid}")
         assert await store.decide(req.user_code, user_id=uid, approved=True) is True
-        # ``create_task`` (not bare coroutines passed to ``gather``) so both
-        # polls are scheduled on the loop before either one runs -- see the
-        # ``pool_disabled`` note above for why this matters.
-        t1 = asyncio.create_task(store.poll(req.device_code))
-        t2 = asyncio.create_task(store.poll(req.device_code))
-        results = await asyncio.gather(t1, t2, return_exceptions=True)
+        # Bare coroutines, not explicit create_task: gather() already calls
+        # ensure_future -> loop.create_task() on each argument synchronously
+        # before returning, in argument order -- see the pool_disabled note
+        # above for what actually makes this race real.
+        results = await asyncio.gather(
+            store.poll(req.device_code),
+            store.poll(req.device_code),
+            return_exceptions=True,
+        )
         return [r.status for r in results if not isinstance(r, BaseException)]
 
     statuses = asyncio.run(_run())
@@ -175,20 +202,19 @@ def test_concurrent_decides_resolve_exactly_once_on_postgres(hosted_stack: None)
 
     uid = f"user-decide-{uuid.uuid4().hex[:8]}"
     _psql(f"INSERT INTO users (id, email, entitlement) VALUES ('{uid}', '{uid}@hosted.local', 'free')")
-    # ``pool_disabled=True`` + ``create_task`` -- see the identical note on
-    # ``test_concurrent_polls_mint_one_token_on_postgres``. Confirmed by
-    # mutation: a pooled engine with bare coroutines passed to ``gather``
-    # resolves the first ``decide`` call to completion before the second
-    # one's first await runs, so the two never actually contend for the row
-    # regardless of whether the guard is present.
+    # ``pool_disabled=True`` -- see the identical note on
+    # ``test_concurrent_polls_mint_one_token_on_postgres`` for why this (not
+    # how the two calls are scheduled) is what makes the race real.
     sf = sessionmaker(create_engine(HOST_APP_DB_URL, pool_disabled=True))
     store = DeviceAuthStore(sf, interval_seconds=0)
 
     async def _run() -> tuple[str, list[bool]]:
         req = await store.authorize(f"device-{uid}")
-        t1 = asyncio.create_task(store.decide(req.user_code, user_id=uid, approved=True))
-        t2 = asyncio.create_task(store.decide(req.user_code, user_id=uid, approved=False))
-        results = await asyncio.gather(t1, t2, return_exceptions=True)
+        results = await asyncio.gather(
+            store.decide(req.user_code, user_id=uid, approved=True),
+            store.decide(req.user_code, user_id=uid, approved=False),
+            return_exceptions=True,
+        )
         outcomes = [r for r in results if isinstance(r, bool)]
         return req.user_code, outcomes
 
