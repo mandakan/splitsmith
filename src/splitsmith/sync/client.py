@@ -58,6 +58,20 @@ class HostedSyncClient:
         self._http = http
         self._media_http = media_http
 
+    def close(self) -> None:
+        """Close the underlying ``httpx.Client``(s).
+
+        A push's ``http_client`` is already closed by its own caller (see
+        ``server.py``'s ``_run_sync_match`` job), so this exists for
+        shorter-lived callers - the device-flow routes (#719) build a
+        fresh client per call and must not leak the connection pool.
+        ``media_http`` is only ever created lazily via ``_media``, so it
+        is only closed here if a caller actually touched it.
+        """
+        self._http.close()
+        if self._media_http is not None:
+            self._media_http.close()
+
     @property
     def _media(self) -> httpx.Client:
         """The client used for presigned-URL part PUTs, created lazily."""
@@ -69,6 +83,29 @@ class HostedSyncClient:
         """Adopt (or refresh the name of) the hosted mirror row for ``match_id``."""
         resp = self._http.post("/api/sync/matches", json={"match_id": match_id, "name": name})
         self._raise_for_status(resp, on_409="a hosted match with this id already exists and is not a mirror")
+
+    def device_authorize(self, device_name: str) -> dict:
+        """Start a device authorization on the hosted side (#719).
+
+        Public route: the client this runs on carries no bearer, by
+        definition - there is no credential yet. Full path, because
+        ``base_url`` is the bare hosted origin (#712) and this client
+        owns every prefix it uses.
+        """
+        resp = self._http.post("/api/device/authorize", json={"device_name": device_name})
+        self._raise_for_status(resp)
+        return resp.json()
+
+    def device_poll(self, device_code: str) -> dict:
+        """Poll for the outcome. Always 200; the verdict is in the body."""
+        resp = self._http.post("/api/device/token", json={"device_code": device_code})
+        self._raise_for_status(resp)
+        return resp.json()
+
+    def device_revoke_session(self) -> None:
+        """Revoke this install's own token. Needs the bearer."""
+        resp = self._http.delete("/api/device/session")
+        self._raise_for_status(resp)
 
     def put_doc(self, match_id: str, item: DocItem) -> int:
         """Upsert one doc, returning the version the hosted side assigned."""

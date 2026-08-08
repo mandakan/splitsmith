@@ -37,6 +37,10 @@ vi.mock("@/lib/api", async (importOriginal) => {
       }),
       getScoreboardIdentity: vi.fn().mockResolvedValue(null),
       getRecentProjectsDetail: vi.fn().mockResolvedValue([]),
+      // The device-flow surface 404s in local mode; the approve page is
+      // only reachable here by planting a stash by hand (see the
+      // device-flow describe block below).
+      getDevicePending: vi.fn().mockRejectedValue(new Error("not found")),
     },
   };
 });
@@ -133,6 +137,41 @@ describe("route tree", () => {
     expect(
       screen.getByRole("link", { name: /design system/i }),
     ).toBeInTheDocument();
+  });
+
+  /**
+   * The device-flow pickup in AuthGate is deliberately NOT gated on
+   * deployment mode (#719 final review, finding 4). useDeploymentMode()
+   * starts at "local" and flips async, so a mode check there is a race
+   * against /api/me: lose it and the ordinary tree mounts, navigates off
+   * "/", and the one pickup window this feature has is gone.
+   *
+   * Dropping the check is only safe because a local install cannot hold
+   * a stash in the first place -- that premise is what these two tests
+   * pin, rather than leaving it as an argument in a comment.
+   */
+  it("never stashes a device code in local mode", async () => {
+    // AuthGate's stash write lives on the hosted anonymous bounce, which
+    // local mode never takes: it returns children before reaching it,
+    // whatever /api/me did. So even the one URL that carries a code
+    // leaves sessionStorage empty here.
+    sessionStorage.clear();
+    vi.mocked(api.getMe).mockRejectedValueOnce(new ApiError(401, "Unauthorized"));
+    await renderAt("/desktop/approve?code=ABCD-2345");
+    await waitFor(() => expect(screen.getByText(/approve device/i)).toBeInTheDocument());
+    expect(sessionStorage.getItem("splitsmith.deviceApproveCode")).toBeNull();
+    expect(window.location.pathname).toBe("/desktop/approve");
+  });
+
+  it("leaves a local-mode visitor with no stash on the ordinary route", async () => {
+    // The everyday local case: "/" behaves exactly as it always did, no
+    // pickup redirect anywhere in sight.
+    sessionStorage.clear();
+    await renderAt("/");
+    await waitFor(() =>
+      expect(screen.getByRole("navigation", { name: /global/i })).toBeInTheDocument(),
+    );
+    expect(window.location.pathname).not.toBe("/desktop/approve");
   });
 
   it("does not render global chrome on the login surface", async () => {

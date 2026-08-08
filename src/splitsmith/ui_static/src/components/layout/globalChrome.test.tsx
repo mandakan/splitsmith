@@ -22,4 +22,19 @@ describe("global chrome mounts", () => {
       "src/components/match/MatchShell.tsx",
     ]);
   });
+
+  it("renders HostedAccountChip from exactly the same two call sites", () => {
+    const sites = readdirSync("src", { recursive: true, encoding: "utf8" })
+      .filter((f) => f.endsWith(".tsx") && !f.endsWith(".test.tsx"))
+      .map((f) => `src/${f}`)
+      .filter((f) => /<HostedAccountChip\b/.test(readFileSync(f, "utf8")));
+    // Same two sites as AccountChip and for the same reason: the global
+    // bar on desktop (and on /pick on a phone), plus MatchShell's mobile
+    // nav drawer, which is the only account surface inside a match on a
+    // phone. The two chips self-gate on opposite deployment modes.
+    expect(sites.sort()).toEqual([
+      "src/components/layout/GlobalBar.tsx",
+      "src/components/match/MatchShell.tsx",
+    ]);
+  });
 });

@@ -102,12 +102,20 @@ def test_revoke_returns_true_and_bearer_stops_authenticating(
     token_id = create.json()["record"]["id"]
 
     # The bearer alone (no session cookie) authenticates against a gated
-    # /api/me/* route - same gate Task 2's DesktopTokenAuth wired in.
+    # route - same gate Task 2's DesktopTokenAuth wired in. Tokens minted
+    # here default to scope="sync" (#719: every token minted from now on
+    # is scoped, whether from the device flow or this manual button), so
+    # the probe route must live under /api/sync/* - a sync-scoped bearer
+    # 403s on /api/me/* itself (see test_token_scope_gate.py), which
+    # would be indistinguishable from "revoked" for this test's purpose.
     client.cookies.clear()
     bearer_headers = {"Authorization": f"Bearer {raw}"}
-    before = client.get(URL, headers=bearer_headers)
-    assert before.status_code == 200
-    assert len(before.json()["tokens"]) == 1
+    before = client.post(
+        "/api/sync/matches",
+        json={"match_id": "m-revoke-probe", "name": "revoke probe"},
+        headers=bearer_headers,
+    )
+    assert before.status_code == 200, before.text
 
     # Revoke via a normal owner session (the SPA's account page, not the
     # bearer itself - the bearer has no route to revoke through).
@@ -118,7 +126,11 @@ def test_revoke_returns_true_and_bearer_stops_authenticating(
 
     # The now-revoked bearer stops authenticating.
     client.cookies.clear()
-    after = client.get(URL, headers=bearer_headers)
+    after = client.post(
+        "/api/sync/matches",
+        json={"match_id": "m-revoke-probe", "name": "revoke probe"},
+        headers=bearer_headers,
+    )
     assert after.status_code == 401
 
 

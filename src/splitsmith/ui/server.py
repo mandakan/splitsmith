@@ -78,6 +78,7 @@ import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -96,6 +97,7 @@ if TYPE_CHECKING:
     # so local mode stays free of the db (procrastinate/psycopg) dependency.
     from ..db import PostgresMatchStore, ProjectStateStore
     from ..db.desktop_tokens import DesktopTokenRecord, DesktopTokenStore
+    from ..db.device_auth import DeviceAuthStore
     from ..db.share_tokens import ResolvedShare, ShareTokenStore
     from ..db.workers import WorkersStore
     from ..worker_channel import WakeChannelRegistry
@@ -121,6 +123,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.staticfiles import StaticFiles
 from pydantic import AwareDatetime, BaseModel, Field
 from starlette.background import BackgroundTask
+from starlette.concurrency import run_in_threadpool
 
 from .. import __version__ as splitsmith_version
 from .. import automation as automation_settings
@@ -910,6 +913,14 @@ _PUBLIC_API_PATHS: frozenset[str] = frozenset(
         # headless box that has no cookie jar.
         "/api/workers/register",
         "/api/workers/channel",
+        # Device-flow bring-up (#719): the desktop install has no cookie
+        # jar and, by definition, no bearer yet. Same rationale already
+        # recorded above for /api/workers/register - the credential in
+        # the request IS the authorization, checked in the handlers, and
+        # an unknown device code is indistinguishable from an expired
+        # one so there is nothing to probe for.
+        "/api/device/authorize",
+        "/api/device/token",
     }
 )
 
@@ -1157,6 +1168,35 @@ class AppState:
     # infrastructure shared across tenants, not per-user data (no RLS; the
     # unique token hash is the isolation boundary).
     workers_store: WorkersStore | None = None
+    # Device-flow authorizations (#719). Raw (non-tenant) session factory,
+    # same as workers_store: the poll authenticates from the device code
+    # alone, before any tenant is pinned. None in local mode.
+    device_auth: DeviceAuthStore | None = None
+    # In-flight device-flow state for the LOCAL install (#719): the
+    # device code, the hosted-declared interval, when it expires, and
+    # when we last forwarded a poll. Also the non-secret half of the
+    # hosted response - ``user_code``, ``verification_uri``,
+    # ``verification_uri_complete`` - so a second ``device/start`` can
+    # hand the still-live flow back to the SPA instead of dead-ending it
+    # (the operator who cancels the dialog and signs in again must get
+    # the code and the approve link, not a ten-minute wait). Only
+    # ``device_code`` is a secret and it never leaves this process.
+    # Deliberately in memory and not on disk - polling is lazy (the
+    # SPA's own poll drives it), so closing the tab leaves no orphaned
+    # poller, and restarting the local server mid-flow just means
+    # starting over inside a 10-minute window.
+    device_flow: dict[str, object] | None = None
+    # Guards every read-modify-write of ``device_flow`` (#719). The three
+    # local device routes each ``await`` a threadpool HTTP call in the
+    # middle of reading/mutating ``device_flow``; without a lock, two
+    # concurrent status polls can both pass the throttle check before
+    # either records ``last_polled_at``, doubling load on the hosted side
+    # and letting one poll's approval response get discarded by the SPA
+    # while the other request that "won" the race serves a stale status.
+    # A plain ``asyncio.Lock`` is enough - this is one desktop process
+    # serving one operator, not a multi-worker server, so there is no
+    # cross-process case to cover.
+    device_flow_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # Live SSE wake channels, one asyncio.Queue per connected self-hosted
     # worker. ``None`` in local mode and on the headless worker process
     # (which must never hold launcher capabilities); set by the non-worker
@@ -4186,16 +4226,32 @@ class ScoreboardIdentityRequest(BaseModel):
     base_url: str | None = None
 
 
+class HostedAccountInfo(BaseModel):
+    """The linked hosted account, as the SPA renders it (#719).
+
+    Cached in ``config.yaml`` from the device-flow poll, never fetched
+    live - a sync-scoped token cannot read ``/api/me``.
+    """
+
+    id: str
+    email: str
+    display_name: str | None = None
+    device_name: str
+    linked_at: datetime
+
+
 class HostedSyncSettings(BaseModel):
     """Response body for GET/PUT /api/settings/hosted-sync (#631, Task 9).
 
     ``token_set`` is a boolean, never the raw token - the desktop client
     keeps its own copy from the moment it typed it in; the server has no
-    business echoing a bearer credential back over localhost HTTP.
+    business echoing a bearer credential back over localhost HTTP. Same
+    rule applies to ``account``: it carries identity, never a credential.
     """
 
     base_url: str | None = None
     token_set: bool = False
+    account: HostedAccountInfo | None = None
 
 
 class HostedSyncSettingsRequest(BaseModel):
@@ -4208,6 +4264,54 @@ class HostedSyncSettingsRequest(BaseModel):
 
     base_url: str
     token: str | None = None
+
+
+class DeviceStartResponse(BaseModel):
+    """Response for POST /api/settings/hosted-sync/device/start (#719).
+
+    Deliberately has no ``device_code`` field: the secret stays on this
+    process. The SPA only needs the code to show and the URL to open.
+
+    ``resumed`` is True when this call did NOT start a new login: a flow
+    was already in flight on this install and is still live, so the same
+    ``user_code`` and links come back and ``expires_in`` counts down the
+    remaining part of the original window. The SPA says so rather than
+    presenting it as a fresh code.
+    """
+
+    user_code: str
+    verification_uri: str
+    verification_uri_complete: str
+    expires_in: int
+    interval: int
+    resumed: bool = False
+
+
+class DeviceStatusResponse(BaseModel):
+    """Response for GET /api/settings/hosted-sync/device/status (#719).
+
+    ``status`` is ``idle`` (no flow in progress), ``pending``, ``approved``,
+    ``denied`` or ``expired``. ``denied`` and ``expired`` are distinct on
+    purpose - "you declined this on splitsmith.app" and "the code ran out"
+    are different problems and get different copy.
+    """
+
+    status: str
+    account: HostedAccountInfo | None = None
+    device_name: str | None = None
+
+
+class DeviceUnlinkResponse(BaseModel):
+    """Response for DELETE /api/settings/hosted-sync/session (#719).
+
+    ``cleared`` is always True - the local prefs are gone either way.
+    ``hosted_revoked`` is False when the upstream revoke could not be
+    confirmed, which the UI turns into "signed out here; check your
+    account page to be sure".
+    """
+
+    cleared: bool
+    hosted_revoked: bool
 
 
 class SyncStatusResponse(BaseModel):
@@ -5184,6 +5288,17 @@ def _hosted_mode_active() -> bool:
     return os.environ.get(SPLITSMITH_MODE_ENV, "").strip().lower() == "hosted"
 
 
+def _build_device_client(base_url: str, *, token: str | None = None) -> HostedSyncClient:
+    """Build a ``HostedSyncClient`` for the device-flow calls (#719).
+
+    ``token=None`` gives the unauthenticated client the two public device
+    routes need - there is no bearer to send before the flow completes.
+    The one seam tests monkeypatch to script a hosted side.
+    """
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    return HostedSyncClient(http=httpx.Client(base_url=base_url, headers=headers, timeout=30.0))
+
+
 def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     """Wire AppState for hosted mode: a per-tenant store factory + the
     process-level resources it needs.
@@ -5225,6 +5340,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         tenant_session_factory,
     )
     from ..db.desktop_tokens import DesktopTokenAuth, DesktopTokenStore
+    from ..db.device_auth import DeviceAuthStore
     from ..db.share_tokens import ShareTokenStore
     from ..db.share_tokens import resolve_share_token as _resolve_share_token_fn
     from ..db.workers import WorkersStore
@@ -5282,9 +5398,11 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # SPLITSMITH_SIGNUP_ALLOWLIST. Returning users always sign in.
     signup_policy = build_signup_policy()
     # Composite: a magic-link session cookie (browser) or a desktop bearer
-    # token (sync push, #631) either resolve to a normal tenant user - the
-    # auth gate and everything downstream of it never distinguish which
-    # backend answered. Session cookie is tried first (the common case).
+    # token (sync push, #631) either resolve to a normal tenant user, so
+    # current_tenant and RLS treat them identically. The auth gate DOES
+    # distinguish which backend answered, via User.token_scope (#719):
+    # a sync-scoped bearer is confined to /api/sync/*. Session cookie is
+    # tried first (the common case).
     state.auth = CompositeAuth(
         MagicLinkAuth(session_factory, email_sender, signup_policy=signup_policy),
         DesktopTokenAuth(session_factory),
@@ -5306,6 +5424,9 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     # Operator-scoped worker registry over the RAW session factory (not a
     # tenant factory): one fleet shared by the operator, no user_id, no RLS.
     state.workers_store = WorkersStore(session_factory)
+    # Device-flow authorizations (#719): raw session factory, same
+    # rationale as workers_store above (see DeviceAuthStore's docstring).
+    state.device_auth = DeviceAuthStore(session_factory)
     # Scale-to-zero worker: only the API process is the enqueuer and the only
     # process that should be able to redeploy the worker. The worker must never
     # acquire launcher capabilities - redeploying itself would be circular and
@@ -6263,6 +6384,20 @@ def create_app(
         # lookup per request in hosted mode. The scope is shared with the
         # endpoint, so this propagates downstream.
         request.state.user = user
+        # Scope gate (#719). Allowlist, not a denylist: only None (session
+        # cookie, loopback user) and "full" (legacy pasted token) are
+        # unrestricted. Everything else - "sync" today, and any value a
+        # future migration or scope introduces tomorrow - is confined to
+        # the sync surface plus its own sign-out route. A typo'd or
+        # unrecognized scope is denied on purpose rather than falling
+        # open: an unrestricted-by-default reading of an unknown value
+        # would be the wrong failure mode for a credential's reach.
+        if (
+            user.token_scope not in (None, "full")
+            and not path.startswith("/api/sync/")
+            and path != "/api/device/session"
+        ):
+            return JSONResponse(status_code=403, content={"detail": "token scope"})
         if not hosted:
             return await call_next(request)
         tenant_token = current_tenant.set(state.build_tenant(user.id))
@@ -12880,26 +13015,230 @@ def create_app(
     # alias.
     # ----------------------------------------------------------------------
 
+    def _account_info(ref: user_config.HostedAccountRef | None) -> HostedAccountInfo | None:
+        if ref is None:
+            return None
+        return HostedAccountInfo(
+            id=ref.id,
+            email=ref.email,
+            display_name=ref.display_name,
+            device_name=ref.device_name,
+            linked_at=ref.linked_at,
+        )
+
     @app.get("/api/settings/hosted-sync", response_model=HostedSyncSettings)
     async def get_hosted_sync_settings() -> HostedSyncSettings:
         if _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
         prefs = user_config.load_global_prefs()
-        return HostedSyncSettings(base_url=prefs.hosted_base_url, token_set=bool(prefs.hosted_token))
+        return HostedSyncSettings(
+            base_url=prefs.hosted_base_url,
+            token_set=bool(prefs.hosted_token),
+            account=_account_info(prefs.hosted_account),
+        )
 
     @app.put("/api/settings/hosted-sync", response_model=HostedSyncSettings)
     async def put_hosted_sync_settings(req: HostedSyncSettingsRequest) -> HostedSyncSettings:
         if _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
         prefs = user_config.load_global_prefs()
+        base_url_changed = prefs.hosted_base_url != req.base_url
         prefs.hosted_base_url = req.base_url
         # None keeps the stored token (the SPA resubmits base_url alone
         # without re-typing the secret); "" clears it; anything else
         # replaces it.
         if req.token is not None:
             prefs.hosted_token = req.token or None
+        # The cached account belongs to the credential that earned it
+        # (#719). Pasting a token through the Advanced disclosure, or
+        # repointing this install from prod to staging, invalidates that
+        # identity - and a chip that keeps naming the old account while
+        # pushes go somewhere else is worse than no chip at all. Clear
+        # it; the next device login (or a GET after one) fills it back in.
+        if req.token is not None or base_url_changed:
+            prefs.hosted_account = None
         user_config.save_global_prefs(prefs)
-        return HostedSyncSettings(base_url=prefs.hosted_base_url, token_set=bool(prefs.hosted_token))
+        # A device login in flight belongs to the host it was started
+        # against. Repointing the install strands it: its device_code
+        # only means something on the old host, so polling it on would
+        # at best waste requests and at worst link this install to an
+        # account on the host we just stopped pushing to. Drop it, so
+        # the next start mints a code against the new target.
+        if base_url_changed:
+            async with state.device_flow_lock:
+                state.device_flow = None
+        return HostedSyncSettings(
+            base_url=prefs.hosted_base_url,
+            token_set=bool(prefs.hosted_token),
+            account=_account_info(prefs.hosted_account),
+        )
+
+    @app.post("/api/settings/hosted-sync/device/start", response_model=DeviceStartResponse)
+    async def start_device_login() -> DeviceStartResponse:
+        """Begin a browser-assisted link. Local-only.
+
+        Names the device after the host so the operator can tell two
+        installs apart on the hosted account page. Holds
+        ``device_flow_lock`` for the whole body (including the hosted
+        round trip): a second start racing this one must not silently
+        clobber the first's ``device_code`` while it's still live -
+        instead it gets that same flow handed back, with
+        ``resumed=True``.
+
+        Resuming rather than rejecting is what keeps "cancel, then sign
+        in again" from being a dead end: the local process is the only
+        holder of the live ``device_code``, so a second start that
+        refused would leave the operator with no code, no approve link
+        and no way out short of waiting out the 10-minute TTL. The
+        secret still never leaves this process - only the ``user_code``
+        and the two verification URLs, which the hosted side prints on
+        the approval screen anyway.
+        """
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        if not prefs.hosted_base_url:
+            raise HTTPException(status_code=409, detail="hosted_base_url_not_set")
+        async with state.device_flow_lock:
+            existing = state.device_flow
+            now = time.monotonic()
+            if existing is not None and now < float(existing["expires_at"]):
+                return DeviceStartResponse(
+                    user_code=str(existing["user_code"]),
+                    verification_uri=str(existing["verification_uri"]),
+                    verification_uri_complete=str(existing["verification_uri_complete"]),
+                    expires_in=max(0, int(float(existing["expires_at"]) - now)),
+                    interval=int(float(existing["interval"])),
+                    resumed=True,
+                )
+            client = _build_device_client(prefs.hosted_base_url)
+            try:
+                started = await run_in_threadpool(client.device_authorize, socket.gethostname())
+            except (SyncClientError, httpx.HTTPError) as exc:
+                raise HTTPException(
+                    status_code=502, detail=f"could not reach the hosted server: {exc}"
+                ) from exc
+            finally:
+                client.close()
+            state.device_flow = {
+                "device_code": started["device_code"],
+                "user_code": started["user_code"],
+                "verification_uri": started["verification_uri"],
+                "verification_uri_complete": started["verification_uri_complete"],
+                "interval": int(started.get("interval", 5)),
+                "expires_at": time.monotonic() + int(started.get("expires_in", 600)),
+                "last_polled_at": None,
+                "last_status": "pending",
+                "base_url": prefs.hosted_base_url,
+            }
+        return DeviceStartResponse(
+            user_code=started["user_code"],
+            verification_uri=started["verification_uri"],
+            verification_uri_complete=started["verification_uri_complete"],
+            expires_in=int(started.get("expires_in", 600)),
+            interval=int(started.get("interval", 5)),
+            resumed=False,
+        )
+
+    @app.get("/api/settings/hosted-sync/device/status", response_model=DeviceStatusResponse)
+    async def get_device_status() -> DeviceStatusResponse:
+        """Forward one poll upstream, at most once per hosted interval.
+
+        The SPA polls faster than the hosted side wants; this throttle is
+        what stops a fast-refreshing tab from tripping ``slow_down``. In
+        between forwards it replays the cached verdict. The whole body
+        runs under ``device_flow_lock`` (held across the hosted round
+        trip) so two concurrent polls can't both pass the throttle check
+        before either records ``last_polled_at`` - without it, both would
+        forward to the hosted side, and whichever request's caller reads
+        second would silently discard the approval the other one saw.
+        """
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        async with state.device_flow_lock:
+            flow = state.device_flow
+            if flow is None:
+                return DeviceStatusResponse(status="idle")
+            now = time.monotonic()
+            if now >= float(flow["expires_at"]):
+                state.device_flow = None
+                return DeviceStatusResponse(status="expired")
+            last = flow["last_polled_at"]
+            if last is not None and now - float(last) < float(flow["interval"]):
+                return DeviceStatusResponse(status=str(flow["last_status"]))
+
+            client = _build_device_client(str(flow["base_url"]))
+            try:
+                verdict = await run_in_threadpool(client.device_poll, str(flow["device_code"]))
+            except (SyncClientError, httpx.HTTPError) as exc:
+                raise HTTPException(
+                    status_code=502, detail=f"could not reach the hosted server: {exc}"
+                ) from exc
+            finally:
+                client.close()
+            flow["last_polled_at"] = now
+            status = str(verdict.get("status", "pending"))
+            # slow_down means we polled upstream too fast despite the
+            # throttle (clock skew, a restarted hosted process). Nothing
+            # has changed for the operator, so report it as pending
+            # rather than inventing a sixth UI state.
+            if status == "slow_down":
+                status = "pending"
+            flow["last_status"] = status
+
+            if status == "approved":
+                account = verdict.get("account") or {}
+                prefs = user_config.load_global_prefs()
+                prefs.hosted_token = verdict.get("token")
+                prefs.hosted_account = user_config.HostedAccountRef(
+                    id=str(account.get("id", "")),
+                    email=str(account.get("email", "")),
+                    display_name=account.get("display_name"),
+                    device_name=str(verdict.get("device_name") or socket.gethostname()),
+                    linked_at=datetime.now(UTC),
+                )
+                user_config.save_global_prefs(prefs)
+                state.device_flow = None
+                return DeviceStatusResponse(
+                    status="approved",
+                    account=_account_info(prefs.hosted_account),
+                    device_name=prefs.hosted_account.device_name,
+                )
+            if status in ("denied", "expired"):
+                state.device_flow = None
+            return DeviceStatusResponse(status=status)
+
+    @app.delete("/api/settings/hosted-sync/session", response_model=DeviceUnlinkResponse)
+    async def unlink_hosted_account() -> DeviceUnlinkResponse:
+        """Unlink this install: revoke upstream, then clear local prefs.
+
+        The local copy is cleared even when the hosted call fails
+        (offline, or the token was already revoked from the account
+        page). Leaving a dead token in config.yaml because the network
+        was down is the worse failure; ``hosted_revoked=False`` is what
+        lets the UI say the local copy is gone and point at the account
+        page for certainty. ``hosted_base_url`` survives - it is how the
+        operator points an install at staging.
+        """
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        revoked = False
+        if prefs.hosted_base_url and prefs.hosted_token:
+            client = _build_device_client(prefs.hosted_base_url, token=prefs.hosted_token)
+            try:
+                await run_in_threadpool(client.device_revoke_session)
+                revoked = True
+            except (SyncClientError, httpx.HTTPError):
+                revoked = False
+            finally:
+                client.close()
+        prefs.hosted_token = None
+        prefs.hosted_account = None
+        user_config.save_global_prefs(prefs)
+        async with state.device_flow_lock:
+            state.device_flow = None
+        return DeviceUnlinkResponse(cleared=True, hosted_revoked=revoked)
 
     # ----------------------------------------------------------------------
     # Desktop-token management routes (desktop-to-hosted sync MVP, #631)
@@ -14178,6 +14517,15 @@ def create_app(
     from .sync_api import router as sync_router
 
     app.include_router(sync_router)
+
+    # Browser-assisted device authorization router (#719). Same lazy-import
+    # / always-registered idiom as sync_router above: db imports stay
+    # inside device_auth_api.py, so a local-slim install still imports and
+    # registers this router safely, and every route 404s outside hosted
+    # mode (see device_auth_api._hosted_gate).
+    from .device_auth_api import router as device_router
+
+    app.include_router(device_router)
 
     # ----------------------------------------------------------------------
     # Static asset serving (SPA)

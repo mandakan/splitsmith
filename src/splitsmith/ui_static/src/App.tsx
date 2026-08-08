@@ -21,6 +21,7 @@ import { UploadProvider } from "@/lib/uploads";
 import { UploadDock } from "@/components/UploadDock";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { useDeploymentMode } from "@/lib/features";
+import { peekApproveCode, stashApproveCode, takeApproveCode } from "@/lib/deviceApproveStash";
 import { ShooterScopedRoute } from "@/components/ShooterScopedRoute";
 import { Login } from "@/pages/Login";
 import { Audit } from "@/pages/Audit";
@@ -29,6 +30,7 @@ import { Coach } from "@/pages/Coach";
 import { Compare } from "@/pages/Compare";
 import { CreateMatch } from "@/pages/CreateMatch";
 import { Design } from "@/pages/Design";
+import { DesktopApprove } from "@/pages/DesktopApprove";
 import { DevCorpus } from "@/pages/dev/DevCorpus";
 import { DevRetrain } from "@/pages/dev/DevRetrain";
 import { DevReviewQueue } from "@/pages/dev/DevReviewQueue";
@@ -103,6 +105,43 @@ function AuthGate({ children }: { children: ReactNode }) {
   const { status } = useAuth();
   const mode = useDeploymentMode();
   const location = useLocation();
+
+  // Device-flow pickup (#719). Whether to redirect has to be decided
+  // synchronously, in THIS render, using the render-safe peek -- not an
+  // effect. If {children} (the ordinary route tree) were allowed to mount
+  // for even one commit while a pickup is pending, its own routing (e.g.
+  // LegacyMatchRedirect's async getHealth()-driven redirect to /pick)
+  // races the pickup and can win, since both write history with
+  // ``replace``. Rendering <Navigate> here instead of {children} means
+  // that competing tree never mounts at all.
+  //
+  // Consuming the stash (the actual sessionStorage mutation) is a
+  // separate, effect-only step below: takeApproveCode() is a
+  // read-then-remove side effect, so it cannot run in the render body --
+  // StrictMode double-invokes render on mount, and the first (discarded)
+  // invocation would consume the stash before the second (committed) one
+  // ever saw it, silently defeating the redirect. The effect is gated on
+  // the same peeked value, so its own StrictMode double-invoke (mount ->
+  // cleanup -> mount) just consumes it once and then no-ops.
+  //
+  // Deliberately NOT gated on deployment mode. useDeploymentMode()
+  // starts at "local" and flips async once /api/server/features lands,
+  // so a mode check here is a race against /api/me: if auth resolves
+  // first, the local-mode early return below mounts the ordinary tree,
+  // LegacyMatchRedirect navigates off "/", and by the time mode flips
+  // the pathname no longer matches -- the only pickup window this
+  // feature gets, missed, with a dead code left to ambush a later
+  // visit. The check bought nothing anyway: sessionStorage is
+  // origin-scoped and stashApproveCode() only ever runs on the hosted
+  // anonymous path, so a local install cannot hold a stash (pinned by a
+  // test in App.routes.test.tsx).
+  const pendingPickupCode =
+    status === "authed" && location.pathname === "/" ? peekApproveCode() : null;
+
+  useEffect(() => {
+    if (pendingPickupCode) takeApproveCode();
+  }, [pendingPickupCode]);
+
   // Public share views are token-authorized server-side; the session
   // gate has no say there. Bypass before the loading branch so a share
   // link renders without waiting on /api/me.
@@ -120,9 +159,22 @@ function AuthGate({ children }: { children: ReactNode }) {
       </div>
     );
   }
+  // Ahead of the local-mode early return on purpose: see the comment on
+  // pendingPickupCode. A pending pickup implies a stash, which only the
+  // hosted anonymous path can ever write.
+  if (pendingPickupCode) {
+    return <Navigate to={`/desktop/approve?code=${pendingPickupCode}`} replace />;
+  }
   // Desktop is never gated -- no login route, no redirect, whatever /api/me did.
   if (mode === "local") return <>{children}</>;
   if (status === "anon" && location.pathname !== "/login") {
+    // Device-flow codes have to survive the login round trip (#719): the
+    // magic link returns to "/" with no query string, so park the code
+    // before we lose it.
+    if (location.pathname === "/desktop/approve") {
+      const code = new URLSearchParams(location.search).get("code");
+      if (code) stashApproveCode(code);
+    }
     return <Navigate to="/login" replace />;
   }
   return <>{children}</>;
@@ -164,6 +216,10 @@ export function App() {
               account menu and an empty sidebar. They nest directly
               under RootLayout now (#550). */}
           <Route path="admin/workers" element={<AdminWorkers />} />
+          {/* Device-flow approval screen (#719). Under RootLayout so it
+              carries the account chip -- the operator needs to see which
+              account they are approving for. */}
+          <Route path="desktop/approve" element={<DesktopApprove />} />
           {/* Canonical match-scoped surfaces (#353 Phase 3 PR C). All
               shooter / stage / overview / picker-within-match routes
               live under ``/match/:matchId/...``. Bare match-scoped paths

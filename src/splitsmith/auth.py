@@ -31,12 +31,20 @@ class User(BaseModel):
     embedded (project ownership, ACL rows, sync sentinels). In local
     mode it is the literal string ``"local"``; in hosted mode it is
     the database ULID.
+
+    ``token_scope`` is the credential's reach, not the user's (#719).
+    ``None`` means unrestricted - a session cookie or the loopback
+    user. ``"sync"`` is a device-flow desktop token, which the gate in
+    ``_auth_gate`` confines to ``/api/sync/*`` plus its own sign-out
+    route. ``"full"`` is a legacy pasted desktop token, unrestricted by
+    design so installs in the field keep working.
     """
 
     id: str
     email: str
     display_name: str | None = None
     is_admin: bool = False
+    token_scope: str | None = None
 
 
 class AuthBackend(Protocol):
@@ -53,9 +61,14 @@ class CompositeAuth:
 
     Hosted mode authenticates two ways: a magic-link session cookie (the
     browser) or a desktop bearer token (the sync push from the desktop
-    app). Both resolve to a normal :class:`User`, so downstream code
-    (``request.state.user``, ``current_tenant``, RLS) never distinguishes
-    which backend answered.
+    app). Both resolve to a normal :class:`User`, so ``current_tenant``
+    and RLS treat them identically.
+
+    One thing downstream DOES distinguish (#719): ``User.token_scope``.
+    ``DesktopTokenAuth`` sets it from the token row; the cookie and
+    loopback backends leave it ``None``. ``_auth_gate`` reads it to
+    confine a sync-scoped token to the sync surface. Tenancy is still
+    backend-agnostic; only reach is not.
     """
 
     def __init__(self, *backends: AuthBackend) -> None:
