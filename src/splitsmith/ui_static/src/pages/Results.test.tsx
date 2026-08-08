@@ -70,6 +70,18 @@ function makeProject(): MatchProject {
         stage_rounds: null,
         scorecard: null,
       },
+      {
+        stage_number: 2,
+        stage_name: "Brass Monkey",
+        time_seconds: 0,
+        scorecard_updated_at: null,
+        videos: [],
+        skipped: false,
+        placeholder: false,
+        time_seconds_manual: false,
+        stage_rounds: null,
+        scorecard: null,
+      },
     ],
     unassigned_videos: [],
     last_scanned_dir: null,
@@ -89,9 +101,9 @@ function makeProject(): MatchProject {
 }
 
 const SHOOTERS = [
-  makeShooter("anna", "Anna", [[1, "audited"]]),
-  makeShooter("bjorn", "Bjorn", [[1, "ready"]]),
-  makeShooter("cleo", "Cleo", [[1, "skipped"]]),
+  makeShooter("anna", "Anna", [[1, "audited"], [2, "ready"]]),
+  makeShooter("bjorn", "Bjorn", [[1, "ready"], [2, "todo"]]),
+  makeShooter("cleo", "Cleo", [[1, "skipped"], [2, "todo"]]),
 ];
 
 function Shell({ ctx }: { ctx: MatchShellOutletContext }) {
@@ -160,7 +172,56 @@ describe("Results rows - share surface", () => {
 
   it("counts videos, not audits, in the header", () => {
     renderResults("/share/tok123/results");
-    expect(screen.getByText(/videos/)).toBeInTheDocument();
+    expect(screen.getAllByText(/videos/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/audited/)).not.toBeInTheDocument();
+  });
+
+  it("collapses a stage with no watchable runs to one No videos yet line", () => {
+    renderResults("/share/tok123/results");
+    // Stage 2 has no audited cell: the per-shooter No video rows give way
+    // to a single line (mobile card + desktop matrix render one each).
+    expect(screen.getAllByText("No videos yet").length).toBeGreaterThan(0);
+    // Stage 1 has a watchable run, so its non-audited siblings keep their
+    // per-shooter No video rows.
+    expect(screen.getAllByText("No video").length).toBeGreaterThan(0);
+  });
+
+  it("never collapses stages on the owner surface", () => {
+    renderResults("/match/m1/results");
+    expect(screen.queryByText("No videos yet")).not.toBeInTheDocument();
+  });
+});
+
+describe("Results rows - hit counts", () => {
+  it("renders the A/C/D/NS/M/P breakdown on scored audited rows", async () => {
+    const scored = makeProject();
+    scored.stages[0].scorecard = {
+      hit_factor: 5.24,
+      stage_points: 100,
+      stage_pct: 87.5,
+      alphas: 10,
+      charlies: 2,
+      deltas: 1,
+      misses: 0,
+      no_shoots: 0,
+      procedurals: 3,
+      dq: false,
+    };
+    const { api } = await import("@/lib/api");
+    vi.mocked(api.getProject).mockResolvedValue(scored);
+    try {
+      renderResults("/match/m1/results");
+      // Multi-shooter cells resolve per-shooter projects async.
+      expect((await screen.findAllByText("NS")).length).toBeGreaterThan(0);
+      expect(screen.getAllByText("P").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("3").length).toBeGreaterThan(0);
+    } finally {
+      vi.mocked(api.getProject).mockImplementation(() => new Promise(() => {}));
+    }
+  });
+
+  it("keeps unscored audited rows free of hit-count chrome", () => {
+    renderResults("/match/m1/results");
+    expect(screen.queryByText("NS")).not.toBeInTheDocument();
   });
 });

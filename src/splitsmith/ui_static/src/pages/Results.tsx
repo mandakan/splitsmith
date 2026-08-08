@@ -101,6 +101,35 @@ function formatHitFactor(hitFactor: number): string {
   return `HF ${hitFactor.toFixed(2)}`;
 }
 
+/** One-line A/C/D/NS/M/P breakdown for a scored row. Same label-beside-
+ *  count pairing as the Scorecard detail view (color never sole carrier),
+ *  compressed to single-letter labels; zeros stay visible so rows keep
+ *  comparable shape when scanning across shooters. Null counts render
+ *  "--" (unknown, not zero), matching Scorecard's fmt. */
+function HitCounts({ scorecard }: { scorecard: StageScorecard }) {
+  const items: [string, number | null][] = [
+    ["A", scorecard.alphas],
+    ["C", scorecard.charlies],
+    ["D", scorecard.deltas],
+    ["NS", scorecard.no_shoots],
+    ["M", scorecard.misses],
+    ["P", scorecard.procedurals],
+  ];
+  return (
+    <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[0.625rem] leading-tight tabular-nums">
+      {items.map(([label, value]) => (
+        <span key={label} className="inline-flex items-center gap-0.5">
+          <span className="text-subtle">{label}</span>
+          <span className="text-muted">{value == null ? "--" : value}</span>
+        </span>
+      ))}
+      {scorecard.dq ? (
+        <span className="font-bold uppercase text-led">DQ</span>
+      ) : null}
+    </span>
+  );
+}
+
 /* -------------------------------------------------------------------------- */
 /* Page                                                                        */
 /* -------------------------------------------------------------------------- */
@@ -269,7 +298,11 @@ export function Results() {
   }
 
   return (
-    <div className="max-w-[1100px] mx-auto px-4 md:px-7 pb-20 pt-6">
+    // w-full is load-bearing: under ShareShell this page is a direct child
+    // of a column flex container, where horizontal auto margins absorb the
+    // free space instead of centering a stretched box - without an explicit
+    // width the page shrink-wraps to its widest line (#349 mobile bug).
+    <div className="w-full max-w-[1100px] mx-auto px-4 md:px-7 pb-20 pt-6">
       {/* Match header */}
       <header className="mb-6">
         <div className="flex items-start justify-between gap-3">
@@ -368,42 +401,57 @@ export function Results() {
                   </span>
                 ) : null}
               </div>
-              {/* Shooter rows */}
+              {/* Shooter rows. Share viewers scanning for something to
+                  watch get one quiet line when a stage has nothing -
+                  repeating the full roster x "No video" is pure noise
+                  (single-shooter already renders exactly one row). */}
               <div className="divide-y divide-rule">
-                {row.cells.map((cell) => {
+                {isShare &&
+                !isSingleShooter &&
+                !row.cells.some((c) => c.status === "audited") ? (
+                  <div className="flex min-h-11 items-center px-4 py-2">
+                    <span className="font-mono text-xs uppercase tracking-[0.08em] text-subtle">
+                      No videos yet
+                    </span>
+                  </div>
+                ) : (
+                row.cells.map((cell) => {
                   const audited = cell.status === "audited";
                   if (audited) {
                     const time = cellTime(cell.shooter.slug, row.stageNumber);
-                    const hitFactor = cellScorecard(cell.shooter.slug, row.stageNumber)
-                      ?.hit_factor;
+                    const scorecard = cellScorecard(cell.shooter.slug, row.stageNumber);
+                    const hitFactor = scorecard?.hit_factor;
                     return (
                       <Link
                         key={cell.shooter.slug}
                         to={href("results", cell.shooter.slug, String(row.stageNumber))}
-                        className="group flex min-h-11 items-center gap-3 px-4 py-2 hover:bg-surface-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led focus-visible:ring-inset"
+                        className="group flex min-h-11 flex-col justify-center gap-1 px-4 py-2 hover:bg-surface-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led focus-visible:ring-inset"
                       >
-                        {!isSingleShooter && (
-                          <span className="flex-1 truncate font-display text-sm font-semibold uppercase tracking-tight text-ink">
-                            {cell.shooter.name}
-                          </span>
-                        )}
-                        <span
-                          className={cn(
-                            "flex flex-col leading-tight",
-                            isSingleShooter ? "flex-1 items-start" : "items-end",
-                          )}
-                        >
-                          <span className="font-mono text-sm tabular-nums text-ink-2">
-                            {time != null ? formatTime(time) : "-"}
-                          </span>
-                          {hitFactor != null ? (
-                            <span className="font-mono text-[0.6875rem] tabular-nums text-muted">
-                              {formatHitFactor(hitFactor)}
+                        <span className="flex items-center gap-3">
+                          {!isSingleShooter && (
+                            <span className="flex-1 truncate font-display text-sm font-semibold uppercase tracking-tight text-ink">
+                              {cell.shooter.name}
                             </span>
-                          ) : null}
+                          )}
+                          <span
+                            className={cn(
+                              "flex flex-col leading-tight",
+                              isSingleShooter ? "flex-1 items-start" : "items-end",
+                            )}
+                          >
+                            <span className="font-mono text-sm tabular-nums text-ink-2">
+                              {time != null ? formatTime(time) : "-"}
+                            </span>
+                            {hitFactor != null ? (
+                              <span className="font-mono text-[0.6875rem] tabular-nums text-muted">
+                                {formatHitFactor(hitFactor)}
+                              </span>
+                            ) : null}
+                          </span>
+                          <span className="sr-only">, watch run</span>
+                          <PlayAffordance />
                         </span>
-                        <span className="sr-only">, watch run</span>
-                        <PlayAffordance />
+                        {scorecard ? <HitCounts scorecard={scorecard} /> : null}
                       </Link>
                     );
                   }
@@ -461,7 +509,8 @@ export function Results() {
                       <StatusChip tone={cell.tone} status={cell.status} />
                     </div>
                   );
-                })}
+                })
+                )}
               </div>
             </section>
           );
@@ -515,20 +564,34 @@ export function Results() {
                     {row.stageName || `Stage ${row.stageNumber}`}
                   </span>
                 </div>
-                {/* Shooter cells */}
-                {row.cells.map((cell) => {
+                {/* Shooter cells. Same share-view collapse as the mobile
+                    cards: an all-unwatchable stage spans one quiet cell
+                    across the shooter columns instead of N "No video"s. */}
+                {isShare &&
+                !isSingleShooter &&
+                !row.cells.some((c) => c.status === "audited") ? (
+                  <div
+                    className="flex min-h-11 items-center bg-surface-2 px-3 py-2"
+                    style={{ gridColumn: "2 / -1" }}
+                  >
+                    <span className="font-mono text-xs uppercase tracking-[0.08em] text-subtle">
+                      No videos yet
+                    </span>
+                  </div>
+                ) : (
+                row.cells.map((cell) => {
                   const audited = cell.status === "audited";
                   if (audited) {
                     const time = cellTime(cell.shooter.slug, row.stageNumber);
-                    const hitFactor = cellScorecard(cell.shooter.slug, row.stageNumber)
-                      ?.hit_factor;
+                    const scorecard = cellScorecard(cell.shooter.slug, row.stageNumber);
+                    const hitFactor = scorecard?.hit_factor;
                     return (
                       <Link
                         key={cell.shooter.slug}
                         to={href("results", cell.shooter.slug, String(row.stageNumber))}
                         className="group flex min-h-11 items-center justify-between gap-2 bg-surface-2 px-3 py-2 hover:bg-surface-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led focus-visible:ring-inset"
                       >
-                        <span className="flex flex-col leading-tight">
+                        <span className="flex flex-col gap-0.5 leading-tight">
                           <span className="font-mono text-sm tabular-nums text-ink-2">
                             {time != null ? formatTime(time) : "-"}
                           </span>
@@ -537,6 +600,7 @@ export function Results() {
                               {formatHitFactor(hitFactor)}
                             </span>
                           ) : null}
+                          {scorecard ? <HitCounts scorecard={scorecard} /> : null}
                         </span>
                         <span className="sr-only">, watch run</span>
                         <PlayAffordance />
@@ -576,7 +640,8 @@ export function Results() {
                       <StatusChip tone={cell.tone} status={cell.status} />
                     </div>
                   );
-                })}
+                })
+                )}
               </div>
             );
           })}
