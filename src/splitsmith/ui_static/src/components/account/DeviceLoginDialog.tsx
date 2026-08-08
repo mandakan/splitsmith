@@ -88,6 +88,21 @@ export function DeviceLoginDialog({ onClose, onLinked }: DeviceLoginDialogProps)
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
+  // Latest-ref pattern: HostedAccountChip (the only caller) passes fresh
+  // inline `onClose`/`onLinked` arrows on every render, and it re-renders
+  // on MatchShell's job-poll cadence (1-5s) while this dialog is open.
+  // Reading these through refs inside the poll effect below - instead of
+  // listing them as effect dependencies - keeps the effect from tearing
+  // down and rebuilding its setInterval (and firing an extra immediate
+  // tick) on every unrelated parent re-render, so the poll runs at the
+  // server-configured interval rather than the parent's render rate.
+  // Safe to mutate during render (not read during render): React
+  // guarantees this runs before any effect that reads it.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const onLinkedRef = useRef(onLinked);
+  onLinkedRef.current = onLinked;
+
   useEffect(() => {
     let alive = true;
     setPhase("loading");
@@ -134,8 +149,8 @@ export function DeviceLoginDialog({ onClose, onLinked }: DeviceLoginDialogProps)
         const status = await api.getDeviceStatus();
         if (!alive) return;
         if (status.status === "approved") {
-          if (status.account) onLinked(status.account);
-          onClose();
+          if (status.account) onLinkedRef.current(status.account);
+          onCloseRef.current();
           return;
         }
         if (status.status === "denied") {
@@ -164,7 +179,7 @@ export function DeviceLoginDialog({ onClose, onLinked }: DeviceLoginDialogProps)
       alive = false;
       clearInterval(id);
     };
-  }, [phase, started, onLinked, onClose]);
+  }, [phase, started]);
 
   function tryAgain() {
     setAttempt((n) => n + 1);
