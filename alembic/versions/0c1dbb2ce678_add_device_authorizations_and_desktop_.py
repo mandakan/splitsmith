@@ -5,7 +5,10 @@ Browser-assisted desktop auth (#719).
 1. ``desktop_tokens.scope`` -- ``server_default='full'`` so every row that
    predates this migration backfills to the legacy, unrestricted value.
    That is what keeps a desktop install in the field working: the scope
-   gate in ``_auth_gate`` tests ``== "sync"``, which a 'full' row fails.
+   gate in ``_auth_gate`` confines a token to the sync surface unless its
+   scope is in the unrestricted allowlist ``{None, 'full'}``, so a
+   backfilled 'full' row keeps the reach it had before this migration and
+   any unrecognized scope is confined rather than falling open.
    Every token minted after this ships is 'sync' (see
    ``DesktopTokenStore.create``). Plain metadata on an already-tenant-
    scoped table; the ``tenant_isolation`` policy keys on ``user_id`` only

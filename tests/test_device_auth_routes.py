@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from tests.hosted_helpers import _CapturingSender, login
+from tests.hosted_helpers import PUBLIC_URL, _CapturingSender, login
 
 
 def _authorize(client: TestClient, name: str = "mac studio") -> dict:
@@ -27,8 +27,13 @@ def test_authorize_is_public_and_returns_both_urls(
 
     assert body["device_code"]
     assert len(body["user_code"]) == 9 and body["user_code"][4] == "-"
-    assert body["verification_uri"].endswith("/desktop/approve")
-    assert body["verification_uri_complete"].endswith(f"/desktop/approve?code={body['user_code']}")
+    # Full URL, not just the suffix: the origin is the whole point of
+    # _public_base. SPLITSMITH_PUBLIC_URL (set to PUBLIC_URL by the
+    # hosted_app fixture) is what makes the approve link correct behind a
+    # proxy, where request.base_url is the internal address the operator
+    # cannot reach. A suffix-only assertion passes either way.
+    assert body["verification_uri"] == f"{PUBLIC_URL}/desktop/approve"
+    assert body["verification_uri_complete"] == (f"{PUBLIC_URL}/desktop/approve?code={body['user_code']}")
     assert body["expires_in"] == 600
     assert body["interval"] == 5
 
@@ -158,7 +163,17 @@ def test_device_session_delete_revokes_the_calling_token(
 
 def test_device_routes_404_in_local_mode(tmp_path) -> None:
     """Same hosted-gate idiom as sync_api: a local install has no accounts
-    to authorize against, so the whole surface is simply absent."""
+    to authorize against, so the whole surface is simply absent.
+
+    The body matters as much as the status here. Three different things
+    produce a 404 on these paths and only one of them is the guard under
+    test: ``_hosted_gate`` says ``{"detail": "not found"}``, the SPA
+    catch-all says ``{"detail": "api route not found"}`` (which is what a
+    checkout with no built bundle would fall through to if the route
+    itself had vanished), and FastAPI's own no-such-route says
+    ``{"detail": "Not Found"}``. Asserting only the number lets this pass
+    for the wrong reason.
+    """
     from splitsmith import match_model
     from splitsmith.ui.server import create_app
 
@@ -166,5 +181,9 @@ def test_device_routes_404_in_local_mode(tmp_path) -> None:
     match = match_model.Match.init(root, name="Local")
     match.add_shooter(root, match_model.Shooter(slug="me", name="Me"))
     client = TestClient(create_app(project_root=root, project_name="Local"))
-    assert client.post("/api/device/authorize", json={"device_name": "x"}).status_code == 404
-    assert client.post("/api/device/token", json={"device_code": "x"}).status_code == 404
+    authorize = client.post("/api/device/authorize", json={"device_name": "x"})
+    assert authorize.status_code == 404
+    assert authorize.json() == {"detail": "not found"}
+    poll = client.post("/api/device/token", json={"device_code": "x"})
+    assert poll.status_code == 404
+    assert poll.json() == {"detail": "not found"}
