@@ -3746,6 +3746,30 @@ export const api = {
   /** Submit a ``sync_match`` job for the current match. 409
    *  ``sync_not_configured`` when no hosted-sync target is saved yet. */
   startSync: () => request<Job>("/api/match/sync", { method: "POST" }),
+
+  // Device-flow approval screen (hosted browser side, #719). The desktop
+  // install polls elsewhere; these three drive the operator-facing
+  // /desktop/approve page.
+
+  /** Load the approval screen's data. 404 for an unknown, already-decided
+   *  or expired code -- the screen renders one message for all three. */
+  getDevicePending: (userCode: string) =>
+    request<DevicePendingInfo>(`/api/device/pending/${encodeURIComponent(userCode)}`),
+
+  /** Approve the device. Mints nothing -- the desktop install's next poll
+   *  collects the credential. */
+  approveDevice: (userCode: string) =>
+    request<{ approved: boolean }>(
+      `/api/device/pending/${encodeURIComponent(userCode)}/approve`,
+      { method: "POST" },
+    ),
+
+  /** Deny the device. */
+  denyDevice: (userCode: string) =>
+    request<{ approved: boolean }>(
+      `/api/device/pending/${encodeURIComponent(userCode)}/deny`,
+      { method: "POST" },
+    ),
 };
 
 /** One compute worker row, mirrored from the backend WorkerView. */
@@ -4137,6 +4161,15 @@ export interface DeviceStatusResponse {
 export interface DeviceUnlinkResponse {
   cleared: boolean;
   hosted_revoked: boolean;
+}
+
+/** The device authorization awaiting approval (#719). */
+export interface DevicePendingInfo {
+  user_code: string;
+  device_name: string;
+  scope: string;
+  created_at: string;
+  expires_at: string;
 }
 
 /** Response from GET /api/match/sync/status (#631 Task 9). Cheap

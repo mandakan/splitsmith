@@ -21,6 +21,7 @@ import { UploadProvider } from "@/lib/uploads";
 import { UploadDock } from "@/components/UploadDock";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { useDeploymentMode } from "@/lib/features";
+import { stashApproveCode, takeApproveCode } from "@/lib/deviceApproveStash";
 import { ShooterScopedRoute } from "@/components/ShooterScopedRoute";
 import { Login } from "@/pages/Login";
 import { Audit } from "@/pages/Audit";
@@ -29,6 +30,7 @@ import { Coach } from "@/pages/Coach";
 import { Compare } from "@/pages/Compare";
 import { CreateMatch } from "@/pages/CreateMatch";
 import { Design } from "@/pages/Design";
+import { DesktopApprove } from "@/pages/DesktopApprove";
 import { DevCorpus } from "@/pages/dev/DevCorpus";
 import { DevRetrain } from "@/pages/dev/DevRetrain";
 import { DevReviewQueue } from "@/pages/dev/DevReviewQueue";
@@ -123,7 +125,18 @@ function AuthGate({ children }: { children: ReactNode }) {
   // Desktop is never gated -- no login route, no redirect, whatever /api/me did.
   if (mode === "local") return <>{children}</>;
   if (status === "anon" && location.pathname !== "/login") {
+    // Device-flow codes have to survive the login round trip (#719): the
+    // magic link returns to "/" with no query string, so park the code
+    // before we lose it.
+    if (location.pathname === "/desktop/approve") {
+      const code = new URLSearchParams(location.search).get("code");
+      if (code) stashApproveCode(code);
+    }
     return <Navigate to="/login" replace />;
+  }
+  if (status === "authed" && location.pathname === "/") {
+    const code = takeApproveCode();
+    if (code) return <Navigate to={`/desktop/approve?code=${code}`} replace />;
   }
   return <>{children}</>;
 }
@@ -164,6 +177,10 @@ export function App() {
               account menu and an empty sidebar. They nest directly
               under RootLayout now (#550). */}
           <Route path="admin/workers" element={<AdminWorkers />} />
+          {/* Device-flow approval screen (#719). Under RootLayout so it
+              carries the account chip -- the operator needs to see which
+              account they are approving for. */}
+          <Route path="desktop/approve" element={<DesktopApprove />} />
           {/* Canonical match-scoped surfaces (#353 Phase 3 PR C). All
               shooter / stage / overview / picker-within-match routes
               live under ``/match/:matchId/...``. Bare match-scoped paths
