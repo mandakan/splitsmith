@@ -574,7 +574,11 @@ def test_ffmpeg_parses_the_clock_filters(tmp_path):
         clocks=clocks,
     )
     plan = _plan([_tile("ann", 0, 0), _tile("bo", 1, 1)])
-    graph = ";".join(mp4_grid._clock_filters(plan, CANVAS, overlay))
+    # ``_clock_filters`` hands back the label the action ends on so a
+    # caller can insert filters before the join; this test is one of
+    # those callers, so it closes the graph itself with ``_video_tail``.
+    filters, label = mp4_grid._clock_filters(plan, CANVAS, overlay)
+    graph = ";".join([*filters, *mp4_grid._video_tail(label, None)])
     done = subprocess.run(
         [
             "ffmpeg", "-hide_banner", "-y",

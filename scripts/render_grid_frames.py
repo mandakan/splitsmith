@@ -39,7 +39,7 @@ never be used for.
 
 Frames come out at **named** moments rather than at frame indices the
 caller has to work out: ``pre-beep``, ``first-shot``, ``mid-action``,
-``last-picture``, ``short-tile-black``, ``last-action``, ``hold-start``,
+``last-picture``, ``short-tile-ends``, ``last-action``, ``hold-start``,
 ``hold-mid``, ``hold-end`` and ``next-stage``. Output goes to a stable
 directory (``build/grid-frames`` by default) so two runs diff.
 
@@ -146,20 +146,43 @@ def _moments(*, fps: int, hold_seconds: float, stages: int, shooters: int) -> li
             "mid-stage, every tile still running",
         ),
         Moment(
-            "short-tile-black",
+            "short-tile-ends",
             at((SHORT_FOOTAGE_ENDS + HEAD_PAD_SECONDS + POST_BEEP_SECONDS) / 2),
-            "the short clip has run out while the others still have picture",
+            "the short clip has run out while the others still have picture"
+            + (
+                " -- with a hold, that tile is already showing its own summary"
+                if hold_frames > 0
+                else " -- with no hold, that tile is black"
+            ),
         ),
+        # ``- 2``, not ``- 1``. The full clips' nominal footage end is
+        # ``HEAD_PAD + POST_BEEP`` (frame 210 at 30fps), but the decoded
+        # stream is a frame shorter than the probed duration implies, so
+        # the tile chain's black ``tpad`` actually starts at 209 -- which
+        # is not visible from the arithmetic and is why this is measured
+        # rather than derived. The early summary covers 209 (its arm is
+        # emitted floored, so a 7.000s end emits ``6.966``, under frame
+        # 209's own 6.966666...s), so nothing renders black there.
+        # Measured on this fixture at 1280x720@30 with a 2s hold: Anders'
+        # and Bea's cells read mean luma 125.7 at 207 and 208 (live
+        # testsrc2 bars) and 76.1 / 69.5 from 209 on (the dimmed,
+        # blurred summary), 0.0% pure black at every one of them. So 208
+        # is the frame this moment is named for.
         Moment(
             "last-picture",
-            at(HEAD_PAD_SECONDS + POST_BEEP_SECONDS) - 1,
-            "the last frame with any picture in it, one frame before the tail pad",
+            at(HEAD_PAD_SECONDS + POST_BEEP_SECONDS) - 2,
+            "the last frame with any live picture in it -- the full tiles pick their own summary "
+            "up at the next one",
         ),
         Moment(
             "last-action",
             action_frames - 1,
-            f"the action's final frame -- inside the {TAIL_PAD_SECONDS:g}s tail pad, so black on "
-            "every tile",
+            f"the action's final frame -- inside the {TAIL_PAD_SECONDS:g}s tail pad"
+            + (
+                ", so every tile is already showing its summary"
+                if hold_frames > 0
+                else ", so black on every tile"
+            ),
         ),
     ]
     if hold_frames > 0:

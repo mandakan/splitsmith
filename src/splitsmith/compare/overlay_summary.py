@@ -158,11 +158,15 @@ def extract_freeze_frames(
     **Not the last frame of the action.** The stage runs for
     ``head_pad + the longest tile's post-beep span + tail_pad``, and every
     tile chain in ``mp4_grid.build_stage_command`` is ``tpad``-ed with
-    black across that whole span. So the action's final frames are black
-    on every tile -- on the longest one for the tail pad's worth, and on
-    every shorter one for longer than that. A seek derived from
-    ``plan.duration_seconds`` therefore lands past the end of the tile's
-    own clip, where there is no frame to take at all: that is what put
+    black across that whole span. So every tile *chain* runs out of
+    picture before the action does -- the longest one by the tail pad's
+    worth, every shorter one by more. (What the viewer sees there is a
+    separate question: with a hold, ``mp4_grid._early_summary_filters``
+    paints each tile's own summary cell over that black, so the rendered
+    frames are not black even though the chain underneath them is. The
+    chain is what this function's arithmetic depends on.) A seek derived
+    from ``plan.duration_seconds`` therefore lands past the end of the
+    tile's own clip, where there is no frame to take at all: that is what put
     text on pure black in every cell of the shipped default render.
 
     The target is ``tile.source_duration_seconds`` instead, which is that

@@ -39,10 +39,13 @@ Anders and Bea read the *same* cut, which is load-bearing for the
 summary-hold test below: it compares one tile's cell against another's
 within a single frame, and that only isolates drawn text because the
 picture underneath is identical by construction. Mathias reads a shorter
-cut, which is load-bearing for the opposite reason -- his cell is black
-while the other two still have picture, so anything that confuses "the
-end of the action" with "the end of this tile's footage" shows up in his
-cell and nowhere else.
+cut, which is load-bearing for the opposite reason -- his footage runs
+out while the other two still have picture, so anything that confuses
+"the end of the action" with "the end of this tile's footage" shows up in
+his cell and nowhere else. That used to mean his cell went black there;
+since each tile's summary starts at its own footage end it means his cell
+is already showing his own crop of the stage summary while theirs are
+still live.
 
 Task 9 adds ``--summary-hold`` and its test is the reason this module
 matters more than it looks. A hold whose still never reached the filter
@@ -267,17 +270,29 @@ AAC_FRAME_SECONDS = 1024 / 48000
 # this. The failure these numbers exist to catch does not announce
 # itself: a segment whose audio outlasts its video stitches at exit 0
 # with no warning, declares the right length in its container, freezes at
-# exactly the right instant and stays A/V-locked to +0.1ms -- on the raw
-# last action frame, unblurred, with no summary drawn on it. So the
-# stitch succeeding, the stream layout and the A/V measurement all pass
-# against a completely missing summary.
+# exactly the right instant and stays A/V-locked to +0.1ms. So the stitch
+# succeeding, the stream layout and the A/V measurement all pass against
+# a completely missing summary.
 #
-# Two measures below do not, and they are not interchangeable. The
-# **decoded** duration catches a missing still, because the muxer stretch
-# is a duration on the last coded frame rather than extra frames, so a
-# frame-accurate read comes up short by the last segment's hold. Only the
-# **pixels** catch a still that is present but wrong -- blank, unblurred,
-# the wrong stage's, or with a clock left on it.
+# What the *pixels* can say about that shape changed with the per-tile
+# early summary, and the change is worth knowing before trusting any
+# reading below. The freeze such a segment produces lands on the last
+# action frame, and every present tile is already carrying its own
+# summary by then: that frame reads 1.45 against the composed still
+# (:data:`LAST_ACTION_MATCHES_STILL_MAX`) where a correct hold reads 1.39
+# (:data:`HOLD_MATCHES_ITS_STILL_MAX`). The two are the same picture, so
+# no pixel measure in this module can tell a hold that froze on the last
+# action frame from a hold that played the still.
+#
+# No coverage was lost, because the pixels were never the guard for that
+# shape. ``build_stage_command`` refuses a hold with no still outright
+# (``test_a_hold_with_no_still_is_refused_rather_than_built``), and the
+# **decoded** duration below still catches an absent still: the muxer
+# stretch is a duration on the last coded frame rather than extra frames,
+# so a frame-accurate read comes up short by the last segment's hold.
+# What the pixels do catch, and nothing else does, is a still that is
+# present but **wrong** -- blank, unblurred, the wrong stage's, or with a
+# clock left on it.
 HOLD_SECONDS = 2.0
 
 #: Frames of action per segment, then frames of hold. Whole numbers on
@@ -292,16 +307,48 @@ SEGMENT_FRAMES = ACTION_FRAMES + HOLD_FRAMES
 LAST_ACTION_INDEX = ACTION_FRAMES - 1
 MID_HOLD_INDEX = ACTION_FRAMES + HOLD_FRAMES // 2
 
+#: Where each tile's own footage stops, in frames on the pinned canvas.
+#:
+#: The short clip (Mathias) runs out at :data:`SHORT_FOOTAGE_ENDS`
+#: (5.4985s, frame 165); the full clips (Anders, Bea) run to ``HEAD_PAD +
+#: POST_BEEP`` (7.0s, frame 210). Each tile's chain is ``tpad``-ed black
+#: from its own end to :data:`LAST_ACTION_INDEX`, so these two numbers
+#: are the only boundaries any sample index below is allowed to be
+#: derived from.
+#:
+#: The early summary arms one frame before each tile's own end,
+#: whether or not that end lands on a whole canvas frame. Mathias's does
+#: not (5.4985s), so his arms at 164; the full clips' does (7.000s), so
+#: theirs arm at 209. That second case only holds because the arm is
+#: emitted floored rather than rounded to nearest -- ``{arm:g}`` used to
+#: turn 6.966666...s into ``6.96667``, above frame 209's own
+#: presentation time, and 209 rendered black. Measured, not derived; see
+#: :data:`FULL_TILE_ARM_INDEX`.
+SHORT_FOOTAGE_END_INDEX = round(SHORT_FOOTAGE_ENDS * 30)
+FULL_FOOTAGE_END_INDEX = round((HEAD_PAD_SECONDS + POST_BEEP_SECONDS) * 30)
+
+#: The full clips' own arm frame: the last frame of the action with no
+#: live picture left in the long tiles, and the frame their summary has
+#: to cover.
+#:
+#: One before :data:`FULL_FOOTAGE_END_INDEX` by construction, because
+#: that is what "armed one frame early" means. It gets its own name
+#: because it is the frame the emission rule is about, and a bare
+#: ``- 1`` at the assertion would not say so.
+FULL_TILE_ARM_INDEX = FULL_FOOTAGE_END_INDEX - 1
+
 #: Late in the action but before any tile's own footage has run out.
 #:
 #: Not the same frame as :data:`LAST_ACTION_INDEX`, and the difference is
 #: the whole blocker. The action runs a tail pad past the longest tile's
 #: footage and every tile chain is ``tpad``-ed black across it, so the
-#: last *action* frame has no picture in it on any tile -- Anders and Bea
-#: end around 6.97s, Mathias at 5.50s, and the action runs to 7.5s. This
-#: index (6.833s) is where Anders and Bea still have footage and Mathias
-#: does not, which is what lets the two "end of the footage" readings be
-#: told apart in pixels.
+#: last *action* frame has no live footage in it on any tile -- Anders and
+#: Bea end around 6.97s, Mathias at 5.50s, and the action runs to 7.5s.
+#: (Every cell there now carries its own summary rather than the raw black
+#: -- see :data:`LAST_ACTION_MATCHES_STILL_MAX` -- which is a reason to
+#: sample elsewhere, not a reason to stop.) This index (6.833s) is where
+#: Anders and Bea still have footage and Mathias does not, which is what
+#: lets the two "end of the footage" readings be told apart in pixels.
 #:
 #: Derived from the boundary it depends on, not hardcoded (#689): the
 #: full clips' footage runs out at ``HEAD_PAD + POST_BEEP`` (7.0s, frame
@@ -311,13 +358,48 @@ MID_HOLD_INDEX = ACTION_FRAMES + HOLD_FRAMES // 2
 #: frames of clearance keeps the read inside that plateau -- and moves
 #: with the geometry, so a change to pads or clip lengths shifts this
 #: index instead of silently moving the cliff underneath a bare literal.
-PICTURE_INDEX = round((HEAD_PAD_SECONDS + POST_BEEP_SECONDS) * 30) - 5
+#:
+#: **Not black at 209 any more, and re-measured on this branch.** The
+#: cliff at 209 is where Anders' *footage* stops either way; what fills
+#: it changed. With the arm emitted floored (see
+#: :func:`mp4_grid._arm_seconds_string`) the summary covers 209 --
+#: measured 0.0% black there, 2.26 against the composed still, against
+#: 76.8% black and 79.81 with the old ``{arm:g}`` emission. Either
+#: reading -- raw ``tpad`` black or blurred still -- puts the HF energy
+#: under the threshold, so this index stays five frames clear of it
+#: regardless; :data:`FULL_TILE_ARM_INDEX` is where that change is
+#: asserted.
+PICTURE_INDEX = FULL_FOOTAGE_END_INDEX - 5
 
 # The frame has to satisfy both of its conditions at once -- the short
 # clip already out of footage, the full clips not yet. Checked here so a
 # geometry change that breaks the window fails as "the fixture geometry
 # changed", not as a baffling HF-energy assertion mid-test.
-assert round(SHORT_FOOTAGE_ENDS * 30) < PICTURE_INDEX < round((HEAD_PAD_SECONDS + POST_BEEP_SECONDS) * 30)
+assert SHORT_FOOTAGE_END_INDEX < PICTURE_INDEX < FULL_FOOTAGE_END_INDEX
+
+#: A frame safely before the short tile's summary arms.
+#:
+#: Named for the arm and not for the footage end because those are one
+#: frame apart: Mathias's clip runs out at
+#: :data:`SHORT_FOOTAGE_END_INDEX` (5.4985s, frame 165) and his summary
+#: arms one frame *earlier*, so frames from 164 on carry it. This keeps
+#: five frames of clearance below the footage end -- the same margin
+#: :data:`PICTURE_INDEX` keeps below its own cliff, and for the same
+#: reason: derived from the geometry so a change to the pads or the clip
+#: lengths moves the sample instead of silently moving the boundary
+#: underneath a literal.
+BEFORE_ARM_INDEX = SHORT_FOOTAGE_END_INDEX - 5
+
+# Both clocked shooters must still have live picture at BEFORE_ARM_INDEX
+# -- it is where the clock check samples, and a clock corner covered by a
+# summary proves nothing about a clock. Mathias binds the sample from
+# above and is five frames clear of his own arm by construction, so the
+# assertion worth making is the other one: Anders and Bea arm at
+# :data:`FULL_TILE_ARM_INDEX`, and nothing in the arithmetic above forces
+# this sample up to it.
+assert BEFORE_ARM_INDEX > round(HEAD_PAD_SECONDS * 30)
+assert BEFORE_ARM_INDEX < FULL_TILE_ARM_INDEX
+
 #: The same point in stage 2's hold, which must carry stage 2's figures.
 STAGE2_MID_HOLD_INDEX = SEGMENT_FRAMES + MID_HOLD_INDEX
 
@@ -367,18 +449,111 @@ HOLD_CELL_MIN_MEAN_LUMA = 30.0
 #: cell edges).
 EMPTY_CELL_MIN_BLACK_FRACTION = 0.9
 
-#: A picture crop on the last *action* frame, which is inside the tail pad
-#: and therefore black on every tile. Measured 1.000 in Bea's bottom half,
-#: which carries no glyphs in any frame. This is what makes "freeze on the
-#: end of the action" an unsound target, stated as a measurement rather
-#: than as an argument.
-TAIL_PAD_MIN_BLACK_FRACTION = 0.95
+#: A tile's cell during the action against the same cell of the still the
+#: render composed for that stage.
+#:
+#: This is the early summary's instrument, and it replaces
+#: ``SHORT_TILE_MIN_BLACK_FRACTION``, which asserted the opposite: that
+#: Mathias's cell was 80.4% pure black at :data:`PICTURE_INDEX` because
+#: his shorter clip had run out and the tile chain was ``tpad``-ed black
+#: to the end of the action. It now carries his summary from his own
+#: footage end, so the same crop is the still's own cell.
+#:
+#: Measured on this fixture: 2.13 in the cell at PICTURE_INDEX (the
+#: summary), 76.39 in the same cell at :data:`BEFORE_ARM_INDEX` (live
+#: footage against a blurred still). The residue at 2.13 is the libx264
+#: crf=20 round trip and nothing else -- the same cell read 2.00 inside
+#: the hold, where the still is composited by a different chain, which
+#: is the confirmation that the early cell and the held cell are the
+#: same pixels. 6.0 sits ~2.8x over the summary reading and ~12.7x under
+#: the live one, and is deliberately the same number as
+#: :data:`HOLD_MATCHES_ITS_STILL_MAX`, which measures the same thing one
+#: frame boundary later.
+#:
+#: The failing baseline, measured rather than argued: with the early
+#: summary taken back out of ``mp4_grid`` entirely (the file reverted to
+#: its pre-feature state and re-rendered), this reads 81.94 -- 13.7x the
+#: threshold. Mathias's cell is 77.3% pure black in that render, which is
+#: the same ``tpad`` the retired ``SHORT_TILE_MIN_BLACK_FRACTION`` used to
+#: assert; that constant recorded 80.4% for the same crop, and the 3-point
+#: gap was not chased down -- it sits well inside the old 0.6 threshold
+#: either way and neither number is load-bearing any more.
+EARLY_SUMMARY_MATCHES_STILL_MAX = 6.0
 
-#: Mathias's cell at :data:`PICTURE_INDEX`, where his shorter clip has
-#: already run out while Anders and Bea still have footage. Measured 0.804
-#: for him against 0.000 for Anders. The residue below 1.0 is his own shot
-#: counter, clock and split label, still drawn over the black.
-SHORT_TILE_MIN_BLACK_FRACTION = 0.6
+#: A full-length tile's cell on :data:`FULL_TILE_ARM_INDEX` against the
+#: same cell of the composed still.
+#:
+#: The one-frame-early bias, measured where it is actually at risk.
+#: Mathias's footage end is not on a whole canvas frame, so his arm
+#: survived any rounding and :data:`EARLY_SUMMARY_MATCHES_STILL_MAX`
+#: passed throughout; Anders' and Bea's end at exactly 7.000s, and with
+#: the arm emitted through ``{arm:g}`` -- six significant digits rounded
+#: to *nearest*, so ``6.96667`` for a computed 6.966666...s -- their
+#: cells armed a frame late and 209 rendered as the tile chain's black
+#: ``tpad``. One black frame, in the exact case the bias existed for.
+#:
+#: Measured on this fixture, floored emission (``6.966``): 2.26 in
+#: Anders' cell and 1.41 in Bea's, both 0.0% pure black. The failing
+#: baseline, re-rendered with the ``{arm:g}`` emission put back and
+#: nothing else changed: 79.81 and 70.11, with Anders' cell 76.8% black
+#: and Bea's 100.0%. 6.0 sits ~2.7x over the armed reading and ~11.7x
+#: under the black one, and is deliberately the same number as
+#: :data:`EARLY_SUMMARY_MATCHES_STILL_MAX` -- it is the same measure on
+#: a different tile's boundary.
+#:
+#: Frame 208 is unchanged by the fix and still live picture: 73.08 in
+#: Anders' cell in both renders. That is what the companion assertion
+#: pins, against :data:`BEFORE_ARM_MIN_DIFF_TO_STILL`, so an ``enable``
+#: that simply armed earlier could not pass this pair.
+BOUNDARY_ARM_MATCHES_STILL_MAX = 6.0
+
+#: The same crop before the summary arms, which must still be footage.
+#:
+#: Without this, an ``enable`` expression that is simply always true --
+#: the summary painted over the whole action from frame zero -- passes
+#: every other check in this test.
+#:
+#: Measured 76.39 at :data:`BEFORE_ARM_INDEX` against 2.13 once the
+#: summary has armed. 20.0 is ~3.8x under the live figure and ~9.4x over
+#: the armed one.
+#:
+#: The failing baseline, measured against that exact mutation:
+#: ``_early_summary_filters``' ``arm`` forced to ``0.0``, so every cell
+#: carries its summary from frame zero, reads 2.09 here -- a tenth of the
+#: threshold. Every assertion ahead of this one in the test passed under
+#: that mutation, including :data:`EARLY_SUMMARY_MATCHES_STILL_MAX`; this
+#: is the one that caught it.
+#:
+#: Gates a second crop too, added with :data:`FULL_TILE_ARM_INDEX`: the
+#: full-length tiles one frame *before* their own arm, which must also
+#: still be footage or the emission has been biased further back rather
+#: than floored. Different frame, different reading -- measured 73.08 in
+#: Anders' cell at ``FULL_TILE_ARM_INDEX - 1`` (frame 208), unchanged by
+#: the emission fix, so 20.0 is ~3.7x under it there. Recorded here
+#: because a constant's clearance is a property of every assertion it
+#: gates, not only of the first one.
+BEFORE_ARM_MIN_DIFF_TO_STILL = 20.0
+
+#: The whole canvas on the action's last frame against the composed
+#: still.
+#:
+#: Replaces ``TAIL_PAD_MIN_BLACK_FRACTION``, which asserted that the last
+#: action frame was 100.0% black in a picture crop because it sits inside
+#: the tail pad. Every present tile is showing its summary by then now,
+#: so the frame *is* the still -- the same measure
+#: :data:`HOLD_MATCHES_ITS_STILL_MAX` applies inside the hold, which is
+#: the point: the cut from the action to the hold is invisible.
+#:
+#: Measured: 1.45 here, against 58.01 on the same frame before this
+#: change (the pre-feature ``mp4_grid`` re-rendered: raw tail-pad black
+#: against a composed summary, and Bea's picture crop 100.0% black,
+#: which is what the retired ``TAIL_PAD_MIN_BLACK_FRACTION`` asserted).
+#: 6.0 sits ~4.1x over the measured figure and ~9.7x under the pre-change
+#: one -- the same number :data:`HOLD_MATCHES_ITS_STILL_MAX` uses on the
+#: same crop one frame later, which reads 1.39. (The two measurements are
+#: 40x apart; that is not this threshold's clearance and must not be read
+#: as headroom.)
+LAST_ACTION_MATCHES_STILL_MAX = 6.0
 
 #: Anders' quadrant against Bea's, in the same hold frame.
 #:
@@ -396,16 +571,27 @@ SUMMARY_INK_MIN_MEAN_ABS_DIFF = 5.0
 TILE_SUMMARY_MIN_HF_ENERGY = 2.0
 UNREACHED_CELL_MAX_HF_ENERGY = 0.2
 
-#: Anders' clock corner against Bea's, on the last *action* frame only.
+#: Anders' clock corner against Bea's, on :data:`BEFORE_ARM_INDEX`.
 #: Anders has a clock during the action and Bea (no audit, no shots)
 #: never has one, so this reads large while the clock is drawn --
 #: confirming the corner genuinely carries a clock during the action, so
 #: the hold check below (a different measure -- see
 #: :data:`HOLD_CLOCK_MAX_MEAN_ABS_DIFF`) is checking something real.
-#: Measured 40.91. Self-referential within a single frame, so encode
-#: noise cancels; this one is not confounded by Task 6's per-tile detail
-#: group because that group only exists in the *hold's* composited
-#: still, never during the action.
+#: Self-referential within a single frame, so encode noise cancels; this
+#: one is not confounded by Task 6's per-tile detail group because that
+#: group only exists in the *hold's* composited still, never during the
+#: action.
+#:
+#: Sampled before any tile's summary arms, which it did not have to be
+#: until each tile started showing its summary from its own footage end.
+#: It used to read the last *action* frame and measured 40.91 there. On
+#: that frame now, every present cell is carrying its own summary and the
+#: corner compares two summaries rather than a clock against a shooter
+#: who never gets one: it reads 0.11 for Anders and 3.77 for Mathias,
+#: both under this threshold. At BEFORE_ARM_INDEX, where both clocked
+#: tiles still have live picture, the same crops read 34.62 and 34.67 --
+#: a 4.3x margin, and the measurement that says the move was necessary
+#: rather than cosmetic.
 ACTION_CLOCK_MIN_MEAN_ABS_DIFF = 8.0
 
 #: Anders' clock-corner crop of the in-hold frame against the *same crop
@@ -557,11 +743,13 @@ def _roster(
     pixel-identical by construction and the background subtracts out
     rather than having to be absorbed by a threshold.
 
-    Mathias's clip is shorter, so his tile is black for the last stretch
-    of every action while the other two still have picture. Freezing on
-    "the last frame of the action" instead of "the last frame of this
-    tile's footage" therefore shows up in his cell and nowhere else --
-    with three equal clips the two are indistinguishable.
+    Mathias's clip is shorter, so his tile has run out of footage for the
+    last stretch of every action while the other two still have picture --
+    his cell carries his own crop of the stage summary from that instant,
+    where it used to be black. Freezing on "the last frame of the action"
+    instead of "the last frame of this tile's footage" therefore shows up
+    in his cell and nowhere else -- with three equal clips the two are
+    indistinguishable.
 
     Each of the three also carries a ``project.json`` with a real
     ``StageScorecard``, which is what puts the Scoring band -- hit
@@ -1141,10 +1329,26 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, shooter_cl
     mathias_clock = (3 * cell_w // 4, cell_h, cell_w, cell_h + cell_h // 4)
 
     mathias_cell = (0, cell_h, cell_w, 2 * cell_h)
+    whole = (0, 0, CANVAS.width, CANVAS.height)
 
     last_action = _frame_at_index(held, LAST_ACTION_INDEX, tmp_path, "held-action")
     with_picture = _frame_at_index(held, PICTURE_INDEX, tmp_path, "held-picture")
+    before_arm = _frame_at_index(held, BEFORE_ARM_INDEX, tmp_path, "held-before-arm")
     in_hold = _frame_at_index(held, MID_HOLD_INDEX, tmp_path, "held-hold")
+
+    # --- one freeze frame per present tile, per stage --------------------
+    # Three present tiles over two stages. Cheap, and it says which layer
+    # failed when the pixel checks below go red: no PNGs means the
+    # extraction never produced one, and everything after this is a
+    # summary drawn on the canvas's own background.
+    work_dir = tmp_path / "work-held.mp4"
+    for stage in (1, 2):
+        frames = sorted(work_dir.glob(f"freeze-stage{stage}-*.png"))
+        assert len(frames) == 3, f"stage {stage} wrote {len(frames)} freeze frames, expected 3"
+        assert all(path.stat().st_size > 0 for path in frames)
+
+    still = Image.open(work_dir / "summary-stage1.png").convert("RGB")
+    assert still.size == (CANVAS.width, CANVAS.height)
 
     # --- there is a picture in the summary, and it is each tile's own ----
     #
@@ -1172,60 +1376,111 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, shooter_cl
         f"cleared by a uniformly grey frame (threshold {EMPTY_CELL_MIN_BLACK_FRACTION:.0%})"
     )
 
-    # --- and it cannot have come from the end of the action --------------
-    # The action's last frame is inside the tail pad, so it is black on
-    # every tile: a freeze taken there is the thing this test caught.
-    tail_black = _black_fraction(last_action, bea_picture)
-    assert tail_black >= TAIL_PAD_MIN_BLACK_FRACTION, (
-        f"the last action frame is only {tail_black:.1%} black in a picture crop -- the fixture "
-        "has stopped exercising the tail pad, and 'freeze on the last action frame' would look "
-        "correct here while failing in production"
+    # --- each tile's summary starts at that tile's own footage end -------
+    #
+    # Mathias's clip is shorter, so at PICTURE_INDEX he has run out while
+    # Anders still has picture. His cell must be the still's own cell by
+    # then -- not black, which is what it was before the early summary,
+    # and not live footage.
+    early = _mean_abs_diff(with_picture, still, mathias_cell)
+    assert early <= EARLY_SUMMARY_MATCHES_STILL_MAX, (
+        f"the short tile is not showing its summary at frame {PICTURE_INDEX}: mean abs diff "
+        f"{early:.2f} against the same cell of the composed still (threshold "
+        f"{EARLY_SUMMARY_MATCHES_STILL_MAX}). A cell that reads near "
+        f"{_mean_abs_diff(before_arm, still, mathias_cell):.2f} is still live footage; one that "
+        "is mostly black is the tpad the early summary exists to cover."
     )
-    # Nor from the *longest* tile's footage end: at PICTURE_INDEX Mathias
-    # has already run out while Anders still has picture, so one shared
-    # seek clamped into range would freeze his cell on black.
     short_black = _black_fraction(with_picture, mathias_cell)
-    assert short_black >= SHORT_TILE_MIN_BLACK_FRACTION, (
-        f"the short tile is only {short_black:.1%} black at frame {PICTURE_INDEX} -- the fixture "
-        "has stopped giving one shooter a shorter clip, so 'each tile's own footage end' is no "
-        "longer distinguishable from 'the longest tile's'"
+    assert short_black <= HOLD_CELL_MAX_BLACK_FRACTION, (
+        f"the short tile's cell is {short_black:.1%} black at frame {PICTURE_INDEX} (threshold "
+        f"{HOLD_CELL_MAX_BLACK_FRACTION:.0%}) -- it matched the still on the reading above, so a "
+        "mostly-black cell here means the still itself has a black cell there and both readings "
+        "are agreeing on the wrong picture"
     )
+    # And Anders, whose clip has not run out, is still live footage.
     assert _black_fraction(with_picture, anders_cell) <= HOLD_CELL_MAX_BLACK_FRACTION
 
-    # --- one freeze frame per present tile, per stage --------------------
-    # Three present tiles over two stages. Cheap, and it says which layer
-    # failed when the pixel checks below go red: no PNGs means the
-    # extraction never produced one, and everything after this is a
-    # summary drawn on the canvas's own background.
-    work_dir = tmp_path / "work-held.mp4"
-    for stage in (1, 2):
-        frames = sorted(work_dir.glob(f"freeze-stage{stage}-*.png"))
-        assert len(frames) == 3, f"stage {stage} wrote {len(frames)} freeze frames, expected 3"
-        assert all(path.stat().st_size > 0 for path in frames)
+    # --- and not one frame before it -------------------------------------
+    # The check that fails against an ``enable`` that is always true,
+    # which every other assertion here would pass.
+    not_yet = _mean_abs_diff(before_arm, still, mathias_cell)
+    assert not_yet >= BEFORE_ARM_MIN_DIFF_TO_STILL, (
+        f"the short tile is already showing its summary at frame {BEFORE_ARM_INDEX}, "
+        f"{SHORT_FOOTAGE_END_INDEX - BEFORE_ARM_INDEX} frames before its footage runs out: "
+        f"{not_yet:.2f} against the still (threshold {BEFORE_ARM_MIN_DIFF_TO_STILL})"
+    )
+
+    # --- an empty cell is still empty -------------------------------------
+    assert (
+        _black_fraction(with_picture, unreached_cell) >= EMPTY_CELL_MIN_BLACK_FRACTION
+    ), "the early summary drew into the unreached cell -- an empty cell is not a shooter"
+
+    # --- and the bias survives being written into the filter string ------
+    #
+    # Anders and Bea end on a whole canvas frame, which is the case a
+    # to-nearest format spec loses the frame on -- see
+    # BOUNDARY_ARM_MATCHES_STILL_MAX. Both cells, because they arm off
+    # the same arithmetic and a fix that reached only one would be a
+    # different defect.
+    at_arm = _frame_at_index(held, FULL_TILE_ARM_INDEX, tmp_path, "held-full-arm")
+    before_full_arm = _frame_at_index(held, FULL_TILE_ARM_INDEX - 1, tmp_path, "held-full-pre-arm")
+    for label, box in (("Anders", anders_cell), ("Bea", bea_cell)):
+        armed = _mean_abs_diff(at_arm, still, box)
+        assert armed <= BOUNDARY_ARM_MATCHES_STILL_MAX, (
+            f"{label}'s cell is not showing its summary at frame {FULL_TILE_ARM_INDEX}, the frame "
+            f"its own footage runs out on: mean abs diff {armed:.2f} against the same cell of the "
+            f"composed still (threshold {BOUNDARY_ARM_MATCHES_STILL_MAX}). The arm was emitted "
+            "later than that frame's presentation time, so the cell is the tile chain's black tpad."
+        )
+        black = _black_fraction(at_arm, box)
+        assert black <= HOLD_CELL_MAX_BLACK_FRACTION, (
+            f"{label}'s cell is {black:.1%} pure black at frame {FULL_TILE_ARM_INDEX} (threshold "
+            f"{HOLD_CELL_MAX_BLACK_FRACTION:.0%}) -- the one black frame the early summary exists "
+            "to remove"
+        )
+        # And not armed a frame earlier than that, which would mean the
+        # emission had simply been biased further rather than floored.
+        not_yet = _mean_abs_diff(before_full_arm, still, box)
+        assert not_yet >= BEFORE_ARM_MIN_DIFF_TO_STILL, (
+            f"{label}'s cell is already showing its summary at frame {FULL_TILE_ARM_INDEX - 1}, "
+            f"which still has live picture in it: {not_yet:.2f} against the still (threshold "
+            f"{BEFORE_ARM_MIN_DIFF_TO_STILL})"
+        )
+
+    # --- by the last action frame every tile has switched ------------------
+    # So the cut to the hold is invisible: the action's final frame and
+    # the hold's frames are the same composed still. This replaces the
+    # tail-pad-is-black assertion, which measured the defect.
+    last_vs_still = _mean_abs_diff(last_action, still, whole)
+    assert last_vs_still <= LAST_ACTION_MATCHES_STILL_MAX, (
+        f"the action's last frame is not the composed summary: mean abs diff {last_vs_still:.2f} "
+        f"over the whole canvas (threshold {LAST_ACTION_MATCHES_STILL_MAX}). Every tile's footage "
+        "has ended by then, so every cell should already be carrying its own summary."
+    )
 
     # --- THE instrument: the hold shows the composed summary and only it -
-    still = Image.open(work_dir / "summary-stage1.png").convert("RGB")
-    assert still.size == (CANVAS.width, CANVAS.height)
-    whole = (0, 0, CANVAS.width, CANVAS.height)
     to_still = _mean_abs_diff(in_hold, still, whole)
     assert to_still <= HOLD_MATCHES_ITS_STILL_MAX, (
         f"the hold is not showing the still this render composed for it: mean abs diff "
         f"{to_still:.2f} over the whole canvas (threshold {HOLD_MATCHES_ITS_STILL_MAX}). "
-        f"The same measure against the last action frame is "
-        f"{_mean_abs_diff(last_action, still, whole):.2f} -- if this reads near that, the "
+        f"The same measure on a frame before any tile finished is "
+        f"{_mean_abs_diff(before_arm, still, whole):.2f} -- if this reads near that, the "
         "video half never got the still and the segment is holding raw footage."
     )
 
     # --- the held frame is blurred ---------------------------------------
-    # Against PICTURE_INDEX, not the last action frame: the last action
-    # frame is tail-pad black, and "blurrier than black" is not a claim
-    # about a blur.
+    # Against PICTURE_INDEX, not the last action frame. The last action
+    # frame is now the composed still itself -- it reads 1.45 against it,
+    # see LAST_ACTION_MATCHES_STILL_MAX -- so "blurrier than the last
+    # action frame" would be comparing the blur against a copy of itself.
+    # PICTURE_INDEX is the late sample where Bea's crop is still live
+    # footage, which is the only thing a blur can be measured against.
     action_hf = _hf_energy(with_picture, bea_picture)
     hold_hf = _hf_energy(in_hold, bea_picture)
     assert action_hf >= ACTION_MIN_HF_ENERGY, f"the action frame is not sharp: {action_hf:.2f}"
     assert hold_hf <= BLURRED_MAX_HF_ENERGY, (
         f"the held frame is not blurred: high-frequency energy {hold_hf:.2f} against "
-        f"{action_hf:.2f} on the last frame with a picture in it (threshold "
+        f"{action_hf:.2f} on the late action frame that still has live picture in it (threshold "
         f"{BLURRED_MAX_HF_ENERGY})"
     )
 
@@ -1259,7 +1514,11 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, shooter_cl
         # otherwise the hold check below proves nothing. Bea (no audit, no
         # shots) never gets one, so her corner is the "no clock" reference
         # for both.
-        action_clock = _crop_diff(last_action, clock_box, bea_clock)
+        # Sampled before any tile's summary has armed, not on the last
+        # action frame: by then every present cell is carrying its own
+        # summary and this corner would be comparing two summaries rather
+        # than a clock against a shooter who never gets one.
+        action_clock = _crop_diff(before_arm, clock_box, bea_clock)
         assert action_clock >= ACTION_CLOCK_MIN_MEAN_ABS_DIFF, (
             f"no clock during the action on {who}'s tile, so the hold check below proves nothing: "
             f"{action_clock:.2f}"

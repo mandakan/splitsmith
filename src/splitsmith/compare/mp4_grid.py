@@ -24,6 +24,7 @@ with an injectable runner, mirroring :mod:`splitsmith.mp4_render` and
 from __future__ import annotations
 
 import logging
+import math
 import subprocess
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -363,17 +364,22 @@ class GridTile:
     (``CompareStageBundle.duration_seconds``) and ``0.0`` on a filler
     tile, which has no source.
 
-    Nothing in the filter graph reads this -- the tile chain pads and
-    trims to the *stage's* length and never needs to know where one
-    clip's footage stops. :func:`overlay_summary.extract_freeze_frames`
-    does, and it is the only thing that does: the stage runs until the
-    *longest* tile's post-beep span is done plus a tail pad, so every
-    tile's window ends past its own footage and "the last frame of the
-    action" is black on every tile. The last frame with a picture in it
-    is this tile's own, at this time. Required rather than defaulted
-    because a tile that silently reported ``0.0`` would freeze on its
-    first frame instead of its last, which looks like footage and is
-    the wrong footage.
+    The tile chain itself never reads this -- it pads and trims to the
+    *stage's* length and does not need to know where one clip's footage
+    stops. Two things above it do, and for the same reason: the stage
+    runs until the *longest* tile's post-beep span is done plus a tail
+    pad, so every tile's window ends past its own footage and every tile
+    chain is ``tpad``-ed black from its own end to the end of the action.
+    :func:`overlay_summary.extract_freeze_frames` reads it to take each
+    tile's freeze from the last frame with a picture in it, which is this
+    tile's own, at this time; :func:`tile_footage_end_seconds` reads it to
+    place the per-tile early summary, which covers that black with the
+    tile's own cell of the stage summary from the same instant.
+
+    Required rather than defaulted because a tile that silently reported
+    ``0.0`` would freeze on its first frame instead of its last, which
+    looks like footage and is the wrong footage -- and would arm that
+    tile's summary from the head of the stage.
     """
 
     row: int
@@ -673,6 +679,31 @@ def _cell_size(canvas: GridCanvas, plan: GridStagePlan) -> tuple[int, int]:
     return canvas.width // plan.cols, canvas.height // plan.rows
 
 
+def tile_footage_end_seconds(tile: GridTile) -> float:
+    """When this tile's own picture stops, in *segment* time.
+
+    Not the end of the action. The stage runs ``head_pad + the longest
+    tile's post-beep span + tail_pad`` and every tile chain is
+    ``tpad``-ed with black across the remainder, so this is exactly
+    where that black starts.
+
+    Both spellings of a tile's front collapse to the same answer. A tile
+    that could seek reads ``source - seek`` of picture with no lead pad;
+    one that could not seek far enough back reads its whole clip behind
+    ``lead_pad`` seconds of synthesised black. Either way the beep lands
+    on the head pad and the picture ends a post-beep span later.
+
+    ``0.0`` for a filler tile, which has no source at all -- see
+    :attr:`GridTile.source_duration_seconds`. Clamped at zero rather
+    than trusted: the duration is an ffprobe reading of the trim and can
+    disagree with the seek by a rounding error, and a negative time
+    would arm an ``enable`` expression from the first frame.
+    """
+    if tile.trim_path is None:
+        return 0.0
+    return max(0.0, tile.lead_pad_seconds + tile.source_duration_seconds - tile.seek_seconds)
+
+
 def _unreached_cells(plan: GridStagePlan) -> tuple[tuple[int, int], ...]:
     """``(row, col)`` for every cell of the grid no tile occupies.
 
@@ -796,14 +827,14 @@ def _video_tail(source_label: str, hold_label: str | None) -> list[str]:
 
     With a hold, the frozen summary still is a *second segment* joined
     after the action rather than something composited over it. That is
-    what makes the live overlay stop at the freeze for free: every
-    ``drawtext`` and the sprite ``overlay`` run on ``source_label``, which
-    ends at the action, so nothing that draws on the action can reach a
-    frame of the hold -- there is no expression to get wrong. That
-    structural bound is the only one there is: the ``enable`` cap
-    :func:`_clock_filters` used to carry alongside it was deleted in
-    ``9ab2156`` once it was shown to restate what the graph already
-    guarantees.
+    what makes the live overlay stop at the freeze for free: the sprite
+    ``overlay``, every ``drawtext`` clock and every per-tile early summary
+    are all upstream of ``source_label``, which ends at the action, so
+    nothing that draws on the action can reach a frame of the hold --
+    there is no expression to get wrong. That structural bound is the
+    only one there is: the ``enable`` cap :func:`_clock_filters` used to
+    carry alongside it was deleted in ``9ab2156`` once it was shown to
+    restate what the graph already guarantees.
 
     ``concat`` demands its inputs agree on size, SAR and frame rate (it
     refuses at graph-config time, not silently), which is why the still's
@@ -824,10 +855,8 @@ def _clock_filters(
     plan: GridStagePlan,
     canvas: GridCanvas,
     overlay: StageOverlayPlan,
-    *,
-    hold_label: str | None = None,
-) -> list[str]:
-    """The ``drawtext`` chain hanging off ``[ovlgrid]``, or the passthrough.
+) -> tuple[list[str], str]:
+    """The ``drawtext`` chain hanging off ``[ovlgrid]``, and the label it ends on.
 
     Two filters per clock, made mutually exclusive by their ``enable``
     expressions: one ticking, one holding the final time. That is two
@@ -933,8 +962,163 @@ def _clock_filters(
             held = quote_filter_value(clock.final_text)
             filters.append(f"drawtext={common}:text={held}:enable='gte(t\\,{freeze})'")
     if not filters:
-        return _video_tail("ovlgrid", hold_label)
-    return ["[ovlgrid]" + ",".join(filters) + "[ovltext]", *_video_tail("ovltext", hold_label)]
+        return [], "ovlgrid"
+    return ["[ovlgrid]" + ",".join(filters) + "[ovltext]"], "ovltext"
+
+
+def _arm_seconds_string(seconds: float) -> str:
+    """Render a non-negative ``enable`` arm time, rounding *down*.
+
+    The direction is the whole point. An arm is deliberately biased one
+    frame early (see :func:`_early_summary_filters`), and a to-nearest
+    format spec spends that bias: ``{6.966666666666667:g}`` is
+    ``6.96667``, which is *above* the number it was asked to print, so a
+    tile ending on a whole canvas frame arms one frame later than the
+    caller computed and shows the black frame the bias existed to
+    cover. More significant digits do not help -- any precision has a
+    last digit that can round up. Only the rounding direction does.
+
+    So: floor to milliseconds, and assemble the decimal from integers so
+    the division cannot reintroduce a rounding step. The emitted string
+    is at most 1ms below ``seconds``.
+
+    **Not "never above it", which is false and cheap to disprove.** The
+    ``* 1000.0`` is itself a rounded product, so an input a hair under a
+    whole millisecond can round *up* to one and hand ``floor`` a
+    millisecond it did not have:
+    ``_arm_seconds_string(0.11699999999999999)`` is ``"0.117"``. Measured
+    over 800k sampled inputs, the worst overshoot is 1.41e-14 s, at
+    ``seconds = 131.128``. That is eleven orders of magnitude under a
+    frame at any rate here, and it does not reach the comparison this
+    exists for: on a boundary-aligned end the emitted decimal parses back
+    to the frame's own presentation time bit-for-bit (``float("6.960")``
+    is ``174 / 25.0``), so ``gte`` is satisfied by equality rather than
+    by a margin.
+
+    1ms is the granularity because it is far under one frame at every
+    rate this renders and deep enough that nothing else notices: a frame
+    is 41.7ms at 24fps, 40ms at 25, 33.3ms at 30, 20ms at 50, 16.7ms at
+    60 and 8.3ms at 120, so even the fastest plausible canvas has eight
+    millisecond steps inside a frame. Going deeper buys no accuracy that
+    ``t`` in a filter expression can act on and only lengthens the argv a
+    human has to read.
+
+    Non-negative only. ``//`` and ``%`` floor toward negative infinity,
+    so a negative input would assemble a nonsense sign; the one caller
+    clamps at ``0.0`` before it gets here.
+    """
+    milliseconds = math.floor(seconds * 1000.0)
+    return f"{milliseconds // 1000}.{milliseconds % 1000:03d}"
+
+
+def _early_summary_filters(
+    plan: GridStagePlan,
+    canvas: GridCanvas,
+    source_label: str,
+    early_index: int,
+) -> tuple[list[str], str]:
+    """Paint each present tile's summary cell from its own footage end.
+
+    A tile's chain is ``tpad``-ed with black from where its own clip runs
+    out to the end of the action (see :func:`tile_footage_end_seconds`),
+    so a shooter who finished first sat on a black cell until the last
+    tile was done. This paints that tile's cell of the stage summary
+    over the black instead, leaving the end-of-stage hold to take over
+    at ``duration_seconds`` with pixel-identical content -- the cut is
+    invisible because both come from the same PNG.
+
+    Cropping the composed still is exact rather than approximate.
+    ``overlay_html.grid_html`` gives every cell ``overflow: hidden`` and
+    builds its content from that label's own ``TileStageData``, so no
+    element crosses a cell boundary and no cell depends on another
+    shooter. A crop of the still is therefore the same pixels that cell
+    will show during the hold.
+
+    **One frame early**, and the direction matters. Arming late by a
+    frame shows a black frame, which is the whole defect; arming early
+    covers the tile's last footage frame with a blurred, dimmed copy of
+    itself, which nothing can see. ``source_duration_seconds`` is an
+    ffprobe reading, so disagreeing with the decoded stream by a fraction
+    of a frame is the expected case rather than the exceptional one.
+
+    That margin only survives if the *emitted decimal* is never later
+    than the computed arm, which is why the time goes through
+    :func:`_arm_seconds_string` rather than a format spec. ``{arm:g}``
+    used to round to nearest at six significant digits and lost the
+    whole frame on any tile whose footage ended on a canvas frame: a
+    7.000s end at 30fps computes 6.966666...s and emitted ``6.96667``,
+    above frame 209's own presentation time, so the cell armed at 210
+    and 209 stayed black -- rendered and confirmed on the
+    ``tests/compare_fixture`` roster at 1280x720@30 with a 2s hold
+    (ffmpeg 6.1.1). The same render with the floored emission
+    (``6.966``) has Anders' and Bea's cells carrying the summary from
+    209, with 208 still live picture. Mathias, whose end (5.4985s) was
+    never boundary-aligned, arms at 164 either way.
+
+    Filler tiles get nothing: an empty cell is not a shooter, and
+    ``build_hold_still`` draws no summary into one either.
+
+    **Cost.** Not free, and not "one more PNG decode". Measured on a
+    12-core box, ffmpeg 6.1.1, a 12-tile 4K grid over 10s of action at
+    ``-preset medium -crf 20`` with ``testsrc2`` tile sources: the
+    filter graph alone goes 6.96s -> 25.84s, and end to end with libx264
+    22.19/22.43s -> 33.93/34.77s. That is about **+1.9s of filter work
+    per second of 4K action, ~+53% end to end**, reproducible across
+    runs. Three things that measurement is often assumed to say and does
+    not:
+
+    * It is paid whether or not any cell arms -- 60.6s against 65.2s
+      with every ``enable`` forced past the end of the action.
+      ``enable`` skips the blend; ffmpeg still decodes, scales, splits,
+      crops and framesyncs the still for every frame.
+    * The PNG decode is the minority: reading the early input at
+      ``-framerate 1`` and dropping ``fps=`` from its chain recovered
+      4.7s of the 18.9s added. The bulk is the N chained ``overlay``
+      filters on a 4K main frame.
+    * It is linear in tile count, not quadratic -- 22.8s / 30.7s /
+      42.0s / 65.2s at 1, 3, 6 and 12 tiles. The constant is large
+      because :data:`DEFAULT_CANVAS_WIDTH` is 3840 and no CLI flag
+      overrides it.
+
+    Caveat on the ratio, not on the absolute: ``testsrc2`` decodes far
+    faster than real H.264, so real footage moves the base up and the
+    percentage down. The added ~1.9s per second of action does not
+    shrink with it.
+
+    Returns the filters and the label the video half now ends on. The
+    caller must keep these upstream of :func:`_video_tail`'s ``concat``
+    -- that is what keeps every compositing filter on the action, which
+    is the structural bound the hold's correctness rests on.
+    """
+    present = [tile for tile in plan.tiles if tile.trim_path is not None]
+    if not present:
+        return [], source_label
+
+    cell_w, cell_h = _cell_size(canvas, plan)
+    frame_seconds = 1.0 / canvas.fps
+    branches = "".join(f"[still{index}]" for index in range(len(present)))
+    # ``split=1`` is legal but reads as a mistake; ``null`` is the same
+    # graph with one output. The scale/setsar/fps conform mirrors the
+    # hold chain: it is a no-op on a still this module composed and the
+    # guard against one it did not.
+    fan_out = f"split={len(present)}" if len(present) > 1 else "null"
+    filters = [
+        f"[{early_index}:v]setpts=PTS-STARTPTS,scale={canvas.width}:{canvas.height},"
+        f"setsar=1,fps={canvas.rate_string},{fan_out}{branches}"
+    ]
+
+    label = source_label
+    for index, tile in enumerate(present):
+        left = tile.col * cell_w
+        top = tile.row * cell_h
+        arm = max(0.0, tile_footage_end_seconds(tile) - frame_seconds)
+        filters.append(f"[still{index}]crop={cell_w}:{cell_h}:{left}:{top}[cell{index}]")
+        filters.append(
+            f"[{label}][cell{index}]overlay={left}:{top}:format=auto:"
+            f"enable='gte(t\\,{_arm_seconds_string(arm)})'[early{index}]"
+        )
+        label = f"early{index}"
+    return filters, label
 
 
 def build_stage_command(
@@ -1106,6 +1290,34 @@ def build_stage_command(
         hold_index = next_index
         next_index += 1
 
+    # After the hold's own input, for the same reason the hold went after
+    # the sprite: the only index safe to occupy is the next free one.
+    # The same PNG, opened a second time and read for the *action* -- see
+    # ``_early_summary_filters``. A second input rather than a ``split``
+    # off the hold's so each ``-t`` states one length, and so the hold
+    # chain, whose length is all that stands between this segment and an
+    # audio stream outlasting its video, is left exactly as it was. What
+    # this input and its chain cost, measured, is in that function's
+    # docstring -- it is a great deal more than the extra PNG decode.
+    #
+    # Gated on the overlay too, not just the hold. A hold with no overlay
+    # is a shape ``render_grid_mp4`` refuses outright, so it reaches no
+    # pixel test and must not grow behaviour here.
+    early_index: int | None = None
+    if hold_index is not None and overlay is not None:
+        args += [
+            "-loop",
+            "1",
+            "-framerate",
+            rate,
+            "-t",
+            f"{plan.duration_seconds:g}",
+            "-i",
+            str(hold_still_path),
+        ]
+        early_index = next_index
+        next_index += 1
+
     args += [
         "-filter_complex",
         _build_filter_graph(
@@ -1117,6 +1329,7 @@ def build_stage_command(
             overlay=overlay,
             sprite_index=sprite_index,
             hold_index=hold_index,
+            early_index=early_index,
         ),
     ]
 
@@ -1208,6 +1421,7 @@ def _build_filter_graph(
     overlay: StageOverlayPlan | None = None,
     sprite_index: int | None = None,
     hold_index: int | None = None,
+    early_index: int | None = None,
 ) -> str:
     """Scale + pad every tile to a uniform cell, then ``xstack`` the grid.
 
@@ -1241,6 +1455,12 @@ def _build_filter_graph(
     ``tpad`` / ``trim`` order is what puts every beep on ``head_pad``;
     reordering it once already cost a silently desynced grid, and the
     overlay has no business anywhere near it.
+
+    ``early_index`` names a second read of the hold still, cropped per
+    tile and composited onto the action from each tile's own footage end
+    (:func:`_early_summary_filters`). It is composited after the clock
+    and before the ``concat``, which is the only position that both
+    replaces a finished tile's held clock and stays on the action.
     """
     cell_w, cell_h = _cell_size(canvas, plan)
     rate = canvas.rate_string
@@ -1311,11 +1531,11 @@ def _build_filter_graph(
         hold_label = "hold"
 
     if overlay is None:
-        parts.extend(_video_tail("grid", hold_label))
+        video_label = "grid"
     else:
         if sprite_index is None:
             raise ValueError("an overlay plan needs the input index its sprite sequence was added at")
-        # ``stop_mode=clone`` holds the last state's *alpha*; the default
+        # ``stop_mode=clone`` holds the last state's alpha; the default
         # ``add`` would pad with opaque black and paint the grid out at
         # the end. The explicit ``trim`` means the segment's length never
         # depends on ``overlay``'s ``eof_action`` default, which is what
@@ -1326,7 +1546,22 @@ def _build_filter_graph(
             f"trim=0:{plan.duration_seconds:g}[ovl]"
         )
         parts.append("[grid][ovl]overlay=0:0:format=auto[ovlgrid]")
-        parts.extend(_clock_filters(plan, canvas, overlay, hold_label=hold_label))
+        clock_parts, video_label = _clock_filters(plan, canvas, overlay)
+        parts.extend(clock_parts)
+
+    if early_index is not None:
+        if overlay is None:
+            # Unreachable from ``build_stage_command``, which only takes
+            # an ``early_index`` when it has an overlay. Raised rather
+            # than trusted for the same reason the sprite check above is:
+            # composited onto ``[grid]`` this would silently produce a
+            # render nothing has ever looked at, where a finished tile
+            # carries a summary and no live overlay ever ran.
+            raise ValueError("an early summary needs the overlay plan whose action chain it draws onto")
+        early_parts, video_label = _early_summary_filters(plan, canvas, video_label, early_index)
+        parts.extend(early_parts)
+
+    parts.extend(_video_tail(video_label, hold_label))
 
     for slot, tile in enumerate(plan.tiles):
         # ``aresample=async=1`` keeps a track that starts short from
@@ -1920,7 +2155,9 @@ def render_grid_mp4(
                 if not draw_clock:
                     # Dropping the clocks is what removes ``drawtext`` from
                     # the command: ``_clock_filters`` emits one filter per
-                    # clock and the plain passthrough when there are none.
+                    # clock and, with none, emits nothing and hands its own
+                    # input label straight back, so the rest of the video
+                    # chain composes onto ``[ovlgrid]`` unchanged.
                     stage_overlay = replace(stage_overlay, clocks=())
                 if plan.hold_seconds > 0:
                     # A missing ``drawtext`` costs the summary nothing: the
