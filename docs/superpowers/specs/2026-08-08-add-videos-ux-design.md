@@ -101,6 +101,12 @@ into this single bar.
   e.g. "Use this folder" for CreateMatch/Relink);
 - N files checked: "Add N files".
 
+Whole-folder commit stays valid even when the folder shows no top-level
+videos: the backend scan walks recursively, so an SD-card root whose
+clips sit under `DCIM/` is a legitimate pick (current behavior,
+preserved). `allowEmptyFolder` therefore stays on for the add-footage
+call site as well as CreateMatch.
+
 Commit acts immediately: the footer swaps to inline scan progress, the
 dialog closes on success, and Ingest refreshes via the existing
 `onImported` path. No queue, no second Import step. Selection still
@@ -152,8 +158,8 @@ Call sites:
   - the app-level guard prevents default on unhandled drops; hosted
     page-level drop enqueues; local drop shows the toast;
   - picker commit flows: whole-folder commit, N-files commit,
-    empty-folder rules per call site (`allowEmptyFolder` on for
-    CreateMatch, off for add-footage);
+    whole-folder commit allowed with no top-level videos (recursive
+    scan covers nested clips - all call sites);
   - selection resets on navigation; sidebar navigation (volume entry,
     Computer entry) triggers a listing load with the right path.
 - Layout verification: bounded headless screenshot pass (domcontentloaded,
