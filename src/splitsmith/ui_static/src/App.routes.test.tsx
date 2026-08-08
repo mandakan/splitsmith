@@ -102,13 +102,37 @@ describe("route tree", () => {
   // (#550 review finding 2). Global chrome coverage previously stopped at
   // Pick, admin/workers and Login -- none of which mount AppShell -- so
   // the duplicate brand shipped with a green suite.
-  it("renders global chrome on an AppShell surface (/_design)", async () => {
+  it("renders AppShell chrome on an AppShell surface (/_design)", async () => {
+    // AppShell's own bound-check (`if (!bindExempt && health && !health.bound)
+    // return <Navigate to="/pick" replace/>`) redirects to /pick whenever
+    // health.bound is false -- which is what the shared module-level mock
+    // above returns. Without overriding it here, this test silently renders
+    // Pick instead of AppShell: the earlier (#550 review) version of this
+    // test asserted only generic global chrome, which Pick has too, so it
+    // stayed green while covering nothing AppShell-specific. Override for
+    // this one call so /_design actually mounts AppShell.
+    vi.mocked(api.getHealth).mockResolvedValueOnce({
+      status: "ok",
+      bound: true,
+      project_name: "Test Project",
+      project_root: "/tmp/test-project",
+      match_id: null,
+      kind: "legacy",
+      default_shooter_slug: null,
+      schema_version: 1,
+    });
     await renderAt("/_design");
     await waitFor(() =>
       expect(
         screen.getByRole("navigation", { name: /global/i }),
       ).toBeInTheDocument(),
     );
+    // AppShell-only markup: the sidebar's "Design system" nav link. Pick
+    // also has global chrome, so that assertion alone can't tell the two
+    // shells apart -- this is the assertion that actually pins AppShell.
+    expect(
+      screen.getByRole("link", { name: /design system/i }),
+    ).toBeInTheDocument();
   });
 
   it("does not render global chrome on the login surface", async () => {
