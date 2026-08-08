@@ -995,8 +995,49 @@ def _early_summary_filters(
     ffprobe reading, so disagreeing with the decoded stream by a fraction
     of a frame is the expected case rather than the exceptional one.
 
+    **Measured: it does not arm one frame early when a tile's footage
+    end lands exactly on a frame boundary.** ``{arm:g}`` is six
+    significant digits, so a tile ending at 7.000s on a 30fps canvas
+    emits ``6.96667``, which is above frame 209's own presentation time
+    of 6.966666...s -- the cell arms at frame 210 instead. Rendered on
+    the ``tests/compare_fixture`` roster at 1280x720@30 with a 2s hold
+    (ffmpeg 6.1.1): Anders' and Bea's cells are live picture through
+    frame 208, **black at 209**, and carry the summary from 210 on,
+    while Mathias, whose end (5.4985s) is not boundary-aligned, arms at
+    164 and covers his own last frame as designed. So a tile whose clip
+    lands on a whole canvas frame still shows the single black frame
+    this exists to remove. Not fixed here: changing the emitted arm
+    changes rendered output and needs its own pixel check.
+
     Filler tiles get nothing: an empty cell is not a shooter, and
     ``build_hold_still`` draws no summary into one either.
+
+    **Cost.** Not free, and not "one more PNG decode". Measured on a
+    12-core box, ffmpeg 6.1.1, a 12-tile 4K grid over 10s of action at
+    ``-preset medium -crf 20`` with ``testsrc2`` tile sources: the
+    filter graph alone goes 6.96s -> 25.84s, and end to end with libx264
+    22.19/22.43s -> 33.93/34.77s. That is about **+1.9s of filter work
+    per second of 4K action, ~+53% end to end**, reproducible across
+    runs. Three things that measurement is often assumed to say and does
+    not:
+
+    * It is paid whether or not any cell arms -- 60.6s against 65.2s
+      with every ``enable`` forced past the end of the action.
+      ``enable`` skips the blend; ffmpeg still decodes, scales, splits,
+      crops and framesyncs the still for every frame.
+    * The PNG decode is the minority: reading the early input at
+      ``-framerate 1`` and dropping ``fps=`` from its chain recovered
+      4.7s of the 18.9s added. The bulk is the N chained ``overlay``
+      filters on a 4K main frame.
+    * It is linear in tile count, not quadratic -- 22.8s / 30.7s /
+      42.0s / 65.2s at 1, 3, 6 and 12 tiles. The constant is large
+      because :data:`DEFAULT_CANVAS_WIDTH` is 3840 and no CLI flag
+      overrides it.
+
+    Caveat on the ratio, not on the absolute: ``testsrc2`` decodes far
+    faster than real H.264, so real footage moves the base up and the
+    percentage down. The added ~1.9s per second of action does not
+    shrink with it.
 
     Returns the filters and the label the video half now ends on. The
     caller must keep these upstream of :func:`_video_tail`'s ``concat``
@@ -1209,7 +1250,9 @@ def build_stage_command(
     # ``_early_summary_filters``. A second input rather than a ``split``
     # off the hold's so each ``-t`` states one length, and so the hold
     # chain, whose length is all that stands between this segment and an
-    # audio stream outlasting its video, is left exactly as it was.
+    # audio stream outlasting its video, is left exactly as it was. What
+    # this input and its chain cost, measured, is in that function's
+    # docstring -- it is a great deal more than the extra PNG decode.
     #
     # Gated on the overlay too, not just the hold. A hold with no overlay
     # is a shape ``render_grid_mp4`` refuses outright, so it reaches no

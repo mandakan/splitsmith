@@ -102,10 +102,13 @@ def export(
         help=(
             "Seconds to freeze on a stage summary at the end of every "
             "stage: each tile holds its last frame, blurred and dimmed, "
-            "with that shooter's shot count, time, hit factor, stage "
-            "percentage and placing over their own cell. 0 (the default) "
-            "is off. Requires --overlay, and is charged per stage -- a "
-            "3-second hold adds 36 seconds to a 12-stage match."
+            "with that shooter's hit and fault counts, hit factor, stage "
+            "time and splits over their own cell. Also turns the summary "
+            "on during the action -- a shooter who finishes early shows "
+            "theirs from that moment instead of a black cell. 0 (the "
+            "default) is off. Requires --overlay, and is charged per "
+            "stage -- a 3-second hold adds 36 seconds to a 12-stage "
+            "match."
         ),
     ),
 ) -> None:

@@ -155,10 +155,22 @@ def _moments(*, fps: int, hold_seconds: float, stages: int, shooters: int) -> li
                 else " -- with no hold, that tile is black"
             ),
         ),
+        # ``- 2``, not ``- 1``. The full clips' nominal footage end is
+        # ``HEAD_PAD + POST_BEEP`` (frame 210 at 30fps), but two things
+        # cost a frame there and neither is visible from the arithmetic.
+        # The decoded stream is a frame shorter than the probed duration
+        # implies, so the tile chain's black ``tpad`` starts at 209; and
+        # the early summary's arm is emitted at six significant digits
+        # (``6.96667`` for a 7.000s end), which is above frame 209's own
+        # 6.966666...s, so the summary arms at 210 rather than covering
+        # 209. Measured on this fixture at 30fps: live picture through
+        # 208, black at 209 on the full tiles, summary from 210. So 208
+        # is the frame this moment is named for.
         Moment(
             "last-picture",
-            at(HEAD_PAD_SECONDS + POST_BEEP_SECONDS) - 1,
-            "the last frame with any live picture in it, one frame before the tail pad",
+            at(HEAD_PAD_SECONDS + POST_BEEP_SECONDS) - 2,
+            "the last frame with any live picture in it -- the full tiles go black at the next "
+            "one and pick their summary up at the one after that",
         ),
         Moment(
             "last-action",

@@ -63,11 +63,18 @@ STAGE_DURATION_SECONDS = STAGE_FRAMES * SYNTHETIC_FPS_DEN / SYNTHETIC_FPS_NUM  #
 #: The short clip, deliberately shorter than the full one.
 #:
 #: A stage runs until the *longest* tile's post-beep span is done, so a
-#: shooter on this clip has a black cell for the last ~1.5s of every
-#: action. That is what separates "freeze on this tile's own last frame"
-#: from "freeze on the action's last frame": the second reads black in
-#: that cell, and with equal-length clips no assertion can tell them
-#: apart. It is the condition that hid the blocker.
+#: shooter on this clip runs out ~1.5s before the action does. That gap
+#: is what separates "freeze on this tile's own last frame" from "freeze
+#: on the action's last frame": the second reads black in that cell, and
+#: with equal-length clips no assertion can tell them apart. It is the
+#: condition that hid the blocker.
+#:
+#: What fills the gap depends on the render. Without a summary hold the
+#: cell is the tile chain's black ``tpad``, as it always was. With one,
+#: the per-tile early summary paints that shooter's own summary cell
+#: over it from their footage end -- so a hold render has picture there,
+#: and any assertion reading black in that window is reading a render
+#: with no hold.
 SHORT_STAGE_FRAMES = 225
 SHORT_STAGE_DURATION_SECONDS = SHORT_STAGE_FRAMES * SYNTHETIC_FPS_DEN / SYNTHETIC_FPS_NUM  # 7.5075
 

@@ -112,7 +112,38 @@ off the hold input. That keeps each input's `-t` meaning exactly one
 thing and leaves the hold chain's documented invariant intact ("the
 explicit `trim` restates the length the input's `-t` already set, so the
 segment's video extent never depends on how `-loop 1` and `concat`'s eof
-handling interact"). The cost is decoding one looped PNG twice.
+handling interact").
+
+**The cost is not "decoding one looped PNG twice."** Measured on a
+12-core box, ffmpeg 6.1.1, a 12-tile 4K grid over 10s of action at
+`-preset medium -crf 20`, tiles from `testsrc2`:
+
+| | filter-only (`-f null -`) | with libx264 |
+|---|---|---|
+| base graph | 6.96 s | 22.19 / 22.43 s |
+| + early summary | 25.84 s | 33.93 / 34.77 s |
+
+About **+1.9 s of filter work per second of 4K action, ~+53% end to
+end**, reproducible across runs. Four qualifying facts, all measured:
+
+- It is paid whether or not any cell arms. The same graph with every
+  `enable` forced past the end measured 60.6 s against 65.2 s. `enable`
+  only skips the blend; ffmpeg still decodes, scales, splits, crops and
+  framesyncs the still for every frame.
+- The PNG decode is the minority. Dropping the early input to
+  `-framerate 1` and removing `fps=` from that chain recovered 4.7 s of
+  the 18.9 s added. The bulk is the N chained `overlay` filters on a 4K
+  main frame.
+- Linear in tile count, nothing is O(n^2): 1 tile 22.8 s, 3 tiles
+  30.7 s, 6 tiles 42.0 s, 12 tiles 65.2 s. The constant is large because
+  the default canvas is 4K (`DEFAULT_CANVAS_WIDTH = 3840`) and the CLI
+  exposes no override.
+- The base uses `testsrc2` sources, which decode far faster than real
+  H.264 footage, so with real footage the *ratio* will be smaller. The
+  added ~1.9 s/s is a fixed absolute cost that does not shrink.
+
+The `-framerate 1` saving is a separate change needing its own test and
+pixel check, and is deliberately not taken here.
 
 Added when the hold input is added *and* an overlay plan is present, so
 `hold_index` keeps its position and only a new `early_index` follows it.
