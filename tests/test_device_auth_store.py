@@ -183,6 +183,24 @@ def test_pending_returns_none_for_unknown_or_expired_user_code(tmp_path: Path) -
     assert stale is None
 
 
+def test_pending_returns_the_live_authorization(tmp_path: Path) -> None:
+    """The happy path ``pending`` is meant to serve the approval screen -
+    device_name, scope, and an aware created_at read back from
+    server_default=func.now()."""
+    sf = _factory(tmp_path)
+    store = DeviceAuthStore(sf)
+
+    async def _run():
+        req = await store.authorize("mac studio")
+        return await store.pending(req.user_code)
+
+    result = asyncio.run(_run())
+    assert result is not None
+    assert result.device_name == "mac studio"
+    assert result.scope == "sync"
+    assert result.created_at.tzinfo is not None
+
+
 def test_two_concurrent_polls_mint_one_token(tmp_path: Path) -> None:
     """The conditional approved -> consumed update is the only thing
     stopping two in-flight polls from each minting a credential."""
@@ -205,7 +223,7 @@ def test_two_concurrent_polls_mint_one_token(tmp_path: Path) -> None:
 
     statuses, count = asyncio.run(_run())
     assert count == 1
-    assert "approved" in statuses
+    assert sorted(statuses) == ["approved", "expired"]
 
 
 def test_revoke_token_revokes_the_matching_row(tmp_path: Path) -> None:

@@ -115,6 +115,24 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
+def _is_code_collision(exc: IntegrityError) -> bool:
+    """True if ``exc`` looks like the one thing ``authorize`` retries for:
+    a unique-constraint collision on ``user_code`` or ``device_code_hash``.
+
+    SQLite reports ``UNIQUE constraint failed: device_authorizations.user_code``;
+    Postgres reports the constraint name, which is
+    ``uq_device_authorizations_user_code`` /
+    ``uq_device_authorizations_device_code_hash`` (migration 0c1dbb2ce678).
+    Both forms contain the column name as a substring, so a plain text scan
+    is portable across the two backends this project runs against. Anything
+    that doesn't match is a real bug, not a collision, and must not be
+    retried five times and then reported as a misleading "could not
+    allocate a unique code".
+    """
+    text = str(exc.orig or exc).lower()
+    return "user_code" in text or "device_code_hash" in text
+
+
 class DeviceAuthStore:
     """The device-flow state machine over ``device_authorizations``."""
 
@@ -131,9 +149,16 @@ class DeviceAuthStore:
 
     async def authorize(self, device_name: str, *, scope: str = "sync") -> DeviceAuthRequest:
         """Create a pending authorization and return its two codes."""
-        plain, hashed = _mint()
         expires_at = datetime.now(UTC) + timedelta(seconds=self._ttl_seconds)
         for _ in range(_USER_CODE_ATTEMPTS):
+            # Fresh device_code AND user_code on every attempt: the table
+            # has two independent unique constraints
+            # (uq_device_authorizations_device_code_hash,
+            # uq_device_authorizations_user_code -- see migration
+            # 0c1dbb2ce678), and only regenerating both makes a retry able
+            # to clear either collision. Regenerating just the user_code
+            # left a device_code_hash collision unretryable.
+            plain, hashed = _mint()
             user_code = format_user_code(
                 "".join(secrets.choice(_USER_CODE_ALPHABET) for _ in range(_USER_CODE_LENGTH))
             )
@@ -149,7 +174,15 @@ class DeviceAuthStore:
                 async with self._session_factory() as session:
                     session.add(row)
                     await session.commit()
-            except IntegrityError:
+            except IntegrityError as exc:
+                if not _is_code_collision(exc):
+                    # A NOT NULL violation, a bad FK, or anything else that
+                    # isn't the one thing this loop knows how to fix by
+                    # retrying with fresh random values. Re-raise instead
+                    # of burning all _USER_CODE_ATTEMPTS on an error a
+                    # retry cannot clear and then masking it behind the
+                    # generic RuntimeError below.
+                    raise
                 continue
             return DeviceAuthRequest(
                 device_code=plain,
@@ -183,9 +216,19 @@ class DeviceAuthStore:
 
     async def decide(self, user_code: str, *, user_id: str, approved: bool) -> bool:
         """Record the browser's decision. ``False`` when there was nothing
-        live to decide on, which the route turns into a 404."""
+        live to decide on, which the route turns into a 404.
+
+        Symmetric with ``poll``'s conditional ``approved -> consumed``
+        update: two concurrent decisions on the same user_code must not
+        let the second writer's commit silently overwrite the first's
+        under READ COMMITTED (an approve stomping a deny, both callers
+        seeing ``True``). The conditional ``pending -> approved|denied``
+        update is the guard; only the writer whose UPDATE actually matched
+        a still-pending row gets ``True``.
+        """
         normalized = normalize_user_code(user_code)
         now = datetime.now(UTC)
+        new_status = "approved" if approved else "denied"
         async with self._session_factory() as session:
             row = (
                 await session.execute(
@@ -194,8 +237,17 @@ class DeviceAuthStore:
             ).scalar_one_or_none()
             if row is None or row.status != "pending" or _aware(row.expires_at) <= now:
                 return False
-            row.status = "approved" if approved else "denied"
-            row.user_id = user_id
+            result = await session.execute(
+                update(DeviceAuthorizationRow)
+                .where(
+                    DeviceAuthorizationRow.id == row.id,
+                    DeviceAuthorizationRow.status == "pending",
+                )
+                .values(status=new_status, user_id=user_id)
+            )
+            if result.rowcount != 1:
+                await session.rollback()
+                return False
             await session.commit()
             return True
 
@@ -277,8 +329,11 @@ class DeviceAuthStore:
         Backs ``DELETE /api/device/session`` - the one route a sync-scoped
         token may reach outside ``/api/sync/*``, so the local install can
         sign itself out without holding a session cookie. Returns ``False``
-        for an unknown or already-revoked token; the route reports success
-        either way (the credential is dead in both cases).
+        only for an unknown token; an already-revoked token still returns
+        ``True`` (its ``revoked_at`` is left untouched, not re-stamped) -
+        the route reports success either way, but ``False`` deliberately
+        stays reserved for "this token never existed" rather than doubling
+        as an existence oracle for "already revoked".
         """
         hashed = _hash(token)
         async with self._session_factory() as session:
