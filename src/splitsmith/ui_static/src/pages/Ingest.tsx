@@ -28,7 +28,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
-import { AddFootageModal } from "@/components/AddFootageModal";
+import { FolderPicker } from "@/components/FolderPicker";
 import { HostedUploadModal } from "@/components/HostedUploadModal";
 import { RelinkDialog } from "@/components/RelinkDialog";
 import { useConfirm } from "@/components/useConfirm";
@@ -77,10 +77,10 @@ function IngestInner({ slug }: { slug: string }) {
   const [project, setProject] = useState<MatchProject | null>(null);
   const [health, setHealth] = useState<ServerHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
-  // Default storage mode for the ingest modal. Stays on the page state
-  // so flipping it between two ingests doesn't get lost when the modal
-  // closes; the modal seeds its own picker from this value.
-  const [storage, setStorage] = useState<StorageMode>("symlink");
+  // Default storage mode for the ingest modal. Transitional: FolderPicker
+  // has no storage-toggle UI yet (Task 7 restores it), so this stays
+  // fixed at "symlink" until then - the setter is intentionally unused.
+  const [storage] = useState<StorageMode>("symlink");
   const [showAddFootage, setShowAddFootage] = useState(false);
   const [showRelinkDialog, setShowRelinkDialog] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -225,6 +225,40 @@ function IngestInner({ slug }: { slug: string }) {
       await reload();
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
+
+  // One source per pass: commit runs the scan immediately, no queue.
+  // Errors land in the page-level banner for now; Task 7 moves them
+  // inline into the picker footer.
+  async function commitFolder(path: string) {
+    setShowAddFootage(false);
+    setBusy(true);
+    try {
+      const result = await api.scanVideos(slug, path, true, storage);
+      await afterImport(result.registered.length, result.registered);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function commitFiles(files: { path: string; mtime: number | null }[]) {
+    setShowAddFootage(false);
+    setBusy(true);
+    try {
+      const result = await api.scanFiles(
+        slug,
+        files.map((f) => f.path),
+        true,
+        storage,
+      );
+      await afterImport(result.registered.length, result.registered);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -517,17 +551,19 @@ function IngestInner({ slug }: { slug: string }) {
               stages={project?.stages ?? []}
             />
           ) : (
-            <AddFootageModal
+            <FolderPicker
               slug={slug}
-              initialStorage={storage}
+              shell="modal"
+              modalTitle="Add footage"
+              modalSubtitle={
+                activeShooterName ? `Adding to ${activeShooterName}` : undefined
+              }
               initialPath={lastScannedDir}
-              onClose={() => setShowAddFootage(false)}
-              onImported={(imported, paths) => {
-                void afterImport(imported, paths);
-              }}
-              onStorageChange={setStorage}
-              shooterName={activeShooterName}
-              stages={project?.stages ?? []}
+              onSelect={(path) => void commitFolder(path)}
+              onSelectFiles={(files) => void commitFiles(files)}
+              onCancel={() => setShowAddFootage(false)}
+              selectLabel="Add this folder"
+              allowEmptyFolder
             />
           ))}
 

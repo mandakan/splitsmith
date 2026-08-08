@@ -33,7 +33,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { DirectoryPickerModal } from "@/components/DirectoryPickerModal";
+import { FolderPicker } from "@/components/FolderPicker";
 import { CompetitorRow } from "@/components/scoreboard/CompetitorRow";
 import { ResultRow } from "@/components/scoreboard/ResultRow";
 import { Brand, Kicker } from "@/components/ui";
@@ -906,13 +906,20 @@ function ScoreboardVariant({
       )}
 
       {pickerOpen && !hostedMode && (
-        <DirectoryPickerModal
+        <FolderPicker
+          unbound
+          contentMode="directories"
+          shell="modal"
+          modalTitle="Pick a parent folder"
+          modalSubtitle="The project folder will be created inside the directory you choose."
           initialPath={parentDir.startsWith("~") ? null : parentDir}
           onSelect={(picked) => {
             setParentDir(picked);
             setPickerOpen(false);
           }}
           onCancel={() => setPickerOpen(false)}
+          selectLabel="Use this folder"
+          allowEmptyFolder
         />
       )}
     </div>

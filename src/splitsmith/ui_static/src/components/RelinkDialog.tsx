@@ -85,13 +85,11 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
   const [appliedCount, setAppliedCount] = useState(0);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
-  // Escape / focus trap / restore. The folder picker renders INLINE
-  // inside this card (not a nested modal), so the trap covers it too;
-  // Escape peels the picker first, then the dialog.
-  useDialogFocus(true, panelRef, () => {
-    if (pickerOpen) setPickerOpen(false);
-    else onClose();
-  }, { disableEscape: busy });
+  // Escape / focus trap / restore. The folder picker is a stacked
+  // modal with its own useDialogFocus registration - the dialog stack
+  // in dialogFocus.ts routes Escape to the topmost surface, so no
+  // manual peeling is needed here.
+  useDialogFocus(true, panelRef, onClose, { disableEscape: busy });
 
   // Initial load: just the link status, no scan yet.
   useEffect(() => {
@@ -248,39 +246,40 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
             ) : null}
           </div>
 
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPickerOpen(true)}
+              disabled={busy}
+            >
+              <FolderSearch className="size-4" />
+              {scannedRoots.length === 0 ? "Pick search folder..." : "Add another folder..."}
+            </Button>
+            {scannedRoots.length > 0 ? (
+              <span className="text-xs text-muted">
+                Scanned: {scannedRoots.join(" · ")}
+              </span>
+            ) : null}
+          </div>
+
           {pickerOpen ? (
-            <div className="rounded-md border border-rule p-2">
-              <FolderPicker
-                slug={slug}
-                onSelect={async (path) => {
-                  setPickerOpen(false);
-                  await runScan(path);
-                }}
-                onCancel={() => setPickerOpen(false)}
-                mode="inline"
-                allowEmptyFolder
-                selectLabel="Scan this folder"
-              />
-            </div>
-          ) : (
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setPickerOpen(true)}
-                disabled={busy}
-              >
-                <FolderSearch className="size-4" />
-                {scannedRoots.length === 0 ? "Pick search folder..." : "Add another folder..."}
-              </Button>
-              {scannedRoots.length > 0 ? (
-                <span className="text-xs text-muted">
-                  Scanned: {scannedRoots.join(" · ")}
-                </span>
-              ) : null}
-            </div>
-          )}
+            <FolderPicker
+              slug={slug}
+              shell="modal"
+              contentMode="directories"
+              modalTitle="Pick a search folder"
+              modalSubtitle="Scanned recursively to find the moved originals."
+              onSelect={(path) => {
+                setPickerOpen(false);
+                void runScan(path);
+              }}
+              onCancel={() => setPickerOpen(false)}
+              allowEmptyFolder
+              selectLabel="Scan this folder"
+            />
+          ) : null}
 
           {error ? (
             <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
