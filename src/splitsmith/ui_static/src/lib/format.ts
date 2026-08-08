@@ -1,5 +1,5 @@
-/** Human-readable byte size. Moved out of AddFootageModal so the upload
- *  queue summary and the per-file rows agree on units. */
+/** Human-readable byte size used consistently across the upload UI
+ *  (queue summary, progress rows, modal display). */
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;

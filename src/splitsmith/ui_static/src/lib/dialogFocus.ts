@@ -51,7 +51,7 @@ export interface DialogFocusOptions {
    *  blocked outright (e.g. while an upload is running), or because a
    *  child of the surface wants Escape for itself first (e.g. an
    *  inline path editor that Escape should merely exit, not the whole
-   *  dialog) -- gate this on that child's own open state so the first
+   *  dialog) - gate this on that child's own open state so the first
    *  Escape reaches only the child's own handler and a second Escape,
    *  once that state clears, falls through to `onClose` normally.
    *  Default false. */

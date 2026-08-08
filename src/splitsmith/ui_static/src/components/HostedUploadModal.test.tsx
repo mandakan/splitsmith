@@ -1,5 +1,5 @@
 /**
- * HostedUploadModal (extracted from AddFootageModal's hosted branch).
+ * HostedUploadModal - hosted-mode upload surface for Ingest add-footage.
  *
  * Pins the two behaviors the extraction changes:
  * - the dropzone uses the depth counter (dragging over a child keeps

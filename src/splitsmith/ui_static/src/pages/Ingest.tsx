@@ -1,19 +1,20 @@
 /**
- * Ingest route (/ingest) -- redesigned in the Shot Timer aesthetic (#325).
+ * Ingest route (/ingest) - redesigned in the Shot Timer aesthetic (#325).
  *
- * Two states selected from project state:
+ * Two deployment modes, each with dedicated UI:
  *
- *   Empty -- no videos assigned to any stage. Renders polished/18:
- *   dashed drop zone, storage-choice radio, tip cards. Picking a folder
- *   triggers the scan and transitions to Review.
+ *   Local mode: fixed-height FolderPicker dialog (left sidebar with Places,
+ *   center listing, footer with storage toggle + actions). Scans recursively;
+ *   storage choice (symlink vs copy) honored end-to-end via /api/videos/scan
+ *   ``link_mode`` parameter.
  *
- *   Review -- post-drop. Renders polished/05: drop summary, storage
- *   choice (compact), cameras card derived from probed metadata, per-
- *   stage assignment cards with per-video role toggles + reassignment
- *   dropdown, unassigned tray, footer with Confirm.
+ *   Hosted mode: HostedUploadModal (drag-drop or file-pick), full-page
+ *   overlay dropzone when dragging, S3 backend, per-file progress, list of
+ *   existing uploads, attach to project after upload.
  *
- * Storage choice (reference-in-place vs copy-into-project) is honored
- * end-to-end via the existing /api/videos/scan ``link_mode`` parameter.
+ * Both flow through the same Review state: post-import, renders cameras card
+ * (derived from probed metadata), per-stage assignment cards with per-video
+ * role toggles + reassignment, unassigned tray, footer with Confirm.
  */
 
 import {

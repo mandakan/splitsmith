@@ -236,7 +236,7 @@ export function FolderPicker({
       onClose();
     },
     // While the path editor is open, Escape belongs to it (it exits edit
-    // mode and restores the breadcrumb bar) -- the dialog-level Escape
+    // mode and restores the breadcrumb bar) - the dialog-level Escape
     // must not also fire, or the first press would close the whole
     // dialog instead of just canceling the edit. A second Escape (once
     // editingPath is back to false) reaches this handler normally.
@@ -684,8 +684,8 @@ function SidebarIcon({ kind }: { kind: PlaceEntry["kind"] }) {
 }
 
 /** Symlink-vs-copy storage choice, rendered in the footer for the
- *  add-footage call site only. Styling matches the old AddFootageModal
- *  StorageTab pair. */
+ *  add-footage call site only. Buttons toggle between reference-in-place
+ *  and copy-into-project modes. */
 function StorageToggle({
   value,
   onChange,

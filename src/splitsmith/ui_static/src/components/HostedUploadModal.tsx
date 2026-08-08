@@ -1,5 +1,5 @@
 /**
- * Hosted-mode browser upload surface (extracted from AddFootageModal).
+ * Hosted-mode browser upload surface for the Ingest add-footage flow.
  *
  * Drag-and-drop / file-pick, per-file progress, list of what's already
  * uploaded, prune via delete. Files land in S3 under
