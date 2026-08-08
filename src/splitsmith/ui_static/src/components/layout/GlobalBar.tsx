@@ -13,6 +13,7 @@
  */
 
 import { AccountChip } from "@/components/AccountChip";
+import { HostedAccountChip } from "@/components/account/HostedAccountChip";
 import { Brand, ModeSwitch } from "@/components/ui";
 
 export function GlobalBar() {
@@ -27,6 +28,7 @@ export function GlobalBar() {
       </span>
       <div className="flex-1" />
       <ModeSwitch size="sm" />
+      <HostedAccountChip />
       <AccountChip />
     </nav>
   );

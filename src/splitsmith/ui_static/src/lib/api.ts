@@ -3719,6 +3719,25 @@ export const api = {
       json: { base_url: baseUrl, token },
     }),
 
+  /** Begin a browser-assisted link to the hosted account (#719). 409
+   *  ``hosted_base_url_not_set`` when no hosted target is configured. */
+  startDeviceLogin: () =>
+    request<DeviceStartResponse>("/api/settings/hosted-sync/device/start", {
+      method: "POST",
+    }),
+
+  /** Poll the in-flight device login. Safe to call on a short interval --
+   *  the local server throttles the upstream forward to the hosted
+   *  interval, so this never trips ``slow_down``. */
+  getDeviceStatus: () =>
+    request<DeviceStatusResponse>("/api/settings/hosted-sync/device/status"),
+
+  /** Unlink: revoke upstream, then clear the local token and account. */
+  unlinkHostedAccount: () =>
+    request<DeviceUnlinkResponse>("/api/settings/hosted-sync/session", {
+      method: "DELETE",
+    }),
+
   /** Poll the current match's sync status: configured?, when it last
    *  synced, whether it's stale, and any plan errors that would block
    *  a push. */
@@ -4080,6 +4099,44 @@ export interface DesktopTokenRevokeResponse {
 export interface HostedSyncSettings {
   base_url: string | null;
   token_set: boolean;
+  account: HostedAccountInfo | null;
+}
+
+/** The hosted account this install is linked to (#719). Cached from the
+ *  device-flow poll on the server side, never a live lookup -- the
+ *  sync-scoped token cannot read /api/me. */
+export interface HostedAccountInfo {
+  id: string;
+  email: string;
+  display_name: string | null;
+  device_name: string;
+  linked_at: string;
+}
+
+/** Response from POST /api/settings/hosted-sync/device/start (#719).
+ *  Carries no device_code: the secret stays on the local server. */
+export interface DeviceStartResponse {
+  user_code: string;
+  verification_uri: string;
+  verification_uri_complete: string;
+  expires_in: number;
+  interval: number;
+}
+
+/** Response from GET /api/settings/hosted-sync/device/status (#719).
+ *  ``denied`` and ``expired`` are distinct terminal states on purpose. */
+export interface DeviceStatusResponse {
+  status: "idle" | "pending" | "approved" | "denied" | "expired";
+  account: HostedAccountInfo | null;
+  device_name: string | null;
+}
+
+/** Response from DELETE /api/settings/hosted-sync/session (#719).
+ *  ``hosted_revoked: false`` means the local copy is gone but the hosted
+ *  side could not be reached to confirm. */
+export interface DeviceUnlinkResponse {
+  cleared: boolean;
+  hosted_revoked: boolean;
 }
 
 /** Response from GET /api/match/sync/status (#631 Task 9). Cheap
