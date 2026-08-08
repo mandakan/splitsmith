@@ -1,10 +1,11 @@
 /**
  * MatchShell -- Shot Timer page chrome for any Match-mode surface (#323).
  *
- * Wraps the page in the polished Shot Timer header + a per-match
- * sidebar built from the currently-bound project. Routes children
- * via <Outlet/> so each surface (Overview, Audit, Compare, ...) owns
- * its own content area but shares the same chrome.
+ * Wraps the page in a per-match sidebar built from the currently-bound
+ * project, plus a breadcrumb/shooter-strip context row it portals into
+ * RootLayout's header slot rather than rendering its own <header> (#550).
+ * Routes children via <Outlet/> so each surface (Overview, Audit, Compare,
+ * ...) owns its own content area but shares the same chrome.
  *
  * Carries the bound-check that AppShell used to do: when /api/health
  * reports unbound, redirect to /pick. Background jobs surface in the
@@ -434,7 +435,7 @@ export function MatchShell() {
   const mobileNavBase = mobileNavMatchId ? `/match/${mobileNavMatchId}` : "";
 
   const contextRow = isMobile ? (
-    <div className="flex items-center gap-3 px-4 py-3">
+    <div className="flex items-center gap-3 border-t border-rule bg-bg px-4 py-3">
       <button
         type="button"
         onClick={() => setNavOpen(true)}
@@ -450,7 +451,7 @@ export function MatchShell() {
       <div className="flex-1" />
     </div>
   ) : (
-    <div className="flex flex-wrap items-center gap-4 px-7 py-2.5">
+    <div className="flex flex-wrap items-center gap-4 border-t border-rule bg-bg px-7 py-2.5">
       <nav
         aria-label="Breadcrumb"
         className="inline-flex items-center gap-2 font-display text-[0.8125rem] font-bold uppercase tracking-[0.06em]"
@@ -521,7 +522,7 @@ export function MatchShell() {
 
   return (
     <div
-      className="min-h-screen text-ink"
+      className="min-h-[calc(100dvh-var(--shell-header-h,86px))] text-ink"
       style={{
         backgroundImage:
           "radial-gradient(1400px 600px at 50% -100px, rgba(255,45,45,0.04), transparent 60%), linear-gradient(to bottom, var(--color-bg-glow), var(--color-bg))",
