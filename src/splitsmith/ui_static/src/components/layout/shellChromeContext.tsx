@@ -13,7 +13,9 @@
  *
  * Outside a provider both hooks are inert (null slot, no-op accent). That
  * keeps a shell renderable in isolation -- MatchShell.test.tsx mounts the
- * shell directly, with no router layout above it.
+ * shell directly against a small local ShellChromeHarness (a
+ * ShellChromeProvider wrapping a real DOM-attached slot node) rather than
+ * a full RootLayout.
  */
 
 import {
