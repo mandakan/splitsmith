@@ -4,7 +4,7 @@ Date: 2026-08-07
 Status: approved (brainstorming session)
 Tracking: #719 (filed from this spec), under #631 -- the "browser-assisted
 device auth" follow-up noted when the sync MVP landed in #707
-Precondition: #550 (RootLayout extraction) lands first -- see "Sequencing"
+Precondition: #550 (RootLayout extraction) -- DONE, PR #724. See "Sequencing"
 
 ## Problem
 
@@ -252,10 +252,28 @@ still needed to point an install at staging. The paste path moves behind an
 
 ## Sequencing
 
-1. **#550** -- extract `RootLayout`, move global chrome into it. No behaviour
-   change, its own PR, its own acceptance criteria.
+1. **#550** -- extract `RootLayout`, move global chrome into it. **Done**, PR
+   #724. It turned out not to be the pure refactor the issue described: the
+   owner chose a real global header bar, so the shells were slimmed to a
+   context row beneath it rather than keeping their own headers.
 2. **This spec** -- hosted device-flow endpoints and the scope gate, then the
    local endpoints, then the UI hung off `RootLayout`.
+
+What #550 leaves for this spec to build on:
+
+- `GlobalBar` (`src/components/layout/GlobalBar.tsx`) is where `AccountChip`
+  now mounts, and where `HostedAccountChip` mounts alongside it. Both
+  self-gate on deployment mode, so the local-only and hosted-only chips
+  never render together.
+- `RootLayout` mounts `GlobalBar` once, so there is no per-surface
+  duplication to repeat -- `globalChrome.test.tsx` guards that and will fail
+  if a third mount appears. Add `HostedAccountChip` to that test's expected
+  list when it lands, rather than working around it.
+- On mobile the global bar renders unless the shell claims the account menu
+  via `useShellOwnsMobileAccount()`; only `MatchShell` does. A device-flow
+  dialog opened from the chip must therefore work on a phone from `/pick`,
+  where the bar is present, and from a match page's nav drawer, where it is
+  not.
 
 ## Testing
 
