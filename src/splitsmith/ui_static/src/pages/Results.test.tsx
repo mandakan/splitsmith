@@ -191,3 +191,37 @@ describe("Results rows - share surface", () => {
     expect(screen.queryByText("No videos yet")).not.toBeInTheDocument();
   });
 });
+
+describe("Results rows - hit counts", () => {
+  it("renders the A/C/D/NS/M/P breakdown on scored audited rows", async () => {
+    const scored = makeProject();
+    scored.stages[0].scorecard = {
+      hit_factor: 5.24,
+      stage_points: 100,
+      stage_pct: 87.5,
+      alphas: 10,
+      charlies: 2,
+      deltas: 1,
+      misses: 0,
+      no_shoots: 0,
+      procedurals: 3,
+      dq: false,
+    };
+    const { api } = await import("@/lib/api");
+    vi.mocked(api.getProject).mockResolvedValue(scored);
+    try {
+      renderResults("/match/m1/results");
+      // Multi-shooter cells resolve per-shooter projects async.
+      expect((await screen.findAllByText("NS")).length).toBeGreaterThan(0);
+      expect(screen.getAllByText("P").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("3").length).toBeGreaterThan(0);
+    } finally {
+      vi.mocked(api.getProject).mockImplementation(() => new Promise(() => {}));
+    }
+  });
+
+  it("keeps unscored audited rows free of hit-count chrome", () => {
+    renderResults("/match/m1/results");
+    expect(screen.queryByText("NS")).not.toBeInTheDocument();
+  });
+});
