@@ -312,52 +312,50 @@ export function Pick() {
   // identity pill that used to sit in Pick's own top row alongside the
   // (now-deleted) AccountChip.
   const contextRow = (
-    <div className="border-t border-rule bg-bg">
-      <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-4 px-8 py-2.5 text-xs text-muted">
-        <span
-          aria-hidden
-          className="inline-block size-1.5 rounded-full bg-led shadow-[0_0_8px_var(--color-led-glow)]"
-        />
-        <span>
-          <strong className="font-mono font-medium tracking-wider text-ink-2">
-            STANDBY
-          </strong>{" "}
-          &middot; No match in session -- pick one or begin a new record
+    <div className="flex flex-wrap items-center gap-4 border-t border-rule bg-bg px-7 py-2.5 text-xs text-muted">
+      <span
+        aria-hidden
+        className="inline-block size-1.5 rounded-full bg-led shadow-[0_0_8px_var(--color-led-glow)]"
+      />
+      <span>
+        <strong className="font-mono font-medium tracking-wider text-ink-2">
+          STANDBY
+        </strong>{" "}
+        &middot; No match in session -- pick one or begin a new record
+      </span>
+      <span className="ml-auto font-mono text-[0.625rem] uppercase tracking-[0.16em] text-subtle">
+        <b className="font-semibold text-ink-2">{pad2(counts.all)}</b>{" "}
+        &middot; matches register
+      </span>
+      {serverVersion ? (
+        <span className="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-subtle">
+          v{serverVersion}
         </span>
-        <span className="ml-auto font-mono text-[0.625rem] uppercase tracking-[0.16em] text-subtle">
-          <b className="font-semibold text-ink-2">{pad2(counts.all)}</b>{" "}
-          &middot; matches register
+      ) : null}
+      {identity?.display_name && (
+        <span className="inline-flex items-center gap-2 rounded-full border border-rule bg-surface-2 py-1.5 pl-1.5 pr-4">
+          <span
+            className="inline-flex size-7 items-center justify-center rounded-full font-mono text-[0.6875rem] font-bold text-ink"
+            style={{
+              background:
+                "linear-gradient(135deg, var(--color-led), var(--color-led-deep))",
+              boxShadow:
+                "0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--color-led-glow)",
+            }}
+          >
+            {shooterInitials(identity.display_name).toUpperCase()}
+          </span>
+          <span className="text-[0.8125rem] font-medium text-ink-2">
+            {identity.display_name}
+          </span>
         </span>
-        {serverVersion ? (
-          <span className="font-mono text-[0.625rem] uppercase tracking-[0.16em] text-subtle">
-            v{serverVersion}
-          </span>
-        ) : null}
-        {identity?.display_name && (
-          <span className="inline-flex items-center gap-2 rounded-full border border-rule bg-surface-2 py-1.5 pl-1.5 pr-4">
-            <span
-              className="inline-flex size-7 items-center justify-center rounded-full font-mono text-[0.6875rem] font-bold text-ink"
-              style={{
-                background:
-                  "linear-gradient(135deg, var(--color-led), var(--color-led-deep))",
-                boxShadow:
-                  "0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--color-led-glow)",
-              }}
-            >
-              {shooterInitials(identity.display_name).toUpperCase()}
-            </span>
-            <span className="text-[0.8125rem] font-medium text-ink-2">
-              {identity.display_name}
-            </span>
-          </span>
-        )}
-      </div>
+      )}
     </div>
   );
 
   return (
     <div
-      className="relative min-h-screen text-ink"
+      className="relative min-h-[calc(100dvh-var(--shell-header-h,86px))] text-ink"
       style={{
         backgroundImage:
           "radial-gradient(1200px 600px at 50% -100px, rgba(255,45,45,0.04), transparent 60%), linear-gradient(to bottom, var(--color-bg-glow), var(--color-bg))",
