@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.19.0](https://github.com/mandakan/splitsmith/compare/v0.18.0...v0.19.0) (2026-08-08)
+
+
+### Features
+
+* **ui:** brand the public share surface + document share links ([#722](https://github.com/mandakan/splitsmith/issues/722)) ([ba81b4e](https://github.com/mandakan/splitsmith/commit/ba81b4ed740d746819707c202328896c34d41506))
+
+
+### Documentation
+
+* design for browser-assisted desktop auth ([#719](https://github.com/mandakan/splitsmith/issues/719)) ([#726](https://github.com/mandakan/splitsmith/issues/726)) ([8699f9b](https://github.com/mandakan/splitsmith/commit/8699f9bfd7198349dbe4bfe84a016b5e6bbd6077))
+
 ## [0.18.0](https://github.com/mandakan/splitsmith/compare/v0.17.0...v0.18.0) (2026-08-07)
 
 
