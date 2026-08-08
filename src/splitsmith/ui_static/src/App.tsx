@@ -11,6 +11,7 @@ import {
 import { AppShell } from "@/components/AppShell";
 import { DesktopGate } from "@/components/DesktopOnlyNotice";
 import { DeveloperShell } from "@/components/developer/DeveloperShell";
+import { DropGuard } from "@/components/DropGuard";
 import { RootLayout } from "@/components/layout/RootLayout";
 import { MatchShell } from "@/components/match/MatchShell";
 import { ShareShell } from "@/components/share/ShareShell";
@@ -135,6 +136,7 @@ export function App() {
         <ConfirmProvider>
           <UploadProvider>
             <UploadDock />
+            <DropGuard />
           <BrowserRouter>
             <AuthGate>
             <Routes>
