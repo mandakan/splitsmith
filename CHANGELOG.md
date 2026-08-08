@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.21.0](https://github.com/mandakan/splitsmith/compare/v0.20.1...v0.21.0) (2026-08-08)
+
+
+### Features
+
+* browser-assisted desktop auth ([#719](https://github.com/mandakan/splitsmith/issues/719)) ([0facc1a](https://github.com/mandakan/splitsmith/commit/0facc1ae071a91c1a0bfcdcd3745b997927032cb))
+* **compare:** show each tile's stage summary from its own footage end ([#744](https://github.com/mandakan/splitsmith/issues/744)) ([49321f8](https://github.com/mandakan/splitsmith/commit/49321f8aa74cfafa6c49e5c376980c59f983528d))
+* **ui:** add depth-counted file-drag tracking util ([ce0daf7](https://github.com/mandakan/splitsmith/commit/ce0daf75443eabe935cdae437d97c1c6307c5c8f))
+* **ui:** add-videos UX rework - mode-gated drops + single-scroll folder picker ([19b310c](https://github.com/mandakan/splitsmith/commit/19b310ca474ac8573ddfee94789868cfb1eb2c61))
+* **ui:** expose deployment-mode resolution state from useDeploymentMode ([45f50e2](https://github.com/mandakan/splitsmith/commit/45f50e23942e3cfc9c71f02ae0a0f1fc3453962f))
+* **ui:** guard the SPA against unhandled file drops ([7b862eb](https://github.com/mandakan/splitsmith/commit/7b862eb460b88d85174f45b30cb72dcd441b7cb9))
+* **ui:** mode-gate the ingest empty state and add hosted full-page drop ([3bddaec](https://github.com/mandakan/splitsmith/commit/3bddaecb8e465bacc072d5c4063d8d52d3e9c139))
+* **ui:** rewrite FolderPicker as a single-scroll picker dialog ([4f321e3](https://github.com/mandakan/splitsmith/commit/4f321e37c635e881304bcde326cbb76cfb0c6db7))
+
+
+### Bug Fixes
+
+* **ui:** clear hosted drop overlay on modal drops, storage toggle a11y, polish ([bc80ffc](https://github.com/mandakan/splitsmith/commit/bc80ffc8546a184817bc8d499743d8ad88089d9e))
+* **ui:** decrement drag depth unconditionally on dragleave ([39be313](https://github.com/mandakan/splitsmith/commit/39be31334d55682f252fcc053c296062a485667f))
+* **ui:** folder picker escape scoping, error gating, busy announcements ([fdeadaf](https://github.com/mandakan/splitsmith/commit/fdeadafa37477df3d25d1be9557aa78828e97f82))
+* **ui:** migrate HostedAccountChip to resolved deployment-mode state ([aa8bf3b](https://github.com/mandakan/splitsmith/commit/aa8bf3bad958a0a624c1902e903c5beae90a88cf))
+
+
+### Refactors
+
+* **ui:** extract HostedUploadModal with depth-counted dropzone ([0757d99](https://github.com/mandakan/splitsmith/commit/0757d993ab4cdf27591cd222d1b7f5e3f4f75466))
+* **ui:** one-shot local add-footage, drop queue and picker facades ([f848a02](https://github.com/mandakan/splitsmith/commit/f848a025e6471c1cffa6d9a3ee17a147d453c245))
+* **ui:** single-dash comments in HostedUploadModal ([0147e48](https://github.com/mandakan/splitsmith/commit/0147e481f7c26e1c159a0ccd3d6abb09753873f7))
+* **ui:** sweep stale add-footage references and comments ([543362d](https://github.com/mandakan/splitsmith/commit/543362df085acc65315af1b40aed6d7d86f381e2))
+
+
+### Documentation
+
+* add-videos UX rework design (mode-gated drops, single-scroll picker) ([d746d48](https://github.com/mandakan/splitsmith/commit/d746d48b57589832be3b06bd85a00494fd83b1e3))
+* add-videos UX rework implementation plan ([57f1caa](https://github.com/mandakan/splitsmith/commit/57f1caafeea2afd0d7adf9e4ab9f516bf4e47115))
+* keep empty-looking folder picks valid for add-footage (recursive scan) ([eb8aaa0](https://github.com/mandakan/splitsmith/commit/eb8aaa01ed8c530f58d1237763571e26f44f65c2))
+
 ## [0.20.1](https://github.com/mandakan/splitsmith/compare/v0.20.0...v0.20.1) (2026-08-08)
 
 
