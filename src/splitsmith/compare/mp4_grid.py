@@ -24,6 +24,7 @@ with an injectable runner, mirroring :mod:`splitsmith.mp4_render` and
 from __future__ import annotations
 
 import logging
+import math
 import subprocess
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -965,6 +966,39 @@ def _clock_filters(
     return ["[ovlgrid]" + ",".join(filters) + "[ovltext]"], "ovltext"
 
 
+def _arm_seconds_string(seconds: float) -> str:
+    """Render a non-negative ``enable`` arm time, rounding *down*.
+
+    The direction is the whole point. An arm is deliberately biased one
+    frame early (see :func:`_early_summary_filters`), and a to-nearest
+    format spec spends that bias: ``{6.966666666666667:g}`` is
+    ``6.96667``, which is *above* the number it was asked to print, so a
+    tile ending on a whole canvas frame arms one frame later than the
+    caller computed and shows the black frame the bias existed to
+    cover. More significant digits do not help -- any precision has a
+    last digit that can round up. Only the rounding direction does.
+
+    So: floor to milliseconds, and assemble the decimal from integers so
+    the division cannot reintroduce a rounding step. The emitted string
+    is therefore never greater than ``seconds``, and is at most 1ms
+    below it.
+
+    1ms is the granularity because it is far under one frame at every
+    rate this renders and deep enough that nothing else notices: a frame
+    is 41.7ms at 24fps, 33.3ms at 30, 16.7ms at 60 and 8.3ms at 120, so
+    even the fastest plausible canvas has eight millisecond steps inside
+    a frame. Going deeper buys no accuracy that ``t`` in a filter
+    expression can act on and only lengthens the argv a human has to
+    read.
+
+    Non-negative only. ``//`` and ``%`` floor toward negative infinity,
+    so a negative input would assemble a nonsense sign; the one caller
+    clamps at ``0.0`` before it gets here.
+    """
+    milliseconds = math.floor(seconds * 1000.0)
+    return f"{milliseconds // 1000}.{milliseconds % 1000:03d}"
+
+
 def _early_summary_filters(
     plan: GridStagePlan,
     canvas: GridCanvas,
@@ -995,19 +1029,19 @@ def _early_summary_filters(
     ffprobe reading, so disagreeing with the decoded stream by a fraction
     of a frame is the expected case rather than the exceptional one.
 
-    **Measured: it does not arm one frame early when a tile's footage
-    end lands exactly on a frame boundary.** ``{arm:g}`` is six
-    significant digits, so a tile ending at 7.000s on a 30fps canvas
-    emits ``6.96667``, which is above frame 209's own presentation time
-    of 6.966666...s -- the cell arms at frame 210 instead. Rendered on
-    the ``tests/compare_fixture`` roster at 1280x720@30 with a 2s hold
-    (ffmpeg 6.1.1): Anders' and Bea's cells are live picture through
-    frame 208, **black at 209**, and carry the summary from 210 on,
-    while Mathias, whose end (5.4985s) is not boundary-aligned, arms at
-    164 and covers his own last frame as designed. So a tile whose clip
-    lands on a whole canvas frame still shows the single black frame
-    this exists to remove. Not fixed here: changing the emitted arm
-    changes rendered output and needs its own pixel check.
+    That margin only survives if the *emitted decimal* is never later
+    than the computed arm, which is why the time goes through
+    :func:`_arm_seconds_string` rather than a format spec. ``{arm:g}``
+    used to round to nearest at six significant digits and lost the
+    whole frame on any tile whose footage ended on a canvas frame: a
+    7.000s end at 30fps computes 6.966666...s and emitted ``6.96667``,
+    above frame 209's own presentation time, so the cell armed at 210
+    and 209 stayed black -- rendered and confirmed on the
+    ``tests/compare_fixture`` roster at 1280x720@30 with a 2s hold
+    (ffmpeg 6.1.1). The same render with the floored emission
+    (``6.966``) has Anders' and Bea's cells carrying the summary from
+    209, with 208 still live picture. Mathias, whose end (5.4985s) was
+    never boundary-aligned, arms at 164 either way.
 
     Filler tiles get nothing: an empty cell is not a shooter, and
     ``build_hold_still`` draws no summary into one either.
@@ -1069,7 +1103,7 @@ def _early_summary_filters(
         filters.append(f"[still{index}]crop={cell_w}:{cell_h}:{left}:{top}[cell{index}]")
         filters.append(
             f"[{label}][cell{index}]overlay={left}:{top}:format=auto:"
-            f"enable='gte(t\\,{arm:g})'[early{index}]"
+            f"enable='gte(t\\,{_arm_seconds_string(arm)})'[early{index}]"
         )
         label = f"early{index}"
     return filters, label

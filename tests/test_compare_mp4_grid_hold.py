@@ -1348,8 +1348,13 @@ def test_clock_filters_hand_back_the_label_the_action_ends_on(tmp_path: Path):
 #   Bo ends at 0.0 + 6.0 - 0.25 = 5.75, arms one frame earlier at 5.71
 #   Cy ends at 0.5 + 6.0 - 0.25 = 6.25, arms at 6.21
 # The cells are 960x540 and the fourth is unreached.
-BO_ARM = "5.71"
-CY_ARM = "6.21"
+#
+# Emitted floored to milliseconds rather than through ``{:g}``, so the
+# strings carry their trailing zero. Same instants; see
+# ``mp4_grid._arm_seconds_string`` for why the rounding direction is the
+# thing under test.
+BO_ARM = "5.710"
+CY_ARM = "6.210"
 
 
 def test_each_present_tile_gets_its_summary_cell_at_its_own_footage_end(tmp_path: Path):
@@ -1361,6 +1366,68 @@ def test_each_present_tile_gets_its_summary_cell_at_its_own_footage_end(tmp_path
     # Cy is at row1,col0 -- x=0, y=540, and arms later because of her lead pad.
     assert "[still1]crop=960:540:0:540[cell1]" in graph, graph
     assert rf"[cell1]overlay=0:540:format=auto:enable='gte(t\,{CY_ARM})'" in graph, graph
+
+
+def test_the_arm_is_emitted_rounded_down_so_it_never_runs_late(tmp_path: Path):
+    """The one-frame bias has to survive being written into the argv.
+
+    A tile whose footage ends on a whole canvas frame is the case that
+    exposes it. 7.000s at 30fps computes an arm of 6.966666...s, one
+    frame below the end, and that arm has to cover frame 209, whose
+    presentation time is 209/30 = 6.966666...s. ``{arm:g}`` emitted
+    ``6.96667`` -- six significant digits, rounded to *nearest*, so
+    above the number it was printing -- and ``gte(t,6.96667)`` is false
+    at 209. The cell armed at 210 instead and 209 rendered as the tile
+    chain's black tpad, which is the single defect this whole feature
+    exists to remove.
+
+    More digits would not have fixed it; only flooring does. So the
+    second assertion is written against the frame time rather than
+    against the literal: whatever precision the emission ever moves to,
+    the string must not be later than the frame it has to cover.
+    """
+    tile = mp4_grid.GridTile(
+        label="Ann",
+        trim_path=Path("/trims/Ann.mov"),
+        beep_offset_in_clip=1.25,
+        seek_seconds=0.25,
+        lead_pad_seconds=0.0,
+        source_duration_seconds=7.25,
+        row=0,
+        col=0,
+    )
+    assert mp4_grid.tile_footage_end_seconds(tile) == 7.0
+
+    plan = mp4_grid.GridStagePlan(
+        stage_number=3,
+        stage_name="Stage 3",
+        tiles=(tile,),
+        duration_seconds=ACTION,
+        audio_label="Ann",
+        rows=1,
+        cols=1,
+        hold_seconds=HOLD,
+    )
+    graph = _graph_of(
+        mp4_grid.build_stage_command(
+            plan,
+            canvas=mp4_grid.GridCanvas(1280, 720, 30, 1),
+            output_path=Path("/w/s3.mov"),
+            ffmpeg_binary="/bin/ffmpeg",
+            overlay=_overlay_plan(tmp_path),
+            hold_still_path=HOLD_STILL,
+        )
+    )
+    assert r"[cell0]overlay=0:0:format=auto:enable='gte(t\,6.966)'[early0]" in graph, graph
+
+    match = re.search(r"enable='gte\(t\\,([\d.]+)\)'", graph)
+    assert match is not None, graph
+    covered_frame_seconds = (round(7.0 * 30) - 1) / 30
+    assert float(match.group(1)) <= covered_frame_seconds, (
+        f"the arm is emitted as {match.group(1)}, later than frame "
+        f"{round(7.0 * 30) - 1}'s own {covered_frame_seconds!r} -- that frame has no picture "
+        "left in it and the summary will not have armed, so it renders black"
+    )
 
 
 def test_the_filler_tile_and_the_unreached_cell_get_no_summary(tmp_path: Path):
@@ -1405,7 +1472,7 @@ def test_one_present_tile_fans_out_with_null_rather_than_split_1(tmp_path: Path)
     assert "[still0]crop=1920:1080:0:0[cell0]" in graph, graph
     # ``_plan`` lead-pads its last tile, so Ann ends at 0.5 + 6.0 - 0.25
     # = 6.25 and arms a 25fps frame earlier.
-    assert r"[cell0]overlay=0:0:format=auto:enable='gte(t\,6.21)'[early0]" in graph, graph
+    assert r"[cell0]overlay=0:0:format=auto:enable='gte(t\,6.210)'[early0]" in graph, graph
     assert "[still1]" not in graph, graph
     # And the join takes that one label, so the fan-out is wired into the
     # chain rather than dangling as an unused filter output.
