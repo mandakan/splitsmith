@@ -24,7 +24,7 @@ import { useDeploymentMode } from "@/lib/features";
 import { api, type HostedAccountInfo } from "@/lib/api";
 
 export function HostedAccountChip({ className }: { className?: string }) {
-  const mode = useDeploymentMode();
+  const { mode, resolved } = useDeploymentMode();
   const [account, setAccount] = useState<HostedAccountInfo | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
@@ -32,11 +32,10 @@ export function HostedAccountChip({ className }: { className?: string }) {
   const [revokeWarning, setRevokeWarning] = useState(false);
 
   // Same shape as SyncCard's load(): the hosted-sync routes 404 outside
-  // local mode, so the request is only fired once mode has resolved to
-  // "local" -- but useDeploymentMode() defaults to "local" while its own
-  // fetch is still in flight, so this can still fire once during that
-  // window on a genuinely hosted deployment. That single stray request
-  // is the same accepted trade-off SyncCard already makes; it 404s
+  // local mode, so the request only fires once the deployment mode has
+  // genuinely resolved to "local" (the resolved flag closes the window
+  // where the hook still reports its in-flight "local" default on a
+  // hosted deployment). A stray fetch would 404
   // harmlessly here too and the catch below still resolves `loaded`.
   const load = useCallback(async () => {
     try {
@@ -50,17 +49,15 @@ export function HostedAccountChip({ className }: { className?: string }) {
   }, []);
 
   useEffect(() => {
-    if (mode !== "local") return;
+    if (!resolved || mode !== "local") return;
     void load();
-  }, [mode, load]);
+  }, [resolved, mode, load]);
 
   // Local-only, and only once the initial settings fetch has resolved --
   // avoids a flash of the sign-in button before we know whether an
   // account is already linked. This is the ONLY point that gates
-  // rendering; the effect above may still complete a fetch that was
-  // already in flight when mode resolved to "hosted" (no cleanup abort,
-  // matching SyncCard), so this check has to be the one true gate.
-  if (mode !== "local" || !loaded) return null;
+  // rendering.
+  if (!resolved || mode !== "local" || !loaded) return null;
 
   async function onSignOut() {
     setBusy(true);

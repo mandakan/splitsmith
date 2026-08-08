@@ -2,7 +2,7 @@
  * SyncCard - local-only hosted-sync status card on MatchOverview
  * (desktop-to-hosted sync MVP, #631 Task 11).
  *
- * Renders only when useDeploymentMode() === "local" - the sync
+ * Renders only when useDeploymentMode().mode === "local" - the sync
  * endpoints it calls (GET/PUT /api/settings/hosted-sync, POST
  * /api/match/sync, GET /api/match/sync/status) 404 in hosted mode,
  * same guard idiom as the desktop-token management routes. A hosted
@@ -91,7 +91,7 @@ function relativeTime(iso: string): string {
 }
 
 export function SyncCard({ jobs, matchId }: SyncCardProps) {
-  const mode = useDeploymentMode();
+  const { mode } = useDeploymentMode();
   const local = mode === "local";
 
   const [status, setStatus] = useState<SyncStatusResponse | null>(null);

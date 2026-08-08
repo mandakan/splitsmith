@@ -85,13 +85,11 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
   const [appliedCount, setAppliedCount] = useState(0);
   const panelRef = useRef<HTMLDivElement | null>(null);
 
-  // Escape / focus trap / restore. The folder picker renders INLINE
-  // inside this card (not a nested modal), so the trap covers it too;
-  // Escape peels the picker first, then the dialog.
-  useDialogFocus(true, panelRef, () => {
-    if (pickerOpen) setPickerOpen(false);
-    else onClose();
-  }, { disableEscape: busy });
+  // Escape / focus trap / restore. The folder picker is a stacked
+  // modal with its own useDialogFocus registration - the dialog stack
+  // in dialogFocus.ts routes Escape to the topmost surface, so no
+  // manual peeling is needed here.
+  useDialogFocus(true, panelRef, onClose, { disableEscape: busy });
 
   // Initial load: just the link status, no scan yet.
   useEffect(() => {
@@ -128,6 +126,9 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
     [rows],
   );
 
+  // Throws on failure - the FolderPicker commit surface renders the
+  // error inline and stays open. Dialog-level ``error`` is reserved
+  // for applyAll.
   const runScan = async (root: string) => {
     setBusy(true);
     setError(null);
@@ -137,9 +138,6 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
         prev.map((row) => {
           const found = resp.entries.find((e) => e.video_id === row.link.video_id);
           if (!found) return row;
-          // Only auto-fill ``picked`` when the row hasn't been resolved
-          // yet by a previous scan. This way iterating across multiple
-          // search roots accumulates resolutions without clobbering them.
           const picked =
             row.picked ?? (found.chosen_path && !found.ambiguous ? found.chosen_path : null);
           return { ...row, scan: found, picked };
@@ -149,9 +147,6 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
       setScannedRoots((prev) =>
         prev.includes(resp.search_root) ? prev : [...prev, resp.search_root],
       );
-    } catch (e) {
-      if (e instanceof ApiError) setError(e.message);
-      else setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
@@ -248,39 +243,36 @@ export function RelinkDialog({ slug, onClose, onApplied }: RelinkDialogProps) {
             ) : null}
           </div>
 
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPickerOpen(true)}
+              disabled={busy}
+            >
+              <FolderSearch className="size-4" />
+              {scannedRoots.length === 0 ? "Pick search folder..." : "Add another folder..."}
+            </Button>
+            {scannedRoots.length > 0 ? (
+              <span className="text-xs text-muted">
+                Scanned: {scannedRoots.join(" · ")}
+              </span>
+            ) : null}
+          </div>
+
           {pickerOpen ? (
-            <div className="rounded-md border border-rule p-2">
-              <FolderPicker
-                slug={slug}
-                onSelect={async (path) => {
-                  setPickerOpen(false);
-                  await runScan(path);
-                }}
-                onCancel={() => setPickerOpen(false)}
-                mode="inline"
-                allowEmptyFolder
-                selectLabel="Scan this folder"
-              />
-            </div>
-          ) : (
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setPickerOpen(true)}
-                disabled={busy}
-              >
-                <FolderSearch className="size-4" />
-                {scannedRoots.length === 0 ? "Pick search folder..." : "Add another folder..."}
-              </Button>
-              {scannedRoots.length > 0 ? (
-                <span className="text-xs text-muted">
-                  Scanned: {scannedRoots.join(" · ")}
-                </span>
-              ) : null}
-            </div>
-          )}
+            <FolderPicker
+              slug={slug}
+              contentMode="directories"
+              title="Pick a search folder"
+              subtitle="Scanned recursively to find the moved originals."
+              allowEmptyFolder
+              folderLabel="Scan this folder"
+              onCommitFolder={(path) => runScan(path)}
+              onClose={() => setPickerOpen(false)}
+            />
+          ) : null}
 
           {error ? (
             <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">

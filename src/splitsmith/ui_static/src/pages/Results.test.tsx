@@ -10,7 +10,7 @@ import { Results } from "@/pages/Results";
 // Hosted-only chrome (Share button) is out of scope here; pin local mode.
 vi.mock("@/lib/features", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/features")>();
-  return { ...actual, useDeploymentMode: () => "local" as const };
+  return { ...actual, useDeploymentMode: () => ({ mode: "local" as const, resolved: true }) };
 });
 
 // Multi-shooter Results fetches every shooter's project for stage times.

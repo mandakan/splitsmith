@@ -1,17 +1,17 @@
 /**
- * FolderPicker — server-side directory browser for selecting a video folder.
+ * FolderPicker - the one modal picker dialog for choosing a server-side
+ * folder (or files within it). Used by the Ingest add-footage flow,
+ * CreateMatch's parent-folder picker, and RelinkDialog.
  *
- * Uses GET /api/fs/list (server has full filesystem access; we don't try to
- * use the browser's File System Access API because that doesn't expose
- * server-side absolute paths needed for our symlink workflow).
- *
- * UX:
- *   - Breadcrumb at top, click any segment to jump up
- *   - Sidebar of bookmarks (last-scanned, ~/Movies, ~/Videos, ~/Downloads, home)
- *   - Subdirectory list with video counts ("match-day · 7 videos")
- *   - "Use this folder" confirms the current path
- *   - Path input visible at top for keyboard / paste workflows
- *   - Keyboard navigable: Tab through, Enter on a row to drill in
+ * Shape (spec 2026-08-08): fixed-height dialog, three fixed regions,
+ * exactly ONE scroll container (the listing). Header carries title +
+ * breadcrumb bar (pencil or "/" swaps in an editable path input).
+ * Left: permanent Places sidebar (Recent / Home / Places incl. every
+ * mounted volume and a static Computer -> "/" entry). Right: the
+ * listing. Footer: selection summary, optional storage toggle, Cancel,
+ * and ONE primary action that commits immediately with inline progress;
+ * the dialog closes on success and stays open on failure with the
+ * server detail inline.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -28,6 +28,8 @@ import {
   HardDrive,
   Home,
   Loader2,
+  Monitor,
+  Pencil,
   X,
 } from "lucide-react";
 
@@ -41,134 +43,83 @@ import {
   type FsListing,
   type SuggestedStart,
 } from "@/lib/api";
+import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-interface FolderPickerProps {
-  /** Shooter slug for shooter-scoped fs endpoints. Required when
-   *  ``unbound !== true``; the picker browses the host filesystem
-   *  boundary-checked against this shooter's project root. Ignored
-   *  when ``unbound`` is true. */
-  slug?: string;
-  /** When true the picker uses :func:`api.listFolderUnbound` (no
-   *  project required, no video probing) instead of the shooter-bound
-   *  endpoint. Used by the create-match flow's parent-folder picker
-   *  which runs before any project exists. */
-  unbound?: boolean;
-  /** Which row kinds to render in the listing. Mirrors the design
-   *  brief's ``mode`` prop; renamed locally to avoid colliding with
-   *  the legacy ``mode: "inline" | "compact"`` density toggle below.
-   *
-   *  ``directories``        Show subfolders only. Video files are
-   *                         silently hidden -- the caller is picking a
-   *                         parent dir, not files within it.
-   *  ``directories+files``  Default. Subfolders + video files. When
-   *                         combined with ``onSelectFiles`` /
-   *                         ``autoCommitFiles`` the file rows render
-   *                         with checkboxes.
-   */
-  contentMode?: "directories" | "directories+files";
-  /** Render chrome. ``inline`` returns a card-shaped block suitable
-   *  for embedding inside a page or another modal. ``modal`` wraps
-   *  the body in a fixed-position dialog with backdrop, header (title
-   *  + close button) and footer (Cancel + primary action). */
-  shell?: "inline" | "modal";
-  /** Modal-specific chrome. Only used when ``shell === "modal"``. */
-  modalTitle?: string;
-  modalSubtitle?: string;
-  initialPath?: string | null;
-  onSelect: (path: string) => void;
-  /** Optional callback for multi-file selection. When provided, video rows
-   * gain a checkbox and the action button switches to "Use N files" when any
-   * files are selected. The callback receives the selected files with their
-   * filesystem mtime so the parent can pre-fill date hints. */
-  onSelectFiles?: (files: { path: string; mtime: number | null }[]) => void;
-  /** When true, file checkboxes auto-commit on every toggle: the picker
-   *  calls :prop:`onFolderFilesChange` with the current folder and the
-   *  current selection (including empty selections) each time. The
-   *  "Use N files" footer button is hidden because commit is implicit.
-   *  Used by the Add-Footage modal where the picker feeds a queue
-   *  instead of a one-shot import. */
-  autoCommitFiles?: boolean;
-  /** Callback for the auto-commit mode. Fires on every selection
-   *  change, including empty -> the caller maintains one queue entry
-   *  per folder and removes it when ``files`` is empty. */
-  onFolderFilesChange?: (folder: string, files: { path: string; mtime: number | null }[]) => void;
-  onCancel?: () => void;
-  /** Render mode: inline (e.g. inside a card) vs. compact. */
-  mode?: "inline" | "compact";
-  /** Optional match window (epoch seconds, inclusive). Files whose
-   *  ``mtime`` falls inside this window are highlighted as likely
-   *  candidates so the user can spot them in a folder full of mixed
-   *  clips. Computed by the caller from the project's stage analysis;
-   *  null when no scoreboard times are loaded yet. The window already
-   *  includes whatever margin the caller wants (typically a couple of
-   *  hours on each side to cover warm-up + drive home with the cam). */
-  matchWindow?: { startEpoch: number; endEpoch: number } | null;
-  /** When true, the "Use this folder" button stays enabled even when
-   *  the current folder has no direct video children. Set by callers
-   *  that walk recursively (e.g. relink scan), where the user is
-   *  expected to pick a top-level folder whose videos live in
-   *  subdirectories. */
-  allowEmptyFolder?: boolean;
-  /** Override the action button label. Default: "Use this folder". */
-  selectLabel?: string;
-  /** Reports the picker's current path each time the operator navigates
-   *  to a new folder. Used by the Add-Footage modal to compute the
-   *  folder-vs-file mutex flags below. */
-  onPathChange?: (path: string | null) => void;
-  /** Disable the "Use this folder" CTA (and surface the reason). Used
-   *  when the current folder is mutually exclusive with something the
-   *  caller already has -- e.g. the queue already has individual files
-   *  picked inside it, so importing the whole folder would double up. */
-  addWholeFolderDisabled?: boolean;
-  addWholeFolderDisabledReason?: string;
-  /** Disable file checkboxes (and the select-all helpers). Used when the
-   *  current folder is already queued as a whole-folder source. */
-  filesDisabled?: boolean;
-  filesDisabledReason?: string;
+export interface FolderPickerCommitFile {
+  path: string;
+  mtime: number | null;
 }
+
+interface FolderPickerProps {
+  /** Shooter slug for shooter-scoped fs endpoints. Required unless
+   *  ``unbound`` is true. */
+  slug?: string;
+  /** Browse via /api/fs/list-dirs (no project bound; dirs only). */
+  unbound?: boolean;
+  /** ``directories`` hides video files entirely - the caller is picking
+   *  a parent dir, not files within it. */
+  contentMode?: "directories" | "directories+files";
+  /** Dialog title (header + aria-label). */
+  title: string;
+  /** Call-site subtitle under the title. */
+  subtitle?: string;
+  initialPath?: string | null;
+  /** Highlight entries modified inside the match window (epoch secs). */
+  matchWindow?: { startEpoch: number; endEpoch: number } | null;
+  /** Keep the folder commit enabled when the folder has no direct
+   *  video children (callers whose commit walks recursively). */
+  allowEmptyFolder?: boolean;
+  /** Primary label when no files are checked. Default "Add this
+   *  folder"; with N files checked the label is always "Add N files". */
+  folderLabel?: string;
+  /** Render the storage toggle in the footer (add-footage only). */
+  storage?: {
+    value: "symlink" | "copy";
+    onChange: (mode: "symlink" | "copy") => void;
+  };
+  /** Commit the current folder. Resolving closes the dialog; throwing
+   *  keeps it open with the error rendered inline in the footer. */
+  onCommitFolder: (path: string) => Promise<void>;
+  /** Commit the checked files. Omit to hide file checkboxes. */
+  onCommitFiles?: (files: FolderPickerCommitFile[]) => Promise<void>;
+  onClose: () => void;
+}
+
+type CommitState =
+  | { phase: "idle" }
+  | { phase: "running"; label: string }
+  | { phase: "error"; message: string };
 
 export function FolderPicker({
   slug,
   unbound = false,
   contentMode = "directories+files",
-  shell = "inline",
-  modalTitle,
-  modalSubtitle,
+  title,
+  subtitle,
   initialPath,
-  onSelect,
-  onSelectFiles,
-  autoCommitFiles = false,
-  onFolderFilesChange,
-  onCancel,
-  mode = "inline",
   matchWindow = null,
   allowEmptyFolder = false,
-  selectLabel = "Use this folder",
-  onPathChange,
-  addWholeFolderDisabled = false,
-  addWholeFolderDisabledReason,
-  filesDisabled = false,
-  filesDisabledReason,
+  folderLabel = "Add this folder",
+  storage,
+  onCommitFolder,
+  onCommitFiles,
+  onClose,
 }: FolderPickerProps) {
   const [listing, setListing] = useState<FsListing | null>(null);
   const [path, setPath] = useState<string | null>(initialPath ?? null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<Set<string>>(new Set());
-  // ``name`` keeps directories above videos in alphabetical order (the
-  // historical default). ``date-desc`` puts the most recent video at
-  // the top, which is what the cam-over-USB workflow wants -- you
-  // typically just shot the match, plug in, and want today's clips
-  // first. Toggling cycles name -> date-desc -> date-asc -> name.
   const [sortMode, setSortMode] = useState<SortMode>("name");
+  const [editingPath, setEditingPath] = useState(false);
+  const [commit, setCommit] = useState<CommitState>({ phase: "idle" });
+  const committing = commit.phase === "running";
 
-  // ``directories``-mode pickers skip metadata probing -- they never
-  // render video rows, so the thumbnail/duration sidecars would be
-  // wasted bandwidth. ``unbound`` pickers also skip (they run before
-  // any project exists; no probe endpoint is reachable).
+  // ``directories``-mode and unbound pickers skip metadata probing -
+  // no video rows means the duration/thumbnail sidecars are wasted.
   const wantMetadata =
-    !unbound && contentMode === "directories+files" && onSelectFiles !== undefined;
+    !unbound && contentMode === "directories+files" && onCommitFiles !== undefined;
 
   const load = useCallback(
     async (next?: string | null) => {
@@ -180,8 +131,10 @@ export function FolderPicker({
           : await api.listFolder(slug!, next ?? undefined, { probe: wantMetadata });
         setListing(data);
         setPath(data.path);
-        // Reset multi-file selection when navigating to a new directory.
+        // Selection resets on navigation (existing behavior, kept).
         setSelectedFiles(new Set());
+        // A stale commit error belongs to the folder it happened in.
+        setCommit({ phase: "idle" });
       } catch (e) {
         setError(e instanceof ApiError ? e.detail : e instanceof Error ? e.message : String(e));
       } finally {
@@ -196,21 +149,10 @@ export function FolderPicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Surface the current path to the parent. AddFootageModal uses this
-  // to compute folder/file mutex flags without owning a duplicate
-  // navigation state.
-  useEffect(() => {
-    onPathChange?.(path);
-  }, [path, onPathChange]);
-
-  const breadcrumb = useMemo(() => buildBreadcrumb(path), [path]);
   const dirEntries = useMemo(
     () => sortEntries(listing?.entries.filter((e) => e.kind === "dir") ?? [], sortMode),
     [listing, sortMode],
   );
-  // ``directories``-mode pickers don't render video rows at all even
-  // when the listing carries them -- the caller is picking a parent
-  // folder, not files within it.
   const videoEntries = useMemo(
     () =>
       contentMode === "directories"
@@ -219,8 +161,7 @@ export function FolderPicker({
     [listing, sortMode, contentMode],
   );
   const videosHere = videoEntries.length;
-  const multiFileMode =
-    contentMode !== "directories" && onSelectFiles !== undefined;
+  const multiFileMode = contentMode !== "directories" && onCommitFiles !== undefined;
   const selectedCount = selectedFiles.size;
 
   const toggleSelect = (name: string) => {
@@ -250,56 +191,406 @@ export function FolderPicker({
     ? videoEntries.filter((e) => isInMatchWindow(e.mtime, matchWindow)).length
     : 0;
 
-  const confirmFiles = () => {
-    if (!path || selectedCount === 0) return;
-    const files = videoEntries
-      .filter((e) => selectedFiles.has(e.name))
-      .map((e) => ({ path: joinPath(path, e.name), mtime: e.mtime }));
-    onSelectFiles!(files);
+  const runCommit = async (label: string, fn: () => Promise<void>) => {
+    setCommit({ phase: "running", label });
+    try {
+      await fn();
+      onClose();
+    } catch (e) {
+      setCommit({
+        phase: "error",
+        message:
+          e instanceof ApiError ? e.detail : e instanceof Error ? e.message : String(e),
+      });
+    }
   };
 
-  // Auto-commit mode: surface every selection change to the parent so a
-  // queue-style UI (Add-Footage modal) updates in lock-step with the
-  // user's clicks. Including the empty-selection case is important --
-  // unchecking the last box has to remove the per-folder queue entry,
-  // otherwise the user "deselects" but the queue still says it's there.
+  const handleCommit = async () => {
+    if (!path || committing) return;
+    if (selectedCount > 0 && onCommitFiles) {
+      const files = videoEntries
+        .filter((e) => selectedFiles.has(e.name))
+        .map((e) => ({ path: joinPath(path, e.name), mtime: e.mtime }));
+      await runCommit(
+        `Adding ${files.length} file${files.length === 1 ? "" : "s"}...`,
+        () => onCommitFiles(files),
+      );
+    } else {
+      await runCommit("Adding folder...", () => onCommitFolder(path));
+    }
+  };
+
+  const primaryDisabled =
+    busy ||
+    committing ||
+    !listing ||
+    error != null ||
+    !path ||
+    (selectedCount === 0 && !allowEmptyFolder && videosHere === 0);
+
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useDialogFocus(
+    true,
+    panelRef,
+    () => {
+      if (committing) return; // a stray Escape must not abandon a running scan
+      onClose();
+    },
+    // While the path editor is open, Escape belongs to it (it exits edit
+    // mode and restores the breadcrumb bar) - the dialog-level Escape
+    // must not also fire, or the first press would close the whole
+    // dialog instead of just canceling the edit. A second Escape (once
+    // editingPath is back to false) reaches this handler normally.
+    { disableEscape: committing || editingPath },
+  );
+
+  return (
+    <Portal>
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className="fixed inset-0 z-modal flex items-center justify-center bg-bg/70 p-4 backdrop-blur-sm"
+        onClick={committing ? undefined : onClose}
+      >
+        <div
+          ref={panelRef}
+          className="relative flex h-[min(680px,90vh)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-rule-strong bg-surface text-ink shadow-[0_24px_48px_-12px_rgba(0,0,0,0.7)]"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            // "/" jumps to the editable path input (rare manual case).
+            if (e.key !== "/" || editingPath || committing) return;
+            const t = e.target as HTMLElement;
+            if (t.tagName === "INPUT" || t.tagName === "TEXTAREA") return;
+            e.preventDefault();
+            setEditingPath(true);
+          }}
+        >
+          <span className="sr-only" role="status" aria-live="polite">
+            {committing ? commit.label : busy ? "Reading folder..." : ""}
+          </span>
+          <header className="shrink-0 border-b border-rule">
+            <div className="flex items-center justify-between gap-4 px-5 py-3.5">
+              <div>
+                <h2 className="font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
+                  {title}
+                </h2>
+                {subtitle && (
+                  <p className="mt-0.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
+                    {subtitle}
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Close"
+                disabled={committing}
+                className="rounded-md p-1.5 text-subtle hover:bg-surface-2 hover:text-ink disabled:opacity-50"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <BreadcrumbBar
+              path={path}
+              busy={busy || committing}
+              editing={editingPath}
+              onNavigate={(p) => void load(p)}
+              onEditStart={() => setEditingPath(true)}
+              onEditEnd={() => setEditingPath(false)}
+            />
+          </header>
+
+          <div className="flex min-h-0 flex-1">
+            <aside className="w-[200px] shrink-0 overflow-y-auto border-r border-rule px-3 py-3">
+              <PlacesSidebar
+                starts={listing?.suggested_starts ?? []}
+                currentPath={path}
+                disabled={busy || committing}
+                onPick={(p) => void load(p)}
+              />
+            </aside>
+
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              {busy && listing ? (
+                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-bg/70 backdrop-blur-[1px]">
+                  <Loader2 className="size-5 animate-spin text-muted" />
+                </div>
+              ) : null}
+              {busy && !listing ? (
+                <div className="flex h-full items-center justify-center gap-2 p-6 text-sm text-muted">
+                  <Loader2 className="size-4 animate-spin" />
+                  <span>Reading folder...</span>
+                </div>
+              ) : error ? (
+                <div className="p-4 text-sm">
+                  <p className="text-destructive">{error}</p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => void load(path)}
+                  >
+                    Retry
+                  </Button>
+                </div>
+              ) : !listing ? null : dirEntries.length === 0 && videoEntries.length === 0 ? (
+                <div className="p-4 text-sm text-muted">Empty folder.</div>
+              ) : (
+                <>
+                  <SortHeader mode={sortMode} onChange={setSortMode} />
+                  <ul className="min-h-0 flex-1 divide-y divide-rule overflow-y-auto">
+                    {dirEntries.map((entry) => {
+                      const childPath = path ? joinPath(path, entry.name) : entry.name;
+                      const inWindow = isInMatchWindow(entry.mtime, matchWindow);
+                      return (
+                        <li key={`d-${entry.name}`}>
+                          <button
+                            type="button"
+                            className={cn(
+                              "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-surface-3 hover:text-ink",
+                              inWindow &&
+                                "border-l-2 border-l-status-info bg-status-info/5",
+                            )}
+                            onClick={() => void load(childPath)}
+                            disabled={busy || committing}
+                            title={inWindow ? "Modified during the match window" : undefined}
+                          >
+                            <span className="flex min-w-0 items-center gap-2">
+                              <Folder className="size-4 shrink-0 text-muted" />
+                              <span className="truncate">{entry.name}</span>
+                            </span>
+                            {entry.video_count ? (
+                              <span className="flex items-center gap-1 text-xs text-muted">
+                                <Film className="size-3" />
+                                {entry.video_count}
+                              </span>
+                            ) : null}
+                          </button>
+                        </li>
+                      );
+                    })}
+                    {multiFileMode
+                      ? videoEntries.map((entry) => {
+                          const checked = selectedFiles.has(entry.name);
+                          const fullPath = path ? joinPath(path, entry.name) : entry.name;
+                          return (
+                            <VideoRowMulti
+                              key={`v-${entry.name}`}
+                              slug={slug!}
+                              entry={entry}
+                              fullPath={fullPath}
+                              checked={checked}
+                              busy={busy || committing}
+                              inMatchWindow={isInMatchWindow(entry.mtime, matchWindow)}
+                              onToggle={() => toggleSelect(entry.name)}
+                              onProbed={(duration, thumbnail_url) => {
+                                setListing((prev) =>
+                                  prev
+                                    ? {
+                                        ...prev,
+                                        entries: prev.entries.map((e) =>
+                                          e.name === entry.name && e.kind === "video"
+                                            ? { ...e, duration, thumbnail_url }
+                                            : e,
+                                        ),
+                                      }
+                                    : prev,
+                                );
+                              }}
+                            />
+                          );
+                        })
+                      : null}
+                  </ul>
+                </>
+              )}
+            </div>
+          </div>
+
+          <footer className="flex shrink-0 items-center justify-between gap-3 border-t border-rule bg-surface-2 px-5 py-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted">
+              {commit.phase === "error" ? (
+                <span role="alert" className="text-led">
+                  {commit.message}
+                </span>
+              ) : (
+                <>
+                  {selectedCount > 0 ? (
+                    <span>
+                      {selectedCount} file{selectedCount === 1 ? "" : "s"} selected
+                    </span>
+                  ) : videosHere > 0 ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Film className="size-3" />
+                      {videosHere} video{videosHere === 1 ? "" : "s"} in this folder
+                    </span>
+                  ) : allowEmptyFolder ? (
+                    <span>No videos directly here - subfolders will be scanned.</span>
+                  ) : (
+                    <span>No videos directly here. Drill into a subfolder.</span>
+                  )}
+                  {multiFileMode && videosHere > 0 ? (
+                    <button
+                      type="button"
+                      className="rounded px-1.5 py-0.5 underline-offset-2 hover:underline disabled:opacity-50"
+                      onClick={
+                        selectedCount === videosHere
+                          ? () => setSelectedFiles(new Set())
+                          : selectAll
+                      }
+                      disabled={busy || committing}
+                    >
+                      {selectedCount === videosHere ? "Clear selection" : "Select all"}
+                    </button>
+                  ) : null}
+                  {multiFileMode && inWindowVideoCount > 0 ? (
+                    <button
+                      type="button"
+                      className="rounded px-1.5 py-0.5 text-status-info underline-offset-2 hover:underline disabled:opacity-50"
+                      onClick={selectInMatchWindow}
+                      disabled={busy || committing}
+                      title="Select videos whose modified time falls inside the match window"
+                    >
+                      Select {inWindowVideoCount} in match window
+                    </button>
+                  ) : null}
+                </>
+              )}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {storage ? (
+                <StorageToggle
+                  value={storage.value}
+                  onChange={storage.onChange}
+                  disabled={committing}
+                />
+              ) : null}
+              <Button variant="ghost" type="button" onClick={onClose} disabled={committing}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={primaryDisabled}
+                onClick={() => void handleCommit()}
+                title={
+                  error != null
+                    ? "This folder could not be read"
+                    : !allowEmptyFolder && selectedCount === 0 && videosHere === 0
+                      ? "Select a folder that contains video files, or drill in."
+                      : path
+                        ? `Use ${path}`
+                        : undefined
+                }
+              >
+                {committing ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <FolderOpen />
+                )}
+                {committing
+                  ? commit.label
+                  : selectedCount > 0
+                    ? `Add ${selectedCount} file${selectedCount === 1 ? "" : "s"}`
+                    : folderLabel}
+              </Button>
+            </div>
+          </footer>
+        </div>
+      </div>
+    </Portal>
+  );
+}
+
+function BreadcrumbBar({
+  path,
+  busy,
+  editing,
+  onNavigate,
+  onEditStart,
+  onEditEnd,
+}: {
+  path: string | null;
+  busy: boolean;
+  editing: boolean;
+  onNavigate: (p: string) => void;
+  onEditStart: () => void;
+  onEditEnd: () => void;
+}) {
+  const [draft, setDraft] = useState(path ?? "");
   useEffect(() => {
-    if (!autoCommitFiles || !onFolderFilesChange || !path) return;
-    const files = videoEntries
-      .filter((e) => selectedFiles.has(e.name))
-      .map((e) => ({ path: joinPath(path, e.name), mtime: e.mtime }));
-    onFolderFilesChange(path, files);
-    // ``videoEntries`` isn't a dep because it derives from ``listing``;
-    // listing-driven changes go through the ``load`` reset of
-    // selectedFiles, which retriggers this effect.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedFiles, path, autoCommitFiles]);
+    setDraft(path ?? "");
+  }, [path, editing]);
+  const crumbs = buildBreadcrumb(path);
 
-  // Modal-shell dialog behavior: Escape, focus entry, Tab trap, focus
-  // restore. Inline shells sit inside a host dialog that owns these.
-  const modalPanelRef = useRef<HTMLDivElement | null>(null);
-  useDialogFocus(shell === "modal", modalPanelRef, () => onCancel?.());
+  // Restore focus to the pencil affordance whenever edit mode closes
+  // (Escape or Cancel), matching the dialog-focus restore-on-close
+  // convention instead of leaving focus stranded on an unmounted input.
+  const pencilRef = useRef<HTMLButtonElement | null>(null);
+  const wasEditingRef = useRef(editing);
+  useEffect(() => {
+    if (wasEditingRef.current && !editing) {
+      pencilRef.current?.focus();
+    }
+    wasEditingRef.current = editing;
+  }, [editing]);
 
-  const body = (
-    <div
-      className={cn(
-        "flex flex-col gap-3",
-        shell === "modal"
-          ? "min-h-0 flex-1"
-          : "rounded-lg border border-rule bg-surface",
-        shell !== "modal" && (mode === "compact" ? "p-3" : "p-4"),
-      )}
-    >
-      <PathBar path={path} onChange={(p) => void load(p)} disabled={busy} />
+  if (editing) {
+    return (
+      <form
+        className="flex items-center gap-2 px-5 py-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (draft.trim()) onNavigate(draft.trim());
+          onEditEnd();
+        }}
+      >
+        <input
+          autoFocus
+          type="text"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              // Peel edit mode only - the parent gates useDialogFocus's
+              // Escape-to-close on editingPath (disableEscape), so the
+              // document-level handler is inert while we're here and
+              // this is the only thing that runs. A second Escape,
+              // pressed once editingPath is back to false, reaches the
+              // dialog's own handler and closes it.
+              e.preventDefault();
+              e.stopPropagation();
+              onEditEnd();
+            }
+          }}
+          className="h-8 flex-1 rounded-md border border-rule bg-bg px-3 font-mono text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
+          placeholder="/path/to/folder"
+          spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
+          aria-label="Folder path"
+        />
+        <Button type="submit" variant="outline" size="sm" disabled={busy || !draft.trim()}>
+          Go
+        </Button>
+        <Button type="button" variant="ghost" size="sm" onClick={onEditEnd}>
+          Cancel
+        </Button>
+      </form>
+    );
+  }
 
-      <div className="flex flex-wrap items-center gap-1 text-sm text-muted">
-        {breadcrumb.map((seg, i) => (
+  return (
+    <div className="flex items-center gap-1 px-5 py-2 text-sm text-muted">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+        {crumbs.map((seg, i) => (
           <span key={`${seg.path}-${i}`} className="flex items-center gap-1">
-            {i > 0 ? <ChevronRight className="size-3" /> : null}
+            {i > 0 ? <ChevronRight className="size-3 shrink-0" /> : null}
             <button
               type="button"
               className="rounded px-1.5 py-0.5 font-mono text-xs hover:bg-surface-3 hover:text-ink"
-              onClick={() => void load(seg.path)}
+              onClick={() => onNavigate(seg.path)}
               disabled={busy}
             >
               {seg.label}
@@ -307,252 +598,32 @@ export function FolderPicker({
           </span>
         ))}
       </div>
-
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-[200px_1fr]">
-        <aside className="flex flex-col gap-3 text-sm">
-          <SuggestedStartsSidebar
-            starts={listing?.suggested_starts ?? []}
-            currentPath={path}
-            disabled={busy}
-            onPick={(p) => void load(p)}
-          />
-        </aside>
-
-        <div className="relative min-h-[12rem] rounded-md border border-rule bg-bg">
-          {/* When ``busy && listing`` (we're navigating into a slow
-              folder while an old listing is still on screen), overlay a
-              translucent spinner instead of swapping the whole panel.
-              Keeps the user oriented and signals that the next listing
-              is coming. The first-load spinner case below renders
-              directly when there's no listing yet. */}
-          {busy && listing ? (
-            <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-md bg-bg/70 backdrop-blur-[1px]">
-              <Loader2 className="size-5 animate-spin text-muted" />
-            </div>
-          ) : null}
-          {busy && !listing ? (
-            <div className="flex h-full items-center justify-center gap-2 p-6 text-sm text-muted">
-              <Loader2 className="size-4 animate-spin" />
-              <span>Reading folder...</span>
-            </div>
-          ) : error ? (
-            <div className="p-4 text-sm text-destructive">{error}</div>
-          ) : !listing ? null : dirEntries.length === 0 && videoEntries.length === 0 ? (
-            <div className="p-4 text-sm text-muted">Empty folder.</div>
-          ) : (
-            <>
-              <SortHeader mode={sortMode} onChange={setSortMode} />
-              <ul className="max-h-80 divide-y divide-rule overflow-y-auto">
-              {dirEntries.map((entry) => {
-                const childPath = path ? joinPath(path, entry.name) : entry.name;
-                const inWindow = isInMatchWindow(entry.mtime, matchWindow);
-                return (
-                  <li key={`d-${entry.name}`}>
-                    <button
-                      type="button"
-                      className={cn(
-                        "flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-surface-3 hover:text-ink",
-                        inWindow &&
-                          "border-l-2 border-l-status-info bg-status-info/5",
-                      )}
-                      onClick={() => void load(childPath)}
-                      disabled={busy}
-                      title={inWindow ? "Modified during the match window" : undefined}
-                    >
-                      <span className="flex min-w-0 items-center gap-2">
-                        <Folder className="size-4 shrink-0 text-muted" />
-                        <span className="truncate">{entry.name}</span>
-                      </span>
-                      {entry.video_count ? (
-                        <span className="flex items-center gap-1 text-xs text-muted">
-                          <Film className="size-3" />
-                          {entry.video_count}
-                        </span>
-                      ) : null}
-                    </button>
-                  </li>
-                );
-              })}
-              {multiFileMode
-                ? videoEntries.map((entry) => {
-                    const checked = selectedFiles.has(entry.name);
-                    const fullPath = path ? joinPath(path, entry.name) : entry.name;
-                    return (
-                      <VideoRowMulti
-                        key={`v-${entry.name}`}
-                        slug={slug!}
-                        entry={entry}
-                        fullPath={fullPath}
-                        checked={checked}
-                        busy={busy || filesDisabled}
-                        disabledReason={filesDisabled ? filesDisabledReason : undefined}
-                        inMatchWindow={isInMatchWindow(entry.mtime, matchWindow)}
-                        onToggle={() => toggleSelect(entry.name)}
-                        onProbed={(duration, thumbnail_url) => {
-                          // Patch the listing in-place so the row remembers
-                          // its on-demand probe result without forcing a
-                          // refresh.
-                          setListing((prev) =>
-                            prev
-                              ? {
-                                  ...prev,
-                                  entries: prev.entries.map((e) =>
-                                    e.name === entry.name && e.kind === "video"
-                                      ? { ...e, duration, thumbnail_url }
-                                      : e,
-                                  ),
-                                }
-                              : prev,
-                          );
-                        }}
-                      />
-                    );
-                  })
-                : null}
-            </ul>
-            </>
-          )}
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-xs text-muted">
-          {videosHere > 0 ? (
-            <span className="inline-flex items-center gap-1">
-              <Film className="size-3" />
-              {videosHere} video{videosHere === 1 ? "" : "s"} in this folder
-            </span>
-          ) : allowEmptyFolder ? (
-            <span>No videos directly here -- subfolders will be scanned.</span>
-          ) : (
-            <span>No videos directly here. Drill into a subfolder.</span>
-          )}
-          {multiFileMode && videosHere > 0 ? (
-            <button
-              type="button"
-              className="rounded px-1.5 py-0.5 underline-offset-2 hover:underline disabled:opacity-50"
-              onClick={selectedCount === videosHere ? () => setSelectedFiles(new Set()) : selectAll}
-              disabled={busy || filesDisabled}
-              title={filesDisabled ? filesDisabledReason : undefined}
-            >
-              {selectedCount === videosHere ? "Clear selection" : "Select all"}
-            </button>
-          ) : null}
-          {multiFileMode && inWindowVideoCount > 0 ? (
-            <button
-              type="button"
-              className="rounded px-1.5 py-0.5 text-status-info underline-offset-2 hover:underline disabled:opacity-50"
-              onClick={selectInMatchWindow}
-              disabled={busy || filesDisabled}
-              title={
-                filesDisabled
-                  ? filesDisabledReason
-                  : "Select videos whose modified time falls inside the match window"
-              }
-            >
-              Select {inWindowVideoCount} in match window
-            </button>
-          ) : null}
-          {filesDisabled && filesDisabledReason ? (
-            <span className="text-muted">{filesDisabledReason}</span>
-          ) : null}
-        </div>
-        <div className="flex gap-2">
-          {onCancel ? (
-            <Button variant="ghost" type="button" onClick={onCancel} disabled={busy}>
-              Cancel
-            </Button>
-          ) : null}
-          {multiFileMode && selectedCount > 0 && !autoCommitFiles ? (
-            <Button type="button" disabled={busy} onClick={confirmFiles}>
-              <FolderOpen />
-              Use {selectedCount} file{selectedCount === 1 ? "" : "s"}
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              disabled={
-                busy ||
-                !path ||
-                (!allowEmptyFolder && videosHere === 0) ||
-                addWholeFolderDisabled
-              }
-              onClick={() => path && onSelect(path)}
-              title={
-                addWholeFolderDisabled && addWholeFolderDisabledReason
-                  ? addWholeFolderDisabledReason
-                  : !allowEmptyFolder && videosHere === 0
-                    ? "Select a folder that contains video files, or drill in."
-                    : `Use ${path}`
-              }
-            >
-              <FolderOpen />
-              {selectLabel}
-            </Button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-
-  // Inline shell: the body is the entire output. Used when the picker
-  // is embedded in a page or larger modal (e.g. AddFootageModal).
-  if (shell !== "modal") return body;
-
-  // Modal shell: wrap the body in a backdrop + card with a header
-  // (title + close) and a footer (path readout + cancel/use buttons).
-  // Replaces the legacy DirectoryPickerModal which had ~80% identical
-  // code paths; the parent-folder picker in CreateMatch now renders
-  // through this branch with ``contentMode="directories"`` and
-  // ``unbound``.
-  return (
-    <Portal>
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-label={modalTitle ?? "Pick a folder"}
-      className="fixed inset-0 z-modal flex items-center justify-center bg-bg/70 p-4 backdrop-blur-sm"
-      onClick={onCancel}
-    >
-      <div
-        ref={modalPanelRef}
-        className="relative flex h-[min(640px,88vh)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-rule-strong bg-surface text-ink shadow-[0_24px_48px_-12px_rgba(0,0,0,0.7)]"
-        onClick={(e) => e.stopPropagation()}
+      <button
+        ref={pencilRef}
+        type="button"
+        onClick={onEditStart}
+        aria-label="Edit path"
+        title='Type a path (or press "/")'
+        disabled={busy}
+        className="rounded-md p-1.5 text-subtle hover:bg-surface-2 hover:text-ink disabled:opacity-50"
       >
-        <header className="flex items-center justify-between gap-4 border-b border-rule px-5 py-3.5">
-          <div>
-            <h2 className="font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
-              {modalTitle ?? "Pick a folder"}
-            </h2>
-            {modalSubtitle && (
-              <p className="mt-0.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
-                {modalSubtitle}
-              </p>
-            )}
-          </div>
-          {onCancel && (
-            <button
-              type="button"
-              onClick={onCancel}
-              aria-label="Cancel"
-              className="rounded-md p-1.5 text-subtle hover:bg-surface-2 hover:text-ink"
-            >
-              <X className="size-4" />
-            </button>
-          )}
-        </header>
-        <div className="flex min-h-0 flex-1 flex-col px-5 py-4">{body}</div>
-      </div>
+        <Pencil className="size-3.5" />
+      </button>
     </div>
-    </Portal>
   );
 }
 
-/** Sidebar bookmarks, grouped by ``kind`` so the user can scan
- *  recent / home / removable+network sections separately. The wire
- *  shape carries one entry per bookmark; we group client-side to keep
- *  the contract simple. */
-function SuggestedStartsSidebar({
+type PlaceEntry = {
+  path: string;
+  label: string;
+  kind: SuggestedStart["kind"] | "computer";
+};
+
+/** Permanent Places sidebar. Groups: Recent (last scanned), Home
+ *  (~ and friends), Places (every removable/network mount from the
+ *  server's _discover_mounts PLUS a static Computer -> "/" entry so
+ *  any location is reachable by clicking, never by typing). */
+function PlacesSidebar({
   starts,
   currentPath,
   disabled,
@@ -563,25 +634,30 @@ function SuggestedStartsSidebar({
   disabled: boolean;
   onPick: (path: string) => void;
 }) {
-  const groups: { title: string; kinds: SuggestedStart["kind"][]; }[] = [
-    { title: "Recent", kinds: ["recent"] },
-    { title: "Home", kinds: ["home"] },
-    { title: "Removable & network", kinds: ["removable", "network"] },
+  const groups: { title: string; items: PlaceEntry[] }[] = [
+    { title: "Recent", items: starts.filter((s) => s.kind === "recent") },
+    { title: "Home", items: starts.filter((s) => s.kind === "home") },
+    {
+      title: "Places",
+      items: [
+        ...starts.filter((s) => s.kind === "removable" || s.kind === "network"),
+        { path: "/", label: "Computer", kind: "computer" },
+      ],
+    },
   ];
   return (
-    <>
-      {groups.map((g) => {
-        const items = starts.filter((s) => g.kinds.includes(s.kind));
-        if (items.length === 0) return null;
-        return (
+    <nav aria-label="Places" className="flex flex-col gap-3 text-sm">
+      {groups.map((g) =>
+        g.items.length === 0 ? null : (
           <div key={g.title} className="space-y-1">
             <div className="px-1 text-[10px] font-medium uppercase tracking-wider text-muted/70">
               {g.title}
             </div>
-            {items.map((s) => (
+            {g.items.map((s) => (
               <button
                 key={s.path}
                 type="button"
+                aria-current={currentPath === s.path ? "true" : undefined}
                 className={cn(
                   "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-surface-3 hover:text-ink",
                   currentPath === s.path && "bg-surface-3 text-ink",
@@ -595,18 +671,84 @@ function SuggestedStartsSidebar({
               </button>
             ))}
           </div>
-        );
-      })}
-    </>
+        ),
+      )}
+    </nav>
   );
 }
 
-function SidebarIcon({ kind }: { kind: SuggestedStart["kind"] }) {
+function SidebarIcon({ kind }: { kind: PlaceEntry["kind"] }) {
   const className = "size-3.5 shrink-0";
   if (kind === "recent") return <Clock className={className} />;
   if (kind === "removable") return <HardDrive className={className} />;
   if (kind === "network") return <Cloud className={className} />;
+  if (kind === "computer") return <Monitor className={className} />;
   return <Home className={className} />;
+}
+
+const STORAGE_OPTIONS = [
+  ["symlink", "Reference in place"],
+  ["copy", "Copy into project"],
+] as const;
+
+/** Symlink-vs-copy storage choice, rendered in the footer for the
+ *  add-footage call site only. Buttons toggle between reference-in-place
+ *  and copy-into-project modes.
+ *
+ *  Roving tabindex per the APG radio group pattern: only the checked
+ *  option is in the tab order; any arrow key moves focus to (and
+ *  selects) the other option since there are exactly two. */
+function StorageToggle({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: "symlink" | "copy";
+  onChange: (mode: "symlink" | "copy") => void;
+  disabled: boolean;
+}) {
+  const btnRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
+    e.preventDefault();
+    // Only two options - every arrow direction moves to the other one.
+    const nextIndex = index === 0 ? 1 : 0;
+    onChange(STORAGE_OPTIONS[nextIndex][0]);
+    btnRefs.current[nextIndex]?.focus();
+  };
+
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Storage mode"
+      className="inline-flex rounded-full border border-rule bg-surface p-0.5"
+    >
+      {STORAGE_OPTIONS.map(([mode, label], index) => (
+        <button
+          key={mode}
+          ref={(el) => {
+            btnRefs.current[index] = el;
+          }}
+          type="button"
+          role="radio"
+          aria-checked={value === mode}
+          tabIndex={value === mode ? 0 : -1}
+          disabled={disabled}
+          onClick={() => onChange(mode)}
+          onKeyDown={(e) => handleKeyDown(e, index)}
+          className={cn(
+            "inline-flex items-center rounded-full px-3 py-1 font-display text-[0.625rem] font-bold uppercase tracking-[0.08em] transition-colors",
+            value === mode
+              ? "bg-led-tint text-led-text shadow-[inset_0_0_0_1px_color-mix(in_srgb,var(--color-led)_55%,transparent)]"
+              : "text-muted hover:text-ink-2",
+          )}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 function VideoRowMulti({
@@ -615,7 +757,6 @@ function VideoRowMulti({
   fullPath,
   checked,
   busy,
-  disabledReason,
   inMatchWindow,
   onToggle,
   onProbed,
@@ -625,9 +766,6 @@ function VideoRowMulti({
   fullPath: string;
   checked: boolean;
   busy: boolean;
-  /** When set the row is treated as disabled; we surface this as a
-   *  tooltip so the operator knows *why* the checkbox is off. */
-  disabledReason?: string;
   inMatchWindow: boolean;
   onToggle: () => void;
   onProbed: (duration: number | null, thumbnail_url: string | null) => void;
@@ -665,15 +803,8 @@ function VideoRowMulti({
           checked && "bg-surface-3/30",
           inMatchWindow && !checked && "border-l-status-info bg-status-info/5",
           inMatchWindow && checked && "border-l-status-info",
-          disabledReason && "cursor-not-allowed opacity-50 hover:bg-transparent",
         )}
-        title={
-          disabledReason
-            ? disabledReason
-            : inMatchWindow
-              ? "Modified during the match window"
-              : undefined
-        }
+        title={inMatchWindow ? "Modified during the match window" : undefined}
       >
         <span className="flex min-w-0 items-center gap-2">
           <input
@@ -825,59 +956,6 @@ function formatDuration(seconds: number): string {
     return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
   }
   return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return `${value.toFixed(value >= 100 ? 0 : 1)} ${units[unit]}`;
-}
-
-function PathBar({
-  path,
-  onChange,
-  disabled,
-}: {
-  path: string | null;
-  onChange: (p: string) => void;
-  disabled: boolean;
-}) {
-  const [draft, setDraft] = useState(path ?? "");
-  useEffect(() => {
-    setDraft(path ?? "");
-  }, [path]);
-
-  return (
-    <form
-      className="flex gap-2"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (draft.trim()) onChange(draft.trim());
-      }}
-    >
-      <input
-        type="text"
-        className="flex h-9 flex-1 rounded-md border border-rule bg-bg px-3 py-1 font-mono text-xs shadow-sm transition-colors placeholder:text-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led disabled:cursor-not-allowed disabled:opacity-50"
-        placeholder="/path/to/folder"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        disabled={disabled}
-        spellCheck={false}
-        autoCapitalize="off"
-        autoCorrect="off"
-        aria-label="Folder path"
-      />
-      <Button type="submit" variant="outline" size="sm" disabled={disabled || !draft.trim()}>
-        Go
-      </Button>
-    </form>
-  );
 }
 
 function buildBreadcrumb(path: string | null): { label: string; path: string }[] {

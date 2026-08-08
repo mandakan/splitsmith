@@ -62,7 +62,7 @@ function matchHome(health: ServerHealth): string {
 export function Pick() {
   const navigate = useNavigate();
   const confirm = useConfirm();
-  const mode = useDeploymentMode();
+  const { mode } = useDeploymentMode();
   const [recents, setRecents] = useState<RecentProjectDetail[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");

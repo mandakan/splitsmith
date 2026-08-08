@@ -11,6 +11,7 @@ import {
 import { AppShell } from "@/components/AppShell";
 import { DesktopGate } from "@/components/DesktopOnlyNotice";
 import { DeveloperShell } from "@/components/developer/DeveloperShell";
+import { DropGuard } from "@/components/DropGuard";
 import { RootLayout } from "@/components/layout/RootLayout";
 import { MatchShell } from "@/components/match/MatchShell";
 import { ShareShell } from "@/components/share/ShareShell";
@@ -103,7 +104,7 @@ function LegacyMatchRedirect() {
  * is the normal-case reason status stays ``authed`` there. */
 function AuthGate({ children }: { children: ReactNode }) {
   const { status } = useAuth();
-  const mode = useDeploymentMode();
+  const { mode } = useDeploymentMode();
   const location = useLocation();
 
   // Device-flow pickup (#719). Whether to redirect has to be decided
@@ -187,6 +188,7 @@ export function App() {
         <ConfirmProvider>
           <UploadProvider>
             <UploadDock />
+            <DropGuard />
           <BrowserRouter>
             <AuthGate>
             <Routes>

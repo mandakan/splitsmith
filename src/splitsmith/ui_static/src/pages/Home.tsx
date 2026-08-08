@@ -81,7 +81,7 @@ export function Home() {
   const ctx = useOutletContext<MatchShellOutletContext>();
   const project = ctx?.project ?? null;
   const { matchId } = useParams<{ matchId: string }>();
-  const deploymentMode = useDeploymentMode();
+  const { mode: deploymentMode } = useDeploymentMode();
   // A desktop-origin mirror is read-only here (#631 Task 10): the server
   // 403s every mutation except share management and match deletion, so
   // the add-shooter and stage-editor entry points this page renders are

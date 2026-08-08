@@ -33,7 +33,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { DirectoryPickerModal } from "@/components/DirectoryPickerModal";
+import { FolderPicker } from "@/components/FolderPicker";
 import { CompetitorRow } from "@/components/scoreboard/CompetitorRow";
 import { ResultRow } from "@/components/scoreboard/ResultRow";
 import { Brand, Kicker } from "@/components/ui";
@@ -242,7 +242,7 @@ function ScoreboardVariant({
   // In hosted mode the server picks the project folder
   // (``users/<user_id>/projects/<slug>/``); the picker UI is suppressed
   // because there's no useful host filesystem inside the container.
-  const deploymentMode = useDeploymentMode();
+  const { mode: deploymentMode } = useDeploymentMode();
   const hostedMode = deploymentMode === "hosted";
   // Division facet -- ``null`` means "any". Selected division narrows the
   // accordion list to a single group. Squad isn't on the wire today, so
@@ -906,13 +906,19 @@ function ScoreboardVariant({
       )}
 
       {pickerOpen && !hostedMode && (
-        <DirectoryPickerModal
+        <FolderPicker
+          unbound
+          contentMode="directories"
+          title="Pick a parent folder"
+          subtitle="The project folder will be created inside the directory you choose."
           initialPath={parentDir.startsWith("~") ? null : parentDir}
-          onSelect={(picked) => {
+          allowEmptyFolder
+          folderLabel="Use this folder"
+          onCommitFolder={(picked) => {
             setParentDir(picked);
-            setPickerOpen(false);
+            return Promise.resolve();
           }}
-          onCancel={() => setPickerOpen(false)}
+          onClose={() => setPickerOpen(false)}
         />
       )}
     </div>
@@ -1021,7 +1027,7 @@ function ManualVariant({
   onError: (e: string | null) => void;
 }) {
   const navigate = useNavigate();
-  const deploymentMode = useDeploymentMode();
+  const { mode: deploymentMode } = useDeploymentMode();
   const hostedMode = deploymentMode === "hosted";
   const today = new Date().toISOString().slice(0, 10);
   const [name, setName] = useState("");

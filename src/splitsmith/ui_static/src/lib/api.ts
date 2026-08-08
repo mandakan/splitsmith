@@ -3701,7 +3701,7 @@ export const api = {
 
   // Hosted-sync settings + match sync trigger (desktop-to-hosted sync MVP,
   // #631 Task 9/11). Local-only - every route 404s in hosted mode; the
-  // SPA only mounts SyncCard when useDeploymentMode() === "local", so
+  // SPA only mounts SyncCard when useDeploymentMode().mode === "local", so
   // that 404 should never be reachable from the UI. Settings are an
   // operator-global install setting (/api/settings/...), not match-scoped;
   // the trigger/status routes ride /api/match/... so scopeRequestPath
