@@ -23,7 +23,7 @@ import {
   Clock,
   Folder,
   Info,
-  Package,
+  Upload,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
@@ -34,6 +34,7 @@ import { useConfirm } from "@/components/useConfirm";
 import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
 import { Brand, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
+import { Portal } from "@/components/ui/Portal";
 import {
   ApiError,
   api,
@@ -43,6 +44,7 @@ import {
   type ShooterListEntry,
   type VideoRole,
 } from "@/lib/api";
+import { useWindowFileDrag } from "@/lib/dragDepth";
 import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
 import { useUploads } from "@/lib/uploads";
@@ -70,7 +72,7 @@ function IngestInner({ slug }: { slug: string }) {
   // Relink rewrites on-disk raw/ symlinks, a local-filesystem concept.
   // In hosted mode the container FS is ephemeral and sources live in object
   // storage, so the "Find moved videos" affordance is meaningless there.
-  const { mode } = useDeploymentMode();
+  const { mode, resolved: modeResolved } = useDeploymentMode();
   const [project, setProject] = useState<MatchProject | null>(null);
   const [health, setHealth] = useState<ServerHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -139,12 +141,35 @@ function IngestInner({ slug }: { slug: string }) {
   // Background uploads auto-attach in the provider and bump attachTick;
   // reload the tray so freshly landed videos appear even after the
   // upload sheet has closed, while this page stays mounted.
-  const { attachTick } = useUploads();
+  const { attachTick, enqueue } = useUploads();
   useEffect(() => {
     if (attachTick === 0) return;
     void reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [attachTick]);
+
+  // Hosted mode: the whole Ingest page is a drop target. Window-level
+  // dragenter/dragleave with a depth counter drives the full-page
+  // overlay; a drop anywhere enqueues into the background upload queue.
+  // DropGuard (App root) preventDefaults the same event so the browser
+  // never navigates; it does not stop propagation, so this listener
+  // always sees the drop.
+  const hostedDropActive = modeResolved && mode === "hosted";
+  const pageDragActive = useWindowFileDrag(hostedDropActive);
+  const stagesRef = useRef<{ stage_number: number; stage_name: string }[]>([]);
+  useEffect(() => {
+    stagesRef.current = project?.stages ?? [];
+  }, [project]);
+  useEffect(() => {
+    if (!hostedDropActive) return;
+    const onDrop = (e: DragEvent) => {
+      if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+        enqueue(e.dataTransfer.files, { slug, stages: stagesRef.current });
+      }
+    };
+    window.addEventListener("drop", onDrop);
+    return () => window.removeEventListener("drop", onDrop);
+  }, [hostedDropActive, enqueue, slug]);
 
   const assignedCount = useMemo(() => {
     if (!project) return 0;
@@ -387,7 +412,7 @@ function IngestInner({ slug }: { slug: string }) {
       <main className="mx-auto max-w-[1240px] px-8 pb-20 pt-9">
         <div className="mb-6">
           <Kicker className="mb-2.5">
-            Ingest &middot; {isEmpty ? "drop state" : "auto-matched"}
+            Ingest &middot; {isEmpty ? "add footage" : "auto-matched"}
           </Kicker>
           <h1 className="mb-2.5 font-display text-4xl font-bold uppercase leading-none tracking-tight text-ink">
             Add footage
@@ -402,7 +427,7 @@ function IngestInner({ slug }: { slug: string }) {
           />
           <p className="max-w-[40rem] text-[0.875rem] text-muted">
             {isEmpty
-              ? "Drop a folder of videos. Splitsmith auto-matches each video to a stage by recording timestamp."
+              ? "Splitsmith auto-matches each video to a stage by recording timestamp."
               : "Auto-matched to stages by recording timestamp. Review the assignments and confirm to start processing."}
           </p>
         </div>
@@ -412,7 +437,7 @@ function IngestInner({ slug }: { slug: string }) {
          *  JTBD. It scans a folder recursively, matches by basename, and
          *  rewrites the per-video symlinks. Reachable here so the user
          *  doesn't have to dig through Settings or the CLI. */}
-        {!isEmpty && mode === "local" && (
+        {!isEmpty && modeResolved && mode === "local" && (
           <div className="mb-4 flex flex-wrap items-center gap-2">
             <Button
               type="button"
@@ -431,7 +456,7 @@ function IngestInner({ slug }: { slug: string }) {
           </div>
         )}
 
-        {showRelinkDialog && mode === "local" && (
+        {showRelinkDialog && modeResolved && mode === "local" && (
           <RelinkDialog
             slug={slug}
             onClose={() => setShowRelinkDialog(false)}
@@ -446,10 +471,15 @@ function IngestInner({ slug }: { slug: string }) {
         )}
 
         {isEmpty ? (
-          <EmptyState
-            onPickFolder={() => setShowAddFootage(true)}
-            lastScannedDir={lastScannedDir}
-          />
+          modeResolved ? (
+            <EmptyState
+              mode={mode}
+              onAdd={() => setShowAddFootage(true)}
+              lastScannedDir={lastScannedDir}
+            />
+          ) : (
+            <AddFootageSkeleton />
+          )
         ) : project ? (
           <ReviewLayout
             slug={slug}
@@ -488,6 +518,29 @@ function IngestInner({ slug }: { slug: string }) {
             stages={project?.stages ?? []}
           />
         )}
+
+        {hostedDropActive && (
+          <span className="sr-only" role="status" aria-live="polite">
+            {pageDragActive ? "Release to add the files to the upload queue" : ""}
+          </span>
+        )}
+        {pageDragActive && (
+          <Portal>
+            <div
+              aria-hidden
+              className="pointer-events-none fixed inset-0 z-takeover flex items-center justify-center bg-bg/80 backdrop-blur-sm"
+            >
+              <div className="rounded-2xl border-2 border-dashed border-led bg-surface px-10 py-8 text-center shadow-[0_0_28px_var(--color-led-glow)]">
+                <div className="font-display text-2xl font-bold uppercase tracking-tight text-ink">
+                  Drop videos to upload
+                </div>
+                <div className="mt-1 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
+                  They join this shooter's upload queue
+                </div>
+              </div>
+            </div>
+          </Portal>
+        )}
       </main>
     </div>
   );
@@ -498,16 +551,18 @@ function IngestInner({ slug }: { slug: string }) {
 /* -------------------------------------------------------------------------- */
 
 function EmptyState({
-  onPickFolder,
+  mode,
+  onAdd,
   lastScannedDir,
 }: {
-  onPickFolder: () => void;
+  mode: "local" | "hosted";
+  onAdd: () => void;
   lastScannedDir: string | null;
 }) {
   return (
     <>
-      <DropZone onPickFolder={onPickFolder} />
-      {lastScannedDir && (
+      <AddFootageCard mode={mode} onAdd={onAdd} />
+      {mode === "local" && lastScannedDir && (
         <RecentSources
           items={[
             {
@@ -516,7 +571,7 @@ function EmptyState({
               when: "previously",
             },
           ]}
-          onUse={onPickFolder}
+          onUse={onAdd}
         />
       )}
       <TipCards />
@@ -524,45 +579,55 @@ function EmptyState({
   );
 }
 
-function DropZone({ onPickFolder }: { onPickFolder: () => void }) {
+/** Neutral placeholder while /api/server/features is in flight - the
+ *  local picker and the hosted upload surface must not flash at the
+ *  wrong audience (spec: deployment-mode resolution). */
+function AddFootageSkeleton() {
   return (
     <div
-      className="relative mb-5 overflow-hidden rounded-2xl border-2 border-dashed border-led-deep bg-surface px-10 py-14 text-center transition-all hover:border-led hover:shadow-[0_0_0_1px_var(--color-led),0_0_28px_var(--color-led-glow)]"
-      style={{
-        backgroundImage:
-          "radial-gradient(800px 320px at 50% 30%, rgba(255,45,45,0.10), transparent 65%), linear-gradient(180deg, var(--color-surface) 0%, var(--color-surface-2) 100%)",
-      }}
+      role="status"
+      aria-label="Checking how footage can be added"
+      className="mb-5 animate-pulse rounded-2xl border border-rule bg-surface px-10 py-14 text-center"
     >
-      <span
-        aria-hidden
-        className="absolute left-[18px] top-[18px] size-20 rounded-tl-[14px] border-t-2 border-l-2 border-led opacity-60"
-      />
-      <span
-        aria-hidden
-        className="absolute bottom-[18px] right-[18px] size-20 rounded-br-[14px] border-b-2 border-r-2 border-led opacity-60"
-      />
+      <div className="mx-auto mb-4 size-[72px] rounded-2xl bg-surface-3" />
+      <div className="mx-auto mb-3 h-8 w-64 rounded bg-surface-3" />
+      <div className="mx-auto h-9 w-40 rounded-md bg-surface-3" />
+    </div>
+  );
+}
+
+function AddFootageCard({
+  mode,
+  onAdd,
+}: {
+  mode: "local" | "hosted";
+  onAdd: () => void;
+}) {
+  return (
+    <div className="relative mb-5 overflow-hidden rounded-2xl border border-rule-strong bg-surface px-10 py-14 text-center">
       <div className="mx-auto mb-4 inline-flex size-[72px] items-center justify-center rounded-2xl border border-led-deep bg-led/10 text-led shadow-[0_0_24px_var(--color-led-glow)]">
-        <Package className="size-9" strokeWidth={1.6} />
+        {mode === "local" ? (
+          <Folder className="size-9" strokeWidth={1.6} />
+        ) : (
+          <Upload className="size-9" strokeWidth={1.6} />
+        )}
       </div>
       <h2 className="mb-3 font-display text-3xl font-bold uppercase tracking-tight text-ink">
-        Drop a folder of videos
+        Add footage
       </h2>
       <p className="mx-auto mb-5 max-w-xl text-[0.9375rem] leading-relaxed text-muted">
-        Drag and drop your SD-card folder, or pick videos manually.
-        Splitsmith will scan for camera-prefixed files (e.g.{" "}
-        <code className="rounded border border-rule bg-surface-3 px-1.5 py-0.5 font-mono text-xs text-ink-2">
-          GH010032.MP4
-        </code>
-        ) and group them by camera.
+        {mode === "local"
+          ? "Pick the folder your camera footage lives in. Splitsmith scans it for video files and groups them by camera."
+          : "Drop video files anywhere on this page, or browse for them. Uploads land in your hosted storage and attach to this shooter."}
       </p>
       <div className="inline-flex gap-2.5">
         <Button
-          onClick={onPickFolder}
+          onClick={onAdd}
           className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
         >
           <Folder className="size-3.5" />
           <span className="font-display uppercase tracking-[0.1em]">
-            Pick a folder
+            {mode === "local" ? "Pick a folder" : "Browse files"}
           </span>
         </Button>
       </div>
@@ -603,7 +668,7 @@ function RecentSources({
           Recent sources
         </span>
         <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-          Drop the same folder again
+          Scan the same folder again
         </span>
       </div>
       {items.map((it, i) => (
