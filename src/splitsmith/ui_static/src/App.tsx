@@ -21,7 +21,7 @@ import { UploadProvider } from "@/lib/uploads";
 import { UploadDock } from "@/components/UploadDock";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { useDeploymentMode } from "@/lib/features";
-import { stashApproveCode, takeApproveCode } from "@/lib/deviceApproveStash";
+import { peekApproveCode, stashApproveCode, takeApproveCode } from "@/lib/deviceApproveStash";
 import { ShooterScopedRoute } from "@/components/ShooterScopedRoute";
 import { Login } from "@/pages/Login";
 import { Audit } from "@/pages/Audit";
@@ -105,6 +105,33 @@ function AuthGate({ children }: { children: ReactNode }) {
   const { status } = useAuth();
   const mode = useDeploymentMode();
   const location = useLocation();
+
+  // Device-flow pickup (#719). Whether to redirect has to be decided
+  // synchronously, in THIS render, using the render-safe peek -- not an
+  // effect. If {children} (the ordinary route tree) were allowed to mount
+  // for even one commit while a pickup is pending, its own routing (e.g.
+  // LegacyMatchRedirect's async getHealth()-driven redirect to /pick)
+  // races the pickup and can win, since both write history with
+  // ``replace``. Rendering <Navigate> here instead of {children} means
+  // that competing tree never mounts at all.
+  //
+  // Consuming the stash (the actual sessionStorage mutation) is a
+  // separate, effect-only step below: takeApproveCode() is a
+  // read-then-remove side effect, so it cannot run in the render body --
+  // StrictMode double-invokes render on mount, and the first (discarded)
+  // invocation would consume the stash before the second (committed) one
+  // ever saw it, silently defeating the redirect. The effect is gated on
+  // the same peeked value, so its own StrictMode double-invoke (mount ->
+  // cleanup -> mount) just consumes it once and then no-ops.
+  const pendingPickupCode =
+    mode !== "local" && status === "authed" && location.pathname === "/"
+      ? peekApproveCode()
+      : null;
+
+  useEffect(() => {
+    if (pendingPickupCode) takeApproveCode();
+  }, [pendingPickupCode]);
+
   // Public share views are token-authorized server-side; the session
   // gate has no say there. Bypass before the loading branch so a share
   // link renders without waiting on /api/me.
@@ -134,9 +161,8 @@ function AuthGate({ children }: { children: ReactNode }) {
     }
     return <Navigate to="/login" replace />;
   }
-  if (status === "authed" && location.pathname === "/") {
-    const code = takeApproveCode();
-    if (code) return <Navigate to={`/desktop/approve?code=${code}`} replace />;
+  if (pendingPickupCode) {
+    return <Navigate to={`/desktop/approve?code=${pendingPickupCode}`} replace />;
   }
   return <>{children}</>;
 }

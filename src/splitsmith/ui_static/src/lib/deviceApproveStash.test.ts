@@ -9,7 +9,7 @@
  */
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { stashApproveCode, takeApproveCode } from "@/lib/deviceApproveStash";
+import { peekApproveCode, stashApproveCode, takeApproveCode } from "@/lib/deviceApproveStash";
 
 describe("deviceApproveStash", () => {
   beforeEach(() => sessionStorage.clear());
@@ -32,5 +32,22 @@ describe("deviceApproveStash", () => {
   it("ignores a stashed value that is not a plausible user code", () => {
     sessionStorage.setItem("splitsmith.deviceApproveCode", "../../etc/passwd");
     expect(takeApproveCode()).toBeNull();
+  });
+
+  // peekApproveCode exists because AuthGate must decide whether to redirect
+  // synchronously during render, and takeApproveCode()'s read-then-remove
+  // is not safe to call there (see App.tsx's AuthGate for why). It has to
+  // be genuinely non-destructive, or that whole reasoning falls apart.
+  it("peek does not consume -- repeated peeks see the same value", () => {
+    stashApproveCode("ABCD-2345");
+    expect(peekApproveCode()).toBe("ABCD-2345");
+    expect(peekApproveCode()).toBe("ABCD-2345");
+    expect(takeApproveCode()).toBe("ABCD-2345");
+    expect(peekApproveCode()).toBeNull();
+  });
+
+  it("peek also rejects an implausible stashed value", () => {
+    sessionStorage.setItem("splitsmith.deviceApproveCode", "../../etc/passwd");
+    expect(peekApproveCode()).toBeNull();
   });
 });

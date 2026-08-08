@@ -10,6 +10,7 @@
  * mode cache is per module registry (see GlobalBar.hosted.test.tsx for
  * the same split).
  */
+import { StrictMode } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -68,6 +69,22 @@ async function renderAt(path: string) {
   return render(<App />);
 }
 
+/** Same as renderAt, but wrapped in StrictMode -- React 18 double-invokes
+ *  both render bodies and (mount -> cleanup -> mount) effects here, which
+ *  is exactly what @testing-library/render's plain (non-strict) mode does
+ *  NOT exercise. A side effect that only belongs in an effect but was
+ *  written into the render body reads fine under plain render() and
+ *  silently misbehaves here -- see the "under StrictMode" test below. */
+async function renderAtStrict(path: string) {
+  window.history.pushState({}, "", path);
+  const { App } = await import("@/App");
+  return render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+}
+
 describe("AuthGate device-flow stash (hosted mode)", () => {
   // Same warm-up as App.routes.test.tsx: ``@/App`` pulls in the whole
   // route tree, and paying that transform cost inside a hook (10s
@@ -118,6 +135,28 @@ describe("AuthGate device-flow stash (hosted mode)", () => {
     // Single-use: picking it up must consume it, or a later "/" visit
     // (e.g. after the operator navigates home) would re-bounce forever.
     expect(sessionStorage.getItem(STASH_KEY)).toBeNull();
+  });
+
+  it("picks up a stashed code under StrictMode (double-invoked render + effects)", async () => {
+    // takeApproveCode() mutates sessionStorage (read-then-remove). If it
+    // were called from the render body instead of an effect, StrictMode's
+    // double render would let the first (discarded) invocation consume the
+    // stash while the second (committed) invocation finds it already gone
+    // -- so the redirect would silently never fire, in dev and in this
+    // test alike. Regression coverage for that failure mode specifically.
+    sessionStorage.setItem(STASH_KEY, "ABCD-2345");
+    vi.mocked(api.getMe).mockResolvedValue({
+      id: "u1",
+      email: "m@thias.se",
+      display_name: null,
+      is_admin: false,
+    });
+    await renderAtStrict("/");
+    await waitFor(() =>
+      expect(screen.getByText(/approve device/i)).toBeInTheDocument(),
+    );
+    expect(window.location.pathname).toBe("/desktop/approve");
+    expect(window.location.search).toBe("?code=ABCD-2345");
   });
 
   it("leaves a signed-in visitor with no stash on the ordinary route", async () => {
