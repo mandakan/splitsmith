@@ -140,10 +140,10 @@ export function Results() {
 
   // Share button: hosted mode only, and only on the owner route. The same
   // Results component renders for anonymous share viewers under /share/:token -
-  // the button must not appear there. useDeploymentMode() returns "local" while
-  // the features fetch is in flight (conservative default), so the button pops
-  // in after the first fetch settles - the same behavior as other hosted-only chrome.
-  const deploymentMode = useDeploymentMode();
+  // the button must not appear there. useDeploymentMode() reports mode "local"
+  // until the features fetch resolves, so the button pops in after the first
+  // fetch settles - the same behavior as other hosted-only chrome.
+  const { mode: deploymentMode } = useDeploymentMode();
   const shareToken = useParams<{ token?: string }>().token;
   const isShare = Boolean(shareToken);
   const canShare = deploymentMode === "hosted" && !shareToken;

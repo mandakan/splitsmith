@@ -101,7 +101,7 @@ function LegacyMatchRedirect() {
  * is the normal-case reason status stays ``authed`` there. */
 function AuthGate({ children }: { children: ReactNode }) {
   const { status } = useAuth();
-  const mode = useDeploymentMode();
+  const { mode } = useDeploymentMode();
   const location = useLocation();
   // Public share views are token-authorized server-side; the session
   // gate has no say there. Bypass before the loading branch so a share

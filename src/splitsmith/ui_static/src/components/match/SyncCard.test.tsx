@@ -36,7 +36,7 @@ vi.mock("@/lib/features", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/features")>();
   return {
     ...actual,
-    useDeploymentMode: vi.fn(() => "local"),
+    useDeploymentMode: vi.fn(() => ({ mode: "local" as const, resolved: true })),
   };
 });
 
@@ -54,7 +54,7 @@ function makeStatus(overrides: Partial<SyncStatusResponse> = {}): SyncStatusResp
 describe("SyncCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(useDeploymentMode).mockReturnValue("local");
+    vi.mocked(useDeploymentMode).mockReturnValue({ mode: "local", resolved: true });
     vi.mocked(api.getSyncSettings).mockResolvedValue({
       base_url: "https://splitsmith.app",
       token_set: true,
@@ -62,7 +62,7 @@ describe("SyncCard", () => {
   });
 
   it("renders nothing in hosted mode", async () => {
-    vi.mocked(useDeploymentMode).mockReturnValue("hosted");
+    vi.mocked(useDeploymentMode).mockReturnValue({ mode: "hosted", resolved: true });
     vi.mocked(api.getSyncStatus).mockResolvedValue(makeStatus());
 
     const { container } = render(<SyncCard jobs={[]} matchId="m1" />);

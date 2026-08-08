@@ -242,7 +242,7 @@ function ScoreboardVariant({
   // In hosted mode the server picks the project folder
   // (``users/<user_id>/projects/<slug>/``); the picker UI is suppressed
   // because there's no useful host filesystem inside the container.
-  const deploymentMode = useDeploymentMode();
+  const { mode: deploymentMode } = useDeploymentMode();
   const hostedMode = deploymentMode === "hosted";
   // Division facet -- ``null`` means "any". Selected division narrows the
   // accordion list to a single group. Squad isn't on the wire today, so
@@ -1021,7 +1021,7 @@ function ManualVariant({
   onError: (e: string | null) => void;
 }) {
   const navigate = useNavigate();
-  const deploymentMode = useDeploymentMode();
+  const { mode: deploymentMode } = useDeploymentMode();
   const hostedMode = deploymentMode === "hosted";
   const today = new Date().toISOString().slice(0, 10);
   const [name, setName] = useState("");

@@ -104,7 +104,7 @@ export function AddFootageModal({
   // picker against the container's ephemeral disk (#425). Hooks below
   // still run so the Rules of Hooks are satisfied; the branch is in
   // the returned JSX.
-  const deploymentMode = useDeploymentMode();
+  const { mode: deploymentMode } = useDeploymentMode();
   const hostedMode = deploymentMode === "hosted";
 
   const [queue, setQueue] = useState<QueueItem[]>([]);

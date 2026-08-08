@@ -132,7 +132,7 @@ export function Export() {
 }
 
 function ExportInner({ slug }: { slug: string }) {
-  const deploymentMode = useDeploymentMode();
+  const { mode: deploymentMode } = useDeploymentMode();
   const [project, setProject] = useState<MatchProject | null>(null);
   const [overview, setOverview] = useState<ExportOverview | null>(null);
   const [error, setError] = useState<string | null>(null);

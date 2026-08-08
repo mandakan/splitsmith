@@ -91,7 +91,7 @@ function relativeTime(iso: string): string {
 }
 
 export function SyncCard({ jobs, matchId }: SyncCardProps) {
-  const mode = useDeploymentMode();
+  const { mode } = useDeploymentMode();
   const local = mode === "local";
 
   const [status, setStatus] = useState<SyncStatusResponse | null>(null);

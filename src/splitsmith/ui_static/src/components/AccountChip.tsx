@@ -22,7 +22,7 @@ import { useDeploymentMode } from "@/lib/features";
 import { useAuth } from "@/lib/auth";
 
 export function AccountChip({ className }: { className?: string }) {
-  const mode = useDeploymentMode();
+  const { mode } = useDeploymentMode();
   const { status, user, logout } = useAuth();
   const [busy, setBusy] = React.useState(false);
   const [tokensOpen, setTokensOpen] = React.useState(false);

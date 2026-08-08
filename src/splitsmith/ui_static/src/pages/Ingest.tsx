@@ -70,7 +70,7 @@ function IngestInner({ slug }: { slug: string }) {
   // Relink rewrites on-disk raw/ symlinks, a local-filesystem concept.
   // In hosted mode the container FS is ephemeral and sources live in object
   // storage, so the "Find moved videos" affordance is meaningless there.
-  const mode = useDeploymentMode();
+  const { mode } = useDeploymentMode();
   const [project, setProject] = useState<MatchProject | null>(null);
   const [health, setHealth] = useState<ServerHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
