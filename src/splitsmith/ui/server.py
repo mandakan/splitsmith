@@ -1179,6 +1179,17 @@ class AppState:
     # the tab leaves no orphaned poller, and restarting the local server
     # mid-flow just means starting over inside a 10-minute window.
     device_flow: dict[str, object] | None = None
+    # Guards every read-modify-write of ``device_flow`` (#719). The three
+    # local device routes each ``await`` a threadpool HTTP call in the
+    # middle of reading/mutating ``device_flow``; without a lock, two
+    # concurrent status polls can both pass the throttle check before
+    # either records ``last_polled_at``, doubling load on the hosted side
+    # and letting one poll's approval response get discarded by the SPA
+    # while the other request that "won" the race serves a stale status.
+    # A plain ``asyncio.Lock`` is enough - this is one desktop process
+    # serving one operator, not a multi-worker server, so there is no
+    # cross-process case to cover.
+    device_flow_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     # Live SSE wake channels, one asyncio.Queue per connected self-hosted
     # worker. ``None`` in local mode and on the headless worker process
     # (which must never hold launcher capabilities); set by the non-worker
@@ -13035,26 +13046,38 @@ def create_app(
         """Begin a browser-assisted link. Local-only.
 
         Names the device after the host so the operator can tell two
-        installs apart on the hosted account page.
+        installs apart on the hosted account page. Holds
+        ``device_flow_lock`` for the whole body (including the hosted
+        round trip): a second start racing this one must not silently
+        clobber the first's ``device_code`` while it's still live -
+        instead it 409s until the first one resolves or expires.
         """
         if _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
         prefs = user_config.load_global_prefs()
         if not prefs.hosted_base_url:
             raise HTTPException(status_code=409, detail="hosted_base_url_not_set")
-        client = _build_device_client(prefs.hosted_base_url)
-        try:
-            started = await run_in_threadpool(client.device_authorize, socket.gethostname())
-        except (SyncClientError, httpx.HTTPError) as exc:
-            raise HTTPException(status_code=502, detail=f"could not reach the hosted server: {exc}") from exc
-        state.device_flow = {
-            "device_code": started["device_code"],
-            "interval": int(started.get("interval", 5)),
-            "expires_at": time.monotonic() + int(started.get("expires_in", 600)),
-            "last_polled_at": None,
-            "last_status": "pending",
-            "base_url": prefs.hosted_base_url,
-        }
+        async with state.device_flow_lock:
+            existing = state.device_flow
+            if existing is not None and time.monotonic() < float(existing["expires_at"]):
+                raise HTTPException(status_code=409, detail="device_login_already_pending")
+            client = _build_device_client(prefs.hosted_base_url)
+            try:
+                started = await run_in_threadpool(client.device_authorize, socket.gethostname())
+            except (SyncClientError, httpx.HTTPError) as exc:
+                raise HTTPException(
+                    status_code=502, detail=f"could not reach the hosted server: {exc}"
+                ) from exc
+            finally:
+                client.close()
+            state.device_flow = {
+                "device_code": started["device_code"],
+                "interval": int(started.get("interval", 5)),
+                "expires_at": time.monotonic() + int(started.get("expires_in", 600)),
+                "last_polled_at": None,
+                "last_status": "pending",
+                "base_url": prefs.hosted_base_url,
+            }
         return DeviceStartResponse(
             user_code=started["user_code"],
             verification_uri=started["verification_uri"],
@@ -13069,57 +13092,67 @@ def create_app(
 
         The SPA polls faster than the hosted side wants; this throttle is
         what stops a fast-refreshing tab from tripping ``slow_down``. In
-        between forwards it replays the cached verdict.
+        between forwards it replays the cached verdict. The whole body
+        runs under ``device_flow_lock`` (held across the hosted round
+        trip) so two concurrent polls can't both pass the throttle check
+        before either records ``last_polled_at`` - without it, both would
+        forward to the hosted side, and whichever request's caller reads
+        second would silently discard the approval the other one saw.
         """
         if _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
-        flow = state.device_flow
-        if flow is None:
-            return DeviceStatusResponse(status="idle")
-        now = time.monotonic()
-        if now >= float(flow["expires_at"]):
-            state.device_flow = None
-            return DeviceStatusResponse(status="expired")
-        last = flow["last_polled_at"]
-        if last is not None and now - float(last) < float(flow["interval"]):
-            return DeviceStatusResponse(status=str(flow["last_status"]))
+        async with state.device_flow_lock:
+            flow = state.device_flow
+            if flow is None:
+                return DeviceStatusResponse(status="idle")
+            now = time.monotonic()
+            if now >= float(flow["expires_at"]):
+                state.device_flow = None
+                return DeviceStatusResponse(status="expired")
+            last = flow["last_polled_at"]
+            if last is not None and now - float(last) < float(flow["interval"]):
+                return DeviceStatusResponse(status=str(flow["last_status"]))
 
-        client = _build_device_client(str(flow["base_url"]))
-        try:
-            verdict = await run_in_threadpool(client.device_poll, str(flow["device_code"]))
-        except (SyncClientError, httpx.HTTPError) as exc:
-            raise HTTPException(status_code=502, detail=f"could not reach the hosted server: {exc}") from exc
-        flow["last_polled_at"] = now
-        status = str(verdict.get("status", "pending"))
-        # slow_down means we polled upstream too fast despite the throttle
-        # (clock skew, a restarted hosted process). Nothing has changed for
-        # the operator, so report it as pending rather than inventing a
-        # sixth UI state.
-        if status == "slow_down":
-            status = "pending"
-        flow["last_status"] = status
+            client = _build_device_client(str(flow["base_url"]))
+            try:
+                verdict = await run_in_threadpool(client.device_poll, str(flow["device_code"]))
+            except (SyncClientError, httpx.HTTPError) as exc:
+                raise HTTPException(
+                    status_code=502, detail=f"could not reach the hosted server: {exc}"
+                ) from exc
+            finally:
+                client.close()
+            flow["last_polled_at"] = now
+            status = str(verdict.get("status", "pending"))
+            # slow_down means we polled upstream too fast despite the
+            # throttle (clock skew, a restarted hosted process). Nothing
+            # has changed for the operator, so report it as pending
+            # rather than inventing a sixth UI state.
+            if status == "slow_down":
+                status = "pending"
+            flow["last_status"] = status
 
-        if status == "approved":
-            account = verdict.get("account") or {}
-            prefs = user_config.load_global_prefs()
-            prefs.hosted_token = verdict.get("token")
-            prefs.hosted_account = user_config.HostedAccountRef(
-                id=str(account.get("id", "")),
-                email=str(account.get("email", "")),
-                display_name=account.get("display_name"),
-                device_name=str(verdict.get("device_name") or socket.gethostname()),
-                linked_at=datetime.now(UTC),
-            )
-            user_config.save_global_prefs(prefs)
-            state.device_flow = None
-            return DeviceStatusResponse(
-                status="approved",
-                account=_account_info(prefs.hosted_account),
-                device_name=prefs.hosted_account.device_name,
-            )
-        if status in ("denied", "expired"):
-            state.device_flow = None
-        return DeviceStatusResponse(status=status)
+            if status == "approved":
+                account = verdict.get("account") or {}
+                prefs = user_config.load_global_prefs()
+                prefs.hosted_token = verdict.get("token")
+                prefs.hosted_account = user_config.HostedAccountRef(
+                    id=str(account.get("id", "")),
+                    email=str(account.get("email", "")),
+                    display_name=account.get("display_name"),
+                    device_name=str(verdict.get("device_name") or socket.gethostname()),
+                    linked_at=datetime.now(UTC),
+                )
+                user_config.save_global_prefs(prefs)
+                state.device_flow = None
+                return DeviceStatusResponse(
+                    status="approved",
+                    account=_account_info(prefs.hosted_account),
+                    device_name=prefs.hosted_account.device_name,
+                )
+            if status in ("denied", "expired"):
+                state.device_flow = None
+            return DeviceStatusResponse(status=status)
 
     @app.delete("/api/settings/hosted-sync/session", response_model=DeviceUnlinkResponse)
     async def unlink_hosted_account() -> DeviceUnlinkResponse:
@@ -13144,10 +13177,13 @@ def create_app(
                 revoked = True
             except (SyncClientError, httpx.HTTPError):
                 revoked = False
+            finally:
+                client.close()
         prefs.hosted_token = None
         prefs.hosted_account = None
         user_config.save_global_prefs(prefs)
-        state.device_flow = None
+        async with state.device_flow_lock:
+            state.device_flow = None
         return DeviceUnlinkResponse(cleared=True, hosted_revoked=revoked)
 
     # ----------------------------------------------------------------------

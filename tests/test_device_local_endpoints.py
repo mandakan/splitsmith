@@ -14,6 +14,7 @@ What matters here and is easy to get wrong:
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import httpx
@@ -174,6 +175,86 @@ def test_denied_and_expired_are_distinct_terminal_states(tmp_path: Path, monkeyp
     assert user_config.load_global_prefs().hosted_token is None
 
 
+def test_hosted_expired_verdict_is_a_terminal_state(tmp_path: Path, monkeypatch) -> None:
+    """The hosted side itself can report ``expired`` (the device code's
+    own TTL ran out on that end) - distinct from the local time-based
+    expiry below, which never even reaches the hosted side."""
+    monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
+    client = _local_app(tmp_path)
+    client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
+    fake = _FakeHosted([{"status": "expired"}])
+    _install_fake(monkeypatch, fake)
+
+    client.post(START)
+    assert client.get(STATUS).json()["status"] == "expired"
+    assert fake.polls == 1
+    # Terminal: cleared, so the next read is idle rather than replaying.
+    assert client.get(STATUS).json()["status"] == "idle"
+    assert user_config.load_global_prefs().hosted_token is None
+
+
+def test_local_time_based_expiry_clears_pending_state_without_polling(tmp_path: Path, monkeypatch) -> None:
+    """The 10-minute window is enforced locally too, independent of what
+    the hosted side would say - checked first, before any poll is
+    forwarded, by reaching into AppState.device_flow directly rather than
+    waiting out a real 10 minutes."""
+    monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
+    client = _local_app(tmp_path)
+    client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
+    fake = _FakeHosted([{"status": "pending"}])
+    _install_fake(monkeypatch, fake)
+
+    client.post(START)
+    state = client.app.state.splitsmith_state
+    assert state.device_flow is not None
+    state.device_flow["expires_at"] = time.monotonic() - 1.0
+
+    assert client.get(STATUS).json()["status"] == "expired"
+    assert fake.polls == 0  # expiry short-circuits before any hosted call
+    assert state.device_flow is None
+    assert user_config.load_global_prefs().hosted_token is None
+
+
+def test_slow_down_remaps_to_pending(tmp_path: Path, monkeypatch) -> None:
+    """The hosted side's slow_down verdict never reaches the SPA as a
+    sixth state - the local side absorbs it and reports pending, exactly
+    like a not-yet-decided poll."""
+    monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
+    client = _local_app(tmp_path)
+    client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
+    _install_fake(monkeypatch, _FakeHosted([{"status": "slow_down"}]))
+
+    client.post(START)
+    resp = client.get(STATUS)
+    assert resp.json()["status"] == "pending"
+    # Not terminal: the flow is still alive for the next poll.
+    assert client.app.state.splitsmith_state.device_flow is not None
+
+
+def test_second_start_while_one_is_pending_is_rejected(tmp_path: Path, monkeypatch) -> None:
+    """A second POST .../device/start must not silently clobber a still-
+    live device_code: the first flow's code stays valid on the hosted
+    side, so overwriting it locally would orphan it and leave the SPA
+    polling a device_code the hosted side no longer expects a poll for.
+    """
+    monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
+    client = _local_app(tmp_path)
+    client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
+    _install_fake(monkeypatch, _FakeHosted([]))
+
+    first = client.post(START)
+    assert first.status_code == 200, first.text
+
+    second = client.post(START)
+    assert second.status_code == 409
+    assert second.json()["detail"] == "device_login_already_pending"
+
+    # The first flow is untouched - still the same device_code, provable
+    # only indirectly here since device_code is never returned, but the
+    # user_code (which round-trips 1:1 with it in the fake) is unchanged.
+    assert first.json()["user_code"] == "ABCD-2345"
+
+
 def test_sign_out_clears_prefs_and_revokes_hosted(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
     client = _local_app(tmp_path)
@@ -211,6 +292,46 @@ def test_sign_out_clears_prefs_even_when_the_hosted_revoke_fails(tmp_path: Path,
     prefs = user_config.load_global_prefs()
     assert prefs.hosted_token is None
     assert prefs.hosted_account is None
+
+
+def test_each_route_closes_its_hosted_client(tmp_path: Path, monkeypatch) -> None:
+    """An httpx.Client per device-flow call that never gets closed leaks a
+    connection pool - one device link polls roughly once per hosted
+    interval for up to the 10-minute expiry window, so an abandoned
+    login would leak dozens of clients in a long-running desktop
+    server. Each of the three routes must close what it opens, success
+    or failure."""
+    monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
+    client = _local_app(tmp_path)
+    client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
+    fake = _FakeHosted([{"status": "pending"}])
+    built: list[HostedSyncClient] = []
+
+    def _build(base_url: str, *, token: str | None = None) -> HostedSyncClient:
+        hosted = HostedSyncClient(
+            http=httpx.Client(
+                base_url=base_url,
+                transport=httpx.MockTransport(fake.handle),
+                headers={"Authorization": f"Bearer {token}"} if token else {},
+            )
+        )
+        built.append(hosted)
+        return hosted
+
+    monkeypatch.setattr(server_mod, "_build_device_client", _build)
+
+    client.post(START)
+    client.get(STATUS)
+    # Force a token into prefs so the unlink route's revoke branch
+    # actually builds (and must close) a third client, rather than
+    # skipping the branch entirely for want of a token.
+    prefs = user_config.load_global_prefs()
+    prefs.hosted_token = "fake-token"
+    user_config.save_global_prefs(prefs)
+    client.delete(SESSION)
+
+    assert len(built) == 3, "expected one client per route call (start, status, unlink)"
+    assert all(c._http.is_closed for c in built), "every device-flow client must be closed"
 
 
 def test_device_routes_404_in_hosted_mode(

@@ -58,6 +58,20 @@ class HostedSyncClient:
         self._http = http
         self._media_http = media_http
 
+    def close(self) -> None:
+        """Close the underlying ``httpx.Client``(s).
+
+        A push's ``http_client`` is already closed by its own caller (see
+        ``server.py``'s ``_run_sync_match`` job), so this exists for
+        shorter-lived callers - the device-flow routes (#719) build a
+        fresh client per call and must not leak the connection pool.
+        ``media_http`` is only ever created lazily via ``_media``, so it
+        is only closed here if a caller actually touched it.
+        """
+        self._http.close()
+        if self._media_http is not None:
+            self._media_http.close()
+
     @property
     def _media(self) -> httpx.Client:
         """The client used for presigned-URL part PUTs, created lazily."""
