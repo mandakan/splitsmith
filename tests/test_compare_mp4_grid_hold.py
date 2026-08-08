@@ -1420,7 +1420,12 @@ def test_the_arm_is_emitted_rounded_down_so_it_never_runs_late(tmp_path: Path):
     )
     assert r"[cell0]overlay=0:0:format=auto:enable='gte(t\,6.966)'[early0]" in graph, graph
 
-    match = re.search(r"enable='gte\(t\\,([\d.]+)\)'", graph)
+    # Anchored on ``[early0]``, not on the first ``enable=`` in the
+    # graph. ``_clock_filters`` emits the identical ``gte(t\,...)`` form
+    # for a clock's freeze and is composited *upstream* of the early
+    # summary, so a bare search would silently retarget this at a freeze
+    # time the moment anyone gave this plan a clock.
+    match = re.search(r"enable='gte\(t\\,([\d.]+)\)'\[early0\]", graph)
     assert match is not None, graph
     covered_frame_seconds = (round(7.0 * 30) - 1) / 30
     assert float(match.group(1)) <= covered_frame_seconds, (

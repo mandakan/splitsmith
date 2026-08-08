@@ -523,6 +523,15 @@ BOUNDARY_ARM_MATCHES_STILL_MAX = 6.0
 #: threshold. Every assertion ahead of this one in the test passed under
 #: that mutation, including :data:`EARLY_SUMMARY_MATCHES_STILL_MAX`; this
 #: is the one that caught it.
+#:
+#: Gates a second crop too, added with :data:`FULL_TILE_ARM_INDEX`: the
+#: full-length tiles one frame *before* their own arm, which must also
+#: still be footage or the emission has been biased further back rather
+#: than floored. Different frame, different reading -- measured 73.08 in
+#: Anders' cell at ``FULL_TILE_ARM_INDEX - 1`` (frame 208), unchanged by
+#: the emission fix, so 20.0 is ~3.7x under it there. Recorded here
+#: because a constant's clearance is a property of every assertion it
+#: gates, not only of the first one.
 BEFORE_ARM_MIN_DIFF_TO_STILL = 20.0
 
 #: The whole canvas on the action's last frame against the composed

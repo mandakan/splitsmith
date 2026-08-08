@@ -980,16 +980,28 @@ def _arm_seconds_string(seconds: float) -> str:
 
     So: floor to milliseconds, and assemble the decimal from integers so
     the division cannot reintroduce a rounding step. The emitted string
-    is therefore never greater than ``seconds``, and is at most 1ms
-    below it.
+    is at most 1ms below ``seconds``.
+
+    **Not "never above it", which is false and cheap to disprove.** The
+    ``* 1000.0`` is itself a rounded product, so an input a hair under a
+    whole millisecond can round *up* to one and hand ``floor`` a
+    millisecond it did not have:
+    ``_arm_seconds_string(0.11699999999999999)`` is ``"0.117"``. Measured
+    over 800k sampled inputs, the worst overshoot is 1.41e-14 s, at
+    ``seconds = 131.128``. That is eleven orders of magnitude under a
+    frame at any rate here, and it does not reach the comparison this
+    exists for: on a boundary-aligned end the emitted decimal parses back
+    to the frame's own presentation time bit-for-bit (``float("6.960")``
+    is ``174 / 25.0``), so ``gte`` is satisfied by equality rather than
+    by a margin.
 
     1ms is the granularity because it is far under one frame at every
     rate this renders and deep enough that nothing else notices: a frame
-    is 41.7ms at 24fps, 33.3ms at 30, 16.7ms at 60 and 8.3ms at 120, so
-    even the fastest plausible canvas has eight millisecond steps inside
-    a frame. Going deeper buys no accuracy that ``t`` in a filter
-    expression can act on and only lengthens the argv a human has to
-    read.
+    is 41.7ms at 24fps, 40ms at 25, 33.3ms at 30, 20ms at 50, 16.7ms at
+    60 and 8.3ms at 120, so even the fastest plausible canvas has eight
+    millisecond steps inside a frame. Going deeper buys no accuracy that
+    ``t`` in a filter expression can act on and only lengthens the argv a
+    human has to read.
 
     Non-negative only. ``//`` and ``%`` floor toward negative infinity,
     so a negative input would assemble a nonsense sign; the one caller
