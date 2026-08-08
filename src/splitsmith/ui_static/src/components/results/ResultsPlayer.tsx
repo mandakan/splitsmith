@@ -28,7 +28,7 @@ import type { CoachShot } from "@/lib/api";
 import { ShotTicker } from "@/components/results/ShotTicker";
 import { useDialogFocus } from "@/lib/dialogFocus";
 import { useSpacePlayPause } from "@/lib/keyboard";
-import { TIER_NEUTRAL_COLOR, type TierBaselines, gapTier } from "@/lib/splits";
+import { TIER_NEUTRAL_COLOR, type TierBaselines, beepElapsed, gapTier } from "@/lib/splits";
 import { cn } from "@/lib/utils";
 
 /** How the player card is currently presented. "native" is the
@@ -345,7 +345,7 @@ export function ResultsPlayer({
         {/* Beep-relative elapsed vs stage time - the axis a shooter
             reads. Shows 0.0 during the preroll before the beep. */}
         <span className="font-mono text-sm tabular-nums text-ink-2">
-          {clock(Math.max(0, time - beepTime))}
+          {clock(beepElapsed(time, beepTime, stageTime))}
           <span className="text-muted">
             {" / "}
             {stageTime != null ? clock(stageTime) : "-"}

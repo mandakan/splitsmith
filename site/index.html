@@ -648,7 +648,7 @@ h1.title .accent {
    column) so it does not visually echo the IO grid that follows. */
 .ways-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 24px;
 }
 @media (max-width: 720px) {
@@ -1097,7 +1097,7 @@ footer.colophon {
   <section class="section" id="ways">
     <div class="section-head">
       <span class="index">02</span>
-      <h2>Two ways to use Splitsmith</h2>
+      <h2>Three ways to use Splitsmith</h2>
       <span class="spacer-line"></span>
     </div>
 
@@ -1130,6 +1130,22 @@ footer.colophon {
           <li>Navigate marker-to-marker on M / Shift+M</li>
         </ul>
         <p class="way-foot">More NLE formats coming</p>
+      </article>
+
+      <article class="way-card">
+        <p class="way-label">Path C · Send it out</p>
+        <h3>Share a link</h3>
+        <p class="way-body">
+          Every match gets a shareable results page. Send one link and your
+          squad watches each run with beep-aligned playback and a live
+          splits ticker. Phone-friendly, no account, no install.
+        </p>
+        <ul class="way-points">
+          <li>Read-only - viewers watch results, not your workflow</li>
+          <li>Beep-aligned playback with per-shot splits</li>
+          <li>Works in any mobile browser</li>
+        </ul>
+        <p class="way-foot">Links are revocable any time</p>
       </article>
     </div>
   </section>

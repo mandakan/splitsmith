@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/pypi/l/splitsmith.svg)](https://github.com/mandakan/splitsmith/blob/main/LICENSE)
 [![CI](https://img.shields.io/github/actions/workflow/status/mandakan/splitsmith/ci.yml?branch=main&label=ci)](https://github.com/mandakan/splitsmith/actions/workflows/ci.yml)
 
-Extract per-shot split times from head-mounted camera footage of IPSC matches and generate Final Cut Pro timelines with per-shot markers.
+Extract per-shot split times from head-mounted camera footage of IPSC matches and generate Final Cut Pro timelines with per-shot markers. Project site: [splitsmith.app](https://splitsmith.app).
 
 ![Splitsmith -- Detect. Coach. Cut.](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/hero.png)
 
@@ -25,6 +25,19 @@ Built to do two things from a single stage video: get per-shot splits for analys
 | ![export](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/export.png) | **Export.** Per-stage or whole-match FCPXML. Open in Final Cut Pro, M / Shift+M to navigate markers. |
 
 > Screenshots regenerate from a live `splitsmith ui` via `scripts/capture_screenshots.py`. See [Regenerating screenshots](#regenerating-screenshots) below.
+
+## Share your results
+
+Hosted matches get shareable results pages. Send one link and the
+recipient watches each run in a mobile browser - beep-aligned playback,
+a live splits ticker, and per-stage scorecards. Links are read-only and
+token-authorized: viewers see finished results, never your workflow, and
+you can revoke a link at any time from the Share dialog on the results
+page.
+
+<!-- Screenshot pending: capture_screenshots.py cannot mint a share
+token against a local project yet; add docs/screenshots/share.png once
+it can. -->
 
 ## Quickstart
 

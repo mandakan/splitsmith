@@ -6,7 +6,7 @@
  * mutations, no persistence - if a fetch 404s the link is gone (revoked,
  * expired, or never existed; the server keeps those indistinguishable).
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Outlet } from "react-router-dom";
 import { Link2Off, RotateCcw } from "lucide-react";
 
@@ -17,7 +17,61 @@ import {
   type ShooterListEntry,
 } from "@/lib/api";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
+import { BrandMark } from "@/components/ui/Brand";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
+
+const MARKETING_URL = "https://splitsmith.app";
+
+/** Branded page frame for every share render path (results, dead link,
+ *  load error): one thin non-sticky header + one footer line, both
+ *  linking to the marketing site. Non-sticky by design - it scrolls
+ *  away during playback and stays out of the --shell-header-h
+ *  sticky-player contract (the share surface never sets that var). */
+function ShareFrame({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex min-h-dvh flex-col bg-bg">
+      <header className="border-b border-rule bg-surface">
+        <div className="mx-auto flex w-full max-w-[1100px] items-center justify-between gap-3 px-4 py-2.5 md:px-7">
+          <a
+            href={MARKETING_URL}
+            target="_blank"
+            rel="noopener"
+            className="inline-flex items-center gap-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
+          >
+            <BrandMark className="size-5" />
+            <span className="font-display text-sm font-bold uppercase tracking-tight text-ink">
+              Splitsmith
+            </span>
+          </a>
+          <a
+            href={MARKETING_URL}
+            target="_blank"
+            rel="noopener"
+            className="rounded font-mono text-[0.625rem] uppercase tracking-[0.14em] text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
+          >
+            splitsmith.app
+          </a>
+        </div>
+      </header>
+      {/* flex column (not a plain block): the dead/error cards center
+          themselves with flex-1 + place-items-center, which needs a
+          flex parent - a percentage min-height would resolve to 0 here. */}
+      <div className="flex flex-1 flex-col">{children}</div>
+      <footer className="border-t border-rule">
+        <div className="mx-auto w-full max-w-[1100px] px-4 py-4 md:px-7">
+          <a
+            href={MARKETING_URL}
+            target="_blank"
+            rel="noopener"
+            className="rounded font-mono text-[0.625rem] uppercase tracking-[0.14em] text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
+          >
+            Made with Splitsmith - analyze your own matches
+          </a>
+        </div>
+      </footer>
+    </div>
+  );
+}
 
 export function ShareShell() {
   const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
@@ -67,8 +121,18 @@ export function ShareShell() {
     };
   }, [refreshKey]);
 
-  if (dead) return <ShareUnavailable />;
-  if (loadFailed) return <ShareLoadError onRetry={refresh} />;
+  if (dead)
+    return (
+      <ShareFrame>
+        <ShareUnavailable />
+      </ShareFrame>
+    );
+  if (loadFailed)
+    return (
+      <ShareFrame>
+        <ShareLoadError onRetry={refresh} />
+      </ShareFrame>
+    );
 
   const context: MatchShellOutletContext = {
     project,
@@ -78,9 +142,9 @@ export function ShareShell() {
     origin,
   };
   return (
-    <div className="min-h-dvh bg-bg">
+    <ShareFrame>
       <Outlet context={context} />
-    </div>
+    </ShareFrame>
   );
 }
 
@@ -89,7 +153,7 @@ export function ShareShell() {
  *  Distinct from ShareUnavailable - this one is retryable. */
 function ShareLoadError({ onRetry }: { onRetry: () => void }) {
   return (
-    <div className="grid min-h-dvh place-items-center bg-bg px-6 py-10">
+    <div className="grid flex-1 place-items-center px-6 py-10">
       <div className="flex max-w-sm flex-col items-center gap-4 text-center">
         <span className="font-mono text-[0.625rem] uppercase tracking-[0.14em] text-subtle">
           Share link
@@ -118,7 +182,7 @@ function ShareLoadError({ onRetry }: { onRetry: () => void }) {
  *  expired, or never valid. Instrument-panel aesthetic; no login CTA. */
 function ShareUnavailable() {
   return (
-    <div className="grid min-h-dvh place-items-center bg-bg px-6 py-10">
+    <div className="grid flex-1 place-items-center px-6 py-10">
       <div className="flex max-w-sm flex-col items-center gap-4 text-center">
         <Link2Off className="size-8 text-subtle" aria-hidden />
         <span className="font-mono text-[0.625rem] uppercase tracking-[0.14em] text-subtle">

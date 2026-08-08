@@ -123,6 +123,19 @@ export function currentShotIndex(
   return idx;
 }
 
+/** Beep-relative elapsed seconds for the playback readouts, clamped to
+ *  the stage time (the last shot's time_from_beep) so the clock stops
+ *  on the final shot the way a shot timer does - not at video end.
+ *  ``stageTime`` null (no shots) leaves the upper bound open. */
+export function beepElapsed(
+  time: number,
+  beepTime: number,
+  stageTime: number | null,
+): number {
+  const raw = Math.max(0, time - beepTime);
+  return stageTime != null ? Math.min(raw, stageTime) : raw;
+}
+
 export const INTERVAL_TONE: Record<CoachIntervalClass, string> = {
   first_shot: "text-led border-led-deep bg-led/10",
   split: "text-done border-done/40 bg-done/10",

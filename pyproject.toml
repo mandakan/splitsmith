@@ -1,6 +1,6 @@
 [project]
 name = "splitsmith"
-version = "0.16.0"
+version = "0.18.0"
 description = "Extract IPSC shot splits from head-mounted camera footage"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -299,7 +299,10 @@ testpaths = ["tests"]
 # ``addopts`` excludes ``docker`` by default -- the docker-compose
 # smoke pulls images + builds a container, which is a 30-60s setup
 # we don't want CI / dev runs to pay for. Opt in with
-# ``pytest -m docker`` when validating hosted-mode locally.
+# ``pytest -m docker`` when validating hosted-mode locally, and add
+# ``-n0`` when the run spans more than one docker-marked file: the
+# compose fixtures use fixed container names, so two xdist workers
+# building the stack concurrently collide and fail spuriously.
 #
 # ``-n auto`` runs the suite across every core. There is no hot spot to
 # delete -- the 25 slowest tests are 12% of the wall clock and the

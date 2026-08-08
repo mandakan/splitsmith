@@ -14,6 +14,7 @@ import {
   INTERVAL_LABEL,
   TIER_NEUTRAL_COLOR,
   type TierBaselines,
+  beepElapsed,
   currentShotIndex,
   gapTier,
 } from "@/lib/splits";
@@ -33,7 +34,8 @@ function pad2(n: number): string {
 export function ShotTicker({ shots, beepTime, time, baselines }: ShotTickerProps) {
   const idx = currentShotIndex(shots, time);
   const shot = idx >= 0 ? shots[idx] : null;
-  const elapsed = Math.max(0, time - beepTime);
+  const stageTime = shots.length > 0 ? shots[shots.length - 1].time_from_beep : null;
+  const elapsed = beepElapsed(time, beepTime, stageTime);
 
   // One motion moment: a short tint pulse on the split row when the
   // live shot changes. Skipped entirely under prefers-reduced-motion.

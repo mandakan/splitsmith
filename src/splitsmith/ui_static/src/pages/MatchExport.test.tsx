@@ -141,12 +141,15 @@ describe("MatchExport", () => {
     const stageThree = screen.getByRole("button", { name: /Stage Three/i });
 
     // The stage buttons mount as soon as ``project`` loads, with
-    // ``aria-pressed="false"`` -- the pre-select effect that flips
-    // eligible stages to "true" is a second, separate state update that
-    // fires after that render. Asserting via getByRole (no wait) is a
-    // race: on a loaded machine the effect's re-render can land after
-    // this line runs, not before. waitFor here waits for the actual
-    // condition instead of assuming it settled by coincidence.
+    // ``aria-pressed="false"``; the pre-select effect that flips eligible
+    // stages to "true" is a separate state update landing after that
+    // render. Asserting without a wait is a race (a real CI flake, #718).
+    //
+    // Both stages go inside the wait. They currently flip in the same
+    // state update, so waiting on stageOne alone happens to cover
+    // stageTwo -- but that is a coincidence of the current effect, not a
+    // guarantee, and the whole point here is not to assert on timing that
+    // holds by luck.
     await waitFor(() => {
       expect(stageOne).toHaveAttribute("aria-pressed", "true");
       expect(stageTwo).toHaveAttribute("aria-pressed", "true");

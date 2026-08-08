@@ -32,21 +32,33 @@ Cases:
      even when the abort call itself fails (a 500 from the abort route
      must not mask the original error). The happy path makes no abort
      call at all.
+  8. Phase timings (#631 Task 13): a real ``PhaseTimer`` passed as
+     ``timer=`` records the same four phases, in order, that
+     ``PushReport.timings`` reports internally.
+  9. ``PushReport``'s new fields default to empty/zero so pre-Task-13
+     callers that construct one directly (without the new kwargs) still
+     work.
+ 10. Concurrent part PUTs (#713): parts overlap in flight, ``complete``
+     receives them sorted by part_number with per-part etags, and a
+     multi-part failure still aborts exactly once.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import threading
+from collections.abc import Callable
 from pathlib import Path
 
 import httpx
 import pytest
 
 from splitsmith import match_model
+from splitsmith.observability import PhaseTimer
 from splitsmith.sync.client import HostedSyncClient, SyncClientError
 from splitsmith.sync.plan import DocItem, MediaItem, build_push_plan
-from splitsmith.sync.push import PushReport, run_push
+from splitsmith.sync.push import MediaItemTiming, PushReport, run_push
 from splitsmith.sync.state import SyncState, load_sync_state
 from splitsmith.ui.project import MatchProject, StageEntry
 
@@ -105,14 +117,19 @@ class _FakeHosted:
         self.calls: list[str] = []
         self.doc_puts: list[tuple[str, dict]] = []
         self.aborts: list[tuple[str, str]] = []  # (key, upload_id)
+        self.completes: list[tuple[str, list[dict]]] = []  # (key, parts)
         self.match_status = 200
         self.fail_keys: set[str] = set()  # remote keys whose part PUT 500s
         self.abort_status = 200
+        #: Optional (key, part_number) callback invoked inside each part
+        #: PUT handler, before the response is built - lets a test block
+        #: one part until another is in flight to prove concurrency (#713).
+        self.media_put_hook: Callable[[str, str], None] | None = None
         self._upload_counter = 0
 
     def clients(self) -> HostedSyncClient:
         http = httpx.Client(
-            base_url="https://hosted.example/api/sync",
+            base_url="https://hosted.example",
             headers={"Authorization": "Bearer test-token"},
             transport=httpx.MockTransport(self._http_handler),
         )
@@ -150,6 +167,7 @@ class _FakeHosted:
 
         if method == "POST" and path.endswith("/media/complete"):
             self.calls.append(f"media_complete:{body['key']}")
+            self.completes.append((body["key"], body["parts"]))
             return httpx.Response(200, json={"size": 0})
 
         if method == "POST" and path.endswith("/media/abort"):
@@ -168,10 +186,13 @@ class _FakeHosted:
 
     def _media_handler(self, request: httpx.Request) -> httpx.Response:
         key = request.url.path.lstrip("/")
+        part = request.url.params.get("part", "")
         self.calls.append(f"media_put:{key}")
+        if self.media_put_hook is not None:
+            self.media_put_hook(key, part)
         if key in self.fail_keys:
             return httpx.Response(500, text="upload failed")
-        return httpx.Response(200, headers={"ETag": f'"etag-{key}"'})
+        return httpx.Response(200, headers={"ETag": f'"etag-{key}-{part}"'})
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +206,27 @@ def test_happy_path_pushes_media_before_docs_and_reports_correctly(tmp_path: Pat
 
     report = run_push(root, client=fake.clients())
 
-    assert report == PushReport(uploaded=2, skipped=0, docs=3)
+    assert report.uploaded == 2
+    assert report.skipped == 0
+    assert report.docs == 3
+
+    # New instrumentation fields (#631 Task 13): the four phases always
+    # run on a successful push, bytes_uploaded is the sum of the two
+    # uploaded items' sizes, and media_items lists exactly those two
+    # items (skipped items - none here - are excluded).
+    assert set(report.timings) == {"plan", "ensure_match", "media", "docs"}
+    for seconds in report.timings.values():
+        assert seconds >= 0
+    trimmed_dir = root / "shooters" / "alice" / "trimmed"
+    expected_bytes = (trimmed_dir / TRIMMED_NAME).stat().st_size + (trimmed_dir / SIDECAR_NAME).stat().st_size
+    assert report.bytes_uploaded == expected_bytes
+    assert {mi.remote_key for mi in report.media_items} == {
+        f"matches/{match_id}/shooters/alice/trimmed/{TRIMMED_NAME}",
+        f"matches/{match_id}/shooters/alice/trimmed/{SIDECAR_NAME}",
+    }
+    assert sum(mi.bytes for mi in report.media_items) == expected_bytes
+    for mi in report.media_items:
+        assert mi.seconds >= 0
 
     media_indices = [
         i
@@ -230,10 +271,18 @@ def test_second_run_with_nothing_touched_uploads_zero_media(tmp_path: Path) -> N
     fake2 = _FakeHosted()
     report2 = run_push(root, client=fake2.clients())
 
-    assert report2 == PushReport(uploaded=0, skipped=2, docs=3)
+    assert report2.uploaded == 0
+    assert report2.skipped == 2
+    assert report2.docs == 3
     assert not any(c.startswith("media_") for c in fake2.calls)
     assert fake2.calls[0] == "ensure_match"
     assert sum(c.startswith("doc_put") for c in fake2.calls) == 3
+
+    # A skipped run uploads nothing: media_items is empty and
+    # bytes_uploaded is 0, even though the phases still ran.
+    assert report2.media_items == []
+    assert report2.bytes_uploaded == 0
+    assert set(report2.timings) == {"plan", "ensure_match", "media", "docs"}
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +317,10 @@ def test_mid_push_part_failure_leaves_prior_items_recorded_and_rerun_only_retrie
     fake2 = _FakeHosted()
     report2 = run_push(root, client=fake2.clients())
 
-    assert report2 == PushReport(uploaded=1, skipped=1, docs=3)
+    assert report2.uploaded == 1
+    assert report2.skipped == 1
+    assert report2.docs == 3
+    assert [mi.remote_key for mi in report2.media_items] == [sidecar_key]
     media_create_calls = [c for c in fake2.calls if c.startswith("media_create")]
     assert media_create_calls == [f"media_create:{sidecar_key}"]
 
@@ -352,15 +404,61 @@ def test_upload_media_chunks_across_multiple_parts_and_returns_correct_sha256(tm
     sha256 = client.upload_media("m1", item, progress=progress_calls.append)
 
     assert sha256 == hashlib.sha256(data).hexdigest()
-    assert progress_calls == [1000, 1000, 560]
+    # Parts upload concurrently (#713), so per-part progress and part-url
+    # ordering are nondeterministic; the totals and the set of parts are not.
+    assert sorted(progress_calls) == [560, 1000, 1000]
     part_url_calls = [c for c in fake.calls if c.startswith("media_part_url")]
-    assert part_url_calls == [
+    assert sorted(part_url_calls) == [
         f"media_part_url:{item.remote_key}:1",
         f"media_part_url:{item.remote_key}:2",
         f"media_part_url:{item.remote_key}:3",
     ]
     put_calls = [c for c in fake.calls if c.startswith("media_put")]
     assert put_calls == [f"media_put:{item.remote_key}"] * 3
+
+
+def test_parts_upload_concurrently_and_complete_stays_ordered(tmp_path: Path) -> None:
+    """Part PUTs overlap in flight (#713) and ``complete`` still receives
+    parts sorted by part_number with each part's own etag.
+
+    Part 1's PUT handler blocks until part 2's has run: a sequential
+    uploader deadlocks there (surfacing as the 10s timeout error below),
+    a concurrent one sails through - and completes part 2 before part 1,
+    proving the sort before ``complete`` is load-bearing.
+    """
+    data = bytes(range(256)) * 10  # 2560 bytes
+    local_path = tmp_path / "clip.mp4"
+    local_path.write_bytes(data)
+
+    fake = _FakeHosted(part_size=1000)  # 3 parts: 1000, 1000, 560
+    part2_done = threading.Event()
+
+    def hook(key: str, part: str) -> None:
+        if part == "2":
+            part2_done.set()
+        if part == "1" and not part2_done.wait(timeout=10):
+            raise AssertionError("part 2 never started while part 1 was in flight - uploads are sequential")
+
+    fake.media_put_hook = hook
+    client = fake.clients()
+
+    item = MediaItem(
+        local_path=local_path,
+        remote_key="matches/m1/shooters/alice/trimmed/clip.mp4",
+        size=len(data),
+        mtime_ns=0,
+    )
+    sha256 = client.upload_media("m1", item)
+
+    assert sha256 == hashlib.sha256(data).hexdigest()
+    assert len(fake.completes) == 1
+    key, parts = fake.completes[0]
+    assert key == item.remote_key
+    assert parts == [
+        {"part_number": 1, "etag": f'"etag-{item.remote_key}-1"'},
+        {"part_number": 2, "etag": f'"etag-{item.remote_key}-2"'},
+        {"part_number": 3, "etag": f'"etag-{item.remote_key}-3"'},
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -387,6 +485,27 @@ def test_part_put_failure_triggers_one_abort_with_matching_key_and_upload_id(tmp
     assert fake.aborts == [(remote_key, "upload-1")]
 
 
+def test_multipart_failure_under_concurrency_still_aborts_exactly_once(tmp_path: Path) -> None:
+    """Several concurrent part PUTs failing at once (#713) must produce one
+    propagated error and exactly one abort call, not one abort per part."""
+    data = b"x" * 2560
+    local_path = tmp_path / "clip.mp4"
+    local_path.write_bytes(data)
+    remote_key = "matches/m1/shooters/alice/trimmed/clip.mp4"
+
+    fake = _FakeHosted(part_size=1000)  # 3 parts, every PUT 500s
+    fake.fail_keys = {remote_key}
+    client = fake.clients()
+
+    item = MediaItem(local_path=local_path, remote_key=remote_key, size=len(data), mtime_ns=0)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        client.upload_media("m1", item)
+
+    assert fake.aborts == [(remote_key, "upload-1")]
+    assert not any(c.startswith("media_complete") for c in fake.calls)
+
+
 def test_abort_failing_does_not_mask_the_original_part_put_error(tmp_path: Path) -> None:
     local_path = tmp_path / "clip.mp4"
     local_path.write_bytes(b"x" * 1024)
@@ -407,6 +526,61 @@ def test_abort_failing_does_not_mask_the_original_part_put_error(tmp_path: Path)
     # on the abort response, so a broken abort route can't surface here.
     assert exc_info.value.request.url.path == f"/{remote_key}"
     assert fake.aborts == [(remote_key, "upload-1")]
+
+
+# ---------------------------------------------------------------------------
+# Case 8: phase timings mirror onto a caller-provided PhaseTimer
+# ---------------------------------------------------------------------------
+
+
+def test_provided_timer_records_the_four_phases_in_order(tmp_path: Path) -> None:
+    root, _match_id = _build_match(tmp_path)
+    fake = _FakeHosted()
+    timer = PhaseTimer()
+
+    report = run_push(root, client=fake.clients(), timer=timer)
+
+    built = timer.build()
+    assert [phase["name"] for phase in built["phases"]] == ["plan", "ensure_match", "media", "docs"]
+    for phase in built["phases"]:
+        assert phase["ms"] >= 0
+    # The internal accounting (always populated, regardless of ``timer``)
+    # reports the same four phase names.
+    assert set(report.timings) == {"plan", "ensure_match", "media", "docs"}
+
+
+def test_no_timer_still_populates_internal_timings(tmp_path: Path) -> None:
+    root, _match_id = _build_match(tmp_path)
+    fake = _FakeHosted()
+
+    report = run_push(root, client=fake.clients())
+
+    assert set(report.timings) == {"plan", "ensure_match", "media", "docs"}
+    for seconds in report.timings.values():
+        assert seconds >= 0
+
+
+# ---------------------------------------------------------------------------
+# Case 9: PushReport's new fields default to empty/zero
+# ---------------------------------------------------------------------------
+
+
+def test_push_report_new_fields_default_empty() -> None:
+    report = PushReport(uploaded=0, skipped=0, docs=0)
+    assert report.timings == {}
+    assert report.bytes_uploaded == 0
+    assert report.media_items == []
+    # Defaults are per-instance, not a shared mutable object (the
+    # pydantic default_factory footgun this guards against).
+    report.timings["x"] = 1.0
+    assert PushReport(uploaded=0, skipped=0, docs=0).timings == {}
+
+
+def test_media_item_timing_round_trips_fields() -> None:
+    item = MediaItemTiming(remote_key="matches/m1/shooters/alice/trimmed/clip.mp4", bytes=1024, seconds=0.5)
+    assert item.remote_key == "matches/m1/shooters/alice/trimmed/clip.mp4"
+    assert item.bytes == 1024
+    assert item.seconds == 0.5
 
 
 # ---------------------------------------------------------------------------

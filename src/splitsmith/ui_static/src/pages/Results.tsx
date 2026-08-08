@@ -9,7 +9,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router-dom";
-import { Loader2, RefreshCw, Share2 } from "lucide-react";
+import { Loader2, Play, RefreshCw, Share2 } from "lucide-react";
 
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { Kicker } from "@/components/ui";
@@ -47,6 +47,21 @@ function StatusChip({ tone, status }: { tone: string; status: StageStatus }) {
       )}
     >
       {statusLabel(status)}
+    </span>
+  );
+}
+
+/** Row-trailing play affordance for audited (watchable) rows. Muted at
+ *  rest, LED on the row's hover/focus (the row Link carries `group`).
+ *  aria-hidden - the row's sr-only ", watch run" suffix names the action
+ *  so the icon is never the sole cue. */
+function PlayAffordance() {
+  return (
+    <span
+      aria-hidden
+      className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-rule text-muted transition-colors group-hover:border-led group-hover:text-led group-focus-visible:border-led group-focus-visible:text-led"
+    >
+      <Play className="size-3.5 fill-current" />
     </span>
   );
 }
@@ -101,6 +116,7 @@ export function Results() {
   // in after the first fetch settles - the same behavior as other hosted-only chrome.
   const deploymentMode = useDeploymentMode();
   const shareToken = useParams<{ token?: string }>().token;
+  const isShare = Boolean(shareToken);
   const canShare = deploymentMode === "hosted" && !shareToken;
   const [showShare, setShowShare] = useState(false);
 
@@ -321,7 +337,9 @@ export function Results() {
             <span className="font-bold text-ink-2">{totals.auditedShooterStages}</span>
             {" / "}
             <span>{totals.totalShooterStages}</span>
-            {" audited"}
+            {/* Share viewers count what there is to watch, not audit
+                workflow progress - a row is watchable iff audited. */}
+            {isShare ? " videos" : " audited"}
           </span>
         </div>
       </header>
@@ -362,7 +380,7 @@ export function Results() {
                       <Link
                         key={cell.shooter.slug}
                         to={href("results", cell.shooter.slug, String(row.stageNumber))}
-                        className="flex min-h-11 items-center gap-3 px-4 py-2 hover:bg-surface-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led focus-visible:ring-inset"
+                        className="group flex min-h-11 items-center gap-3 px-4 py-2 hover:bg-surface-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led focus-visible:ring-inset"
                       >
                         {!isSingleShooter && (
                           <span className="flex-1 truncate font-display text-sm font-semibold uppercase tracking-tight text-ink">
@@ -384,8 +402,34 @@ export function Results() {
                             </span>
                           ) : null}
                         </span>
-                        <StatusChip tone={cell.tone} status={cell.status} />
+                        <span className="sr-only">, watch run</span>
+                        <PlayAffordance />
                       </Link>
+                    );
+                  }
+                  // Share viewers get no workflow states - any row
+                  // without a watchable run reads "No video", including
+                  // skipped (the skip decision is operator context).
+                  if (isShare) {
+                    return (
+                      <div
+                        key={cell.shooter.slug}
+                        className="flex min-h-11 items-center gap-3 px-4 py-2"
+                      >
+                        {!isSingleShooter && (
+                          <span className="flex-1 truncate font-display text-sm font-semibold uppercase tracking-tight text-subtle">
+                            {cell.shooter.name}
+                          </span>
+                        )}
+                        <span
+                          className={cn(
+                            "font-mono text-xs uppercase tracking-[0.08em] text-subtle",
+                            isSingleShooter && "flex-1",
+                          )}
+                        >
+                          No video
+                        </span>
+                      </div>
                     );
                   }
                   // Skipped rows carry their state in the chip alone - a
@@ -482,7 +526,7 @@ export function Results() {
                       <Link
                         key={cell.shooter.slug}
                         to={href("results", cell.shooter.slug, String(row.stageNumber))}
-                        className="flex min-h-11 items-center justify-between gap-2 bg-surface-2 px-3 py-2 hover:bg-surface-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led focus-visible:ring-inset"
+                        className="group flex min-h-11 items-center justify-between gap-2 bg-surface-2 px-3 py-2 hover:bg-surface-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led focus-visible:ring-inset"
                       >
                         <span className="flex flex-col leading-tight">
                           <span className="font-mono text-sm tabular-nums text-ink-2">
@@ -494,8 +538,23 @@ export function Results() {
                             </span>
                           ) : null}
                         </span>
-                        <StatusChip tone={cell.tone} status={cell.status} />
+                        <span className="sr-only">, watch run</span>
+                        <PlayAffordance />
                       </Link>
+                    );
+                  }
+                  // Share viewers: no workflow states (see the mobile
+                  // rows note), skipped included.
+                  if (isShare) {
+                    return (
+                      <div
+                        key={cell.shooter.slug}
+                        className="flex min-h-11 items-center justify-end gap-2 bg-surface-2 px-3 py-2"
+                      >
+                        <span className="font-mono text-xs uppercase tracking-[0.08em] text-subtle">
+                          No video
+                        </span>
+                      </div>
                     );
                   }
                   // Skipped cells: chip only (see the mobile rows note).

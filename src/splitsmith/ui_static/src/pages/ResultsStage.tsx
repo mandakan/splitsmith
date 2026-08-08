@@ -9,9 +9,9 @@
  * Read-only by contract: this surface is the future share-link view -
  * no mutations, no localStorage, no operator-only assumptions.
  */
-import { ArrowLeft, ArrowRight, Loader2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronLeft, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useOutletContext, useParams } from "react-router-dom";
+import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
 
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { ResultsPlayer, type FullscreenMode } from "@/components/results/ResultsPlayer";
@@ -58,6 +58,7 @@ export function ResultsStage() {
 function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const { shooters } = useOutletContext<MatchShellOutletContext>();
   const href = useMatchHref();
+  const navigate = useNavigate();
   const [coach, setCoach] = useState<CoachStageResponse | null>(null);
   const [baselines, setBaselines] = useState<TierBaselines | null>(null);
   const [scorecard, setScorecard] = useState<StageScorecard | null>(null);
@@ -219,14 +220,57 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const header = (
     <div className="flex items-center gap-3">
       <div className="min-w-0 flex-1">
+        {/* The only route back to the overview on the bare share
+            surface; on the owner surface it complements the shell nav.
+            href round-trips the /share/:token prefix. */}
+        <Link
+          to={href("results")}
+          className="mb-1 inline-flex items-center gap-0.5 font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
+        >
+          <ChevronLeft className="size-3.5" aria-hidden />
+          All stages
+        </Link>
         <h1 className="truncate font-display text-xl font-bold uppercase leading-tight tracking-tight text-ink md:text-2xl">
           <span className="text-led">Stage {pad2(stage)}</span>
-          {coach.stage_name ? <span className="text-ink"> - {coach.stage_name}</span> : null}
+          {coach?.stage_name ? <span className="text-ink"> - {coach.stage_name}</span> : null}
         </h1>
         {shooter ? (
-          <p className="truncate font-mono text-xs uppercase tracking-[0.08em] text-muted">
-            {shooter.name}
-          </p>
+          shooters.length > 1 ? (
+            // Minimal shooter switcher: the name line itself is a
+            // native select (OS picker on mobile), one caret of added
+            // chrome. Shooters without an audited take of this stage
+            // are disabled - the same contract the overview links use.
+            <span className="relative inline-flex max-w-full items-center">
+              <select
+                value={slug}
+                onChange={(e) => navigate(href("results", e.target.value, String(stage)))}
+                aria-label="Shooter"
+                className="cursor-pointer appearance-none truncate bg-transparent pr-4 font-mono text-xs uppercase tracking-[0.08em] text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
+              >
+                {shooters.map((s) => (
+                  <option
+                    key={s.slug}
+                    value={s.slug}
+                    disabled={
+                      !s.stage_statuses.some(
+                        (e) => e.stage_number === stage && e.status === "audited",
+                      )
+                    }
+                  >
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                aria-hidden
+                className="pointer-events-none absolute right-0 size-3 text-subtle"
+              />
+            </span>
+          ) : (
+            <p className="truncate font-mono text-xs uppercase tracking-[0.08em] text-muted">
+              {shooter.name}
+            </p>
+          )
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
