@@ -624,6 +624,12 @@ class DesktopTokenRow(Base):
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
     token_hash: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    # Device-flow scoping (#719). ``'full'`` is the legacy pasted token
+    # that resolves to an unrestricted User; ``'sync'`` is the scoped
+    # credential the device flow (and, from #719 on, the account page's
+    # manual button) mints. The server-side default is 'full' so rows
+    # that predate this column -- and only those -- read as legacy.
+    scope: Mapped[str] = mapped_column(String, nullable=False, server_default="full", default="full")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -636,4 +642,58 @@ class DesktopTokenRow(Base):
         return (
             f"<DesktopTokenRow id={self.id!r} user_id={self.user_id!r} "
             f"name={self.name!r} revoked={self.revoked_at is not None}>"
+        )
+
+
+class DeviceAuthorizationRow(Base):
+    """One in-flight browser-assisted device authorization (#719).
+
+    The desktop install POSTs to ``/api/device/authorize`` and gets back a
+    ``device_code`` (32 bytes, stored only as a SHA-256 hash -- the real
+    secret) plus a ``user_code`` (8 characters, low entropy on purpose:
+    only usable by a caller who already holds a session and who then has
+    to approve, and it dies in 10 minutes).
+
+    Not under RLS, same rationale as ``DesktopTokenRow`` and
+    ``ShareTokenRow``: the polling request authenticates from the device
+    code alone, before any ``app.user_id`` GUC exists. An RLS'd table
+    would make the resolution query return zero rows and break the flow
+    outright.
+
+    ``status`` walks pending -> approved|denied -> consumed. Approving
+    records the approver and nothing else; the token is minted by the
+    first poll that wins the conditional approved -> consumed update, so
+    no plaintext credential is ever stored at rest and two concurrent
+    polls cannot mint two tokens.
+
+    ``last_polled_at`` backs the per-device_code interval throttle that
+    produces the ``slow_down`` poll verdict.
+    """
+
+    __tablename__ = "device_authorizations"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
+    device_code_hash: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    user_code: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    device_name: Mapped[str] = mapped_column(String, nullable=False)
+    scope: Mapped[str] = mapped_column(String, nullable=False, server_default="sync", default="sync")
+    status: Mapped[str] = mapped_column(String, nullable=False, server_default="pending", default="pending")
+    user_id: Mapped[str | None] = mapped_column(
+        String,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_polled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"<DeviceAuthorizationRow id={self.id!r} user_code={self.user_code!r} "
+            f"status={self.status!r} device_name={self.device_name!r}>"
         )
