@@ -38,11 +38,15 @@ is finished.
    the tail pad when a hold is set -- moves `duration_seconds`, which
    every audio track length, the sprite sequence and the freeze
    extraction key off, for half a second of pacing.
-4. Active only when `plan.hold_seconds > 0`. This is the same condition
-   under which the summary still is composed today
-   (`render_grid_mp4`'s `if plan.hold_seconds > 0:` around
-   `_stage_hold_still`). An `--overlay` render with no `--summary-hold`
-   comes out byte-identical to what ships now, including its argv.
+4. Active only when `plan.hold_seconds > 0` **and** the stage carries an
+   overlay plan. The first half is the condition under which the summary
+   still is composed today (`render_grid_mp4`'s `if plan.hold_seconds >
+   0:` around `_stage_hold_still`). The second is not a convenience:
+   `render_grid_mp4` refuses a hold without an overlay outright, so
+   hold-without-overlay is a shape `build_stage_command` accepts but no
+   render ever produces -- it has no integration coverage and must not
+   grow behaviour. An `--overlay` render with no `--summary-hold` comes
+   out byte-identical to what ships now, including its argv.
 
 ## Why cropping the existing still is exact
 
@@ -110,8 +114,8 @@ explicit `trim` restates the length the input's `-t` already set, so the
 segment's video extent never depends on how `-loop 1` and `concat`'s eof
 handling interact"). The cost is decoding one looped PNG twice.
 
-Added under the same condition as the hold input, so `hold_index` keeps
-its position and only a new `early_index` follows it.
+Added when the hold input is added *and* an overlay plan is present, so
+`hold_index` keeps its position and only a new `early_index` follows it.
 
 **Filters.** One `split` into one branch per present tile, then per
 tile a crop and an enabled overlay, chained:
@@ -191,9 +195,9 @@ Unit, against the built argv and filter graph:
   `test_no_hold_writes_no_still_and_changes_no_command` cover this and
   must pass **unedited**. If either needs a change, the gating is wrong.
 
-Two existing tests in `tests/test_compare_mp4_grid_hold.py` do have to be
-extended, because they assert the shape of the input list's tail and a
-second `-loop` input now follows the hold's:
+Three existing tests in `tests/test_compare_mp4_grid_hold.py` do have to
+be extended -- exactly the three that pass **both** a hold and an
+overlay, which is what the gating above predicts:
 
 - `test_hold_still_input_is_appended_after_the_sprite_input` -- the
   sprite is at `inputs[-3]` now, with the hold still at `-2` and the
@@ -202,25 +206,72 @@ second `-loop` input now follows the hold's:
   in the middle renumbers streams behind it and lands one shooter's
   audio in another's track. The new assertions state the same thing
   about the new input.
-- `test_the_still_input_is_looped_for_exactly_the_hold_duration` --
-  it slices from the first `-loop` to `-filter_complex`, which now spans
-  both inputs. Split into two assertions: the hold input is looped for
-  `hold_seconds` exactly as before, and the early input for
-  `duration_seconds`.
+- `test_the_sprite_overlay_does_not_reach_the_hold` -- asserts the
+  `concat`'s first input is `[ovlgrid]` or `[ovltext]`. It is now the
+  last early-summary label. The claim being kept is that the sprite is
+  composited inside the half that ends at the freeze, so the assertion
+  becomes "the join's first input is whatever the action chain ends on,
+  and the sprite chain precedes it".
+- `test_the_hold_does_not_touch_the_clock_windows` -- it collects every
+  comma-separated part containing `drawtext=` **or** `enable=`, and the
+  early overlays carry an `enable=`. Narrow the predicate to
+  `drawtext=`; the surrounding `graph.count("lt(t\\,") == 1` assertion
+  already covers the claim that nothing else introduces an upper bound.
 
-Neither may be weakened into "some input mentions the still".
+None may be weakened into "some input mentions the still" or "some
+filter has an enable".
 
-Integration, reading actual frames rather than the graph:
+The remaining hold tests pass unedited, including
+`test_the_still_input_is_looped_for_exactly_the_hold_duration`,
+`test_hold_is_concatenated_after_the_action_not_composited_over_it` and
+`test_the_hold_does_not_move_the_beep` -- all three build their command
+without an overlay.
 
-- Render two tiles of visibly different length with a hold. Crop the
-  short tile's cell region from a frame sampled inside its gap, and the
-  same region from a frame sampled during the hold. Assert the two are
-  near-identical, and that neither is uniformly black.
+Integration, reading actual frames rather than the graph. The fixture
+already has what this needs: `tests/compare_fixture.py` gives Mathias a
+deliberately shorter clip so his cell is black for the last stretch of
+every action, and exports `SHORT_FOOTAGE_ENDS` as the segment time where
+it runs out.
 
-That last assertion is the one that matters: it fails against
-pre-change code (black vs summary), which is the only proof the fixture
-can express the defect. Per the #683 lesson, the test gets run against
-the unpatched code before the change is called done.
+**Two existing assertions in
+`test_the_summary_hold_reaches_the_rendered_pixels` assert the behaviour
+being removed, and both must be inverted rather than deleted:**
+
+- `SHORT_TILE_MIN_BLACK_FRACTION` -- "Mathias's cell at `PICTURE_INDEX`
+  ... measured 0.804 black". After the change his cell shows his summary
+  there. The inverted form is the new instrument: that cell now matches
+  the same cell of the still the render composed.
+- `TAIL_PAD_MIN_BLACK_FRACTION` -- "the last action frame is inside the
+  tail pad and therefore black on every tile". With the tail pad kept
+  (decision 3), every present tile is showing its summary by then. The
+  inverted form is stronger: the whole last action frame now matches the
+  composed still, which is the same measure the in-hold check already
+  uses.
+
+Also moved rather than dropped: the clock check at the last action frame
+compares a shooter's clock corner against Bea's *in the same frame*, and
+that frame is now summary on every tile. It samples a frame where both
+clocked tiles still have live footage instead.
+
+New assertions:
+
+- At `PICTURE_INDEX`, the short tile's cell matches its cell of the
+  composed still, and is not black.
+- At the last action frame, the whole canvas matches the composed still.
+- **At a frame a few before the short tile's arm time, that same cell is
+  still live footage** -- i.e. far from the still. Without this, an
+  `enable` expression that is simply always true passes every other
+  check here.
+- The unreached cell is still black at `PICTURE_INDEX`.
+
+Thresholds are measured against this fixture and pinned with the
+measurement in the comment, matching the module's existing convention --
+not guessed.
+
+Every new or inverted assertion is run against the unpatched renderer
+before the change is called done. Per the #683 lesson, a fixture that
+cannot express the defect is the failure mode to guard against, and
+here the old constants are proof the fixture can.
 
 ## Out of scope
 
