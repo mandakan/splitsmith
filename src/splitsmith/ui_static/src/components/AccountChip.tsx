@@ -46,6 +46,7 @@ export function AccountChip({ className }: { className?: string }) {
 
   return (
     <div
+      data-testid="account-chip"
       className={`inline-flex items-center gap-2 rounded-full border border-rule bg-surface-2 py-1 pl-3 pr-1 ${className ?? ""}`}
     >
       <span

@@ -6,11 +6,12 @@ import {
   Repeat,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { JobsSurface } from "@/components/Jobs";
+import { useShellContextSlot } from "@/components/layout/shellChromeContext";
 import { useJobs } from "@/lib/jobs";
-import { ModeSwitch } from "@/components/ui/ModeSwitch";
 import { api, type ServerHealth } from "@/lib/api";
 import { useMode } from "@/lib/mode";
 import { cn } from "@/lib/utils";
@@ -24,6 +25,13 @@ export function AppShell() {
   // JobsSurface no longer self-hosts its poller (#663); each shell
   // owns one jobs state and hands it down.
   const jobsState = useJobs();
+  // RootLayout's header slot -- AppShell portals its context row (the
+  // project switcher, or the fixture-mode label; see contextRow below)
+  // there instead of rendering its own <header> (#550). It does not call
+  // useShellAccent (the "led" default is right here) or
+  // useShellOwnsMobileAccount (no nav drawer; the global bar's account
+  // chip is the only one on a phone too).
+  const slot = useShellContextSlot();
   // AppShell hosts the fixture editor + design system. Either one is
   // mode-agnostic, but flipping to Developer should take the user to
   // the dev workspace rather than leaving them on a hidden-sidebar page
@@ -39,13 +47,7 @@ export function AppShell() {
   // 404 against the throwaway tmp project ``splitsmith review`` boots.
   // Hide the sidebar entirely so the screen reads as a single-purpose
   // tool instead of "audit screen with broken navigation".
-  const fixtureMode = pathname.startsWith("/review");
-  // /admin/* surfaces (worker fleet, etc.) are project-agnostic: they
-  // manage server-wide state, not a bound project. In hosted mode the
-  // server boots unbound, so they must be exempt from the bind guard
-  // below or they flash and bounce to /pick. Unlike fixtureMode we keep
-  // the sidebar so the admin can navigate back out.
-  const bindExempt = fixtureMode || pathname.startsWith("/admin");
+  const bindExempt = pathname.startsWith("/review");
 
   // Sidebar collapse state. Persisted in localStorage so the user's
   // choice survives page reloads. Pages that benefit from the extra
@@ -101,32 +103,45 @@ export function AppShell() {
     return <Navigate to="/pick" replace />;
   }
 
+  // See the ``slot`` declaration above for what this portals into.
+  const contextRow = (
+    <div className="flex h-14 items-center border-t border-rule bg-bg px-7">
+      {bindExempt ? (
+        <div className="flex items-center gap-2 text-sm font-semibold tracking-tight">
+          <Crosshair className="size-4 text-led" />
+          splitsmith review
+        </div>
+      ) : (
+        <ProjectHeader health={health} />
+      )}
+    </div>
+  );
+
   return (
-    <div className="flex min-h-screen bg-bg text-ink">
-      {fixtureMode ? null : (
+    <div className="flex min-h-[calc(100dvh-var(--shell-header-h,86px))] bg-bg text-ink">
+      {bindExempt ? null : (
         <aside
           className={cn(
             "flex flex-col border-r border-rule bg-surface transition-[width] duration-150",
             sidebarCollapsed ? "w-14" : "w-60",
           )}
         >
+          {/* Collapse toggle row. The brand mark used to live here too, but
+              RootLayout's GlobalBar now spans full width above the sidebar
+              and already renders it once (#550 review finding 2) -- a
+              second crosshair + wordmark here just duplicated it. */}
           <div
             className={cn(
-              "flex h-14 items-center gap-2 px-3 font-semibold tracking-tight",
-              sidebarCollapsed && "justify-center px-2",
+              "flex h-14 items-center px-3",
+              sidebarCollapsed ? "justify-center px-2" : "justify-end",
             )}
           >
-            <Crosshair className="size-5 shrink-0 text-led" />
-            {sidebarCollapsed ? null : <span>splitsmith</span>}
             <button
               type="button"
               onClick={toggleSidebar}
               title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className={cn(
-                "ml-auto inline-flex size-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-3 hover:text-ink",
-                sidebarCollapsed && "ml-0",
-              )}
+              className="inline-flex size-7 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-3 hover:text-ink"
             >
               {sidebarCollapsed ? (
                 <PanelLeftOpen className="size-4" aria-hidden />
@@ -135,12 +150,11 @@ export function AppShell() {
               )}
             </button>
           </div>
-          {/* AppShell only renders the legacy single-purpose surfaces
-              (fixture editor, design system). Those screens self-shell;
-              the cross-surface nav lives on MatchShell / DeveloperShell,
-              and the global admin link lives in AccountChip so it shows
-              on the shell-less picker too. This region is just the flex
-              spacer that pushes the footer down. */}
+          {/* AppShell now holds only the fixture editor and the design
+              system -- every other surface has its own shell
+              (MatchShell / DeveloperShell) with its own cross-surface
+              nav. This region is just the flex spacer that pushes the
+              footer down. */}
           <div className="flex-1" />
 
           <div className="border-t border-rule p-2">
@@ -175,19 +189,7 @@ export function AppShell() {
           this column would let the flex item grow to fit, defeating
           the waveform's own overflow-x-auto and breaking zoom. */}
       <div className="flex min-w-0 flex-1 flex-col overflow-x-hidden">
-        <header className="flex h-14 items-center justify-between border-b border-rule px-6">
-          {fixtureMode ? (
-            <div className="flex items-center gap-2 text-sm font-semibold tracking-tight">
-              <Crosshair className="size-4 text-led" />
-              splitsmith review
-            </div>
-          ) : (
-            <ProjectHeader health={health} />
-          )}
-          <div className="flex items-center gap-2">
-            <ModeSwitch size="sm" />
-          </div>
-        </header>
+        {slot ? createPortal(contextRow, slot) : null}
         <main className="min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-6 py-6">
           <Outlet />
         </main>
