@@ -34,8 +34,11 @@ export function useWindowFileDrag(enabled: boolean): boolean {
       depth.current += 1;
       setActive(true);
     };
-    const onLeave = (e: DragEvent) => {
-      if (!dragHasFiles(e)) return;
+    const onLeave = (_e: DragEvent) => {
+      // Decrement unconditionally - browsers (Safari, Firefox) may clear
+      // dataTransfer.types on dragleave, so the enter-side gate is the only
+      // file-filter that matters. Without unconditional decrement, depth sticks
+      // above zero if a drag exits the window without drop/dragend firing.
       depth.current = Math.max(0, depth.current - 1);
       if (depth.current === 0) setActive(false);
     };
@@ -87,8 +90,11 @@ export function useElementFileDrag(): {
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
   }, []);
-  const onDragLeave = useCallback((e: React.DragEvent) => {
-    if (!dragHasFiles(e)) return;
+  const onDragLeave = useCallback((_e: React.DragEvent) => {
+    // Decrement unconditionally - browsers (Safari, Firefox) may clear
+    // dataTransfer.types on dragleave, so the enter-side gate is the only
+    // file-filter that matters. Without unconditional decrement, depth sticks
+    // above zero if a drag exits the window without drop/dragend firing.
     depth.current = Math.max(0, depth.current - 1);
     if (depth.current === 0) setDragging(false);
   }, []);

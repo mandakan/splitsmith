@@ -57,6 +57,19 @@ describe("useWindowFileDrag", () => {
     });
     expect(off.result.current).toBe(false);
   });
+
+  it("recovers when dragleave has no Files in dataTransfer.types", () => {
+    const { result } = renderHook(() => useWindowFileDrag(true));
+    act(() => {
+      fireEvent.dragEnter(window, fileDrag);
+    });
+    expect(result.current).toBe(true);
+    // Simulate browser clearing types on dragleave (Safari, Firefox behavior).
+    act(() => {
+      fireEvent.dragLeave(window, { dataTransfer: { types: [] } });
+    });
+    expect(result.current).toBe(false);
+  });
 });
 
 function Zone() {
@@ -95,6 +108,16 @@ describe("useElementFileDrag", () => {
     fireEvent.dragEnter(zone, fileDrag);
     expect(zone).toHaveAttribute("data-dragging", "1");
     fireEvent.drop(zone, fileDrag);
+    expect(zone).toHaveAttribute("data-dragging", "0");
+  });
+
+  it("recovers when dragleave has no Files in dataTransfer.types", () => {
+    render(<Zone />);
+    const zone = screen.getByTestId("zone");
+    fireEvent.dragEnter(zone, fileDrag);
+    expect(zone).toHaveAttribute("data-dragging", "1");
+    // Simulate browser clearing types on dragleave (Safari, Firefox behavior).
+    fireEvent.dragLeave(zone, { dataTransfer: { types: [] } });
     expect(zone).toHaveAttribute("data-dragging", "0");
   });
 });
