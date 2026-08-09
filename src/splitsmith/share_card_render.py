@@ -13,8 +13,10 @@ Slack and X refetch rather than serving a preview of numbers nobody has
 any more. Nothing needs invalidating.
 
 A render failure never reaches the crawler as a 500: it serves the
-bundled plate and leaves the cache key empty, so the next request with a
-working browser still fills it.
+bundled plate, leaves the cache key empty, and reports ``fell_back=True``
+so the HTTP layer serves the plate with a short ``Cache-Control``. The
+next request with a working browser then fills both caches -- ours and
+the unfurler's -- with the real card.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from collections.abc import Callable
 from contextlib import AbstractContextManager
 from importlib.resources import files
 from pathlib import Path
+from typing import NamedTuple
 
 from .overlay_raster import Rasterizer, RasterizerUnavailableError
 from .overlay_theme import OverlayTheme
@@ -37,6 +40,24 @@ logger = logging.getLogger(__name__)
 #: ``scripts/og/og.html`` and checked in, so the error path needs no
 #: browser of its own.
 FALLBACK_PNG_PATH: Path = Path(str(files("splitsmith.data") / "share_card_fallback.png"))
+
+
+class RenderedCard(NamedTuple):
+    """PNG bytes plus whether they are the real card or the bundled plate.
+
+    ``fell_back`` exists so an HTTP caller can pick a cache header. Leaving
+    it out (returning bare bytes) made the two outcomes indistinguishable
+    at the seam, and ``ui/share_og.py`` then attached its one-year
+    ``Cache-Control`` to both -- so a single transient Chromium failure
+    during the *first* crawler fetch pinned a blank brand plate as that
+    share link's preview for a year. The plate is deliberately not written
+    to storage for the same reason; this flag is the missing half of that
+    rule, at the layer where the cache that actually matters (the
+    unfurler's, keyed by URL) is decided.
+    """
+
+    png: bytes
+    fell_back: bool
 
 
 def storage_key(token: str, card: MatchCard | StageCard, *, slug: str | None = None) -> str:
@@ -65,23 +86,29 @@ def cached_card_png(
     theme: OverlayTheme,
     rasterizer_factory: Callable[[], AbstractContextManager[Rasterizer]],
     slug: str | None = None,
-) -> bytes:
+) -> RenderedCard:
     """Serve the cached PNG, rendering and writing it on a miss.
 
     ``rasterizer_factory`` is called ONLY on a miss. Launching Chromium
     costs about a second; taking a live rasterizer instead would pay that
     on every cache hit and leave the cache saving nothing but CPU.
+
+    Returns a :class:`RenderedCard`, not bare bytes: the caller has to be
+    able to tell a real render from the browser-less fallback plate, or it
+    cannot cache the two differently -- see that class's docstring.
     """
     key = storage_key(token, card, slug=slug)
     if storage.exists(key):
-        return storage.read_bytes(key)
+        return RenderedCard(png=storage.read_bytes(key), fell_back=False)
     try:
         with rasterizer_factory() as rasterizer:
             data = render_card(card, theme=theme, rasterizer=rasterizer)
     except RasterizerUnavailableError as exc:
         # Deliberately not cached: a browser-less host must not pin the
-        # fallback plate onto this key forever.
+        # fallback plate onto this key forever. ``fell_back=True`` carries
+        # the same rule outward, so the HTTP layer does not pin it in a
+        # crawler's cache either.
         logger.warning("share card render unavailable, serving fallback plate: %s", exc.detail)
-        return FALLBACK_PNG_PATH.read_bytes()
+        return RenderedCard(png=FALLBACK_PNG_PATH.read_bytes(), fell_back=True)
     storage.write_bytes(key, data)
-    return data
+    return RenderedCard(png=data, fell_back=False)

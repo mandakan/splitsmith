@@ -108,6 +108,52 @@ def test_match_png_is_reachable_anonymously(
     assert resp.content != FALLBACK_PNG_PATH.read_bytes()
 
 
+def test_the_fallback_plate_is_not_served_behind_a_year_long_cache(
+    hosted_env: str,
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A crawler caches ``og:image`` by URL, and the URL is content-addressed
+    -- it only moves when the shooter's data moves. So a one-year
+    ``Cache-Control`` on the browser-less fallback plate pins a blank brand
+    card as that share link's preview until the next re-audit, off a single
+    transient Chromium failure that happened to land on the first crawler
+    fetch. ``share_card_render`` already refuses to write the plate to
+    object storage for this reason; this pins the same rule at the HTTP
+    layer, which is the cache that decides what a viewer actually sees.
+
+    The share-creation warm has already filled the match card's key, so the
+    degraded fetch below moves the card (a different match name hashes to a
+    different key) to force the miss the fallback needs.
+    """
+    from splitsmith.overlay_raster import RasterizerUnavailableError
+    from splitsmith.ui import share_og
+
+    token = _setup_shared_match(hosted_env, hosted_app_with_storage)
+    client, _sender = hosted_app_with_storage
+
+    real = client.get(f"/api/share/{token}/og.png")
+    assert real.status_code == 200
+    assert real.content != FALLBACK_PNG_PATH.read_bytes(), "not a real render -- no Chromium?"
+    assert real.headers["cache-control"] == "public, max-age=31536000"
+
+    def _moved_card(state: object) -> share_og.MatchCard:
+        return share_og.MatchCard(match_name="A card no key holds yet", stage_count=1)
+
+    def _no_browser() -> object:
+        raise RasterizerUnavailableError("no chromium", "no chromium, run the install hint")
+
+    monkeypatch.setattr(share_og, "build_match_card", _moved_card)
+    monkeypatch.setattr(share_og, "_chromium_factory", _no_browser)
+
+    degraded = client.get(f"/api/share/{token}/og.png")
+    assert degraded.status_code == 200
+    assert degraded.content == FALLBACK_PNG_PATH.read_bytes()
+    assert degraded.headers["cache-control"] != real.headers["cache-control"]
+    max_age = int(degraded.headers["cache-control"].rsplit("=", 1)[1])
+    assert 0 < max_age <= 300, f"the plate must expire in minutes, not {max_age}s"
+
+
 def test_unknown_token_png_is_404(hosted_app: tuple[TestClient, _CapturingSender]) -> None:
     client, _ = hosted_app
     assert client.get("/api/share/not-a-real-token/og.png").status_code == 404

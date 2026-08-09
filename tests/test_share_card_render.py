@@ -121,8 +121,11 @@ def test_stage_key_carries_slug_and_stage_number() -> None:
 def test_first_call_renders_and_writes(store, theme) -> None:
     ras = _FakeRasterizer()
     factory = _Factory(ras)
-    data = cached_card_png(_match_card(), token=TOKEN, storage=store, theme=theme, rasterizer_factory=factory)
-    assert data == ras.payload
+    rendered = cached_card_png(
+        _match_card(), token=TOKEN, storage=store, theme=theme, rasterizer_factory=factory
+    )
+    assert rendered.png == ras.payload
+    assert rendered.fell_back is False
     assert ras.calls == 1
     assert store.exists(storage_key(TOKEN, _match_card()))
 
@@ -133,7 +136,8 @@ def test_second_call_serves_the_cache_without_rendering(store, theme) -> None:
     card = _match_card()
     first = cached_card_png(card, token=TOKEN, storage=store, theme=theme, rasterizer_factory=factory)
     second = cached_card_png(card, token=TOKEN, storage=store, theme=theme, rasterizer_factory=factory)
-    assert first == second
+    assert first.png == second.png
+    assert second.fell_back is False
     assert ras.calls == 1
 
 
@@ -160,11 +164,15 @@ def test_changed_figures_miss_the_cache_and_re_render(store, theme) -> None:
 
 def test_rasterizer_failure_serves_the_bundled_plate(store, theme) -> None:
     ras = _BrokenRasterizer()
-    data = cached_card_png(
+    rendered = cached_card_png(
         _match_card(), token=TOKEN, storage=store, theme=theme, rasterizer_factory=_Factory(ras)
     )
-    assert data == FALLBACK_PNG_PATH.read_bytes()
+    assert rendered.png == FALLBACK_PNG_PATH.read_bytes()
     assert ras.calls == 1
+    # The flag is the whole point: bytes alone leave the caller unable to
+    # tell a degraded response from a real one, and ``ui/share_og.py`` then
+    # has no way to keep its one-year Cache-Control off the plate.
+    assert rendered.fell_back is True
 
 
 def test_rasterizer_failure_does_not_poison_the_cache(store, theme) -> None:
@@ -179,8 +187,11 @@ def test_rasterizer_failure_does_not_poison_the_cache(store, theme) -> None:
     )
     assert not store.exists(storage_key(TOKEN, card))
     good = _FakeRasterizer()
-    data = cached_card_png(card, token=TOKEN, storage=store, theme=theme, rasterizer_factory=_Factory(good))
-    assert data == good.payload
+    rendered = cached_card_png(
+        card, token=TOKEN, storage=store, theme=theme, rasterizer_factory=_Factory(good)
+    )
+    assert rendered.png == good.payload
+    assert rendered.fell_back is False
 
 
 def test_the_bundled_plate_is_a_1200x630_png() -> None:

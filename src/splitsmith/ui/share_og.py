@@ -169,6 +169,20 @@ def build_stage_card(state: Any, slug: str, stage_number: int) -> StageCard | No
 #: served after another write. Long-lived, but revalidatable.
 _PNG_HEADERS = {"Cache-Control": "public, max-age=31536000"}
 
+#: The browser-less fallback plate is a *degraded* response, so it gets a
+#: cache measured in seconds. The reasoning above does not hold for it: the
+#: plate is not what the ``?v=`` hash describes, and the hash only moves
+#: when the shooter's data moves, so a year-long cache on the plate would
+#: pin a blank brand card as this link's preview until the next re-audit --
+#: from one transient Chromium failure that happened to coincide with the
+#: first crawler fetch. ``share_card_render`` refuses to write the plate to
+#: object storage for exactly this reason; this is the same rule applied to
+#: the cache that actually decides what a viewer sees. Short enough that
+#: the next unfurl gets a real card, long enough to absorb the burst of
+#: fetches a single paste produces (Slack, X and Discord each fetch
+#: independently).
+_FALLBACK_PNG_HEADERS = {"Cache-Control": "public, max-age=60"}
+
 
 def _chromium_factory() -> AbstractContextManager[Rasterizer]:
     # Lazy import breaks an import cycle with .server (share_og is imported
@@ -289,7 +303,7 @@ def _png_response(state: Any, token: str, card: MatchCard | StageCard, slug: str
         # 404 for everyone else.
         logger.warning("share card render unavailable: state.storage is None (token=%s)", token)
         raise HTTPException(status_code=404, detail="not found")
-    data = cached_card_png(
+    rendered = cached_card_png(
         card,
         token=token,
         storage=state.storage,
@@ -297,7 +311,8 @@ def _png_response(state: Any, token: str, card: MatchCard | StageCard, slug: str
         rasterizer_factory=_chromium_factory,
         slug=slug,
     )
-    return Response(content=data, media_type="image/png", headers=_PNG_HEADERS)
+    headers = _FALLBACK_PNG_HEADERS if rendered.fell_back else _PNG_HEADERS
+    return Response(content=rendered.png, media_type="image/png", headers=headers)
 
 
 def _share_token(request: Request) -> str:
