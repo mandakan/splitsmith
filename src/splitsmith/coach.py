@@ -27,7 +27,6 @@ from .config import (
     IntervalClass,
     IntervalClassSource,
     Shot,
-    SplitColorThresholds,
 )
 
 COACH_INTERVAL_CLASSES: Final[tuple[str, ...]] = get_args(IntervalClass)
@@ -164,7 +163,12 @@ def reload_hinted(gap_s: float | None, config: CoachAutoClassifyConfig) -> bool:
 # the run's dead time, so only ``"split"``-classed intervals feed them.
 # ---------------------------------------------------------------------------
 
-SPLIT_STAT_TRANSITION_MIN: Final[float] = SplitColorThresholds().transition_min
+# The unclassified fallback mirrors the auto-classifier's split rule
+# (``CoachAutoClassifyConfig.split_max_s``) rather than the FCPXML band's
+# ``transition_min`` (1.0s): 35% of corpus intervals sit between the two,
+# so any other cutoff would move the figures the moment a stage gets
+# classified (issue #773).
+SPLIT_STAT_SPLIT_MAX: Final[float] = CoachAutoClassifyConfig().split_max_s
 
 
 class SplitStatInterval(Protocol):
@@ -180,7 +184,7 @@ class SplitStatInterval(Protocol):
 def statistic_splits(
     shots: Sequence[SplitStatInterval],
     *,
-    transition_min: float = SPLIT_STAT_TRANSITION_MIN,
+    split_max: float = SPLIT_STAT_SPLIT_MAX,
 ) -> list[float]:
     """The splits eligible for split statistics (best/avg/worst), in order.
 
@@ -188,9 +192,9 @@ def statistic_splits(
     On a stage with any classified interval, exactly the ``"split"``-classed
     intervals count - transitions, movement and reloads are the run's dead
     time, not its shooting. A stage with no classification at all falls
-    back to the rule :func:`splitsmith.fcpxml_gen.split_color_band` already
-    encodes: index 0 is the draw, anything above ``transition_min`` is not
-    a split (the boundary itself is inclusive, as in the band).
+    back to the auto-classifier's split rule (:func:`_classify_gap`):
+    index 0 is the draw, anything above ``split_max`` is not a split (the
+    boundary itself is inclusive, as in the rule).
 
     An empty return is meaningful - a stage of transitions and reloads has
     no splits to average, and callers render nothing rather than a zero.
@@ -200,7 +204,7 @@ def statistic_splits(
     """
     if any(s.interval_class is not None for s in shots):
         return [s.split for s in shots if s.interval_class == "split"]
-    return [s.split for i, s in enumerate(shots) if i > 0 and s.split <= transition_min]
+    return [s.split for i, s in enumerate(shots) if i > 0 and s.split <= split_max]
 
 
 def classify_intervals_in_dicts(

@@ -318,11 +318,13 @@ def test_statistic_splits_counts_only_split_classed_intervals() -> None:
 
 
 def test_statistic_splits_unclassified_falls_back_to_draw_and_threshold() -> None:
-    # No classification anywhere: the split_color_band rule applies -
-    # index 0 is the draw, anything above transition_min (1.0s) is not a
-    # split. The 1.0 boundary itself is inclusive, exactly as the band is.
-    shots = [_Gap(1.5), _Gap(0.2), _Gap(2.6), _Gap(1.0), _Gap(0.3)]
-    assert statistic_splits(shots) == [0.2, 1.0, 0.3]
+    # No classification anywhere: the auto-classifier's split rule applies -
+    # index 0 is the draw, anything above split_max_s (0.5s) is not a
+    # split. The 0.5 boundary itself is inclusive, exactly as in
+    # _classify_gap, so classifying the stage never moves the figures
+    # (issue #773).
+    shots = [_Gap(1.5), _Gap(0.2), _Gap(2.6), _Gap(0.5), _Gap(0.3), _Gap(0.8)]
+    assert statistic_splits(shots) == [0.2, 0.5, 0.3]
 
 
 def test_statistic_splits_partial_classification_trusts_the_classes() -> None:
