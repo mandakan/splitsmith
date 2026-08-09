@@ -30,6 +30,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
+from ..overlay_clock import clock_common_options, clock_text, elapsed_text_option
 from ..overlay_layout import Anchor, CellScale, anchor_ffmpeg_expr
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..overlay_text import FALLBACK_BUNDLED_FONT, overlay_font_file
@@ -796,29 +797,6 @@ class StageOverlayPlan:
     stroke: tuple[int, int, int] = (0, 0, 0)
 
 
-def _ffmpeg_color(rgb: tuple[int, int, int]) -> str:
-    """``drawtext`` colour literal. Hex, because it takes named colours
-    only from its own table -- the splitsmith theme's ink is
-    ``(244, 244, 245)``, which has no name."""
-    red, green, blue = rgb
-    return f"0x{red:02x}{green:02x}{blue:02x}"
-
-
-def _clock_text(seconds: float) -> str:
-    """Format an elapsed time the way the ticking filter renders it.
-
-    Truncated to hundredths rather than rounded, so the held value can
-    never read above the last value the ticking filter drew.
-
-    The truncation runs on integer milliseconds and not on
-    ``math.floor(seconds * 100) / 100``: ``2.09 * 100`` is
-    ``208.99999999999997`` in binary floating point, which floors to
-    ``2.08`` and would show the clock jumping backwards at the freeze.
-    """
-    hundredths = round(seconds * 1000) // 10
-    return f"{hundredths // 100}.{hundredths % 100:02d}"
-
-
 def _clock_pad(cell_height: int) -> int:
     """Inset from the cell edge, shared with the sprite's own anchors.
 
@@ -942,7 +920,6 @@ def _clock_filters(
     """
     cell_w, cell_h = _cell_size(canvas, plan)
     pad = _clock_pad(cell_h)
-    font = quote_filter_value(str(overlay.font_path))
     filters: list[str] = []
     for clock in overlay.clocks:
         x_expr, y_expr = anchor_ffmpeg_expr(
@@ -953,17 +930,16 @@ def _clock_filters(
             cell_h=cell_h,
             pad=pad,
         )
-        common = (
-            f"fontfile={font}:fontsize={overlay.font_size}:"
-            f"fontcolor={_ffmpeg_color(overlay.ink)}:"
-            f"borderw={max(2, overlay.font_size // 18)}:"
-            f"bordercolor={_ffmpeg_color(overlay.stroke)}:"
-            f"x={x_expr}:y={y_expr}"
+        common = clock_common_options(
+            font_path=overlay.font_path,
+            font_size=overlay.font_size,
+            ink=overlay.ink,
+            stroke=overlay.stroke,
+            x_expr=x_expr,
+            y_expr=y_expr,
         )
         start = f"{clock.start_seconds:g}"
-        elapsed = (
-            f"text='%{{eif\\:trunc(t-{start})\\:d}}." f"%{{eif\\:trunc(mod((t-{start})*100\\,100))\\:d\\:2}}'"
-        )
+        elapsed = elapsed_text_option(start)
         if clock.freeze_seconds is None:
             # No known end: tick from the beep to the end of the action,
             # hold nothing after it.
@@ -1829,7 +1805,7 @@ def _stage_overlay_plan(
                 freeze_seconds=head_pad_seconds + last,
                 # Truncated, not rounded, so the held value cannot read
                 # above the last value the ticking filter drew.
-                final_text=_clock_text(last),
+                final_text=clock_text(last),
             )
         )
 

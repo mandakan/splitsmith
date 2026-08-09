@@ -21,7 +21,7 @@ from urllib.request import url2pathname
 import pytest
 from PIL import Image
 
-from splitsmith import overlay_html
+from splitsmith import overlay_clock, overlay_html
 from splitsmith.compare import mp4_grid
 from splitsmith.compare.mp4_grid import GridCanvas, GridStagePlan, GridTile
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
@@ -522,10 +522,10 @@ def test_the_render_gives_the_clock_the_themes_own_colours(tmp_path):
 
 def test_the_held_text_is_truncated_not_rounded(tmp_path):
     """The hold must never read above the last value the clock ticked."""
-    assert mp4_grid._clock_text(1.958) == "1.95"  # truncated, not 1.96
-    assert mp4_grid._clock_text(5.0) == "5.00"
-    assert mp4_grid._clock_text(0.05) == "0.05"
-    assert mp4_grid._clock_text(12.999) == "12.99"
+    assert overlay_clock.clock_text(1.958) == "1.95"  # truncated, not 1.96
+    assert overlay_clock.clock_text(5.0) == "5.00"
+    assert overlay_clock.clock_text(0.05) == "0.05"
+    assert overlay_clock.clock_text(12.999) == "12.99"
 
 
 def test_the_held_text_truncates_on_milliseconds_not_in_floating_point(tmp_path):
@@ -541,8 +541,8 @@ def test_the_held_text_truncates_on_milliseconds_not_in_floating_point(tmp_path)
     platform -- ``2.09 * 100 == 209.0`` -- which is why the value matters
     here and a plausible-looking one proves nothing.)
     """
-    assert mp4_grid._clock_text(0.29) == "0.29"
-    assert mp4_grid._clock_text(1.13) == "1.13"
+    assert overlay_clock.clock_text(0.29) == "0.29"
+    assert overlay_clock.clock_text(1.13) == "1.13"
 
 
 # --- the graph ffmpeg actually accepts ------------------------------------

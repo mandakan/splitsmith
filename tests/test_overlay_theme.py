@@ -1,4 +1,4 @@
-"""Tests for the overlay theme palette + DefaultTemplate integration."""
+"""Tests for the overlay theme palette + its reach into rendered output."""
 
 from __future__ import annotations
 
@@ -6,9 +6,11 @@ import json
 from importlib import resources
 
 import pytest
-from PIL import Image
 
-from splitsmith import overlay_render, overlay_theme
+from splitsmith import overlay_text, overlay_theme
+from splitsmith.overlay_html import single_html
+from splitsmith.overlay_layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
+from tests.test_overlay_html import _rule
 
 
 def test_clean_preset_matches_legacy_hardcoded_values() -> None:
@@ -72,134 +74,77 @@ def test_unknown_theme_raises() -> None:
         overlay_theme.load_theme("midnight")  # type: ignore[arg-type]
 
 
-def test_default_template_paints_theme_ink() -> None:
-    """DefaultTemplate must paint the theme's ink color for shot count /
-    timer, not a hardcoded white. We swap in a magenta ink and verify the
-    canvas carries that hue."""
-    magenta = overlay_theme.OverlayTheme(
-        name="clean",
-        ink=(255, 0, 200),
-        split=(0, 200, 255),
-        split_good=(0, 255, 120),
-        stroke=(0, 0, 0),
-        accent=(255, 0, 0),
-        accent_fill=(200, 0, 0),
-        accent_text=(255, 150, 150),
-        rule=(60, 60, 60),
-        muted=(150, 150, 150),
-        ink_2=(205, 205, 205),
-        font_display="Antonio",
-        font_mono="JetBrains Mono",
+def test_the_theme_ink_reaches_the_rendered_css() -> None:
+    """The theme's ink color must reach the rendered document, not a
+    hardcoded white. Re-expresses what
+    ``test_default_template_paints_theme_ink`` checked on pixels back when
+    ``DefaultTemplate`` drew the counter itself -- the counter now draws
+    through ``single_html``'s CSS, so this checks the CSS instead."""
+    theme = overlay_theme.load_theme("splitsmith")
+    doc = single_html(
+        (
+            Group(
+                anchor=Anchor.TOP_LEFT,
+                flow=Flow.ROW,
+                elements=(Element(text="7/32", role=Role.LIVE_PRIMARY),),
+            ),
+        ),
+        width=1920,
+        height=1080,
+        scale=CellScale.for_cell(1080),
+        theme=theme,
     )
-    tmpl = overlay_render.DefaultTemplate(width=320, height=180, theme=magenta)
-    state = overlay_render.FrameState(
-        time_seconds=2.0,
-        beep_time_in_clip=0.5,
-        shot_count=5,
-        shots_fired=2,
-        last_split=0.21,
-        last_shot_time_in_clip=1.5,
-        running_total=1.5,
+    red, green, blue = theme.ink
+    assert f"rgb({red},{green},{blue})" in doc
+
+
+def test_the_theme_split_color_reaches_the_rendered_css() -> None:
+    """The bottom-center last-split label used ``theme.split``, not a
+    hardcoded gold -- re-expresses
+    ``test_default_template_paints_theme_split_color``. ``ColorToken.SPLIT``
+    is how an element opts into that token now; the CSS class it draws
+    through (``.tok-split``) carries the color, not a per-pixel scan."""
+    theme = overlay_theme.load_theme("splitsmith")
+    doc = single_html(
+        (
+            Group(
+                anchor=Anchor.BOTTOM_CENTER,
+                flow=Flow.ROW,
+                elements=(Element(text="0.21s", role=Role.LIVE_PRIMARY, color=ColorToken.SPLIT),),
+            ),
+        ),
+        width=1920,
+        height=1080,
+        scale=CellScale.for_cell(1080),
+        theme=theme,
     )
-    canvas = Image.new("RGBA", (320, 180), (0, 0, 0, 0))
-    tmpl.draw_frame(canvas, state)
-
-    # Look for at least one opaque, magenta-ish pixel (high R, low G, high B).
-    # The fill is anti-aliased so we tolerate near-matches rather than
-    # require an exact RGBA tuple.
-    pixels = canvas.load()
-    found = False
-    for y in range(canvas.height):
-        for x in range(canvas.width):
-            r, g, b, a = pixels[x, y]
-            if a > 200 and r > 200 and g < 80 and b > 150:
-                found = True
-                break
-        if found:
-            break
-    assert found, "expected magenta ink pixels from the theme override"
+    red, green, blue = theme.split
+    rule = _rule(doc, ".tok-split")
+    assert f"rgb({red},{green},{blue})" in rule
 
 
-def test_default_template_paints_theme_split_color() -> None:
-    """The bottom-center last-split label uses theme.split, not the
-    hardcoded gold."""
-    cyan_split = overlay_theme.OverlayTheme(
-        name="clean",
-        ink=(255, 255, 255),
-        split=(0, 220, 255),
-        split_good=(46, 204, 113),
-        stroke=(0, 0, 0),
-        accent=(0, 0, 0),
-        accent_fill=(0, 0, 0),
-        accent_text=(255, 150, 150),
-        rule=(60, 60, 60),
-        muted=(150, 150, 150),
-        ink_2=(205, 205, 205),
-        font_display="Antonio",
-        font_mono="JetBrains Mono",
+def test_the_two_themes_do_not_render_the_same_ink() -> None:
+    """The property the DefaultTemplate tests were really guarding: that
+    --theme is not decoration. If both themes produced the same CSS the
+    flag would be a lie, and no other test would notice."""
+    groups = (
+        Group(
+            anchor=Anchor.TOP_LEFT,
+            flow=Flow.ROW,
+            elements=(Element(text="7/32", role=Role.LIVE_PRIMARY),),
+        ),
     )
-    tmpl = overlay_render.DefaultTemplate(width=320, height=180, theme=cyan_split)
-    state = overlay_render.FrameState(
-        time_seconds=2.0,
-        beep_time_in_clip=0.5,
-        shot_count=5,
-        shots_fired=2,
-        last_split=0.21,
-        last_shot_time_in_clip=2.0,  # split label fully held (alpha=255)
-        running_total=1.5,
+    kwargs = {"width": 1920, "height": 1080, "scale": CellScale.for_cell(1080)}
+    assert single_html(groups, theme=overlay_theme.load_theme("splitsmith"), **kwargs) != single_html(
+        groups, theme=overlay_theme.load_theme("clean"), **kwargs
     )
-    canvas = Image.new("RGBA", (320, 180), (0, 0, 0, 0))
-    tmpl.draw_frame(canvas, state)
-
-    # Cyan: low R, high G, high B. Scan the bottom half where the split label sits.
-    pixels = canvas.load()
-    found = False
-    for y in range(canvas.height // 2, canvas.height):
-        for x in range(canvas.width):
-            r, g, b, a = pixels[x, y]
-            if a > 200 and r < 80 and g > 150 and b > 200:
-                found = True
-                break
-        if found:
-            break
-    assert found, "expected cyan split label pixels from the theme override"
-
-
-def test_default_template_defaults_to_splitsmith() -> None:
-    """Omitting ``theme`` picks the brand palette so every overlay matches
-    the web UI without callers having to opt in."""
-    tmpl = overlay_render.DefaultTemplate(width=320, height=180)
-    assert tmpl.theme.name == "splitsmith"
-
-
-def test_splitsmith_theme_picks_bundled_mono_font_by_default() -> None:
-    """When the caller doesn't pin a font and the theme is splitsmith,
-    DefaultTemplate must resolve the bundled JetBrains Mono Bold so the
-    overlay matches the web UI's tabular numerals on every host."""
-    tmpl = overlay_render.DefaultTemplate(width=320, height=180)
-    # PIL exposes the family/style via getname().
-    family, style = tmpl.font_big.getname()
-    assert family == "JetBrains Mono"
-    assert "Bold" in style
-
-
-def test_clean_theme_leaves_font_resolution_to_system_fallback() -> None:
-    """The clean preset must NOT pin the bundled font, so callers picking
-    the neutral palette still get whatever system mono they had before.
-    The bundled JetBrains Mono is only auto-wired for splitsmith; clean
-    theme falls through to the OS-specific fallback list, which doesn't
-    include the bundled file."""
-    clean = overlay_theme.load_theme("clean")
-    tmpl = overlay_render.DefaultTemplate(width=320, height=180, theme=clean)
-    family, _ = tmpl.font_big.getname()
-    assert family != "JetBrains Mono", f"clean theme should not auto-wire bundled font; got family={family!r}"
 
 
 def test_available_font_names_includes_bundled_presets() -> None:
     """The bundled splitsmith-* presets must be discoverable via the
     public preset listing -- they're how a future UI picker offers brand
     fonts without filesystem path knowledge."""
-    names = overlay_render.available_font_names()
+    names = overlay_text.available_font_names()
     assert "splitsmith-mono" in names
     assert "splitsmith-display" in names
 

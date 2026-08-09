@@ -465,10 +465,20 @@ def anchor_ffmpeg_expr(
 
     The ``TOP_RIGHT`` form is what ``mp4_grid._clock_filters`` built
     inline before this function existed and it is reproduced character
-    for character. Both argv fingerprint tests hash whole commands, so
-    any drift here fails them --
-    ``test_the_clock_expression_is_character_for_character_what_it_is_today``
-    exists so that a drift is a deliberate act rather than a surprise.
+    for character.
+
+    **The argv fingerprint tests do not guard that**, contrary to what
+    this docstring used to claim. ``DEFAULT_OFF_ARGV_SHA256`` and
+    ``ZERO_HOLD_ARGV_SHA256`` both hash commands built without an
+    ``overlay=`` argument, so ``_clock_filters`` is never invoked and no
+    ``drawtext`` string is inside either hash. What actually pins these
+    expressions is the substring suite in
+    ``tests/test_compare_mp4_grid_overlay.py`` -- notably
+    ``test_clock_is_positioned_inside_its_own_cell``, which asserts the
+    literal ``:x=960+960-tw-24:y=540+24:`` inside a rendered filter
+    graph -- plus
+    ``tests/test_overlay_layout.py::test_the_clock_expression_is_character_for_character_what_it_is_today``
+    on this function's own return value. A drift fails those.
     """
     left = col * cell_w
     top = row * cell_h

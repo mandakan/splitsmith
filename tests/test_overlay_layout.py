@@ -107,11 +107,21 @@ def test_center_anchors_land_on_the_cells_horizontal_middle():
 def test_the_clock_expression_is_character_for_character_what_it_is_today():
     """``mp4_grid._clock_filters`` builds this string inline today.
 
-    The two argv fingerprint tests hash whole commands, so any drift here
-    -- an added space, a reordered term, ``-tw`` moving -- fails them and
-    can make ``concat -c copy`` refuse a segment mid-render. This asserts
+    A drift here -- an added space, a reordered term, ``-tw`` moving --
+    moves the clock in the compare grid's rendered output. This asserts
     the literal rather than recomputing it, so a "harmless tidy" of the
     expression has to change this test deliberately.
+
+    **Not backed by the argv fingerprints.** ``DEFAULT_OFF_ARGV_SHA256``
+    (``tests/test_compare_mp4_grid_commands.py``) and
+    ``ZERO_HOLD_ARGV_SHA256`` (``tests/test_compare_mp4_grid_hold.py``)
+    both hash commands built with no ``overlay=`` argument, so
+    ``_clock_filters`` never runs and no ``drawtext`` text is inside
+    either hash -- an earlier version of this docstring said a drift
+    "fails them", and it does not. The end-to-end guard is the substring
+    suite in ``tests/test_compare_mp4_grid_overlay.py``, above all
+    ``test_clock_is_positioned_inside_its_own_cell``, which asserts
+    ``:x=960+960-tw-24:y=540+24:`` inside a real filter graph.
     """
     x_expr, y_expr = anchor_ffmpeg_expr(Anchor.TOP_RIGHT, col=2, row=1, cell_w=1280, cell_h=720, pad=24)
     assert x_expr == "2560+1280-tw-24"

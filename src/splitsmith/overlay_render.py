@@ -9,13 +9,13 @@ Pipeline:
    overlay must mirror the source or it will drift off the timeline.
 2. Build per-frame state from the audit JSON (which shots have fired by
    time t, the most recent split, the running total since the beep).
-3. PIL renders each RGBA frame.
+3. Run-length encode those states (``overlay_single.build_overlay_runs``)
+   and rasterize one document per run through headless Chromium -- ~31
+   browser renders for a 30-shot stage instead of one PIL draw per frame.
 4. Pipe raw RGBA bytes to ``ffmpeg -f rawvideo ... -c:v prores_ks
-   -profile:v 4444 -pix_fmt yuva444p10le`` writing the final MOV.
-
-A :class:`Template` ABC keeps the v1 layout pluggable: a future second
-template is a subclass with its own ``draw_frame``, not a rewrite of the
-renderer. v1 ships exactly one template -- :class:`DefaultTemplate`.
+   -profile:v 4444 -pix_fmt yuva444p10le`` writing the final MOV, plus a
+   ``drawtext`` running clock -- the one element that genuinely changes
+   every frame and so can never be a run.
 
 The renderer is pure of detection: the audit JSON is the source of truth.
 Stages without a completed audit cannot render an overlay -- callers MUST
@@ -24,56 +24,38 @@ gate on that before invoking :func:`render_overlay`.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import logging
 import math
 import platform
 import shutil
 import subprocess
-from abc import ABC, abstractmethod
+import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
 from typing import Literal
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageFont
 
 from .config import VideoMetadata
 from .fcpxml_gen import probe_video
-from .overlay_text import (
-    _BUNDLED_FONTS as _BUNDLED_FONTS,
+from .overlay_clock import clock_common_options, clock_text, elapsed_text_option
+from .overlay_html import single_html
+from .overlay_layout import Anchor, CellScale, anchor_ffmpeg_expr
+from .overlay_raster import (
+    INSTALL_HINT,
+    ChromiumRasterizer,
+    Rasterizer,
+    RasterizerUnavailableError,
 )
-from .overlay_text import (
-    _FONT_FALLBACKS as _FONT_FALLBACKS,
-)
-from .overlay_text import (
-    _FONT_PRESETS as _FONT_PRESETS,
-)
-from .overlay_text import (
-    OverlayRenderError as OverlayRenderError,
-)
-from .overlay_text import (
-    _BundledFont as _BundledFont,
-)
-from .overlay_text import (
-    _draw_text_with_shadow as _draw_text_with_shadow,
-)
-from .overlay_text import (
-    _load_bundled_font as _load_bundled_font,
-)
-from .overlay_text import (
-    _load_font as _load_font,
-)
-from .overlay_text import (
-    _log_font_choice as _log_font_choice,
-)
-from .overlay_text import (
-    available_font_names as available_font_names,
-)
-from .overlay_text import (
-    reset_font_log_cache as reset_font_log_cache,
-)
-from .overlay_theme import OverlayTheme, ThemeName, load_theme
+from .overlay_single import build_overlay_runs, run_groups
+from .overlay_text import OverlayRenderError, overlay_font_file, resolve_overlay_face
+from .overlay_theme import ThemeName, load_theme
+from .runtime import Runner, ffmpeg_capabilities, quote_filter_value
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +74,13 @@ OverlayCodec = Literal["auto", "hevc-alpha", "prores-4444"]
 
 OVERLAY_CODECS: tuple[OverlayCodec, ...] = ("auto", "hevc-alpha", "prores-4444")
 
+#: The glyph set every clock filter draws -- digits and a period, never a
+#: descender or a taller mark. :func:`_clock_filter_graph` measures its
+#: ascender-to-ink gap once to reconcile ``drawtext``'s origin with the
+#: sprite's; using the literal the pre-beep filter already prints keeps
+#: the measured string and the drawn string the same thing.
+CLOCK_SAMPLE_TEXT = "0.00"
+
 
 @dataclass(frozen=True)
 class FrameState:
@@ -109,19 +98,6 @@ class FrameState:
     last_split: float | None  # split of the most-recently-fired shot
     last_shot_time_in_clip: float | None  # for fade timing on the last-split label
     running_total: float  # max(0, time_seconds - beep_time_in_clip)
-
-
-class Template(ABC):
-    """Pluggable overlay layout.
-
-    Subclasses mutate the supplied RGBA canvas in place to draw the overlay
-    for one frame's :class:`FrameState`. v1 ships :class:`DefaultTemplate`;
-    a second template lands as a subclass without touching the renderer.
-    """
-
-    @abstractmethod
-    def draw_frame(self, canvas: Image.Image, state: FrameState) -> None:
-        """Render one frame onto ``canvas`` (mode ``RGBA``)."""
 
 
 def build_frame_states(
@@ -178,137 +154,6 @@ def build_frame_states(
             )
         )
     return states
-
-
-class DefaultTemplate(Template):
-    """v1 layout. Three pieces:
-
-    - Top-left: ``N/M`` (current of total kept shots).
-    - Top-right: running total elapsed since the beep. Holds at ``00.00``
-      pre-beep; ticks up after.
-    - Bottom-center: most recent split, held at full alpha for
-      ``split_hold_seconds`` after each shot, then fades over
-      ``split_fade_seconds``.
-
-    Sizes scale to the source resolution so 1080p / 2K / 4K all look
-    reasonable without re-tuning. Numerals use a monospaced TTF when one
-    can be located; otherwise PIL's default bitmap font, which is ugly
-    but always available (CI / minimal Linux).
-    """
-
-    def __init__(
-        self,
-        *,
-        width: int,
-        height: int,
-        font_path: Path | None = None,
-        font_name: str | None = None,
-        split_hold_seconds: float = 1.0,
-        split_fade_seconds: float = 0.3,
-        stroke_width_px: int | None = None,
-        shadow_blur_px: int | None = None,
-        shadow_offset_px: int | None = None,
-        theme: OverlayTheme | None = None,
-    ) -> None:
-        self.width = width
-        self.height = height
-        self.split_hold_seconds = split_hold_seconds
-        self.split_fade_seconds = split_fade_seconds
-        self.theme = theme if theme is not None else load_theme("splitsmith")
-        # When the caller didn't pin a font and the theme is splitsmith,
-        # use the bundled JetBrains Mono Bold so the overlay matches the
-        # web UI's tabular numerals on every host instead of falling back
-        # to whatever system mono happens to be installed.
-        if font_path is None and font_name is None and self.theme.name == "splitsmith":
-            font_name = "splitsmith-mono"
-        big = max(48, height // 14)
-        try:
-            self.font_big = _load_font(font_path, big, font_name=font_name)
-        except OSError as exc:
-            raise OverlayRenderError(f"failed to load font: {exc}") from exc
-        self.pad = max(24, height // 36)
-        # Legibility defaults scale with the type size so 1080p / 4K stay
-        # consistent. Stroke at ~6% of the cap-height reads as crisp without
-        # turning the glyphs into blobs; shadow blur slightly larger than
-        # offset gives a soft halo rather than a hard duplicate.
-        self.stroke_width_px = stroke_width_px if stroke_width_px is not None else max(2, big // 18)
-        self.shadow_offset_px = shadow_offset_px if shadow_offset_px is not None else max(2, big // 24)
-        self.shadow_blur_px = shadow_blur_px if shadow_blur_px is not None else max(3, big // 12)
-
-    def draw_frame(self, canvas: Image.Image, state: FrameState) -> None:
-        d = ImageDraw.Draw(canvas)
-
-        ink = (*self.theme.ink, 255)
-        if state.shot_count > 0:
-            shot_text = f"{state.shots_fired}/{state.shot_count}"
-            self._draw(canvas, d, (self.pad, self.pad), shot_text, ink)
-
-        total_text = _format_running_total(state.running_total)
-        bbox = d.textbbox((0, 0), total_text, font=self.font_big)
-        tw = bbox[2] - bbox[0]
-        self._draw(
-            canvas,
-            d,
-            (self.width - tw - self.pad, self.pad),
-            total_text,
-            ink,
-        )
-
-        if state.last_split is not None and state.last_shot_time_in_clip is not None:
-            since_shot = state.time_seconds - state.last_shot_time_in_clip
-            alpha = _split_alpha(since_shot, self.split_hold_seconds, self.split_fade_seconds)
-            if alpha > 0:
-                split_text = f"{state.last_split:.2f}s"
-                bbox = d.textbbox((0, 0), split_text, font=self.font_big)
-                tw = bbox[2] - bbox[0]
-                th = bbox[3] - bbox[1]
-                x = (self.width - tw) // 2
-                y = self.height - th - self.pad * 2
-                self._draw(canvas, d, (x, y), split_text, (*self.theme.split, alpha))
-
-    def _draw(
-        self,
-        canvas: Image.Image,
-        draw: ImageDraw.ImageDraw,
-        xy: tuple[int, int],
-        text: str,
-        fill: tuple[int, int, int, int],
-    ) -> None:
-        _draw_text_with_shadow(
-            draw,
-            canvas,
-            xy,
-            text,
-            self.font_big,
-            fill,
-            stroke_width=self.stroke_width_px,
-            shadow_offset=self.shadow_offset_px,
-            shadow_blur=self.shadow_blur_px,
-            stroke_color=self.theme.stroke,
-            shadow_color=self.theme.shadow,
-        )
-
-
-def _split_alpha(since_shot: float, hold: float, fade: float) -> int:
-    """0..255 alpha for the "last split" label given seconds-since-shot."""
-    if since_shot < 0:
-        return 0
-    if since_shot <= hold:
-        return 255
-    if fade <= 0 or since_shot >= hold + fade:
-        return 0
-    t = (since_shot - hold) / fade
-    return int(round(255 * (1.0 - t)))
-
-
-def _format_running_total(seconds: float) -> str:
-    """``SS.SS`` under a minute; ``M:SS.SS`` past it. Width-stable so the
-    overlay doesn't jitter from frame to frame."""
-    if seconds < 60:
-        return f"{seconds:5.2f}"
-    m = int(seconds // 60)
-    s = seconds - m * 60
-    return f"{m:d}:{s:05.2f}"
 
 
 def _shot_times_from_audit(audit_data: dict, *, beep_offset_seconds: float) -> list[float]:
@@ -416,6 +261,160 @@ def _capped_frame_rate(num: int, den: int, max_fps: float | None) -> tuple[int, 
     return target.numerator, target.denominator
 
 
+def _clock_filter_graph(
+    *,
+    width: int,
+    height: int,
+    scale: CellScale,
+    font_path: Path,
+    beep_offset_seconds: float,
+    last_shot_in_clip: float,
+    ink: tuple[int, int, int],
+    stroke: tuple[int, int, int],
+) -> str:
+    """The running clock, as three mutually exclusive ``drawtext`` filters.
+
+    The grid needs two -- a ticking window and a held final value. This
+    path needs a third because it has always drawn ``0.00`` before the
+    beep (``build_frame_states`` clamps ``running_total`` to zero there,
+    and the PIL template drew it unconditionally), where the grid draws
+    nothing until its beep. Keeping that costs one filter and keeps the
+    clock consistent with the counter, which also reads ``0/M`` from
+    frame zero.
+
+    The windows are ``lt`` / ``gte`` rather than a ``between``, for the
+    reason ``mp4_grid._clock_filters`` documents: ``between(t,a,b)`` and
+    ``gte(t,b)`` are both true at exactly ``b``, and a frame landing
+    there draws two numbers over each other. Verified for these three
+    windows by rendering: at each boundary frame exactly one filter
+    draws, and the composite is byte-identical to that filter alone.
+
+    The clock freezes at the last shot rather than running on to the end
+    of the clip -- the running total is the stage time, not the clip
+    duration, which is what ``build_frame_states`` does in Python for the
+    sprite half.
+
+    **The y expression carries an ascender correction and must.**
+    ``drawtext`` puts the top of the *drawn ink* at ``y``; CSS puts the
+    top of the *line box* there and the ink starts an ascender-to-cap gap
+    lower, and PIL's default ``"la"`` anchor -- what the pre-port
+    :class:`DefaultTemplate` used for both corners -- does the same. So
+    the same string at the same size in the same face lands in two
+    different places. Measured on a real 1920x1080 frame, both corners
+    drawing ``0.00``: the sprite's ink began at y=52 and the clock's at
+    y=30. Adding the face's own gap to the clock is what puts them back
+    on one baseline, and it is deliberately the *clock* that moves: 52 is
+    where the PIL renderer drew both corners (verified against it at 720,
+    1080 and 2160), so moving the sprite instead would fix the alignment
+    by breaking issue #684's "the output must not move" rule.
+
+    The gap is read off ``font_path`` rather than hard-coded as an em
+    fraction, so it follows whatever face
+    :func:`~splitsmith.overlay_text.resolve_overlay_face` actually
+    resolved -- including a system fallback on a host with no bundled
+    font. ffmpeg cannot compute it: ``drawtext``'s own ``ascent``
+    variable is the maximum ink above the baseline **of the glyphs it is
+    rendering**, so for a digits-only clock ``ascent - th`` is zero
+    (measured: it moves the 1080 clock by 1px, not 22).
+    """
+    x_expr, y_expr = anchor_ffmpeg_expr(
+        Anchor.TOP_RIGHT, col=0, row=0, cell_w=width, cell_h=height, pad=scale.pad
+    )
+    face = ImageFont.truetype(str(font_path), size=scale.live_primary)
+    y_expr = f"{y_expr}+{face.getbbox(CLOCK_SAMPLE_TEXT)[1]}"
+    common = clock_common_options(
+        font_path=font_path,
+        font_size=scale.live_primary,
+        ink=ink,
+        stroke=stroke,
+        x_expr=x_expr,
+        y_expr=y_expr,
+    )
+    start = f"{beep_offset_seconds:g}"
+    freeze = f"{last_shot_in_clip:g}"
+    held = quote_filter_value(clock_text(max(0.0, last_shot_in_clip - beep_offset_seconds)))
+    return ",".join(
+        (
+            f"drawtext={common}:text='{CLOCK_SAMPLE_TEXT}':enable='lt(t\\,{start})'",
+            f"drawtext={common}:{elapsed_text_option(start)}:" f"enable='gte(t\\,{start})*lt(t\\,{freeze})'",
+            f"drawtext={common}:text={held}:enable='gte(t\\,{freeze})'",
+        )
+    )
+
+
+def _discard_partial_output(output_path: Path, *, piped_frames: bool) -> None:
+    """Remove a half-written MOV -- but only one *this* run wrote.
+
+    ``-y`` does not mean "truncate on launch". With ``-f rawvideo ... -i
+    -`` ffmpeg blocks on stdin and does not open its output until the
+    first frame arrives. Measured: a pre-existing 1700-byte file at
+    ``output_path`` survived 3.7 s of a blocked ffmpeg byte for byte, and
+    only became a 36-byte header once a frame was piped.
+
+    So there is a window -- everything up to the first ``Rasterizer.png``
+    returning -- in which the file on disk is the caller's *previous,
+    good* render. A Playwright timeout on the first sprite, or a Ctrl-C
+    while the browser is starting, must not delete it: ``ui/exports.py``
+    treats an existing overlay as a "stale render from a prior run" and
+    still wires it into the FCPXML, so the user keeps a working timeline
+    across a transient browser failure instead of losing both the file
+    and the FCPXML reference.
+
+    Once a frame has been piped that reasoning inverts. What is on disk
+    is then this run's own truncation, and the same ``ui/exports.py``
+    rule would hand the user a timeline referencing a clip that stops
+    partway through the stage. That one has to go.
+
+    ``piped_frames`` is which of the two happened.
+    """
+    if not piped_frames:
+        return
+    with contextlib.suppress(OSError):
+        output_path.unlink(missing_ok=True)
+
+
+@contextlib.contextmanager
+def _rasterizer_for(supplied: Rasterizer | None) -> Iterator[Rasterizer]:
+    """Yield a rasterizer, launching one only when the caller has none.
+
+    A missing browser is a hard failure here, not a degradation. The
+    grid can lose its sprites and still hand back an MP4 worth watching;
+    this renderer's entire output is the sprites plus a clock, and a
+    clock-only MOV is a file that looks like a success until it reaches
+    the Final Cut timeline. ``ui/exports.py`` already turns
+    ``OverlayRenderError`` into a visible skip reason.
+    """
+    if supplied is not None:
+        yield supplied
+        return
+    owned = ChromiumRasterizer()
+    try:
+        active = owned.__enter__()
+    except RasterizerUnavailableError as exc:
+        # Deliberately not ``exc.detail``. That string is
+        # ``overlay_raster._unavailable``'s *degradation* notice, written
+        # for the compare grid, and it ends "the running clock still
+        # draws ... and the rest of the render proceeds" -- true there,
+        # the exact opposite of what happens here. On this path nothing
+        # renders, no file is written, and a user told the render
+        # proceeded goes hunting in ``exports/`` for a MOV that does not
+        # exist. So the sentence is composed here, from the underlying
+        # launch failure plus the one install command, and the grid's own
+        # message stays accurate for the grid.
+        cause = exc.__cause__ or exc
+        raise OverlayRenderError(
+            "cannot render the overlay: Playwright could not launch a Chromium browser. "
+            "Nothing was rendered and no overlay file was written -- the shot counter, the "
+            "split labels and the running clock are all absent, not degraded. The browser is "
+            "not vendored in the wheel; install it once per environment with "
+            f"'{INSTALL_HINT}'. Original error: {cause}"
+        ) from exc
+    try:
+        yield active
+    finally:
+        owned.__exit__(None, None, None)
+
+
 def _build_ffmpeg_cmd(
     *,
     ffmpeg_binary: str,
@@ -424,6 +423,7 @@ def _build_ffmpeg_cmd(
     height: int,
     rate: str,
     output_path: Path,
+    clock_filter: str | None = None,
 ) -> list[str]:
     """Encoder-specific argv. RGBA raw input is identical across codecs;
     only the output side differs."""
@@ -443,6 +443,8 @@ def _build_ffmpeg_cmd(
         "-i",
         "-",
     ]
+    if clock_filter is not None:
+        cmd += ["-vf", clock_filter]
     if codec == "hevc-alpha":
         # ``alpha_quality`` ranges 0.0..1.0; 0.75 is a good legibility/size
         # tradeoff for sharp text on transparent. ``hvc1`` tag is what FCP
@@ -485,15 +487,14 @@ def render_overlay(
     trimmed_video_path: Path,
     output_path: Path,
     beep_offset_seconds: float,
-    template: Template | None = None,
-    font_name: str | None = None,
-    font_path: Path | None = None,
     ffmpeg_binary: str = "ffmpeg",
     probe: VideoMetadata | None = None,
     codec: OverlayCodec = "auto",
     max_height: int | None = None,
     max_fps: float | None = None,
     theme: ThemeName = "splitsmith",
+    rasterizer: Rasterizer | None = None,
+    probe_runner: Runner = subprocess.run,
 ) -> Path:
     """Render an alpha overlay MOV alongside a trimmed clip.
 
@@ -506,11 +507,6 @@ def render_overlay(
     ``beep_offset_seconds``: where the beep lives in the trimmed clip.
         Audit ``ms_after_beep`` is converted to clip-local time as
         ``beep_offset + ms_after_beep / 1000``.
-    ``template``: defaults to :class:`DefaultTemplate` sized to the probe.
-    ``font_name`` / ``font_path``: passed to the default template when
-        ``template`` isn't supplied. ``font_name`` accepts a preset from
-        :func:`available_font_names`; ``font_path`` is an explicit override.
-        Ignored when the caller passes a fully-built ``template``.
     ``probe``: optional pre-computed metadata. When given, ``ffprobe`` is
         skipped -- useful from tests and to share one probe across the
         export's other steps.
@@ -521,11 +517,24 @@ def render_overlay(
         over the timeline.
     ``max_fps``: cap output frame rate. Source rate is preserved when it
         already fits under the cap.
-    ``theme``: palette preset for the default template. ``"splitsmith"``
-        (default) pulls colors from the web UI's @theme tokens so the
-        overlay matches the brand. ``"clean"`` is the neutral
-        white-on-amber alternative. Ignored when ``template`` is supplied
-        explicitly.
+    ``theme``: palette preset. ``"splitsmith"`` (default) pulls colors
+        from the web UI's @theme tokens so the overlay matches the brand.
+        ``"clean"`` is the neutral white-on-amber alternative.
+    ``rasterizer``: injected :class:`~splitsmith.overlay_raster.Rasterizer`.
+        Defaults to launching one headless Chromium for this call. A
+        caller rendering several stages should supply one so the browser
+        starts once (measured: 0.40 s of startup against 3.93 s of
+        rasterizing for a 31-run stage). Without a usable browser this
+        raises -- see :func:`_rasterizer_for`.
+    ``probe_runner``: how the ffmpeg capability probe shells out, the same
+        seam ``compare.mp4_grid.render_match_grid`` carries and for the
+        same two reasons. It is deliberately not the encoder's own
+        ``subprocess.Popen``: a unit test that stubs the encode has
+        stubbed ``Popen`` module-wide, and ``subprocess.run`` opens one
+        internally -- so without this the probe would be answered by the
+        encoder's stub. And a fake here is the only way to exercise a
+        build without ``drawtext``, which no ffmpeg on any machine in
+        this project actually is.
 
     Returns the written ``output_path``.
     """
@@ -554,14 +563,8 @@ def render_overlay(
     fps = rate_num / rate_den
     duration_seconds = probe.duration_seconds
 
-    if template is None:
-        template = DefaultTemplate(
-            width=width,
-            height=height,
-            font_path=font_path,
-            font_name=font_name,
-            theme=load_theme(theme),
-        )
+    scale = CellScale.for_cell(height)
+    palette = load_theme(theme)
 
     states = build_frame_states(
         shot_times_in_clip=shot_times,
@@ -569,39 +572,118 @@ def render_overlay(
         fps=fps,
         duration_seconds=duration_seconds,
     )
+    runs = build_overlay_runs(states)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-
     rate = f"{rate_num}/{rate_den}"
-    cmd = _build_ffmpeg_cmd(
-        ffmpeg_binary=ffmpeg_binary,
-        codec=resolved_codec,
-        width=width,
-        height=height,
-        rate=rate,
-        output_path=output_path,
-    )
 
-    proc = subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    assert proc.stdin is not None
-    try:
-        for state in states:
-            canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-            template.draw_frame(canvas, state)
-            proc.stdin.write(canvas.tobytes())
-        proc.stdin.close()
-    except (BrokenPipeError, OSError) as exc:
-        proc.kill()
-        proc.wait()
-        stderr = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
-        raise OverlayRenderError(f"ffmpeg failed during render: {stderr or exc}") from exc
+    # ``drawtext`` opens the font file itself, long after this call, so
+    # it has to be a real path that outlives the encode -- not a temp
+    # file from ``importlib.resources.as_file``.
+    with tempfile.TemporaryDirectory(prefix="splitsmith-overlay-") as work:
+        # One bundled face for every theme. A theme decides colour, never
+        # the typeface -- see ``compare.overlay_sprites.theme_font_face``
+        # for the measurement behind that: only one of the overlay's two
+        # halves could ever honour a per-theme face deterministically.
+        font_path = overlay_font_file(resolve_overlay_face("splitsmith-mono"), Path(work))
+        capabilities = ffmpeg_capabilities(ffmpeg_binary, font_path=font_path, runner=probe_runner)
+        clock_filter: str | None = None
+        if capabilities.drawtext:
+            clock_filter = _clock_filter_graph(
+                width=width,
+                height=height,
+                scale=scale,
+                font_path=font_path,
+                beep_offset_seconds=beep_offset_seconds,
+                # Clamped, not just taken: an audit can carry a negative
+                # ``ms_after_beep`` (a shot the auditor placed before the
+                # beep), which would put ``freeze`` below ``start`` and
+                # leave the pre-beep filter and the held filter BOTH
+                # enabled over ``[freeze, start)`` -- two numbers stacked
+                # at the same x/y, the exact failure the lt/gte windows
+                # exist to prevent. Clamping collapses the ticking window
+                # to nothing instead, which is right: a stage whose last
+                # shot precedes its beep has no elapsed time to tick.
+                last_shot_in_clip=max(beep_offset_seconds, max(shot_times)),
+                ink=palette.ink,
+                stroke=palette.stroke,
+            )
+        else:
+            logger.warning(
+                "%s (ffmpeg %s) has no usable drawtext, so the overlay's running clock is "
+                "omitted; the shot counter and split labels still render.",
+                capabilities.binary,
+                capabilities.version,
+            )
 
-    rc = proc.wait()
+        cmd = _build_ffmpeg_cmd(
+            ffmpeg_binary=ffmpeg_binary,
+            codec=resolved_codec,
+            width=width,
+            height=height,
+            rate=rate,
+            output_path=output_path,
+            clock_filter=clock_filter,
+        )
+
+        with _rasterizer_for(rasterizer) as active:
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+            assert proc.stdin is not None
+            # Whether ffmpeg has been handed anything yet, which is what
+            # decides if a file at ``output_path`` belongs to this run or
+            # to the previous good render -- see ``_discard_partial_output``.
+            piped_frames = False
+            try:
+                for run in runs:
+                    png = active.png(
+                        single_html(
+                            run_groups(run),
+                            width=width,
+                            height=height,
+                            scale=scale,
+                            theme=palette,
+                        ),
+                        width=width,
+                        height=height,
+                    )
+                    # Decode once per run and write the same buffer for
+                    # every frame it spans. The draw is the expensive
+                    # part; the pipe is not, and repeating the buffer is
+                    # what keeps the output frame-for-frame with the trim
+                    # without a concat list to quantize.
+                    frame = Image.open(io.BytesIO(png)).convert("RGBA").tobytes()
+                    for _ in range(run.frame_count):
+                        proc.stdin.write(frame)
+                        piped_frames = True
+                proc.stdin.close()
+            except BaseException as exc:
+                # Anything, not just the pipe's own BrokenPipeError/OSError.
+                # ``active.png`` is a Playwright call: a browser timeout or
+                # crash raises ``playwright.sync_api.Error``, which is
+                # neither. Uncaught, the child is never killed and stdin is
+                # never closed, so ffmpeg blocks on an open pipe until the
+                # GC drops this Popen and then flushes a truncated MOV to
+                # ``output_path`` -- and since the escaping exception is not
+                # an OverlayRenderError, ``ui/exports.py`` does not catch it
+                # either, so one bad stage aborts a whole multi-stage export
+                # instead of becoming that stage's skip reason. Kill, reap,
+                # and throw the fragment away before anything can find it.
+                proc.kill()
+                proc.wait()
+                _discard_partial_output(output_path, piped_frames=piped_frames)
+                if not isinstance(exc, Exception):
+                    # Ctrl-C / SystemExit: the encoder is still owed a
+                    # teardown, but the interrupt keeps unwinding as itself.
+                    raise
+                # Read stderr only after the wait above -- the pipe does not
+                # reach EOF while the child is alive, so reading first on a
+                # child blocked on stdin would hang here forever.
+                stderr = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
+                raise OverlayRenderError(f"ffmpeg failed during render: {stderr or exc}") from exc
+
+            rc = proc.wait()
+            stderr_text = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
     if rc != 0:
-        stderr = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
-        raise OverlayRenderError(f"ffmpeg exited with {rc}: {stderr}")
+        _discard_partial_output(output_path, piped_frames=piped_frames)
+        raise OverlayRenderError(f"ffmpeg exited with {rc}: {stderr_text}")
     return output_path

@@ -24,6 +24,12 @@ from ``overlay_layout``, ``overlay_theme`` and
 ``overlay_raster.py``'s job (Task 6R-2), a separate module so that only
 one of the two needs a browser.
 
+``compare/overlay_sprites`` is a type-only ``TYPE_CHECKING`` import, not
+a runtime one (see the guard below). That is what keeps this module a
+leaf: since issue #684, ``overlay_render`` imports this module, and
+``compare/overlay_sprites`` reaches ``overlay_render`` transitively
+through ``ui.exports`` -- a real import here would close that cycle.
+
 Design rules, each answering one of the old fitter's defects:
 
 - **``overflow: hidden`` on every ``.cell``.** This is the fix for all
@@ -98,10 +104,24 @@ from collections.abc import Sequence
 from html import escape
 from importlib.resources import files
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from .compare.overlay_sprites import SpriteGeometry, TilePlacement
+from .overlay_clock import border_width
 from .overlay_layout import MIN_FONT_SIZE, Anchor, CellScale, ColorToken, Element, Flow, Group, Role
 from .overlay_theme import OverlayTheme
+
+if TYPE_CHECKING:
+    # ``grid_html`` names these two in its signature and reads attributes
+    # off them; it never constructs one, so a runtime import buys nothing
+    # -- and it costs the leaf position this module's docstring claims.
+    # ``compare.overlay_sprites`` reaches ``ui.exports`` transitively (via
+    # ``compare.overlay_data``) and ``ui.exports`` imports
+    # ``overlay_render``, which since #684 imports THIS module: a real
+    # import here closes that cycle and nothing in the package can be
+    # imported at all. Type-only keeps the annotation honest (this module
+    # has ``from __future__ import annotations``, so it is never
+    # evaluated) without the edge.
+    from .compare.overlay_sprites import SpriteGeometry, TilePlacement
 
 RGB = tuple[int, int, int]
 
@@ -864,17 +884,104 @@ def cell_html(groups: Sequence[Group], *, scale: CellScale, theme: OverlayTheme)
 
     Includes its own ``<style>`` block and the fit-policy ``<script>``
     (see :func:`_fit_script`), so this is valid to drop anywhere (a
-    test, a future single-shooter port) without also needing a whole
-    document -- :func:`grid_html` calls the same building blocks but
-    emits the stylesheet and script once for the whole grid instead of
-    once per cell. The script only *defines* ``window.__splitsmithFit``
-    here; nothing in this module calls it -- see
-    :mod:`splitsmith.overlay_raster` for where and why it is invoked.
+    test, some future embedding that isn't the grid) without also
+    needing a whole document -- :func:`grid_html` calls the same
+    building blocks but emits the stylesheet and script once for the
+    whole grid instead of once per cell. :func:`single_html`, the
+    single-shooter port, does the same thing again for a different
+    reason: it needs page-level ``html``/``body`` sizing this fragment
+    doesn't carry, so it calls the same private building blocks
+    (``_style_rules``, ``_fit_script``, ``_cell_div``) directly rather
+    than wrapping this function's output. The script only *defines*
+    ``window.__splitsmithFit`` here; nothing in this module calls it --
+    see :mod:`splitsmith.overlay_raster` for where and why it is
+    invoked.
     """
     return (
         f"<style>{_style_rules(scale=scale, theme=theme)}</style>\n"
         f"{_fit_script()}\n"
         f"{_cell_div(groups)}"
+    )
+
+
+def single_html(
+    groups: Sequence[Group],
+    *,
+    width: int,
+    height: int,
+    scale: CellScale,
+    theme: OverlayTheme,
+) -> str:
+    """One canvas-sized cell as a whole HTML document (issue #684).
+
+    The single-shooter overlay's counterpart to :func:`grid_html`. There
+    is exactly one cell and it is the whole frame, so this takes plain
+    pixel dimensions rather than a :class:`SpriteGeometry` -- nothing
+    about a single-shooter export has rows, columns or tile placements,
+    and borrowing the grid's vocabulary to express "one of one" would be
+    the same information spelled twice.
+
+    :func:`cell_html` is nearly this -- same building blocks, same
+    single cell -- but it returns a *fragment*. That matters more than
+    it sounds: ``.cell`` is
+    ``width: 100%; height: 100%``, which resolves against its containing
+    block, and in a grid document that block is a grid item sized by
+    ``.grid``'s pixel tracks. A fragment dropped into an empty page has
+    no such ancestor, so the cell collapses to its content and every
+    anchor lands in the wrong place. This emits the same ``html, body``
+    sizing block :func:`grid_html` does -- minus the grid tracks -- so the
+    cell fills the canvas.
+
+    ``html``/``body`` stay ``background: transparent``: the rasterizer
+    screenshots with ``omit_background=True`` and the result is piped to
+    ffmpeg as an alpha layer. An opaque background here would paint the
+    whole frame black over the footage.
+
+    Carries the fit-policy ``<script>`` for the same reason both siblings
+    do -- see :func:`_fit_script`.
+
+    **One rule here overrides the shared stylesheet, and only here.** The
+    single-shooter overlay draws its counter and split through this
+    function and its running clock through ffmpeg ``drawtext``
+    (``overlay_render._clock_filter_graph``) -- two rasterizers, one
+    frame, two corners a viewer reads side by side. They have to agree on
+    stroke weight or the frame looks like two overlays. ``.emphasis-plain``
+    asks for ``CellScale.stroke_width`` px of ``-webkit-text-stroke``,
+    which is *centred* on the outline and so shows half its width outside
+    the glyph; the clock's ``borderw`` sits fully outside. At 1080 that is
+    1px against 4px -- a 4:1 difference in the halo that carries the text
+    over bright footage, which the pre-port PIL renderer did not have
+    (it drew both corners in one call at one stroke). Doubling the CSS
+    width makes the visible outside halves equal by construction.
+
+    This is not applied in :func:`grid_html`: the compare grid has the
+    same seam, but its rendered output is settled and moving its pixels
+    is not in this change's scope. Confining the override to the document
+    only the single-shooter export builds is what keeps that true
+    structurally rather than by anyone remembering.
+    """
+    style = _style_rules(scale=scale, theme=theme)
+    page_style = (
+        "html, body {\n"
+        "margin: 0; padding: 0;\n"
+        f"width: {width}px; height: {height}px;\n"
+        "background: transparent; overflow: hidden;\n"
+        "}"
+    )
+    # Declared after ``style`` so it wins on source order -- both
+    # selectors are a single class, so specificity does not separate them.
+    single_style = (
+        ".role-live-primary {\n"
+        f"-webkit-text-stroke: {2 * border_width(scale.live_primary)}px rgb({_rgb(theme.stroke)});\n"
+        "}"
+    )
+    return (
+        "<!doctype html>\n"
+        '<html><head><meta charset="utf-8"><title>overlay</title>'
+        f"<style>{style}\n{page_style}\n{single_style}</style>"
+        f"{_fit_script()}"
+        "</head>"
+        f"<body>{_cell_div(groups)}</body></html>"
     )
 
 

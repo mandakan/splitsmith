@@ -1144,15 +1144,20 @@ def overlay(
         None,
         "--max-height",
         help=(
-            "Cap output height (aspect preserved). FCPXML emits a separate "
-            "format so FCP scales it back up."
+            "Cap output height (aspect preserved). Smaller files and a "
+            "cheaper render. FCPXML emits a separate format so FCP scales "
+            "it back up."
         ),
     ),
     max_fps: float | None = typer.Option(
-        None, "--max-fps", help="Cap output frame rate. Source rate kept when below cap."
-    ),
-    font_name: str | None = typer.Option(
-        None, "--font", help=f"Preset font: {', '.join(overlay_render.available_font_names())}."
+        None,
+        "--max-fps",
+        help=(
+            "Cap output frame rate. Source rate kept when below cap. "
+            "Trades file size and encode time -- overlay content is drawn "
+            "per shot, not per frame, so this no longer changes how much "
+            "gets drawn."
+        ),
     ),
     theme: str = typer.Option(
         "splitsmith",
@@ -1181,7 +1186,6 @@ def overlay(
         codec=codec,  # type: ignore[arg-type]
         max_height=max_height,
         max_fps=max_fps,
-        font_name=font_name,
         theme=theme,  # type: ignore[arg-type]
         ffmpeg_binary=runtime().ffmpeg_binary,
     )

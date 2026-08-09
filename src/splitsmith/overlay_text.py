@@ -3,15 +3,19 @@
 Extracted from ``overlay_render.py`` so the multi-shooter grid
 (``compare/overlay_sprites.py``) can draw the same typography without a
 top-level module importing from a subpackage to reach its own helpers.
-This is a move: every function body here is byte-identical to the one it
-replaced, and ``overlay_render`` re-exports them so its callers and its
-tests keep reaching them at the old names.
+This started as a move: every function body here was byte-identical to
+the one it replaced, and ``overlay_render`` re-exported the lot so old
+call sites kept working. That scaffolding is gone. Everything now
+imports this module by name; ``overlay_render`` pulls in only
+``OverlayRenderError``, ``overlay_font_file`` and
+``resolve_overlay_face``, for its own use.
 
 ``OverlayRenderError`` moved with them because ``_load_font`` raises it
 and leaving it behind would make the import circular. It keeps its name
 -- it is still the overlay pipeline's error -- and ``overlay_render``
-re-exports the same class object, so ``except`` clauses elsewhere are
-unaffected.
+re-exports the same class object, so ``except
+overlay_render.OverlayRenderError`` clauses elsewhere are unaffected.
+That one re-export is deliberate; the rest are gone.
 """
 
 import contextlib
@@ -206,12 +210,14 @@ OverlayFace = str | Path
 def resolve_overlay_face(font_name: str | None) -> OverlayFace:
     """Resolve ``font_name`` to one face, for *both* halves of an overlay.
 
-    The multi-shooter grid draws its counters and splits with PIL and its
-    running clock with ffmpeg ``drawtext``. Those are two different font
-    loaders, and left to themselves they disagreed: the sprite fell
-    through to system discovery on the ``clean`` theme while the clock
-    was pinned to the bundled mono, so the two halves of one overlay used
-    two typefaces. Worse, on a host with no DejaVu the sprite dropped to
+    Both overlays draw their counters and splits through headless
+    Chromium -- the grid since #693, the single-shooter export since
+    #684 -- and their running clocks with ffmpeg ``drawtext``. Two
+    different font loaders either way, and back when the sprite half was
+    PIL they disagreed if left to themselves: the sprite fell through to
+    system discovery on the ``clean`` theme while the clock was pinned to
+    the bundled mono, so the two halves of one overlay used two
+    typefaces. Worse, on a host with no DejaVu the sprite dropped to
     PIL's bitmap default beside a TrueType clock.
 
     So resolution happens once, here, and both halves consume the result.
