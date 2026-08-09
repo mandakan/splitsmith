@@ -39,7 +39,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Literal
 
-from PIL import Image
+from PIL import Image, ImageFont
 
 from .config import VideoMetadata
 from .fcpxml_gen import probe_video
@@ -73,6 +73,13 @@ OverlayCodec = Literal["auto", "hevc-alpha", "prores-4444"]
 """
 
 OVERLAY_CODECS: tuple[OverlayCodec, ...] = ("auto", "hevc-alpha", "prores-4444")
+
+#: The glyph set every clock filter draws -- digits and a period, never a
+#: descender or a taller mark. :func:`_clock_filter_graph` measures its
+#: ascender-to-ink gap once to reconcile ``drawtext``'s origin with the
+#: sprite's; using the literal the pre-beep filter already prints keeps
+#: the measured string and the drawn string the same thing.
+CLOCK_SAMPLE_TEXT = "0.00"
 
 
 @dataclass(frozen=True)
@@ -286,10 +293,35 @@ def _clock_filter_graph(
     of the clip -- the running total is the stage time, not the clip
     duration, which is what ``build_frame_states`` does in Python for the
     sprite half.
+
+    **The y expression carries an ascender correction and must.**
+    ``drawtext`` puts the top of the *drawn ink* at ``y``; CSS puts the
+    top of the *line box* there and the ink starts an ascender-to-cap gap
+    lower, and PIL's default ``"la"`` anchor -- what the pre-port
+    :class:`DefaultTemplate` used for both corners -- does the same. So
+    the same string at the same size in the same face lands in two
+    different places. Measured on a real 1920x1080 frame, both corners
+    drawing ``0.00``: the sprite's ink began at y=52 and the clock's at
+    y=30. Adding the face's own gap to the clock is what puts them back
+    on one baseline, and it is deliberately the *clock* that moves: 52 is
+    where the PIL renderer drew both corners (verified against it at 720,
+    1080 and 2160), so moving the sprite instead would fix the alignment
+    by breaking issue #684's "the output must not move" rule.
+
+    The gap is read off ``font_path`` rather than hard-coded as an em
+    fraction, so it follows whatever face
+    :func:`~splitsmith.overlay_text.resolve_overlay_face` actually
+    resolved -- including a system fallback on a host with no bundled
+    font. ffmpeg cannot compute it: ``drawtext``'s own ``ascent``
+    variable is the maximum ink above the baseline **of the glyphs it is
+    rendering**, so for a digits-only clock ``ascent - th`` is zero
+    (measured: it moves the 1080 clock by 1px, not 22).
     """
     x_expr, y_expr = anchor_ffmpeg_expr(
         Anchor.TOP_RIGHT, col=0, row=0, cell_w=width, cell_h=height, pad=scale.pad
     )
+    face = ImageFont.truetype(str(font_path), size=scale.live_primary)
+    y_expr = f"{y_expr}+{face.getbbox(CLOCK_SAMPLE_TEXT)[1]}"
     common = clock_common_options(
         font_path=font_path,
         font_size=scale.live_primary,
@@ -303,11 +335,28 @@ def _clock_filter_graph(
     held = quote_filter_value(clock_text(max(0.0, last_shot_in_clip - beep_offset_seconds)))
     return ",".join(
         (
-            f"drawtext={common}:text='0.00':enable='lt(t\\,{start})'",
+            f"drawtext={common}:text='{CLOCK_SAMPLE_TEXT}':enable='lt(t\\,{start})'",
             f"drawtext={common}:{elapsed_text_option(start)}:" f"enable='gte(t\\,{start})*lt(t\\,{freeze})'",
             f"drawtext={common}:text={held}:enable='gte(t\\,{freeze})'",
         )
     )
+
+
+def _discard_partial_output(output_path: Path) -> None:
+    """Remove a half-written MOV so nothing downstream mistakes it for a render.
+
+    ffmpeg opens its output with ``-y`` the moment it starts, so from the
+    first piped frame there is always a file at ``output_path`` -- and a
+    render that dies in the middle leaves a truncated one. ``ui/exports.py``
+    treats an existing overlay file as a "stale render from a prior run"
+    and wires it into the FCPXML rather than dropping it, so leaving the
+    truncation behind is worse than leaving nothing: the user gets a
+    timeline referencing a clip that stops partway through the stage.
+    Whatever was there before this call is already gone either way; ``-y``
+    truncated it before the first frame.
+    """
+    with contextlib.suppress(OSError):
+        output_path.unlink(missing_ok=True)
 
 
 @contextlib.contextmanager
@@ -517,7 +566,16 @@ def render_overlay(
                 scale=scale,
                 font_path=font_path,
                 beep_offset_seconds=beep_offset_seconds,
-                last_shot_in_clip=max(shot_times),
+                # Clamped, not just taken: an audit can carry a negative
+                # ``ms_after_beep`` (a shot the auditor placed before the
+                # beep), which would put ``freeze`` below ``start`` and
+                # leave the pre-beep filter and the held filter BOTH
+                # enabled over ``[freeze, start)`` -- two numbers stacked
+                # at the same x/y, the exact failure the lt/gte windows
+                # exist to prevent. Clamping collapses the ticking window
+                # to nothing instead, which is right: a stage whose last
+                # shot precedes its beep has no elapsed time to tick.
+                last_shot_in_clip=max(beep_offset_seconds, max(shot_times)),
                 ink=palette.ink,
                 stroke=palette.stroke,
             )
@@ -564,14 +622,34 @@ def render_overlay(
                     for _ in range(run.frame_count):
                         proc.stdin.write(frame)
                 proc.stdin.close()
-            except (BrokenPipeError, OSError) as exc:
+            except BaseException as exc:
+                # Anything, not just the pipe's own BrokenPipeError/OSError.
+                # ``active.png`` is a Playwright call: a browser timeout or
+                # crash raises ``playwright.sync_api.Error``, which is
+                # neither. Uncaught, the child is never killed and stdin is
+                # never closed, so ffmpeg blocks on an open pipe until the
+                # GC drops this Popen and then flushes a truncated MOV to
+                # ``output_path`` -- and since the escaping exception is not
+                # an OverlayRenderError, ``ui/exports.py`` does not catch it
+                # either, so one bad stage aborts a whole multi-stage export
+                # instead of becoming that stage's skip reason. Kill, reap,
+                # and throw the fragment away before anything can find it.
                 proc.kill()
                 proc.wait()
+                _discard_partial_output(output_path)
+                if not isinstance(exc, Exception):
+                    # Ctrl-C / SystemExit: the encoder is still owed a
+                    # teardown, but the interrupt keeps unwinding as itself.
+                    raise
+                # Read stderr only after the wait above -- the pipe does not
+                # reach EOF while the child is alive, so reading first on a
+                # child blocked on stdin would hang here forever.
                 stderr = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
                 raise OverlayRenderError(f"ffmpeg failed during render: {stderr or exc}") from exc
 
             rc = proc.wait()
             stderr_text = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
     if rc != 0:
+        _discard_partial_output(output_path)
         raise OverlayRenderError(f"ffmpeg exited with {rc}: {stderr_text}")
     return output_path

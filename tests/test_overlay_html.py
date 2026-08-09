@@ -16,6 +16,7 @@ import pytest
 from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
 from splitsmith.compare.overlay_summary import _cell_groups
+from splitsmith.overlay_clock import border_width
 from splitsmith.overlay_html import cell_html, grid_html, single_html
 from splitsmith.overlay_layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
 from splitsmith.overlay_theme import load_theme
@@ -634,3 +635,48 @@ def test_single_html_carries_the_fit_script() -> None:
 def test_single_html_reads_sizes_off_the_scale_it_is_given() -> None:
     doc = single_html(_live_groups(), width=1920, height=1080, scale=SCALE, theme=THEME)
     assert f"font-size: {SCALE.live_primary}px" in _rule(doc, ".role-live-primary")
+
+
+# --- the single-shooter document's own stroke (issue #684) ---------------
+
+
+def test_single_html_matches_the_clock_stroke_and_grid_html_is_untouched():
+    """The single-shooter overlay's two halves must agree on stroke weight.
+
+    Its counter and split come from ``single_html`` through Chromium; its
+    running clock is an ffmpeg ``drawtext`` filter whose ``borderw`` is
+    ``overlay_clock.border_width``. ``-webkit-text-stroke`` is *centred*
+    on the outline while ``borderw`` sits fully outside, so the CSS width
+    has to be doubled for the visible outside halves to match -- at 1080
+    the shared stylesheet's own ``stroke_width`` would show 1px against
+    the clock's 4px.
+
+    The compare grid has the same seam and is deliberately left alone:
+    its rendered output is settled. This asserts both halves of that --
+    the override is present in the single-shooter document and absent
+    from the grid's, which still carries the shared value.
+    """
+    scale = CellScale.for_cell(1080)
+    groups = (
+        Group(
+            anchor=Anchor.TOP_LEFT,
+            flow=Flow.ROW,
+            elements=(Element(role=Role.LIVE_PRIMARY, text="7/32"),),
+        ),
+    )
+    doubled = f"-webkit-text-stroke: {2 * border_width(scale.live_primary)}px"
+    shared = f"-webkit-text-stroke: {scale.stroke_width}px"
+    assert doubled != shared  # or this test proves nothing
+
+    single = single_html(groups, width=1920, height=1080, scale=scale, theme=THEME)
+    assert doubled in single
+
+    geometry = SpriteGeometry(canvas_width=1920, canvas_height=2160, rows=2, cols=1)
+    grid = grid_html(
+        [(TilePlacement(row=0, col=0, present=True, label="A"), groups)],
+        geometry=geometry,
+        scale=scale,
+        theme=THEME,
+    )
+    assert doubled not in grid
+    assert shared in grid

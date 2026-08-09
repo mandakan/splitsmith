@@ -100,6 +100,7 @@ from importlib.resources import files
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .overlay_clock import border_width
 from .overlay_layout import MIN_FONT_SIZE, Anchor, CellScale, ColorToken, Element, Flow, Group, Role
 from .overlay_theme import OverlayTheme
 
@@ -926,6 +927,26 @@ def single_html(
 
     Carries the fit-policy ``<script>`` for the same reason both siblings
     do -- see :func:`_fit_script`.
+
+    **One rule here overrides the shared stylesheet, and only here.** The
+    single-shooter overlay draws its counter and split through this
+    function and its running clock through ffmpeg ``drawtext``
+    (``overlay_render._clock_filter_graph``) -- two rasterizers, one
+    frame, two corners a viewer reads side by side. They have to agree on
+    stroke weight or the frame looks like two overlays. ``.emphasis-plain``
+    asks for ``CellScale.stroke_width`` px of ``-webkit-text-stroke``,
+    which is *centred* on the outline and so shows half its width outside
+    the glyph; the clock's ``borderw`` sits fully outside. At 1080 that is
+    1px against 4px -- a 4:1 difference in the halo that carries the text
+    over bright footage, which the pre-port PIL renderer did not have
+    (it drew both corners in one call at one stroke). Doubling the CSS
+    width makes the visible outside halves equal by construction.
+
+    This is not applied in :func:`grid_html`: the compare grid has the
+    same seam, but its rendered output is settled and moving its pixels
+    is not in this change's scope. Confining the override to the document
+    only the single-shooter export builds is what keeps that true
+    structurally rather than by anyone remembering.
     """
     style = _style_rules(scale=scale, theme=theme)
     page_style = (
@@ -935,10 +956,17 @@ def single_html(
         "background: transparent; overflow: hidden;\n"
         "}"
     )
+    # Declared after ``style`` so it wins on source order -- both
+    # selectors are a single class, so specificity does not separate them.
+    single_style = (
+        ".role-live-primary {\n"
+        f"-webkit-text-stroke: {2 * border_width(scale.live_primary)}px rgb({_rgb(theme.stroke)});\n"
+        "}"
+    )
     return (
         "<!doctype html>\n"
         '<html><head><meta charset="utf-8"><title>overlay</title>'
-        f"<style>{style}\n{page_style}</style>"
+        f"<style>{style}\n{page_style}\n{single_style}</style>"
         f"{_fit_script()}"
         "</head>"
         f"<body>{_cell_div(groups)}</body></html>"

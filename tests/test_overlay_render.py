@@ -17,10 +17,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageFont
+from playwright.sync_api import Error as PlaywrightError
 
 from splitsmith import overlay_raster, overlay_render, runtime
 from splitsmith.config import VideoMetadata
+from splitsmith.overlay_clock import border_width
+from splitsmith.overlay_layout import CellScale
+from splitsmith.overlay_text import overlay_font_file, resolve_overlay_face
 from tests.conftest import fake_ffmpeg_probe
 from tests.synthetic_media import ffmpeg_available
 
@@ -641,6 +645,7 @@ def test_a_missing_browser_fails_the_render_with_the_install_hint(
             beep_offset_seconds=0.0,
             probe=_meta_30fps(duration=1.0),
             codec="prores-4444",
+            probe_runner=fake_ffmpeg_probe(),
         )
     assert overlay_raster.INSTALL_HINT in str(excinfo.value)
 
@@ -748,3 +753,175 @@ def test_the_clock_holds_before_the_beep_ticks_during_and_freezes_after(
     # Frozen after the last shot: the running total is the stage time,
     # not the clip duration.
     assert list(corner(66).getdata()) == list(corner(86).getdata())
+
+
+# --- fix round 1: the failure path, the clamp, and the shared baseline ---
+
+
+def test_a_rasterizer_that_dies_mid_render_kills_ffmpeg_and_leaves_no_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A browser crash must not orphan ffmpeg or leave a truncated MOV.
+
+    ``active.png`` is a Playwright call and its failures are
+    ``playwright.sync_api.Error``, which is neither ``BrokenPipeError``
+    nor ``OSError``. Escaping the loop uncaught, it leaves ffmpeg blocked
+    on an open stdin until the GC drops the Popen and flushes a truncated
+    file -- and it is not an ``OverlayRenderError``, so ``ui/exports.py``
+    turns one bad stage into a failed export request instead of a skip
+    reason, then wires the truncation into the next FCPXML as a "stale
+    render from a prior run".
+    """
+    audit = tmp_path / "stage1.json"
+    audit.write_text(json.dumps({"shots": [{"shot_number": 1, "ms_after_beep": 100}]}), encoding="utf-8")
+    output = tmp_path / "overlay.mov"
+    # ffmpeg opens its output with -y before the first frame, so there is
+    # always something on disk by the time a run fails.
+    output.write_bytes(b"truncated")
+    lifecycle: list[str] = []
+
+    class StubStdin:
+        def write(self, data: bytes) -> int:
+            return len(data)
+
+        def close(self) -> None:
+            lifecycle.append("close")
+
+    class StubStderr:
+        def read(self) -> bytes:
+            return b""
+
+    class StubProc:
+        def __init__(self, **_: Any) -> None:
+            self.stdin = StubStdin()
+            self.stderr = StubStderr()
+
+        def wait(self) -> int:
+            lifecycle.append("wait")
+            return 0
+
+        def kill(self) -> None:
+            lifecycle.append("kill")
+
+    class DyingRasterizer:
+        def png(self, html: str, *, width: int, height: int) -> bytes:
+            raise PlaywrightError("Timeout 30000ms exceeded.")
+
+    monkeypatch.setattr(overlay_render.subprocess, "Popen", lambda cmd, **_: StubProc())
+    monkeypatch.setattr(overlay_render.shutil, "which", lambda _b: "/bin/ffmpeg")
+
+    with pytest.raises(overlay_render.OverlayRenderError, match="Timeout 30000ms"):
+        overlay_render.render_overlay(
+            audit_path=audit,
+            trimmed_video_path=tmp_path / "trim.mp4",
+            output_path=output,
+            beep_offset_seconds=0.0,
+            probe=_meta_30fps(duration=0.1),
+            codec="prores-4444",
+            rasterizer=DyingRasterizer(),
+            probe_runner=fake_ffmpeg_probe(),
+        )
+    assert lifecycle == ["kill", "wait"], "the encoder was not killed and reaped"
+    assert not output.exists(), "a truncated MOV was left where a caller would find it"
+
+
+def test_a_shot_before_the_beep_cannot_stack_two_clock_filters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A negative ``ms_after_beep`` used to put ``freeze`` below ``start``,
+    which enables the pre-beep filter and the held filter over the same
+    ``[freeze, start)`` window and draws two numbers on top of each other
+    -- the exact collision the lt/gte windows exist to prevent."""
+    audit = tmp_path / "stage1.json"
+    audit.write_text(json.dumps({"shots": [{"shot_number": 1, "ms_after_beep": -200}]}), encoding="utf-8")
+    cmd, _ = _capture_render_cmd(
+        monkeypatch,
+        audit_path=audit,
+        output=tmp_path / "overlay.mov",
+        probe=_meta_30fps(duration=2.0),
+        rasterizer=_FakeRasterizer(),
+        beep_offset_seconds=1.0,
+    )
+    graph = cmd[cmd.index("-vf") + 1]
+    # freeze is clamped up to the beep, so the ticking window is empty and
+    # the two remaining windows meet at 1 without overlapping.
+    assert r"enable='lt(t\,1)'" in graph
+    assert r"enable='gte(t\,1)*lt(t\,1)'" in graph
+    assert r"enable='gte(t\,1)'" in graph
+    assert "lt(t\\,0.8)" not in graph
+
+
+@pytest.mark.integration
+def test_the_counter_and_the_clock_sit_on_one_baseline(tmp_path: Path) -> None:
+    """Two rasterizers, one frame, one baseline -- asserted on pixels.
+
+    ``drawtext`` puts the top of the drawn *ink* at ``y``; CSS (and PIL's
+    default ``"la"`` anchor, which the pre-port template used) put the
+    *ascender* there. Same face, same size, ~22px apart at 1080 unless
+    something reconciles them -- which is what shipped, and what this
+    pins.
+
+    The two corners draw different glyph sets (``0/1`` has a slash that
+    rises above digits), so comparing raw ink tops would compare the
+    fonts, not the layout. Instead each corner's measured ink top is
+    walked back to the ascender line it implies -- minus its own outside
+    stroke, minus the face's ascender-to-ink gap for the string it
+    actually drew -- and both must land on ``pad``. That also catches a
+    stroke regression: the two corners are only equal here because their
+    visible outside stroke is the same number.
+    """
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("ffmpeg not installed")
+    width, height = 1920, 1080
+    audit = tmp_path / "stage1.json"
+    audit.write_text(json.dumps({"shots": [{"shot_number": 1, "ms_after_beep": 200}]}), encoding="utf-8")
+    output = tmp_path / "overlay.mov"
+    with overlay_raster.ChromiumRasterizer() as ras:
+        overlay_render.render_overlay(
+            audit_path=audit,
+            trimmed_video_path=tmp_path / "unused.mp4",
+            output_path=output,
+            # Beep at 1.0s with a 0.1s clip: every rendered frame is
+            # pre-beep, so the corners read "0/1" and "0.00".
+            beep_offset_seconds=1.0,
+            probe=VideoMetadata(
+                width=width, height=height, duration_seconds=0.1, frame_rate_num=30, frame_rate_den=1
+            ),
+            codec="prores-4444",
+            rasterizer=ras,
+        )
+
+    frame = tmp_path / "f0.png"
+    subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-y", "-v", "error", "-i", str(output),
+            "-vf", "select=eq(n\\,0)", "-fps_mode", "passthrough",
+            "-frames:v", "1", "-pix_fmt", "rgba", str(frame),
+        ],  # fmt: skip
+        check=True,
+    )
+    # Threshold away the soft text-shadow so the measurement is the glyph
+    # and its stroke, which is what "on one baseline" is about.
+    alpha = Image.open(frame).convert("RGBA").getchannel("A")
+    core = alpha.point(lambda p: 255 if p >= 200 else 0)
+
+    def ink_top(left: int, right: int) -> int:
+        box = core.crop((left, 0, right, height // 3)).getbbox()
+        assert box is not None, f"nothing drawn in x={left}..{right}"
+        return box[1]
+
+    scale = CellScale.for_cell(height)
+    face = ImageFont.truetype(
+        str(overlay_font_file(resolve_overlay_face("splitsmith-mono"), tmp_path)),
+        size=scale.live_primary,
+    )
+    outside = border_width(scale.live_primary)
+    counter_ascender = ink_top(0, width // 2) + outside - face.getbbox("0/1")[1]
+    clock_ascender = ink_top(width // 2, width) + outside - face.getbbox("0.00")[1]
+
+    assert (
+        abs(counter_ascender - clock_ascender) <= 1
+    ), f"counter puts the ascender at y={counter_ascender}, clock at y={clock_ascender}"
+    assert (
+        abs(counter_ascender - scale.pad) <= 1
+    ), f"both corners agree at y={counter_ascender} but pad is {scale.pad}"
