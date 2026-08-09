@@ -114,6 +114,11 @@ class OverlayTheme:
     #: for labels, text-shadow only), dim enough not to compete with the
     #: figure it sits above or beside.
     ink_2: RGB
+    #: Plate fill behind a share-card stat cell (``--color-surface``).
+    surface: RGB
+    #: Dimmer label grey than :attr:`muted` (``--color-subtle``), for
+    #: captions that must sit below a value without competing with it.
+    subtle: RGB
 
     @property
     def shadow(self) -> RGB:
@@ -154,6 +159,11 @@ _CLEAN = OverlayTheme(
     # borrowed from accent/split/split_good, same discipline as rule/muted
     # above.
     ink_2=(205, 205, 205),
+    # No brand palette here either. The clean theme's existing neutral
+    # discipline: pure black for the plate fill, mid grey for the dimmer
+    # caption tone.
+    surface=(0, 0, 0),
+    subtle=(128, 128, 128),
 )
 
 
@@ -184,6 +194,8 @@ def _load_splitsmith() -> OverlayTheme:
             rule=_rgb(colors, "rule"),
             muted=_rgb(colors, "muted"),
             ink_2=_rgb(colors, "ink_2"),
+            surface=_rgb(colors, "surface"),
+            subtle=_rgb(colors, "subtle"),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise OverlayThemeError(f"overlay_theme.json malformed: {exc}") from exc

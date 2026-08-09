@@ -70,6 +70,11 @@ TOKEN_MAP: dict[str, str] = {
     # design system's own text ramp (ink / ink-2 / muted / subtle /
     # whisper) for this job.
     "ink_2": "--color-ink-2",
+    # Share card (spec 2026-08-09): the plate fill behind a stat cell and
+    # the dimmer grey its caption uses. Both already exist in index.css;
+    # the card must not invent its own hexes.
+    "surface": "--color-surface",
+    "subtle": "--color-subtle",
 }
 
 FONT_MAP: dict[str, str] = {
