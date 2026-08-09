@@ -422,6 +422,50 @@ def test_share_creation_still_succeeds_when_rendering_fails(
     assert calls, "cached_card_png was never called -- the monkeypatch was not exercised"
 
 
+def test_an_abandoned_warm_never_reaches_asyncio_as_an_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``warm_match_card_bounded``'s docstring promises that *every*
+    failure is logged there at ``warning`` and never re-raised. Abandoning
+    the task without cancelling it broke that promise for the one case
+    where both things go wrong: a warm that times out and *then* raises
+    finishes unretrieved, so asyncio's ``Task.__del__`` logs "Task
+    exception was never retrieved" with a full traceback at ``ERROR`` --
+    on exactly the degraded host where the timeout fires, which is where a
+    spurious ERROR is most expensive to an operator triaging a real
+    incident.
+
+    The loop's exception handler is where that report lands, so installing
+    one and asserting it stays empty tests the outcome (nothing at ERROR),
+    not the mechanism (that ``cancel`` was called).
+    """
+    import gc
+    import time
+
+    import splitsmith.ui.share_og as share_og
+
+    monkeypatch.setattr(share_og, "_WARM_TIMEOUT_S", 0.05)
+
+    def _slow_then_boom(state: object, token: str) -> None:
+        time.sleep(0.3)
+        raise RuntimeError("the render failed after the caller gave up")
+
+    monkeypatch.setattr(share_og, "warm_match_card", _slow_then_boom)
+
+    handled: list[dict[str, object]] = []
+
+    async def _drive() -> None:
+        asyncio.get_running_loop().set_exception_handler(lambda _loop, context: handled.append(context))
+        await share_og.warm_match_card_bounded(object(), "tok_abandoned")
+        # Outlive the warm so it really does raise in its worker thread,
+        # then force the collection that runs Task.__del__.
+        await asyncio.sleep(0.6)
+        gc.collect()
+        await asyncio.sleep(0)
+
+    asyncio.run(_drive())
+
+    assert not handled, handled
+
+
 def test_share_creation_returns_promptly_when_warming_is_slow(
     hosted_env: str,
     hosted_app: tuple[TestClient, _CapturingSender],

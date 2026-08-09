@@ -287,6 +287,18 @@ async def warm_match_card_bounded(state: Any, token: str) -> None:
             _WARM_TIMEOUT_S,
             token,
         )
+        # Not cancellation of the warm itself -- ``asyncio.to_thread``'s
+        # worker cannot be interrupted, and the paragraph above says so.
+        # What this cancels is *this* function's interest in the task's
+        # result. Without it the task finishes unretrieved, and if the warm
+        # also raised, asyncio's "Task exception was never retrieved"
+        # handler logs the traceback at ERROR -- contradicting the promise
+        # two paragraphs up that every failure is logged here at warning
+        # and never re-raised, and doing it on precisely the degraded host
+        # where the timeout fires. ``_fetch_og_meta`` cancels on its own
+        # timeout path for the same reason; not cancelling here was the
+        # asymmetry, not a deliberate difference.
+        task.cancel()
         return
     exc = task.exception()
     if exc is not None:
