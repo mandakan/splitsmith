@@ -1845,6 +1845,7 @@ from ..share_card import (
     MatchCard,
     RosterEntry,
     StageCard,
+    card_hash,
     stage_figures,
 )
 from ..share_card_render import cached_card_png
@@ -2074,8 +2075,8 @@ def test_match_shell_carries_og_tags(
 
     html = client.get(f"/share/{token}").text
     assert _meta(html, "og:title")
-    assert _meta(html, "og:image", ).startswith("http")
-    assert _meta(html, "og:image").endswith("/og.png")
+    assert _meta(html, "og:image").startswith("http")
+    assert "/og.png?v=" in _meta(html, "og:image")
     assert _meta(html, "og:image:width") == "1200"
     assert _meta(html, "og:image:height") == "630"
     assert _meta(html, "twitter:card") == "summary_large_image"
@@ -2105,7 +2106,26 @@ def test_stage_shell_names_the_stage_and_points_at_the_stage_png(
 
     html = client.get(f"/share/{token}/results/{SLUG}/1").text
     assert "Stage 1" in (_meta(html, "og:title") or "")
-    assert _meta(html, "og:image").endswith(f"/og/{SLUG}/1.png")
+    assert f"/og/{SLUG}/1.png?v=" in _meta(html, "og:image")
+
+
+def test_the_og_image_url_moves_when_the_data_moves(
+    hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender]
+) -> None:
+    """The freshness mechanism, asserted rather than assumed. If the URL
+    does not move, a re-audit writes an object nobody fetches and every
+    crawler keeps serving stale numbers behind a year-long cache."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    seed_match(hosted_env, "owner@example.com", MID)
+    token = _share_token(client)
+
+    before = _meta(client.get(f"/share/{token}").text, "og:image")
+    _rename_match(hosted_env, MID, "A Different Match Name")
+    after = _meta(client.get(f"/share/{token}").text, "og:image")
+
+    assert before != after
+    assert before.split("?v=")[1] != after.split("?v=")[1]
 
 
 def test_revoked_and_unknown_tokens_serve_identical_shells(
@@ -2238,7 +2258,11 @@ def share_match_shell(token: str, request: Request) -> HTMLResponse:
     shooters = ", ".join(r.name for r in card.roster) or "No shooters yet"
     return _shell(
         _base_tags(
-            image_url=f"{base}/api/share/{token}/og.png",
+            # The hash is what makes the URL content-addressed. Without it
+            # a re-audit writes a new object nobody fetches, while every
+            # crawler and CDN keeps serving last week's numbers. This is
+            # the whole freshness mechanism -- do not drop the query.
+            image_url=f"{base}/api/share/{token}/og.png?v={card_hash(card)}",
             title=card.match_name,
             description=f"{shooters} - {card.stage_count} stages",
             page_url=f"{base}/share/{token}",
@@ -2265,7 +2289,7 @@ def share_stage_shell(token: str, slug: str, stage: int, request: Request) -> HT
     parts.append(f"{card.shot_count} shots")
     return _shell(
         _base_tags(
-            image_url=f"{base}/api/share/{token}/og/{slug}/{stage}.png",
+            image_url=f"{base}/api/share/{token}/og/{slug}/{stage}.png?v={card_hash(card)}",
             title=f"Stage {stage} - {card.stage_name}",
             description=" - ".join(parts),
             page_url=f"{base}/share/{token}/results/{slug}/{stage}",
@@ -2273,6 +2297,12 @@ def share_stage_shell(token: str, slug: str, stage: int, request: Request) -> HT
         )
     )
 ```
+
+`_rename_match(hosted_env, match_id, new_name)` is a helper the new
+freshness test needs and which does not exist yet: write it in the test
+file, changing the match's stored name the same way `seed_match` in
+`tests/hosted_helpers.py` writes one. Any mutation that moves a field the
+match card displays will do; the name is simply the cheapest.
 
 Two things to verify against `ui/server.py` before writing: that
 `state.resolve_share_token` is reachable from a plain request (it is set
