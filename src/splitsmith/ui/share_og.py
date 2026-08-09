@@ -563,8 +563,16 @@ def _parse_positive_int(value: str) -> int | None:
     in the route signature would make FastAPI 422 a mistyped or truncated
     URL with a raw JSON error body, where ``spa_fallback`` used to serve
     the app -- the SPA's own client-side route matches any string. Falling
-    back to the generic shell instead keeps a human looking at a page."""
-    if not value.isdigit():
+    back to the generic shell instead keeps a human looking at a page.
+
+    ``isdecimal``, deliberately, not ``isdigit``: ``"²".isdigit()`` is
+    True but ``int("²")`` raises ``ValueError``, so the ``isdigit``
+    spelling let a superscript in a URL segment reach ``int()`` and 500 an
+    anonymous public route -- the exact outcome ``_fetch_og_meta``'s
+    docstring rules out ("no rich preview" is acceptable, "no page" is
+    not). ``isdecimal`` is True for exactly the Unicode ``Nd`` characters
+    ``int()`` parses, so it cannot admit a value that then fails."""
+    if not value.isdecimal():
         return None
     return int(value)
 

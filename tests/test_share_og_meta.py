@@ -333,6 +333,27 @@ def test_a_non_numeric_stage_falls_back_to_the_generic_shell_not_a_422(hosted_en
     assert _meta(resp.text, "og:title") == "Splitsmith"
 
 
+@pytest.mark.parametrize("stage", ["not-a-number", "²", "¹²³", "-1", "1.0"])
+def test_a_stage_segment_int_cannot_parse_still_serves_a_page(hosted_env, hosted_app, stage: str) -> None:
+    """``str.isdigit()`` is True for superscripts (``²``, ``³``, ``¹``)
+    while ``int()`` rejects them, so gating on ``isdigit`` let ``²`` through
+    to an unhandled ``ValueError`` -- a 500 on an anonymous, uncontrolled
+    public URL. ``not-a-number`` (already covered above) cannot catch that:
+    it fails both predicates. The superscript cases are the ones that
+    discriminate ``isdigit`` from ``isdecimal``; the rest pin the shape the
+    docstring promises."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed(hosted_env)
+    token = _share_token(client)
+    client.cookies.clear()
+
+    resp = client.get(f"/share/{token}/results/{SLUG}/{stage}")
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["content-type"].startswith("text/html")
+    assert _meta(resp.text, "og:title") == "Splitsmith"
+
+
 def test_a_slow_card_build_still_returns_promptly_with_the_generic_shell(
     hosted_env, hosted_app, monkeypatch
 ) -> None:
