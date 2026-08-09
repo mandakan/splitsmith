@@ -13,19 +13,28 @@ from splitsmith.config import StageRounds
 from splitsmith.match_project import MatchProject, StageEntry, StageScorecard
 
 
-def _write_audit(root: Path, stage_number: int, ms_after_beep: list[int]) -> Path:
+def _write_audit(
+    root: Path,
+    stage_number: int,
+    ms_after_beep: list[int],
+    classes: list[str | None] | None = None,
+) -> Path:
     audit_dir = root / "audit"
     audit_dir.mkdir(parents=True, exist_ok=True)
     path = audit_dir / f"stage{stage_number}.json"
+    shots = []
+    for i, ms in enumerate(ms_after_beep):
+        shot: dict = {"shot_number": i + 1, "candidate_number": i + 1, "ms_after_beep": ms}
+        if classes is not None and classes[i] is not None:
+            shot["interval_class"] = classes[i]
+            shot["interval_class_source"] = "auto"
+        shots.append(shot)
     path.write_text(
         json.dumps(
             {
                 "stage_time_seconds": 6.0,
                 "beep_time": 3.0,
-                "shots": [
-                    {"shot_number": i + 1, "candidate_number": i + 1, "ms_after_beep": ms}
-                    for i, ms in enumerate(ms_after_beep)
-                ],
+                "shots": shots,
             }
         )
     )
@@ -94,6 +103,18 @@ def test_splits_are_recomputed_over_the_time_sorted_sequence(tmp_path):
     assert [round(s.time_from_beep, 3) for s in tile.shots] == [1.2, 1.45, 1.7]
     assert [round(s.split, 3) for s in tile.shots] == [1.2, 0.25, 0.25]
     assert all(s.split > 0 for s in tile.shots)
+
+
+def test_interval_classes_ride_along_on_tile_shots(tmp_path):
+    # Fed out of order on purpose: the class must stay attached to its
+    # own shot through the time re-sort, not to its original row index.
+    # The split statistics (issue #772) read this field to tell a split
+    # from a reload.
+    audit = _write_audit(tmp_path / "ann", 1, [1450, 1200, 1700], classes=["split", "first_shot", None])
+    data = overlay_data.load_overlay_data([_bundle(tmp_path, "ann", audit=audit)])
+    tile = data[("ann", 1)]
+    assert [round(s.time_from_beep, 3) for s in tile.shots] == [1.2, 1.45, 1.7]
+    assert [s.interval_class for s in tile.shots] == ["first_shot", "split", None]
 
 
 @pytest.mark.parametrize("payload", ["[]", "null", '"nope"', "3"])

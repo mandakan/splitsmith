@@ -25,6 +25,7 @@ import {
   type TierBaselines,
   baselinesFromMatchDistributions,
   currentShotIndex,
+  statisticSplits,
 } from "@/lib/splits";
 import { cn } from "@/lib/utils";
 
@@ -159,14 +160,15 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   }, [shots, currentTime]);
 
   const stageTime = shots.length > 0 ? shots[shots.length - 1].time_from_beep : null;
-  // Draw (shot 1) is not a split - exclude it from fastest/avg.
-  const splits = useMemo(
-    () => shots.filter((s) => s.shot_number !== 1).map((s) => s.split),
-    [shots],
-  );
+  // Split statistics count split-classed intervals only - transitions,
+  // movement and reloads are dead time, not shooting (issue #772).
+  // statisticSplits owns the rule and the unclassified fallback.
+  const splits = useMemo(() => statisticSplits(shots), [shots]);
   const fastestSplit = splits.length > 0 ? Math.min(...splits) : null;
   const avgSplit =
     splits.length > 0 ? splits.reduce((sum, s) => sum + s, 0) / splits.length : null;
+  // The first shot's split is the draw, whatever its classification.
+  const draw = shots.length > 0 ? shots[0].split : null;
 
   const seekToShot = useCallback((shot: { time_absolute: number }) => {
     const v = videoRef.current;
@@ -367,6 +369,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
         <StageStats
           stageTime={stageTime}
           shotCount={shots.length}
+          draw={draw}
           fastestSplit={fastestSplit}
           avgSplit={avgSplit}
         />
