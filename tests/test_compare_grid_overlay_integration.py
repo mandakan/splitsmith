@@ -1633,3 +1633,53 @@ def test_the_summary_hold_reaches_the_rendered_pixels(tmp_path: Path, shooter_cl
         f"the hold moved audio against picture: A/V gap {held_gap * 1000:.1f}ms with the hold "
         f"against {unheld_gap * 1000:.1f}ms without it, over two segments"
     )
+
+
+@integration
+@needs_ffmpeg
+def test_a_non_dividing_canvas_still_renders_the_hold(tmp_path: Path, shooter_clips):
+    """#691, rendered and measured: 641x361 at 2x2 composes 640x360.
+
+    Before the fix the hold still was canvas-sized, ``concat`` refused
+    the 641x361-vs-640x360 mismatch at graph-config time and every stage
+    failed. Exit 0 alone is not the instrument - the claim is that the
+    still, the decoded frames and the hold's pixels all agree at the
+    composed size.
+    """
+    canvas = mp4_grid.GridCanvas(width=641, height=361, frame_rate_num=30, frame_rate_den=1)
+    composed = (640, 360)
+    shooters = _roster(tmp_path, shooter_clips, stages=1)
+    out = tmp_path / "odd-canvas.mp4"
+    result = mp4_grid.render_grid_mp4(
+        shooters,
+        audio_label="Mathias",
+        output_path=out,
+        canvas=canvas,
+        head_pad_seconds=HEAD_PAD_SECONDS,
+        tail_pad_seconds=TAIL_PAD_SECONDS,
+        overlay=True,
+        summary_hold_seconds=HOLD_SECONDS,
+        ffmpeg_binary=FFMPEG,
+        work_dir=tmp_path / "work-odd",
+    )
+    assert result.failed == (), result.failed
+    assert out.exists()
+
+    # The still itself shrank to the composed size.
+    still = Image.open(tmp_path / "work-odd" / "summary-stage1.png").convert("RGB")
+    assert still.size == composed, still.size
+
+    # concat accepted the join: the decoded stream is action + hold, at
+    # the composed size.
+    assert _video_frames(out) == SEGMENT_FRAMES
+    in_hold = _frame_at_index(out, MID_HOLD_INDEX, tmp_path, "odd-hold")
+    assert in_hold.size == composed, in_hold.size
+
+    # And the hold's pixels are the composed still's - the whole-frame
+    # check the two-stage test calls THE instrument.
+    whole = (0, 0, *composed)
+    to_still = _mean_abs_diff(in_hold, still, whole)
+    assert to_still <= HOLD_MATCHES_ITS_STILL_MAX, (
+        f"the hold is not showing the still this render composed: mean abs diff "
+        f"{to_still:.2f} over the composed frame (threshold {HOLD_MATCHES_ITS_STILL_MAX})"
+    )
