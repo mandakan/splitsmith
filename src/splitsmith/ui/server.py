@@ -147,6 +147,7 @@ from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
+from ..audit_data import StageExportError, audit_shots_to_engine_shots
 from ..auth import AuthBackend, CompositeAuth, LoopbackAuth, User
 from ..compare import mp4_grid, project_loader
 from ..compute import ComputeBackend, LocalComputeBackend
@@ -3043,7 +3044,7 @@ def register_job_bodies(state: AppState) -> None:
                     config=Config(),
                     secondaries=secondaries,
                 )
-        except export_helpers.StageExportError as exc:
+        except StageExportError as exc:
             # Surface as a job failure with the exporter's own message so
             # the JobsPanel row reads "audit JSON has no shots in shots[]"
             # rather than a stack trace.
@@ -3257,7 +3258,7 @@ def register_job_bodies(state: AppState) -> None:
                             config=Config(),
                             secondaries=secondaries_in,
                         )
-                    except export_helpers.StageExportError as exc:
+                    except StageExportError as exc:
                         raise RuntimeError(f"stage {stage_number}: {exc}") from exc
                     # Hosted: a re-cut here produced the per-stage trims/overlay
                     # on this worker -- push them so other workers + the API
@@ -10174,7 +10175,7 @@ def create_app(
 
         prim = stg.primary()
         beep_time = prim.beep_time if prim is not None and prim.beep_time is not None else 0.0
-        shots = export_helpers.audit_shots_to_engine_shots(audit_payload, beep_time_in_source=beep_time)
+        shots = audit_shots_to_engine_shots(audit_payload, beep_time_in_source=beep_time)
         anomalies = report.detect_anomalies_structured(shots, beep_time, stg.time_seconds)
         return JSONResponse({"anomalies": [a.model_dump() for a in anomalies]})
 

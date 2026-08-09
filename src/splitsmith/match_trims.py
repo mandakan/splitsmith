@@ -21,6 +21,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from . import camera_select
+from .audit_data import StageExportError
 from .compare.project_loader import audit_path_for_stage, trim_path_for_video
 from .config import Config, StageData
 from .match_model import Match
@@ -301,7 +302,7 @@ def _run_one(match_root: Path, entry: TrimPlanEntry) -> TrimResult:
             config=Config(),
             secondaries=secondaries,
         )
-    except (exports.StageExportError, OSError, RuntimeError) as exc:
+    except (StageExportError, OSError, RuntimeError) as exc:
         return TrimResult(
             entry=entry, skip_reasons=[str(exc)], notes=notes, substituted_from=substituted_from
         )

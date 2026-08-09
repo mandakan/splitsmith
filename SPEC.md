@@ -58,7 +58,8 @@ raw videos + stage JSON
     │   adaptive priors from stage_rounds; consensus seeds shots[]
     ▼
 [6] Generate outputs               (csv_gen.py, fcpxml_gen.py,
-    │                              ui/exports.py, ui/match_exports.py,
+    │                              audit_data.py, ui/exports.py,
+    │                              ui/match_exports.py,
     │                              report.py)
     │
     ▼
@@ -120,6 +121,11 @@ Tuning notes:
 - Note: `-ss` before `-i` is fast but may not be frame-accurate; the buffer absorbs any seek imprecision. In audit mode the re-encode re-aligns frames, so the concern is moot.
 - Start: `max(0, beep_time - 5)`
 - End: `beep_time + stage_time + 5`
+
+**`audit_data.py`** — Read a stage's audit JSON and convert it to engine `Shot` records.
+- `read_audit_data`: the audit precondition (#619). A missing file is zero shots, not an error — detection never having run is a legitimate state, so the trim and FCPXML spine still export and the shot-dependent artefacts skip themselves. A file that exists but won't parse raises `StageExportError`.
+- `audit_shots_to_engine_shots`: audit `shots[]` → `Shot` records. Audit times are clip-local; the engine wants source-absolute, so `time_absolute = beep_time_in_source + time_from_beep`. Shot 1's split is the draw; shot N>1 is the difference between successive `time_from_beep` values, matching `csv_gen.write_splits_csv`.
+- **Why a core module and not part of `ui/exports.py`, where both used to live:** two consumers on opposite sides of the codebase need them — the export pipeline and `compare/overlay_data.py`. The compare side reaching into the web-UI layer closed an import cycle through `overlay_render` (issue #760). Nothing here knows about HTTP; it imports only `config`.
 
 **`csv_gen.py`** — Write splits CSV.
 - Columns: `shot_number, time_from_start, split, peak_amplitude, confidence, notes`

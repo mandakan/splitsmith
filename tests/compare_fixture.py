@@ -230,7 +230,7 @@ class ShooterSpec:
     """One shooter across every stage.
 
     ``shots_ms`` of ``None`` is the no-audit shooter: the audit path names
-    a file that is never written, so ``ui.exports.read_audit_data`` hits
+    a file that is never written, so ``audit_data.read_audit_data`` hits
     its missing-file branch and the overlay degrades to no shots for that
     tile -- on the rendered path, not just in a unit test.
     """

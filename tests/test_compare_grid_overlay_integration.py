@@ -23,7 +23,7 @@ that both:
   exercised on the rendered path, not just in a unit test that
   constructs a ``TilePlacement(present=False)`` by hand; and
 - lets one shooter go without an audit file, so the no-data
-  degradation (``ui.exports.read_audit_data``'s missing-file branch)
+  degradation (``audit_data.read_audit_data``'s missing-file branch)
   runs through the whole pipeline -- loader, sprite builder, filter
   graph, ffmpeg -- instead of only through ``test_compare_overlay_data.py``.
 

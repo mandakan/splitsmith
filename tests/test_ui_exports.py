@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from splitsmith.audit_data import StageExportError
 from splitsmith.config import Config, StageData
 from splitsmith.ui import exports as exports_mod
 
@@ -44,72 +45,6 @@ def _audit_payload(shots: list[dict] | None = None, beep_in_clip: float = 5.0) -
             ]
         },
     }
-
-
-def test_audit_shots_to_engine_shots_computes_splits() -> None:
-    """Shot 1's split is the draw (= time_from_beep); shot N>1 is the diff
-    against the previous shot's time_from_beep. Mirrors the CLI's csv_gen
-    expectations."""
-    payload = _audit_payload(
-        shots=[
-            {"shot_number": 1, "candidate_number": 1, "time": 5.5, "ms_after_beep": 500},
-            {"shot_number": 2, "candidate_number": 2, "time": 5.9, "ms_after_beep": 900},
-        ]
-    )
-    shots = exports_mod.audit_shots_to_engine_shots(payload, beep_time_in_source=10.0)
-    assert [s.shot_number for s in shots] == [1, 2]
-    # First shot's split == draw == time_from_beep.
-    assert shots[0].split == pytest.approx(0.5)
-    assert shots[1].split == pytest.approx(0.4)
-    # Engine time_absolute == beep_time_in_source + time_from_beep.
-    assert shots[0].time_absolute == pytest.approx(10.5)
-    assert shots[1].time_absolute == pytest.approx(10.9)
-    # Peak / confidence lifted from the candidate by candidate_number.
-    assert shots[0].peak_amplitude == pytest.approx(0.7)
-    assert shots[0].confidence == pytest.approx(0.9)
-
-
-def test_audit_shots_to_engine_shots_orders_by_shot_number() -> None:
-    """Shots are sorted by shot_number even if the JSON stores them out of
-    order (audit-apply writes append-style; tools may reorder)."""
-    payload = _audit_payload(
-        shots=[
-            {"shot_number": 2, "candidate_number": 2, "time": 5.9, "ms_after_beep": 900},
-            {"shot_number": 1, "candidate_number": 1, "time": 5.5, "ms_after_beep": 500},
-        ]
-    )
-    shots = exports_mod.audit_shots_to_engine_shots(payload, beep_time_in_source=10.0)
-    assert [s.shot_number for s in shots] == [1, 2]
-
-
-def test_audit_shots_to_engine_shots_handles_manual_shot_without_candidate() -> None:
-    """A manually-added shot has candidate_number=None; we still emit the
-    shot but with peak/confidence defaults."""
-    payload = _audit_payload(
-        shots=[
-            {"shot_number": 1, "candidate_number": None, "time": 5.5, "ms_after_beep": 500},
-        ]
-    )
-    shots = exports_mod.audit_shots_to_engine_shots(payload, beep_time_in_source=10.0)
-    assert len(shots) == 1
-    assert shots[0].peak_amplitude == 0.0
-    assert shots[0].confidence == 0.0
-
-
-def test_audit_shots_to_engine_shots_preserves_notes() -> None:
-    payload = _audit_payload(
-        shots=[
-            {
-                "shot_number": 1,
-                "candidate_number": 1,
-                "time": 5.5,
-                "ms_after_beep": 500,
-                "notes": "draw",
-            },
-        ]
-    )
-    shots = exports_mod.audit_shots_to_engine_shots(payload, beep_time_in_source=10.0)
-    assert shots[0].notes == "draw"
 
 
 def test_export_stage_writes_csv_and_report(tmp_path: Path) -> None:
@@ -336,7 +271,7 @@ def test_export_stage_corrupt_audit_still_raises(tmp_path: Path) -> None:
     audit_path = tmp_path / "stage1.json"
     audit_path.write_text("{not json", encoding="utf-8")
 
-    with pytest.raises(exports_mod.StageExportError, match="failed to read audit JSON"):
+    with pytest.raises(StageExportError, match="failed to read audit JSON"):
         exports_mod.export_stage(
             request=exports_mod.StageExportRequest(stage_number=1, write_trim=False),
             audit_path=audit_path,

@@ -20,8 +20,8 @@ from pathlib import Path
 from typing import Literal
 
 from .. import composition, fcp7xml_render, fcpxml_gen, mp4_render, youtube_sidecar
+from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..config import OutputConfig
-from .exports import StageExportError, audit_shots_to_engine_shots, read_audit_data
 
 PipLayout = Literal["stacked", "pip-corners"]
 # Issue #197. ``"fcpxml"`` writes a Final Cut Pro 1.10 timeline (current
