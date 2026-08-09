@@ -21,6 +21,16 @@ Spec: `docs/superpowers/specs/2026-08-09-share-og-images-design.md`.
 - Card dimensions are exactly 1200 x 630.
 - `SplitColorThresholds.transition_min` default is `1.0` (`src/splitsmith/config.py:357`). It hangs off `OutputConfig` as `split_color_thresholds` (`config.py:361`), so the configured value is `OutputConfig().split_color_thresholds.transition_min`. The fallback path reads it from config; never hardcode it.
 - `CoachIntervalClass` values are exactly: `first_shot`, `split`, `transition`, `movement`, `reload`, `activation`.
+- **The split rule is owned by `splitsmith.coach.statistic_splits`** (landed on
+  main in #774, closing #772), mirrored in TS as `statisticSplits`. Nothing in
+  this plan may reimplement it. Main's rule uses the classified path as soon as
+  ANY interval carries a class; this plan originally specified all-or-nothing,
+  and that disagreement is filed as #775 rather than settled here.
+- After Task 4b, `share_card.Interval` and `share_card.intervals_from_audit_shots`
+  **do not exist**. Shot records come from `audit_data.audit_shots_to_engine_shots`,
+  whose `config.Shot` carries `.split` and `.interval_class` and so satisfies
+  `coach.SplitStatInterval`. Tests use a local frozen-dataclass double with those
+  two attributes rather than constructing a full engine `Shot`.
 - Share links are hosted-only. Every new route returns 404 when `_hosted_mode_active()` is False.
 - Run the full suite with `uv run pytest` before the final commit. Use `-n0` when debugging one test.
 - Tests must not depend on execution order or share mutable state outside `tmp_path`.
@@ -28,6 +38,12 @@ Spec: `docs/superpowers/specs/2026-08-09-share-og-images-design.md`.
 ---
 
 ### Task 1: Split-figure derivation (the shared definition)
+
+> **Superseded in part by Task 4b.** #774 landed the canonical rule on main as
+> `coach.statistic_splits` while this branch was in flight. Task 4b deletes this
+> task's reimplementation, its `Interval` type and its `intervals_from_audit_shots`,
+> keeping only `StageFigures`. The text below is left as the record of what was
+> built and why; do not implement it fresh.
 
 This is the module #772 will also consume. It is pure: no I/O, no browser, no FastAPI.
 
@@ -1006,6 +1022,257 @@ git commit -m "feat(share): 1200x630 card HTML, pure and browser-free"
 
 ---
 
+### Task 4b: Consume main's canonical split rule
+
+Reconciliation, not new behaviour. #774 landed on main while this branch was in
+flight and closed issue #772, putting the split rule in
+`splitsmith.coach.statistic_splits` (mirrored in TS as `statisticSplits`). Task 1
+had implemented the same rule independently. Two definitions of one rule is the
+exact outcome both the spec and #772 exist to prevent, so this branch drops its
+copy.
+
+The duplication is wider than the rule itself: main also taught
+`audit_data.audit_shots_to_engine_shots` to carry `interval_class` onto the engine
+`Shot`, which already has `.split` and therefore satisfies `coach.SplitStatInterval`.
+That makes Task 1's `Interval` and `intervals_from_audit_shots` redundant too.
+
+**One behavioural change comes with this.** Main's rule takes the classified path
+as soon as ANY interval carries a class; Task 1 implemented all-or-nothing. On a
+partially classified stage the two disagree. Main's is shipped and canonical, so
+the card adopts it. The disagreement is filed as **#775** and is not settled here
+— do not "fix" main's semantics in this task.
+
+**Files:**
+- Modify: `src/splitsmith/share_card.py`
+- Modify: `tests/test_share_card_figures.py`
+
+**Interfaces:**
+- Consumes: `splitsmith.coach.statistic_splits`, `coach.SplitStatInterval`,
+  `coach.SPLIT_STAT_TRANSITION_MIN`.
+- Produces: `stage_figures(shots: Sequence[SplitStatInterval], *, transition_min: float = SPLIT_STAT_TRANSITION_MIN) -> StageFigures`
+- Deletes: `Interval`, `intervals_from_audit_shots`, `DRAW_CLASS`, `SPLIT_CLASS`,
+  and the inline rule inside `stage_figures`.
+- `StageFigures` keeps its shape exactly: `draw`, `avg_split`, `split_count`,
+  `interval_count`, `source`. Tasks 2, 4, 5, 6 and 9 all read those fields.
+
+- [ ] **Step 1: Rewrite the tests first**
+
+Replace the rule-testing half of `tests/test_share_card_figures.py`. The tests that
+must go are the ones asserting a rule this module no longer owns: the all-or-nothing
+test contradicts main outright, and the two `intervals_from_audit_shots` tests cover
+a deleted function. What stays is what `StageFigures` still decides: the draw, the
+mean, the counts, and `source`.
+
+```python
+"""Share-card figures. The RULE lives in ``coach.statistic_splits`` (#774);
+this module only shapes its output into a card's two headline numbers, so
+these tests assert the shaping, not the rule."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import pytest
+
+from splitsmith.share_card import StageFigures, stage_figures
+
+
+@dataclass(frozen=True)
+class _Shot:
+    """The two attributes ``coach.SplitStatInterval`` reads. A real engine
+    ``Shot`` needs six more required fields that no card looks at."""
+
+    split: float
+    interval_class: str | None
+
+
+# Draw 1.28, nine splits (mean 0.182), two transitions, one movement, one
+# reload. The intervals sum to 14.74 s.
+_SECONDS = [1.28, 0.19, 0.17, 0.22, 1.85, 0.16, 0.18, 2.42, 0.21, 0.15, 5.45, 0.20, 0.16, 2.10]
+_CLASSES = [
+    "first_shot", "split", "split", "split", "transition", "split", "split",
+    "reload", "split", "split", "movement", "split", "split", "transition",
+]
+
+
+def _classified() -> tuple[_Shot, ...]:
+    return tuple(_Shot(split=s, interval_class=c) for s, c in zip(_SECONDS, _CLASSES, strict=True))
+
+
+def _unclassified() -> tuple[_Shot, ...]:
+    return tuple(_Shot(split=s, interval_class=None) for s in _SECONDS)
+
+
+def test_classified_stage_reports_the_draw_and_the_split_mean() -> None:
+    figs = stage_figures(_classified())
+    assert figs.source == "coach"
+    assert figs.draw == pytest.approx(1.28)
+    assert figs.avg_split == pytest.approx(0.182, abs=5e-4)
+    assert figs.split_count == 9
+    assert figs.interval_count == 14
+
+
+def test_unclassified_stage_falls_back_through_the_shared_helper() -> None:
+    figs = stage_figures(_unclassified())
+    assert figs.source == "threshold"
+    assert figs.draw == pytest.approx(1.28)
+    assert figs.split_count == 9
+    assert figs.avg_split == pytest.approx(0.182, abs=5e-4)
+
+
+def test_the_fallback_excludes_a_draw_faster_than_the_threshold() -> None:
+    """A Production Optics draw can land under transition_min, so duration
+    alone cannot exclude it -- index 0 must. Guards the shared helper's
+    fallback branch through this module's own surface."""
+    shots = (
+        _Shot(split=0.90, interval_class=None),
+        _Shot(split=0.20, interval_class=None),
+        _Shot(split=0.20, interval_class=None),
+        _Shot(split=0.20, interval_class=None),
+    )
+    figs = stage_figures(shots)
+    assert figs.draw == pytest.approx(0.90)
+    assert figs.split_count == 3
+    assert figs.avg_split == pytest.approx(0.20)
+
+
+def test_partial_classification_follows_mains_any_rule_see_issue_775() -> None:
+    """This branch's spec argued for all-or-nothing; main counts the
+    classified intervals as soon as ANY interval carries a class. Main is
+    canonical, so the card follows it. The disagreement is issue #775 --
+    if that issue changes the rule, this test changes with it."""
+    shots = (
+        _Shot(split=1.28, interval_class="first_shot"),
+        _Shot(split=0.19, interval_class="split"),
+        _Shot(split=0.80, interval_class=None),
+    )
+    figs = stage_figures(shots)
+    assert figs.source == "coach"
+    assert figs.split_count == 1
+    assert figs.avg_split == pytest.approx(0.19)
+
+
+def test_a_stage_of_pure_dead_time_reports_a_draw_but_no_average() -> None:
+    shots = (
+        _Shot(split=1.28, interval_class="first_shot"),
+        _Shot(split=2.40, interval_class="reload"),
+    )
+    figs = stage_figures(shots)
+    assert figs.draw == pytest.approx(1.28)
+    assert figs.avg_split is None
+    assert figs.split_count == 0
+
+
+def test_no_shots_yields_empty_source_and_no_figures() -> None:
+    figs = stage_figures(())
+    assert figs == StageFigures(
+        draw=None, avg_split=None, split_count=0, interval_count=0, source="empty"
+    )
+```
+
+- [ ] **Step 2: Run them and watch them fail**
+
+Run: `uv run pytest tests/test_share_card_figures.py -n0 -q`
+Expected: failures — `stage_figures` still takes `Interval` objects with `.seconds`
+and still applies all-or-nothing.
+
+- [ ] **Step 3: Rewrite `stage_figures` as a wrapper**
+
+In `src/splitsmith/share_card.py`, delete `Interval`, `intervals_from_audit_shots`,
+`DRAW_CLASS` and `SPLIT_CLASS`, and replace the rule with delegation:
+
+```python
+def stage_figures(
+    shots: Sequence[SplitStatInterval],
+    *,
+    transition_min: float = SPLIT_STAT_TRANSITION_MIN,
+) -> StageFigures:
+    """The two headline figures a stage card shows, plus their provenance.
+
+    **This function does not own the split rule.** ``coach.statistic_splits``
+    does (issue #772, landed in #774), mirrored in TS by ``statisticSplits``.
+    All this adds is the card's shape: the draw, the mean of whatever the
+    shared helper returned, and how it was derived.
+
+    ``shots`` is one stage's full time-ordered sequence, draw first --
+    ``config.Shot`` from ``audit_data.audit_shots_to_engine_shots`` satisfies
+    the protocol. The draw is ``shots[0].split``, matching the helper's own
+    "index 0 is the draw" convention.
+
+    ``avg_split`` is None rather than zero when the helper returns nothing:
+    a stage of transitions and reloads has no splits to average, and the
+    card renders no average rather than inventing one.
+    """
+    if not shots:
+        return StageFigures(
+            draw=None, avg_split=None, split_count=0, interval_count=0, source="empty"
+        )
+    splits = statistic_splits(shots, transition_min=transition_min)
+    classified = any(s.interval_class is not None for s in shots)
+    return StageFigures(
+        draw=shots[0].split,
+        avg_split=(sum(splits) / len(splits)) if splits else None,
+        split_count=len(splits),
+        interval_count=len(shots),
+        # Mirrors the helper's own branch condition. If #775 changes that
+        # condition, this line changes with it -- they must not drift.
+        source="coach" if classified else "threshold",
+    )
+```
+
+Update the module docstring: it currently claims to be the one definition. It is
+not any more, and saying so is the point of this task. Point it at
+`coach.statistic_splits` and at #775 for the partial-classification question.
+
+Imports to add (local group): `from .coach import SPLIT_STAT_TRANSITION_MIN, SplitStatInterval, statistic_splits`.
+Drop `Mapping` from the typing imports if nothing else uses it.
+
+- [ ] **Step 4: Run the tests**
+
+Run: `uv run pytest tests/test_share_card_figures.py tests/test_share_card_models.py tests/test_share_card_html.py -n0 -q`
+Expected: PASS.
+
+- [ ] **Step 5: Prove the delegation is real**
+
+Break `coach.statistic_splits` — make it return `[]` unconditionally — and re-run
+`tests/test_share_card_figures.py`. Tests must fail. If they pass, `share_card`
+still has its own copy of the rule somewhere and the task is not done. Revert and
+confirm green.
+
+This is the whole point of the task, so it is not optional.
+
+- [ ] **Step 6: Confirm nothing else imports the deleted names**
+
+Run: `rg -n 'intervals_from_audit_shots|share_card import.*Interval|DRAW_CLASS|SPLIT_CLASS' src tests`
+Expected: no hits.
+
+- [ ] **Step 7: Run the coach and audit suites too**
+
+`share_card` now depends on `coach`. Run:
+`uv run pytest tests/test_coach_classify.py tests/test_audit_data.py tests/test_share_card_figures.py tests/test_share_card_models.py tests/test_share_card_html.py -q`
+Expected: PASS.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/splitsmith/share_card.py tests/test_share_card_figures.py
+git commit -m "refactor(share): consume the canonical split rule instead of repeating it
+
+coach.statistic_splits (#774) landed on main while this branch was in
+flight, implementing the same rule share_card had built independently.
+Two definitions of one rule is what issue #772 exists to prevent, so
+this deletes the copy, along with Interval and intervals_from_audit_shots
+-- audit_shots_to_engine_shots now carries interval_class onto the engine
+Shot, which already satisfies SplitStatInterval.
+
+Adopts main's partial-classification semantics as a consequence; the
+disagreement with this branch's spec is filed as #775.
+
+Refs #772, #775"
+```
+
+---
+
 ### Task 5: Render-and-cache seam
 
 **Files:**
@@ -1061,11 +1328,13 @@ Create `tests/test_share_card_render.py`:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pytest
 
 from splitsmith.overlay_raster import RasterizerUnavailableError
 from splitsmith.overlay_theme import load_theme
-from splitsmith.share_card import Interval, MatchCard, RosterEntry, StageCard, stage_figures
+from splitsmith.share_card import MatchCard, RosterEntry, StageCard, stage_figures
 from splitsmith.share_card_render import (
     FALLBACK_PNG_PATH,
     cached_card_png,
@@ -1074,6 +1343,16 @@ from splitsmith.share_card_render import (
 from splitsmith.storage import FilesystemStorage
 
 TOKEN = "tok_abc123"
+
+
+@dataclass(frozen=True)
+class _Shot:
+    """Minimal stand-in for ``config.Shot``: the two attributes
+    ``coach.SplitStatInterval`` reads. Building a real engine ``Shot``
+    here would mean six irrelevant required fields."""
+
+    split: float
+    interval_class: str | None
 
 
 class _FakeRasterizer:
@@ -1147,10 +1426,9 @@ def _stage_card() -> StageCard:
         stage_time=14.74,
         figures=stage_figures(
             (
-                Interval(index=1, seconds=1.28, interval_class="first_shot"),
-                Interval(index=2, seconds=0.19, interval_class="split"),
-            ),
-            transition_min=1.0,
+                _Shot(split=1.28, interval_class="first_shot"),
+                _Shot(split=0.19, interval_class="split"),
+            )
         ),
     )
 
@@ -1561,13 +1839,12 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
-from ..config import OutputConfig
 from ..overlay_theme import load_theme
+from ..audit_data import audit_shots_to_engine_shots
 from ..share_card import (
     MatchCard,
     RosterEntry,
     StageCard,
-    intervals_from_audit_shots,
     stage_figures,
 )
 from ..share_card_render import cached_card_png
@@ -1587,11 +1864,6 @@ def _hosted_gate() -> None:
 
 def _state(request: Request) -> Any:
     return request.app.state.splitsmith_state
-
-
-def _transition_min() -> float:
-    """The configured value, never a literal (#773 may move it)."""
-    return OutputConfig().split_color_thresholds.transition_min
 
 
 def build_match_card(state: Any) -> MatchCard:
@@ -1620,10 +1892,14 @@ def build_stage_card(state: Any, slug: str, stage_number: int) -> StageCard | No
     payload, _version = state.load_audit(slug, stage_number)
     if not payload:
         return None
-    intervals = intervals_from_audit_shots(payload.get("shots") or [])
-    if not intervals:
+    # main's canonical converter (#774) -- it carries interval_class onto
+    # each engine Shot, which is what makes the rule reachable here. The
+    # beep offset only affects ``time_absolute``, which no card reads, so
+    # 0.0 is correct rather than merely harmless.
+    shots = audit_shots_to_engine_shots(payload, beep_time_in_source=0.0)
+    if not shots:
         return None
-    figures = stage_figures(intervals, transition_min=_transition_min())
+    figures = stage_figures(shots)
     shooter = next((s for s in state.shooters() if s["slug"] == slug), {})
     return StageCard(
         stage_number=stage_number,
@@ -2139,13 +2415,20 @@ rasterizes at the declared size."""
 from __future__ import annotations
 
 import struct
+from dataclasses import dataclass
 
 import pytest
 
 from splitsmith.overlay_raster import ChromiumRasterizer
 from splitsmith.overlay_theme import load_theme
-from splitsmith.share_card import Interval, MatchCard, RosterEntry, StageCard, stage_figures
+from splitsmith.share_card import MatchCard, RosterEntry, StageCard, stage_figures
 from splitsmith.share_card_render import render_card
+
+
+@dataclass(frozen=True)
+class _Shot:
+    split: float
+    interval_class: str | None
 
 
 @pytest.mark.integration
@@ -2159,11 +2442,10 @@ def test_stage_card_rasterizes_to_a_1200x630_png() -> None:
         stage_time=14.74,
         figures=stage_figures(
             (
-                Interval(index=1, seconds=1.28, interval_class="first_shot"),
-                Interval(index=2, seconds=0.19, interval_class="split"),
-                Interval(index=3, seconds=1.85, interval_class="transition"),
-            ),
-            transition_min=1.0,
+                _Shot(split=1.28, interval_class="first_shot"),
+                _Shot(split=0.19, interval_class="split"),
+                _Shot(split=1.85, interval_class="transition"),
+            )
         ),
     )
     with ChromiumRasterizer() as rasterizer:
@@ -2205,17 +2487,18 @@ disk and open it:
 uv run python -c "
 from splitsmith.overlay_raster import ChromiumRasterizer
 from splitsmith.overlay_theme import load_theme
-from splitsmith.share_card import Interval, StageCard, stage_figures
+from splitsmith.share_card import StageCard, stage_figures
 from splitsmith.share_card_render import render_card
+from collections import namedtuple
 import pathlib
+S = namedtuple('S', 'split interval_class')
 card = StageCard(
     stage_number=3, stage_name='Per told me to do it!',
     shooter_name='Mathias Axell', match_name='Tallmilan 2026',
     shot_count=14, stage_time=14.74,
     figures=stage_figures((
-        Interval(index=1, seconds=1.28, interval_class='first_shot'),
-        Interval(index=2, seconds=0.19, interval_class='split'),
-    ), transition_min=1.0),
+        S(1.28, 'first_shot'), S(0.19, 'split'),
+    )),
 )
 with ChromiumRasterizer() as r:
     pathlib.Path('/tmp/stage-card.png').write_bytes(

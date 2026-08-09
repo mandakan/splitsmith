@@ -69,11 +69,14 @@ case no interval carries a class. The fallback is the rule
 any interval above `SplitColorThresholds.transition_min`
 (`config.py:357`, default 1.0 s) is not a split.
 
-Classification is all-or-nothing per stage: the coach path is used only
-when every interval carries a class, and otherwise the threshold rule
-covers the whole stage. Mixing the two within one run would produce an
-average whose definition varies by which intervals happened to be
-reviewed.
+This document originally specified all-or-nothing per stage -- the coach
+path only when every interval carries a class -- on the grounds that
+mixing the two within one run produces an average whose definition
+varies by which intervals happened to be reviewed. That reasoning
+stands, but it is **not** what ships. `coach.statistic_splits` takes the
+classified path as soon as any interval carries a class, and the card
+consumes that helper rather than second-guessing it. The disagreement is
+filed as #775 with a worked example.
 
 No new threshold is introduced. The card model records which path
 produced its figures, so the fallback is testable and later auditable.
