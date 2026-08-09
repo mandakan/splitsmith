@@ -539,6 +539,11 @@ def test_share_management_routes_local_mode_404() -> None:
         "shooters/anna/videos/stream",
         "shooters/anna/coach/distributions",
         "shooters/s_ab12/coach/distributions",
+        "og.png",
+        "og/anna/1.png",
+        "og-meta",
+        "og-meta/anna/1",
+        "og-meta/s_ab12/12",
     ],
 )
 def test_share_path_re_accepts(rest: str) -> None:
@@ -566,6 +571,16 @@ def test_share_path_re_accepts(rest: str) -> None:
         "shooters/anna/coach/distributions/extra",
         "me",
         "match/shares",
+        # og-meta near-misses -- the allowlist widened by exactly the two
+        # intended shapes, not by a prefix.
+        "og-meta/",
+        "og-meta/anna",
+        "og-meta/anna/1/extra",
+        "og-meta/anna/x",
+        "og-meta//1",
+        "OG-META",
+        "og-metax",
+        "og-meta/anna/",
     ],
 )
 def test_share_path_re_rejects(rest: str) -> None:

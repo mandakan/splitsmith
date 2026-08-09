@@ -33,9 +33,11 @@ the URL after that first rewrite and the card cache key needs it.
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
@@ -260,7 +262,9 @@ def share_stage_meta(slug: str, stage: int, request: Request) -> OgMeta:
 
 
 # ---------------------------------------------------------------------------
-# Share shells: /share/{token} and /share/{token}/results/{slug}/{stage}.
+# Share shells: /share/{token}, /share/{token}/results (the SPA's own
+# client-side redirect target for the bare token URL), and /share/{token}/
+# results/{slug}/{stage}.
 #
 # These paths do NOT start with /api/, so neither _share_alias nor
 # _match_id_alias ever sees them -- no tenant is pinned, no match is bound.
@@ -272,6 +276,19 @@ def share_stage_meta(slug: str, stage: int, request: Request) -> OgMeta:
 # the JSON that comes back.
 # ---------------------------------------------------------------------------
 
+#: httpx's own ``timeout=`` kwarg on ``AsyncClient``/``request`` is a
+#: *network* timeout -- it never fires over ``ASGITransport``, which calls
+#: the app in-process with no socket involved, so setting it is a no-op.
+#: ``asyncio.wait_for`` doesn't reliably fill the gap either: the og-meta
+#: handlers are sync route functions, and FastAPI runs those through
+#: ``anyio.to_thread.run_sync`` with its default ``abandon_on_cancel=False``
+#: -- meaning a cancelled awaiting task still *blocks* until the worker
+#: thread actually returns, so a slow synchronous call inside the card
+#: build (measured: a `time.sleep` past the bound) holds the response just
+#: as long as an inert timeout would. The only thing that genuinely bounds
+#: wall time here is not waiting on the sub-request's task at all past the
+#: deadline -- see ``_fetch_og_meta``, which races it against a timer and
+#: abandons (does not await) whatever hasn't finished.
 _SUB_REQUEST_TIMEOUT_S = 5.0
 
 
@@ -286,17 +303,54 @@ async def _fetch_og_meta(request: Request, path: str) -> OgMeta | None:
     Sent with NO headers -- no cookies, no authorization. The share
     surface is anonymous by definition, and a shell whose content varied
     with the viewer's session would be a different bug.
+
+    Bounded by ``_SUB_REQUEST_TIMEOUT_S`` via ``asyncio.wait`` rather than
+    ``asyncio.wait_for``: the latter cancels and then *awaits* the
+    cancelled task's actual completion, which for a sync route handler
+    stuck in blocking I/O means waiting out the full blocking call anyway
+    (see the module-level comment above). ``asyncio.wait(..., timeout=)``
+    instead returns control the moment the deadline passes, leaving the
+    sub-request task to finish or fail on its own time, unread -- the
+    response we send back is never held hostage by it.
+
+    Every failure mode -- timeout, a transport-level exception, a non-200
+    response, or a body that doesn't parse as ``OgMeta`` -- collapses to
+    ``None``, which the caller renders as the generic, token-free shell.
+    That is deliberate, not merely convenient: ``ASGITransport`` re-raises
+    any *unhandled* exception from inside the sub-request (its
+    ``raise_app_exceptions`` default is ``True``), and a card build that
+    happens to crash on a live token must not distinguish itself from an
+    unknown one with a 500 -- that would be exactly the token-existence
+    oracle ``_png_response`` already avoids on the PNG side, and it would
+    take the whole page down for a real browser where ``spa_fallback``
+    (data-independent, can't fail) used to serve it. "No rich preview" is
+    an acceptable degraded outcome here; "no page" is not.
     """
     import httpx
 
-    transport = httpx.ASGITransport(app=request.app)
-    async with httpx.AsyncClient(
-        transport=transport, base_url="http://share.internal", timeout=_SUB_REQUEST_TIMEOUT_S
-    ) as client:
-        resp = await client.get(path, headers={})
+    async def _do_request() -> httpx.Response:
+        transport = httpx.ASGITransport(app=request.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://share.internal") as client:
+            return await client.get(path, headers={})
+
+    task: asyncio.Task[httpx.Response] = asyncio.ensure_future(_do_request())
+    done, _pending = await asyncio.wait({task}, timeout=_SUB_REQUEST_TIMEOUT_S)
+    if task not in done:
+        logger.warning("og-meta sub-request timed out after %.1fs for path=%s", _SUB_REQUEST_TIMEOUT_S, path)
+        task.cancel()  # best-effort; not awaited, so this never blocks the caller
+        return None
+    try:
+        resp = task.result()
+    except Exception:
+        logger.warning("og-meta sub-request failed for path=%s", path, exc_info=True)
+        return None
     if resp.status_code != 200:
         return None
-    return OgMeta.model_validate(resp.json())
+    try:
+        return OgMeta.model_validate(resp.json())
+    except Exception:
+        logger.warning("og-meta sub-request returned an unparsable body for path=%s", path, exc_info=True)
+        return None
 
 
 def _tag(kind: str, key: str, value: str) -> str:
@@ -346,7 +400,7 @@ def _meta_tags(meta: OgMeta, image_url: str) -> str:
 
 def _shell(tags_html: str) -> Response:
     """Serve the SPA's index.html with ``tags_html`` injected before
-    ``</head>``, shadowing the ``spa_fallback`` catch-all these two paths
+    ``</head>``, shadowing the ``spa_fallback`` catch-all these routes
     would otherwise hit. Same 503 + no-cache contract as that fallback --
     a real browser must still get a working app, only a crawler cares
     about the injected tags."""
@@ -376,13 +430,45 @@ async def _shell_response(request: Request, og_meta_path: str) -> Response:
     return _shell(_meta_tags(meta, image_url))
 
 
+def _parse_positive_int(value: str) -> int | None:
+    """``None`` for anything that isn't a bare positive integer -- no sign,
+    no leading zeros ambiguity, no float. Used to validate the ``{stage}``
+    path segment by hand (see ``share_stage_shell``): declaring it ``int``
+    in the route signature would make FastAPI 422 a mistyped or truncated
+    URL with a raw JSON error body, where ``spa_fallback`` used to serve
+    the app -- the SPA's own client-side route matches any string. Falling
+    back to the generic shell instead keeps a human looking at a page."""
+    if not value.isdigit():
+        return None
+    return int(value)
+
+
+async def _match_shell(token: str, request: Request) -> Response:
+    return await _shell_response(request, f"/api/share/{quote(token, safe='')}/og-meta")
+
+
 @router.get("/share/{token}", include_in_schema=False)
 async def share_match_shell(token: str, request: Request) -> Response:
     _hosted_gate()
-    return await _shell_response(request, f"/api/share/{token}/og-meta")
+    return await _match_shell(token, request)
+
+
+@router.get("/share/{token}/results", include_in_schema=False)
+async def share_match_results_shell(token: str, request: Request) -> Response:
+    """The SPA's own client-side router immediately redirects ``/share/
+    {token}`` here (``App.tsx``'s ``index`` route), so this is the URL a
+    visitor's address bar actually shows and the one they'd hand-copy --
+    it needs the same tags and ``noindex`` as ``/share/{token}`` itself,
+    not just whatever a pasted top-level link happens to carry."""
+    _hosted_gate()
+    return await _match_shell(token, request)
 
 
 @router.get("/share/{token}/results/{slug}/{stage}", include_in_schema=False)
-async def share_stage_shell(token: str, slug: str, stage: int, request: Request) -> Response:
+async def share_stage_shell(token: str, slug: str, stage: str, request: Request) -> Response:
     _hosted_gate()
-    return await _shell_response(request, f"/api/share/{token}/og-meta/{slug}/{stage}")
+    stage_number = _parse_positive_int(stage)
+    if stage_number is None:
+        return _shell(_generic_tags())
+    og_meta_path = f"/api/share/{quote(token, safe='')}/og-meta/{quote(slug, safe='')}/{stage_number}"
+    return await _shell_response(request, og_meta_path)

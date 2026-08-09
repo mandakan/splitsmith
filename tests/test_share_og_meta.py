@@ -4,6 +4,7 @@ must be in the served HTML, not rendered by React."""
 from __future__ import annotations
 
 import asyncio
+import html as html_lib
 import re
 
 from fastapi.testclient import TestClient
@@ -27,7 +28,14 @@ def _share_token(client: TestClient) -> str:
     return resp.json()["url"].rsplit("/", 1)[-1]
 
 
-def _seed_state_docs(db_url: str, user_email: str, match_id: str, slug: str, match_name: str) -> None:
+def _seed_state_docs(
+    db_url: str,
+    user_email: str,
+    match_id: str,
+    slug: str,
+    match_name: str,
+    stage_name: str = "Stage 1",
+) -> None:
     """Insert the match + per-shooter project + audit state docs the card
     builders read through (state.match() / state.shooter_project() /
     state.load_audit()). ``seed_match`` alone only inserts the
@@ -50,17 +58,17 @@ def _seed_state_docs(db_url: str, user_email: str, match_id: str, slug: str, mat
             match_id=match_id,
             name=match_name,
             shooters=[slug],
-            stages=[match_model.MatchStageDefinition(stage_number=1, stage_name="Stage 1")],
+            stages=[match_model.MatchStageDefinition(stage_number=1, stage_name=stage_name)],
         )
         await store.save_match(match_id, match.model_dump(mode="json"), expected_version=0)
         project = MatchProject(
             name="Anna",
-            stages=[StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=8.0)],
+            stages=[StageEntry(stage_number=1, stage_name=stage_name, time_seconds=8.0)],
         )
         await store.save_project(match_id, slug, project.model_dump(mode="json"), expected_version=0)
         audit = {
             "stage_number": 1,
-            "stage_name": "Stage 1",
+            "stage_name": stage_name,
             "shots": [
                 {"shot_number": 1, "ms_after_beep": 500},
                 {"shot_number": 2, "ms_after_beep": 900},
@@ -181,9 +189,16 @@ def test_the_shell_still_serves_the_spa_bundle(hosted_env, hosted_app) -> None:
 
 
 def test_the_shell_does_not_inherit_the_viewers_session(hosted_env, hosted_app) -> None:
-    """The sub-request must be anonymous. A logged-in viewer of someone
-    else's share link must get the same shell an anonymous one gets --
-    otherwise the shell's data depends on who is looking at it."""
+    """Outcome-level sanity check, not the guard: a logged-in viewer of
+    someone else's share link gets the same shell bytes an anonymous one
+    gets. This alone has no power to catch a header-forwarding regression
+    in ``_fetch_og_meta`` -- ``/api/share/`` is *also* unconditionally
+    exempt from the auth gate, so the JSON this shell renders from cannot
+    vary with the caller's session for a second, independent reason. The
+    real guard on the sub-request itself is
+    ``test_the_sub_request_carries_no_cookie_or_authorization_at_the_asgi_scope``
+    below; this test stays as the end-to-end confirmation of the visible
+    behavior the whole design exists to guarantee."""
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     _seed(hosted_env)
@@ -195,17 +210,19 @@ def test_the_shell_does_not_inherit_the_viewers_session(hosted_env, hosted_app) 
     assert with_session == without_session
 
 
-def test_the_og_meta_sub_request_carries_no_headers(hosted_env, hosted_app, monkeypatch) -> None:
-    """Direct proof that ``_fetch_og_meta`` sends the sub-request with an
-    empty header set. ``/api/share/`` is *also* exempt from the auth gate
-    regardless of cookies (defense in depth), which means
-    ``test_the_shell_does_not_inherit_the_viewers_session`` alone would keep
-    passing even if this function forwarded ``request.headers`` -- that
-    exemption is a second, independent reason the shell output wouldn't
-    change. This test pins the actual call site instead of the double-
-    protected outcome, so it fails on its own if the empty-headers behavior
-    regresses, even if the auth-gate exemption is later removed or
-    weakened."""
+def test_the_sub_request_carries_no_cookie_or_authorization_at_the_asgi_scope(
+    hosted_env, hosted_app, monkeypatch
+) -> None:
+    """Scope-level proof, stronger than pinning the ``headers=`` kwarg on
+    ``.get()``: a plausible wrong implementation -- e.g. constructing
+    ``httpx.AsyncClient(transport=transport, cookies=dict(request.cookies))``
+    while leaving the per-call ``headers={}`` untouched -- would still put
+    the viewer's session cookie on the wire, and both a kwarg-only
+    assertion and the outcome-level session test above would stay green
+    (the auth gate ignores it either way). Spying on
+    ``ASGITransport.handle_async_request`` inspects the actual outgoing
+    ASGI request headers, which is where a leaked cookie or bearer token
+    would show up regardless of which httpx API attached it."""
     import httpx
 
     client, sender = hosted_app
@@ -213,19 +230,178 @@ def test_the_og_meta_sub_request_carries_no_headers(hosted_env, hosted_app, monk
     _seed(hosted_env)
     token = _share_token(client)
 
-    captured: list[object] = []
-    original_get = httpx.AsyncClient.get
+    captured: list[list[tuple[bytes, bytes]]] = []
+    original = httpx.ASGITransport.handle_async_request
 
-    async def _spy_get(self, url, *args, **kwargs):
-        captured.append(kwargs.get("headers"))
-        return await original_get(self, url, *args, **kwargs)
+    async def _spy(self, request):
+        captured.append(list(request.headers.raw))
+        return await original(self, request)
 
-    monkeypatch.setattr(httpx.AsyncClient, "get", _spy_get)
+    monkeypatch.setattr(httpx.ASGITransport, "handle_async_request", _spy)
 
     resp = client.get(f"/share/{token}")
     assert resp.status_code == 200
     assert captured, "the ASGI sub-request was never made"
-    assert captured[0] == {}
+    # ``request.headers.raw`` is ``list[tuple[bytes, bytes]]`` -- decode
+    # before comparing, or a str/bytes mismatch makes this assertion
+    # vacuously true regardless of what was actually sent.
+    names = {name.decode("latin-1").lower() for name, _value in captured[0]}
+    assert "cookie" not in names
+    assert "authorization" not in names
+
+
+def test_the_results_shell_carries_the_same_tags_as_the_bare_token_url(hosted_env, hosted_app) -> None:
+    """The SPA's client-side router redirects ``/share/{token}`` to
+    ``/share/{token}/results`` immediately (App.tsx's ``index`` route), so
+    that is the URL a visitor's address bar shows and would hand-copy. It
+    must carry the same tags and ``noindex`` as the bare token URL, not
+    fall through to a tag-free ``spa_fallback``."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed(hosted_env)
+    token = _share_token(client)
+    client.cookies.clear()
+
+    html = client.get(f"/share/{token}/results").text
+    assert _meta(html, "og:title")
+    assert _meta(html, "robots") == "noindex"
+    assert "/og.png?v=" in _meta(html, "og:image")
+
+
+def test_a_non_numeric_stage_falls_back_to_the_generic_shell_not_a_422(hosted_env, hosted_app) -> None:
+    """Declaring ``{stage}`` as ``int`` in the route would make FastAPI 422
+    a mistyped or truncated URL with a raw JSON body -- the SPA's own
+    client-side route matches any string, so that URL is reachable by a
+    human. A malformed stage must still render *a page*, just the generic
+    one, exactly like an unknown token does."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed(hosted_env)
+    token = _share_token(client)
+    client.cookies.clear()
+
+    resp = client.get(f"/share/{token}/results/{SLUG}/not-a-number")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    assert _meta(resp.text, "og:title") == "Splitsmith"
+
+
+def test_a_slow_card_build_still_returns_promptly_with_the_generic_shell(
+    hosted_env, hosted_app, monkeypatch
+) -> None:
+    """``httpx.ASGITransport`` ignores httpx's own network ``timeout=``
+    entirely -- it calls the app in-process, no socket involved. Without an
+    explicit bound enforced on our side, a slow storage or DB call inside
+    the card build holds a crawler's (or a browser's) connection open
+    indefinitely. Shrink the timeout and make the card builder sleep well
+    past it, then confirm the shell still comes back promptly, degraded to
+    the generic tags rather than waiting out the full sleep."""
+    import time
+
+    from splitsmith.ui import share_og
+
+    monkeypatch.setattr(share_og, "_SUB_REQUEST_TIMEOUT_S", 0.2)
+
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed(hosted_env)
+    token = _share_token(client)
+    client.cookies.clear()
+
+    def _slow_build_match_card(state):
+        time.sleep(1.5)
+        return share_og.MatchCard(match_name="should not be reached", stage_count=0)
+
+    monkeypatch.setattr(share_og, "build_match_card", _slow_build_match_card)
+
+    started = time.monotonic()
+    resp = client.get(f"/share/{token}")
+    elapsed = time.monotonic() - started
+
+    assert resp.status_code == 200
+    assert elapsed < 1.0, elapsed
+    assert _meta(resp.text, "og:title") == "Splitsmith"
+
+
+def test_a_crashing_card_build_degrades_to_the_generic_shell_not_a_500(
+    hosted_env, hosted_app, monkeypatch
+) -> None:
+    """A live token whose card build crashes must be indistinguishable from
+    an unknown token -- a 500 here would be a token-existence oracle
+    (exactly what ``_png_response`` already avoids on the PNG side), and it
+    would take the whole page down for a real browser where the
+    data-independent ``spa_fallback`` used to serve it unconditionally."""
+    from splitsmith.ui import share_og
+
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed(hosted_env)
+    token = _share_token(client)
+    client.cookies.clear()
+
+    def _boom(state):
+        raise RuntimeError("card build blew up")
+
+    monkeypatch.setattr(share_og, "build_match_card", _boom)
+
+    resp = client.get(f"/share/{token}")
+    assert resp.status_code == 200
+    assert _meta(resp.text, "og:title") == "Splitsmith"
+
+
+def test_a_match_name_with_markup_does_not_break_out_of_the_meta_tag(hosted_env, hosted_app) -> None:
+    """Match and shooter names are untrusted input rendered into a page
+    served to arbitrary anonymous viewers. Every interpolated value must
+    go through ``html.escape`` -- a quote or an angle bracket in a name
+    must not become an attribute or tag breakout."""
+    payload = 'Ma"tch <&> </title>"><script>alert(1)</script>'
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed(hosted_env, match_name=payload)
+    token = _share_token(client)
+    client.cookies.clear()
+
+    html = client.get(f"/share/{token}").text
+    assert "<script>alert(1)</script>" not in html
+    assert '"><script>' not in html
+    assert payload not in html
+    title = _meta(html, "og:title")
+    assert title is not None
+    # The *decoded* value round-trips (this is really the same match name);
+    # the raw HTML bytes above must never contain it unescaped.
+    assert html_lib.unescape(title) == payload
+
+
+def test_a_stage_name_with_markup_does_not_break_out_of_the_meta_tag(hosted_env, hosted_app) -> None:
+    payload = 'Stage <&> "><script>alert(2)</script>'
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    seed_match(hosted_env, "owner@example.com", MID)
+    _seed_state_docs(hosted_env, "owner@example.com", MID, SLUG, f"Test match {MID}", stage_name=payload)
+    token = _share_token(client)
+    client.cookies.clear()
+
+    html = client.get(f"/share/{token}/results/{SLUG}/1").text
+    assert "<script>alert(2)</script>" not in html
+    assert '"><script>' not in html
+    assert payload not in html
+
+
+def test_new_share_og_routes_404_outside_hosted_mode() -> None:
+    """The whole share-og surface -- both og-meta JSON endpoints and all
+    three shells -- is hosted-only, same idiom as the PNG routes. The
+    existing local-mode lock (test_share_routes.py::test_share_local_mode_404)
+    only covers ``match/shooters``; this pins the four routes Task 7 added
+    plus the ``/results`` shell from finding 7."""
+    from splitsmith.ui.server import create_app
+
+    app = create_app()
+    with TestClient(app, follow_redirects=False) as client:
+        assert client.get("/api/share/anything/og-meta").status_code == 404
+        assert client.get("/api/share/anything/og-meta/anna/1").status_code == 404
+        assert client.get("/share/anything").status_code == 404
+        assert client.get("/share/anything/results").status_code == 404
+        assert client.get("/share/anything/results/anna/1").status_code == 404
 
 
 def test_the_shell_is_entered_exactly_once_per_request(hosted_env, hosted_app, caplog) -> None:
