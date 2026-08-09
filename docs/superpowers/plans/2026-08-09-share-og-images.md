@@ -2329,6 +2329,100 @@ that, not two."
 
 ---
 
+### Task 6c: Heal legacy audit docs when building a stage card
+
+Landed on main after Task 6: #775 was closed not by changing the split
+rule but by making partial classification unreachable — the audit save
+endpoint classifies, and `get_stage_coach` heals legacy docs on read
+(`server.py:10387`). Owner reads persist the heal; **share-token reads
+classify in-memory only and never write back.**
+
+`build_stage_card` reads the raw audit payload through
+`state.load_audit()` and does no such heal. So for a stage audited before
+that change, the share **card** would see unclassified shots and fall
+back to the 0.5 s threshold rule, while the **page the link opens** —
+which goes through the coach GET — shows coach-classified figures. Two
+different average splits for the same run, one on the preview and one on
+the page behind it. Nothing would flag it.
+
+**Files:**
+- Modify: `src/splitsmith/ui/share_og.py` (`build_stage_card` only)
+- Test: `tests/test_share_og_routes.py`
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `tests/test_share_og_routes.py`. Build a legacy-shaped audit doc
+— shots carrying `ms_after_beep` but no `interval_class` — where the
+classified and threshold rules give **different** answers, so the test
+can tell which path ran. A gap between 0.5 s and the auto-classifier's
+split ceiling is the discriminator: the threshold rule excludes it, the
+classifier may not.
+
+```python
+def test_a_legacy_unclassified_audit_is_healed_for_the_card(
+    hosted_env, hosted_app_with_storage
+) -> None:
+    """A stage audited before #775 has no interval_class. The coach GET
+    heals such docs in memory for share reads; the card must do the same,
+    or the preview shows different numbers than the page it links to."""
+```
+
+Assert on the rendered card's figures via `build_stage_card`, not on PNG
+bytes — the figures are the claim, and PNG bytes would pass for the wrong
+reason.
+
+- [ ] **Step 2: Run it and watch it fail**
+
+Run: `uv run pytest tests/test_share_og_routes.py -n0 -q -k legacy`
+Expected: FAIL — the card takes the threshold path.
+
+- [ ] **Step 3: Heal in memory**
+
+In `build_stage_card`, after loading the payload and before
+`audit_shots_to_engine_shots`, apply the same in-memory classification
+the share-read branch of `get_stage_coach` applies, and **never persist
+it**. Read that handler first and mirror its guard exactly (only shots
+that are dicts with `ms_after_beep`, only when something is actually
+unclassified) rather than writing a second variant of the condition.
+
+Comment it with why: a share read is read-only, and the card must agree
+with the page.
+
+- [ ] **Step 4: Run the tests**
+
+Run:
+```
+uv run pytest tests/test_share_og_routes.py tests/test_share_og_meta.py \
+  tests/test_coach_api.py tests/test_share_routes.py -q
+```
+
+- [ ] **Step 5: Prove the heal is load-bearing**
+
+Delete the heal, confirm the new test fails, restore it. Report what you
+observed.
+
+- [ ] **Step 6: Confirm nothing was persisted**
+
+The share path must not write. Assert the stored audit doc is byte-
+identical before and after a card build for a legacy stage.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add src/splitsmith/ui/share_og.py tests/test_share_og_routes.py
+git commit -m "fix(share): heal legacy audit docs in memory when building a stage card
+
+get_stage_coach heals unclassified legacy docs on read (#775); the card
+read the raw payload and did not, so a stage audited before that change
+showed threshold-derived figures on the preview and coach-classified
+figures on the page behind it. Read-only: the heal is never persisted on
+a share read.
+
+Refs #775"
+```
+
+---
+
 ### Task 8: Warm the match card at share creation
 
 **Files:**
