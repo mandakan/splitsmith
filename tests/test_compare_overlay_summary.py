@@ -567,9 +567,9 @@ def test_split_statistics_skip_intervals_not_classed_split():
 
 
 def test_unclassified_stages_fall_back_to_the_color_band_rule():
-    """No classification on any shot: the ``split_color_band`` rule
-    applies - index 0 is the draw, anything above ``transition_min``
-    (1.0s) is not a split (issue #772). Same figures as the classified
+    """No classification on any shot: the auto-classifier's split rule
+    applies - index 0 is the draw, anything above ``split_max_s`` (0.5s)
+    is not a split (issues #772/#773). Same figures as the classified
     twin above."""
     shots = (
         TileShot(time_from_beep=1.5, split=1.5),
