@@ -105,14 +105,20 @@ leaves no hole. It does not print a zero or a dash.
 `compare/overlay_summary.py` already follows that rule ("only what can
 actually be computed, never invented") and this follows it too.
 
-### Relationship to #772
+### Relationship to #772 -- resolved
 
-Issue #772 covers the same two figures on the video stage summary and the
-results page, where splits are currently averaged over transitions and
-reloads and the page omits the draw. That issue and this design share one
-definition. Whichever lands first owns the shared Python helper; the
-other consumes it. This design does not wait on #772 -- the share card is
-correct on its own -- but the two must not end up with two definitions.
+Issue #772 covered the same two figures on the video stage summary and the
+results page. This design pre-committed to a rule for the collision:
+whichever landed first would own the shared Python helper, and the other
+would consume it.
+
+**#774 landed first**, closing #772 and putting the rule in
+`coach.statistic_splits`, mirrored in TS as `statisticSplits`. So the share
+card consumes it and owns no rule of its own. `audit_shots_to_engine_shots`
+now carries `interval_class` onto the engine `Shot`, which already has
+`.split` and therefore satisfies `coach.SplitStatInterval` -- so the card
+needs no interval type of its own either. Task 4b of the plan deletes the
+duplicate this branch had already built.
 
 ## Modules
 
@@ -125,8 +131,9 @@ Architecture rules 2 and 3.
 RosterEntry:  name, division
 MatchCard:    match_name, match_date, stage_count, roster: list[RosterEntry]
 StageCard:    stage_number, stage_name, shooter_name, match_name,
-              shot_count, draw, avg_split: float | None,
-              split_count, interval_count, source: "coach" | "threshold"
+              shot_count, stage_time, figures: StageFigures
+StageFigures: draw, avg_split: float | None, split_count,
+              interval_count, source: "coach" | "threshold" | "empty"
 ```
 
 Roster order is alphabetical by name, matching the slot-order convention
