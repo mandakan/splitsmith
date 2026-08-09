@@ -25,7 +25,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .coach import SPLIT_STAT_TRANSITION_MIN, SplitStatInterval, statistic_splits
+from .coach import SPLIT_STAT_SPLIT_MAX, SplitStatInterval, statistic_splits
 
 FigureSource = Literal["coach", "threshold", "empty"]
 
@@ -44,14 +44,15 @@ class StageFigures:
 def stage_figures(
     shots: Sequence[SplitStatInterval],
     *,
-    transition_min: float = SPLIT_STAT_TRANSITION_MIN,
+    split_max: float = SPLIT_STAT_SPLIT_MAX,
 ) -> StageFigures:
     """The two headline figures a stage card shows, plus their provenance.
 
     **This function does not own the split rule.** ``coach.statistic_splits``
-    does (issue #772, landed in #774), mirrored in TS by ``statisticSplits``.
-    All this adds is the card's shape: the draw, the mean of whatever the
-    shared helper returned, and how it was derived.
+    does (issue #772, landed in #774; #773/#776 set the unclassified cutoff
+    to the auto-classifier's 0.5 s ``split_max_s``), mirrored in TS by
+    ``statisticSplits``. All this adds is the card's shape: the draw, the
+    mean of whatever the shared helper returned, and how it was derived.
 
     ``shots`` is one stage's full time-ordered sequence, draw first --
     ``config.Shot`` from ``audit_data.audit_shots_to_engine_shots`` satisfies
@@ -64,7 +65,7 @@ def stage_figures(
     """
     if not shots:
         return StageFigures(draw=None, avg_split=None, split_count=0, interval_count=0, source="empty")
-    splits = statistic_splits(shots, transition_min=transition_min)
+    splits = statistic_splits(shots, split_max=split_max)
     classified = any(s.interval_class is not None for s in shots)
     return StageFigures(
         draw=shots[0].split,

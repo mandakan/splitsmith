@@ -67,17 +67,23 @@ def test_unclassified_stage_falls_back_through_the_shared_helper() -> None:
 
 
 def test_the_fallback_excludes_a_draw_faster_than_the_threshold() -> None:
-    """A Production Optics draw can land under transition_min, so duration
-    alone cannot exclude it -- index 0 must. Guards the shared helper's
-    fallback branch through this module's own surface."""
+    """Isolates the index-0 guard: the draw must be excluded from the split
+    average by *position*, not by duration.
+
+    The fixture is synthetic, not representative -- at the 0.5 s
+    ``split_max`` cutoff (#776) no realistic Production Optics draw
+    (~1.0-1.5 s) could ever land here; a real draw is already excluded by
+    duration alone, which would let the index-0 guard rot unnoticed. So
+    the draw below is pinned under 0.5 s on purpose, to force the guard to
+    be the only thing keeping it out of the average."""
     shots = (
-        _Shot(split=0.90, interval_class=None),
+        _Shot(split=0.40, interval_class=None),
         _Shot(split=0.20, interval_class=None),
         _Shot(split=0.20, interval_class=None),
         _Shot(split=0.20, interval_class=None),
     )
     figs = stage_figures(shots)
-    assert figs.draw == pytest.approx(0.90)
+    assert figs.draw == pytest.approx(0.40)
     assert figs.split_count == 3
     assert figs.avg_split == pytest.approx(0.20)
 
