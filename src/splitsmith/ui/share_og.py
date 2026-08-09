@@ -1,10 +1,16 @@
 """Hosted-only share-card routes: the card PNGs served on the anonymous
 share surface (spec 2026-08-09).
 
-Same lazy-import, always-registered idiom as ``sync_api`` and
-``device_auth_api``: db and rendering imports stay inside function
-bodies so a local-slim install still imports this module, and every
-route 404s outside hosted mode.
+Same always-registered idiom as ``sync_api`` and ``device_auth_api``:
+every route 404s outside hosted mode. The db-import laziness that idiom
+is usually about doesn't apply here -- this module has no db import to
+defer, hosted or otherwise. What *is* deferred is the ``.server`` import
+in ``_hosted_gate`` (breaks an import cycle: ``server.create_app``
+imports this module) and the Chromium *launch* in ``_chromium_factory``
+(``playwright`` itself is a core dependency, already imported
+transitively via ``share_card_render`` -> ``overlay_raster`` by the time
+this module loads; only the browser process start is deferred, and only
+until a cache miss -- see that function's docstring).
 
 The two PNG paths are on the anonymous share surface, so they are also
 listed in ``server._SHARE_PATH_RE`` -- that regex is the containment
@@ -28,7 +34,7 @@ the URL after that first rewrite and the card cache key needs it.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
 
@@ -36,6 +42,11 @@ from ..audit_data import audit_shots_to_engine_shots
 from ..overlay_theme import load_theme
 from ..share_card import MatchCard, RosterEntry, StageCard, stage_figures
 from ..share_card_render import cached_card_png
+
+if TYPE_CHECKING:
+    from contextlib import AbstractContextManager
+
+    from ..overlay_raster import Rasterizer
 
 logger = logging.getLogger(__name__)
 
@@ -106,15 +117,33 @@ def build_stage_card(state: Any, slug: str, stage_number: int) -> StageCard | No
         shooter_name=project.competitor_name or slug,
         match_name=state.match().name or "Splitsmith match",
         shot_count=len(shots),
-        stage_time=stg.time_seconds,
+        # ``StageCard.stage_time`` is ``float | None`` precisely so the
+        # card can omit it; the HTML only omits it for ``None``. A
+        # placeholder stage carries ``time_seconds=0.0`` (never negative),
+        # which is not a real stage time worth rendering -- ``or None``
+        # turns that falsy-but-"set" value into the omit case.
+        stage_time=stg.time_seconds or None,
         figures=figures,
     )
 
 
-_PNG_HEADERS = {"Cache-Control": "public, max-age=31536000, immutable"}
+#: The URL carries the card hash as ``?v=``, so a changed card is a
+#: changed URL and long caching is safe. ``immutable`` is deliberately
+#: absent: the meta tag is rendered from live data a moment before the
+#: crawler fetches the image, so a given ``?v`` can in principle be
+#: served after another write. Long-lived, but revalidatable.
+_PNG_HEADERS = {"Cache-Control": "public, max-age=31536000"}
 
 
-def _chromium_factory() -> Any:
+def _chromium_factory() -> AbstractContextManager[Rasterizer]:
+    # Lazy import breaks an import cycle with .server (share_og is imported
+    # from create_app), not for local-slim's sake -- playwright is a core
+    # dependency, so it's already in sys.modules by the time this runs
+    # (share_card_render imports overlay_raster imports playwright.sync_api
+    # at module scope). What's actually deferred here is the browser
+    # *launch*: ChromiumRasterizer() doesn't start Chromium until its
+    # __enter__ runs, and cached_card_png only calls this factory on a
+    # cache miss, so a hit never pays the ~1s launch cost.
     from ..overlay_raster import ChromiumRasterizer
 
     return ChromiumRasterizer()
@@ -122,15 +151,19 @@ def _chromium_factory() -> Any:
 
 def _png_response(state: Any, token: str, card: MatchCard | StageCard, slug: str | None) -> Response:
     if state.storage is None:
-        raise HTTPException(status_code=503, detail="share card rendering is hosted-mode only")
+        # Not a 503: the anonymous surface's invariant is that every
+        # failure looks the same (_share_alias rewrites only a 404 into
+        # the opaque body). A 503 here would let a caller distinguish "no
+        # such token" from "token is real but storage isn't wired up" --
+        # a token-existence oracle. Log the real reason for an operator;
+        # 404 for everyone else.
+        logger.warning("share card render unavailable: state.storage is None (token=%s)", token)
+        raise HTTPException(status_code=404, detail="not found")
     data = cached_card_png(
         card,
         token=token,
         storage=state.storage,
         theme=load_theme("splitsmith"),
-        # Passed as a factory, not an instance: a cache hit must not pay
-        # Chromium's ~1s launch. Lazy import keeps a local-slim install
-        # from importing playwright at module load.
         rasterizer_factory=_chromium_factory,
         slug=slug,
     )

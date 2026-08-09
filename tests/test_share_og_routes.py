@@ -18,7 +18,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select as _select
 
 from splitsmith.db import ProjectStateStore, User, create_engine, sessionmaker
+from splitsmith.share_card_render import FALLBACK_PNG_PATH
 from tests.hosted_helpers import _CapturingSender, login, moto_s3_storage, seed_match
+
+_PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
 MID = "test-match-og001"
 SLUG = "anna"
@@ -96,7 +99,13 @@ def test_match_png_is_reachable_anonymously(
     resp = client.get(f"/api/share/{token}/og.png")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "image/png"
-    assert resp.content[:8] == b"\x89PNG\r\n\x1a\n"
+    assert resp.content[:8] == _PNG_MAGIC
+    # Not just *a* PNG -- a real render, not the browser-less fallback
+    # plate. CI has Chromium installed so this exercises the actual
+    # render path there; on a dev box without it, this is the assertion
+    # that turns a silent false-green into a real failure (see the fix
+    # report's mutation proof for finding 3).
+    assert resp.content != FALLBACK_PNG_PATH.read_bytes()
 
 
 def test_unknown_token_png_is_404(hosted_app: tuple[TestClient, _CapturingSender]) -> None:
@@ -133,10 +142,16 @@ def test_a_path_outside_the_allowlist_is_still_404(
     client.cookies.clear()
 
     # A non-numeric stage does not match the allowlist shape, so the
-    # middleware 404s before routing. (A "../.." path is not used here:
-    # httpx normalises it client-side, so that assertion could not fail.)
+    # middleware 404s before routing -- if the allowlist admitted it, the
+    # request would reach share_stage_png and 422 on the int(stage)
+    # conversion instead, so this assertion has power to catch a regex
+    # that widened too far. (A "../.." path is not used here: httpx
+    # normalises it client-side, so that assertion could not fail. An
+    # "ogx.png" case was dropped for the same reason: no route is
+    # registered at /api/ogx.png, so it 404s whether or not the allowlist
+    # admits it -- the assertion couldn't distinguish the regex causing
+    # the 404 from routing causing it.)
     assert client.get(f"/api/share/{token}/og/{SLUG}/abc.png").status_code == 404
-    assert client.get(f"/api/share/{token}/ogx.png").status_code == 404
 
 
 def test_stage_png_for_an_unknown_stage_falls_back_to_the_match_card(
@@ -145,9 +160,18 @@ def test_stage_png_for_an_unknown_stage_falls_back_to_the_match_card(
     token = _setup_shared_match(hosted_env, hosted_app_with_storage)
     client, _sender = hosted_app_with_storage
 
-    match_png = client.get(f"/api/share/{token}/og.png").content
-    stage_png = client.get(f"/api/share/{token}/og/{SLUG}/99.png").content
-    assert stage_png == match_png
+    match_resp = client.get(f"/api/share/{token}/og.png")
+    stage_resp = client.get(f"/api/share/{token}/og/{SLUG}/99.png")
+    # Bare content equality alone passes just as well when both requests
+    # fail identically (e.g. both 404 JSON bodies, or both the browser-less
+    # fallback plate) as when the fallback genuinely happened -- pinning
+    # each response to a real, successful PNG render is what makes the
+    # equality check mean "the same *card* rendered twice."
+    for resp in (match_resp, stage_resp):
+        assert resp.status_code == 200
+        assert resp.content[:8] == _PNG_MAGIC
+        assert resp.content != FALLBACK_PNG_PATH.read_bytes()
+    assert stage_resp.content == match_resp.content
 
 
 def test_png_routes_404_outside_hosted_mode() -> None:
