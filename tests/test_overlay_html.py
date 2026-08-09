@@ -16,8 +16,8 @@ import pytest
 from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
 from splitsmith.compare.overlay_summary import _cell_groups
-from splitsmith.overlay_html import cell_html, grid_html
-from splitsmith.overlay_layout import Anchor, CellScale, Element, Flow, Group, Role
+from splitsmith.overlay_html import cell_html, grid_html, single_html
+from splitsmith.overlay_layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
 from splitsmith.overlay_theme import load_theme
 from splitsmith.ui.project import StageScorecard
 
@@ -573,3 +573,64 @@ def test_golden_roster_structure():
     ghost_section = doc[doc.index('grid-column:3;">') :]
     assert '<div class="cell"></div>' in ghost_section
     assert "Ghost" not in doc
+
+
+# --- single_html (issue #684) ------------------------------------------
+
+
+def _live_groups() -> tuple[Group, ...]:
+    return (
+        Group(
+            anchor=Anchor.TOP_LEFT,
+            flow=Flow.ROW,
+            elements=(Element(text="7/32", role=Role.LIVE_PRIMARY),),
+        ),
+        Group(
+            anchor=Anchor.BOTTOM_CENTER,
+            flow=Flow.ROW,
+            elements=(Element(text="0.21s", role=Role.LIVE_PRIMARY, color=ColorToken.SPLIT),),
+        ),
+    )
+
+
+def test_single_html_is_a_whole_document_not_a_fragment() -> None:
+    doc = single_html(_live_groups(), width=1920, height=1080, scale=SCALE, theme=THEME)
+    assert doc.startswith("<!doctype html>")
+    assert "</html>" in doc
+
+
+def test_single_html_sizes_the_document_to_the_canvas_and_stays_transparent() -> None:
+    """``.cell`` is width/height 100%, which only resolves against a sized
+    ancestor. ``grid_html`` supplies one via its ``.grid`` wrapper; this
+    has no wrapper, so ``html, body`` has to carry the canvas size or the
+    cell collapses and every anchor lands in the wrong place."""
+    doc = single_html(_live_groups(), width=1920, height=1080, scale=SCALE, theme=THEME)
+    rule = _rule(doc, "html, body")
+    assert "width: 1920px" in rule
+    assert "height: 1080px" in rule
+    assert "background: transparent" in rule
+
+
+def test_single_html_has_no_grid_wrapper() -> None:
+    doc = single_html(_live_groups(), width=1920, height=1080, scale=SCALE, theme=THEME)
+    assert 'class="grid"' not in doc
+    assert "grid-template-columns: repeat(" not in doc
+
+
+def test_single_html_carries_the_declared_text() -> None:
+    doc = single_html(_live_groups(), width=1920, height=1080, scale=SCALE, theme=THEME)
+    assert "7/32" in doc
+    assert "0.21s" in doc
+
+
+def test_single_html_carries_the_fit_script() -> None:
+    """The rasterizer calls ``window.__splitsmithFit`` on every document.
+    The ``&&`` guard makes omitting it safe, but omitting it trades the
+    shrink-before-clip policy for bare overflow clipping, for no gain."""
+    doc = single_html(_live_groups(), width=1920, height=1080, scale=SCALE, theme=THEME)
+    assert "window.__splitsmithFit" in doc
+
+
+def test_single_html_reads_sizes_off_the_scale_it_is_given() -> None:
+    doc = single_html(_live_groups(), width=1920, height=1080, scale=SCALE, theme=THEME)
+    assert f"font-size: {SCALE.live_primary}px" in _rule(doc, ".role-live-primary")

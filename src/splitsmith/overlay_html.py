@@ -878,6 +878,60 @@ def cell_html(groups: Sequence[Group], *, scale: CellScale, theme: OverlayTheme)
     )
 
 
+def single_html(
+    groups: Sequence[Group],
+    *,
+    width: int,
+    height: int,
+    scale: CellScale,
+    theme: OverlayTheme,
+) -> str:
+    """One canvas-sized cell as a whole HTML document (issue #684).
+
+    The single-shooter overlay's counterpart to :func:`grid_html`. There
+    is exactly one cell and it is the whole frame, so this takes plain
+    pixel dimensions rather than a :class:`SpriteGeometry` -- nothing
+    about a single-shooter export has rows, columns or tile placements,
+    and borrowing the grid's vocabulary to express "one of one" would be
+    the same information spelled twice.
+
+    :func:`cell_html` is nearly this and its docstring names "a future
+    single-shooter port" as its reason to exist, but it returns a
+    *fragment*. That matters more than it sounds: ``.cell`` is
+    ``width: 100%; height: 100%``, which resolves against its containing
+    block, and in a grid document that block is a grid item sized by
+    ``.grid``'s pixel tracks. A fragment dropped into an empty page has
+    no such ancestor, so the cell collapses to its content and every
+    anchor lands in the wrong place. This emits the same ``html, body``
+    sizing block :func:`grid_html` does -- minus the grid tracks -- so the
+    cell fills the canvas.
+
+    ``html``/``body`` stay ``background: transparent``: the rasterizer
+    screenshots with ``omit_background=True`` and the result is piped to
+    ffmpeg as an alpha layer. An opaque background here would paint the
+    whole frame black over the footage.
+
+    Carries the fit-policy ``<script>`` for the same reason both siblings
+    do -- see :func:`_fit_script`.
+    """
+    style = _style_rules(scale=scale, theme=theme)
+    page_style = (
+        "html, body {\n"
+        "margin: 0; padding: 0;\n"
+        f"width: {width}px; height: {height}px;\n"
+        "background: transparent; overflow: hidden;\n"
+        "}"
+    )
+    return (
+        "<!doctype html>\n"
+        '<html><head><meta charset="utf-8"><title>overlay</title>'
+        f"<style>{style}\n{page_style}</style>"
+        f"{_fit_script()}"
+        "</head>"
+        f"<body>{_cell_div(groups)}</body></html>"
+    )
+
+
 def grid_html(
     cells: Sequence[tuple[TilePlacement, Sequence[Group]]],
     *,
