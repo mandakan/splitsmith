@@ -2021,23 +2021,46 @@ git commit -m "feat(share): serve OG card PNGs on the anonymous share surface"
 
 **Files:**
 - Modify: `src/splitsmith/ui/share_og.py`
+- Modify: `src/splitsmith/ui/server.py` (`_SHARE_PATH_RE` only)
 - Test: `tests/test_share_og_meta.py`
 
 **Interfaces:**
-- Consumes: Task 6's card builders; `state.public_base_url`; `server.STATIC_DIR`.
-- Produces: `GET /share/{token}` and `GET /share/{token}/results/{slug}/{stage}` on the same `router`.
+- Produces, on the same `router`:
+  - `GET /og-meta` and `GET /og-meta/{slug}/{stage}` — JSON, reachable anonymously as `/api/share/{token}/og-meta[...]`
+  - `GET /share/{token}` and `GET /share/{token}/results/{slug}/{stage}` — the HTML shells
 
-These must be registered before the SPA catch-all at
-`ui/server.py:14558`. `app.include_router` in Task 6 already runs before
-that block, so ordering holds -- but the test below is what proves it.
+#### Why this shape, and what you must not do instead
 
-- [ ] **Step 1: Write the failing tests**
+The shells need match data (title, description, card hash). Data access
+resolves through context vars that two middlewares set: `_share_alias`
+(`server.py:6305`) pins the owner's tenant, and `_match_id_alias`
+(`server.py:6179`) resolves the match and mirrors its state down to a
+working root. **Neither runs for `/share/{token}`** — `_share_alias`
+only intercepts paths beginning `/api/share/`.
+
+So a shell handler cannot call `build_match_card(state)` directly: there
+is no tenant pinned and no match bound. It would either fail or, worse,
+resolve against whatever tenant happened to be ambient.
+
+**Do not re-implement the pinning in the shell handler.** Impersonating
+a share's owner must have exactly one implementation, in the middleware
+that is already audited for it. Instead the shell makes an in-process
+ASGI sub-request to the anonymous API, so every impersonation still
+happens in `_share_alias`.
+
+#### Step 1: Widen the allowlist by two more shapes
+
+In `server.py`, `_SHARE_PATH_RE` gains `og-meta` and `og-meta/[^/]+/\d+`
+alongside the two `og.png` shapes. Same rule as before: read-only,
+match-scoped, client supplies no match id. Do not broaden to a prefix.
+
+- [ ] **Step 2: Write the failing tests**
 
 Create `tests/test_share_og_meta.py`:
 
 ```python
-"""Meta tags on the share shells. Crawlers do not run JavaScript, so
-these must be in the served HTML, not rendered by React."""
+"""Meta tags on the share shells. Crawlers do not run JavaScript, so these
+must be in the served HTML, not rendered by React."""
 
 from __future__ import annotations
 
@@ -2064,9 +2087,7 @@ def _share_token(client: TestClient) -> str:
     return resp.json()["url"].rsplit("/", 1)[-1]
 
 
-def test_match_shell_carries_og_tags(
-    hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender]
-) -> None:
+def test_match_shell_carries_og_tags(hosted_env, hosted_app) -> None:
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     seed_match(hosted_env, "owner@example.com", MID)
@@ -2082,21 +2103,18 @@ def test_match_shell_carries_og_tags(
     assert _meta(html, "twitter:card") == "summary_large_image"
 
 
-def test_share_shells_are_noindex(
-    hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender]
-) -> None:
+def test_share_shells_are_noindex(hosted_env, hosted_app) -> None:
     """A share link is unlisted, not public."""
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     seed_match(hosted_env, "owner@example.com", MID)
     token = _share_token(client)
     client.cookies.clear()
-
     assert _meta(client.get(f"/share/{token}").text, "robots") == "noindex"
 
 
 def test_stage_shell_names_the_stage_and_points_at_the_stage_png(
-    hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender]
+    hosted_env, hosted_app
 ) -> None:
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
@@ -2109,12 +2127,10 @@ def test_stage_shell_names_the_stage_and_points_at_the_stage_png(
     assert f"/og/{SLUG}/1.png?v=" in _meta(html, "og:image")
 
 
-def test_the_og_image_url_moves_when_the_data_moves(
-    hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender]
-) -> None:
-    """The freshness mechanism, asserted rather than assumed. If the URL
-    does not move, a re-audit writes an object nobody fetches and every
-    crawler keeps serving stale numbers behind a year-long cache."""
+def test_the_og_image_url_moves_when_the_data_moves(hosted_env, hosted_app) -> None:
+    """The freshness mechanism, asserted rather than assumed. If the URL does
+    not move, a re-audit writes an object nobody fetches and every crawler
+    keeps serving stale numbers from behind a year-long cache."""
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     seed_match(hosted_env, "owner@example.com", MID)
@@ -2128,9 +2144,7 @@ def test_the_og_image_url_moves_when_the_data_moves(
     assert before.split("?v=")[1] != after.split("?v=")[1]
 
 
-def test_revoked_and_unknown_tokens_serve_identical_shells(
-    hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender]
-) -> None:
+def test_revoked_and_unknown_tokens_serve_identical_shells(hosted_env, hosted_app) -> None:
     """The meta must not reveal that a token once existed."""
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
@@ -2145,9 +2159,7 @@ def test_revoked_and_unknown_tokens_serve_identical_shells(
     assert revoked == unknown
 
 
-def test_the_shell_still_serves_the_spa_bundle(
-    hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender]
-) -> None:
+def test_the_shell_still_serves_the_spa_bundle(hosted_env, hosted_app) -> None:
     """Meta injection must not break the app for a real browser."""
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
@@ -2159,177 +2171,160 @@ def test_the_shell_still_serves_the_spa_bundle(
     assert resp.status_code == 200
     assert '<div id="root">' in resp.text
     assert resp.headers["cache-control"] == "no-cache"
+
+
+def test_the_shell_does_not_inherit_the_viewers_session(hosted_env, hosted_app) -> None:
+    """The sub-request must be anonymous. A logged-in viewer of someone
+    else's share link must get the same shell an anonymous one gets --
+    otherwise the shell's data depends on who is looking at it."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    seed_match(hosted_env, "owner@example.com", MID)
+    token = _share_token(client)
+
+    with_session = client.get(f"/share/{token}").text
+    client.cookies.clear()
+    without_session = client.get(f"/share/{token}").text
+    assert with_session == without_session
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+`_rename_match(hosted_env, match_id, new_name)` does not exist — write it
+in the test file, changing the match's stored name the way
+`tests/hosted_helpers.py`'s `seed_match` writes one. Any mutation that
+moves a field the match card displays will do; the name is cheapest.
+
+`hosted_env` / `hosted_app` come from `tests/hosted_helpers.py`. Some
+tests may need the moto-S3-backed variant Task 6 added
+(`hosted_app_with_storage`) — check what Task 6 landed and reuse it
+rather than writing a second one.
+
+- [ ] **Step 3: Run them and watch them fail**
 
 Run: `uv run pytest tests/test_share_og_meta.py -n0 -q`
-Expected: FAIL -- the SPA fallback serves `index.html` with no meta tags.
+Expected: failures — the SPA fallback serves `index.html` with no meta tags.
 
-- [ ] **Step 3: Implement the shells**
+- [ ] **Step 4: Add the JSON meta route**
 
-Add to `src/splitsmith/ui/share_og.py` (add `from html import escape` and
-`from fastapi.responses import HTMLResponse` to the imports):
+In `share_og.py`, alongside the PNG handlers and registered the same way
+(at the rewritten plain paths, reading the token from
+`request.state.share_token`):
 
 ```python
-def _meta_tags(tags: dict[str, str]) -> str:
-    """Render meta elements. ``og:*`` uses ``property``, everything else
-    uses ``name`` -- the Open Graph spec and the HTML spec disagree, and
-    Facebook's crawler only honours ``property``."""
-    out = []
-    for key, value in tags.items():
-        attr = "property" if key.startswith("og:") else "name"
-        out.append(f'<meta {attr}="{escape(key, quote=True)}" content="{escape(value, quote=True)}">')
-    return "".join(out)
+class OgMeta(BaseModel):
+    """Everything a shell needs, computed where the tenant is pinned."""
+
+    title: str
+    description: str
+    image_path: str  # relative; the shell prefixes public_base_url
+    alt: str
 
 
-def _shell(tags: dict[str, str]) -> HTMLResponse:
-    """The SPA shell with meta injected before ``</head>``.
-
-    ``no-cache`` is preserved from the SPA fallback it shadows: the shell
-    still points at a content-hashed bundle, and a cached shell would
-    pin an old one.
-    """
-    from .server import STATIC_DIR
-
-    index = STATIC_DIR / "index.html"
-    if not index.exists():
-        raise HTTPException(
-            status_code=503,
-            detail=(
-                "SPA bundle not built. Run `npm run build` in "
-                "src/splitsmith/ui_static/ or use `npm run dev`."
-            ),
-        )
-    html = index.read_text(encoding="utf-8")
-    html = html.replace("</head>", f"{_meta_tags(tags)}</head>", 1)
-    return HTMLResponse(content=html, headers={"Cache-Control": "no-cache"})
-
-
-def _base_tags(image_url: str, title: str, description: str, page_url: str, alt: str) -> dict[str, str]:
-    return {
-        "og:title": title,
-        "og:description": description,
-        "og:type": "website",
-        "og:url": page_url,
-        "og:image": image_url,
-        "og:image:width": "1200",
-        "og:image:height": "630",
-        "og:image:alt": alt,
-        "twitter:card": "summary_large_image",
-        "twitter:title": title,
-        "twitter:description": description,
-        "twitter:image": image_url,
-        # A share link is unlisted, not public.
-        "robots": "noindex",
-    }
-
-
-def _generic_tags() -> dict[str, str]:
-    """Unknown or revoked token. Carries nothing token-derived, so the two
-    cases are byte-identical and the meta never reveals that a token
-    once existed."""
-    return {
-        "og:title": "Splitsmith",
-        "og:description": "Per-shot split detection from stage video.",
-        "og:type": "website",
-        "robots": "noindex",
-    }
-
-
-def _resolved_or_none(state: Any, token: str) -> bool:
-    """True iff the token resolves to a live share. Mirrors what the
-    share middleware already does for the API surface."""
-    from ..async_bridge import run_sync
-
-    if state.resolve_share_token is None:
-        return False
-    return run_sync(state.resolve_share_token(token)) is not None
-
-
-@router.get("/share/{token}", include_in_schema=False)
-def share_match_shell(token: str, request: Request) -> HTMLResponse:
+@router.get("/og-meta", response_model=OgMeta, include_in_schema=False)
+def share_match_meta(request: Request) -> OgMeta:
     _hosted_gate()
     state = _state(request)
-    if not _resolved_or_none(state, token):
-        return _shell(_generic_tags())
-    base = state.public_base_url or ""
+    token = _share_token(request)
     card = build_match_card(state)
     shooters = ", ".join(r.name for r in card.roster) or "No shooters yet"
-    return _shell(
-        _base_tags(
-            # The hash is what makes the URL content-addressed. Without it
-            # a re-audit writes a new object nobody fetches, while every
-            # crawler and CDN keeps serving last week's numbers. This is
-            # the whole freshness mechanism -- do not drop the query.
-            image_url=f"{base}/api/share/{token}/og.png?v={card_hash(card)}",
-            title=card.match_name,
-            description=f"{shooters} - {card.stage_count} stages",
-            page_url=f"{base}/share/{token}",
-            alt=f"Splitsmith results card for {card.match_name}",
-        )
-    )
-
-
-@router.get("/share/{token}/results/{slug}/{stage}", include_in_schema=False)
-def share_stage_shell(token: str, slug: str, stage: int, request: Request) -> HTMLResponse:
-    _hosted_gate()
-    state = _state(request)
-    if not _resolved_or_none(state, token):
-        return _shell(_generic_tags())
-    base = state.public_base_url or ""
-    card = build_stage_card(state, slug, stage)
-    if card is None:
-        return share_match_shell(token, request)
-    parts = [card.shooter_name]
-    if card.figures.draw is not None:
-        parts.append(f"draw {card.figures.draw:.2f}s")
-    if card.figures.avg_split is not None:
-        parts.append(f"avg split {card.figures.avg_split:.3f}s")
-    parts.append(f"{card.shot_count} shots")
-    return _shell(
-        _base_tags(
-            image_url=f"{base}/api/share/{token}/og/{slug}/{stage}.png?v={card_hash(card)}",
-            title=f"Stage {stage} - {card.stage_name}",
-            description=" - ".join(parts),
-            page_url=f"{base}/share/{token}/results/{slug}/{stage}",
-            alt=f"Splitsmith stage card: stage {stage}, {card.shooter_name}",
-        )
+    return OgMeta(
+        title=card.match_name,
+        description=f"{shooters} - {card.stage_count} stages",
+        image_path=f"/api/share/{token}/og.png?v={card_hash(card)}",
+        alt=f"Splitsmith results card for {card.match_name}",
     )
 ```
 
-`_rename_match(hosted_env, match_id, new_name)` is a helper the new
-freshness test needs and which does not exist yet: write it in the test
-file, changing the match's stored name the same way `seed_match` in
-`tests/hosted_helpers.py` writes one. Any mutation that moves a field the
-match card displays will do; the name is simply the cheapest.
+and the stage variant at `/og-meta/{slug}/{stage}`, which falls back to
+the match card's values when `build_stage_card` returns `None` (unknown
+slug or stage, or a stage with no shots), mirroring what the PNG route
+already does.
 
-Two things to verify against `ui/server.py` before writing: that
-`state.resolve_share_token` is reachable from a plain request (it is set
-on `AppState` at `server.py:5419`), and that the share middleware does
-not also need to run for these HTML routes. It does not -- these
-handlers resolve the token themselves and read only match-scoped
-accessors.
+- [ ] **Step 5: Add the shells**
 
-`run_sync` comes from `splitsmith.async_bridge`; confirm the exact
-helper name there, since these handlers are sync `def`.
+Also in `share_og.py`. These are NOT under `/api`, so no middleware
+touches them and they must resolve nothing themselves:
 
-- [ ] **Step 4: Run the tests to verify they pass**
+```python
+_SUB_REQUEST_TIMEOUT_S = 5.0
+
+
+async def _fetch_og_meta(request: Request, path: str) -> OgMeta | None:
+    """In-process ASGI GET against this same app.
+
+    Why a sub-request rather than resolving here: token resolution and
+    owner impersonation live in ``_share_alias``, and there must be
+    exactly one implementation of them. Going back in through the
+    anonymous API means this handler never touches a tenant.
+
+    Sent with NO headers -- no cookies, no authorization. The share
+    surface is anonymous by definition, and a shell whose content varied
+    with the viewer's session would be a different bug.
+    """
+    import httpx
+
+    transport = httpx.ASGITransport(app=request.app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://share.internal", timeout=_SUB_REQUEST_TIMEOUT_S
+    ) as client:
+        resp = await client.get(path, headers={})
+    if resp.status_code != 200:
+        return None
+    return OgMeta.model_validate(resp.json())
+```
+
+Then the two shell handlers: `_hosted_gate()`, fetch the meta for
+`/api/share/{token}/og-meta[...]`, and on `None` render `_generic_tags()`
+— the unknown-token and revoked-token branches must produce byte-identical
+HTML, so the generic branch must carry nothing token-derived.
+
+`_meta_tags`, `_shell` and `_base_tags` are as previously specified:
+`og:*` uses `property`, everything else `name`, every value through
+`html.escape(value, quote=True)`, `robots: noindex` on every share shell,
+`Cache-Control: no-cache` preserved from the SPA fallback it shadows, and
+a 503 with the existing "SPA bundle not built" message when
+`STATIC_DIR / "index.html"` is absent.
+
+Absolute image URLs are `state.public_base_url` + `image_path`.
+
+- [ ] **Step 6: Run the tests**
 
 Run: `uv run pytest tests/test_share_og_meta.py -n0 -q`
-Expected: PASS, 5 tests.
+Expected: PASS.
 
-- [ ] **Step 5: Run the existing share and SPA tests**
+- [ ] **Step 7: Prove there is no recursion and no session leak**
 
-Run: `uv run pytest tests/test_share_routes.py tests/test_hosted_mode_boot.py -n0 -q`
-Expected: PASS. The new routes shadow two paths that previously fell
-through to the SPA catch-all; this confirms nothing else did.
+Two things a sub-request design can get wrong, both silent:
 
-- [ ] **Step 6: Commit**
+1. Confirm `og-meta` never reaches a shell route — assert the shell
+   handler is entered exactly once for one shell request (a counter or a
+   log assertion is fine). An accidental loop would only show up under
+   load.
+2. Confirm the sub-request carries no cookies: with a logged-in client,
+   assert the shell HTML is byte-identical to the anonymous one
+   (`test_the_shell_does_not_inherit_the_viewers_session` covers this —
+   verify it fails if you forward `request.headers`).
+
+- [ ] **Step 8: Run the wider share + hosted suites**
+
+```
+uv run pytest tests/test_share_og_meta.py tests/test_share_og_routes.py \
+  tests/test_share_routes.py tests/test_hosted_mode_boot.py \
+  tests/test_hosted_status.py -q
+```
+The new routes shadow two paths that previously fell through to the SPA
+catch-all; this confirms nothing else relied on that.
+
+- [ ] **Step 9: Commit**
 
 ```bash
-git add src/splitsmith/ui/share_og.py tests/test_share_og_meta.py
-git commit -m "feat(share): inject og tags into the share shells, noindex both"
+git add src/splitsmith/ui/share_og.py src/splitsmith/ui/server.py \
+        tests/test_share_og_meta.py
+git commit -m "feat(share): inject og tags into the share shells, noindex both
+
+The shells sit outside the middleware that pins a share's owner, so they
+read their data through an in-process sub-request to the anonymous API
+rather than re-implementing impersonation. One audited implementation of
+that, not two."
 ```
 
 ---
