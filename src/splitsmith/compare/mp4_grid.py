@@ -1170,8 +1170,9 @@ def build_stage_command(
     Nothing about the audio graph, the ``-map`` arguments or the tile
     chains changes either way.
 
-    ``hold_still_path`` is the frozen stage summary (one canvas-sized PNG,
-    written by :mod:`splitsmith.compare.overlay_summary`) and is
+    ``hold_still_path`` is the frozen stage summary (one PNG at the
+    composed grid size (see ``_composed_size``), written by
+    :mod:`splitsmith.compare.overlay_summary`) and is
     **required whenever** ``plan.hold_seconds`` is non-zero. A hold with
     no still is refused here rather than built, because almost nothing
     downstream complains about that segment: measured on ffmpeg 6.1.1,

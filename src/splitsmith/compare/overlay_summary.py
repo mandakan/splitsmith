@@ -730,7 +730,9 @@ def build_hold_still(
     blur_radius: int | None = None,
     dim: float = DEFAULT_DIM,
 ) -> Image.Image:
-    """Compose the canvas-sized RGB stage summary still.
+    """Compose the geometry-sized RGB stage summary still. Since #691 the
+    production caller passes the composed grid size here, not the render
+    canvas's.
 
     Each present tile's blurred, dimmed freeze frame is pasted into its
     cell first (never a crash: a cell with no freeze frame, extraction
@@ -738,7 +740,7 @@ def build_hold_still(
     background). Every shooter's summary text is then composed in one
     pass: the whole canvas's declared cells (see :func:`_summary_cells`)
     become one HTML document (``overlay_html.grid_html``), rasterized
-    to one canvas-sized PNG by the injected ``rasterizer``, and
+    to one geometry-sized PNG by the injected ``rasterizer``, and
     alpha-composited over the freezes in a single call -- not drawn per
     cell. This is what makes ``overflow: hidden`` (declared once, in the
     HTML's own stylesheet) the thing that keeps one shooter's figures out
