@@ -34,7 +34,7 @@ genuinely loaded and once forced onto the browser's own fallback:
   proving the bundled face is what actually painted the bundled
   document.
 
-See ``overlay_html._font_face_url``'s docstring for the exact numbers.
+See ``overlay_html.font_face_url``'s docstring for the exact numbers.
 :meth:`ChromiumRasterizer.png` therefore ALWAYS writes the HTML to a real
 file and navigates to it -- **never** ``page.set_content()``. Do not
 "simplify" this without re-measuring; ``test_overlay_raster.py`` carries

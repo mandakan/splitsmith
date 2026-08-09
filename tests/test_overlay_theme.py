@@ -10,6 +10,7 @@ import pytest
 from splitsmith import overlay_text, overlay_theme
 from splitsmith.overlay_html import single_html
 from splitsmith.overlay_layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
+from splitsmith.overlay_theme import load_theme
 from tests.test_overlay_html import _rule
 
 
@@ -155,6 +156,15 @@ def test_both_brand_faces_are_still_bundled(face: str, tmp_path) -> None:
 
     assert path.is_file()
     assert path.stat().st_size > 0
+
+
+def test_splitsmith_theme_carries_surface_and_subtle() -> None:
+    """The share card (spec 2026-08-09) paints a surface fill and a
+    dimmer label grey. Both come from index.css via the build script,
+    never hardcoded in a renderer."""
+    theme = load_theme("splitsmith")
+    assert theme.surface == (0x14, 0x17, 0x1C)  # --color-surface
+    assert theme.subtle == (0x6B, 0x70, 0x79)  # --color-subtle
 
 
 def test_overlay_theme_json_is_in_sync_with_css() -> None:

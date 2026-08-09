@@ -222,6 +222,46 @@ Anomaly detection:
 - `run_trims(plan, ...)`: drives `exports.export_stage` with trim-only flags, one stage at a time. One stage's failure never ends the run.
 - The permanent skip rules live in `ui.project.trim_blocker`, shared with the SPA's `ready_to_trim` and the per-stage export endpoint, so eligibility cannot drift between surfaces. `SkipReason` adds what only a planner sees: `source_unreachable`, `already_exported`, `camera_ambiguous`.
 
+**`share_card.py`** -- pure. Builds the `MatchCard` / `StageCard` models plus
+their content hash. **Does not own the split rule** -- `coach.statistic_splits`
+(issue #772) does; `stage_figures` only derives the draw and the mean of
+whatever that shared helper returns, plus the two figures' provenance
+(`"coach"` once a stage has any classified interval, `"threshold"` when it
+falls back to the auto-classifier's split rule).
+
+**`share_card_html.py`** -- pure. Card model to a 1200x630 HTML document.
+No browser, no file I/O beyond resolving a bundled font path.
+
+**`share_card_render.py`** -- rasterizes a card through
+`overlay_raster.Rasterizer` and caches the PNG under a content-addressed
+storage key (`card_hash`, over everything the card displays). Serves a
+bundled plate if Chromium is absent.
+
+**`ui/share_og.py`** -- hosted-only. Serves four route families on the
+anonymous share surface:
+- the card PNGs (`/api/share/{token}/og.png`, `/api/share/{token}/og/{slug}/{stage}.png`);
+- a JSON `og-meta` route describing what a shell should render;
+- the HTML shells (`/share/{token}`, `/share/{token}/results`,
+  `/share/{token}/results/{slug}/{stage}`), which inject `og:*`/`twitter:*`
+  meta tags into the SPA's `index.html` server-side, since crawlers do not
+  run JavaScript.
+
+The shells sit outside the middleware that pins a share's owner (`_share_alias`
+only rewrites `/api/...` paths). Rather than resolve the token or impersonate
+the owner a second time, a shell handler makes an in-process ASGI sub-request
+back into the anonymous `og-meta` API -- token resolution and owner
+impersonation have exactly one implementation, in `_share_alias`, and the
+shell only ever touches the JSON that comes back.
+
+`build_stage_card` heals legacy unclassified audit docs in memory (mirroring
+`get_stage_coach`'s backfill) and never persists -- this route is share-only
+and must never mutate a doc an anonymous caller reached through impersonation.
+
+The `og:image` URL carries `?v=<card_hash>` as its freshness mechanism: a
+re-audit changes the figures, which changes the hash, which changes the URL,
+so a crawler refetches instead of an object write nobody's cached copy ever
+points at.
+
 ## Data structures
 
 ```python

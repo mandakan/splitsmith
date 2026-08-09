@@ -938,7 +938,11 @@ _SHARE_PATH_RE = re.compile(
     r"|shooters/[^/]+/project"
     r"|shooters/[^/]+/stages/\d+/coach"
     r"|shooters/[^/]+/coach/distributions"
-    r"|shooters/[^/]+/videos/stream)$"
+    r"|shooters/[^/]+/videos/stream"
+    r"|og\.png"
+    r"|og/[^/]+/\d+\.png"
+    r"|og-meta"
+    r"|og-meta/[^/]+/\d+)$"
 )
 
 
@@ -6046,6 +6050,21 @@ def create_app(
         if store is None:
             raise HTTPException(status_code=500, detail="share store unavailable")
         s = await store.create(mid)
+        # Best-effort, timeout-bounded: warm the match card cache so the
+        # link the owner immediately pastes previews without a cold
+        # Chromium render on first fetch. All of the "never cost the
+        # owner their share link" handling -- the worker-thread hop
+        # (Playwright's sync API can't run on this coroutine's
+        # event-loop thread), the wall-time bound, and swallowing any
+        # failure -- lives in ``warm_match_card_bounded`` itself; see its
+        # docstring for what the bound does and does not guarantee. This
+        # try/except is defense in depth, not the primary guard.
+        try:
+            from .share_og import warm_match_card_bounded
+
+            await warm_match_card_bounded(state, s.token)
+        except Exception:
+            logger.warning("failed to warm match card for share %s", s.id, exc_info=True)
         return ShareInfo(
             id=s.id,
             url=f"{state.public_base_url}/share/{s.token}",
@@ -6325,6 +6344,16 @@ def create_app(
         request.scope["raw_path"] = rewritten.encode("utf-8")
         tenant_token = current_tenant.set(state.build_tenant(resolved.owner_user_id))
         share_token = current_share_request.set(True)
+        # Stashed on request.state (not a ContextVar) because only the two
+        # OG PNG handlers need it and they already take ``request`` -- same
+        # precedent as ``_auth_gate``'s ``request.state.user``. The card
+        # PNG cache key is scoped to this token (share_card_render.storage_key),
+        # and the raw token is gone from the URL by the time a route handler
+        # runs: this middleware rewrites onto /api/matches/{match_id}/{rest},
+        # then _match_id_alias rewrites again onto /api/{rest}, which is the
+        # path every route in _SHARE_PATH_RE (og.png included) is actually
+        # registered under.
+        request.state.share_token = token
         try:
             response = await call_next(request)
             # Uniform-404 seam: a live token whose underlying resource no
@@ -14586,6 +14615,13 @@ def create_app(
     from .device_auth_api import router as device_router
 
     app.include_router(device_router)
+
+    # Share-link OG card PNGs (spec 2026-08-09). Same lazy-import,
+    # always-registered idiom as sync_router and device_router: every
+    # route 404s outside hosted mode (see share_og._hosted_gate).
+    from .share_og import router as share_og_router
+
+    app.include_router(share_og_router)
 
     # ----------------------------------------------------------------------
     # Static asset serving (SPA)

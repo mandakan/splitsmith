@@ -130,6 +130,49 @@ and is the only unmuted tile. Per-module breakdown lives in SPEC.md
 under "Module responsibilities"; the example manifest is at
 ``examples/compare-bromma-classifier-2026.yaml``.
 
+## Share-link previews
+
+A share link previews as a 1200x630 card. The match card is a roster --
+deliberately no summed stage time, since IPSC ranks by hit factor and
+accumulated raw time is not a figure the sport produces. The stage card
+leads with draw and average non-anomaly split, the numbers splitsmith
+itself computes. The split rule lives in ``coach.statistic_splits``
+(main, issue #772) -- ``share_card.stage_figures`` does not own it, only
+shapes its output into a card's two headline figures. An uncoached stage
+falls back to the auto-classifier's own cutoff,
+``coach.SPLIT_STAT_SPLIT_MAX`` (``CoachAutoClassifyConfig.split_max_s``,
+0.5 s) -- *not* ``split_color_band``'s ``transition_min`` (1.0 s), which
+#773/#776 retired for this purpose because 35% of corpus intervals sit
+between the two, so the figures would jump the moment a stage got
+classified. (#772 also brings the video summary and results page onto
+that same definition.) ``ui/share_og.py``'s ``build_stage_card`` heals legacy
+unclassified audit docs in memory, mirroring ``get_stage_coach``'s
+backfill, and never persists -- a share-only route must not mutate a
+doc an anonymous caller reached through impersonation.
+
+``ui/share_og.py`` serves four route families on the anonymous share
+surface: the card PNGs, a JSON ``og-meta`` route, and the HTML shells
+at ``/share/{token}``, ``/share/{token}/results``, and
+``/share/{token}/results/{slug}/{stage}``. The shells sit outside the
+middleware that pins a share's owner -- ``_share_alias`` only rewrites
+``/api/...`` paths -- so a shell fetches its data through an in-process
+ASGI sub-request back into the anonymous API rather than resolving the
+token or impersonating the owner itself. This is deliberate and is the
+single least obvious thing on this surface: token resolution and owner
+impersonation must have exactly one implementation, in ``_share_alias``.
+Do not "simplify" a shell handler to read the tenant directly -- that
+would be a second implementation of impersonation, not a shortcut.
+
+``og:image`` URLs are content-addressed: they carry ``?v=<card_hash>``,
+and that query *is* the freshness mechanism, not a cache-buster afterthought.
+A re-audit moves the figures, which moves the hash, which moves the URL,
+so crawlers refetch. Without it, a re-audit writes a new cached object
+that nothing's ``og:image`` tag points at, and a crawler goes on serving
+a stale card behind a long-lived ``Cache-Control``. Nothing invalidates
+a cache; there is nothing to invalidate. Meta tags are injected
+server-side in ``ui/share_og.py`` for every client -- crawlers do not run
+JavaScript, so a client-side helmet would reach none of them.
+
 ## Things Claude Code should not do
 
 - Add new dependencies without asking. The dep list is small on purpose.

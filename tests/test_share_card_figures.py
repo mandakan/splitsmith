@@ -1,0 +1,173 @@
+"""Share-card figures. The RULE lives in ``coach.statistic_splits`` (#774);
+this module only shapes its output into a card's two headline numbers, so
+these tests assert the shaping, not the rule."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import pytest
+
+from splitsmith.share_card import StageFigures, stage_figures
+
+
+@dataclass(frozen=True)
+class _Shot:
+    """The two attributes ``coach.SplitStatInterval`` reads. A real engine
+    ``Shot`` needs six more required fields that no card looks at."""
+
+    split: float
+    interval_class: str | None
+
+
+# Draw 1.28, nine splits (mean 0.182), two transitions, one movement, one
+# reload. The intervals sum to 14.74 s.
+_SECONDS = [1.28, 0.19, 0.17, 0.22, 1.85, 0.16, 0.18, 2.42, 0.21, 0.15, 5.45, 0.20, 0.16, 2.10]
+_CLASSES = [
+    "first_shot",
+    "split",
+    "split",
+    "split",
+    "transition",
+    "split",
+    "split",
+    "reload",
+    "split",
+    "split",
+    "movement",
+    "split",
+    "split",
+    "transition",
+]
+
+
+def _classified() -> tuple[_Shot, ...]:
+    return tuple(_Shot(split=s, interval_class=c) for s, c in zip(_SECONDS, _CLASSES, strict=True))
+
+
+def _unclassified() -> tuple[_Shot, ...]:
+    return tuple(_Shot(split=s, interval_class=None) for s in _SECONDS)
+
+
+def test_classified_stage_reports_the_draw_and_the_split_mean() -> None:
+    figs = stage_figures(_classified())
+    assert figs.source == "coach"
+    assert figs.draw == pytest.approx(1.28)
+    assert figs.avg_split == pytest.approx(0.182, abs=5e-4)
+    assert figs.split_count == 9
+    assert figs.interval_count == 14
+
+
+def test_unclassified_stage_falls_back_through_the_shared_helper() -> None:
+    figs = stage_figures(_unclassified())
+    assert figs.source == "threshold"
+    assert figs.draw == pytest.approx(1.28)
+    assert figs.split_count == 9
+    assert figs.avg_split == pytest.approx(0.182, abs=5e-4)
+
+
+#: Draw, then four post-draw intervals chosen so the coached and uncoached
+#: paths *cannot* agree under the 0.5 s ``split_max`` cutoff (#776):
+#:
+#:   * ``0.30`` classed ``transition`` -- the coach excludes it (dead
+#:     time), the cutoff includes it (0.30 <= 0.50);
+#:   * ``0.60`` classed ``split`` -- the coach includes it (still
+#:     shooting), the cutoff excludes it (0.60 > 0.50).
+#:
+#: Both are ordinary manual overrides: a shooter who swung the gun without
+#: moving their feet calls the 0.30 a transition, and a hard partial at
+#: distance takes 0.60 and is still a split. Every other fixture in this
+#: file lands on the same side of both rules, which is why they all stay
+#: green with the classification branch disabled.
+_DISCRIMINATING_SECONDS = [1.20, 0.20, 0.30, 0.60, 0.20]
+_DISCRIMINATING_CLASSES = ["first_shot", "split", "transition", "split", "split"]
+
+
+def test_classification_changes_the_numbers_not_just_the_provenance_label() -> None:
+    """The same run, coached and uncoached, must produce *different*
+    averages -- otherwise nothing in this file can fail when the
+    classification is silently ignored.
+
+    ``source`` alone has no power here: ``stage_figures`` computes it from
+    its own ``any(...)`` over the shots, so it still reads ``"coach"`` even
+    if ``statistic_splits`` fell through to the threshold branch. Only the
+    average discriminates, which is why both are asserted by value.
+    """
+    classified = tuple(
+        _Shot(split=s, interval_class=c)
+        for s, c in zip(_DISCRIMINATING_SECONDS, _DISCRIMINATING_CLASSES, strict=True)
+    )
+    unclassified = tuple(_Shot(split=s, interval_class=None) for s in _DISCRIMINATING_SECONDS)
+
+    coach = stage_figures(classified)
+    threshold = stage_figures(unclassified)
+
+    assert coach.source == "coach"
+    assert threshold.source == "threshold"
+    # Coached: 0.20 + 0.60 + 0.20, the 0.30 transition dropped as dead time.
+    assert coach.avg_split == pytest.approx((0.20 + 0.60 + 0.20) / 3)
+    # Uncoached: 0.20 + 0.30 + 0.20, the 0.60 dropped for being over the
+    # cutoff -- the rule cannot see either class.
+    assert threshold.avg_split == pytest.approx((0.20 + 0.30 + 0.20) / 3)
+    assert coach.avg_split != pytest.approx(threshold.avg_split)
+    assert coach.split_count == threshold.split_count == 3
+    assert coach.interval_count == threshold.interval_count == 5
+
+
+def test_the_fallback_excludes_a_draw_faster_than_the_threshold() -> None:
+    """Isolates the index-0 guard: the draw must be excluded from the split
+    average by *position*, not by duration.
+
+    The fixture is synthetic, not representative -- at the 0.5 s
+    ``split_max`` cutoff (#776) no realistic Production Optics draw
+    (~1.0-1.5 s) could ever land here; a real draw is already excluded by
+    duration alone, which would let the index-0 guard rot unnoticed. So
+    the draw below is pinned under 0.5 s on purpose, to force the guard to
+    be the only thing keeping it out of the average."""
+    shots = (
+        _Shot(split=0.40, interval_class=None),
+        _Shot(split=0.20, interval_class=None),
+        _Shot(split=0.20, interval_class=None),
+        _Shot(split=0.20, interval_class=None),
+    )
+    figs = stage_figures(shots)
+    assert figs.draw == pytest.approx(0.40)
+    assert figs.split_count == 3
+    assert figs.avg_split == pytest.approx(0.20)
+
+
+def test_partial_classification_follows_mains_any_rule_see_issue_775() -> None:
+    """This branch's spec argued for all-or-nothing; main counts the
+    classified intervals as soon as ANY interval carries a class. Main is
+    canonical, so the card follows it. Issue #775 is closed -- resolved by
+    making partial classification unreachable (the audit-save endpoint and
+    the coach GET both auto-classify), not by changing this rule -- so a
+    stage this module ever sees mid-classified in practice shouldn't
+    happen. The rule's logic is unchanged, so this pins the ``any`` branch
+    as a real contract: upstream guarantees it is all-or-nothing, this
+    fixture is deliberately not, and the two must still agree."""
+    shots = (
+        _Shot(split=1.28, interval_class="first_shot"),
+        _Shot(split=0.19, interval_class="split"),
+        _Shot(split=0.80, interval_class=None),
+    )
+    figs = stage_figures(shots)
+    assert figs.source == "coach"
+    assert figs.split_count == 1
+    assert figs.avg_split == pytest.approx(0.19)
+
+
+def test_a_stage_of_pure_dead_time_reports_a_draw_but_no_average() -> None:
+    shots = (
+        _Shot(split=1.28, interval_class="first_shot"),
+        _Shot(split=2.40, interval_class="reload"),
+    )
+    figs = stage_figures(shots)
+    assert figs.draw == pytest.approx(1.28)
+    assert figs.avg_split is None
+    assert figs.split_count == 0
+
+
+def test_no_shots_yields_empty_source_and_no_figures() -> None:
+    figs = stage_figures(())
+    assert figs == StageFigures(draw=None, avg_split=None, split_count=0, interval_count=0, source="empty")

@@ -17,7 +17,7 @@ a defect.
 
 **This module is pure.** No browser, no Playwright import, no file I/O
 beyond resolving a path string for ``@font-face`` (see
-:func:`_font_face_url`) -- nothing here opens a font, measures a glyph or
+:func:`font_face_url`) -- nothing here opens a font, measures a glyph or
 shells out. It is unit-testable with nothing but the declaration objects
 from ``overlay_layout``, ``overlay_theme`` and
 ``compare/overlay_sprites``. Rasterizing the HTML this module returns is
@@ -94,7 +94,7 @@ Design rules, each answering one of the old fitter's defects:
   rasterizer navigates to the HTML as a real ``file://`` document rather
   than injecting it via ``page.set_content()``** -- the fonts silently
   fall back to a system face with no error under ``set_content()``. See
-  :func:`_font_face_url` for the measured numbers and the data-URI
+  :func:`font_face_url` for the measured numbers and the data-URI
   fallback if a caller cannot navigate to a real document.
 - **Every string is escaped.** A competitor's name is untrusted input --
   see :func:`_element_div`.
@@ -136,7 +136,9 @@ RGB = tuple[int, int, int]
 
 #: Bundled TTFs this module's ``@font-face`` rules point at. Both are
 #: declared unconditionally -- see the module docstring's fonts bullet.
-_FONT_FILES: dict[str, str] = {
+#: Public: ``share_card_html`` reuses these filenames so a font swap can't
+#: desynchronise the two modules' ``@font-face`` rules.
+FONT_FILES: dict[str, str] = {
     "mono": "JetBrainsMono-Bold.ttf",
     "display": "Antonio-VariableFont.ttf",
 }
@@ -148,8 +150,11 @@ _FONT_FILES: dict[str, str] = {
 _IDENTITY_MIN_WIDTH_CH = 3
 
 
-def _font_face_url(filename: str) -> str:
+def font_face_url(filename: str) -> str:
     """Resolve a bundled font file to a ``file://`` URL.
+
+    Public: ``share_card_html`` also builds ``@font-face`` rules against
+    these same bundled TTFs and needs this resolver too.
 
     ``importlib.resources.files`` returns the real on-disk path for this
     project's normal (unzipped) install layout -- the same assumption
@@ -227,8 +232,8 @@ def _style_rules(*, scale: CellScale, theme: OverlayTheme) -> str:
     is independently valid HTML a test can inspect without also holding
     a whole document.
     """
-    mono_url = _font_face_url(_FONT_FILES["mono"])
-    display_url = _font_face_url(_FONT_FILES["display"])
+    mono_url = font_face_url(FONT_FILES["mono"])
+    display_url = font_face_url(FONT_FILES["display"])
     ink = _rgb(theme.ink)
     ink_2 = _rgb(theme.ink_2)
     rule_color = _rgb(theme.rule)
