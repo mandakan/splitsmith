@@ -1005,3 +1005,52 @@ def test_overlay_cli_forwards_its_flags_to_render_overlay(
         "max_fps": None,
         "theme": "clean",
     }
+
+
+def test_overlay_cli_defaults_theme_to_splitsmith_when_omitted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Companion to the test above, which always passes ``--theme`` explicitly
+    and so never exercises the default. Omitting ``--theme`` must forward
+    ``"splitsmith"`` to ``render_overlay`` -- the brand palette, not a silent
+    fallback to ``"clean"`` -- so every overlay matches the web UI unless a
+    caller opts out."""
+    audit_path = tmp_path / "stage1.json"
+    video_path = tmp_path / "trimmed.mp4"
+    output_path = tmp_path / "overlay.mov"
+
+    captured: dict[str, Any] = {}
+
+    def fake_render_overlay(
+        *,
+        audit_path: Path,
+        trimmed_video_path: Path,
+        output_path: Path,
+        beep_offset_seconds: float,
+        ffmpeg_binary: str = "ffmpeg",
+        probe: VideoMetadata | None = None,
+        codec: str = "auto",
+        max_height: int | None = None,
+        max_fps: float | None = None,
+        theme: str = "splitsmith",
+        rasterizer: Any = None,
+        probe_runner: Any = None,
+    ) -> Path:
+        captured["theme"] = theme
+        output_path.write_bytes(b"")
+        return output_path
+
+    monkeypatch.setattr(overlay_render, "render_overlay", fake_render_overlay)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "overlay",
+            "--audit", str(audit_path),
+            "--video", str(video_path),
+            "--output", str(output_path),
+        ],  # fmt: skip
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["theme"] == "splitsmith"
