@@ -441,6 +441,27 @@ def test_codec_auto_falls_back_to_prores_off_darwin(tmp_path: Path, monkeypatch:
     assert "hevc_videotoolbox" not in cmd
 
 
+def test_codec_auto_on_darwin_asks_the_injected_probe_not_the_host(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``auto`` resolves the encoder question through ``probe_runner``,
+    never through a live ``subprocess.run``. With ``Popen`` stubbed, a
+    host probe explodes inside ``subprocess.run`` - which is what every
+    macOS checkout hit while CI stayed green behind the Darwin guard."""
+    monkeypatch.setattr(overlay_render.platform, "system", lambda: "Darwin")
+    cmd, _ = _capture_render_cmd(
+        monkeypatch,
+        audit_path=_write_audit(tmp_path),
+        output=tmp_path / "overlay.mov",
+        probe=_meta_30fps(duration=0.1),
+        codec="auto",
+    )
+    # ``fake_ffmpeg_probe`` imitates an ubuntu ffmpeg, which has no
+    # VideoToolbox - ``auto`` must land on ProRes from the fake's answer.
+    assert "prores_ks" in cmd
+    assert "hevc_videotoolbox" not in cmd
+
+
 def test_codec_auto_picks_hevc_on_darwin_with_videotoolbox(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -448,7 +469,9 @@ def test_codec_auto_picks_hevc_on_darwin_with_videotoolbox(
     ``hevc-alpha`` -- the size win that motivated the option."""
     monkeypatch.setattr(overlay_render.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(
-        overlay_render, "_ffmpeg_supports_encoder", lambda _bin, enc: enc == "hevc_videotoolbox"
+        overlay_render,
+        "_ffmpeg_supports_encoder",
+        lambda _bin, enc, _runner: enc == "hevc_videotoolbox",
     )
     cmd, _ = _capture_render_cmd(
         monkeypatch,

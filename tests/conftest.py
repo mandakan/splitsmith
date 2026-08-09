@@ -74,6 +74,13 @@ def fake_ffmpeg_probe(
             return subprocess.CompletedProcess(
                 argv, 0, f"ffmpeg version {version} Copyright (c) 2000-2023\n".encode(), b""
             )
+        if "-encoders" in argv:
+            # The encoder listing of the ubuntu build this fake imitates:
+            # no VideoToolbox, so ``codec="auto"`` lands on ProRes on
+            # every platform a test runs on.
+            return subprocess.CompletedProcess(
+                argv, 0, b" V....D prores_ks             Apple ProRes (iCodec Pro)\n", b""
+            )
         if "filter=drawtext" in argv:
             if not drawtext:
                 return subprocess.CompletedProcess(argv, 0, b"", UNKNOWN_FILTER_STDERR.encode())
