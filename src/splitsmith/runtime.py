@@ -40,6 +40,7 @@ home dir.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
@@ -48,7 +49,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
@@ -278,7 +279,7 @@ def _clear_runtime_cache() -> None:
     binary the previous resolution picked.
     """
     resolve_runtime.cache_clear()
-    ffmpeg_capabilities.cache_clear()
+    _clear_ffmpeg_capabilities_cache()
 
 
 # --- ffmpeg capability probing --------------------------------------------
@@ -486,7 +487,40 @@ def _probe_concat_option(binary: str, runner: Runner) -> bool | None:
     return "unknown keyword" not in _probe_text(completed)
 
 
-@lru_cache(maxsize=8)
+@dataclass(frozen=True)
+class _FontIdentity:
+    """A font as a cache key: its bytes, not the path it occupies today.
+
+    Both callers of :func:`ffmpeg_capabilities` materialize the bundled
+    font into a fresh :class:`tempfile.TemporaryDirectory` per render, so
+    the path is new every time and a path-keyed cache can never hit.
+    Only ``digest`` takes part in ``__eq__``/``__hash__``; ``path`` rides
+    along because the probe still has to draw with the file this caller
+    actually named.
+    """
+
+    digest: str
+    path: Path = field(compare=False)
+
+
+def _font_identity(font_path: Path | None) -> _FontIdentity | None:
+    """Key ``font_path`` by content, falling back to the path itself.
+
+    Hashing a ~200 KB font costs well under a millisecond against the
+    four subprocess probes it saves. An unreadable file has no content
+    to claim two callers share, so it degrades to the path -- the old
+    behaviour, and the honest key for that case.
+    """
+    if font_path is None:
+        return None
+    try:
+        with font_path.open("rb") as handle:
+            digest = hashlib.file_digest(handle, "sha256").hexdigest()
+    except OSError:
+        digest = f"path:{font_path}"
+    return _FontIdentity(digest, font_path)
+
+
 def ffmpeg_capabilities(
     binary: str | None = None,
     *,
@@ -497,14 +531,26 @@ def ffmpeg_capabilities(
 
     Cached for the lifetime of the process, keyed by every argument --
     including ``runner``, so a test's fake never answers for a later
-    call's real one. Reset via :func:`_clear_ffmpeg_capabilities_cache`
-    (or :func:`_clear_runtime_cache`, which also clears this).
+    call's real one. ``font_path`` is keyed by its *content* (see
+    :class:`_FontIdentity`). Reset via
+    :func:`_clear_ffmpeg_capabilities_cache` (or
+    :func:`_clear_runtime_cache`, which also clears this).
 
     ``runner`` exists so unit tests never shell out; ``font_path``, when
     given, upgrades the ``drawtext`` probe from "is it listed" to "does
     it draw with this font" (see :func:`_probe_drawtext`).
     """
+    return _probe_capabilities(binary, _font_identity(font_path), runner)
+
+
+@lru_cache(maxsize=8)
+def _probe_capabilities(
+    binary: str | None,
+    font: _FontIdentity | None,
+    runner: Runner,
+) -> FFmpegCapabilities:
     resolved = binary or runtime().ffmpeg_binary
+    font_path = None if font is None else font.path
     version = _probe_version(resolved, runner)
     drawtext = _probe_drawtext(resolved, font_path, runner)
     concat_option = _probe_concat_option(resolved, runner)
@@ -518,5 +564,5 @@ def ffmpeg_capabilities(
 
 
 def _clear_ffmpeg_capabilities_cache() -> None:
-    """Reset the ``lru_cache`` on :func:`ffmpeg_capabilities`. Test-only helper."""
-    ffmpeg_capabilities.cache_clear()
+    """Reset the capability cache behind :func:`ffmpeg_capabilities`. Test-only helper."""
+    _probe_capabilities.cache_clear()

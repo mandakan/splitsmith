@@ -259,6 +259,115 @@ def test_the_probe_runs_once_per_binary_not_once_per_caller():
     assert len(calls) == 2 * count
 
 
+def test_the_same_font_at_a_new_temp_path_still_hits_the_cache(tmp_path: Path):
+    """The cache has to survive the way its callers actually hand it a font.
+
+    Both production callers -- ``overlay_render.render_overlay`` and
+    ``compare.mp4_grid.render_grid_mp4`` -- materialize the bundled font
+    into a fresh ``TemporaryDirectory`` per render. Keying on that path
+    means the key is never the same twice: every render re-probes, and
+    every miss evicts an entry from the small cache that other callers
+    could have hit. Identical bytes must answer identically.
+    """
+    calls: list[list[str]] = []
+    capable = fake_ffmpeg_probe()
+
+    def runner(cmd, **kwargs):
+        calls.append([str(c) for c in cmd])
+        return capable(cmd, **kwargs)
+
+    data = BUNDLED_FONT.read_bytes()
+    first_font = tmp_path / "run-one" / "JetBrainsMono-Bold.ttf"
+    second_font = tmp_path / "run-two" / "JetBrainsMono-Bold.ttf"
+    for path in (first_font, second_font):
+        path.parent.mkdir()
+        path.write_bytes(data)
+
+    first = ffmpeg_capabilities("/bin/ffmpeg", font_path=first_font, runner=runner)
+    count = len(calls)
+    second = ffmpeg_capabilities("/bin/ffmpeg", font_path=second_font, runner=runner)
+
+    assert count > 0
+    assert len(calls) == count, calls[count:]
+    assert first is second
+
+
+def test_a_different_font_is_still_probed_again(tmp_path: Path):
+    """Content is the key, so different content must not answer for it.
+
+    The exercise render exists to catch a ``drawtext`` that cannot
+    initialise with the file this render will hand it. Collapsing two
+    genuinely different fonts onto one entry would report the first
+    font's answer for the second.
+    """
+    calls: list[list[str]] = []
+    capable = fake_ffmpeg_probe()
+
+    def runner(cmd, **kwargs):
+        calls.append([str(c) for c in cmd])
+        return capable(cmd, **kwargs)
+
+    good = tmp_path / "good.ttf"
+    good.write_bytes(BUNDLED_FONT.read_bytes())
+    other = tmp_path / "other.ttf"
+    other.write_bytes(b"a different font entirely")
+
+    ffmpeg_capabilities("/bin/ffmpeg", font_path=good, runner=runner)
+    count = len(calls)
+    ffmpeg_capabilities("/bin/ffmpeg", font_path=other, runner=runner)
+
+    assert len(calls) == 2 * count
+
+
+def test_the_exercise_render_names_the_path_it_was_handed(tmp_path: Path):
+    """Keying on content must not hand ffmpeg some other copy's path.
+
+    A cache key is not a substitute for the argument. On a miss the
+    probe still has to draw with the file this caller named, or the
+    exercise stops being a proxy for what the render will do.
+    """
+    seen: list[str] = []
+
+    def runner(cmd, **kwargs):
+        argv = [str(c) for c in cmd]
+        if "-vf" in argv:
+            seen.append(argv[argv.index("-vf") + 1])
+        return fake_ffmpeg_probe()(cmd, **kwargs)
+
+    font = tmp_path / "here" / "font.ttf"
+    font.parent.mkdir()
+    font.write_bytes(BUNDLED_FONT.read_bytes())
+    ffmpeg_capabilities("/bin/ffmpeg", font_path=font, runner=runner)
+
+    assert seen, "the exercise render never ran"
+    assert f"fontfile='{font}'" in seen[0], seen
+
+
+def test_an_unreadable_font_falls_back_to_keying_on_its_path(tmp_path: Path):
+    """A font whose bytes cannot be read must not take the probe down.
+
+    Hashing is an optimisation; failing it is not a reason to refuse to
+    answer. The probe degrades to the old path-keyed behaviour, which
+    for a nonexistent file is also the honest key -- there is no content
+    to claim two callers share.
+    """
+    calls: list[list[str]] = []
+    capable = fake_ffmpeg_probe()
+
+    def runner(cmd, **kwargs):
+        calls.append([str(c) for c in cmd])
+        return capable(cmd, **kwargs)
+
+    absent = tmp_path / "gone.ttf"
+    caps = ffmpeg_capabilities("/bin/ffmpeg", font_path=absent, runner=runner)
+    count = len(calls)
+    again = ffmpeg_capabilities("/bin/ffmpeg", font_path=absent, runner=runner)
+
+    assert count > 0
+    assert caps is again
+    assert len(calls) == count, calls[count:]
+
+
 def test_clearing_the_runtime_cache_clears_the_capability_cache():
     """The default key resolves its binary through the runtime cache.
 
