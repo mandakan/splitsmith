@@ -72,8 +72,10 @@ def _read(audit_file: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def test_get_coach_returns_shots_with_stale_when_unset(tmp_path: Path) -> None:
-    client, _audit, base = _bootstrap(tmp_path)
+def test_get_coach_backfills_classes_on_first_read(tmp_path: Path) -> None:
+    """#775: a legacy audit doc with unclassified shots heals on first
+    read - the response carries auto classes and the doc is persisted."""
+    client, audit_file, base = _bootstrap(tmp_path)
     resp = client.get(f"{base}/shooters/me/stages/1/coach")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -81,13 +83,26 @@ def test_get_coach_returns_shots_with_stale_when_unset(tmp_path: Path) -> None:
     assert body["beep_time"] == 5.0
     assert len(body["shots"]) == 4
 
-    # Nothing classified yet -> stored class is None and stale=False per
-    # the spec (unannotated shots aren't stale).
+    assert [s["interval_class"] for s in body["shots"]] == [
+        "first_shot",
+        "split",
+        "transition",
+        "movement",
+    ]
     for s in body["shots"]:
-        assert s["interval_class"] is None
-        assert s["interval_class_source"] is None
+        assert s["interval_class_source"] == "auto"
         assert s["stale"] is False
         assert s["improvement_flag"] is False
+
+    # The heal is persisted, silently (no new audit event kinds).
+    stored = _read(audit_file)
+    assert [s["interval_class"] for s in stored["shots"]] == [
+        "first_shot",
+        "split",
+        "transition",
+        "movement",
+    ]
+    assert not any(e.get("kind") == "coach_reclassify" for e in stored.get("audit_events") or [])
 
     # time_absolute = beep_time + ms/1000 so the SPA can seek videos.
     assert body["shots"][0]["time_absolute"] == pytest.approx(5.0 + 1.5)
