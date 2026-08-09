@@ -24,6 +24,12 @@ from ``overlay_layout``, ``overlay_theme`` and
 ``overlay_raster.py``'s job (Task 6R-2), a separate module so that only
 one of the two needs a browser.
 
+``compare/overlay_sprites`` is a type-only ``TYPE_CHECKING`` import, not
+a runtime one (see the guard below). That is what keeps this module a
+leaf: since issue #684, ``overlay_render`` imports this module, and
+``compare/overlay_sprites`` reaches ``overlay_render`` transitively
+through ``ui.exports`` -- a real import here would close that cycle.
+
 Design rules, each answering one of the old fitter's defects:
 
 - **``overflow: hidden`` on every ``.cell``.** This is the fix for all
@@ -878,12 +884,18 @@ def cell_html(groups: Sequence[Group], *, scale: CellScale, theme: OverlayTheme)
 
     Includes its own ``<style>`` block and the fit-policy ``<script>``
     (see :func:`_fit_script`), so this is valid to drop anywhere (a
-    test, a future single-shooter port) without also needing a whole
-    document -- :func:`grid_html` calls the same building blocks but
-    emits the stylesheet and script once for the whole grid instead of
-    once per cell. The script only *defines* ``window.__splitsmithFit``
-    here; nothing in this module calls it -- see
-    :mod:`splitsmith.overlay_raster` for where and why it is invoked.
+    test, some future embedding that isn't the grid) without also
+    needing a whole document -- :func:`grid_html` calls the same
+    building blocks but emits the stylesheet and script once for the
+    whole grid instead of once per cell. :func:`single_html`, the
+    single-shooter port, does the same thing again for a different
+    reason: it needs page-level ``html``/``body`` sizing this fragment
+    doesn't carry, so it calls the same private building blocks
+    (``_style_rules``, ``_fit_script``, ``_cell_div``) directly rather
+    than wrapping this function's output. The script only *defines*
+    ``window.__splitsmithFit`` here; nothing in this module calls it --
+    see :mod:`splitsmith.overlay_raster` for where and why it is
+    invoked.
     """
     return (
         f"<style>{_style_rules(scale=scale, theme=theme)}</style>\n"
@@ -909,9 +921,9 @@ def single_html(
     and borrowing the grid's vocabulary to express "one of one" would be
     the same information spelled twice.
 
-    :func:`cell_html` is nearly this and its docstring names "a future
-    single-shooter port" as its reason to exist, but it returns a
-    *fragment*. That matters more than it sounds: ``.cell`` is
+    :func:`cell_html` is nearly this -- same building blocks, same
+    single cell -- but it returns a *fragment*. That matters more than
+    it sounds: ``.cell`` is
     ``width: 100%; height: 100%``, which resolves against its containing
     block, and in a grid document that block is a grid item sized by
     ``.grid``'s pixel tracks. A fragment dropped into an empty page has

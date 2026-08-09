@@ -81,7 +81,12 @@ def _moments() -> tuple[Moment, ...]:
         Moment("pre-beep", at(BEEP_OFFSET_SECONDS / 2), "counter reads 0/M, clock reads 0.00"),
         Moment("first-shot", at(first), "counter goes 1/M, no split yet -- nothing to measure against"),
         Moment("mid-action", at(mid), "counter and split both live, clock ticking"),
-        Moment("last-shot", at(last), "counter reads M/M"),
+        # round()-to-nearest lands this one frame before the last shot's
+        # exact timestamp (4.8382s vs 4.85s) and build_frame_states fires
+        # at-or-after, so the counter reads (M-1)/M here, not M/M -- e.g.
+        # 11/12 for the default SHOTS_MS. The frame is correct and
+        # deterministic; only this description used to overpromise.
+        Moment("last-shot", at(last), "counter reads (M-1)/M -- one frame short of the last shot"),
         Moment("after-last-shot", at(last + 0.75), "clock frozen, split still up"),
         Moment("tail-end", CLIP_FRAMES - 2, "the post-buffer -- what the viewer is left looking at"),
     )

@@ -62,13 +62,16 @@ class OverlayThemeError(RuntimeError):
 
 @dataclass(frozen=True)
 class OverlayTheme:
-    """Palette + font name hints used by ``DefaultTemplate``.
+    """Palette + font name hints for the alpha overlay renderer.
 
-    All colors are 8-bit RGB tuples; alpha is applied at draw time by the
-    template (the last-split label fades, shadows track foreground alpha,
-    etc.). Font names are advisory: today they only matter when the caller
-    also passes ``font_name=None`` so the template can fall back to a
-    sensible default for the theme.
+    All colors are 8-bit RGB tuples. The pre-port PIL template applied
+    alpha at draw time (the last-split label faded in and out, shadows
+    tracked foreground alpha); the ported renderer draws through CSS
+    instead and the last-split label is present-or-absent per run rather
+    than fading (see ``overlay_single.run_groups``). ``font_display`` /
+    ``font_mono`` are advisory design-system metadata carried through
+    from the JSON build -- ``overlay_html`` currently names its bundled
+    faces directly rather than reading these fields.
     """
 
     name: ThemeName

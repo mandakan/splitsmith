@@ -446,6 +446,14 @@ host does 21.3 ms and ~300 ms per sprite where a 1x1 cell carrying two
 short strings costs 124 ms. Neither number includes encode, which is
 unchanged.
 
+Task 7 measured the number that matters to a caller: `render_overlay`
+end to end, same 20s/30-shot/1920x1080 stage, ProRes 4444, including
+ffprobe, drawing, and the ffmpeg encode neither figure above covers:
+**32.94 s**. The drawing measurement above only covers the sprite
+rasterization; the difference is almost entirely the ProRes 4444 encode
+of a 600-frame 1080p alpha sequence, which the drawing-only comparison
+never timed on either renderer.
+
 Re-measure at 4K before quoting these anywhere else -- a sprite's cost
 scales with canvas area and PIL's does too, but not necessarily at the
 same rate.
