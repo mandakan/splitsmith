@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from splitsmith.overlay_theme import load_theme
@@ -113,11 +115,42 @@ def test_match_card_survives_an_empty_roster(theme) -> None:
     assert "Tallmilan 2026" in html
 
 
+def _rule_body(html: str, selector: str) -> str:
+    """The declaration block for one CSS selector, read back out of the
+    document's own ``<style>`` tag rather than assumed from the
+    stylesheet source -- so a test using this actually inspects what a
+    browser would receive."""
+    match = re.search(re.escape(selector) + r"\s*\{(.*?)\}", html, re.DOTALL)
+    assert match is not None, f"no {selector!r} rule found in the stylesheet"
+    return match.group(1)
+
+
 def test_every_text_box_hides_overflow(theme) -> None:
     """The categorical fix overlay_html.py exists for: nothing a
-    descendant does can paint outside its own box."""
+    descendant does can paint outside its own box.
+
+    Checks the specific selectors that must carry ``overflow: hidden``
+    rather than a raw count across the whole stylesheet -- the
+    stylesheet emits a fixed number of ``overflow: hidden`` occurrences
+    regardless of content, so a bare count would stay unchanged (and the
+    test would stay green) if the rule were dropped from one selector
+    while a coincidentally-equal number stayed elsewhere.
+    """
     html = stage_card_html(_stage_card(), theme=theme)
-    assert html.count("overflow: hidden") >= 2
+    for selector in (
+        ".card",
+        ".top",
+        ".brand",
+        ".kick",
+        ".body",
+        ".display",
+        ".figs",
+        ".fig",
+        ".col",
+        ".roster",
+        ".rrow",
+    ):
+        assert "overflow: hidden" in _rule_body(html, selector), selector
 
 
 def test_bundled_font_faces_are_declared(theme) -> None:
@@ -125,3 +158,29 @@ def test_bundled_font_faces_are_declared(theme) -> None:
     assert "@font-face" in html
     assert "Antonio" in html
     assert "JetBrains Mono" in html
+    # An unquoted file:// @font-face src breaks silently on any path
+    # containing a space -- Chromium falls back to a host font with no
+    # error, no warning, exactly the failure mode overlay_html.py's own
+    # docstring exists to warn about. Both bundled faces must be quoted.
+    assert html.count('url("') == 2
+
+
+def test_a_field_containing_the_literal_mark_placeholder_renders_as_text(theme) -> None:
+    """The old implementation built the brand mark by interpolating a
+    ``{MARK}`` sentinel into the body and replacing it in a second pass
+    over already-escaped user text. ``html.escape`` does not touch ``{``
+    or ``}``, so a match/roster name containing the literal substring
+    ``{MARK}`` collided with the sentinel and had its own text silently
+    swapped for the brand SVG. The mark is now built inline before any
+    user text joins the string, so this must render as plain (escaped)
+    text and the card must still carry exactly one brand mark."""
+    card = MatchCard(
+        match_name="{MARK} Cup",
+        match_date=None,
+        stage_count=1,
+        roster=[RosterEntry(name="{MARK}", division="Open")],
+    )
+    html = match_card_html(card, theme=theme)
+    assert "{MARK} Cup" in html
+    assert "{MARK}</div>" in html
+    assert html.count("<svg") == 1

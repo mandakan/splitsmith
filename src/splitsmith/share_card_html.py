@@ -89,17 +89,35 @@ def _style(theme: OverlayTheme) -> str:
 </style>"""
 
 
-def _document(theme: OverlayTheme, body: str) -> str:
+def _brand_row(theme: OverlayTheme) -> str:
+    """The mark + wordmark, built once at construction time so the mark
+    never has to be spliced into an already-built document.
+
+    ``_document`` used to carry a ``{MARK}`` placeholder through
+    already-escaped user text and replace it in a second pass. That is
+    the wrong shape: ``html.escape`` does not touch ``{`` or ``}``, so a
+    user field containing the literal substring ``{MARK}`` collided with
+    the placeholder and had its own text silently swapped for the brand
+    SVG. Building the mark inline, before any user text joins the
+    string, removes the second pass -- and the collision -- entirely.
+    """
     mark = _BRAND_MARK.format(
         surface=_rgb(theme.surface),
         rule=_rgb(theme.rule),
         ink=_rgb(theme.ink),
         accent=_rgb(theme.accent),
     )
+    return f'<div class="brand">{mark}<div class="wordmark">Splitsmith</div></div>'
+
+
+def _document(theme: OverlayTheme, body: str) -> str:
+    """Wrap an already-finished body in the document shell. Performs no
+    substitution of its own -- ``body`` is final by the time it gets
+    here; see :func:`_brand_row`."""
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
         f"{_style(theme)}</head><body>"
-        f'<div class="card">{body.replace("{MARK}", mark)}</div>'
+        f'<div class="card">{body}</div>'
         "</body></html>"
     )
 
@@ -124,8 +142,7 @@ def match_card_html(card: MatchCard, *, theme: OverlayTheme) -> str:
     )
     label = f"{len(card.roster)} shooters" if len(card.roster) != 1 else "Shooter"
     body = (
-        '<div class="top"><div class="brand">{MARK}'
-        '<div class="wordmark">Splitsmith</div></div>'
+        f'<div class="top">{_brand_row(theme)}'
         f'<div class="kick">{" &middot; ".join(meta)}</div></div>'
         '<div class="body">'
         f'<div class="col"><div class="display" style="font-size:96px">'
@@ -156,8 +173,7 @@ def stage_card_html(card: StageCard, *, theme: OverlayTheme) -> str:
         meta.append(f"{card.stage_time:.2f}s")
 
     body = (
-        '<div class="top"><div class="brand">{MARK}'
-        '<div class="wordmark">Splitsmith</div></div>'
+        f'<div class="top">{_brand_row(theme)}'
         f'<div class="kick">{" &middot; ".join(escape(m) for m in meta)}</div></div>'
         f'<div class="body"><div class="figs">{"".join(figs)}</div>'
         '<div class="vrule"></div>'
