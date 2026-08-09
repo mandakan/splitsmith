@@ -100,6 +100,25 @@ def test_all_intervals_are_transitions_yields_draw_but_no_average() -> None:
     assert figs.split_count == 0
 
 
+def test_threshold_fallback_excludes_the_draw_even_when_it_is_a_fast_draw() -> None:
+    """The fallback guard excludes index 1 by position, not by duration. A
+    draw at or under transition_min must still be kept out of the split
+    average -- if the guard were dropped, avg_split would move from 0.20
+    (three splits only) to 0.375 (draw folded in), which is the sharp
+    signal this assertion is checking for."""
+    intervals = (
+        Interval(index=1, seconds=0.90, interval_class=None),
+        Interval(index=2, seconds=0.20, interval_class=None),
+        Interval(index=3, seconds=0.20, interval_class=None),
+        Interval(index=4, seconds=0.20, interval_class=None),
+    )
+    figs = stage_figures(intervals, transition_min=1.0)
+    assert figs.source == "threshold"
+    assert figs.draw == pytest.approx(0.90)
+    assert figs.split_count == 3
+    assert figs.avg_split == pytest.approx(0.20)
+
+
 def test_no_intervals_yields_empty_source_and_no_figures() -> None:
     figs = stage_figures((), transition_min=1.0)
     assert figs.source == "empty"
