@@ -30,7 +30,7 @@ from splitsmith.match_model import (
     plan_merge,
     slugify_filename,
 )
-from splitsmith.ui.project import MatchProject, StageEntry
+from splitsmith.match_project import MatchProject, StageEntry
 
 # ---------------------------------------------------------------------------
 # Helpers

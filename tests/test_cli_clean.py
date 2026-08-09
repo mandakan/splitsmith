@@ -7,7 +7,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from splitsmith.cli import app
-from splitsmith.ui.project import MatchProject
+from splitsmith.match_project import MatchProject
 
 
 def _seed_project(tmp_path: Path) -> Path:

@@ -16,8 +16,8 @@ from unittest.mock import patch
 import pytest
 
 from splitsmith import beep_detect
+from splitsmith.match_project import StageVideo
 from splitsmith.ui import audio as audio_helpers
-from splitsmith.ui.project import StageVideo
 
 FIXTURES = Path(__file__).parent / "fixtures"
 BEEP_TRUE_S = 4.877  # ground truth from beep-test.json

@@ -38,8 +38,8 @@ from typing import Any
 from .. import automation as automation_module
 from .. import beep_detect
 from .. import ensemble as ensemble_module
+from ..match_project import STUB_AUDIT_DETECTION, MatchProject
 from ..ui import audio as audio_helpers
-from ..ui.project import STUB_AUDIT_DETECTION, MatchProject
 from .sandbox import resolve_project_root
 from .write_tools import _resolve_stage_video
 

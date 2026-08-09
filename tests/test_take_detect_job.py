@@ -14,9 +14,9 @@ from typing import Any
 import pytest
 
 from splitsmith.config import BeepWindowConfig
+from splitsmith.match_project import MatchProject, RawVideo, StageEntry, StageVideo
 from splitsmith.ui import audio as audio_helpers
 from splitsmith.ui.jobs import JobBodyRegistry
-from splitsmith.ui.project import MatchProject, RawVideo, StageEntry, StageVideo
 from splitsmith.ui.server import create_app, current_match_root
 
 from .conftest import scaffold_match

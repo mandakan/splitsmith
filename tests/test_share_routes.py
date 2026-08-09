@@ -189,7 +189,7 @@ def _seed_state_docs(db_url: str, user_email: str, match_id: str, slug: str) -> 
     """Insert the match + per-shooter project state docs the read handlers
     load, as the user identified by ``user_email`` (call after login)."""
     from splitsmith import match_model
-    from splitsmith.ui.project import MatchProject
+    from splitsmith.match_project import MatchProject
 
     engine = create_engine(db_url)
     sf = sessionmaker(engine)
@@ -258,7 +258,7 @@ def _seed_state_docs_with_scan_dir(
 ) -> None:
     """Seed match + project state docs with last_scanned_dir set on the project."""
     from splitsmith import match_model
-    from splitsmith.ui.project import MatchProject
+    from splitsmith.match_project import MatchProject
 
     engine = create_engine(db_url)
     sf = sessionmaker(engine)

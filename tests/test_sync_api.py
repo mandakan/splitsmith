@@ -15,7 +15,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from splitsmith import match_model
-from splitsmith.ui.project import MatchProject
+from splitsmith.match_project import MatchProject
 from tests.hosted_helpers import _CapturingSender, login, seed_match
 
 CREATE_URL = "/api/sync/matches"

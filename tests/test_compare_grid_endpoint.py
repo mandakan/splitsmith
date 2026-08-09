@@ -30,8 +30,8 @@ from splitsmith.compare import project_loader as pl_mod
 from splitsmith.export_naming import stage_file_base
 from splitsmith.fcpxml_gen import VideoMetadata
 from splitsmith.match_model import Match, MatchStageDefinition, Shooter
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.ui import server as server_mod
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 from tests.test_ui_server import _match_create_app, _MatchClient
 
 

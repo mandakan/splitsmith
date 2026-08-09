@@ -43,10 +43,10 @@ moto = pytest.importorskip("moto")
 from fastapi.testclient import TestClient  # noqa: E402
 
 from splitsmith import match_model  # noqa: E402
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo  # noqa: E402
 from splitsmith.storage import S3Storage  # noqa: E402
 from splitsmith.sync.client import HostedSyncClient  # noqa: E402
 from splitsmith.sync.push import run_push  # noqa: E402
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo  # noqa: E402
 
 from .hosted_helpers import _CapturingSender, login, moto_s3_storage  # noqa: E402
 

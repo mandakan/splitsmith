@@ -6,7 +6,7 @@ machine that wrote them - pushing them verbatim would let a hosted mirror
 point at paths that don't exist on the server. :func:`sanitize_project_doc`
 strips them before the doc is upserted.
 
-Separately, an individual :class:`~splitsmith.ui.project.StageVideo` can
+Separately, an individual :class:`~splitsmith.match_project.StageVideo` can
 carry an absolute ``path`` (the user pointed the ingest screen at a raw
 file outside the project tree). That's not sanitizable the way the
 project-level dir overrides are: hosted streaming's presign branch
@@ -21,7 +21,7 @@ hosted side can't stream.
 
 from __future__ import annotations
 
-from ..ui.project import MatchProject
+from ..match_project import MatchProject
 
 #: Project-level fields that are filesystem-absolute (or absolute-capable)
 #: path overrides, meaningless once pushed to a hosted mirror.

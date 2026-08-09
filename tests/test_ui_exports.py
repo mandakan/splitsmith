@@ -487,7 +487,7 @@ def test_export_stage_skips_secondary_when_source_unreachable(
 
 def test_export_overview_status(tmp_path: Path) -> None:
     """The MatchProject.export_overview reports per-stage status correctly."""
-    from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
+    from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 
     root = tmp_path / "m"
     project = MatchProject.init(root, name="m")
@@ -544,7 +544,7 @@ def test_export_overview_surfaces_secondaries(tmp_path: Path) -> None:
     """Every secondary on the stage shows up in ``StageExportStatus.secondaries``,
     flagged with beep / source / trim state so the SPA can render the multi-cam
     panel without having to cross-reference the project + filesystem itself."""
-    from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
+    from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 
     root = tmp_path / "m"
     project = MatchProject.init(root, name="m")
@@ -664,7 +664,7 @@ def test_export_overview_ready_to_trim_branches(tmp_path: Path) -> None:
     separately so the SPA can badge "source missing" on an otherwise
     exportable row rather than hiding it.
     """
-    from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
+    from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 
     def _stage(n: int, **kw: object) -> StageEntry:
         stage = StageEntry(

@@ -13,9 +13,9 @@ from unittest.mock import patch
 import pytest
 
 from splitsmith.automation import AutomationOverride
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.mcp import tools
 from splitsmith.mcp.sandbox import ALLOWED_ROOT_ENV
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 from splitsmith.video_probe import ProbeResult
 
 

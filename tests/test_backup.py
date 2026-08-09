@@ -17,7 +17,7 @@ from splitsmith.backup import (
     export_project,
     import_project,
 )
-from splitsmith.ui.project import PROJECT_FILE, MatchProject
+from splitsmith.match_project import PROJECT_FILE, MatchProject
 from splitsmith.ui.server import create_app
 
 

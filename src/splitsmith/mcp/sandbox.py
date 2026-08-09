@@ -63,7 +63,7 @@ def resolve_project_root(value: str | Path) -> Path:
     Layered on top of :func:`resolve_within_sandbox`: the sandbox check
     runs first, then we confirm the directory is actually a splitsmith
     project root. Tools should call this rather than instantiating
-    :class:`~splitsmith.ui.project.MatchProject` directly so the
+    :class:`~splitsmith.match_project.MatchProject` directly so the
     error messages stay consistent across the surface.
     """
     resolved = resolve_within_sandbox(value, label="project_root")

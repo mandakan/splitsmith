@@ -28,7 +28,7 @@ from typing import Any
 
 from .. import automation as automation_module
 from .. import video_probe
-from ..ui.project import MatchProject, StageEntry, StageVideo
+from ..match_project import MatchProject, StageEntry, StageVideo
 from .sandbox import resolve_project_root, resolve_within_sandbox
 
 # Video extensions the discovery tool surfaces. Mirrors the legacy

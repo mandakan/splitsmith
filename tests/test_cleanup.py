@@ -15,7 +15,7 @@ from splitsmith.cleanup import (
     apply_cleanup,
     plan_cleanup,
 )
-from splitsmith.ui.project import MatchProject
+from splitsmith.match_project import MatchProject
 
 
 def _project(tmp_path: Path) -> tuple[MatchProject, Path]:

@@ -8,8 +8,8 @@ from unittest.mock import patch
 import pytest
 
 from splitsmith.config import BeepCandidate
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.mcp import write_tools
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 
 
 def _build_project(

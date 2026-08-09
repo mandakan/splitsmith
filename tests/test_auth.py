@@ -38,7 +38,7 @@ def test_api_me_returns_loopback_user(tmp_path: Path) -> None:
     # Scaffold a Match folder so the bind path is happy (Tier 1
     # step 3 of doc 10 retired legacy single-shooter scaffolding).
     from splitsmith import match_model
-    from splitsmith.ui.project import MatchProject
+    from splitsmith.match_project import MatchProject
 
     root = tmp_path / "match"
     match = match_model.Match.init(root, name="Auth Test Match")

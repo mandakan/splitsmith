@@ -127,6 +127,10 @@ Tuning notes:
 - `audit_shots_to_engine_shots`: audit `shots[]` → `Shot` records. Audit times are clip-local; the engine wants source-absolute, so `time_absolute = beep_time_in_source + time_from_beep`. Shot 1's split is the draw; shot N>1 is the difference between successive `time_from_beep` values, matching `csv_gen.write_splits_csv`.
 - **Why a core module and not part of `ui/exports.py`, where both used to live:** two consumers on opposite sides of the codebase need them — the export pipeline and `compare/overlay_data.py`. The compare side reaching into the web-UI layer closed an import cycle through `overlay_render` (issue #760). Nothing here knows about HTTP; it imports only `config`.
 
+**`match_project.py`** — The on-disk match-project model (`MatchProject`, `StageEntry`, `StageVideo`, `StageStatus`) plus its schema migrations and atomic JSON writes.
+- Top-level, not under `ui/`, despite having started there: it imports nothing from `ui` and thirteen of its twenty-three importers sit outside it (`cli`, `backup`, `cleanup`, `relink`, `camera_select`, `match_model`, `match_trims`, all of `mcp/`, all of `sync/`, three of `compare/`).
+- Nothing under `compare/` imports the web-UI layer, pinned by `test_compare_does_not_reach_into_the_web_ui_layer`.
+
 **`export_naming.py`** — The names export artefacts get on disk.
 - `stage_file_base(stage_number, stage_name)` → `stage<N>_<slug>`, the shared stem every per-stage artefact appends to (`_trimmed.mp4`, `_cam_<video_id>_trimmed.mp4`, `.csv`, `.fcpxml`).
 - One writer produces these names and six readers look for them (CLI, `ui.exports`, `ui.project`, `ui.server`, MCP export tools, `compare.project_loader`). They all call this rather than interpolating, so they cannot drift.

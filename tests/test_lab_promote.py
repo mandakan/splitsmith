@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient
 
 from splitsmith.lab import core as lab_core
 from splitsmith.lab.core import PromoteRequest, promote_stage_to_fixture
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.ui.server import create_app
 
 

@@ -11,7 +11,7 @@ from pydantic import ValidationError
 
 from splitsmith import camera_select, match_trims
 from splitsmith.match_model import Match
-from splitsmith.ui.project import MatchProject
+from splitsmith.match_project import MatchProject
 from tests.conftest import _video
 
 # ``two_shooter_match`` lives in tests/conftest.py so ``test_match_trims_cli.py``

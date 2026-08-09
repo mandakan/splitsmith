@@ -10,7 +10,7 @@ import pytest
 
 from splitsmith.compare import overlay_data, project_loader
 from splitsmith.config import StageRounds
-from splitsmith.ui.project import MatchProject, StageEntry, StageScorecard
+from splitsmith.match_project import MatchProject, StageEntry, StageScorecard
 
 
 def _write_audit(root: Path, stage_number: int, ms_after_beep: list[int]) -> Path:
@@ -332,7 +332,7 @@ def test_one_bad_audit_does_not_stop_the_other_stages(tmp_path):
     assert [data[("ann", n)].shot_count for n in (1, 2, 3)] == [1, 0, 1]
 
 
-def test_reading_audit_data_does_not_drag_in_the_web_ui_export_layer() -> None:
+def test_compare_does_not_reach_into_the_web_ui_layer() -> None:
     """The root of the import cycle #684 papered over (issue #760).
 
     ``compare/overlay_data`` is a core comparison module. It used to
@@ -343,33 +343,32 @@ def test_reading_audit_data_does_not_drag_in_the_web_ui_export_layer() -> None:
     whole package could not import through, held open only by a
     ``TYPE_CHECKING`` guard in ``overlay_html``.
 
-    Named modules rather than the whole ``splitsmith.ui`` prefix,
-    because two other ``compare -> ui`` edges survive this fix and
-    neither closes a cycle:
+    This bans the whole ``splitsmith.ui`` prefix, which it could not do
+    when it was written. Two other ``compare -> ui`` edges survived
+    #760 and both have since gone:
 
-    - ``overlay_data`` imports ``ui.project`` for ``MatchProject`` /
-      ``StageScorecard`` -- a data model, reaching no overlay module.
-    ``compare.project_loader`` used to reach ``ui.match_exports`` for a
-    private ``_slugify`` as well; that one is gone -- it turned out to
-    be a real bug, not just a smell, and moved to ``export_naming``.
+    - ``compare.project_loader`` reached ``ui.match_exports`` for a
+      private ``_slugify``. That turned out to be a real bug rather than
+      a smell -- two readers had the wrong fallback and looked for files
+      the exporter never wrote -- and it moved to ``export_naming``.
+    - ``overlay_data`` reached ``ui.project`` for ``MatchProject``. That
+      module imported nothing from ``ui`` itself and had thirteen
+      importers outside it, so it moved to a top-level
+      ``match_project``.
 
-    ``ui.project`` deserves its own change rather than a silent
-    widening of this one, so naming it here would make this test about
-    something it does not fix.
+    Nothing under ``compare`` imports the web-UI layer now, so the
+    assertion can be the strong one: not "avoids these four modules" but
+    "does not reach into ``ui`` at all".
 
     A subprocess because this test module imports ``splitsmith.ui.*`` at
     the top: in-process ``sys.modules`` is already populated and the
     assertion could never fail.
     """
-    cycle = {
-        "splitsmith.ui.exports",
-        "splitsmith.overlay_render",
-        "splitsmith.overlay_html",
-    }
     probe = (
         "import sys; import splitsmith.compare.overlay_data; "
-        f"cycle = {sorted(cycle)!r}; "
-        "leaked = sorted(m for m in cycle if m in sys.modules); "
+        "leaked = sorted(m for m in sys.modules if m.startswith('splitsmith.ui')); "
+        "leaked += [m for m in ('splitsmith.overlay_render', 'splitsmith.overlay_html') "
+        "if m in sys.modules]; "
         "assert not leaked, leaked"
     )
     result = subprocess.run(

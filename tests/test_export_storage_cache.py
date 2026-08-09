@@ -18,10 +18,10 @@ from pathlib import Path
 
 import pytest
 
+from splitsmith.match_project import MatchProject
 from splitsmith.storage import FilesystemStorage
 from splitsmith.ui import export_storage
 from splitsmith.ui.exports import StageExportResult
-from splitsmith.ui.project import MatchProject
 
 SCOPE = "matches/m1/shooters/me"
 

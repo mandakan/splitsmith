@@ -49,7 +49,7 @@ from typing import Literal
 
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
 from splitsmith.config import StageRounds
-from splitsmith.ui.project import MatchProject, StageEntry, StageScorecard
+from splitsmith.match_project import MatchProject, StageEntry, StageScorecard
 from tests.synthetic_media import SYNTHETIC_FPS_DEN, SYNTHETIC_FPS_NUM
 
 # --- clip lengths: declared == what the media actually is ---------------

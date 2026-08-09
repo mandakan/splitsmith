@@ -8,13 +8,13 @@ from pathlib import Path
 
 import pytest
 
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.relink import (
     apply_relink,
     index_search_root,
     inspect_links,
     plan_relink,
 )
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 
 
 def _project_with_videos(root: Path, names: list[str]) -> MatchProject:

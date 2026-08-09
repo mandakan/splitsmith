@@ -29,9 +29,9 @@ from .. import templates as templates_module
 from ..config import Config
 from ..config import StageData as EngineStageData
 from ..export_naming import stage_file_base
+from ..match_project import MatchProject, StageEntry
 from ..ui import exports as export_helpers
 from ..ui import match_exports as match_export_helpers
-from ..ui.project import MatchProject, StageEntry
 from .sandbox import resolve_project_root
 
 # ``StageData`` requires a non-None ``scorecard_updated_at`` but

@@ -33,7 +33,7 @@ from pathlib import Path
 
 from .. import beep_detect
 from ..config import BeepDetectConfig, BeepDetection
-from .project import MatchProject, StageVideo
+from ..match_project import MatchProject, StageVideo
 
 logger = logging.getLogger(__name__)
 

@@ -19,7 +19,7 @@ from splitsmith.compare.emitter import emit_compare_fcpxml
 from splitsmith.compare.manifest import CompareManifest, CompareShooter
 from splitsmith.compare.project_loader import CompareShooterBundle, CompareStageBundle
 from splitsmith.config import OutputConfig
-from splitsmith.ui.project import MatchProject
+from splitsmith.match_project import MatchProject
 from tests._dtd import fcpxml_dtd, fcpxml_dtd_path, validate_against_dtd
 
 

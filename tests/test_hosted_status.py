@@ -21,7 +21,7 @@ from sqlalchemy import select as _select
 
 from splitsmith import match_model
 from splitsmith.db import ProjectStateStore, User, create_engine, sessionmaker
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 
 # ``hosted_app`` / ``hosted_env`` are auto-discovered via conftest.py; only
 # the helpers need importing (same convention as test_share_routes.py).

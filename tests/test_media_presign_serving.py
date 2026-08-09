@@ -107,7 +107,7 @@ def _seed_match_and_project(db_url: str, email: str, match_id: str, slug: str) -
     correctly.
     """
     from splitsmith import match_model
-    from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
+    from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 
     engine = create_engine(db_url)
     sf = sessionmaker(engine)
@@ -368,7 +368,7 @@ def test_peaks_trimmed_path_does_not_mirror_source(
     a call argument, downloading hundreds of MB from R2 before returning a
     tiny peaks payload. The trimmed path only needs the small trim + WAV.
     """
-    from splitsmith.ui.project import MatchProject
+    from splitsmith.match_project import MatchProject
 
     client, storage = s3_stream_client
     # Seed the trim + audit WAV, but NOT the source object. If the code

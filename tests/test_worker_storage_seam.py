@@ -27,9 +27,9 @@ import pytest
 
 from splitsmith.db import Base, ProjectStateStore, User, create_engine, sessionmaker
 from splitsmith.match_model import Match
+from splitsmith.match_project import PROJECT_FILE, MatchProject, StageEntry, StageVideo
 from splitsmith.storage import FilesystemStorage
 from splitsmith.ui import audio as audio_helpers
-from splitsmith.ui.project import PROJECT_FILE, MatchProject, StageEntry, StageVideo
 from splitsmith.ui.server import AppState, current_match_id, current_match_root
 
 

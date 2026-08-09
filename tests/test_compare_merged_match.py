@@ -24,7 +24,7 @@ from splitsmith.compare.project_loader import (
 from splitsmith.config import StageRounds
 from splitsmith.export_naming import stage_file_base
 from splitsmith.match_model import execute_merge, plan_merge
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 
 
 def _stub_probe(_path: Path) -> object:

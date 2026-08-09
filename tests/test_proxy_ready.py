@@ -59,7 +59,7 @@ def _seed_session(db_url: str, email: str = EMAIL) -> str:
 def _seed_match_and_project(db_url: str, email: str, match_id: str, slug: str) -> None:
     """Insert a MatchRow and a project doc with raw/clip.mp4 in unassigned_videos."""
     from splitsmith import match_model
-    from splitsmith.ui.project import MatchProject, StageVideo
+    from splitsmith.match_project import MatchProject, StageVideo
 
     engine = create_engine(db_url)
     sf = sessionmaker(engine)

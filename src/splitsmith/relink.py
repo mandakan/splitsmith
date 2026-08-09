@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from .ui.project import VIDEO_EXTENSIONS, MatchProject
+from .match_project import VIDEO_EXTENSIONS, MatchProject
 
 LinkStatus = Literal["ok", "broken", "missing_link", "not_a_symlink"]
 
