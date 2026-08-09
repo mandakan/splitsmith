@@ -19,7 +19,7 @@ Spec: `docs/superpowers/specs/2026-08-09-share-og-images-design.md`.
 - Pydantic models for all data crossing module boundaries. No dicts of unknown shape.
 - Detection and derivation logic stays out of `cli.py` and out of route handlers.
 - Card dimensions are exactly 1200 x 630.
-- `SplitColorThresholds.transition_min` default is `1.0` (`src/splitsmith/config.py:357`). It hangs off `OutputConfig` as `split_color_thresholds` (`config.py:361`), so the configured value is `OutputConfig().split_color_thresholds.transition_min`. The fallback path reads it from config; never hardcode it.
+- The unclassified fallback cutoff is `coach.SPLIT_STAT_SPLIT_MAX` (0.5 s, from `CoachAutoClassifyConfig().split_max_s`), and `statistic_splits`'s keyword is `split_max=`. #776 moved it there from `SplitColorThresholds.transition_min` (1.0 s) so the fallback predicts what classification will show. **`transition_min` is no longer the split cutoff** -- it still governs FCPXML marker colouring only. Never hardcode either value.
 - `CoachIntervalClass` values are exactly: `first_shot`, `split`, `transition`, `movement`, `reload`, `activation`.
 - **The split rule is owned by `splitsmith.coach.statistic_splits`** (landed on
   main in #774, closing #772), mirrored in TS as `statisticSplits`. Nothing in

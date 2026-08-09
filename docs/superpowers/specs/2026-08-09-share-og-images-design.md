@@ -66,8 +66,9 @@ first_shot | split | transition | movement | reload | activation
 A stage can be detected and audited without ever being coached, in which
 case no interval carries a class. The fallback is the rule
 `fcpxml_gen.split_color_band` already encodes: index 1 is the draw, and
-any interval above `SplitColorThresholds.transition_min`
-(`config.py:357`, default 1.0 s) is not a split.
+any interval above the auto-classifier's `split_max_s`
+(`CoachAutoClassifyConfig`, 0.5 s) is not a split. That cutoff is
+`coach.SPLIT_STAT_SPLIT_MAX`.
 
 This document originally specified all-or-nothing per stage -- the coach
 path only when every interval carries a class -- on the grounds that
@@ -81,9 +82,16 @@ filed as #775 with a worked example.
 No new threshold is introduced. The card model records which path
 produced its figures, so the fallback is testable and later auditable.
 
-Tuning `transition_min` for this role is issue #773 -- it was chosen for
-FCPXML marker colouring, and this design gives it more weight than it was
-picked for.
+Issue #773 asked whether the fallback cutoff was right for this role.
+It has since been answered by #776, measured against the corpus rather
+than argued: the gap distribution has no valley between splits and
+transitions, so no single threshold reproduces the true partition
+(error floor ~12%). Given that, the fallback's job is to predict what
+classification will show -- and only the auto-classifier's own
+`split_max_s` does that exactly. The old 1.0 s `transition_min` left
+35% of corpus intervals disagreeing with classification, so a figure
+visibly jumped the moment a stage was coached. FCPXML marker colouring
+still uses `transition_min`; only the split statistic moved.
 
 ### Zero-shot stages
 
@@ -312,4 +320,7 @@ passes against the bug it claims to cover is not coverage.
 
 - #772 -- draw and non-anomaly average on the video summary and results
   page, and the shared definition.
-- #773 -- tune `transition_min` against the corpus.
+- #773 -- closed by #776: the fallback now cuts at the auto-classifier's
+  `split_max_s` (0.5 s), so it predicts classification instead of
+  disagreeing with it.
+- #775 -- open: what a partially classified stage should report.
