@@ -6047,23 +6047,19 @@ def create_app(
         if store is None:
             raise HTTPException(status_code=500, detail="share store unavailable")
         s = await store.create(mid)
-        # Best-effort: warm the match card cache so the link the owner
-        # immediately pastes previews without a cold Chromium render on
-        # first fetch. A browser-less host, a storage hiccup, or a slow
-        # render must never cost the owner their share link -- the PNG
-        # route renders on first fetch anyway, so a failed warm costs
-        # nothing but a cold first preview. Run on a worker thread, not
-        # awaited inline: ``warm_match_card`` launches Chromium through
-        # Playwright's *sync* API, which refuses to run on the event-loop
-        # thread this async route executes on. ``asyncio.to_thread``
-        # copies the current context, so ``current_tenant`` /
-        # ``current_match_root`` / ``current_match_id`` -- all read deep
-        # inside ``warm_match_card`` -- resolve the same in the thread as
-        # they do here.
+        # Best-effort, timeout-bounded: warm the match card cache so the
+        # link the owner immediately pastes previews without a cold
+        # Chromium render on first fetch. All of the "never cost the
+        # owner their share link" handling -- the worker-thread hop
+        # (Playwright's sync API can't run on this coroutine's
+        # event-loop thread), the wall-time bound, and swallowing any
+        # failure -- lives in ``warm_match_card_bounded`` itself; see its
+        # docstring for what the bound does and does not guarantee. This
+        # try/except is defense in depth, not the primary guard.
         try:
-            from .share_og import warm_match_card
+            from .share_og import warm_match_card_bounded
 
-            await asyncio.to_thread(warm_match_card, state, s.token)
+            await warm_match_card_bounded(state, s.token)
         except Exception:
             logger.warning("failed to warm match card for share %s", s.id, exc_info=True)
         return ShareInfo(

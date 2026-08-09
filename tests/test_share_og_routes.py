@@ -374,3 +374,40 @@ def test_share_creation_still_succeeds_when_rendering_fails(
 
     assert client.post(f"/api/matches/{MID}/match/shares").status_code == 201
     assert calls, "cached_card_png was never called -- the monkeypatch was not exercised"
+
+
+def test_share_creation_returns_promptly_when_warming_is_slow(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``warm_match_card_bounded``'s timeout unblocks the response -- it
+    does not, and cannot, cancel the in-flight warm (see that function's
+    docstring). A slow or stuck render must not make the owner wait for
+    it: this pins the response time, not just the eventual status code.
+    """
+    import time
+
+    import splitsmith.ui.share_og as share_og
+
+    monkeypatch.setattr(share_og, "_WARM_TIMEOUT_S", 0.1)
+
+    def _slow(*args: object, **kwargs: object) -> None:
+        time.sleep(2.0)
+
+    monkeypatch.setattr(share_og, "warm_match_card", _slow)
+
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    seed_match(hosted_env, "owner@example.com", MID)
+    _seed_state_docs(hosted_env, "owner@example.com", MID, SLUG)
+
+    start = time.monotonic()
+    resp = client.post(f"/api/matches/{MID}/match/shares")
+    elapsed = time.monotonic() - start
+
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["url"], "share creation must still hand back a working share URL"
+    assert "/share/" in body["url"]
+    assert elapsed < 1.0, f"response should not wait out the slow warm: took {elapsed:.2f}s"

@@ -205,9 +205,9 @@ def warm_match_card(state: Any, token: str) -> None:
     Callers must treat this as best-effort: it does real rendering work
     (Chromium, object storage) and any of it can fail on a browser-less
     host or a storage hiccup. This function does not itself guard
-    against that -- the caller (``_create_match_share``) wraps the call
-    in ``try/except Exception`` so a failed warm never costs the owner
-    their share link; the PNG route renders on first fetch anyway.
+    against that, nor does it bound how long it can run -- see
+    :func:`warm_match_card_bounded`, which every route should call
+    instead of this function directly.
     """
     cached_card_png(
         build_match_card(state),
@@ -216,6 +216,67 @@ def warm_match_card(state: Any, token: str) -> None:
         theme=load_theme("splitsmith"),
         rasterizer_factory=_chromium_factory,
     )
+
+
+#: Bounds how long ``POST /api/match/shares`` waits on ``warm_match_card``
+#: before giving up and returning the share link anyway. Chosen
+#: deliberately short: this warm's entire benefit is that the owner's
+#: *first* paste already previews -- a real warm (moto-backed S3, a real
+#: Chromium launch, measured locally) takes ~0.6s, so 3s gives a normal
+#: warm generous headroom while still keeping the owner off a
+#: multi-ten-second spinner if the host is degraded. Past that point the
+#: benefit of waiting longer is already gone -- a human staring at
+#: "creating link..." has lost patience well before Playwright's own
+#: internal launch/navigation timeouts (tens of seconds) would fire --
+#: and the PNG route renders on first fetch regardless, so giving up
+#: costs nothing but one cold preview.
+_WARM_TIMEOUT_S = 3.0
+
+
+async def warm_match_card_bounded(state: Any, token: str) -> None:
+    """Best-effort, timeout-bounded wrapper around :func:`warm_match_card`.
+
+    Runs the synchronous, Chromium-launching warm on a worker thread via
+    ``asyncio.to_thread`` -- required because ``ChromiumRasterizer`` uses
+    Playwright's *sync* API, which refuses to run on an event-loop
+    thread (the thread this coroutine's caller runs on).
+    ``asyncio.to_thread`` copies the calling context, so
+    ``current_tenant`` / ``current_match_root`` / ``current_match_id``
+    (read deep inside ``warm_match_card`` via ``state``) resolve the
+    same in the worker thread as they do at the call site.
+
+    Bounded by ``_WARM_TIMEOUT_S`` via ``asyncio.wait`` -- the same shape
+    ``_fetch_og_meta`` uses below, for the same reason:
+    ``asyncio.wait_for`` cancels and then *awaits* the cancelled task's
+    actual completion, which for a blocking call already running in a
+    worker thread means waiting out the full call anyway.
+    ``asyncio.wait(..., timeout=)`` instead returns control the moment
+    the deadline passes and leaves the warm task to finish (or fail) on
+    its own time, unread. **This is not cancellation** -- Chromium
+    keeps launching, or the render keeps running, in its thread until it
+    naturally completes; the timeout only stops this function from
+    waiting on it, so it cannot make an in-flight warm take less wall
+    time or CPU, only keep a slow one from holding the caller's response
+    hostage.
+
+    Every failure -- a timeout, or any exception ``warm_match_card``
+    raises -- is caught and logged here at ``warning``, never re-raised:
+    a failed or slow warm must never cost the caller anything already
+    committed to (e.g. a share link about to be returned).
+    """
+    task: asyncio.Task[None] = asyncio.ensure_future(asyncio.to_thread(warm_match_card, state, token))
+    done, _pending = await asyncio.wait({task}, timeout=_WARM_TIMEOUT_S)
+    if task not in done:
+        logger.warning(
+            "match card warm timed out after %.1fs for share token=%s "
+            "(still running in the background; response not held for it)",
+            _WARM_TIMEOUT_S,
+            token,
+        )
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("failed to warm match card for share token=%s", token, exc_info=exc)
 
 
 def _png_response(state: Any, token: str, card: MatchCard | StageCard, slug: str | None) -> Response:
