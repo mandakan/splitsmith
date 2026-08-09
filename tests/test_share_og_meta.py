@@ -6,7 +6,10 @@ from __future__ import annotations
 import asyncio
 import html as html_lib
 import re
+from collections.abc import Iterator
+from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select as _select
 
@@ -15,6 +18,50 @@ from tests.hosted_helpers import login, seed_match
 
 MID = "test-match-meta01"
 SLUG = "anna"
+
+#: The whole SPA bundle these tests need. ``_shell`` reads
+#: ``STATIC_DIR/index.html`` and splices the tags in before ``</head>``, so
+#: the two things it and the assertions below actually require are a
+#: ``</head>`` to splice at and the ``<div id="root">`` that proves the app
+#: shell survived injection. A real Vite build supplies both plus a hashed
+#: script tag nothing here reads.
+_MINIMAL_INDEX_HTML = """<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Splitsmith</title>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
+"""
+
+
+@pytest.fixture(autouse=True)
+def spa_index(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Path]:
+    """Point the share shells at a hand-written ``index.html``.
+
+    Without this every shell test in this file needs ``pnpm build`` to have
+    run first: ``share_og._shell`` 503s when ``STATIC_DIR/index.html`` is
+    missing, ``src/splitsmith/ui_static/dist/`` is gitignored, and the CI
+    ``test`` job installs no Node at all -- so the file was green only on a
+    dev box with a stale build lying around, and would have failed on a
+    clean checkout. Nothing here is testing Vite; the premise is that meta
+    tags reach the *served* HTML, which a two-line document proves just as
+    well as a real bundle.
+
+    ``_shell`` does ``from .server import STATIC_DIR`` at call time, so
+    patching the attribute on the server module (not rebinding a local) is
+    what the handler actually reads.
+    """
+    from splitsmith.ui import server as server_module
+
+    dist = tmp_path / "spa-dist"
+    dist.mkdir()
+    (dist / "index.html").write_text(_MINIMAL_INDEX_HTML, encoding="utf-8")
+    monkeypatch.setattr(server_module, "STATIC_DIR", dist)
+    yield dist
 
 
 def _meta(html: str, prop: str) -> str | None:
