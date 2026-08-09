@@ -42,7 +42,9 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
+from .. import coach as coach_module
 from ..audit_data import audit_shots_to_engine_shots
+from ..config import CoachAutoClassifyConfig
 from ..overlay_theme import load_theme
 from ..share_card import MatchCard, RosterEntry, StageCard, card_hash, stage_figures
 from ..share_card_render import cached_card_png
@@ -107,6 +109,35 @@ def build_stage_card(state: Any, slug: str, stage_number: int) -> StageCard | No
     payload, _version = state.load_audit(slug, stage_number)
     if not payload:
         return None
+    # #775 / #779: a stage audited before #775 landed can still have shots
+    # with ms_after_beep but no interval_class -- the audit-save endpoint
+    # only started auto-classifying on that fix, and get_stage_coach
+    # (server.py) only heals a doc *on an owner's read*, persisting the
+    # result. This route is share-only (never reached by an owner read),
+    # so it must reach the same in-memory verdict get_stage_coach would
+    # without writing anything back: RLS does not protect a share
+    # request -- the share alias impersonates the owner's tenant, so an
+    # anonymous caller mutating this doc would be an application-level
+    # bug, not one Postgres would catch (#779). Rather than reproduce
+    # get_stage_coach's owner-persist branch (its version handling and
+    # StateConflictError retry) here, this function is unconditionally
+    # read-only -- a deliberate choice, not an oversight: it makes the
+    # card safe by construction without this module needing to reason
+    # about current_share_request at all. The guard below is copied
+    # verbatim from get_stage_coach's ``needs_backfill`` (server.py) so
+    # the two never define "needs a heal" differently.
+    shots_raw = payload.get("shots")
+    needs_backfill = isinstance(shots_raw, list) and any(
+        isinstance(s, dict)
+        and s.get("ms_after_beep") is not None
+        and s.get(coach_module.FIELD_INTERVAL_CLASS) is None
+        and s.get(coach_module.FIELD_INTERVAL_CLASS_SOURCE) != "manual"
+        for s in shots_raw
+    )
+    if needs_backfill:
+        coach_module.classify_intervals_in_dicts(
+            [s for s in shots_raw if isinstance(s, dict)], CoachAutoClassifyConfig()
+        )
     # #774's canonical converter -- it carries interval_class onto each
     # engine Shot, which is what makes the split rule reachable here. The
     # beep offset only affects ``time_absolute``, which no card reads, so

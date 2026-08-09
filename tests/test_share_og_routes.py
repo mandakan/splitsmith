@@ -174,6 +174,132 @@ def test_stage_png_for_an_unknown_stage_falls_back_to_the_match_card(
     assert stage_resp.content == match_resp.content
 
 
+def _seed_legacy_stage_audit(db_url: str, user_email: str, match_id: str, slug: str) -> None:
+    """Match + project (with a real stage 1, so ``project.stage(1)``
+    resolves) + a legacy-shaped audit doc: every shot carries
+    ``ms_after_beep``, none carries ``interval_class`` -- the shape an
+    audit doc had before #775 started classifying on save.
+    """
+    from splitsmith import match_model
+    from splitsmith.match_project import MatchProject, StageEntry
+
+    engine = create_engine(db_url)
+    sf = sessionmaker(engine)
+
+    async def _seed() -> None:
+        async with sf() as s:
+            row = (await s.execute(_select(User).where(User.email == user_email))).scalar_one()
+            user_id = row.id
+        store = ProjectStateStore(sf, user_id=user_id)
+        match = match_model.Match(
+            match_id=match_id,
+            name=f"Test match {match_id}",
+            shooters=[slug],
+            stages=[match_model.MatchStageDefinition(stage_number=1, stage_name="Stage 1")],
+        )
+        await store.save_match(match_id, match.model_dump(mode="json"), expected_version=0)
+        project = MatchProject(
+            name="Anna",
+            stages=[StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=8.0)],
+        )
+        await store.save_project(match_id, slug, project.model_dump(mode="json"), expected_version=0)
+        # The 564ms -> 1064ms gap is engineered so the two computation
+        # paths disagree at the auto-classifier's 0.5s split ceiling:
+        # coach.classify_intervals_in_dicts computes (1064-564)/1000.0
+        # == 0.5 exactly (<=0.5 -> "split"), while
+        # audit_shots_to_engine_shots computes 1.064-0.564 ==
+        # 0.5000000000000001 (just over 0.5, excluded by the
+        # unclassified fallback in coach.statistic_splits). That
+        # float-precision gap is what lets a test on the *figures* tell
+        # the healed (classified) path apart from the raw (threshold)
+        # one -- a gap both rules agree on would prove nothing.
+        audit = {
+            "stage_number": 1,
+            "stage_name": "Stage 1",
+            "shots": [
+                {"shot_number": 1, "ms_after_beep": 564},
+                {"shot_number": 2, "ms_after_beep": 1064},
+                {"shot_number": 3, "ms_after_beep": 1264},
+                {"shot_number": 4, "ms_after_beep": 1464},
+            ],
+        }
+        await store.save_audit(match_id, slug, 1, audit, expected_version=0)
+
+    asyncio.run(_seed())
+
+
+def _load_audit_doc(db_url: str, user_email: str, match_id: str, slug: str) -> tuple[dict, int]:
+    engine = create_engine(db_url)
+    sf = sessionmaker(engine)
+
+    async def _load() -> tuple[dict, int]:
+        async with sf() as s:
+            row = (await s.execute(_select(User).where(User.email == user_email))).scalar_one()
+            user_id = row.id
+        store = ProjectStateStore(sf, user_id=user_id)
+        doc, version = await store.load_audit(match_id, slug, 1)
+        assert doc is not None
+        return doc, version
+
+    return asyncio.run(_load())
+
+
+def test_a_legacy_unclassified_audit_is_healed_for_the_card(
+    hosted_env: str,
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stage audited before #775 has no interval_class. The coach GET
+    heals such docs in memory for share reads; the card must do the same,
+    or the preview shows different numbers than the page it links to."""
+    from splitsmith.ui import share_og
+
+    client, sender = hosted_app_with_storage
+    login(client, sender, "owner@example.com")
+    seed_match(hosted_env, "owner@example.com", MID)
+    _seed_legacy_stage_audit(hosted_env, "owner@example.com", MID, SLUG)
+    token = _create_share(client)
+    client.cookies.clear()
+
+    doc_before, version_before = _load_audit_doc(hosted_env, "owner@example.com", MID, SLUG)
+
+    captured: list = []
+    original_build_stage_card = share_og.build_stage_card
+
+    def _capturing_build_stage_card(state: object, slug: str, stage_number: int):
+        card = original_build_stage_card(state, slug, stage_number)
+        captured.append(card)
+        return card
+
+    monkeypatch.setattr(share_og, "build_stage_card", _capturing_build_stage_card)
+
+    # og-meta, not og.png: it exercises build_stage_card through the real
+    # anonymous share path (middleware sets current_tenant/current_match_id)
+    # without needing Chromium to render a PNG.
+    resp = client.get(f"/api/share/{token}/og-meta/{SLUG}/1")
+    assert resp.status_code == 200, resp.text
+
+    assert len(captured) == 1
+    card = captured[0]
+    assert card is not None
+
+    # The healed (classified) figures, not the raw threshold ones: shot 2's
+    # gap resolves to a split under the classifier's own arithmetic (see
+    # the comment in _seed_legacy_stage_audit), so all three post-draw
+    # intervals count.
+    assert card.figures.source == "coach"
+    assert card.figures.split_count == 3
+    assert card.figures.avg_split == pytest.approx(0.3)
+    assert card.figures.draw == pytest.approx(0.564)
+
+    # The share read must never persist the heal: the stored doc is
+    # unchanged (same version, same content) after building the card.
+    doc_after, version_after = _load_audit_doc(hosted_env, "owner@example.com", MID, SLUG)
+    assert version_after == version_before
+    assert doc_after == doc_before
+    assert all(s.get("interval_class") is None for s in doc_after["shots"])
+
+
 def test_png_routes_404_outside_hosted_mode() -> None:
     """No hosted env at all: create_app() unbound, same idiom as
     test_share_routes.py::test_share_local_mode_404. There is no shared

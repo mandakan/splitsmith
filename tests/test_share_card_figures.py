@@ -91,8 +91,13 @@ def test_the_fallback_excludes_a_draw_faster_than_the_threshold() -> None:
 def test_partial_classification_follows_mains_any_rule_see_issue_775() -> None:
     """This branch's spec argued for all-or-nothing; main counts the
     classified intervals as soon as ANY interval carries a class. Main is
-    canonical, so the card follows it. The disagreement is issue #775 --
-    if that issue changes the rule, this test changes with it."""
+    canonical, so the card follows it. Issue #775 is closed -- resolved by
+    making partial classification unreachable (the audit-save endpoint and
+    the coach GET both auto-classify), not by changing this rule -- so a
+    stage this module ever sees mid-classified in practice shouldn't
+    happen. The rule's logic is unchanged, so this pins the ``any`` branch
+    as a real contract: upstream guarantees it is all-or-nothing, this
+    fixture is deliberately not, and the two must still agree."""
     shots = (
         _Shot(split=1.28, interval_class="first_shot"),
         _Shot(split=0.19, interval_class="split"),
