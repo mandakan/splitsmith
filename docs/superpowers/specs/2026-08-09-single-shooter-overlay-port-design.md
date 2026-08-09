@@ -94,6 +94,21 @@ changes the ffmpeg invocation shape for no gain.
 | `overlay_render.build_frame_states` | unchanged |
 | **`src/splitsmith/overlay_single.py`** (new) | run-building (RLE) and what a single-shooter frame *says*, as `Group`/`Element` declarations. Sibling of `compare/overlay_live.py`; same split of concerns, different content. |
 | **`overlay_html.single_html`** (new, ~15 lines) | one canvas-sized cell as a whole document. `cell_html` already exists for this -- its docstring names "a future single-shooter port" -- but returns a fragment, so this adds the `html`/`body` sizing and transparent background the rasterizer needs. Signature takes plain ints: no `SpriteGeometry`, no `TilePlacement`. |
+
+`.cell` is `width: 100%; height: 100%`, which today only resolves because
+`grid_html` supplies a pixel-sized ancestor. `single_html` has no `.grid`
+wrapper, so it must size `html, body` itself -- the same block `grid_html`
+builds inline, minus the grid tracks. Prototyped and rasterized at
+1920x1080 before this was written into the spec: the counter's ink lands
+at x=31, y=41 against `CellScale.pad` of 30, and the split centres at
+x 846-1075 on a 1920 canvas. `.cell` in a sized `<body>` resolves
+correctly with no wrapper.
+
+`single_html` carries `_fit_script()` like both siblings. The rasterizer
+calls `window.__splitsmithFit && window.__splitsmithFit()` unconditionally
+and the `&&` guard makes omitting it safe -- but omitting it would trade
+the shrink-before-clip policy for bare `overflow: hidden` clipping, for
+no gain.
 | **`src/splitsmith/overlay_clock.py`** (new) | `clock_text()`, `ffmpeg_color()` and the `%{eif:...}` elapsed expression, lifted out of `compare/mp4_grid.py` verbatim. Both renderers import it. |
 
 `overlay_render.py` keeps orchestration only: probe, codec resolution,
@@ -117,11 +132,25 @@ fully transparent RGBA stream and ProRes 4444 preserves the alpha.
 Measured on a 640x360 test frame -- 2293 fully opaque pixels (the text),
 227575 fully transparent, the remainder antialiasing.
 
-Extracting `overlay_clock.py` is provable rather than hopeful: the grid's
-argv fingerprint tests, including
-`test_the_clock_expression_is_character_for_character_what_it_is_today`,
-hash whole commands. A correct extraction leaves them green; any drift
-fails them.
+Extracting `overlay_clock.py` is provable rather than hopeful, but **not
+by the argv fingerprint tests** -- checked rather than assumed. Both
+`DEFAULT_OFF_ARGV_SHA256` (`tests/test_compare_mp4_grid_commands.py:574`)
+and `ZERO_HOLD_ARGV_SHA256` (`tests/test_compare_mp4_grid_hold.py:429`)
+hash commands built without an `overlay=` argument, so `_clock_filters`
+is never invoked and no `drawtext` text is inside either hash.
+`test_the_clock_expression_is_character_for_character_what_it_is_today`
+(`tests/test_overlay_layout.py:107`) asserts only `anchor_ffmpeg_expr`'s
+output, not the filter string -- its own docstring's claim that a drift
+"fails them" does not hold against the current fixtures.
+
+What actually pins the strings is the substring suite in
+`tests/test_compare_mp4_grid_overlay.py`: `enable='gte(t\,1)*lt(t\,6)'`
+and `enable='gte(t\,6)'` (lines 398-415), `trunc(t-1.5)` (418-440),
+`:x=960+960-tw-24:y=540+24:` (443-457), `fontsize=`/`fontcolor=`/
+`bordercolor=` (460-498), plus `_clock_text`'s own literal-return tests
+(523-545) and an integration test that feeds the graph through a real
+`ffmpeg -f null` (556-592). Those are the extraction's proof. Leave every
+one of them untouched; if the extraction is correct they stay green.
 
 **Both ends of the clock have to be built explicitly**, because
 `build_frame_states` handles them in Python today and a filter graph
@@ -197,9 +226,9 @@ rendered frames against.
   through the tail after the last one, instead of holding 1.0s and fading
   over 0.3s. A step function has no frames between events, and the
   alternatives are worse: quantising the ramp into six alpha steps costs
-  ~210 states, which at ~300ms per browser render is ~63s/stage against
-  today's ~36s -- the fade is the one thing that would make the port a
-  net loss.
+  ~210 states, which at the measured 124 ms per sprite is ~26 s/stage
+  against today's measured 12.78 s -- the fade is the one thing that
+  would make the port a net loss.
 - **Clock format.** `5.20` rather than `" 5.20"`. Both are right-anchored
   so the right edge does not move; the width-stable padding was
   compensating for a jitter that right-alignment already prevents. Past a
@@ -226,7 +255,10 @@ and it tells the viewer the stage's round count. This is why
 
 `--font` becomes inert and is removed, along with `font_name` /
 `font_path` on `render_overlay` and the `overlay_text` re-exports from
-`overlay_render`.
+`overlay_render`. The blast radius is one file: `cli.py:1154-1156` and
+`cli.py:1184`. `ui/exports.py`'s `StageExportRequest` has no font field,
+the MCP `export_stage` / `export_match` tools have none, the SPA has no
+font control, and neither README.md nor SPEC.md documents the flag.
 
 The sprite's typeface comes from `overlay_html`'s unconditional
 `@font-face` rules and the clock's from `theme_font_face`; both are the
@@ -278,26 +310,64 @@ supply their own.
 The issue's rule is that an edit to any of `tests/test_overlay_render.py`'s
 31 tests is a finding to explain, not a chore. Every one is accounted for:
 
-**11 deleted with the mechanism they describe.**
-`test_split_alpha_holds_then_fades_then_zero`, the three
-`test_default_template_*` tests, and both `test_format_running_total_*`
-tests exercise PIL drawing, the fade, and a formatter that no longer
-exists. The five `test_load_font_*` / `test_available_font_names_*` tests
-exercise re-exports only; `tests/test_overlay_text.py` tests the same
-functions directly, so no coverage is lost.
+**6 deleted with the mechanism they describe.**
+`test_split_alpha_holds_then_fades_then_zero` (117-129), the three
+`test_default_template_*` tests (135-149, 152-189, 241-258), and both
+`test_format_running_total_*` tests (264-266, 269-270). These exercise
+PIL drawing, the fade, and a formatter that no longer exists.
+
+**5 moved verbatim to `tests/test_overlay_text.py`**, not deleted. An
+earlier draft of this spec claimed they only exercise re-exports and that
+`test_overlay_text.py` already covers the same ground. That was checked
+and is **false**: only `test_load_font_unknown_name_raises` has a true
+equivalent there. The other four each cover something that file does not
+-- the known-preset-with-missing-files fallback
+(`test_load_font_known_name_falls_back_when_missing`), the contents of
+`available_font_names()`, the full PIL-bitmap fallback and its warning
+log (`test_load_font_pil_default_fallback_warns`), and the absence of any
+WARNING on the happy path (`test_load_font_bundled_emits_debug_only`).
+They test `overlay_text` functions and belong in `overlay_text`'s file;
+moving them there loses nothing and is the only change they need, since
+`overlay_render` will no longer re-export the names they reach through.
 
 **10 gain one `rasterizer=` argument** and nothing else -- every test
-that drives `render_overlay` through a stub `Popen`: codec (3),
-`--max-height` (2), `--max-fps` (2), the pipe test, the ffmpeg-nonzero
-test, and the real-ProRes integration test, which gets a real
-rasterizer rather than a fake. No assertion weakens. In particular
+that drives `render_overlay` far enough to reach the render loop: codec
+(3), `--max-height` (2), `--max-fps` (2), the pipe test, the
+ffmpeg-nonzero test, and the real-ProRes integration test, which gets a
+real rasterizer rather than a fake. Seven of these go through the
+`_capture_render_cmd` helper (475-526), so the argument is added once
+there and in three direct callers. No assertion weakens. In particular
 `assert captured["bytes"] == 30 * 320 * 180 * 4` survives untouched,
 which is the frame-count contract this port must not break.
 
 **10 pass completely untouched**: the five `build_frame_states` tests,
 `test_capped_frame_rate_keeps_rational_for_29_97`,
-`test_scaled_dimensions_forces_even`, both early-raise paths, and
-`test_codec_unknown_raises`.
+`test_scaled_dimensions_forces_even`, both early-raise paths
+(`test_render_overlay_raises_when_audit_missing`,
+`test_render_overlay_raises_when_no_shots`), and
+`test_codec_unknown_raises` -- which raises in `_resolve_codec` before
+any rasterizer is needed.
+
+6 + 5 + 10 + 10 = 31.
+
+### 7.1b A sixth file the earlier draft missed
+
+`tests/test_overlay_theme.py` drives `overlay_render.DefaultTemplate`
+directly at five call sites (94, 141, 171, 179, 193) to assert that a
+theme's palette reaches the drawn pixels. Deleting `DefaultTemplate`
+breaks them, and they are not covered by the accounting above because
+they live in a different file.
+
+They must be **re-expressed against the new renderer, not deleted** --
+they assert a property that still matters and that nothing else checks:
+that `--theme clean` and `--theme splitsmith` actually produce different
+ink. Re-express each as an assertion over `single_html`'s emitted CSS
+(the established style in `tests/test_overlay_html.py` -- the `_rule(html,
+selector)` helper plus a substring check, e.g. `f"color: rgb({r},{g},{b})"`),
+which is where the theme now reaches the picture. `test_overlay_theme.py`
+also has `test_available_font_names_includes_bundled_presets` (198-202)
+reaching through the `overlay_render` re-export; repoint it at
+`overlay_text`.
 
 ### 7.2 New tests
 
@@ -334,6 +404,21 @@ overlay, composites it over the trim the way Final Cut would, and drops
 frames at named moments (`pre-beep`, `first-shot`, `mid-action`,
 `after-last-shot`, `tail-end`).
 
+Compositing the alpha MOV over the trim is not new ground:
+`src/splitsmith/mp4_render.py:454-457` already does exactly this, and the
+tool should reuse its filter shape rather than invent one.
+
+```
+[{overlay_index}:v]setpts=PTS-STARTPTS[overlay_v]
+[{base_label}][overlay_v]overlay=0:0[withov]
+```
+
+Frame extraction follows `render_grid_frames.py:218-238`: `select=eq(n,N)`
+with `-fps_mode passthrough`, never a timestamp seek. Note that
+`synthetic_media` builds at 30000/1001, not a whole rate -- selecting by
+frame index is exact regardless, but any moment expressed in seconds must
+be converted with `round(t * fps)` once, not seeked to.
+
 On this project every overlay defect that mattered was found by rendering
 and measuring, none by reading. The before/after procedure:
 
@@ -347,8 +432,23 @@ and measuring, none by reading. The before/after procedure:
 ### 7.4 Performance
 
 The kickoff's ~36s -> ~9s per stage is arithmetic over #693's per-sprite
-figures, not an end-to-end timing of this path. Measure it on the real
-fixture and report the measured number. Do not quote the estimate.
+figures, not a timing of this path. Measured directly on the dev host, a
+20s/30-shot stage at 1920x1080:
+
+| | draws | measured |
+|---|---|---|
+| today, per-frame PIL | 600 | **12.78 s** (21.3 ms/frame) |
+| ported, 31 sprites | 31 | **4.33 s** (124 ms median/sprite + 0.40 s browser startup) |
+
+Roughly 2.9x, against the kickoff's predicted 4x. Both absolute figures
+are far below its estimate, which assumed 60 ms per PIL draw where this
+host does 21.3 ms and ~300 ms per sprite where a 1x1 cell carrying two
+short strings costs 124 ms. Neither number includes encode, which is
+unchanged.
+
+Re-measure at 4K before quoting these anywhere else -- a sprite's cost
+scales with canvas area and PIL's does too, but not necessarily at the
+same rate.
 
 ## 8. Sequencing
 
