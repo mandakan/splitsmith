@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 
 import pytest
 
 from splitsmith.overlay_theme import load_theme
 from splitsmith.share_card import (
-    Interval,
     MatchCard,
     RosterEntry,
     StageCard,
@@ -22,6 +22,14 @@ from splitsmith.share_card_html import (
 )
 
 
+@dataclass(frozen=True)
+class _Shot:
+    """The two attributes ``coach.SplitStatInterval`` reads."""
+
+    split: float
+    interval_class: str | None
+
+
 @pytest.fixture
 def theme():
     return load_theme("splitsmith")
@@ -32,11 +40,10 @@ def _stage_card(**overrides) -> StageCard:
         "figures",
         stage_figures(
             (
-                Interval(index=1, seconds=1.28, interval_class="first_shot"),
-                Interval(index=2, seconds=0.19, interval_class="split"),
-                Interval(index=3, seconds=0.17, interval_class="split"),
+                _Shot(split=1.28, interval_class="first_shot"),
+                _Shot(split=0.19, interval_class="split"),
+                _Shot(split=0.17, interval_class="split"),
             ),
-            transition_min=1.0,
         ),
     )
     base = {
@@ -72,10 +79,9 @@ def test_stage_card_shows_draw_and_average_split(theme) -> None:
 def test_stage_card_omits_the_average_when_there_are_no_splits(theme) -> None:
     figures = stage_figures(
         (
-            Interval(index=1, seconds=1.28, interval_class="first_shot"),
-            Interval(index=2, seconds=2.40, interval_class="reload"),
+            _Shot(split=1.28, interval_class="first_shot"),
+            _Shot(split=2.40, interval_class="reload"),
         ),
-        transition_min=1.0,
     )
     html = stage_card_html(_stage_card(figures=figures), theme=theme)
     assert "Draw" in html

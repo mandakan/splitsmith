@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pytest
 from pydantic import ValidationError
 
 from splitsmith.share_card import (
-    Interval,
     MatchCard,
     RosterEntry,
     StageCard,
@@ -15,13 +16,20 @@ from splitsmith.share_card import (
 )
 
 
+@dataclass(frozen=True)
+class _Shot:
+    """The two attributes ``coach.SplitStatInterval`` reads."""
+
+    split: float
+    interval_class: str | None
+
+
 def _figs() -> object:
     return stage_figures(
         (
-            Interval(index=1, seconds=1.28, interval_class="first_shot"),
-            Interval(index=2, seconds=0.19, interval_class="split"),
+            _Shot(split=1.28, interval_class="first_shot"),
+            _Shot(split=0.19, interval_class="split"),
         ),
-        transition_min=1.0,
     )
 
 
@@ -93,10 +101,9 @@ def test_hash_changes_when_the_average_split_changes() -> None:
         update={
             "figures": stage_figures(
                 (
-                    Interval(index=1, seconds=1.28, interval_class="first_shot"),
-                    Interval(index=2, seconds=0.31, interval_class="split"),
+                    _Shot(split=1.28, interval_class="first_shot"),
+                    _Shot(split=0.31, interval_class="split"),
                 ),
-                transition_min=1.0,
             )
         }
     )

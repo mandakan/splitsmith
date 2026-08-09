@@ -4,53 +4,30 @@ Pure: no file I/O, no browser, no FastAPI. Rasterizing a card is
 ``share_card_html`` plus ``overlay_raster``'s job; serving one is
 ``ui/share_og.py``'s.
 
-**One definition of a split.** A split statistic is computed over
-intervals classed ``split`` -- transitions, movement, reloads and
-activations are excluded by construction rather than by a threshold.
-The draw is the ``first_shot`` interval. When a stage carries no
-classification at all (detected and audited, never coached), the
-fallback is the rule ``fcpxml_gen.split_color_band`` already encodes:
-index 1 is the draw, and any interval above
-``SplitColorThresholds.transition_min`` is not a split.
-
-Classification is all-or-nothing per stage. Mixing the two rules within
-one run would produce an average whose definition varies by which
-intervals happened to be reviewed, so a single unset interval demotes
-the whole stage to the threshold path. :attr:`StageFigures.source`
-records which path ran.
+**This module does not define the split rule.** That rule lives in
+``coach.statistic_splits`` (issue #772, landed in #774) and is mirrored
+in TS by ``statisticSplits``. This module only shapes the helper's
+output into a card's two headline figures: the draw and the split mean,
+plus their provenance. What happens on a partially classified stage is
+that shared helper's call, not this module's -- see issue #775.
 
 Issue #772 brings the video stage summary and the results page onto
-this same definition; both consume :func:`stage_figures`.
+that same definition; both consume :func:`stage_figures`.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-#: The interval class naming the draw. Mirrors ``CoachIntervalClass`` in
-#: ``ui_static/src/lib/api.ts``; ``coach.py`` owns the Python side.
-DRAW_CLASS = "first_shot"
-
-#: The only class a split statistic is computed over.
-SPLIT_CLASS = "split"
+from .coach import SPLIT_STAT_TRANSITION_MIN, SplitStatInterval, statistic_splits
 
 FigureSource = Literal["coach", "threshold", "empty"]
-
-
-@dataclass(frozen=True)
-class Interval:
-    """One inter-shot gap. ``index`` is 1-based; index 1 is the draw, so
-    its ``seconds`` is time from the beep rather than from a prior shot."""
-
-    index: int
-    seconds: float
-    interval_class: str | None
 
 
 @dataclass(frozen=True)
@@ -64,63 +41,39 @@ class StageFigures:
     source: FigureSource
 
 
-def intervals_from_audit_shots(shots: Sequence[Mapping[str, Any]]) -> tuple[Interval, ...]:
-    """Derive ordered intervals from an audit doc's ``shots`` list.
+def stage_figures(
+    shots: Sequence[SplitStatInterval],
+    *,
+    transition_min: float = SPLIT_STAT_TRANSITION_MIN,
+) -> StageFigures:
+    """The two headline figures a stage card shows, plus their provenance.
 
-    Mirrors the ordering and gap arithmetic ``ui/server._build_coach_response``
-    applies: sort by ``ms_after_beep``, treat shot 1's time from the beep as
-    its interval, and take each later shot's gap from its predecessor.
-    Entries without ``ms_after_beep`` are not shots on a timeline and are
-    dropped rather than defaulted to zero.
+    **This function does not own the split rule.** ``coach.statistic_splits``
+    does (issue #772, landed in #774), mirrored in TS by ``statisticSplits``.
+    All this adds is the card's shape: the draw, the mean of whatever the
+    shared helper returned, and how it was derived.
+
+    ``shots`` is one stage's full time-ordered sequence, draw first --
+    ``config.Shot`` from ``audit_data.audit_shots_to_engine_shots`` satisfies
+    the protocol. The draw is ``shots[0].split``, matching the helper's own
+    "index 0 is the draw" convention.
+
+    ``avg_split`` is None rather than zero when the helper returns nothing:
+    a stage of transitions and reloads has no splits to average, and the
+    card renders no average rather than inventing one.
     """
-    ordered = sorted(
-        (s for s in shots if isinstance(s, Mapping) and s.get("ms_after_beep") is not None),
-        key=lambda s: float(s["ms_after_beep"]),
-    )
-    out: list[Interval] = []
-    prev_ms: float | None = None
-    for i, shot in enumerate(ordered):
-        ms = float(shot["ms_after_beep"])
-        seconds = ms / 1000.0 if prev_ms is None else (ms - prev_ms) / 1000.0
-        prev_ms = ms
-        cls = shot.get("interval_class")
-        out.append(
-            Interval(
-                index=i + 1,
-                seconds=seconds,
-                interval_class=cls if isinstance(cls, str) else None,
-            )
-        )
-    return tuple(out)
-
-
-def stage_figures(intervals: Sequence[Interval], *, transition_min: float) -> StageFigures:
-    """Draw and average split for one run.
-
-    ``transition_min`` comes from ``SplitColorThresholds`` and is only
-    consulted on the fallback path. Passing it explicitly keeps this
-    function pure and lets a caller A/B a candidate value (#773) without
-    touching config.
-    """
-    if not intervals:
+    if not shots:
         return StageFigures(draw=None, avg_split=None, split_count=0, interval_count=0, source="empty")
-
-    classified = all(i.interval_class is not None for i in intervals)
-    if classified:
-        source: FigureSource = "coach"
-        draw = next((i.seconds for i in intervals if i.interval_class == DRAW_CLASS), None)
-        splits = [i.seconds for i in intervals if i.interval_class == SPLIT_CLASS]
-    else:
-        source = "threshold"
-        draw = next((i.seconds for i in intervals if i.index == 1), None)
-        splits = [i.seconds for i in intervals if i.index != 1 and i.seconds <= transition_min]
-
+    splits = statistic_splits(shots, transition_min=transition_min)
+    classified = any(s.interval_class is not None for s in shots)
     return StageFigures(
-        draw=draw,
+        draw=shots[0].split,
         avg_split=(sum(splits) / len(splits)) if splits else None,
         split_count=len(splits),
-        interval_count=len(intervals),
-        source=source,
+        interval_count=len(shots),
+        # Mirrors the helper's own branch condition. If #775 changes that
+        # condition, this line changes with it -- they must not drift.
+        source="coach" if classified else "threshold",
     )
 
 
