@@ -686,23 +686,29 @@ def test_single_html_matches_the_clock_stroke_and_grid_html_is_untouched():
 
 
 def test_overlay_html_stays_a_leaf_and_pulls_in_no_compare_module() -> None:
-    """The ``TYPE_CHECKING`` guard on ``compare.overlay_sprites`` is load-bearing.
+    """The ``TYPE_CHECKING`` guard on ``compare.overlay_sprites`` still earns its keep.
 
-    ``compare.overlay_sprites`` -> ``compare.overlay_data`` -> ``ui.exports``
-    -> ``overlay_render`` -> this module. Turning that guarded import into a
-    runtime one closes the cycle and the whole package stops importing.
-    Measured by flipping ``if TYPE_CHECKING:`` to ``if True:``: this probe
-    exits non-zero on ``ImportError: cannot import name 'single_html' from
-    partially initialized module 'splitsmith.overlay_html'``.
+    This test was written for #684, when the guard was the only thing
+    keeping the package importable: ``compare.overlay_sprites`` ->
+    ``compare.overlay_data`` -> ``ui.exports`` -> ``overlay_render`` ->
+    this module. Flipping ``if TYPE_CHECKING:`` to ``if True:`` made the
+    probe exit non-zero on ``ImportError: cannot import name
+    'single_html' from partially initialized module``.
 
-    Two assertions, not one, because they fail at different times. The
-    trailing ``import splitsmith.overlay_render`` catches the cycle as it
-    exists today. The ``sys.modules`` check is the one with a future: the
-    ``compare.overlay_data`` -> ``ui.exports`` edge is a filed follow-up,
-    and once it goes away a runtime import here would pull the whole
-    ``compare`` subpackage into every overlay render without raising
-    anything -- a silent loss of the leaf position this module's docstring
-    claims, visible only here.
+    **Issue #760 removed that edge** -- ``read_audit_data`` /
+    ``audit_shots_to_engine_shots`` live in the core ``audit_data``
+    module now -- so a runtime import no longer raises anything. Which
+    is exactly the case this test's ``sys.modules`` assertion was
+    written for: it predicted that once the cycle went, a runtime import
+    would pull the whole ``compare`` subpackage into every overlay
+    render *silently*. Measured on that branch: ``import
+    splitsmith.overlay_html`` loads 136 modules with the guard and 346
+    without it.
+
+    So the assertion that had a future is now the only one with teeth.
+    The trailing ``import splitsmith.overlay_render`` is kept as a cheap
+    smoke that the #684 import direction still resolves; it can no
+    longer fail the way it was written to.
 
     A subprocess because this test module itself imports
     ``splitsmith.compare.*`` at the top -- in-process, ``sys.modules`` is

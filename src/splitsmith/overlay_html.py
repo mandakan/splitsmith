@@ -26,9 +26,10 @@ one of the two needs a browser.
 
 ``compare/overlay_sprites`` is a type-only ``TYPE_CHECKING`` import, not
 a runtime one (see the guard below). That is what keeps this module a
-leaf: since issue #684, ``overlay_render`` imports this module, and
-``compare/overlay_sprites`` reaches ``overlay_render`` transitively
-through ``ui.exports`` -- a real import here would close that cycle.
+leaf. It used to be load-bearing for a different reason -- until issue
+#760 a real import here closed an import cycle and nothing in the
+package could be imported at all. That cycle is gone; the guard stays
+because a leaf should not drag a higher-level subpackage in behind it.
 
 Design rules, each answering one of the old fitter's defects:
 
@@ -115,13 +116,20 @@ if TYPE_CHECKING:
     # ``grid_html`` names these two in its signature and reads attributes
     # off them; it never constructs one, so a runtime import buys nothing
     # -- and it costs the leaf position this module's docstring claims.
-    # ``compare.overlay_sprites`` reaches ``ui.exports`` transitively (via
-    # ``compare.overlay_data``) and ``ui.exports`` imports
-    # ``overlay_render``, which since #684 imports THIS module: a real
-    # import here closes that cycle and nothing in the package can be
-    # imported at all. Type-only keeps the annotation honest (this module
-    # has ``from __future__ import annotations``, so it is never
-    # evaluated) without the edge.
+    #
+    # Until #760 this guard was also all that kept the package importable:
+    # ``compare.overlay_sprites`` reached ``ui.exports`` transitively, and
+    # ``ui.exports`` imports ``overlay_render``, which since #684 imports
+    # THIS module. That edge is gone -- ``audit_data`` is a core module
+    # now -- so a runtime import here no longer raises.
+    #
+    # It is still wrong. Measured on the branch that removed the edge:
+    # ``import splitsmith.overlay_html`` loads 136 modules with the guard
+    # and 346 without it, because the annotation would drag the whole
+    # ``compare`` subpackage and its ``ui`` dependencies into every
+    # single-shooter overlay render. Type-only keeps the annotation
+    # honest (this module has ``from __future__ import annotations``, so
+    # it is never evaluated) without paying for it.
     from .compare.overlay_sprites import SpriteGeometry, TilePlacement
 
 RGB = tuple[int, int, int]

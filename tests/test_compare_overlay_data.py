@@ -2,6 +2,8 @@
 
 import json
 import logging
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -328,3 +330,53 @@ def test_one_bad_audit_does_not_stop_the_other_stages(tmp_path):
     )
     data = overlay_data.load_overlay_data([bundle])
     assert [data[("ann", n)].shot_count for n in (1, 2, 3)] == [1, 0, 1]
+
+
+def test_reading_audit_data_does_not_drag_in_the_web_ui_export_layer() -> None:
+    """The root of the import cycle #684 papered over (issue #760).
+
+    ``compare/overlay_data`` is a core comparison module. It used to
+    reach ``ui.exports`` for ``read_audit_data`` /
+    ``audit_shots_to_engine_shots``, and ``ui.exports`` imports
+    ``overlay_render``, which since #684 imports ``overlay_html`` --
+    which needs ``compare.overlay_sprites``. That closed a cycle the
+    whole package could not import through, held open only by a
+    ``TYPE_CHECKING`` guard in ``overlay_html``.
+
+    Named modules rather than the whole ``splitsmith.ui`` prefix,
+    because two other ``compare -> ui`` edges survive this fix and
+    neither closes a cycle:
+
+    - ``overlay_data`` imports ``ui.project`` for ``MatchProject`` /
+      ``StageScorecard`` -- a data model, reaching no overlay module.
+    - ``compare.project_loader`` imports ``ui.match_exports._slugify``,
+      a private helper. The same layering smell as the edge this test
+      names, but ``match_exports`` reaches no overlay module either.
+
+    Both deserve their own change rather than a silent widening of this
+    one, so naming them here would make this test about something it
+    does not fix.
+
+    A subprocess because this test module imports ``splitsmith.ui.*`` at
+    the top: in-process ``sys.modules`` is already populated and the
+    assertion could never fail.
+    """
+    cycle = {
+        "splitsmith.ui.exports",
+        "splitsmith.overlay_render",
+        "splitsmith.overlay_html",
+    }
+    probe = (
+        "import sys; import splitsmith.compare.overlay_data; "
+        f"cycle = {sorted(cycle)!r}; "
+        "leaked = sorted(m for m in cycle if m in sys.modules); "
+        "assert not leaked, leaked"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).parent.parent,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
