@@ -24,8 +24,12 @@ An audited stage's shots - those with `ms_after_beep` - all carry an
   feeds statistics) runs the same classifier when it finds an unclassified
   shot that has `ms_after_beep`. For the owner the result is persisted; for
   share-token/anonymous readers it is classified in-memory only and never
-  written (RLS would reject the write, and readers must not mutate). Legacy
-  audited stages therefore heal on first touch.
+  written (share-token requests impersonate the owner's tenant, so RLS would
+  not reject the write - the `current_share_request` guard is the only
+  defense). Legacy audited stages therefore heal on first touch. The overlay
+  export path (`compare/overlay_data.py::_load_shots`) heals the same way,
+  in memory only, so a legacy partial doc never renders a wrong average into
+  an exported MP4.
 
 Shots without `ms_after_beep` remain unclassified by design. Python drops
 them in `audit_shots_to_engine_shots` before statistics see them; the TS

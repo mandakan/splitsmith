@@ -10398,6 +10398,7 @@ def create_app(
             isinstance(s, dict)
             and s.get("ms_after_beep") is not None
             and s.get(coach_module.FIELD_INTERVAL_CLASS) is None
+            and s.get(coach_module.FIELD_INTERVAL_CLASS_SOURCE) != "manual"
             for s in shots
         )
         if needs_backfill:
@@ -10473,6 +10474,14 @@ def create_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        # #775: a ``clear_class: true`` patch drops the shot's class, which
+        # would re-open the partial-classification state the invariant
+        # rules out. Re-running the classifier heals it back to the rule's
+        # auto verdict; this is a no-op for every other patch because the
+        # classifier only rewrites unset/auto entries and manual patches
+        # set interval_class_source="manual" on the target shot itself.
+        coach_module.classify_intervals_in_dicts([s for s in shots if isinstance(s, dict)], cfg)
 
         events = list(payload.get("audit_events") or [])
         events.append(
