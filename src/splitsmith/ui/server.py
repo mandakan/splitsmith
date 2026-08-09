@@ -4660,8 +4660,9 @@ class ExportStageRequest(BaseModel):
     write_fcpxml: bool = True
     write_report: bool = True
     # Pre-rendered alpha overlay MOV (issue #45). Defaults False because
-    # the render is per-frame PIL + ffmpeg -- non-trivially slower than
-    # the other writers. The Analysis & Export checkbox opts-in per stage.
+    # the render rasterizes sprites through a browser and encodes them --
+    # non-trivially slower than the other writers. The Analysis & Export
+    # checkbox opts-in per stage.
     write_overlay: bool = False
     # Overlay format knobs (issue #45 follow-up). Defaults match the
     # legacy ProRes 4444 path on platforms without VideoToolbox; on macOS

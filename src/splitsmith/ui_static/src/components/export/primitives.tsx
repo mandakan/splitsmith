@@ -114,16 +114,36 @@ export function StageChip({
   );
 }
 
-export function SelectField({
+/** A select whose options are checked against the state it drives.
+ *
+ *  `T` is inferred from `value`, so passing a union-typed state (an
+ *  `OverlayCodec`, an output format) makes the compiler reject any
+ *  `options` entry that isn't a member of it. Callers therefore need no
+ *  cast in `onChange` -- which is the point: a cast at the call site
+ *  launders whatever the select emits straight into typed state, and
+ *  that is exactly how the Export page came to offer two overlay codecs
+ *  the backend rejects with a 422 (issue #761).
+ *
+ *  The one `as T` lives here, and it is the only place it can be made
+ *  safely: a `<select>` can emit nothing but the `value`s rendered
+ *  below, and every one of those is a `T`.
+ *
+ *  `options` is `NoInfer<T>` deliberately. Without it `T` widens to
+ *  absorb whatever the options happen to say -- `"h264"` becomes part
+ *  of `T` rather than an error against it -- and the check quietly
+ *  stops checking anything. Inference comes from `value` alone; the
+ *  options are measured against it.
+ */
+export function SelectField<T extends string>({
   label,
   value,
   onChange,
   options,
 }: {
   label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
+  value: T;
+  onChange: (v: T) => void;
+  options: readonly { value: NoInfer<T>; label: string }[];
 }) {
   return (
     <label className="flex flex-col gap-1.5">
@@ -133,7 +153,7 @@ export function SelectField({
       <div className="relative">
         <select
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(e.target.value as T)}
           className="w-full appearance-none rounded-md border border-rule bg-surface-3 px-3 py-2 pr-8 font-mono text-sm text-ink outline-none focus:border-led"
         >
           {options.map((opt) => (

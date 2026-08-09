@@ -763,8 +763,8 @@ export interface ExportStageRequestPayload {
   write_csv?: boolean;
   write_fcpxml?: boolean;
   write_report?: boolean;
-  /** Render the per-frame PIL + ffmpeg overlay MOV (issue #45). Defaults
-   *  off because it's the slowest writer; opt in per stage. */
+  /** Render the alpha overlay MOV (issue #45). Defaults off because it's
+   *  the slowest writer; opt in per stage. */
   write_overlay?: boolean;
   /** Encoder for the overlay MOV. Defaults to ``"auto"``. */
   overlay_codec?: OverlayCodec;
