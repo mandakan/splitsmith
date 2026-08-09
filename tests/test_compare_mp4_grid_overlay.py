@@ -1079,7 +1079,7 @@ def _sprite_face_file() -> Path:
     this test declares. A test carrying its own copy of the filename
     would keep passing after the stylesheet started naming a different
     one, which is the whole failure this section exists to catch."""
-    return Path(url2pathname(urlparse(overlay_html._font_face_url(overlay_html._FONT_FILES["mono"])).path))
+    return Path(url2pathname(urlparse(overlay_html.font_face_url(overlay_html.FONT_FILES["mono"])).path))
 
 
 @pytest.mark.parametrize("theme_name", ["splitsmith", "clean"])

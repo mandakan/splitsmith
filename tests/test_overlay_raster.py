@@ -371,11 +371,11 @@ def _font_probe_html(*, with_bundled_face: bool, text: str, font_size: int, canv
     the real failure mode: a silently-failed ``@font-face`` falls
     through the same stack onto the browser's own ``monospace``.
     """
-    from splitsmith.overlay_html import _font_face_url
+    from splitsmith.overlay_html import font_face_url
 
     face_css = ""
     if with_bundled_face:
-        font_url = _font_face_url("JetBrainsMono-Bold.ttf")
+        font_url = font_face_url("JetBrainsMono-Bold.ttf")
         face_css = f"""
 @font-face {{
   font-family: "Splitsmith Mono Test";

@@ -287,7 +287,7 @@ def theme_font_face(theme: OverlayTheme) -> OverlayFace:
     declares the bundled faces unconditionally regardless of theme -- it
     chose determinism across machines over matching the ``clean`` theme's
     old system-font discovery (see
-    :func:`splitsmith.overlay_html._font_face_url`). Keeping the *old*
+    :func:`splitsmith.overlay_html.font_face_url`). Keeping the *old*
     branch here would have meant the counter and the clock drawing in two
     different typefaces inside the same cell on that theme, with the
     clock's own face varying by host: measured on the dev box, ``clean``
