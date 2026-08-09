@@ -23,7 +23,9 @@ held it open with a ``TYPE_CHECKING`` guard in ``overlay_html``; issue
 #760 is this module, which removes the edge instead of guarding it.
 
 Reading an audit is a core concern, not a web-UI one. Nothing here
-knows about HTTP, and it imports only ``config``.
+knows about HTTP, and it imports only the core ``config`` and ``coach``
+modules (the latter for the coach field names it is the source of truth
+for).
 """
 
 from __future__ import annotations
@@ -32,6 +34,12 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .coach import (
+    COACH_INTERVAL_CLASS_SOURCES,
+    COACH_INTERVAL_CLASSES,
+    FIELD_INTERVAL_CLASS,
+    FIELD_INTERVAL_CLASS_SOURCE,
+)
 from .config import Shot
 
 
@@ -130,6 +138,18 @@ def audit_shots_to_engine_shots(
         conf = max(0.0, min(1.0, conf))
         notes_raw = raw.get("notes")
         notes = str(notes_raw) if isinstance(notes_raw, str) else ""
+        # Coach annotations ride along (#772) so downstream consumers can
+        # tell a split from a reload. A junk or half-set pair degrades to
+        # unclassified rather than failing the read - same posture as the
+        # candidate lookups above.
+        interval_class = raw.get(FIELD_INTERVAL_CLASS)
+        interval_class_source = raw.get(FIELD_INTERVAL_CLASS_SOURCE)
+        if (
+            interval_class not in COACH_INTERVAL_CLASSES
+            or interval_class_source not in COACH_INTERVAL_CLASS_SOURCES
+        ):
+            interval_class = None
+            interval_class_source = None
         shot_number = int(raw.get("shot_number", len(out) + 1))
         if prev_time_from_beep is None:
             split = time_from_beep  # draw
@@ -145,6 +165,8 @@ def audit_shots_to_engine_shots(
                 peak_amplitude=peak,
                 confidence=conf,
                 notes=notes,
+                interval_class=interval_class,
+                interval_class_source=interval_class_source,
             )
         )
     return out

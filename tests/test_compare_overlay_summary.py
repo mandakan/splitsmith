@@ -541,6 +541,62 @@ def test_split_statistics_are_a_captioned_four_column_grid():
     assert grid_group.align == "left"
 
 
+def _splits_grid(groups):
+    """The Splits band's GRID group - the one carrying captioned figures."""
+    return next(
+        g
+        for g in _groups_by_anchor(groups)[Anchor.MIDDLE_CENTER]
+        if any(e.caption in ("Best", "Avg", "Worst", "Draw") for e in g.elements)
+    )
+
+
+def test_split_statistics_skip_intervals_not_classed_split():
+    """Issue #772: Best/Avg/Worst are split statistics, not interval
+    statistics. On a classified stage a reload or transition never
+    surfaces as the 'Worst' split, and never inflates 'Avg'."""
+    shots = (
+        TileShot(time_from_beep=1.5, split=1.5, interval_class="first_shot"),
+        TileShot(time_from_beep=1.7, split=0.2, interval_class="split"),
+        TileShot(time_from_beep=4.3, split=2.6, interval_class="reload"),
+        TileShot(time_from_beep=4.7, split=0.4, interval_class="split"),
+    )
+    tile = TileStageData(label="Ann", stage_number=1, shots=shots)
+    grid = _splits_grid(_cg(tile))
+    by_caption = {e.caption: e.text for e in grid.elements}
+    assert by_caption == {"Best": "0.20", "Avg": "0.30", "Worst": "0.40", "Draw": "1.50"}
+
+
+def test_unclassified_stages_fall_back_to_the_color_band_rule():
+    """No classification on any shot: the ``split_color_band`` rule
+    applies - index 0 is the draw, anything above ``transition_min``
+    (1.0s) is not a split (issue #772). Same figures as the classified
+    twin above."""
+    shots = (
+        TileShot(time_from_beep=1.5, split=1.5),
+        TileShot(time_from_beep=1.7, split=0.2),
+        TileShot(time_from_beep=4.3, split=2.6),
+        TileShot(time_from_beep=4.7, split=0.4),
+    )
+    tile = TileStageData(label="Ann", stage_number=1, shots=shots)
+    grid = _splits_grid(_cg(tile))
+    by_caption = {e.caption: e.text for e in grid.elements}
+    assert by_caption == {"Best": "0.20", "Avg": "0.30", "Worst": "0.40", "Draw": "1.50"}
+
+
+def test_a_stage_with_no_split_intervals_shows_only_the_draw():
+    """Every interval is dead time (transitions, reloads): there is no
+    split to average, so Best/Avg/Worst are absent - never invented -
+    while Draw still draws."""
+    shots = (
+        TileShot(time_from_beep=1.5, split=1.5, interval_class="first_shot"),
+        TileShot(time_from_beep=4.1, split=2.6, interval_class="reload"),
+        TileShot(time_from_beep=5.3, split=1.2, interval_class="transition"),
+    )
+    tile = TileStageData(label="Ann", stage_number=1, shots=shots)
+    grid = _splits_grid(_cg(tile))
+    assert [(e.caption, e.text) for e in grid.elements] == [("Draw", "1.50")]
+
+
 def test_a_dq_chip_suppresses_the_scoring_figures():
     scorecard = StageScorecard(hit_factor=5.12, stage_pct=80.0, alphas=7, dq=True)
     tile = TileStageData(label="Ann", stage_number=1, scorecard=scorecard)

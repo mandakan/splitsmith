@@ -99,6 +99,64 @@ def test_audit_shots_to_engine_shots_handles_manual_shot_without_candidate() -> 
     assert shots[0].confidence == 0.0
 
 
+def test_audit_shots_to_engine_shots_carries_interval_classes() -> None:
+    """Coach annotations ride along onto the engine Shot (issue #772) so
+    downstream consumers - the compare overlay's split statistics - can
+    tell a split from a reload. Unannotated shots stay unclassified."""
+    payload = _audit_payload(
+        shots=[
+            {
+                "shot_number": 1,
+                "candidate_number": 1,
+                "ms_after_beep": 500,
+                "interval_class": "first_shot",
+                "interval_class_source": "auto",
+            },
+            {
+                "shot_number": 2,
+                "candidate_number": 2,
+                "ms_after_beep": 900,
+                "interval_class": "split",
+                "interval_class_source": "manual",
+            },
+            {"shot_number": 3, "candidate_number": None, "ms_after_beep": 1400},
+        ]
+    )
+    shots = audit_data.audit_shots_to_engine_shots(payload, beep_time_in_source=10.0)
+    assert [(s.interval_class, s.interval_class_source) for s in shots] == [
+        ("first_shot", "auto"),
+        ("split", "manual"),
+        (None, None),
+    ]
+
+
+def test_audit_shots_to_engine_shots_drops_invalid_interval_classes() -> None:
+    """A junk or half-set annotation degrades to unclassified rather than
+    failing the read - same posture as the candidate lookups."""
+    payload = _audit_payload(
+        shots=[
+            {
+                "shot_number": 1,
+                "candidate_number": 1,
+                "ms_after_beep": 500,
+                "interval_class": "warp",
+                "interval_class_source": "auto",
+            },
+            {
+                "shot_number": 2,
+                "candidate_number": 2,
+                "ms_after_beep": 900,
+                "interval_class": "split",
+            },
+        ]
+    )
+    shots = audit_data.audit_shots_to_engine_shots(payload, beep_time_in_source=10.0)
+    assert [(s.interval_class, s.interval_class_source) for s in shots] == [
+        (None, None),
+        (None, None),
+    ]
+
+
 def test_audit_shots_to_engine_shots_preserves_notes() -> None:
     payload = _audit_payload(
         shots=[
