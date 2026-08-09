@@ -10,9 +10,9 @@ import typer
 from rich.console import Console
 
 from .. import camera_select
+from ..export_naming import slugify
 from ..match_model import Match, is_match_folder
 from ..overlay_theme import THEME_NAMES, ThemeName
-from ..ui.match_exports import _slugify
 from . import emitter as emitter_mod
 from . import manifest as manifest_mod
 from . import mp4_grid, project_loader
@@ -277,11 +277,11 @@ def _apply_manifest_overrides(
     checked here first -- an ``--audio-from`` naming nobody would
     otherwise reach the emitter as a bare ``ValueError``.
     """
-    by_key = {_slugify(s.label): s.label for s in manifest.shooters}
+    by_key = {slugify(s.label, fallback="shooter"): s.label for s in manifest.shooters}
     cameras_by_label: dict[str, str] = {}
     unknown: list[str] = []
     for key, value in cameras.items():
-        label = by_key.get(_slugify(key))
+        label = by_key.get(slugify(key, fallback="shooter"))
         if label is None:
             unknown.append(key)
         else:

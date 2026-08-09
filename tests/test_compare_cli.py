@@ -12,9 +12,9 @@ from typer.testing import CliRunner
 
 from splitsmith.cli import app
 from splitsmith.compare.project_loader import CompareShooterBundle, ProbeFn
+from splitsmith.export_naming import stage_file_base
 from splitsmith.fcpxml_gen import VideoMetadata
 from splitsmith.match_model import Match, MatchStageDefinition, Shooter, ShooterStageData
-from splitsmith.ui.match_exports import _slugify
 from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 
 
@@ -37,7 +37,7 @@ def _seed_shooter(root: Path, *, name: str, stage_name: str = "Skipper") -> Path
         )
     ]
     project.save(root)
-    trim = project.exports_path(root) / f"stage1_{_slugify(stage_name)}_trimmed.mp4"
+    trim = project.exports_path(root) / f"{stage_file_base(1, stage_name)}_trimmed.mp4"
     trim.parent.mkdir(parents=True, exist_ok=True)
     trim.write_bytes(b"")
     return root
@@ -95,7 +95,7 @@ def _seed_match_with_two_cams(root: Path, *, stage_name: str = "Skipper") -> Pat
     stamped = MatchProject.load(shooter_root)
     exports = stamped.exports_path(shooter_root)
     exports.mkdir(parents=True, exist_ok=True)
-    base = f"stage1_{_slugify(stage_name)}"
+    base = f"{stage_file_base(1, stage_name)}"
     (exports / f"{base}_trimmed.mp4").write_bytes(b"")
     chest_id = stamped.stage(1).videos[-1].video_id
     (exports / f"{base}_cam_{chest_id}_trimmed.mp4").write_bytes(b"")
@@ -221,7 +221,7 @@ def test_missing_per_cam_trim_warns_instead_of_silently_emptying(
     stamped = MatchProject.load(anders_root)
     exports = stamped.exports_path(anders_root)
     exports.mkdir(parents=True, exist_ok=True)
-    (exports / f"stage1_{_slugify('Skipper')}_trimmed.mp4").write_bytes(b"")
+    (exports / f"{stage_file_base(1, 'Skipper')}_trimmed.mp4").write_bytes(b"")
 
     for trim in (match_root / "shooters" / "mathias" / "exports").glob("*_cam_*_trimmed.mp4"):
         trim.unlink()
@@ -401,7 +401,7 @@ def _seed_shooter_with_two_cams(root: Path, *, name: str, stage_name: str = "Ski
     stamped = MatchProject.load(root)
     exports = stamped.exports_path(root)
     exports.mkdir(parents=True, exist_ok=True)
-    base = f"stage1_{_slugify(stage_name)}"
+    base = f"{stage_file_base(1, stage_name)}"
     (exports / f"{base}_trimmed.mp4").write_bytes(b"")
     chest_id = stamped.stage(1).videos[-1].video_id
     (exports / f"{base}_cam_{chest_id}_trimmed.mp4").write_bytes(b"")

@@ -21,9 +21,9 @@ import splitsmith.compare.cli as cli_mod
 import splitsmith.compare.project_loader as pl_mod
 from splitsmith.cli import app
 from splitsmith.compare import mp4_grid
+from splitsmith.export_naming import stage_file_base
 from splitsmith.fcpxml_gen import VideoMetadata
 from splitsmith.match_model import Match, MatchStageDefinition, Shooter, ShooterStageData
-from splitsmith.ui.match_exports import _slugify
 from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 from tests.conftest import strip_ansi
 
@@ -80,7 +80,7 @@ def _seed_match_with_stages(root: Path, *, stage_count: int = 2) -> Path:
     exports = project.exports_path(shooter_root)
     exports.mkdir(parents=True, exist_ok=True)
     for n, name in stage_names.items():
-        (exports / f"stage{n}_{_slugify(name)}_trimmed.mp4").write_bytes(b"")
+        (exports / f"{stage_file_base(n, name)}_trimmed.mp4").write_bytes(b"")
     return root
 
 

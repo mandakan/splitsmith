@@ -349,13 +349,13 @@ def test_reading_audit_data_does_not_drag_in_the_web_ui_export_layer() -> None:
 
     - ``overlay_data`` imports ``ui.project`` for ``MatchProject`` /
       ``StageScorecard`` -- a data model, reaching no overlay module.
-    - ``compare.project_loader`` imports ``ui.match_exports._slugify``,
-      a private helper. The same layering smell as the edge this test
-      names, but ``match_exports`` reaches no overlay module either.
+    ``compare.project_loader`` used to reach ``ui.match_exports`` for a
+    private ``_slugify`` as well; that one is gone -- it turned out to
+    be a real bug, not just a smell, and moved to ``export_naming``.
 
-    Both deserve their own change rather than a silent widening of this
-    one, so naming them here would make this test about something it
-    does not fix.
+    ``ui.project`` deserves its own change rather than a silent
+    widening of this one, so naming it here would make this test about
+    something it does not fix.
 
     A subprocess because this test module imports ``splitsmith.ui.*`` at
     the top: in-process ``sys.modules`` is already populated and the

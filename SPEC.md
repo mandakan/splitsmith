@@ -127,6 +127,12 @@ Tuning notes:
 - `audit_shots_to_engine_shots`: audit `shots[]` → `Shot` records. Audit times are clip-local; the engine wants source-absolute, so `time_absolute = beep_time_in_source + time_from_beep`. Shot 1's split is the draw; shot N>1 is the difference between successive `time_from_beep` values, matching `csv_gen.write_splits_csv`.
 - **Why a core module and not part of `ui/exports.py`, where both used to live:** two consumers on opposite sides of the codebase need them — the export pipeline and `compare/overlay_data.py`. The compare side reaching into the web-UI layer closed an import cycle through `overlay_render` (issue #760). Nothing here knows about HTTP; it imports only `config`.
 
+**`export_naming.py`** — The names export artefacts get on disk.
+- `stage_file_base(stage_number, stage_name)` → `stage<N>_<slug>`, the shared stem every per-stage artefact appends to (`_trimmed.mp4`, `_cam_<video_id>_trimmed.mp4`, `.csv`, `.fcpxml`).
+- One writer produces these names and six readers look for them (CLI, `ui.exports`, `ui.project`, `ui.server`, MCP export tools, `compare.project_loader`). They all call this rather than interpolating, so they cannot drift.
+- `slugify(name, *, fallback)` takes its fallback explicitly. `stage` and `match` are both correct for their own job — an unnamed project should not produce `stage-match.fcpxml` — and letting each caller hard-code one is what caused two readers to look for files the exporter never wrote.
+- Distinct from `match_model.slugify_filename`, which strips diacritics and bounds its length for URL-safe ids. Merging them would rename existing files.
+
 **`csv_gen.py`** — Write splits CSV.
 - Columns: `shot_number, time_from_start, split, peak_amplitude, confidence, notes`
 - Time format: seconds with 3 decimal places (millisecond precision).

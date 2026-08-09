@@ -28,6 +28,7 @@ from typing import Any, Literal
 from .. import templates as templates_module
 from ..config import Config
 from ..config import StageData as EngineStageData
+from ..export_naming import stage_file_base
 from ..ui import exports as export_helpers
 from ..ui import match_exports as match_export_helpers
 from ..ui.project import MatchProject, StageEntry
@@ -275,7 +276,7 @@ def export_match_tool(
                 f"stage {stage_number} has no primary or no beep yet; "
                 "finish ingest + audit before match export"
             )
-        base = f"stage{stage_number}_{export_helpers._slugify(stage.stage_name)}"
+        base = stage_file_base(stage_number, stage.stage_name)
         trimmed_path = exports_dir / f"{base}_trimmed.mp4"
         if not trimmed_path.exists():
             raise FileNotFoundError(

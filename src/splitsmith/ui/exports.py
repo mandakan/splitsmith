@@ -14,13 +14,13 @@ the production UI is that the user-audited shots are the truth.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import csv_gen, fcpxml_gen, overlay_render, report, trim
 from ..audit_data import audit_shots_to_engine_shots, read_audit_data
 from ..config import Config, ReportFiles, StageAnalysis, StageData
+from ..export_naming import stage_file_base
 from ..overlay_render import OverlayCodec
 from ..overlay_theme import ThemeName
 
@@ -147,7 +147,7 @@ def export_stage(
     # the audit trail stays clean.
 
     exports_dir.mkdir(parents=True, exist_ok=True)
-    base = f"stage{stage_data.stage_number}_{_slugify(stage_data.stage_name)}"
+    base = stage_file_base(stage_data.stage_number, stage_data.stage_name)
 
     skip_reasons: list[str] = []
 
@@ -444,13 +444,3 @@ def export_stage(
         shot_anomalies=shot_anomalies,
         export_failures=list(skip_reasons),
     )
-
-
-_SLUG_RE = re.compile(r"[^a-z0-9]+")
-
-
-def _slugify(name: str) -> str:
-    """Filesystem-friendly slug. Mirrors the CLI's ``_slugify`` exactly so
-    exports have identical names whether produced via the CLI or the
-    production UI -- byte-comparable filenames are part of the AC."""
-    return _SLUG_RE.sub("-", name.lower()).strip("-") or "stage"

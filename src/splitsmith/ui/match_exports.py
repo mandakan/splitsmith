@@ -14,7 +14,6 @@ That keeps the unit tests free of project fixtures.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -22,6 +21,7 @@ from typing import Literal
 from .. import composition, fcp7xml_render, fcpxml_gen, mp4_render, youtube_sidecar
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..config import OutputConfig
+from ..export_naming import slugify
 
 PipLayout = Literal["stacked", "pip-corners"]
 # Issue #197. ``"fcpxml"`` writes a Final Cut Pro 1.10 timeline (current
@@ -279,7 +279,7 @@ def export_match(
 
     exports_dir.mkdir(parents=True, exist_ok=True)
     extension = _OUTPUT_EXTENSIONS[request.output_format]
-    output_path = exports_dir / f"{_slugify(request.project_name)}-match{extension}"
+    output_path = exports_dir / f"{slugify(request.project_name, fallback='match')}-match{extension}"
     # Match export goes through the composition IR (issue #194). The bridge
     # renderer lowers back to ``generate_match_fcpxml`` for the FCPXML path
     # so output stays byte-identical to the pre-IR emitter when no extra
@@ -411,15 +411,6 @@ _OUTPUT_EXTENSIONS: dict[OutputFormat, str] = {
     "fcp7xml": ".xml",
     "mp4": ".mp4",
 }
-
-
-_SLUG_RE = re.compile(r"[^a-z0-9]+")
-
-
-def _slugify(name: str) -> str:
-    """Filesystem-friendly slug. Mirrors ``exports._slugify`` so match-export
-    filenames look the same as their per-stage cousins."""
-    return _SLUG_RE.sub("-", name.lower()).strip("-") or "match"
 
 
 def _build_uniform_transitions(
