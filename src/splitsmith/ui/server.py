@@ -3811,6 +3811,9 @@ class CompareShotPoint(BaseModel):
     shot_number: int
     time_after_beep: float  # seconds since beep (primary stage clock)
     source: Literal["detected", "manual"]
+    # Interval class from the audit doc (#781). Legacy docs are healed
+    # in memory on read; junk values degrade to ``None``.
+    interval_class: IntervalClass | None = None
 
 
 class CompareShooterRecord(BaseModel):
@@ -12621,23 +12624,35 @@ def create_app(
                 # state_docs (hosted) or disk (local).
                 audit_data, _ = state.load_audit(shooter_root.name, stage_number)
                 if isinstance(audit_data, dict):
-                    for shot in audit_data.get("shots") or []:
-                        t = shot.get("time")
-                        if t is None:
-                            continue
-                        # Audit stores time in the trim's local clock;
-                        # subtract the trim's beep offset to get
-                        # time-since-beep.
-                        audit_beep = audit_data.get("beep_time")
-                        if audit_beep is None:
-                            continue
-                        shots.append(
-                            CompareShotPoint(
-                                shot_number=int(shot.get("shot_number", 0)),
-                                time_after_beep=float(t) - float(audit_beep),
-                                source=("manual" if shot.get("source") == "manual" else "detected"),
+                    audit_beep = audit_data.get("beep_time")
+                    raw_shots = [s for s in (audit_data.get("shots") or []) if isinstance(s, dict)]
+                    if audit_beep is not None:
+                        # #781: legacy docs predate #775's classify-on-save;
+                        # heal in memory only. Never persisted - share
+                        # requests impersonate the owner tenant and
+                        # ``current_share_request`` is the only write
+                        # defense (#778), so this read path stays write-free.
+                        if any(
+                            s.get("ms_after_beep") is not None
+                            and s.get(coach_module.FIELD_INTERVAL_CLASS) is None
+                            for s in raw_shots
+                        ):
+                            coach_module.classify_intervals_in_dicts(raw_shots, CoachAutoClassifyConfig())
+                        for shot in raw_shots:
+                            t = shot.get("time")
+                            if t is None:
+                                continue
+                            cls = shot.get(coach_module.FIELD_INTERVAL_CLASS)
+                            shots.append(
+                                CompareShotPoint(
+                                    shot_number=int(shot.get("shot_number", 0)),
+                                    time_after_beep=float(t) - float(audit_beep),
+                                    source=("manual" if shot.get("source") == "manual" else "detected"),
+                                    interval_class=(
+                                        cls if cls in coach_module.COACH_INTERVAL_CLASSES else None
+                                    ),
+                                )
                             )
-                        )
 
             records.append(
                 CompareShooterRecord(
