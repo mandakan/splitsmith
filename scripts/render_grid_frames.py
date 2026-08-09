@@ -67,7 +67,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from splitsmith.compare import mp4_grid  # noqa: E402
-from splitsmith.compare.layout import choose_grid, grid_shape  # noqa: E402
 from tests.compare_fixture import (  # noqa: E402
     HEAD_PAD_SECONDS,
     MAX_SHOOTERS,
@@ -376,28 +375,12 @@ def main(argv: list[str] | None = None) -> int:
     if not ffmpeg_available():
         parser.error("ffmpeg and ffprobe must be on PATH")
 
-    # ``mp4_grid._cell_size`` floors, so a canvas that does not divide by
-    # the grid composes narrower or shorter than the canvas -- 1280x720 at
-    # 3x3 is 3 x 426 = 1278 wide. The live overlay survives that (it is
-    # composited with ``overlay``, which just draws at 0,0), but the
-    # summary hold does not: the still is canvas-sized and goes into the
-    # video stream through ``concat``, which refuses mismatched
-    # dimensions and fails the whole stage with a wall of filter-graph
-    # errors. The shipped 3840x2160 divides by 1, 2 and 3 so it never
-    # bites in production, and no CLI flag exposes the canvas today.
-    # Caught here rather than left to ffmpeg, because the message it
-    # gives is unreadable.
-    rows, cols = grid_shape(choose_grid(args.shooters))
+    # A canvas that does not divide by the grid composes slightly smaller
+    # (``mp4_grid._cell_size`` floors - 1280x720 at 3x3 renders 1278x720).
+    # Since #691 the summary stills are composed at that same size, so the
+    # combination just works; the output is the composed size, not the
+    # requested canvas.
     width, height = args.canvas
-    if args.summary_hold > 0 and (width % cols or height % rows):
-        parser.error(
-            f"a {args.shooters}-shooter render is a {rows}x{cols} grid, and {width}x{height} does "
-            f"not divide by it ({cols} x {width // cols} = {cols * (width // cols)} wide, "
-            f"{rows} x {height // rows} = {rows * (height // rows)} tall). The summary hold "
-            f"concatenates a canvas-sized still into the video stream and concat refuses a size "
-            f"mismatch. Use a canvas divisible by {cols}x{rows} (e.g. "
-            f"{width - width % cols}x{height - height % rows}), or drop --summary-hold."
-        )
 
     ffmpeg = shutil.which("ffmpeg")
     ffprobe = shutil.which("ffprobe")
