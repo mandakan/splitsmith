@@ -31,7 +31,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 #: The interval class naming the draw. Mirrors ``CoachIntervalClass`` in
 #: ``ui_static/src/lib/api.ts``; ``coach.py`` owns the Python side.
@@ -127,6 +127,8 @@ def stage_figures(intervals: Sequence[Interval], *, transition_min: float) -> St
 class RosterEntry(BaseModel):
     """One shooter on a match card."""
 
+    model_config = ConfigDict(frozen=True)
+
     name: str
     division: str | None = None
 
@@ -139,6 +141,8 @@ class MatchCard(BaseModel):
     produces. See the spec's "Match card -- roster" section.
     """
 
+    model_config = ConfigDict(frozen=True)
+
     match_name: str
     match_date: str | None = None
     stage_count: int
@@ -148,12 +152,23 @@ class MatchCard(BaseModel):
     @classmethod
     def _sorted_roster(cls, value: list[RosterEntry]) -> list[RosterEntry]:
         """Alphabetical by name, matching the slot-order convention
-        ``compare/`` already uses so a roster never reshuffles."""
+        ``compare/`` already uses so a roster never reshuffles.
+
+        This validator runs on construction and on ``model_validate`` --
+        the two paths a card normally travels. It does **not** run on
+        ``model_copy(update={"roster": ...})``: Pydantic v2 gives frozen
+        models no hook for that path, so a copy-update with an out-of-order
+        list is not re-sorted and not rejected. Callers that need to change
+        a roster must rebuild the ``MatchCard`` (or the ``roster`` list)
+        rather than ``model_copy``-update it.
+        """
         return sorted(value, key=lambda r: r.name)
 
 
 class StageCard(BaseModel):
     """One shooter's run on one stage."""
+
+    model_config = ConfigDict(frozen=True)
 
     stage_number: int
     stage_name: str

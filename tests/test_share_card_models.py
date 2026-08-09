@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from splitsmith.share_card import (
     Interval,
     MatchCard,
@@ -46,6 +49,32 @@ def test_roster_is_sorted_alphabetically_by_name() -> None:
         ],
     )
     assert [r.name for r in card.roster] == ["Anders Berg", "Mathias Axell", "Petra Lind"]
+
+
+def test_match_card_is_frozen_against_attribute_assignment() -> None:
+    card = MatchCard(match_name="Tallmilan 2026", match_date="2026-04-26", stage_count=7, roster=[])
+    with pytest.raises(ValidationError):
+        card.roster = [RosterEntry(name="Zoe"), RosterEntry(name="Bob")]
+
+
+def test_model_validate_of_a_dumped_card_preserves_the_sort() -> None:
+    card = MatchCard(
+        match_name="Tallmilan 2026",
+        match_date="2026-04-26",
+        stage_count=7,
+        roster=[
+            RosterEntry(name="Petra Lind", division="Standard"),
+            RosterEntry(name="Anders Berg", division="Production Optics"),
+            RosterEntry(name="Mathias Axell", division="Production Optics"),
+        ],
+    )
+    dumped = card.model_dump(mode="json")
+    # Scramble the order in the dumped payload so re-validation is the only
+    # thing that could put it back -- a no-op re-sort on already-sorted data
+    # wouldn't prove the validator ran.
+    dumped["roster"] = list(reversed(dumped["roster"]))
+    rebuilt = MatchCard.model_validate(dumped)
+    assert [r.name for r in rebuilt.roster] == ["Anders Berg", "Mathias Axell", "Petra Lind"]
 
 
 def test_hash_is_stable_across_equal_cards() -> None:
