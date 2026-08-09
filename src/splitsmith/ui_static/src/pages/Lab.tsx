@@ -65,7 +65,7 @@ import {
   type StageAudit,
   type StageExportStatus,
 } from "@/lib/api";
-import { slugify } from "@/lib/slugify";
+import { exportSlugify } from "@/lib/slugify";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_CONFIG: LabEvalConfig = {
@@ -1615,7 +1615,10 @@ function buildBatchRows(
 ): BatchRow[] {
   const existing = new Set(catalog.map((f) => f.slug));
   const token = project.shooter_token;
-  const projectSlug = slugify(project.name);
+  // Must agree with the backend reader (`/api/lab/promote-from-anchor`
+  // composes the same slug via export_naming.slugify with this fallback),
+  // or the secondary promote 409s on a fixture the primary just wrote.
+  const projectSlug = exportSlugify(project.name, "stage");
   const overviewByStage = new Map(overview.map((s) => [s.stage_number, s]));
   const rows: BatchRow[] = [];
   for (const stage of project.stages) {
