@@ -66,6 +66,54 @@ def test_unclassified_stage_falls_back_through_the_shared_helper() -> None:
     assert figs.avg_split == pytest.approx(0.182, abs=5e-4)
 
 
+#: Draw, then four post-draw intervals chosen so the coached and uncoached
+#: paths *cannot* agree under the 0.5 s ``split_max`` cutoff (#776):
+#:
+#:   * ``0.30`` classed ``transition`` -- the coach excludes it (dead
+#:     time), the cutoff includes it (0.30 <= 0.50);
+#:   * ``0.60`` classed ``split`` -- the coach includes it (still
+#:     shooting), the cutoff excludes it (0.60 > 0.50).
+#:
+#: Both are ordinary manual overrides: a shooter who swung the gun without
+#: moving their feet calls the 0.30 a transition, and a hard partial at
+#: distance takes 0.60 and is still a split. Every other fixture in this
+#: file lands on the same side of both rules, which is why they all stay
+#: green with the classification branch disabled.
+_DISCRIMINATING_SECONDS = [1.20, 0.20, 0.30, 0.60, 0.20]
+_DISCRIMINATING_CLASSES = ["first_shot", "split", "transition", "split", "split"]
+
+
+def test_classification_changes_the_numbers_not_just_the_provenance_label() -> None:
+    """The same run, coached and uncoached, must produce *different*
+    averages -- otherwise nothing in this file can fail when the
+    classification is silently ignored.
+
+    ``source`` alone has no power here: ``stage_figures`` computes it from
+    its own ``any(...)`` over the shots, so it still reads ``"coach"`` even
+    if ``statistic_splits`` fell through to the threshold branch. Only the
+    average discriminates, which is why both are asserted by value.
+    """
+    classified = tuple(
+        _Shot(split=s, interval_class=c)
+        for s, c in zip(_DISCRIMINATING_SECONDS, _DISCRIMINATING_CLASSES, strict=True)
+    )
+    unclassified = tuple(_Shot(split=s, interval_class=None) for s in _DISCRIMINATING_SECONDS)
+
+    coach = stage_figures(classified)
+    threshold = stage_figures(unclassified)
+
+    assert coach.source == "coach"
+    assert threshold.source == "threshold"
+    # Coached: 0.20 + 0.60 + 0.20, the 0.30 transition dropped as dead time.
+    assert coach.avg_split == pytest.approx((0.20 + 0.60 + 0.20) / 3)
+    # Uncoached: 0.20 + 0.30 + 0.20, the 0.60 dropped for being over the
+    # cutoff -- the rule cannot see either class.
+    assert threshold.avg_split == pytest.approx((0.20 + 0.30 + 0.20) / 3)
+    assert coach.avg_split != pytest.approx(threshold.avg_split)
+    assert coach.split_count == threshold.split_count == 3
+    assert coach.interval_count == threshold.interval_count == 5
+
+
 def test_the_fallback_excludes_a_draw_faster_than_the_threshold() -> None:
     """Isolates the index-0 guard: the draw must be excluded from the split
     average by *position*, not by duration.
