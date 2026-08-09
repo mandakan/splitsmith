@@ -7,9 +7,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .. import camera_select, fcpxml_gen
+from ..export_naming import stage_file_base
 from ..fcpxml_gen import VideoMetadata
 from ..match_model import Match
-from ..ui.match_exports import _slugify
 from ..ui.project import MatchProject, StageVideo
 
 ProbeFn = Callable[[Path], VideoMetadata]
@@ -99,7 +99,7 @@ def trim_path_for_video(
     ``exports.export_stage``. ``video=None`` means the primary, same
     convention as :func:`splitsmith.camera_select.resolve_camera`.
     """
-    base = f"stage{stage_number}_{_slugify(stage_name)}"
+    base = stage_file_base(stage_number, stage_name)
     exports = project.exports_path(project_root)
     if video is None or video.role == "primary":
         return exports / f"{base}_trimmed.mp4"

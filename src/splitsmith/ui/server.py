@@ -160,6 +160,7 @@ from ..config import (
     IntervalClassSource,
     StageRounds,
 )
+from ..export_naming import slugify, stage_file_base
 from ..fixture_schema import (
     AgcState,
     AudioSource,
@@ -3136,7 +3137,6 @@ def register_job_bodies(state: AppState) -> None:
         match FCPXML.
         """
         from ..config import StageData as EngineStageData
-        from . import exports as exports_mod
 
         handle.update(progress=0.02, message="Loading project...")
         with handle.timer.phase("load_project"):
@@ -3160,7 +3160,7 @@ def register_job_bodies(state: AppState) -> None:
                 if prim is None or prim.beep_time is None:
                     raise RuntimeError(f"stage {stage_number}: primary or beep disappeared mid-flight")
 
-                base = f"stage{stage_number}_{exports_mod._slugify(stg.stage_name)}"
+                base = stage_file_base(stage_number, stg.stage_name)
                 trimmed_path = exports_dir / f"{base}_trimmed.mp4"
                 overlay_target = exports_dir / f"{base}_overlay.mov"
 
@@ -3284,7 +3284,7 @@ def register_job_bodies(state: AppState) -> None:
                 stg = proj.stage(stage_number)
                 prim = stg.primary()
                 assert prim is not None and prim.beep_time is not None
-                base = f"stage{stage_number}_{exports_mod._slugify(stg.stage_name)}"
+                base = stage_file_base(stage_number, stg.stage_name)
                 trimmed_path = exports_dir / f"{base}_trimmed.mp4"
                 audit_path = audit_dir / f"stage{stage_number}.json"
                 overlay_path = exports_dir / f"{base}_overlay.mov"
@@ -12550,7 +12550,7 @@ def create_app(
                 # and the fallback lets compare just work after audit
                 # without requiring a separate lossless export pass.
                 stage_name = stage_def.stage_name
-                base = f"stage{stage_number}_{match_export_helpers._slugify(stage_name)}"
+                base = stage_file_base(stage_number, stage_name)
                 exports = (
                     Path(legacy.exports_dir).expanduser() if legacy.exports_dir else shooter_root / "exports"
                 )
@@ -13954,9 +13954,8 @@ def create_app(
                     detail=("this project has no SSI shooter pinned; " "cannot resolve anchor fixture slug."),
                 )
             anchor_token = lab_module.shooter_token(project.selected_shooter_id)
-            primary_slug = (
-                f"stage-shots-{export_helpers._slugify(project.name)}-stage{stage_number}" f"-{anchor_token}"
-            )
+            name_slug = slugify(project.name, fallback="stage")
+            primary_slug = f"stage-shots-{name_slug}-stage{stage_number}-{anchor_token}"
             fixtures_root = lab_module.core.DEFAULT_FIXTURES_ROOT
             anchor_path = fixtures_root / f"{primary_slug}.json"
             if not anchor_path.exists():

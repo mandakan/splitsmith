@@ -22,8 +22,8 @@ from splitsmith.compare.project_loader import (
     load_shooter_from_match,
 )
 from splitsmith.config import StageRounds
+from splitsmith.export_naming import stage_file_base
 from splitsmith.match_model import execute_merge, plan_merge
-from splitsmith.ui.match_exports import _slugify
 from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 
 
@@ -101,7 +101,7 @@ def _seed_legacy_project(
     exports = project.exports_path(root)
     exports.mkdir(parents=True, exist_ok=True)
     for n, sname, _ in stages_meta:
-        (exports / f"stage{n}_{_slugify(sname)}_trimmed.mp4").write_bytes(b"")
+        (exports / f"{stage_file_base(n, sname)}_trimmed.mp4").write_bytes(b"")
     return project
 
 

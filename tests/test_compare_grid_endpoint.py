@@ -27,10 +27,10 @@ import pytest
 
 from splitsmith.compare import mp4_grid as mp4_grid_mod
 from splitsmith.compare import project_loader as pl_mod
+from splitsmith.export_naming import stage_file_base
 from splitsmith.fcpxml_gen import VideoMetadata
 from splitsmith.match_model import Match, MatchStageDefinition, Shooter
 from splitsmith.ui import server as server_mod
-from splitsmith.ui.match_exports import _slugify
 from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 from tests.test_ui_server import _match_create_app, _MatchClient
 
@@ -79,7 +79,7 @@ def _write_trims(match_root: Path, *, slug: str, stage_numbers: list[int]) -> No
     exports.mkdir(parents=True, exist_ok=True)
     for number in stage_numbers:
         stage = next(s for s in project.stages if s.stage_number == number)
-        (exports / f"stage{number}_{_slugify(stage.stage_name)}_trimmed.mp4").write_bytes(b"")
+        (exports / f"{stage_file_base(number, stage.stage_name)}_trimmed.mp4").write_bytes(b"")
 
 
 def _seed_match(tmp_path: Path, *, shooters: list[str], stage_numbers: list[int]) -> Path:

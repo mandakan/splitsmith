@@ -12,7 +12,6 @@ This module orchestrates -- all detection / IO logic lives in dedicated modules.
 from __future__ import annotations
 
 import json
-import re
 import shutil
 from pathlib import Path
 
@@ -47,6 +46,7 @@ from .config import (
     StageAnalysis,
     StageData,
 )
+from .export_naming import stage_file_base
 from .runtime import runtime
 from .ui.project import MatchProject
 
@@ -1273,7 +1273,7 @@ def _process_one(
     markers) still produce -- mirrors the permissive export gate
     introduced in #214.
     """
-    base = f"stage{stage.stage_number}_{_slugify(stage.stage_name)}"
+    base = stage_file_base(stage.stage_number, stage.stage_name)
     audio_path = _video_to_audio_path(video)
     audio, sr = _extract_or_load_audio(video, audio_path)
 
@@ -1453,13 +1453,6 @@ def _iter_video_files(directory: Path):
     if not directory.is_dir():
         raise typer.BadParameter(f"not a directory: {directory}")
     return [p for p in directory.iterdir() if p.suffix.lower() in {".mp4", ".mov", ".m4v"}]
-
-
-_SLUG_RE = re.compile(r"[^a-z0-9]+")
-
-
-def _slugify(name: str) -> str:
-    return _SLUG_RE.sub("-", name.lower()).strip("-") or "stage"
 
 
 def _override_trim_mode(output_config, value: str):

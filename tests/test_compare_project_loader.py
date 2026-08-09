@@ -13,9 +13,9 @@ from splitsmith.compare.project_loader import (
     load_shooter_from_match,
     trim_path_for_stage,
 )
+from splitsmith.export_naming import stage_file_base
 from splitsmith.fcpxml_gen import VideoMetadata
 from splitsmith.match_model import Match, MatchStageDefinition, Shooter, ShooterStageData
-from splitsmith.ui.match_exports import _slugify
 from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 
 
@@ -108,7 +108,7 @@ def _seed_project_with_two_cams(tmp_path: Path, *, chest_on_stage_2: bool = True
     project = MatchProject.load(root)
     exports = project.exports_path(root)
     for stage in project.stages:
-        base = f"stage{stage.stage_number}_{_slugify(stage.stage_name)}"
+        base = f"{stage_file_base(stage.stage_number, stage.stage_name)}"
         for video in stage.videos:
             if video.role == "primary":
                 _touch(exports / f"{base}_trimmed.mp4")
@@ -190,7 +190,7 @@ def _build_two_stage_match(tmp_path: Path) -> Path:
 
     exports = project.exports_path(shooter_root)
     exports.mkdir(parents=True, exist_ok=True)
-    (exports / f"stage1_{_slugify('Stage One')}_trimmed.mp4").write_bytes(b"trim")
+    (exports / f"{stage_file_base(1, 'Stage One')}_trimmed.mp4").write_bytes(b"trim")
 
     return match_root
 
@@ -359,7 +359,7 @@ def test_probe_metadata_propagates(tmp_path: Path) -> None:
 
 
 def test_slug_drives_trim_filename(tmp_path: Path) -> None:
-    """Stage with a complex name resolves through ``_slugify`` for the filename."""
+    """Stage with a complex name resolves through ``stage_file_base`` for the filename."""
     root = tmp_path / "slug"
     project = _build_project(
         root,
@@ -535,7 +535,7 @@ def test_load_shooter_from_match_selects_camera(tmp_path: Path) -> None:
 
     chest_id = MatchProject.load(shooter_root).stage(1).videos[-1].video_id
     exports = shooter_root / "exports"
-    (exports / f"stage1_{_slugify('Stage One')}_cam_{chest_id}_trimmed.mp4").write_bytes(b"trim")
+    (exports / f"{stage_file_base(1, 'Stage One')}_cam_{chest_id}_trimmed.mp4").write_bytes(b"trim")
 
     bundle = load_shooter_from_match(match_root, "mathias", "Mathias", camera="chest", probe=_stub_probe)
     stage = bundle.stages_by_number[1]
@@ -559,7 +559,7 @@ def test_load_shooter_from_match_sees_post_merge_beeps(tmp_path: Path) -> None:
 
     exports = shooter_root / "exports"
     exports.mkdir(parents=True, exist_ok=True)
-    (exports / f"stage2_{_slugify('Stage Two')}_trimmed.mp4").write_bytes(b"trim")
+    (exports / f"{stage_file_base(2, 'Stage Two')}_trimmed.mp4").write_bytes(b"trim")
 
     bundle = load_shooter_from_match(match_root, "mathias", "Mathias", probe=_stub_probe)
 
@@ -590,12 +590,12 @@ def test_load_shooter_from_match_names_trims_from_the_shooters_own_stage_name(
     exports.mkdir(parents=True, exist_ok=True)
     for stale in exports.glob("stage1_*_trimmed.mp4"):
         stale.unlink()
-    (exports / f"stage1_{_slugify('El Presidente')}_trimmed.mp4").write_bytes(b"trim")
+    (exports / f"{stage_file_base(1, 'El Presidente')}_trimmed.mp4").write_bytes(b"trim")
 
     bundle = load_shooter_from_match(match_root, "mathias", "Mathias", probe=_stub_probe)
 
     stage = bundle.stages_by_number[1]
-    assert stage.trim_path.name == f"stage1_{_slugify('El Presidente')}_trimmed.mp4"
+    assert stage.trim_path.name == f"{stage_file_base(1, 'El Presidente')}_trimmed.mp4"
     # The label stays the match's: a shared stage must read the same across
     # every tile in the grid, whatever one shooter's scorecard called it.
     assert stage.stage_name == "Stage One"

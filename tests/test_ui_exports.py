@@ -339,14 +339,6 @@ def test_export_stage_skips_trim_and_fcpxml_when_source_unreachable(tmp_path: Pa
     assert any("fcpxml not written" in a for a in result.anomalies)
 
 
-def test_slugify_matches_cli_format() -> None:
-    """Filename slug parity: same shape as cli._slugify so exports
-    produced via the SPA and via the CLI are byte-comparable."""
-    assert exports_mod._slugify("Stage 1 -- H1") == "stage-1-h1"
-    assert exports_mod._slugify("All Symbols!@#") == "all-symbols"
-    assert exports_mod._slugify("") == "stage"
-
-
 def test_export_stage_trims_secondaries_and_records_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

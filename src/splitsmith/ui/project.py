@@ -40,6 +40,7 @@ from .. import video_match
 from ..async_bridge import run_sync
 from ..automation import AutomationOverride
 from ..config import BeepCandidate, StageData, StageRounds, VideoMatchConfig
+from ..export_naming import stage_file_base
 from ..storage import Storage
 from ..video_match import match_videos_to_stages
 
@@ -1221,7 +1222,6 @@ class MatchProject(BaseModel):
         passes ``audit_docs=None`` and has no bound storage, so this stays
         pure disk I/O.
         """
-        from . import exports as exports_mod  # local: avoid import cycle
 
         audit_dir = self.audit_path(root)
         exports_dir = self.exports_path(root)
@@ -1282,7 +1282,7 @@ class MatchProject(BaseModel):
                     if isinstance(cands, list):
                         total_candidates = len(cands)
 
-            base = f"stage{stage.stage_number}_{exports_mod._slugify(stage.stage_name)}"
+            base = stage_file_base(stage.stage_number, stage.stage_name)
             csv_p = exports_dir / f"{base}_splits.csv"
             fcpxml_p = exports_dir / f"{base}.fcpxml"
             report_p = exports_dir / f"{base}_report.txt"
