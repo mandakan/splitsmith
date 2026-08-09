@@ -1007,8 +1007,14 @@ git commit -m "feat(share): 1200x630 card HTML, pure and browser-free"
 - Produces:
   - `storage_key(token: str, card: MatchCard | StageCard, *, slug: str | None = None) -> str`
   - `render_card(card, *, theme, rasterizer) -> bytes`
-  - `cached_card_png(card, *, token, storage, theme, rasterizer, slug=None) -> bytes` -- reads storage, renders and writes on a miss, returns the bundled fallback plate on `RasterizerUnavailableError`
+  - `cached_card_png(card, *, token, storage, theme, rasterizer_factory, slug=None) -> bytes` -- reads storage, renders and writes on a miss, returns the bundled fallback plate on `RasterizerUnavailableError`
   - `FALLBACK_PNG_PATH: Path`
+
+**`rasterizer_factory`, not a rasterizer.** It is a zero-argument callable
+returning a context manager that yields a `Rasterizer`. Launching
+Chromium costs about a second; taking an already-live instance would pay
+that on every cache hit and defeat the cache. The factory is only called
+on a miss. Tests assert this directly.
 
 - [ ] **Step 1: Build the fallback plate**
 
@@ -1081,6 +1087,26 @@ class _BrokenRasterizer:
         raise RasterizerUnavailableError("no chromium", "no chromium, run the install hint")
 
 
+class _Factory:
+    """Zero-arg callable returning a context manager, standing in for
+    ``ChromiumRasterizer``. ``launches`` counts how many times a browser
+    would actually have been started -- a cache hit must not start one."""
+
+    def __init__(self, rasterizer: object) -> None:
+        self.rasterizer = rasterizer
+        self.launches = 0
+
+    def __call__(self) -> "_Factory":
+        self.launches += 1
+        return self
+
+    def __enter__(self) -> object:
+        return self.rasterizer
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
 @pytest.fixture
 def theme():
     return load_theme("splitsmith")
@@ -1131,8 +1157,9 @@ def test_stage_key_carries_slug_and_stage_number() -> None:
 
 def test_first_call_renders_and_writes(store, theme) -> None:
     ras = _FakeRasterizer()
+    factory = _Factory(ras)
     data = cached_card_png(
-        _match_card(), token=TOKEN, storage=store, theme=theme, rasterizer=ras
+        _match_card(), token=TOKEN, storage=store, theme=theme, rasterizer_factory=factory
     )
     assert data == ras.payload
     assert ras.calls == 1
@@ -1141,26 +1168,47 @@ def test_first_call_renders_and_writes(store, theme) -> None:
 
 def test_second_call_serves_the_cache_without_rendering(store, theme) -> None:
     ras = _FakeRasterizer()
+    factory = _Factory(ras)
     card = _match_card()
-    first = cached_card_png(card, token=TOKEN, storage=store, theme=theme, rasterizer=ras)
-    second = cached_card_png(card, token=TOKEN, storage=store, theme=theme, rasterizer=ras)
+    first = cached_card_png(
+        card, token=TOKEN, storage=store, theme=theme, rasterizer_factory=factory
+    )
+    second = cached_card_png(
+        card, token=TOKEN, storage=store, theme=theme, rasterizer_factory=factory
+    )
     assert first == second
     assert ras.calls == 1
 
 
+def test_a_cache_hit_never_launches_a_browser(store, theme) -> None:
+    """Launching Chromium costs about a second. Paying that on a hit
+    would defeat the cache, so the factory must stay uncalled."""
+    factory = _Factory(_FakeRasterizer())
+    card = _match_card()
+    cached_card_png(card, token=TOKEN, storage=store, theme=theme, rasterizer_factory=factory)
+    assert factory.launches == 1
+    cached_card_png(card, token=TOKEN, storage=store, theme=theme, rasterizer_factory=factory)
+    assert factory.launches == 1
+
+
 def test_changed_figures_miss_the_cache_and_re_render(store, theme) -> None:
     ras = _FakeRasterizer()
+    factory = _Factory(ras)
     card = _stage_card()
-    cached_card_png(card, token=TOKEN, storage=store, theme=theme, rasterizer=ras, slug="m")
+    cached_card_png(
+        card, token=TOKEN, storage=store, theme=theme, rasterizer_factory=factory, slug="m"
+    )
     moved = card.model_copy(update={"stage_name": "Short and Sweet"})
-    cached_card_png(moved, token=TOKEN, storage=store, theme=theme, rasterizer=ras, slug="m")
+    cached_card_png(
+        moved, token=TOKEN, storage=store, theme=theme, rasterizer_factory=factory, slug="m"
+    )
     assert ras.calls == 2
 
 
 def test_rasterizer_failure_serves_the_bundled_plate(store, theme) -> None:
     ras = _BrokenRasterizer()
     data = cached_card_png(
-        _match_card(), token=TOKEN, storage=store, theme=theme, rasterizer=ras
+        _match_card(), token=TOKEN, storage=store, theme=theme, rasterizer_factory=_Factory(ras)
     )
     assert data == FALLBACK_PNG_PATH.read_bytes()
     assert ras.calls == 1
@@ -1170,11 +1218,17 @@ def test_rasterizer_failure_does_not_poison_the_cache(store, theme) -> None:
     """A later working render must still be able to fill the key."""
     card = _match_card()
     cached_card_png(
-        card, token=TOKEN, storage=store, theme=theme, rasterizer=_BrokenRasterizer()
+        card,
+        token=TOKEN,
+        storage=store,
+        theme=theme,
+        rasterizer_factory=_Factory(_BrokenRasterizer()),
     )
     assert not store.exists(storage_key(TOKEN, card))
     good = _FakeRasterizer()
-    data = cached_card_png(card, token=TOKEN, storage=store, theme=theme, rasterizer=good)
+    data = cached_card_png(
+        card, token=TOKEN, storage=store, theme=theme, rasterizer_factory=_Factory(good)
+    )
     assert data == good.payload
 
 
@@ -1218,6 +1272,8 @@ working browser still fills it.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from contextlib import AbstractContextManager
 from importlib.resources import files
 from pathlib import Path
 
@@ -1261,15 +1317,21 @@ def cached_card_png(
     token: str,
     storage: Storage,
     theme: OverlayTheme,
-    rasterizer: Rasterizer,
+    rasterizer_factory: Callable[[], AbstractContextManager[Rasterizer]],
     slug: str | None = None,
 ) -> bytes:
-    """Serve the cached PNG, rendering and writing it on a miss."""
+    """Serve the cached PNG, rendering and writing it on a miss.
+
+    ``rasterizer_factory`` is called ONLY on a miss. Launching Chromium
+    costs about a second; taking a live rasterizer instead would pay that
+    on every cache hit and leave the cache saving nothing but CPU.
+    """
     key = storage_key(token, card, slug=slug)
     if storage.exists(key):
         return storage.read_bytes(key)
     try:
-        data = render_card(card, theme=theme, rasterizer=rasterizer)
+        with rasterizer_factory() as rasterizer:
+            data = render_card(card, theme=theme, rasterizer=rasterizer)
     except RasterizerUnavailableError as exc:
         # Deliberately not cached: a browser-less host must not pin the
         # fallback plate onto this key forever.
@@ -1282,7 +1344,7 @@ def cached_card_png(
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_share_card_render.py -n0 -q`
-Expected: PASS, 9 tests.
+Expected: PASS, 10 tests.
 
 - [ ] **Step 6: Commit**
 
@@ -1401,7 +1463,10 @@ def test_a_path_outside_the_allowlist_is_still_404(
     token = _create_share(client)
     client.cookies.clear()
 
-    assert client.get(f"/api/share/{token}/og/../../secrets").status_code == 404
+    # A non-numeric stage does not match the allowlist shape, so the
+    # middleware 404s before routing. (A "../.." path is not used here:
+    # httpx normalises it client-side, so that assertion could not fail.)
+    assert client.get(f"/api/share/{token}/og/{SLUG}/abc.png").status_code == 404
     assert client.get(f"/api/share/{token}/ogx.png").status_code == 404
 
 
@@ -1564,20 +1629,26 @@ _PNG_HEADERS = {"Cache-Control": "public, max-age=31536000, immutable"}
 
 
 def _png_response(state: Any, token: str, card: Any, slug: str | None) -> Response:
-    from ..overlay_raster import ChromiumRasterizer
-
     if state.storage is None:
         raise HTTPException(status_code=503, detail="storage unavailable")
-    with ChromiumRasterizer() as rasterizer:
-        data = cached_card_png(
-            card,
-            token=token,
-            storage=state.storage,
-            theme=load_theme("splitsmith"),
-            rasterizer=rasterizer,
-            slug=slug,
-        )
+    data = cached_card_png(
+        card,
+        token=token,
+        storage=state.storage,
+        theme=load_theme("splitsmith"),
+        # Passed as a factory, not an instance: a cache hit must not pay
+        # Chromium's ~1 s launch. Lazy import keeps a local-slim install
+        # from importing playwright at module load.
+        rasterizer_factory=_chromium_factory,
+        slug=slug,
+    )
     return Response(content=data, media_type="image/png", headers=_PNG_HEADERS)
+
+
+def _chromium_factory():
+    from ..overlay_raster import ChromiumRasterizer
+
+    return ChromiumRasterizer()
 
 
 @router.get("/api/share/{token}/og.png", include_in_schema=False)
@@ -1603,16 +1674,13 @@ def warm_match_card(state: Any, token: str) -> None:
     than pinning it: later data changes miss the cache and re-render."""
     if state.storage is None:
         return
-    from ..overlay_raster import ChromiumRasterizer
-
-    with ChromiumRasterizer() as rasterizer:
-        cached_card_png(
-            build_match_card(state),
-            token=token,
-            storage=state.storage,
-            theme=load_theme("splitsmith"),
-            rasterizer=rasterizer,
-        )
+    cached_card_png(
+        build_match_card(state),
+        token=token,
+        storage=state.storage,
+        theme=load_theme("splitsmith"),
+        rasterizer_factory=_chromium_factory,
+    )
 ```
 
 Confirm `state.match_meta()`, `state.shooters()` and the `stage` object's
