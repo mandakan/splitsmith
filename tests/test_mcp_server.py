@@ -9,8 +9,11 @@ under us without dragging stdio / asyncio into the unit suite.
 from __future__ import annotations
 
 import asyncio
+import typing
 
-from splitsmith.mcp import create_server
+import pytest
+
+from splitsmith.mcp import create_server, export_tools
 
 
 def _list_tool_names() -> set[str]:
@@ -78,6 +81,45 @@ def test_server_tools_have_descriptions() -> None:
     tools = asyncio.run(server.list_tools())
     for tool in tools:
         assert tool.description, f"{tool.name} has no description"
+
+
+def _literal_params(fn) -> dict[str, tuple[str, ...]]:
+    """The ``Literal``-typed parameters of an ``export_tools`` entry point."""
+    return {
+        name: typing.get_args(hint)
+        for name, hint in typing.get_type_hints(fn).items()
+        if typing.get_origin(hint) is typing.Literal
+    }
+
+
+CONSTRAINED_PARAMS = [
+    ("export_stage", name, values) for name, values in _literal_params(export_tools.export_stage_tool).items()
+] + [
+    ("export_match", name, values) for name, values in _literal_params(export_tools.export_match_tool).items()
+]
+
+
+@pytest.mark.parametrize(("tool_name", "param", "expected"), CONSTRAINED_PARAMS)
+def test_a_closed_set_reaches_the_agent_as_a_closed_set(
+    tool_name: str, param: str, expected: tuple[str, ...]
+) -> None:
+    """A ``Literal`` in ``export_tools`` must not widen to ``str`` at the tool.
+
+    The MCP wrappers are the only description an agent ever sees. Typing
+    one of these as a bare ``str`` tells the agent any string will do, so
+    it invents plausible-but-wrong values (``h264`` for an overlay codec)
+    and the failure surfaces deep in the export instead of at the call.
+    The tool schema is where the constraint has to be legible.
+
+    Driven off ``export_tools``' own annotations so the two cannot drift:
+    adding a value there without re-exposing it here fails this.
+    """
+    tools = asyncio.run(create_server().list_tools())
+    schema = next(t for t in tools if t.name == tool_name).inputSchema
+    prop = schema["properties"].get(param)
+
+    assert prop is not None, f"{tool_name} does not expose {param}"
+    assert prop.get("enum") == list(expected), prop
 
 
 def test_server_has_no_unexpected_tools() -> None:

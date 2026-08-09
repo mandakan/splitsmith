@@ -14,6 +14,8 @@ Run via ``python -m splitsmith.mcp`` or ``splitsmith mcp``.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from mcp.server.fastmcp import FastMCP
 
 from . import detect_tools, export_tools, tools, write_tools
@@ -282,10 +284,10 @@ def create_server(name: str = "splitsmith") -> FastMCP:
         write_fcpxml: bool = True,
         write_report: bool = True,
         write_overlay: bool = False,
-        overlay_codec: str = "auto",
+        overlay_codec: Literal["auto", "hevc-alpha", "prores-4444"] = "auto",
         overlay_max_height: int | None = None,
         overlay_max_fps: float | None = None,
-        overlay_theme: str = "splitsmith",
+        overlay_theme: Literal["splitsmith", "clean"] = "splitsmith",
     ) -> dict:
         """Run a single stage's export.
 
@@ -304,10 +306,10 @@ def create_server(name: str = "splitsmith") -> FastMCP:
             write_fcpxml=write_fcpxml,
             write_report=write_report,
             write_overlay=write_overlay,
-            overlay_codec=overlay_codec,  # type: ignore[arg-type]
+            overlay_codec=overlay_codec,
             overlay_max_height=overlay_max_height,
             overlay_max_fps=overlay_max_fps,
-            overlay_theme=overlay_theme,  # type: ignore[arg-type]
+            overlay_theme=overlay_theme,
         )
 
     @mcp.tool()
@@ -319,11 +321,11 @@ def create_server(name: str = "splitsmith") -> FastMCP:
         include_secondaries: bool = True,
         include_overlay: bool = True,
         project_name: str | None = None,
-        pip_layout: str = "stacked",
-        output_format: str = "fcpxml",
-        transition_kind: str = "none",
+        pip_layout: Literal["stacked", "pip-corners"] = "stacked",
+        output_format: Literal["fcpxml", "fcp7xml", "mp4"] = "fcpxml",
+        transition_kind: Literal["none", "zoom", "static"] = "none",
         transition_duration_seconds: float = 0.5,
-        title_kind: str = "none",
+        title_kind: Literal["none", "slate", "lower-third"] = "none",
         title_duration_seconds: float = 1.5,
         intro_path: str | None = None,
         outro_path: str | None = None,
@@ -348,11 +350,11 @@ def create_server(name: str = "splitsmith") -> FastMCP:
             include_secondaries=include_secondaries,
             include_overlay=include_overlay,
             project_name=project_name,
-            pip_layout=pip_layout,  # type: ignore[arg-type]
-            output_format=output_format,  # type: ignore[arg-type]
-            transition_kind=transition_kind,  # type: ignore[arg-type]
+            pip_layout=pip_layout,
+            output_format=output_format,
+            transition_kind=transition_kind,
             transition_duration_seconds=transition_duration_seconds,
-            title_kind=title_kind,  # type: ignore[arg-type]
+            title_kind=title_kind,
             title_duration_seconds=title_duration_seconds,
             intro_path=intro_path,
             outro_path=outro_path,

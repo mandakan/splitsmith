@@ -797,13 +797,18 @@ function ExportInner({ slug }: { slug: string }) {
                     <SelectField
                       label="Overlay codec"
                       value={overlayCodec}
-                      onChange={(v) => setOverlayCodec(v as OverlayCodec)}
+                      onChange={setOverlayCodec}
                       options={[
                         { value: "auto", label: "Auto" },
-                        { value: "h264", label: "H.264" },
-                        { value: "prores422", label: "ProRes 422" },
+                        { value: "hevc-alpha", label: "HEVC + alpha (macOS)" },
+                        { value: "prores-4444", label: "ProRes 4444" },
                       ]}
                     />
+                    <p className="self-end text-[0.75rem] leading-relaxed text-muted">
+                      The overlay is a transparent MOV, so the codec has to
+                      carry alpha. Auto picks HEVC on macOS (far smaller) and
+                      ProRes 4444 everywhere else.
+                    </p>
                   </div>
                 )}
               </Section>
@@ -847,7 +852,7 @@ function ExportInner({ slug }: { slug: string }) {
               <SelectField
                 label="Variant"
                 value={outputFormat}
-                onChange={(v) => setOutputFormat(v as typeof outputFormat)}
+                onChange={setOutputFormat}
                 options={[
                   { value: "fcpxml", label: "FCPXML 1.10 (Final Cut Pro)" },
                   { value: "fcp7xml", label: "FCP 7 XML (Premiere / Resolve)" },
