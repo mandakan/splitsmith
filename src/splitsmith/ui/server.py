@@ -940,7 +940,9 @@ _SHARE_PATH_RE = re.compile(
     r"|shooters/[^/]+/coach/distributions"
     r"|shooters/[^/]+/videos/stream"
     r"|og\.png"
-    r"|og/[^/]+/\d+\.png)$"
+    r"|og/[^/]+/\d+\.png"
+    r"|og-meta"
+    r"|og-meta/[^/]+/\d+)$"
 )
 
 

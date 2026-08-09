@@ -33,14 +33,16 @@ the URL after that first rewrite and the card cache key needs it.
 
 from __future__ import annotations
 
+import html
 import logging
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
+from pydantic import BaseModel
 
 from ..audit_data import audit_shots_to_engine_shots
 from ..overlay_theme import load_theme
-from ..share_card import MatchCard, RosterEntry, StageCard, stage_figures
+from ..share_card import MatchCard, RosterEntry, StageCard, card_hash, stage_figures
 from ..share_card_render import cached_card_png
 
 if TYPE_CHECKING:
@@ -200,3 +202,187 @@ def share_stage_png(slug: str, stage: int, request: Request) -> Response:
     if card is None:
         return _png_response(state, token, build_match_card(state), None)
     return _png_response(state, token, card, slug)
+
+
+# ---------------------------------------------------------------------------
+# og-meta: JSON describing what a shell should render (spec 2026-08-09,
+# Task 7). Same registration idiom as the PNG routes above -- ``/api/og-meta``
+# and ``/api/og-meta/{slug}/{stage}`` are the rewritten plain paths reached
+# publicly as ``/api/share/{token}/og-meta[...]``, listed in
+# ``server._SHARE_PATH_RE`` alongside ``og.png`` / ``og/{slug}/{stage}.png``.
+# ---------------------------------------------------------------------------
+
+
+class OgMeta(BaseModel):
+    """Everything a shell needs, computed where the tenant is pinned."""
+
+    title: str
+    description: str
+    image_path: str  # relative; the shell prefixes public_base_url
+    alt: str
+
+
+@router.get("/api/og-meta", response_model=OgMeta, include_in_schema=False)
+def share_match_meta(request: Request) -> OgMeta:
+    _hosted_gate()
+    state = _state(request)
+    token = _share_token(request)
+    card = build_match_card(state)
+    shooters = ", ".join(r.name for r in card.roster) or "No shooters yet"
+    return OgMeta(
+        title=card.match_name,
+        description=f"{shooters} - {card.stage_count} stages",
+        image_path=f"/api/share/{token}/og.png?v={card_hash(card)}",
+        alt=f"Splitsmith results card for {card.match_name}",
+    )
+
+
+@router.get("/api/og-meta/{slug}/{stage}", response_model=OgMeta, include_in_schema=False)
+def share_stage_meta(slug: str, stage: int, request: Request) -> OgMeta:
+    _hosted_gate()
+    state = _state(request)
+    token = _share_token(request)
+    card = build_stage_card(state, slug, stage)
+    if card is None:
+        # Mirrors share_stage_png's fallback: an unknown slug/stage, or a
+        # stage with no audited shots, degrades to the match card rather
+        # than 404ing or inventing stage data.
+        return share_match_meta(request)
+    summary = f"{card.shot_count} shots"
+    if card.stage_time is not None:
+        summary = f"{summary} - {card.stage_time:.2f}s"
+    return OgMeta(
+        title=f"{card.shooter_name} - {card.stage_name} ({card.match_name})",
+        description=summary,
+        image_path=f"/api/share/{token}/og/{slug}/{stage}.png?v={card_hash(card)}",
+        alt=f"Splitsmith stage card for {card.shooter_name}, {card.stage_name}",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Share shells: /share/{token} and /share/{token}/results/{slug}/{stage}.
+#
+# These paths do NOT start with /api/, so neither _share_alias nor
+# _match_id_alias ever sees them -- no tenant is pinned, no match is bound.
+# A handler here must not resolve a token or impersonate an owner itself;
+# that has exactly one implementation, in _share_alias. Instead it makes an
+# in-process ASGI sub-request back into the anonymous API
+# (/api/share/{token}/og-meta[...]), so token resolution and impersonation
+# still happen in the one audited place, and this handler only ever touches
+# the JSON that comes back.
+# ---------------------------------------------------------------------------
+
+_SUB_REQUEST_TIMEOUT_S = 5.0
+
+
+async def _fetch_og_meta(request: Request, path: str) -> OgMeta | None:
+    """In-process ASGI GET against this same app.
+
+    Why a sub-request rather than resolving here: token resolution and
+    owner impersonation live in ``_share_alias``, and there must be
+    exactly one implementation of them. Going back in through the
+    anonymous API means this handler never touches a tenant.
+
+    Sent with NO headers -- no cookies, no authorization. The share
+    surface is anonymous by definition, and a shell whose content varied
+    with the viewer's session would be a different bug.
+    """
+    import httpx
+
+    transport = httpx.ASGITransport(app=request.app)
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://share.internal", timeout=_SUB_REQUEST_TIMEOUT_S
+    ) as client:
+        resp = await client.get(path, headers={})
+    if resp.status_code != 200:
+        return None
+    return OgMeta.model_validate(resp.json())
+
+
+def _tag(kind: str, key: str, value: str) -> str:
+    escaped = html.escape(value, quote=True)
+    return f'<meta {kind}="{key}" content="{escaped}">'
+
+
+#: Present on every share shell regardless of whether the token resolved --
+#: an unlisted share link is still not something a crawler should index,
+#: and the card is always the large-image twitter layout.
+_STATIC_TAGS = (
+    '<meta name="robots" content="noindex">'
+    '<meta property="og:type" content="website">'
+    '<meta name="twitter:card" content="summary_large_image">'
+)
+
+
+def _generic_tags() -> str:
+    """The unknown-token and revoked-token branches render this. It must
+    carry nothing token-derived, or a crawler could tell a dead share link
+    apart from one that never existed."""
+    return "\n".join(
+        [
+            _STATIC_TAGS,
+            _tag("property", "og:title", "Splitsmith"),
+            _tag("property", "og:description", "Shot-split results"),
+        ]
+    )
+
+
+def _meta_tags(meta: OgMeta, image_url: str) -> str:
+    return "\n".join(
+        [
+            _STATIC_TAGS,
+            _tag("property", "og:title", meta.title),
+            _tag("property", "og:description", meta.description),
+            _tag("property", "og:image", image_url),
+            _tag("property", "og:image:width", "1200"),
+            _tag("property", "og:image:height", "630"),
+            _tag("property", "og:image:alt", meta.alt),
+            _tag("name", "twitter:title", meta.title),
+            _tag("name", "twitter:description", meta.description),
+            _tag("name", "twitter:image", image_url),
+        ]
+    )
+
+
+def _shell(tags_html: str) -> Response:
+    """Serve the SPA's index.html with ``tags_html`` injected before
+    ``</head>``, shadowing the ``spa_fallback`` catch-all these two paths
+    would otherwise hit. Same 503 + no-cache contract as that fallback --
+    a real browser must still get a working app, only a crawler cares
+    about the injected tags."""
+    from .server import STATIC_DIR
+
+    index = STATIC_DIR / "index.html"
+    if not index.exists():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "SPA bundle not built. Run `npm run build` in "
+                "src/splitsmith/ui_static/ or use `npm run dev`."
+            ),
+        )
+    document = index.read_text(encoding="utf-8")
+    injected = document.replace("</head>", f"{tags_html}\n  </head>", 1)
+    return Response(content=injected, media_type="text/html", headers={"Cache-Control": "no-cache"})
+
+
+async def _shell_response(request: Request, og_meta_path: str) -> Response:
+    logger.debug("share shell entered: og_meta_path=%s", og_meta_path)
+    meta = await _fetch_og_meta(request, og_meta_path)
+    if meta is None:
+        return _shell(_generic_tags())
+    state = _state(request)
+    image_url = f"{state.public_base_url}{meta.image_path}"
+    return _shell(_meta_tags(meta, image_url))
+
+
+@router.get("/share/{token}", include_in_schema=False)
+async def share_match_shell(token: str, request: Request) -> Response:
+    _hosted_gate()
+    return await _shell_response(request, f"/api/share/{token}/og-meta")
+
+
+@router.get("/share/{token}/results/{slug}/{stage}", include_in_schema=False)
+async def share_stage_shell(token: str, slug: str, stage: int, request: Request) -> Response:
+    _hosted_gate()
+    return await _shell_response(request, f"/api/share/{token}/og-meta/{slug}/{stage}")
