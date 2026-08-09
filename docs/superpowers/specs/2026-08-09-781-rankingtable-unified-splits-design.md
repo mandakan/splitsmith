@@ -45,16 +45,20 @@ behind a share token, which makes the inconsistency anonymous-viewer-visible.
   `statisticSplits`. The shot list is sorted by `time_after_beep` before
   pairing (same ordering `computeSplits` uses), so gap i belongs to shot i,
   matching the coach-side meaning of `split`.
-- Columns become `#` / Shooter / Time / Draw / Best / Avg / Worst / Shots,
-  aligned with #774's `StageStats` set (replacing Fastest / Avg split):
+- Columns become `#` / Shooter / Time / Draw / Fastest / Avg split /
+  Shots - StageStats' exact stat set (Draw / Fastest split / Avg split;
+  the results page shows no Worst, so neither does the table):
   - Draw = the first shot's `time_after_beep` (identical to the coach-side
-    `shots[0].split`, which is measured from the beep).
-  - Best / Avg / Worst over `statisticSplits(...)`.
-  - Formatting mirrors `StageStats` (`toFixed(2)`).
+    `shots[0].split`, which is measured from the beep), shown whatever its
+    classification, as on the results page.
+  - Fastest / Avg over `statisticSplits(...)`.
+  - Formatting mirrors `StageStats`: draw and time `toFixed(2)`, splits
+    `toFixed(3)`, "-" placeholders (replacing the table's "--").
 - Empty results (no shots, or all intervals dead time) render the same "-"
   placeholders the results page uses. Ranking by stage time is unaffected.
-- `computeSplits` remains for any other consumer; only RankingTable's
-  stat derivation changes.
+- RankingTable was `computeSplits`' only caller; the pairing moves into a
+  shared `splitsFromTimeline` helper in `lib/splits.ts` (next to
+  `statisticSplits`) and `computeSplits` is deleted.
 
 ## Error handling
 
@@ -69,8 +73,9 @@ behind a share token, which makes the inconsistency anonymous-viewer-visible.
 Backend (`pytest`):
 - Compare response carries `interval_class` for a classified doc.
 - A partially classified doc (ms-bearing shots without classes) is healed
-  in the response, and the stored doc is byte-identical afterwards - also
-  under a share-token request.
+  in the response, and the stored doc is byte-identical afterwards. (A
+  share-token HTTP variant is unreachable until #700 allowlists the
+  endpoint; the guarantee tested is that the path never writes at all.)
 - Manual classes survive (heal skips `interval_class_source == "manual"`).
 
 Frontend (`vitest`):
