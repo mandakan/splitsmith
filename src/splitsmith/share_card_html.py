@@ -72,16 +72,18 @@ def _style(theme: OverlayTheme) -> str:
 .hot {{ color: {_rgb(theme.accent)}; }}
 .body {{ flex: 1; display: flex; align-items: center; gap: 56px; overflow: hidden; }}
 .display {{ font-family: "Antonio"; font-weight: 700; text-transform: uppercase;
-            line-height: 0.92; letter-spacing: -0.01em; overflow: hidden;
-            display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }}
+            line-height: 1.08; letter-spacing: -0.01em; overflow: hidden;
+            padding-bottom: 0.12em; display: -webkit-box; -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical; }}
 .num {{ font-family: "JetBrains Mono"; font-weight: 700; font-variant-numeric: tabular-nums;
         letter-spacing: -0.03em; line-height: 0.86; }}
-.dim {{ color: {_rgb(theme.muted)}; }}
 .vrule {{ width: 1px; align-self: stretch; margin: 14px 0; background: {_rgb(theme.rule)}; }}
 .hrule {{ height: 1px; background: {_rgb(theme.rule)}; margin-bottom: 22px; }}
+.stagebody {{ flex: 1; display: grid; grid-template-columns: minmax(0, 500px) 1px minmax(420px, 1fr);
+              align-items: center; gap: 48px; overflow: hidden; }}
 .figs {{ display: flex; gap: 48px; overflow: hidden; }}
 .fig {{ display: flex; flex-direction: column; gap: 8px; overflow: hidden; }}
-.fig .v {{ font-size: 128px; }}
+.fig .v {{ font-size: 88px; }}
 .col {{ display: flex; flex-direction: column; gap: 14px; flex: 1; overflow: hidden; }}
 .roster {{ display: flex; flex-direction: column; gap: 14px; width: 430px; overflow: hidden; }}
 .rrow {{ display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
@@ -175,7 +177,7 @@ def stage_card_html(card: StageCard, *, theme: OverlayTheme) -> str:
     body = (
         f'<div class="top">{_brand_row(theme)}'
         f'<div class="kick">{" &middot; ".join(escape(m) for m in meta)}</div></div>'
-        f'<div class="body"><div class="figs">{"".join(figs)}</div>'
+        f'<div class="stagebody"><div class="figs">{"".join(figs)}</div>'
         '<div class="vrule"></div>'
         f'<div class="col"><div class="display" style="font-size:44px">'
         f"{escape(card.stage_name)}</div>"
@@ -187,10 +189,12 @@ def stage_card_html(card: StageCard, *, theme: OverlayTheme) -> str:
 
 
 def _figure(value: str, caption: str) -> str:
-    """One numeral block. ``caption`` is already-escaped markup."""
-    whole, _, frac = value.partition(".")
-    return (
-        f'<div class="fig"><div class="num v">{escape(whole)}'
-        f'<span class="dim">.{escape(frac)}</span></div>'
-        f'<div class="kick">{caption}</div></div>'
-    )
+    """One numeral block, rendered in a single weight and colour.
+
+    An earlier version dimmed the fractional part (``.32`` in a lighter
+    grey than the leading ``1``). At the 88px this renders at, that made
+    the bright leading digit alone read as the headline number -- "1" or
+    "0" -- with the rest receding, exactly the opposite of what a
+    glanceable card needs. ``caption`` is already-escaped markup.
+    """
+    return f'<div class="fig"><div class="num v">{escape(value)}</div><div class="kick">{caption}</div></div>'

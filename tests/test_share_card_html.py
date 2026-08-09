@@ -67,11 +67,13 @@ def test_card_dimensions_are_declared(theme) -> None:
 
 
 def test_stage_card_shows_draw_and_average_split(theme) -> None:
-    """The fractional part is wrapped in a dimmed span, so assert on the
-    parts rather than a contiguous "1.28"."""
+    """Both numerals render in one weight, as a single contiguous string
+    -- no dimmed fractional part (an earlier version split "1.28" into a
+    bright "1" and a dimmed ".28", which at headline size made the card
+    read as "1" rather than "1.28")."""
     html = stage_card_html(_stage_card(), theme=theme)
-    assert ">1<span" in html and ".28</span>" in html
-    assert ">0<span" in html and ".180</span>" in html  # (0.19 + 0.17) / 2
+    assert ">1.28<" in html
+    assert ">0.180<" in html  # (0.19 + 0.17) / 2
     assert "Draw" in html
     assert "Avg split" in html
 
@@ -87,7 +89,7 @@ def test_stage_card_omits_the_average_when_there_are_no_splits(theme) -> None:
     assert "Draw" in html
     assert "Avg split" not in html
     # Never a placeholder: no zero, no dash standing in for a real figure.
-    assert ".000</span>" not in html
+    assert "0.000" not in html
 
 
 def test_names_are_escaped(theme) -> None:
@@ -149,6 +151,7 @@ def test_every_text_box_hides_overflow(theme) -> None:
         ".brand",
         ".kick",
         ".body",
+        ".stagebody",
         ".display",
         ".figs",
         ".fig",
