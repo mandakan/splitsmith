@@ -10138,6 +10138,16 @@ def create_app(
             project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # #775: an audited stage is fully classified. Run the auto-classifier
+        # on every save so statistic_splits never sees a partial stage; shots
+        # whose source is "manual" are preserved, shots with no ms_after_beep
+        # are left unclassified (they never reach statistics).
+        shots = payload.get("shots")
+        if isinstance(shots, list):
+            coach_module.classify_intervals_in_dicts(
+                [s for s in shots if isinstance(s, dict)],
+                CoachAutoClassifyConfig(),
+            )
         # Read the current version so the save is optimistic-locked. The
         # SPA PUT doesn't carry a version (it assumes last-writer-wins), so
         # this load-then-save has a tiny race window: if a concurrent
