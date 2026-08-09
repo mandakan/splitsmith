@@ -1,14 +1,17 @@
-"""Tests for overlay_render (issue #45).
+"""Tests for overlay_render (issue #45, ported in #684).
 
-Pure unit tests on frame-state derivation and template rendering. The
-ffmpeg pipe path is exercised via a mocked Popen so CI doesn't need
-prores_ks support; an integration test skipped without ffmpeg covers the
-real binary in development.
+Pure unit tests on frame-state derivation and on the argv / rasterizer
+calls the render loop makes. The ffmpeg pipe path is exercised via a
+mocked Popen so CI doesn't need prores_ks support, and the browser via an
+injected fake :class:`~splitsmith.overlay_raster.Rasterizer`; integration
+tests cover the real binary and a real Chromium in development.
 """
 
 from __future__ import annotations
 
+import io
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -16,8 +19,9 @@ from typing import Any
 import pytest
 from PIL import Image
 
-from splitsmith import overlay_render, overlay_text
+from splitsmith import overlay_raster, overlay_render, runtime
 from splitsmith.config import VideoMetadata
+from tests.conftest import fake_ffmpeg_probe
 from tests.synthetic_media import ffmpeg_available
 
 
@@ -111,165 +115,6 @@ def test_build_frame_states_running_total_freezes_after_last_shot() -> None:
     assert states[-1].running_total == pytest.approx(final_total)
 
 
-# --- _split_alpha -----------------------------------------------------------
-
-
-def test_split_alpha_holds_then_fades_then_zero() -> None:
-    # 1.0s hold, 0.5s fade.
-    assert overlay_render._split_alpha(0.0, 1.0, 0.5) == 255
-    assert overlay_render._split_alpha(0.5, 1.0, 0.5) == 255
-    assert overlay_render._split_alpha(1.0, 1.0, 0.5) == 255
-    # Mid-fade.
-    mid = overlay_render._split_alpha(1.25, 1.0, 0.5)
-    assert 100 < mid < 200
-    # End of fade.
-    assert overlay_render._split_alpha(1.5, 1.0, 0.5) == 0
-    assert overlay_render._split_alpha(2.0, 1.0, 0.5) == 0
-    # Pre-shot (negative since_shot can happen at frame boundary).
-    assert overlay_render._split_alpha(-0.1, 1.0, 0.5) == 0
-
-
-# --- DefaultTemplate --------------------------------------------------------
-
-
-def test_default_template_draws_n_over_m_and_running_total() -> None:
-    tmpl = overlay_render.DefaultTemplate(width=320, height=180)
-    canvas = Image.new("RGBA", (320, 180), (0, 0, 0, 0))
-    state = overlay_render.FrameState(
-        time_seconds=2.0,
-        beep_time_in_clip=0.5,
-        shot_count=5,
-        shots_fired=2,
-        last_split=0.21,
-        last_shot_time_in_clip=1.5,
-        running_total=1.5,
-    )
-    tmpl.draw_frame(canvas, state)
-    # The template wrote SOMETHING -- at least one pixel is non-transparent.
-    assert canvas.getextrema()[3][1] > 0  # alpha channel max > 0
-
-
-def test_default_template_renders_stroke_and_blurred_shadow() -> None:
-    """Stroke + soft drop shadow widen the painted region beyond a bare
-    text render (more non-transparent pixels) and leave dark pixels around
-    the white glyphs (the stroke). Both checks fail under the old 1px
-    shadow + no-stroke renderer."""
-    state = overlay_render.FrameState(
-        time_seconds=2.0,
-        beep_time_in_clip=0.5,
-        shot_count=5,
-        shots_fired=2,
-        last_split=0.21,
-        last_shot_time_in_clip=1.5,
-        running_total=1.5,
-    )
-    enhanced = overlay_render.DefaultTemplate(width=640, height=360)
-    bare = overlay_render.DefaultTemplate(
-        width=640,
-        height=360,
-        stroke_width_px=0,
-        shadow_blur_px=0,
-        shadow_offset_px=0,
-    )
-    canvas_enhanced = Image.new("RGBA", (640, 360), (0, 0, 0, 0))
-    canvas_bare = Image.new("RGBA", (640, 360), (0, 0, 0, 0))
-    enhanced.draw_frame(canvas_enhanced, state)
-    bare.draw_frame(canvas_bare, state)
-
-    def nonzero_alpha_count(img: Image.Image) -> int:
-        return sum(1 for px in img.getchannel("A").tobytes() if px > 0)
-
-    def dark_outline_count(img: Image.Image) -> int:
-        # Opaque-ish pixel that is mostly black -> stroke around the glyph.
-        alpha = img.getchannel("A").tobytes()
-        red = img.getchannel("R").tobytes()
-        return sum(1 for a, r in zip(alpha, red, strict=True) if a > 200 and r < 64)
-
-    assert nonzero_alpha_count(canvas_enhanced) > nonzero_alpha_count(canvas_bare) * 1.5
-    assert dark_outline_count(canvas_enhanced) > 100
-
-
-def test_load_font_unknown_name_raises() -> None:
-    with pytest.raises(overlay_render.OverlayRenderError):
-        overlay_render._load_font(None, 24, font_name="not-a-real-font")
-
-
-def test_load_font_known_name_falls_back_when_missing(tmp_path: Path) -> None:
-    """A named preset whose files don't exist on this machine must still
-    produce a usable font (generic fallback or PIL default), not crash."""
-    font = overlay_render._load_font(None, 24, font_name="dejavu-mono")
-    assert font is not None
-
-
-def test_available_font_names_includes_known_presets() -> None:
-    names = overlay_render.available_font_names()
-    assert "menlo" in names
-    assert "sf-mono" in names
-    assert "dejavu-mono" in names
-
-
-def test_load_font_pil_default_fallback_warns(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    """When neither bundled nor any system font is present we land on PIL's
-    bitmap default and the overlay looks bad. The fallback must log a
-    warning so a packaged Linux user sees *why* their overlays look low-res."""
-    # Keep "dejavu-mono" as a known preset name (so the unknown-name guard
-    # doesn't raise) but give it no candidate paths -- forces the full walk.
-    monkeypatch.setattr(overlay_text, "_FONT_PRESETS", {"dejavu-mono": ()})
-    monkeypatch.setattr(overlay_text, "_FONT_FALLBACKS", ())
-    # Force bundled lookup to miss so we walk the full fallback chain.
-    monkeypatch.setattr(overlay_text, "_load_bundled_font", lambda *_args, **_kw: None)
-    overlay_render.reset_font_log_cache()
-
-    with caplog.at_level("WARNING", logger="splitsmith.overlay_text"):
-        font = overlay_render._load_font(None, 24, font_name="dejavu-mono")
-    assert font is not None
-    assert any("PIL's built-in bitmap font" in rec.message for rec in caplog.records)
-
-
-def test_load_font_bundled_emits_debug_only(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """The happy path (bundled font in the wheel) must not warn."""
-    overlay_render.reset_font_log_cache()
-    with caplog.at_level("WARNING", logger="splitsmith.overlay_text"):
-        overlay_render._load_font(None, 24, font_name="splitsmith-mono")
-    assert not [rec for rec in caplog.records if rec.levelname == "WARNING"]
-
-
-def test_default_template_skips_split_after_fade() -> None:
-    """Long after the last shot, the split label fades to zero. The N/M
-    and total are still drawn, but the split region is empty."""
-    tmpl = overlay_render.DefaultTemplate(width=320, height=180)
-    canvas_after = Image.new("RGBA", (320, 180), (0, 0, 0, 0))
-    state_after = overlay_render.FrameState(
-        time_seconds=10.0,
-        beep_time_in_clip=0.5,
-        shot_count=2,
-        shots_fired=2,
-        last_split=0.21,
-        last_shot_time_in_clip=1.5,  # 8.5s ago -> well past fade
-        running_total=9.5,
-    )
-    tmpl.draw_frame(canvas_after, state_after)
-    # Bottom strip (where the split label lives) must be fully transparent.
-    bottom = canvas_after.crop((0, 140, 320, 180))
-    assert bottom.getextrema()[3][1] == 0
-
-
-# --- format helpers ---------------------------------------------------------
-
-
-def test_format_running_total_under_minute() -> None:
-    assert overlay_render._format_running_total(0.0).strip() == "0.00"
-    assert overlay_render._format_running_total(7.42).strip() == "7.42"
-
-
-def test_format_running_total_over_minute() -> None:
-    assert overlay_render._format_running_total(75.5) == "1:15.50"
-
-
 # --- render_overlay error paths ---------------------------------------------
 
 
@@ -354,6 +199,8 @@ def test_render_overlay_pipes_rgba_frames_and_writes_output(
         beep_offset_seconds=0.0,
         probe=_meta_30fps(duration=1.0),  # 30 frames
         codec="prores-4444",  # explicit so the test is host-independent
+        rasterizer=_FakeRasterizer(),
+        probe_runner=fake_ffmpeg_probe(),
     )
 
     assert result == output
@@ -410,6 +257,8 @@ def test_render_overlay_raises_when_ffmpeg_returns_nonzero(
             beep_offset_seconds=0.0,
             probe=_meta_30fps(duration=0.1),
             codec="prores-4444",
+            rasterizer=_FakeRasterizer(),
+            probe_runner=fake_ffmpeg_probe(),
         )
 
 
@@ -436,14 +285,16 @@ def test_render_overlay_writes_real_prores_4444_alpha(tmp_path: Path) -> None:
     )
     output = tmp_path / "overlay.mov"
 
-    overlay_render.render_overlay(
-        audit_path=audit,
-        trimmed_video_path=tmp_path / "ignored.mp4",
-        output_path=output,
-        beep_offset_seconds=0.0,
-        probe=_meta_30fps(duration=0.5),  # 15 frames
-        codec="prores-4444",  # this test asserts the prores path specifically
-    )
+    with overlay_raster.ChromiumRasterizer() as ras:
+        overlay_render.render_overlay(
+            audit_path=audit,
+            trimmed_video_path=tmp_path / "ignored.mp4",
+            output_path=output,
+            beep_offset_seconds=0.0,
+            probe=_meta_30fps(duration=0.5),  # 15 frames
+            codec="prores-4444",  # this test asserts the prores path specifically
+            rasterizer=ras,
+        )
 
     assert output.exists() and output.stat().st_size > 0
     proc = subprocess.run(
@@ -478,10 +329,24 @@ def _capture_render_cmd(
     audit_path: Path,
     output: Path,
     probe: VideoMetadata,
+    rasterizer: Any = None,
+    beep_offset_seconds: float = 0.0,
     **kwargs: Any,
 ) -> tuple[list[str], int]:
     """Run :func:`render_overlay` with a stub Popen, returning the cmd
-    that would have been invoked and the bytes piped to ffmpeg's stdin."""
+    that would have been invoked and the bytes piped to ffmpeg's stdin.
+
+    ``rasterizer`` defaults to a fresh :class:`_FakeRasterizer`, so every
+    caller that only cares about argv gets a browser-free render without
+    saying so; pass one to inspect the documents it was handed.
+    ``beep_offset_seconds`` defaults to the ``0.0`` this helper has always
+    passed. The capability probe is faked for the reason
+    ``render_overlay``'s ``probe_runner`` docstring gives -- stubbing
+    ``Popen`` stubs it for ``subprocess.run`` too.
+    """
+    if rasterizer is None:
+        rasterizer = _FakeRasterizer()
+    kwargs.setdefault("probe_runner", fake_ffmpeg_probe())
     captured: dict[str, Any] = {"bytes": 0, "cmd": []}
 
     class StubStdin:
@@ -519,8 +384,9 @@ def _capture_render_cmd(
         audit_path=audit_path,
         trimmed_video_path=audit_path.parent / "trim.mp4",
         output_path=output,
-        beep_offset_seconds=0.0,
+        beep_offset_seconds=beep_offset_seconds,
         probe=probe,
+        rasterizer=rasterizer,
         **kwargs,
     )
     return captured["cmd"], captured["bytes"]
@@ -681,3 +547,204 @@ def test_scaled_dimensions_forces_even() -> None:
     """Even output dims keep yuv420 / yuv444 chroma alignment happy."""
     w, h = overlay_render._scaled_dimensions(1921, 1081, 720)
     assert w % 2 == 0 and h % 2 == 0
+
+
+# --- the ported renderer (issue #684) ---------------------------------
+
+
+class _FakeRasterizer:
+    """Records what it was asked to draw and returns a real PNG.
+
+    A real PNG, not a stub: ``render_overlay`` decodes what comes back
+    and pipes its bytes, so a fake returning ``b""`` would test a code
+    path that cannot exist.
+    """
+
+    def __init__(self) -> None:
+        self.documents: list[str] = []
+
+    def png(self, html: str, *, width: int, height: int) -> bytes:
+        self.documents.append(html)
+        buffer = io.BytesIO()
+        Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
+def test_the_renderer_rasterizes_once_per_run_not_once_per_frame(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The whole point of the port. 30 frames, two shots -> three runs
+    (nothing fired, one fired, two fired), so three browser renders."""
+    audit = tmp_path / "stage1.json"
+    audit.write_text(
+        json.dumps(
+            {"shots": [{"shot_number": 1, "ms_after_beep": 200}, {"shot_number": 2, "ms_after_beep": 500}]}
+        ),
+        encoding="utf-8",
+    )
+    fake = _FakeRasterizer()
+    _capture_render_cmd(
+        monkeypatch,
+        audit_path=audit,
+        output=tmp_path / "overlay.mov",
+        probe=_meta_30fps(duration=1.0),
+        rasterizer=fake,
+    )
+    assert len(fake.documents) == 3
+
+
+def test_the_counter_and_split_reach_the_rasterized_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    audit = tmp_path / "stage1.json"
+    audit.write_text(
+        json.dumps(
+            {"shots": [{"shot_number": 1, "ms_after_beep": 200}, {"shot_number": 2, "ms_after_beep": 500}]}
+        ),
+        encoding="utf-8",
+    )
+    fake = _FakeRasterizer()
+    _capture_render_cmd(
+        monkeypatch,
+        audit_path=audit,
+        output=tmp_path / "overlay.mov",
+        probe=_meta_30fps(duration=1.0),
+        rasterizer=fake,
+    )
+    assert "0/2" in fake.documents[0]
+    assert "1/2" in fake.documents[1]
+    assert "2/2" in fake.documents[2]
+    # 500ms - 200ms = 0.30s
+    assert "0.30s" in fake.documents[2]
+
+
+def test_a_missing_browser_fails_the_render_with_the_install_hint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unlike the grid, which degrades to clock-only because its MP4 is
+    still worth having, the overlay MOV *is* the deliverable here. A
+    clock-only MOV looks like a success the user would only discover was
+    empty after dropping it on V2 in Final Cut."""
+    audit = tmp_path / "stage1.json"
+    audit.write_text(json.dumps({"shots": [{"shot_number": 1, "ms_after_beep": 100}]}), encoding="utf-8")
+
+    def boom(*_args: Any, **_kwargs: Any) -> Any:
+        raise overlay_raster.RasterizerUnavailableError("no chromium", "detail with a hint")
+
+    monkeypatch.setattr(overlay_render.ChromiumRasterizer, "__enter__", boom)
+    monkeypatch.setattr(overlay_render.shutil, "which", lambda _b: "/bin/ffmpeg")
+    with pytest.raises(overlay_render.OverlayRenderError) as excinfo:
+        overlay_render.render_overlay(
+            audit_path=audit,
+            trimmed_video_path=tmp_path / "trim.mp4",
+            output_path=tmp_path / "overlay.mov",
+            beep_offset_seconds=0.0,
+            probe=_meta_30fps(duration=1.0),
+            codec="prores-4444",
+        )
+    assert overlay_raster.INSTALL_HINT in str(excinfo.value)
+
+
+def test_the_clock_is_three_drawtext_filters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pre-beep 0.00, a ticking window, and a held final value. The grid
+    needs only two because it never draws a pre-beep zero; this path has
+    always shown one and keeps doing so."""
+    audit = tmp_path / "stage1.json"
+    audit.write_text(json.dumps({"shots": [{"shot_number": 1, "ms_after_beep": 200}]}), encoding="utf-8")
+    cmd, _ = _capture_render_cmd(
+        monkeypatch,
+        audit_path=audit,
+        output=tmp_path / "overlay.mov",
+        probe=_meta_30fps(duration=2.0),
+        rasterizer=_FakeRasterizer(),
+        beep_offset_seconds=1.0,
+    )
+    graph = cmd[cmd.index("-vf") + 1]
+    assert graph.count("drawtext") == 3
+    assert r"enable='lt(t\,1)'" in graph
+    assert r"enable='gte(t\,1)*lt(t\,1.2)'" in graph
+    assert r"enable='gte(t\,1.2)'" in graph
+
+
+def test_an_ffmpeg_without_drawtext_still_renders_the_counter_and_split(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other degradation, and it goes the other way: losing the clock
+    leaves a file worth having, so it warns rather than failing."""
+    audit = tmp_path / "stage1.json"
+    audit.write_text(json.dumps({"shots": [{"shot_number": 1, "ms_after_beep": 200}]}), encoding="utf-8")
+    monkeypatch.setattr(
+        overlay_render,
+        "ffmpeg_capabilities",
+        lambda *_a, **_k: runtime.FFmpegCapabilities(
+            binary="ffmpeg", version="6.1.1", drawtext=False, concat_option_keyword=True
+        ),
+    )
+    fake = _FakeRasterizer()
+    cmd, _ = _capture_render_cmd(
+        monkeypatch,
+        audit_path=audit,
+        output=tmp_path / "overlay.mov",
+        probe=_meta_30fps(duration=1.0),
+        rasterizer=fake,
+    )
+    assert "-vf" not in cmd
+    assert len(fake.documents) == 2
+
+
+@pytest.mark.integration
+def test_the_clock_holds_before_the_beep_ticks_during_and_freezes_after(
+    tmp_path: Path,
+) -> None:
+    """Three windows, asserted on rendered frames rather than on argv.
+
+    No OCR: what matters is behavioural and reads straight off the
+    pixels. Two frames inside the same window must be identical in the
+    clock's corner (it is holding a value); two frames inside the ticking
+    window must differ (it is counting). And the corner must not be
+    blank before the beep -- drawing nothing there is exactly the
+    regression copying the grid's two-filter clock would have caused.
+    """
+    if shutil.which("ffmpeg") is None or shutil.which("ffprobe") is None:
+        pytest.skip("ffmpeg/ffprobe not installed")
+
+    audit = tmp_path / "stage1.json"
+    audit.write_text(json.dumps({"shots": [{"shot_number": 1, "ms_after_beep": 1000}]}), encoding="utf-8")
+    output = tmp_path / "overlay.mov"
+    with overlay_raster.ChromiumRasterizer() as ras:
+        overlay_render.render_overlay(
+            audit_path=audit,
+            trimmed_video_path=tmp_path / "unused.mp4",
+            output_path=output,
+            beep_offset_seconds=1.0,
+            probe=_meta_30fps(duration=3.0),
+            codec="prores-4444",
+            rasterizer=ras,
+        )
+
+    def corner(frame_index: int) -> Image.Image:
+        """The top-right quadrant, where the clock lives."""
+        png = tmp_path / f"f{frame_index}.png"
+        subprocess.run(
+            [
+                "ffmpeg", "-hide_banner", "-y", "-v", "error", "-i", str(output),
+                "-vf", f"select=eq(n\\,{frame_index})", "-fps_mode", "passthrough",
+                "-frames:v", "1", str(png),
+            ],  # fmt: skip
+            check=True,
+        )
+        image = Image.open(png).convert("RGBA")
+        width, height = image.size
+        return image.crop((width // 2, 0, width, height // 3))
+
+    # Pre-beep: two frames, both reading 0.00.
+    pre_early, pre_late = corner(6), corner(24)
+    assert pre_early.getbbox() is not None, "the clock corner is blank before the beep"
+    assert list(pre_early.getdata()) == list(pre_late.getdata())
+
+    # Ticking (beep at 1.0s = frame 30, freeze at 2.0s = frame 60).
+    assert list(corner(36).getdata()) != list(corner(50).getdata())
+
+    # Frozen after the last shot: the running total is the stage time,
+    # not the clip duration.
+    assert list(corner(66).getdata()) == list(corner(86).getdata())

@@ -98,10 +98,23 @@ from collections.abc import Sequence
 from html import escape
 from importlib.resources import files
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from .compare.overlay_sprites import SpriteGeometry, TilePlacement
 from .overlay_layout import MIN_FONT_SIZE, Anchor, CellScale, ColorToken, Element, Flow, Group, Role
 from .overlay_theme import OverlayTheme
+
+if TYPE_CHECKING:
+    # ``grid_html`` names these two in its signature and reads attributes
+    # off them; it never constructs one, so a runtime import buys nothing
+    # -- and it costs the leaf position this module's docstring claims.
+    # ``compare.overlay_sprites`` reaches ``ui.exports`` transitively (via
+    # ``compare.overlay_data``) and ``ui.exports`` imports
+    # ``overlay_render``, which since #684 imports THIS module: a real
+    # import here closes that cycle and nothing in the package can be
+    # imported at all. Type-only keeps the annotation honest (this module
+    # has ``from __future__ import annotations``, so it is never
+    # evaluated) without the edge.
+    from .compare.overlay_sprites import SpriteGeometry, TilePlacement
 
 RGB = tuple[int, int, int]
 
