@@ -21,8 +21,8 @@ the assertion that fails against the pre-change code.
 
 from pathlib import Path
 
+from splitsmith.match_project import MatchProject
 from splitsmith.storage import FilesystemStorage
-from splitsmith.ui.project import MatchProject
 
 from .test_ui_server import _MatchClient, _seed_match_export_project
 

@@ -62,6 +62,7 @@ from splitsmith.compare import overlay_summary as summ
 from splitsmith.compare.mp4_grid import GridStagePlan, GridTile
 from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
+from splitsmith.match_project import StageScorecard
 from splitsmith.overlay_html import grid_html
 from splitsmith.overlay_layout import Anchor, ColorToken, Emphasis, Flow, Role
 from splitsmith.overlay_raster import (
@@ -71,7 +72,6 @@ from splitsmith.overlay_raster import (
     RasterizerUnavailableError,
 )
 from splitsmith.overlay_theme import load_theme
-from splitsmith.ui.project import StageScorecard
 
 THEME = load_theme("clean")
 GEOMETRY = SpriteGeometry(canvas_width=640, canvas_height=360, rows=2, cols=2)

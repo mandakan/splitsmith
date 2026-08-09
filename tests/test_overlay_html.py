@@ -19,11 +19,11 @@ import pytest
 from splitsmith.compare.overlay_data import TileShot, TileStageData
 from splitsmith.compare.overlay_sprites import SpriteGeometry, TilePlacement
 from splitsmith.compare.overlay_summary import _cell_groups
+from splitsmith.match_project import StageScorecard
 from splitsmith.overlay_clock import border_width
 from splitsmith.overlay_html import cell_html, grid_html, single_html
 from splitsmith.overlay_layout import Anchor, CellScale, ColorToken, Element, Flow, Group, Role
 from splitsmith.overlay_theme import load_theme
-from splitsmith.ui.project import StageScorecard
 
 THEME = load_theme("clean")
 SCALE = CellScale(

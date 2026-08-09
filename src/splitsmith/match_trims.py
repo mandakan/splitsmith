@@ -25,8 +25,8 @@ from .audit_data import StageExportError
 from .compare.project_loader import audit_path_for_stage, trim_path_for_video
 from .config import Config, StageData
 from .match_model import Match
+from .match_project import MatchProject, StageEntry, StageVideo, TrimBlocker, trim_blocker
 from .ui import exports
-from .ui.project import MatchProject, StageEntry, StageVideo, TrimBlocker, trim_blocker
 
 # The engine's ``StageData`` requires a non-None ``scorecard_updated_at``
 # (the video-matching heuristic keys off it), but manually-timed stages on
@@ -39,7 +39,7 @@ _PLACEHOLDER_SCORECARD_TIME = datetime(2000, 1, 1, tzinfo=UTC)
 SkipReason = TrimBlocker | Literal["source_unreachable", "already_exported", "camera_ambiguous"]
 """Every reason a planned stage can be turned down.
 
-The permanent ones come straight from :data:`ui.project.TrimBlocker` -- the
+The permanent ones come straight from :data:`match_project.TrimBlocker` -- the
 rule the SPA and the per-stage export endpoint read too -- so a stage cannot
 be ineligible here for a reason those surfaces have never heard of. The three
 added here are what only a *planner* can see: the source is not on disk right
@@ -168,7 +168,7 @@ def _classify(
 
     Camera resolution has to happen mid-way -- it decides *which* video the
     beep check reads -- so the permanent blockers are asked of
-    :func:`ui.project.trim_blocker` rather than re-implemented here (#613).
+    :func:`match_project.trim_blocker` rather than re-implemented here (#613).
     A deliberately skipped stage answers before camera selection, so it is
     never reported as an ambiguous-camera config problem instead.
     """

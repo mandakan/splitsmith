@@ -39,7 +39,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from .ui.project import MatchProject
+from .match_project import MatchProject
 
 # Filename for the per-project cleanup audit trail. JSONL so multiple
 # cleanups append cleanly. Hidden so it doesn't clutter Finder.

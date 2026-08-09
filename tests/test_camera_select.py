@@ -13,7 +13,7 @@ from splitsmith.camera_select import (
     resolve_camera,
     validate_camera,
 )
-from splitsmith.ui.project import StageVideo
+from splitsmith.match_project import StageVideo
 
 
 def _video(name: str, *, role: str, mount: str | None = None) -> StageVideo:

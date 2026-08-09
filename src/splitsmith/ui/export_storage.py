@@ -26,7 +26,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .project import MatchProject
+from ..match_project import MatchProject
 
 if TYPE_CHECKING:
     from .exports import StageExportResult

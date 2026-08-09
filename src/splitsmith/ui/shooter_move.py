@@ -1,8 +1,8 @@
 """Cross-shooter video relocation service (wrong-shooter correction).
 
 Implements :func:`move_shooter` -- the I/O-bearing service that lifts
-a set of :class:`~splitsmith.ui.project.StageVideo` records from one
-shooter's :class:`~splitsmith.ui.project.MatchProject` and inserts them
+a set of :class:`~splitsmith.match_project.StageVideo` records from one
+shooter's :class:`~splitsmith.match_project.MatchProject` and inserts them
 into another's, carrying all human-reviewed state (beep, audit shots)
 while reproducing machine-generated artifacts in the background.
 
@@ -32,9 +32,9 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from ..match_project import MatchProject, RawVideo, StageVideo
 from ..storage import Storage
 from .audio import trimmed_video_path, video_audio_path, video_audit_audio_path
-from .project import MatchProject, RawVideo, StageVideo
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +221,7 @@ def move_shooter(
             target_stage = _find_target_stage(target_project, stage_number)
             if target_stage is None:
                 # Target doesn't have this stage yet -- treat as a no-primary slot.
-                from .project import StageEntry
+                from ..match_project import StageEntry
 
                 target_stage = StageEntry(
                     stage_number=stage_number,

@@ -1,7 +1,7 @@
 """One function names a stage's export files, so readers cannot miss them.
 
 ``stage<N>_<slug>_trimmed.mp4`` is written in one place and looked for in
-six others -- the CLI, the SPA's export endpoints, ``ui.project``, the
+six others -- the CLI, the SPA's export endpoints, ``match_project``, the
 MCP export tools, and the compare grid's project loader. Every one of
 them used to build that string by hand off a private ``_slugify``, and
 there were three hand-copied ``_slugify`` implementations to choose
@@ -20,11 +20,12 @@ from __future__ import annotations
 import pytest
 
 from splitsmith import cli, export_naming
+from splitsmith import match_project as project
 from splitsmith.compare import project_loader
+from splitsmith.match_project import MatchProject
 from splitsmith.mcp import export_tools
 from splitsmith.ui import exports as exports_mod
-from splitsmith.ui import project, server
-from splitsmith.ui.project import MatchProject
+from splitsmith.ui import server
 
 #: Names whose slug is empty, so the fallback decides the filename. The
 #: ordinary case agreed all along; only these ever diverged.

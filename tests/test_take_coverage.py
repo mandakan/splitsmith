@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 
+from splitsmith.match_project import MatchProject, StageEntry
 from splitsmith.ui.jobs import Job, JobBodyRegistry, JobStatus
-from splitsmith.ui.project import MatchProject, StageEntry
 
 # ---------------------------------------------------------------------------
 # Shared helpers

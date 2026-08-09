@@ -169,6 +169,18 @@ from ..fixture_schema import (
     CameraPosition,
     probe_camera_metadata,
 )
+from ..match_project import (
+    STUB_AUDIT_DETECTION,
+    VIDEO_EXTENSIONS,
+    MatchProject,
+    RawVideo,
+    ScoreboardImportConflictError,
+    StageEntry,
+    StageStatus,
+    StageVideo,
+    VideoRole,
+    trim_blocker,
+)
 from ..match_registry import MatchRegistry
 from ..observability import StructuredJsonFormatter, init_sentry
 from ..runtime import runtime as process_runtime
@@ -193,18 +205,6 @@ from .jobs import (
     ShutdownInProgressError,
 )
 from .match_delete import DeletionSummary, delete_match_cascade
-from .project import (
-    STUB_AUDIT_DETECTION,
-    VIDEO_EXTENSIONS,
-    MatchProject,
-    RawVideo,
-    ScoreboardImportConflictError,
-    StageEntry,
-    StageStatus,
-    StageVideo,
-    VideoRole,
-    trim_blocker,
-)
 from .scoreboard import (
     CachingScoreboardClient,
     CompetitorNotInMatch,

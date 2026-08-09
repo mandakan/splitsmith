@@ -20,10 +20,10 @@ from pathlib import Path
 
 import pytest
 
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.storage import FilesystemStorage
 from splitsmith.ui import audio as audio_helpers
 from splitsmith.ui.audio import ensure_video_audit_trim, trimmed_video_path
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 
 STAGE = 1
 STAGE_TIME = 10.0

@@ -10,7 +10,7 @@ from .. import camera_select, fcpxml_gen
 from ..export_naming import stage_file_base
 from ..fcpxml_gen import VideoMetadata
 from ..match_model import Match
-from ..ui.project import MatchProject, StageVideo
+from ..match_project import MatchProject, StageVideo
 
 ProbeFn = Callable[[Path], VideoMetadata]
 

@@ -47,8 +47,8 @@ from .config import (
     StageData,
 )
 from .export_naming import stage_file_base
+from .match_project import MatchProject
 from .runtime import runtime
-from .ui.project import MatchProject
 
 app = typer.Typer(
     name="splitsmith",

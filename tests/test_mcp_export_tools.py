@@ -9,8 +9,8 @@ from unittest.mock import patch
 import pytest
 
 from splitsmith.audit_data import StageExportError
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.mcp import export_tools
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 
 
 def _build_project(

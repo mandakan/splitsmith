@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.ui.server import create_app
 
 

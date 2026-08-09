@@ -249,7 +249,7 @@ class _FakeStorage:
 
 
 def _project_with_dirs(tmp_path):
-    from splitsmith.ui.project import MatchProject
+    from splitsmith.match_project import MatchProject
 
     project = MatchProject(name="M")
     project.init_placeholder_stages(3)
@@ -389,7 +389,7 @@ def _harness(tmp_path, slugs, stage_numbers, *, order: list[str] | None = None):
     / ``save_match`` to append their own markers gets one combined
     timeline proving cancellation happens before the per-shooter fan-out.
     """
-    from splitsmith.ui.project import MatchProject
+    from splitsmith.match_project import MatchProject
 
     projects = {}
     for slug in slugs:
@@ -559,7 +559,7 @@ def test_apply_adds_a_stage_to_match_and_every_shooter(tmp_path) -> None:
 
 
 def test_apply_reports_per_shooter_counts(tmp_path) -> None:
-    from splitsmith.ui.project import StageVideo
+    from splitsmith.match_project import StageVideo
     from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
 
     match = _match_with_stages(1, 2, 3)
@@ -677,7 +677,7 @@ def test_apply_resets_videos_unassigned_and_records_error_when_save_fails(tmp_pa
     survive, because those are independent, already-committed side
     effects, not part of the unsaved project doc.
     """
-    from splitsmith.ui.project import StageVideo
+    from splitsmith.match_project import StageVideo
     from splitsmith.ui.stage_edit import SubmittedStage, apply_stage_edit
 
     match = _match_with_stages(1, 2, 3)

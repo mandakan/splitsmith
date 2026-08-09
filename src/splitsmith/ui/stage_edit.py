@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 
 from splitsmith.config import StageRounds
 from splitsmith.match_model import MatchStageDefinition
-from splitsmith.ui.project import MatchProject, StageEntry
+from splitsmith.match_project import MatchProject, StageEntry
 
 
 class StageEditError(Exception):

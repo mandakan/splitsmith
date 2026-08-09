@@ -55,12 +55,12 @@ import httpx
 import pytest
 
 from splitsmith import match_model
+from splitsmith.match_project import MatchProject, StageEntry
 from splitsmith.observability import PhaseTimer
 from splitsmith.sync.client import HostedSyncClient, SyncClientError
 from splitsmith.sync.plan import DocItem, MediaItem, build_push_plan
 from splitsmith.sync.push import MediaItemTiming, PushReport, run_push
 from splitsmith.sync.state import SyncState, load_sync_state
-from splitsmith.ui.project import MatchProject, StageEntry
 
 TRIMMED_NAME = "stage1_cam_abc123_trimmed.mp4"
 SIDECAR_NAME = "stage1_cam_abc123_trimmed.params.json"

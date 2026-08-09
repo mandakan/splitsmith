@@ -15,7 +15,7 @@ from splitsmith.compare.project_loader import CompareShooterBundle, ProbeFn
 from splitsmith.export_naming import stage_file_base
 from splitsmith.fcpxml_gen import VideoMetadata
 from splitsmith.match_model import Match, MatchStageDefinition, Shooter, ShooterStageData
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 
 
 def _ffmpeg_stub_factory() -> Any:

@@ -33,10 +33,10 @@ import time
 from pathlib import Path
 
 from splitsmith import match_model
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.sync.docs import STRIPPED_PROJECT_FIELDS
 from splitsmith.sync.plan import build_push_plan
 from splitsmith.sync.state import SYNC_STATE_FILE, SyncedItem, SyncState, load_sync_state, save_sync_state
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 
 TRIMMED_NAME = "stage1_cam_abc123_trimmed.mp4"
 SIDECAR_NAME = "stage1_cam_abc123_trimmed.params.json"

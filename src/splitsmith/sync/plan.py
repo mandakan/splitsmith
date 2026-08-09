@@ -23,7 +23,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from ..match_model import load_match_or_legacy
-from ..ui.project import MatchProject
+from ..match_project import MatchProject
 from .docs import absolute_path_videos, sanitize_project_doc
 from .state import SyncState
 

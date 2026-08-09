@@ -23,7 +23,7 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
-from splitsmith.ui.project import MatchProject
+from splitsmith.match_project import MatchProject
 
 from .test_ui_server import _match_create_app, _MatchClient
 

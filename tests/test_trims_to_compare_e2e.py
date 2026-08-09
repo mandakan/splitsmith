@@ -27,7 +27,7 @@ from splitsmith import match_trims
 from splitsmith.cli import app
 from splitsmith.fcpxml_gen import VideoMetadata
 from splitsmith.match_model import Match, MatchStageDefinition, Shooter
-from splitsmith.ui.project import MatchProject, StageEntry
+from splitsmith.match_project import MatchProject, StageEntry
 from tests.conftest import _video
 
 runner = CliRunner()

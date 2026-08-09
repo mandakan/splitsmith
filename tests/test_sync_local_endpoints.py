@@ -23,7 +23,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from splitsmith import match_model, user_config
-from splitsmith.ui.project import MatchProject
+from splitsmith.match_project import MatchProject
 from splitsmith.ui.server import create_app
 from tests.conftest import bound_match_id
 from tests.hosted_helpers import _CapturingSender, login, seed_match

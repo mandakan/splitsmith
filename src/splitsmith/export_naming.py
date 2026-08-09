@@ -1,7 +1,7 @@
 """The names export artefacts get on disk.
 
 One writer produces ``<exports>/stage<N>_<slug>_trimmed.mp4`` and six
-readers go looking for it: the CLI, ``ui.exports``, ``ui.project``,
+readers go looking for it: the CLI, ``ui.exports``, ``match_project``,
 ``ui.server``, the MCP export tools, and ``compare.project_loader``.
 Every one of them used to build that string by hand, off a private
 ``_slugify`` copied into three modules.

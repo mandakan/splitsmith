@@ -10,7 +10,7 @@ untouched multi-gigabyte trims. The sha256 itself is only ever verified
 by the push executor (Task 8) at upload time; it is not recomputed here.
 
 Persisted at ``<match-root>/sync_state.json``, written atomically via
-:func:`splitsmith.ui.project.atomic_write_json` so a crash mid-push never
+:func:`splitsmith.match_project.atomic_write_json` so a crash mid-push never
 corrupts the cache. A missing or corrupt file is not an error - it just
 means "nothing has been pushed yet," which makes the next plan a full
 plan.
@@ -24,7 +24,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, ValidationError
 
-from ..ui.project import atomic_write_json
+from ..match_project import atomic_write_json
 
 SYNC_STATE_FILE = "sync_state.json"
 

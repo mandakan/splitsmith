@@ -53,11 +53,11 @@ from pathlib import Path
 
 from PIL import Image, ImageFilter
 
+from ..match_project import StageScorecard
 from ..overlay_html import grid_html
 from ..overlay_layout import Anchor, CellScale, ColorToken, Element, Emphasis, Flow, Group, Role
 from ..overlay_raster import Rasterizer
 from ..overlay_theme import OverlayTheme
-from ..ui.project import StageScorecard
 from .mp4_grid import GridStagePlan, Runner
 from .overlay_data import TileStageData
 from .overlay_sprites import SpriteGeometry, TilePlacement

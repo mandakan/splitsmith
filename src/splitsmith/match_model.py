@@ -36,7 +36,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 
 from .async_bridge import run_sync
 from .config import StageRounds
-from .ui.project import (
+from .match_project import (
     PROJECT_FILE,
     SUBDIRS,
     MatchProject,

@@ -67,7 +67,7 @@ def _seed_match_and_project(db_url: str, email: str, match_id: str, slug: str) -
     via find_video() without needing a full scoreboard import.
     """
     from splitsmith import match_model
-    from splitsmith.ui.project import MatchProject, StageVideo
+    from splitsmith.match_project import MatchProject, StageVideo
 
     engine = create_engine(db_url)
     sf = sessionmaker(engine)

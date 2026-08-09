@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 
 
 def test_beep_window_round_trips() -> None:

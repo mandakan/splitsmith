@@ -20,9 +20,9 @@ from pathlib import Path
 
 import pytest
 
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.storage import FilesystemStorage
 from splitsmith.ui.audio import ensure_audit_audio, ensure_video_audio
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 
 
 @pytest.fixture

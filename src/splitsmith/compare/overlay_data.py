@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 from ..audit_data import audit_shots_to_engine_shots, read_audit_data
 from ..config import StageRounds
-from ..ui.project import MatchProject, StageScorecard, is_stub_audit
+from ..match_project import MatchProject, StageScorecard, is_stub_audit
 from .project_loader import CompareShooterBundle, CompareStageBundle
 
 logger = logging.getLogger(__name__)

@@ -10,14 +10,14 @@ import pytest
 
 from splitsmith.beep_detect import BeepNotFoundError
 from splitsmith.config import BeepCandidate, BeepDetection
-from splitsmith.mcp import detect_tools
-from splitsmith.ui.project import (
+from splitsmith.match_project import (
     STUB_AUDIT_DETECTION,
     MatchProject,
     StageEntry,
     StageVideo,
     is_stub_audit,
 )
+from splitsmith.mcp import detect_tools
 
 
 def _fake_ensemble_result(times: list[float], consensus: int = 3, expected_rounds=None):

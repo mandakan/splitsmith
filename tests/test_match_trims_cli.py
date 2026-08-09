@@ -10,7 +10,7 @@ from typer.testing import CliRunner
 from splitsmith import match_trims
 from splitsmith.cli import app
 from splitsmith.match_model import Match, MatchStageDefinition
-from splitsmith.ui.project import MatchProject, StageEntry
+from splitsmith.match_project import MatchProject, StageEntry
 from tests.conftest import _video
 
 runner = CliRunner()

@@ -39,7 +39,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from . import __version__
-from .ui.project import PROJECT_FILE, MatchProject
+from .match_project import PROJECT_FILE, MatchProject
 
 DEFAULT_DIRS: tuple[str, ...] = ("audit", "scoreboard")
 OPTIONAL_DIRS: frozenset[str] = frozenset({"raw", "audio", "trimmed", "exports"})

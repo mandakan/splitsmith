@@ -26,7 +26,7 @@ the fix.
 from pathlib import Path
 from typing import Any
 
-from splitsmith.ui.project import MatchProject
+from splitsmith.match_project import MatchProject
 
 from .test_ui_server import _seed_match_export_project
 

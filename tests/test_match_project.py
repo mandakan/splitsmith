@@ -1,4 +1,9 @@
-"""Tests for the production UI's match-project model.
+"""Tests for the on-disk match-project model.
+
+Lived at tests/test_ui_project.py while the model was
+splitsmith.ui.project. It moved to a top-level match_project
+because it imports nothing from ui and thirteen of its twenty-three
+importers are outside it.
 
 Covers:
 - ``MatchProject.init`` creates the standard subdirectory layout
@@ -17,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from splitsmith.ui.project import (
+from splitsmith.match_project import (
     PROJECT_FILE,
     SCHEMA_VERSION,
     SUBDIRS,
@@ -441,7 +446,7 @@ def test_atomic_write_no_partial_file_on_crash(tmp_path: Path) -> None:
     with pytest.raises(BoomError):
         # Force the json.dump path through ``default`` by passing an
         # unserializable object plus our exploding default.
-        from splitsmith.ui import project as project_module
+        from splitsmith import match_project as project_module
 
         original_default = project_module._json_default
         project_module._json_default = serializer_that_blows_up
@@ -996,7 +1001,7 @@ def test_import_scoreboard_populates_stage_rounds_from_top_level_stages(
 
 
 def test_import_scoreboard_refuses_overwrite_by_default(tmp_path: Path) -> None:
-    from splitsmith.ui.project import ScoreboardImportConflictError
+    from splitsmith.match_project import ScoreboardImportConflictError
 
     root = tmp_path / "match-conflict"
     project = MatchProject.init(root, name="x")
@@ -1070,7 +1075,7 @@ def test_init_placeholder_rejects_zero_or_negative(tmp_path: Path) -> None:
 
 
 def test_init_placeholder_refuses_when_real_stages_exist(tmp_path: Path) -> None:
-    from splitsmith.ui.project import ScoreboardImportConflictError
+    from splitsmith.match_project import ScoreboardImportConflictError
 
     root = tmp_path / "match"
     project = MatchProject.init(root, name="x")
@@ -1334,7 +1339,7 @@ def test_register_video_stamps_camera_mount_from_make_heuristic(
     from splitsmith import fixture_schema
 
     monkeypatch.setattr(
-        "splitsmith.ui.project.probe_camera_metadata",
+        "splitsmith.match_project.probe_camera_metadata",
         lambda _path: fixture_schema.CameraProbeResult(make="Apple", model="iPhone 15 Pro"),
         raising=False,
     )
@@ -1961,8 +1966,8 @@ def test_export_overview_hosted_uses_storage_and_audit_docs(tmp_path) -> None:
     deliverables to object storage, neither on this process's disk. The
     overview must read shot counts from the injected audit docs and file
     presence from storage -- not stat an empty local exports/ dir."""
+    from splitsmith.match_project import MatchProject, StageEntry
     from splitsmith.storage import FilesystemStorage
-    from splitsmith.ui.project import MatchProject, StageEntry
 
     root = tmp_path / "shooters" / "me"
     proj = MatchProject.init(root, name="X")

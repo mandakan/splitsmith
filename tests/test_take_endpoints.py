@@ -262,7 +262,7 @@ def _setup_take(tmp_path: Path, n_stages: int = 2):
     Returns (client, filename).
     """
     from splitsmith.match_model import Match
-    from splitsmith.ui.project import MatchProject, StageEntry
+    from splitsmith.match_project import MatchProject, StageEntry
     from tests.test_ui_server import _match_create_app, _MatchClient
 
     project_root = tmp_path / "match"
@@ -366,7 +366,7 @@ def test_take_overview_status_found_after_beep(tmp_path: Path) -> None:
 def test_take_overview_status_none_on_failed_detect(tmp_path: Path) -> None:
     """Stage status is 'none' when beep_auto_detect_failed is True and no beep_time."""
     from splitsmith.match_model import Match
-    from splitsmith.ui.project import MatchProject
+    from splitsmith.match_project import MatchProject
 
     client, filename = _setup_take(tmp_path, n_stages=1)
 
@@ -462,7 +462,7 @@ def _setup_hosted_peaks(tmp_path: Path, project_subdir: str = "match", filename:
     from unittest.mock import MagicMock
 
     from splitsmith.match_model import Match
-    from splitsmith.ui.project import MatchProject, StageEntry
+    from splitsmith.match_project import MatchProject, StageEntry
     from tests.test_ui_server import _match_create_app, _MatchClient
 
     project_root = tmp_path / project_subdir

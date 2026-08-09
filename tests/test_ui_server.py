@@ -16,8 +16,8 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from splitsmith.automation import AutomationOverride
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.thumbnail import ThumbnailError
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
 from splitsmith.ui.server import create_app
 from splitsmith.video_probe import ProbeError, ProbeResult
 
@@ -1587,7 +1587,7 @@ def test_manual_stage_time_survives_scoreboard_sync(tmp_path: Path) -> None:
     """``merge_stage_times`` (the per-competitor sync path) must
     leave manual values alone -- otherwise pinning yourself in the
     Scoreboard would silently overwrite a duration the user typed in."""
-    from splitsmith.ui.project import MatchProject
+    from splitsmith.match_project import MatchProject
     from splitsmith.ui.scoreboard.models import (
         CompetitorStageResult,
         CompetitorStageResults,
@@ -1622,7 +1622,7 @@ def test_manual_stage_time_survives_scoreboard_sync(tmp_path: Path) -> None:
 
 
 def test_scoreboard_sync_persists_full_scorecard() -> None:
-    from splitsmith.ui.project import MatchProject
+    from splitsmith.match_project import MatchProject
     from splitsmith.ui.scoreboard.models import (
         CompetitorStageResult,
         CompetitorStageResults,
@@ -2874,7 +2874,7 @@ def test_shot_detect_clears_beep_confirm_stub_marker(tmp_path: Path, monkeypatch
     import numpy as np
     import soundfile as sf
 
-    from splitsmith.ui.project import StageStatus, is_stub_audit, stage_audit_status
+    from splitsmith.match_project import StageStatus, is_stub_audit, stage_audit_status
 
     client, _ = _seed_project_with_primary(tmp_path)
     project_root = tmp_path / "match"
@@ -3954,7 +3954,7 @@ def test_beep_confirm_seeds_the_stub_in_hosted_state_docs(tmp_path: Path) -> Non
 
     from splitsmith import match_model as _match_model
     from splitsmith.db import Base, ProjectStateStore, User, create_engine, sessionmaker
-    from splitsmith.ui.project import is_stub_audit
+    from splitsmith.match_project import is_stub_audit
 
     engine = create_engine("sqlite+aiosqlite:///:memory:")
     sf = sessionmaker(engine)
@@ -6577,7 +6577,7 @@ def test_recent_projects_detail_in_progress_once_footage_attached(
     ``awaiting_footage`` to ``in_progress`` (the existing in-flight
     state). Drives the MatchShell menu treatment per #425."""
     from splitsmith import match_model, user_config
-    from splitsmith.ui.project import StageEntry, StageVideo
+    from splitsmith.match_project import StageEntry, StageVideo
 
     match_root = tmp_path / "with-footage"
     match = match_model.Match.init(match_root, name="With Footage")
@@ -7196,7 +7196,7 @@ def test_promote_against_fixture_endpoint_validates_anchor_exists(
     tmp_path: Path,
 ) -> None:
     """Lab-enabled, but the anchor slug doesn't exist on disk -> 404."""
-    from splitsmith.ui.project import MatchProject, StageEntry
+    from splitsmith.match_project import MatchProject, StageEntry
 
     project_root = tmp_path / "match-anchor"
     _shooter_root = project_root / "shooters" / "me"
@@ -7253,7 +7253,7 @@ def _seed_match_export_project(
     """
     import json as _json
 
-    from splitsmith.ui.project import MatchProject, StageEntry
+    from splitsmith.match_project import MatchProject, StageEntry
 
     numbers = list(stage_numbers) if stage_numbers is not None else list(range(1, stage_count + 1))
     project_root = tmp_path / "match"
@@ -7440,7 +7440,7 @@ def test_export_stage_accepts_a_scoreboard_time_without_a_timestamp(tmp_path: Pa
     to cut it; the server used to reject it as a placeholder, which is the
     divergence the shared ``ready_to_trim`` rule closes.
     """
-    from splitsmith.ui.project import MatchProject
+    from splitsmith.match_project import MatchProject
 
     client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
     stage = MatchProject.load(project_root / "shooters" / "me").stages[0]
@@ -7461,7 +7461,7 @@ def test_export_stage_400_on_untouched_placeholder(tmp_path: Path) -> None:
     ``time_seconds=10.0`` -- it asserted the stricter rule (#613) rather
     than the placeholder case its name described.
     """
-    from splitsmith.ui.project import MatchProject
+    from splitsmith.match_project import MatchProject
 
     client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
     shooter_root = project_root / "shooters" / "me"
@@ -7482,7 +7482,7 @@ def test_export_stage_400_on_a_skipped_stage(tmp_path: Path) -> None:
     ``trim_blocker``, a direct API call gets the same answer the UI implies,
     with a message that names the actual problem.
     """
-    from splitsmith.ui.project import MatchProject
+    from splitsmith.match_project import MatchProject
 
     client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
     shooter_root = project_root / "shooters" / "me"
@@ -7506,7 +7506,7 @@ def test_export_stage_reports_secondary_trim_filenames(tmp_path: Path, monkeypat
     SPA, after the trims had already been written to disk.
     """
     from splitsmith import trim
-    from splitsmith.ui.project import MatchProject
+    from splitsmith.match_project import MatchProject
 
     client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
     shooter_root = project_root / "shooters" / "me"
@@ -7617,7 +7617,7 @@ def test_trims_only_export_reports_a_clean_run(tmp_path: Path, monkeypatch) -> N
 def test_trims_only_export_still_reports_a_failed_secondary(tmp_path: Path, monkeypatch) -> None:
     """Filtering shot findings must not swallow an artefact that failed."""
     from splitsmith import trim
-    from splitsmith.ui.project import MatchProject
+    from splitsmith.match_project import MatchProject
 
     client, project_root = _seed_trims_only_stage(tmp_path, monkeypatch)
     shooter_root = project_root / "shooters" / "me"

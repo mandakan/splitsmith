@@ -36,13 +36,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, PrivateAttr, computed_field, model_validator
 
-from .. import video_match
-from ..async_bridge import run_sync
-from ..automation import AutomationOverride
-from ..config import BeepCandidate, StageData, StageRounds, VideoMatchConfig
-from ..export_naming import stage_file_base
-from ..storage import Storage
-from ..video_match import match_videos_to_stages
+from . import video_match
+from .async_bridge import run_sync
+from .automation import AutomationOverride
+from .config import BeepCandidate, StageData, StageRounds, VideoMatchConfig
+from .export_naming import stage_file_base
+from .storage import Storage
+from .video_match import match_videos_to_stages
 
 logger = logging.getLogger(__name__)
 
@@ -1003,7 +1003,7 @@ class MatchProject(BaseModel):
         """
         if self.selected_shooter_id is None:
             return None
-        from ..lab.core import shooter_token as _token
+        from .lab.core import shooter_token as _token
 
         return _token(self.selected_shooter_id)
 
@@ -1886,7 +1886,7 @@ class MatchProject(BaseModel):
         # if ffprobe fails or the make is unknown, ``camera_mount`` stays
         # ``None`` and the detector falls back to the default class. The
         # user can correct via the videos PATCH endpoint.
-        from ..fixture_schema import probe_camera_metadata
+        from .fixture_schema import probe_camera_metadata
 
         probed_make: str | None = None
         probed_model: str | None = None

@@ -36,7 +36,7 @@ from pathlib import Path
 import pytest
 
 from splitsmith import match_model
-from splitsmith.ui.project import MatchProject, RawVideo, StageEntry, StageVideo
+from splitsmith.match_project import MatchProject, RawVideo, StageEntry, StageVideo
 from splitsmith.ui.shooter_move import move_shooter
 
 # ---------------------------------------------------------------------------

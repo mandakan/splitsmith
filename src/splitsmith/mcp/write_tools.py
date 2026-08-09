@@ -26,12 +26,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from ..match_project import MatchProject, StageVideo
 from ..ui import audio as audio_helpers
-from ..ui.project import MatchProject, StageVideo
 from .sandbox import resolve_project_root
 
 # Roles the assign tool accepts. Mirror of
-# :data:`splitsmith.ui.project.VideoRole` -- spelled out here so the
+# :data:`splitsmith.match_project.VideoRole` -- spelled out here so the
 # MCP error message tells the agent what valid values look like.
 ALLOWED_ROLES = ("primary", "secondary", "ignored")
 

@@ -115,7 +115,7 @@ def _seeded_match(tmp_path: Path, *, stages: int, shooters: list[str]):
     HTTP requests via ``client``.
     """
     from splitsmith import match_model
-    from splitsmith.ui.project import MatchProject
+    from splitsmith.match_project import MatchProject
     from splitsmith.ui.server import current_match_root
     from tests.test_ui_server import _match_create_app, _MatchClient
 
@@ -437,7 +437,7 @@ class TestEditMatchStages:
         that would return 200 with the stage-list edit silently unsaved for
         that shooter (Task 6 review finding 2)."""
         from splitsmith.db import StateConflictError
-        from splitsmith.ui.project import MatchProject
+        from splitsmith.match_project import MatchProject
 
         client, _state = _seeded_match(tmp_path, stages=3, shooters=["me"])
 
@@ -475,7 +475,7 @@ class TestEditMatchStages:
         resolving the first. Two browser tabs on one hosted match reach this.
         """
         from splitsmith.db import StateConflictError
-        from splitsmith.ui.project import MatchProject
+        from splitsmith.match_project import MatchProject
 
         client, state = _seeded_match(tmp_path, stages=3, shooters=["anna", "erik"])
         real_save = MatchProject.save

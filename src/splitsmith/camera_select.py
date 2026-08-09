@@ -12,7 +12,7 @@ projects.
 
 from __future__ import annotations
 
-from .ui.project import StageVideo
+from .match_project import StageVideo
 
 #: Role names accepted as selectors when no mount matches.
 ROLE_SELECTORS = ("primary", "secondary")

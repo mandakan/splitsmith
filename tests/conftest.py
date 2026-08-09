@@ -11,7 +11,7 @@ import pytest
 
 from splitsmith.compare.project_loader import trim_path_for_video
 from splitsmith.match_model import Match, MatchStageDefinition
-from splitsmith.ui.project import MatchProject, StageEntry, StageVideo
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 
 # Re-export hosted-mode fixtures so pytest auto-discovers them without
 # needing per-test-file imports (which trigger ruff F811 redefinition
@@ -298,7 +298,7 @@ def scaffold_match(
     should now write at ``shooter_root`` instead.
     """
     from splitsmith import match_model
-    from splitsmith.ui.project import MatchProject
+    from splitsmith.match_project import MatchProject
 
     root = tmp_path / subdir
     match = match_model.Match.init(root, name=name)

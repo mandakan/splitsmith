@@ -37,8 +37,8 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 
 from .. import match_model
+from ..match_project import MatchProject
 from ..storage import Storage
-from .project import MatchProject
 
 if TYPE_CHECKING:
     from ..db.matches import PostgresMatchStore
