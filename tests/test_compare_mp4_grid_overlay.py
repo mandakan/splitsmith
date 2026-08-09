@@ -1099,22 +1099,28 @@ def test_the_clock_and_the_sprite_resolve_to_the_same_face(theme_name, tmp_path)
     ), f"the {theme_name} theme draws its sprite and its clock with different typefaces"
 
 
-def test_a_host_with_no_system_fonts_still_gets_one_real_face(monkeypatch, tmp_path):
+def test_a_host_with_no_system_fonts_still_gets_one_real_face(tmp_path):
+    """The host cannot influence the face, so a fontless one is fine.
+
+    This used to empty ``overlay_text._FONT_PRESETS`` /
+    ``_FONT_FALLBACKS`` to simulate a bare host, because resolution
+    walked those tables before giving up on the bundled face. Issue #759
+    deleted the walk -- a face is a bundled name or an error -- so there
+    is no longer any host state to take away. What is worth keeping is
+    the assertion the old test was really making: the clock's file and
+    the sprite's file are the same typeface, on any host.
+    """
     from splitsmith import overlay_text
     from splitsmith.compare import overlay_sprites
     from splitsmith.overlay_theme import load_theme
 
-    # Patch where the names are *read* -- ``resolve_overlay_face`` reads
-    # them out of overlay_text's globals, so patching anywhere else
-    # silently patches nothing (the Task 1 monkeypatch trap).
-    monkeypatch.setattr(overlay_text, "_FONT_PRESETS", {})
-    monkeypatch.setattr(overlay_text, "_FONT_FALLBACKS", ())
     face = overlay_sprites.theme_font_face(load_theme("clean"))
     clock_path = overlay_text.overlay_font_file(face, tmp_path)
+
     assert clock_path.is_file()
     assert (
         clock_path.read_bytes() == _sprite_face_file().read_bytes()
-    ), "a host with no system fonts drew its clock with something other than the bundled face"
+    ), "the clock drew with something other than the bundled face the sprite uses"
 
 
 def test_the_rendered_clock_uses_the_face_the_sprite_draws_with(tmp_path):
