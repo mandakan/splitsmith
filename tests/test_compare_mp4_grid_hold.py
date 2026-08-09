@@ -1587,3 +1587,31 @@ def test_a_tile_whose_footage_covers_the_whole_action_gets_a_cell_that_never_arm
     # inside it and does.
     assert max(arms) > base.duration_seconds
     assert min(arms) < base.duration_seconds
+
+
+def test_a_non_dividing_canvas_scales_the_stills_to_the_composed_size(tmp_path):
+    """#691: the still must agree with what xstack composes, not the canvas.
+
+    1280 at 3 columns floors to 426-wide cells, so the grid is 1278 wide.
+    A canvas-sized still fails ``concat`` at graph-config time and every
+    stage dies. Both consumers of the PNG - the hold chain and the early
+    per-tile summary chain - must scale to the composed size.
+    """
+    plan = _plan(("Ann", "Bo", "Cy", "Di", "Ed"), rows=3, cols=3, hold=HOLD)
+    cmd = mp4_grid.build_stage_command(
+        plan,
+        canvas=mp4_grid.GridCanvas(1280, 720, 30, 1),
+        output_path=Path("/w/s3.mov"),
+        ffmpeg_binary="/bin/ffmpeg",
+        overlay=_overlay_plan(tmp_path),
+        hold_still_path=HOLD_STILL,
+    )
+    graph = _graph_of(cmd)
+
+    (still_chain,) = _chains(graph, r"\[hold\]$")
+    assert "scale=1278:720" in still_chain, still_chain
+    # The early-summary chain reads the same PNG and crops cells out of
+    # it; a canvas-sized scale there leaves the crop grid misaligned by
+    # the flooring remainder.
+    assert graph.count("scale=1278:720") == 2, graph
+    assert "scale=1280:720" not in graph, graph

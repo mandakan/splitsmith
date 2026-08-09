@@ -679,6 +679,19 @@ def _cell_size(canvas: GridCanvas, plan: GridStagePlan) -> tuple[int, int]:
     return canvas.width // plan.cols, canvas.height // plan.rows
 
 
+def _composed_size(canvas: GridCanvas, plan: GridStagePlan) -> tuple[int, int]:
+    """What ``xstack`` actually composes: the floored cells re-multiplied.
+
+    Equal to the canvas whenever it divides by the grid; up to
+    ``cols - 1`` / ``rows - 1`` pixels smaller when it does not. Every
+    still that meets the composed video - the hold via ``concat``, the
+    early per-tile summary via per-cell crops - must be this size, not
+    the canvas's (#691).
+    """
+    cell_w, cell_h = _cell_size(canvas, plan)
+    return cell_w * plan.cols, cell_h * plan.rows
+
+
 def tile_footage_end_seconds(tile: GridTile) -> float:
     """When this tile's own picture stops, in *segment* time.
 
@@ -1095,6 +1108,7 @@ def _early_summary_filters(
         return [], source_label
 
     cell_w, cell_h = _cell_size(canvas, plan)
+    composed_w, composed_h = _composed_size(canvas, plan)
     frame_seconds = 1.0 / canvas.fps
     branches = "".join(f"[still{index}]" for index in range(len(present)))
     # ``split=1`` is legal but reads as a mistake; ``null`` is the same
@@ -1103,7 +1117,7 @@ def _early_summary_filters(
     # guard against one it did not.
     fan_out = f"split={len(present)}" if len(present) > 1 else "null"
     filters = [
-        f"[{early_index}:v]setpts=PTS-STARTPTS,scale={canvas.width}:{canvas.height},"
+        f"[{early_index}:v]setpts=PTS-STARTPTS,scale={composed_w}:{composed_h},"
         f"setsar=1,fps={canvas.rate_string},{fan_out}{branches}"
     ]
 
@@ -1463,6 +1477,7 @@ def _build_filter_graph(
     replaces a finished tile's held clock and stays on the action.
     """
     cell_w, cell_h = _cell_size(canvas, plan)
+    composed_w, composed_h = _composed_size(canvas, plan)
     rate = canvas.rate_string
     parts: list[str] = []
 
@@ -1518,14 +1533,15 @@ def _build_filter_graph(
 
     # The still, conformed to exactly what ``concat`` compares: size, SAR
     # and frame rate. ``scale`` is a no-op on a still this module wrote
-    # (``build_hold_still`` composes at canvas size) and the guard against
+    # (``build_hold_still`` composes at the composed grid size, which is
+    # what ``xstack`` emits - see ``_composed_size``) and the guard against
     # one it did not. ``trim`` restates the length the input's ``-t``
     # already set, so the segment's video extent never depends on how
     # ``-loop 1`` and ``concat``'s eof handling interact.
     hold_label: str | None = None
     if hold_index is not None:
         parts.append(
-            f"[{hold_index}:v]setpts=PTS-STARTPTS,scale={canvas.width}:{canvas.height},"
+            f"[{hold_index}:v]setpts=PTS-STARTPTS,scale={composed_w}:{composed_h},"
             f"setsar=1,fps={rate},trim=0:{plan.hold_seconds:g}[hold]"
         )
         hold_label = "hold"
@@ -1865,12 +1881,17 @@ def _stage_hold_still(
     """
     from .overlay_summary import write_hold_still
 
+    composed_w, composed_h = _composed_size(canvas, plan)
     return write_hold_still(
         plan,
         _overlay_data_for_stage(data, plan.stage_number),
+        # Composed size, not canvas size: ``SpriteGeometry`` floor-divides
+        # its width and height back into cells, and a composed size divides
+        # exactly, so the cells come out identical to ``_cell_size``'s and
+        # the PNG matches the ``xstack`` output by construction (#691).
         SpriteGeometry(
-            canvas_width=canvas.width,
-            canvas_height=canvas.height,
+            canvas_width=composed_w,
+            canvas_height=composed_h,
             rows=plan.rows,
             cols=plan.cols,
         ),
