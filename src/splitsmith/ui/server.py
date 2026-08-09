@@ -10138,6 +10138,16 @@ def create_app(
             project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # #775: an audited stage is fully classified. Run the auto-classifier
+        # on every save so statistic_splits never sees a partial stage; shots
+        # whose source is "manual" are preserved, shots with no ms_after_beep
+        # are left unclassified (they never reach statistics).
+        shots = payload.get("shots")
+        if isinstance(shots, list):
+            coach_module.classify_intervals_in_dicts(
+                [s for s in shots if isinstance(s, dict)],
+                CoachAutoClassifyConfig(),
+            )
         # Read the current version so the save is optimistic-locked. The
         # SPA PUT doesn't carry a version (it assumes last-writer-wins), so
         # this load-then-save has a tiny race window: if a concurrent
@@ -10359,12 +10369,15 @@ def create_app(
     def get_stage_coach(slug: str, stage_number: int) -> JSONResponse:
         """Return the per-shot coach view for a stage.
 
-        Read-only: the stored ``interval_class`` is surfaced as-is, plus a
-        ``stale`` flag indicating whether the current rule disagrees. The
-        client can call ``POST /coach/reclassify`` to persist the rule's
-        verdict onto unset/auto entries. Returns ``200 null`` when the
-        stage has no audit JSON yet (a normal pre-audit state); 404 is
-        reserved for genuinely-unknown stage numbers.
+        A legacy audit doc with unclassified shots is healed on first read
+        so every consumer sees fully-classified data - see ``stale`` for
+        whether the current rule disagrees with a stored (possibly manual)
+        class. Owner reads persist the heal; share-token reads classify
+        in-memory only and never write back. The client can also call
+        ``POST /coach/reclassify`` to force-persist the rule's verdict onto
+        unset/auto entries. Returns ``200 null`` when the stage has no
+        audit JSON yet (a normal pre-audit state); 404 is reserved for
+        genuinely-unknown stage numbers.
         """
         project = state.shooter_project(slug)
         try:
@@ -10374,8 +10387,31 @@ def create_app(
         audit_payload, _ = state.load_audit(slug, stage_number)
         if audit_payload is None:
             return JSONResponse(None)
-        payload, _version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
+        payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
         cfg = CoachAutoClassifyConfig()
+        # #775: heal legacy docs on read so consumers (Results, share view,
+        # statistic_splits) always see a fully classified stage. Owners get
+        # the heal persisted; share-token readers are read-only, so the
+        # classes are computed in-memory and never written back.
+        shots = payload.get("shots")
+        needs_backfill = isinstance(shots, list) and any(
+            isinstance(s, dict)
+            and s.get("ms_after_beep") is not None
+            and s.get(coach_module.FIELD_INTERVAL_CLASS) is None
+            and s.get(coach_module.FIELD_INTERVAL_CLASS_SOURCE) != "manual"
+            for s in shots
+        )
+        if needs_backfill:
+            coach_module.classify_intervals_in_dicts([s for s in shots if isinstance(s, dict)], cfg)
+            if not current_share_request.get():
+                from ..db import StateConflictError
+
+                try:
+                    _coach_save(slug, stage_number, payload, version)
+                except StateConflictError:
+                    # A concurrent writer won the version race; serve the
+                    # in-memory heal and let the next read persist it.
+                    pass
         return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/coach/reclassify")
@@ -10438,6 +10474,14 @@ def create_app(
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        # #775: a ``clear_class: true`` patch drops the shot's class, which
+        # would re-open the partial-classification state the invariant
+        # rules out. Re-running the classifier heals it back to the rule's
+        # auto verdict; this is a no-op for every other patch because the
+        # classifier only rewrites unset/auto entries and manual patches
+        # set interval_class_source="manual" on the target shot itself.
+        coach_module.classify_intervals_in_dicts([s for s in shots if isinstance(s, dict)], cfg)
 
         events = list(payload.get("audit_events") or [])
         events.append(

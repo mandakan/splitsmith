@@ -415,6 +415,71 @@ def test_share_project_happy_path(
     assert not client.cookies
 
 
+def _seed_stage_audit(db_url: str, user_email: str, match_id: str, slug: str, doc: dict) -> None:
+    """Insert one stage-1 audit doc into state_docs, plus a stage entry on
+    the shooter project so the coach route's stage lookup succeeds."""
+    from splitsmith.match_project import MatchProject, StageEntry
+
+    engine = create_engine(db_url)
+    sf = sessionmaker(engine)
+
+    async def _seed() -> None:
+        async with sf() as s:
+            row = (await s.execute(_select(User).where(User.email == user_email))).scalar_one()
+            user_id = row.id
+        store = ProjectStateStore(sf, user_id=user_id)
+        project_doc, version = await store.load_project(match_id, slug)
+        project = MatchProject.model_validate(project_doc)
+        project.stages = [StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=30.0)]
+        await store.save_project(match_id, slug, project.model_dump(mode="json"), expected_version=version)
+        await store.save_audit(match_id, slug, 1, doc, expected_version=0)
+
+    asyncio.run(_seed())
+
+
+def _load_stage_audit(db_url: str, user_email: str, match_id: str, slug: str) -> dict:
+    engine = create_engine(db_url)
+    sf = sessionmaker(engine)
+
+    async def _load() -> dict:
+        async with sf() as s:
+            row = (await s.execute(_select(User).where(User.email == user_email))).scalar_one()
+            user_id = row.id
+        store = ProjectStateStore(sf, user_id=user_id)
+        doc, _version = await store.load_audit(match_id, slug, 1)
+        assert doc is not None
+        return doc
+
+    return asyncio.run(_load())
+
+
+def test_share_coach_read_classifies_in_memory_without_persisting(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """#775: a share-token coach read of a legacy (unclassified) doc gets
+    classified shots in the response but must not write the heal back -
+    anonymous readers never mutate owner state."""
+    token = _setup_shared_match(hosted_env, hosted_app)
+    legacy_doc = {
+        "stage_number": 1,
+        "shots": [
+            {"shot_number": 1, "ms_after_beep": 1500},
+            {"shot_number": 2, "ms_after_beep": 1800},
+        ],
+    }
+    _seed_stage_audit(hosted_env, "owner@example.com", MID, SLUG, legacy_doc)
+
+    client, _ = hosted_app
+    resp = client.get(_share_url(token, f"shooters/{SLUG}/stages/1/coach"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert [s["interval_class"] for s in body["shots"]] == ["first_shot", "split"]
+
+    stored = _load_stage_audit(hosted_env, "owner@example.com", MID, SLUG)
+    assert all(s.get("interval_class") is None for s in stored["shots"])
+
+
 def test_share_url_match_id_is_ignored(
     hosted_env: str,
     hosted_app: tuple[TestClient, _CapturingSender],

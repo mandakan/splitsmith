@@ -72,8 +72,10 @@ def _read(audit_file: Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def test_get_coach_returns_shots_with_stale_when_unset(tmp_path: Path) -> None:
-    client, _audit, base = _bootstrap(tmp_path)
+def test_get_coach_backfills_classes_on_first_read(tmp_path: Path) -> None:
+    """#775: a legacy audit doc with unclassified shots heals on first
+    read - the response carries auto classes and the doc is persisted."""
+    client, audit_file, base = _bootstrap(tmp_path)
     resp = client.get(f"{base}/shooters/me/stages/1/coach")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -81,13 +83,26 @@ def test_get_coach_returns_shots_with_stale_when_unset(tmp_path: Path) -> None:
     assert body["beep_time"] == 5.0
     assert len(body["shots"]) == 4
 
-    # Nothing classified yet -> stored class is None and stale=False per
-    # the spec (unannotated shots aren't stale).
+    assert [s["interval_class"] for s in body["shots"]] == [
+        "first_shot",
+        "split",
+        "transition",
+        "movement",
+    ]
     for s in body["shots"]:
-        assert s["interval_class"] is None
-        assert s["interval_class_source"] is None
+        assert s["interval_class_source"] == "auto"
         assert s["stale"] is False
         assert s["improvement_flag"] is False
+
+    # The heal is persisted, silently (no new audit event kinds).
+    stored = _read(audit_file)
+    assert [s["interval_class"] for s in stored["shots"]] == [
+        "first_shot",
+        "split",
+        "transition",
+        "movement",
+    ]
+    assert not any(e.get("kind") == "coach_reclassify" for e in stored.get("audit_events") or [])
 
     # time_absolute = beep_time + ms/1000 so the SPA can seek videos.
     assert body["shots"][0]["time_absolute"] == pytest.approx(5.0 + 1.5)
@@ -96,6 +111,21 @@ def test_get_coach_returns_shots_with_stale_when_unset(tmp_path: Path) -> None:
     assert body["shots"][1]["split"] == pytest.approx(0.3)
     # Reload-hint flag fires on the long gap.
     assert body["shots"][3]["reload_hint"] is True
+
+
+def test_get_coach_does_not_write_when_already_classified(tmp_path: Path) -> None:
+    """#775: once a first GET has healed a bootstrap doc, a second GET
+    over an already-fully-classified stage must not touch the file -
+    ``needs_backfill`` is False, so there is nothing to persist."""
+    client, audit_file, base = _bootstrap(tmp_path)
+    first = client.get(f"{base}/shooters/me/stages/1/coach")
+    assert first.status_code == 200, first.text
+    before = audit_file.read_bytes()
+
+    second = client.get(f"{base}/shooters/me/stages/1/coach")
+    assert second.status_code == 200, second.text
+    after = audit_file.read_bytes()
+    assert after == before
 
 
 def test_get_coach_returns_videos_with_beep_in_clip(tmp_path: Path) -> None:
@@ -382,7 +412,10 @@ def test_patch_set_class_and_note_and_flag(tmp_path: Path) -> None:
     assert target["coaching_note"] == "second A was slow"
 
 
-def test_patch_clear_class_drops_pair(tmp_path: Path) -> None:
+def test_patch_clear_class_reverts_to_auto_verdict(tmp_path: Path) -> None:
+    """#775: clearing a manual class must not re-open the partial
+    classification state - it drops straight back to the rule's auto
+    verdict, never leaving the shot unclassified."""
     client, audit_file, base = _bootstrap(tmp_path)
     client.patch(
         f"{base}/shooters/me/stages/1/shots/2/coach",
@@ -391,8 +424,15 @@ def test_patch_clear_class_drops_pair(tmp_path: Path) -> None:
     resp = client.patch(f"{base}/shooters/me/stages/1/shots/2/coach", json={"clear_class": True})
     assert resp.status_code == 200
     body = resp.json()
-    assert body["shots"][1]["interval_class"] is None
-    assert body["shots"][1]["interval_class_source"] is None
+    # Shot 2's gap is 0.30s (<= split_max_s), so the rule's verdict is
+    # "split" once the manual override is cleared.
+    assert body["shots"][1]["interval_class"] == "split"
+    assert body["shots"][1]["interval_class_source"] == "auto"
+
+    saved = _read(audit_file)
+    assert not any(
+        s.get("ms_after_beep") is not None and s.get("interval_class") is None for s in saved["shots"]
+    )
 
 
 def test_patch_class_without_source_rejected(tmp_path: Path) -> None:

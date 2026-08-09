@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from splitsmith.coach import statistic_splits
 from splitsmith.compare import overlay_data, project_loader
 from splitsmith.config import StageRounds
 from splitsmith.match_project import MatchProject, StageEntry, StageScorecard
@@ -109,12 +110,36 @@ def test_interval_classes_ride_along_on_tile_shots(tmp_path):
     # Fed out of order on purpose: the class must stay attached to its
     # own shot through the time re-sort, not to its original row index.
     # The split statistics (issue #772) read this field to tell a split
-    # from a reload.
-    audit = _write_audit(tmp_path / "ann", 1, [1450, 1200, 1700], classes=["split", "first_shot", None])
+    # from a reload. Fully classified on purpose - the partial case
+    # (some shots classified, some not) is covered separately below,
+    # since #775 heals it rather than passing ``None`` through.
+    audit = _write_audit(tmp_path / "ann", 1, [1450, 1200, 1700], classes=["split", "first_shot", "movement"])
     data = overlay_data.load_overlay_data([_bundle(tmp_path, "ann", audit=audit)])
     tile = data[("ann", 1)]
     assert [round(s.time_from_beep, 3) for s in tile.shots] == [1.2, 1.45, 1.7]
-    assert [s.interval_class for s in tile.shots] == ["first_shot", "split", None]
+    assert [s.interval_class for s in tile.shots] == ["first_shot", "split", "movement"]
+
+
+def test_partially_classified_legacy_audit_is_healed_in_memory(tmp_path):
+    # #775: an audited stage is fully classified by invariant, but a
+    # legacy doc on disk can still carry a mix of classified and
+    # unclassified shots. ``_load_shots`` must heal it in memory so
+    # ``statistic_splits`` sees the same input it would see for a stage
+    # that was fully classified from the start - the unclassified
+    # shots' real splits must not be dropped from the average.
+    partial = _write_audit(tmp_path / "ann", 1, [1200, 1450, 1700], classes=["first_shot", "split", None])
+    full = _write_audit(tmp_path / "bo", 1, [1200, 1450, 1700], classes=["first_shot", "split", "split"])
+    data = overlay_data.load_overlay_data(
+        [_bundle(tmp_path, "ann", audit=partial), _bundle(tmp_path, "bo", audit=full)]
+    )
+    partial_tile = data[("ann", 1)]
+    full_tile = data[("bo", 1)]
+    assert None not in [s.interval_class for s in partial_tile.shots]
+    assert [round(s.split, 3) for s in partial_tile.shots] == [round(s.split, 3) for s in full_tile.shots]
+    assert statistic_splits(partial_tile.shots) == statistic_splits(full_tile.shots)
+
+    # The heal must not touch the file on disk.
+    assert json.loads(partial.read_text())["shots"][2].get("interval_class") is None
 
 
 @pytest.mark.parametrize("payload", ["[]", "null", '"nope"', "3"])

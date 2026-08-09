@@ -104,6 +104,12 @@ export const SPLIT_STAT_SPLIT_MAX = 0.5;
  * order. Mirrors ``splitsmith.coach.statistic_splits``; if the rule
  * changes, update both (issue #772).
  *
+ * Partial classification (#775): the backend classifies on audit save and
+ * backfills on coach reads, so any stage served to this function is fully
+ * classified for ms-bearing shots - the some() branch is all-or-nothing in
+ * practice. Shots lacking ms_after_beep keep a null class and are excluded
+ * by the class filter either way.
+ *
  * ``shots`` is one stage's full time-ordered shot sequence, draw first.
  * On a stage with any classified interval, exactly the "split"-classed
  * intervals count - transitions, movement and reloads are the run's
