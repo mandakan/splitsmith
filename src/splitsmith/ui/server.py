@@ -6047,6 +6047,25 @@ def create_app(
         if store is None:
             raise HTTPException(status_code=500, detail="share store unavailable")
         s = await store.create(mid)
+        # Best-effort: warm the match card cache so the link the owner
+        # immediately pastes previews without a cold Chromium render on
+        # first fetch. A browser-less host, a storage hiccup, or a slow
+        # render must never cost the owner their share link -- the PNG
+        # route renders on first fetch anyway, so a failed warm costs
+        # nothing but a cold first preview. Run on a worker thread, not
+        # awaited inline: ``warm_match_card`` launches Chromium through
+        # Playwright's *sync* API, which refuses to run on the event-loop
+        # thread this async route executes on. ``asyncio.to_thread``
+        # copies the current context, so ``current_tenant`` /
+        # ``current_match_root`` / ``current_match_id`` -- all read deep
+        # inside ``warm_match_card`` -- resolve the same in the thread as
+        # they do here.
+        try:
+            from .share_og import warm_match_card
+
+            await asyncio.to_thread(warm_match_card, state, s.token)
+        except Exception:
+            logger.warning("failed to warm match card for share %s", s.id, exc_info=True)
         return ShareInfo(
             id=s.id,
             url=f"{state.public_base_url}/share/{s.token}",

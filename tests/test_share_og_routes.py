@@ -309,3 +309,68 @@ def test_png_routes_404_outside_hosted_mode() -> None:
     app = create_app()
     with TestClient(app, follow_redirects=False) as client:
         assert client.get("/api/share/anything/og.png").status_code == 404
+
+
+def test_creating_a_share_warms_the_match_card(
+    hosted_env: str,
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The link the owner pastes previews without a cold render.
+
+    ``state.storage`` only resolves inside a pinned-tenant request (it
+    reads the ``current_tenant`` contextvar, which resets once the
+    request that set it returns), so this can't assert
+    ``storage.exists(...)`` from the test body directly. Instead it
+    poisons ``share_card_render.render_card`` -- the only thing that
+    would run on a cache *miss* -- then fetches the PNG the share just
+    created. If share-creation warmed the cache, the fetch is a hit and
+    never reaches the poisoned function; if it didn't, the fetch is a
+    miss, ``render_card`` runs, and the poison fires.
+    """
+    import splitsmith.share_card_render as share_card_render_mod
+
+    token = _setup_shared_match(hosted_env, hosted_app_with_storage)
+    client, _sender = hosted_app_with_storage
+
+    def _unwarmed(*args: object, **kwargs: object) -> bytes:
+        raise AssertionError("render_card was called: the match card was not pre-warmed")
+
+    monkeypatch.setattr(share_card_render_mod, "render_card", _unwarmed)
+
+    resp = client.get(f"/api/share/{token}/og.png")
+    assert resp.status_code == 200
+    assert resp.content[:8] == _PNG_MAGIC
+
+
+def test_share_creation_still_succeeds_when_rendering_fails(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Warming is best-effort: a browser-less host must still hand the
+    owner a working link.
+
+    ``_seed_state_docs`` matters here beyond the other tests in this
+    file: without it, ``build_match_card`` 404s before ``warm_match_card``
+    ever reaches ``cached_card_png``, and the monkeypatch below would go
+    unexercised while the test still passed for the wrong reason. The
+    ``calls`` list makes that failure mode visible instead of assumed.
+    """
+    import splitsmith.ui.share_og as share_og
+
+    calls: list[str] = []
+
+    def _boom(*args: object, **kwargs: object) -> bytes:
+        calls.append(str(kwargs.get("token")))
+        raise RuntimeError("no browser here")
+
+    monkeypatch.setattr(share_og, "cached_card_png", _boom)
+
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    seed_match(hosted_env, "owner@example.com", MID)
+    _seed_state_docs(hosted_env, "owner@example.com", MID, SLUG)
+
+    assert client.post(f"/api/matches/{MID}/match/shares").status_code == 201
+    assert calls, "cached_card_png was never called -- the monkeypatch was not exercised"

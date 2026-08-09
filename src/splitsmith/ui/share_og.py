@@ -184,6 +184,40 @@ def _chromium_factory() -> AbstractContextManager[Rasterizer]:
     return ChromiumRasterizer()
 
 
+def warm_match_card(state: Any, token: str) -> None:
+    """Render the match card once, at share-creation time, and cache it.
+
+    This is a warm, not a pin: ``cached_card_png`` writes under a key
+    derived from ``card_hash(build_match_card(state))``, so this call
+    only ever populates *today's* hash. If the match data changes
+    afterwards -- a shooter added, the roster renamed, another stage
+    audited -- ``build_match_card`` produces a different card, which
+    hashes to a different key, which simply misses this cache and
+    renders on first fetch, exactly like any other share card. There is
+    no invalidation here and nothing to keep in sync: don't add either
+    on the assumption this is a cache that needs maintaining.
+
+    Calls :func:`cached_card_png` through the module-level name (not a
+    local binding, not a function-local import) so a test can
+    monkeypatch ``share_og.cached_card_png`` and have this function see
+    the replacement.
+
+    Callers must treat this as best-effort: it does real rendering work
+    (Chromium, object storage) and any of it can fail on a browser-less
+    host or a storage hiccup. This function does not itself guard
+    against that -- the caller (``_create_match_share``) wraps the call
+    in ``try/except Exception`` so a failed warm never costs the owner
+    their share link; the PNG route renders on first fetch anyway.
+    """
+    cached_card_png(
+        build_match_card(state),
+        token=token,
+        storage=state.storage,
+        theme=load_theme("splitsmith"),
+        rasterizer_factory=_chromium_factory,
+    )
+
+
 def _png_response(state: Any, token: str, card: MatchCard | StageCard, slug: str | None) -> Response:
     if state.storage is None:
         # Not a 503: the anonymous surface's invariant is that every
