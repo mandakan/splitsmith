@@ -53,6 +53,7 @@ from pathlib import Path
 
 from PIL import Image, ImageFilter
 
+from ..coach import statistic_splits
 from ..match_project import StageScorecard
 from ..overlay_html import grid_html
 from ..overlay_layout import Anchor, CellScale, ColorToken, Element, Emphasis, Flow, Group, Role
@@ -655,11 +656,14 @@ def _cell_groups(
             )
 
     # Splits: Best/Avg/Worst/Draw, only what can actually be computed --
-    # "Best"/"Avg"/"Worst" need at least one non-draw shot; "Draw" needs
-    # only the draw itself. Never invented, per the module's own rule.
+    # "Best"/"Avg"/"Worst" need at least one split-classed interval
+    # (transitions, movement and reloads are the run's dead time, not its
+    # shooting - issue #772; ``statistic_splits`` owns the rule and the
+    # unclassified fallback); "Draw" needs only the draw itself. Never
+    # invented, per the module's own rule.
     splits: list[Element] = []
     if tile.has_shots:
-        rest = [shot.split for shot in tile.shots[1:]]
+        rest = statistic_splits(tile.shots)
         if rest:
             splits.append(Element(role=Role.HEADLINE, text=f"{min(rest):.2f}", caption="Best"))
             splits.append(Element(role=Role.HEADLINE, text=f"{sum(rest) / len(rest):.2f}", caption="Avg"))

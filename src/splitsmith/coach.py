@@ -19,9 +19,16 @@ Pure functions only -- no I/O. Callers own the audit JSON read/write.
 
 from __future__ import annotations
 
-from typing import Any, Final, get_args
+from collections.abc import Sequence
+from typing import Any, Final, Protocol, get_args
 
-from .config import CoachAutoClassifyConfig, IntervalClass, IntervalClassSource, Shot
+from .config import (
+    CoachAutoClassifyConfig,
+    IntervalClass,
+    IntervalClassSource,
+    Shot,
+    SplitColorThresholds,
+)
 
 COACH_INTERVAL_CLASSES: Final[tuple[str, ...]] = get_args(IntervalClass)
 COACH_INTERVAL_CLASS_SOURCES: Final[tuple[str, ...]] = get_args(IntervalClassSource)
@@ -150,6 +157,50 @@ def reload_hinted(gap_s: float | None, config: CoachAutoClassifyConfig) -> bool:
     if gap_s is None:
         return False
     return gap_s > config.reload_hint_min_s
+
+
+# ---------------------------------------------------------------------------
+# Split statistics (#772). Best/avg/worst figures describe shooting, not
+# the run's dead time, so only ``"split"``-classed intervals feed them.
+# ---------------------------------------------------------------------------
+
+SPLIT_STAT_TRANSITION_MIN: Final[float] = SplitColorThresholds().transition_min
+
+
+class SplitStatInterval(Protocol):
+    """What :func:`statistic_splits` reads off a shot record."""
+
+    @property
+    def split(self) -> float: ...
+
+    @property
+    def interval_class(self) -> IntervalClass | None: ...
+
+
+def statistic_splits(
+    shots: Sequence[SplitStatInterval],
+    *,
+    transition_min: float = SPLIT_STAT_TRANSITION_MIN,
+) -> list[float]:
+    """The splits eligible for split statistics (best/avg/worst), in order.
+
+    ``shots`` is one stage's full time-ordered shot sequence, draw first.
+    On a stage with any classified interval, exactly the ``"split"``-classed
+    intervals count - transitions, movement and reloads are the run's dead
+    time, not its shooting. A stage with no classification at all falls
+    back to the rule :func:`splitsmith.fcpxml_gen.split_color_band` already
+    encodes: index 0 is the draw, anything above ``transition_min`` is not
+    a split (the boundary itself is inclusive, as in the band).
+
+    An empty return is meaningful - a stage of transitions and reloads has
+    no splits to average, and callers render nothing rather than a zero.
+
+    Mirrored by ``statisticSplits`` in ``ui_static/src/lib/splits.ts``; if
+    the rule changes, update both.
+    """
+    if any(s.interval_class is not None for s in shots):
+        return [s.split for s in shots if s.interval_class == "split"]
+    return [s.split for i, s in enumerate(shots) if i > 0 and s.split <= transition_min]
 
 
 def classify_intervals_in_dicts(

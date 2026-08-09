@@ -14,7 +14,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from ..audit_data import audit_shots_to_engine_shots, read_audit_data
-from ..config import StageRounds
+from ..config import IntervalClass, StageRounds
 from ..match_project import MatchProject, StageScorecard, is_stub_audit
 from .project_loader import CompareShooterBundle, CompareStageBundle
 
@@ -37,10 +37,16 @@ class TileShot:
     that index plus one, which disagrees with the audit's own
     ``shot_number`` on exactly the input that motivated re-deriving the
     splits -- an audit whose row order is not its time order.
+
+    ``interval_class`` is the Coach annotation when the audit carries one
+    (#772): the split statistics need it to tell a split from a reload.
+    ``None`` means unclassified, and the statistics fall back to a
+    threshold rule - see :func:`splitsmith.coach.statistic_splits`.
     """
 
     time_from_beep: float
     split: float
+    interval_class: IntervalClass | None = None
 
 
 @dataclass(frozen=True)
@@ -170,7 +176,13 @@ def _load_shots(stage: CompareStageBundle) -> tuple[TileShot, ...]:
         # the shot before it in time order.
         split = shot.time_from_beep if previous is None else shot.time_from_beep - previous
         previous = shot.time_from_beep
-        shots.append(TileShot(time_from_beep=shot.time_from_beep, split=split))
+        shots.append(
+            TileShot(
+                time_from_beep=shot.time_from_beep,
+                split=split,
+                interval_class=shot.interval_class,
+            )
+        )
     return tuple(shots)
 
 

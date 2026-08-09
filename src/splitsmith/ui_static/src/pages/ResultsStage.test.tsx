@@ -3,7 +3,13 @@ import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
-import type { CoachStageResponse, ShooterListEntry, StageStatus } from "@/lib/api";
+import type {
+  CoachIntervalClass,
+  CoachShot,
+  CoachStageResponse,
+  ShooterListEntry,
+  StageStatus,
+} from "@/lib/api";
 
 import { ResultsStage } from "@/pages/ResultsStage";
 
@@ -42,13 +48,34 @@ beforeAll(() => {
   })) as unknown as typeof window.matchMedia;
 });
 
-function makeCoach(): CoachStageResponse {
+function makeCoach(shots: CoachShot[] = []): CoachStageResponse {
   return {
     stage_number: 2,
     stage_name: "Steel Rush",
     beep_time: 5,
     videos: [{ path: "trimmed/stage2.mp4", role: "primary", beep_in_clip: 5 }],
-    shots: [],
+    shots,
+  };
+}
+
+function makeShot(
+  n: number,
+  timeFromBeep: number,
+  split: number,
+  cls: CoachIntervalClass | null,
+): CoachShot {
+  return {
+    shot_number: n,
+    ms_after_beep: timeFromBeep * 1000,
+    time_from_beep: timeFromBeep,
+    time_absolute: 5 + timeFromBeep,
+    split,
+    interval_class: cls,
+    interval_class_source: cls !== null ? "auto" : null,
+    improvement_flag: false,
+    coaching_note: null,
+    stale: false,
+    reload_hint: false,
   };
 }
 
@@ -75,8 +102,8 @@ function Shell({ ctx }: { ctx: MatchShellOutletContext }) {
   return <Outlet context={ctx} />;
 }
 
-function renderStage(path: string, shooters: ShooterListEntry[]) {
-  vi.mocked(api.getStageCoach).mockResolvedValue(makeCoach());
+function renderStage(path: string, shooters: ShooterListEntry[], shots: CoachShot[] = []) {
+  vi.mocked(api.getStageCoach).mockResolvedValue(makeCoach(shots));
   const ctx: MatchShellOutletContext = {
     project: null,
     health: null,
@@ -119,6 +146,26 @@ describe("ResultsStage back link", () => {
     renderStage("/match/m1/results/anna/2", MULTI);
     const back = await screen.findByRole("link", { name: /all stages/i });
     expect(back).toHaveAttribute("href", "/match/m1/results");
+  });
+});
+
+describe("ResultsStage stats strip", () => {
+  it("computes split stats over split-classed intervals only, and shows the draw", async () => {
+    // A reload (2.6s) sits between the two real splits. It must not
+    // surface as fastest/avg material, and the draw gets its own cell
+    // (issue #772).
+    const shots = [
+      makeShot(1, 1.5, 1.5, "first_shot"),
+      makeShot(2, 1.7, 0.2, "split"),
+      makeShot(3, 4.3, 2.6, "reload"),
+      makeShot(4, 4.7, 0.4, "split"),
+    ];
+    renderStage("/match/m1/results/anna/2", MULTI, shots);
+    // StageStats suffixes its figures with "s"; SplitsList renders bare
+    // numbers - so these matches are unambiguously the stats strip's.
+    expect(await screen.findByText("1.50s")).toBeInTheDocument(); // draw
+    expect(screen.getByText("0.200s")).toBeInTheDocument(); // fastest: the reload is not a split
+    expect(screen.getByText("0.300s")).toBeInTheDocument(); // avg over the two real splits
   });
 });
 

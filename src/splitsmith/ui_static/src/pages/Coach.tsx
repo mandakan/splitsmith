@@ -63,6 +63,7 @@ import {
   type TierBaselines,
   baselinesFromMatchDistributions,
   gapTier,
+  statisticSplits,
 } from "@/lib/splits";
 import { ShotRuler } from "@/components/results/ShotRuler";
 
@@ -188,13 +189,9 @@ function CoachMatchInner({ slug }: { slug: string }) {
           }
           // Avg/fastest/slowest judge fire splits only; other interval
           // classes (draws, movement...) live on different timescales.
-          // Unclassified stages fall back to every gap but the draw.
-          const anyClassified = coach.shots.some((shot) => shot.interval_class !== null);
-          const splits = coach.shots
-            .filter((shot) =>
-              anyClassified ? shot.interval_class === "split" : shot.shot_number !== 1,
-            )
-            .map((shot) => shot.split);
+          // statisticSplits owns the rule and the unclassified fallback
+          // (issue #772) - the same figures the Results page shows.
+          const splits = statisticSplits(coach.shots);
           const buckets = { quick: 0, typical: 0, long: 0 };
           for (const shot of coach.shots) {
             const tier = gapTier(shot.split, shot.interval_class, baselines);

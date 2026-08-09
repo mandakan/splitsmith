@@ -93,6 +93,34 @@ export function baselinesFromMatchDistributions(
   return out;
 }
 
+/** Fallback threshold for split statistics on unclassified stages.
+ *  Mirrors ``SplitColorThresholds.transition_min`` (config.py). */
+export const SPLIT_STAT_TRANSITION_MIN = 1.0;
+
+/**
+ * The splits eligible for split statistics (fastest/avg/slowest), in
+ * order. Mirrors ``splitsmith.coach.statistic_splits``; if the rule
+ * changes, update both (issue #772).
+ *
+ * ``shots`` is one stage's full time-ordered shot sequence, draw first.
+ * On a stage with any classified interval, exactly the "split"-classed
+ * intervals count - transitions, movement and reloads are the run's
+ * dead time, not its shooting. An unclassified stage falls back to the
+ * ``split_color_band`` rule: index 0 is the draw, anything above the
+ * threshold is not a split (boundary inclusive). An empty return is
+ * meaningful - render nothing rather than a zero.
+ */
+export function statisticSplits(
+  shots: readonly { split: number; interval_class: CoachIntervalClass | null }[],
+): number[] {
+  if (shots.some((s) => s.interval_class !== null)) {
+    return shots.filter((s) => s.interval_class === "split").map((s) => s.split);
+  }
+  return shots
+    .filter((s, i) => i > 0 && s.split <= SPLIT_STAT_TRANSITION_MIN)
+    .map((s) => s.split);
+}
+
 export const INTERVAL_LABEL: Record<CoachIntervalClass, string> = {
   first_shot: "Draw",
   split: "Fire",

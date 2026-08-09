@@ -7,6 +7,7 @@ inserts / deletes shots.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -17,6 +18,7 @@ from splitsmith.coach import (
     is_classification_stale,
     read_coach_fields,
     reload_hinted,
+    statistic_splits,
 )
 from splitsmith.config import CoachAutoClassifyConfig, Shot
 
@@ -290,3 +292,47 @@ def test_auto_written_fields_round_trip(cfg: CoachAutoClassifyConfig) -> None:
     classify_intervals_in_dicts(shots, cfg)
     fields = read_coach_fields(shots[1])
     assert fields == {"interval_class": "split", "interval_class_source": "auto"}
+
+
+# ---------------------------------------------------------------------------
+# statistic_splits: which intervals feed best/avg/worst (issue #772)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class _Gap:
+    split: float
+    interval_class: str | None = None
+
+
+def test_statistic_splits_counts_only_split_classed_intervals() -> None:
+    shots = [
+        _Gap(1.5, "first_shot"),
+        _Gap(0.2, "split"),
+        _Gap(2.6, "reload"),
+        _Gap(0.3, "split"),
+        _Gap(0.8, "transition"),
+        _Gap(1.9, "movement"),
+    ]
+    assert statistic_splits(shots) == [0.2, 0.3]
+
+
+def test_statistic_splits_unclassified_falls_back_to_draw_and_threshold() -> None:
+    # No classification anywhere: the split_color_band rule applies -
+    # index 0 is the draw, anything above transition_min (1.0s) is not a
+    # split. The 1.0 boundary itself is inclusive, exactly as the band is.
+    shots = [_Gap(1.5), _Gap(0.2), _Gap(2.6), _Gap(1.0), _Gap(0.3)]
+    assert statistic_splits(shots) == [0.2, 1.0, 0.3]
+
+
+def test_statistic_splits_partial_classification_trusts_the_classes() -> None:
+    # One classified shot makes the stage classified: unclassed intervals
+    # are not splits, however small their gap.
+    shots = [_Gap(1.5), _Gap(0.2, "split"), _Gap(0.25)]
+    assert statistic_splits(shots) == [0.2]
+
+
+def test_statistic_splits_without_split_intervals_yields_nothing() -> None:
+    shots = [_Gap(1.5, "first_shot"), _Gap(2.6, "reload"), _Gap(1.2, "transition")]
+    assert statistic_splits(shots) == []
+    assert statistic_splits([]) == []
