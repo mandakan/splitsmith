@@ -10,6 +10,9 @@ rather than enforcing it structurally.
 """
 
 import re
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -680,3 +683,38 @@ def test_single_html_matches_the_clock_stroke_and_grid_html_is_untouched():
     )
     assert doubled not in grid
     assert shared in grid
+
+
+def test_overlay_html_stays_a_leaf_and_pulls_in_no_compare_module() -> None:
+    """The ``TYPE_CHECKING`` guard on ``compare.overlay_sprites`` is load-bearing.
+
+    ``compare.overlay_sprites`` -> ``compare.overlay_data`` -> ``ui.exports``
+    -> ``overlay_render`` -> this module. Turning that guarded import into a
+    runtime one closes the cycle and the whole package stops importing.
+    Measured by flipping ``if TYPE_CHECKING:`` to ``if True:``: this probe
+    exits non-zero on ``ImportError: cannot import name 'single_html' from
+    partially initialized module 'splitsmith.overlay_html'``.
+
+    Two assertions, not one, because they fail at different times. The
+    trailing ``import splitsmith.overlay_render`` catches the cycle as it
+    exists today. The ``sys.modules`` check is the one with a future: the
+    ``compare.overlay_data`` -> ``ui.exports`` edge is a filed follow-up,
+    and once it goes away a runtime import here would pull the whole
+    ``compare`` subpackage into every overlay render without raising
+    anything -- a silent loss of the leaf position this module's docstring
+    claims, visible only here.
+
+    A subprocess because this test module itself imports
+    ``splitsmith.compare.*`` at the top -- in-process, ``sys.modules`` is
+    already populated and the assertion could never fail.
+    """
+    probe = (
+        "import sys; import splitsmith.overlay_html; "
+        "leaked = sorted(m for m in sys.modules if m.startswith('splitsmith.compare')); "
+        "assert not leaked, leaked; "
+        "import splitsmith.overlay_render"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", probe], capture_output=True, text=True, cwd=Path(__file__).parent.parent
+    )
+    assert result.returncode == 0, result.stderr

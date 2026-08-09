@@ -217,8 +217,17 @@ Every one of these is deliberate. This is the section a reviewer checks
 rendered frames against.
 
 - **Text rendering.** CSS `text-shadow` replaces PIL's Gaussian-blurred
-  shadow, and the stroke narrows from `max(2, 77 // 18)` = 4px to
-  `CellScale.stroke_width` = `max(1, 1080 // 540)` = 2px at 1080p.
+  shadow. **The stroke weight does not change** -- an earlier draft of
+  this section said it narrowed to `CellScale.stroke_width`
+  (`max(1, 1080 // 540)` = 2px, and `-webkit-text-stroke` is centred on
+  the outline so only 1px of that shows outside the glyph). That is the
+  shared stylesheet's rule and it applies to the compare grid;
+  `single_html` overrides `.role-live-primary` with
+  `2 * border_width(scale.live_primary)` = `2 * max(2, 77 // 18)` = 8px,
+  whose outside half is 4px -- exactly what the pre-port PIL renderer
+  drew at 1080p, and exactly the `borderw` the clock's `drawtext` puts
+  in the opposite corner. Doubling is what makes the two rasterizers
+  agree; see `overlay_html.single_html`'s docstring.
 - **Split position.** Rises by one `pad`: today
   `y = height - th - pad * 2`, where `Anchor.BOTTOM_CENTER` insets by
   `pad`.

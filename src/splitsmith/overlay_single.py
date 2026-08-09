@@ -48,11 +48,24 @@ class _FrameLike(Protocol):
     else in the overlay pipeline (``overlay_layout``, ``overlay_html``,
     ``overlay_theme``) sits at the leaf of the import graph for the same
     reason, and this module belongs there with them.
+
+    Declared as read-only properties rather than as variables. A Protocol
+    member spelled as a variable is *mutable*, and a frozen dataclass
+    cannot supply a mutable attribute -- so ``overlay_render.FrameState``,
+    the only type this is ever matched against, failed the structural
+    check and mypy rejected the ``build_overlay_runs`` call site. Nothing
+    here writes to any of the three, so read-only is also the honest
+    declaration.
     """
 
-    shot_count: int
-    shots_fired: int
-    last_split: float | None
+    @property
+    def shot_count(self) -> int: ...
+
+    @property
+    def shots_fired(self) -> int: ...
+
+    @property
+    def last_split(self) -> float | None: ...
 
 
 @dataclass(frozen=True)

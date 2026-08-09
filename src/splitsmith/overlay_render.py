@@ -342,19 +342,33 @@ def _clock_filter_graph(
     )
 
 
-def _discard_partial_output(output_path: Path) -> None:
-    """Remove a half-written MOV so nothing downstream mistakes it for a render.
+def _discard_partial_output(output_path: Path, *, piped_frames: bool) -> None:
+    """Remove a half-written MOV -- but only one *this* run wrote.
 
-    ffmpeg opens its output with ``-y`` the moment it starts, so from the
-    first piped frame there is always a file at ``output_path`` -- and a
-    render that dies in the middle leaves a truncated one. ``ui/exports.py``
-    treats an existing overlay file as a "stale render from a prior run"
-    and wires it into the FCPXML rather than dropping it, so leaving the
-    truncation behind is worse than leaving nothing: the user gets a
-    timeline referencing a clip that stops partway through the stage.
-    Whatever was there before this call is already gone either way; ``-y``
-    truncated it before the first frame.
+    ``-y`` does not mean "truncate on launch". With ``-f rawvideo ... -i
+    -`` ffmpeg blocks on stdin and does not open its output until the
+    first frame arrives. Measured: a pre-existing 1700-byte file at
+    ``output_path`` survived 3.7 s of a blocked ffmpeg byte for byte, and
+    only became a 36-byte header once a frame was piped.
+
+    So there is a window -- everything up to the first ``Rasterizer.png``
+    returning -- in which the file on disk is the caller's *previous,
+    good* render. A Playwright timeout on the first sprite, or a Ctrl-C
+    while the browser is starting, must not delete it: ``ui/exports.py``
+    treats an existing overlay as a "stale render from a prior run" and
+    still wires it into the FCPXML, so the user keeps a working timeline
+    across a transient browser failure instead of losing both the file
+    and the FCPXML reference.
+
+    Once a frame has been piped that reasoning inverts. What is on disk
+    is then this run's own truncation, and the same ``ui/exports.py``
+    rule would hand the user a timeline referencing a clip that stops
+    partway through the stage. That one has to go.
+
+    ``piped_frames`` is which of the two happened.
     """
+    if not piped_frames:
+        return
     with contextlib.suppress(OSError):
         output_path.unlink(missing_ok=True)
 
@@ -377,8 +391,23 @@ def _rasterizer_for(supplied: Rasterizer | None) -> Iterator[Rasterizer]:
     try:
         active = owned.__enter__()
     except RasterizerUnavailableError as exc:
+        # Deliberately not ``exc.detail``. That string is
+        # ``overlay_raster._unavailable``'s *degradation* notice, written
+        # for the compare grid, and it ends "the running clock still
+        # draws ... and the rest of the render proceeds" -- true there,
+        # the exact opposite of what happens here. On this path nothing
+        # renders, no file is written, and a user told the render
+        # proceeded goes hunting in ``exports/`` for a MOV that does not
+        # exist. So the sentence is composed here, from the underlying
+        # launch failure plus the one install command, and the grid's own
+        # message stays accurate for the grid.
+        cause = exc.__cause__ or exc
         raise OverlayRenderError(
-            f"cannot render the overlay: {exc.detail} Install it with '{INSTALL_HINT}'."
+            "cannot render the overlay: Playwright could not launch a Chromium browser. "
+            "Nothing was rendered and no overlay file was written -- the shot counter, the "
+            "split labels and the running clock are all absent, not degraded. The browser is "
+            "not vendored in the wheel; install it once per environment with "
+            f"'{INSTALL_HINT}'. Original error: {cause}"
         ) from exc
     try:
         yield active
@@ -600,6 +629,10 @@ def render_overlay(
         with _rasterizer_for(rasterizer) as active:
             proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
             assert proc.stdin is not None
+            # Whether ffmpeg has been handed anything yet, which is what
+            # decides if a file at ``output_path`` belongs to this run or
+            # to the previous good render -- see ``_discard_partial_output``.
+            piped_frames = False
             try:
                 for run in runs:
                     png = active.png(
@@ -621,6 +654,7 @@ def render_overlay(
                     frame = Image.open(io.BytesIO(png)).convert("RGBA").tobytes()
                     for _ in range(run.frame_count):
                         proc.stdin.write(frame)
+                        piped_frames = True
                 proc.stdin.close()
             except BaseException as exc:
                 # Anything, not just the pipe's own BrokenPipeError/OSError.
@@ -636,7 +670,7 @@ def render_overlay(
                 # and throw the fragment away before anything can find it.
                 proc.kill()
                 proc.wait()
-                _discard_partial_output(output_path)
+                _discard_partial_output(output_path, piped_frames=piped_frames)
                 if not isinstance(exc, Exception):
                     # Ctrl-C / SystemExit: the encoder is still owed a
                     # teardown, but the interrupt keeps unwinding as itself.
@@ -650,6 +684,6 @@ def render_overlay(
             rc = proc.wait()
             stderr_text = proc.stderr.read().decode("utf-8", "replace") if proc.stderr else ""
     if rc != 0:
-        _discard_partial_output(output_path)
+        _discard_partial_output(output_path, piped_frames=piped_frames)
         raise OverlayRenderError(f"ffmpeg exited with {rc}: {stderr_text}")
     return output_path

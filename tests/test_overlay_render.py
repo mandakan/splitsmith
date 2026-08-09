@@ -630,12 +630,26 @@ def test_a_missing_browser_fails_the_render_with_the_install_hint(
     """Unlike the grid, which degrades to clock-only because its MP4 is
     still worth having, the overlay MOV *is* the deliverable here. A
     clock-only MOV looks like a success the user would only discover was
-    empty after dropping it on V2 in Final Cut."""
+    empty after dropping it on V2 in Final Cut.
+
+    The failure is raised the way production raises it --
+    ``overlay_raster._unavailable`` wrapping a real launch error -- so
+    this asserts the literal message a user sees, not a placeholder. The
+    earlier version of this test injected ``("no chromium", "detail with
+    a hint")`` and checked only that ``INSTALL_HINT`` appeared somewhere,
+    which is exactly how the production text shipped saying the opposite
+    of what happened: it reused the grid's *degradation* notice, which
+    ends "the running clock still draws ... and the rest of the render
+    proceeds". Nothing proceeds here.
+    """
     audit = tmp_path / "stage1.json"
     audit.write_text(json.dumps({"shots": [{"shot_number": 1, "ms_after_beep": 100}]}), encoding="utf-8")
+    launch_failure = PlaywrightError(
+        "BrowserType.launch: Chromium distribution 'chromium-headless-shell' is not found"
+    )
 
     def boom(*_args: Any, **_kwargs: Any) -> Any:
-        raise overlay_raster.RasterizerUnavailableError("no chromium", "detail with a hint")
+        raise overlay_raster._unavailable(launch_failure) from launch_failure
 
     monkeypatch.setattr(overlay_render.ChromiumRasterizer, "__enter__", boom)
     monkeypatch.setattr(overlay_render.shutil, "which", lambda _b: "/bin/ffmpeg")
@@ -649,7 +663,28 @@ def test_a_missing_browser_fails_the_render_with_the_install_hint(
             codec="prores-4444",
             probe_runner=fake_ffmpeg_probe(),
         )
-    assert overlay_raster.INSTALL_HINT in str(excinfo.value)
+    message = str(excinfo.value)
+    assert message == (
+        "cannot render the overlay: Playwright could not launch a Chromium browser. "
+        "Nothing was rendered and no overlay file was written -- the shot counter, the "
+        "split labels and the running clock are all absent, not degraded. The browser is "
+        "not vendored in the wheel; install it once per environment with "
+        f"'{overlay_raster.INSTALL_HINT}'. Original error: {launch_failure}"
+    )
+    # The three things the old message got wrong, pinned individually so
+    # a future reword cannot quietly reintroduce any of them.
+    assert "the rest of the render proceeds" not in message
+    assert "running clock still draws" not in message
+    assert message.count(overlay_raster.INSTALL_HINT) == 1, "the install hint is printed twice"
+
+
+def test_the_grid_keeps_its_own_degradation_wording(tmp_path: Path) -> None:
+    """The single-shooter message is composed separately precisely so
+    ``overlay_raster._unavailable``'s text can stay true for the compare
+    grid, where the render really does proceed without a browser."""
+    detail = overlay_raster._unavailable(PlaywrightError("no browser")).detail
+    assert "The running clock still draws" in detail
+    assert "the rest of the render proceeds" in detail
 
 
 def test_the_clock_is_three_drawtext_filters(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -760,26 +795,44 @@ def test_the_clock_holds_before_the_beep_ticks_during_and_freezes_after(
 # --- fix round 1: the failure path, the clamp, and the shared baseline ---
 
 
-def test_a_rasterizer_that_dies_mid_render_kills_ffmpeg_and_leaves_no_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A browser crash must not orphan ffmpeg or leave a truncated MOV.
+class _DyingRasterizer:
+    """Draws ``die_on_call - 1`` real sprites, then raises Playwright's error.
 
-    ``active.png`` is a Playwright call and its failures are
-    ``playwright.sync_api.Error``, which is neither ``BrokenPipeError``
-    nor ``OSError``. Escaping the loop uncaught, it leaves ffmpeg blocked
-    on an open stdin until the GC drops the Popen and flushes a truncated
-    file -- and it is not an ``OverlayRenderError``, so ``ui/exports.py``
-    turns one bad stage into a failed export request instead of a skip
-    reason, then wires the truncation into the next FCPXML as a "stale
-    render from a prior run".
+    ``die_on_call=1`` is a browser that never produced a single frame;
+    anything higher is a crash partway through an encode that had already
+    piped bytes. The distinction is the whole point of the two tests
+    below -- what is on disk means opposite things in the two cases.
     """
+
+    def __init__(self, *, die_on_call: int) -> None:
+        self.die_on_call = die_on_call
+        self.calls = 0
+
+    def png(self, html: str, *, width: int, height: int) -> bytes:
+        self.calls += 1
+        if self.calls >= self.die_on_call:
+            raise PlaywrightError("Timeout 30000ms exceeded.")
+        buffer = io.BytesIO()
+        Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buffer, format="PNG")
+        return buffer.getvalue()
+
+
+def _run_a_dying_render(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    output: Path,
+    die_on_call: int,
+) -> list[str]:
+    """Drive ``render_overlay`` to a rasterizer failure. Returns the
+    encoder lifecycle calls the stubbed ``Popen`` recorded."""
     audit = tmp_path / "stage1.json"
-    audit.write_text(json.dumps({"shots": [{"shot_number": 1, "ms_after_beep": 100}]}), encoding="utf-8")
-    output = tmp_path / "overlay.mov"
-    # ffmpeg opens its output with -y before the first frame, so there is
-    # always something on disk by the time a run fails.
-    output.write_bytes(b"truncated")
+    audit.write_text(
+        json.dumps(
+            {"shots": [{"shot_number": 1, "ms_after_beep": 200}, {"shot_number": 2, "ms_after_beep": 500}]}
+        ),
+        encoding="utf-8",
+    )
     lifecycle: list[str] = []
 
     class StubStdin:
@@ -805,10 +858,6 @@ def test_a_rasterizer_that_dies_mid_render_kills_ffmpeg_and_leaves_no_file(
         def kill(self) -> None:
             lifecycle.append("kill")
 
-    class DyingRasterizer:
-        def png(self, html: str, *, width: int, height: int) -> bytes:
-            raise PlaywrightError("Timeout 30000ms exceeded.")
-
     monkeypatch.setattr(overlay_render.subprocess, "Popen", lambda cmd, **_: StubProc())
     monkeypatch.setattr(overlay_render.shutil, "which", lambda _b: "/bin/ffmpeg")
 
@@ -818,13 +867,108 @@ def test_a_rasterizer_that_dies_mid_render_kills_ffmpeg_and_leaves_no_file(
             trimmed_video_path=tmp_path / "trim.mp4",
             output_path=output,
             beep_offset_seconds=0.0,
-            probe=_meta_30fps(duration=0.1),
+            probe=_meta_30fps(duration=1.0),
             codec="prores-4444",
-            rasterizer=DyingRasterizer(),
+            rasterizer=_DyingRasterizer(die_on_call=die_on_call),
             probe_runner=fake_ffmpeg_probe(),
         )
+    return lifecycle
+
+
+def test_a_rasterizer_that_dies_mid_render_kills_ffmpeg_and_discards_the_fragment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A browser crash after frames were piped must not orphan ffmpeg or
+    leave a truncated MOV.
+
+    ``active.png`` is a Playwright call and its failures are
+    ``playwright.sync_api.Error``, which is neither ``BrokenPipeError``
+    nor ``OSError``. Escaping the loop uncaught, it leaves ffmpeg blocked
+    on an open stdin until the GC drops the Popen and flushes a truncated
+    file -- and it is not an ``OverlayRenderError``, so ``ui/exports.py``
+    turns one bad stage into a failed export request instead of a skip
+    reason, then wires the truncation into the next FCPXML as a "stale
+    render from a prior run".
+
+    The second sprite is the one that dies, so the first run's frames
+    have already reached the pipe and whatever sits at ``output_path`` is
+    this run's own fragment.
+    """
+    output = tmp_path / "overlay.mov"
+    output.write_bytes(b"truncated")
+    lifecycle = _run_a_dying_render(tmp_path, monkeypatch, output=output, die_on_call=2)
     assert lifecycle == ["kill", "wait"], "the encoder was not killed and reaped"
     assert not output.exists(), "a truncated MOV was left where a caller would find it"
+
+
+def test_a_failure_before_the_first_frame_leaves_the_previous_render_intact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half, and the one that used to be data loss.
+
+    ``-y`` does not truncate on launch: with ``-f rawvideo ... -i -``
+    ffmpeg blocks on stdin and does not open its output until a frame
+    arrives (measured -- a pre-existing file survived 3.7 s of a blocked
+    ffmpeg byte for byte). So when the *first* sprite times out, the file
+    on disk is still the caller's previous good render, and deleting it
+    costs the user both the MOV and the FCPXML reference
+    ``ui/exports.py`` would otherwise keep ("stale render from a prior
+    run") -- from a transient browser failure.
+
+    Asserts the exact prior bytes, not just existence: a zero-byte file
+    left behind by an over-eager truncate would pass ``exists()``.
+    """
+    output = tmp_path / "overlay.mov"
+    previous = b"a complete prior render" * 64
+    output.write_bytes(previous)
+    lifecycle = _run_a_dying_render(tmp_path, monkeypatch, output=output, die_on_call=1)
+    assert lifecycle == ["kill", "wait"], "the encoder was not killed and reaped"
+    assert output.read_bytes() == previous, "a good prior render was destroyed by a failed run"
+
+
+def test_ctrl_c_before_the_first_frame_also_leaves_the_previous_render_intact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``KeyboardInterrupt`` reaches the same handler and re-raises as
+    itself, but the discard runs *before* that re-raise -- so a Ctrl-C
+    while the browser is still starting used to delete a good render on
+    the way out."""
+    audit = tmp_path / "stage1.json"
+    audit.write_text(json.dumps({"shots": [{"shot_number": 1, "ms_after_beep": 200}]}), encoding="utf-8")
+    output = tmp_path / "overlay.mov"
+    previous = b"a complete prior render"
+    output.write_bytes(previous)
+
+    class StubProc:
+        def __init__(self, **_: Any) -> None:
+            self.stdin = io.BytesIO()
+            self.stderr = io.BytesIO()
+
+        def wait(self) -> int:
+            return 0
+
+        def kill(self) -> None:
+            return None
+
+    class InterruptedRasterizer:
+        def png(self, html: str, *, width: int, height: int) -> bytes:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(overlay_render.subprocess, "Popen", lambda cmd, **_: StubProc())
+    monkeypatch.setattr(overlay_render.shutil, "which", lambda _b: "/bin/ffmpeg")
+
+    with pytest.raises(KeyboardInterrupt):
+        overlay_render.render_overlay(
+            audit_path=audit,
+            trimmed_video_path=tmp_path / "trim.mp4",
+            output_path=output,
+            beep_offset_seconds=0.0,
+            probe=_meta_30fps(duration=1.0),
+            codec="prores-4444",
+            rasterizer=InterruptedRasterizer(),
+            probe_runner=fake_ffmpeg_probe(),
+        )
+    assert output.read_bytes() == previous
 
 
 def test_a_shot_before_the_beep_cannot_stack_two_clock_filters(
