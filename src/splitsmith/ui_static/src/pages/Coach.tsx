@@ -1011,20 +1011,6 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   }, [slug, stage]);
 
   useEffect(() => {
-    if (!coach) return;
-    const anyUnclassified = coach.shots.some((s) => s.interval_class === null);
-    if (anyUnclassified && !reclassifying) {
-      setReclassifying(true);
-      api
-        .reclassifyStageCoach(slug, stage)
-        .then((c) => setCoach(c))
-        .catch(() => {})
-        .finally(() => setReclassifying(false));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
     if (!coach || activeShotNumber == null) return;
     const shot = coach.shots.find((s) => s.shot_number === activeShotNumber);
     setNoteDraft(shot?.coaching_note ?? "");
