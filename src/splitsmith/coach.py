@@ -201,6 +201,12 @@ def statistic_splits(
 
     Mirrored by ``statisticSplits`` in ``ui_static/src/lib/splits.ts``; if
     the rule changes, update both.
+
+    Partial classification (#775): the save endpoint and the coach GET
+    both run the auto-classifier, so an audited stage is fully classified
+    for every shot that has ``ms_after_beep``. The ``any`` branch below is
+    therefore all-or-nothing in practice; shots without ``ms_after_beep``
+    never reach this function (audit_shots_to_engine_shots drops them).
     """
     if any(s.interval_class is not None for s in shots):
         return [s.split for s in shots if s.interval_class == "split"]

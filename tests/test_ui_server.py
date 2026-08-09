@@ -4413,6 +4413,90 @@ def test_put_stage_audit_404_when_stage_unknown(tmp_path: Path) -> None:
     assert resp.status_code == 404
 
 
+def test_put_stage_audit_classifies_intervals(tmp_path: Path) -> None:
+    """#775: an audited stage is fully classified. The save endpoint runs
+    the auto-classifier so statistic_splits never sees a partially
+    classified stage."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    payload = {
+        "stage_number": 1,
+        "shots": [
+            {"shot_number": 1, "ms_after_beep": 1500, "source": "detected"},
+            {"shot_number": 2, "ms_after_beep": 1800, "source": "detected"},  # 0.30 -> split
+            {"shot_number": 3, "ms_after_beep": 2700, "source": "detected"},  # 0.90 -> transition
+            {"shot_number": 4, "ms_after_beep": 5300, "source": "detected"},  # 2.60 -> movement
+        ],
+        "audit_events": [{"ts": "2026-08-09T12:00:00Z", "kind": "save", "payload": {}}],
+    }
+    resp = client.put("/api/shooters/me/stages/1/audit", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [s["interval_class"] for s in body["shots"]] == [
+        "first_shot",
+        "split",
+        "transition",
+        "movement",
+    ]
+    assert all(s["interval_class_source"] == "auto" for s in body["shots"])
+
+    on_disk = json.loads(
+        (tmp_path / "match" / "shooters" / "me" / "audit" / "stage1.json").read_text(encoding="utf-8")
+    )
+    assert [s["interval_class"] for s in on_disk["shots"]] == [
+        "first_shot",
+        "split",
+        "transition",
+        "movement",
+    ]
+
+
+def test_put_stage_audit_preserves_manual_classes(tmp_path: Path) -> None:
+    """Manual classifications survive the save-time auto-classify."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    payload = {
+        "stage_number": 1,
+        "shots": [
+            {"shot_number": 1, "ms_after_beep": 1500},
+            {
+                "shot_number": 2,
+                "ms_after_beep": 1800,
+                "interval_class": "reload",
+                "interval_class_source": "manual",
+            },
+        ],
+    }
+    resp = client.put("/api/shooters/me/stages/1/audit", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["shots"][0]["interval_class"] == "first_shot"
+    assert body["shots"][0]["interval_class_source"] == "auto"
+    assert body["shots"][1]["interval_class"] == "reload"
+    assert body["shots"][1]["interval_class_source"] == "manual"
+
+
+def test_put_stage_audit_skips_shots_without_ms(tmp_path: Path) -> None:
+    """A shot with no ms_after_beep stays unclassified (it never reaches
+    statistics - audit_shots_to_engine_shots drops it). It sorts to the
+    end of the classifier's walk, so the ms-bearing shots still classify
+    against each other's gaps."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    payload = {
+        "stage_number": 1,
+        "shots": [
+            {"shot_number": 1, "ms_after_beep": 1500},
+            {"shot_number": 2, "time": 2.0},  # no ms_after_beep
+            {"shot_number": 3, "ms_after_beep": 2700},
+        ],
+    }
+    resp = client.put("/api/shooters/me/stages/1/audit", json=payload)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["shots"][0]["interval_class"] == "first_shot"
+    assert "interval_class" not in body["shots"][1] or body["shots"][1]["interval_class"] is None
+    # gap vs shot 1 = 1.2s -> movement; the ms-less shot doesn't break the chain
+    assert body["shots"][2]["interval_class"] == "movement"
+
+
 def test_get_stage_anomalies_empty_when_no_audit_file(tmp_path: Path) -> None:
     """No audit JSON yet -> empty anomalies list (issue #42).
 
