@@ -129,6 +129,30 @@ export function statisticSplits(
     .map((s) => s.split);
 }
 
+/** One shot on the compare timeline: seconds since the beep plus the
+ * interval class carried by the compare endpoint (#781). */
+export interface TimelineShot {
+  time_after_beep: number;
+  interval_class: CoachIntervalClass | null;
+}
+
+/**
+ * Convert beep-relative shot times into the `{split, interval_class}`
+ * pairs `statisticSplits` consumes. Shots are sorted by time; the first
+ * entry's split is the draw (measured from the beep), matching the
+ * coach-side meaning of `split` (#781).
+ */
+export function splitsFromTimeline(
+  shots: readonly TimelineShot[],
+): { split: number; interval_class: CoachIntervalClass | null }[] {
+  const sorted = [...shots].sort((a, b) => a.time_after_beep - b.time_after_beep);
+  return sorted.map((s, i) => ({
+    split:
+      i === 0 ? s.time_after_beep : s.time_after_beep - sorted[i - 1].time_after_beep,
+    interval_class: s.interval_class,
+  }));
+}
+
 export const INTERVAL_LABEL: Record<CoachIntervalClass, string> = {
   first_shot: "Draw",
   split: "Fire",
