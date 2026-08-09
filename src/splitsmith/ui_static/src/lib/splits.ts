@@ -94,8 +94,10 @@ export function baselinesFromMatchDistributions(
 }
 
 /** Fallback threshold for split statistics on unclassified stages.
- *  Mirrors ``SplitColorThresholds.transition_min`` (config.py). */
-export const SPLIT_STAT_TRANSITION_MIN = 1.0;
+ *  Mirrors ``CoachAutoClassifyConfig.split_max_s`` (config.py) - the
+ *  auto-classifier's own split cutoff, so classifying a stage never
+ *  moves the figures (issue #773). */
+export const SPLIT_STAT_SPLIT_MAX = 0.5;
 
 /**
  * The splits eligible for split statistics (fastest/avg/slowest), in
@@ -106,7 +108,7 @@ export const SPLIT_STAT_TRANSITION_MIN = 1.0;
  * On a stage with any classified interval, exactly the "split"-classed
  * intervals count - transitions, movement and reloads are the run's
  * dead time, not its shooting. An unclassified stage falls back to the
- * ``split_color_band`` rule: index 0 is the draw, anything above the
+ * auto-classifier's split rule: index 0 is the draw, anything above the
  * threshold is not a split (boundary inclusive). An empty return is
  * meaningful - render nothing rather than a zero.
  */
@@ -117,7 +119,7 @@ export function statisticSplits(
     return shots.filter((s) => s.interval_class === "split").map((s) => s.split);
   }
   return shots
-    .filter((s, i) => i > 0 && s.split <= SPLIT_STAT_TRANSITION_MIN)
+    .filter((s, i) => i > 0 && s.split <= SPLIT_STAT_SPLIT_MAX)
     .map((s) => s.split);
 }
 
