@@ -55,6 +55,7 @@ import {
   type MatchProject,
 } from "@/lib/api";
 import { useMatchHref } from "@/lib/matchHref";
+import { splitsFromTimeline, statisticSplits } from "@/lib/splits";
 import { cn } from "@/lib/utils";
 
 type Layout = "grid" | "row" | "stack";
@@ -1053,15 +1054,19 @@ function SyncTimeline({
 /* Ranking                                                                    */
 /* -------------------------------------------------------------------------- */
 
-function RankingTable({ shooters }: { shooters: CompareShooterRecord[] }) {
+export function RankingTable({ shooters }: { shooters: CompareShooterRecord[] }) {
   const rows = shooters
     .map((s) => {
-      const splits = computeSplits(s.shots);
+      // statisticSplits owns which gaps count (#774); the pairs come
+      // from the same beep-relative timeline the tiles play.
+      const pairs = splitsFromTimeline(s.shots);
+      const splits = statisticSplits(pairs);
       return {
         shooter: s,
         time: s.stage_time_seconds ?? Infinity,
-        avgSplit: splits.length === 0 ? null : avg(splits),
+        draw: pairs.length > 0 ? pairs[0].split : null,
         fastestSplit: splits.length === 0 ? null : Math.min(...splits),
+        avgSplit: splits.length === 0 ? null : avg(splits),
         shotCount: s.shots.length,
       };
     })
@@ -1073,10 +1078,11 @@ function RankingTable({ shooters }: { shooters: CompareShooterRecord[] }) {
       <div className="border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3 font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
         Ranking
       </div>
-      <div className="grid grid-cols-[48px_1fr_120px_120px_120px_80px] items-center gap-3 border-b border-rule bg-surface-2 px-5 py-2 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
+      <div className="grid grid-cols-[48px_1fr_120px_120px_120px_120px_80px] items-center gap-3 border-b border-rule bg-surface-2 px-5 py-2 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
         <span>#</span>
         <span>Shooter</span>
         <span className="text-right">Time</span>
+        <span className="text-right">Draw</span>
         <span className="text-right">Fastest</span>
         <span className="text-right">Avg split</span>
         <span className="text-right">Shots</span>
@@ -1084,7 +1090,7 @@ function RankingTable({ shooters }: { shooters: CompareShooterRecord[] }) {
       {rows.map((row) => (
         <div
           key={row.shooter.slug}
-          className="grid grid-cols-[48px_1fr_120px_120px_120px_80px] items-center gap-3 border-b border-rule px-5 py-3 last:border-b-0"
+          className="grid grid-cols-[48px_1fr_120px_120px_120px_120px_80px] items-center gap-3 border-b border-rule px-5 py-3 last:border-b-0"
         >
           <RankPill rank={row.rank} />
           <div className="inline-flex items-center gap-2.5">
@@ -1104,13 +1110,16 @@ function RankingTable({ shooters }: { shooters: CompareShooterRecord[] }) {
               row.rank === 1 ? "text-led drop-shadow-[0_0_8px_var(--color-led-glow)]" : "text-ink",
             )}
           >
-            {Number.isFinite(row.time) ? `${row.time.toFixed(2)}s` : "--"}
+            {Number.isFinite(row.time) ? `${row.time.toFixed(2)}s` : "-"}
           </span>
           <span className="text-right font-mono text-[0.8125rem] tabular-nums text-ink-2">
-            {row.fastestSplit != null ? `${row.fastestSplit.toFixed(3)}s` : "--"}
+            {row.draw != null ? `${row.draw.toFixed(2)}s` : "-"}
+          </span>
+          <span className="text-right font-mono text-[0.8125rem] tabular-nums text-ink-2">
+            {row.fastestSplit != null ? `${row.fastestSplit.toFixed(3)}s` : "-"}
           </span>
           <span className="text-right font-mono text-[0.8125rem] tabular-nums text-muted">
-            {row.avgSplit != null ? `${row.avgSplit.toFixed(3)}s` : "--"}
+            {row.avgSplit != null ? `${row.avgSplit.toFixed(3)}s` : "-"}
           </span>
           <span className="text-right font-mono text-[0.8125rem] tabular-nums text-muted">
             {row.shotCount}
@@ -1143,20 +1152,6 @@ function RankPill({ rank }: { rank: number }) {
 /* -------------------------------------------------------------------------- */
 /* Helpers                                                                    */
 /* -------------------------------------------------------------------------- */
-
-function computeSplits(
-  shots: { time_after_beep: number }[],
-): number[] {
-  if (shots.length < 2) return [];
-  const sorted = [...shots]
-    .map((s) => s.time_after_beep)
-    .sort((a, b) => a - b);
-  const splits: number[] = [];
-  for (let i = 1; i < sorted.length; i++) {
-    splits.push(sorted[i] - sorted[i - 1]);
-  }
-  return splits;
-}
 
 function avg(arr: number[]): number {
   return arr.reduce((a, b) => a + b, 0) / arr.length;

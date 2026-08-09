@@ -1636,6 +1636,7 @@ export interface CompareShotPoint {
   shot_number: number;
   time_after_beep: number;
   source: "detected" | "manual";
+  interval_class: CoachIntervalClass | null;
 }
 
 /** Per-shooter data for a stage in /compare (#328). */
