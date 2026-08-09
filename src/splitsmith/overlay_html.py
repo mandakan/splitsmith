@@ -59,9 +59,10 @@ Design rules, each answering one of the old fitter's defects:
   ink text and *no* stroke (a stroke around thin glyphs on top of a
   filled plate is a halo that eats the glyph -- the plate already brings
   its own contrast). ``PLAIN``/``MUTED`` get ink text with a CSS
-  stroke+shadow analogue of ``overlay_text._draw_text_with_shadow``
-  (``paint-order: stroke fill`` plus ``-webkit-text-stroke`` and
-  ``text-shadow``), and ``MUTED`` additionally drops opacity.
+  stroke+shadow (``paint-order: stroke fill`` plus
+  ``-webkit-text-stroke`` and ``text-shadow``) -- the successor to the
+  PIL routine this pipeline drew with before #693 and #684 -- and
+  ``MUTED`` additionally drops opacity.
 - **``Element.color`` (:class:`~splitsmith.overlay_layout.ColorToken`)
   overrides an element's ink with a named theme colour** -- ``.tok-*``
   classes, one per token, declared between the emphasis rules and

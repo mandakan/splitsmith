@@ -140,13 +140,21 @@ def test_the_two_themes_do_not_render_the_same_ink() -> None:
     )
 
 
-def test_available_font_names_includes_bundled_presets() -> None:
-    """The bundled splitsmith-* presets must be discoverable via the
-    public preset listing -- they're how a future UI picker offers brand
-    fonts without filesystem path knowledge."""
-    names = overlay_text.available_font_names()
-    assert "splitsmith-mono" in names
-    assert "splitsmith-display" in names
+@pytest.mark.parametrize("face", ["splitsmith-mono", "splitsmith-display"])
+def test_both_brand_faces_are_still_bundled(face: str, tmp_path) -> None:
+    """Both brand faces have to reach disk from the installed package.
+
+    The display face has no Python caller -- ``overlay_html`` reaches
+    Antonio through a ``file://`` URL in an ``@font-face`` rule, so a
+    wheel that stopped shipping it would fail in a browser, off the back
+    of a stylesheet, rather than anywhere a stack trace would help.
+    Materializing it here is the cheap Python-side proof that the file
+    is present.
+    """
+    path = overlay_text.materialize_font(face, tmp_path)
+
+    assert path.is_file()
+    assert path.stat().st_size > 0
 
 
 def test_overlay_theme_json_is_in_sync_with_css() -> None:

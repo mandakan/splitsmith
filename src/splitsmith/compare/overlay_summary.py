@@ -278,9 +278,11 @@ def _apply_blur(image: Image.Image, radius: int) -> Image.Image:
     """The one place a Gaussian blur touches a hold-still tile.
 
     Kept as its own named function -- not inlined -- so a test can count
-    calls to it directly rather than to ``Image.filter`` in general, which
-    ``overlay_text._draw_text_with_shadow`` also calls (for its drop
-    shadow) and would otherwise be double-counted.
+    calls to it directly rather than to ``Image.filter`` in general,
+    which the overlay's own text drawing used to call as well (for its
+    drop shadow) and would otherwise have been double-counted. That text
+    path is CSS now, but counting the named function is still the
+    stricter assertion.
     """
     if radius <= 0:
         return image

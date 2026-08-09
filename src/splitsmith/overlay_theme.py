@@ -19,8 +19,8 @@ Re-run the build script after touching ``index.css``.
 Bundled fonts (Antonio + JetBrains Mono, SIL OFL 1.1) live under
 ``src/splitsmith/data/fonts/`` so overlay text renders deterministic
 typography without depending on whatever the host machine happens to
-have installed. The numeric readouts (both the live sprite's PIL text
-and the stage summary's ``@font-face``-declared CSS -- see
+have installed. The numeric readouts (the live sprites and the stage
+summary alike, both ``@font-face``-declared CSS -- see
 ``overlay_html.py``) use JetBrains Mono Bold; Antonio is
 ``.role-identity``'s live condensed face for the stage summary's
 shooter-name row (issue #683 Task 7b), not a placeholder waiting on a
@@ -62,16 +62,21 @@ class OverlayThemeError(RuntimeError):
 
 @dataclass(frozen=True)
 class OverlayTheme:
-    """Palette + font name hints for the alpha overlay renderer.
+    """Palette for the alpha overlay renderer.
 
     All colors are 8-bit RGB tuples. The pre-port PIL template applied
     alpha at draw time (the last-split label faded in and out, shadows
     tracked foreground alpha); the ported renderer draws through CSS
     instead and the last-split label is present-or-absent per run rather
-    than fading (see ``overlay_single.run_groups``). ``font_display`` /
-    ``font_mono`` are advisory design-system metadata carried through
-    from the JSON build -- ``overlay_html`` currently names its bundled
-    faces directly rather than reading these fields.
+    than fading (see ``overlay_single.run_groups``).
+
+    A theme decides every colour in the overlay and nothing else. It used
+    to carry ``font_display`` / ``font_mono`` from the JSON build too,
+    but no renderer ever read them -- ``overlay_html`` names its bundled
+    faces directly -- so they came out with the rest of the font
+    machinery in issue #759. The build script still writes a ``fonts``
+    block into the JSON; it documents the design system's font stack,
+    and :func:`load_theme` ignores it.
     """
 
     name: ThemeName
@@ -109,8 +114,6 @@ class OverlayTheme:
     #: for labels, text-shadow only), dim enough not to compete with the
     #: figure it sits above or beside.
     ink_2: RGB
-    font_display: str
-    font_mono: str
 
     @property
     def shadow(self) -> RGB:
@@ -151,8 +154,6 @@ _CLEAN = OverlayTheme(
     # borrowed from accent/split/split_good, same discipline as rule/muted
     # above.
     ink_2=(205, 205, 205),
-    font_display="Antonio",
-    font_mono="JetBrains Mono",
 )
 
 
@@ -170,7 +171,6 @@ def _load_splitsmith() -> OverlayTheme:
         raise OverlayThemeError(f"overlay_theme.json is not valid JSON: {exc}") from exc
 
     colors = data.get("colors") or {}
-    fonts = data.get("fonts") or {}
     try:
         return OverlayTheme(
             name="splitsmith",
@@ -184,8 +184,6 @@ def _load_splitsmith() -> OverlayTheme:
             rule=_rgb(colors, "rule"),
             muted=_rgb(colors, "muted"),
             ink_2=_rgb(colors, "ink_2"),
-            font_display=str(fonts.get("display", "Antonio")),
-            font_mono=str(fonts.get("mono", "JetBrains Mono")),
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise OverlayThemeError(f"overlay_theme.json malformed: {exc}") from exc

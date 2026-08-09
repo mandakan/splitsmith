@@ -18,7 +18,7 @@ overlay rendering, file-manager integration, and locale / XDG edge cases.
 | Subprocess returncode comparisons | clean | All checks are `== 0` / `!= 0` -- nothing matches specific nonzero values that could differ between Homebrew's binary and Debian's shell-wrapper variants. |
 | `encoding="utf-8"` coverage | one fix, see below | Only one real text-mode `open()` in `src/` lacked the kwarg (the candidates CSV); fixed. |
 | XDG basedir handling | one fix, see below | `runtime.py` and `user_config.py` correctly fell back when `XDG_*_HOME` was empty or unset, but accepted relative paths. Per the freedesktop spec relative values are malformed; fixed. |
-| Hardcoded macOS font paths | one fix, see below | `_FONT_PRESETS` is macOS-heavy but `_FONT_FALLBACKS` includes DejaVu, and the final fallback is PIL's bitmap default. Silent fallback was the real bug -- now logged. |
+| Hardcoded macOS font paths | one fix, see below (since removed) | `_FONT_PRESETS` is macOS-heavy but `_FONT_FALLBACKS` includes DejaVu, and the final fallback is PIL's bitmap default. Silent fallback was the real bug -- now logged. **Superseded 2026-08-09:** both tables and the whole discovery chain are gone (issue #759); there are no host font paths left to be macOS-heavy about. |
 | `xdg-open` / `open -R` / `explorer` failure | one fix, see below | The reveal endpoints used to run with `check=False` and swallow nonzero exits. Now propagated as HTTP 500 so the SPA can toast. |
 | Hardcoded `/sbin/mount` | already gated | `ui/server.py:8808` is inside a per-OS branch -- only the macOS path hits the hardcoded binary. Linux uses `/proc/mounts`. Not changed (no real-world failure mode). |
 | Symlinks | clean | `shutil.copytree(..., symlinks=True)` preserves them; reveal endpoint walks the symlink target so registered videos on external storage resolve correctly. |
@@ -44,6 +44,8 @@ Tests: `tests/test_runtime.py::test_xdg_*` and `tests/test_user_config.py::test_
 Now: each tier choice is logged once per `(font_name, tier)` pair. Bundled and explicit hits are DEBUG; system-path resolution is INFO; the `_FONT_FALLBACKS` walk is WARNING; the PIL bitmap default is WARNING with a `apt install fonts-dejavu-core` hint.
 
 Tests: `tests/test_overlay_render.py::test_load_font_pil_default_fallback_warns` + `test_load_font_bundled_emits_debug_only`.
+
+**Superseded 2026-08-09 (issue #759).** This whole finding is historical. Neither overlay rasterizes text with PIL any more -- the compare grid moved to a headless-Chromium render in #693 and the single-shooter export followed in #684 -- so `_load_font`, the two path tables and the tier logging have been deleted along with the tests named above. A face is now a bundled font shipped in the wheel or an error, which removes the failure this section describes rather than logging it: there is no host-font tier left to fall through, and therefore no bitmap-default outcome to warn about. The `fonts-dejavu-core` hint no longer applies.
 
 ### 4. Reveal endpoints surface helper failures (`ui/server.py`)
 `/api/files/reveal` and `/api/shooters/{slug}/videos/reveal` previously called `subprocess.run(..., check=False)` and unconditionally returned 200. A headless Linux install without `xdg-open`, a Wayland session without DBUS, or `xdg-open` exiting nonzero would silently no-op -- the SPA had no way to surface the failure.
