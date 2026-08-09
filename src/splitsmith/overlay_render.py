@@ -55,7 +55,7 @@ from .overlay_raster import (
 from .overlay_single import build_overlay_runs, run_groups
 from .overlay_text import OverlayRenderError, overlay_font_file, resolve_overlay_face
 from .overlay_theme import ThemeName, load_theme
-from .runtime import Runner, ffmpeg_capabilities, quote_filter_value
+from .runtime import Runner, _probe, _probe_text, ffmpeg_capabilities, quote_filter_value
 
 logger = logging.getLogger(__name__)
 
@@ -176,29 +176,28 @@ def _shot_times_from_audit(audit_data: dict, *, beep_offset_seconds: float) -> l
     return out
 
 
-def _ffmpeg_supports_encoder(ffmpeg_binary: str, encoder: str) -> bool:
+def _ffmpeg_supports_encoder(ffmpeg_binary: str, encoder: str, runner: Runner) -> bool:
     """``True`` when ``ffmpeg -encoders`` advertises ``encoder``.
 
-    Mirrors the probe in :mod:`splitsmith.trim` -- a runtime check beats
+    Mirrors the probe in :mod:`splitsmith.trim` - a runtime check beats
     hard-coding macOS-only encoders, since users can install ffmpeg
     builds without VideoToolbox.
+
+    ``runner`` is the same injected seam every other ffmpeg probe goes
+    through (:func:`splitsmith.runtime.ffmpeg_capabilities`); shelling
+    out via the module-level ``subprocess.run`` here is exactly the
+    bypass that blew up under a stubbed ``Popen`` on macOS while staying
+    invisible on non-Darwin CI.
     """
-    try:
-        proc = subprocess.run(
-            [ffmpeg_binary, "-hide_banner", "-encoders"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+    proc = _probe(runner, [ffmpeg_binary, "-hide_banner", "-encoders"])
+    if proc is None or proc.returncode != 0:
         return False
-    if proc.returncode != 0:
-        return False
-    return encoder in proc.stdout
+    return encoder in _probe_text(proc)
 
 
-def _resolve_codec(codec: OverlayCodec, ffmpeg_binary: str) -> Literal["hevc-alpha", "prores-4444"]:
+def _resolve_codec(
+    codec: OverlayCodec, ffmpeg_binary: str, runner: Runner
+) -> Literal["hevc-alpha", "prores-4444"]:
     """Resolve ``"auto"`` against the host. Concrete codecs pass through.
 
     ``hevc-alpha`` only makes sense on Apple platforms with VideoToolbox;
@@ -210,7 +209,7 @@ def _resolve_codec(codec: OverlayCodec, ffmpeg_binary: str) -> Literal["hevc-alp
         return codec
     if codec != "auto":
         raise OverlayRenderError(f"unknown overlay codec {codec!r}; expected one of {OVERLAY_CODECS}")
-    if platform.system() == "Darwin" and _ffmpeg_supports_encoder(ffmpeg_binary, "hevc_videotoolbox"):
+    if platform.system() == "Darwin" and _ffmpeg_supports_encoder(ffmpeg_binary, "hevc_videotoolbox", runner):
         return "hevc-alpha"
     return "prores-4444"
 
@@ -557,7 +556,7 @@ def render_overlay(
     if shutil.which(ffmpeg_binary) is None:
         raise OverlayRenderError(f"ffmpeg binary not found: {ffmpeg_binary}")
 
-    resolved_codec = _resolve_codec(codec, ffmpeg_binary)
+    resolved_codec = _resolve_codec(codec, ffmpeg_binary, probe_runner)
     width, height = _scaled_dimensions(probe.width, probe.height, max_height)
     rate_num, rate_den = _capped_frame_rate(probe.frame_rate_num, probe.frame_rate_den, max_fps)
     fps = rate_num / rate_den
