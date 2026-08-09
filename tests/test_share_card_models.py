@@ -1,0 +1,80 @@
+"""Card models: roster ordering and content hashing (spec 2026-08-09)."""
+
+from __future__ import annotations
+
+from splitsmith.share_card import (
+    Interval,
+    MatchCard,
+    RosterEntry,
+    StageCard,
+    card_hash,
+    stage_figures,
+)
+
+
+def _figs() -> object:
+    return stage_figures(
+        (
+            Interval(index=1, seconds=1.28, interval_class="first_shot"),
+            Interval(index=2, seconds=0.19, interval_class="split"),
+        ),
+        transition_min=1.0,
+    )
+
+
+def _stage_card(stage_name: str = "Per told me to do it!") -> StageCard:
+    return StageCard(
+        stage_number=3,
+        stage_name=stage_name,
+        shooter_name="Mathias Axell",
+        match_name="Tallmilan 2026",
+        shot_count=2,
+        stage_time=14.74,
+        figures=_figs(),
+    )
+
+
+def test_roster_is_sorted_alphabetically_by_name() -> None:
+    card = MatchCard(
+        match_name="Tallmilan 2026",
+        match_date="2026-04-26",
+        stage_count=7,
+        roster=[
+            RosterEntry(name="Petra Lind", division="Standard"),
+            RosterEntry(name="Anders Berg", division="Production Optics"),
+            RosterEntry(name="Mathias Axell", division="Production Optics"),
+        ],
+    )
+    assert [r.name for r in card.roster] == ["Anders Berg", "Mathias Axell", "Petra Lind"]
+
+
+def test_hash_is_stable_across_equal_cards() -> None:
+    assert card_hash(_stage_card()) == card_hash(_stage_card())
+
+
+def test_hash_changes_when_any_displayed_figure_changes() -> None:
+    before = card_hash(_stage_card())
+    after = card_hash(_stage_card(stage_name="Short and Sweet"))
+    assert before != after
+
+
+def test_hash_changes_when_the_average_split_changes() -> None:
+    base = _stage_card()
+    moved = base.model_copy(
+        update={
+            "figures": stage_figures(
+                (
+                    Interval(index=1, seconds=1.28, interval_class="first_shot"),
+                    Interval(index=2, seconds=0.31, interval_class="split"),
+                ),
+                transition_min=1.0,
+            )
+        }
+    )
+    assert card_hash(base) != card_hash(moved)
+
+
+def test_hash_is_sixteen_hex_characters() -> None:
+    h = card_hash(_stage_card())
+    assert len(h) == 16
+    assert all(c in "0123456789abcdef" for c in h)

@@ -25,9 +25,13 @@ this same definition; both consume :func:`stage_figures`.
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
+
+from pydantic import BaseModel, Field, field_validator
 
 #: The interval class naming the draw. Mirrors ``CoachIntervalClass`` in
 #: ``ui_static/src/lib/api.ts``; ``coach.py`` owns the Python side.
@@ -118,3 +122,55 @@ def stage_figures(intervals: Sequence[Interval], *, transition_min: float) -> St
         interval_count=len(intervals),
         source=source,
     )
+
+
+class RosterEntry(BaseModel):
+    """One shooter on a match card."""
+
+    name: str
+    division: str | None = None
+
+
+class MatchCard(BaseModel):
+    """The top-level share card: identity plus who is in the match.
+
+    No aggregate time figure by design -- IPSC ranks by hit factor and
+    match percentage, so summed stage time is not a number the sport
+    produces. See the spec's "Match card -- roster" section.
+    """
+
+    match_name: str
+    match_date: str | None = None
+    stage_count: int
+    roster: list[RosterEntry] = Field(default_factory=list)
+
+    @field_validator("roster")
+    @classmethod
+    def _sorted_roster(cls, value: list[RosterEntry]) -> list[RosterEntry]:
+        """Alphabetical by name, matching the slot-order convention
+        ``compare/`` already uses so a roster never reshuffles."""
+        return sorted(value, key=lambda r: r.name)
+
+
+class StageCard(BaseModel):
+    """One shooter's run on one stage."""
+
+    stage_number: int
+    stage_name: str
+    shooter_name: str
+    match_name: str
+    shot_count: int
+    stage_time: float | None = None
+    figures: StageFigures
+
+
+def card_hash(card: MatchCard | StageCard) -> str:
+    """Content hash over everything the card displays.
+
+    The ``og:image`` URL carries this, so a re-audit that moves any
+    displayed figure moves the URL and crawlers refetch instead of
+    serving a stale preview. Sixteen hex characters: collision risk is
+    negligible for a per-token keyspace and the URL stays readable.
+    """
+    payload = json.dumps(card.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
