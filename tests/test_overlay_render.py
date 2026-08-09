@@ -19,8 +19,10 @@ from typing import Any
 import pytest
 from PIL import Image, ImageFont
 from playwright.sync_api import Error as PlaywrightError
+from typer.testing import CliRunner
 
 from splitsmith import overlay_raster, overlay_render, runtime
+from splitsmith.cli import app
 from splitsmith.config import VideoMetadata
 from splitsmith.overlay_clock import border_width
 from splitsmith.overlay_layout import CellScale
@@ -925,3 +927,81 @@ def test_the_counter_and_the_clock_sit_on_one_baseline(tmp_path: Path) -> None:
     assert (
         abs(counter_ascender - scale.pad) <= 1
     ), f"both corners agree at y={counter_ascender} but pad is {scale.pad}"
+
+
+# --- CLI wiring (issue #684 Task 6) -----------------------------------------
+
+
+def test_overlay_cli_forwards_its_flags_to_render_overlay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Nothing exercised ``splitsmith export overlay`` end to end before this,
+    which is exactly why the branch could ship ``font_name=font_name`` after
+    Task 5 dropped that parameter from ``render_overlay`` -- the mismatch
+    only raised at call time, not at import time, and no test ever called it.
+
+    ``fake_render_overlay`` deliberately mirrors ``render_overlay``'s real
+    keyword-only signature instead of catching everything with ``**kwargs``:
+    a stray keyword the CLI still sends (like the removed ``font_name``)
+    raises ``TypeError`` against this fake exactly as it would against the
+    real function, so a future signature drift fails here again.
+    """
+    audit_path = tmp_path / "stage1.json"
+    video_path = tmp_path / "trimmed.mp4"
+    output_path = tmp_path / "overlay.mov"
+
+    captured: dict[str, Any] = {}
+
+    def fake_render_overlay(
+        *,
+        audit_path: Path,
+        trimmed_video_path: Path,
+        output_path: Path,
+        beep_offset_seconds: float,
+        ffmpeg_binary: str = "ffmpeg",
+        probe: VideoMetadata | None = None,
+        codec: str = "auto",
+        max_height: int | None = None,
+        max_fps: float | None = None,
+        theme: str = "splitsmith",
+        rasterizer: Any = None,
+        probe_runner: Any = None,
+    ) -> Path:
+        captured.update(
+            audit_path=audit_path,
+            trimmed_video_path=trimmed_video_path,
+            output_path=output_path,
+            beep_offset_seconds=beep_offset_seconds,
+            codec=codec,
+            max_height=max_height,
+            max_fps=max_fps,
+            theme=theme,
+        )
+        output_path.write_bytes(b"")
+        return output_path
+
+    monkeypatch.setattr(overlay_render, "render_overlay", fake_render_overlay)
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "overlay",
+            "--audit", str(audit_path),
+            "--video", str(video_path),
+            "--output", str(output_path),
+            "--beep-offset", "3.5",
+            "--theme", "clean",
+        ],  # fmt: skip
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured == {
+        "audit_path": audit_path,
+        "trimmed_video_path": video_path,
+        "output_path": output_path,
+        "beep_offset_seconds": 3.5,
+        "codec": "auto",
+        "max_height": None,
+        "max_fps": None,
+        "theme": "clean",
+    }
