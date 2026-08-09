@@ -608,10 +608,21 @@ Run: `uv run python scripts/build_overlay_theme.py`
 Expected: `src/splitsmith/data/overlay_theme.json` now contains `surface`
 and `subtle`. Verify with `git diff --stat src/splitsmith/data/overlay_theme.json`.
 
-- [ ] **Step 6: Run the theme tests**
+- [ ] **Step 6: Run the theme tests AND everything downstream of the dataclass**
 
-Run: `uv run pytest tests/test_overlay_theme.py -n0 -q`
-Expected: PASS, all tests including the new one.
+`OverlayTheme` gains two required fields and the shipped
+`overlay_theme.json` is regenerated. Every overlay renderer reads that
+dataclass, so a focused run cannot see the blast radius -- adding a
+required field to a frozen dataclass is exactly the change that breaks a
+constructor call in another module.
+
+Run: `uv run pytest tests/test_overlay_theme.py tests/test_overlay_html.py \
+  tests/test_overlay_raster.py tests/test_overlay_render.py \
+  tests/test_overlay_single.py tests/test_overlay_layout.py \
+  tests/test_overlay_clock.py tests/test_overlay_text.py \
+  tests/test_compare_overlay_summary.py tests/test_compare_overlay_live.py \
+  tests/test_compare_overlay_sprites.py -q`
+Expected: PASS. Any failure here is this task's to fix, not a later task's.
 
 - [ ] **Step 7: Commit**
 
@@ -1702,10 +1713,15 @@ registration:
     app.include_router(share_og_router)
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [ ] **Step 6: Run the tests, plus everything downstream of the allowlist**
 
-Run: `uv run pytest tests/test_share_og_routes.py -n0 -q`
-Expected: PASS, 6 tests.
+`_SHARE_PATH_RE` is the containment boundary the whole anonymous share
+surface routes through, so a focused run on the new file is not enough.
+
+Run: `uv run pytest tests/test_share_og_routes.py tests/test_share_routes.py \
+  tests/test_share_tokens_store.py tests/test_hosted_mode_boot.py \
+  tests/test_hosted_status.py -q`
+Expected: PASS, including the 6 new tests.
 
 - [ ] **Step 7: Prove the allowlist test can fail**
 
