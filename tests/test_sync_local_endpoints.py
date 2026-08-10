@@ -234,6 +234,24 @@ def test_sync_status_offline_remote_changes_none(tmp_path: Path, monkeypatch) ->
     assert resp.json()["remote_changes"] is None
 
 
+def test_sync_status_malformed_manifest_remote_changes_none(tmp_path: Path, monkeypatch) -> None:
+    """A manifest entry missing required keys must degrade the hint to
+    None, not 500 the whole status poll."""
+    client, match_id = _local_app_with_match(tmp_path)
+    client.put(
+        "/api/settings/hosted-sync",
+        json={"base_url": "https://hosted.example", "token": "secret-token"},
+    )
+    monkeypatch.setattr(
+        "splitsmith.ui.server._fetch_remote_manifest", lambda prefs, match_id: [{"bogus": True}]
+    )
+
+    resp = client.get(f"/api/matches/{match_id}/match/sync/status")
+
+    assert resp.status_code == 200
+    assert resp.json()["remote_changes"] is None
+
+
 # ---------------------------------------------------------------------------
 # Hosted mode: all four routes 404
 # ---------------------------------------------------------------------------

@@ -6237,7 +6237,8 @@ def create_app(
                 try:
                     manifest = await run_in_threadpool(_fetch_remote_manifest, prefs, match_id)
                     remote_changes = len(plan_pull(manifest, sync_state))
-                except (httpx.HTTPError, SyncClientError):
+                # a best-effort hint must never break the status poll - malformed manifest degrades to unknown
+                except (httpx.HTTPError, SyncClientError, KeyError, ValueError, TypeError):
                     remote_changes = None
 
         return SyncStatusResponse(
