@@ -12829,8 +12829,13 @@ def create_app(
         endpoint: in hosted mode returns 425 when the proxy is absent;
         in local mode falls back to source.
 
-        Non-registered paths (exports/ or trimmed/) are always served
-        from local disk regardless of mode.
+        Non-registered paths must match the logical ref grammar
+        ``(exports|trimmed)/<name>.mp4`` (the shape ``_resolve_compare_trim``
+        hands back for a Compare trim) - absolute paths, traversal shapes,
+        non-.mp4 suffixes, and anything else are rejected with 404. Hosted
+        mode serves a matching ref via a presigned redirect (storage.exists
+        + serve_media); local mode serves it from disk under the shooter's
+        exports/ or trimmed/ dir.
         """
         match_root, match = _resolve_match_context()
         if slug not in match.shooters:
@@ -12897,8 +12902,28 @@ def create_app(
             served_path = shooter_project.resolve_video_path(shooter_root, video.path).resolve()
             return FileResponse(served_path, media_type="video/mp4")
 
-        # non-registered path: must be inside exports/ or trimmed/ (local disk only)
-        resolved = target.expanduser().resolve()
+        # Non-registered path: a Compare-produced trim, addressed by the
+        # logical ref grammar ``(exports|trimmed)/<name>.mp4`` -- the same
+        # shape ``_resolve_compare_trim`` hands back. Absolute paths and
+        # traversal shapes never reach a dir derivation at all; they just
+        # fail the match.
+        ref_match = re.fullmatch(r"(exports|trimmed)/([^/]+\.mp4)", path)
+        if ref_match is None:
+            raise HTTPException(status_code=404, detail=f"not a valid trim ref: {path}")
+        dirkind, name = ref_match.group(1), ref_match.group(2)
+
+        storage = state.storage
+        scope = shooter_project._storage_scope
+        if storage is not None and storage.supports_presigned_get and scope:
+            key = f"{scope}/{dirkind}/{name}"
+            if not storage.exists(key):
+                raise HTTPException(status_code=404, detail=f"file not found: {key}")
+            return serve_media(storage, key, shooter_root / dirkind / name, content_type="video/mp4")
+
+        # Local mode: resolve against the actual dirs (which may be
+        # absolute overrides outside the shooter root); containment check
+        # kept as defense-in-depth even though the ref grammar above
+        # already rules out a filename with a path separator in it.
         exports_dir = (
             Path(shooter_project.exports_dir).expanduser().resolve()
             if shooter_project.exports_dir
@@ -12909,22 +12934,12 @@ def create_app(
             if shooter_project.trimmed_dir
             else (shooter_root / "trimmed").resolve()
         )
-        in_allowed_dir = False
-        for allowed in (exports_dir, trimmed_dir):
-            try:
-                resolved.relative_to(allowed)
-                in_allowed_dir = True
-                break
-            except ValueError:
-                continue
-        if not in_allowed_dir:
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    f"path {path} is neither a registered video nor inside "
-                    f"the shooter's exports/ or trimmed/ dirs"
-                ),
-            )
+        target_dir = exports_dir if dirkind == "exports" else trimmed_dir
+        resolved = (target_dir / name).resolve()
+        try:
+            resolved.relative_to(target_dir)
+        except ValueError:
+            raise HTTPException(status_code=404, detail=f"file not found: {path}") from None
         if not resolved.exists():
             raise HTTPException(status_code=404, detail=f"file not found: {resolved}")
         return FileResponse(resolved, media_type="video/mp4")
