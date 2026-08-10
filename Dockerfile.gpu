@@ -129,8 +129,12 @@ RUN uv sync --frozen --no-dev --extra hosted
 # where `get_available_providers()` reports no CUDA. The real device check is at
 # runtime in build_onnx_session (which preloads the CUDA dlls and falls back to
 # CPU), and on a live GPU host via scripts/setup-agent-gpu.sh.
-RUN uv pip uninstall onnxruntime \
- && uv pip install \
+# --python pins the swap to the project venv. Without it the ENV
+# UV_PYTHON=/usr/bin/python3.11 above sends `uv pip install` to the *system*
+# interpreter, leaving /app/.venv on the CPU wheel -- which is exactly the
+# silent miss the .so check below caught in CI.
+RUN uv pip uninstall --python /app/.venv/bin/python onnxruntime \
+ && uv pip install --python /app/.venv/bin/python \
         "onnxruntime-gpu==1.22.0" \
         "nvidia-cudnn-cu12" \
         "nvidia-cublas-cu12" \
