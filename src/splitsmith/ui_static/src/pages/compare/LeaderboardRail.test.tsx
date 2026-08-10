@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import type { CompareShooterRecord } from "@/lib/api";
+import type { CompareShooterRecord, CompareShotPoint } from "@/lib/api";
 
 import { LeaderboardRail } from "./LeaderboardRail";
 
@@ -9,19 +9,24 @@ function shooter(
   slug: string,
   name: string,
   stageTime: number | null,
-  shotTimes: number[],
+  shots: { t: number; c: CompareShotPoint["interval_class"] }[] | number[],
 ): CompareShooterRecord {
+  const shotList =
+    shots.length > 0 && typeof shots[0] === "number"
+      ? (shots as number[]).map((t) => ({ t, c: null }))
+      : (shots as { t: number; c: CompareShotPoint["interval_class"] }[]);
+
   return {
     slug,
     name,
     stage_time_seconds: stageTime,
     beep_offset_in_clip: 0,
     video_ref: `trimmed/${slug}.mp4`,
-    shots: shotTimes.map((t, i) => ({
+    shots: shotList.map((s, i) => ({
       shot_number: i + 1,
-      time_after_beep: t,
+      time_after_beep: s.t,
       source: "detected",
-      interval_class: null,
+      interval_class: s.c,
     })),
   } as CompareShooterRecord;
 }
@@ -62,6 +67,22 @@ describe("LeaderboardRail", () => {
       <LeaderboardRail shooters={[shooter("a", "Empty Shooter", null, [])]} />,
     );
     expect(screen.getByTestId("rail-draw")).toHaveTextContent("-");
+    expect(screen.getByTestId("rail-fast")).toHaveTextContent("-");
+    expect(screen.getByTestId("rail-avg")).toHaveTextContent("-");
+  });
+
+  it("renders placeholders when no interval counts as a split", () => {
+    render(
+      <LeaderboardRail
+        shooters={[
+          shooter("cy", "Cy", 20.0, [
+            { t: 3.0, c: "first_shot" },
+            { t: 8.0, c: "movement" },
+          ]),
+        ]}
+      />,
+    );
+    expect(screen.getByTestId("rail-draw")).toHaveTextContent("3.00");
     expect(screen.getByTestId("rail-fast")).toHaveTextContent("-");
     expect(screen.getByTestId("rail-avg")).toHaveTextContent("-");
   });

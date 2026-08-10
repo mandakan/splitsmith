@@ -25,7 +25,6 @@ export function LeaderboardRail({
         draw: pairs.length > 0 ? pairs[0].split : null,
         fastestSplit: splits.length === 0 ? null : Math.min(...splits),
         avgSplit: splits.length === 0 ? null : avg(splits),
-        shotCount: s.shots.length,
       };
     })
     .sort((a, b) => a.time - b.time)
