@@ -137,11 +137,10 @@ RUN uv pip uninstall onnxruntime \
         "nvidia-cuda-runtime-cu12" \
         "nvidia-curand-cu12" \
         "nvidia-cufft-cu12" \
- && /app/.venv/bin/python -c "import importlib.metadata as m, pathlib, onnxruntime as o; \
-v = m.version('onnxruntime-gpu'); \
+ && /app/.venv/bin/python -c "import pathlib, onnxruntime as o; \
 so = list((pathlib.Path(o.__file__).parent / 'capi').glob('libonnxruntime_providers_cuda.so')); \
-assert so, 'onnxruntime-gpu CUDA provider .so missing'; \
-print('onnxruntime-gpu', v, '->', so[0].name)"
+assert so, 'onnxruntime-gpu CUDA provider .so missing -- the CPU wheel got installed'; \
+print('onnxruntime', o.__version__, '->', so[0].name)"
 
 # Slim the venv (drop bundled test suites + __pycache__); do NOT strip .so files.
 RUN find /app/.venv -type d -name '__pycache__' -prune -exec rm -rf {} + ; \
