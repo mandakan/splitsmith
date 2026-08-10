@@ -150,7 +150,7 @@ def test_compare_leaves_a_cleared_manual_doc_alone(tmp_path: Path) -> None:
         s["interval_class_source"] = "auto"
     shots[3]["interval_class_source"] = "manual"  # cleared, class absent
 
-    client, _audit, compare_url = _bootstrap(tmp_path, shots)
+    client, _audit, compare_url, _shooter_root = _bootstrap(tmp_path, shots)
     resp = client.get(compare_url)
     assert resp.status_code == 200, resp.text
     (shooter,) = resp.json()["shooters"]
