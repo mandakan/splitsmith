@@ -20,7 +20,7 @@ from splitsmith.sync.client import SyncClientError, SyncVersionConflict
 from splitsmith.sync.plan import doc_identity_key
 from splitsmith.sync.pull import plan_pull, remote_doc_key
 from splitsmith.sync.run import run_sync
-from splitsmith.sync.state import SyncState, load_sync_state
+from splitsmith.sync.state import SyncState, load_sync_state, save_sync_state
 
 M = [
     {
@@ -269,3 +269,37 @@ def test_run_sync_crash_replay_after_merge_before_push(tmp_path):
     assert report.pulled == 0  # remote version already recorded during crash run
     pushed, _ = client.docs[audit_key]
     assert pushed["shots"][0]["coaching_note"] == "survives"
+
+
+def test_run_sync_missing_local_audit_is_skipped_not_synthesized(tmp_path):
+    """Remote has an audit doc for a stage whose local audit file does not
+    exist - pull must note and skip, never synthesize an events-only local
+    audit or push it back over hosted's copy."""
+    match_root = make_synced_match(tmp_path)
+    client = _first_sync(match_root)
+    audit_key = next(k for k in client.docs if k.startswith("audit/"))
+    slug, stage = audit_key.split("/")[1], audit_key.split("/")[2]
+    audit_path = match_root / "shooters" / slug / "audit" / f"stage{stage}.json"
+
+    # Simulate the doc never having been seen locally (e.g. first sync
+    # after an upgrade): the local file, its base snapshot, and its
+    # recorded version/hash are all gone, but the shooter still exists.
+    audit_path.unlink()
+    (match_root / "sync_base" / f"{audit_key}.json").unlink()
+    state = load_sync_state(match_root)
+    del state.doc_versions[audit_key]
+    state.doc_hashes.pop(audit_key, None)
+    save_sync_state(match_root, state)
+
+    # Hosted-side edit so the doc is pulled (bumped version).
+    body, version = client.docs[audit_key]
+    hosted_body = {**body, "shots": [{**body["shots"][0], "coaching_note": "hosted-only"}]}
+    client.docs[audit_key] = (hosted_body, version + 1)
+
+    report = run_sync(match_root, client=client)
+
+    assert not audit_path.exists()
+    unchanged_hosted, _ = client.docs[audit_key]
+    assert unchanged_hosted["shots"][0]["shot_number"] == 1
+    assert unchanged_hosted["shots"][0].get("coaching_note") == "hosted-only"
+    assert any("no local audit doc" in n for n in report.notes)

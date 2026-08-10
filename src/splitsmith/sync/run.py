@@ -199,8 +199,20 @@ def _apply_pull(
             )
             if audit_path is None:
                 notes.append(f"{key}: no local shooter {rd.slug!r}; ignored")
+            elif not audit_path.exists():
+                # A missing local audit file is not "start from nothing" -
+                # audit doc membership (whether the file exists at all) is
+                # desktop-owned. Merging into {} would let historical
+                # events synthesize a zero-shot "audited" doc and push it
+                # back over hosted's fuller copy. Skip like a missing
+                # shooter; base/version still record below so this doc
+                # is not re-pulled every sync.
+                notes.append(
+                    f"{key}: no local audit doc for stage {rd.stage_number} ({rd.slug!r}) - "
+                    "audit doc membership is desktop-owned; ignored"
+                )
             else:
-                local_doc = json.loads(audit_path.read_text(encoding="utf-8")) if audit_path.exists() else {}
+                local_doc = json.loads(audit_path.read_text(encoding="utf-8"))
                 result = merge_audit_doc(
                     base,
                     local_doc,
