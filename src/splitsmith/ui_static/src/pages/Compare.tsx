@@ -412,21 +412,26 @@ export function Compare() {
           />
         </div>
         {/* Grid export ships with #328; disabled + badged like the
-         *  Export page's compare ModeOption so the two surfaces agree. */}
-        <Button
-          type="button"
-          variant="outline"
-          disabled
-          title="Multi-shooter grid export arrives with #328. Single-shooter export lives on the Export page."
-        >
-          <ArrowDownToLine className="size-3.5" />
-          <span className="font-display uppercase tracking-[0.08em]">
-            Export FCPXML
-          </span>
-          <span className="rounded border border-rule px-1.5 font-mono text-[0.625rem] font-semibold text-muted">
-            #328
-          </span>
-        </Button>
+         *  Export page's compare ModeOption so the two surfaces agree.
+         *  Operator-only affordance (mutates nothing yet, but the
+         *  destination Export page needs a session) - hidden on the
+         *  anonymous share view, same as Audit/Coach above (#700). */}
+        {!shareView && (
+          <Button
+            type="button"
+            variant="outline"
+            disabled
+            title="Multi-shooter grid export arrives with #328. Single-shooter export lives on the Export page."
+          >
+            <ArrowDownToLine className="size-3.5" />
+            <span className="font-display uppercase tracking-[0.08em]">
+              Export FCPXML
+            </span>
+            <span className="rounded border border-rule px-1.5 font-mono text-[0.625rem] font-semibold text-muted">
+              #328
+            </span>
+          </Button>
+        )}
       </div>
 
       {/* Unfinished banner: when at least one shooter is playable, the
@@ -542,10 +547,19 @@ function UnfinishedShootersBanner({
           Missing footage
         </span>
         <span className="text-ink-2">{unfinished.length}</span>
-        <span>
-          {unfinished.length === 1 ? "shooter has" : "shooters have"} no
-          cached trim for this stage.
-        </span>
+        {shareView ? (
+          <span>
+            {unfinished.length === 1
+              ? "shooter has"
+              : "shooters have"}{" "}
+            no comparison video for this stage yet.
+          </span>
+        ) : (
+          <span>
+            {unfinished.length === 1 ? "shooter has" : "shooters have"} no
+            cached trim for this stage.
+          </span>
+        )}
       </div>
       <div className="mt-2.5 flex flex-wrap items-center gap-2">
         {unfinished.map((s) => {
