@@ -651,7 +651,7 @@ function CompareEmptyState({
   // viewers get viewer-neutral copy instead of audit instructions - they
   // cannot act on any of this (#700).
   return (
-    <div className="rounded-2xl border border-rule-strong bg-surface px-6 py-10 text-sm text-muted">
+    <div className="flex min-h-0 flex-1 flex-col justify-center rounded-2xl border border-rule-strong bg-surface px-6 py-10 text-sm text-muted">
       {shareView ? (
         <p className="text-center text-ink-2">
           The match owner hasn't prepared comparison video for this stage
@@ -808,7 +808,7 @@ function VideoTile({
     <div
       className={cn(
         "relative overflow-hidden rounded-xl border bg-bg-glow",
-        fit === "fill" && "flex min-h-0 flex-col",
+        fit === "fill" ? "flex min-h-0 flex-col" : "shrink-0",
         isAudio
           ? "border-led shadow-[0_0_0_1px_var(--color-led-deep),0_0_16px_var(--color-led-glow)]"
           : "border-rule-strong",
