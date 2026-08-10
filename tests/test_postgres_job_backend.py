@@ -198,6 +198,31 @@ def test_submit_persists_row_and_runs_to_succeeded(tmp_path) -> None:
     assert final.finished_at is not None
 
 
+def _fetch_row(session_factory: sessionmaker, job_id: str) -> ComputeJobRow:
+    from sqlalchemy import select
+
+    async def _fetch() -> ComputeJobRow:
+        async with session_factory() as s:
+            result = await s.execute(select(ComputeJobRow).where(ComputeJobRow.id == job_id))
+            return result.scalar_one()
+
+    return asyncio.run(_fetch())
+
+
+def test_submit_persists_wire_args(tmp_path) -> None:
+    """Submit stores wire-serialised args on the row; empty args become {} not NULL."""
+    backend, session_factory, _ = _build_backend_for_new_user(tmp_path)
+    _register(backend, "detect_beep", lambda _h: None)
+
+    job = asyncio.run(backend.submit(kind="detect_beep", args={"video_id": "v1"}, stage_number=2))
+    row = _fetch_row(session_factory, job.id)
+    assert row.args == {"video_id": "v1"}
+
+    job2 = asyncio.run(backend.submit(kind="detect_beep", stage_number=2))
+    row2 = _fetch_row(session_factory, job2.id)
+    assert row2.args == {}  # None coalesces to {} so NULL means "pre-migration"
+
+
 def test_failed_job_records_error_string(tmp_path) -> None:
     backend, _, _ = _build_backend_for_new_user(tmp_path)
 

@@ -225,6 +225,7 @@ class PostgresJobBackend:
             id=job_id,
             user_id=self._user_id,
             kind=kind,
+            args=_to_wire_args(args or {}),
             stage_number=stage_number,
             shooter_slug=shooter_slug,
             video_id=video_id,
