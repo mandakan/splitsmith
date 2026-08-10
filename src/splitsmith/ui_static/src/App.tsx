@@ -203,6 +203,20 @@ export function App() {
             <Route index element={<Navigate to="results" replace />} />
             <Route path="results" element={<Results />} />
             <Route path="results/:slug/:stage" element={<ResultsStage />} />
+            {/* Compare-behind-a-token (#700): read-only, desktop-only.
+                Compare.tsx's own isShareView() gates the operator-only
+                affordances (Audit/Coach tabs, audit CTAs) off this
+                mount; api plumbing needs no changes here since
+                scopeRequestPath already rewrites Compare's fetches into
+                the share prefix. */}
+            <Route
+              path="compare/:stage"
+              element={
+                <DesktopGate screen="Compare">
+                  <Compare />
+                </DesktopGate>
+              }
+            />
           </Route>
 
           <Route element={<RootLayout />}>

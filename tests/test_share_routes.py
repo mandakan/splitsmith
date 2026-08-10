@@ -7,7 +7,9 @@ Tests the GET/POST/DELETE /api/match/shares routes via the
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,7 +17,7 @@ from sqlalchemy import delete as _delete
 from sqlalchemy import select as _select
 
 from splitsmith.db import MatchRow, ProjectStateStore, ShareTokenRow, User, create_engine, sessionmaker
-from tests.hosted_helpers import _CapturingSender, login, seed_match
+from tests.hosted_helpers import _CapturingSender, login, moto_s3_storage, seed_match
 
 MID = "test-match-abc123"
 OTHER_MID = "test-match-xyz999"
@@ -335,6 +337,8 @@ def test_share_revoked_token_404_on_every_path(
         f"shooters/{SLUG}/project",
         f"shooters/{SLUG}/stages/1/coach",
         f"shooters/{SLUG}/videos/stream",
+        "match/stage/1/compare",
+        f"match/shooters/{SLUG}/videos/stream",
     ):
         resp = client.get(_share_url(token, rest))
         assert resp.status_code == 404, rest
@@ -380,9 +384,14 @@ def test_share_whitelisted_non_get_404(
 ) -> None:
     token = _setup_shared_match(hosted_env, hosted_app)
     client, _ = hosted_app
-    resp = client.post(_share_url(token, "match/shooters"))
-    assert resp.status_code == 404
-    assert resp.json() == NOT_FOUND
+    for rest in (
+        "match/shooters",
+        "match/stage/1/compare",
+        f"match/shooters/{SLUG}/videos/stream",
+    ):
+        resp = client.post(_share_url(token, rest))
+        assert resp.status_code == 404, rest
+        assert resp.json() == NOT_FOUND, rest
 
 
 # -- happy paths ---------------------------------------------------------
@@ -437,6 +446,37 @@ def _seed_stage_audit(db_url: str, user_email: str, match_id: str, slug: str, do
     asyncio.run(_seed())
 
 
+def _seed_stage_video_and_audit(db_url: str, user_email: str, match_id: str, slug: str, doc: dict) -> None:
+    """Like ``_seed_stage_audit``, but the stage entry also carries a
+    primary video with ``beep_time`` set - the compare endpoint's
+    ``video_ref``/``shots`` blocks are both gated on a primary beep, so
+    compare-happy-path tests need this instead of the coach helper above."""
+    from splitsmith.match_project import MatchProject, StageEntry, StageVideo
+
+    engine = create_engine(db_url)
+    sf = sessionmaker(engine)
+
+    async def _seed() -> None:
+        async with sf() as s:
+            row = (await s.execute(_select(User).where(User.email == user_email))).scalar_one()
+            user_id = row.id
+        store = ProjectStateStore(sf, user_id=user_id)
+        project_doc, version = await store.load_project(match_id, slug)
+        project = MatchProject.model_validate(project_doc)
+        project.stages = [
+            StageEntry(
+                stage_number=1,
+                stage_name="Stage 1",
+                time_seconds=30.0,
+                videos=[StageVideo(path=Path("raw/v.mp4"), role="primary", beep_time=5.0)],
+            )
+        ]
+        await store.save_project(match_id, slug, project.model_dump(mode="json"), expected_version=version)
+        await store.save_audit(match_id, slug, 1, doc, expected_version=0)
+
+    asyncio.run(_seed())
+
+
 def _load_stage_audit(db_url: str, user_email: str, match_id: str, slug: str) -> dict:
     engine = create_engine(db_url)
     sf = sessionmaker(engine)
@@ -459,25 +499,178 @@ def test_share_coach_read_classifies_in_memory_without_persisting(
 ) -> None:
     """#775: a share-token coach read of a legacy (unclassified) doc gets
     classified shots in the response but must not write the heal back -
-    anonymous readers never mutate owner state."""
+    anonymous readers never mutate owner state. #778: the same read also
+    strips ``coaching_note``/``improvement_flag`` - a coach's private
+    annotations are not part of the anonymous viewer's surface - while an
+    owner read of the same stage still sees the real values (the strip is
+    share-scoped, not global)."""
     token = _setup_shared_match(hosted_env, hosted_app)
     legacy_doc = {
         "stage_number": 1,
         "shots": [
-            {"shot_number": 1, "ms_after_beep": 1500},
+            {
+                "shot_number": 1,
+                "ms_after_beep": 1500,
+                "coaching_note": "private!",
+                "improvement_flag": True,
+            },
             {"shot_number": 2, "ms_after_beep": 1800},
         ],
     }
     _seed_stage_audit(hosted_env, "owner@example.com", MID, SLUG, legacy_doc)
 
-    client, _ = hosted_app
+    client, sender = hosted_app
     resp = client.get(_share_url(token, f"shooters/{SLUG}/stages/1/coach"))
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert [s["interval_class"] for s in body["shots"]] == ["first_shot", "split"]
+    assert all(s["coaching_note"] is None for s in body["shots"])
+    assert all(s["improvement_flag"] is False for s in body["shots"])
 
     stored = _load_stage_audit(hosted_env, "owner@example.com", MID, SLUG)
     assert all(s.get("interval_class") is None for s in stored["shots"])
+
+    # The strip is share-scoped, not global: an owner read of the same
+    # stage still returns the real coaching_note/improvement_flag.
+    login(client, sender, "owner@example.com")
+    owner_resp = client.get(f"/api/matches/{MID}/shooters/{SLUG}/stages/1/coach")
+    assert owner_resp.status_code == 200, owner_resp.text
+    owner_shots = owner_resp.json()["shots"]
+    assert owner_shots[0]["coaching_note"] == "private!"
+    assert owner_shots[0]["improvement_flag"] is True
+    client.cookies.clear()
+
+
+# -- stage compare (#700 task 3) -----------------------------------------
+
+
+def test_share_stage_compare_happy_path(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The compare payload needs no share-conditional stripping (#700
+    design doc, backend section 3): it carries the decided minimal
+    surface already. Assert that surface directly - ``video_ref``
+    present-or-null, ``video_path`` never present, and shot dicts carry
+    exactly the four documented keys."""
+    token = _setup_shared_match(hosted_env, hosted_app)
+    doc = {
+        "stage_number": 1,
+        "beep_time": 5.0,
+        "shots": [
+            {"shot_number": 1, "time": 5.5, "ms_after_beep": 500, "source": "detected"},
+            {"shot_number": 2, "time": 5.9, "ms_after_beep": 900, "source": "manual"},
+        ],
+    }
+    _seed_stage_video_and_audit(hosted_env, "owner@example.com", MID, SLUG, doc)
+
+    client, _ = hosted_app
+    resp = client.get(_share_url(token, "match/stage/1/compare"))
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    (shooter,) = body["shooters"]
+    assert shooter["slug"] == SLUG
+    assert "video_ref" in shooter
+    assert shooter["video_ref"] is None or isinstance(shooter["video_ref"], str)
+    assert "video_path" not in shooter
+    assert shooter["shots"], "expected at least one shot in the response"
+    for shot in shooter["shots"]:
+        assert set(shot.keys()) == {"shot_number", "time_after_beep", "source", "interval_class"}
+    assert not client.cookies
+
+
+def test_share_stream_trim_happy_path(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end anonymous streaming happy path (#700): share token ->
+    ``_share_alias`` -> ``stream_shooter_video``'s logical-ref fallback ->
+    ``storage.exists`` -> 307 presigned redirect. Also ties the compare
+    payload's ``video_ref`` for the same shooter to the ref actually
+    streamed, so the two surfaces are proven consistent end-to-end."""
+    client, sender = hosted_app
+    with moto_s3_storage(monkeypatch, "share-stream-happy-path-bucket") as captured:
+        login(client, sender, "owner@example.com")
+        seed_match(hosted_env, "owner@example.com", MID)
+        _seed_state_docs(hosted_env, "owner@example.com", MID, SLUG)
+        doc = {
+            "stage_number": 1,
+            "beep_time": 5.0,
+            "shots": [{"shot_number": 1, "time": 5.5, "ms_after_beep": 500, "source": "detected"}],
+        }
+        _seed_stage_video_and_audit(hosted_env, "owner@example.com", MID, SLUG, doc)
+
+        # Drive one authenticated request so the per-request tenant storage
+        # builds and is captured for the direct write below (same trick as
+        # test_media_presign_serving.py's s3_stream_client fixture).
+        client.get("/api/me/recent-projects")
+        storage = captured["storage"]
+
+        # video_id formula: hashlib.blake2s("<path>#<stage_number>",
+        # digest_size=6) - same derivation _seed_stage_video_and_audit's
+        # StageVideo(path=Path("raw/v.mp4"), ...) on stage 1 produces.
+        video_id = hashlib.blake2s(b"raw/v.mp4#1", digest_size=6).hexdigest()
+        trim_name = f"stage1_cam_{video_id}_trimmed.mp4"
+        trim_key = f"matches/{MID}/shooters/{SLUG}/trimmed/{trim_name}"
+        storage.write_bytes(trim_key, b"TRIMDATA")
+
+        token = _create_share_token(client, MID)
+        client.cookies.clear()
+
+        resp = client.get(
+            _share_url(token, f"match/shooters/{SLUG}/videos/stream"),
+            params={"path": f"trimmed/{trim_name}", "kind": "auto"},
+        )
+        assert resp.status_code == 307, resp.text
+        location = resp.headers["location"]
+        # Presigned URL: the key (and its unique video-id segment) shows up
+        # in the path, and a signature query param is present.
+        assert trim_name in location
+        assert "Signature=" in location
+        assert not client.cookies
+
+        # Tie the stream ref back to the compare payload for the same
+        # shooter/stage - the two surfaces must agree end-to-end.
+        compare_resp = client.get(_share_url(token, "match/stage/1/compare"))
+        assert compare_resp.status_code == 200, compare_resp.text
+        (shooter,) = compare_resp.json()["shooters"]
+        assert shooter["video_ref"] == f"trimmed/{trim_name}"
+
+
+def test_share_stream_malformed_ref_matches_unknown_token_404(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """A traversal-shaped ``path`` fails the ref grammar before any
+    filesystem/storage touch, and the middleware's uniform-404 seam
+    (server.py:6359-6364) means it is indistinguishable from an unknown
+    token."""
+    token = _setup_shared_match(hosted_env, hosted_app)
+    client, _ = hosted_app
+    resp = client.get(
+        _share_url(token, f"match/shooters/{SLUG}/videos/stream"),
+        params={"path": "../trimmed/evil.mp4"},
+    )
+    assert resp.status_code == 404
+    assert resp.json() == NOT_FOUND
+
+
+def test_share_stream_absent_ref_matches_unknown_token_404(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """A well-formed ref that resolves to nothing (no such trim) also 404s
+    through the same uniform seam, and its body is identical to the
+    malformed-ref and unknown-token cases."""
+    token = _setup_shared_match(hosted_env, hosted_app)
+    client, _ = hosted_app
+    resp = client.get(
+        _share_url(token, f"match/shooters/{SLUG}/videos/stream"),
+        params={"path": "trimmed/does-not-exist.mp4"},
+    )
+    assert resp.status_code == 404
+    assert resp.json() == NOT_FOUND
 
 
 def test_share_url_match_id_is_ignored(
@@ -604,6 +797,8 @@ def test_share_management_routes_local_mode_404() -> None:
         "shooters/anna/videos/stream",
         "shooters/anna/coach/distributions",
         "shooters/s_ab12/coach/distributions",
+        "match/stage/1/compare",
+        "match/shooters/some-slug/videos/stream",
         "og.png",
         "og/anna/1.png",
         "og-meta",
@@ -636,6 +831,12 @@ def test_share_path_re_accepts(rest: str) -> None:
         "shooters/anna/coach/distributions/extra",
         "me",
         "match/shares",
+        # match/stage/compare + match/shooters/videos/stream near-misses -
+        # the allowlist widened by exactly the two intended shapes, not by
+        # a looser pattern.
+        "match/stage/x/compare",
+        "match/shooters/videos/stream",
+        "match/stage/1/compare/extra",
         # og-meta near-misses -- the allowlist widened by exactly the two
         # intended shapes, not by a prefix.
         "og-meta/",

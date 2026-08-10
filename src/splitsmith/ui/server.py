@@ -939,6 +939,15 @@ _SHARE_PATH_RE = re.compile(
     r"|shooters/[^/]+/stages/\d+/coach"
     r"|shooters/[^/]+/coach/distributions"
     r"|shooters/[^/]+/videos/stream"
+    r"|match/stage/\d+/compare"
+    # Same registry as the "shooters/[^/]+/videos/stream" shape above -
+    # this alternative also reaches the registered-video branch of
+    # stream_shooter_video (raw sources/proxies), not just Compare's
+    # logical trim refs. That's deliberate: it's the multi-shooter
+    # wrapper the SPA's Compare view streams through, and parity with
+    # the already-whitelisted single-shooter shape means it exposes
+    # nothing new in-surface.
+    r"|match/shooters/[^/]+/videos/stream"
     r"|og\.png"
     r"|og/[^/]+/\d+\.png"
     r"|og-meta"
@@ -3825,9 +3834,11 @@ class CompareShooterRecord(BaseModel):
 
     slug: str
     name: str
-    # Path to the lossless trim clip on disk; the SPA streams via
-    # GET /api/match/shooters/{slug}/videos/stream?path=...
-    video_path: str | None
+    # Logical ref for the stage's playable trim - ``exports/<name>`` or
+    # ``trimmed/<name>``, relative to the shooter's exports/trimmed dirs
+    # (local mode) or storage scope (hosted mode). Resolvable by the
+    # stream route in both modes; never an absolute path.
+    video_ref: str | None
     # Trim is per-shooter and starts at ``beep_offset_in_clip`` seconds
     # before the beep; SPA uses this to sync all clips to time-since-beep.
     beep_offset_in_clip: float | None
@@ -5756,6 +5767,56 @@ def _hosted_boot_lifespan(state: Any) -> Any | None:
         yield
 
     return _lifespan
+
+
+def _resolve_compare_trim(
+    legacy: MatchProject,
+    shooter_root: Path,
+    stage_number: int,
+    stage_name: str,
+    primary: StageVideo,
+    storage: Storage | None,
+) -> str | None:
+    """Logical ref for the stage's playable trim: ``exports/<name>`` or
+    ``trimmed/<name>``, lossless export preferred. Local mode checks the
+    actual dirs on disk; hosted checks object storage under the
+    established key conventions. Returns None when nothing is playable.
+
+    Hosted resolution (storage bound + a per-project scope set) is
+    storage-only and never falls through to a disk check - the app
+    container's disk is not authoritative for hosted trims.
+    """
+    base = stage_file_base(stage_number, stage_name)
+    lossless_name = f"{base}_trimmed.mp4"
+    cache_name = f"stage{stage_number}_cam_{primary.video_id}_trimmed.mp4"
+
+    hosted = storage is not None and storage.supports_presigned_get
+    if hosted:
+        scope = legacy._storage_scope
+        if scope:
+            if storage.exists(f"{scope}/exports/{lossless_name}"):
+                return f"exports/{lossless_name}"
+            if storage.exists(f"{scope}/trimmed/{cache_name}"):
+                return f"trimmed/{cache_name}"
+            return None
+
+    # Local mode (or hosted storage with no scope yet, which never
+    # happens in practice - state.shooter_project always binds one
+    # alongside a match id): existence checks against the actual dirs,
+    # which may be absolute overrides outside the shooter root.
+    exports = Path(legacy.exports_dir).expanduser() if legacy.exports_dir else shooter_root / "exports"
+    if not exports.is_absolute():
+        exports = shooter_root / exports
+    trimmed = Path(legacy.trimmed_dir).expanduser() if legacy.trimmed_dir else shooter_root / "trimmed"
+    if not trimmed.is_absolute():
+        trimmed = shooter_root / trimmed
+    lossless = exports / lossless_name
+    audit_cache = trimmed / cache_name
+    if lossless.exists():
+        return f"exports/{lossless_name}"
+    if audit_cache.exists():
+        return f"trimmed/{cache_name}"
+    return None
 
 
 def create_app(
@@ -10379,8 +10440,10 @@ def create_app(
                     "split": split,
                     "interval_class": s.get("interval_class"),
                     "interval_class_source": s.get("interval_class_source"),
-                    "improvement_flag": bool(s.get("improvement_flag", False)),
-                    "coaching_note": s.get("coaching_note"),
+                    "improvement_flag": (
+                        False if current_share_request.get() else bool(s.get("improvement_flag", False))
+                    ),
+                    "coaching_note": (None if current_share_request.get() else s.get("coaching_note")),
                     "stale": stale,
                     "reload_hint": reload_hint,
                 }
@@ -12608,7 +12671,7 @@ def create_app(
 
             beep_offset: float | None = None
             duration_seconds: float | None = None
-            video_path: str | None = None
+            video_ref: str | None = None
             if stage is not None and primary is not None and primary.beep_time is not None:
                 # Prefer the lossless export (same file FCPXML references);
                 # fall back to the audit-mode short-GOP cache produced
@@ -12618,25 +12681,10 @@ def create_app(
                 # streams during scrubbing. Either is fine for sync playback,
                 # and the fallback lets compare just work after audit
                 # without requiring a separate lossless export pass.
-                stage_name = stage_def.stage_name
-                base = stage_file_base(stage_number, stage_name)
-                exports = (
-                    Path(legacy.exports_dir).expanduser() if legacy.exports_dir else shooter_root / "exports"
+                video_ref = _resolve_compare_trim(
+                    legacy, shooter_root, stage_number, stage_def.stage_name, primary, state.storage
                 )
-                if not exports.is_absolute():
-                    exports = shooter_root / exports
-                trimmed = (
-                    Path(legacy.trimmed_dir).expanduser() if legacy.trimmed_dir else shooter_root / "trimmed"
-                )
-                if not trimmed.is_absolute():
-                    trimmed = shooter_root / trimmed
-                lossless = exports / f"{base}_trimmed.mp4"
-                audit_cache = trimmed / f"stage{stage_number}_cam_{primary.video_id}_trimmed.mp4"
-                resolved_trim = (
-                    lossless if lossless.exists() else (audit_cache if audit_cache.exists() else None)
-                )
-                if resolved_trim is not None:
-                    video_path = str(resolved_trim)
+                if video_ref is not None:
                     beep_offset = min(legacy.trim_pre_buffer_seconds, primary.beep_time)
 
             # Shots come from audit; convert each shot.time to time-after-beep.
@@ -12677,7 +12725,7 @@ def create_app(
                 CompareShooterRecord(
                     slug=slug,
                     name=legacy.competitor_name or slug,
-                    video_path=video_path,
+                    video_ref=video_ref,
                     beep_offset_in_clip=beep_offset,
                     duration_seconds=duration_seconds,
                     stage_time_seconds=(stage.time_seconds if stage is not None else None),
@@ -12782,8 +12830,13 @@ def create_app(
         endpoint: in hosted mode returns 425 when the proxy is absent;
         in local mode falls back to source.
 
-        Non-registered paths (exports/ or trimmed/) are always served
-        from local disk regardless of mode.
+        Non-registered paths must match the logical ref grammar
+        ``(exports|trimmed)/<name>.mp4`` (the shape ``_resolve_compare_trim``
+        hands back for a Compare trim) - absolute paths, traversal shapes,
+        non-.mp4 suffixes, and anything else are rejected with 404. Hosted
+        mode serves a matching ref via a presigned redirect (storage.exists
+        + serve_media); local mode serves it from disk under the shooter's
+        exports/ or trimmed/ dir.
         """
         match_root, match = _resolve_match_context()
         if slug not in match.shooters:
@@ -12850,8 +12903,28 @@ def create_app(
             served_path = shooter_project.resolve_video_path(shooter_root, video.path).resolve()
             return FileResponse(served_path, media_type="video/mp4")
 
-        # non-registered path: must be inside exports/ or trimmed/ (local disk only)
-        resolved = target.expanduser().resolve()
+        # Non-registered path: a Compare-produced trim, addressed by the
+        # logical ref grammar ``(exports|trimmed)/<name>.mp4`` - the same
+        # shape ``_resolve_compare_trim`` hands back. Absolute paths and
+        # traversal shapes never reach a dir derivation at all; they just
+        # fail the match.
+        ref_match = re.fullmatch(r"(exports|trimmed)/([^/]+\.mp4)", path)
+        if ref_match is None:
+            raise HTTPException(status_code=404, detail=f"not a valid trim ref: {path}")
+        dirkind, name = ref_match.group(1), ref_match.group(2)
+
+        storage = state.storage
+        scope = shooter_project._storage_scope
+        if storage is not None and storage.supports_presigned_get and scope:
+            key = f"{scope}/{dirkind}/{name}"
+            if not storage.exists(key):
+                raise HTTPException(status_code=404, detail=f"file not found: {key}")
+            return serve_media(storage, key, shooter_root / dirkind / name, content_type="video/mp4")
+
+        # Local mode: resolve against the actual dirs (which may be
+        # absolute overrides outside the shooter root); containment check
+        # kept as defense-in-depth even though the ref grammar above
+        # already rules out a filename with a path separator in it.
         exports_dir = (
             Path(shooter_project.exports_dir).expanduser().resolve()
             if shooter_project.exports_dir
@@ -12862,22 +12935,12 @@ def create_app(
             if shooter_project.trimmed_dir
             else (shooter_root / "trimmed").resolve()
         )
-        in_allowed_dir = False
-        for allowed in (exports_dir, trimmed_dir):
-            try:
-                resolved.relative_to(allowed)
-                in_allowed_dir = True
-                break
-            except ValueError:
-                continue
-        if not in_allowed_dir:
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    f"path {path} is neither a registered video nor inside "
-                    f"the shooter's exports/ or trimmed/ dirs"
-                ),
-            )
+        target_dir = exports_dir if dirkind == "exports" else trimmed_dir
+        resolved = (target_dir / name).resolve()
+        try:
+            resolved.relative_to(target_dir)
+        except ValueError:
+            raise HTTPException(status_code=404, detail=f"file not found: {path}") from None
         if not resolved.exists():
             raise HTTPException(status_code=404, detail=f"file not found: {resolved}")
         return FileResponse(resolved, media_type="video/mp4")
