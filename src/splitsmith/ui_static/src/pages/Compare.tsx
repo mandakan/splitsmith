@@ -1,20 +1,20 @@
 /**
- * Compare route (/compare/:stage) -- multi-shooter sync timeline (#328).
+ * Compare route (/compare/:stage) - multi-shooter cockpit (#328, #700).
  *
  * Replaces the CLI-only ``splitsmith compare export`` for in-app
- * browsing. Layout per polished/07:
+ * browsing. Viewport-locked cockpit layout:
  *
- *   - Compact header carried from /audit, with Audit / Compare / Coach
- *     tab strip (Compare is the active tab here)
- *   - Visibility chips: one per shooter with avatar + name; the audio-
- *     source chip carries the LED ring + "AUDIO" badge
+ *   - One merged header row (flex-none): stage nav + title + Audit /
+ *     Compare / Coach tab strip, then the visibility chips, layout
+ *     pills and export pushed to the right cluster
+ *   - Visibility chips: one per shooter with avatar + initials; the
+ *     audio-source chip carries the LED ring
  *   - Layout toggle: 2x2 / 1x4 / Stack
- *   - Multi-video grid: each shooter's lossless trim, beep-aligned
- *   - Shared transport with master scrub bar (time-since-beep)
- *   - F1-style sync timeline: per-shooter track with shot markers,
- *     beep tick at x=0, end-of-run marker at each track's total time,
- *     vertical playhead through all tracks
- *   - Ranking table: stage time, fastest split, avg split, rank pill
+ *   - Fill-sizing video zone: each shooter's lossless trim, beep-
+ *     aligned, sharing a bounded row with the leaderboard rail
+ *   - Leaderboard rail: rank, stage time, delta, split microstats
+ *   - Fused transport dock: play/scrub controls over the per-shooter
+ *     track lanes behind one playhead
  *
  * Sync engine: the audio shooter is the master. Every 100ms we re-sync
  * the other shooters by setting their ``currentTime`` to
@@ -27,12 +27,7 @@ import {
   ArrowDownToLine,
   ArrowLeft,
   ArrowRight,
-  Crosshair,
   Loader2,
-  MoveLeft,
-  MoveRight,
-  Pause,
-  Play,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -55,8 +50,11 @@ import {
   type MatchProject,
 } from "@/lib/api";
 import { useMatchHref } from "@/lib/matchHref";
-import { splitsFromTimeline, statisticSplits } from "@/lib/splits";
 import { cn } from "@/lib/utils";
+
+import { initials } from "./compare/format";
+import { LeaderboardRail } from "./compare/LeaderboardRail";
+import { TransportDock } from "./compare/TransportDock";
 
 type Layout = "grid" | "row" | "stack";
 
@@ -315,9 +313,18 @@ export function Compare() {
   );
 
   return (
-    <div data-testid="compare-page" className="flex flex-col gap-4 px-7 py-5">
-      {/* Compact header (mirrors Audit's pattern) */}
-      <div className="flex flex-wrap items-center gap-4 border-b border-rule pb-4">
+    <div
+      data-testid="compare-page"
+      className={cn(
+        "flex min-h-0 flex-col gap-3 overflow-hidden px-7 py-4",
+        shareView
+          ? "min-h-0 flex-1"
+          : "h-[calc(100dvh-var(--shell-header-h,86px))] min-h-[560px]",
+      )}
+    >
+      {/* Merged header row: stage nav + title + tab strip, then the
+       *  chips, layout pills and export in the right cluster. */}
+      <div className="flex flex-none flex-wrap items-center gap-x-4 gap-y-2 border-b border-rule pb-3">
         <div className="flex items-center gap-1.5">
           <button
             type="button"
@@ -336,14 +343,14 @@ export function Compare() {
             <ArrowRight className="size-4" />
           </button>
         </div>
-        <h1 className="font-display text-3xl font-bold uppercase leading-none tracking-tight text-ink">
+        <h1 className="font-display text-2xl font-bold uppercase leading-none tracking-tight text-ink">
           <span className="text-led">STAGE {pad2(stageNumber)}</span>
           <span className="mx-2 text-whisper">·</span>
           <span>{bundle.stage_name}</span>
         </h1>
         <nav
           aria-label="Stage views"
-          className="ml-auto inline-flex overflow-hidden rounded-lg border border-rule bg-surface-2 p-0.5"
+          className="inline-flex overflow-hidden rounded-lg border border-rule bg-surface-2 p-0.5"
         >
           {/* Audit/Coach are operator-only surfaces (mutate state, need a
               session) - hidden on the anonymous share view (#700). */}
@@ -378,60 +385,58 @@ export function Compare() {
             </button>
           )}
         </nav>
-      </div>
-
-      {/* Toolbar: visibility chips + layout toggle + export */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          {orderedShooters.map((shooter) => (
-            <ShooterChip
-              key={shooter.slug}
-              shooter={shooter}
-              visible={visibleSlugs.has(shooter.slug)}
-              isAudio={audioSlug === shooter.slug}
-              onToggleVisibility={() => toggleVisibility(shooter.slug)}
-              onPickAudio={() => setAudioSlug(shooter.slug)}
+        <div className="ml-auto flex flex-wrap items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {orderedShooters.map((shooter) => (
+              <ShooterChip
+                key={shooter.slug}
+                shooter={shooter}
+                visible={visibleSlugs.has(shooter.slug)}
+                isAudio={audioSlug === shooter.slug}
+                onToggleVisibility={() => toggleVisibility(shooter.slug)}
+                onPickAudio={() => setAudioSlug(shooter.slug)}
+              />
+            ))}
+          </div>
+          <div className="inline-flex overflow-hidden rounded-lg border border-rule bg-surface-2 p-0.5">
+            <LayoutPill
+              label="2x2"
+              active={layout === "grid"}
+              onClick={() => setLayout("grid")}
             />
-          ))}
+            <LayoutPill
+              label="1x4"
+              active={layout === "row"}
+              onClick={() => setLayout("row")}
+            />
+            <LayoutPill
+              label="Stack"
+              active={layout === "stack"}
+              onClick={() => setLayout("stack")}
+            />
+          </div>
+          {/* Grid export ships with #328; disabled + badged like the
+           *  Export page's compare ModeOption so the two surfaces agree.
+           *  Operator-only affordance (mutates nothing yet, but the
+           *  destination Export page needs a session) - hidden on the
+           *  anonymous share view, same as Audit/Coach above (#700). */}
+          {!shareView && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled
+              title="Multi-shooter grid export arrives with #328. Single-shooter export lives on the Export page."
+            >
+              <ArrowDownToLine className="size-3.5" />
+              <span className="font-display uppercase tracking-[0.08em]">
+                Export FCPXML
+              </span>
+              <span className="rounded border border-rule px-1.5 font-mono text-[0.625rem] font-semibold text-muted">
+                #328
+              </span>
+            </Button>
+          )}
         </div>
-        <div className="ml-auto inline-flex overflow-hidden rounded-lg border border-rule bg-surface-2 p-0.5">
-          <LayoutPill
-            label="2x2"
-            active={layout === "grid"}
-            onClick={() => setLayout("grid")}
-          />
-          <LayoutPill
-            label="1x4"
-            active={layout === "row"}
-            onClick={() => setLayout("row")}
-          />
-          <LayoutPill
-            label="Stack"
-            active={layout === "stack"}
-            onClick={() => setLayout("stack")}
-          />
-        </div>
-        {/* Grid export ships with #328; disabled + badged like the
-         *  Export page's compare ModeOption so the two surfaces agree.
-         *  Operator-only affordance (mutates nothing yet, but the
-         *  destination Export page needs a session) - hidden on the
-         *  anonymous share view, same as Audit/Coach above (#700). */}
-        {!shareView && (
-          <Button
-            type="button"
-            variant="outline"
-            disabled
-            title="Multi-shooter grid export arrives with #328. Single-shooter export lives on the Export page."
-          >
-            <ArrowDownToLine className="size-3.5" />
-            <span className="font-display uppercase tracking-[0.08em]">
-              Export FCPXML
-            </span>
-            <span className="rounded border border-rule px-1.5 font-mono text-[0.625rem] font-semibold text-muted">
-              #328
-            </span>
-          </Button>
-        )}
       </div>
 
       {/* Unfinished banner: when at least one shooter is playable, the
@@ -450,8 +455,8 @@ export function Compare() {
         />
       ) : null}
 
-      {/* Video grid */}
-      <div className={layoutClass(layout)}>
+      {/* Video zone + leaderboard rail share a bounded row */}
+      <div className="flex min-h-0 flex-1 gap-4">
         {visibleShooters.length === 0 ? (
           <CompareEmptyState
             unfinished={orderedShooters.filter((s) => !s.video_ref)}
@@ -461,38 +466,55 @@ export function Compare() {
             shareView={shareView}
           />
         ) : (
-          visibleShooters.map((shooter) => (
-            <VideoTile
-              key={shooter.slug}
-              shooter={shooter}
-              isAudio={audioSlug === shooter.slug}
-              onPickAudio={() => setAudioSlug(shooter.slug)}
-              onMount={(el) => setVideoRef(shooter.slug, el)}
-            />
-          ))
+          <>
+            <div
+              className={cn(
+                "min-h-0 min-w-0 flex-1",
+                layout === "stack"
+                  ? "flex flex-col gap-3 overflow-y-auto"
+                  : "grid gap-3",
+              )}
+              style={
+                layout === "stack"
+                  ? undefined
+                  : layout === "grid"
+                    ? {
+                        gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                        gridTemplateRows: `repeat(${Math.max(1, Math.ceil(visibleShooters.length / 2))}, minmax(0, 1fr))`,
+                      }
+                    : {
+                        gridTemplateColumns: `repeat(${visibleShooters.length}, minmax(0, 1fr))`,
+                        gridTemplateRows: "minmax(0, 1fr)",
+                      }
+              }
+            >
+              {visibleShooters.map((shooter) => (
+                <VideoTile
+                  key={shooter.slug}
+                  shooter={shooter}
+                  isAudio={audioSlug === shooter.slug}
+                  fit={layout === "stack" ? "aspect" : "fill"}
+                  onPickAudio={() => setAudioSlug(shooter.slug)}
+                  onMount={(el) => setVideoRef(shooter.slug, el)}
+                />
+              ))}
+            </div>
+            <LeaderboardRail shooters={playableShooters} />
+          </>
         )}
       </div>
-
-      {/* Transport */}
-      <Transport
-        isPlaying={isPlaying}
-        onTogglePlay={togglePlay}
-        timeSinceBeep={timeSinceBeep}
-        maxTime={maxStageTime}
-        onScrub={scrubTo}
-      />
-
-      {/* Sync timeline */}
-      <SyncTimeline
-        shooters={playableShooters}
-        maxTime={maxStageTime}
-        timeSinceBeep={timeSinceBeep}
-        audioSlug={audioSlug}
-        onScrub={scrubTo}
-      />
-
-      {/* Ranking */}
-      <RankingTable shooters={playableShooters} />
+      {visibleShooters.length > 0 ? (
+        <TransportDock
+          shooters={playableShooters}
+          maxTime={maxStageTime}
+          timeSinceBeep={timeSinceBeep}
+          audioSlug={audioSlug}
+          isPlaying={isPlaying}
+          onTogglePlay={togglePlay}
+          onScrub={scrubTo}
+          onPickAudio={(slug) => setAudioSlug(slug)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -629,7 +651,7 @@ function CompareEmptyState({
   // viewers get viewer-neutral copy instead of audit instructions - they
   // cannot act on any of this (#700).
   return (
-    <div className="rounded-2xl border border-rule-strong bg-surface px-6 py-10 text-sm text-muted">
+    <div className="flex min-h-0 flex-1 flex-col justify-center rounded-2xl border border-rule-strong bg-surface px-6 py-10 text-sm text-muted">
       {shareView ? (
         <p className="text-center text-ink-2">
           The match owner hasn't prepared comparison video for this stage
@@ -707,14 +729,17 @@ function ShooterChip({
         type="button"
         onClick={onToggleVisibility}
         className="font-display text-[0.6875rem] font-semibold uppercase tracking-[0.06em] text-ink-2 hover:text-ink"
-        title={visible ? "Hide" : "Show"}
+        title={`${shooter.name} - ${visible ? "hide" : "show"}`}
+        aria-label={`${shooter.name} - ${visible ? "hide" : "show"}`}
+        aria-pressed={visible}
       >
-        {shooter.name}
+        {initials(shooter.name)}
       </button>
       <button
         type="button"
         onClick={onPickAudio}
         title={isAudio ? "Audio source" : "Use as audio source"}
+        aria-label={`${shooter.name} - audio source`}
         aria-pressed={isAudio}
         className={cn(
           "inline-flex size-6 items-center justify-center rounded-full transition-colors",
@@ -732,12 +757,6 @@ function ShooterChip({
 /* -------------------------------------------------------------------------- */
 /* Layout                                                                     */
 /* -------------------------------------------------------------------------- */
-
-function layoutClass(layout: Layout): string {
-  if (layout === "grid") return "grid grid-cols-1 gap-3 sm:grid-cols-2";
-  if (layout === "row") return "grid grid-cols-1 gap-3 md:grid-cols-4";
-  return "flex flex-col gap-3";
-}
 
 function LayoutPill({
   label,
@@ -772,11 +791,13 @@ function LayoutPill({
 function VideoTile({
   shooter,
   isAudio,
+  fit,
   onPickAudio,
   onMount,
 }: {
   shooter: CompareShooterRecord;
   isAudio: boolean;
+  fit: "fill" | "aspect";
   onPickAudio: () => void;
   onMount: (el: HTMLVideoElement | null) => void;
 }) {
@@ -787,12 +808,13 @@ function VideoTile({
     <div
       className={cn(
         "relative overflow-hidden rounded-xl border bg-bg-glow",
+        fit === "fill" ? "flex min-h-0 flex-col" : "shrink-0",
         isAudio
           ? "border-led shadow-[0_0_0_1px_var(--color-led-deep),0_0_16px_var(--color-led-glow)]"
           : "border-rule-strong",
       )}
     >
-      <div className="flex items-center gap-2 border-b border-rule bg-surface-2 px-3 py-2">
+      <div className="flex flex-none items-center gap-2 border-b border-rule bg-surface-2 px-3 py-1.5">
         <Avatar
           size="xs"
           initials={initials(shooter.name)}
@@ -810,7 +832,7 @@ function VideoTile({
           </span>
         )}
       </div>
-      <div className="relative">
+      <div className={cn("relative", fit === "fill" && "min-h-0 flex-1 bg-black")}>
         {url ? (
           <video
             ref={onMount}
@@ -818,7 +840,11 @@ function VideoTile({
             preload="metadata"
             playsInline
             controls={false}
-            className="aspect-video w-full bg-black"
+            className={cn(
+              fit === "fill"
+                ? "h-full w-full object-contain"
+                : "aspect-video w-full bg-black",
+            )}
             onClick={(e) => {
               if (!isAudio) {
                 onPickAudio();
@@ -827,392 +853,17 @@ function VideoTile({
             }}
           />
         ) : (
-          <div className="flex aspect-video items-center justify-center bg-surface-3 text-sm text-muted">
+          <div
+            className={cn(
+              "flex items-center justify-center bg-surface-3 text-sm text-muted",
+              fit === "fill" ? "h-full" : "aspect-video",
+            )}
+          >
             No trim yet
           </div>
         )}
       </div>
-      <div className="flex items-center justify-between border-t border-rule bg-surface-2 px-3 py-1.5 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted tabular-nums">
-        <span>
-          {shooter.stage_time_seconds != null && (
-            <>
-              Stage{" "}
-              <b className="font-bold text-ink">
-                {shooter.stage_time_seconds.toFixed(2)}s
-              </b>
-            </>
-          )}
-        </span>
-        <span>
-          <b className="font-bold text-ink">{shooter.shots.length}</b> shots
-        </span>
-      </div>
     </div>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Transport                                                                  */
-/* -------------------------------------------------------------------------- */
-
-function Transport({
-  isPlaying,
-  onTogglePlay,
-  timeSinceBeep,
-  maxTime,
-  onScrub,
-}: {
-  isPlaying: boolean;
-  onTogglePlay: () => void;
-  timeSinceBeep: number;
-  maxTime: number;
-  onScrub: (tsb: number) => void;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-rule bg-surface-2 px-4 py-3">
-      <button
-        type="button"
-        onClick={() => onScrub(0)}
-        aria-label="Jump to beep"
-        title="Jump to beep"
-        className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-3 text-muted transition-colors hover:bg-surface-4 hover:text-ink"
-      >
-        <MoveLeft className="size-4" />
-      </button>
-      <button
-        type="button"
-        onClick={onTogglePlay}
-        aria-label={isPlaying ? "Pause" : "Play"}
-        className="inline-flex size-11 items-center justify-center rounded-full bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
-      >
-        {isPlaying ? <Pause className="size-5" /> : <Play className="size-5" />}
-      </button>
-      <button
-        type="button"
-        onClick={() => onScrub(maxTime)}
-        aria-label="Jump to end"
-        title="Jump to end"
-        className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-3 text-muted transition-colors hover:bg-surface-4 hover:text-ink"
-      >
-        <MoveRight className="size-4" />
-      </button>
-      <div className="ml-2 flex items-center gap-3 font-mono tabular-nums">
-        <Readout label="t-beep" value={`${timeSinceBeep.toFixed(3)}s`} />
-        <Readout label="span" value={`${maxTime.toFixed(2)}s`} />
-      </div>
-      <input
-        type="range"
-        className="flex-1 min-w-[160px] accent-led"
-        min={0}
-        max={maxTime}
-        step={0.01}
-        value={Math.max(0, Math.min(timeSinceBeep, maxTime))}
-        onChange={(e) => onScrub(parseFloat(e.target.value))}
-      />
-    </div>
-  );
-}
-
-function Readout({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex flex-col items-start gap-0.5">
-      <span className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
-        {label}
-      </span>
-      <span className="font-mono text-base font-bold leading-none text-ink">
-        {value}
-      </span>
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Sync timeline                                                              */
-/* -------------------------------------------------------------------------- */
-
-const TRACK_PALETTE: string[] = [
-  "var(--color-led)",
-  "var(--color-shooter-jl)",
-  "var(--color-shooter-pe)",
-  "var(--color-shooter-rj)",
-  "var(--color-manual)",
-];
-
-function SyncTimeline({
-  shooters,
-  maxTime,
-  timeSinceBeep,
-  audioSlug,
-  onScrub,
-}: {
-  shooters: CompareShooterRecord[];
-  maxTime: number;
-  timeSinceBeep: number;
-  audioSlug: string | null;
-  onScrub: (tsb: number) => void;
-}) {
-  const trackHeight = 56;
-  const padLeft = 56;
-  const padRight = 24;
-  const padTop = 28;
-  const padBottom = 22;
-  const innerW = 1200;
-  const innerH = padTop + shooters.length * trackHeight + padBottom;
-  const xOf = (tsb: number) =>
-    padLeft + ((tsb / maxTime) * (innerW - padLeft - padRight));
-
-  function onClick(e: React.MouseEvent<SVGRectElement>) {
-    const rect = (e.currentTarget as SVGRectElement).getBoundingClientRect();
-    const px = e.clientX - rect.left;
-    const ratio = (px - padLeft * (rect.width / innerW)) /
-      ((innerW - padLeft - padRight) * (rect.width / innerW));
-    onScrub(Math.max(0, Math.min(ratio * maxTime, maxTime)));
-  }
-
-  // Time ruler ticks every second.
-  const ticks: number[] = [];
-  for (let t = 0; t <= maxTime + 0.001; t += 1) ticks.push(t);
-
-  return (
-    <div className="overflow-hidden rounded-2xl border border-rule-strong bg-bg-glow shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rule bg-gradient-to-b from-surface to-transparent px-5 py-3">
-        <div className="inline-flex items-center gap-2.5 font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
-          <Crosshair className="size-4 text-led" />
-          Sync timeline
-        </div>
-        <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-          all shooters aligned to beep at t=0
-        </span>
-      </div>
-      <svg
-        viewBox={`0 0 ${innerW} ${innerH}`}
-        className="block w-full"
-        preserveAspectRatio="none"
-      >
-        {/* Clickable backdrop */}
-        <rect
-          x={0}
-          y={0}
-          width={innerW}
-          height={innerH}
-          fill="transparent"
-          onClick={onClick}
-          style={{ cursor: "crosshair" }}
-        />
-        {/* Time ruler */}
-        {ticks.map((t) => (
-          <g key={`tick-${t}`}>
-            <line
-              x1={xOf(t)}
-              x2={xOf(t)}
-              y1={padTop - 4}
-              y2={innerH - padBottom + 4}
-              stroke="var(--color-rule)"
-              strokeWidth={1}
-            />
-            <text
-              x={xOf(t)}
-              y={padTop - 8}
-              textAnchor="middle"
-              fill="var(--color-subtle)"
-              fontFamily="JetBrains Mono, monospace"
-              fontSize={10}
-            >
-              {t}s
-            </text>
-          </g>
-        ))}
-        {/* Beep marker */}
-        <line
-          x1={xOf(0)}
-          x2={xOf(0)}
-          y1={padTop}
-          y2={innerH - padBottom}
-          stroke="var(--color-beep)"
-          strokeWidth={1.5}
-          strokeDasharray="4 4"
-        />
-        {/* Playhead */}
-        <line
-          x1={xOf(Math.max(0, Math.min(timeSinceBeep, maxTime)))}
-          x2={xOf(Math.max(0, Math.min(timeSinceBeep, maxTime)))}
-          y1={padTop}
-          y2={innerH - padBottom}
-          stroke="var(--color-led)"
-          strokeWidth={2}
-          style={{
-            filter: "drop-shadow(0 0 4px var(--color-led-glow))",
-          }}
-        />
-        {/* Per-shooter tracks */}
-        {shooters.map((shooter, i) => {
-          const yMid = padTop + i * trackHeight + trackHeight / 2;
-          const color =
-            TRACK_PALETTE[i % TRACK_PALETTE.length] ?? "var(--color-ink-2)";
-          const endX = xOf(shooter.stage_time_seconds ?? maxTime);
-          return (
-            <g key={shooter.slug}>
-              {/* Track label */}
-              <text
-                x={padLeft - 10}
-                y={yMid + 4}
-                textAnchor="end"
-                fill={audioSlug === shooter.slug ? "var(--color-led)" : "var(--color-ink-2)"}
-                fontFamily="Antonio, sans-serif"
-                fontSize={13}
-                fontWeight={700}
-              >
-                {initials(shooter.name)}
-              </text>
-              {/* Track lane */}
-              <line
-                x1={xOf(0)}
-                x2={endX}
-                y1={yMid}
-                y2={yMid}
-                stroke={color}
-                strokeWidth={3}
-                strokeOpacity={0.4}
-                strokeLinecap="round"
-              />
-              {/* End marker + total time */}
-              <g>
-                <line
-                  x1={endX}
-                  x2={endX}
-                  y1={yMid - 8}
-                  y2={yMid + 8}
-                  stroke={color}
-                  strokeWidth={2}
-                />
-                <text
-                  x={endX + 6}
-                  y={yMid + 4}
-                  textAnchor="start"
-                  fill={color}
-                  fontFamily="JetBrains Mono, monospace"
-                  fontSize={10}
-                  fontWeight={700}
-                >
-                  {(shooter.stage_time_seconds ?? 0).toFixed(2)}s
-                </text>
-              </g>
-              {/* Shot markers */}
-              {shooter.shots.map((shot) => (
-                <circle
-                  key={`${shooter.slug}-${shot.shot_number}`}
-                  cx={xOf(shot.time_after_beep)}
-                  cy={yMid}
-                  r={shot.source === "manual" ? 4 : 3.5}
-                  fill={shot.source === "manual" ? "var(--color-manual)" : color}
-                  stroke="var(--color-bg)"
-                  strokeWidth={1}
-                />
-              ))}
-            </g>
-          );
-        })}
-      </svg>
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Ranking                                                                    */
-/* -------------------------------------------------------------------------- */
-
-export function RankingTable({ shooters }: { shooters: CompareShooterRecord[] }) {
-  const rows = shooters
-    .map((s) => {
-      // statisticSplits owns which gaps count (#774); the pairs come
-      // from the same beep-relative timeline the tiles play.
-      const pairs = splitsFromTimeline(s.shots);
-      const splits = statisticSplits(pairs);
-      return {
-        shooter: s,
-        time: s.stage_time_seconds ?? Infinity,
-        draw: pairs.length > 0 ? pairs[0].split : null,
-        fastestSplit: splits.length === 0 ? null : Math.min(...splits),
-        avgSplit: splits.length === 0 ? null : avg(splits),
-        shotCount: s.shots.length,
-      };
-    })
-    .sort((a, b) => a.time - b.time)
-    .map((row, i) => ({ ...row, rank: i + 1 }));
-
-  return (
-    <div className="overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
-      <div className="border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3 font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
-        Ranking
-      </div>
-      <div className="grid grid-cols-[48px_1fr_120px_120px_120px_120px_80px] items-center gap-3 border-b border-rule bg-surface-2 px-5 py-2 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
-        <span>#</span>
-        <span>Shooter</span>
-        <span className="text-right">Time</span>
-        <span className="text-right">Draw</span>
-        <span className="text-right">Fastest</span>
-        <span className="text-right">Avg split</span>
-        <span className="text-right">Shots</span>
-      </div>
-      {rows.map((row) => (
-        <div
-          key={row.shooter.slug}
-          className="grid grid-cols-[48px_1fr_120px_120px_120px_120px_80px] items-center gap-3 border-b border-rule px-5 py-3 last:border-b-0"
-        >
-          <RankPill rank={row.rank} />
-          <div className="inline-flex items-center gap-2.5">
-            <Avatar
-              size="sm"
-              initials={initials(row.shooter.name)}
-              tone={undefined}
-              seed={row.shooter.slug}
-            />
-            <span className="font-display text-sm font-bold uppercase tracking-[0.04em] text-ink">
-              {row.shooter.name}
-            </span>
-          </div>
-          <span
-            className={cn(
-              "text-right font-mono text-sm font-bold tabular-nums",
-              row.rank === 1 ? "text-led drop-shadow-[0_0_8px_var(--color-led-glow)]" : "text-ink",
-            )}
-          >
-            {Number.isFinite(row.time) ? `${row.time.toFixed(2)}s` : "-"}
-          </span>
-          <span className="text-right font-mono text-[0.8125rem] tabular-nums text-ink-2">
-            {row.draw != null ? `${row.draw.toFixed(2)}s` : "-"}
-          </span>
-          <span className="text-right font-mono text-[0.8125rem] tabular-nums text-ink-2">
-            {row.fastestSplit != null ? `${row.fastestSplit.toFixed(3)}s` : "-"}
-          </span>
-          <span className="text-right font-mono text-[0.8125rem] tabular-nums text-muted">
-            {row.avgSplit != null ? `${row.avgSplit.toFixed(3)}s` : "-"}
-          </span>
-          <span className="text-right font-mono text-[0.8125rem] tabular-nums text-muted">
-            {row.shotCount}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function RankPill({ rank }: { rank: number }) {
-  const tone =
-    rank === 1
-      ? "border-led bg-led-fill text-ink shadow-[0_0_10px_var(--color-led-glow)]"
-      : rank === 2
-        ? "border-ink-2 bg-surface-3 text-ink"
-        : "border-rule bg-surface-3 text-muted";
-  return (
-    <span
-      className={cn(
-        "inline-flex size-8 items-center justify-center rounded-md border font-display text-sm font-bold tabular-nums",
-        tone,
-      )}
-    >
-      {rank}
-    </span>
   );
 }
 
@@ -1220,17 +871,6 @@ function RankPill({ rank }: { rank: number }) {
 /* Helpers                                                                    */
 /* -------------------------------------------------------------------------- */
 
-function avg(arr: number[]): number {
-  return arr.reduce((a, b) => a + b, 0) / arr.length;
-}
-
 function pad2(n: number): string {
   return n.toString().padStart(2, "0");
-}
-
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 0 || !parts[0]) return "??";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 }
