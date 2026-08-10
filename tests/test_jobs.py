@@ -807,13 +807,14 @@ def test_retry_failed_job_resubmits_with_original_args() -> None:
             raise RuntimeError("boom")
 
     reg._inner.bodies.register("flaky", flaky)
-    job = reg.submit(kind="flaky", args={"x": 1}, stage_number=3, shooter_slug="anna")
+    job = reg.submit(kind="flaky", args={"x": 1}, stage_number=3, shooter_slug="anna", video_id="v9")
     assert _wait_until(lambda: reg.get(job.id).status == JobStatus.FAILED)
     assert reg.get(job.id).status is JobStatus.FAILED
 
     new = reg.retry(job.id)
     assert new is not None and new.id != job.id
     assert new.kind == "flaky" and new.stage_number == 3 and new.shooter_slug == "anna"
+    assert new.video_id == "v9"
     assert _wait_until(lambda: reg.get(new.id).status == JobStatus.SUCCEEDED)
     assert calls == [{"x": 1}, {"x": 1}]
     assert reg.get(job.id).acknowledged is True  # retry clears it from the failed list
@@ -829,5 +830,42 @@ def test_retry_non_failed_job_raises() -> None:
     reg._inner.bodies.register("ok", lambda handle, **kw: None)
     job = reg.submit(kind="ok")
     assert _wait_until(lambda: reg.get(job.id).status == JobStatus.SUCCEEDED)
-    with pytest.raises(JobNotRetryableError):
+    with pytest.raises(JobNotRetryableError, match="only failed jobs can be retried"):
+        reg.retry(job.id)
+
+
+def test_retry_already_acknowledged_failed_job_raises() -> None:
+    # An acknowledged FAILED job (dismissed via acknowledge(), or already
+    # claimed by a prior retry()) must not be retryable a second time.
+    reg = _Sync(JobRegistry(max_concurrent=1))
+
+    def always_fails(handle, **kw) -> None:
+        raise RuntimeError("boom")
+
+    reg._inner.bodies.register("flaky", always_fails)
+    job = reg.submit(kind="flaky")
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.FAILED)
+
+    reg.acknowledge(job.id)
+    with pytest.raises(JobNotRetryableError, match="already retried or dismissed"):
+        reg.retry(job.id)
+
+
+def test_retry_twice_sequential_second_call_raises() -> None:
+    # This is the observable contract of the atomic claim: two callers
+    # racing retry(job_id) can't both win. A true concurrent-thread race
+    # isn't required; sequential calls exercise the same claim check.
+    reg = _Sync(JobRegistry(max_concurrent=1))
+
+    def always_fails(handle, **kw) -> None:
+        raise RuntimeError("boom")
+
+    reg._inner.bodies.register("flaky", always_fails)
+    job = reg.submit(kind="flaky")
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.FAILED)
+
+    first = reg.retry(job.id)
+    assert first is not None
+
+    with pytest.raises(JobNotRetryableError, match="already retried or dismissed"):
         reg.retry(job.id)

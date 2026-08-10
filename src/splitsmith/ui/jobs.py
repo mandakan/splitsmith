@@ -771,9 +771,17 @@ class JobRegistry:
     async def retry(self, job_id: str) -> Job | None:
         """Re-enqueue a FAILED job with its original args.
 
+        ``acknowledged`` doubles as the atomic claim bit: the eligibility
+        check (status is FAILED and not yet acknowledged) and the flip to
+        acknowledged=True both happen inside one locked section, so two
+        concurrent retry(job_id) calls can't both pass the check and both
+        resubmit. The winner flips the flag and proceeds; the loser finds
+        it already set and raises instead of re-enqueuing a duplicate job.
+
         Returns the NEW pending job; the failed job stays in history,
-        acknowledged. None for an unknown id. Raises
-        JobNotRetryableError when the job is not FAILED.
+        acknowledged. None for an unknown id. Raises JobNotRetryableError
+        when the job is not FAILED, or when it is FAILED but was already
+        retried or dismissed (acknowledged=True).
         """
         with self._lock:
             job = self._jobs.get(job_id)
@@ -781,12 +789,19 @@ class JobRegistry:
                 return None
             if job.status is not JobStatus.FAILED:
                 raise JobNotRetryableError(f"job is {job.status.value}; only failed jobs can be retried")
+            if job.acknowledged:
+                raise JobNotRetryableError("job was already retried or dismissed")
+            # Claim the job in place, under the lock, before releasing it:
+            # this is the same flip acknowledge() performs, inlined so the
+            # check-then-set is atomic instead of racing across two lock
+            # acquisitions.
+            job.acknowledged = True
+            job.updated_at = datetime.now(UTC)
             args = dict(self._args.get(job_id) or {})
             kind = job.kind
             stage_number = job.stage_number
             shooter_slug = job.shooter_slug
             video_id = job.video_id
-        await self.acknowledge(job_id)
         return await self.submit(
             kind=kind,
             args=args,
