@@ -43,7 +43,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 
 import { Avatar } from "@/components/ui";
 import { Button } from "@/components/ui/button";
@@ -63,10 +63,20 @@ type Layout = "grid" | "row" | "stack";
 const SYNC_DRIFT_THRESHOLD_S = 0.15;
 const SYNC_INTERVAL_MS = 120;
 
+/** Share-mode detection (#700), path-based like useMatchHref/AuthGate.
+ *  Gates the operator-only affordances (Audit/Coach tabs, "Open in
+ *  audit", "Build trim cache", the empty-state "Audit {name}" CTAs) off
+ *  the anonymous share surface. */
+export function isShareView(pathname: string): boolean {
+  return /^\/share\//.test(pathname);
+}
+
 export function Compare() {
   const { stage: stageParam } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const href = useMatchHref();
+  const shareView = isShareView(location.pathname);
   const stageNumber = stageParam ? Number(stageParam) : NaN;
 
   const [project, setProject] = useState<MatchProject | null>(null);
@@ -115,7 +125,7 @@ export function Compare() {
         if (b.shooters.length > 0) {
           setAudioSlug(b.shooters[0].slug);
           setVisibleSlugs(
-            new Set(b.shooters.filter((s) => s.video_path).map((s) => s.slug)),
+            new Set(b.shooters.filter((s) => s.video_ref).map((s) => s.slug)),
           );
         }
       })
@@ -129,7 +139,7 @@ export function Compare() {
 
   const orderedShooters = bundle?.shooters ?? [];
   const playableShooters = orderedShooters.filter(
-    (s) => s.video_path && s.beep_offset_in_clip != null,
+    (s) => s.video_ref && s.beep_offset_in_clip != null,
   );
   const audioShooter = audioSlug
     ? orderedShooters.find((s) => s.slug === audioSlug) ?? null
@@ -286,7 +296,7 @@ export function Compare() {
   );
 
   return (
-    <div className="flex flex-col gap-4 px-7 py-5">
+    <div data-testid="compare-page" className="flex flex-col gap-4 px-7 py-5">
       {/* Compact header (mirrors Audit's pattern) */}
       <div className="flex flex-wrap items-center gap-4 border-b border-rule pb-4">
         <div className="flex items-center gap-1.5">
@@ -316,32 +326,38 @@ export function Compare() {
           aria-label="Stage views"
           className="ml-auto inline-flex overflow-hidden rounded-lg border border-rule bg-surface-2 p-0.5"
         >
-          <button
-            type="button"
-            onClick={() => {
-              // Compare is multi-shooter; pick the audio source (the
-              // primary shown in this view) as the target shooter so
-              // the user lands on the same camera they were watching.
-              const target = audioSlug ?? orderedShooters[0]?.slug;
-              if (target) navigate(href("audit", target, String(stageNumber)));
-            }}
-            className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink-2"
-          >
-            Audit
-          </button>
+          {/* Audit/Coach are operator-only surfaces (mutate state, need a
+              session) - hidden on the anonymous share view (#700). */}
+          {!shareView && (
+            <button
+              type="button"
+              onClick={() => {
+                // Compare is multi-shooter; pick the audio source (the
+                // primary shown in this view) as the target shooter so
+                // the user lands on the same camera they were watching.
+                const target = audioSlug ?? orderedShooters[0]?.slug;
+                if (target) navigate(href("audit", target, String(stageNumber)));
+              }}
+              className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink-2"
+            >
+              Audit
+            </button>
+          )}
           <span className="tab-pill-led-fill inline-flex min-h-9 items-center rounded-md px-3.5">
             Compare
           </span>
-          <button
-            type="button"
-            onClick={() => {
-              const target = audioSlug ?? orderedShooters[0]?.slug;
-              if (target) navigate(href("coach", target, String(stageNumber)));
-            }}
-            className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink"
-          >
-            Coach
-          </button>
+          {!shareView && (
+            <button
+              type="button"
+              onClick={() => {
+                const target = audioSlug ?? orderedShooters[0]?.slug;
+                if (target) navigate(href("coach", target, String(stageNumber)));
+              }}
+              className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink"
+            >
+              Coach
+            </button>
+          )}
         </nav>
       </div>
 
@@ -400,12 +416,13 @@ export function Compare() {
        *  audit is done) or jump into audit (when nothing has run yet)
        *  without having to leave the page. */}
       {visibleShooters.length > 0 &&
-      orderedShooters.some((s) => !s.video_path) ? (
+      orderedShooters.some((s) => !s.video_ref) ? (
         <UnfinishedShootersBanner
-          unfinished={orderedShooters.filter((s) => !s.video_path)}
+          unfinished={orderedShooters.filter((s) => !s.video_ref)}
           onOpenInAudit={(slug) =>
             navigate(href("audit", slug, String(stageNumber)))
           }
+          shareView={shareView}
         />
       ) : null}
 
@@ -413,10 +430,11 @@ export function Compare() {
       <div className={layoutClass(layout)}>
         {visibleShooters.length === 0 ? (
           <CompareEmptyState
-            unfinished={orderedShooters.filter((s) => !s.video_path)}
+            unfinished={orderedShooters.filter((s) => !s.video_ref)}
             onOpenInAudit={(slug) => {
               navigate(href("audit", slug, String(stageNumber)));
             }}
+            shareView={shareView}
           />
         ) : (
           visibleShooters.map((shooter) => (
@@ -462,15 +480,17 @@ export function Compare() {
 function UnfinishedShootersBanner({
   unfinished,
   onOpenInAudit,
+  shareView,
 }: {
   unfinished: CompareShooterRecord[];
   onOpenInAudit: (slug: string) => void | Promise<void>;
+  shareView: boolean;
 }) {
   const [busySlug, setBusySlug] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [doneSlugs, setDoneSlugs] = useState<Set<string>>(() => new Set());
 
-  // A shooter with shots[] but no video_path has finished audit; just
+  // A shooter with shots[] but no video_ref has finished audit; just
   // the trim cache is missing. Offer to rebuild it in-place. A shooter
   // with neither needs to be audited first.
   const rebuild = async (slug: string) => {
@@ -518,7 +538,10 @@ function UnfinishedShootersBanner({
               className="inline-flex items-center gap-2 rounded-lg border border-rule-strong bg-surface-2 px-3 py-1.5 text-xs"
             >
               <span className="font-semibold text-ink-2">{s.name}</span>
-              {auditedButUncached ? (
+              {/* Both CTAs are operator actions (rebuild POSTs, audit
+                  needs a session) - a share viewer just sees the name
+                  and the "missing footage" status above (#700). */}
+              {shareView ? null : auditedButUncached ? (
                 queued ? (
                   <span className="text-[0.6875rem] uppercase tracking-[0.08em] text-done">
                     Build queued -- check Jobs
@@ -550,7 +573,7 @@ function UnfinishedShootersBanner({
           );
         })}
       </div>
-      {errorMsg ? (
+      {!shareView && errorMsg ? (
         <div className="mt-2 text-xs text-led">{errorMsg}</div>
       ) : null}
     </div>
@@ -560,20 +583,31 @@ function UnfinishedShootersBanner({
 function CompareEmptyState({
   unfinished,
   onOpenInAudit,
+  shareView,
 }: {
   unfinished: CompareShooterRecord[];
   onOpenInAudit: (slug: string) => void | Promise<void>;
+  shareView: boolean;
 }) {
   // Compare uses the lossless export if present, otherwise the audit-mode
   // short-GOP cache; both come out of the per-shooter trim + audit pass.
-  // So a missing video_path means audit isn't finished for that shooter
-  // (no primary, no beep, or the trim cache hasn't been built).
+  // So a missing video_ref means audit isn't finished for that shooter
+  // (no primary, no beep, or the trim cache hasn't been built). Share
+  // viewers get viewer-neutral copy instead of audit instructions - they
+  // cannot act on any of this (#700).
   return (
     <div className="rounded-2xl border border-rule-strong bg-surface px-6 py-10 text-sm text-muted">
-      <p className="text-center text-ink-2">
-        Compare needs an audited primary cam from each shooter.
-      </p>
-      {unfinished.length > 0 && (
+      {shareView ? (
+        <p className="text-center text-ink-2">
+          The match owner hasn't prepared comparison video for this stage
+          yet.
+        </p>
+      ) : (
+        <p className="text-center text-ink-2">
+          Compare needs an audited primary cam from each shooter.
+        </p>
+      )}
+      {!shareView && unfinished.length > 0 && (
         <>
           <p className="mt-2 text-center">
             Not ready yet:{" "}
@@ -713,8 +747,8 @@ function VideoTile({
   onPickAudio: () => void;
   onMount: (el: HTMLVideoElement | null) => void;
 }) {
-  const url = shooter.video_path
-    ? api.shooterVideoStreamUrl(shooter.slug, shooter.video_path)
+  const url = shooter.video_ref
+    ? api.shooterVideoStreamUrl(shooter.slug, shooter.video_ref)
     : null;
   return (
     <div

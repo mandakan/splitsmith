@@ -1639,11 +1639,13 @@ export interface CompareShotPoint {
   interval_class: CoachIntervalClass | null;
 }
 
-/** Per-shooter data for a stage in /compare (#328). */
+/** Per-shooter data for a stage in /compare (#328). Field is a logical
+ *  ref (``exports/<name>`` | ``trimmed/<name>``), not a filesystem path
+ *  (#700) - resolved server-side against local dirs or storage. */
 export interface CompareShooterRecord {
   slug: string;
   name: string;
-  video_path: string | null;
+  video_ref: string | null;
   beep_offset_in_clip: number | null;
   duration_seconds: number | null;
   stage_time_seconds: number | null;

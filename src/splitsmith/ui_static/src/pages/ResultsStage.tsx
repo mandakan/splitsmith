@@ -276,6 +276,15 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
+        {/* Compare is a desktop-only workflow (#700); the link works
+            owner- and share-side via useMatchHref, hidden on phones the
+            same way DesktopGate would reject the mount anyway. */}
+        <Link
+          to={href("compare", String(stage))}
+          className="hidden min-h-11 items-center rounded-md border border-rule-strong bg-surface-2 px-4 font-display text-xs font-bold uppercase tracking-[0.08em] text-ink transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led md:inline-flex"
+        >
+          Compare shooters
+        </Link>
         {prevStage != null ? (
           <Link
             to={href("results", slug, String(prevStage))}

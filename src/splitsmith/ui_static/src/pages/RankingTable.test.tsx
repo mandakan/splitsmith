@@ -14,7 +14,7 @@ function shooter(
   return {
     slug,
     name,
-    video_path: null,
+    video_ref: null,
     beep_offset_in_clip: null,
     duration_seconds: null,
     stage_time_seconds: stageTime,
