@@ -100,6 +100,65 @@ def _db_url_for(client: TestClient) -> str:
     return os.environ["SPLITSMITH_DATABASE_URL"]
 
 
+# recent-projects registration (#794)
+
+
+def test_ensure_match_registers_recent_project(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """A push/ensure to a fresh match must register a recents row for
+    the owner - otherwise the hosted picker can never show a
+    sync-only match."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+
+    resp = client.post(CREATE_URL, json={"match_id": "synced1", "name": "HFO Masters"})
+    assert resp.status_code == 200, resp.text
+
+    projects = client.get("/api/me/recent-projects").json()["projects"]
+    matches = [p for p in projects if p["match_id"] == "synced1"]
+    assert len(matches) == 1, projects
+    assert matches[0]["name"] == "HFO Masters"
+
+
+def test_second_ensure_does_not_duplicate_or_bump_last_opened_at(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """A repeat push is idempotent - one row, name refreshed, but the
+    picker ordering must not move just because a background sync
+    happened to land (a push is not an open)."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+
+    assert client.post(CREATE_URL, json={"match_id": "synced2", "name": "First Name"}).status_code == 200
+    first = next(
+        p for p in client.get("/api/me/recent-projects").json()["projects"] if p["match_id"] == "synced2"
+    )
+
+    resp = client.post(CREATE_URL, json={"match_id": "synced2", "name": "Renamed"})
+    assert resp.status_code == 200, resp.text
+    projects = client.get("/api/me/recent-projects").json()["projects"]
+    matches = [p for p in projects if p["match_id"] == "synced2"]
+    assert len(matches) == 1, projects
+    assert matches[0]["name"] == "Renamed"
+    assert matches[0]["last_opened_at"] == first["last_opened_at"]
+
+
+def test_other_users_recent_projects_stay_empty(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The row lands under the pushing tenant only - a second user's
+    picker must stay empty."""
+    client, sender = hosted_app
+    login(client, sender, "usera@example.com")
+    assert client.post(CREATE_URL, json={"match_id": "synced3", "name": "A's match"}).status_code == 200
+
+    client.cookies.clear()
+    login(client, sender, "userb@example.com")
+    projects = client.get("/api/me/recent-projects").json()["projects"]
+    assert projects == []
+
+
 # match-doc upserts
 
 

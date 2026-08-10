@@ -283,3 +283,93 @@ def test_record_open_does_not_clobber_match_id_on_bare_reopen() -> None:
     asyncio.run(store.record_open(Path("/work/m1"), "Oden", kind="match"))  # no match_id
     rows = asyncio.run(store.list())
     assert rows[0].match_id == "oden-abc-123"
+
+
+# ---------------------------------------------------------------------------
+# record_sync_push (#794)
+# ---------------------------------------------------------------------------
+
+
+def test_record_sync_push_creates_a_row() -> None:
+    store, _ = _build_store_for_new_user()
+    asyncio.run(store.record_sync_push("m1", "HFO Masters", Path("/work/users/u1/projects/hfo-masters")))
+    rows = asyncio.run(store.list())
+    assert len(rows) == 1
+    assert rows[0].match_id == "m1"
+    assert rows[0].name == "HFO Masters"
+    assert rows[0].kind == "match"
+
+
+def test_record_sync_push_is_idempotent_by_match_id_and_does_not_bump_last_opened_at() -> None:
+    """A second push for the same match_id must not duplicate the row
+    or move ``last_opened_at`` - a push is not an open."""
+    store, _ = _build_store_for_new_user()
+    path = Path("/work/users/u1/projects/hfo-masters")
+    asyncio.run(store.record_sync_push("m1", "First Name", path))
+    first = asyncio.run(store.list())[0]
+
+    asyncio.run(store.record_sync_push("m1", "Renamed", path))
+    rows = asyncio.run(store.list())
+    assert len(rows) == 1
+    assert rows[0].name == "Renamed"
+    assert rows[0].last_opened_at == first.last_opened_at
+
+
+def test_record_sync_push_leaves_last_opened_at_alone_even_when_name_unchanged() -> None:
+    store, _ = _build_store_for_new_user()
+    path = Path("/work/users/u1/projects/hfo-masters")
+    asyncio.run(store.record_sync_push("m1", "Same Name", path))
+    first = asyncio.run(store.list())[0]
+
+    asyncio.run(store.record_sync_push("m1", "Same Name", path))
+    rows = asyncio.run(store.list())
+    assert rows[0].last_opened_at == first.last_opened_at
+
+
+def test_record_sync_push_disambiguates_path_collision_with_a_different_match_id() -> None:
+    """A native row already sits at the candidate path (name-slug
+    collision) under a *different* match_id. The sync push must not
+    steal or merge into that row - it gets its own, disambiguated,
+    row instead, and the original is untouched."""
+    store, _ = _build_store_for_new_user()
+    collision_path = Path("/work/users/u1/projects/hfo-masters")
+    asyncio.run(store.record_open(collision_path, "HFO Masters (native)", kind="match", match_id="native-1"))
+
+    asyncio.run(store.record_sync_push("synced-1", "HFO Masters", collision_path))
+
+    rows = asyncio.run(store.list())
+    assert len(rows) == 2
+    native_row = next(r for r in rows if r.match_id == "native-1")
+    synced_row = next(r for r in rows if r.match_id == "synced-1")
+    assert native_row.path == str(collision_path.resolve())
+    assert native_row.name == "HFO Masters (native)"
+    assert synced_row.path != native_row.path
+    assert synced_row.name == "HFO Masters"
+
+
+def test_record_sync_push_isolates_by_tenant() -> None:
+    """Another user's recents must stay empty after a push under a
+    different tenant."""
+    engine = create_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = sessionmaker(engine)
+
+    async def _setup() -> tuple[str, str]:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_factory() as s:
+            alice = User(email="alice3@thias.se")
+            bob = User(email="bob3@thias.se")
+            s.add_all([alice, bob])
+            await s.commit()
+            await s.refresh(alice)
+            await s.refresh(bob)
+            return alice.id, bob.id
+
+    alice_id, bob_id = asyncio.run(_setup())
+    alice_store = PostgresRecentProjectsStore(session_factory, user_id=alice_id)
+    bob_store = PostgresRecentProjectsStore(session_factory, user_id=bob_id)
+
+    asyncio.run(alice_store.record_sync_push("m1", "Alice's match", Path("/work/users/a/projects/m1")))
+
+    assert len(asyncio.run(alice_store.list())) == 1
+    assert asyncio.run(bob_store.list()) == []
