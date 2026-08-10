@@ -22,10 +22,10 @@ from tests.conftest import bound_match_id, scaffold_match
 def local_app_with_stage(tmp_path: Path) -> tuple[TestClient, str]:
     """Local-mode TestClient for a project with one shooter + one stage.
 
-    Returns ``(client, url_base)`` -- ``url_base`` is the
+    Returns ``(client, url_base)`` - ``url_base`` is the
     ``/api/matches/{match_id}`` prefix the ``/api/shooters/...`` routes
     need (see the alias middleware in ``server.py``). No primary video
-    assignment -- the audit PUT/GET endpoints only need the stage to
+    assignment - the audit PUT/GET endpoints only need the stage to
     exist (``project.stage(stage_number)`` must not raise).
     """
     root, shooter_root = scaffold_match(tmp_path, name="Sync Match")
