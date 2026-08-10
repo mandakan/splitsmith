@@ -2801,7 +2801,7 @@ def test_retry_endpoint_409_for_already_acknowledged_job(tmp_path: Path, monkeyp
     assert retry_resp.status_code == 409
 
 
-def test_retry_endpoint_reenqueues_failed_job_via_match_alias(tmp_path: Path, monkeypatch) -> None:
+def test_retry_endpoint_reenqueues_failed_job_via_bare_path(tmp_path: Path, monkeypatch) -> None:
     """retry() rebinds the ORIGINAL submitting request's match context
     (stashed at submit time) before resubmitting, not whatever match
     context is ambient on the retry request itself - the jobs list is

@@ -60,6 +60,53 @@ import { cn } from "@/lib/utils";
 
 const SIDEBAR_COLLAPSE_KEY = "splitsmith.matchshell.sidebarCollapsed";
 
+/** Strip the ``/match/:matchId`` prefix off a raw pathname so the
+ *  breadcrumb/shooter-strip label helpers below can match against the
+ *  match-relative path (``/audit/anna/3``, not
+ *  ``/match/m1/audit/anna/3``). ``matchId`` may be undefined (routes
+ *  mounted without the prefix, e.g. in tests) - in that case the
+ *  pathname passes through unchanged. */
+export function toMatchRelativePath(
+  pathname: string,
+  matchId: string | undefined,
+): string {
+  if (!matchId) return pathname;
+  const prefix = `/match/${matchId}`;
+  return pathname.startsWith(prefix) ? pathname.slice(prefix.length) : pathname;
+}
+
+/** Trailing breadcrumb segment ("Audit" / "Coach" / ...) for a
+ *  match-relative path. The current-view label is the only breadcrumb
+ *  segment shown in LED red; everything else stays in the muted
+ *  breadcrumb tone. ``null`` means no trailing segment (e.g. the match
+ *  overview / home route). */
+export function viewLabelForPath(relativePath: string): string | null {
+  if (relativePath.startsWith("/audit")) return "Audit";
+  if (relativePath.startsWith("/coach")) return "Coach";
+  if (relativePath.startsWith("/compare")) return "Compare";
+  if (relativePath.startsWith("/export")) return "Export";
+  if (relativePath.startsWith("/ingest") || relativePath.startsWith("/videos"))
+    return "Videos";
+  if (relativePath.startsWith("/beep-review")) return "Beep review";
+  if (relativePath.startsWith("/jobs")) return "Jobs";
+  if (relativePath.startsWith("/shooters")) return "Shooters";
+  return null;
+}
+
+/** activeMeaning kicker for the shell-level shooter strip, for a
+ *  match-relative path. Names what "active" means on this page:
+ *  "Editing" on Audit / Ingest / Export, "Coaching" on Coach. Per Shell
+ *  - Active shooter.html in the design bundle: "the kicker is the
+ *  entire IA decision in 7 chars". */
+export function shooterStripLabelForPath(relativePath: string): string | null {
+  if (relativePath.startsWith("/coach")) return "Coaching";
+  if (relativePath.startsWith("/audit")) return "Editing";
+  if (relativePath.startsWith("/export")) return "Editing";
+  if (relativePath.startsWith("/ingest") || relativePath.startsWith("/videos"))
+    return "Editing";
+  return null;
+}
+
 export interface MatchShellOutletContext {
   project: MatchProject | null;
   health: ServerHealth | null;
@@ -96,33 +143,30 @@ export function MatchShell() {
   }>();
   const { pathname } = useLocation();
   const { mode, setMode } = useMode();
-  // Trailing breadcrumb segment ("AUDIT" / "COACH" / ...) derived from the
+  // The shell mounts under ``/match/:matchId``, so ``pathname`` carries
+  // that prefix - strip it once here so the label helpers below can match
+  // against the match-relative path they were written for (#691: the raw
+  // pathname always starts with "/match/...", so every "startsWith" check
+  // against it was silently dead).
+  const relativePath = useMemo(
+    () => toMatchRelativePath(pathname, urlMatchId),
+    [pathname, urlMatchId],
+  );
+  // Trailing breadcrumb segment ("Audit" / "Coach" / ...) derived from the
   // current URL. The current-view label is the only segment shown in LED
   // red; everything else stays in the muted breadcrumb tone.
-  const viewLabel = useMemo<string | null>(() => {
-    if (pathname.startsWith("/audit")) return "Audit";
-    if (pathname.startsWith("/coach")) return "Coach";
-    if (pathname.startsWith("/compare")) return "Compare";
-    if (pathname.startsWith("/export")) return "Export";
-    if (pathname.startsWith("/ingest") || pathname.startsWith("/videos"))
-      return "Videos";
-    if (pathname.startsWith("/beep-review")) return "Beep review";
-    if (pathname.startsWith("/jobs")) return "Jobs";
-    if (pathname.startsWith("/shooters")) return "Shooters";
-    return null;
-  }, [pathname]);
+  const viewLabel = useMemo<string | null>(
+    () => viewLabelForPath(relativePath),
+    [relativePath],
+  );
   // activeMeaning kicker for the shell-level shooter strip. Names what
   // "active" means on this page: "Editing" on Audit / Ingest / Export,
   // "Coaching" on Coach. Per Shell - Active shooter.html in the design
   // bundle: "the kicker is the entire IA decision in 7 chars".
-  const shooterStripLabel = useMemo<string | null>(() => {
-    if (pathname.startsWith("/coach")) return "Coaching";
-    if (pathname.startsWith("/audit")) return "Editing";
-    if (pathname.startsWith("/export")) return "Editing";
-    if (pathname.startsWith("/ingest") || pathname.startsWith("/videos"))
-      return "Editing";
-    return null;
-  }, [pathname]);
+  const shooterStripLabel = useMemo<string | null>(
+    () => shooterStripLabelForPath(relativePath),
+    [relativePath],
+  );
   // Sidebar collapse state -- persisted so the operator's choice survives
   // reloads. The Audit page (waveform + docked MultiCamColumn) benefits
   // from collapsing once and staying collapsed.
@@ -493,7 +537,7 @@ export function MatchShell() {
         <ShooterChipStrip
           shooters={shooters}
           activeSlug={slug}
-          urlBase={breadcrumbUrlBase(pathname)}
+          urlBase={breadcrumbUrlBase(relativePath)}
           label={shooterStripLabel}
           variant="inline"
         />
@@ -650,9 +694,9 @@ function renderMatchSubtitle(project: MatchProject | null) {
   return bits.length > 0 ? <span>{bits.join(" · ")}</span> : null;
 }
 
-/** Map the current pathname to the route prefix the inline ShooterChipStrip
- *  should link to. Strips ahead of the slug + stage so flipping shooters
- *  keeps the operator on the same view. */
+/** Map the current match-relative pathname to the route prefix the inline
+ *  ShooterChipStrip should link to. Strips ahead of the slug + stage so
+ *  flipping shooters keeps the operator on the same view. */
 function breadcrumbUrlBase(
   pathname: string,
 ): "audit" | "ingest" | "coach" | "export" {

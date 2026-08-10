@@ -55,7 +55,10 @@ function JobCard({
       <div className="flex items-center gap-2">
         <span aria-hidden>{KIND_ICON[job.kind] ?? null}</span>
         <span className="font-medium text-ink">{KIND_LABEL[job.kind] ?? job.kind}</span>
-        <span className="text-xs text-muted">{jobTarget(job) || "(no target)"}</span>
+        <span className="text-xs text-muted">
+          {[job.shooter_slug, jobTarget(job)].filter(Boolean).join(" · ") ||
+            "(no target)"}
+        </span>
         <span className="ml-auto flex items-center gap-1.5 text-xs text-ink-2">
           <span
             className={

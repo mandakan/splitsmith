@@ -90,6 +90,22 @@ describe("Jobs page", () => {
     expect(screen.getByRole("progressbar", { name: /progress/ })).toBeInTheDocument();
   });
 
+  it("shows the shooter slug on a shooter-scoped job card", () => {
+    const job = makeJob({ shooter_slug: "anna" });
+    renderJobs(makeJobsState([job]));
+    expect(screen.getByText(/anna/)).toBeInTheDocument();
+  });
+
+  it("falls back to (no target) for a match-level job with no slug, stage, or video", () => {
+    const job = makeJob({
+      shooter_slug: null,
+      stage_number: null,
+      video_id: null,
+    });
+    renderJobs(makeJobsState([job]));
+    expect(screen.getByText("(no target)")).toBeInTheDocument();
+  });
+
   it("shows the most recently updated finished jobs, not the stalest", () => {
     // 25 succeeded jobs in ascending updated_at order (submission order, as
     // state.jobs comes from the API) - "Recent" caps at 20, so without
