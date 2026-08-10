@@ -253,9 +253,12 @@ back into the anonymous `og-meta` API -- token resolution and owner
 impersonation have exactly one implementation, in `_share_alias`, and the
 shell only ever touches the JSON that comes back.
 
-`build_stage_card` heals legacy unclassified audit docs in memory (mirroring
-`get_stage_coach`'s backfill) and never persists -- this route is share-only
-and must never mutate a doc an anonymous caller reached through impersonation.
+`build_stage_card` heals legacy unclassified audit docs in memory and never
+persists -- this route is share-only and must never mutate a doc an anonymous
+caller reached through impersonation. What counts as "needs a heal" is
+`coach.heal_unclassified`, shared with `get_stage_coach`, the compare payload
+and the overlay renderer (#780); it returns whether the doc changed, which
+only `get_stage_coach` -- the one caller on a writable surface -- acts on.
 
 The `og:image` URL carries `?v=<card_hash>` as its freshness mechanism: a
 re-audit changes the figures, which changes the hash, which changes the URL,

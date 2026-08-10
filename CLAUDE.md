@@ -146,9 +146,12 @@ falls back to the auto-classifier's own cutoff,
 between the two, so the figures would jump the moment a stage got
 classified. (#772 also brings the video summary and results page onto
 that same definition.) ``ui/share_og.py``'s ``build_stage_card`` heals legacy
-unclassified audit docs in memory, mirroring ``get_stage_coach``'s
-backfill, and never persists -- a share-only route must not mutate a
-doc an anonymous caller reached through impersonation.
+unclassified audit docs in memory and never persists -- a share-only
+route must not mutate a doc an anonymous caller reached through
+impersonation. The heal's guard is ``coach.heal_unclassified`` (#780),
+shared with ``get_stage_coach``, the compare payload and the overlay
+renderer; adding a fifth consumer of ``statistic_splits`` that reads raw
+audit shots means calling it, not re-deriving the condition.
 
 ``ui/share_og.py`` serves four route families on the anonymous share
 surface: the card PNGs, a JSON ``og-meta`` route, and the HTML shells

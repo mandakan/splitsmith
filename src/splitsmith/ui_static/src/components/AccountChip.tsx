@@ -10,6 +10,16 @@
  * Also carries the entry point to DesktopTokensDialog (#631 Task 10) -
  * desktop token management is an account-level concern, same tier as
  * sign-out, not match-scoped like ShareDialog.
+ *
+ * Phone width (#733): measured at 326 -> 632 on a 390px bar, i.e. further
+ * past the edge than the chip that issue was filed about. What it drops is
+ * the email, and the treatment is deliberately not HostedAccountChip's:
+ * that chip keeps its email because the email is the fact it exists to
+ * report, whereas here you *are* the account and the email is the only
+ * thing on the chip that is not an affordance. All three controls stay
+ * reachable -- with three icon buttons the admin variant already wants
+ * 130px of the 158px a phone leaves, which no email would fit inside
+ * legibly.
  */
 
 import * as React from "react";
@@ -19,10 +29,12 @@ import { Link } from "react-router-dom";
 import { IconButton, iconButtonVariants } from "@/components/ui/IconButton";
 import { DesktopTokensDialog } from "@/components/account/DesktopTokensDialog";
 import { useDeploymentMode } from "@/lib/features";
+import { useIsMobile } from "@/lib/useIsMobile";
 import { useAuth } from "@/lib/auth";
 
 export function AccountChip({ className }: { className?: string }) {
   const { mode } = useDeploymentMode();
+  const isMobile = useIsMobile();
   const { status, user, logout } = useAuth();
   const [busy, setBusy] = React.useState(false);
   const [tokensOpen, setTokensOpen] = React.useState(false);
@@ -47,25 +59,32 @@ export function AccountChip({ className }: { className?: string }) {
   return (
     <div
       data-testid="account-chip"
-      className={`inline-flex items-center gap-2 rounded-full border border-rule bg-surface-2 py-1 pl-3 pr-1 ${className ?? ""}`}
+      className={`inline-flex min-w-0 items-center gap-2 rounded-full border border-rule bg-surface-2 py-1 pr-1 ${isMobile ? "pl-1" : "pl-3"} ${className ?? ""}`}
     >
-      <span
-        className="max-w-[16rem] truncate text-[0.8125rem] text-ink-2"
-        title={user.email}
-      >
-        {user.display_name ?? user.email}
-      </span>
+      {isMobile ? null : (
+        <span
+          className="min-w-0 max-w-[16rem] truncate text-[0.8125rem] text-ink-2"
+          title={user.email}
+        >
+          {user.display_name ?? user.email}
+        </span>
+      )}
       {user.is_admin ? (
         <Link
           to="/admin/workers"
           aria-label="Workers (admin)"
           title="Workers (admin)"
-          className={iconButtonVariants({ variant: "subtle", size: "sm" })}
+          className={iconButtonVariants({
+            variant: "subtle",
+            size: "sm",
+            className: "shrink-0",
+          })}
         >
           <Server className="size-3.5" />
         </Link>
       ) : null}
       <IconButton
+        className="shrink-0"
         variant="subtle"
         size="sm"
         label="Desktop sync tokens"
@@ -75,6 +94,7 @@ export function AccountChip({ className }: { className?: string }) {
         <KeyRound className="size-3.5" />
       </IconButton>
       <IconButton
+        className="shrink-0"
         variant="subtle"
         size="sm"
         label="Sign out"

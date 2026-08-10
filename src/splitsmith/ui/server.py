@@ -10487,26 +10487,19 @@ def create_app(
         # #775: heal legacy docs on read so consumers (Results, share view,
         # statistic_splits) always see a fully classified stage. Owners get
         # the heal persisted; share-token readers are read-only, so the
-        # classes are computed in-memory and never written back.
-        shots = payload.get("shots")
-        needs_backfill = isinstance(shots, list) and any(
-            isinstance(s, dict)
-            and s.get("ms_after_beep") is not None
-            and s.get(coach_module.FIELD_INTERVAL_CLASS) is None
-            and s.get(coach_module.FIELD_INTERVAL_CLASS_SOURCE) != "manual"
-            for s in shots
-        )
-        if needs_backfill:
-            coach_module.classify_intervals_in_dicts([s for s in shots if isinstance(s, dict)], cfg)
-            if not current_share_request.get():
-                from ..db import StateConflictError
+        # classes are computed in-memory and never written back. The guard
+        # itself lives in ``coach.heal_unclassified`` (#780) - this is the
+        # only one of its four callers that persists, and it keys the write
+        # off the return value so an untouched doc costs no version bump.
+        if coach_module.heal_unclassified(payload.get("shots"), cfg) and not current_share_request.get():
+            from ..db import StateConflictError
 
-                try:
-                    _coach_save(slug, stage_number, payload, version)
-                except StateConflictError:
-                    # A concurrent writer won the version race; serve the
-                    # in-memory heal and let the next read persist it.
-                    pass
+            try:
+                _coach_save(slug, stage_number, payload, version)
+            except StateConflictError:
+                # A concurrent writer won the version race; serve the
+                # in-memory heal and let the next read persist it.
+                pass
         return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/coach/reclassify")
@@ -12709,12 +12702,9 @@ def create_app(
                         # requests impersonate the owner tenant and
                         # ``current_share_request`` is the only write
                         # defense (#778), so this read path stays write-free.
-                        if any(
-                            s.get("ms_after_beep") is not None
-                            and s.get(coach_module.FIELD_INTERVAL_CLASS) is None
-                            for s in raw_shots
-                        ):
-                            coach_module.classify_intervals_in_dicts(raw_shots, CoachAutoClassifyConfig())
+                        # The return value is deliberately ignored: only the
+                        # coach GET persists a heal (#780).
+                        coach_module.heal_unclassified(raw_shots)
                         for shot in raw_shots:
                             t = shot.get("time")
                             if t is None:
