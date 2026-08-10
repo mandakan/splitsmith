@@ -11,10 +11,21 @@ from __future__ import annotations
 import sys
 import types
 
+import pytest
+
+from splitsmith.ensemble import onnx_session
 from splitsmith.ensemble.onnx_session import ENV_ONNX_DEVICE, build_onnx_session, resolve_onnx_device
 
 CPU = "CPUExecutionProvider"
 CUDA = "CUDAExecutionProvider"
+
+
+@pytest.fixture(autouse=True)
+def _reset_preload_flag():
+    """The one-shot CUDA-dll-preload latch is module global; reset per test."""
+    onnx_session._cuda_dlls_preloaded = False
+    yield
+    onnx_session._cuda_dlls_preloaded = False
 
 
 # --------------------------------------------------------------------------
@@ -63,15 +74,23 @@ class _FakeSession:
         return self.providers
 
 
-def _install_fake_ort(monkeypatch, available, *, cuda_build_raises=False, cuda_silently_drops=False):
+def _install_fake_ort(
+    monkeypatch, available, *, cuda_build_raises=False, cuda_silently_drops=False, with_preload=False
+):
     """Inject a fake onnxruntime whose InferenceSession records its providers.
 
     ``cuda_build_raises``: constructing with CUDA in the list raises (init
     failure). ``cuda_silently_drops``: construction succeeds but the session
     reports only CPU (onnxruntime's real "un-initialisable provider dropped"
-    behaviour).
+    behaviour). ``with_preload``: expose a ``preload_dlls`` that records calls
+    (mirrors onnxruntime-gpu; the CPU wheel has none).
     """
-    calls: list[list[str]] = []
+
+    class _Calls(list):
+        """A recording list that can also carry the preload-call log."""
+
+    calls = _Calls()
+    preload_calls: list[int] = []
 
     class InferenceSession(_FakeSession):
         def __init__(self, path, sess_options=None, providers=None):
@@ -85,7 +104,10 @@ def _install_fake_ort(monkeypatch, available, *, cuda_build_raises=False, cuda_s
     fake = types.ModuleType("onnxruntime")
     fake.InferenceSession = InferenceSession
     fake.get_available_providers = lambda: list(available)
+    if with_preload:
+        fake.preload_dlls = lambda: preload_calls.append(1)
     monkeypatch.setitem(sys.modules, "onnxruntime", fake)
+    calls.preload = preload_calls  # type: ignore[attr-defined]
     return calls
 
 
@@ -131,3 +153,25 @@ def test_cuda_silently_dropped_still_returns_session(monkeypatch) -> None:
     session = build_onnx_session("m.onnx")
 
     assert session.get_providers() == [CPU]
+
+
+def test_cuda_path_preloads_dlls_once(monkeypatch) -> None:
+    """The CUDA path preloads the onnxruntime-gpu wheel CUDA libs so a native
+    agent needs no LD_LIBRARY_PATH; it does so once across sessions."""
+    monkeypatch.setenv(ENV_ONNX_DEVICE, "cuda")
+    calls = _install_fake_ort(monkeypatch, [CUDA, CPU], with_preload=True)
+
+    build_onnx_session("a.onnx")
+    build_onnx_session("b.onnx")
+
+    assert calls.preload == [1], "preload_dlls should run exactly once, not per session"
+
+
+def test_cpu_path_does_not_preload(monkeypatch) -> None:
+    """The CPU device is byte-identical to before -- no preload, no CUDA poke."""
+    monkeypatch.setenv(ENV_ONNX_DEVICE, "cpu")
+    calls = _install_fake_ort(monkeypatch, [CUDA, CPU], with_preload=True)
+
+    build_onnx_session("m.onnx")
+
+    assert calls.preload == []
