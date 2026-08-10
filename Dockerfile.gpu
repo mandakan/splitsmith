@@ -123,6 +123,12 @@ RUN uv sync --frozen --no-dev --extra hosted
 # / cuDNN 9 runtime wheels. Pinned to the versions validated in #796. They share
 # the `onnxruntime` import name, so it is an uninstall-then-install; nothing else
 # in the venv references onnxruntime directly.
+#
+# The build-time check verifies the GPU *wheel* is installed (the CUDA provider
+# .so is on disk), NOT that CUDA runs: this layer builds on a GPU-less CI runner,
+# where `get_available_providers()` reports no CUDA. The real device check is at
+# runtime in build_onnx_session (which preloads the CUDA dlls and falls back to
+# CPU), and on a live GPU host via scripts/setup-agent-gpu.sh.
 RUN uv pip uninstall onnxruntime \
  && uv pip install \
         "onnxruntime-gpu==1.22.0" \
@@ -131,7 +137,11 @@ RUN uv pip uninstall onnxruntime \
         "nvidia-cuda-runtime-cu12" \
         "nvidia-curand-cu12" \
         "nvidia-cufft-cu12" \
- && /app/.venv/bin/python -c "import onnxruntime as o; assert 'CUDAExecutionProvider' in o.get_available_providers(), o.get_available_providers()"
+ && /app/.venv/bin/python -c "import importlib.metadata as m, pathlib, onnxruntime as o; \
+v = m.version('onnxruntime-gpu'); \
+so = list((pathlib.Path(o.__file__).parent / 'capi').glob('libonnxruntime_providers_cuda.so')); \
+assert so, 'onnxruntime-gpu CUDA provider .so missing'; \
+print('onnxruntime-gpu', v, '->', so[0].name)"
 
 # Slim the venv (drop bundled test suites + __pycache__); do NOT strip .so files.
 RUN find /app/.venv -type d -name '__pycache__' -prune -exec rm -rf {} + ; \
