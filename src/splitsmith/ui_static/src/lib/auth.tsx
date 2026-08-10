@@ -9,6 +9,10 @@
  * untouched. The deployment-mode gate (``mode === "hosted"``) is what
  * decides whether the login route + account chrome render at all; this
  * context only reports who the caller is.
+ *
+ * Exception: `/share/` pages never have a session, so the fetch is
+ * skipped entirely there and the state settles straight to anonymous
+ * (see isShareRoute() below).
  */
 
 import * as React from "react";
@@ -28,11 +32,31 @@ interface AuthContextValue {
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
 
+// Anonymous share pages (`/share/:token/...`) never have a session --
+// the request is guaranteed to 401. Same path-prefix idiom as
+// matchHref.ts and AuthGate's bypass in App.tsx (Compare.tsx's
+// isShareView() is page-level; a lib importing from a page would be
+// backwards). A share session never navigates out of `/share/` (every
+// link inside one resolves via the share-aware useMatchHref), so
+// checking once at mount is sound -- no need to react to route changes.
+function isShareRoute(): boolean {
+  return window.location.pathname.startsWith("/share/");
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [status, setStatus] = React.useState<AuthStatus>("loading");
+  const [status, setStatus] = React.useState<AuthStatus>(
+    isShareRoute() ? "anon" : "loading",
+  );
   const [user, setUser] = React.useState<AuthUser | null>(null);
 
   const refresh = React.useCallback(async () => {
+    if (isShareRoute()) {
+      // Settle to the same anonymous shape the failed fetch would have
+      // produced, without the doomed network round-trip or its warn.
+      setUser(null);
+      setStatus("anon");
+      return;
+    }
     try {
       const me = await api.getMe();
       setUser(me);
