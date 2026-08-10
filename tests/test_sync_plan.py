@@ -23,6 +23,10 @@ Cases:
      ``errors`` entry explaining the project needs conversion.
   8. A corrupt ``audit/stage2.json`` is skipped but named in ``errors``;
      the good audit doc alongside it still plans normally.
+  9. Doc delta skipping (#797): a plan built with every doc's hash
+     already recorded skips all three docs; mutating one audit doc
+     re-plans exactly that doc; legacy ``sync_state.json`` without
+     ``doc_hashes`` at all (pre-#797) plans every doc, no crash.
 """
 
 from __future__ import annotations
@@ -35,7 +39,7 @@ from pathlib import Path
 from splitsmith import match_model
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.sync.docs import STRIPPED_PROJECT_FIELDS
-from splitsmith.sync.plan import build_push_plan
+from splitsmith.sync.plan import build_push_plan, doc_identity_key, hash_doc_body
 from splitsmith.sync.state import SYNC_STATE_FILE, SyncedItem, SyncState, load_sync_state, save_sync_state
 
 TRIMMED_NAME = "stage1_cam_abc123_trimmed.mp4"
@@ -87,6 +91,17 @@ def _synced_state_from(plan) -> SyncState:  # type: ignore[no-untyped-def]
             for item in plan.media
         }
     )
+
+
+def _fully_synced_state(plan) -> SyncState:  # type: ignore[no-untyped-def]
+    """Build a SyncState whose media items AND doc hashes both match
+    ``plan`` exactly - simulating "everything, docs included, was already
+    pushed last time" (#797)."""
+    state = _synced_state_from(plan)
+    state.doc_hashes = {
+        doc_identity_key(doc.kind, doc.slug, doc.stage_number): hash_doc_body(doc.body) for doc in plan.docs
+    }
+    return state
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +159,9 @@ def test_second_plan_skips_media_already_recorded_in_sync_state(tmp_path: Path) 
 
     assert second_plan.media == []
     assert second_plan.media_skipped == 2
-    # Docs are always pushed, regardless of sync state.
+    # This SyncState only has media digests recorded (via
+    # _synced_state_from), no doc hashes - so all 3 docs still plan.
+    # See Case 9 below for the doc-hash skip itself.
     assert len(second_plan.docs) == 3
 
 
@@ -270,3 +287,58 @@ def test_corrupt_audit_file_is_named_in_errors_and_skipped(tmp_path: Path) -> No
     assert len(plan.errors) == 1
     assert "2" in plan.errors[0]
     assert slug in plan.errors[0]
+
+
+# ---------------------------------------------------------------------------
+# Case 9: doc delta skipping (#797)
+# ---------------------------------------------------------------------------
+
+
+def test_doc_identity_key_matches_put_docs_url_shape() -> None:
+    assert doc_identity_key("match", None, None) == "match"
+    assert doc_identity_key("project", "alice", None) == "project/alice"
+    assert doc_identity_key("audit", "alice", 1) == "audit/alice/1"
+
+
+def test_second_plan_skips_docs_already_recorded_in_sync_state(tmp_path: Path) -> None:
+    root, _slug = _build_basic_match(tmp_path)
+    first_plan = build_push_plan(root, sync_state=SyncState())
+    assert len(first_plan.docs) == 3
+
+    state = _fully_synced_state(first_plan)
+    second_plan = build_push_plan(root, sync_state=state)
+
+    assert second_plan.docs == []
+    assert second_plan.docs_skipped == 3
+
+
+def test_mutating_one_audit_doc_repushes_only_that_doc(tmp_path: Path) -> None:
+    root, slug = _build_basic_match(tmp_path)
+    first_plan = build_push_plan(root, sync_state=SyncState())
+    state = _fully_synced_state(first_plan)
+
+    audit_file = match_model.Match.shooter_root(root, slug) / "audit" / "stage1.json"
+    audit_file.write_text(json.dumps({"detection": "ensemble", "shots": [{"index": 0}]}), encoding="utf-8")
+
+    plan = build_push_plan(root, sync_state=state)
+
+    assert len(plan.docs) == 1
+    assert plan.docs[0].kind == "audit"
+    assert plan.docs[0].stage_number == 1
+    assert plan.docs_skipped == 2
+
+
+def test_legacy_sync_state_without_doc_hashes_plans_every_doc_once(tmp_path: Path) -> None:
+    root, _slug = _build_basic_match(tmp_path)
+    # A sync_state.json written before #797 has no "doc_hashes" key at
+    # all - pydantic must default it to an empty dict, not crash.
+    (root / SYNC_STATE_FILE).write_text(
+        json.dumps({"schema_version": 1, "last_synced_at": None, "items": {}}), encoding="utf-8"
+    )
+
+    state = load_sync_state(root)
+    assert state.doc_hashes == {}
+
+    plan = build_push_plan(root, sync_state=state)
+    assert len(plan.docs) == 3
+    assert plan.docs_skipped == 0

@@ -206,7 +206,9 @@ def test_desktop_push_then_anonymous_share_stream_round_trip(
     assert f"matches/{match_id}/shooters/{SLUG}/trimmed/{trimmed_name}" in location, location
 
     # A second push with nothing touched on disk uploads 0 media
-    # (rsync-style size+mtime skip via sync_state.json).
+    # (rsync-style size+mtime skip via sync_state.json) and, since #797,
+    # PUTs 0 docs too (content-hash skip).
     report2 = run_push(match_root, client=sync_client)
     assert report2.uploaded == 0
-    assert report2.docs == 3
+    assert report2.docs == 0
+    assert report2.docs_skipped == 3
