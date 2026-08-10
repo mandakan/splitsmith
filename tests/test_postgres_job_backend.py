@@ -700,6 +700,137 @@ def test_wire_and_rehydrate_round_trip_a_pydantic_req() -> None:
     assert _rehydrate_args("trim", {"video_id": "v1"}) == {"video_id": "v1"}
 
 
+def test_retry_failed_job_reenqueues_with_persisted_args(tmp_path) -> None:
+    """A retried job gets a new id, carries over kind/stage, and the body
+    is re-invoked with the original args. The old row ends up
+    acknowledged so it stops showing up as retryable."""
+    backend, _, _ = _build_backend_for_new_user(tmp_path)
+    calls: list[dict[str, object]] = []
+
+    def flaky(_handle, **kwargs):
+        calls.append(dict(kwargs))
+        if len(calls) == 1:
+            raise ValueError("first attempt fails")
+
+    backend.bodies.register("flaky", flaky)
+    job = asyncio.run(backend.submit(kind="flaky", args={"x": 1}, stage_number=3))
+    assert _wait_until(lambda: asyncio.run(backend.get(job.id)).status == JobStatus.FAILED)
+
+    new = asyncio.run(backend.retry(job.id))
+    assert new is not None
+    assert new.id != job.id
+    assert new.kind == "flaky"
+    assert new.stage_number == 3
+
+    assert _wait_until(lambda: asyncio.run(backend.get(new.id)).status == JobStatus.SUCCEEDED)
+    assert calls == [{"x": 1}, {"x": 1}]  # body re-invoked with the original kwargs
+
+    old = asyncio.run(backend.get(job.id))
+    assert old.acknowledged is True
+
+
+def test_retry_pre_migration_row_raises(tmp_path) -> None:
+    """A FAILED row with args=NULL predates the args-persistence migration
+    and can't be safely rehydrated; retry must refuse rather than guess.
+    The claim still burns (row stays acknowledged), so retrying it again
+    raises the same way; it doesn't loop."""
+    from splitsmith.ui.jobs import JobNotRetryableError
+
+    backend, session_factory, _ = _build_backend_for_new_user(tmp_path)
+
+    def boom(_h, **_kwargs):
+        raise ValueError("boom")
+
+    backend.bodies.register("flaky", boom)
+    job = asyncio.run(backend.submit(kind="flaky", args={"x": 1}))
+    assert _wait_until(lambda: asyncio.run(backend.get(job.id)).status == JobStatus.FAILED)
+
+    async def _null_args() -> None:
+        from sqlalchemy import select
+
+        async with session_factory() as s:
+            row = (await s.execute(select(ComputeJobRow).where(ComputeJobRow.id == job.id))).scalar_one()
+            row.args = None
+            await s.commit()
+
+    asyncio.run(_null_args())
+
+    with pytest.raises(JobNotRetryableError, match="predates retry support"):
+        asyncio.run(backend.retry(job.id))
+
+    # The claim stays burned even though the retry raised.
+    assert asyncio.run(backend.get(job.id)).acknowledged is True
+
+
+def test_retry_wrong_user_returns_none(tmp_path) -> None:
+    """Retry is user-scoped like every other lookup: another tenant's
+    backend must see the id as unknown, never leak existence via an
+    exception. Mirrors this file's other cross-user isolation tests."""
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path}/retry-iso.sqlite")
+    session_factory = sessionmaker(engine)
+
+    async def _setup() -> tuple[str, str]:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_factory() as s:
+            alice = User(email="alice-retry@thias.se")
+            bob = User(email="bob-retry@thias.se")
+            s.add_all([alice, bob])
+            await s.commit()
+            await s.refresh(alice)
+            await s.refresh(bob)
+            return alice.id, bob.id
+
+    alice_id, bob_id = asyncio.run(_setup())
+    box_a: list[PostgresJobBackend] = []
+    alice = PostgresJobBackend(session_factory, user_id=alice_id, deferrer=_inline_deferrer(box_a))
+    box_a.append(alice)
+    bob = PostgresJobBackend(session_factory, user_id=bob_id, deferrer=_noop_deferrer())
+
+    def boom(_h, **_kwargs):
+        raise ValueError("boom")
+
+    alice.bodies.register("flaky", boom)
+    job = asyncio.run(alice.submit(kind="flaky", args={"x": 1}))
+    assert asyncio.run(alice.get(job.id)).status == JobStatus.FAILED
+
+    assert asyncio.run(bob.retry(job.id)) is None
+
+
+def test_retry_already_acknowledged_raises(tmp_path) -> None:
+    """A FAILED-but-acknowledged row was already retried or dismissed; a
+    second retry call must not silently resubmit a duplicate job."""
+    from splitsmith.ui.jobs import JobNotRetryableError
+
+    backend, _, _ = _build_backend_for_new_user(tmp_path)
+
+    def boom(_h, **_kwargs):
+        raise ValueError("boom")
+
+    backend.bodies.register("flaky", boom)
+    job = asyncio.run(backend.submit(kind="flaky", args={"x": 1}))
+    assert _wait_until(lambda: asyncio.run(backend.get(job.id)).status == JobStatus.FAILED)
+
+    asyncio.run(backend.acknowledge(job.id))
+    assert asyncio.run(backend.get(job.id)).acknowledged is True
+
+    with pytest.raises(JobNotRetryableError, match="already retried or dismissed"):
+        asyncio.run(backend.retry(job.id))
+
+
+def test_retry_non_failed_job_raises(tmp_path) -> None:
+    """A SUCCEEDED job is not retryable: there is nothing to retry."""
+    from splitsmith.ui.jobs import JobNotRetryableError
+
+    backend, _, _ = _build_backend_for_new_user(tmp_path)
+    backend.bodies.register("quick", lambda _h, **_kwargs: None)
+    job = asyncio.run(backend.submit(kind="quick"))
+    assert asyncio.run(backend.get(job.id)).status == JobStatus.SUCCEEDED
+
+    with pytest.raises(JobNotRetryableError, match="only failed jobs can be retried"):
+        asyncio.run(backend.retry(job.id))
+
+
 def test_find_active_scopes_by_shooter_slug(tmp_path) -> None:
     """Issue #664: the dedupe key includes the owning shooter's slug -
     stage numbers collide across every shooter in a match by definition.
