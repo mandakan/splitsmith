@@ -107,6 +107,7 @@ export function MatchShell() {
     if (pathname.startsWith("/ingest") || pathname.startsWith("/videos"))
       return "Videos";
     if (pathname.startsWith("/beep-review")) return "Beep review";
+    if (pathname.startsWith("/jobs")) return "Jobs";
     if (pathname.startsWith("/shooters")) return "Shooters";
     return null;
   }, [pathname]);
@@ -558,6 +559,7 @@ export function MatchShell() {
             hasFootage: shooters.some((s) => s.video_count > 0),
             shooterCount,
             beepReviewPendingCount: beepReviewPending,
+            jobsAttentionCount: jobsState.failed.length,
             footageHint: FOOTAGE_HINT,
           })}
           header={{ matchName: project?.name ?? health?.project_name ?? "..." }}
@@ -597,6 +599,7 @@ export function MatchShell() {
           stages={stages}
           shooterCount={shooterCount}
           beepReviewPendingCount={beepReviewPending}
+          jobsAttentionCount={jobsState.failed.length}
           awaiting={
             stages.length > 0 && stages.every((s) => s.status === "todo")
           }
