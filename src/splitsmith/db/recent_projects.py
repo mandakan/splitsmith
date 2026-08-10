@@ -145,6 +145,69 @@ class PostgresRecentProjectsStore:
             await session.commit()
             await self._trim_to_limit(session)
 
+    async def record_sync_push(self, match_id: str, name: str, path: Path) -> None:
+        """Insert-if-absent registration for a match adopted via desktop
+        sync (#794).
+
+        Looked up by ``match_id`` first, not path: a repeated
+        ``ensure_match`` push for the same match must stay idempotent
+        even if the desktop renamed the match between pushes, and a
+        push is not an open, so unlike :meth:`record_open` this never
+        bumps ``last_opened_at`` on an existing row - the picker's
+        ordering should reflect when the owner actually opened the
+        match, not when a background push happened to land.
+
+        ``path`` is the candidate row path for a brand-new mirror,
+        built by the caller with the same shape hosted-native match
+        creation uses (``server._resolve_create_target``). If that
+        exact path is already owned by a *different* match_id - a
+        native match's name happened to slugify the same way - the
+        path is disambiguated with a short match_id suffix so the
+        existing row (and whatever it binds to) is left untouched;
+        two distinct matches never collapse into one row.
+        """
+        resolved = str(Path(path).expanduser().resolve())
+        now = datetime.now(UTC)
+        async with self._session_factory() as session:
+            by_match_id = (
+                await session.execute(
+                    select(RecentProjectRow).where(
+                        RecentProjectRow.user_id == self._user_id,
+                        RecentProjectRow.match_id == match_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if by_match_id is not None:
+                if by_match_id.name != name:
+                    by_match_id.name = name
+                    await session.commit()
+                return
+
+            at_path = (
+                await session.execute(
+                    select(RecentProjectRow).where(
+                        RecentProjectRow.user_id == self._user_id,
+                        RecentProjectRow.path == resolved,
+                    )
+                )
+            ).scalar_one_or_none()
+            if at_path is not None and at_path.match_id != match_id:
+                candidate = Path(resolved)
+                resolved = str(candidate.with_name(f"{candidate.name}-{match_id[:8]}"))
+
+            session.add(
+                RecentProjectRow(
+                    user_id=self._user_id,
+                    path=resolved,
+                    name=name,
+                    kind="match",
+                    match_id=match_id,
+                    last_opened_at=now,
+                )
+            )
+            await session.commit()
+            await self._trim_to_limit(session)
+
     async def remove(self, path: Path) -> bool:
         """Drop one entry; return ``True`` if a row was deleted."""
         resolved = str(Path(path).expanduser().resolve())

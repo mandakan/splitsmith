@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, ValidationError
@@ -43,6 +43,7 @@ from ..storage import Storage
 if TYPE_CHECKING:
     from ..db.matches import PostgresMatchStore
     from ..db.project_state import ProjectStateStore
+    from ..db.recent_projects import PostgresRecentProjectsStore
 
 router = APIRouter(prefix="/api/sync")
 
@@ -192,6 +193,41 @@ def _project_state(request: Request) -> ProjectStateStore:
     return store
 
 
+def _recent_projects_store(request: Request) -> PostgresRecentProjectsStore:
+    """The tenant-scoped recents store for the current sync request.
+
+    ``AppState.recent_projects`` types as the ``RecentProjectsStore``
+    Protocol (local mode's Json-backed store fits it too), but every
+    ``/api/sync/*`` route already ran through ``_hosted_gate()`` -
+    hosted mode's ``recent_projects`` always resolves to a
+    :class:`PostgresRecentProjectsStore` bound to the sync caller's
+    own tenant (``current_tenant`` is pinned by the outer ``_auth_gate``
+    from the desktop bearer's resolved user, exactly like a session -
+    see ``server.py``). Cast rather than import-and-``isinstance``, so
+    this module keeps deferring the hosted-only db import (module
+    docstring).
+    """
+    state = request.app.state.splitsmith_state
+    return cast("PostgresRecentProjectsStore", state.recent_projects)
+
+
+async def _register_recent_project(request: Request, match_id: str, name: str) -> None:
+    """Upsert the owner's picker row for a synced match (#794).
+
+    Reuses the exact path shape hosted-native match creation builds
+    (``server._resolve_create_target``: ``<SPLITSMITH_PROJECTS_DIR>/
+    users/<user_id>/projects/<slug>``) so a synced match's row is
+    indistinguishable in shape from one a browser-created match would
+    get - one path-building implementation, not a second. Imported
+    lazily, same reason as ``_hosted_gate``.
+    """
+    from .server import _resolve_create_target
+
+    state = request.app.state.splitsmith_state
+    path = _resolve_create_target(state, project_folder=None, name=name)
+    await _recent_projects_store(request).record_sync_push(match_id, name, path)
+
+
 async def _resolve_mirror(request: Request, match_id: str) -> Any:
     """Load the match row, enforcing the shared mirror contract.
 
@@ -276,6 +312,10 @@ async def create_or_adopt_match(
     existing row). 409 ``match_exists_hosted`` when the row already
     exists as a natively-created hosted match - a sync push must never
     silently reclassify one.
+
+    Also upserts the owner's ``recent_projects`` row (#794) so a match
+    that only ever arrived via sync shows up in the hosted picker
+    instead of being reachable only by typing its URL by hand.
     """
     _hosted_gate()
     store = _matches_store(request)
@@ -283,6 +323,7 @@ async def create_or_adopt_match(
     if existing is not None and existing.origin == "hosted":
         raise HTTPException(status_code=409, detail="match_exists_hosted")
     record = await store.upsert(body.match_id, body.name, f"matches/{body.match_id}", origin="desktop")
+    await _register_recent_project(request, body.match_id, body.name)
     return SyncMatchCreateResponse(match_id=record.match_id, origin=record.origin)
 
 
