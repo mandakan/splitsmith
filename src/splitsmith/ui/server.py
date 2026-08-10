@@ -188,7 +188,8 @@ from ..runtime import runtime as process_runtime
 from ..storage import Storage
 from ..sync.client import HostedSyncClient, SyncClientError
 from ..sync.plan import build_push_plan
-from ..sync.push import format_push_message, run_push
+from ..sync.run import format_sync_message
+from ..sync.run import run_sync as run_bidirectional_sync  # ..async_bridge.run_sync already owns this name
 from ..sync.state import load_sync_state
 from . import audio as audio_helpers
 from . import export_storage, stage_edit
@@ -3442,9 +3443,9 @@ def register_job_bodies(state: AppState) -> None:
         handle.update(progress=1.0, message="Preview ready")
 
     def _run_sync_match(handle: JobHandle) -> None:
-        """Worker for the ``sync_match`` job (desktop-to-hosted sync MVP,
-        #631 Task 9): push the current match to the configured hosted
-        server.
+        """Worker for the ``sync_match`` job (bidirectional sync, #631 +
+        the pull-merge-push slice): sync the current match with the
+        configured hosted server.
 
         Takes no args - the match root comes from ``state.match_root``,
         which resolves against the ``current_match_root`` ContextVar that
@@ -3453,12 +3454,16 @@ def register_job_bodies(state: AppState) -> None:
 
         Builds the bearer-authed ``httpx.Client`` from the persisted
         hosted-sync prefs (the ``SsiHttpClient`` idiom) and delegates to
-        ``run_push``, which does the real work: plan, adopt the mirror,
-        upload changed media, upsert docs. ``SyncClientError`` and the two
-        httpx error classes a network hiccup or a bad token actually raise
-        are caught and re-raised as ``RuntimeError`` with a readable
-        message - a bare traceback in the jobs panel is not acceptable
-        UX; anything else propagates as-is.
+        ``run_sync``, which does the real work: pull hosted changes,
+        three-way merge, then push (plan, adopt the mirror, upload
+        changed media, upsert docs). ``SyncClientError`` (including its
+        ``SyncVersionConflict`` subclass, which ``run_sync`` retries
+        internally and only re-raises as a plain ``SyncClientError`` once
+        exhausted) and the two httpx error classes a network hiccup or a
+        bad token actually raise are caught and re-raised as
+        ``RuntimeError`` with a readable message - a bare traceback in
+        the jobs panel is not acceptable UX; anything else propagates
+        as-is.
         """
         handle.update(progress=0.0, message="Starting sync...")
         match_root = state.match_root
@@ -3473,7 +3478,7 @@ def register_job_bodies(state: AppState) -> None:
         try:
             client = HostedSyncClient(http=http_client)
             try:
-                report = run_push(
+                report = run_bidirectional_sync(
                     match_root,
                     client=client,
                     on_progress=lambda p, m: handle.update(progress=p, message=m),
@@ -3491,7 +3496,7 @@ def register_job_bodies(state: AppState) -> None:
         finally:
             http_client.close()
         handle.set_result(report.model_dump())
-        handle.update(progress=1.0, message=format_push_message(report))
+        handle.update(progress=1.0, message=format_sync_message(report))
 
     state.jobs.bodies.register("model_download", _run_model_download_job)
     state.jobs.bodies.register("detect_beep", _run_detect_beep_for_video)

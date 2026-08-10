@@ -393,7 +393,7 @@ def test_put_doc_returns_server_version(tmp_path: Path) -> None:
     client = fake.clients()
 
     item = DocItem(kind="match", body={"name": "Test Match"})
-    version = client.put_doc("some-match", item)
+    version = client.put_doc("some-match", item, expected_version=0)
 
     assert version == 1
     assert fake.doc_puts == [("/api/sync/matches/some-match/docs/match", {"name": "Test Match"})]
