@@ -257,7 +257,13 @@ export function ReviewLayout({
       {/* Three-region workspace */}
       <div
         className={cn(
-          "grid min-h-[70vh] grid-cols-1 gap-4",
+          // The lg height must be definite (not just a min) with the row
+          // clamped via minmax(0,1fr): an auto row sizes to the tallest
+          // column, so a long clip list grows the whole workspace and the
+          // video pane with it, pushing the picture out of view. Definite
+          // height lets the columns' h-full/overflow-y-auto chains resolve
+          // and scroll internally instead.
+          "grid min-h-[70vh] grid-cols-1 gap-4 lg:h-[70vh] lg:grid-rows-[minmax(0,1fr)]",
           drawerCollapsed
             ? "lg:grid-cols-[300px_minmax(0,1fr)_28px]"
             : "lg:grid-cols-[300px_minmax(0,1fr)_300px]",
