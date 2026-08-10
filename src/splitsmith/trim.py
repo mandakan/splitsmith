@@ -36,7 +36,9 @@ TrimMode = Literal["lossless", "audit"]
 # Encoders that don't take libx264-style ``-preset`` / ``-crf`` knobs. When the
 # audit-mode trim uses one of these we drop those flags from the command line
 # and let the encoder defaults handle quality (good enough for cache files).
-_HARDWARE_ENCODERS: frozenset[str] = frozenset({"h264_videotoolbox"})
+# ``h264_nvenc`` interprets ``-preset``/``-cq`` differently from libx264 and
+# rejects a libx264 ``-crf`` outright, so it belongs here too (issue #796).
+_HARDWARE_ENCODERS: frozenset[str] = frozenset({"h264_videotoolbox", "h264_nvenc"})
 
 
 class FFmpegError(RuntimeError):
@@ -70,19 +72,73 @@ def _probe_available_encoders(ffmpeg_binary: str = "ffmpeg") -> frozenset[str]:
     return frozenset(names)
 
 
+@lru_cache(maxsize=4)
+def _nvenc_encode_usable(ffmpeg_binary: str, runner: Runner) -> bool:
+    """Can this host *actually* encode with ``h264_nvenc``?
+
+    ffmpeg advertises ``h264_nvenc`` in ``-encoders`` on any build compiled
+    with NVENC support, whether or not an NVIDIA GPU is present or usable --
+    it fails only at encode time, with ``Cannot load nvcuda.dll`` /
+    ``No capable devices found``. So the ``-encoders`` string is necessary
+    but not sufficient; the only honest test is a real trial encode.
+
+    Encodes one 640x480 ``lavfi`` frame to the null muxer (~tens of ms, once
+    per process thanks to the cache) and reports whether ffmpeg exited
+    cleanly. The frame is deliberately well above NVENC's minimum encode
+    resolution: measured on an RTX 2070 SUPER, ``h264_nvenc`` rejects 128x128
+    with ``InitializeEncoder failed: invalid param`` but accepts 256x256+, so
+    a tiny probe frame is a false negative that would advertise a genuinely
+    capable GPU as unusable. ``-pix_fmt yuv420p`` matches the real audit
+    encode so the trial exercises the same path. Any failure -- non-zero exit,
+    missing binary, a runner that raises -- is reported as "not usable" so the
+    caller falls back to ``libx264`` rather than emitting a job that dies at
+    encode time.
+    """
+    cmd = [
+        ffmpeg_binary,
+        "-hide_banner",
+        "-v",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "color=c=black:s=640x480:r=25",
+        "-c:v",
+        "h264_nvenc",
+        "-pix_fmt",
+        "yuv420p",
+        "-frames:v",
+        "1",
+        "-f",
+        "null",
+        "-",
+    ]
+    try:
+        completed = runner(cmd, capture_output=True, text=True)
+    except (FileNotFoundError, OSError):
+        return False
+    return getattr(completed, "returncode", 1) == 0
+
+
 def select_audit_encoder(
     requested: str = "auto",
     *,
     ffmpeg_binary: str = "ffmpeg",
+    runner: Runner = subprocess.run,
 ) -> str:
     """Pick the best audit-mode video encoder available.
 
     ``requested`` is the user's preference from ``OutputConfig.trim_audit_encoder``:
 
-    - ``"auto"``: probe ffmpeg for ``h264_videotoolbox`` on macOS (~10x speedup
-      on 4K Insta360 footage), otherwise ``libx264``.
+    - ``"auto"``: prefer ``h264_videotoolbox`` on macOS (~10x speedup on 4K
+      Insta360 footage), else ``h264_nvenc`` on an NVIDIA host that passes a
+      real trial encode (issue #796), else ``libx264``.
     - explicit name (``"libx264"``, ``"h264_videotoolbox"``, ...): used as-is
       when the binary advertises it; falls back to ``libx264`` when not.
+
+    ``runner`` is injected so unit tests can drive the NVENC trial encode
+    without shelling out; it is only consulted on the ``auto`` branch when
+    ``h264_nvenc`` is advertised.
 
     Returns a usable encoder name. ``libx264`` is the universal fallback because
     every realistic ffmpeg build ships it.
@@ -98,6 +154,10 @@ def select_audit_encoder(
     encoders = _probe_available_encoders(ffmpeg_binary)
     if platform.system() == "Darwin" and "h264_videotoolbox" in encoders:
         return "h264_videotoolbox"
+    # NVENC is advertised even with no usable GPU, so the string is a
+    # prerequisite for the trial, not a decision on its own.
+    if "h264_nvenc" in encoders and _nvenc_encode_usable(ffmpeg_binary, runner):
+        return "h264_nvenc"
     return "libx264"
 
 
