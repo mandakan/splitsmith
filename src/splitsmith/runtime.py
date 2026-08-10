@@ -11,6 +11,16 @@ The same hooks let OSS users A/B-test custom model artifacts:
 
     SPLITSMITH_ARTIFACTS_DIR=/path/to/experimental splitsmith ui
 
+Related engine env vars owned by other modules (listed here so the full
+set has one index):
+
+- ``SPLITSMITH_BACKEND`` (``splitsmith.ensemble.backend``): ``onnx`` /
+  ``torch`` inference backend selection.
+- ``SPLITSMITH_ONNX_DEVICE`` (``splitsmith.ensemble.onnx_session``):
+  ``cpu`` / ``cuda`` / ``auto`` execution-provider selection for the ONNX
+  backend. ``auto`` (default) uses CUDA on an ``onnxruntime-gpu`` host and
+  is a no-op on the CPU wheel (issue #796).
+
 Resolution priority for paths:
 
 1. Explicit kwargs to :func:`resolve_runtime`.
