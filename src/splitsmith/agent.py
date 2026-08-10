@@ -112,6 +112,24 @@ def _agent_version() -> str:
         return "unknown"
 
 
+def _probe_capabilities_safe() -> dict:
+    """Probe host capabilities, degrading to ``{}`` on any failure.
+
+    ``capabilities.probe_capabilities`` is already failure-tolerant per-probe,
+    but registration is a bootstrap step that must succeed even if the whole
+    module fails to import (e.g. a partial install), so this adds one more
+    belt-and-braces guard. An empty dict reads as "advertises nothing", which
+    the dispatcher treats as a CPU-only box -- the safe default.
+    """
+    try:
+        from .capabilities import probe_capabilities
+
+        return probe_capabilities()
+    except Exception:  # noqa: BLE001 - advertisement must never block registration
+        logger.debug("capability probe failed; advertising none", exc_info=True)
+        return {}
+
+
 def register(
     server_url: str,
     token: str,
@@ -128,11 +146,17 @@ def register(
     persists and returns the :class:`AgentState`; any non-2xx is turned into a
     clear :class:`RuntimeError` (the server answers a bad/spent token with a
     uniform 404, so there is nothing more specific to say).
+
+    ``info["capabilities"]`` advertises what this host can actually do (verified
+    NVENC, CUDA execution provider, GPU name -- issue #796) so the dispatcher
+    can later bias GPU-amenable jobs toward GPU boxes. The probe is
+    failure-tolerant by construction; registration never blocks on it.
     """
     info = {
         "agent_version": _agent_version(),
         "hostname": socket.gethostname(),
         "concurrency": concurrency,
+        "capabilities": _probe_capabilities_safe(),
     }
     with httpx.Client(transport=transport, timeout=30.0) as client:
         response = client.post(f"{server_url}/api/workers/register", json={"token": token, "info": info})

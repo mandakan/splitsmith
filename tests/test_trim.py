@@ -294,6 +294,93 @@ def test_select_audit_encoder_explicit_override_when_unsupported(monkeypatch) ->
     assert select_audit_encoder("h264_nvenc") == "libx264"
 
 
+def _nvenc_runner(returncode: int):
+    """A fake ffmpeg runner for the NVENC trial encode.
+
+    Records the command it was handed and answers with the given exit code,
+    mimicking ``subprocess.run(..., capture_output=True)``'s result shape.
+    """
+    calls: list[list[str]] = []
+
+    def run(cmd, *a, **kw):  # type: ignore[no-untyped-def]
+        calls.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, returncode, stdout="", stderr="")
+
+    run.calls = calls  # type: ignore[attr-defined]
+    return run
+
+
+def _patch_encoders(monkeypatch, names: set[str], *, system: str = "Linux") -> None:
+    import splitsmith.trim as trim_module
+
+    trim_module._probe_available_encoders.cache_clear()
+    trim_module._nvenc_encode_usable.cache_clear()
+    monkeypatch.setattr(trim_module, "_probe_available_encoders", lambda *a, **kw: frozenset(names))
+    monkeypatch.setattr(trim_module.platform, "system", lambda: system)
+
+
+def test_select_audit_encoder_picks_nvenc_when_trial_encode_succeeds(monkeypatch) -> None:
+    """On a non-macOS host advertising h264_nvenc, "auto" picks it only after
+    a real trial encode confirms a usable GPU -- the encode is plausibly the
+    dominant wall-clock cost of a job on a GPU box (issue #796)."""
+    _patch_encoders(monkeypatch, {"libx264", "h264_nvenc"})
+    runner = _nvenc_runner(0)
+
+    assert select_audit_encoder("auto", runner=runner) == "h264_nvenc"
+    # The gate was a real trial encode against the nvenc encoder, not a string.
+    assert runner.calls, "expected a trial-encode subprocess call"
+    trial = runner.calls[0]
+    assert trial[trial.index("-c:v") + 1] == "h264_nvenc"
+    assert "lavfi" in trial
+
+
+def test_select_audit_encoder_rejects_nvenc_when_trial_encode_fails(monkeypatch) -> None:
+    """h264_nvenc is advertised even with no usable GPU and fails only at
+    encode time. A failing trial encode must fall back to libx264 rather than
+    hand the pipeline an encoder that dies mid-job."""
+    _patch_encoders(monkeypatch, {"libx264", "h264_nvenc"})
+    runner = _nvenc_runner(1)
+
+    assert select_audit_encoder("auto", runner=runner) == "libx264"
+
+
+def test_select_audit_encoder_skips_nvenc_trial_when_not_advertised(monkeypatch) -> None:
+    """No h264_nvenc in the encoder list means no trial encode at all -- the
+    string is a prerequisite, so a build without NVENC never shells out."""
+    _patch_encoders(monkeypatch, {"libx264"})
+    runner = _nvenc_runner(0)
+
+    assert select_audit_encoder("auto", runner=runner) == "libx264"
+    assert runner.calls == [], "must not run a trial encode when nvenc is unadvertised"
+
+
+def test_trim_audit_nvenc_skips_libx264_knobs(tmp_path: Path) -> None:
+    """h264_nvenc rejects a libx264 ``-crf`` and reads ``-preset`` on a
+    different scale, so the audit trim must drop both while keeping the
+    codec-level GOP/pixfmt knobs (issue #796)."""
+    src = _touch(tmp_path / "in.mp4")
+    dst = tmp_path / "out.mp4"
+    runner = _RecordingRunner()
+
+    trim_video(
+        src,
+        dst,
+        beep_time=1.0,
+        stage_time=1.0,
+        mode="audit",
+        video_encoder="h264_nvenc",
+        runner=runner,
+    )
+
+    cmd = runner.calls[0]
+    assert cmd[cmd.index("-c:v") + 1] == "h264_nvenc"
+    assert "-preset" not in cmd
+    assert "-crf" not in cmd
+    assert cmd[cmd.index("-g") + 1] == "15"
+    assert cmd[cmd.index("-pix_fmt") + 1] == "yuv420p"
+    assert cmd[cmd.index("-c:a") + 1] == "copy"
+
+
 @pytest.mark.integration
 def test_trim_integration_real_ffmpeg(tmp_path: Path, synthetic_source_video: Path) -> None:
     src = synthetic_source_video

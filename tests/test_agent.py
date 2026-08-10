@@ -46,15 +46,26 @@ def _isolate_env(monkeypatch: pytest.MonkeyPatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_register_writes_agent_json_0600_and_roundtrips(tmp_path: Path) -> None:
+def test_register_writes_agent_json_0600_and_roundtrips(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     creds = {"database_url": "postgresql://db", "public_url": "http://srv", "s3": None}
+    # Don't shell out to ffmpeg / nvidia-smi in a unit test (CLAUDE.md): stub
+    # the capability probe and assert the wiring forwards it verbatim. The
+    # probe itself is covered in test_capabilities.py.
+    caps = {"nvenc_h264": True, "cuda_ep": False, "gpu_name": "NVIDIA GeForce RTX 2070 SUPER"}
+    import splitsmith.agent as agent_module
+
+    monkeypatch.setattr(agent_module, "_probe_capabilities_safe", lambda: caps)
 
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/api/workers/register"
         body = __import__("json").loads(request.content)
         assert body["token"] == "reg-token"
-        assert set(body["info"]) == {"agent_version", "hostname", "concurrency"}
+        assert set(body["info"]) == {"agent_version", "hostname", "concurrency", "capabilities"}
         assert body["info"]["concurrency"] == 3
+        # Capabilities are advertised for GPU-aware routing (issue #796).
+        assert body["info"]["capabilities"] == caps
         return httpx.Response(
             200,
             json={"worker_id": "w1", "worker_token": "wtok", "credentials": creds},
