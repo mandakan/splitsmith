@@ -57,6 +57,7 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from enum import StrEnum
+from pathlib import Path
 from typing import Any, Protocol
 
 from pydantic import BaseModel
@@ -472,6 +473,12 @@ class JobRegistry:
         # Original call_args per retained job, so retry can re-enqueue.
         # Entries die with their job in _trim_retained_locked.
         self._args: dict[str, dict[str, Any]] = {}
+        # The submitting request's match ContextVars (current_match_id,
+        # current_match_root) per retained job, so retry can rebind the
+        # ORIGINAL job's match instead of inheriting whatever match is
+        # ambient on the retrying request. Entries die with their job in
+        # _trim_retained_locked, same lifetime as _args.
+        self._match_ctx: dict[str, tuple[str | None, Path | None]] = {}
         self._lock = threading.RLock()
         self._max_concurrent = max_concurrent
         self._executor = ThreadPoolExecutor(
@@ -566,11 +573,24 @@ class JobRegistry:
         ``no_project``. See Tier 1 step 3 of doc 10. (The hosted backend
         instead reconstructs the match context from the ``args`` it ships
         to the worker process, which has no inherited contextvars.)
+
+        The same ``(current_match_id, current_match_root)`` pair is also
+        stashed in ``self._match_ctx`` keyed by the new job id, separately
+        from the ``copy_context()`` capture above: :meth:`retry` reads it
+        back to rebind the ORIGINAL submitting request's match before
+        re-submitting, regardless of what's ambient when the retry call
+        itself is made.
         """
         if self._shutting_down:
             raise ShutdownInProgressError("server is shutting down; no new jobs accepted")
         body = self.bodies.get(kind)
         call_args = args or {}
+        # In-method import: server.py imports this module at module level
+        # (register_job_bodies et al.), so a module-level import here would
+        # be circular.
+        from .server import current_match_id, current_match_root
+
+        match_ctx = (current_match_id.get(), current_match_root.get())
         now = datetime.now(UTC)
         job = Job(
             id=uuid.uuid4().hex,
@@ -590,6 +610,7 @@ class JobRegistry:
         with self._lock:
             self._jobs[job.id] = job
             self._args[job.id] = call_args
+            self._match_ctx[job.id] = match_ctx
             self._order.append(job.id)
             self._pending.append((job.id, _ctx_fn))
             # Journal before dispatch: once the executor has the job a
@@ -782,6 +803,16 @@ class JobRegistry:
         acknowledged. None for an unknown id. Raises JobNotRetryableError
         when the job is not FAILED, or when it is FAILED but was already
         retried or dismissed (acknowledged=True).
+
+        Replays the ORIGINAL job's match binding (stashed by :meth:`submit`
+        in ``self._match_ctx``), not whatever match context is ambient on
+        the retrying request - the jobs list is global (cross-match), so
+        viewing match A and retrying a FAILED job that belongs to match B
+        must not rebind that job's resubmit to match A. The stored
+        ``current_match_id`` / ``current_match_root`` values are set on the
+        ContextVars, with tokens, around the :meth:`submit` call so its
+        internal ``copy_context()`` capture sees the right values; reset in
+        ``finally`` regardless of outcome.
         """
         with self._lock:
             job = self._jobs.get(job_id)
@@ -798,17 +829,29 @@ class JobRegistry:
             job.acknowledged = True
             job.updated_at = datetime.now(UTC)
             args = dict(self._args.get(job_id) or {})
+            match_id, match_root = self._match_ctx.get(job_id, (None, None))
             kind = job.kind
             stage_number = job.stage_number
             shooter_slug = job.shooter_slug
             video_id = job.video_id
-        return await self.submit(
-            kind=kind,
-            args=args,
-            stage_number=stage_number,
-            shooter_slug=shooter_slug,
-            video_id=video_id,
-        )
+
+        # In-method import: circular at module level, matches submit()'s
+        # pattern above.
+        from .server import current_match_id, current_match_root
+
+        id_token = current_match_id.set(match_id)
+        root_token = current_match_root.set(match_root)
+        try:
+            return await self.submit(
+                kind=kind,
+                args=args,
+                stage_number=stage_number,
+                shooter_slug=shooter_slug,
+                video_id=video_id,
+            )
+        finally:
+            current_match_id.reset(id_token)
+            current_match_root.reset(root_token)
 
     # ------------------------------------------------------------------
     # Internal -- worker glue. These run on the executor thread.
@@ -1053,4 +1096,5 @@ class JobRegistry:
         for jid in ranked[:excess]:
             self._jobs.pop(jid, None)
             self._args.pop(jid, None)
+            self._match_ctx.pop(jid, None)
             self._order.remove(jid)

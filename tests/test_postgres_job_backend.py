@@ -831,6 +831,66 @@ def test_retry_non_failed_job_raises(tmp_path) -> None:
         asyncio.run(backend.retry(job.id))
 
 
+def test_retry_persists_and_rebinds_the_original_match_id(tmp_path) -> None:
+    """The jobs list is global (cross-match); retry must resubmit under
+    the ORIGINAL submitting request's match_id, not whatever is ambient
+    when the retry() call itself is made. ``submit`` ships
+    ``current_match_id.get()`` to the deferrer payload (see
+    ``queue.make_deferrer``) - this test swaps in a deferrer that records
+    that payload and asserts both submits (original + retry) carried the
+    match id recorded on the FAILED row, even though the ambient
+    ContextVar is cleared before ``retry()`` is called.
+    """
+    from splitsmith.ui.server import current_match_id
+
+    backend, session_factory, _ = _build_backend_for_new_user(tmp_path, inline=False)
+    payloads: list[dict] = []
+
+    async def _recording_defer(*, job_id, kind, args=None, **rest):
+        payloads.append({"job_id": job_id, "kind": kind, "args": args, **rest})
+        await backend.run_job(job_id=job_id, kind=kind, args=args)
+
+    backend._deferrer = _recording_defer
+
+    calls: list[dict] = []
+
+    def flaky(_h, **kwargs):
+        calls.append(dict(kwargs))
+        if len(calls) == 1:
+            raise ValueError("first attempt fails")
+
+    backend.bodies.register("flaky", flaky)
+
+    id_token = current_match_id.set("match-original")
+    try:
+        job = asyncio.run(backend.submit(kind="flaky", args={"x": 1}))
+    finally:
+        current_match_id.reset(id_token)
+    assert _wait_until(lambda: asyncio.run(backend.get(job.id)).status == JobStatus.FAILED)
+
+    # The row persisted the submitting request's match_id.
+    async def _row_match_id() -> str | None:
+        from sqlalchemy import select
+
+        async with session_factory() as s:
+            row = (await s.execute(select(ComputeJobRow).where(ComputeJobRow.id == job.id))).scalar_one()
+            return row.match_id
+
+    assert asyncio.run(_row_match_id()) == "match-original"
+
+    # Ambient context is unset (or could be a different match entirely) at
+    # the point retry() is called - simulates viewing a different match.
+    assert current_match_id.get() is None
+
+    new = asyncio.run(backend.retry(job.id))
+    assert new is not None
+    assert _wait_until(lambda: asyncio.run(backend.get(new.id)).status == JobStatus.SUCCEEDED)
+
+    assert len(payloads) == 2
+    assert payloads[0]["match_id"] == "match-original"
+    assert payloads[1]["match_id"] == "match-original"
+
+
 def test_find_active_scopes_by_shooter_slug(tmp_path) -> None:
     """Issue #664: the dedupe key includes the owning shooter's slug -
     stage numbers collide across every shooter in a match by definition.

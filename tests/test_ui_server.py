@@ -2802,13 +2802,15 @@ def test_retry_endpoint_409_for_already_acknowledged_job(tmp_path: Path, monkeyp
 
 
 def test_retry_endpoint_reenqueues_failed_job_via_match_alias(tmp_path: Path, monkeypatch) -> None:
-    """retry() resubmits via submit(), which captures the request's match
-    ContextVars (set only by the /api/matches/{match_id}/ alias
-    middleware). A bare /api/me/jobs/{id}/retry call has no match
-    context, so a match-bound job body (detect_beep here) would 409
-    no_project when the retried job runs. This test drives retry
-    through the alias prefix and asserts the retried job actually
-    reaches SUCCEEDED, proving the body ran with working match context.
+    """retry() rebinds the ORIGINAL submitting request's match context
+    (stashed at submit time) before resubmitting, not whatever match
+    context is ambient on the retry request itself - the jobs list is
+    global (cross-match), so URL scoping the retry call must not matter.
+    This test drives the ORIGINAL submit through the match-scoped client
+    (as usual) but hits retry on the BARE ``/api/me/jobs/{id}/retry``
+    path, with no alias prefix and no match ContextVars ambient, and
+    asserts the retried job still reaches SUCCEEDED - proving the body
+    ran with the original match's context, rebound server-side.
     """
     client, _ = _seed_project_with_primary(tmp_path)
     from splitsmith.config import BeepDetection
@@ -2832,8 +2834,9 @@ def test_retry_endpoint_reenqueues_failed_job_via_match_alias(tmp_path: Path, mo
     first = _wait_for_job(client, job_id)
     assert first["status"] == "failed", first
 
-    match_id = client.app.state.splitsmith_state.matches.known_ids()[0]
-    retry_resp = client.post(f"/api/matches/{match_id}/me/jobs/{job_id}/retry")
+    # Bare path: no alias prefix, so no match ContextVars are ambient on
+    # this request. retry() must rebind the job's own original match.
+    retry_resp = client.post(f"/api/me/jobs/{job_id}/retry")
     assert retry_resp.status_code == 200, retry_resp.text
     new = retry_resp.json()
     assert new["id"] != job_id

@@ -9262,12 +9262,13 @@ def create_app(
 
         409s when the job isn't FAILED, or is FAILED but already
         acknowledged (retried or dismissed) - ``acknowledged`` doubles
-        as the atomic claim bit, see :meth:`JobRegistry.retry`. A
-        match-bound job body (detect_beep, trim, shot_detect...) needs
-        the submitting request's match ContextVars, so callers must hit
-        this through the ``/api/matches/{match_id}/`` alias for those
-        kinds - a bare call has no match context and the resubmitted
-        job will 409 ``no_project`` when it runs.
+        as the atomic claim bit, see :meth:`JobRegistry.retry`. Works on
+        the bare path: match context for the resubmit is rebound from the
+        job itself (the match it was originally submitted under), not from
+        this request's URL - the jobs list is global (cross-match), so a
+        retry issued while viewing a different match must not rebind the
+        job to that match. See :meth:`JobRegistry.retry` /
+        :meth:`PostgresJobBackend.retry`.
         """
         try:
             job = await state.jobs.retry(job_id)

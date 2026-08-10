@@ -489,6 +489,12 @@ class ComputeJobRow(Base):
     # created before the retry migration - retry refuses those. Not part
     # of the wire Job model.
     args: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
+    # The submitting request's match binding (current_match_id ContextVar
+    # at submit time), persisted so retry rebinds the ORIGINAL job's match
+    # instead of whatever match is ambient on the retrying request. NULL
+    # for rows predating this column and for legitimately match-less kinds
+    # (model_download). Not part of the wire Job model.
+    match_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

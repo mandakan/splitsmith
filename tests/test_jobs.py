@@ -869,3 +869,49 @@ def test_retry_twice_sequential_second_call_raises() -> None:
 
     with pytest.raises(JobNotRetryableError, match="already retried or dismissed"):
         reg.retry(job.id)
+
+
+def test_retry_rebinds_original_match_context_regardless_of_ambient_state() -> None:
+    """The jobs list is global (cross-match); retry must replay the
+    ORIGINAL submitting request's match ContextVars, not whatever happens
+    to be ambient when the retry call itself is made (e.g. the operator
+    viewing a different match, or no match at all) - the reviewer-flagged
+    cross-match retry bug.
+    """
+    from pathlib import Path
+
+    from splitsmith.ui.server import current_match_id, current_match_root
+
+    reg = _Sync(JobRegistry(max_concurrent=1))
+    seen: list[tuple[str | None, Path | None]] = []
+    calls = {"n": 0}
+
+    def flaky(handle, **kw) -> None:
+        calls["n"] += 1
+        seen.append((current_match_id.get(), current_match_root.get()))
+        if calls["n"] == 1:
+            raise RuntimeError("boom")
+
+    reg._inner.bodies.register("flaky", flaky)
+
+    sentinel_root = Path("/sentinel/match-a")
+    id_token = current_match_id.set("match-a")
+    root_token = current_match_root.set(sentinel_root)
+    try:
+        job = reg.submit(kind="flaky")
+    finally:
+        current_match_id.reset(id_token)
+        current_match_root.reset(root_token)
+
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.FAILED)
+
+    # Simulate a context-free retry request (or one ambiently bound to a
+    # DIFFERENT match) - the vars are unset at the point retry() is called.
+    assert current_match_id.get() is None
+    assert current_match_root.get() is None
+
+    new = reg.retry(job.id)
+    assert new is not None
+    assert _wait_until(lambda: reg.get(new.id).status == JobStatus.SUCCEEDED)
+
+    assert seen == [("match-a", sentinel_root), ("match-a", sentinel_root)]

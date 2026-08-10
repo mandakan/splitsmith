@@ -1847,14 +1847,14 @@ export function currentShareTokenFromLocation(): string | null {
 /** Prefixes that ride on the per-request match scope. Other ``/api/`` paths
  *  (``/api/health``, ``/api/me/*``, ``/api/server/*``, ``/api/lab/*``,
  *  ``/api/files/*``, ``/api/fs/*``, ``/api/dev/*``, etc.) stay on their
- *  legacy bare paths because they are operator-global or unbound. */
-// "/api/me/jobs/" (with the trailing slash) is here so per-job actions
-// (get/cancel/acknowledge/retry) carry match context - a retried job's
-// resubmit needs the submitting match's ContextVars, see api.retryJob.
-// The bare list path "/api/me/jobs" (no trailing slash, used by listJobs)
-// deliberately does not match this prefix, so the jobs poller stays global
-// across matches.
-const MATCH_SCOPED_PREFIXES = ["/api/shooters/", "/api/match/", "/api/me/jobs/"];
+ *  legacy bare paths because they are operator-global or unbound. Jobs are
+ *  per-user resources, not per-match: the jobs list is intentionally
+ *  cross-match, so ``/api/me/jobs/*`` (get/cancel/acknowledge/retry) is
+ *  deliberately NOT scoped here - retry rebinds the job's own original
+ *  match server-side instead (see api.retryJob), so scoping the request to
+ *  whatever match the SPA happens to be viewing would be both wrong and
+ *  unnecessary. */
+const MATCH_SCOPED_PREFIXES = ["/api/shooters/", "/api/match/"];
 
 function scopeRequestPath(path: string): string {
   if (!MATCH_SCOPED_PREFIXES.some((p) => path.startsWith(p))) return path;
@@ -3028,10 +3028,10 @@ export const api = {
   cancelJob: (jobId: string) =>
     request<Job>(`/api/me/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" }),
 
-  /** Re-enqueue a failed job with its original args. Must be called from a
-   *  match route for match-bound job kinds so the request carries match
-   *  context via {@link scopeRequestPath} - the server 409s ``no_project``
-   *  otherwise when the resubmitted job runs. */
+  /** Re-enqueue a failed job with its original args. Callable from any
+   *  route, match or otherwise - the server rebinds the resubmit to the
+   *  job's own original match server-side, not to whatever match the
+   *  calling request happens to be scoped to. */
   retryJob: (jobId: string) =>
     request<Job>(`/api/me/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" }),
 

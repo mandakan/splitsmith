@@ -230,6 +230,7 @@ class PostgresJobBackend:
             stage_number=stage_number,
             shooter_slug=shooter_slug,
             video_id=video_id,
+            match_id=match_id,
             status=JobStatus.PENDING.value,
             cancel_requested=False,
             acknowledged=False,
@@ -418,7 +419,19 @@ class PostgresJobBackend:
         before it, so it can't reintroduce the race a pre-read would; a
         row that fails that check stays acknowledged (the claim isn't
         refunded), matching the registry's post-claim failure behavior.
+
+        The resubmit is bound to the ORIGINAL job's ``match_id`` (see
+        :meth:`submit`), not whatever match is ambient on the retrying
+        request - a job failed while viewing match A must not resubmit
+        under match B just because that's the match the retry HTTP
+        request happened to carry. ``current_match_id`` is set from the
+        persisted ``row.match_id`` (``None`` included - that's correct for
+        a legitimately match-less kind like ``model_download``) around the
+        :meth:`submit` call so its ``current_match_id.get()`` read sees
+        the right value regardless of ambient request context.
         """
+        from ..ui.server import current_match_id
+
         now = datetime.now(UTC)
         async with self._session_factory() as session:
             claim = await session.execute(
@@ -456,14 +469,19 @@ class PostgresJobBackend:
             stage_number = row.stage_number
             shooter_slug = row.shooter_slug
             video_id = row.video_id
+            row_match_id = row.match_id
 
-        return await self.submit(
-            kind=kind,
-            args=rehydrate_args(kind, wire_args),
-            stage_number=stage_number,
-            shooter_slug=shooter_slug,
-            video_id=video_id,
-        )
+        match_token = current_match_id.set(row_match_id)
+        try:
+            return await self.submit(
+                kind=kind,
+                args=rehydrate_args(kind, wire_args),
+                stage_number=stage_number,
+                shooter_slug=shooter_slug,
+                video_id=video_id,
+            )
+        finally:
+            current_match_id.reset(match_token)
 
     async def find_active(
         self,
