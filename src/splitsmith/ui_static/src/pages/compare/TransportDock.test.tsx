@@ -103,4 +103,28 @@ describe("TransportDock", () => {
     fireEvent.change(screen.getByRole("slider"), { target: { value: "4.5" } });
     expect(onScrub).toHaveBeenCalledWith(4.5);
   });
+
+  it("thins ruler ticks on long stages", () => {
+    const { container: container120 } = render(
+      <TransportDock
+        {...baseProps}
+        maxTime={120}
+        shooters={[shooter("a", "Fast Shooter", 9.5, [1.0])]}
+        timeSinceBeep={0}
+      />,
+    );
+    expect(
+      container120.querySelectorAll("[data-ruler-tick]").length,
+    ).toBe(25);
+
+    const { container: container10 } = render(
+      <TransportDock
+        {...baseProps}
+        maxTime={10}
+        shooters={[shooter("a", "Fast Shooter", 9.5, [1.0])]}
+        timeSinceBeep={0}
+      />,
+    );
+    expect(container10.querySelectorAll("[data-ruler-tick]").length).toBe(11);
+  });
 });

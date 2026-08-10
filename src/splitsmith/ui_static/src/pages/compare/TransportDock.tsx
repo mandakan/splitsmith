@@ -84,10 +84,12 @@ export function TransportDock({
   };
 
   // Time ruler ticks every second; labels every second up to 20s span,
-  // every 5s beyond that so long stages stay legible.
+  // every 5s beyond that so long stages stay legible. Thin tick lines on
+  // long stages (maxTime > 60s) to match label frequency, avoiding visual smear.
   const labelEvery = maxTime > 20 ? 5 : 1;
+  const tickEvery = maxTime > 60 ? labelEvery : 1;
   const ticks: number[] = [];
-  for (let t = 0; t <= maxTime + 0.001; t += 1) ticks.push(t);
+  for (let t = 0; t <= maxTime + 0.001; t += tickEvery) ticks.push(t);
 
   return (
     <div
@@ -215,6 +217,7 @@ export function TransportDock({
           {ticks.map((t) => (
             <g key={`tick-${t}`}>
               <line
+                data-ruler-tick
                 x1={xOf(t)}
                 x2={xOf(t)}
                 y1={RULER_H - (t % 5 === 0 ? 9 : 5)}
