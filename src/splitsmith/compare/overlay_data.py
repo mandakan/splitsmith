@@ -14,8 +14,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 
 from ..audit_data import audit_shots_to_engine_shots, read_audit_data
-from ..coach import FIELD_INTERVAL_CLASS, classify_intervals_in_dicts
-from ..config import CoachAutoClassifyConfig, IntervalClass, StageRounds
+from ..coach import heal_unclassified
+from ..config import IntervalClass, StageRounds
 from ..match_project import MatchProject, StageScorecard, is_stub_audit
 from .project_loader import CompareShooterBundle, CompareStageBundle
 
@@ -148,11 +148,13 @@ def _load_shots(stage: CompareStageBundle) -> tuple[TileShot, ...]:
 
     #775: an audited stage is an invariant of "fully classified", but a
     legacy doc on disk can still be partially classified. When that is
-    true here, the raw shot dicts are run through the in-memory
-    classifier before conversion, mirroring the coach GET's needs-check -
-    otherwise ``statistic_splits`` (overlay_summary.py) sees a mixed
-    doc and renders the wrong average into the exported MP4. This path
-    never writes back to disk; only the coach GET/PUT persist a heal.
+    true here, ``coach.heal_unclassified`` runs the raw shot dicts through
+    the in-memory classifier before conversion - otherwise
+    ``statistic_splits`` (overlay_summary.py) sees a mixed doc and renders
+    the wrong average into the exported MP4. That helper is where "needs a
+    heal" is defined for every surface (#780); this path never writes back
+    to disk, so it ignores the return value. Only the coach GET/PUT
+    persist a heal.
     """
     try:
         audit_data = read_audit_data(stage.audit_path)
@@ -169,15 +171,10 @@ def _load_shots(stage: CompareStageBundle) -> tuple[TileShot, ...]:
             # future loosening of the sentinel rather than becoming a
             # silent bug.
             return ()
-        raw_shots = audit_data.get("shots")
-        if isinstance(raw_shots, list) and any(
-            isinstance(s, dict) and s.get("ms_after_beep") is not None and s.get(FIELD_INTERVAL_CLASS) is None
-            for s in raw_shots
-        ):
-            # Heal in memory only - see the #775 note above.
-            classify_intervals_in_dicts(
-                [s for s in raw_shots if isinstance(s, dict)], CoachAutoClassifyConfig()
-            )
+        # Heal in memory only - see the #775 note above. The guard lives in
+        # ``coach.heal_unclassified`` (#780); its return value is ignored
+        # here because this path never writes back.
+        heal_unclassified(audit_data.get("shots"))
         engine_shots = audit_shots_to_engine_shots(audit_data, beep_time_in_source=0.0)
     except Exception as exc:  # noqa: BLE001 -- one bad file must not fail the render
         logger.warning(
