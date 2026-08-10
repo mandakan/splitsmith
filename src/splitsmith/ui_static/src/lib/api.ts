@@ -4217,13 +4217,17 @@ export interface DevicePendingInfo {
  *  size/mtime-only planning, no hashing - safe to poll. ``stale`` is
  *  true whenever a push would have real work to do (never synced,
  *  unpushed media, or the plan itself can't run). ``errors`` lists
- *  the reasons a push would refuse to run right now. */
+ *  the reasons a push would refuse to run right now. ``remote_changes``
+ *  is a best-effort staleness hint (count of hosted docs newer than
+ *  this desktop's last sync); null means unknown - sync unconfigured
+ *  or the hosted side unreachable right now, not an error. */
 export interface SyncStatusResponse {
   configured: boolean;
   last_synced_at: string | null;
   stale: boolean;
   pending_media: number;
   errors: string[];
+  remote_changes: number | null;
 }
 
 export { ApiError };

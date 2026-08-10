@@ -335,6 +335,14 @@ function SyncStatusLine({
       </p>
     );
   }
+  if ((status.remote_changes ?? 0) > 0) {
+    return (
+      <p className={lineClass}>
+        <RefreshCw className="size-3.5 shrink-0 text-led" aria-hidden="true" />
+        Hosted has newer changes - sync now
+      </p>
+    );
+  }
   if (!status.last_synced_at) {
     return (
       <p className={lineClass}>

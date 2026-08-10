@@ -188,6 +188,7 @@ from ..runtime import runtime as process_runtime
 from ..storage import Storage
 from ..sync.client import HostedSyncClient, SyncClientError
 from ..sync.plan import build_push_plan
+from ..sync.pull import plan_pull
 from ..sync.run import format_sync_message
 from ..sync.run import run_sync as run_bidirectional_sync  # ..async_bridge.run_sync already owns this name
 from ..sync.state import load_sync_state
@@ -2093,6 +2094,19 @@ async def _advance_sequential_chain(
                 },
             )
         break
+
+
+def _fetch_remote_manifest(prefs: user_config.GlobalPrefs, match_id: str) -> list[dict]:
+    """One short-timeout manifest GET for the status endpoint's
+    remote-staleness hint. Module-level (not inline in the handler) so
+    tests monkeypatch it; raises httpx errors to the caller."""
+    with httpx.Client(
+        base_url=prefs.hosted_base_url,
+        headers={"Authorization": f"Bearer {prefs.hosted_token}"},
+        timeout=5.0,
+    ) as http:
+        client = HostedSyncClient(http=http)
+        return client.get_doc_manifest(match_id)
 
 
 def register_job_bodies(state: AppState) -> None:
@@ -4363,6 +4377,11 @@ class SyncStatusResponse(BaseModel):
     stale: bool
     pending_media: int
     errors: list[str] = Field(default_factory=list)
+    #: Count of hosted docs newer than what this desktop last synced
+    #: (manifest version diff). None = unknown: sync unconfigured or the
+    #: hosted side unreachable right now - offline is a normal desktop
+    #: condition, so the card just omits the hint rather than erroring.
+    remote_changes: int | None = None
 
 
 class ScoreboardUploadRequest(BaseModel):
@@ -6194,6 +6213,13 @@ def create_app(
         the match has never synced, there's unpushed media or doc changes,
         or the plan itself can't run (e.g. a legacy project without a
         match id).
+
+        ``remote_changes`` is a best-effort staleness hint: one short
+        manifest GET against the hosted side, diffed against
+        ``sync_state`` via ``plan_pull``. Left ``None`` (never an error
+        response) when sync isn't configured, the match has never been
+        pushed (hosted 404), or the hosted side is unreachable right
+        now - offline is a normal desktop condition, not a failure.
         """
         if _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
@@ -6203,12 +6229,24 @@ def create_app(
         sync_state = load_sync_state(match_root)
         plan = build_push_plan(match_root, sync_state=sync_state)
         stale = sync_state.last_synced_at is None or bool(plan.media) or bool(plan.docs) or bool(plan.errors)
+
+        remote_changes: int | None = None
+        if configured:
+            match_id = plan.match_id or None
+            if match_id:
+                try:
+                    manifest = await run_in_threadpool(_fetch_remote_manifest, prefs, match_id)
+                    remote_changes = len(plan_pull(manifest, sync_state))
+                except (httpx.HTTPError, SyncClientError):
+                    remote_changes = None
+
         return SyncStatusResponse(
             configured=configured,
             last_synced_at=sync_state.last_synced_at,
             stale=stale,
             pending_media=len(plan.media),
             errors=plan.errors,
+            remote_changes=remote_changes,
         )
 
     @app.exception_handler(ShutdownInProgressError)
