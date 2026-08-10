@@ -51,7 +51,7 @@ import {
   type ServerHealth,
   type ShooterListEntry,
 } from "@/lib/api";
-import { isJobActive, useJobs } from "@/lib/jobs";
+import { isJobActive, useJobs, type JobsState } from "@/lib/jobs";
 import { useMode } from "@/lib/mode";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 import { useIsMobile } from "@/lib/useIsMobile";
@@ -78,6 +78,9 @@ export interface MatchShellOutletContext {
    *  poller of its own (SyncCard never mounts there - it's local-only
    *  and share links are hosted-only) and passes none. */
   jobs?: Job[];
+  /** The shell's single jobs poller - pages must use this, never a second
+   *  useJobs(). */
+  jobsState?: JobsState;
 }
 
 export function MatchShell() {
@@ -626,6 +629,7 @@ export function MatchShell() {
               refresh: () => setRefreshKey((k) => k + 1),
               origin,
               jobs,
+              jobsState,
             }}
           />
         </div>
