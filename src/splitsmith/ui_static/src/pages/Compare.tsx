@@ -90,6 +90,8 @@ export function Compare() {
 
   const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
   const rafRef = useRef<number | null>(null);
+  const maxDriftRef = useRef(0);
+  const startedAtRef = useRef(0);
 
   // Load project + compare data. Stage definitions are identical across
   // every shooter in a match, so we lift them from whichever shooter is
@@ -162,6 +164,9 @@ export function Compare() {
     const masterEl = videoRefs.current.get(audioShooter.slug);
     if (!masterEl) return;
 
+    startedAtRef.current = Date.now();
+    maxDriftRef.current = 0;
+
     const interval = window.setInterval(() => {
       const masterBeep = audioShooter.beep_offset_in_clip ?? 0;
       const tsb = masterEl.currentTime - masterBeep;
@@ -172,13 +177,27 @@ export function Compare() {
         const shooter = orderedShooters.find((s) => s.slug === slug);
         if (!shooter || shooter.beep_offset_in_clip == null) return;
         const target = shooter.beep_offset_in_clip + tsb;
-        if (Math.abs(el.currentTime - target) > SYNC_DRIFT_THRESHOLD_S) {
+        const drift = Math.abs(el.currentTime - target);
+        maxDriftRef.current = Math.max(maxDriftRef.current, drift);
+        if (drift > SYNC_DRIFT_THRESHOLD_S) {
           el.currentTime = Math.max(0, target);
         }
       });
     }, SYNC_INTERVAL_MS);
-    return () => window.clearInterval(interval);
-  }, [isPlaying, audioShooter, orderedShooters]);
+    return () => {
+      window.clearInterval(interval);
+      if (maxDriftRef.current > 0) {
+        const elapsedS = (Date.now() - startedAtRef.current) / 1000;
+        console.info(
+          "[compare-sync] stage %s max drift %sms over %ss",
+          stageNumber,
+          Math.round(maxDriftRef.current * 1000),
+          Math.round(elapsedS),
+        );
+        maxDriftRef.current = 0;
+      }
+    };
+  }, [isPlaying, audioShooter, orderedShooters, stageNumber]);
 
   // When the master pauses naturally (end of clip), reflect into state.
   useEffect(() => {
