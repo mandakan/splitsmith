@@ -3825,9 +3825,11 @@ class CompareShooterRecord(BaseModel):
 
     slug: str
     name: str
-    # Path to the lossless trim clip on disk; the SPA streams via
-    # GET /api/match/shooters/{slug}/videos/stream?path=...
-    video_path: str | None
+    # Logical ref for the stage's playable trim - ``exports/<name>`` or
+    # ``trimmed/<name>``, relative to the shooter's exports/trimmed dirs
+    # (local mode) or storage scope (hosted mode). Resolvable by the
+    # stream route in both modes; never an absolute path.
+    video_ref: str | None
     # Trim is per-shooter and starts at ``beep_offset_in_clip`` seconds
     # before the beep; SPA uses this to sync all clips to time-since-beep.
     beep_offset_in_clip: float | None
@@ -5756,6 +5758,56 @@ def _hosted_boot_lifespan(state: Any) -> Any | None:
         yield
 
     return _lifespan
+
+
+def _resolve_compare_trim(
+    legacy: MatchProject,
+    shooter_root: Path,
+    stage_number: int,
+    stage_name: str,
+    primary: StageVideo,
+    storage: Storage | None,
+) -> str | None:
+    """Logical ref for the stage's playable trim: ``exports/<name>`` or
+    ``trimmed/<name>``, lossless export preferred. Local mode checks the
+    actual dirs on disk; hosted checks object storage under the
+    established key conventions. Returns None when nothing is playable.
+
+    Hosted resolution (storage bound + a per-project scope set) is
+    storage-only and never falls through to a disk check - the app
+    container's disk is not authoritative for hosted trims.
+    """
+    base = stage_file_base(stage_number, stage_name)
+    lossless_name = f"{base}_trimmed.mp4"
+    cache_name = f"stage{stage_number}_cam_{primary.video_id}_trimmed.mp4"
+
+    hosted = storage is not None and storage.supports_presigned_get
+    if hosted:
+        scope = legacy._storage_scope
+        if scope:
+            if storage.exists(f"{scope}/exports/{lossless_name}"):
+                return f"exports/{lossless_name}"
+            if storage.exists(f"{scope}/trimmed/{cache_name}"):
+                return f"trimmed/{cache_name}"
+            return None
+
+    # Local mode (or hosted storage with no scope yet, which never
+    # happens in practice - state.shooter_project always binds one
+    # alongside a match id): existence checks against the actual dirs,
+    # which may be absolute overrides outside the shooter root.
+    exports = Path(legacy.exports_dir).expanduser() if legacy.exports_dir else shooter_root / "exports"
+    if not exports.is_absolute():
+        exports = shooter_root / exports
+    trimmed = Path(legacy.trimmed_dir).expanduser() if legacy.trimmed_dir else shooter_root / "trimmed"
+    if not trimmed.is_absolute():
+        trimmed = shooter_root / trimmed
+    lossless = exports / lossless_name
+    audit_cache = trimmed / cache_name
+    if lossless.exists():
+        return f"exports/{lossless_name}"
+    if audit_cache.exists():
+        return f"trimmed/{cache_name}"
+    return None
 
 
 def create_app(
@@ -12615,7 +12667,7 @@ def create_app(
 
             beep_offset: float | None = None
             duration_seconds: float | None = None
-            video_path: str | None = None
+            video_ref: str | None = None
             if stage is not None and primary is not None and primary.beep_time is not None:
                 # Prefer the lossless export (same file FCPXML references);
                 # fall back to the audit-mode short-GOP cache produced
@@ -12625,25 +12677,10 @@ def create_app(
                 # streams during scrubbing. Either is fine for sync playback,
                 # and the fallback lets compare just work after audit
                 # without requiring a separate lossless export pass.
-                stage_name = stage_def.stage_name
-                base = stage_file_base(stage_number, stage_name)
-                exports = (
-                    Path(legacy.exports_dir).expanduser() if legacy.exports_dir else shooter_root / "exports"
+                video_ref = _resolve_compare_trim(
+                    legacy, shooter_root, stage_number, stage_def.stage_name, primary, state.storage
                 )
-                if not exports.is_absolute():
-                    exports = shooter_root / exports
-                trimmed = (
-                    Path(legacy.trimmed_dir).expanduser() if legacy.trimmed_dir else shooter_root / "trimmed"
-                )
-                if not trimmed.is_absolute():
-                    trimmed = shooter_root / trimmed
-                lossless = exports / f"{base}_trimmed.mp4"
-                audit_cache = trimmed / f"stage{stage_number}_cam_{primary.video_id}_trimmed.mp4"
-                resolved_trim = (
-                    lossless if lossless.exists() else (audit_cache if audit_cache.exists() else None)
-                )
-                if resolved_trim is not None:
-                    video_path = str(resolved_trim)
+                if video_ref is not None:
                     beep_offset = min(legacy.trim_pre_buffer_seconds, primary.beep_time)
 
             # Shots come from audit; convert each shot.time to time-after-beep.
@@ -12687,7 +12724,7 @@ def create_app(
                 CompareShooterRecord(
                     slug=slug,
                     name=legacy.competitor_name or slug,
-                    video_path=video_path,
+                    video_ref=video_ref,
                     beep_offset_in_clip=beep_offset,
                     duration_seconds=duration_seconds,
                     stage_time_seconds=(stage.time_seconds if stage is not None else None),
