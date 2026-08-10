@@ -1,0 +1,53 @@
+# Self-hosted GPU worker agent (issue #796; see docs/self-hosted-workers.md).
+#
+# Same as docker-compose.agent.yml, but runs the GPU image (Dockerfile.gpu) and
+# reserves the NVIDIA GPU via the Container Toolkit. Use this on a box with a
+# discrete NVIDIA GPU so ensemble detect runs on the CUDA execution provider and
+# audit encodes use h264_nvenc; on a box without a GPU, use the CPU compose file.
+#
+# Prerequisites on the host:
+#   - NVIDIA driver new enough for CUDA 12 (the container carries its own CUDA
+#     userspace; a driver reporting CUDA >= 12.4 via `nvidia-smi` is enough --
+#     no driver upgrade needed on e.g. 566.x).
+#   - NVIDIA Container Toolkit installed and the docker runtime configured
+#     (`nvidia-ctk runtime configure --runtime=docker && systemctl restart docker`).
+#   - Verify with: `docker run --rm --gpus all <cuda-image> nvidia-smi`.
+#
+# First run (registers, then stays connected):
+#
+#   SPLITSMITH_SERVER_URL=https://my.splitsmith.app \
+#   SPLITSMITH_REGISTRATION_TOKEN=<token-from-admin-ui> \
+#   docker compose -f docker-compose.agent.gpu.yml up -d
+#
+# The token is consumed once; later `up`s reuse agent.json from the volume.
+
+services:
+  agent:
+    image: ghcr.io/mandakan/splitsmith:${SPLITSMITH_IMAGE_TAG:-latest-gpu}
+    restart: unless-stopped
+    command:
+      - agent
+      - --server-url
+      - ${SPLITSMITH_SERVER_URL:?set SPLITSMITH_SERVER_URL to your server, e.g. https://my.splitsmith.app}
+      - --token
+      - ${SPLITSMITH_REGISTRATION_TOKEN:-}
+    environment:
+      SPLITSMITH_SOURCE_CACHE_MAX_GB: ${SPLITSMITH_SOURCE_CACHE_MAX_GB:-20}
+      # cpu | cuda | auto. `auto` (default) uses the GPU when the CUDA provider
+      # initialises and falls back to CPU otherwise, so the agent never fails
+      # closed. Pin to `cpu` to force the CPU path (e.g. while parity-checking a
+      # new GPU/onnxruntime combination).
+      SPLITSMITH_ONNX_DEVICE: ${SPLITSMITH_ONNX_DEVICE:-auto}
+    # Reserve the GPU (Compose Spec device reservation -> nvidia-container-toolkit).
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - splitsmith-agent:/data
+
+volumes:
+  splitsmith-agent:
