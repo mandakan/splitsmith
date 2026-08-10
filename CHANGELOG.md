@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.22.1](https://github.com/mandakan/splitsmith/compare/v0.22.0...v0.22.1) (2026-08-10)
+
+
+### Bug Fixes
+
+* **sync:** register pushed matches in the hosted picker ([4317948](https://github.com/mandakan/splitsmith/commit/4317948728da70e1881e5d53e016db42477fb008))
+* **sync:** register pushed matches in the hosted picker ([eb6d2f8](https://github.com/mandakan/splitsmith/commit/eb6d2f8a95eca6268921cb7e1a8b47edbd83da50))
+* **ui:** share pages skip the doomed /api/me fetch ([91558db](https://github.com/mandakan/splitsmith/commit/91558db6257e595c07f473fff3a9605f8278f6fb))
+* **ui:** share pages skip the doomed /api/me fetch ([04ee5b8](https://github.com/mandakan/splitsmith/commit/04ee5b8985dc8467d8104ef421eea9f6f60e6e04))
+
 ## [0.22.0](https://github.com/mandakan/splitsmith/compare/v0.21.0...v0.22.0) (2026-08-10)
 
 
