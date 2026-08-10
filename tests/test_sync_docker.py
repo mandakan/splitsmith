@@ -1,12 +1,12 @@
 """Docker-compose RLS proof for the desktop-to-hosted sync MVP (#631, Task 12).
 
 Reuses ``test_hosted_docker_smoke.py``'s ``hosted_stack`` fixture (docker
-compose up/down) plus its ``_psql`` / ``_psql_run`` helpers, so this file
-pays no extra setup cost beyond bringing its own copy of the compose stack
-up - the same idiom every other ``@pytest.mark.docker`` test in this repo
-already uses.
+compose up/down) plus its ``_psql`` / ``_psql_run`` / ``_magic_link_login``
+helpers and ``API_BASE``, so this file pays no extra setup cost beyond
+bringing its own copy of the compose stack up - the same idiom every other
+``@pytest.mark.docker`` test in this repo already uses.
 
-Two things the in-process (SQLite) test suite cannot prove, both driven
+Four things the in-process (SQLite) test suite cannot prove, all driven
 against live Postgres under the non-superuser ``splitsmith_app`` role the
 production API and worker actually run as:
 
@@ -29,6 +29,12 @@ production API and worker actually run as:
    from the RAW session factory - the pre-tenant path, same rationale as
    ``MagicLinkAuth``) resolves both users' tokens correctly when driven
    against the ``splitsmith_app`` role, before any tenant GUC is set.
+4. The manifest + version-guarded PUT stack (Tasks 2/3) over real HTTP:
+   a coalesce-unique-index-backed ``ProjectStateStore`` upsert racing
+   against a stale ``expected_version`` actually 409s ``version_conflict``
+   under live Postgres, and the manifest/GET routes reflect the winning
+   write, not the rejected one - aiosqlite's simpler locking can't
+   exercise the same race.
 
 Run with ``PATH=~/.claude-tmp/bin:$PATH pytest -m docker tests/test_sync_docker.py -v``
 (docker CLI lives outside the default non-interactive PATH on this host).
@@ -39,9 +45,10 @@ from __future__ import annotations
 import asyncio
 import uuid
 
+import httpx
 import pytest
 
-from .test_hosted_docker_smoke import _psql
+from .test_hosted_docker_smoke import API_BASE, _magic_link_login, _psql
 
 # ``hosted_stack`` is re-exported for global fixture discovery via
 # conftest.py (same idiom as ``hosted_app`` / ``hosted_env`` - importing it
@@ -236,3 +243,78 @@ def test_mirror_matches_with_check_blocks_cross_tenant_insert(hosted_stack: None
     )
     assert bad_insert.returncode != 0, "RLS WITH CHECK let tenant A insert a mirror row owned by tenant B"
     assert "row-level security" in bad_insert.stderr.lower()
+
+
+def test_manifest_and_version_guarded_put_round_trip_over_http(hosted_stack: None) -> None:
+    """Full HTTP round trip through the running API container, driven the
+    way the desktop client actually drives it (session cookie to mint a
+    desktop token, then bearer auth for every ``/api/sync/*`` call):
+
+    adopt -> PUT project doc at ``expected_version=0`` -> manifest shows
+    version 1 -> PUT again at ``expected_version=1`` -> ok, version 2 ->
+    stale PUT at ``expected_version=1`` again -> 409 ``version_conflict``
+    -> GET returns the latest body, not the rejected stale write.
+
+    This proves the coalesce-unique-index + RLS + version-guard stack
+    end to end against real Postgres under the non-superuser app role -
+    the one thing the in-process (aiosqlite) suite can't stand in for,
+    since the whole point is the optimistic-lock race living in a real
+    transaction, not a test double's in-memory dict.
+    """
+    email = f"sync-http-{uuid.uuid4().hex[:8]}@example.com"
+    _, secret = _magic_link_login(email)
+    cookies = {"splitsmith_session": secret}
+
+    token_resp = httpx.post(
+        f"{API_BASE}/api/me/desktop-tokens",
+        json={"name": "docker-smoke"},
+        cookies=cookies,
+        timeout=5.0,
+    )
+    assert token_resp.status_code == 201, token_resp.text
+    bearer = {"Authorization": f"Bearer {token_resp.json()['token']}"}
+
+    match_id = f"mid-sync-http-{uuid.uuid4().hex[:8]}"
+    adopt = httpx.post(
+        f"{API_BASE}/api/sync/matches",
+        json={"match_id": match_id, "name": "HTTP round trip"},
+        headers=bearer,
+        timeout=5.0,
+    )
+    assert adopt.status_code == 200, adopt.text
+    assert adopt.json()["origin"] == "desktop"
+
+    slug = "alice"
+    doc_url = f"{API_BASE}/api/sync/matches/{match_id}/docs/project/{slug}"
+
+    put0 = httpx.put(
+        doc_url, params={"expected_version": 0}, json={"name": "Alice"}, headers=bearer, timeout=5.0
+    )
+    assert put0.status_code == 200, put0.text
+    assert put0.json()["version"] == 1
+
+    manifest = httpx.get(f"{API_BASE}/api/sync/matches/{match_id}/docs", headers=bearer, timeout=5.0)
+    assert manifest.status_code == 200, manifest.text
+    versions = {(d["doc_kind"], d["slug"]): d["version"] for d in manifest.json()["docs"]}
+    assert versions[("project", slug)] == 1
+
+    put1 = httpx.put(
+        doc_url, params={"expected_version": 1}, json={"name": "Alice v2"}, headers=bearer, timeout=5.0
+    )
+    assert put1.status_code == 200, put1.text
+    assert put1.json()["version"] == 2
+
+    stale = httpx.put(
+        doc_url,
+        params={"expected_version": 1},
+        json={"name": "Alice stale write"},
+        headers=bearer,
+        timeout=5.0,
+    )
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["detail"]["code"] == "version_conflict"
+
+    latest = httpx.get(doc_url, headers=bearer, timeout=5.0)
+    assert latest.status_code == 200, latest.text
+    assert latest.json()["version"] == 2
+    assert latest.json()["doc"]["name"] == "Alice v2"
