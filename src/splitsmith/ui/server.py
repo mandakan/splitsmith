@@ -187,7 +187,7 @@ from ..runtime import runtime as process_runtime
 from ..storage import Storage
 from ..sync.client import HostedSyncClient, SyncClientError
 from ..sync.plan import build_push_plan
-from ..sync.push import run_push
+from ..sync.push import format_push_message, run_push
 from ..sync.state import load_sync_state
 from . import audio as audio_helpers
 from . import export_storage, stage_edit
@@ -3480,10 +3480,7 @@ def register_job_bodies(state: AppState) -> None:
         finally:
             http_client.close()
         handle.set_result(report.model_dump())
-        handle.update(
-            progress=1.0,
-            message=f"Synced: {report.uploaded} uploaded, {report.skipped} skipped, {report.docs} docs",
-        )
+        handle.update(progress=1.0, message=format_push_message(report))
 
     state.jobs.bodies.register("model_download", _run_model_download_job)
     state.jobs.bodies.register("detect_beep", _run_detect_beep_for_video)
@@ -4336,9 +4333,9 @@ class DeviceUnlinkResponse(BaseModel):
 class SyncStatusResponse(BaseModel):
     """Response body for GET /api/match/sync/status (#631, Task 9).
 
-    Built from ``load_sync_state`` + ``build_push_plan`` - the latter is
-    the fast size/mtime-only planner (no hashing), so this stays cheap
-    enough to poll.
+    Built from ``load_sync_state`` + ``build_push_plan`` - media is a fast
+    size/mtime-only check and docs are a cheap small-JSON sha256 (#797),
+    so this stays cheap enough to poll.
     """
 
     configured: bool
@@ -6169,11 +6166,14 @@ def create_app(
 
     @app.get("/api/match/sync/status", response_model=SyncStatusResponse)
     async def get_match_sync_status() -> SyncStatusResponse:
-        """Cheap sync status: size/mtime-only planning, no hashing.
+        """Cheap sync status: size/mtime-only planning for media, no media
+        hashing (#797's per-doc hashing is cheap - small JSON, not
+        multi-gigabyte trims - so it still runs here on every poll).
 
         ``stale`` is True whenever a push would have real work to do -
-        the match has never synced, there's unpushed media, or the plan
-        itself can't run (e.g. a legacy project without a match id).
+        the match has never synced, there's unpushed media or doc changes,
+        or the plan itself can't run (e.g. a legacy project without a
+        match id).
         """
         if _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
@@ -6182,7 +6182,7 @@ def create_app(
         match_root = state.match_root
         sync_state = load_sync_state(match_root)
         plan = build_push_plan(match_root, sync_state=sync_state)
-        stale = sync_state.last_synced_at is None or bool(plan.media) or bool(plan.errors)
+        stale = sync_state.last_synced_at is None or bool(plan.media) or bool(plan.docs) or bool(plan.errors)
         return SyncStatusResponse(
             configured=configured,
             last_synced_at=sync_state.last_synced_at,

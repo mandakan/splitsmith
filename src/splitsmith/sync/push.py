@@ -4,9 +4,11 @@
 (Task 7), adopt the hosted mirror, upload every changed media item
 before any doc - the consistency invariant a hosted reader depends on,
 since a doc can reference a clip that must already be resolvable - then
-upsert every doc. Sync state is saved after each media item lands
-(crash-safe incrementality: a killed process re-uploads only what didn't
-finish), and once more at the end with ``last_synced_at`` stamped.
+upsert every changed doc (#797: unchanged docs are already filtered out
+of ``plan.docs`` by the planner). Sync state is saved after each media
+item and each doc lands (crash-safe incrementality: a killed process
+re-uploads/re-pushes only what didn't finish), and once more at the end
+with ``last_synced_at`` stamped.
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from pydantic import BaseModel, Field
 
 from ..observability import PhaseTimer
 from .client import HostedSyncClient, SyncClientError
-from .plan import build_push_plan
+from .plan import build_push_plan, doc_identity_key, hash_doc_body
 from .state import SyncedItem, load_sync_state, save_sync_state
 
 
@@ -50,6 +52,20 @@ class PushReport(BaseModel):
     timings: dict[str, float] = Field(default_factory=dict)
     bytes_uploaded: int = 0
     media_items: list[MediaItemTiming] = Field(default_factory=list)
+    #: Docs whose canonical-JSON hash matched what was already recorded
+    #: (#797) - not PUT this push. ``docs`` above stays "docs pushed".
+    docs_skipped: int = 0
+
+
+def format_push_message(report: PushReport) -> str:
+    """The one-line "Synced: ..." summary a sync job reports as its final
+    progress message. Names the unchanged-doc count only when it's
+    nonzero, so a first push (everything new) reads exactly as it did
+    before #797."""
+    message = f"Synced: {report.uploaded} uploaded, {report.skipped} skipped, {report.docs} docs"
+    if report.docs_skipped:
+        message += f" ({report.docs_skipped} unchanged)"
+    return message
 
 
 @contextlib.contextmanager
@@ -135,6 +151,12 @@ def run_push(
             label = doc.kind if doc.slug is None else f"{doc.kind} ({doc.slug})"
             on_progress(1.0, f"syncing {label}")
             client.put_doc(plan.match_id, doc)
+            # Record the hash only after the PUT succeeds (#797) - same
+            # crash-safety invariant as media above: a failed push must
+            # retry this doc next time, not skip it forever.
+            key = doc_identity_key(doc.kind, doc.slug, doc.stage_number)
+            sync_state.doc_hashes[key] = hash_doc_body(doc.body)
+            save_sync_state(match_root, sync_state)
 
     sync_state.last_synced_at = datetime.now(UTC)
     save_sync_state(match_root, sync_state)
@@ -146,4 +168,5 @@ def run_push(
         timings=timings,
         bytes_uploaded=bytes_uploaded,
         media_items=media_items,
+        docs_skipped=plan.docs_skipped,
     )

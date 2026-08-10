@@ -13,10 +13,16 @@ Cases:
      audit) all land, every media request precedes every doc request,
      and the returned ``PushReport`` matches.
   2. A second run against the same match root with nothing touched on
-     disk uploads 0 media (rsync-style skip) but still upserts all docs.
+     disk uploads 0 media (rsync-style skip) and, since #797, PUTs 0
+     docs too (content-hash skip) - only ``docs_skipped`` moves.
   3. A part PUT failing partway through leaves the already-uploaded
      item's digest recorded in ``sync_state.json`` and never reaches the
      docs phase; a rerun re-uploads only the failed item.
+ 11. Doc delta skipping (#797): mutating one audit doc between two runs
+     re-pushes exactly that doc; a doc PUT failure does not record that
+     doc's hash (a rerun retries it, the others stay skipped); and
+     ``format_push_message`` names the unchanged count only when it's
+     nonzero.
   4. A legacy (no ``match.json``) project aborts with ``SyncClientError``
      before any HTTP request - the planner's ``errors`` guard fires
      pre-network.
@@ -59,7 +65,7 @@ from splitsmith.match_project import MatchProject, StageEntry
 from splitsmith.observability import PhaseTimer
 from splitsmith.sync.client import HostedSyncClient, SyncClientError
 from splitsmith.sync.plan import DocItem, MediaItem, build_push_plan
-from splitsmith.sync.push import MediaItemTiming, PushReport, run_push
+from splitsmith.sync.push import MediaItemTiming, PushReport, format_push_message, run_push
 from splitsmith.sync.state import SyncState, load_sync_state
 
 TRIMMED_NAME = "stage1_cam_abc123_trimmed.mp4"
@@ -120,6 +126,7 @@ class _FakeHosted:
         self.completes: list[tuple[str, list[dict]]] = []  # (key, parts)
         self.match_status = 200
         self.fail_keys: set[str] = set()  # remote keys whose part PUT 500s
+        self.fail_doc_paths: set[str] = set()  # doc URL paths whose PUT 500s (#797)
         self.abort_status = 200
         #: Optional (key, part_number) callback invoked inside each part
         #: PUT handler, before the response is built - lets a test block
@@ -179,6 +186,8 @@ class _FakeHosted:
 
         if method == "PUT" and "/docs/" in path:
             self.calls.append(f"doc_put:{path}")
+            if path in self.fail_doc_paths:
+                return httpx.Response(500, text="doc put failed")
             self.doc_puts.append((path, body))
             return httpx.Response(200, json={"version": len(self.doc_puts)})
 
@@ -209,6 +218,7 @@ def test_happy_path_pushes_media_before_docs_and_reports_correctly(tmp_path: Pat
     assert report.uploaded == 2
     assert report.skipped == 0
     assert report.docs == 3
+    assert report.docs_skipped == 0
 
     # New instrumentation fields (#631 Task 13): the four phases always
     # run on a successful push, bytes_uploaded is the sum of the two
@@ -264,7 +274,7 @@ def test_happy_path_pushes_media_before_docs_and_reports_correctly(tmp_path: Pat
 # ---------------------------------------------------------------------------
 
 
-def test_second_run_with_nothing_touched_uploads_zero_media(tmp_path: Path) -> None:
+def test_second_run_with_nothing_touched_uploads_zero_media_and_zero_docs(tmp_path: Path) -> None:
     root, _match_id = _build_match(tmp_path)
     run_push(root, client=_FakeHosted().clients())
 
@@ -273,10 +283,13 @@ def test_second_run_with_nothing_touched_uploads_zero_media(tmp_path: Path) -> N
 
     assert report2.uploaded == 0
     assert report2.skipped == 2
-    assert report2.docs == 3
+    # #797: docs are content-hash skipped the same way media is
+    # size/mtime skipped - nothing changed, so nothing is PUT.
+    assert report2.docs == 0
+    assert report2.docs_skipped == 3
     assert not any(c.startswith("media_") for c in fake2.calls)
     assert fake2.calls[0] == "ensure_match"
-    assert sum(c.startswith("doc_put") for c in fake2.calls) == 3
+    assert sum(c.startswith("doc_put") for c in fake2.calls) == 0
 
     # A skipped run uploads nothing: media_items is empty and
     # bytes_uploaded is 0, even though the phases still ran.
@@ -570,6 +583,7 @@ def test_push_report_new_fields_default_empty() -> None:
     assert report.timings == {}
     assert report.bytes_uploaded == 0
     assert report.media_items == []
+    assert report.docs_skipped == 0
     # Defaults are per-instance, not a shared mutable object (the
     # pydantic default_factory footgun this guards against).
     report.timings["x"] = 1.0
@@ -595,3 +609,64 @@ def test_build_push_plan_still_reachable(tmp_path: Path) -> None:
     assert not plan.errors
     assert len(plan.media) == 2
     assert len(plan.docs) == 3
+
+
+# ---------------------------------------------------------------------------
+# Case 11: doc delta skipping (#797)
+# ---------------------------------------------------------------------------
+
+
+def test_mutating_one_audit_doc_between_runs_repushes_only_that_doc(tmp_path: Path) -> None:
+    root, match_id = _build_match(tmp_path)
+    run_push(root, client=_FakeHosted().clients())
+
+    audit_file = root / "shooters" / "alice" / "audit" / "stage1.json"
+    audit_file.write_text(json.dumps({"detection": "ensemble", "shots": [{"index": 0}]}), encoding="utf-8")
+
+    fake2 = _FakeHosted()
+    report2 = run_push(root, client=fake2.clients())
+
+    assert report2.docs == 1
+    assert report2.docs_skipped == 2
+    doc_paths = {path for path, _ in fake2.doc_puts}
+    assert doc_paths == {f"/api/sync/matches/{match_id}/docs/audit/alice/1"}
+
+
+def test_doc_put_failure_does_not_record_its_hash_and_rerun_retries_only_it(tmp_path: Path) -> None:
+    root, match_id = _build_match(tmp_path)
+    project_path = f"/api/sync/matches/{match_id}/docs/project/alice"
+
+    fake = _FakeHosted()
+    fake.fail_doc_paths = {project_path}
+
+    with pytest.raises(httpx.HTTPStatusError):
+        run_push(root, client=fake.clients())
+
+    # The match doc (planned before the project doc) landed and its hash
+    # was recorded; the project doc failed and was never recorded; the
+    # audit doc (planned after) was never attempted at all.
+    state = load_sync_state(root)
+    assert state.doc_hashes.get("match") is not None
+    assert "project/alice" not in state.doc_hashes
+    assert "audit/alice/1" not in state.doc_hashes
+
+    # Rerun with the failure fixed: only the previously-failed project
+    # doc (plus anything never attempted) is still unrecorded, so only
+    # those re-push - the match doc is skipped this time.
+    fake2 = _FakeHosted()
+    report2 = run_push(root, client=fake2.clients())
+
+    doc_paths = {path for path, _ in fake2.doc_puts}
+    assert f"/api/sync/matches/{match_id}/docs/match" not in doc_paths
+    assert project_path in doc_paths
+    assert report2.docs_skipped == 1  # only the match doc was already up to date
+
+
+def test_format_push_message_omits_unchanged_suffix_when_zero() -> None:
+    report = PushReport(uploaded=0, skipped=96, docs=53, docs_skipped=0)
+    assert format_push_message(report) == "Synced: 0 uploaded, 96 skipped, 53 docs"
+
+
+def test_format_push_message_names_unchanged_count_when_nonzero() -> None:
+    report = PushReport(uploaded=0, skipped=96, docs=1, docs_skipped=52)
+    assert format_push_message(report) == "Synced: 0 uploaded, 96 skipped, 1 docs (52 unchanged)"

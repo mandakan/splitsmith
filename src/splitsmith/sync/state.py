@@ -1,4 +1,4 @@
-"""Local digest cache for the desktop-to-hosted sync push (#631).
+"""Local digest cache for the desktop-to-hosted sync push (#631, #797).
 
 ``SyncState`` records the (sha256, size, mtime_ns) of every remote media
 object this match has already pushed, keyed by remote key. The push
@@ -8,6 +8,17 @@ pushing again - the same rsync-style shortcut ``rsync --size-only``'s
 cousin uses, cheap enough to run before every push without hashing
 untouched multi-gigabyte trims. The sha256 itself is only ever verified
 by the push executor (Task 8) at upload time; it is not recomputed here.
+
+``doc_hashes`` mirrors that pattern for docs (#797): a sha256 of each
+doc's canonical JSON body, keyed by the doc identity ``put_doc`` uses
+(``"match"`` / ``"project/<slug>"`` / ``"audit/<slug>/<stage_number>"``).
+Docs are cheap to hash (small JSON, unlike multi-gigabyte trims) so the
+planner hashes every candidate doc on every plan rather than doing a
+size/mtime shortcut - the skip check is an exact content comparison, not
+an approximation. A key absent from ``doc_hashes`` always means "push
+it" - a sync_state.json written before #797 simply has no doc hashes at
+all, which pydantic defaults to an empty dict, so the first push after
+upgrading rehashes and pushes every doc once, then settles.
 
 Persisted at ``<match-root>/sync_state.json``, written atomically via
 :func:`splitsmith.match_project.atomic_write_json` so a crash mid-push never
@@ -43,6 +54,9 @@ class SyncState(BaseModel):
     schema_version: int = 1
     last_synced_at: datetime | None = None
     items: dict[str, SyncedItem] = Field(default_factory=dict)  # remote key -> digest
+    #: doc identity ("match" / "project/<slug>" / "audit/<slug>/<stage>") ->
+    #: sha256 of the last-pushed canonical JSON body. Absent key = push it.
+    doc_hashes: dict[str, str] = Field(default_factory=dict)
 
 
 def load_sync_state(match_root: Path) -> SyncState:
