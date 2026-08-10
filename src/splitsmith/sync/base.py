@@ -25,7 +25,7 @@ BASE_DIR = "sync_base"
 
 
 def _base_path(match_root: Path, key: str) -> Path:
-    return (match_root / BASE_DIR / key).with_suffix(".json")
+    return match_root / BASE_DIR / f"{key}.json"
 
 
 def load_base_doc(match_root: Path, key: str) -> dict | None:

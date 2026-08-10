@@ -39,3 +39,11 @@ def test_base_doc_corrupt_reads_as_missing(tmp_path: Path):
     p.parent.mkdir(parents=True)
     p.write_text("{not json", encoding="utf-8")
     assert load_base_doc(tmp_path, "match") is None
+
+
+def test_base_doc_key_segment_with_dot_is_not_truncated(tmp_path: Path):
+    save_base_doc(tmp_path, "project/j.doe", {"a": 1})
+    save_base_doc(tmp_path, "project/j", {"b": 2})
+    assert (tmp_path / "sync_base" / "project" / "j.doe.json").exists()
+    assert load_base_doc(tmp_path, "project/j.doe") == {"a": 1}
+    assert load_base_doc(tmp_path, "project/j") == {"b": 2}
