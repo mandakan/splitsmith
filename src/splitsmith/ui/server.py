@@ -939,6 +939,8 @@ _SHARE_PATH_RE = re.compile(
     r"|shooters/[^/]+/stages/\d+/coach"
     r"|shooters/[^/]+/coach/distributions"
     r"|shooters/[^/]+/videos/stream"
+    r"|match/stage/\d+/compare"
+    r"|match/shooters/[^/]+/videos/stream"
     r"|og\.png"
     r"|og/[^/]+/\d+\.png"
     r"|og-meta"
@@ -10431,8 +10433,10 @@ def create_app(
                     "split": split,
                     "interval_class": s.get("interval_class"),
                     "interval_class_source": s.get("interval_class_source"),
-                    "improvement_flag": bool(s.get("improvement_flag", False)),
-                    "coaching_note": s.get("coaching_note"),
+                    "improvement_flag": (
+                        False if current_share_request.get() else bool(s.get("improvement_flag", False))
+                    ),
+                    "coaching_note": (None if current_share_request.get() else s.get("coaching_note")),
                     "stale": stale,
                     "reload_hint": reload_hint,
                 }
