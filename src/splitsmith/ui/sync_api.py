@@ -30,7 +30,7 @@ management routes and share links.
 from __future__ import annotations
 
 import re
-from collections.abc import Awaitable, Callable
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
@@ -81,6 +81,29 @@ class SyncMatchCreateResponse(BaseModel):
 class SyncDocVersionResponse(BaseModel):
     """Response shared by all three doc-upsert routes."""
 
+    version: int
+
+
+class SyncDocMeta(BaseModel):
+    """One manifest row: doc identity + version."""
+
+    doc_kind: str
+    slug: str | None = None
+    stage_number: int | None = None
+    version: int
+    updated_at: datetime
+
+
+class SyncDocManifestResponse(BaseModel):
+    """Response for ``GET /api/sync/matches/{match_id}/docs``."""
+
+    docs: list[SyncDocMeta]
+
+
+class SyncDocResponse(BaseModel):
+    """Response for the three per-doc GET routes."""
+
+    doc: dict[str, Any]
     version: int
 
 
@@ -279,21 +302,6 @@ def _validate_media_key(key: str, match_id: str) -> None:
         raise HTTPException(status_code=422, detail="invalid media key")
 
 
-async def _mirror_save(
-    load: Callable[[], Awaitable[tuple[dict | None, int]]],
-    save: Callable[[int], Awaitable[int]],
-) -> int:
-    """Unconditional last-write-wins upsert over the optimistic-lock store."""
-    from ..db import StateConflictError
-
-    _, version = await load()
-    try:
-        return await save(version)
-    except StateConflictError:
-        _, version = await load()
-        return await save(version)
-
-
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -327,14 +335,94 @@ async def create_or_adopt_match(
     return SyncMatchCreateResponse(match_id=record.match_id, origin=record.origin)
 
 
+@router.get("/matches/{match_id}/docs", response_model=SyncDocManifestResponse)
+async def get_doc_manifest(
+    match_id: str,
+    request: Request,
+    user: Any = Depends(_current_user),
+) -> SyncDocManifestResponse:
+    """Identity + version of every state doc in this mirror.
+
+    The pull side of the bidirectional sync: desktop diffs these
+    versions against the ones recorded at its last sync and GETs only
+    the docs that moved. Doc bodies never ride in the manifest.
+    """
+    _hosted_gate()
+    await _resolve_mirror(request, match_id)
+    store = _project_state(request)
+    meta = await store.list_doc_meta(match_id)
+    return SyncDocManifestResponse(
+        docs=[
+            SyncDocMeta(
+                doc_kind=m.doc_kind,
+                slug=m.slug,
+                stage_number=m.stage_number,
+                version=m.version,
+                updated_at=m.updated_at,
+            )
+            for m in meta
+        ]
+    )
+
+
+@router.get("/matches/{match_id}/docs/match", response_model=SyncDocResponse)
+async def get_match_doc(
+    match_id: str, request: Request, user: Any = Depends(_current_user)
+) -> SyncDocResponse:
+    """Fetch the match doc + its version. 404 when it does not exist."""
+    _hosted_gate()
+    await _resolve_mirror(request, match_id)
+    doc, version = await _project_state(request).load_match(match_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return SyncDocResponse(doc=doc, version=version)
+
+
+@router.get("/matches/{match_id}/docs/project/{slug}", response_model=SyncDocResponse)
+async def get_project_doc(
+    match_id: str, slug: str, request: Request, user: Any = Depends(_current_user)
+) -> SyncDocResponse:
+    """Fetch one shooter's project doc + version. 404 when absent."""
+    _hosted_gate()
+    await _resolve_mirror(request, match_id)
+    doc, version = await _project_state(request).load_project(match_id, slug)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return SyncDocResponse(doc=doc, version=version)
+
+
+@router.get("/matches/{match_id}/docs/audit/{slug}/{stage_number}", response_model=SyncDocResponse)
+async def get_audit_doc(
+    match_id: str,
+    slug: str,
+    stage_number: int,
+    request: Request,
+    user: Any = Depends(_current_user),
+) -> SyncDocResponse:
+    """Fetch one stage's audit doc + version. 404 when absent."""
+    _hosted_gate()
+    await _resolve_mirror(request, match_id)
+    doc, version = await _project_state(request).load_audit(match_id, slug, stage_number)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return SyncDocResponse(doc=doc, version=version)
+
+
 @router.put("/matches/{match_id}/docs/match", response_model=SyncDocVersionResponse)
 async def put_match_doc(
     match_id: str,
+    expected_version: int,
     request: Request,
     body: dict[str, Any] = Body(...),
     user: Any = Depends(_current_user),
 ) -> SyncDocVersionResponse:
-    """Upsert the match doc, validated against ``match_model.Match``."""
+    """Upsert the match doc at ``expected_version`` (0 = create).
+
+    409 ``version_conflict`` when the row moved on - the desktop client
+    re-pulls, re-merges, and retries; the hosted side never resolves the
+    race itself (that was the pre-pull ``_mirror_save`` clobber, deleted
+    with the bidirectional slice).
+    """
     _hosted_gate()
     await _resolve_mirror(request, match_id)
     try:
@@ -342,14 +430,7 @@ async def put_match_doc(
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
     store = _project_state(request)
-
-    async def _load() -> tuple[dict | None, int]:
-        return await store.load_match(match_id)
-
-    async def _save(version: int) -> int:
-        return await store.save_match(match_id, body, expected_version=version)
-
-    version = await _mirror_save(_load, _save)
+    version = await store.save_match(match_id, body, expected_version=expected_version)
     return SyncDocVersionResponse(version=version)
 
 
@@ -357,11 +438,15 @@ async def put_match_doc(
 async def put_project_doc(
     match_id: str,
     slug: str,
+    expected_version: int,
     request: Request,
     body: dict[str, Any] = Body(...),
     user: Any = Depends(_current_user),
 ) -> SyncDocVersionResponse:
-    """Upsert one shooter's project doc, validated against ``MatchProject``."""
+    """Upsert one shooter's project doc at ``expected_version``.
+
+    Same optimistic-lock contract as ``put_match_doc``.
+    """
     _hosted_gate()
     await _resolve_mirror(request, match_id)
     try:
@@ -369,14 +454,7 @@ async def put_project_doc(
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
     store = _project_state(request)
-
-    async def _load() -> tuple[dict | None, int]:
-        return await store.load_project(match_id, slug)
-
-    async def _save(version: int) -> int:
-        return await store.save_project(match_id, slug, body, expected_version=version)
-
-    version = await _mirror_save(_load, _save)
+    version = await store.save_project(match_id, slug, body, expected_version=expected_version)
     return SyncDocVersionResponse(version=version)
 
 
@@ -385,22 +463,19 @@ async def put_audit_doc(
     match_id: str,
     slug: str,
     stage_number: int,
+    expected_version: int,
     request: Request,
     body: dict[str, Any] = Body(...),
     user: Any = Depends(_current_user),
 ) -> SyncDocVersionResponse:
-    """Upsert one stage's audit doc. Schemaless - stored as-is, no model."""
+    """Upsert one stage's audit doc at ``expected_version``. Schemaless -
+    stored as-is, no model. Same optimistic-lock contract as
+    ``put_match_doc``.
+    """
     _hosted_gate()
     await _resolve_mirror(request, match_id)
     store = _project_state(request)
-
-    async def _load() -> tuple[dict | None, int]:
-        return await store.load_audit(match_id, slug, stage_number)
-
-    async def _save(version: int) -> int:
-        return await store.save_audit(match_id, slug, stage_number, body, expected_version=version)
-
-    version = await _mirror_save(_load, _save)
+    version = await store.save_audit(match_id, slug, stage_number, body, expected_version=expected_version)
     return SyncDocVersionResponse(version=version)
 
 

@@ -25,6 +25,23 @@ def _docs_url(match_id: str, kind: str) -> str:
     return f"/api/sync/matches/{match_id}/docs/{kind}"
 
 
+def _put_doc(
+    client: TestClient,
+    match_id: str,
+    kind: str,
+    *,
+    body: dict,
+    expected_version: int,
+):
+    """PUT one doc, always sending ``expected_version`` - the param is
+    required, no compat path for an unversioned call."""
+    return client.put(
+        _docs_url(match_id, kind),
+        params={"expected_version": expected_version},
+        json=body,
+    )
+
+
 def _bearer_for(client: TestClient) -> dict[str, str]:
     """Mint a desktop token for the currently-logged-in session, then
     clear the session cookie so subsequent requests authenticate purely
@@ -43,7 +60,8 @@ def test_local_mode_404() -> None:
     app = create_app()
     with TestClient(app, follow_redirects=False) as client:
         assert client.post(CREATE_URL, json={"match_id": "m1", "name": "Match 1"}).status_code == 404
-        assert client.put(_docs_url("m1", "match"), json={"name": "x"}).status_code == 404
+        put_resp = client.put(_docs_url("m1", "match"), params={"expected_version": 0}, json={"name": "x"})
+        assert put_resp.status_code == 404
 
 
 # anonymous requests are rejected
@@ -171,15 +189,15 @@ def test_put_match_doc_versions_increment_and_422_on_garbage(
 
     doc = match_model.Match(name="Match 1").model_dump(mode="json")
 
-    first = client.put(_docs_url("m1", "match"), json=doc)
+    first = _put_doc(client, "m1", "match", body=doc, expected_version=0)
     assert first.status_code == 200, first.text
     assert first.json() == {"version": 1}
 
-    second = client.put(_docs_url("m1", "match"), json=doc)
+    second = _put_doc(client, "m1", "match", body=doc, expected_version=1)
     assert second.status_code == 200, second.text
     assert second.json() == {"version": 2}
 
-    garbage = client.put(_docs_url("m1", "match"), json={"totally": "not a match doc"})
+    garbage = _put_doc(client, "m1", "match", body={"totally": "not a match doc"}, expected_version=2)
     assert garbage.status_code == 422, garbage.text
 
 
@@ -188,7 +206,7 @@ def test_put_match_doc_unknown_match_404(hosted_app: tuple[TestClient, _Capturin
     login(client, sender, "owner@example.com")
 
     doc = match_model.Match(name="Ghost").model_dump(mode="json")
-    resp = client.put(_docs_url("ghost", "match"), json=doc)
+    resp = _put_doc(client, "ghost", "match", body=doc, expected_version=0)
     assert resp.status_code == 404, resp.text
 
 
@@ -200,7 +218,7 @@ def test_put_match_doc_against_native_match_is_not_a_mirror(
     seed_match(_db_url_for(client), "owner@example.com", "native2")
 
     doc = match_model.Match(name="Native").model_dump(mode="json")
-    resp = client.put(_docs_url("native2", "match"), json=doc)
+    resp = _put_doc(client, "native2", "match", body=doc, expected_version=0)
     assert resp.status_code == 409, resp.text
     assert resp.json() == {"detail": "not_a_mirror"}
 
@@ -216,7 +234,7 @@ def test_second_user_cannot_touch_first_users_mirror(
     login(client, sender, "userb@example.com")
 
     doc = match_model.Match(name="A's match").model_dump(mode="json")
-    resp = client.put(_docs_url("m1", "match"), json=doc)
+    resp = _put_doc(client, "m1", "match", body=doc, expected_version=0)
     assert resp.status_code == 404, resp.text
 
 
@@ -231,11 +249,11 @@ def test_put_project_doc_round_trips_and_422_on_garbage(
     assert client.post(CREATE_URL, json={"match_id": "m1", "name": "Match 1"}).status_code == 200
 
     doc = MatchProject(name="Shooter A").model_dump(mode="json")
-    ok = client.put(_docs_url("m1", "project/shooter-a"), json=doc)
+    ok = _put_doc(client, "m1", "project/shooter-a", body=doc, expected_version=0)
     assert ok.status_code == 200, ok.text
     assert ok.json() == {"version": 1}
 
-    garbage = client.put(_docs_url("m1", "project/shooter-a"), json={"nope": True})
+    garbage = _put_doc(client, "m1", "project/shooter-a", body={"nope": True}, expected_version=1)
     assert garbage.status_code == 422, garbage.text
 
 
@@ -249,10 +267,83 @@ def test_put_audit_doc_is_schemaless_and_versions_increment(
     login(client, sender, "owner@example.com")
     assert client.post(CREATE_URL, json={"match_id": "m1", "name": "Match 1"}).status_code == 200
 
-    first = client.put(_docs_url("m1", "audit/shooter-a/1"), json={"shots": [0.5, 1.1]})
+    first = _put_doc(client, "m1", "audit/shooter-a/1", body={"shots": [0.5, 1.1]}, expected_version=0)
     assert first.status_code == 200, first.text
     assert first.json() == {"version": 1}
 
-    second = client.put(_docs_url("m1", "audit/shooter-a/1"), json={"shots": [0.5, 1.1, 1.9]})
+    second = _put_doc(client, "m1", "audit/shooter-a/1", body={"shots": [0.5, 1.1, 1.9]}, expected_version=1)
     assert second.status_code == 200, second.text
     assert second.json() == {"version": 2}
+
+
+# doc manifest + per-doc GET routes
+
+
+def test_doc_manifest_lists_versions(hosted_app: tuple[TestClient, _CapturingSender]) -> None:
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    assert client.post(CREATE_URL, json={"match_id": "m1", "name": "Match 1"}).status_code == 200
+
+    match_doc = match_model.Match(name="Match 1").model_dump(mode="json")
+    project_doc = MatchProject(name="Anna").model_dump(mode="json")
+    assert _put_doc(client, "m1", "match", body=match_doc, expected_version=0).status_code == 200
+    assert _put_doc(client, "m1", "project/anna", body=project_doc, expected_version=0).status_code == 200
+
+    resp = client.get("/api/sync/matches/m1/docs")
+    assert resp.status_code == 200, resp.text
+    docs = resp.json()["docs"]
+    by_key = {(d["doc_kind"], d["slug"], d["stage_number"]): d for d in docs}
+    assert by_key[("match", None, None)]["version"] == 1
+    assert by_key[("project", "anna", None)]["version"] == 1
+    assert "updated_at" in by_key[("match", None, None)]
+
+
+def test_get_doc_roundtrip_and_404(hosted_app: tuple[TestClient, _CapturingSender]) -> None:
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    assert client.post(CREATE_URL, json={"match_id": "m1", "name": "Match 1"}).status_code == 200
+
+    match_doc = match_model.Match(name="Match 1").model_dump(mode="json")
+    assert _put_doc(client, "m1", "match", body=match_doc, expected_version=0).status_code == 200
+
+    resp = client.get("/api/sync/matches/m1/docs/match")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"doc": match_doc, "version": 1}
+
+    resp = client.get("/api/sync/matches/m1/docs/audit/anna/9")
+    assert resp.status_code == 404, resp.text
+
+
+def test_put_doc_requires_expected_version(hosted_app: tuple[TestClient, _CapturingSender]) -> None:
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    assert client.post(CREATE_URL, json={"match_id": "m1", "name": "Match 1"}).status_code == 200
+
+    match_doc = match_model.Match(name="Match 1").model_dump(mode="json")
+    resp = client.put(_docs_url("m1", "match"), json=match_doc)  # no expected_version query param
+    assert resp.status_code == 422, resp.text
+
+
+def test_put_doc_version_conflict_409(hosted_app: tuple[TestClient, _CapturingSender]) -> None:
+    """A stale UPDATE (not a duplicate INSERT) - a second ``expected_version
+    == 0`` save would also conflict on Postgres's coalesce unique index,
+    but SQLite's plain unique index doesn't catch a NULL-slug duplicate
+    (see ``test_insert_conflict_when_already_exists`` in
+    ``test_project_state_store.py``), so this drives the conflict through
+    the UPDATE path instead - the same one every real re-push race hits.
+    """
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    assert client.post(CREATE_URL, json={"match_id": "m1", "name": "Match 1"}).status_code == 200
+
+    match_doc = match_model.Match(name="Match 1").model_dump(mode="json")
+    assert _put_doc(client, "m1", "match", body=match_doc, expected_version=0).status_code == 200
+    assert _put_doc(client, "m1", "match", body=match_doc, expected_version=1).status_code == 200
+
+    resp = client.put(
+        _docs_url("m1", "match"),
+        params={"expected_version": 1},  # stale: row is at version 2 now
+        json=match_doc,
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "version_conflict"

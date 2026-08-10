@@ -3,18 +3,21 @@
 ``HostedSyncClient`` wraps the two httpx clients a push needs: ``http``
 talks to the splitsmith API (base_url is the bare hosted origin - the
 client owns the /api/sync path prefix - plus bearer auth, built by the
-caller) for match adoption, the three doc-upsert routes, and the
-presign/complete legs of the multipart media protocol (see
-``splitsmith.ui.sync_api``); ``media_http`` is a plain client that PUTs
-part bytes straight to the presigned storage URLs the API hands back -
-no auth header, no base_url, since those URLs are already fully
-qualified and pre-signed.
+caller) for match adoption, the doc manifest / per-doc GET routes, the
+three version-guarded doc-upsert PUT routes, and the presign/complete
+legs of the multipart media protocol (see ``splitsmith.ui.sync_api``);
+``media_http`` is a plain client that PUTs part bytes straight to the
+presigned storage URLs the API hands back - no auth header, no
+base_url, since those URLs are already fully qualified and pre-signed.
 
 Every method raises :class:`SyncClientError` with a user-facing message
-on the two error conditions a desktop operator can actually act on: a
+on the error conditions a desktop operator can actually act on: a
 revoked/expired token (401, any route) and a match_id collision with a
-natively-created hosted match (409, only on ``ensure_match``). Every
-other HTTP error is left as an ``httpx.HTTPStatusError`` - there's
+natively-created hosted match (409, only on ``ensure_match``).
+``put_doc`` raises the narrower :class:`SyncVersionConflict` on its own
+409 - a lost optimistic-lock race, not an operator-facing error, but
+one the caller (the push executor) is expected to catch and retry.
+Every other HTTP error is left as an ``httpx.HTTPStatusError`` - there's
 nothing more useful to say about a 500 than what the server already
 said.
 """
@@ -29,7 +32,7 @@ from typing import IO
 
 import httpx
 
-from .plan import DocItem, MediaItem
+from .plan import DocItem, MediaItem, doc_identity_key
 
 #: Chunk size for each ``.read()`` call while filling out one upload
 #: part - independent of the server-chosen ``part_size`` (which arrives
@@ -49,6 +52,11 @@ _PART_UPLOAD_CONCURRENCY = 4
 
 class SyncClientError(RuntimeError):
     """Raised with a user-facing message (401 -> token revoked, 409 -> hosted match exists, etc.)."""
+
+
+class SyncVersionConflict(SyncClientError):
+    """A doc PUT lost the optimistic-lock race (hosted 409
+    ``version_conflict``) - the caller re-pulls, re-merges, retries."""
 
 
 class HostedSyncClient:
@@ -107,11 +115,39 @@ class HostedSyncClient:
         resp = self._http.delete("/api/device/session")
         self._raise_for_status(resp)
 
-    def put_doc(self, match_id: str, item: DocItem) -> int:
-        """Upsert one doc, returning the version the hosted side assigned."""
-        resp = self._http.put(self._doc_url(match_id, item), json=item.body)
+    def put_doc(self, match_id: str, item: DocItem, *, expected_version: int) -> int:
+        """Upsert one doc at ``expected_version`` (0 = create), returning
+        the version the hosted side assigned. Raises
+        :class:`SyncVersionConflict` when the row moved on since the
+        manifest/pull this ``expected_version`` came from."""
+        resp = self._http.put(
+            self._doc_url(match_id, item),
+            params={"expected_version": expected_version},
+            json=item.body,
+        )
+        if resp.status_code == 409:
+            raise SyncVersionConflict(
+                f"doc {doc_identity_key(item.kind, item.slug, item.stage_number)} "
+                "changed on the hosted side during this sync"
+            )
         self._raise_for_status(resp)
         return resp.json()["version"]
+
+    def get_doc_manifest(self, match_id: str) -> list[dict]:
+        """Identity + version of every hosted doc for this match."""
+        resp = self._http.get(f"/api/sync/matches/{match_id}/docs")
+        self._raise_for_status(resp)
+        return resp.json()["docs"]
+
+    def get_doc(
+        self, match_id: str, kind: str, slug: str | None, stage_number: int | None
+    ) -> tuple[dict, int]:
+        """Fetch one doc body + version by identity."""
+        path = self._doc_path(kind, slug, stage_number)
+        resp = self._http.get(f"/api/sync/matches/{match_id}/{path}")
+        self._raise_for_status(resp)
+        payload = resp.json()
+        return payload["doc"], payload["version"]
 
     def upload_media(
         self,
@@ -211,12 +247,19 @@ class HostedSyncClient:
         return digest.hexdigest()
 
     @staticmethod
-    def _doc_url(match_id: str, item: DocItem) -> str:
-        if item.kind == "match":
-            return f"/api/sync/matches/{match_id}/docs/match"
-        if item.kind == "project":
-            return f"/api/sync/matches/{match_id}/docs/project/{item.slug}"
-        return f"/api/sync/matches/{match_id}/docs/audit/{item.slug}/{item.stage_number}"
+    def _doc_path(kind: str, slug: str | None, stage_number: int | None) -> str:
+        """The ``docs/...`` URL suffix for one doc identity - shared by
+        ``_doc_url`` (a ``DocItem`` in hand) and ``get_doc`` (bare identity
+        fields, no ``DocItem`` to build for a read)."""
+        if kind == "match":
+            return "docs/match"
+        if kind == "project":
+            return f"docs/project/{slug}"
+        return f"docs/audit/{slug}/{stage_number}"
+
+    @classmethod
+    def _doc_url(cls, match_id: str, item: DocItem) -> str:
+        return f"/api/sync/matches/{match_id}/{cls._doc_path(item.kind, item.slug, item.stage_number)}"
 
     @staticmethod
     def _raise_for_status(resp: httpx.Response, *, on_409: str | None = None) -> None:
