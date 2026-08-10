@@ -44,7 +44,6 @@ from pydantic import BaseModel
 
 from .. import coach as coach_module
 from ..audit_data import audit_shots_to_engine_shots
-from ..config import CoachAutoClassifyConfig
 from ..overlay_theme import load_theme
 from ..share_card import MatchCard, RosterEntry, StageCard, card_hash, stage_figures
 from ..share_card_render import cached_card_png
@@ -123,21 +122,12 @@ def build_stage_card(state: Any, slug: str, stage_number: int) -> StageCard | No
     # StateConflictError retry) here, this function is unconditionally
     # read-only -- a deliberate choice, not an oversight: it makes the
     # card safe by construction without this module needing to reason
-    # about current_share_request at all. The guard below is copied
-    # verbatim from get_stage_coach's ``needs_backfill`` (server.py) so
-    # the two never define "needs a heal" differently.
-    shots_raw = payload.get("shots")
-    needs_backfill = isinstance(shots_raw, list) and any(
-        isinstance(s, dict)
-        and s.get("ms_after_beep") is not None
-        and s.get(coach_module.FIELD_INTERVAL_CLASS) is None
-        and s.get(coach_module.FIELD_INTERVAL_CLASS_SOURCE) != "manual"
-        for s in shots_raw
-    )
-    if needs_backfill:
-        coach_module.classify_intervals_in_dicts(
-            [s for s in shots_raw if isinstance(s, dict)], CoachAutoClassifyConfig()
-        )
+    # about current_share_request at all. "Needs a heal" is defined once,
+    # in ``coach.heal_unclassified`` (#780), so this surface and the coach
+    # GET can never drift apart on it; its return value says whether the
+    # doc changed, which only the persisting caller (get_stage_coach) has
+    # any use for.
+    coach_module.heal_unclassified(payload.get("shots"))
     # #774's canonical converter -- it carries interval_class onto each
     # engine Shot, which is what makes the split rule reachable here. The
     # beep offset only affects ``time_absolute``, which no card reads, so

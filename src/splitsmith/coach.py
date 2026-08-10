@@ -255,6 +255,53 @@ def classify_intervals_in_dicts(
     return shots
 
 
+def heal_unclassified(
+    shots: Any,
+    config: CoachAutoClassifyConfig | None = None,
+) -> bool:
+    """Backfill ``interval_class`` on a legacy audit doc's shot list (#780).
+
+    Every consumer of :func:`statistic_splits` that reads raw audit shots
+    needs this: a doc written before #775 carries no classes at all, and
+    without a heal it silently falls back to the threshold rule and
+    reports different figures than its neighbours. This is the one
+    definition of "needs a heal" -- four surfaces used to carry a copy and
+    one had already drifted.
+
+    ``shots`` is the raw ``audit["shots"]`` value, since that is what
+    every caller has; anything that is not a list is "nothing to heal",
+    and non-dict entries inside the list are skipped.
+
+    Returns True iff the classifier ran, so a caller on a writable surface
+    can decide whether to persist. Read-only surfaces (the share card, the
+    overlay renderer, the compare payload) ignore the result: they must
+    reach the same in-memory verdict without writing back.
+
+    A shot with no ``interval_class`` but ``interval_class_source ==
+    "manual"`` is an explicitly-cleared "do not reclassify" marker and
+    does not call for a heal. :func:`classify_intervals_in_dicts` skips
+    such a shot per-shot anyway, so this clause only decides whether the
+    pass runs at all -- which is exactly what decides whether the other
+    shots' stale auto classes get rewritten, and whether a persisting
+    caller has anything to write.
+
+    Mutates the shot dicts in place.
+    """
+    if not isinstance(shots, list):
+        return False
+    dicts = [s for s in shots if isinstance(s, dict)]
+    needs_heal = any(
+        s.get("ms_after_beep") is not None
+        and s.get(FIELD_INTERVAL_CLASS) is None
+        and s.get(FIELD_INTERVAL_CLASS_SOURCE) != "manual"
+        for s in dicts
+    )
+    if not needs_heal:
+        return False
+    classify_intervals_in_dicts(dicts, config or CoachAutoClassifyConfig())
+    return True
+
+
 def classify_intervals_in_models(
     shots: list[Shot],
     config: CoachAutoClassifyConfig,

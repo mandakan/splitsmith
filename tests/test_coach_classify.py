@@ -15,6 +15,7 @@ import pytest
 from splitsmith.coach import (
     classify_intervals_in_dicts,
     classify_intervals_in_models,
+    heal_unclassified,
     is_classification_stale,
     read_coach_fields,
     reload_hinted,
@@ -338,3 +339,73 @@ def test_statistic_splits_without_split_intervals_yields_nothing() -> None:
     shots = [_Gap(1.5, "first_shot"), _Gap(2.6, "reload"), _Gap(1.2, "transition")]
     assert statistic_splits(shots) == []
     assert statistic_splits([]) == []
+
+
+# ---------------------------------------------------------------------------
+# heal_unclassified: the single definition of "this doc needs a backfill"
+# (issue #780). Four surfaces used to carry their own copy of the guard.
+# ---------------------------------------------------------------------------
+
+
+def test_heal_unclassified_backfills_a_legacy_doc() -> None:
+    shots = [_shot(1, 1500), _shot(2, 1800)]
+    assert heal_unclassified(shots) is True
+    assert [s["interval_class"] for s in shots] == ["first_shot", "split"]
+    assert all(s["interval_class_source"] == "auto" for s in shots)
+
+
+def test_heal_unclassified_is_a_no_op_on_a_classified_doc() -> None:
+    shots = [_shot(1, 1500), _shot(2, 1800)]
+    heal_unclassified(shots)
+    before = [dict(s) for s in shots]
+    assert heal_unclassified(shots) is False
+    assert shots == before
+
+
+def test_heal_unclassified_takes_a_config() -> None:
+    # 0.30 s gap, but split_max_s is below it: the caller's config wins.
+    shots = [_shot(1, 1500), _shot(2, 1800)]
+    assert heal_unclassified(shots, CoachAutoClassifyConfig(split_max_s=0.2)) is True
+    assert shots[1]["interval_class"] == "transition"
+
+
+def test_heal_unclassified_skips_a_doc_whose_only_gap_is_a_cleared_manual() -> None:
+    # ``interval_class`` unset with ``interval_class_source == "manual"``
+    # is the "explicitly cleared, do not reclassify" marker. It is the one
+    # state where the ``!= manual`` clause changes anything: without it the
+    # pass runs and rewrites the *other* shots' stale auto classes. Only a
+    # hand-edited or imported doc reaches this shape (write_coach_fields
+    # sets both fields or neither), but all four surfaces must agree on it.
+    shots = [
+        _shot(1, 1500, interval_class="movement", interval_class_source="auto"),  # stale on purpose
+        _shot(2, 1800, interval_class_source="manual"),
+    ]
+    assert heal_unclassified(shots) is False
+    assert shots[0]["interval_class"] == "movement"
+    assert shots[1].get("interval_class") is None
+
+
+def test_heal_unclassified_runs_for_others_but_spares_the_cleared_manual() -> None:
+    shots = [_shot(1, 1500), _shot(2, 1800, interval_class_source="manual")]
+    assert heal_unclassified(shots) is True
+    assert shots[0]["interval_class"] == "first_shot"
+    assert shots[1].get("interval_class") is None
+
+
+def test_heal_unclassified_ignores_shots_without_ms_after_beep() -> None:
+    # No gap to classify, so nothing to heal -- and nothing written.
+    shots = [{"shot_number": 1}, {"shot_number": 2}]
+    assert heal_unclassified(shots) is False
+    assert shots == [{"shot_number": 1}, {"shot_number": 2}]
+
+
+@pytest.mark.parametrize("raw", [None, {}, "shots", 3, [None, "nope", 5]])
+def test_heal_unclassified_tolerates_a_malformed_shots_value(raw: Any) -> None:
+    # Every caller hands over ``audit["shots"]`` straight off a JSON doc.
+    assert heal_unclassified(raw) is False
+
+
+def test_heal_unclassified_classifies_around_non_dict_entries() -> None:
+    shots: list[Any] = [_shot(1, 1500), "junk", _shot(2, 1800)]
+    assert heal_unclassified(shots) is True
+    assert [shots[0]["interval_class"], shots[2]["interval_class"]] == ["first_shot", "split"]

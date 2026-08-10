@@ -134,6 +134,30 @@ def test_compare_junk_class_degrades_to_none(tmp_path: Path) -> None:
     assert audit_file.read_text(encoding="utf-8") == before
 
 
+def test_compare_leaves_a_cleared_manual_doc_alone(tmp_path: Path) -> None:
+    # #780: this route's guard used to omit the ``!= "manual"`` clause the
+    # coach GET and the share card carry, so a doc whose only unclassified
+    # shot is the "explicitly cleared, do not reclassify" marker triggered
+    # a heal here and not on its neighbours -- rewriting the other shots'
+    # stale auto classes and reporting different figures for the same run.
+    shots = _legacy_shots()
+    for s in shots[:3]:
+        s["interval_class"] = "movement"  # stale against the rule, on purpose
+        s["interval_class_source"] = "auto"
+    shots[3]["interval_class_source"] = "manual"  # cleared, class absent
+
+    client, _audit, compare_url = _bootstrap(tmp_path, shots)
+    resp = client.get(compare_url)
+    assert resp.status_code == 200, resp.text
+    (shooter,) = resp.json()["shooters"]
+    assert [s["interval_class"] for s in shooter["shots"]] == [
+        "movement",
+        "movement",
+        "movement",
+        None,
+    ]
+
+
 def test_compare_shot_without_ms_stays_unclassified(tmp_path: Path) -> None:
     shots = _legacy_shots()
     del shots[2]["ms_after_beep"]

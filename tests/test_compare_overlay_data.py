@@ -142,6 +142,23 @@ def test_partially_classified_legacy_audit_is_healed_in_memory(tmp_path):
     assert json.loads(partial.read_text())["shots"][2].get("interval_class") is None
 
 
+def test_cleared_manual_class_suppresses_the_heal(tmp_path):
+    # #780: this guard used to omit the ``!= "manual"`` clause the coach
+    # GET and the share card carry. A shot with no ``interval_class`` but
+    # ``interval_class_source == "manual"`` means "explicitly cleared, do
+    # not reclassify"; with the clause missing it triggered a heal here
+    # that rewrote the other shots' stale auto classes, so the overlay's
+    # average split disagreed with the same stage's coach page.
+    path = _write_audit(tmp_path / "ann", 1, [1200, 1450, 1700], classes=["movement", "movement", None])
+    doc = json.loads(path.read_text())
+    doc["shots"][2]["interval_class_source"] = "manual"
+    path.write_text(json.dumps(doc))
+
+    data = overlay_data.load_overlay_data([_bundle(tmp_path, "ann", audit=path)])
+    tile = data[("ann", 1)]
+    assert [s.interval_class for s in tile.shots] == ["movement", "movement", None]
+
+
 @pytest.mark.parametrize("payload", ["[]", "null", '"nope"', "3"])
 def test_valid_json_that_is_not_an_object_degrades_and_warns(tmp_path, caplog, payload):
     # ``read_audit_data`` hands back whatever ``json.loads`` produced with
