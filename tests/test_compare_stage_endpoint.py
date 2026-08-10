@@ -8,6 +8,7 @@ without ever writing back.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -99,6 +100,24 @@ def test_compare_heals_legacy_doc_in_memory_only(tmp_path: Path) -> None:
     # field itself must be the renamed ``video_ref``, not ``video_path``.
     assert shooter["video_ref"] is None
     assert "video_path" not in shooter
+
+
+def test_compare_survives_slim_install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The compare read heals in memory only and must never need the
+    hosted db extras - same slim-install invariant the coach GET broke
+    (see ``test_coach_api.test_get_coach_heal_survives_slim_install``).
+    Poisoning ``sys.modules`` makes any ``splitsmith.db`` import raise."""
+    client, _audit_file, compare_url, _shooter_root = _bootstrap(tmp_path, _legacy_shots())
+    monkeypatch.setitem(sys.modules, "splitsmith.db", None)
+    resp = client.get(compare_url)
+    assert resp.status_code == 200, resp.text
+    (shooter,) = resp.json()["shooters"]
+    assert [s["interval_class"] for s in shooter["shots"]] == [
+        "first_shot",
+        "split",
+        "transition",
+        "movement",
+    ]
 
 
 def test_compare_preserves_manual_classes(tmp_path: Path) -> None:

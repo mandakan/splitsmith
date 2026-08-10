@@ -10496,13 +10496,15 @@ def create_app(
         # only one of its four callers that persists, and it keys the write
         # off the return value so an untouched doc costs no version bump.
         if coach_module.heal_unclassified(payload.get("shots"), cfg) and not current_share_request.get():
-            from ..db import StateConflictError
-
             try:
                 _coach_save(slug, stage_number, payload, version)
-            except StateConflictError:
+            except _state_conflict_excs():
                 # A concurrent writer won the version race; serve the
                 # in-memory heal and let the next read persist it.
+                # ``_state_conflict_excs`` resolves the hosted-only
+                # conflict type lazily and guarded - a slim local install
+                # has no db extras, and an unguarded import here 500ed
+                # every heal-triggering coach GET.
                 pass
         return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
 
