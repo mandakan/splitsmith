@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.1](https://github.com/mandakan/splitsmith/compare/v0.23.0...v0.23.1) (2026-08-10)
+
+
+### Bug Fixes
+
+* **ui:** coach heal persist 500s on slim local installs ([#804](https://github.com/mandakan/splitsmith/issues/804)) ([e3cc8a5](https://github.com/mandakan/splitsmith/commit/e3cc8a5597009f54bb82b9590c588ec8863dc045))
+
 ## [0.23.0](https://github.com/mandakan/splitsmith/compare/v0.22.1...v0.23.0) (2026-08-10)
 
 
