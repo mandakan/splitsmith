@@ -508,11 +508,11 @@ function StageGroup({
   const [expanded, setExpanded] = useState(false);
   const showConfirmed = expanded || activeIsConfirmedHere;
 
-  // Edge case: a stage with no primary cameras yet -- nothing to review.
+  // Edge case: a stage with no cameras yet - nothing to review.
   if (group.items.length === 0) {
     return (
       <div className="border-t border-rule px-5 py-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
-        Stage {pad2(group.stage_number)} &middot; {group.stage_name} -- no primary cameras
+        Stage {pad2(group.stage_number)} &middot; {group.stage_name} - no cameras
       </div>
     );
   }
@@ -525,7 +525,7 @@ function StageGroup({
         </span>
         <span className="font-bold text-ink-2">{group.stage_name}</span>
         <span className="ml-auto text-subtle">
-          {group.confirmed} of {group.total_primaries} confirmed
+          {group.confirmed} of {group.total_videos} confirmed
         </span>
       </div>
       {pending.map((item) => (
@@ -591,8 +591,15 @@ function ItemRow({
     >
       <ShooterDot initials={initials(item.shooter_name)} slug={item.slug} />
       <div className="min-w-0">
-        <div className="truncate font-display text-[0.8125rem] font-bold uppercase tracking-[0.04em] text-ink">
-          {item.shooter_name}
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate font-display text-[0.8125rem] font-bold uppercase tracking-[0.04em] text-ink">
+            {item.shooter_name}
+          </span>
+          {item.role === "secondary" ? (
+            <span className="shrink-0 rounded-full border border-rule bg-surface-3 px-1.5 py-px font-mono text-[0.5rem] font-bold uppercase tracking-[0.08em] text-muted">
+              2nd cam
+            </span>
+          ) : null}
         </div>
         <div className="mt-0.5 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted tabular-nums">
           {item.beep_time != null ? `t ${item.beep_time.toFixed(3)}s` : "no beep"}
@@ -818,7 +825,9 @@ function ActiveDetail({
           <ShooterDot initials={initials(item.shooter_name)} slug={item.slug} />
           <span className="text-ink-2">{item.shooter_name}</span>
         </span>
-        <span className="text-subtle">Primary camera</span>
+        <span className="text-subtle">
+          {item.role === "secondary" ? "Secondary camera" : "Primary camera"}
+        </span>
         {takeName != null && (
           <Link
             to={takeHref(matchId, item.slug, takeName)}
@@ -868,8 +877,14 @@ function ActiveDetail({
                 <b className="font-mono text-led tabular-nums">
                   {draftTime.toFixed(3)}s
                 </b>
-                . Applying will discard any kept shots on this stage and
-                re-run trim + shot detection on the new beep.
+                {item.role === "secondary" ? (
+                  <>. Applying will re-cut this angle&apos;s trim around the new beep.</>
+                ) : (
+                  <>
+                    . Applying will discard any kept shots on this stage and
+                    re-run trim + shot detection on the new beep.
+                  </>
+                )}
               </>
             ) : mode === "empty" ? (
               <>
@@ -906,17 +921,30 @@ function ActiveDetail({
         </div>
       </div>
 
-      <div className="flex items-start gap-3 rounded-xl border border-live/40 bg-live/[0.08] px-4 py-3 text-[0.8125rem] text-ink-2">
-        <Crosshair className="mt-0.5 size-4 shrink-0 text-live" />
-        <div>
-          <b className="font-bold text-live">
-            Stage {pad2(item.stage_number)} is gated on every shooter&apos;s
-            beep being confirmed
-          </b>{" "}
-          before shot detection runs. Confirming the queue clears the
-          gate.
+      {item.role === "secondary" ? (
+        <div className="flex items-start gap-3 rounded-xl border border-rule bg-surface-2 px-4 py-3 text-[0.8125rem] text-ink-2">
+          <Crosshair className="mt-0.5 size-4 shrink-0 text-muted" />
+          <div>
+            <b className="font-bold text-ink-2">
+              This beep anchors the secondary angle&apos;s trim
+            </b>{" "}
+            - a wrong beep means this camera plays out of sync in the
+            audit view. It doesn&apos;t gate shot detection.
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex items-start gap-3 rounded-xl border border-live/40 bg-live/[0.08] px-4 py-3 text-[0.8125rem] text-ink-2">
+          <Crosshair className="mt-0.5 size-4 shrink-0 text-live" />
+          <div>
+            <b className="font-bold text-live">
+              Stage {pad2(item.stage_number)} is gated on every shooter&apos;s
+              beep being confirmed
+            </b>{" "}
+            before shot detection runs. Confirming the queue clears the
+            gate.
+          </div>
+        </div>
+      )}
 
       {/* Real waveform picker + small video preview. The picker remounts
           on item change via its key prop so the audio element resets and

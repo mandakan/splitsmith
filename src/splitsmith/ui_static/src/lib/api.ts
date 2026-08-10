@@ -1669,6 +1669,9 @@ export interface BeepQueueItem {
   shooter_name: string;
   stage_number: number;
   stage_name: string;
+  /** Secondaries queue too - their beep anchors that angle's trim. Only
+   *  shot detection stays gated on primaries. */
+  role: "primary" | "secondary";
   video_id: string;
   video_path: string;
   beep_time: number | null;
@@ -1686,7 +1689,7 @@ export interface BeepQueueStageGroup {
   stage_number: number;
   stage_name: string;
   items: BeepQueueItem[];
-  total_primaries: number;
+  total_videos: number;
   confirmed: number;
 }
 

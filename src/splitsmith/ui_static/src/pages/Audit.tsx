@@ -100,6 +100,7 @@ import {
 } from "@/lib/api";
 import { detectAnomalies, keptShotsFromMarkers } from "@/lib/anomalies";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
+import { planServedClip } from "@/lib/camPlayback";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
 import { useMatchHref } from "@/lib/matchHref";
 import { snapToPeak, type SnapPeaks } from "@/lib/peak-snap";
@@ -507,16 +508,25 @@ export function Audit() {
     }
   }, [videos, auditBeep]);
 
-  const beepOffset = useMemo(() => {
-    // Primary tab: served clip *is* the audit timeline (trimmed primary
-    // serves trimmed; untrimmed primary serves source). Offset is zero.
-    if (activeVideoIndex === 0) return 0;
-    // Secondary tab: served clip is always the source for now (per-video
-    // trimming isn't wired through the production UI yet). Map audit time
-    // T to secondary source time via beep alignment.
-    if (activeBeep == null || auditBeep == null) return 0;
-    return activeBeep - auditBeep;
-  }, [activeBeep, auditBeep, activeVideoIndex]);
+  // Which file to stream for the active cam + how audit time maps onto
+  // it. Secondaries have their own beep-anchored trim once built, so the
+  // mapping runs through clip-local beeps - source-space deltas against
+  // a trimmed clip seek past its EOF (black frame). See camPlayback.ts.
+  const servedPlan = useMemo(
+    () =>
+      activeVideo
+        ? planServedClip({
+            index: activeVideoIndex,
+            beepTime: activeBeep,
+            processedTrim: activeVideo.processed?.trim ?? false,
+            primaryPeaksTrimmed: peaks?.trimmed ?? false,
+            auditBeep,
+            preBufferSeconds: project?.trim_pre_buffer_seconds ?? 5,
+          })
+        : null,
+    [activeVideo, activeVideoIndex, activeBeep, auditBeep, peaks?.trimmed, project],
+  );
+  const beepOffset = servedPlan?.offset ?? 0;
 
   // Reset state on stage change. Anything dirty has already been
   // auto-saved in the StageSelector handler before navigating.
@@ -1590,18 +1600,14 @@ export function Audit() {
   // thing because the trim can't exist without a beep.
   // proxy_ready === false means the proxy object is not in storage yet;
   // VideoPanel renders an explicit placeholder rather than a broken player.
-  const videoSrc = activeVideo
-    ? peaks
-      ? // Sync mode swaps to the full source stream so the operator can
-        api.videoStreamUrl(
-          slug,
-          activeVideo.path,
-          peaks.trimmed ? "trim" : "proxy",
-        )
-      : peaksError != null
-        ? api.videoStreamUrl(slug, activeVideo.path)
-        : ""
-    : "";
+  const videoSrc =
+    activeVideo && servedPlan
+      ? peaks
+        ? api.videoStreamUrl(slug, activeVideo.path, servedPlan.kind)
+        : peaksError != null
+          ? api.videoStreamUrl(slug, activeVideo.path)
+          : ""
+      : "";
 
   // The trimmed audit clip drives the waveform when present; falls back
   // to the full source peaks otherwise. Beep-editing surfaces lived
