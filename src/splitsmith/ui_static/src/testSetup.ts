@@ -31,6 +31,40 @@ afterEach(() => {
   cleanup();
 });
 
+// Node >= 26 defines its own experimental `localStorage`/`sessionStorage`
+// globals, which are `undefined` unless the process runs with
+// --localstorage-file. In the vitest jsdom environment those globals shadow
+// jsdom's real Web Storage, so any component that reads storage on render
+// (mode toggle, stage-drawer collapse, device-code stash, ...) crashes.
+// Provide an in-memory stand-in per test file; the jsdom window is fresh per
+// file (isolate on), so nothing leaks across files.
+function memoryStorage(): Storage {
+  const store = new Map<string, string>();
+  return {
+    get length() {
+      return store.size;
+    },
+    key: (i: number) => [...store.keys()][i] ?? null,
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => void store.set(k, String(v)),
+    removeItem: (k: string) => void store.delete(k),
+    clear: () => store.clear(),
+  };
+}
+
+if (window.localStorage == null) {
+  Object.defineProperty(window, "localStorage", {
+    value: memoryStorage(),
+    configurable: true,
+  });
+}
+if (window.sessionStorage == null) {
+  Object.defineProperty(window, "sessionStorage", {
+    value: memoryStorage(),
+    configurable: true,
+  });
+}
+
 class ResizeObserverStub {
   observe() {}
   unobserve() {}
