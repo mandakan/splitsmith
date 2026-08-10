@@ -44,7 +44,7 @@ def _seed_mirror(client: TestClient, match_id: str, name: str) -> None:
     created = client.post(CREATE_URL, json={"match_id": match_id, "name": name})
     assert created.status_code == 200, created.text
     doc = match_model.Match(match_id=match_id, name=name, shooters=[], stages=[]).model_dump(mode="json")
-    put = client.put(_sync_docs_url(match_id, "match"), json=doc)
+    put = client.put(_sync_docs_url(match_id, "match"), params={"expected_version": 0}, json=doc)
     assert put.status_code == 200, put.text
 
 
