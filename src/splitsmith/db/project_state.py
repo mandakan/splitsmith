@@ -24,6 +24,7 @@ uses ``postgresql+asyncpg://``.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import delete, select, update
@@ -31,6 +32,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from .models import StateDocRow
+
+
+@dataclass(frozen=True)
+class DocMeta:
+    """Identity + version of one state doc, for the sync manifest."""
+
+    doc_kind: str
+    slug: str | None
+    stage_number: int | None
+    version: int
+    updated_at: datetime
 
 
 class StateConflictError(Exception):
@@ -183,6 +195,30 @@ class ProjectStateStore:
         async with self._session_factory() as session:
             rows = (await session.execute(select(StateDocRow).where(*terms))).scalars().all()
         return [(row.slug, row.stage_number, row.doc) for row in rows]
+
+    async def list_doc_meta(self, match_id: str) -> list[DocMeta]:
+        """Identity, version, and updated_at of every doc in a match.
+
+        The sync pull manifest: desktop diffs these versions against the
+        ones it recorded at last sync to find remotely-changed docs
+        without shipping doc bodies. One indexed query, no doc payloads.
+        """
+        async with self._session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(
+                        StateDocRow.doc_kind,
+                        StateDocRow.slug,
+                        StateDocRow.stage_number,
+                        StateDocRow.version,
+                        StateDocRow.updated_at,
+                    ).where(
+                        StateDocRow.user_id == self._user_id,
+                        StateDocRow.match_id == match_id,
+                    )
+                )
+            ).all()
+        return [DocMeta(*row) for row in rows]
 
     async def delete_shooter(self, match_id: str, slug: str) -> int:
         """Delete one shooter's docs within a match; return the row count.
