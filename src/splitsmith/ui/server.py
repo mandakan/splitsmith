@@ -3866,6 +3866,10 @@ class BeepQueueItem(BaseModel):
     shooter_name: str
     stage_number: int
     stage_name: str
+    # Secondaries are queue items too: their beep anchors that angle's trim,
+    # so a wrong auto-beep needs the same review surface as a primary's.
+    # Only shot detection remains primary-gated.
+    role: Literal["primary", "secondary"]
     video_id: str
     video_path: str
     beep_time: float | None
@@ -3888,7 +3892,7 @@ class BeepQueueStageGroup(BaseModel):
     stage_number: int
     stage_name: str
     items: list[BeepQueueItem]
-    total_primaries: int
+    total_videos: int
     confirmed: int
 
 
@@ -12953,7 +12957,9 @@ def create_app(
     def get_beep_queue(include_confirmed: bool = Query(default=False)) -> BeepQueueResponse:
         """Pending beep items across every shooter in the bound match.
 
-        Surfaces three pending states per primary video:
+        Surfaces three pending states per video (primary and secondary -
+        every angle's beep anchors its own trim; ``ignored`` videos are
+        skipped):
           - ``missing``: detector hasn't run or didn't find a beep
           - ``low_confidence``: detector found one but below the project's
             auto-trust threshold
@@ -12967,6 +12973,8 @@ def create_app(
 
         Items are grouped by stage; per-stage shot detection is gated on
         every shooter's primary in that stage being ``beep_reviewed``.
+        Secondary items never gate anything - they exist so a wrong
+        secondary auto-beep has a review surface at all.
         """
         match_root, match = _resolve_match_context()
         # Resolve the low-confidence threshold from any shooter's automation
@@ -12986,7 +12994,7 @@ def create_app(
         groups: dict[int, BeepQueueStageGroup] = {}
         total_pending = 0
         total_confirmed = 0
-        total_primaries = 0
+        total_videos = 0
 
         # Proxy readiness drives the beep review "preview generating"
         # placeholder. Raw uploads and their proxies live in the tenant-root
@@ -13015,63 +13023,73 @@ def create_app(
             for stage in proj.stages:
                 if stage.skipped:
                     continue
+                # Primary first, then secondaries in the order they were
+                # added - the same ordering the Audit page's cam column
+                # uses, so the queue reads top-to-bottom like the tiles.
                 primary = next((v for v in stage.videos if v.role == "primary"), None)
-                if primary is None:
+                secondaries = sorted(
+                    (v for v in stage.videos if v.role == "secondary"),
+                    key=lambda v: v.added_at,
+                )
+                stage_videos = ([primary] if primary is not None else []) + secondaries
+                if not stage_videos:
                     continue
-                total_primaries += 1
                 grp = groups.setdefault(
                     stage.stage_number,
                     BeepQueueStageGroup(
                         stage_number=stage.stage_number,
                         stage_name=stage_lookup.get(stage.stage_number, stage.stage_name),
                         items=[],
-                        total_primaries=0,
+                        total_videos=0,
                         confirmed=0,
                     ),
                 )
-                grp.total_primaries += 1
-                # Status classification.
-                if primary.beep_time is None:
-                    status = "missing"
-                elif primary.beep_reviewed:
-                    grp.confirmed += 1
-                    total_confirmed += 1
-                    if not include_confirmed:
-                        continue
-                    status = "confirmed"
-                elif primary.beep_confidence is not None and primary.beep_confidence < threshold:
-                    status = "low_confidence"
-                else:
-                    status = "unreviewed"
-                if status != "confirmed":
-                    total_pending += 1
-                alts = [
-                    BeepQueueAltCandidate(
-                        time=cand.time,
-                        confidence=cand.confidence,
+                for video in stage_videos:
+                    total_videos += 1
+                    grp.total_videos += 1
+                    # Status classification.
+                    if video.beep_time is None:
+                        status = "missing"
+                    elif video.beep_reviewed:
+                        grp.confirmed += 1
+                        total_confirmed += 1
+                        if not include_confirmed:
+                            continue
+                        status = "confirmed"
+                    elif video.beep_confidence is not None and video.beep_confidence < threshold:
+                        status = "low_confidence"
+                    else:
+                        status = "unreviewed"
+                    if status != "confirmed":
+                        total_pending += 1
+                    alts = [
+                        BeepQueueAltCandidate(
+                            time=cand.time,
+                            confidence=cand.confidence,
+                        )
+                        for cand in (video.beep_candidates or [])[:3]
+                    ]
+                    grp.items.append(
+                        BeepQueueItem(
+                            slug=slug,
+                            shooter_name=proj.competitor_name or slug,
+                            stage_number=stage.stage_number,
+                            stage_name=stage_lookup.get(stage.stage_number, stage.stage_name),
+                            role=video.role,
+                            video_id=video.video_id,
+                            video_path=video.path.as_posix(),
+                            beep_time=video.beep_time,
+                            beep_confidence=video.beep_confidence,
+                            beep_reviewed=video.beep_reviewed,
+                            status=status,
+                            alt_candidates=alts,
+                            proxy_ready=_proxy_ready(video.path.as_posix()),
+                        )
                     )
-                    for cand in (primary.beep_candidates or [])[:3]
-                ]
-                grp.items.append(
-                    BeepQueueItem(
-                        slug=slug,
-                        shooter_name=proj.competitor_name or slug,
-                        stage_number=stage.stage_number,
-                        stage_name=stage_lookup.get(stage.stage_number, stage.stage_name),
-                        video_id=primary.video_id,
-                        video_path=primary.path.as_posix(),
-                        beep_time=primary.beep_time,
-                        beep_confidence=primary.beep_confidence,
-                        beep_reviewed=primary.beep_reviewed,
-                        status=status,
-                        alt_candidates=alts,
-                        proxy_ready=_proxy_ready(primary.path.as_posix()),
-                    )
-                )
 
         ordered_stages = sorted(groups.values(), key=lambda g: g.stage_number)
         return BeepQueueResponse(
-            total_items=total_primaries,
+            total_items=total_videos,
             pending_count=total_pending,
             confirmed_count=total_confirmed,
             stages=ordered_stages,

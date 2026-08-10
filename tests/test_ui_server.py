@@ -8800,6 +8800,140 @@ def test_beep_queue_proxy_ready_local_mode_always_true(tmp_path: Path) -> None:
     assert items[0]["proxy_ready"] is True, "local mode must always report proxy_ready=True"
 
 
+def _add_stage_video(
+    root: Path,
+    *,
+    role: str,
+    filename: str,
+    beep_time: float | None,
+    beep_source: str | None,
+    beep_confidence: float | None,
+    beep_reviewed: bool,
+) -> str:
+    """Append a video to stage 1 of the ``me`` shooter and return its video_id."""
+    from splitsmith import match_model
+
+    shooter_root = match_model.Match.shooter_root(root, "me")
+    project = MatchProject.load(shooter_root)
+    video = StageVideo(
+        path=root / filename,
+        role=role,  # type: ignore[arg-type]
+        beep_time=beep_time,
+        beep_source=beep_source,  # type: ignore[arg-type]
+        beep_confidence=beep_confidence,
+        beep_reviewed=beep_reviewed,
+    )
+    project.stages[0].videos.append(video)
+    project.save(shooter_root)
+    # video_id hashes "<path>#<stage_number>" and stage_number is stamped
+    # on load - read the id back from a fresh load, not the local object.
+    reloaded = MatchProject.load(shooter_root)
+    return next(v for v in reloaded.stages[0].videos if v.path == video.path).video_id
+
+
+def test_beep_queue_includes_secondary_videos(tmp_path: Path) -> None:
+    """A secondary with an unreviewed auto beep is a first-class queue item.
+
+    Before this behavior existed the queue enumerated only primaries, so a
+    wrong secondary auto-beep (echo, neighbouring timer) had no review
+    surface anywhere in the SPA - Audit's sync pill deep-linked into the
+    queue with a focus key that matched nothing.
+    """
+    root = tmp_path / "match"
+    _build_project_with_primary(
+        root,
+        "Secondary In Queue",
+        beep_time=25.13,
+        beep_source="manual",
+        beep_confidence=1.0,
+        beep_reviewed=True,
+    )
+    secondary_id = _add_stage_video(
+        root,
+        role="secondary",
+        filename="secondary.mp4",
+        beep_time=5.95,
+        beep_source="auto",
+        beep_confidence=0.8,
+        beep_reviewed=False,
+    )
+    # Ignored videos are skipped entirely by the pipeline and must not
+    # surface in the queue.
+    _add_stage_video(
+        root,
+        role="ignored",
+        filename="ignored.mp4",
+        beep_time=None,
+        beep_source=None,
+        beep_confidence=None,
+        beep_reviewed=False,
+    )
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
+
+    resp = client.get("/api/match/beep-queue")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    items = [item for stage in body["stages"] for item in stage["items"]]
+    assert [it["video_id"] for it in items] == [secondary_id]
+    assert items[0]["role"] == "secondary"
+    assert items[0]["status"] == "unreviewed"
+    # Reviewed primary counts as confirmed; the ignored video is invisible.
+    assert body["total_items"] == 2
+    assert body["pending_count"] == 1
+    assert body["confirmed_count"] == 1
+    group = body["stages"][0]
+    assert group["total_videos"] == 2
+    assert group["confirmed"] == 1
+
+    # include_confirmed=true surfaces both, primary first.
+    resp = client.get("/api/match/beep-queue?include_confirmed=true")
+    items = [item for stage in resp.json()["stages"] for item in stage["items"]]
+    assert [it["role"] for it in items] == ["primary", "secondary"]
+    assert items[0]["status"] == "confirmed"
+
+
+def test_beep_queue_confirm_secondary(tmp_path: Path) -> None:
+    """Confirming a secondary's beep through the queue flips beep_reviewed
+    on the secondary video and leaves the primary untouched."""
+    from splitsmith import match_model
+
+    root = tmp_path / "match"
+    _build_project_with_primary(
+        root,
+        "Confirm Secondary",
+        beep_time=25.13,
+        beep_source="manual",
+        beep_confidence=1.0,
+        beep_reviewed=True,
+    )
+    secondary_id = _add_stage_video(
+        root,
+        role="secondary",
+        filename="secondary.mp4",
+        beep_time=5.95,
+        beep_source="auto",
+        beep_confidence=0.8,
+        beep_reviewed=False,
+    )
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
+
+    resp = client.post(
+        "/api/match/beep-queue/confirm",
+        json={"slug": "me", "stage_number": 1, "video_id": secondary_id},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["pending_count"] == 0
+
+    shooter_root = match_model.Match.shooter_root(root, "me")
+    project = MatchProject.load(shooter_root)
+    videos = project.stages[0].videos
+    secondary = next(v for v in videos if v.video_id == secondary_id)
+    assert secondary.beep_reviewed is True
+    assert secondary.beep_time == 5.95
+
+
 def test_shot_detect_does_not_adopt_other_shooters_job(two_shooter_match: Path) -> None:
     """Issue #664: with shooter A's shot-detect still in flight on stage 1,
     shooter B's POST for stage 1 must start B's own job - the dedupe used
