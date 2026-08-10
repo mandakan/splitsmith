@@ -7,6 +7,7 @@ Tests the GET/POST/DELETE /api/match/shares routes via the
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -16,7 +17,7 @@ from sqlalchemy import delete as _delete
 from sqlalchemy import select as _select
 
 from splitsmith.db import MatchRow, ProjectStateStore, ShareTokenRow, User, create_engine, sessionmaker
-from tests.hosted_helpers import _CapturingSender, login, seed_match
+from tests.hosted_helpers import _CapturingSender, login, moto_s3_storage, seed_match
 
 MID = "test-match-abc123"
 OTHER_MID = "test-match-xyz999"
@@ -576,6 +577,65 @@ def test_share_stage_compare_happy_path(
     for shot in shooter["shots"]:
         assert set(shot.keys()) == {"shot_number", "time_after_beep", "source", "interval_class"}
     assert not client.cookies
+
+
+def test_share_stream_trim_happy_path(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end anonymous streaming happy path (#700): share token ->
+    ``_share_alias`` -> ``stream_shooter_video``'s logical-ref fallback ->
+    ``storage.exists`` -> 307 presigned redirect. Also ties the compare
+    payload's ``video_ref`` for the same shooter to the ref actually
+    streamed, so the two surfaces are proven consistent end-to-end."""
+    client, sender = hosted_app
+    with moto_s3_storage(monkeypatch, "share-stream-happy-path-bucket") as captured:
+        login(client, sender, "owner@example.com")
+        seed_match(hosted_env, "owner@example.com", MID)
+        _seed_state_docs(hosted_env, "owner@example.com", MID, SLUG)
+        doc = {
+            "stage_number": 1,
+            "beep_time": 5.0,
+            "shots": [{"shot_number": 1, "time": 5.5, "ms_after_beep": 500, "source": "detected"}],
+        }
+        _seed_stage_video_and_audit(hosted_env, "owner@example.com", MID, SLUG, doc)
+
+        # Drive one authenticated request so the per-request tenant storage
+        # builds and is captured for the direct write below (same trick as
+        # test_media_presign_serving.py's s3_stream_client fixture).
+        client.get("/api/me/recent-projects")
+        storage = captured["storage"]
+
+        # video_id formula: hashlib.blake2s("<path>#<stage_number>",
+        # digest_size=6) - same derivation _seed_stage_video_and_audit's
+        # StageVideo(path=Path("raw/v.mp4"), ...) on stage 1 produces.
+        video_id = hashlib.blake2s(b"raw/v.mp4#1", digest_size=6).hexdigest()
+        trim_name = f"stage1_cam_{video_id}_trimmed.mp4"
+        trim_key = f"matches/{MID}/shooters/{SLUG}/trimmed/{trim_name}"
+        storage.write_bytes(trim_key, b"TRIMDATA")
+
+        token = _create_share_token(client, MID)
+        client.cookies.clear()
+
+        resp = client.get(
+            _share_url(token, f"match/shooters/{SLUG}/videos/stream"),
+            params={"path": f"trimmed/{trim_name}", "kind": "auto"},
+        )
+        assert resp.status_code == 307, resp.text
+        location = resp.headers["location"]
+        # Presigned URL: the key (and its unique video-id segment) shows up
+        # in the path, and a signature query param is present.
+        assert trim_name in location
+        assert "Signature=" in location
+        assert not client.cookies
+
+        # Tie the stream ref back to the compare payload for the same
+        # shooter/stage - the two surfaces must agree end-to-end.
+        compare_resp = client.get(_share_url(token, "match/stage/1/compare"))
+        assert compare_resp.status_code == 200, compare_resp.text
+        (shooter,) = compare_resp.json()["shooters"]
+        assert shooter["video_ref"] == f"trimmed/{trim_name}"
 
 
 def test_share_stream_malformed_ref_matches_unknown_token_404(

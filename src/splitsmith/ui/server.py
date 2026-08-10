@@ -940,6 +940,13 @@ _SHARE_PATH_RE = re.compile(
     r"|shooters/[^/]+/coach/distributions"
     r"|shooters/[^/]+/videos/stream"
     r"|match/stage/\d+/compare"
+    # Same registry as the "shooters/[^/]+/videos/stream" shape above -
+    # this alternative also reaches the registered-video branch of
+    # stream_shooter_video (raw sources/proxies), not just Compare's
+    # logical trim refs. That's deliberate: it's the multi-shooter
+    # wrapper the SPA's Compare view streams through, and parity with
+    # the already-whitelisted single-shooter shape means it exposes
+    # nothing new in-surface.
     r"|match/shooters/[^/]+/videos/stream"
     r"|og\.png"
     r"|og/[^/]+/\d+\.png"
