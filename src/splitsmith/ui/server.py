@@ -84,6 +84,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -613,6 +614,14 @@ def _ensure_ui_built() -> None:
 def _now_iso() -> str:
     """ISO-8601 UTC timestamp for audit_events entries."""
     return datetime.now(UTC).isoformat()
+
+
+def _new_event_id() -> str:
+    """Unique id for audit_events entries - the sync merge unions event
+    lists by this id, so every event needs one at creation time. uuid4
+    hex, not ULID: ordering comes from ``ts``, and the ulid package is a
+    hosted-only extra while events are stamped on slim local installs too."""
+    return uuid.uuid4().hex
 
 
 def _load_env_files(project_root: Path | None = None) -> list[Path]:
@@ -2911,6 +2920,7 @@ def register_job_bodies(state: AppState) -> None:
             events = list(doc.get("audit_events") or [])
             events.append(
                 {
+                    "id": _new_event_id(),
                     "ts": _now_iso(),
                     "kind": "shot_detect_run",
                     "payload": {
@@ -10268,6 +10278,14 @@ def create_app(
                 [s for s in shots if isinstance(s, dict)],
                 CoachAutoClassifyConfig(),
             )
+        # Sync merge unions audit_events by id (bidirectional sync
+        # slice); the SPA authors events without one, so stamp them here
+        # at the save boundary.
+        events = payload.get("audit_events")
+        if isinstance(events, list):
+            for event in events:
+                if isinstance(event, dict) and not event.get("id"):
+                    event["id"] = _new_event_id()
         # Read the current version so the save is optimistic-locked. The
         # SPA PUT doesn't carry a version (it assumes last-writer-wins), so
         # this load-then-save has a tiny race window: if a concurrent
@@ -10546,6 +10564,7 @@ def create_app(
         events = list(payload.get("audit_events") or [])
         events.append(
             {
+                "id": _new_event_id(),
                 "ts": _now_iso(),
                 "kind": "coach_reclassify",
                 "payload": {"shot_count": len(shots)},
@@ -10603,6 +10622,7 @@ def create_app(
         events = list(payload.get("audit_events") or [])
         events.append(
             {
+                "id": _new_event_id(),
                 "ts": _now_iso(),
                 "kind": "coach_patch",
                 "payload": {
