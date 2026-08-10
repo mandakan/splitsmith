@@ -33,6 +33,7 @@ export interface JobsState {
   acknowledge: (job: Job) => Promise<void>;
   acknowledgeAll: () => Promise<void>;
   cancel: (job: Job) => Promise<void>;
+  retry: (job: Job) => Promise<void>;
 }
 
 export function useJobs(): JobsState {
@@ -96,6 +97,18 @@ export function useJobs(): JobsState {
     }
   }, []);
 
+  const retry = useCallback(
+    async (job: Job) => {
+      try {
+        await api.retryJob(job.id);
+        await refresh();
+      } catch {
+        /* swallow */
+      }
+    },
+    [refresh],
+  );
+
   const running = jobs.filter((j) => j.status === "running");
   const pending = jobs.filter((j) => j.status === "pending");
   const failed = jobs.filter((j) => j.status === "failed" && !j.acknowledged);
@@ -110,5 +123,6 @@ export function useJobs(): JobsState {
     acknowledge,
     acknowledgeAll,
     cancel,
+    retry,
   };
 }
