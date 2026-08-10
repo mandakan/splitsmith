@@ -24,13 +24,16 @@ const MARKETING_URL = "https://splitsmith.app";
 
 /** Branded page frame for every share render path (results, dead link,
  *  load error): one thin header + one footer line, both linking to the
- *  marketing site. The frame locks to the viewport (h-dvh); the middle
- *  region owns scrolling, so the branded header/footer stay pinned and
- *  a child that renders min-h-0 flex-1 (Compare's cockpit layout) is
- *  viewport-bounded without needing --shell-header-h. */
+ *  marketing site. At md+ the frame locks to the viewport (h-dvh) and
+ *  the middle region owns scrolling, so the branded header/footer stay
+ *  pinned and a child that renders min-h-0 flex-1 (Compare's cockpit
+ *  layout, desktop-gated at the same md breakpoint) is viewport-bounded
+ *  without needing --shell-header-h. Below md the frame grows and the
+ *  document scrolls as before - the mobile results viewer keeps its
+ *  shipped scroll-away header/footer. */
 function ShareFrame({ children }: { children: ReactNode }) {
   return (
-    <div className="flex h-dvh flex-col bg-bg">
+    <div className="flex min-h-dvh flex-col bg-bg md:h-dvh">
       <header className="flex-none border-b border-rule bg-surface">
         <div className="mx-auto flex w-full max-w-[1100px] items-center justify-between gap-3 px-4 py-2.5 md:px-7">
           <a
@@ -57,7 +60,7 @@ function ShareFrame({ children }: { children: ReactNode }) {
       {/* flex column (not a plain block): the dead/error cards center
           themselves with flex-1 + place-items-center, which needs a
           flex parent - a percentage min-height would resolve to 0 here. */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">{children}</div>
+      <div className="flex flex-1 flex-col md:min-h-0 md:overflow-y-auto">{children}</div>
       <footer className="flex-none border-t border-rule">
         <div className="mx-auto w-full max-w-[1100px] px-4 py-4 md:px-7">
           <a
