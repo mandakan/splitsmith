@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.23.0](https://github.com/mandakan/splitsmith/compare/v0.22.1...v0.23.0) (2026-08-10)
+
+
+### Features
+
+* **ui:** add compare leaderboard rail for cockpit layout ([3429231](https://github.com/mandakan/splitsmith/commit/342923156aff6d935f874b864f99023c65069085))
+* **ui:** add fused transport + timeline dock for compare cockpit ([e718824](https://github.com/mandakan/splitsmith/commit/e718824ec046caff6476f90e0c32e45c440f0802))
+* **ui:** viewport-locked cockpit layout for compare view ([1158c2f](https://github.com/mandakan/splitsmith/commit/1158c2f29881816bfb1b71a98d984658b8396528))
+* **ui:** viewport-locked cockpit layout for compare view ([0e8bab5](https://github.com/mandakan/splitsmith/commit/0e8bab5f52fdc24e44f3a317edaafb5dfe639524))
+
+
+### Bug Fixes
+
+* **sync:** skip unchanged docs on push, delta like media ([7c54aca](https://github.com/mandakan/splitsmith/commit/7c54aca988b462ac5e82a145af551ee0bc5cba56))
+* **sync:** skip unchanged docs on push, delta like media ([1ae0d47](https://github.com/mandakan/splitsmith/commit/1ae0d47f65b38fb0e1c89ae87a32b873e5b5a275)), closes [#797](https://github.com/mandakan/splitsmith/issues/797)
+* **ui:** bound the ingest workspace height so the clip list scrolls internally ([44da0c8](https://github.com/mandakan/splitsmith/commit/44da0c80ea2fa6b1de0bd1b134c16f384fdcf3f3))
+* **ui:** bound the ingest workspace height so the clip list scrolls internally ([d6483d5](https://github.com/mandakan/splitsmith/commit/d6483d5be5bdd20fb6291b1142f967b3c954e8a2))
+* **ui:** compare cockpit layout polish from visual verification ([3bb6a62](https://github.com/mandakan/splitsmith/commit/3bb6a622fe730c68c17e2eab60146a4338a773ba))
+* **ui:** make secondary camera beeps reviewable and fix secondary focus playback ([49d944c](https://github.com/mandakan/splitsmith/commit/49d944ca25c73691ce470f1e96566a2398eff973))
+* **ui:** scope share frame viewport lock to md+ viewports ([ee1b675](https://github.com/mandakan/splitsmith/commit/ee1b675ae565d8b7d7ada5cec2e920ba24c28988))
+* **ui:** secondary camera beep review + trimmed-secondary focus playback ([2515e0d](https://github.com/mandakan/splitsmith/commit/2515e0d302d9e363d97fb3a893fbe918ea246410))
+* **ui:** thin transport dock ruler ticks on long stages ([ac3aade](https://github.com/mandakan/splitsmith/commit/ac3aade1ab2ffe984bb31bdecd326528dc58dcfb))
+
+
+### Refactors
+
+* **ui:** pin share frame to viewport with scrolling middle region ([e111b2e](https://github.com/mandakan/splitsmith/commit/e111b2ec0fa443c889dfaae66c71e53b7d96a74c))
+
+
+### Documentation
+
+* implementation plan for compare cockpit layout ([1195ad1](https://github.com/mandakan/splitsmith/commit/1195ad1edf47a00713f3e2956ef613ff69f92bc3))
+
 ## [0.22.1](https://github.com/mandakan/splitsmith/compare/v0.22.0...v0.22.1) (2026-08-10)
 
 
