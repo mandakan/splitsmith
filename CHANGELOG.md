@@ -1,5 +1,69 @@
 # Changelog
 
+## [0.22.0](https://github.com/mandakan/splitsmith/compare/v0.21.0...v0.22.0) (2026-08-10)
+
+
+### Features
+
+* **compare:** log max observed sync drift per playback session ([ff98292](https://github.com/mandakan/splitsmith/commit/ff9829227159ff3a4a6a39f4f9ecdabe554450ec))
+* **compare:** resolve trims through storage, expose logical video_ref ([e486d72](https://github.com/mandakan/splitsmith/commit/e486d7216e2517c48efbbf2a32cd96c6a7f37089))
+* **compare:** stream fallback takes logical refs, serves hosted via presign ([baa27d2](https://github.com/mandakan/splitsmith/commit/baa27d24f90937ec00bc74d4a635c1eb266d84bd))
+* **overlay:** give single-shooter exports the sprite engine and shared clock ([#758](https://github.com/mandakan/splitsmith/issues/758)) ([ea3565e](https://github.com/mandakan/splitsmith/commit/ea3565ed514ace21282e260d950732a8b30284d2))
+* **share:** allowlist stage compare + ref streaming, strip coach notes for viewers ([1a88efa](https://github.com/mandakan/splitsmith/commit/1a88efaf32875f2d9aae00edf5703794d1a3309f))
+* **share:** compare view behind share links ([#700](https://github.com/mandakan/splitsmith/issues/700) MVP) ([1cf9bbd](https://github.com/mandakan/splitsmith/commit/1cf9bbd599b838cdb07a2989ca2d26ad7bac2c33))
+* **share:** Open Graph preview images for share links ([#786](https://github.com/mandakan/splitsmith/issues/786)) ([4f032d9](https://github.com/mandakan/splitsmith/commit/4f032d9bef6f3b0243c6db8519c54c5c33a3bf6e))
+* **ui:** compare view behind share links - desktop-only, read-only ([43875a9](https://github.com/mandakan/splitsmith/commit/43875a9e5a4d86f89215312deead10663b361c62))
+
+
+### Bug Fixes
+
+* align unclassified split-stat fallback with the auto-classifier ([#776](https://github.com/mandakan/splitsmith/issues/776)) ([abdeba2](https://github.com/mandakan/splitsmith/commit/abdeba2e9cb98f08b95ebf67404eca484c1fa137))
+* audited stages are always fully classified ([#775](https://github.com/mandakan/splitsmith/issues/775)) ([6d963b6](https://github.com/mandakan/splitsmith/commit/6d963b6aa91143c6c93d090532daa24d0fb43733))
+* classify intervals on audit save so audited stages are fully classified ([#775](https://github.com/mandakan/splitsmith/issues/775)) ([daf0ce6](https://github.com/mandakan/splitsmith/commit/daf0ce697e45bbeb2fe2eb0f15bca6832ee1036f))
+* coach GET backfills interval classes on legacy docs, in-memory for share reads ([#775](https://github.com/mandakan/splitsmith/issues/775)) ([adbcdce](https://github.com/mandakan/splitsmith/commit/adbcdce855b4750e19373a613fbe091c3ec6bb62))
+* **compare:** carry interval classes on the stage compare payload ([4d119c5](https://github.com/mandakan/splitsmith/commit/4d119c522a5b63527cf8d792c9595cc82bb2f100))
+* **compare:** compose summary stills at the grid's composed size ([a1eb917](https://github.com/mandakan/splitsmith/commit/a1eb917ec6c854b9f8f3984153070a492e9c2908))
+* **compare:** compose summary stills at the grid's composed size ([#691](https://github.com/mandakan/splitsmith/issues/691)) ([45d79a2](https://github.com/mandakan/splitsmith/commit/45d79a28b4bef93988b26ded892bd51a179278c5))
+* **compare:** RankingTable follows the unified split rule ([e45172b](https://github.com/mandakan/splitsmith/commit/e45172b92f6a682e6d0c45f652f86131b4d61395))
+* **exports:** one function names a stage's files, so readers stop missing them ([#768](https://github.com/mandakan/splitsmith/issues/768)) ([b2edbc4](https://github.com/mandakan/splitsmith/commit/b2edbc4bc25c7329733dd91344b9f0dc48639029))
+* heal partial classification in overlay loader and clear_class patch, harden backfill guard ([#775](https://github.com/mandakan/splitsmith/issues/775)) ([6038eaf](https://github.com/mandakan/splitsmith/commit/6038eafd1f61ad98ef0fc5cd39373b422f1a5dac))
+* **overlay:** resolve the auto codec through the injected probe runner ([#770](https://github.com/mandakan/splitsmith/issues/770)) ([0a3a031](https://github.com/mandakan/splitsmith/commit/0a3a0313a5937cfc3876f154a63550acf970c709))
+* split statistics count only split-classed intervals, page shows the draw ([#774](https://github.com/mandakan/splitsmith/issues/774)) ([5e53846](https://github.com/mandakan/splitsmith/commit/5e538466415aac466f6ce0649c8af4e771336ac8)), closes [#772](https://github.com/mandakan/splitsmith/issues/772)
+* **ui:** add splitsFromTimeline pairing gaps with interval classes ([374abb1](https://github.com/mandakan/splitsmith/commit/374abb194c44fd8006a2737cc921e118917d8fff))
+* **ui:** compose Lab fixture slugs the way the backend reads them ([#771](https://github.com/mandakan/splitsmith/issues/771)) ([f6ea18e](https://github.com/mandakan/splitsmith/commit/f6ea18ebe4f875237c22deb32f6f9d7a476ecd80))
+* **ui:** global bar and account chips fit a phone ([#733](https://github.com/mandakan/splitsmith/issues/733)) ([#790](https://github.com/mandakan/splitsmith/issues/790)) ([4ddce6f](https://github.com/mandakan/splitsmith/commit/4ddce6f35267ff82a19090c28993e64ecd2eff64))
+* **ui:** hide operator-only Export FCPXML button and use neutral banner copy on share views ([5c491b7](https://github.com/mandakan/splitsmith/commit/5c491b7d66391ca6e69b59a337ae77791a80a91c))
+* **ui:** offer the overlay codecs the backend actually accepts ([#765](https://github.com/mandakan/splitsmith/issues/765)) ([0f64819](https://github.com/mandakan/splitsmith/commit/0f6481999e069947197ccf61478761a9026f668a)), closes [#761](https://github.com/mandakan/splitsmith/issues/761)
+* **ui:** RankingTable follows the unified split rule, adds Draw ([a6bdb44](https://github.com/mandakan/splitsmith/commit/a6bdb44fea58a2960c39170c7ba45a10c929ea9a))
+
+
+### Performance
+
+* **overlay:** key the ffmpeg capability probe on the font's bytes ([#764](https://github.com/mandakan/splitsmith/issues/764)) ([ed3a7d5](https://github.com/mandakan/splitsmith/commit/ed3a7d5f191d0ad462e4af80c19597587d3d47c9)), closes [#762](https://github.com/mandakan/splitsmith/issues/762)
+
+
+### Refactors
+
+* **coach:** one heal_unclassified guard for all four surfaces ([#789](https://github.com/mandakan/splitsmith/issues/789)) ([5e6884f](https://github.com/mandakan/splitsmith/commit/5e6884fc0df90331920ad4fa07b036572c633bec)), closes [#780](https://github.com/mandakan/splitsmith/issues/780)
+* **compare:** move audit reading into a core module and cut the cycle ([#767](https://github.com/mandakan/splitsmith/issues/767)) ([60e1cfe](https://github.com/mandakan/splitsmith/commit/60e1cfe79160df28f5ec23caade5fd20cdb4d7c0)), closes [#760](https://github.com/mandakan/splitsmith/issues/760)
+* **overlay:** remove the PIL text machinery nothing calls any more ([#766](https://github.com/mandakan/splitsmith/issues/766)) ([c0c09b1](https://github.com/mandakan/splitsmith/commit/c0c09b13031ddaaa9acc48e73f0cf981459210f9)), closes [#759](https://github.com/mandakan/splitsmith/issues/759)
+* **project:** the match-project model is core, not part of the web UI ([#769](https://github.com/mandakan/splitsmith/issues/769)) ([21487e6](https://github.com/mandakan/splitsmith/commit/21487e603fb832472b42961dc96f8cb1b88036af))
+* **ui:** drop Coach mount-time auto-reclassify, backend guarantees classified stages ([#775](https://github.com/mandakan/splitsmith/issues/775)) ([e4807a3](https://github.com/mandakan/splitsmith/commit/e4807a322ce283001bf56b90347e7b1b124034b9))
+
+
+### Documentation
+
+* **compare:** correct still-size wording after the composed-size fix ([#691](https://github.com/mandakan/splitsmith/issues/691)) ([38beea2](https://github.com/mandakan/splitsmith/commit/38beea294ccde47676a9a8582a8fb86bff536ef1))
+* design for [#781](https://github.com/mandakan/splitsmith/issues/781) (RankingTable unified splits) ([37784dc](https://github.com/mandakan/splitsmith/commit/37784dc4a0e4ec884fc32a86069ce6d6b2be9908))
+* design for the [#700](https://github.com/mandakan/splitsmith/issues/700) compare share MVP ([76fea29](https://github.com/mandakan/splitsmith/commit/76fea29ea619e473d280a909b803cc7fb660aba7))
+* design spec for [#775](https://github.com/mandakan/splitsmith/issues/775) classify-on-audit-save ([a3bfb19](https://github.com/mandakan/splitsmith/commit/a3bfb19f102c7284dc66ddfb9f9cdea83c5810dc))
+* implementation plan for [#775](https://github.com/mandakan/splitsmith/issues/775) classify-on-audit-save ([fe529cd](https://github.com/mandakan/splitsmith/commit/fe529cdbecf584aa886d4304cee1bc39d4c4f2a5))
+* implementation plan for [#781](https://github.com/mandakan/splitsmith/issues/781); spec aligned with StageStats reality ([590ca22](https://github.com/mandakan/splitsmith/commit/590ca224654e88f53333329a153e61ac5140c2ff))
+* implementation plan for the [#700](https://github.com/mandakan/splitsmith/issues/700) compare share MVP ([0e352ed](https://github.com/mandakan/splitsmith/commit/0e352edfa7d934eb8f45527acf28eff555154767))
+* **overlay:** kickoff for the four [#684](https://github.com/mandakan/splitsmith/issues/684) follow-ups ([#763](https://github.com/mandakan/splitsmith/issues/763)) ([4dcf56a](https://github.com/mandakan/splitsmith/commit/4dcf56a9da85afc8ad60620ce1ab21afe2a06c77))
+* plan for composing summary stills at the composed grid size ([#691](https://github.com/mandakan/splitsmith/issues/691)) ([bf5abaf](https://github.com/mandakan/splitsmith/commit/bf5abaf0e78a6582cdfd9edd7fbd9ff68e2811dc))
+* state the [#775](https://github.com/mandakan/splitsmith/issues/775) full-classification invariant at both statistic_splits mirrors ([24e05a4](https://github.com/mandakan/splitsmith/commit/24e05a4209daa598a8d7072c230d9b2422b39429))
+
 ## [0.21.0](https://github.com/mandakan/splitsmith/compare/v0.20.1...v0.21.0) (2026-08-08)
 
 
