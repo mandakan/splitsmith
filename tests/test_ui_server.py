@@ -2753,6 +2753,99 @@ def test_cancel_endpoint_returns_404_for_unknown_job(tmp_path: Path) -> None:
     assert resp.status_code == 404
 
 
+def test_retry_endpoint_returns_404_for_unknown_job(tmp_path: Path) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    resp = client.post("/api/me/jobs/does-not-exist/retry")
+    assert resp.status_code == 404
+
+
+def test_retry_endpoint_409_for_non_failed_job(tmp_path: Path, monkeypatch) -> None:
+    """A succeeded job isn't retryable - retry() raises JobNotRetryableError,
+    which the endpoint maps to 409."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_detect(monkeypatch, beep_time=12.453)
+
+    resp = client.post("/api/shooters/me/stages/1/detect-beep")
+    assert resp.status_code == 200
+    job_id = resp.json()["id"]
+    final = _wait_for_job(client, job_id)
+    assert final["status"] == "succeeded", final
+
+    retry_resp = client.post(f"/api/me/jobs/{job_id}/retry")
+    assert retry_resp.status_code == 409
+
+
+def test_retry_endpoint_409_for_already_acknowledged_job(tmp_path: Path, monkeypatch) -> None:
+    """``acknowledged`` doubles as the retry claim bit: a failed job that
+    was already retried (or dismissed) can't be retried a second time."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    from splitsmith.ui import audio as audio_helpers
+
+    def boom(*a, **kw):  # type: ignore[no-untyped-def]
+        raise audio_helpers.AudioExtractionError("kaboom")
+
+    monkeypatch.setattr(audio_helpers, "detect_primary_beep", boom)
+    monkeypatch.setattr(audio_helpers, "detect_video_beep", boom)
+
+    submit = client.post("/api/shooters/me/stages/1/detect-beep")
+    assert submit.status_code == 200
+    job_id = submit.json()["id"]
+    final = _wait_for_job(client, job_id)
+    assert final["status"] == "failed", final
+
+    ack = client.post(f"/api/me/jobs/{job_id}/acknowledge")
+    assert ack.status_code == 200
+    assert ack.json()["acknowledged"] is True
+
+    retry_resp = client.post(f"/api/me/jobs/{job_id}/retry")
+    assert retry_resp.status_code == 409
+
+
+def test_retry_endpoint_reenqueues_failed_job_via_match_alias(tmp_path: Path, monkeypatch) -> None:
+    """retry() resubmits via submit(), which captures the request's match
+    ContextVars (set only by the /api/matches/{match_id}/ alias
+    middleware). A bare /api/me/jobs/{id}/retry call has no match
+    context, so a match-bound job body (detect_beep here) would 409
+    no_project when the retried job runs. This test drives retry
+    through the alias prefix and asserts the retried job actually
+    reaches SUCCEEDED, proving the body ran with working match context.
+    """
+    client, _ = _seed_project_with_primary(tmp_path)
+    from splitsmith.config import BeepDetection
+    from splitsmith.ui import audio as audio_helpers
+
+    calls = {"n": 0}
+
+    def flaky(*args, **kwargs):  # type: ignore[no-untyped-def]
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise audio_helpers.AudioExtractionError("transient failure")
+        return BeepDetection(time=12.453, peak_amplitude=0.42, duration_ms=320.0, candidates=[])
+
+    monkeypatch.setattr(audio_helpers, "detect_primary_beep", flaky)
+    monkeypatch.setattr(audio_helpers, "detect_video_beep", flaky)
+
+    submit = client.post("/api/shooters/me/stages/1/detect-beep")
+    assert submit.status_code == 200
+    job_id = submit.json()["id"]
+    kind = submit.json()["kind"]
+    first = _wait_for_job(client, job_id)
+    assert first["status"] == "failed", first
+
+    match_id = client.app.state.splitsmith_state.matches.known_ids()[0]
+    retry_resp = client.post(f"/api/matches/{match_id}/me/jobs/{job_id}/retry")
+    assert retry_resp.status_code == 200, retry_resp.text
+    new = retry_resp.json()
+    assert new["id"] != job_id
+    assert new["kind"] == kind
+
+    old = client.get(f"/api/me/jobs/{job_id}").json()
+    assert old["acknowledged"] is True
+
+    final = _wait_for_job(client, new["id"])
+    assert final["status"] == "succeeded", final
+
+
 def _fake_ensemble_result(candidates: list[dict], consensus: int = 3):
     """Build an ``EnsembleResult`` from terse candidate dicts for tests."""
     from splitsmith.ensemble import EnsembleCandidate, EnsembleResult
