@@ -1196,6 +1196,19 @@ export interface StageAudit {
 
 export type JobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
 
+export interface JobPhase {
+  name: string;
+  ms: number;
+}
+
+/** Per-job observability persisted on completion (observability.py). */
+export interface JobTimings {
+  queue_wait_ms: number | null;
+  total_ms: number;
+  phases: JobPhase[];
+  meta?: Record<string, unknown>;
+}
+
 /** Mirror of splitsmith.ui.jobs.Job. Long-running endpoints (detect-beep,
  *  trim, future shot-detect/export) submit a job and return a snapshot;
  *  the SPA polls /api/me/jobs/{id} until status leaves "pending" / "running". */
@@ -1235,6 +1248,8 @@ export interface Job {
    *  interpret. ``null`` for jobs that signal success only by writing
    *  files. */
   result: Record<string, unknown> | null;
+  /** Phase timings persisted when the job finishes; null while active. */
+  timings: JobTimings | null;
   created_at: string;
   updated_at: string;
   started_at: string | null;
@@ -1832,7 +1847,13 @@ export function currentShareTokenFromLocation(): string | null {
 /** Prefixes that ride on the per-request match scope. Other ``/api/`` paths
  *  (``/api/health``, ``/api/me/*``, ``/api/server/*``, ``/api/lab/*``,
  *  ``/api/files/*``, ``/api/fs/*``, ``/api/dev/*``, etc.) stay on their
- *  legacy bare paths because they are operator-global or unbound. */
+ *  legacy bare paths because they are operator-global or unbound. Jobs are
+ *  per-user resources, not per-match: the jobs list is intentionally
+ *  cross-match, so ``/api/me/jobs/*`` (get/cancel/acknowledge/retry) is
+ *  deliberately NOT scoped here - retry rebinds the job's own original
+ *  match server-side instead (see api.retryJob), so scoping the request to
+ *  whatever match the SPA happens to be viewing would be both wrong and
+ *  unnecessary. */
 const MATCH_SCOPED_PREFIXES = ["/api/shooters/", "/api/match/"];
 
 function scopeRequestPath(path: string): string {
@@ -3006,6 +3027,13 @@ export const api = {
    *  ffmpeg subprocess so the cancel takes effect immediately. */
   cancelJob: (jobId: string) =>
     request<Job>(`/api/me/jobs/${encodeURIComponent(jobId)}/cancel`, { method: "POST" }),
+
+  /** Re-enqueue a failed job with its original args. Callable from any
+   *  route, match or otherwise - the server rebinds the resubmit to the
+   *  job's own original match server-side, not to whatever match the
+   *  calling request happens to be scoped to. */
+  retryJob: (jobId: string) =>
+    request<Job>(`/api/me/jobs/${encodeURIComponent(jobId)}/retry`, { method: "POST" }),
 
   /** Mark a single failed job as seen (issue #73). The badge stops
    *  counting it and the registry rolls it off ahead of unacknowledged

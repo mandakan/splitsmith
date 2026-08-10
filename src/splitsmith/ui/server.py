@@ -201,6 +201,7 @@ from .jobs import (
     JobBodyRegistry,
     JobCancelled,
     JobHandle,
+    JobNotRetryableError,
     JobRegistry,
     ShutdownInProgressError,
 )
@@ -9251,6 +9252,28 @@ def create_app(
         returns the existing snapshot unchanged.
         """
         job = await state.jobs.cancel(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
+        return job
+
+    @app.post("/api/me/jobs/{job_id}/retry", response_model=Job)
+    async def retry_job(job_id: str, user: User = Depends(get_current_user)) -> Job:
+        """Re-enqueue a failed job with its original args; returns the new job.
+
+        409s when the job isn't FAILED, or is FAILED but already
+        acknowledged (retried or dismissed) - ``acknowledged`` doubles
+        as the atomic claim bit, see :meth:`JobRegistry.retry`. Works on
+        the bare path: match context for the resubmit is rebound from the
+        job itself (the match it was originally submitted under), not from
+        this request's URL - the jobs list is global (cross-match), so a
+        retry issued while viewing a different match must not rebind the
+        job to that match. See :meth:`JobRegistry.retry` /
+        :meth:`PostgresJobBackend.retry`.
+        """
+        try:
+            job = await state.jobs.retry(job_id)
+        except JobNotRetryableError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         if job is None:
             raise HTTPException(status_code=404, detail=f"unknown job: {job_id}")
         return job

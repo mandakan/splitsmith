@@ -30,7 +30,11 @@ import {
   type ShellChromeValue,
 } from "@/components/layout/shellChromeContext";
 
-import { MatchShell } from "@/components/match/MatchShell";
+import {
+  MatchShell,
+  toMatchRelativePath,
+  viewLabelForPath,
+} from "@/components/match/MatchShell";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -159,6 +163,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
     cancel_requested: false,
     acknowledged: false,
     result: null,
+    timings: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     started_at: "2026-01-01T00:00:00Z",
@@ -277,6 +282,43 @@ function setupHappyPath() {
   stubMatchMedia();
   setUpApiWithOrigin("local");
 }
+
+describe("viewLabelForPath (#691)", () => {
+  it('maps "/jobs" to "Jobs"', () => {
+    expect(viewLabelForPath("/jobs")).toBe("Jobs");
+  });
+
+  it('maps "/beep-review" to "Beep review"', () => {
+    expect(viewLabelForPath("/beep-review")).toBe("Beep review");
+  });
+
+  it('has no trailing segment for "/" or ""', () => {
+    expect(viewLabelForPath("/")).toBeNull();
+    expect(viewLabelForPath("")).toBeNull();
+  });
+
+  it('maps a shooter-scoped path like "/audit/anna/3" to "Audit"', () => {
+    expect(viewLabelForPath("/audit/anna/3")).toBe("Audit");
+  });
+});
+
+describe("toMatchRelativePath (#691)", () => {
+  it("strips the /match/:matchId prefix", () => {
+    expect(toMatchRelativePath("/match/m1/audit/anna/3", "m1")).toBe(
+      "/audit/anna/3",
+    );
+  });
+
+  it("passes the pathname through unchanged when matchId is undefined", () => {
+    expect(toMatchRelativePath("/audit/anna/3", undefined)).toBe(
+      "/audit/anna/3",
+    );
+  });
+
+  it("passes the pathname through unchanged when it does not carry the prefix", () => {
+    expect(toMatchRelativePath("/pick", "m1")).toBe("/pick");
+  });
+});
 
 describe("MatchShell job settlement (#663)", () => {
   beforeEach(() => {

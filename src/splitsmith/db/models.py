@@ -484,6 +484,17 @@ class ComputeJobRow(Base):
     # Generic ``JSON`` on SQLite (unit tests); the migration ALTERs to JSONB on
     # Postgres. Nullable: populated once by the backend on job completion.
     timings: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
+    # Wire-serialised submit args (job_journal.to_wire_args shape),
+    # persisted so retry can re-enqueue a failed job. NULL only on rows
+    # created before the retry migration - retry refuses those. Not part
+    # of the wire Job model.
+    args: Mapped[dict | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=True)
+    # The submitting request's match binding (current_match_id ContextVar
+    # at submit time), persisted so retry rebinds the ORIGINAL job's match
+    # instead of whatever match is ambient on the retrying request. NULL
+    # for rows predating this column and for legitimately match-less kinds
+    # (model_download). Not part of the wire Job model.
+    match_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

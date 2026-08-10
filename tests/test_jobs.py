@@ -12,6 +12,7 @@ import pytest
 from splitsmith.ui.jobs import (
     JobBodyRegistry,
     JobCancelled,
+    JobNotRetryableError,
     JobRegistry,
     JobStatus,
     UnknownJobKindError,
@@ -79,6 +80,9 @@ class _Sync:
 
     def find_active(self, **kwargs):
         return asyncio.run(self._inner.find_active(**kwargs))
+
+    def retry(self, job_id):
+        return asyncio.run(self._inner.retry(job_id))
 
 
 def _wait_until(predicate, *, timeout=2.0, poll=0.01):
@@ -791,3 +795,123 @@ def test_find_active_scopes_by_shooter_slug() -> None:
         assert reg.find_active(kind="shot_detect", stage_number=3) is None
     finally:
         release.set()
+
+
+def test_retry_failed_job_resubmits_with_original_args() -> None:
+    reg = _Sync(JobRegistry(max_concurrent=1))
+    calls: list[dict] = []
+
+    def flaky(handle, **kwargs) -> None:
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+
+    reg._inner.bodies.register("flaky", flaky)
+    job = reg.submit(kind="flaky", args={"x": 1}, stage_number=3, shooter_slug="anna", video_id="v9")
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.FAILED)
+    assert reg.get(job.id).status is JobStatus.FAILED
+
+    new = reg.retry(job.id)
+    assert new is not None and new.id != job.id
+    assert new.kind == "flaky" and new.stage_number == 3 and new.shooter_slug == "anna"
+    assert new.video_id == "v9"
+    assert _wait_until(lambda: reg.get(new.id).status == JobStatus.SUCCEEDED)
+    assert calls == [{"x": 1}, {"x": 1}]
+    assert reg.get(job.id).acknowledged is True  # retry clears it from the failed list
+
+
+def test_retry_unknown_id_returns_none() -> None:
+    reg = _Sync(JobRegistry())
+    assert reg.retry("nope") is None
+
+
+def test_retry_non_failed_job_raises() -> None:
+    reg = _Sync(JobRegistry(max_concurrent=1))
+    reg._inner.bodies.register("ok", lambda handle, **kw: None)
+    job = reg.submit(kind="ok")
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.SUCCEEDED)
+    with pytest.raises(JobNotRetryableError, match="only failed jobs can be retried"):
+        reg.retry(job.id)
+
+
+def test_retry_already_acknowledged_failed_job_raises() -> None:
+    # An acknowledged FAILED job (dismissed via acknowledge(), or already
+    # claimed by a prior retry()) must not be retryable a second time.
+    reg = _Sync(JobRegistry(max_concurrent=1))
+
+    def always_fails(handle, **kw) -> None:
+        raise RuntimeError("boom")
+
+    reg._inner.bodies.register("flaky", always_fails)
+    job = reg.submit(kind="flaky")
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.FAILED)
+
+    reg.acknowledge(job.id)
+    with pytest.raises(JobNotRetryableError, match="already retried or dismissed"):
+        reg.retry(job.id)
+
+
+def test_retry_twice_sequential_second_call_raises() -> None:
+    # This is the observable contract of the atomic claim: two callers
+    # racing retry(job_id) can't both win. A true concurrent-thread race
+    # isn't required; sequential calls exercise the same claim check.
+    reg = _Sync(JobRegistry(max_concurrent=1))
+
+    def always_fails(handle, **kw) -> None:
+        raise RuntimeError("boom")
+
+    reg._inner.bodies.register("flaky", always_fails)
+    job = reg.submit(kind="flaky")
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.FAILED)
+
+    first = reg.retry(job.id)
+    assert first is not None
+
+    with pytest.raises(JobNotRetryableError, match="already retried or dismissed"):
+        reg.retry(job.id)
+
+
+def test_retry_rebinds_original_match_context_regardless_of_ambient_state() -> None:
+    """The jobs list is global (cross-match); retry must replay the
+    ORIGINAL submitting request's match ContextVars, not whatever happens
+    to be ambient when the retry call itself is made (e.g. the operator
+    viewing a different match, or no match at all) - the reviewer-flagged
+    cross-match retry bug.
+    """
+    from pathlib import Path
+
+    from splitsmith.ui.server import current_match_id, current_match_root
+
+    reg = _Sync(JobRegistry(max_concurrent=1))
+    seen: list[tuple[str | None, Path | None]] = []
+    calls = {"n": 0}
+
+    def flaky(handle, **kw) -> None:
+        calls["n"] += 1
+        seen.append((current_match_id.get(), current_match_root.get()))
+        if calls["n"] == 1:
+            raise RuntimeError("boom")
+
+    reg._inner.bodies.register("flaky", flaky)
+
+    sentinel_root = Path("/sentinel/match-a")
+    id_token = current_match_id.set("match-a")
+    root_token = current_match_root.set(sentinel_root)
+    try:
+        job = reg.submit(kind="flaky")
+    finally:
+        current_match_id.reset(id_token)
+        current_match_root.reset(root_token)
+
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.FAILED)
+
+    # Simulate a context-free retry request (or one ambiently bound to a
+    # DIFFERENT match) - the vars are unset at the point retry() is called.
+    assert current_match_id.get() is None
+    assert current_match_root.get() is None
+
+    new = reg.retry(job.id)
+    assert new is not None
+    assert _wait_until(lambda: reg.get(new.id).status == JobStatus.SUCCEEDED)
+
+    assert seen == [("match-a", sentinel_root), ("match-a", sentinel_root)]

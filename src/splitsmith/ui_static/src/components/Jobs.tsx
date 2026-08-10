@@ -50,7 +50,7 @@ import { useDialogFocus } from "@/lib/dialogFocus";
 import { type JobsState } from "@/lib/jobs";
 import { cn } from "@/lib/utils";
 
-const KIND_LABEL: Record<string, string> = {
+export const KIND_LABEL: Record<string, string> = {
   detect_beep: "Detect beep",
   trim: "Trim stage video",
   shot_detect: "Detect shots",
@@ -62,7 +62,7 @@ const KIND_LABEL: Record<string, string> = {
   sync_match: "Sync to hosted",
 };
 
-const KIND_ICON: Record<string, ReactNode> = {
+export const KIND_ICON: Record<string, ReactNode> = {
   detect_beep: <Volume2 className="size-3.5" />,
   trim: <Crosshair className="size-3.5" />,
   shot_detect: <Activity className="size-3.5" />,
@@ -78,7 +78,7 @@ function kindLabel(kind: string): string {
   return KIND_LABEL[kind] ?? kind;
 }
 
-function jobTarget(job: Job): string {
+export function jobTarget(job: Job): string {
   const bits: string[] = [];
   if (job.stage_number != null) bits.push(`stage ${pad2(job.stage_number)}`);
   if (job.video_id) bits.push(`cam ${job.video_id.slice(0, 6)}`);

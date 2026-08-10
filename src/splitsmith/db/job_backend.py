@@ -42,12 +42,13 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from ..observability import PhaseTimer, capture_job_exception, emit_job_event
-from ..ui.job_journal import to_wire_args
+from ..ui.job_journal import rehydrate_args, to_wire_args
 from ..ui.jobs import (
     Job,
     JobBodyRegistry,
     JobCancelled,
     JobHandle,
+    JobNotRetryableError,
     JobStatus,
     ShutdownInProgressError,
 )
@@ -225,9 +226,11 @@ class PostgresJobBackend:
             id=job_id,
             user_id=self._user_id,
             kind=kind,
+            args=_to_wire_args(args or {}),
             stage_number=stage_number,
             shooter_slug=shooter_slug,
             video_id=video_id,
+            match_id=match_id,
             status=JobStatus.PENDING.value,
             cancel_requested=False,
             acknowledged=False,
@@ -397,6 +400,88 @@ class PostgresJobBackend:
             if rows:
                 await session.commit()
         return affected
+
+    async def retry(self, job_id: str) -> Job | None:
+        """Re-enqueue a FAILED job as a new row, replaying its persisted args.
+
+        ``acknowledged`` doubles as the atomic claim bit, mirroring
+        :class:`~splitsmith.ui.jobs.JobRegistry`. A conditional UPDATE
+        (status FAILED, acknowledged False) is the claim itself, so it is
+        race-safe across processes, unlike the in-memory registry's
+        thread lock: two API replicas racing the same job id can only have
+        one of them see rowcount 1. The loser falls through to the
+        read-only branch below to report why.
+
+        Returns the NEW pending job. ``None`` for an id this user doesn't
+        own. Raises JobNotRetryableError when the row is not FAILED, was
+        already retried or dismissed, or predates the args column (args is
+        NULL). The args check runs after the claim is won rather than
+        before it, so it can't reintroduce the race a pre-read would; a
+        row that fails that check stays acknowledged (the claim isn't
+        refunded), matching the registry's post-claim failure behavior.
+
+        The resubmit is bound to the ORIGINAL job's ``match_id`` (see
+        :meth:`submit`), not whatever match is ambient on the retrying
+        request - a job failed while viewing match A must not resubmit
+        under match B just because that's the match the retry HTTP
+        request happened to carry. ``current_match_id`` is set from the
+        persisted ``row.match_id`` (``None`` included - that's correct for
+        a legitimately match-less kind like ``model_download``) around the
+        :meth:`submit` call so its ``current_match_id.get()`` read sees
+        the right value regardless of ambient request context.
+        """
+        from ..ui.server import current_match_id
+
+        now = datetime.now(UTC)
+        async with self._session_factory() as session:
+            claim = await session.execute(
+                update(ComputeJobRow)
+                .where(
+                    ComputeJobRow.id == job_id,
+                    ComputeJobRow.user_id == self._user_id,
+                    ComputeJobRow.status == JobStatus.FAILED.value,
+                    ComputeJobRow.acknowledged.is_(False),
+                )
+                .values(acknowledged=True, updated_at=now)
+            )
+            await session.commit()
+            won_claim = claim.rowcount == 1
+
+            row = (
+                await session.execute(
+                    select(ComputeJobRow).where(
+                        ComputeJobRow.id == job_id,
+                        ComputeJobRow.user_id == self._user_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            if not won_claim:
+                if row.status != JobStatus.FAILED.value:
+                    raise JobNotRetryableError(f"job is {row.status}; only failed jobs can be retried")
+                raise JobNotRetryableError("job was already retried or dismissed")
+
+            if row.args is None:
+                raise JobNotRetryableError("job predates retry support; re-run it from its surface")
+            kind = row.kind
+            wire_args = row.args
+            stage_number = row.stage_number
+            shooter_slug = row.shooter_slug
+            video_id = row.video_id
+            row_match_id = row.match_id
+
+        match_token = current_match_id.set(row_match_id)
+        try:
+            return await self.submit(
+                kind=kind,
+                args=rehydrate_args(kind, wire_args),
+                stage_number=stage_number,
+                shooter_slug=shooter_slug,
+                video_id=video_id,
+            )
+        finally:
+            current_match_id.reset(match_token)
 
     async def find_active(
         self,

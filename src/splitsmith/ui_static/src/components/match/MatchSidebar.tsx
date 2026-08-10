@@ -63,6 +63,9 @@ interface MatchSidebarProps {
    *  count chip so the operator can see at a glance that there's work
    *  there. */
   beepReviewPendingCount?: number;
+  /** Failed jobs still awaiting acknowledgement across the match, mirroring
+   *  ``beepReviewPendingCount``'s badge contract for the Jobs nav row. */
+  jobsAttentionCount: number;
   /** When true the sidebar renders the "no footage yet" sub for the stage
    *  list (matches polished/17). Defaults to false. */
   awaiting?: boolean;
@@ -110,6 +113,7 @@ export function MatchSidebar({
   stages,
   shooterCount,
   beepReviewPendingCount,
+  jobsAttentionCount,
   awaiting = false,
   hasFootage = true,
   onStageClick,
@@ -201,6 +205,7 @@ export function MatchSidebar({
           hasFootage,
           shooterCount,
           beepReviewPendingCount: beepReviewPendingCount ?? 0,
+          jobsAttentionCount,
           footageHint,
         }).map((item) => (
           <SidebarLink

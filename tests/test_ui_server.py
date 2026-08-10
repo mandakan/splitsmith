@@ -2753,6 +2753,102 @@ def test_cancel_endpoint_returns_404_for_unknown_job(tmp_path: Path) -> None:
     assert resp.status_code == 404
 
 
+def test_retry_endpoint_returns_404_for_unknown_job(tmp_path: Path) -> None:
+    client, _ = _seed_project_with_primary(tmp_path)
+    resp = client.post("/api/me/jobs/does-not-exist/retry")
+    assert resp.status_code == 404
+
+
+def test_retry_endpoint_409_for_non_failed_job(tmp_path: Path, monkeypatch) -> None:
+    """A succeeded job isn't retryable - retry() raises JobNotRetryableError,
+    which the endpoint maps to 409."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    _stub_detect(monkeypatch, beep_time=12.453)
+
+    resp = client.post("/api/shooters/me/stages/1/detect-beep")
+    assert resp.status_code == 200
+    job_id = resp.json()["id"]
+    final = _wait_for_job(client, job_id)
+    assert final["status"] == "succeeded", final
+
+    retry_resp = client.post(f"/api/me/jobs/{job_id}/retry")
+    assert retry_resp.status_code == 409
+
+
+def test_retry_endpoint_409_for_already_acknowledged_job(tmp_path: Path, monkeypatch) -> None:
+    """``acknowledged`` doubles as the retry claim bit: a failed job that
+    was already retried (or dismissed) can't be retried a second time."""
+    client, _ = _seed_project_with_primary(tmp_path)
+    from splitsmith.ui import audio as audio_helpers
+
+    def boom(*a, **kw):  # type: ignore[no-untyped-def]
+        raise audio_helpers.AudioExtractionError("kaboom")
+
+    monkeypatch.setattr(audio_helpers, "detect_primary_beep", boom)
+    monkeypatch.setattr(audio_helpers, "detect_video_beep", boom)
+
+    submit = client.post("/api/shooters/me/stages/1/detect-beep")
+    assert submit.status_code == 200
+    job_id = submit.json()["id"]
+    final = _wait_for_job(client, job_id)
+    assert final["status"] == "failed", final
+
+    ack = client.post(f"/api/me/jobs/{job_id}/acknowledge")
+    assert ack.status_code == 200
+    assert ack.json()["acknowledged"] is True
+
+    retry_resp = client.post(f"/api/me/jobs/{job_id}/retry")
+    assert retry_resp.status_code == 409
+
+
+def test_retry_endpoint_reenqueues_failed_job_via_bare_path(tmp_path: Path, monkeypatch) -> None:
+    """retry() rebinds the ORIGINAL submitting request's match context
+    (stashed at submit time) before resubmitting, not whatever match
+    context is ambient on the retry request itself - the jobs list is
+    global (cross-match), so URL scoping the retry call must not matter.
+    This test drives the ORIGINAL submit through the match-scoped client
+    (as usual) but hits retry on the BARE ``/api/me/jobs/{id}/retry``
+    path, with no alias prefix and no match ContextVars ambient, and
+    asserts the retried job still reaches SUCCEEDED - proving the body
+    ran with the original match's context, rebound server-side.
+    """
+    client, _ = _seed_project_with_primary(tmp_path)
+    from splitsmith.config import BeepDetection
+    from splitsmith.ui import audio as audio_helpers
+
+    calls = {"n": 0}
+
+    def flaky(*args, **kwargs):  # type: ignore[no-untyped-def]
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise audio_helpers.AudioExtractionError("transient failure")
+        return BeepDetection(time=12.453, peak_amplitude=0.42, duration_ms=320.0, candidates=[])
+
+    monkeypatch.setattr(audio_helpers, "detect_primary_beep", flaky)
+    monkeypatch.setattr(audio_helpers, "detect_video_beep", flaky)
+
+    submit = client.post("/api/shooters/me/stages/1/detect-beep")
+    assert submit.status_code == 200
+    job_id = submit.json()["id"]
+    kind = submit.json()["kind"]
+    first = _wait_for_job(client, job_id)
+    assert first["status"] == "failed", first
+
+    # Bare path: no alias prefix, so no match ContextVars are ambient on
+    # this request. retry() must rebind the job's own original match.
+    retry_resp = client.post(f"/api/me/jobs/{job_id}/retry")
+    assert retry_resp.status_code == 200, retry_resp.text
+    new = retry_resp.json()
+    assert new["id"] != job_id
+    assert new["kind"] == kind
+
+    old = client.get(f"/api/me/jobs/{job_id}").json()
+    assert old["acknowledged"] is True
+
+    final = _wait_for_job(client, new["id"])
+    assert final["status"] == "succeeded", final
+
+
 def _fake_ensemble_result(candidates: list[dict], consensus: int = 3):
     """Build an ``EnsembleResult`` from terse candidate dicts for tests."""
     from splitsmith.ensemble import EnsembleCandidate, EnsembleResult

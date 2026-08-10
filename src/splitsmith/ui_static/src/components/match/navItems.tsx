@@ -5,6 +5,7 @@
  */
 import type { ReactNode } from "react";
 import {
+  Activity,
   ArrowDownToLine,
   ClipboardCheck,
   Crosshair,
@@ -38,9 +39,18 @@ export function matchNavItems(args: {
   hasFootage: boolean;
   shooterCount?: number;
   beepReviewPendingCount: number;
+  jobsAttentionCount: number;
   footageHint?: string;
 }): MatchNavItem[] {
-  const { base, shooterSlug, hasFootage, shooterCount, beepReviewPendingCount, footageHint } = args;
+  const {
+    base,
+    shooterSlug,
+    hasFootage,
+    shooterCount,
+    beepReviewPendingCount,
+    jobsAttentionCount,
+    footageHint,
+  } = args;
   return [
     { key: "overview", to: `${base}/`, icon: <LayoutGrid className="size-[15px]" />, label: "Overview", end: true },
     { key: "results", to: `${base}/results`, icon: <MonitorPlay className="size-[15px]" />, label: "Results" },
@@ -80,6 +90,14 @@ export function matchNavItems(args: {
       icon: <Volume2 className="size-[15px]" />,
       label: "Beep review",
       count: beepReviewPendingCount,
+      badgeKind: "pending",
+    },
+    {
+      key: "jobs",
+      to: `${base}/jobs`,
+      icon: <Activity className="size-[15px]" />,
+      label: "Jobs",
+      count: jobsAttentionCount,
       badgeKind: "pending",
     },
     {

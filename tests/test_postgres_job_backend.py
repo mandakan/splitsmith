@@ -198,6 +198,31 @@ def test_submit_persists_row_and_runs_to_succeeded(tmp_path) -> None:
     assert final.finished_at is not None
 
 
+def _fetch_row(session_factory: sessionmaker, job_id: str) -> ComputeJobRow:
+    from sqlalchemy import select
+
+    async def _fetch() -> ComputeJobRow:
+        async with session_factory() as s:
+            result = await s.execute(select(ComputeJobRow).where(ComputeJobRow.id == job_id))
+            return result.scalar_one()
+
+    return asyncio.run(_fetch())
+
+
+def test_submit_persists_wire_args(tmp_path) -> None:
+    """Submit stores wire-serialised args on the row; empty args become {} not NULL."""
+    backend, session_factory, _ = _build_backend_for_new_user(tmp_path)
+    _register(backend, "detect_beep", lambda _h: None)
+
+    job = asyncio.run(backend.submit(kind="detect_beep", args={"video_id": "v1"}, stage_number=2))
+    row = _fetch_row(session_factory, job.id)
+    assert row.args == {"video_id": "v1"}
+
+    job2 = asyncio.run(backend.submit(kind="detect_beep", stage_number=2))
+    row2 = _fetch_row(session_factory, job2.id)
+    assert row2.args == {}  # None coalesces to {} so NULL means "pre-migration"
+
+
 def test_failed_job_records_error_string(tmp_path) -> None:
     backend, _, _ = _build_backend_for_new_user(tmp_path)
 
@@ -673,6 +698,197 @@ def test_wire_and_rehydrate_round_trip_a_pydantic_req() -> None:
     assert rehydrated["req"] == req
     # Pass-through kinds are returned untouched (no ``req`` to rebuild).
     assert _rehydrate_args("trim", {"video_id": "v1"}) == {"video_id": "v1"}
+
+
+def test_retry_failed_job_reenqueues_with_persisted_args(tmp_path) -> None:
+    """A retried job gets a new id, carries over kind/stage, and the body
+    is re-invoked with the original args. The old row ends up
+    acknowledged so it stops showing up as retryable."""
+    backend, _, _ = _build_backend_for_new_user(tmp_path)
+    calls: list[dict[str, object]] = []
+
+    def flaky(_handle, **kwargs):
+        calls.append(dict(kwargs))
+        if len(calls) == 1:
+            raise ValueError("first attempt fails")
+
+    backend.bodies.register("flaky", flaky)
+    job = asyncio.run(backend.submit(kind="flaky", args={"x": 1}, stage_number=3))
+    assert _wait_until(lambda: asyncio.run(backend.get(job.id)).status == JobStatus.FAILED)
+
+    new = asyncio.run(backend.retry(job.id))
+    assert new is not None
+    assert new.id != job.id
+    assert new.kind == "flaky"
+    assert new.stage_number == 3
+
+    assert _wait_until(lambda: asyncio.run(backend.get(new.id)).status == JobStatus.SUCCEEDED)
+    assert calls == [{"x": 1}, {"x": 1}]  # body re-invoked with the original kwargs
+
+    old = asyncio.run(backend.get(job.id))
+    assert old.acknowledged is True
+
+
+def test_retry_pre_migration_row_raises(tmp_path) -> None:
+    """A FAILED row with args=NULL predates the args-persistence migration
+    and can't be safely rehydrated; retry must refuse rather than guess.
+    The claim still burns (row stays acknowledged), so retrying it again
+    raises the same way; it doesn't loop."""
+    from splitsmith.ui.jobs import JobNotRetryableError
+
+    backend, session_factory, _ = _build_backend_for_new_user(tmp_path)
+
+    def boom(_h, **_kwargs):
+        raise ValueError("boom")
+
+    backend.bodies.register("flaky", boom)
+    job = asyncio.run(backend.submit(kind="flaky", args={"x": 1}))
+    assert _wait_until(lambda: asyncio.run(backend.get(job.id)).status == JobStatus.FAILED)
+
+    async def _null_args() -> None:
+        from sqlalchemy import select
+
+        async with session_factory() as s:
+            row = (await s.execute(select(ComputeJobRow).where(ComputeJobRow.id == job.id))).scalar_one()
+            row.args = None
+            await s.commit()
+
+    asyncio.run(_null_args())
+
+    with pytest.raises(JobNotRetryableError, match="predates retry support"):
+        asyncio.run(backend.retry(job.id))
+
+    # The claim stays burned even though the retry raised.
+    assert asyncio.run(backend.get(job.id)).acknowledged is True
+
+
+def test_retry_wrong_user_returns_none(tmp_path) -> None:
+    """Retry is user-scoped like every other lookup: another tenant's
+    backend must see the id as unknown, never leak existence via an
+    exception. Mirrors this file's other cross-user isolation tests."""
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path}/retry-iso.sqlite")
+    session_factory = sessionmaker(engine)
+
+    async def _setup() -> tuple[str, str]:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_factory() as s:
+            alice = User(email="alice-retry@thias.se")
+            bob = User(email="bob-retry@thias.se")
+            s.add_all([alice, bob])
+            await s.commit()
+            await s.refresh(alice)
+            await s.refresh(bob)
+            return alice.id, bob.id
+
+    alice_id, bob_id = asyncio.run(_setup())
+    box_a: list[PostgresJobBackend] = []
+    alice = PostgresJobBackend(session_factory, user_id=alice_id, deferrer=_inline_deferrer(box_a))
+    box_a.append(alice)
+    bob = PostgresJobBackend(session_factory, user_id=bob_id, deferrer=_noop_deferrer())
+
+    def boom(_h, **_kwargs):
+        raise ValueError("boom")
+
+    alice.bodies.register("flaky", boom)
+    job = asyncio.run(alice.submit(kind="flaky", args={"x": 1}))
+    assert asyncio.run(alice.get(job.id)).status == JobStatus.FAILED
+
+    assert asyncio.run(bob.retry(job.id)) is None
+
+
+def test_retry_already_acknowledged_raises(tmp_path) -> None:
+    """A FAILED-but-acknowledged row was already retried or dismissed; a
+    second retry call must not silently resubmit a duplicate job."""
+    from splitsmith.ui.jobs import JobNotRetryableError
+
+    backend, _, _ = _build_backend_for_new_user(tmp_path)
+
+    def boom(_h, **_kwargs):
+        raise ValueError("boom")
+
+    backend.bodies.register("flaky", boom)
+    job = asyncio.run(backend.submit(kind="flaky", args={"x": 1}))
+    assert _wait_until(lambda: asyncio.run(backend.get(job.id)).status == JobStatus.FAILED)
+
+    asyncio.run(backend.acknowledge(job.id))
+    assert asyncio.run(backend.get(job.id)).acknowledged is True
+
+    with pytest.raises(JobNotRetryableError, match="already retried or dismissed"):
+        asyncio.run(backend.retry(job.id))
+
+
+def test_retry_non_failed_job_raises(tmp_path) -> None:
+    """A SUCCEEDED job is not retryable: there is nothing to retry."""
+    from splitsmith.ui.jobs import JobNotRetryableError
+
+    backend, _, _ = _build_backend_for_new_user(tmp_path)
+    backend.bodies.register("quick", lambda _h, **_kwargs: None)
+    job = asyncio.run(backend.submit(kind="quick"))
+    assert asyncio.run(backend.get(job.id)).status == JobStatus.SUCCEEDED
+
+    with pytest.raises(JobNotRetryableError, match="only failed jobs can be retried"):
+        asyncio.run(backend.retry(job.id))
+
+
+def test_retry_persists_and_rebinds_the_original_match_id(tmp_path) -> None:
+    """The jobs list is global (cross-match); retry must resubmit under
+    the ORIGINAL submitting request's match_id, not whatever is ambient
+    when the retry() call itself is made. ``submit`` ships
+    ``current_match_id.get()`` to the deferrer payload (see
+    ``queue.make_deferrer``) - this test swaps in a deferrer that records
+    that payload and asserts both submits (original + retry) carried the
+    match id recorded on the FAILED row, even though the ambient
+    ContextVar is cleared before ``retry()`` is called.
+    """
+    from splitsmith.ui.server import current_match_id
+
+    backend, session_factory, _ = _build_backend_for_new_user(tmp_path, inline=False)
+    payloads: list[dict] = []
+
+    async def _recording_defer(*, job_id, kind, args=None, **rest):
+        payloads.append({"job_id": job_id, "kind": kind, "args": args, **rest})
+        await backend.run_job(job_id=job_id, kind=kind, args=args)
+
+    backend._deferrer = _recording_defer
+
+    calls: list[dict] = []
+
+    def flaky(_h, **kwargs):
+        calls.append(dict(kwargs))
+        if len(calls) == 1:
+            raise ValueError("first attempt fails")
+
+    backend.bodies.register("flaky", flaky)
+
+    id_token = current_match_id.set("match-original")
+    try:
+        job = asyncio.run(backend.submit(kind="flaky", args={"x": 1}))
+    finally:
+        current_match_id.reset(id_token)
+    assert _wait_until(lambda: asyncio.run(backend.get(job.id)).status == JobStatus.FAILED)
+
+    # The row persisted the submitting request's match_id.
+    async def _row_match_id() -> str | None:
+        from sqlalchemy import select
+
+        async with session_factory() as s:
+            row = (await s.execute(select(ComputeJobRow).where(ComputeJobRow.id == job.id))).scalar_one()
+            return row.match_id
+
+    assert asyncio.run(_row_match_id()) == "match-original"
+
+    # Ambient context is unset (or could be a different match entirely) at
+    # the point retry() is called - simulates viewing a different match.
+    assert current_match_id.get() is None
+
+    new = asyncio.run(backend.retry(job.id))
+    assert new is not None
+    assert _wait_until(lambda: asyncio.run(backend.get(new.id)).status == JobStatus.SUCCEEDED)
+
+    assert len(payloads) == 2
+    assert payloads[0]["match_id"] == "match-original"
+    assert payloads[1]["match_id"] == "match-original"
 
 
 def test_find_active_scopes_by_shooter_slug(tmp_path) -> None:

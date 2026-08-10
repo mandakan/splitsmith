@@ -40,6 +40,7 @@ import { Export } from "@/pages/Export";
 import { MatchExport } from "@/pages/MatchExport";
 import { Home } from "@/pages/Home";
 import { Ingest } from "@/pages/Ingest";
+import { Jobs } from "@/pages/Jobs";
 import { Lab } from "@/pages/Lab";
 import { MergeMatches } from "@/pages/MergeMatches";
 import { Pick } from "@/pages/Pick";
@@ -298,6 +299,7 @@ export function App() {
                 path="results/:slug/:stage"
                 element={<ShooterScopedRoute element={<ResultsStage />} />}
               />
+              <Route path="jobs" element={<Jobs />} />
             </Route>
           </Route>
           {/* Developer mode (#331). All four workflow steps + the
