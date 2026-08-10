@@ -8,6 +8,7 @@ style in ``test_ui_server.py``.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -111,6 +112,26 @@ def test_get_coach_backfills_classes_on_first_read(tmp_path: Path) -> None:
     assert body["shots"][1]["split"] == pytest.approx(0.3)
     # Reload-hint flag fires on the long gap.
     assert body["shots"][3]["reload_hint"] is True
+
+
+def test_get_coach_heal_survives_slim_install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A local install without the ``[hosted]`` extra has no sqlalchemy,
+    so the heal-persist branch must not import ``splitsmith.db``
+    unguarded - it 500ed with ModuleNotFoundError on a released local
+    install (user report 2026-08-10). Poisoning ``sys.modules`` makes any ``splitsmith.db``
+    import raise, simulating the slim install; the GET must still serve
+    and persist the heal."""
+    client, audit_file, base = _bootstrap(tmp_path)
+    monkeypatch.setitem(sys.modules, "splitsmith.db", None)
+    resp = client.get(f"{base}/shooters/me/stages/1/coach")
+    assert resp.status_code == 200, resp.text
+    stored = _read(audit_file)
+    assert [s["interval_class"] for s in stored["shots"]] == [
+        "first_shot",
+        "split",
+        "transition",
+        "movement",
+    ]
 
 
 def test_get_coach_does_not_write_when_already_classified(tmp_path: Path) -> None:
