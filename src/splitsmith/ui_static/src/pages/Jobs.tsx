@@ -55,7 +55,7 @@ function JobCard({
       <div className="flex items-center gap-2">
         <span aria-hidden>{KIND_ICON[job.kind] ?? null}</span>
         <span className="font-medium text-ink">{KIND_LABEL[job.kind] ?? job.kind}</span>
-        <span className="text-xs text-muted">{jobTarget(job)}</span>
+        <span className="text-xs text-muted">{jobTarget(job) || "(no target)"}</span>
         <span className="ml-auto flex items-center gap-1.5 text-xs text-ink-2">
           <span
             className={
@@ -74,6 +74,7 @@ function JobCard({
         <div
           className="mt-2 h-1 overflow-hidden rounded bg-surface-3"
           role="progressbar"
+          aria-label={`${KIND_LABEL[job.kind] ?? job.kind} progress`}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={Math.round(job.progress * 100)}
@@ -137,12 +138,19 @@ export function Jobs() {
   const attention = state.failed;
   const recent = state.jobs
     .filter((j) => !active.includes(j) && !attention.includes(j))
+    // state.jobs is submission order (oldest first) - sort newest-updated
+    // first before slicing so "Recent" shows the latest finished jobs.
+    .slice()
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     .slice(0, 20);
   const quiet = active.length === 0 && attention.length === 0;
 
   return (
     <div className="mx-auto max-w-2xl px-4 py-6">
-      <Kicker>Jobs</Kicker>
+      <Kicker className="mb-2">Background jobs</Kicker>
+      <h1 className="mb-2 font-display text-4xl font-bold uppercase leading-none tracking-tight text-ink">
+        Jobs
+      </h1>
       {quiet && (
         <p className="mt-4 rounded-md border border-rule bg-surface-2 p-4 text-sm text-muted">
           All quiet - nothing pending.

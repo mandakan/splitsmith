@@ -72,12 +72,39 @@ describe("Jobs page", () => {
     expect(state.retry).toHaveBeenCalledWith(failed);
   });
 
-  it("renders phase timings on finished jobs", () => {
+  it("renders phase timings on finished jobs behind a collapsed disclosure", () => {
     const done = makeJob({
       status: "succeeded",
       timings: { queue_wait_ms: 120, total_ms: 4500, phases: [{ name: "beep_detect", ms: 4380 }] },
     });
     renderJobs(makeJobsState([done]));
+    const summary = screen.getByText("Phase timings");
+    expect(summary).toBeInTheDocument();
+    expect(summary.closest("details")).not.toHaveAttribute("open");
     expect(screen.getByText("beep_detect")).toBeInTheDocument();
+  });
+
+  it("labels the progressbar with the job kind for running jobs", () => {
+    const running = makeJob({ id: "jr", status: "running", progress: 0.5 });
+    renderJobs(makeJobsState([running]));
+    expect(screen.getByRole("progressbar", { name: /progress/ })).toBeInTheDocument();
+  });
+
+  it("shows the most recently updated finished jobs, not the stalest", () => {
+    // 25 succeeded jobs in ascending updated_at order (submission order, as
+    // state.jobs comes from the API) - "Recent" caps at 20, so without
+    // sorting-before-slicing the newest 5 would be dropped instead of the
+    // oldest 5.
+    const jobs = Array.from({ length: 25 }, (_, i) =>
+      makeJob({
+        id: `j${i}`,
+        status: "succeeded",
+        message: `marker-${i}`,
+        updated_at: `2026-08-${String(i + 1).padStart(2, "0")}T10:00:00Z`,
+      }),
+    );
+    renderJobs(makeJobsState(jobs));
+    expect(screen.getByText("marker-24")).toBeInTheDocument();
+    expect(screen.queryByText("marker-0")).not.toBeInTheDocument();
   });
 });
