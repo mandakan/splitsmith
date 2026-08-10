@@ -348,3 +348,30 @@ def test_delete_shooter_tenant_isolation() -> None:
         1,
     )
     assert asyncio.run(b.load_audit("shared", "ada", 1)) == ({"shots": []}, 1)
+
+
+# -- doc manifest (sync pull) -------------------------------------------
+
+
+def test_list_doc_meta_returns_all_kinds() -> None:
+    sf, (uid,) = _engine_with_users("m@thias.se")
+    store = ProjectStateStore(sf, user_id=uid)
+
+    asyncio.run(store.save_match("m1", {"name": "x"}, expected_version=0))
+    asyncio.run(store.save_project("m1", "anna", {"stages": []}, expected_version=0))
+    asyncio.run(store.save_audit("m1", "anna", 3, {"shots": []}, expected_version=0))
+
+    meta = asyncio.run(store.list_doc_meta("m1"))
+    keys = {(m.doc_kind, m.slug, m.stage_number) for m in meta}
+    assert keys == {("match", None, None), ("project", "anna", None), ("audit", "anna", 3)}
+    assert all(m.version == 1 for m in meta)
+    assert all(m.updated_at is not None for m in meta)
+
+
+def test_list_doc_meta_tenant_isolation() -> None:
+    sf, (alice, bob) = _engine_with_users("alice@thias.se", "bob@thias.se")
+    a, b = ProjectStateStore(sf, user_id=alice), ProjectStateStore(sf, user_id=bob)
+
+    asyncio.run(a.save_match("m1", {"name": "x"}, expected_version=0))
+
+    assert asyncio.run(b.list_doc_meta("m1")) == []

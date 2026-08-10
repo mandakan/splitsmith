@@ -84,6 +84,7 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
@@ -187,7 +188,9 @@ from ..runtime import runtime as process_runtime
 from ..storage import Storage
 from ..sync.client import HostedSyncClient, SyncClientError
 from ..sync.plan import build_push_plan
-from ..sync.push import format_push_message, run_push
+from ..sync.pull import plan_pull
+from ..sync.run import format_sync_message
+from ..sync.run import run_sync as run_bidirectional_sync  # ..async_bridge.run_sync already owns this name
 from ..sync.state import load_sync_state
 from . import audio as audio_helpers
 from . import export_storage, stage_edit
@@ -613,6 +616,14 @@ def _ensure_ui_built() -> None:
 def _now_iso() -> str:
     """ISO-8601 UTC timestamp for audit_events entries."""
     return datetime.now(UTC).isoformat()
+
+
+def _new_event_id() -> str:
+    """Unique id for audit_events entries - the sync merge unions event
+    lists by this id, so every event needs one at creation time. uuid4
+    hex, not ULID: ordering comes from ``ts``, and the ulid package is a
+    hosted-only extra while events are stamped on slim local installs too."""
+    return uuid.uuid4().hex
 
 
 def _load_env_files(project_root: Path | None = None) -> list[Path]:
@@ -2085,6 +2096,19 @@ async def _advance_sequential_chain(
         break
 
 
+def _fetch_remote_manifest(prefs: user_config.GlobalPrefs, match_id: str) -> list[dict]:
+    """One short-timeout manifest GET for the status endpoint's
+    remote-staleness hint. Module-level (not inline in the handler) so
+    tests monkeypatch it; raises httpx errors to the caller."""
+    with httpx.Client(
+        base_url=prefs.hosted_base_url,
+        headers={"Authorization": f"Bearer {prefs.hosted_token}"},
+        timeout=5.0,
+    ) as http:
+        client = HostedSyncClient(http=http)
+        return client.get_doc_manifest(match_id)
+
+
 def register_job_bodies(state: AppState) -> None:
     """Register the production job-body closures on ``state.jobs.bodies``.
 
@@ -2911,6 +2935,7 @@ def register_job_bodies(state: AppState) -> None:
             events = list(doc.get("audit_events") or [])
             events.append(
                 {
+                    "id": _new_event_id(),
                     "ts": _now_iso(),
                     "kind": "shot_detect_run",
                     "payload": {
@@ -3432,9 +3457,9 @@ def register_job_bodies(state: AppState) -> None:
         handle.update(progress=1.0, message="Preview ready")
 
     def _run_sync_match(handle: JobHandle) -> None:
-        """Worker for the ``sync_match`` job (desktop-to-hosted sync MVP,
-        #631 Task 9): push the current match to the configured hosted
-        server.
+        """Worker for the ``sync_match`` job (bidirectional sync, #631 +
+        the pull-merge-push slice): sync the current match with the
+        configured hosted server.
 
         Takes no args - the match root comes from ``state.match_root``,
         which resolves against the ``current_match_root`` ContextVar that
@@ -3443,12 +3468,16 @@ def register_job_bodies(state: AppState) -> None:
 
         Builds the bearer-authed ``httpx.Client`` from the persisted
         hosted-sync prefs (the ``SsiHttpClient`` idiom) and delegates to
-        ``run_push``, which does the real work: plan, adopt the mirror,
-        upload changed media, upsert docs. ``SyncClientError`` and the two
-        httpx error classes a network hiccup or a bad token actually raise
-        are caught and re-raised as ``RuntimeError`` with a readable
-        message - a bare traceback in the jobs panel is not acceptable
-        UX; anything else propagates as-is.
+        ``run_sync``, which does the real work: pull hosted changes,
+        three-way merge, then push (plan, adopt the mirror, upload
+        changed media, upsert docs). ``SyncClientError`` (including its
+        ``SyncVersionConflict`` subclass, which ``run_sync`` retries
+        internally and only re-raises as a plain ``SyncClientError`` once
+        exhausted) and the two httpx error classes a network hiccup or a
+        bad token actually raise are caught and re-raised as
+        ``RuntimeError`` with a readable message - a bare traceback in
+        the jobs panel is not acceptable UX; anything else propagates
+        as-is.
         """
         handle.update(progress=0.0, message="Starting sync...")
         match_root = state.match_root
@@ -3463,7 +3492,7 @@ def register_job_bodies(state: AppState) -> None:
         try:
             client = HostedSyncClient(http=http_client)
             try:
-                report = run_push(
+                report = run_bidirectional_sync(
                     match_root,
                     client=client,
                     on_progress=lambda p, m: handle.update(progress=p, message=m),
@@ -3481,7 +3510,7 @@ def register_job_bodies(state: AppState) -> None:
         finally:
             http_client.close()
         handle.set_result(report.model_dump())
-        handle.update(progress=1.0, message=format_push_message(report))
+        handle.update(progress=1.0, message=format_sync_message(report))
 
     state.jobs.bodies.register("model_download", _run_model_download_job)
     state.jobs.bodies.register("detect_beep", _run_detect_beep_for_video)
@@ -4348,6 +4377,11 @@ class SyncStatusResponse(BaseModel):
     stale: bool
     pending_media: int
     errors: list[str] = Field(default_factory=list)
+    #: Count of hosted docs newer than what this desktop last synced
+    #: (manifest version diff). None = unknown: sync unconfigured or the
+    #: hosted side unreachable right now - offline is a normal desktop
+    #: condition, so the card just omits the hint rather than erroring.
+    remote_changes: int | None = None
 
 
 class ScoreboardUploadRequest(BaseModel):
@@ -6179,6 +6213,13 @@ def create_app(
         the match has never synced, there's unpushed media or doc changes,
         or the plan itself can't run (e.g. a legacy project without a
         match id).
+
+        ``remote_changes`` is a best-effort staleness hint: one short
+        manifest GET against the hosted side, diffed against
+        ``sync_state`` via ``plan_pull``. Left ``None`` (never an error
+        response) when sync isn't configured, the match has never been
+        pushed (hosted 404), or the hosted side is unreachable right
+        now - offline is a normal desktop condition, not a failure.
         """
         if _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
@@ -6188,12 +6229,25 @@ def create_app(
         sync_state = load_sync_state(match_root)
         plan = build_push_plan(match_root, sync_state=sync_state)
         stale = sync_state.last_synced_at is None or bool(plan.media) or bool(plan.docs) or bool(plan.errors)
+
+        remote_changes: int | None = None
+        if configured:
+            match_id = plan.match_id or None
+            if match_id:
+                try:
+                    manifest = await run_in_threadpool(_fetch_remote_manifest, prefs, match_id)
+                    remote_changes = len(plan_pull(manifest, sync_state))
+                # a best-effort hint must never break the status poll - malformed manifest degrades to unknown
+                except (httpx.HTTPError, SyncClientError, KeyError, ValueError, TypeError):
+                    remote_changes = None
+
         return SyncStatusResponse(
             configured=configured,
             last_synced_at=sync_state.last_synced_at,
             stale=stale,
             pending_media=len(plan.media),
             errors=plan.errors,
+            remote_changes=remote_changes,
         )
 
     @app.exception_handler(ShutdownInProgressError)
@@ -10268,6 +10322,14 @@ def create_app(
                 [s for s in shots if isinstance(s, dict)],
                 CoachAutoClassifyConfig(),
             )
+        # Sync merge unions audit_events by id (bidirectional sync
+        # slice); the SPA authors events without one, so stamp them here
+        # at the save boundary.
+        events = payload.get("audit_events")
+        if isinstance(events, list):
+            for event in events:
+                if isinstance(event, dict) and not event.get("id"):
+                    event["id"] = _new_event_id()
         # Read the current version so the save is optimistic-locked. The
         # SPA PUT doesn't carry a version (it assumes last-writer-wins), so
         # this load-then-save has a tiny race window: if a concurrent
@@ -10546,6 +10608,7 @@ def create_app(
         events = list(payload.get("audit_events") or [])
         events.append(
             {
+                "id": _new_event_id(),
                 "ts": _now_iso(),
                 "kind": "coach_reclassify",
                 "payload": {"shot_count": len(shots)},
@@ -10603,6 +10666,7 @@ def create_app(
         events = list(payload.get("audit_events") or [])
         events.append(
             {
+                "id": _new_event_id(),
                 "ts": _now_iso(),
                 "kind": "coach_patch",
                 "payload": {

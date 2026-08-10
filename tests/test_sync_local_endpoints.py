@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import httpx
 from fastapi.testclient import TestClient
 
 from splitsmith import match_model, user_config
@@ -189,6 +190,66 @@ def test_status_unconfigured_match_reports_not_configured(tmp_path: Path) -> Non
     body = resp.json()
     assert body["configured"] is False
     assert body["stale"] is True
+
+
+def test_sync_status_reports_remote_changes(tmp_path: Path, monkeypatch) -> None:
+    """A manifest with a doc version doc_versions has not seen -> remote_changes 1."""
+    client, match_id = _local_app_with_match(tmp_path)
+    client.put(
+        "/api/settings/hosted-sync",
+        json={"base_url": "https://hosted.example", "token": "secret-token"},
+    )
+    manifest = [
+        {
+            "doc_kind": "project",
+            "slug": "anna",
+            "stage_number": None,
+            "version": 5,
+            "updated_at": "2026-08-10T10:00:00+00:00",
+        }
+    ]
+    monkeypatch.setattr("splitsmith.ui.server._fetch_remote_manifest", lambda prefs, match_id: manifest)
+
+    resp = client.get(f"/api/matches/{match_id}/match/sync/status")
+
+    assert resp.status_code == 200
+    assert resp.json()["remote_changes"] == 1
+
+
+def test_sync_status_offline_remote_changes_none(tmp_path: Path, monkeypatch) -> None:
+    client, match_id = _local_app_with_match(tmp_path)
+    client.put(
+        "/api/settings/hosted-sync",
+        json={"base_url": "https://hosted.example", "token": "secret-token"},
+    )
+
+    def _boom(prefs, match_id):
+        raise httpx.TransportError("offline")
+
+    monkeypatch.setattr("splitsmith.ui.server._fetch_remote_manifest", _boom)
+
+    resp = client.get(f"/api/matches/{match_id}/match/sync/status")
+
+    assert resp.status_code == 200
+    assert resp.json()["remote_changes"] is None
+
+
+def test_sync_status_malformed_manifest_remote_changes_none(tmp_path: Path, monkeypatch) -> None:
+    """A manifest entry missing required keys must degrade the hint to
+    None, not 500 the whole status poll."""
+    client, match_id = _local_app_with_match(tmp_path)
+    client.put(
+        "/api/settings/hosted-sync",
+        json={"base_url": "https://hosted.example", "token": "secret-token"},
+    )
+    monkeypatch.setattr(
+        "splitsmith.ui.server._fetch_remote_manifest", lambda prefs, match_id: [{"bogus": True}]
+    )
+
+    resp = client.get(f"/api/matches/{match_id}/match/sync/status")
+
+    assert resp.status_code == 200
+    assert resp.json()["remote_changes"] is None
 
 
 # ---------------------------------------------------------------------------

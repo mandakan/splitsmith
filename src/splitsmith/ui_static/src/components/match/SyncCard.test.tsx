@@ -47,6 +47,7 @@ function makeStatus(overrides: Partial<SyncStatusResponse> = {}): SyncStatusResp
     stale: false,
     pending_media: 0,
     errors: [],
+    remote_changes: null,
     ...overrides,
   };
 }
@@ -190,5 +191,22 @@ describe("SyncCard", () => {
     // shell's next poll tick.
     await waitFor(() => expect(api.startSync).toHaveBeenCalled());
     await waitFor(() => expect(button).toBeDisabled());
+  });
+
+  it("shows the hosted-has-newer hint when remote_changes > 0", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue(makeStatus({ remote_changes: 2 }));
+
+    render(<SyncCard jobs={[]} matchId="m1" />);
+
+    expect(await screen.findByText(/hosted has newer changes/i)).toBeInTheDocument();
+  });
+
+  it("omits the hint when remote_changes is null", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue(makeStatus({ remote_changes: null }));
+
+    render(<SyncCard jobs={[]} matchId="m1" />);
+
+    expect(await screen.findByText(/synced/i)).toBeInTheDocument();
+    expect(screen.queryByText(/hosted has newer changes/i)).not.toBeInTheDocument();
   });
 });

@@ -20,6 +20,14 @@ it" - a sync_state.json written before #797 simply has no doc hashes at
 all, which pydantic defaults to an empty dict, so the first push after
 upgrading rehashes and pushes every doc once, then settles.
 
+``doc_versions`` complements ``doc_hashes`` (#797): a version number for
+each doc, keyed by the same doc identity. The pull planner diffs the
+hosted manifest against this; the push executor sends it as
+``expected_version``. A key absent from ``doc_versions`` means "never
+seen" (expected_version 0). Like ``doc_hashes``, old sync_state.json
+files have no versions at all, which pydantic defaults to an empty dict,
+so the first pull/push after upgrading populates it.
+
 Persisted at ``<match-root>/sync_state.json``, written atomically via
 :func:`splitsmith.match_project.atomic_write_json` so a crash mid-push never
 corrupts the cache. A missing or corrupt file is not an error - it just
@@ -51,12 +59,17 @@ class SyncedItem(BaseModel):
 class SyncState(BaseModel):
     """The full local sync digest cache for one match."""
 
-    schema_version: int = 1
+    schema_version: int = 2
     last_synced_at: datetime | None = None
     items: dict[str, SyncedItem] = Field(default_factory=dict)  # remote key -> digest
     #: doc identity ("match" / "project/<slug>" / "audit/<slug>/<stage>") ->
     #: sha256 of the last-pushed canonical JSON body. Absent key = push it.
     doc_hashes: dict[str, str] = Field(default_factory=dict)
+    #: doc identity -> the hosted ``state_docs.version`` last seen for it
+    #: (recorded from PUT responses and pulls). The pull planner diffs
+    #: the hosted manifest against this; the push executor sends it as
+    #: ``expected_version``. Absent key = never seen (expected_version 0).
+    doc_versions: dict[str, int] = Field(default_factory=dict)
 
 
 def load_sync_state(match_root: Path) -> SyncState:

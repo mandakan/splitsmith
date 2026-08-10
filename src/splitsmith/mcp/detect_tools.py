@@ -32,6 +32,7 @@ import json
 import logging
 import os
 import threading
+import uuid
 from datetime import UTC, datetime
 from typing import Any
 
@@ -72,6 +73,14 @@ def _get_ensemble_runtime() -> ensemble_module.EnsembleRuntime:
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def _new_event_id() -> str:
+    """Unique id for audit_events entries - mirrors
+    ``splitsmith.ui.server._new_event_id`` (the sync merge unions event
+    lists by this id). Duplicated rather than imported: this module
+    doesn't otherwise depend on the web-UI layer."""
+    return uuid.uuid4().hex
 
 
 def detect_beep_for_video(
@@ -315,6 +324,7 @@ def detect_shots_for_stage(
     events = list(existing_json.get("audit_events") or [])
     events.append(
         {
+            "id": _new_event_id(),
             "ts": _now_iso(),
             "kind": "shot_detect_run",
             "payload": {

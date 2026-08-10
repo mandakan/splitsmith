@@ -22,9 +22,10 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from ..observability import PhaseTimer
+from .base import save_base_doc
 from .client import HostedSyncClient, SyncClientError
 from .plan import build_push_plan, doc_identity_key, hash_doc_body
-from .state import SyncedItem, load_sync_state, save_sync_state
+from .state import SyncedItem, SyncState, load_sync_state, save_sync_state
 
 
 class MediaItemTiming(BaseModel):
@@ -94,6 +95,7 @@ def run_push(
     client: HostedSyncClient,
     on_progress: Callable[[float, str], None] = lambda p, m: None,
     timer: PhaseTimer | None = None,
+    sync_state: SyncState | None = None,
 ) -> PushReport:
     """Push ``match_root`` to the hosted mirror via ``client``.
 
@@ -108,13 +110,19 @@ def run_push(
     ``time.monotonic()`` accounting that always lands on
     :attr:`PushReport.timings`, so a caller running this as a job body
     gets the same numbers on ``Job.timings``.
+
+    ``sync_state``, when given, is used as-is instead of loading it fresh
+    - ``run_sync`` hands in the state it already loaded and mutated
+    during its pull/merge phase, so this push sees those doc_versions and
+    doc_hashes rather than a stale on-disk copy. ``None`` (the default)
+    keeps ``run_push`` callable standalone, exactly as before.
     """
     timings: dict[str, float] = {}
     bytes_uploaded = 0
     media_items: list[MediaItemTiming] = []
 
     with _timed_phase(timings, timer, "plan"):
-        sync_state = load_sync_state(match_root)
+        sync_state = sync_state or load_sync_state(match_root)
         plan = build_push_plan(match_root, sync_state=sync_state)
         if plan.errors:
             raise SyncClientError("\n".join(plan.errors))
@@ -150,12 +158,16 @@ def run_push(
         for doc in plan.docs:
             label = doc.kind if doc.slug is None else f"{doc.kind} ({doc.slug})"
             on_progress(1.0, f"syncing {label}")
-            client.put_doc(plan.match_id, doc)
-            # Record the hash only after the PUT succeeds (#797) - same
-            # crash-safety invariant as media above: a failed push must
-            # retry this doc next time, not skip it forever.
             key = doc_identity_key(doc.kind, doc.slug, doc.stage_number)
+            new_version = client.put_doc(
+                plan.match_id, doc, expected_version=sync_state.doc_versions.get(key, 0)
+            )
+            # Record hash + version + base only after the PUT succeeds -
+            # same crash-safety invariant as media: a failed push must
+            # retry this doc next time, not skip it forever.
             sync_state.doc_hashes[key] = hash_doc_body(doc.body)
+            sync_state.doc_versions[key] = new_version
+            save_base_doc(match_root, key, doc.body)
             save_sync_state(match_root, sync_state)
 
     sync_state.last_synced_at = datetime.now(UTC)
