@@ -12903,7 +12903,7 @@ def create_app(
             return FileResponse(served_path, media_type="video/mp4")
 
         # Non-registered path: a Compare-produced trim, addressed by the
-        # logical ref grammar ``(exports|trimmed)/<name>.mp4`` -- the same
+        # logical ref grammar ``(exports|trimmed)/<name>.mp4`` - the same
         # shape ``_resolve_compare_trim`` hands back. Absolute paths and
         # traversal shapes never reach a dir derivation at all; they just
         # fail the match.

@@ -7,7 +7,7 @@ Compare view's own trims, falls back to a logical ref of the shape
 
   - rejection matrix: absolute path (even when a real file exists at
     that path), ``..`` traversal, non-.mp4 suffix, well-formed-but-
-    absent ref -- all 404, nothing served
+    absent ref - all 404, nothing served
   - local happy path: a real trim file under ``trimmed/`` streams back
   - hosted: trim key present in object storage -> 307 presigned
     redirect; absent -> 404
@@ -71,7 +71,7 @@ def _local_url(match_id: str, slug: str = "me") -> str:
 def test_absolute_path_rejected_even_when_file_exists(
     local_client: tuple[TestClient, Path, Path, str],
 ) -> None:
-    """An absolute path is rejected outright -- not merely because the
+    """An absolute path is rejected outright - not merely because the
     file is missing. Prove rejection by creating a real file at that
     absolute path inside exports_dir and asserting 404 anyway."""
     client, _match_root, shooter_root, match_id = local_client
@@ -86,7 +86,7 @@ def test_absolute_path_rejected_even_when_file_exists(
 
 
 def test_traversal_path_rejected(local_client: tuple[TestClient, Path, Path, str]) -> None:
-    """``trimmed/../secrets.mp4`` is rejected -- the ref grammar has no
+    """``trimmed/../secrets.mp4`` is rejected - the ref grammar has no
     slash inside the filename component, so this never reaches a dir
     derivation at all."""
     client, _match_root, shooter_root, match_id = local_client
@@ -187,7 +187,7 @@ def _seed_session(db_url: str, email: str = EMAIL) -> str:
 
 
 def _seed_match_and_project(db_url: str, email: str, match_id: str, slug: str) -> None:
-    """Insert a MatchRow + an empty project doc -- no video registered,
+    """Insert a MatchRow + an empty project doc - no video registered,
     since the fallback only cares about the shooter existing."""
     from splitsmith import match_model
     from splitsmith.match_project import MatchProject
