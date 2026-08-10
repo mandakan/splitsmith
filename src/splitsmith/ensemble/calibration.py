@@ -379,10 +379,10 @@ class OnnxProbaModel:
         # Imported lazily, matching ``features.py``'s PANN/CLAP branches:
         # onnxruntime pulls in native libraries and nothing should pay
         # for that at import time.
-        import onnxruntime as ort
+        from .onnx_session import build_onnx_session
 
         self.path = path
-        self._session = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
+        self._session = build_onnx_session(path)
         spec = self._session.get_inputs()[0]
         self._input_name = spec.name
         # skl2onnx declares ``[None, n_features]``: a symbolic batch axis

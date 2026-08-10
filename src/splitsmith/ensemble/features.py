@@ -421,12 +421,11 @@ def _build_clap_runtime_onnx() -> ClapRuntime:
     L2-normalised embeddings. Audio preprocessing goes through the
     license-clean numpy mel pipeline in :mod:`splitsmith.ensemble.clap_mel`.
     """
-    import onnxruntime as ort
-
     from .clap_mel import batch_log_mel_input_features
+    from .onnx_session import build_onnx_session
 
     audio_path, text_path = _resolve_onnx_clap_paths()
-    session = ort.InferenceSession(str(audio_path), providers=["CPUExecutionProvider"])
+    session = build_onnx_session(audio_path)
     input_name = session.get_inputs()[0].name
     text_emb = np.load(text_path).astype(np.float32)
     if text_emb.ndim != 2 or text_emb.shape[0] != len(CLAP_PROMPTS):
@@ -574,10 +573,10 @@ def _build_pann_runtime_onnx() -> PannRuntime:
     torch branch: ``(N, T)`` float32 audio at ``PANN_SR`` -> ``(N,)``
     gunshot probability in numpy.
     """
-    import onnxruntime as ort
+    from .onnx_session import build_onnx_session
 
     onnx_path = _resolve_onnx_pann_path()
-    session = ort.InferenceSession(str(onnx_path), providers=["CPUExecutionProvider"])
+    session = build_onnx_session(onnx_path)
     input_name = session.get_inputs()[0].name
 
     def predict_gunshot_prob(batch: np.ndarray) -> np.ndarray:
