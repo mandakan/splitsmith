@@ -51,6 +51,41 @@ ENV_ONNX_DEVICE = "SPLITSMITH_ONNX_DEVICE"
 _CPU_ONLY = ["CPUExecutionProvider"]
 _CUDA_THEN_CPU = ["CUDAExecutionProvider", "CPUExecutionProvider"]
 
+_cuda_dlls_preloaded = False
+
+
+def _preload_cuda_dlls(ort) -> None:  # type: ignore[no-untyped-def]
+    """Load the CUDA/cuDNN runtime the way onnxruntime-gpu ships it, once.
+
+    ``onnxruntime-gpu`` no longer bundles the CUDA runtime; it declares the
+    ``nvidia-*-cu12`` wheels as dependencies and expects them on the loader
+    path. ``ort.preload_dlls()`` loads those wheel libraries from
+    ``site-packages`` directly, so a native (non-Docker) agent needs **no**
+    ``LD_LIBRARY_PATH`` pointing at the wheels -- only ``libcuda`` from the
+    driver, which a normal WSL2 / Linux install already exposes via
+    ``ld.so.conf.d``. Validated on WSL2 + RTX 2070 SUPER (issue #796): with
+    this call and a stock install, ``SPLITSMITH_ONNX_DEVICE=auto`` runs on CUDA
+    with zero env setup.
+
+    Guarded and best-effort: the CPU ``onnxruntime`` wheel has no
+    ``preload_dlls``; a failure here is not fatal because the CUDA session
+    build below still succeeds when the libraries are reachable another way
+    (e.g. a CUDA base image's system libraries), and falls back to CPU when
+    they are not.
+    """
+    global _cuda_dlls_preloaded
+    if _cuda_dlls_preloaded:
+        return
+    preload = getattr(ort, "preload_dlls", None)
+    if preload is not None:
+        try:
+            preload()
+        except Exception:  # noqa: BLE001 - preloading is an optimisation, never required
+            logger.debug(
+                "onnxruntime.preload_dlls() failed; relying on the system library path", exc_info=True
+            )
+    _cuda_dlls_preloaded = True
+
 
 def resolve_onnx_device(available: list[str]) -> str:
     """Resolve the target device from the env var + what onnxruntime offers.
@@ -101,6 +136,9 @@ def build_onnx_session(
     if device == "cpu":
         return ort.InferenceSession(path_str, sess_options=sess_options, providers=_CPU_ONLY)
 
+    # Make the onnxruntime-gpu wheel's CUDA libraries loadable without the
+    # caller having set LD_LIBRARY_PATH (see _preload_cuda_dlls).
+    _preload_cuda_dlls(ort)
     try:
         session = ort.InferenceSession(path_str, sess_options=sess_options, providers=_CUDA_THEN_CPU)
     except Exception:  # noqa: BLE001 - any CUDA init failure must degrade to CPU

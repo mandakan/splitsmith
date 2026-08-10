@@ -5,6 +5,7 @@ __pycache__/
 *.so
 .Python
 .venv/
+.venv-agent-gpu/
 venv/
 .pytest_cache/
 .mypy_cache/

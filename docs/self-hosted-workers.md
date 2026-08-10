@@ -145,6 +145,34 @@ reservation. Set `SPLITSMITH_ONNX_DEVICE=cpu` to force the CPU path (e.g. while
 parity-checking a new GPU or onnxruntime version); the default `auto` uses the
 GPU when the CUDA provider initialises and falls back otherwise.
 
+### Without Docker (native, e.g. WSL2)
+
+On a box where Docker isn't an option -- WSL2 is the common case -- run the agent
+natively with the same GPU acceleration. From a clone of the repo:
+
+```bash
+scripts/setup-agent-gpu.sh                 # creates .venv-agent-gpu, installs the
+                                           # GPU onnxruntime stack, verifies CUDA + NVENC
+scripts/run-agent-gpu.sh \
+  --server-url https://my.splitsmith.app \
+  --token <REGISTRATION_TOKEN>
+```
+
+`setup-agent-gpu.sh` installs `onnxruntime-gpu` plus the CUDA 12 / cuDNN 9
+runtime wheels and checks that a real CUDA session binds. **No `LD_LIBRARY_PATH`
+setup is needed:** the engine calls `onnxruntime.preload_dlls()` to load the
+CUDA libraries from those wheels, and a normal WSL2/Linux install already exposes
+`libcuda` from the driver via `ld.so.conf.d`. The only host requirement is an
+NVIDIA driver reporting CUDA >= 12.4 (`nvidia-smi` -- on WSL2 it lives at
+`/usr/lib/wsl/lib/nvidia-smi`); no driver upgrade is needed on e.g. a 566.x
+driver.
+
+Validated on WSL2 + RTX 2070 SUPER: with no environment variables set, ensemble
+detect runs on CUDA (~4.5x faster than CPU, identical detections) and audit
+trims use `h264_nvenc`. `--token` is only needed on first run, exactly as in the
+Docker path; `agent.json` persists under the agent's state dir (`~/.splitsmith`
+by default, or `--state-dir`).
+
 ## Source cache
 
 Every job needs the raw video local. The agent mirrors each raw file from object
