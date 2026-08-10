@@ -1,0 +1,213 @@
+# syntax=docker/dockerfile:1.7
+#
+# GPU agent image for `splitsmith agent` on an NVIDIA host (issue #796).
+#
+# This is a variant of the base ./Dockerfile, NOT a replacement. It exists so
+# a self-hosted worker on a box with a discrete NVIDIA GPU accelerates the two
+# hot paths measured in #796:
+#   - ensemble detect  -> onnxruntime CUDA execution provider (11.2s -> 2.5s,
+#     ~4.5x, byte-identical detections on an RTX 2070 SUPER)
+#   - audit-mode encode -> ffmpeg h264_nvenc (66.6s -> 14.7s on 4K60), selected
+#     automatically by select_audit_encoder's trial-encode probe.
+#
+# The base image stays CPU-only and unchanged; a GPU host builds and runs THIS
+# image instead. Run it with the NVIDIA Container Toolkit so the container sees
+# the GPU:
+#
+#   docker build -f Dockerfile.gpu -t ghcr.io/mandakan/splitsmith:latest-gpu .
+#   docker compose -f docker-compose.agent.gpu.yml up -d   # adds `gpus: all`
+#
+# DELTAS FROM ./Dockerfile (everything else is intentionally identical so the
+# two images stay in lock-step):
+#
+#   1. Base image is `nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04` (CUDA 12 +
+#      cuDNN 9) instead of `python:3.11-slim-bookworm`. That is the stack the
+#      #796 validation used with onnxruntime-gpu 1.22. The host driver only
+#      needs to satisfy CUDA 12 (>= 550 / any driver that reports CUDA >= 12.4)
+#      -- the container carries its own CUDA userspace, so no host driver
+#      upgrade is required on a box already running e.g. 566.x.
+#   2. Ubuntu 22.04 ships Python 3.10; we install 3.11 from deadsnakes so the
+#      wheel's `requires-python` is satisfied and the interpreter path is
+#      identical across the builder and runtime stages (the same CRITICAL
+#      cross-stage invariant the base image documents).
+#   3. After `uv sync`, the CPU `onnxruntime` wheel is swapped for
+#      `onnxruntime-gpu` (+ the CUDA 12 / cuDNN 9 runtime wheels). onnxruntime
+#      and onnxruntime-gpu share the `onnxruntime` import namespace and cannot
+#      coexist, so this is an uninstall-then-install, not an extra. This is the
+#      packaging reason a GPU *image* is the right unit rather than a
+#      pip-installable `[gpu]` extra.
+#   4. `SPLITSMITH_ONNX_DEVICE=auto` is set (the default) so the CUDA provider
+#      is used when present and falls back to CPU otherwise -- a GPU agent
+#      never fails closed.
+#
+# NOTE (untested in the authoring session -- no Docker on that box): this file
+# is derived line-for-line from the proven base image, but it MUST be
+# build+run validated on a GPU Docker host before it ships. The one-shot check
+# after `up`: the agent log should show an onnxruntime CUDA session, and a
+# detect job should complete ~4x faster than the CPU image.
+
+ARG CUDA_IMAGE=nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+ARG NODE_IMAGE=node:22-bookworm-slim
+
+# --------------------------------------------------------------------------
+# SPA build (Node) -- identical to ./Dockerfile so the one image can also
+# `serve` if ever needed; the agent command never touches dist/, but keeping
+# the stage identical avoids a second SPA build path to maintain.
+# --------------------------------------------------------------------------
+FROM ${NODE_IMAGE} AS spa
+WORKDIR /spa
+RUN corepack enable && corepack prepare pnpm@10.30.3 --activate
+COPY src/splitsmith/ui_static/package.json src/splitsmith/ui_static/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY src/splitsmith/ui_static/ ./
+RUN pnpm run build
+
+# --------------------------------------------------------------------------
+# Builder
+# --------------------------------------------------------------------------
+FROM ${CUDA_IMAGE} AS builder
+
+# Python 3.11 from deadsnakes (Ubuntu 22.04 default is 3.10). `python3.11` lands
+# at /usr/bin/python3.11 in BOTH stages because both use ${CUDA_IMAGE} -- the
+# venv's interpreter shebang stays valid after the cross-stage COPY.
+ENV DEBIAN_FRONTEND=noninteractive
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends software-properties-common ca-certificates curl xz-utils gnupg; \
+    add-apt-repository -y ppa:deadsnakes/ppa; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends python3.11 python3.11-venv python3.11-dev; \
+    rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /uvx /usr/local/bin/
+
+# Build the venv against the system 3.11; never fetch a uv-managed interpreter
+# (its path would not exist in the runtime stage). Copy link mode so the venv
+# holds real files that survive the cross-stage COPY.
+ENV UV_PYTHON_DOWNLOADS=never \
+    UV_LINK_MODE=copy \
+    UV_PYTHON=/usr/bin/python3.11
+
+# Static ffmpeg + ffprobe (John Van Sickle) -- the SAME binaries the base image
+# uses. They advertise h264_nvenc and dlopen libnvidia-encode at encode time,
+# which the NVIDIA Container Toolkit injects from the host driver at runtime, so
+# NVENC works in-container without ffmpeg carrying any GPU libs itself.
+ARG TARGETARCH
+RUN set -eux; \
+    case "${TARGETARCH:-amd64}" in \
+        amd64) ff_arch=amd64 ;; \
+        arm64) ff_arch=arm64 ;; \
+        *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${ff_arch}-static.tar.xz" \
+        -o /tmp/ffmpeg.tar.xz; \
+    mkdir -p /tmp/ffmpeg; \
+    tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1; \
+    install -m0755 /tmp/ffmpeg/ffmpeg /tmp/ffmpeg/ffprobe /usr/local/bin/; \
+    rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz; \
+    /usr/local/bin/ffmpeg -version | head -1
+
+WORKDIR /app
+
+# Dependency layer first so it caches across source-only edits.
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-dev --extra hosted --no-install-project
+
+# Source + editable project install.
+COPY src ./src
+RUN rm -rf src/splitsmith/ui_static
+COPY --from=spa /spa/dist ./src/splitsmith/ui_static/dist
+RUN uv sync --frozen --no-dev --extra hosted
+
+# GPU swap: replace the CPU onnxruntime wheel with onnxruntime-gpu + the CUDA 12
+# / cuDNN 9 runtime wheels. Pinned to the versions validated in #796. They share
+# the `onnxruntime` import name, so it is an uninstall-then-install; nothing else
+# in the venv references onnxruntime directly.
+RUN uv pip uninstall onnxruntime \
+ && uv pip install \
+        "onnxruntime-gpu==1.22.0" \
+        "nvidia-cudnn-cu12" \
+        "nvidia-cublas-cu12" \
+        "nvidia-cuda-runtime-cu12" \
+        "nvidia-curand-cu12" \
+        "nvidia-cufft-cu12" \
+ && /app/.venv/bin/python -c "import onnxruntime as o; assert 'CUDAExecutionProvider' in o.get_available_providers(), o.get_available_providers()"
+
+# Slim the venv (drop bundled test suites + __pycache__); do NOT strip .so files.
+RUN find /app/.venv -type d -name '__pycache__' -prune -exec rm -rf {} + ; \
+    find /app/.venv -type d -name 'tests' -prune -exec rm -rf {} + ; \
+    find /app/.venv -type d -name 'test' -prune -exec rm -rf {} +
+
+# Bake the slim ONNX model artifacts into a staging dir copied to runtime.
+ENV SPLITSMITH_CONFIG_DIR=/opt/splitsmith
+ARG BAKE_MODELS=1
+RUN if [ "$BAKE_MODELS" = "1" ]; then \
+        /app/.venv/bin/splitsmith fetch-models; \
+    else \
+        echo "BAKE_MODELS=0 -- skipping model bake; runtime will download on first detection"; \
+        mkdir -p /opt/splitsmith/models; \
+    fi
+
+# --------------------------------------------------------------------------
+# Runtime
+# --------------------------------------------------------------------------
+FROM ${CUDA_IMAGE} AS runtime
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends software-properties-common ca-certificates curl gnupg; \
+    add-apt-repository -y ppa:deadsnakes/ppa; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends python3.11 python3.11-venv; \
+    rm -rf /var/lib/apt/lists/*
+
+# Static ffmpeg + ffprobe from the builder.
+COPY --from=builder /usr/local/bin/ffmpeg /usr/local/bin/ffprobe /usr/local/bin/
+
+# Non-root user with a writable home for the baked model cache + runtime writes.
+RUN groupadd --system splitsmith \
+ && useradd --system --gid splitsmith --home-dir /home/splitsmith --create-home splitsmith
+
+WORKDIR /app
+
+# The venv (now carrying onnxruntime-gpu + CUDA wheels) + the editable source.
+COPY --from=builder --chown=splitsmith:splitsmith /app/.venv /app/.venv
+COPY --from=builder --chown=splitsmith:splitsmith /app/src /app/src
+
+# Playwright Chromium for the overlay rasterizer (a compare-grid render needs it
+# at runtime), same one-time install as the base image.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN apt-get update \
+ && /app/.venv/bin/playwright install --with-deps chromium --only-shell \
+ && rm -rf /var/lib/apt/lists/* \
+ && chown -R splitsmith:splitsmith /opt/ms-playwright
+
+# Alembic (the agent does not migrate, but keep the layout identical to base).
+COPY --chown=splitsmith:splitsmith alembic.ini ./
+COPY --chown=splitsmith:splitsmith alembic ./alembic
+
+# Baked models -> the runtime config dir's models/ cache.
+COPY --from=builder --chown=splitsmith:splitsmith /opt/splitsmith /home/splitsmith/.splitsmith
+
+# Agent state + source cache dir (the documented -v splitsmith-agent:/data mount).
+RUN mkdir -p /data && chown splitsmith:splitsmith /data
+
+USER splitsmith
+
+# The onnxruntime-gpu wheel loads libcudart/libcublas/libcudnn from the nvidia
+# pip wheels; expose their lib dirs so the CUDA provider can dlopen them. The
+# CUDA base image also carries the system CUDA/cuDNN under the default loader
+# path, so this is belt-and-braces for the wheel-provided copies.
+ENV LD_LIBRARY_PATH=/app/.venv/lib/python3.11/site-packages/nvidia/cudnn/lib:/app/.venv/lib/python3.11/site-packages/nvidia/cublas/lib:/app/.venv/lib/python3.11/site-packages/nvidia/cuda_runtime/lib:/app/.venv/lib/python3.11/site-packages/nvidia/curand/lib:/app/.venv/lib/python3.11/site-packages/nvidia/cufft/lib
+
+ENV PATH="/app/.venv/bin:${PATH}" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    SPLITSMITH_CONFIG_DIR=/home/splitsmith/.splitsmith \
+    SPLITSMITH_ONNX_DEVICE=auto
+
+# Agent-only image: the ENTRYPOINT is the CLI, default CMD runs the worker
+# agent. (The base image defaults to `serve`; a GPU box is a compute agent.)
+ENTRYPOINT ["splitsmith"]
+CMD ["agent"]

@@ -103,6 +103,48 @@ one copy per environment with distinct project names
 (`docker compose -p splitsmith-agent-staging ...`) so their state volumes do not
 collide.
 
+## GPU acceleration (NVIDIA)
+
+If the box has a discrete NVIDIA GPU, run the **GPU image** instead so the agent
+offloads its two hot paths (issue #796):
+
+- **ensemble detect** runs on the onnxruntime CUDA execution provider
+  (~4.5x faster than CPU, with byte-identical detections);
+- **audit-mode encode** uses ffmpeg `h264_nvenc` (measured 66.6s -> 14.7s on a
+  4K60 stage), selected automatically once the agent confirms the GPU can
+  actually encode.
+
+Both are opportunistic: the same code falls back to CPU when the GPU is absent
+or busy, so nothing fails closed. On registration the agent advertises what it
+verified it can do (`capabilities.nvenc_h264`, `capabilities.cuda_ep`,
+`capabilities.gpu_name`), visible in **Admin > Workers**.
+
+**Prerequisites on the host:**
+
+- An NVIDIA driver new enough for CUDA 12. The container carries its own CUDA
+  userspace, so a driver that reports CUDA >= 12.4 (`nvidia-smi`) is enough --
+  no driver upgrade needed on e.g. a 566.x driver.
+- The [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html),
+  with the Docker runtime configured
+  (`sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`).
+- Verify GPU passthrough works: `docker run --rm --gpus all <cuda-image> nvidia-smi`.
+
+**Build and run** (the GPU image is a separate `latest-gpu` tag / `Dockerfile.gpu`):
+
+```bash
+docker build -f Dockerfile.gpu -t splitsmith:local-gpu .
+
+SPLITSMITH_SERVER_URL=https://my.splitsmith.app \
+SPLITSMITH_REGISTRATION_TOKEN=<REGISTRATION_TOKEN> \
+SPLITSMITH_IMAGE_TAG=local-gpu \
+docker compose -f docker-compose.agent.gpu.yml up -d
+```
+
+`docker-compose.agent.gpu.yml` is the agent compose file with an added GPU
+reservation. Set `SPLITSMITH_ONNX_DEVICE=cpu` to force the CPU path (e.g. while
+parity-checking a new GPU or onnxruntime version); the default `auto` uses the
+GPU when the CUDA provider initialises and falls back otherwise.
+
 ## Source cache
 
 Every job needs the raw video local. The agent mirrors each raw file from object
