@@ -12,6 +12,7 @@ import pytest
 from splitsmith.ui.jobs import (
     JobBodyRegistry,
     JobCancelled,
+    JobNotRetryableError,
     JobRegistry,
     JobStatus,
     UnknownJobKindError,
@@ -79,6 +80,9 @@ class _Sync:
 
     def find_active(self, **kwargs):
         return asyncio.run(self._inner.find_active(**kwargs))
+
+    def retry(self, job_id):
+        return asyncio.run(self._inner.retry(job_id))
 
 
 def _wait_until(predicate, *, timeout=2.0, poll=0.01):
@@ -791,3 +795,39 @@ def test_find_active_scopes_by_shooter_slug() -> None:
         assert reg.find_active(kind="shot_detect", stage_number=3) is None
     finally:
         release.set()
+
+
+def test_retry_failed_job_resubmits_with_original_args() -> None:
+    reg = _Sync(JobRegistry(max_concurrent=1))
+    calls: list[dict] = []
+
+    def flaky(handle, **kwargs) -> None:
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise RuntimeError("boom")
+
+    reg._inner.bodies.register("flaky", flaky)
+    job = reg.submit(kind="flaky", args={"x": 1}, stage_number=3, shooter_slug="anna")
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.FAILED)
+    assert reg.get(job.id).status is JobStatus.FAILED
+
+    new = reg.retry(job.id)
+    assert new is not None and new.id != job.id
+    assert new.kind == "flaky" and new.stage_number == 3 and new.shooter_slug == "anna"
+    assert _wait_until(lambda: reg.get(new.id).status == JobStatus.SUCCEEDED)
+    assert calls == [{"x": 1}, {"x": 1}]
+    assert reg.get(job.id).acknowledged is True  # retry clears it from the failed list
+
+
+def test_retry_unknown_id_returns_none() -> None:
+    reg = _Sync(JobRegistry())
+    assert reg.retry("nope") is None
+
+
+def test_retry_non_failed_job_raises() -> None:
+    reg = _Sync(JobRegistry(max_concurrent=1))
+    reg._inner.bodies.register("ok", lambda handle, **kw: None)
+    job = reg.submit(kind="ok")
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.SUCCEEDED)
+    with pytest.raises(JobNotRetryableError):
+        reg.retry(job.id)

@@ -146,6 +146,10 @@ class JobBodyRegistry:
         return kind in self._bodies
 
 
+class JobNotRetryableError(Exception):
+    """Job exists but cannot be retried (not FAILED, or args unknown)."""
+
+
 class JobStatus(StrEnum):
     """Job lifecycle states.
 
@@ -434,6 +438,8 @@ class JobBackend(Protocol):
         video_id: str | None = None,
     ) -> Job | None: ...
 
+    async def retry(self, job_id: str) -> Job | None: ...
+
 
 class JobRegistry:
     """Thread-safe in-memory job backend.
@@ -463,6 +469,9 @@ class JobRegistry:
         self._journal = journal
         self._jobs: dict[str, Job] = {}
         self._order: list[str] = []
+        # Original call_args per retained job, so retry can re-enqueue.
+        # Entries die with their job in _trim_retained_locked.
+        self._args: dict[str, dict[str, Any]] = {}
         self._lock = threading.RLock()
         self._max_concurrent = max_concurrent
         self._executor = ThreadPoolExecutor(
@@ -580,6 +589,7 @@ class JobRegistry:
 
         with self._lock:
             self._jobs[job.id] = job
+            self._args[job.id] = call_args
             self._order.append(job.id)
             self._pending.append((job.id, _ctx_fn))
             # Journal before dispatch: once the executor has the job a
@@ -757,6 +767,33 @@ class JobRegistry:
                     continue
                 return j.model_copy(deep=True)
             return None
+
+    async def retry(self, job_id: str) -> Job | None:
+        """Re-enqueue a FAILED job with its original args.
+
+        Returns the NEW pending job; the failed job stays in history,
+        acknowledged. None for an unknown id. Raises
+        JobNotRetryableError when the job is not FAILED.
+        """
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            if job.status is not JobStatus.FAILED:
+                raise JobNotRetryableError(f"job is {job.status.value}; only failed jobs can be retried")
+            args = dict(self._args.get(job_id) or {})
+            kind = job.kind
+            stage_number = job.stage_number
+            shooter_slug = job.shooter_slug
+            video_id = job.video_id
+        await self.acknowledge(job_id)
+        return await self.submit(
+            kind=kind,
+            args=args,
+            stage_number=stage_number,
+            shooter_slug=shooter_slug,
+            video_id=video_id,
+        )
 
     # ------------------------------------------------------------------
     # Internal -- worker glue. These run on the executor thread.
@@ -1000,4 +1037,5 @@ class JobRegistry:
         ranked = sorted(finished, key=lambda jid: (_eviction_priority(jid), order_index[jid]))
         for jid in ranked[:excess]:
             self._jobs.pop(jid, None)
+            self._args.pop(jid, None)
             self._order.remove(jid)
