@@ -273,10 +273,10 @@ export interface MatchProject {
    *  ``covers_stages = [1, 2, 3, 4]``. StageVideo entries reference
    *  these by ``storage_path``. */
   raw_videos: RawVideoManifestEntry[];
-  /** See :type:`MatchOrigin` (#631, #821). Drives the honest not-ready
-   *  copy: a "desktop" origin means raw footage never leaves the desktop
-   *  install, so a placeholder promising a proxy is coming would be a lie. */
-  origin: MatchOrigin;
+  /** Which install owns the media ("desktop" mirror / "hosted" native /
+   *  "local"). Only GET .../project injects it - mutating routes echo the
+   *  doc without it, so treat absence as "unknown, not a mirror". */
+  origin?: MatchOrigin;
 }
 
 /** GET /api/scoreboard/source response. ``mode === "local"`` means the

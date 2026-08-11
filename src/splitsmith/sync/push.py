@@ -9,9 +9,10 @@ garbage-collect remote beep_review objects whose local file is gone
 pushed copy must follow or ``snippet_ready`` lies forever for reopened
 items), then upsert every changed doc (#797: unchanged docs are already
 filtered out of ``plan.docs`` by the planner). Sync state is saved
-after each media item, each gc deletion, and each doc lands (crash-safe
-incrementality: a killed process re-uploads/re-pushes only what didn't
-finish), and once more at the end with ``last_synced_at`` stamped.
+after each media item, after the gc phase, and after each doc lands
+(crash-safe incrementality: a killed process re-uploads/re-pushes only
+what didn't finish), and once more at the end with ``last_synced_at``
+stamped.
 """
 
 from __future__ import annotations
