@@ -135,10 +135,13 @@ def test_non_admin_gets_403(hosted_env: str, monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_admin_list_empty(admin_client) -> None:
+    from splitsmith import __version__
+
     client, _ = admin_client
     resp = client.get("/api/admin/workers")
     assert resp.status_code == 200
-    assert resp.json() == {"workers": []}
+    # server_version lets the admin UI flag workers behind the current release.
+    assert resp.json() == {"workers": [], "server_version": __version__}
 
 
 def test_admin_list_returns_workers_after_create(admin_client) -> None:
