@@ -23,6 +23,7 @@ export function MobileConfirmSheet({
   title,
   body,
   confirmLabel,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: {
@@ -30,6 +31,7 @@ export function MobileConfirmSheet({
   title: string;
   body: ReactNode;
   confirmLabel: string;
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -81,7 +83,8 @@ export function MobileConfirmSheet({
             <button
               type="button"
               onClick={onConfirm}
-              className="btn-led-fill min-h-11 flex-1 rounded-md"
+              disabled={confirmDisabled}
+              className="btn-led-fill min-h-11 flex-1 rounded-md disabled:cursor-default disabled:opacity-60"
             >
               {confirmLabel}
             </button>

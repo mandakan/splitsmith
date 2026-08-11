@@ -91,7 +91,7 @@ describe("SplitsList", () => {
         onReclassify={() => {}}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /01/ }));
+    fireEvent.click(screen.getByRole("button", { name: "011.000.500" }));
     expect(onSeek).toHaveBeenCalledTimes(1);
   });
 });
