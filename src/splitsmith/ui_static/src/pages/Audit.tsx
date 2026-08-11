@@ -35,6 +35,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import {
+  AlertTriangle,
   Crosshair,
   HelpCircle,
   ListChecks,
@@ -80,6 +81,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/Kbd";
 import { Portal } from "@/components/ui/Portal";
+import { StatusPill } from "@/components/ui/StatusPill";
 import {
   Card,
   CardContent,
@@ -1732,6 +1734,21 @@ export function Audit() {
               }}
             />
           </div>
+
+          {/* Triage flag (#823): a mobile operator marked this stage for
+              desktop follow-up. Saving from here clears the flag
+              server-side (put_stage_audit), so no unflag action lives
+              here -- this is status, not a control. */}
+          {audit?.needs_attention?.flagged ? (
+            <div role="status" className="flex flex-wrap items-center gap-2">
+              <StatusPill tone="in-progress" icon={<AlertTriangle aria-hidden className="size-3" />}>
+                Flagged for desktop
+              </StatusPill>
+              {audit.needs_attention.note ? (
+                <span className="text-sm text-muted">{audit.needs_attention.note}</span>
+              ) : null}
+            </div>
+          ) : null}
 
           {/* Toolbar: beep status + re-pick + trim/detect + filter chips
               + zoom + drawer toggle. Save & next + Undo live in the

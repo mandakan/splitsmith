@@ -263,6 +263,43 @@ def test_flag_note_too_long_422(client: _MatchClient, seeded_stage: dict) -> Non
     assert resp.status_code == 422
 
 
+def test_desktop_save_clears_flag(client: _MatchClient, seeded_stage: dict) -> None:
+    """#823: a desktop full-audit save (the SPA's Audit.tsx PUT, carrying a
+    "save" audit event) resolves an open triage flag, same as accept."""
+    flag_resp = client.post(
+        "/api/shooters/alice/stages/1/attention",
+        json={"flagged": True, "note": "check split 3"},
+    )
+    assert flag_resp.status_code == 200
+
+    doc = client.get("/api/shooters/alice/stages/1/audit").json()
+    doc["audit_events"] = doc.get("audit_events", []) + [{"kind": "save", "payload": {}}]
+    put_resp = client.put("/api/shooters/alice/stages/1/audit", json=doc)
+    assert put_resp.status_code == 200
+
+    doc2 = client.get("/api/shooters/alice/stages/1/audit").json()
+    assert doc2["needs_attention"]["flagged"] is False
+    assert doc2["needs_attention"]["updated_at"]
+
+
+def test_non_save_put_keeps_flag(client: _MatchClient, seeded_stage: dict) -> None:
+    """A PUT without a save event (e.g. a marker-edit autosave) must not
+    clear the triage flag - only an explicit desktop save resolves it."""
+    flag_resp = client.post(
+        "/api/shooters/alice/stages/1/attention",
+        json={"flagged": True, "note": "check split 3"},
+    )
+    assert flag_resp.status_code == 200
+
+    doc = client.get("/api/shooters/alice/stages/1/audit").json()
+    doc["audit_events"] = doc.get("audit_events", []) + [{"kind": "marker_kept", "payload": {"id": "cand-4"}}]
+    put_resp = client.put("/api/shooters/alice/stages/1/audit", json=doc)
+    assert put_resp.status_code == 200
+
+    doc2 = client.get("/api/shooters/alice/stages/1/audit").json()
+    assert doc2["needs_attention"]["flagged"] is True
+
+
 def test_triage_lists_cells_with_status_and_anomalies(client: _MatchClient, seeded_match: None) -> None:
     body = client.get("/api/match/triage").json()
     cells = body["cells"]

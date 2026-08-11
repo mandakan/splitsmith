@@ -1194,6 +1194,10 @@ export interface StageAudit {
   _candidates_pending_audit?: { candidates: AuditCandidate[] };
   audit_events?: AuditEvent[];
   source?: string;
+  /** Triage flag (#823) - present when a mobile operator flagged this
+   *  stage for desktop follow-up; cleared server-side on the next
+   *  desktop save. */
+  needs_attention?: TriageAttention | null;
 }
 
 export type JobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";

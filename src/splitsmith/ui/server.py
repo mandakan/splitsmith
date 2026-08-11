@@ -10478,7 +10478,20 @@ def create_app(
         # worker bumps the version in between, save_audit raises
         # StateConflictError -> 409 and the SPA re-fetches. Local: version
         # is always 0 and this is a plain atomic file write.
-        _, version = state.load_audit(slug, stage_number)
+        stored, version = state.load_audit(slug, stage_number)
+        # #823: a desktop full-audit save resolves an open triage flag, same
+        # as the triage "accept" action. The SPA round-trips needs_attention
+        # (Audit.tsx buildAuditJson spreads the loaded doc), so checking the
+        # incoming payload covers the normal path - but a stale SPA session
+        # that dropped the key would silently keep the stored doc flagged,
+        # so check both sides.
+        is_save = isinstance(events, list) and any(
+            isinstance(e, dict) and e.get("kind") == "save" for e in events
+        )
+        incoming_flagged = bool((payload.get("needs_attention") or {}).get("flagged"))
+        stored_flagged = bool(((stored or {}).get("needs_attention") or {}).get("flagged"))
+        if is_save and (incoming_flagged or stored_flagged):
+            _set_needs_attention(payload, flagged=False)
         state.save_audit(slug, stage_number, payload, version=version)
         return JSONResponse(payload)
 
