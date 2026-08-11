@@ -1300,7 +1300,7 @@ export function isNoProjectError(err: unknown): boolean {
  *  reaches a generic error path instead of the banner. Keeping one
  *  string means the two surfaces can never say something different. */
 export const READ_ONLY_MIRROR_MESSAGE =
-  "Synced from a desktop install - read-only here.";
+  "SYNCED FROM A DESKTOP INSTALL - REVIEW ACTIONS SYNC BACK, EDITING STAYS ON DESKTOP";
 
 /** True when ``err`` is the 403 the server raises for a mutation against
  *  a desktop-origin mirror match (#631 Task 6 - every alias-routed
