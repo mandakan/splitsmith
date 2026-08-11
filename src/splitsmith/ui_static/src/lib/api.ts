@@ -1772,10 +1772,10 @@ export interface BeepQueueResponse {
   pending_count: number;
   confirmed_count: number;
   stages: BeepQueueStageGroup[];
-  /** "desktop" on a hosted mirror, "local" everywhere else - lets the SPA
-   *  pick the honest media surface (snippet vs proxy) without a second
-   *  round trip. */
-  origin: string;
+  /** "desktop" on a hosted mirror, "hosted" on a hosted-native match,
+   *  "local" in local mode - lets the SPA pick the honest media surface
+   *  (snippet vs proxy) without a second round trip. */
+  origin: MatchOrigin;
 }
 
 /** Desktop-pushed beep review snippet peaks for a mirror video (slice 3).

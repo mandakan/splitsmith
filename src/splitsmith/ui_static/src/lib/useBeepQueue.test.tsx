@@ -46,7 +46,7 @@ const item = (over: Partial<api.BeepQueueItem> = {}): api.BeepQueueItem => ({
 
 const queue = (
   items: api.BeepQueueItem[],
-  origin = "desktop",
+  origin: api.MatchOrigin = "desktop",
 ): api.BeepQueueResponse => ({
   total_items: items.length,
   pending_count: items.length,
