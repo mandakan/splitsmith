@@ -13,12 +13,15 @@ desktop-authoritative: remote-only additions/removals are noted, not
 merged.
 
 Taking a remote beep group applies the same derivation invalidation a
-local beep override does (``_apply_beep_override`` in ui/server.py):
-trim and (for primaries) shot_detect flags drop, and the video lands on
+local beep override does (``_apply_beep_override`` in ui/server.py) -
+but only when beep_time itself changed: trim and (for primaries)
+shot_detect flags drop, and the video lands on
 :attr:`MergeResult.reprocess_video_ids` so the sync report can say "N
-videos need re-processing". Hosted never re-derives for mirrors - raw
-media never leaves the desktop - so this is where re-derivation gets
-scheduled.
+videos need re-processing". A confirm-only remote write (beep_reviewed
+flips with beep_time unchanged) still replaces the whole group
+atomically but does not invalidate derived work (#821). Hosted never
+re-derives for mirrors - raw media never leaves the desktop - so this
+is where re-derivation gets scheduled.
 
 No I/O in this module; callers own loading, timestamps, and writes.
 """
@@ -122,16 +125,22 @@ def merge_project_doc(
         if is_conflict:
             result.conflicts.append(MergeConflict(doc_key=doc_key, unit=unit_name, winner=winner))
         if winner == "remote" and remote_u != local_u:
+            # Only beep_time feeds the trim/shot-detect derivation chain.
+            # A confirm-only change (beep_reviewed, beep_source, candidate
+            # metadata) must merge without re-queueing work whose inputs
+            # did not change (#821).
+            derivation_changed = remote_u.get("beep_time") != local_u.get("beep_time")
             for k in list(merged_video):
                 if k.startswith(_BEEP_PREFIX):
                     del merged_video[k]
             merged_video.update(copy.deepcopy(remote_u))
             processed = merged_video.setdefault("processed", {})
             processed["beep"] = remote_u.get("beep_time") is not None
-            processed["trim"] = False
-            if merged_video.get("role") == "primary":
-                processed["shot_detect"] = False
-            result.reprocess_video_ids.append(video_id)
+            if derivation_changed:
+                processed["trim"] = False
+                if merged_video.get("role") == "primary":
+                    processed["shot_detect"] = False
+                result.reprocess_video_ids.append(video_id)
 
     for key in remote_videos.keys() - merged_videos.keys():
         result.notes.append(
