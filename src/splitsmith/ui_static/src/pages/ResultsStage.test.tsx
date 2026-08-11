@@ -249,6 +249,41 @@ describe("ResultsStage reclassify flow", () => {
     expect(await screen.findByText("Change undone")).toBeInTheDocument();
   });
 
+  it("stale-close guard: a slower in-flight patch resolving must not yank a newer sheet closed", async () => {
+    const shots = [makeShot(1, 1.5, 1.5, "split"), makeShot(2, 2.5, 1.0, "split")];
+    renderStage("/match/m1/results/anna/2", SOLO, shots);
+
+    let resolveShot1!: (value: CoachStageResponse) => void;
+    const pendingShot1 = new Promise<CoachStageResponse>((resolve) => {
+      resolveShot1 = resolve;
+    });
+    vi.mocked(api.patchStageShotCoach).mockReturnValueOnce(pendingShot1);
+
+    const chip1 = await screen.findByRole("button", { name: /^Reclassify shot 1 / });
+    fireEvent.click(chip1);
+    fireEvent.click(screen.getByRole("radio", { name: "Movement" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    // Shot 1's sheet stays open while the patch is in flight (busy).
+    expect(await screen.findByRole("dialog", { name: /^Shot 1 - / })).toBeInTheDocument();
+
+    // Cancel shot 1's sheet and open shot 2's while shot 1's patch is
+    // still unresolved.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    const chip2 = await screen.findByRole("button", { name: /^Reclassify shot 2 / });
+    fireEvent.click(chip2);
+    expect(await screen.findByRole("dialog", { name: /^Shot 2 - / })).toBeInTheDocument();
+
+    // Resolve shot 1's patch now - the stale-close guard must leave
+    // shot 2's sheet open, since sheetShot no longer matches shot 1.
+    resolveShot1(makeCoach(shots));
+
+    expect(await screen.findByText("Shot 1 - Movement")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: /^Shot 2 - / })).toBeInTheDocument();
+  });
+
   it("a non-API patch failure shows the friendly fallback, not String(e)", async () => {
     const shots = [makeShot(1, 1.5, 1.5, "split")];
     renderStage("/match/m1/results/anna/2", SOLO, shots);
