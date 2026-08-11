@@ -202,16 +202,47 @@ def test_needs_attention_local_clear_kept_when_remote_unchanged():
     assert not r.conflicts
 
 
-def test_needs_attention_true_conflict_newer_updated_at_wins_and_logs():
+def test_needs_attention_true_conflict_remote_newer_wins_and_logs():
     base = _audit([], [])
     base["needs_attention"] = _na(False, "2026-08-11T08:00:00+00:00")
     local = _audit([], [])
-    local["needs_attention"] = _na(False, "2026-08-11T09:00:00+00:00")
+    local["needs_attention"] = _na(True, "2026-08-11T09:00:00+00:00", "local note")
     remote = _audit([], [])
     remote["needs_attention"] = _na(True, "2026-08-11T10:00:00+00:00", "check")
     r = merge_audit_doc(base, local, remote, doc_key="audit/alice/1", local_ts=T_OLD, remote_ts=T_NEW)
-    assert r.doc["needs_attention"]["flagged"] is True
+    assert r.doc["needs_attention"] == remote["needs_attention"]
     assert [c.unit for c in r.conflicts] == ["needs_attention"]
+    assert r.conflicts[0].winner == "remote"
+
+
+def test_needs_attention_true_conflict_local_newer_wins_and_logs():
+    base = _audit([], [])
+    base["needs_attention"] = _na(False, "2026-08-11T08:00:00+00:00")
+    local = _audit([], [])
+    local["needs_attention"] = _na(True, "2026-08-11T10:00:00+00:00", "local note")
+    remote = _audit([], [])
+    remote["needs_attention"] = _na(True, "2026-08-11T09:00:00+00:00", "check")
+    r = merge_audit_doc(base, local, remote, doc_key="audit/alice/1", local_ts=T_OLD, remote_ts=T_NEW)
+    assert r.doc["needs_attention"] == local["needs_attention"]
+    assert [c.unit for c in r.conflicts] == ["needs_attention"]
+    assert r.conflicts[0].winner == "local"
+
+
+def test_needs_attention_converged_content_no_phantom_conflict():
+    # Both sides flag with the same note at different times - content
+    # projection {flagged, note} is identical on both sides, so this
+    # must NOT log a conflict even though the raw objects' stamps
+    # differ. The newer-stamped object (full four keys) is what lands
+    # in the merged doc.
+    base = _audit([], [])
+    base["needs_attention"] = _na(False, "2026-08-11T08:00:00+00:00")
+    local = _audit([], [])
+    local["needs_attention"] = _na(True, "2026-08-11T09:00:00+00:00", "same note")
+    remote = _audit([], [])
+    remote["needs_attention"] = _na(True, "2026-08-11T10:30:00+00:00", "same note")
+    r = merge_audit_doc(base, local, remote, doc_key="audit/alice/1", local_ts=T_OLD, remote_ts=T_NEW)
+    assert r.doc["needs_attention"] == remote["needs_attention"]
+    assert r.conflicts == []
 
 
 def test_needs_attention_not_a_tripwire():

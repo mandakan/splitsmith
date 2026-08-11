@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 
 from ..coach import COACH_FIELDS
 
@@ -217,19 +217,51 @@ def merge_audit_doc(
             "shot membership is desktop-owned; ignored"
         )
 
-    # needs_attention: doc-level LWW unit (triage slice 4). The object
-    # always carries updated_at - including clears - so both directions
-    # have a timestamp to compare, same as beep groups and coach fields
-    # but keyed on the object's own stamp instead of the doc-wide ts.
-    def _na_ts(value: object) -> str:
-        return (value.get("updated_at") or "") if isinstance(value, dict) else ""
+    # needs_attention: doc-level LWW unit (triage slice 4). Change
+    # detection and equality compare a CONTENT projection - flagged and
+    # note only - so two writers who converge on the same flag state
+    # don't log a conflict just because flagged_at/updated_at differ;
+    # those are stamps, same class as the MatchProject.updated_at noise
+    # this same commit exempts below. The LWW tie-break still reads
+    # updated_at off the raw (unprojected) objects, and the winning
+    # side's full object - all four keys - is what lands in the merged
+    # doc. Not routed through _resolve_unit: its equal-unit branch
+    # always picks "local", but here the raw objects can differ by
+    # stamp alone even when content converges, so that case needs its
+    # own newer-stamp tie-break instead.
+    def _na_content(value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        return {"flagged": value.get("flagged"), "note": value.get("note")}
+
+    def _na_ts(value: object) -> datetime:
+        # Mirrors the audit-event union's ``str(e.get("ts") or "")``
+        # fallback idiom above (missing/malformed sorts first) but as a
+        # tz-aware datetime - a naive datetime.min would raise TypeError
+        # when compared against an aware stamp.
+        raw = value.get("updated_at") if isinstance(value, dict) else None
+        if isinstance(raw, str) and raw:
+            try:
+                return datetime.fromisoformat(raw)
+            except ValueError:
+                pass
+        return datetime.min.replace(tzinfo=UTC)
 
     base_na = (base or {}).get("needs_attention")
     local_na = local.get("needs_attention")
     remote_na = remote.get("needs_attention")
-    na_winner, na_conflict = _resolve_unit(
-        base_na, local_na, remote_na, local_ts=_na_ts(local_na), remote_ts=_na_ts(remote_na)
-    )
+    na_base_content = _na_content(base_na)
+    na_local_content = _na_content(local_na)
+    na_remote_content = _na_content(remote_na)
+    na_local_changed = na_local_content != na_base_content
+    na_remote_changed = na_remote_content != na_base_content
+    if not na_remote_changed:
+        na_winner, na_conflict = "local", False
+    elif not na_local_changed:
+        na_winner, na_conflict = "remote", False
+    else:
+        na_winner = "remote" if _na_ts(remote_na) > _na_ts(local_na) else "local"
+        na_conflict = na_local_content != na_remote_content
     if na_conflict:
         result.conflicts.append(MergeConflict(doc_key=doc_key, unit="needs_attention", winner=na_winner))
     if na_winner == "remote" and remote_na != local_na:
