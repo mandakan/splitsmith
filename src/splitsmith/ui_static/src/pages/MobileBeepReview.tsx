@@ -15,7 +15,7 @@
  *      operator at desktop and keep Confirm disabled (confirming a beep
  *      with no evidence in front of the operator is not a real review).
  */
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Loader2 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -86,7 +86,7 @@ export function MobileBeepReview() {
             type="button"
             disabled={q.busy || !mediaAvailable || (item.beep_time == null && draft == null)}
             onClick={doConfirm}
-            className="btn-led-fill inline-flex min-h-11 items-center justify-center rounded-md disabled:opacity-40"
+            className="btn-led-fill inline-flex min-h-11 items-center justify-center rounded-md px-5 disabled:opacity-40"
           >
             {draft != null ? "Apply new time and confirm" : "Confirm beep"}
           </button>
@@ -94,7 +94,7 @@ export function MobileBeepReview() {
             <button
               type="button"
               onClick={q.skip}
-              className="min-h-11 flex-1 rounded border border-rule text-sm text-ink"
+              className="min-h-11 flex-1 rounded border border-rule px-4 text-sm text-ink"
             >
               Skip
             </button>
@@ -103,7 +103,7 @@ export function MobileBeepReview() {
                 type="button"
                 disabled={q.busy}
                 onClick={() => setSheet("redetect")}
-                className="min-h-11 flex-1 rounded border border-rule text-sm text-ink"
+                className="min-h-11 flex-1 rounded border border-rule px-4 text-sm text-ink"
               >
                 Re-detect
               </button>
@@ -114,7 +114,7 @@ export function MobileBeepReview() {
               type="button"
               onClick={q.prevItem}
               aria-label="Previous item"
-              className="min-h-11 flex-1 rounded border border-rule text-sm text-ink"
+              className="min-h-11 flex-1 rounded border border-rule px-4 text-sm text-ink"
             >
               Prev
             </button>
@@ -122,7 +122,7 @@ export function MobileBeepReview() {
               type="button"
               onClick={q.nextItem}
               aria-label="Next item"
-              className="min-h-11 flex-1 rounded border border-rule text-sm text-ink"
+              className="min-h-11 flex-1 rounded border border-rule px-4 text-sm text-ink"
             >
               Next
             </button>
@@ -152,6 +152,7 @@ export function MobileBeepReview() {
         confirmLabel="Re-detect"
         onConfirm={() => {
           setSheet(null);
+          setDraft(null); // redetect keeps activeKey, so the effect below won't fire
           void q.redetect(item);
         }}
         onCancel={() => setSheet(null)}
@@ -249,14 +250,12 @@ function SnippetPlayer({
       });
     return () => {
       cancelled = true;
-    };
-  }, [item.slug, item.stage_number, item.video_id]);
-
-  useEffect(() => {
-    return () => {
+      // A pending play-around-beep timeout from the outgoing item must not
+      // pause the incoming item's audio once Prev/Next swaps `item` while
+      // this component stays mounted.
       if (pauseTimeoutRef.current != null) clearTimeout(pauseTimeoutRef.current);
     };
-  }, []);
+  }, [item.slug, item.stage_number, item.video_id]);
 
   const playAroundBeep = () => {
     if (!peaks || !audioRef.current) return;
@@ -275,6 +274,25 @@ function SnippetPlayer({
     const rect = e.currentTarget.getBoundingClientRect();
     const fraction = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
     onPick(peaks.snippet_start + fraction * peaks.duration);
+  };
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (!peaks) return;
+    const current = draft ?? item.beep_time ?? peaks.snippet_start;
+    const clamp = (t: number) => Math.min(peaks.snippet_start + peaks.duration, Math.max(peaks.snippet_start, t));
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      onPick(clamp(current - NUDGE_S));
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      onPick(clamp(current + NUDGE_S));
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      onPick(peaks.snippet_start);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      onPick(peaks.snippet_start + peaks.duration);
+    }
   };
 
   return (
@@ -303,6 +321,7 @@ function SnippetPlayer({
           aria-valuemax={peaks.snippet_start + peaks.duration}
           aria-valuenow={draft ?? item.beep_time ?? peaks.snippet_start}
           onClick={handleTap}
+          onKeyDown={handleKeyDown}
           className="relative h-24 w-full cursor-pointer overflow-hidden rounded border border-rule bg-bg"
         >
           <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full" aria-hidden>

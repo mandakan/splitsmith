@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { MobileBeepReview } from "./MobileBeepReview";
@@ -121,5 +121,25 @@ describe("MobileBeepReview", () => {
       expect.objectContaining({ video_id: "v1" }),
       expect.any(Number),
     );
+  });
+
+  it("re-detecting through the sheet clears a placed draft (finding 1)", async () => {
+    // useBeepQueue.redetect() re-selects the SAME activeKey, so the
+    // `useEffect(() => setDraft(null), [q.activeKey])` in the component
+    // never fires on its own - the redetect sheet's onConfirm must clear
+    // the draft itself, or a stale draft survives into the next Confirm.
+    const state = hookState({ isMirror: false }); // Re-detect only renders off-mirror
+    vi.mocked(hook.useBeepQueue).mockReturnValue(state as unknown as ReturnType<typeof hook.useBeepQueue>);
+    render(<MobileBeepReview />);
+
+    fireEvent.click(screen.getByRole("button", { name: /\+10 ms/i }));
+    expect(screen.getByRole("button", { name: /apply new time and confirm/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^re-detect$/i }));
+    expect(screen.getByText(DESTRUCTIVE_RERUN_WARNING)).toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^re-detect$/i }));
+
+    expect(state.redetect).toHaveBeenCalledWith(expect.objectContaining({ video_id: "v1" }));
+    expect(screen.getByRole("button", { name: /^confirm beep$/i })).toBeInTheDocument();
   });
 });
