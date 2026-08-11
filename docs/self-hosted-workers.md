@@ -155,7 +155,10 @@ scripts/setup-agent-gpu.sh                 # creates .venv-agent-gpu, installs t
                                            # GPU onnxruntime stack, verifies CUDA + NVENC
 scripts/run-agent-gpu.sh \
   --server-url https://my.splitsmith.app \
-  --token <REGISTRATION_TOKEN>
+  --token <REGISTRATION_TOKEN> \
+  --state-dir ~/.splitsmith               # REQUIRED natively: the default is /data
+                                          # (a Docker path), which a normal user
+                                          # can't write. See the note below.
 ```
 
 `setup-agent-gpu.sh` installs `onnxruntime-gpu` plus the CUDA 12 / cuDNN 9
@@ -170,8 +173,92 @@ driver.
 Validated on WSL2 + RTX 2070 SUPER: with no environment variables set, ensemble
 detect runs on CUDA (~4.5x faster than CPU, identical detections) and audit
 trims use `h264_nvenc`. `--token` is only needed on first run, exactly as in the
-Docker path; `agent.json` persists under the agent's state dir (`~/.splitsmith`
-by default, or `--state-dir`).
+Docker path.
+
+**State dir (native gotcha).** The state dir defaults to `$SPLITSMITH_AGENT_STATE_DIR`
+or `/data` -- a path that suits the Docker image (where a named volume is mounted
+there) but that an ordinary user cannot create. Running natively without
+overriding it fails on first registration with `PermissionError: /data`, *after*
+the server has already consumed the one-time token -- so you then have to delete
+the half-registered worker and register a fresh one. Always pass `--state-dir`
+(e.g. `~/.splitsmith`) or set `SPLITSMITH_AGENT_STATE_DIR`. `agent.json` and the
+source cache (`<state-dir>/projects`) live there and persist across restarts.
+
+To run it under systemd so it starts on boot, point the unit at the same state
+dir and run it as your user, e.g.:
+
+```ini
+# /etc/systemd/system/splitsmith-agent.service
+[Unit]
+Description=splitsmith self-hosted GPU worker agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=<you>
+Environment=HOME=/home/<you>
+Environment=SPLITSMITH_AGENT_STATE_DIR=/home/<you>/.splitsmith
+WorkingDirectory=/path/to/splitsmith
+ExecStart=/path/to/splitsmith/scripts/run-agent-gpu.sh --server-url https://my.splitsmith.app
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Register once by hand (with `--token` and `--state-dir`) so `agent.json` exists,
+then `sudo systemctl enable --now splitsmith-agent`. On WSL2 the distro's
+`systemd=true` boot plus a Windows "start WSL at logon/boot" task is what brings
+the unit up without an interactive login.
+
+### From PyPI (no clone; auto-updating)
+
+`splitsmith` is published to PyPI, so a long-lived native worker doesn't need a
+git checkout at all -- install the wheel into a dedicated venv and upgrade it in
+place. This is the better shape for a home worker: updates are one `uv pip
+install -U`, and there's no working tree to drift or clobber (and no risk of the
+agent running uncommitted WIP from a dev clone).
+
+The one wrinkle is the GPU wheel. `splitsmith[hosted]` depends on the CPU
+`onnxruntime`, and `onnxruntime` / `onnxruntime-gpu` share an import name and
+cannot coexist -- so every base install or upgrade pulls the CPU wheel and you
+must swap it back:
+
+```bash
+VENV=~/.venv-splitsmith-agent
+uv venv "$VENV" --python 3.11
+uv pip install --python "$VENV" "splitsmith[hosted]"
+# swap CPU onnxruntime -> GPU (pins mirror scripts/setup-agent-gpu.sh)
+uv pip uninstall --python "$VENV" onnxruntime
+uv pip install --python "$VENV" onnxruntime-gpu==1.22.0 \
+  nvidia-cudnn-cu12 nvidia-cublas-cu12 nvidia-cuda-runtime-cu12 \
+  nvidia-curand-cu12 nvidia-cufft-cu12
+```
+
+Point the systemd unit's `ExecStart` at the venv binary directly (no
+`run-agent-gpu.sh` needed):
+
+```ini
+ExecStart=/home/<you>/.venv-splitsmith-agent/bin/splitsmith agent --server-url https://my.splitsmith.app
+Environment=SPLITSMITH_ONNX_DEVICE=auto
+Environment=SPLITSMITH_AGENT_STATE_DIR=/home/<you>/.splitsmith
+```
+
+Register once by hand (`... agent --token <TOKEN> --state-dir ~/.splitsmith`) so
+`agent.json` exists, then `enable --now` the unit.
+
+**Auto-update.** There is no server-push "update" command -- the worker channel
+only carries wake / enabled / disabled / replaced (a deleted worker gets a 404
+and the agent exits). Updates are client-pull: a `systemd` timer that upgrades
+from PyPI and restarts the agent. A minimal updater compares the installed
+version against the latest on PyPI, and when a newer one is out **and the agent
+is idle** runs the `uv pip install -U` + GPU-swap above and `systemctl restart`s
+the service. Gate the restart on the drain state -- the agent logs `wake
+received; draining` when busy and `drain finished; waiting` when idle, so keying
+on the most recent marker avoids killing a running job. Credentials live in the
+state dir, independent of the venv, so an upgrade never re-registers. Drive it
+with a `.timer` (e.g. `OnUnitActiveSec=6h`, `Persistent=true`).
 
 ## Source cache
 
