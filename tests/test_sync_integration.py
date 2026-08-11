@@ -47,6 +47,8 @@ from splitsmith.match_project import MatchProject, StageEntry, StageVideo  # noq
 from splitsmith.storage import S3Storage  # noqa: E402
 from splitsmith.sync.client import HostedSyncClient  # noqa: E402
 from splitsmith.sync.push import run_push  # noqa: E402
+from splitsmith.sync.run import run_sync  # noqa: E402
+from splitsmith.sync.state import load_sync_state  # noqa: E402
 
 from .hosted_helpers import _CapturingSender, login, moto_s3_storage  # noqa: E402
 
@@ -212,3 +214,81 @@ def test_desktop_push_then_anonymous_share_stream_round_trip(
     assert report2.uploaded == 0
     assert report2.docs == 0
     assert report2.docs_skipped == 3
+
+
+def test_pull_materializes_metadata_only_audit_doc_with_no_local_file(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+    tmp_path: Path,
+) -> None:
+    """A phone flags a stage desktop never audited - the hosted doc holds
+    only ``needs_attention`` (plus the beep-confirm stub keys), no
+    ``shots``/``audit_events``, and no local audit file exists yet.
+    Desktop's next pull must materialize that doc locally instead of
+    silently skipping it: the desktop-owned-membership skip exists
+    because merging into ``{}`` could let historical audit_events
+    synthesize a fabricated "audited" doc, and a metadata-only doc has no
+    audit_events for that synthesis to draw on. The flag must also
+    survive the following push (recorded doc hash - no redundant
+    overwrite clobbers it).
+    """
+    client, sender, captured = hosted_app_with_storage
+    match_root, video_path, trimmed_name = _build_local_match(tmp_path)
+
+    # No local audit file for stage 1 - the scenario under test.
+    audit_path = match_root / "shooters" / SLUG / "audit" / "stage1.json"
+    audit_path.unlink()
+
+    login(client, sender, EMAIL)
+    client.get("/api/me/recent-projects")
+    storage: S3Storage = captured["storage"]
+
+    token_resp = client.post("/api/me/desktop-tokens", json={"name": "integration box"})
+    assert token_resp.status_code == 201, token_resp.text
+    raw_token = token_resp.json()["token"]
+
+    sync_http = TestClient(
+        client.app,
+        base_url="http://testserver",
+        headers={"Authorization": f"Bearer {raw_token}"},
+        follow_redirects=False,
+    )
+    media_http = httpx.Client(transport=httpx.MockTransport(_media_handler(storage)))
+    sync_client = HostedSyncClient(http=sync_http, media_http=media_http)
+
+    # Desktop pushes match + project only - no local audit doc to push.
+    push_report = run_push(match_root, client=sync_client)
+    assert push_report.docs == 2
+
+    match_id = match_model.Match.load(match_root).match_id
+    assert match_id is not None
+
+    # Phone flags the doc-less stage through the real triage endpoint, as
+    # the logged-in owner session (Finding 1's fixed path: the doc is the
+    # beep-confirm stub shape plus the flag, not bare {}).
+    flag_resp = client.post(
+        f"/api/matches/{match_id}/shooters/{SLUG}/stages/1/attention",
+        json={"flagged": True, "note": "check this one"},
+    )
+    assert flag_resp.status_code == 200, flag_resp.text
+
+    # Desktop syncs: pull must materialize the metadata-only doc locally.
+    report = run_sync(match_root, client=sync_client)
+    assert report.pulled == 1
+
+    assert audit_path.exists()
+    local_doc = json.loads(audit_path.read_text(encoding="utf-8"))
+    assert local_doc["needs_attention"]["flagged"] is True
+    assert local_doc["needs_attention"]["note"] == "check this one"
+
+    state = load_sync_state(match_root)
+    audit_key = next(k for k in state.doc_versions if k.startswith(f"audit/{SLUG}/"))
+    assert audit_key in state.doc_hashes  # recorded, so the flag isn't re-pulled/re-pushed forever
+
+    # A follow-up sync is a no-op: the doc hash recorded above means the
+    # flag is not clobbered by a redundant re-push.
+    report2 = run_sync(match_root, client=sync_client)
+    assert report2.pulled == 0
+    assert report2.docs == 0
+
+    server_doc = client.get(f"/api/matches/{match_id}/shooters/{SLUG}/stages/1/audit").json()
+    assert server_doc["needs_attention"]["flagged"] is True

@@ -242,9 +242,16 @@ def merge_audit_doc(
         raw = value.get("updated_at") if isinstance(value, dict) else None
         if isinstance(raw, str) and raw:
             try:
-                return datetime.fromisoformat(raw)
+                dt = datetime.fromisoformat(raw)
             except ValueError:
                 pass
+            else:
+                # A stamp with no UTC offset parses naive; comparing it
+                # against an aware stamp (below, or the other side) raises
+                # TypeError. Treat naive as UTC rather than crash the pull.
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=UTC)
+                return dt
         return datetime.min.replace(tzinfo=UTC)
 
     base_na = (base or {}).get("needs_attention")

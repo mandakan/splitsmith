@@ -245,6 +245,24 @@ def test_needs_attention_converged_content_no_phantom_conflict():
     assert r.conflicts == []
 
 
+def test_needs_attention_naive_timestamp_does_not_raise():
+    # One side's updated_at has no UTC offset (e.g. a client that wrote
+    # datetime.isoformat() without tzinfo) - fromisoformat parses it
+    # naive, and comparing that against the aware remote/local stamp used
+    # to raise TypeError. It must not raise, and LWW still resolves to
+    # the newer side by wall-clock time.
+    base = _audit([], [])
+    base["needs_attention"] = _na(False, "2026-08-11T08:00:00+00:00")
+    local = _audit([], [])
+    local["needs_attention"] = _na(True, "2026-08-11T09:00:00+00:00", "local note")
+    remote = _audit([], [])
+    remote["needs_attention"] = _na(True, "2026-08-11T10:00:00", "no offset")  # naive
+    r = merge_audit_doc(base, local, remote, doc_key="audit/alice/1", local_ts=T_OLD, remote_ts=T_NEW)
+    assert r.doc["needs_attention"] == remote["needs_attention"]
+    assert [c.unit for c in r.conflicts] == ["needs_attention"]
+    assert r.conflicts[0].winner == "remote"
+
+
 def test_needs_attention_not_a_tripwire():
     # remote adds the key; the non-whitelisted-fields note must NOT fire
     base = _audit([], [])
