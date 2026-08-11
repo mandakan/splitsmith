@@ -50,6 +50,15 @@ describe("buildCoachPatch", () => {
       coaching_note: "n",
     });
   });
+
+  it("a whitespace-padded stored note does not ride a class-only patch", () => {
+    expect(
+      buildCoachPatch(shot({ coaching_note: " wide entry " }), {
+        intervalClass: "movement",
+        note: " wide entry ",
+      }),
+    ).toEqual({ interval_class: "movement", interval_class_source: "manual" });
+  });
 });
 
 describe("buildUndoPatch", () => {

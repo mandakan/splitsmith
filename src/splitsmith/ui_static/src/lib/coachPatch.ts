@@ -24,7 +24,7 @@ export function buildCoachPatch(prev: CoachShot, draft: ReclassifyDraft): CoachS
     patch.interval_class_source = "manual";
   }
   const note = draft.note.trim();
-  const prevNote = prev.coaching_note ?? "";
+  const prevNote = (prev.coaching_note ?? "").trim();
   if (note !== prevNote) {
     if (note === "") patch.clear_note = true;
     else patch.coaching_note = note;
