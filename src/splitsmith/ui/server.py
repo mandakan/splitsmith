@@ -10323,10 +10323,11 @@ def create_app(
         key = _beep_snippet_key(slug, video_id, ".peaks.json")
         if key is None or not state.storage.exists(key):
             raise HTTPException(status_code=404, detail="beep_snippet_not_available")
-        local = state.shooter_root(slug) / "beep_review" / f"{video_id}.peaks.json"
-        if not local.exists():
-            MatchProject._mirror_from_storage(state.storage, key, local)
-        return JSONResponse(json.loads(local.read_text(encoding="utf-8")))
+        # Read through to storage every request - desktop rewrites this object
+        # under the same key when it regenerates a snippet (beep_time/candidates
+        # change), so mirror-once-then-serve-local would go stale. A few KB of
+        # JSON is cheap enough to fetch fresh each time.
+        return JSONResponse(json.loads(state.storage.read_bytes(key)))
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/audit")
     def get_stage_audit(slug: str, stage_number: int) -> JSONResponse:

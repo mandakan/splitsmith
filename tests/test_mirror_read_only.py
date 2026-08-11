@@ -516,6 +516,49 @@ def test_beep_snippet_endpoints_serve_pushed_artifacts(
     assert audio.status_code in (200, 307), audio.text
 
 
+def test_beep_snippet_peaks_reflects_rewritten_object(
+    hosted_env: str,
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict[str, object]],
+) -> None:
+    """Desktop rewrites the peaks object under the same key when it
+    regenerates a snippet (beep_time/candidates change) and re-pushes -
+    the endpoint must read through to storage each request, not mirror
+    once and serve a stale local copy forever."""
+    client, sender, captured = hosted_app_with_storage
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRBEEPSNIP000000003"
+    video_id = _seed_mirror_with_video(client, match_id, "snippet-rewrite")
+
+    resp = client.get(f"/api/matches/{match_id}/match/beep-queue")
+    assert resp.status_code == 200, resp.text  # forces the tenant/storage to resolve
+
+    storage = captured["storage"]
+    base = f"matches/{match_id}/shooters/alice/beep_review/{video_id}"
+    first_doc = {
+        "snippet_start": 1.0,
+        "duration": 10.0,
+        "bins": 4,
+        "peaks": [0.1, 0.9, 0.2, 0.1],
+        "beep_time": 2.0,
+        "candidates": [{"time": 2.0, "confidence": 0.4}],
+    }
+    storage.write_bytes(f"{base}.m4a", b"fake-aac-bytes")
+    storage.write_bytes(f"{base}.peaks.json", json.dumps(first_doc).encode())
+
+    peaks_url = f"/api/matches/{match_id}/shooters/alice/stages/1/videos/{video_id}/beep-snippet/peaks"
+    first = client.get(peaks_url)
+    assert first.status_code == 200, first.text
+    assert first.json()["snippet_start"] == 1.0
+
+    # Desktop regenerates the snippet and re-pushes under the SAME key.
+    second_doc = dict(first_doc, snippet_start=5.5, beep_time=6.0)
+    storage.write_bytes(f"{base}.peaks.json", json.dumps(second_doc).encode())
+
+    second = client.get(peaks_url)
+    assert second.status_code == 200, second.text
+    assert second.json()["snippet_start"] == 5.5
+
+
 def test_beep_snippet_404_when_absent(
     hosted_env: str,
     hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict[str, object]],
