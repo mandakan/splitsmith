@@ -14,6 +14,7 @@ mirror down.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -470,3 +471,69 @@ def test_mirror_beep_queue_trim_stale_when_trim_not_processed(
     assert resp.status_code == 200, resp.text
     item = resp.json()["stages"][0]["items"][0]
     assert item["trim_stale"] is True
+
+
+# Beep snippet serving endpoints (mobile beep review, slice 3, Task 4).
+
+
+def test_beep_snippet_endpoints_serve_pushed_artifacts(
+    hosted_env: str,
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict[str, object]],
+) -> None:
+    """Both snippet endpoints serve what desktop pushed - peaks as JSON,
+    audio as a 200/307 media response - once both R2 objects exist."""
+    client, sender, captured = hosted_app_with_storage
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRBEEPSNIP000000001"
+    video_id = _seed_mirror_with_video(client, match_id, "snippet-serve")
+
+    resp = client.get(f"/api/matches/{match_id}/match/beep-queue")
+    assert resp.status_code == 200, resp.text  # forces the tenant/storage to resolve
+
+    storage = captured["storage"]
+    base = f"matches/{match_id}/shooters/alice/beep_review/{video_id}"
+    peaks_doc = {
+        "snippet_start": 1.0,
+        "duration": 10.0,
+        "bins": 4,
+        "peaks": [0.1, 0.9, 0.2, 0.1],
+        "beep_time": 2.0,
+        "candidates": [{"time": 2.0, "confidence": 0.4}],
+    }
+    storage.write_bytes(f"{base}.m4a", b"fake-aac-bytes")
+    storage.write_bytes(f"{base}.peaks.json", json.dumps(peaks_doc).encode())
+
+    peaks = client.get(
+        f"/api/matches/{match_id}/shooters/alice/stages/1/videos/{video_id}/beep-snippet/peaks"
+    )
+    assert peaks.status_code == 200, peaks.text
+    assert peaks.json()["snippet_start"] == 1.0
+
+    audio = client.get(
+        f"/api/matches/{match_id}/shooters/alice/stages/1/videos/{video_id}/beep-snippet/audio",
+        follow_redirects=False,
+    )
+    assert audio.status_code in (200, 307), audio.text
+
+
+def test_beep_snippet_404_when_absent(
+    hosted_env: str,
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict[str, object]],
+) -> None:
+    """Nothing pushed yet -> both endpoints 404 beep_snippet_not_available."""
+    client, sender, captured = hosted_app_with_storage
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRBEEPSNIP000000002"
+    video_id = _seed_mirror_with_video(client, match_id, "snippet-missing")
+
+    audio = client.get(
+        f"/api/matches/{match_id}/shooters/alice/stages/1/videos/{video_id}/beep-snippet/audio"
+    )
+    assert audio.status_code == 404
+    assert audio.json()["detail"] == "beep_snippet_not_available"
+
+    peaks = client.get(
+        f"/api/matches/{match_id}/shooters/alice/stages/1/videos/{video_id}/beep-snippet/peaks"
+    )
+    assert peaks.status_code == 404
+    assert peaks.json()["detail"] == "beep_snippet_not_available"

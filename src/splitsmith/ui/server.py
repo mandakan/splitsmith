@@ -10296,6 +10296,38 @@ def create_app(
         payload["trimmed"] = audit.trimmed
         return JSONResponse(payload)
 
+    def _beep_snippet_key(slug: str, video_id: str, suffix: str) -> str | None:
+        """Build the desktop-pushed snippet key, or None with no match/storage bound."""
+        match_id = current_match_id.get()
+        if state.storage is None or not match_id:
+            return None
+        return f"matches/{match_id}/shooters/{slug}/beep_review/{video_id}{suffix}"
+
+    @app.get(
+        "/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep-snippet/audio",
+        response_model=None,
+    )
+    def beep_snippet_audio(slug: str, stage_number: int, video_id: str) -> FileResponse | RedirectResponse:
+        """Serve the pushed beep review audio snippet for a mirror video."""
+        _resolve_stage_video(slug, stage_number, video_id)  # 404 on unknown video
+        key = _beep_snippet_key(slug, video_id, ".m4a")
+        if key is None or not state.storage.exists(key):
+            raise HTTPException(status_code=404, detail="beep_snippet_not_available")
+        local = state.shooter_root(slug) / "beep_review" / f"{video_id}.m4a"
+        return serve_media(state.storage, key, local, content_type="audio/mp4")
+
+    @app.get("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep-snippet/peaks")
+    def beep_snippet_peaks(slug: str, stage_number: int, video_id: str) -> JSONResponse:
+        """Return the pushed peaks JSON for a mirror video's beep snippet."""
+        _resolve_stage_video(slug, stage_number, video_id)  # 404 on unknown video
+        key = _beep_snippet_key(slug, video_id, ".peaks.json")
+        if key is None or not state.storage.exists(key):
+            raise HTTPException(status_code=404, detail="beep_snippet_not_available")
+        local = state.shooter_root(slug) / "beep_review" / f"{video_id}.peaks.json"
+        if not local.exists():
+            MatchProject._mirror_from_storage(state.storage, key, local)
+        return JSONResponse(json.loads(local.read_text(encoding="utf-8")))
+
     @app.get("/api/shooters/{slug}/stages/{stage_number}/audit")
     def get_stage_audit(slug: str, stage_number: int) -> JSONResponse:
         """Return the stage's audit JSON (issue #15) if one has been written.
