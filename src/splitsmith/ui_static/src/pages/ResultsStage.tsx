@@ -64,6 +64,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const [baselines, setBaselines] = useState<TierBaselines | null>(null);
   const [scorecard, setScorecard] = useState<StageScorecard | null>(null);
   const [scorecardUpdatedAt, setScorecardUpdatedAt] = useState<string | null>(null);
+  const [trimStale, setTrimStale] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
@@ -100,6 +101,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
     setError(null);
     setScorecard(null);
     setScorecardUpdatedAt(null);
+    setTrimStale(false);
     (async () => {
       const [coachResult, projectResult, distResult] = await Promise.allSettled([
         api.getStageCoach(slug, stage),
@@ -130,6 +132,11 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
         const stageEntry = projectResult.value.stages.find((s) => s.stage_number === stage);
         setScorecard(stageEntry?.scorecard ?? null);
         setScorecardUpdatedAt(stageEntry?.scorecard_updated_at ?? null);
+        setTrimStale(
+          (stageEntry?.videos ?? []).some(
+            (v) => v.beep_time != null && !v.processed.trim,
+          ),
+        );
       }
     })();
     return () => {
@@ -232,10 +239,20 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           <ChevronLeft className="size-3.5" aria-hidden />
           All stages
         </Link>
-        <h1 className="truncate font-display text-xl font-bold uppercase leading-tight tracking-tight text-ink md:text-2xl">
-          <span className="text-led">Stage {pad2(stage)}</span>
-          {coach?.stage_name ? <span className="text-ink"> - {coach.stage_name}</span> : null}
-        </h1>
+        <div className="flex flex-wrap items-center gap-x-2">
+          <h1 className="truncate font-display text-xl font-bold uppercase leading-tight tracking-tight text-ink md:text-2xl">
+            <span className="text-led">Stage {pad2(stage)}</span>
+            {coach?.stage_name ? <span className="text-ink"> - {coach.stage_name}</span> : null}
+          </h1>
+          {trimStale ? (
+            <span
+              role="status"
+              className="ml-2 inline-flex min-h-6 items-center rounded border border-rule px-2 text-xs text-muted"
+            >
+              Awaiting desktop re-process
+            </span>
+          ) : null}
+        </div>
         {shooter ? (
           shooters.length > 1 ? (
             // Minimal shooter switcher: the name line itself is a
