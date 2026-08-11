@@ -1724,10 +1724,8 @@ export interface BeepQueueResponse {
   stages: BeepQueueStageGroup[];
   /** "desktop" on a hosted mirror, "local" everywhere else - lets the SPA
    *  pick the honest media surface (snippet vs proxy) without a second
-   *  round trip. Optional so pre-existing mocks that predate this field
-   *  (e.g. MatchShell's test fixtures) still typecheck; the server always
-   *  sends it. */
-  origin?: string;
+   *  round trip. */
+  origin: string;
 }
 
 /** Desktop-pushed beep review snippet peaks for a mirror video (slice 3).
