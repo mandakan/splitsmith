@@ -98,7 +98,7 @@ export function HostedAccountChip({ className }: { className?: string }) {
     try {
       const resp = await api.unlinkHostedAccount();
       setAccount(null);
-      if (!resp.hosted_revoked) setRevokeWarning(true);
+      if (resp.hosted_revoked === false) setRevokeWarning(true);
     } finally {
       setBusy(false);
     }

@@ -4443,13 +4443,15 @@ class DeviceUnlinkResponse(BaseModel):
     """Response for DELETE /api/settings/hosted-sync/session (#719).
 
     ``cleared`` is always True - the local prefs are gone either way.
-    ``hosted_revoked`` is False when the upstream revoke could not be
-    confirmed, which the UI turns into "signed out here; check your
-    account page to be sure".
+    ``hosted_revoked`` is tri-state: ``None`` when there was nothing to
+    revoke (no linked token), ``False`` when the upstream revoke was
+    attempted and could not be confirmed - which the UI turns into
+    "signed out here; check your account page to be sure" - and ``True``
+    when the hosted side confirmed the revoke.
     """
 
     cleared: bool
-    hosted_revoked: bool
+    hosted_revoked: bool | None
 
 
 class SyncStatusResponse(BaseModel):
@@ -13680,8 +13682,28 @@ def create_app(
         if _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
         prefs = user_config.load_global_prefs()
-        base_url_changed = prefs.hosted_base_url != req.base_url
+        old_base_url = prefs.hosted_base_url
+        old_token = prefs.hosted_token
+        base_url_changed = old_base_url != req.base_url
         prefs.hosted_base_url = req.base_url
+        # A token minted by one host is dead weight - and a live
+        # credential - once this install points elsewhere (#737).
+        # Best-effort revoke against the OLD host, then drop the local
+        # copy. The ``token: null`` keeps-the-token contract is about
+        # same-host resubmits and is untouched by this.
+        if base_url_changed and old_token:
+            if old_base_url:
+                client = _build_device_client(old_base_url, token=old_token)
+                try:
+                    await run_in_threadpool(client.device_revoke_session)
+                except (SyncClientError, httpx.HTTPError):
+                    # Old host unreachable. The existing warning copy
+                    # already points the operator at that host's account
+                    # page; nothing more to do here.
+                    pass
+                finally:
+                    client.close()
+            prefs.hosted_token = None
         # None keeps the stored token (the SPA resubmits base_url alone
         # without re-typing the secret); "" clears it; anything else
         # replaces it.
@@ -13861,7 +13883,7 @@ def create_app(
         if _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
         prefs = user_config.load_global_prefs()
-        revoked = False
+        revoked: bool | None = None
         if prefs.hosted_base_url and prefs.hosted_token:
             client = _build_device_client(prefs.hosted_base_url, token=prefs.hosted_token)
             try:

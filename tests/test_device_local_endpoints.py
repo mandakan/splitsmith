@@ -49,6 +49,7 @@ class _FakeHosted:
         self.authorizes = 0
         self.polls = 0
         self.revokes = 0
+        self.built_against: list[str] = []
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -77,6 +78,7 @@ class _FakeHosted:
 
 def _install_fake(monkeypatch, fake: _FakeHosted) -> None:
     def _build(base_url: str, *, token: str | None = None) -> HostedSyncClient:
+        fake.built_against.append(base_url)
         return HostedSyncClient(
             http=httpx.Client(
                 base_url=base_url,
@@ -362,9 +364,10 @@ def test_repointing_the_base_url_clears_the_linked_account(tmp_path: Path, monke
     assert resp.status_code == 200, resp.text
     assert resp.json()["account"] is None
     assert user_config.load_global_prefs().hosted_account is None
-    # The token itself is untouched by a base_url-only save (``token:
-    # null`` keeps): only the identity claim is dropped.
-    assert user_config.load_global_prefs().hosted_token == "sync-token-value"
+    # The token is revoked and cleared on repoint (#737): a credential
+    # minted by one host must not survive pointing this install at
+    # another. Only same-host resubmits (``token: null``) keep it.
+    assert user_config.load_global_prefs().hosted_token is None
 
 
 def test_resaving_the_same_base_url_keeps_the_linked_account(tmp_path: Path, monkeypatch) -> None:
@@ -386,6 +389,50 @@ def test_resaving_the_same_base_url_keeps_the_linked_account(tmp_path: Path, mon
     assert resp.status_code == 200, resp.text
     assert resp.json()["account"]["email"] == "shooter@example.com"
     assert user_config.load_global_prefs().hosted_account is not None
+
+
+def test_repointing_the_base_url_revokes_and_clears_the_token(tmp_path: Path, monkeypatch) -> None:
+    """A token minted by one host must not survive a repoint (#737): the
+    revoke has to run against the OLD host, and the local copy goes."""
+    monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
+    client = _local_app(tmp_path)
+    client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
+    fake = _FakeHosted([dict(_APPROVED)])
+    _install_fake(monkeypatch, fake)
+    client.post(START)
+    assert client.get(STATUS).json()["status"] == "approved"
+
+    resp = client.put(
+        "/api/settings/hosted-sync",
+        json={"base_url": "https://staging.hosted.example", "token": None},
+    )
+    assert resp.status_code == 200, resp.text
+    assert fake.revokes == 1
+    # The revoke client was built against the OLD host, not the new one.
+    assert fake.built_against[-1] == "https://hosted.example"
+    assert resp.json()["token_set"] is False
+    prefs = user_config.load_global_prefs()
+    assert prefs.hosted_token is None
+    assert prefs.hosted_account is None
+
+
+def test_repoint_revoke_failure_still_clears_the_token(tmp_path: Path, monkeypatch) -> None:
+    """Old host unreachable: the local copy still goes. A dead token in
+    config.yaml is the worse failure, same rule as sign-out."""
+    monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
+    client = _local_app(tmp_path)
+    client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
+    fake = _FakeHosted([dict(_APPROVED)], revoke_status=500)
+    _install_fake(monkeypatch, fake)
+    client.post(START)
+    assert client.get(STATUS).json()["status"] == "approved"
+
+    resp = client.put(
+        "/api/settings/hosted-sync",
+        json={"base_url": "https://staging.hosted.example", "token": None},
+    )
+    assert resp.status_code == 200, resp.text
+    assert user_config.load_global_prefs().hosted_token is None
 
 
 def test_sign_out_clears_prefs_and_revokes_hosted(tmp_path: Path, monkeypatch) -> None:
@@ -425,6 +472,21 @@ def test_sign_out_clears_prefs_even_when_the_hosted_revoke_fails(tmp_path: Path,
     prefs = user_config.load_global_prefs()
     assert prefs.hosted_token is None
     assert prefs.hosted_account is None
+
+
+def test_sign_out_with_nothing_linked_reports_no_revoke_needed(tmp_path: Path, monkeypatch) -> None:
+    """hosted_revoked is tri-state (#737): null means there was nothing to
+    revoke, so the UI must not warn about a revoke that never ran."""
+    monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
+    client = _local_app(tmp_path)
+    client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
+    fake = _FakeHosted([])
+    _install_fake(monkeypatch, fake)
+
+    resp = client.delete(SESSION)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"cleared": True, "hosted_revoked": None}
+    assert fake.revokes == 0
 
 
 def test_each_route_closes_its_hosted_client(tmp_path: Path, monkeypatch) -> None:

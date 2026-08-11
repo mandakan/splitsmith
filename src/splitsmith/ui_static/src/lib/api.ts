@@ -4336,12 +4336,13 @@ export interface DeviceStatusResponse {
   device_name: string | null;
 }
 
-/** Response from DELETE /api/settings/hosted-sync/session (#719).
- *  ``hosted_revoked: false`` means the local copy is gone but the hosted
- *  side could not be reached to confirm. */
+/** Response from DELETE /api/settings/hosted-sync/session (#719, #737).
+ *  ``hosted_revoked`` is tri-state: true - the hosted side confirmed the
+ *  revoke; false - a revoke was attempted and failed (warn); null -
+ *  there was nothing to revoke (do not warn). */
 export interface DeviceUnlinkResponse {
   cleared: boolean;
-  hosted_revoked: boolean;
+  hosted_revoked: boolean | null;
 }
 
 /** The device authorization awaiting approval (#719). */
