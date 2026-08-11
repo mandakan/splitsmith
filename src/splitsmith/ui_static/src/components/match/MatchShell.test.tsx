@@ -49,6 +49,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       listMatchShooters: vi.fn(),
       getProject: vi.fn(),
       getBeepQueue: vi.fn(),
+      getTriage: vi.fn(),
       listJobs: vi.fn(),
     },
   };
@@ -224,6 +225,7 @@ function setUpApi(listJobsImpl: () => Promise<Job[]>) {
     stages: [],
     origin: "local",
   });
+  vi.mocked(api.getTriage).mockResolvedValue({ cells: [], flagged_count: 0 });
   vi.mocked(api.listJobs).mockImplementation(listJobsImpl);
 }
 
@@ -276,6 +278,7 @@ function setUpApiWithOrigin(origin: "hosted" | "desktop" | "local") {
     stages: [],
     origin: "local",
   });
+  vi.mocked(api.getTriage).mockResolvedValue({ cells: [], flagged_count: 0 });
   vi.mocked(api.listJobs).mockResolvedValue([]);
 }
 

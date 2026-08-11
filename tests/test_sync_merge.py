@@ -171,3 +171,114 @@ def test_audit_non_whitelisted_remote_change_noted_local_wins():
     r = merge_audit_doc(base, local, remote, doc_key="audit/anna/3", local_ts=T_OLD, remote_ts=T_NEW)
     assert r.doc["shots"][0]["time"] == 1.0
     assert any("non-whitelisted" in n for n in r.notes)
+
+
+# needs_attention (triage slice 4)
+
+
+def _na(flagged, ts, note=None):
+    return {"flagged": flagged, "flagged_at": ts if flagged else None, "note": note, "updated_at": ts}
+
+
+def test_needs_attention_remote_only_change_wins():
+    base = _audit([], [])
+    local = _audit([], [])
+    remote = _audit([], [])
+    remote["needs_attention"] = _na(True, "2026-08-11T10:00:00+00:00")
+    r = merge_audit_doc(base, local, remote, doc_key="audit/alice/1", local_ts=T_OLD, remote_ts=T_NEW)
+    assert r.doc["needs_attention"]["flagged"] is True
+    assert not r.conflicts and not r.notes
+
+
+def test_needs_attention_local_clear_kept_when_remote_unchanged():
+    base = _audit([], [])
+    base["needs_attention"] = _na(True, "2026-08-11T09:00:00+00:00")
+    local = _audit([], [])
+    local["needs_attention"] = _na(False, "2026-08-11T10:00:00+00:00")
+    remote = _audit([], [])
+    remote["needs_attention"] = _na(True, "2026-08-11T09:00:00+00:00")
+    r = merge_audit_doc(base, local, remote, doc_key="audit/alice/1", local_ts=T_OLD, remote_ts=T_NEW)
+    assert r.doc["needs_attention"]["flagged"] is False
+    assert not r.conflicts
+
+
+def test_needs_attention_true_conflict_remote_newer_wins_and_logs():
+    base = _audit([], [])
+    base["needs_attention"] = _na(False, "2026-08-11T08:00:00+00:00")
+    local = _audit([], [])
+    local["needs_attention"] = _na(True, "2026-08-11T09:00:00+00:00", "local note")
+    remote = _audit([], [])
+    remote["needs_attention"] = _na(True, "2026-08-11T10:00:00+00:00", "check")
+    r = merge_audit_doc(base, local, remote, doc_key="audit/alice/1", local_ts=T_OLD, remote_ts=T_NEW)
+    assert r.doc["needs_attention"] == remote["needs_attention"]
+    assert [c.unit for c in r.conflicts] == ["needs_attention"]
+    assert r.conflicts[0].winner == "remote"
+
+
+def test_needs_attention_true_conflict_local_newer_wins_and_logs():
+    base = _audit([], [])
+    base["needs_attention"] = _na(False, "2026-08-11T08:00:00+00:00")
+    local = _audit([], [])
+    local["needs_attention"] = _na(True, "2026-08-11T10:00:00+00:00", "local note")
+    remote = _audit([], [])
+    remote["needs_attention"] = _na(True, "2026-08-11T09:00:00+00:00", "check")
+    r = merge_audit_doc(base, local, remote, doc_key="audit/alice/1", local_ts=T_OLD, remote_ts=T_NEW)
+    assert r.doc["needs_attention"] == local["needs_attention"]
+    assert [c.unit for c in r.conflicts] == ["needs_attention"]
+    assert r.conflicts[0].winner == "local"
+
+
+def test_needs_attention_converged_content_no_phantom_conflict():
+    # Both sides flag with the same note at different times - content
+    # projection {flagged, note} is identical on both sides, so this
+    # must NOT log a conflict even though the raw objects' stamps
+    # differ. The newer-stamped object (full four keys) is what lands
+    # in the merged doc.
+    base = _audit([], [])
+    base["needs_attention"] = _na(False, "2026-08-11T08:00:00+00:00")
+    local = _audit([], [])
+    local["needs_attention"] = _na(True, "2026-08-11T09:00:00+00:00", "same note")
+    remote = _audit([], [])
+    remote["needs_attention"] = _na(True, "2026-08-11T10:30:00+00:00", "same note")
+    r = merge_audit_doc(base, local, remote, doc_key="audit/alice/1", local_ts=T_OLD, remote_ts=T_NEW)
+    assert r.doc["needs_attention"] == remote["needs_attention"]
+    assert r.conflicts == []
+
+
+def test_needs_attention_naive_timestamp_does_not_raise():
+    # One side's updated_at has no UTC offset (e.g. a client that wrote
+    # datetime.isoformat() without tzinfo) - fromisoformat parses it
+    # naive, and comparing that against the aware remote/local stamp used
+    # to raise TypeError. It must not raise, and LWW still resolves to
+    # the newer side by wall-clock time.
+    base = _audit([], [])
+    base["needs_attention"] = _na(False, "2026-08-11T08:00:00+00:00")
+    local = _audit([], [])
+    local["needs_attention"] = _na(True, "2026-08-11T09:00:00+00:00", "local note")
+    remote = _audit([], [])
+    remote["needs_attention"] = _na(True, "2026-08-11T10:00:00", "no offset")  # naive
+    r = merge_audit_doc(base, local, remote, doc_key="audit/alice/1", local_ts=T_OLD, remote_ts=T_NEW)
+    assert r.doc["needs_attention"] == remote["needs_attention"]
+    assert [c.unit for c in r.conflicts] == ["needs_attention"]
+    assert r.conflicts[0].winner == "remote"
+
+
+def test_needs_attention_not_a_tripwire():
+    # remote adds the key; the non-whitelisted-fields note must NOT fire
+    base = _audit([], [])
+    local = _audit([], [])
+    remote = _audit([], [])
+    remote["needs_attention"] = _na(True, "2026-08-11T10:00:00+00:00")
+    r = merge_audit_doc(base, local, remote, doc_key="audit/alice/1", local_ts=T_OLD, remote_ts=T_NEW)
+    assert not r.notes
+
+
+def test_project_updated_at_stamp_is_not_a_tripwire():
+    # 821: hosted saves bump MatchProject.updated_at; that alone must not
+    # fire the non-whitelisted-change note
+    base = _project(_video())
+    local = _project(_video())
+    remote = _project(_video())
+    remote["updated_at"] = "2026-08-11T10:00:00+00:00"
+    r = merge_project_doc(base, local, remote, doc_key="project/alice", local_ts=T_OLD, remote_ts=T_NEW)
+    assert not r.notes

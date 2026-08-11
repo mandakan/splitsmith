@@ -6,6 +6,8 @@
  * extend this file rather than scattering fetch() calls across the SPA.
  */
 
+import type { Anomaly } from "@/lib/anomalies";
+
 export type VideoRole = "primary" | "secondary" | "ignored";
 /** ``"aligned"`` means the in-stream beep detector failed on a secondary
  *  and ``cross_align`` projected the primary's beep into the secondary's
@@ -1298,7 +1300,7 @@ export function isNoProjectError(err: unknown): boolean {
  *  reaches a generic error path instead of the banner. Keeping one
  *  string means the two surfaces can never say something different. */
 export const READ_ONLY_MIRROR_MESSAGE =
-  "Synced from a desktop install - read-only here.";
+  "Synced from a desktop install - review actions sync back, editing stays on desktop.";
 
 /** True when ``err`` is the 403 the server raises for a mutation against
  *  a desktop-origin mirror match (#631 Task 6 - every alias-routed
@@ -1537,6 +1539,34 @@ export interface ShooterCameraInfo {
 export interface StageStatusEntry {
   stage_number: number;
   status: StageStatus;
+}
+
+/** Triage attention marker for a single stage. */
+export interface TriageAttention {
+  flagged: boolean;
+  flagged_at: string | null;
+  note: string | null;
+  updated_at: string;
+}
+
+/** One cell in the triage grid - a shooter's stage with its audit
+ *  status, beep confidence, anomalies, and attention marker. */
+export interface TriageCell {
+  slug: string;
+  shooter_name: string;
+  stage_number: number;
+  stage_name: string;
+  status: StageStatus;
+  beep_confidence: number | null;
+  anomalies: Anomaly[];
+  needs_attention: TriageAttention | null;
+}
+
+/** Response from GET /api/match/triage and POST accept/attention mutations.
+ *  Returns the current triage list and the count of flagged cells. */
+export interface TriageResponse {
+  cells: TriageCell[];
+  flagged_count: number;
 }
 
 /** One shooter row in the /shooters page (#324). */
@@ -3002,6 +3032,31 @@ export const api = {
       method: "POST",
       json: body,
     }),
+
+  /** Fetch the triage grid for the current match. Returns the list of
+   *  cells and the count of flagged stages. */
+  getTriage: () =>
+    request<TriageResponse>("/api/match/triage"),
+
+  /** Accept a stage's audit (mark ready). Returns the refreshed triage
+   *  list - same contract as confirmBeepInQueue. */
+  acceptStage: (slug: string, stageNumber: number) =>
+    request<TriageResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/audit/accept`,
+      { method: "POST" },
+    ),
+
+  /** Set or clear the attention flag on a stage. Returns the refreshed
+   *  triage list - same contract as confirmBeepInQueue. */
+  setStageAttention: (
+    slug: string,
+    stageNumber: number,
+    body: { flagged: boolean; note?: string | null },
+  ) =>
+    request<TriageResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/attention`,
+      { method: "POST", json: body },
+    ),
 
   /** Create a new match from a picked scoreboard match (#322). The SPA
    *  follows up with /api/scoreboard/fetch + /select-shooter to populate

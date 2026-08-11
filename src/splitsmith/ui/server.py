@@ -122,7 +122,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, ValidationError
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
@@ -148,7 +148,7 @@ from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
-from ..audit_data import StageExportError, audit_shots_to_engine_shots
+from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
 from ..auth import AuthBackend, CompositeAuth, LoopbackAuth, User
 from ..compare import mp4_grid, project_loader
 from ..compute import ComputeBackend, LocalComputeBackend
@@ -624,6 +624,16 @@ def _new_event_id() -> str:
     hex, not ULID: ordering comes from ``ts``, and the ulid package is a
     hosted-only extra while events are stamped on slim local installs too."""
     return uuid.uuid4().hex
+
+
+def _kept_audit_shots(shots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Kept shots from an audit doc's ``shots[]``.
+
+    Thin wrapper over :func:`splitsmith.audit_data.is_kept_shot` -- the
+    same filter :func:`audit_shots_to_engine_shots` applies -- so "kept"
+    has exactly one definition project-wide, not a parallel one here.
+    """
+    return [s for s in shots if is_kept_shot(s)]
 
 
 def _load_env_files(project_root: Path | None = None) -> list[Path]:
@@ -3845,6 +3855,43 @@ class MoveShooterResponse(BaseModel):
     source_project: MatchProject
 
 
+class StageAttentionBody(BaseModel):
+    """POST .../attention body (triage slice 4)."""
+
+    flagged: bool
+    note: str | None = Field(default=None, max_length=280)
+
+
+class TriageAttentionOut(BaseModel):
+    """The ``needs_attention`` object as read back on a triage cell."""
+
+    flagged: bool
+    flagged_at: str | None = None
+    note: str | None = None
+    updated_at: str
+
+
+class TriageCell(BaseModel):
+    """One (shooter, stage) cell of GET /api/match/triage (slice 4)."""
+
+    slug: str
+    shooter_name: str
+    stage_number: int
+    stage_name: str
+    status: str  # StageStatus value, backend-authoritative
+    beep_confidence: float | None  # min across stage videos that have one
+    anomalies: list[dict]  # report.Anomaly.model_dump() records
+    needs_attention: TriageAttentionOut | None = None
+
+
+class TriageResponse(BaseModel):
+    """GET /api/match/triage payload (slice 4): the cross-shooter,
+    cross-stage triage grid the mobile audit-triage surface renders."""
+
+    cells: list[TriageCell]
+    flagged_count: int
+
+
 class CompareShotPoint(BaseModel):
     """One shot for a shooter on a stage (#328 timeline)."""
 
@@ -6335,6 +6382,11 @@ def create_app(
     # jobs, and stays read-only on mirrors.
     _mirror_beep_write_re = re.compile(r"^shooters/[^/]+/stages/\d+/videos/[^/]+/beep$")
 
+    # Slice 4 (mobile audit triage): the two stage-level writes a mirror
+    # accepts - accept-stage and flag-for-desktop. Everything else stays
+    # desktop-owned until its slice ships a whitelist entry.
+    _mirror_triage_write_re = re.compile(r"^shooters/[^/]+/stages/\d+/(audit/accept|attention)$")
+
     @app.middleware("http")
     async def _match_id_alias(request, call_next):
         path = request.url.path
@@ -6402,6 +6454,7 @@ def create_app(
                     or rest.startswith("match/shares/")
                     or (request.method == "POST" and rest == "match/beep-queue/confirm")
                     or (request.method == "POST" and _mirror_beep_write_re.match(rest) is not None)
+                    or (request.method == "POST" and _mirror_triage_write_re.match(rest) is not None)
                 )
             ):
                 return JSONResponse(status_code=403, content={"detail": "read_only_mirror"})
@@ -10401,6 +10454,96 @@ def create_app(
         state.save_audit(slug, stage_number, payload, version=version)
         return JSONResponse(payload)
 
+    def _set_needs_attention(payload: dict[str, Any], *, flagged: bool, note: str | None = None) -> None:
+        """Write the triage flag as a full object so sync LWW always has a
+        timestamp to compare - clears keep the object with flagged=False."""
+        now = _now_iso()
+        payload["needs_attention"] = {
+            "flagged": flagged,
+            "flagged_at": now if flagged else None,
+            "note": (note or None) if flagged else None,
+            "updated_at": now,
+        }
+
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/audit/accept")
+    def accept_stage_audit(slug: str, stage_number: int) -> JSONResponse:
+        """Mark a stage audited from the triage surface (slice 4).
+
+        Appends an explicit ``accept`` audit event instead of the desktop
+        ``save`` so provenance stays distinguishable; ``stage_audit_status``
+        treats both as audited. Runs the auto-classifier first (#775) and
+        refuses when the stage has nothing to accept or a kept shot cannot
+        be classified (#778 invariant, enforced not just healed). Returns
+        the fresh triage list (task 4) so the SPA never has to re-fetch
+        after a write.
+        """
+        project = state.shooter_project(slug)
+        try:
+            project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        conflict_excs = _state_conflict_excs()
+        for _attempt in range(3):
+            payload, version = state.load_audit(slug, stage_number)
+            if payload is None:
+                raise HTTPException(status_code=409, detail="nothing_to_accept")
+            shots = [s for s in payload.get("shots") or [] if isinstance(s, dict)]
+            kept = _kept_audit_shots(shots)
+            if not kept:
+                raise HTTPException(status_code=409, detail="nothing_to_accept")
+            coach_module.classify_intervals_in_dicts(shots, CoachAutoClassifyConfig())
+            if any(not s.get("interval_class") for s in kept):
+                raise HTTPException(status_code=409, detail="not_fully_classified")
+            events = payload.setdefault("audit_events", [])
+            events.append(
+                {
+                    "id": _new_event_id(),
+                    "ts": _now_iso(),
+                    "kind": "accept",
+                    "payload": {"source": "triage"},
+                }
+            )
+            _set_needs_attention(payload, flagged=False)
+            try:
+                state.save_audit(slug, stage_number, payload, version=version)
+            except conflict_excs:
+                continue
+            return JSONResponse(_build_triage_response().model_dump())
+        raise HTTPException(status_code=409, detail="version_conflict")
+
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/attention")
+    def set_stage_attention(slug: str, stage_number: int, body: StageAttentionBody) -> JSONResponse:
+        """Flag or clear a stage for desktop follow-up (slice 4).
+
+        The flag lives in the schemaless audit doc so it syncs with the
+        other triage writes; flagging a stage that has no audit doc yet
+        creates one holding only the flag. Returns the fresh triage list
+        (task 4), same fresh-list contract as accept.
+        """
+        project = state.shooter_project(slug)
+        try:
+            project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        conflict_excs = _state_conflict_excs()
+        for _attempt in range(3):
+            payload, version = state.load_audit(slug, stage_number)
+            if payload is None:
+                # Seed the same beep-confirm stub shape as the beep-review
+                # endpoint (line ~9897): is_stub_audit ignores the
+                # needs_attention key, so a flagged doc-less stage still
+                # reads as "ready" (derived from real shots/events) instead
+                # of falling to "in_progress" and getting stuck flagged
+                # forever once cleared.
+                payload, version = {"shots": [], "detection": STUB_AUDIT_DETECTION}, 0
+            _set_needs_attention(payload, flagged=body.flagged, note=body.note)
+            try:
+                state.save_audit(slug, stage_number, payload, version=version)
+            except conflict_excs:
+                continue
+            return JSONResponse(_build_triage_response().model_dump())
+        raise HTTPException(status_code=409, detail="version_conflict")
+
     @app.get("/api/shooters/{slug}/stages/{stage_number}/anomalies")
     def get_stage_anomalies(slug: str, stage_number: int) -> JSONResponse:
         """Return structured anomalies for the saved audit JSON (issue #42).
@@ -12416,6 +12559,80 @@ def create_app(
             shooters=entries,
             origin=current_match_origin.get() or "local",
         )
+
+    def _build_triage_response() -> TriageResponse:
+        """Assemble the cross-shooter, cross-stage triage grid (slice 4).
+
+        Enumerates shooters exactly as :func:`list_match_shooters` does,
+        then per shooter bulk-loads audit docs once via
+        ``state.load_audit_docs`` (hosted: one query; local: ``None``,
+        falling back to per-stage ``state.load_audit`` below) and derives
+        statuses via the same ``stage_statuses`` walk used by the project
+        GET. Per non-placeholder stage, the anomaly computation mirrors
+        :func:`get_stage_anomalies` exactly: same beep-time fallback, same
+        ``audit_shots_to_engine_shots`` + ``report.detect_anomalies_structured``
+        call. Both the accept and attention endpoints return this so the
+        SPA never has to re-fetch after a write (the confirm-returns-
+        fresh-list contract from slice 3).
+        """
+        match_root, match = _resolve_match_context()
+        cells: list[TriageCell] = []
+        for slug in match.shooters:
+            shooter_root = match_model.Match.shooter_root(match_root, slug)
+            try:
+                legacy = state.shooter_project(slug)
+            except Exception as exc:  # noqa: BLE001 - mirror list_match_shooters's per-shooter skip
+                logger.warning("Skipping shooter %s in triage: %s", slug, exc)
+                continue
+            name = legacy.competitor_name or slug
+            audit_docs = state.load_audit_docs(slug)
+            status_map = legacy.stage_statuses(shooter_root, audit_docs=audit_docs)
+            for stg in legacy.stages:
+                if stg.placeholder:
+                    continue
+                prim = stg.primary()
+                beep = prim.beep_time if prim is not None and prim.beep_time is not None else 0.0
+                doc = (audit_docs or {}).get(stg.stage_number)
+                if doc is None and audit_docs is None:
+                    doc, _ = state.load_audit(slug, stg.stage_number)
+                anomalies: list[dict] = []
+                if doc is not None:
+                    engine_shots = audit_shots_to_engine_shots(doc, beep_time_in_source=beep)
+                    anomalies = [
+                        a.model_dump()
+                        for a in report.detect_anomalies_structured(engine_shots, beep, stg.time_seconds)
+                    ]
+                confs = [v.beep_confidence for v in stg.videos if v.beep_confidence is not None]
+                na_raw = doc.get("needs_attention") if isinstance(doc, dict) else None
+                needs_attention: TriageAttentionOut | None = None
+                if isinstance(na_raw, dict):
+                    try:
+                        needs_attention = TriageAttentionOut(**na_raw)
+                    except ValidationError:
+                        needs_attention = None
+                cells.append(
+                    TriageCell(
+                        slug=slug,
+                        shooter_name=name,
+                        stage_number=stg.stage_number,
+                        stage_name=stg.stage_name,
+                        status=str(status_map[stg.stage_number]),
+                        beep_confidence=min(confs) if confs else None,
+                        anomalies=anomalies,
+                        needs_attention=needs_attention,
+                    )
+                )
+        cells.sort(key=lambda c: (c.stage_number, c.shooter_name.lower()))
+        flagged_count = sum(1 for c in cells if c.needs_attention is not None and c.needs_attention.flagged)
+        return TriageResponse(cells=cells, flagged_count=flagged_count)
+
+    @app.get("/api/match/triage", response_model=TriageResponse)
+    def get_match_triage() -> TriageResponse:
+        """Cross-shooter, cross-stage triage grid for the mobile audit-
+        triage surface (slice 4). Placeholder stages are excluded; skipped
+        stages are included with status ``skipped`` (the SPA collapses
+        them client-side)."""
+        return _build_triage_response()
 
     @app.post("/api/match/shooters", response_model=ShooterListResponse)
     def add_match_shooter(req: AddShooterRequest) -> ShooterListResponse:

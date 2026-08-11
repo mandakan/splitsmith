@@ -48,6 +48,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       listMatchShooters: vi.fn(),
       getProject: vi.fn(),
       getBeepQueue: vi.fn(),
+      getTriage: vi.fn(),
       listJobs: vi.fn(),
     },
   };
@@ -211,6 +212,7 @@ describe("MatchShell mobile drawer account menu (#550)", () => {
       stages: [],
       origin: "local",
     });
+    vi.mocked(api.getTriage).mockResolvedValue({ cells: [], flagged_count: 0 });
     vi.mocked(api.listJobs).mockResolvedValue([]);
 
     renderShell();

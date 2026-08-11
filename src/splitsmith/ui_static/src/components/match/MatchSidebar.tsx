@@ -63,6 +63,10 @@ interface MatchSidebarProps {
    *  count chip so the operator can see at a glance that there's work
    *  there. */
   beepReviewPendingCount?: number;
+  /** Stages flagged for a closer look on desktop from the mobile Triage
+   *  worklist. Drives the badge on the Triage nav row, mirroring
+   *  ``beepReviewPendingCount``'s contract. */
+  triageFlaggedCount?: number;
   /** Failed jobs still awaiting acknowledgement across the match, mirroring
    *  ``beepReviewPendingCount``'s badge contract for the Jobs nav row. */
   jobsAttentionCount: number;
@@ -113,6 +117,7 @@ export function MatchSidebar({
   stages,
   shooterCount,
   beepReviewPendingCount,
+  triageFlaggedCount,
   jobsAttentionCount,
   awaiting = false,
   hasFootage = true,
@@ -205,6 +210,7 @@ export function MatchSidebar({
           hasFootage,
           shooterCount,
           beepReviewPendingCount: beepReviewPendingCount ?? 0,
+          triageFlaggedCount: triageFlaggedCount ?? 0,
           jobsAttentionCount,
           footageHint,
         }).map((item) => (
@@ -218,6 +224,7 @@ export function MatchSidebar({
             disabledHint={item.disabledHint}
             count={item.count}
             badgeKind={item.badgeKind}
+            badgeAriaLabel={item.badgeAriaLabel}
           >
             {item.label}
           </SidebarLink>
@@ -350,6 +357,7 @@ function SidebarLink({
   icon,
   count,
   badgeKind = "count",
+  badgeAriaLabel,
   end,
   collapsed,
   disabled = false,
@@ -363,6 +371,10 @@ function SidebarLink({
    *  visible while ``count`` is defined. ``pending`` -- positive work
    *  queue (Beep review), cyan pill+dot, hides at zero. */
   badgeKind?: "count" | "pending";
+  /** Accessible name for the expanded badge pill when a bare number
+   *  isn't descriptive enough (not color-only). Undefined leaves the
+   *  badge announced as its visible digits, same as before. */
+  badgeAriaLabel?: string;
   end?: boolean;
   collapsed: boolean;
   /** Renders as a non-interactive muted row with ``disabledHint`` as a
@@ -460,6 +472,7 @@ function SidebarLink({
       <span>{children}</span>
       {showBadge ? (
         <span
+          aria-label={badgeAriaLabel}
           className={cn(
             "ml-auto",
             badgeKind === "pending" ? "badge-pending" : "badge-count",

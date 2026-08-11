@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 
 from ..coach import COACH_FIELDS
 
@@ -217,12 +217,73 @@ def merge_audit_doc(
             "shot membership is desktop-owned; ignored"
         )
 
+    # needs_attention: doc-level LWW unit (triage slice 4). Change
+    # detection and equality compare a CONTENT projection - flagged and
+    # note only - so two writers who converge on the same flag state
+    # don't log a conflict just because flagged_at/updated_at differ;
+    # those are stamps, same class as the MatchProject.updated_at noise
+    # this same commit exempts below. The LWW tie-break still reads
+    # updated_at off the raw (unprojected) objects, and the winning
+    # side's full object - all four keys - is what lands in the merged
+    # doc. Not routed through _resolve_unit: its equal-unit branch
+    # always picks "local", but here the raw objects can differ by
+    # stamp alone even when content converges, so that case needs its
+    # own newer-stamp tie-break instead.
+    def _na_content(value: object) -> object:
+        if not isinstance(value, dict):
+            return value
+        return {"flagged": value.get("flagged"), "note": value.get("note")}
+
+    def _na_ts(value: object) -> datetime:
+        # Mirrors the audit-event union's ``str(e.get("ts") or "")``
+        # fallback idiom above (missing/malformed sorts first) but as a
+        # tz-aware datetime - a naive datetime.min would raise TypeError
+        # when compared against an aware stamp.
+        raw = value.get("updated_at") if isinstance(value, dict) else None
+        if isinstance(raw, str) and raw:
+            try:
+                dt = datetime.fromisoformat(raw)
+            except ValueError:
+                pass
+            else:
+                # A stamp with no UTC offset parses naive; comparing it
+                # against an aware stamp (below, or the other side) raises
+                # TypeError. Treat naive as UTC rather than crash the pull.
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=UTC)
+                return dt
+        return datetime.min.replace(tzinfo=UTC)
+
+    base_na = (base or {}).get("needs_attention")
+    local_na = local.get("needs_attention")
+    remote_na = remote.get("needs_attention")
+    na_base_content = _na_content(base_na)
+    na_local_content = _na_content(local_na)
+    na_remote_content = _na_content(remote_na)
+    na_local_changed = na_local_content != na_base_content
+    na_remote_changed = na_remote_content != na_base_content
+    if not na_remote_changed:
+        na_winner, na_conflict = "local", False
+    elif not na_local_changed:
+        na_winner, na_conflict = "remote", False
+    else:
+        na_winner = "remote" if _na_ts(remote_na) > _na_ts(local_na) else "local"
+        na_conflict = na_local_content != na_remote_content
+    if na_conflict:
+        result.conflicts.append(MergeConflict(doc_key=doc_key, unit="needs_attention", winner=na_winner))
+    if na_winner == "remote" and remote_na != local_na:
+        if remote_na is not None:
+            merged["needs_attention"] = copy.deepcopy(remote_na)
+        else:
+            merged.pop("needs_attention", None)
+
     # Same tripwire as the project merge: remote edits outside the audit
     # whitelist (events + coach fields) should be impossible while the
     # mirror write gate is closed - note them loudly, local wins.
     def _strip_audit(doc: dict | None) -> dict:
         clone = copy.deepcopy(doc or {})
         clone.pop("audit_events", None)
+        clone.pop("needs_attention", None)
         for shot in clone.get("shots") or []:
             if isinstance(shot, dict):
                 for k in COACH_FIELDS:
@@ -255,6 +316,11 @@ def _note_non_whitelisted_remote_changes(
 
     def _strip(doc: dict) -> dict:
         clone = copy.deepcopy(doc)
+        # #821: MatchProject.updated_at bumps on every hosted save - not a
+        # mobile-write field, just save-noise. Stripping it here stops a
+        # spurious "remote changed non-whitelisted fields" note firing on
+        # every phone write.
+        clone.pop("updated_at", None)
         for stage in clone.get("stages") or []:
             if not isinstance(stage, dict):
                 continue

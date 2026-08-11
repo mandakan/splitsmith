@@ -10,6 +10,7 @@ import {
   ClipboardCheck,
   Crosshair,
   Film,
+  Flag,
   LayoutGrid,
   MonitorPlay,
   Users,
@@ -31,6 +32,10 @@ export interface MatchNavItem {
   disabledHint?: string;
   count?: number;
   badgeKind?: "count" | "pending";
+  /** Accessible name for the count badge when a bare number isn't
+   *  descriptive enough on its own (not color-only). Overrides the
+   *  badge's default announced text; undefined leaves it as-is. */
+  badgeAriaLabel?: string;
 }
 
 export function matchNavItems(args: {
@@ -39,6 +44,7 @@ export function matchNavItems(args: {
   hasFootage: boolean;
   shooterCount?: number;
   beepReviewPendingCount: number;
+  triageFlaggedCount: number;
   jobsAttentionCount: number;
   footageHint?: string;
 }): MatchNavItem[] {
@@ -48,6 +54,7 @@ export function matchNavItems(args: {
     hasFootage,
     shooterCount,
     beepReviewPendingCount,
+    triageFlaggedCount,
     jobsAttentionCount,
     footageHint,
   } = args;
@@ -91,6 +98,15 @@ export function matchNavItems(args: {
       label: "Beep review",
       count: beepReviewPendingCount,
       badgeKind: "pending",
+    },
+    {
+      key: "triage",
+      to: `${base}/triage`,
+      icon: <Flag className="size-[15px]" />,
+      label: "Triage",
+      count: triageFlaggedCount,
+      badgeKind: "pending",
+      badgeAriaLabel: `${triageFlaggedCount} stage${triageFlaggedCount === 1 ? "" : "s"} flagged for desktop`,
     },
     {
       key: "jobs",

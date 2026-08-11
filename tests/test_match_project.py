@@ -603,6 +603,54 @@ def test_stage_status_audited_when_save_event_present(tmp_path: Path) -> None:
     assert stage_audit_status(project.stages[0], audit_dir) == StageStatus.audited
 
 
+def test_accept_event_counts_as_audited(tmp_path: Path) -> None:
+    """One ``accept`` event in audit_events counts as audited, just like ``save``.
+    Mobile triage uses accept without a full desktop audit."""
+    root, project = _bare_project(tmp_path)
+    project.stages[0].videos.append(StageVideo(path=Path("raw/v.mp4"), role="primary"))
+    project.stages[0].time_seconds = 12.5
+    audit_dir = project.audit_path(root)
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stage1.json").write_text(
+        json.dumps(
+            {
+                "stage_number": 1,
+                "shots": [],
+                "audit_events": [
+                    {"ts": "2026-05-22T12:00:00Z", "kind": "shot_detect_run"},
+                    {"ts": "2026-05-22T12:01:00Z", "kind": "accept"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert stage_audit_status(project.stages[0], audit_dir) == StageStatus.audited
+
+
+def test_invalid_event_kind_does_not_mark_audited(tmp_path: Path) -> None:
+    """An event with kind ``accepted`` (wrong spelling) does not flip status,
+    only exact matches of ``save`` or ``accept`` count."""
+    root, project = _bare_project(tmp_path)
+    project.stages[0].videos.append(StageVideo(path=Path("raw/v.mp4"), role="primary"))
+    project.stages[0].time_seconds = 12.5
+    audit_dir = project.audit_path(root)
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stage1.json").write_text(
+        json.dumps(
+            {
+                "stage_number": 1,
+                "shots": [],
+                "audit_events": [
+                    {"ts": "2026-05-22T12:00:00Z", "kind": "shot_detect_run"},
+                    {"ts": "2026-05-22T12:01:00Z", "kind": "accepted"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert stage_audit_status(project.stages[0], audit_dir) == StageStatus.in_progress
+
+
 def test_stage_status_skipped_overrides_everything(tmp_path: Path) -> None:
     """``skipped`` is terminal; we never fall through to other checks even
     if the stage has audit data. Skipped is operator intent."""

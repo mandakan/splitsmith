@@ -53,6 +53,7 @@ import { AdminWorkers } from "@/pages/AdminWorkers";
 import { Results } from "@/pages/Results";
 import { ResultsStage } from "@/pages/ResultsStage";
 import { Review } from "@/pages/Review";
+import { Triage } from "@/pages/Triage";
 import { api } from "@/lib/api";
 
 function RedirectLabSlug() {
@@ -310,6 +311,9 @@ export function App() {
                 path="results/:slug/:stage"
                 element={<ShooterScopedRoute element={<ResultsStage />} />}
               />
+              {/* Triage is responsive by design - it doubles as the desktop
+                  flagged-stage worklist, so no DesktopGate (slice 4). */}
+              <Route path="triage" element={<Triage />} />
               <Route path="jobs" element={<Jobs />} />
             </Route>
           </Route>
