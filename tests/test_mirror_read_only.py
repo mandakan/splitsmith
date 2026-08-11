@@ -14,15 +14,17 @@ mirror down.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select as _select
 
 from splitsmith import match_model
 from splitsmith.db import MatchRow, ProjectStateStore, RecentProjectRow, User, create_engine, sessionmaker
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
-from tests.hosted_helpers import _CapturingSender, login, seed_match
+from tests.hosted_helpers import _CapturingSender, login, moto_s3_storage, seed_match
 
 CREATE_URL = "/api/sync/matches"
 
@@ -49,7 +51,13 @@ def _seed_mirror(client: TestClient, match_id: str, name: str) -> None:
     assert put.status_code == 200, put.text
 
 
-def _seed_mirror_with_video(client: TestClient, match_id: str, name: str) -> str:
+def _seed_mirror_with_video(
+    client: TestClient,
+    match_id: str,
+    name: str,
+    *,
+    processed: dict[str, bool] | None = None,
+) -> str:
     """Adopt ``match_id`` as a mirror with one shooter "alice", stage 1, and
     one primary video.
 
@@ -61,12 +69,17 @@ def _seed_mirror_with_video(client: TestClient, match_id: str, name: str) -> str
     ``StageVideo``/``MatchProject`` instance rather than a hand-rolled
     dict so the value returned here always matches what the server
     resolves. Returns that real video_id for the caller's request URLs.
+
+    ``processed`` defaults to a fully-processed video (beep+trim+shot
+    detect all done); pass a different dict to seed a trim_stale case.
     """
     _seed_mirror(client, match_id, name)
-    roster_doc = match_model.Match(
-        match_id=match_id, name=name, shooters=["alice"], stages=[]
-    ).model_dump(mode="json")
-    put_roster = client.put(_sync_docs_url(match_id, "match"), params={"expected_version": 1}, json=roster_doc)
+    roster_doc = match_model.Match(match_id=match_id, name=name, shooters=["alice"], stages=[]).model_dump(
+        mode="json"
+    )
+    put_roster = client.put(
+        _sync_docs_url(match_id, "match"), params={"expected_version": 1}, json=roster_doc
+    )
     assert put_roster.status_code == 200, put_roster.text
 
     video = StageVideo(
@@ -77,7 +90,7 @@ def _seed_mirror_with_video(client: TestClient, match_id: str, name: str) -> str
         beep_source="auto",
         beep_confidence=0.4,
         beep_reviewed=False,
-        processed={"beep": True, "trim": True, "shot_detect": True},
+        processed=processed or {"beep": True, "trim": True, "shot_detect": True},
     )
     stage = StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=12.5, videos=[video])
     project_doc = MatchProject(name=name, competitor_name="Alice", stages=[stage]).model_dump(mode="json")
@@ -283,12 +296,13 @@ def test_mirror_destructive_beep_paths_still_blocked(
     _seed_mirror(client, match_id, "gate-blocked")
     blocked = [
         ("POST", f"/api/matches/{match_id}/shooters/g/stages/1/videos/v1/detect-beep", None),
-        ("PUT", f"/api/matches/{match_id}/shooters/g/stages/1/videos/v1/beep-window",
-         {"start": 0.0, "end": 5.0}),
-        ("POST", f"/api/matches/{match_id}/shooters/g/stages/1/videos/v1/beep/select",
-         {"time": 1.0}),
-        ("POST", f"/api/matches/{match_id}/shooters/g/stages/1/videos/v1/beep/snap",
-         {"time": 1.0}),
+        (
+            "PUT",
+            f"/api/matches/{match_id}/shooters/g/stages/1/videos/v1/beep-window",
+            {"start": 0.0, "end": 5.0},
+        ),
+        ("POST", f"/api/matches/{match_id}/shooters/g/stages/1/videos/v1/beep/select", {"time": 1.0}),
+        ("POST", f"/api/matches/{match_id}/shooters/g/stages/1/videos/v1/beep/snap", {"time": 1.0}),
         ("POST", f"/api/matches/{match_id}/shooters/g/stages/1/beep", {"beep_time": 1.0}),
     ]
     for method, url, body in blocked:
@@ -375,3 +389,84 @@ def test_mirror_confirm_sets_reviewed(
     assert resp.status_code == 200, resp.text
     jobs = client.get("/api/me/jobs").json()
     assert jobs == []
+
+
+# Beep-queue media honesty on mirrors (mobile beep review, slice 3).
+
+
+@pytest.fixture
+def hosted_app_with_storage(
+    hosted_env: str, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[tuple[TestClient, _CapturingSender, dict[str, object]]]:
+    """``hosted_app``, but with a moto-backed S3 bucket wired as tenant
+    storage instead of ``state.storage`` staying ``None``.
+
+    ``hosted_app`` (see ``tests/hosted_helpers.py``) boots its app before
+    any storage stub could apply, so this rebuilds the app inside
+    ``moto_s3_storage``'s monkeypatch of ``_tenant_s3_storage`` - same
+    recipe ``tests/test_hosted_raw_upload.py`` uses. ``captured["storage"]``
+    is only populated once a request has resolved a tenant, so callers
+    must log in and hit any endpoint before reading it.
+    """
+    pytest.importorskip("moto")
+    with moto_s3_storage(monkeypatch, "beep-queue-media-test") as captured:
+        from splitsmith.ui.server import create_app
+
+        app = create_app()
+        sender = _CapturingSender()
+        app.state.splitsmith_state.auth.backends[0]._email = sender
+        with TestClient(app, follow_redirects=False) as client:
+            yield client, sender, captured
+
+
+def test_mirror_beep_queue_media_flags(
+    hosted_env: str,
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict[str, object]],
+) -> None:
+    """Mirror queue items report honest media: no proxy, snippet only when
+    both R2 objects exist, origin=desktop, trim_stale from processed."""
+    client, sender, captured = hosted_app_with_storage
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRBEEPQUEUE00000001"
+    video_id = _seed_mirror_with_video(client, match_id, "queue-flags")
+
+    resp = client.get(f"/api/matches/{match_id}/match/beep-queue")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["origin"] == "desktop"
+    item = body["stages"][0]["items"][0]
+    assert item["proxy_ready"] is False  # was falsely True before this task
+    assert item["snippet_ready"] is False  # nothing uploaded yet
+    assert item["trim_stale"] is False  # processed.trim is True in the seed
+
+    # Upload both snippet objects into the fake storage, then re-query.
+    storage = captured["storage"]
+    base = f"matches/{match_id}/shooters/alice/beep_review/{video_id}"
+    storage.write_bytes(f"{base}.m4a", b"fake-audio")
+    storage.write_bytes(f"{base}.peaks.json", b"{}")
+    item = client.get(f"/api/matches/{match_id}/match/beep-queue").json()["stages"][0]["items"][0]
+    assert item["snippet_ready"] is True
+
+
+def test_mirror_beep_queue_trim_stale_when_trim_not_processed(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """trim_stale flips True once a beep is set but the trim step hasn't
+    run against it - desktop re-trims on its next sync pull, this just
+    flags the video as behind in the meantime. No storage needed here,
+    trim_stale reads purely from processed/beep_time."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRBEEPQUEUE00000002"
+    _seed_mirror_with_video(
+        client,
+        match_id,
+        "trim-stale",
+        processed={"beep": True, "trim": False, "shot_detect": False},
+    )
+
+    resp = client.get(f"/api/matches/{match_id}/match/beep-queue")
+    assert resp.status_code == 200, resp.text
+    item = resp.json()["stages"][0]["items"][0]
+    assert item["trim_stale"] is True

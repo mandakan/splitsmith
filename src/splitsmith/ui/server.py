@@ -3912,6 +3912,15 @@ class BeepQueueItem(BaseModel):
     # "preview generating" placeholder instead of a broken player when
     # this is False.
     proxy_ready: bool
+    # True once a desktop-pushed beep review snippet (audio + peaks) is
+    # available for a mirror's video. Mobile beep review (slice 3) plays
+    # this snippet instead of the raw/proxy media, which mirrors never
+    # have. False everywhere else - snippets are hosted-mirror only.
+    snippet_ready: bool = False
+    # True once a beep has been set but the trim step hasn't run against
+    # it yet - the clip boundaries on disk no longer match the reviewed
+    # beep. Desktop re-trims on its next sync pull; this just flags it.
+    trim_stale: bool = False
     # Auto-computed cross-align suggestion for secondaries lives on the
     # shooter's other videos; the SPA fetches them lazily if needed.
 
@@ -3933,6 +3942,10 @@ class BeepQueueResponse(BaseModel):
     pending_count: int
     confirmed_count: int
     stages: list[BeepQueueStageGroup]
+    # "desktop" on a hosted mirror, "local" everywhere else - lets the SPA
+    # pick the honest media surface (snippet vs proxy) without a second
+    # round trip.
+    origin: str = "local"
 
 
 class BeepQueueConfirmRequest(BaseModel):
@@ -13115,8 +13128,23 @@ def create_app(
             if _storage is None:
                 return True
             if not path_str.startswith("raw/"):
-                return True
+                # Hosted but not a hosted-native upload (a desktop-pushed
+                # mirror): there is no proxy object to stream.
+                return False
             return proxy_key_for(path_str) in _proxy_keys
+
+        # Snippet artifacts pushed by desktop for unconfirmed videos
+        # (slice 3). One list per request covers every shooter.
+        _match_id = current_match_id.get()
+        _snippet_keys: set[str] = set()
+        if _storage is not None and _match_id:
+            _snippet_keys = {obj.path for obj in _storage.list(f"matches/{_match_id}/shooters/")}
+
+        def _snippet_ready(slug: str, video_id: str) -> bool:
+            if not _snippet_keys:
+                return False
+            base = f"matches/{_match_id}/shooters/{slug}/beep_review/{video_id}"
+            return f"{base}.m4a" in _snippet_keys and f"{base}.peaks.json" in _snippet_keys
 
         for slug in match.shooters:
             shooter_root = match_model.Match.shooter_root(match_root, slug)
@@ -13188,6 +13216,10 @@ def create_app(
                             status=status,
                             alt_candidates=alts,
                             proxy_ready=_proxy_ready(video.path.as_posix()),
+                            snippet_ready=_snippet_ready(slug, video.video_id),
+                            trim_stale=(
+                                video.beep_time is not None and not video.processed.get("trim", False)
+                            ),
                         )
                     )
 
@@ -13197,6 +13229,7 @@ def create_app(
             pending_count=total_pending,
             confirmed_count=total_confirmed,
             stages=ordered_stages,
+            origin=current_match_origin.get() or "local",
         )
 
     @app.post("/api/match/beep-queue/confirm", response_model=BeepQueueResponse)
