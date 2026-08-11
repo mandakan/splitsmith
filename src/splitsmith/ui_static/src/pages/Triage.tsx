@@ -20,14 +20,6 @@ import { ApiError, api, type TriageCell, type TriageResponse } from "@/lib/api";
 import { useMatchHref } from "@/lib/matchHref";
 import { statusLabel } from "@/lib/stageStatus";
 
-/** Confidence below which a detected beep is treated as needing a human
- *  look, mirroring the default of `beep_low_confidence_threshold`
- *  (splitsmith/automation.py:72, 0.95) - the same gate
- *  `get_hitl_queue` reads (splitsmith/ui/server.py:8077). TriageCell
- *  only carries the raw confidence (not the resolved per-project
- *  threshold), so this is a display-only mirror of the default. */
-const BEEP_LOW_CONFIDENCE = 0.95;
-
 type PendingAction =
   | { kind: "accept"; cell: TriageCell }
   | { kind: "flag"; cell: TriageCell }
@@ -216,6 +208,7 @@ export function Triage() {
                     href={href}
                     busy={busyKey === cellKey(cell)}
                     error={cardErrors[cellKey(cell)]}
+                    lowConfidenceThreshold={data.beep_low_confidence_threshold}
                     onAccept={() => openAccept(cell)}
                     onFlag={() => openFlag(cell)}
                     onUnflag={() => openUnflag(cell)}
@@ -317,6 +310,7 @@ function TriageCard({
   href,
   busy,
   error,
+  lowConfidenceThreshold,
   onAccept,
   onFlag,
   onUnflag,
@@ -325,13 +319,14 @@ function TriageCard({
   href: (...segments: string[]) => string;
   busy: boolean;
   error: string | undefined;
+  lowConfidenceThreshold: number;
   onAccept: () => void;
   onFlag: () => void;
   onUnflag: () => void;
 }) {
   const terminal = cell.status === "audited" || cell.status === "skipped";
   const flagged = cell.needs_attention?.flagged ?? false;
-  const lowConfidence = cell.beep_confidence != null && cell.beep_confidence < BEEP_LOW_CONFIDENCE;
+  const lowConfidence = cell.beep_confidence != null && cell.beep_confidence < lowConfidenceThreshold;
 
   return (
     <div className="rounded-lg border border-rule bg-surface p-4">

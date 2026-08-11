@@ -35,6 +35,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 import {
+  AlertTriangle,
   Crosshair,
   HelpCircle,
   ListChecks,
@@ -80,6 +81,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/Kbd";
 import { Portal } from "@/components/ui/Portal";
+import { StatusPill } from "@/components/ui/StatusPill";
 import {
   Card,
   CardContent,
@@ -1733,6 +1735,21 @@ export function Audit() {
             />
           </div>
 
+          {/* Triage flag (#823): a mobile operator marked this stage for
+              desktop follow-up. Saving from here clears the flag
+              server-side (put_stage_audit), so no unflag action lives
+              here -- this is status, not a control. */}
+          {audit?.needs_attention?.flagged ? (
+            <div role="status" className="flex flex-wrap items-center gap-2">
+              <StatusPill tone="in-progress" icon={<AlertTriangle aria-hidden className="size-3" />}>
+                Flagged for desktop
+              </StatusPill>
+              {audit.needs_attention.note ? (
+                <span className="text-sm text-muted">{audit.needs_attention.note}</span>
+              ) : null}
+            </div>
+          ) : null}
+
           {/* Toolbar: beep status + re-pick + trim/detect + filter chips
               + zoom + drawer toggle. Save & next + Undo live in the
               sticky bottom action bar; shooter switcher lives in the
@@ -2307,6 +2324,14 @@ type SaveStatus =
   | { kind: "saved"; at: number }
   | { kind: "error"; message: string };
 
+// Stale-base LWW race (#823): `base` is captured once on page-open (or
+// stage change) and held for the life of the edit session - it is not
+// refreshed by a mid-edit sync pull. If a pull lands while the operator
+// is still editing, that pulled state is discarded: the next save here
+// rebuilds from the held `base` and its local changes win the merge,
+// silently reverting the pulled update. Accepted for the single-operator
+// model - only one person edits a stage's audit at a time, so there is
+// no concurrent writer to lose work to.
 function buildAuditJson(opts: {
   base: StageAudit | null;
   stage: { stage_number: number; stage_name: string; time_seconds: number };

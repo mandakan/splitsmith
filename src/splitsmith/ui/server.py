@@ -85,7 +85,7 @@ import tempfile
 import threading
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
@@ -634,6 +634,25 @@ def _kept_audit_shots(shots: list[dict[str, Any]]) -> list[dict[str, Any]]:
     has exactly one definition project-wide, not a parallel one here.
     """
     return [s for s in shots if is_kept_shot(s)]
+
+
+def _count_flagged(docs: Iterable[dict | None]) -> int:
+    """Count audit docs whose ``needs_attention.flagged`` is truthy.
+
+    The one flagged-counting rule, shared by ``_build_triage_response``
+    (docs it already loaded while assembling cells) and the triage
+    summary endpoint (docs loaded without the anomaly/status-walk cost
+    of the full grid) - so there's exactly one definition of "flagged"
+    across both.
+    """
+    count = 0
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        na = doc.get("needs_attention")
+        if isinstance(na, dict) and na.get("flagged"):
+            count += 1
+    return count
 
 
 def _load_env_files(project_root: Path | None = None) -> list[Path]:
@@ -3889,6 +3908,15 @@ class TriageResponse(BaseModel):
     cross-stage triage grid the mobile audit-triage surface renders."""
 
     cells: list[TriageCell]
+    flagged_count: int
+    beep_low_confidence_threshold: float
+
+
+class TriageSummaryResponse(BaseModel):
+    """GET /api/match/triage/summary payload (#823): just the flagged
+    count, cheap enough to poll without the anomaly/status-walk cost
+    of the full triage grid."""
+
     flagged_count: int
 
 
@@ -10450,7 +10478,20 @@ def create_app(
         # worker bumps the version in between, save_audit raises
         # StateConflictError -> 409 and the SPA re-fetches. Local: version
         # is always 0 and this is a plain atomic file write.
-        _, version = state.load_audit(slug, stage_number)
+        stored, version = state.load_audit(slug, stage_number)
+        # #823: a desktop full-audit save resolves an open triage flag, same
+        # as the triage "accept" action. The SPA round-trips needs_attention
+        # (Audit.tsx buildAuditJson spreads the loaded doc), so checking the
+        # incoming payload covers the normal path - but a stale SPA session
+        # that dropped the key would silently keep the stored doc flagged,
+        # so check both sides.
+        is_save = isinstance(events, list) and any(
+            isinstance(e, dict) and e.get("kind") == "save" for e in events
+        )
+        incoming_flagged = bool((payload.get("needs_attention") or {}).get("flagged"))
+        stored_flagged = bool(((stored or {}).get("needs_attention") or {}).get("flagged"))
+        if is_save and (incoming_flagged or stored_flagged):
+            _set_needs_attention(payload, flagged=False)
         state.save_audit(slug, stage_number, payload, version=version)
         return JSONResponse(payload)
 
@@ -12573,10 +12614,15 @@ def create_app(
         ``audit_shots_to_engine_shots`` + ``report.detect_anomalies_structured``
         call. Both the accept and attention endpoints return this so the
         SPA never has to re-fetch after a write (the confirm-returns-
-        fresh-list contract from slice 3).
+        fresh-list contract from slice 3). ``beep_low_confidence_threshold``
+        is resolved from the first loadable shooter's project override
+        exactly the way ``get_hitl_queue`` resolves it (#823) - the gate
+        is global to the match, not per-shooter.
         """
         match_root, match = _resolve_match_context()
         cells: list[TriageCell] = []
+        docs: list[dict | None] = []
+        threshold: float | None = None
         for slug in match.shooters:
             shooter_root = match_model.Match.shooter_root(match_root, slug)
             try:
@@ -12584,6 +12630,9 @@ def create_app(
             except Exception as exc:  # noqa: BLE001 - mirror list_match_shooters's per-shooter skip
                 logger.warning("Skipping shooter %s in triage: %s", slug, exc)
                 continue
+            if threshold is None:
+                resolved = automation_settings.resolve_automation(project_override=legacy.automation)
+                threshold = resolved.settings.beep_low_confidence_threshold
             name = legacy.competitor_name or slug
             audit_docs = state.load_audit_docs(slug)
             status_map = legacy.stage_statuses(shooter_root, audit_docs=audit_docs)
@@ -12595,6 +12644,7 @@ def create_app(
                 doc = (audit_docs or {}).get(stg.stage_number)
                 if doc is None and audit_docs is None:
                     doc, _ = state.load_audit(slug, stg.stage_number)
+                docs.append(doc)
                 anomalies: list[dict] = []
                 if doc is not None:
                     engine_shots = audit_shots_to_engine_shots(doc, beep_time_in_source=beep)
@@ -12623,8 +12673,13 @@ def create_app(
                     )
                 )
         cells.sort(key=lambda c: (c.stage_number, c.shooter_name.lower()))
-        flagged_count = sum(1 for c in cells if c.needs_attention is not None and c.needs_attention.flagged)
-        return TriageResponse(cells=cells, flagged_count=flagged_count)
+        if threshold is None:
+            threshold = automation_settings.resolve_automation().settings.beep_low_confidence_threshold
+        return TriageResponse(
+            cells=cells,
+            flagged_count=_count_flagged(docs),
+            beep_low_confidence_threshold=threshold,
+        )
 
     @app.get("/api/match/triage", response_model=TriageResponse)
     def get_match_triage() -> TriageResponse:
@@ -12633,6 +12688,29 @@ def create_app(
         stages are included with status ``skipped`` (the SPA collapses
         them client-side)."""
         return _build_triage_response()
+
+    @app.get("/api/match/triage/summary", response_model=TriageSummaryResponse)
+    def get_match_triage_summary() -> TriageSummaryResponse:
+        """Just the flagged count, without the anomaly computation or
+        status walk that :func:`_build_triage_response` does (#823) - a
+        cheap poll target for the mobile triage surface's badge."""
+        _, match = _resolve_match_context()
+        docs: list[dict | None] = []
+        for slug in match.shooters:
+            try:
+                legacy = state.shooter_project(slug)
+            except Exception as exc:  # noqa: BLE001 - mirror _build_triage_response's per-shooter skip
+                logger.warning("Skipping shooter %s in triage summary: %s", slug, exc)
+                continue
+            audit_docs = state.load_audit_docs(slug)
+            for stg in legacy.stages:
+                if stg.placeholder:
+                    continue
+                doc = (audit_docs or {}).get(stg.stage_number)
+                if doc is None and audit_docs is None:
+                    doc, _ = state.load_audit(slug, stg.stage_number)
+                docs.append(doc)
+        return TriageSummaryResponse(flagged_count=_count_flagged(docs))
 
     @app.post("/api/match/shooters", response_model=ShooterListResponse)
     def add_match_shooter(req: AddShooterRequest) -> ShooterListResponse:
@@ -13351,7 +13429,9 @@ def create_app(
         for first_slug in match.shooters:
             try:
                 proj_for_threshold = state.shooter_project(first_slug)
-                resolved = automation_settings.resolve_automation(proj_for_threshold)
+                resolved = automation_settings.resolve_automation(
+                    project_override=proj_for_threshold.automation,
+                )
                 threshold = resolved.settings.beep_low_confidence_threshold
                 break
             except Exception:  # noqa: BLE001

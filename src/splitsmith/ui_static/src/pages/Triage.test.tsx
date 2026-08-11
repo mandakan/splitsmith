@@ -74,7 +74,7 @@ describe("Triage", () => {
       cell({ slug: "alice", stage_number: 1, status: "ready", anomalies: [longPause], needs_attention: null }),
       cell({ slug: "bob", shooter_name: "bob", stage_number: 1, status: "audited" }),
     ];
-    renderTriage({ cells, flagged_count: 0 });
+    renderTriage({ cells, flagged_count: 0, beep_low_confidence_threshold: 0.95 });
 
     expect(await screen.findByText("alice")).toBeInTheDocument();
     expect(screen.getByText(/long pause/i)).toBeInTheDocument();
@@ -86,10 +86,21 @@ describe("Triage", () => {
 
   it("shows the stage heading and low-confidence beep chip", async () => {
     const cells = [cell({ stage_number: 3, stage_name: "Steel Rush", beep_confidence: 0.4 })];
-    renderTriage({ cells, flagged_count: 0 });
+    renderTriage({ cells, flagged_count: 0, beep_low_confidence_threshold: 0.95 });
 
     expect(await screen.findByText(/stage 3.*steel rush/i)).toBeInTheDocument();
     expect(screen.getByText(/beep 40%/i)).toBeInTheDocument();
+  });
+
+  it("uses the payload threshold, not a hardcoded default, to gate the low-confidence pill", async () => {
+    const cells = [cell({ stage_number: 3, stage_name: "Steel Rush", beep_confidence: 0.65 })];
+    renderTriage({ cells, flagged_count: 0, beep_low_confidence_threshold: 0.5 });
+
+    // 0.65 confidence is below the old hardcoded 0.95 default (which would
+    // have shown the pill) but at or above this project's resolved 0.5
+    // threshold, so no low-confidence pill should render.
+    expect(await screen.findByText(/stage 3.*steel rush/i)).toBeInTheDocument();
+    expect(screen.queryByText(/beep 65%/i)).not.toBeInTheDocument();
   });
 
   it("shows a flagged cell as a card even when terminal, with its note", async () => {
@@ -106,7 +117,7 @@ describe("Triage", () => {
         },
       }),
     ];
-    renderTriage({ cells, flagged_count: 1 });
+    renderTriage({ cells, flagged_count: 1, beep_low_confidence_threshold: 0.95 });
 
     expect(await screen.findByText("carol")).toBeInTheDocument();
     expect(screen.getByText(/flagged for desktop/i)).toBeInTheDocument();
@@ -117,10 +128,10 @@ describe("Triage", () => {
 
   it("accept confirms then swaps in the fresh list", async () => {
     const cells = [cell({ slug: "alice", stage_number: 1, status: "ready" })];
-    renderTriage({ cells, flagged_count: 0 });
+    renderTriage({ cells, flagged_count: 0, beep_low_confidence_threshold: 0.95 });
     vi.mocked(api.acceptStage).mockResolvedValue({
       cells: [cell({ slug: "alice", stage_number: 1, status: "audited" })],
-      flagged_count: 0,
+      flagged_count: 0, beep_low_confidence_threshold: 0.95,
     });
 
     await user.click(await screen.findByRole("button", { name: /^accept$/i }));
@@ -133,7 +144,7 @@ describe("Triage", () => {
 
   it("accept 409 nothing_to_accept shows a readable message", async () => {
     const cells = [cell({ slug: "alice", stage_number: 1, status: "ready" })];
-    renderTriage({ cells, flagged_count: 0 });
+    renderTriage({ cells, flagged_count: 0, beep_low_confidence_threshold: 0.95 });
     vi.mocked(api.acceptStage).mockRejectedValue(new ApiError(409, "nothing_to_accept"));
 
     await user.click(await screen.findByRole("button", { name: /^accept$/i }));
@@ -145,7 +156,7 @@ describe("Triage", () => {
 
   it("accept 409 not_fully_classified shows a readable message", async () => {
     const cells = [cell({ slug: "alice", stage_number: 1, status: "ready" })];
-    renderTriage({ cells, flagged_count: 0 });
+    renderTriage({ cells, flagged_count: 0, beep_low_confidence_threshold: 0.95 });
     vi.mocked(api.acceptStage).mockRejectedValue(new ApiError(409, "not_fully_classified"));
 
     await user.click(await screen.findByRole("button", { name: /^accept$/i }));
@@ -157,7 +168,7 @@ describe("Triage", () => {
 
   it("flag sheet sends the note", async () => {
     const cells = [cell({ slug: "alice", stage_number: 1, status: "ready" })];
-    renderTriage({ cells, flagged_count: 0 });
+    renderTriage({ cells, flagged_count: 0, beep_low_confidence_threshold: 0.95 });
     vi.mocked(api.setStageAttention).mockResolvedValue({
       cells: [
         cell({
@@ -172,7 +183,7 @@ describe("Triage", () => {
           },
         }),
       ],
-      flagged_count: 1,
+      flagged_count: 1, beep_low_confidence_threshold: 0.95,
     });
 
     await user.click(await screen.findByRole("button", { name: /^flag$/i }));
@@ -200,10 +211,10 @@ describe("Triage", () => {
         },
       }),
     ];
-    renderTriage({ cells, flagged_count: 1 });
+    renderTriage({ cells, flagged_count: 1, beep_low_confidence_threshold: 0.95 });
     vi.mocked(api.setStageAttention).mockResolvedValue({
       cells: [cell({ slug: "alice", stage_number: 1, status: "ready", needs_attention: null })],
-      flagged_count: 0,
+      flagged_count: 0, beep_low_confidence_threshold: 0.95,
     });
 
     await user.click(await screen.findByRole("button", { name: /^unflag$/i }));
@@ -215,7 +226,7 @@ describe("Triage", () => {
 
   it("links to the results page for the cell's stage", async () => {
     const cells = [cell({ slug: "alice", stage_number: 2, status: "ready" })];
-    renderTriage({ cells, flagged_count: 0 });
+    renderTriage({ cells, flagged_count: 0, beep_low_confidence_threshold: 0.95 });
 
     const link = await screen.findByRole("link", { name: /results/i });
     expect(link).toHaveAttribute("href", "/match/m1/results/alice/2");
@@ -234,7 +245,7 @@ describe("Triage", () => {
 
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     const retry = screen.getByRole("button", { name: /retry/i });
-    vi.mocked(api.getTriage).mockResolvedValueOnce({ cells: [], flagged_count: 0 });
+    vi.mocked(api.getTriage).mockResolvedValueOnce({ cells: [], flagged_count: 0, beep_low_confidence_threshold: 0.95 });
     await user.click(retry);
 
     expect(await screen.findByText(/nothing.*triage|all clear|no stages/i)).toBeInTheDocument();

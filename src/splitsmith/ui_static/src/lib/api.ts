@@ -1194,6 +1194,10 @@ export interface StageAudit {
   _candidates_pending_audit?: { candidates: AuditCandidate[] };
   audit_events?: AuditEvent[];
   source?: string;
+  /** Triage flag (#823) - present when a mobile operator flagged this
+   *  stage for desktop follow-up; cleared server-side on the next
+   *  desktop save. */
+  needs_attention?: TriageAttention | null;
 }
 
 export type JobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
@@ -1566,6 +1570,18 @@ export interface TriageCell {
  *  Returns the current triage list and the count of flagged cells. */
 export interface TriageResponse {
   cells: TriageCell[];
+  flagged_count: number;
+  /** Resolved per-project HITL gate threshold (#219 / #220), same value
+   *  ``GET /api/automation`` reports at ``settings.beep_low_confidence_threshold``.
+   *  The SPA reads this instead of hardcoding the global default so a
+   *  project-level override is reflected in the low-confidence pill. */
+  beep_low_confidence_threshold: number;
+}
+
+/** Response from GET /api/match/triage/summary - the cheap poll behind
+ *  the sidebar/drawer flagged-count badge. Avoids paying for the full
+ *  triage cell list on every shell load and job settlement. */
+export interface TriageSummaryResponse {
   flagged_count: number;
 }
 
@@ -3037,6 +3053,13 @@ export const api = {
    *  cells and the count of flagged stages. */
   getTriage: () =>
     request<TriageResponse>("/api/match/triage"),
+
+  /** Cheap poll for the flagged-count badge alone, without the full
+   *  triage cell list ``getTriage`` returns. Use this for the sidebar /
+   *  mobile-drawer badge; use ``getTriage`` only where the cells
+   *  themselves are rendered (the Triage page). */
+  getTriageSummary: () =>
+    request<TriageSummaryResponse>("/api/match/triage/summary"),
 
   /** Accept a stage's audit (mark ready). Returns the refreshed triage
    *  list - same contract as confirmBeepInQueue. */

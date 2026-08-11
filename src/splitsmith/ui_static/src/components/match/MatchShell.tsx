@@ -374,7 +374,7 @@ export function MatchShell() {
     // load, failure-tolerant so a triage-endpoint hiccup never blocks
     // the rest of the shell.
     api
-      .getTriage()
+      .getTriageSummary()
       .then((r) => {
         if (alive) setTriageFlaggedCount(r.flagged_count);
       })
@@ -430,7 +430,7 @@ export function MatchShell() {
         /* keep the last known badge count */
       });
     api
-      .getTriage()
+      .getTriageSummary()
       .then((r) => {
         if (alive) setTriageFlaggedCount(r.flagged_count);
       })

@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from splitsmith import match_model
+from splitsmith.automation import AutomationOverride
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from tests.conftest import bound_match_id
 from tests.conftest import scaffold_match as _scaffold_match
@@ -262,6 +263,43 @@ def test_flag_note_too_long_422(client: _MatchClient, seeded_stage: dict) -> Non
     assert resp.status_code == 422
 
 
+def test_desktop_save_clears_flag(client: _MatchClient, seeded_stage: dict) -> None:
+    """#823: a desktop full-audit save (the SPA's Audit.tsx PUT, carrying a
+    "save" audit event) resolves an open triage flag, same as accept."""
+    flag_resp = client.post(
+        "/api/shooters/alice/stages/1/attention",
+        json={"flagged": True, "note": "check split 3"},
+    )
+    assert flag_resp.status_code == 200
+
+    doc = client.get("/api/shooters/alice/stages/1/audit").json()
+    doc["audit_events"] = doc.get("audit_events", []) + [{"kind": "save", "payload": {}}]
+    put_resp = client.put("/api/shooters/alice/stages/1/audit", json=doc)
+    assert put_resp.status_code == 200
+
+    doc2 = client.get("/api/shooters/alice/stages/1/audit").json()
+    assert doc2["needs_attention"]["flagged"] is False
+    assert doc2["needs_attention"]["updated_at"]
+
+
+def test_non_save_put_keeps_flag(client: _MatchClient, seeded_stage: dict) -> None:
+    """A PUT without a save event (e.g. a marker-edit autosave) must not
+    clear the triage flag - only an explicit desktop save resolves it."""
+    flag_resp = client.post(
+        "/api/shooters/alice/stages/1/attention",
+        json={"flagged": True, "note": "check split 3"},
+    )
+    assert flag_resp.status_code == 200
+
+    doc = client.get("/api/shooters/alice/stages/1/audit").json()
+    doc["audit_events"] = doc.get("audit_events", []) + [{"kind": "marker_kept", "payload": {"id": "cand-4"}}]
+    put_resp = client.put("/api/shooters/alice/stages/1/audit", json=doc)
+    assert put_resp.status_code == 200
+
+    doc2 = client.get("/api/shooters/alice/stages/1/audit").json()
+    assert doc2["needs_attention"]["flagged"] is True
+
+
 def test_triage_lists_cells_with_status_and_anomalies(client: _MatchClient, seeded_match: None) -> None:
     body = client.get("/api/match/triage").json()
     cells = body["cells"]
@@ -312,6 +350,38 @@ def test_triage_excludes_placeholder_stages(client: _MatchClient) -> None:
     stage_numbers = {c["stage_number"] for c in body["cells"]}
     assert 3 not in stage_numbers
     assert stage_numbers == {1, 2}
+
+
+def test_triage_carries_resolved_threshold(client: _MatchClient, seeded_match: None) -> None:
+    """The triage payload's threshold is the resolved per-project value
+    (same resolution path as ``get_hitl_queue``), not the automation
+    default of 0.95."""
+    match_id = bound_match_id(client.app)
+    match_root = client.app.state.splitsmith_state.matches.resolve(match_id)
+    alice_root = match_model.Match.shooter_root(match_root, "alice")
+    project = MatchProject.load(alice_root)
+    project.automation = AutomationOverride(beep_low_confidence_threshold=0.5)
+    project.save(alice_root)
+
+    body = client.get("/api/match/triage").json()
+    assert body["beep_low_confidence_threshold"] == 0.5
+
+
+def test_triage_summary_counts_flags_only(client: _MatchClient, seeded_match: None) -> None:
+    resp = client.post(
+        "/api/shooters/alice/stages/2/attention",
+        json={"flagged": True, "note": "recheck"},
+    )
+    assert resp.status_code == 200
+
+    body = client.get("/api/match/triage/summary").json()
+    assert body == {"flagged_count": 1}
+
+    unflag_resp = client.post("/api/shooters/alice/stages/2/attention", json={"flagged": False})
+    assert unflag_resp.status_code == 200
+
+    body2 = client.get("/api/match/triage/summary").json()
+    assert body2 == {"flagged_count": 0}
 
 
 def test_triage_includes_skipped_stages_with_skipped_status(client: _MatchClient) -> None:
