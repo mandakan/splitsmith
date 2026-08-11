@@ -6415,6 +6415,14 @@ def create_app(
     # desktop-owned until its slice ships a whitelist entry.
     _mirror_triage_write_re = re.compile(r"^shooters/[^/]+/stages/\d+/(audit/accept|attention)$")
 
+    # Slice 5 (mobile interval reclassify): the two coach writes a mirror
+    # accepts - the per-shot coach PATCH and the bulk reclassify POST.
+    # Both are pure state-doc writes (no job chaining), and COACH_FIELDS
+    # already merge per-shot LWW on desktop pull. Note the per-shot patch
+    # is a PATCH, so its exemption is method-gated separately below.
+    _mirror_coach_patch_re = re.compile(r"^shooters/[^/]+/stages/\d+/shots/\d+/coach$")
+    _mirror_coach_reclassify_re = re.compile(r"^shooters/[^/]+/stages/\d+/coach/reclassify$")
+
     @app.middleware("http")
     async def _match_id_alias(request, call_next):
         path = request.url.path
@@ -6483,6 +6491,8 @@ def create_app(
                     or (request.method == "POST" and rest == "match/beep-queue/confirm")
                     or (request.method == "POST" and _mirror_beep_write_re.match(rest) is not None)
                     or (request.method == "POST" and _mirror_triage_write_re.match(rest) is not None)
+                    or (request.method == "PATCH" and _mirror_coach_patch_re.match(rest) is not None)
+                    or (request.method == "POST" and _mirror_coach_reclassify_re.match(rest) is not None)
                 )
             ):
                 return JSONResponse(status_code=403, content={"detail": "read_only_mirror"})

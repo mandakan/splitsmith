@@ -405,6 +405,82 @@ def test_mirror_triage_exemption_boundary_pins(
     assert resp.json() == {"detail": "read_only_mirror"}
 
 
+# Coach writes pass the read-only gate on mirrors (Slice 5: mobile
+# interval reclassify); everything else coach-shaped stays blocked.
+
+
+def test_mirror_allows_coach_shot_patch(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The gate no longer 403s the per-shot coach PATCH on a mirror.
+
+    Only the middleware is under test: with no shooter seeded the handler
+    itself 404s, which proves the request got past the 403."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRCOACHGATE0000000001"
+    _seed_mirror(client, match_id, "gate-coach-patch")
+    resp = client.patch(
+        f"/api/matches/{match_id}/shooters/alice/stages/1/shots/3/coach",
+        json={"interval_class": "movement", "interval_class_source": "manual"},
+    )
+    assert resp.status_code != 403, resp.text
+
+
+def test_mirror_allows_coach_reclassify(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The gate no longer 403s the bulk coach reclassify POST on a mirror."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRCOACHGATE0000000002"
+    _seed_mirror(client, match_id, "gate-coach-reclassify")
+    resp = client.post(f"/api/matches/{match_id}/shooters/alice/stages/1/coach/reclassify")
+    assert resp.status_code != 403, resp.text
+
+
+@pytest.mark.parametrize(
+    ("match_id", "method", "rest"),
+    [
+        ("01JMIRRCOACHGATEBOUND0001", "POST", "shooters/alice/stages/1/shots/3/coach"),
+        ("01JMIRRCOACHGATEBOUND0002", "PATCH", "shooters/alice/stages/1/coach/reclassify"),
+        ("01JMIRRCOACHGATEBOUND0003", "PATCH", "shooters/alice/stages/1/shots/3/coach/extra"),
+        ("01JMIRRCOACHGATEBOUND0004", "PATCH", "shooters/alice/stages/1/coach"),
+        ("01JMIRRCOACHGATEBOUND0005", "POST", "shooters/alice/stages/1/coach/reclassify/"),
+        ("01JMIRRCOACHGATEBOUND0006", "DELETE", "shooters/alice/stages/1/shots/3/coach"),
+    ],
+    ids=[
+        "shot-patch-wrong-method",
+        "reclassify-wrong-method",
+        "shot-patch-extra-segment",
+        "coach-root-patch",
+        "reclassify-trailing-slash",
+        "shot-patch-delete",
+    ],
+)
+def test_mirror_coach_exemption_boundary_pins(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+    match_id: str,
+    method: str,
+    rest: str,
+) -> None:
+    """Pin the edges of the coach exemptions.
+
+    Each shape is exempt only for its own method (PATCH for the per-shot
+    patch, POST for reclassify); the regexes are anchored with ``$``. Any
+    variant slipping through would silently widen the read-only mirror's
+    write surface."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed_mirror(client, match_id, "gate-coach-boundary")
+    resp = client.request(method, f"/api/matches/{match_id}/{rest}", json={})
+    assert resp.status_code == 403, resp.text
+    assert resp.json() == {"detail": "read_only_mirror"}
+
+
 # Deleting a mirror still works - delete-match is a non-alias-routed
 # picker action (POST /api/me/recent-projects/delete), untouched by the
 # gate, but covered here so the exemption stays honest.
