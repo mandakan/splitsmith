@@ -154,10 +154,10 @@ Mechanism:
 - True conflicts (both sides touched the same field since last sync) are rare
   with a single operator. Resolve last-writer-wins but log them visibly; never
   silently clobber without a trace.
-- Derived artifacts: a beep override from the phone re-runs trim and shot
-  detection on hosted workers, producing new derived media in R2. On pull,
-  desktop downloads derived objects it lacks. Content hashes then match, so
-  the next push is a natural re-push-0. No local re-derivation.
+- Derived artifacts: SUPERSEDED by 2026-08-10-bidirectional-sync-design.md
+  and 2026-08-11-mobile-beep-review-design.md. Hosted never re-derives (raw
+  media never leaves the desktop); a phone beep edit marks state only, and
+  desktop re-derives trim and shot detection on its next pull.
 - Ordering guard: pull-merge ships before any mobile write surface goes live,
   otherwise a desktop push clobbers phone edits. The build order enforces
   this.

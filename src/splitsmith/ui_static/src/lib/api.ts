@@ -1698,6 +1698,15 @@ export interface BeepQueueItem {
    *  beep review video streams the proxy, so the SPA shows a "preview
    *  generating" placeholder instead of a broken player when this is false. */
   proxy_ready: boolean;
+  /** True once a desktop-pushed beep review snippet (audio + peaks) is
+   *  available for a mirror's video. Mobile beep review (slice 3) plays
+   *  this snippet instead of the raw/proxy media, which mirrors never
+   *  have. False everywhere else - snippets are hosted-mirror only. */
+  snippet_ready: boolean;
+  /** True once a beep has been set but the trim step hasn't run against
+   *  it yet - the clip boundaries on disk no longer match the reviewed
+   *  beep. Desktop re-trims on its next sync pull; this just flags it. */
+  trim_stale: boolean;
 }
 
 export interface BeepQueueStageGroup {
@@ -1713,6 +1722,26 @@ export interface BeepQueueResponse {
   pending_count: number;
   confirmed_count: number;
   stages: BeepQueueStageGroup[];
+  /** "desktop" on a hosted mirror, "local" everywhere else - lets the SPA
+   *  pick the honest media surface (snippet vs proxy) without a second
+   *  round trip. */
+  origin: string;
+}
+
+/** Desktop-pushed beep review snippet peaks for a mirror video (slice 3).
+ *  Same waveform-picker payload shape as {@link PeaksResult} plus the
+ *  fields the mirror needs since it has no live detector: where the
+ *  snippet starts in the source timeline, the ranked candidates, and the
+ *  input hash desktop uses to skip regenerating an unchanged snippet. */
+export interface BeepSnippetPeaks {
+  snippet_start: number;
+  duration: number;
+  sample_rate: number;
+  bins: number;
+  peaks: number[];
+  beep_time: number | null;
+  candidates: { time: number; confidence: number | null }[];
+  input_hash: string;
 }
 
 /** Merge wizard types (#332). plan_merge dry-runs the merge; the SPA
@@ -3167,6 +3196,21 @@ export const api = {
   ) =>
     request<PeaksResult>(
       `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/peaks?bins=${bins}`,
+    ),
+
+  /** URL for the desktop-pushed beep review audio snippet (mirror-only,
+   *  slice 3). 404s until ``snippet_ready`` is true on the queue item. */
+  beepSnippetAudioUrl: (slug: string, stageNumber: number, videoId: string) =>
+    scopeRequestPath(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep-snippet/audio`,
+    ),
+
+  /** Peaks + candidates for the pushed beep review snippet. Fetched fresh
+   *  every call - desktop rewrites the object in place when it
+   *  regenerates the snippet, so caching would go stale. */
+  getBeepSnippetPeaks: (slug: string, stageNumber: number, videoId: string) =>
+    request<BeepSnippetPeaks>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep-snippet/peaks`,
     ),
 
   /** Returns the saved audit JSON for a stage, or null when none exists yet.

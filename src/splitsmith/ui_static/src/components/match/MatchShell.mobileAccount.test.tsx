@@ -209,6 +209,7 @@ describe("MatchShell mobile drawer account menu (#550)", () => {
       pending_count: 0,
       confirmed_count: 0,
       stages: [],
+      origin: "local",
     });
     vi.mocked(api.listJobs).mockResolvedValue([]);
 

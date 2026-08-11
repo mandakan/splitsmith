@@ -3912,6 +3912,15 @@ class BeepQueueItem(BaseModel):
     # "preview generating" placeholder instead of a broken player when
     # this is False.
     proxy_ready: bool
+    # True once a desktop-pushed beep review snippet (audio + peaks) is
+    # available for a mirror's video. Mobile beep review (slice 3) plays
+    # this snippet instead of the raw/proxy media, which mirrors never
+    # have. False everywhere else - snippets are hosted-mirror only.
+    snippet_ready: bool = False
+    # True once a beep has been set but the trim step hasn't run against
+    # it yet - the clip boundaries on disk no longer match the reviewed
+    # beep. Desktop re-trims on its next sync pull; this just flags it.
+    trim_stale: bool = False
     # Auto-computed cross-align suggestion for secondaries lives on the
     # shooter's other videos; the SPA fetches them lazily if needed.
 
@@ -3933,6 +3942,10 @@ class BeepQueueResponse(BaseModel):
     pending_count: int
     confirmed_count: int
     stages: list[BeepQueueStageGroup]
+    # "desktop" on a hosted mirror, "local" everywhere else - lets the SPA
+    # pick the honest media surface (snippet vs proxy) without a second
+    # round trip.
+    origin: str = "local"
 
 
 class BeepQueueConfirmRequest(BaseModel):
@@ -6315,6 +6328,13 @@ def create_app(
     # because each runs in its own contextvar scope. The singleton
     # ``state._bound_root`` is only consulted for legacy bare-path
     # traffic that hasn't migrated to the new prefix.
+
+    # Slice 3 (mobile beep review): the only two beep writes a mirror
+    # accepts. Everything else beep-shaped (detect-beep, beep-window,
+    # select, snap, the legacy primary shim) needs source audio or fires
+    # jobs, and stays read-only on mirrors.
+    _mirror_beep_write_re = re.compile(r"^shooters/[^/]+/stages/\d+/videos/[^/]+/beep$")
+
     @app.middleware("http")
     async def _match_id_alias(request, call_next):
         path = request.url.path
@@ -6377,7 +6397,12 @@ def create_app(
             if (
                 owner_row.origin == "desktop"
                 and request.method not in ("GET", "HEAD", "OPTIONS")
-                and not (rest == "match/shares" or rest.startswith("match/shares/"))
+                and not (
+                    rest == "match/shares"
+                    or rest.startswith("match/shares/")
+                    or (request.method == "POST" and rest == "match/beep-queue/confirm")
+                    or (request.method == "POST" and _mirror_beep_write_re.match(rest) is not None)
+                )
             ):
                 return JSONResponse(status_code=403, content={"detail": "read_only_mirror"})
             work_root = (
@@ -9605,7 +9630,10 @@ def create_app(
             raise HTTPException(status_code=400, detail="beep_time must be >= 0")
         _apply_beep_override(slug, project, stage, video, req.beep_time)
         project.save(state.shooter_root(slug))
-        if req.beep_time is not None:
+        # Mirrors mark state only: no raw media exists hosted-side, so
+        # there is nothing to trim or detect against. Desktop re-derives
+        # on its next sync pull (bidirectional sync design).
+        if req.beep_time is not None and current_match_origin.get() != "desktop":
             await _maybe_chain_trim(slug, stage, video)
             await _advance_sequential_chain(state, slug, project, video, stage_number)
         return JSONResponse(project.model_dump(mode="json"))
@@ -10267,6 +10295,39 @@ def create_app(
         payload["beep_time"] = audit.beep_in_clip
         payload["trimmed"] = audit.trimmed
         return JSONResponse(payload)
+
+    def _beep_snippet_key(slug: str, video_id: str, suffix: str) -> str | None:
+        """Build the desktop-pushed snippet key, or None with no match/storage bound."""
+        match_id = current_match_id.get()
+        if state.storage is None or not match_id:
+            return None
+        return f"matches/{match_id}/shooters/{slug}/beep_review/{video_id}{suffix}"
+
+    @app.get(
+        "/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep-snippet/audio",
+        response_model=None,
+    )
+    def beep_snippet_audio(slug: str, stage_number: int, video_id: str) -> FileResponse | RedirectResponse:
+        """Serve the pushed beep review audio snippet for a mirror video."""
+        _resolve_stage_video(slug, stage_number, video_id)  # 404 on unknown video
+        key = _beep_snippet_key(slug, video_id, ".m4a")
+        if key is None or not state.storage.exists(key):
+            raise HTTPException(status_code=404, detail="beep_snippet_not_available")
+        local = state.shooter_root(slug) / "beep_review" / f"{video_id}.m4a"
+        return serve_media(state.storage, key, local, content_type="audio/mp4")
+
+    @app.get("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep-snippet/peaks")
+    def beep_snippet_peaks(slug: str, stage_number: int, video_id: str) -> JSONResponse:
+        """Return the pushed peaks JSON for a mirror video's beep snippet."""
+        _resolve_stage_video(slug, stage_number, video_id)  # 404 on unknown video
+        key = _beep_snippet_key(slug, video_id, ".peaks.json")
+        if key is None or not state.storage.exists(key):
+            raise HTTPException(status_code=404, detail="beep_snippet_not_available")
+        # Read through to storage every request - desktop rewrites this object
+        # under the same key when it regenerates a snippet (beep_time/candidates
+        # change), so mirror-once-then-serve-local would go stale. A few KB of
+        # JSON is cheap enough to fetch fresh each time.
+        return JSONResponse(json.loads(state.storage.read_bytes(key)))
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/audit")
     def get_stage_audit(slug: str, stage_number: int) -> JSONResponse:
@@ -13100,8 +13161,23 @@ def create_app(
             if _storage is None:
                 return True
             if not path_str.startswith("raw/"):
-                return True
+                # Hosted but not a hosted-native upload (a desktop-pushed
+                # mirror): there is no proxy object to stream.
+                return False
             return proxy_key_for(path_str) in _proxy_keys
+
+        # Snippet artifacts pushed by desktop for unconfirmed videos
+        # (slice 3). One list per request covers every shooter.
+        _match_id = current_match_id.get()
+        _snippet_keys: set[str] = set()
+        if _storage is not None and _match_id:
+            _snippet_keys = {obj.path for obj in _storage.list(f"matches/{_match_id}/shooters/")}
+
+        def _snippet_ready(slug: str, video_id: str) -> bool:
+            if not _snippet_keys:
+                return False
+            base = f"matches/{_match_id}/shooters/{slug}/beep_review/{video_id}"
+            return f"{base}.m4a" in _snippet_keys and f"{base}.peaks.json" in _snippet_keys
 
         for slug in match.shooters:
             shooter_root = match_model.Match.shooter_root(match_root, slug)
@@ -13173,6 +13249,10 @@ def create_app(
                             status=status,
                             alt_candidates=alts,
                             proxy_ready=_proxy_ready(video.path.as_posix()),
+                            snippet_ready=_snippet_ready(slug, video.video_id),
+                            trim_stale=(
+                                video.beep_time is not None and not video.processed.get("trim", False)
+                            ),
                         )
                     )
 
@@ -13182,6 +13262,7 @@ def create_app(
             pending_count=total_pending,
             confirmed_count=total_confirmed,
             stages=ordered_stages,
+            origin=current_match_origin.get() or "local",
         )
 
     @app.post("/api/match/beep-queue/confirm", response_model=BeepQueueResponse)

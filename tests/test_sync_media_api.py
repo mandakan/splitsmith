@@ -172,6 +172,44 @@ def test_wav_extension_rejected(
     assert resp.status_code == 422, resp.text
 
 
+# --- beep_review media keys (slice 3, #631) ---------------------------------
+
+
+def test_beep_review_m4a_key_accepted(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+) -> None:
+    client, sender, captured = hosted_app_with_storage
+    _login_and_adopt(client, sender, captured)
+
+    key = f"matches/{MATCH_ID}/shooters/{SLUG}/beep_review/vid123.m4a"
+    resp = client.post(CREATE_URL, json={"key": key})
+    assert resp.status_code == 200, resp.text
+
+
+def test_beep_review_peaks_json_key_accepted(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+) -> None:
+    client, sender, captured = hosted_app_with_storage
+    _login_and_adopt(client, sender, captured)
+
+    key = f"matches/{MATCH_ID}/shooters/{SLUG}/beep_review/vid123.peaks.json"
+    resp = client.post(CREATE_URL, json={"key": key})
+    assert resp.status_code == 200, resp.text
+
+
+def test_beep_review_foreign_subdir_rejected(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+) -> None:
+    client, sender, captured = hosted_app_with_storage
+    _login_and_adopt(client, sender, captured)
+
+    # Not one of the two admitted subdirs (trimmed, beep_review) - the
+    # escape-attempt control for this key family.
+    bad_key = f"matches/{MATCH_ID}/shooters/{SLUG}/beep_review_evil/vid123.m4a"
+    resp = client.post(CREATE_URL, json={"key": bad_key})
+    assert resp.status_code == 422, resp.text
+
+
 @pytest.mark.parametrize("route", [CREATE_URL, PART_URL_URL, COMPLETE_URL, ABORT_URL])
 def test_key_containment_enforced_on_every_route(
     hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict], route: str

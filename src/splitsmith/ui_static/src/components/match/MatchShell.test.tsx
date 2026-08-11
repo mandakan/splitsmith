@@ -222,6 +222,7 @@ function setUpApi(listJobsImpl: () => Promise<Job[]>) {
     pending_count: 0,
     confirmed_count: 0,
     stages: [],
+    origin: "local",
   });
   vi.mocked(api.listJobs).mockImplementation(listJobsImpl);
 }
@@ -273,6 +274,7 @@ function setUpApiWithOrigin(origin: "hosted" | "desktop" | "local") {
     pending_count: 0,
     confirmed_count: 0,
     stages: [],
+    origin: "local",
   });
   vi.mocked(api.listJobs).mockResolvedValue([]);
 }

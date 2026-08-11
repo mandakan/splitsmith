@@ -136,6 +136,7 @@ describe("Ingest add-footage (local)", () => {
       pending_count: 0,
       confirmed_count: 0,
       stages: [],
+      origin: "local",
     });
     vi.mocked(api.listFolder).mockResolvedValue(listing);
     vi.mocked(api.scanVideos).mockResolvedValue({
