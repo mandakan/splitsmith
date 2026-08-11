@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 
 export interface AnomalyChipsProps {
   anomalies: Anomaly[];
-  onJump: (anomaly: Anomaly) => void;
+  onJump?: (anomaly: Anomaly) => void;
 }
 
 /**
@@ -20,22 +20,16 @@ export function AnomalyChips({ anomalies, onJump }: AnomalyChipsProps) {
       </span>
       {anomalies.map((a, i) => {
         const isWarn = a.severity === "warn";
-        const clickable = a.time != null;
-        return (
-          <button
-            key={`${a.kind}-${a.shot_number ?? "stage"}-${i}`}
-            type="button"
-            onClick={clickable ? () => onJump(a) : undefined}
-            disabled={!clickable}
-            title={a.message}
-            className={cn(
-              "inline-flex max-w-[22rem] items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[0.625rem] font-semibold",
-              isWarn
-                ? "border-live/40 bg-live/10 text-live"
-                : "border-beep/40 bg-beep/10 text-beep",
-              clickable ? "cursor-pointer" : "cursor-default opacity-75",
-            )}
-          >
+        const clickable = a.time != null && onJump != null;
+        const chipClassName = cn(
+          "inline-flex max-w-[22rem] items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[0.625rem] font-semibold",
+          isWarn
+            ? "border-live/40 bg-live/10 text-live"
+            : "border-beep/40 bg-beep/10 text-beep",
+          clickable ? "cursor-pointer" : "cursor-default opacity-75",
+        );
+        const chipContent = (
+          <>
             <span
               aria-hidden
               className={cn(
@@ -49,7 +43,25 @@ export function AnomalyChips({ anomalies, onJump }: AnomalyChipsProps) {
               {a.shot_number != null ? `Shot ${a.shot_number} · ` : ""}
               {summariseMessage(a.message)}
             </span>
-          </button>
+          </>
+        );
+        return (
+          <div key={`${a.kind}-${a.shot_number ?? "stage"}-${i}`}>
+            {clickable ? (
+              <button
+                type="button"
+                onClick={() => onJump(a)}
+                title={a.message}
+                className={chipClassName}
+              >
+                {chipContent}
+              </button>
+            ) : (
+              <div title={a.message} className={chipClassName}>
+                {chipContent}
+              </div>
+            )}
+          </div>
         );
       })}
     </div>

@@ -12,7 +12,7 @@
  * motion-safe so prefers-reduced-motion users get no transition.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { Portal } from "@/components/ui/Portal";
 import { useDialogFocus } from "@/lib/dialogFocus";
@@ -28,7 +28,7 @@ export function MobileConfirmSheet({
 }: {
   open: boolean;
   title: string;
-  body: string;
+  body: ReactNode;
   confirmLabel: string;
   onConfirm: () => void;
   onCancel: () => void;
