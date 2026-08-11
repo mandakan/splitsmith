@@ -248,6 +248,7 @@ export function MatchShell() {
   const [identity, setIdentity] = useState<ScoreboardIdentity | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [beepReviewPending, setBeepReviewPending] = useState<number>(0);
+  const [triageFlaggedCount, setTriageFlaggedCount] = useState<number>(0);
   const shooterCount = shooters.length || undefined;
   // Per-shooter pages (Audit / Coach / Videos / Export) need a shooter in
   // the URL. Rather than forcing the user to the shooter list, default to
@@ -368,6 +369,18 @@ export function MatchShell() {
       .catch(() => {
         if (alive) setBeepReviewPending(0);
       });
+    // Triage flagged count drives the sidebar/drawer badge the same way
+    // the beep queue does above - cheap GET, refreshed on every shell
+    // load, failure-tolerant so a triage-endpoint hiccup never blocks
+    // the rest of the shell.
+    api
+      .getTriage()
+      .then((r) => {
+        if (alive) setTriageFlaggedCount(r.flagged_count);
+      })
+      .catch(() => {
+        if (alive) setTriageFlaggedCount(0);
+      });
     return () => {
       alive = false;
     };
@@ -412,6 +425,14 @@ export function MatchShell() {
       .getBeepQueue()
       .then((q) => {
         if (alive) setBeepReviewPending(q.pending_count);
+      })
+      .catch(() => {
+        /* keep the last known badge count */
+      });
+    api
+      .getTriage()
+      .then((r) => {
+        if (alive) setTriageFlaggedCount(r.flagged_count);
       })
       .catch(() => {
         /* keep the last known badge count */
@@ -603,6 +624,7 @@ export function MatchShell() {
             hasFootage: shooters.some((s) => s.video_count > 0),
             shooterCount,
             beepReviewPendingCount: beepReviewPending,
+            triageFlaggedCount,
             jobsAttentionCount: jobsState.failed.length,
             footageHint: FOOTAGE_HINT,
           })}
@@ -643,6 +665,7 @@ export function MatchShell() {
           stages={stages}
           shooterCount={shooterCount}
           beepReviewPendingCount={beepReviewPending}
+          triageFlaggedCount={triageFlaggedCount}
           jobsAttentionCount={jobsState.failed.length}
           awaiting={
             stages.length > 0 && stages.every((s) => s.status === "todo")

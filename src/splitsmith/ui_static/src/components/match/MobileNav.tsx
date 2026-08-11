@@ -136,6 +136,7 @@ export function MobileNav({ open, onClose, items, header, extras }: MobileNavPro
                 <span className="truncate">{item.label}</span>
                 {showBadge ? (
                   <span
+                    aria-label={item.badgeAriaLabel}
                     className={cn(
                       "ml-auto",
                       item.badgeKind === "pending" ? "badge-pending" : "badge-count",
