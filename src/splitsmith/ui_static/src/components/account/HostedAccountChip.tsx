@@ -120,16 +120,7 @@ export function HostedAccountChip({ className }: { className?: string }) {
           while the nav's own scrollWidth still reads a healthy 390. Only
           looking at the rendered bar catches that one. */}
       <div className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border border-rule bg-surface-2 py-1 pl-3 pr-1">
-        {loadFailed ? (
-          <button
-            type="button"
-            onClick={() => void load()}
-            title="Could not load the linked-account status - click to retry"
-            className="text-[0.8125rem] text-muted transition-colors hover:text-ink"
-          >
-            Account status unavailable - retry
-          </button>
-        ) : account ? (
+        {account ? (
           <>
             <span
               className="min-w-0 max-w-[16rem] truncate text-[0.8125rem] text-ink-2"
@@ -153,6 +144,15 @@ export function HostedAccountChip({ className }: { className?: string }) {
               <LogOut className="size-3.5" />
             </IconButton>
           </>
+        ) : loadFailed ? (
+          <button
+            type="button"
+            onClick={() => void load()}
+            title="Could not load the linked-account status - click to retry"
+            className="text-[0.8125rem] text-muted transition-colors hover:text-ink"
+          >
+            Account status unavailable - retry
+          </button>
         ) : (
           <Button
             type="button"

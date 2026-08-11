@@ -137,4 +137,25 @@ describe("HostedAccountChip (local mode)", () => {
     await userEvent.click(retry);
     expect(await screen.findByText(/shooter@example\.com/)).toBeInTheDocument();
   });
+
+  it("keeps a displayed account visible when a background refetch fails (#738)", async () => {
+    getSyncSettings.mockResolvedValueOnce({
+      base_url: "https://hosted.example",
+      token_set: true,
+      account: ACCOUNT,
+    });
+    render(<HostedAccountChip />);
+    expect(await screen.findByText("shooter@example.com")).toBeInTheDocument();
+
+    getSyncSettings.mockRejectedValueOnce(new Error("boom"));
+    act(() => {
+      window.dispatchEvent(new CustomEvent(HOSTED_ACCOUNT_CHANGED_EVENT));
+    });
+    await waitFor(() => expect(getSyncSettings).toHaveBeenCalledTimes(2));
+
+    expect(await screen.findByText("shooter@example.com")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /account status unavailable/i }),
+    ).not.toBeInTheDocument();
+  });
 });
