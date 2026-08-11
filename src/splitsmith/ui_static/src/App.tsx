@@ -17,6 +17,7 @@ import { MatchShell } from "@/components/match/MatchShell";
 import { ShareShell } from "@/components/share/ShareShell";
 import { DefaultShooterRedirect } from "@/components/match/DefaultShooterRedirect";
 import { ModeProvider } from "@/lib/mode";
+import { useIsMobile } from "@/lib/useIsMobile";
 import { ConfirmProvider } from "@/components/useConfirm";
 import { UploadProvider } from "@/lib/uploads";
 import { UploadDock } from "@/components/UploadDock";
@@ -27,6 +28,7 @@ import { ShooterScopedRoute } from "@/components/ShooterScopedRoute";
 import { Login } from "@/pages/Login";
 import { Audit } from "@/pages/Audit";
 import { BeepReview } from "@/pages/BeepReview";
+import { MobileBeepReview } from "@/pages/MobileBeepReview";
 import { Coach } from "@/pages/Coach";
 import { Compare } from "@/pages/Compare";
 import { CreateMatch } from "@/pages/CreateMatch";
@@ -56,6 +58,15 @@ import { api } from "@/lib/api";
 function RedirectLabSlug() {
   const { slug } = useParams<{ slug: string }>();
   return <Navigate to={`/dev/legacy/lab/${slug ?? ""}`} replace />;
+}
+
+/* Beep review is the one match-scoped screen with a real mobile surface
+ * (slice 3, #326 follow-up) - every other match-scoped route still goes
+ * through DesktopGate. Below the 768 px breakpoint this renders the
+ * card-pager MobileBeepReview instead of gating the desktop layout. */
+function BeepReviewRoute() {
+  const isMobile = useIsMobile();
+  return isMobile ? <MobileBeepReview /> : <BeepReview />;
 }
 
 /* Catch-all for bare match-scoped paths (``/audit/...``, ``/ingest``,
@@ -271,7 +282,7 @@ export function App() {
               />
               <Route path="coach" element={<DefaultShooterRedirect base="coach" />} />
               <Route path="shooters" element={<DesktopGate screen="Shooter management"><Shooters /></DesktopGate>} />
-              <Route path="beep-review" element={<DesktopGate screen="Beep review"><BeepReview /></DesktopGate>} />
+              <Route path="beep-review" element={<BeepReviewRoute />} />
               {/* Take overview: carve-up review for one multi-stage raw
                   recording. :filename is the raw video's basename. */}
               <Route
