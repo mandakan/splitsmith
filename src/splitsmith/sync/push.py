@@ -14,6 +14,7 @@ with ``last_synced_at`` stamped.
 from __future__ import annotations
 
 import contextlib
+import logging
 import time
 from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
@@ -23,9 +24,12 @@ from pydantic import BaseModel, Field
 
 from ..observability import PhaseTimer
 from .base import save_base_doc
+from .beep_snippets import generate_beep_snippets
 from .client import HostedSyncClient, SyncClientError
 from .plan import build_push_plan, doc_identity_key, hash_doc_body
 from .state import SyncedItem, SyncState, load_sync_state, save_sync_state
+
+logger = logging.getLogger(__name__)
 
 
 class MediaItemTiming(BaseModel):
@@ -123,6 +127,9 @@ def run_push(
 
     with _timed_phase(timings, timer, "plan"):
         sync_state = sync_state or load_sync_state(match_root)
+        snippet_report = generate_beep_snippets(match_root)
+        for err in snippet_report.errors:
+            logger.warning("beep snippet generation: %s", err)
         plan = build_push_plan(match_root, sync_state=sync_state)
         if plan.errors:
             raise SyncClientError("\n".join(plan.errors))

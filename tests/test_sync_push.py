@@ -63,6 +63,7 @@ import pytest
 from splitsmith import match_model
 from splitsmith.match_project import MatchProject, StageEntry
 from splitsmith.observability import PhaseTimer
+from splitsmith.sync import beep_snippets, push
 from splitsmith.sync.client import HostedSyncClient, SyncClientError
 from splitsmith.sync.plan import DocItem, MediaItem, build_push_plan
 from splitsmith.sync.push import MediaItemTiming, PushReport, format_push_message, run_push
@@ -670,3 +671,32 @@ def test_format_push_message_omits_unchanged_suffix_when_zero() -> None:
 def test_format_push_message_names_unchanged_count_when_nonzero() -> None:
     report = PushReport(uploaded=0, skipped=96, docs=1, docs_skipped=52)
     assert format_push_message(report) == "Synced: 0 uploaded, 96 skipped, 1 docs (52 unchanged)"
+
+
+# ---------------------------------------------------------------------------
+# Case 12: beep review snippet generation runs before planning (slice 3)
+# ---------------------------------------------------------------------------
+
+
+def test_run_push_regenerates_beep_snippets_before_planning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root, match_id = _build_match(tmp_path)
+    calls: list[Path] = []
+
+    def _spy(match_root: Path, **_kwargs: object) -> beep_snippets.BeepSnippetReport:
+        calls.append(match_root)
+        out_dir = match_root / "shooters" / "alice" / "beep_review"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (out_dir / "vid1.m4a").write_bytes(b"aac")
+        return beep_snippets.BeepSnippetReport(generated=1)
+
+    monkeypatch.setattr(push, "generate_beep_snippets", _spy)
+
+    fake = _FakeHosted()
+    report = run_push(root, client=fake.clients())
+
+    assert calls == [root]
+    beep_key = f"matches/{match_id}/shooters/alice/beep_review/vid1.m4a"
+    assert beep_key in {mi.remote_key for mi in report.media_items}
+    assert any(c.startswith(f"media_create:{beep_key}") for c in fake.calls)

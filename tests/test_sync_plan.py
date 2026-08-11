@@ -342,3 +342,49 @@ def test_legacy_sync_state_without_doc_hashes_plans_every_doc_once(tmp_path: Pat
     plan = build_push_plan(root, sync_state=state)
     assert len(plan.docs) == 3
     assert plan.docs_skipped == 0
+
+
+# ---------------------------------------------------------------------------
+# Case 10: beep review snippets (slice 3)
+# ---------------------------------------------------------------------------
+
+
+def test_plan_includes_beep_review_artifacts(tmp_path: Path) -> None:
+    root, slug = _build_basic_match(tmp_path)
+    match_id = match_model.Match.load(root).match_id
+    assert match_id is not None
+    shooter_root = match_model.Match.shooter_root(root, slug)
+
+    out = shooter_root / "beep_review"
+    out.mkdir()
+    (out / "vid1.m4a").write_bytes(b"aac")
+    (out / "vid1.peaks.json").write_text("{}")
+    (out / "notes.txt").write_text("ignored")  # only .m4a / .peaks.json enter the plan
+
+    plan = build_push_plan(root, sync_state=SyncState())
+    keys = {m.remote_key for m in plan.media}
+    assert f"matches/{match_id}/shooters/{slug}/beep_review/vid1.m4a" in keys
+    assert f"matches/{match_id}/shooters/{slug}/beep_review/vid1.peaks.json" in keys
+    assert not any(k.endswith("notes.txt") for k in keys)
+
+
+def test_plan_skips_unchanged_beep_review_artifacts(tmp_path: Path) -> None:
+    root, slug = _build_basic_match(tmp_path)
+    shooter_root = match_model.Match.shooter_root(root, slug)
+
+    out = shooter_root / "beep_review"
+    out.mkdir()
+    (out / "vid1.m4a").write_bytes(b"aac")
+    (out / "vid1.peaks.json").write_text("{}")
+
+    first_plan = build_push_plan(root, sync_state=SyncState())
+    beep_keys = {m.remote_key for m in first_plan.media if "beep_review" in m.remote_key}
+    assert len(beep_keys) == 2
+
+    state = _synced_state_from(first_plan)
+    second_plan = build_push_plan(root, sync_state=state)
+
+    # Everything (trimmed clip, sidecar, and both beep review artifacts)
+    # was already recorded, so nothing re-enters the plan.
+    assert second_plan.media == []
+    assert second_plan.media_skipped == len(first_plan.media)

@@ -73,8 +73,8 @@ class PushPlan(BaseModel):
     errors: list[str] = Field(default_factory=list)  # non-empty -> push must not run
 
 
-def _remote_key(match_id: str, slug: str, basename: str) -> str:
-    return f"matches/{match_id}/shooters/{slug}/trimmed/{basename}"
+def _remote_key(match_id: str, slug: str, basename: str, *, subdir: str = "trimmed") -> str:
+    return f"matches/{match_id}/shooters/{slug}/{subdir}/{basename}"
 
 
 def doc_identity_key(kind: str, slug: str | None, stage_number: int | None) -> str:
@@ -208,6 +208,18 @@ def build_push_plan(match_root: Path, *, sync_state: SyncState) -> PushPlan:
                         media_skipped += 1
                     else:
                         media.append(item)
+
+        beep_review_dir = shooter_root / "beep_review"
+        if beep_review_dir.is_dir():
+            for artifact in sorted(beep_review_dir.iterdir()):
+                if artifact.suffix != ".m4a" and not artifact.name.endswith(".peaks.json"):
+                    continue
+                remote_key = _remote_key(match.match_id, slug, artifact.name, subdir="beep_review")
+                item = _plan_media_item(artifact, remote_key, sync_state)
+                if item is None:
+                    media_skipped += 1
+                else:
+                    media.append(item)
 
     return PushPlan(
         match_id=match.match_id,
