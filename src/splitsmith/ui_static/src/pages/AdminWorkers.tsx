@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { ArrowUpCircle, Trash2 } from "lucide-react";
 
 import { StatusPill } from "@/components/ui/StatusPill";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RegisterWorkerDialog } from "@/components/admin/RegisterWorkerDialog";
-import { ApiError, api, type WorkerView } from "@/lib/api";
+import { ApiError, api, type WorkerInfo, type WorkerView } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
@@ -37,12 +38,81 @@ function workerTone(
   }
 }
 
+/** True when a worker runs a release behind the server's own version.
+ *
+ * A missing worker version (pending / never reported) or an unparseable
+ * component is treated as "not outdated" -- we never nag on uncertainty, and a
+ * worker ahead of the server (self-hosted updated before the server deploy) is
+ * not flagged either. */
+function isOutdated(version: string | null, serverVersion: string): boolean {
+  if (!version || !serverVersion) return false;
+  const parse = (v: string) =>
+    v.replace(/^v/, "").split(".").map((n) => parseInt(n, 10));
+  const a = parse(version);
+  const b = parse(serverVersion);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] ?? 0;
+    const y = b[i] ?? 0;
+    if (Number.isNaN(x) || Number.isNaN(y)) return false;
+    if (x !== y) return x < y;
+  }
+  return false;
+}
+
+/** GPU / NVENC / CUDA badges from a worker's advertised capabilities (#796).
+ *
+ * ``capabilities`` is absent on workers that never advertised any (e.g. Railway
+ * rows) -- render nothing there. A worker that advertised an all-false bundle
+ * is a probed CPU-only box, which we label explicitly. */
+function CapabilityBadges({ info }: { info: WorkerInfo | null }) {
+  const caps = info?.capabilities;
+  if (!caps) return null;
+  const badges = [];
+  if (caps.gpu_name) {
+    badges.push(
+      <Badge key="gpu" variant="secondary" title="GPU model">
+        {caps.gpu_name}
+      </Badge>,
+    );
+  }
+  if (caps.cuda_ep) {
+    badges.push(
+      <Badge
+        key="cuda"
+        variant="good"
+        title="onnxruntime CUDA execution provider available"
+      >
+        CUDA
+      </Badge>,
+    );
+  }
+  if (caps.nvenc_h264) {
+    badges.push(
+      <Badge key="nvenc" variant="good" title="ffmpeg h264_nvenc usable">
+        NVENC
+      </Badge>,
+    );
+  }
+  if (badges.length === 0) {
+    badges.push(
+      <Badge key="cpu" variant="outline" title="No GPU acceleration advertised">
+        CPU
+      </Badge>,
+    );
+  }
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1">{badges}</div>
+  );
+}
+
 interface WorkerRowProps {
   worker: WorkerView;
+  serverVersion: string;
   onRefetch: () => void;
 }
 
-function WorkerRow({ worker, onRefetch }: WorkerRowProps) {
+function WorkerRow({ worker, serverVersion, onRefetch }: WorkerRowProps) {
+  const outdated = isOutdated(worker.version, serverVersion);
   const [priorityDraft, setPriorityDraft] = useState(String(worker.priority));
   const [patching, setPatching] = useState(false);
   const [deleteArmed, setDeleteArmed] = useState(false);
@@ -110,6 +180,7 @@ function WorkerRow({ worker, onRefetch }: WorkerRowProps) {
             <span className="ml-2 text-amber-500">unregistered</span>
           )}
         </div>
+        <CapabilityBadges info={worker.info} />
       </div>
 
       {/* Status pill */}
@@ -146,10 +217,23 @@ function WorkerRow({ worker, onRefetch }: WorkerRowProps) {
 
       {/* Version */}
       <div
-        className="shrink-0 font-mono text-xs text-subtle"
-        title="Worker software version"
+        className={cn(
+          "flex shrink-0 items-center gap-1 font-mono text-xs",
+          outdated ? "text-amber-500" : "text-subtle",
+        )}
+        title={
+          outdated
+            ? `Update available - server is on v${serverVersion}`
+            : "Worker software version"
+        }
       >
         {worker.version ? `v${worker.version}` : "unknown"}
+        {outdated ? (
+          <ArrowUpCircle
+            className="size-3.5"
+            aria-label={`update available (server is on v${serverVersion})`}
+          />
+        ) : null}
       </div>
 
       {/* Last seen */}
@@ -230,6 +314,7 @@ function WorkerRow({ worker, onRefetch }: WorkerRowProps) {
 export function AdminWorkers() {
   const { user } = useAuth();
   const [workers, setWorkers] = useState<WorkerView[] | null>(null);
+  const [serverVersion, setServerVersion] = useState("");
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [showRegister, setShowRegister] = useState(false);
   const mountedRef = useRef(true);
@@ -245,7 +330,10 @@ export function AdminWorkers() {
     setFetchError(null);
     try {
       const resp = await api.adminListWorkers();
-      if (mountedRef.current) setWorkers(resp.workers);
+      if (mountedRef.current) {
+        setWorkers(resp.workers);
+        setServerVersion(resp.server_version);
+      }
     } catch (e) {
       if (mountedRef.current) {
         setFetchError(e instanceof ApiError ? e.detail : String(e));
@@ -299,7 +387,12 @@ export function AdminWorkers() {
         ) : workers !== null ? (
           <div className="rounded-md border border-rule bg-surface">
             {workers.map((w) => (
-              <WorkerRow key={w.id} worker={w} onRefetch={() => void loadWorkers()} />
+              <WorkerRow
+                key={w.id}
+                worker={w}
+                serverVersion={serverVersion}
+                onRefetch={() => void loadWorkers()}
+              />
             ))}
           </div>
         ) : null}

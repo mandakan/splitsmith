@@ -901,9 +901,15 @@ class WorkerView(BaseModel):
 
 
 class AdminWorkerListResponse(BaseModel):
-    """Response body for ``GET /api/admin/workers``."""
+    """Response body for ``GET /api/admin/workers``.
+
+    ``server_version`` is this server's own release. The admin UI compares each
+    worker's ``version`` against it to flag self-hosted agents that have fallen
+    behind the current release (release-please publishes the PyPI package and
+    deploys the server together, so "behind the server" == "behind latest")."""
 
     workers: list[WorkerView]
+    server_version: str
 
 
 class AdminCreateWorkerBody(BaseModel):
@@ -9478,7 +9484,10 @@ def create_app(
         registry = state.wake_channels
         connected = registry.connected_ids() if registry is not None else frozenset()
         records = await store.list()
-        return AdminWorkerListResponse(workers=[_to_worker_view(r, connected) for r in records])
+        return AdminWorkerListResponse(
+            workers=[_to_worker_view(r, connected) for r in records],
+            server_version=splitsmith_version,
+        )
 
     @app.post("/api/admin/workers", response_model=AdminCreateWorkerResponse)
     async def _admin_create_worker(

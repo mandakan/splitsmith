@@ -3930,6 +3930,24 @@ export const api = {
     ),
 };
 
+/** Verified host capabilities a worker advertised at registration (#796). */
+export interface WorkerCapabilities {
+  /** ffmpeg h264_nvenc usable (gated on a real trial encode). */
+  nvenc_h264?: boolean;
+  /** onnxruntime CUDA execution provider available. */
+  cuda_ep?: boolean;
+  /** GPU model string, best-effort; null on CPU-only boxes. */
+  gpu_name?: string | null;
+}
+
+/** Advisory box metadata a worker reported at registration. All optional. */
+export interface WorkerInfo {
+  agent_version?: string;
+  hostname?: string;
+  concurrency?: number;
+  capabilities?: WorkerCapabilities;
+}
+
 /** One compute worker row, mirrored from the backend WorkerView. */
 export interface WorkerView {
   id: string;
@@ -3942,11 +3960,13 @@ export interface WorkerView {
   last_seen_at: string | null;
   last_wake_at: string | null;
   version: string | null;
-  info: object | null;
+  info: WorkerInfo | null;
 }
 
 export interface WorkerListResponse {
   workers: WorkerView[];
+  /** This server's release; the UI flags workers running behind it. */
+  server_version: string;
 }
 
 export interface CreateWorkerResponse {
