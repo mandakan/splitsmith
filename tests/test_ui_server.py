@@ -8951,7 +8951,12 @@ def test_beep_queue_includes_secondary_videos(tmp_path: Path) -> None:
         filename="secondary.mp4",
         beep_time=5.95,
         beep_source="auto",
-        beep_confidence=0.8,
+        # Above the global default threshold (0.95, see
+        # test_get_automation_returns_resolved_settings_and_provenance) so
+        # this exercises the "unreviewed" status specifically, not
+        # "low_confidence" - #823 fixed get_beep_queue's threshold
+        # resolution, which used to silently stick at a 0.5 fallback.
+        beep_confidence=0.98,
         beep_reviewed=False,
     )
     # Ignored videos are skipped entirely by the pipeline and must not
@@ -9029,6 +9034,39 @@ def test_beep_queue_confirm_secondary(tmp_path: Path) -> None:
     secondary = next(v for v in videos if v.video_id == secondary_id)
     assert secondary.beep_reviewed is True
     assert secondary.beep_time == 5.95
+
+
+def test_beep_queue_threshold_respects_project_override(tmp_path: Path) -> None:
+    """Project-level threshold override flows through to item status.
+
+    Regression test for #823: ``get_beep_queue`` called
+    ``resolve_automation`` positionally, which raises ``TypeError``
+    against the keyword-only signature and gets swallowed by the
+    surrounding ``except Exception: continue`` -- the threshold silently
+    stuck at the 0.5 fallback instead of reflecting the override. At
+    confidence=0.65 that bug classifies the item as ``unreviewed``
+    (0.65 > 0.5); with the override correctly resolved to 0.9, the same
+    item is ``low_confidence`` (0.65 < 0.9).
+    """
+    root = tmp_path / "match"
+    project = _build_project_with_primary(
+        root,
+        "Beep Queue Threshold",
+        beep_time=22.5,
+        beep_source="auto",
+        beep_confidence=0.65,
+        beep_reviewed=False,
+    )
+    project.automation = AutomationOverride(beep_low_confidence_threshold=0.9)
+    project.save(root / "shooters" / "me")
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
+
+    resp = client.get("/api/match/beep-queue")
+    assert resp.status_code == 200, resp.text
+    items = [item for stage in resp.json()["stages"] for item in stage["items"]]
+    assert len(items) == 1
+    assert items[0]["status"] == "low_confidence"
 
 
 def test_shot_detect_does_not_adopt_other_shooters_job(two_shooter_match: Path) -> None:

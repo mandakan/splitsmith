@@ -362,6 +362,49 @@ def test_mirror_still_blocks_audit_put(
     assert resp.json()["detail"] == "read_only_mirror"
 
 
+@pytest.mark.parametrize(
+    ("match_id", "method", "rest"),
+    [
+        (
+            "01JMIRRTRIAGEGATEBOUND01",
+            "POST",
+            "shooters/alice/stages/1/attention/extra",
+        ),
+        (
+            "01JMIRRTRIAGEGATEBOUND02",
+            "PATCH",
+            "shooters/alice/stages/1/attention",
+        ),
+        (
+            "01JMIRRTRIAGEGATEBOUND03",
+            "POST",
+            "shooters/alice/stages/1/audit/accept/",
+        ),
+    ],
+    ids=["attention-extra-segment", "attention-wrong-method", "accept-trailing-slash"],
+)
+def test_mirror_triage_exemption_boundary_pins(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+    match_id: str,
+    method: str,
+    rest: str,
+) -> None:
+    """Pin the edges of ``_mirror_triage_write_re``.
+
+    The exemption regex is anchored with ``$`` and only fires for POST -
+    an extra path segment after ``attention``, the wrong HTTP method, or
+    a trailing slash on ``audit/accept`` must all still 403. Any of these
+    variants slipping through would silently widen the read-only
+    mirror's write surface (#823)."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed_mirror(client, match_id, "gate-triage-boundary")
+    resp = client.request(method, f"/api/matches/{match_id}/{rest}")
+    assert resp.status_code == 403, resp.text
+    assert resp.json() == {"detail": "read_only_mirror"}
+
+
 # Deleting a mirror still works - delete-match is a non-alias-routed
 # picker action (POST /api/me/recent-projects/delete), untouched by the
 # gate, but covered here so the exemption stays honest.

@@ -45,22 +45,20 @@ export function AnomalyChips({ anomalies, onJump }: AnomalyChipsProps) {
             </span>
           </>
         );
-        return (
-          <div key={`${a.kind}-${a.shot_number ?? "stage"}-${i}`}>
-            {clickable ? (
-              <button
-                type="button"
-                onClick={() => onJump(a)}
-                title={a.message}
-                className={chipClassName}
-              >
-                {chipContent}
-              </button>
-            ) : (
-              <div title={a.message} className={chipClassName}>
-                {chipContent}
-              </div>
-            )}
+        const key = `${a.kind}-${a.shot_number ?? "stage"}-${i}`;
+        return clickable ? (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onJump(a)}
+            title={a.message}
+            className={chipClassName}
+          >
+            {chipContent}
+          </button>
+        ) : (
+          <div key={key} title={a.message} className={chipClassName}>
+            {chipContent}
           </div>
         );
       })}

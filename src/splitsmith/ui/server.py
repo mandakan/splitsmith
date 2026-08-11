@@ -642,7 +642,7 @@ def _count_flagged(docs: Iterable[dict | None]) -> int:
     The one flagged-counting rule, shared by ``_build_triage_response``
     (docs it already loaded while assembling cells) and the triage
     summary endpoint (docs loaded without the anomaly/status-walk cost
-    of the full grid) -- so there's exactly one definition of "flagged"
+    of the full grid) - so there's exactly one definition of "flagged"
     across both.
     """
     count = 0
@@ -12616,7 +12616,7 @@ def create_app(
         SPA never has to re-fetch after a write (the confirm-returns-
         fresh-list contract from slice 3). ``beep_low_confidence_threshold``
         is resolved from the first loadable shooter's project override
-        exactly the way ``get_hitl_queue`` resolves it (#823) -- the gate
+        exactly the way ``get_hitl_queue`` resolves it (#823) - the gate
         is global to the match, not per-shooter.
         """
         match_root, match = _resolve_match_context()
@@ -12692,7 +12692,7 @@ def create_app(
     @app.get("/api/match/triage/summary", response_model=TriageSummaryResponse)
     def get_match_triage_summary() -> TriageSummaryResponse:
         """Just the flagged count, without the anomaly computation or
-        status walk that :func:`_build_triage_response` does (#823) -- a
+        status walk that :func:`_build_triage_response` does (#823) - a
         cheap poll target for the mobile triage surface's badge."""
         _, match = _resolve_match_context()
         docs: list[dict | None] = []
@@ -13429,7 +13429,9 @@ def create_app(
         for first_slug in match.shooters:
             try:
                 proj_for_threshold = state.shooter_project(first_slug)
-                resolved = automation_settings.resolve_automation(proj_for_threshold)
+                resolved = automation_settings.resolve_automation(
+                    project_override=proj_for_threshold.automation,
+                )
                 threshold = resolved.settings.beep_low_confidence_threshold
                 break
             except Exception:  # noqa: BLE001

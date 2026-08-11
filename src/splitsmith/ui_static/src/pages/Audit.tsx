@@ -2324,6 +2324,14 @@ type SaveStatus =
   | { kind: "saved"; at: number }
   | { kind: "error"; message: string };
 
+// Stale-base LWW race (#823): `base` is captured once on page-open (or
+// stage change) and held for the life of the edit session - it is not
+// refreshed by a mid-edit sync pull. If a pull lands while the operator
+// is still editing, that pulled state is discarded: the next save here
+// rebuilds from the held `base` and its local changes win the merge,
+// silently reverting the pulled update. Accepted for the single-operator
+// model - only one person edits a stage's audit at a time, so there is
+// no concurrent writer to lose work to.
 function buildAuditJson(opts: {
   base: StageAudit | null;
   stage: { stage_number: number; stage_name: string; time_seconds: number };
