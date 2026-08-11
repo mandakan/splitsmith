@@ -282,6 +282,7 @@ export function ReviewLayout({
           allStages={project.stages}
           shooters={shooters}
           rawVideos={project.raw_videos ?? []}
+          mediaOnDesktop={project.origin === "desktop"}
           busy={busy}
           onMove={handleMove}
           onRemove={onRemoveVideo}

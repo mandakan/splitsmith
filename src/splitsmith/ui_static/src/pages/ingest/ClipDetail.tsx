@@ -34,6 +34,7 @@ export function ClipDetail({
   allStages,
   shooters,
   rawVideos,
+  mediaOnDesktop,
   busy,
   onMove,
   onRemove,
@@ -48,6 +49,10 @@ export function ClipDetail({
   /** Raw-video manifest from the project; drives the "Take overview"
    *  link when this clip's source recording covers 2+ stages. */
   rawVideos: RawVideoManifestEntry[];
+  /** True when this match is a desktop-pushed mirror (#821): raw footage
+   *  never leaves the desktop install, so the "proxy generating" pill
+   *  would be a lie. From the project payload's `origin` field. */
+  mediaOnDesktop: boolean;
   busy: boolean;
   onMove: (videoPath: string, toStage: number | null, role: VideoRole) => Promise<void>;
   onRemove: (videoPath: string) => Promise<void>;
@@ -339,9 +344,12 @@ export function ClipDetail({
       <div className="border-t border-rule bg-surface-2 px-4 py-3">
         <div className="mb-2 flex items-center gap-2 font-mono text-[0.5625rem] uppercase tracking-[0.08em] text-subtle">
           Streaming source &middot; scrub to identify the stage
-          {video.proxy_ready === false && (
-            <StatusPill tone="in-progress">Proxy generating</StatusPill>
-          )}
+          {video.proxy_ready === false &&
+            (mediaOnDesktop ? (
+              <StatusPill tone="archived">Video on desktop</StatusPill>
+            ) : (
+              <StatusPill tone="in-progress">Proxy generating</StatusPill>
+            ))}
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <div className="relative">

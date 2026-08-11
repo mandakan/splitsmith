@@ -67,6 +67,7 @@ export function BeepReview() {
     activeKey,
     setActiveKey,
     active,
+    isMirror,
     busy,
     error,
     setError,
@@ -211,6 +212,7 @@ export function BeepReview() {
         {active ? (
           <ActiveDetail
             item={active}
+            mediaOnDesktop={isMirror}
             busy={busy}
             onConfirm={(draftTime) =>
               void confirm(active, draftTime ?? undefined)
@@ -516,6 +518,7 @@ type DetailMode = "idle" | "picking" | "empty";
 
 function ActiveDetail({
   item,
+  mediaOnDesktop,
   busy,
   onConfirm,
   onRedetect,
@@ -525,6 +528,10 @@ function ActiveDetail({
   onError,
 }: {
   item: BeepQueueItem;
+  /** True when this match is a desktop-pushed mirror (#821): the beep
+   *  queue's own `origin`, threaded down so the preview placeholder can
+   *  tell "generating" apart from "never coming". */
+  mediaOnDesktop: boolean;
   busy: boolean;
   /** ``draftTime`` is the operator's manually-picked beep time (null
    *  when confirming the detector's candidate as-is). When set, the
@@ -792,6 +799,7 @@ function ActiveDetail({
           slug={item.slug}
           videoPath={item.video_path}
           proxyReady={item.proxy_ready}
+          mediaOnDesktop={mediaOnDesktop}
           initialTime={previewTime}
           videoRef={videoRef}
           mode={mode}
@@ -1043,6 +1051,7 @@ function BeepVideoMini({
   slug,
   videoPath,
   proxyReady,
+  mediaOnDesktop,
   initialTime,
   videoRef,
   mode,
@@ -1056,6 +1065,10 @@ function BeepVideoMini({
    *  "preview generating" placeholder so we never mount a player that
    *  the server would answer with 425. */
   proxyReady: boolean;
+  /** True when this match is a desktop-pushed mirror (#821): raw footage
+   *  never leaves the desktop install, so a proxy is never coming. Swaps
+   *  the not-ready placeholder for the honest "stays on desktop" copy. */
+  mediaOnDesktop: boolean;
   /** Time to park the playhead at when the clip first loads (detector
    *  beep, or the draft if the operator has picked one). */
   initialTime: number | null;
@@ -1123,8 +1136,17 @@ function BeepVideoMini({
           className="flex aspect-video w-full flex-col items-center justify-center gap-2 bg-black p-4 text-center text-sm text-white/70"
         >
           <Clock className="h-5 w-5 text-white/40" aria-hidden="true" />
-          <span>Preview generating</span>
-          <span className="text-xs text-white/40">Check back shortly</span>
+          {mediaOnDesktop ? (
+            <>
+              <span>Video stays on the desktop install</span>
+              <span className="text-xs text-white/40">Raw footage is not synced to hosted</span>
+            </>
+          ) : (
+            <>
+              <span>Preview generating</span>
+              <span className="text-xs text-white/40">Check back shortly</span>
+            </>
+          )}
         </div>
       ) : videoError ? (
         <div

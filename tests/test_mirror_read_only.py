@@ -618,6 +618,27 @@ def test_mirror_beep_queue_media_flags(
     assert item["snippet_ready"] is True
 
 
+def test_mirror_get_project_reports_proxy_not_ready(
+    hosted_env: str,
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict[str, object]],
+) -> None:
+    """#821: get_project's proxy_ready must agree with get_beep_queue's.
+    A mirror video has no proxy object; reporting ready mounts a player
+    the server can only answer with an error."""
+    client, sender, _captured = hosted_app_with_storage
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRGETPROJECT0000001"
+    _seed_mirror_with_video(client, match_id, "get-project-flags")
+
+    resp = client.get(f"/api/matches/{match_id}/shooters/alice/project")
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["origin"] == "desktop"
+    videos = [v for s in payload["stages"] for v in s["videos"]] + list(payload.get("unassigned_videos", []))
+    assert videos, "seeded mirror should have videos"
+    assert all(v["proxy_ready"] is False for v in videos)
+
+
 def test_beep_queue_lists_only_beep_review_prefixes(
     hosted_env: str,
     hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict[str, object]],
