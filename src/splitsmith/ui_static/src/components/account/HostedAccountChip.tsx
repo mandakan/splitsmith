@@ -36,7 +36,12 @@ import { Button } from "@/components/ui/button";
 import { DeviceLoginDialog } from "@/components/account/DeviceLoginDialog";
 import { useDeploymentMode } from "@/lib/features";
 import { useIsMobile } from "@/lib/useIsMobile";
-import { api, type HostedAccountInfo } from "@/lib/api";
+import {
+  api,
+  HOSTED_ACCOUNT_CHANGED_EVENT,
+  notifyHostedAccountChanged,
+  type HostedAccountInfo,
+} from "@/lib/api";
 
 export function HostedAccountChip({ className }: { className?: string }) {
   const { mode, resolved } = useDeploymentMode();
@@ -67,6 +72,18 @@ export function HostedAccountChip({ className }: { className?: string }) {
   useEffect(() => {
     if (!resolved || mode !== "local") return;
     void load();
+  }, [resolved, mode, load]);
+
+  // Keeps this chip in agreement with its sibling copy (GlobalBar + the
+  // mobile drawer render one each with independent state) and with
+  // SyncSettingsDialog: any of them can change the linked account, and
+  // this refetches on the resulting event instead of going stale until
+  // a hard reload (#736).
+  useEffect(() => {
+    if (!resolved || mode !== "local") return;
+    const onChanged = () => void load();
+    window.addEventListener(HOSTED_ACCOUNT_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(HOSTED_ACCOUNT_CHANGED_EVENT, onChanged);
   }, [resolved, mode, load]);
 
   // Local-only, and only once the initial settings fetch has resolved --
@@ -146,6 +163,7 @@ export function HostedAccountChip({ className }: { className?: string }) {
             setAccount(linked);
             setRevokeWarning(false);
             setLoginOpen(false);
+            notifyHostedAccountChanged();
           }}
         />
       ) : null}

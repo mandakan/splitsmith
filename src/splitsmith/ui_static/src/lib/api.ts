@@ -2113,6 +2113,18 @@ async function uploadRawMultipart(
   });
 }
 
+/** Fired on window after any mutation that changes the linked hosted
+ *  account (settings save, unlink, device link). HostedAccountChip
+ *  renders twice (GlobalBar and the mobile nav drawer) with independent
+ *  state; the event is what keeps the copies in agreement (#736). */
+export const HOSTED_ACCOUNT_CHANGED_EVENT = "splitsmith:hosted-account-changed";
+
+export function notifyHostedAccountChanged(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(HOSTED_ACCOUNT_CHANGED_EVENT));
+  }
+}
+
 export const api = {
   getProject: (slug: string) =>
     request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/project`),
@@ -3869,11 +3881,14 @@ export const api = {
   /** Save the hosted-sync target. ``token: null`` keeps whatever token is
    *  already stored so the caller can resubmit ``baseUrl`` alone without
    *  re-typing the secret; ``""`` clears it; any other string replaces it. */
-  putSyncSettings: (baseUrl: string, token: string | null) =>
-    request<HostedSyncSettings>("/api/settings/hosted-sync", {
+  putSyncSettings: async (baseUrl: string, token: string | null) => {
+    const settings = await request<HostedSyncSettings>("/api/settings/hosted-sync", {
       method: "PUT",
       json: { base_url: baseUrl, token },
-    }),
+    });
+    notifyHostedAccountChanged();
+    return settings;
+  },
 
   /** Begin a browser-assisted link to the hosted account (#719). 409
    *  ``hosted_base_url_not_set`` when no hosted target is configured.
@@ -3891,10 +3906,13 @@ export const api = {
     request<DeviceStatusResponse>("/api/settings/hosted-sync/device/status"),
 
   /** Unlink: revoke upstream, then clear the local token and account. */
-  unlinkHostedAccount: () =>
-    request<DeviceUnlinkResponse>("/api/settings/hosted-sync/session", {
+  unlinkHostedAccount: async () => {
+    const resp = await request<DeviceUnlinkResponse>("/api/settings/hosted-sync/session", {
       method: "DELETE",
-    }),
+    });
+    notifyHostedAccountChanged();
+    return resp;
+  },
 
   /** Poll the current match's sync status: configured?, when it last
    *  synced, whether it's stale, and any plan errors that would block

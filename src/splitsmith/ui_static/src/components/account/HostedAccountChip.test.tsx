@@ -6,11 +6,12 @@
  * the deployment mode in a module-level promise with no invalidation,
  * so the first mode resolved in a file wins for the whole file.
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostedAccountChip } from "@/components/account/HostedAccountChip";
+import { HOSTED_ACCOUNT_CHANGED_EVENT } from "@/lib/api";
 
 const getSyncSettings = vi.fn();
 const unlinkHostedAccount = vi.fn();
@@ -94,5 +95,27 @@ describe("HostedAccountChip (local mode)", () => {
     render(<HostedAccountChip />);
     await userEvent.click(await screen.findByRole("button", { name: /sign out/i }));
     expect(await screen.findByText(/account page/i)).toBeInTheDocument();
+  });
+
+  it("refetches when the hosted account changes elsewhere (#736)", async () => {
+    getSyncSettings.mockResolvedValueOnce({
+      base_url: "https://hosted.example",
+      token_set: false,
+      account: null,
+    });
+    render(<HostedAccountChip />);
+    expect(
+      await screen.findByRole("button", { name: /sign in to splitsmith\.app/i }),
+    ).toBeInTheDocument();
+
+    getSyncSettings.mockResolvedValueOnce({
+      base_url: "https://hosted.example",
+      token_set: true,
+      account: ACCOUNT,
+    });
+    act(() => {
+      window.dispatchEvent(new CustomEvent(HOSTED_ACCOUNT_CHANGED_EVENT));
+    });
+    expect(await screen.findByText("shooter@example.com")).toBeInTheDocument();
   });
 });
