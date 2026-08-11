@@ -217,12 +217,34 @@ def merge_audit_doc(
             "shot membership is desktop-owned; ignored"
         )
 
+    # needs_attention: doc-level LWW unit (triage slice 4). The object
+    # always carries updated_at - including clears - so both directions
+    # have a timestamp to compare, same as beep groups and coach fields
+    # but keyed on the object's own stamp instead of the doc-wide ts.
+    def _na_ts(value: object) -> str:
+        return (value.get("updated_at") or "") if isinstance(value, dict) else ""
+
+    base_na = (base or {}).get("needs_attention")
+    local_na = local.get("needs_attention")
+    remote_na = remote.get("needs_attention")
+    na_winner, na_conflict = _resolve_unit(
+        base_na, local_na, remote_na, local_ts=_na_ts(local_na), remote_ts=_na_ts(remote_na)
+    )
+    if na_conflict:
+        result.conflicts.append(MergeConflict(doc_key=doc_key, unit="needs_attention", winner=na_winner))
+    if na_winner == "remote" and remote_na != local_na:
+        if remote_na is not None:
+            merged["needs_attention"] = copy.deepcopy(remote_na)
+        else:
+            merged.pop("needs_attention", None)
+
     # Same tripwire as the project merge: remote edits outside the audit
     # whitelist (events + coach fields) should be impossible while the
     # mirror write gate is closed - note them loudly, local wins.
     def _strip_audit(doc: dict | None) -> dict:
         clone = copy.deepcopy(doc or {})
         clone.pop("audit_events", None)
+        clone.pop("needs_attention", None)
         for shot in clone.get("shots") or []:
             if isinstance(shot, dict):
                 for k in COACH_FIELDS:
@@ -255,6 +277,11 @@ def _note_non_whitelisted_remote_changes(
 
     def _strip(doc: dict) -> dict:
         clone = copy.deepcopy(doc)
+        # #821: MatchProject.updated_at bumps on every hosted save - not a
+        # mobile-write field, just save-noise. Stripping it here stops a
+        # spurious "remote changed non-whitelisted fields" note firing on
+        # every phone write.
+        clone.pop("updated_at", None)
         for stage in clone.get("stages") or []:
             if not isinstance(stage, dict):
                 continue
