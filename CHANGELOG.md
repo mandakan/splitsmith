@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.26.0](https://github.com/mandakan/splitsmith/compare/v0.25.0...v0.26.0) (2026-08-11)
+
+
+### Features
+
+* **admin-workers:** show GPU capabilities and flag outdated versions ([#830](https://github.com/mandakan/splitsmith/issues/830)) ([97cb2bf](https://github.com/mandakan/splitsmith/commit/97cb2bf37b338242da0f7172de86d90f3de26bd4))
+* **results:** add per-stage compare CTA to share view and match summary ([#831](https://github.com/mandakan/splitsmith/issues/831)) ([7693e4a](https://github.com/mandakan/splitsmith/commit/7693e4a8a47786bf5a7105bfe5a60cc002e670e0))
+
+
+### Documentation
+
+* **workers:** fix native state-dir default + add PyPI/auto-update section ([#828](https://github.com/mandakan/splitsmith/issues/828)) ([f00bffe](https://github.com/mandakan/splitsmith/commit/f00bffe925f18caed1e46162d69a1b8f527e3014))
+
 ## [0.25.0](https://github.com/mandakan/splitsmith/compare/v0.24.0...v0.25.0) (2026-08-11)
 
 
