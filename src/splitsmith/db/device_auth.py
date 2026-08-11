@@ -20,7 +20,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -42,6 +42,13 @@ _USER_CODE_LENGTH = 8
 #: with a 10-minute window; the retry exists so a collision is a slow
 #: request rather than a 500.
 _USER_CODE_ATTEMPTS = 5
+
+#: How long past ``expires_at`` a row may linger before an authorize call
+#: sweeps it (#735). Inside the grace window an expired code still
+#: answers polls with a real "expired" verdict; past it the row is pure
+#: growth - consumed rows too, since the credential they minted lives in
+#: ``desktop_tokens``, not here.
+_PURGE_AFTER = timedelta(days=1)
 
 
 def format_user_code(raw: str) -> str:
@@ -149,7 +156,8 @@ class DeviceAuthStore:
 
     async def authorize(self, device_name: str, *, scope: str = "sync") -> DeviceAuthRequest:
         """Create a pending authorization and return its two codes."""
-        expires_at = datetime.now(UTC) + timedelta(seconds=self._ttl_seconds)
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(seconds=self._ttl_seconds)
         for _ in range(_USER_CODE_ATTEMPTS):
             # Fresh device_code AND user_code on every attempt: the table
             # has two independent unique constraints
@@ -172,6 +180,14 @@ class DeviceAuthStore:
             )
             try:
                 async with self._session_factory() as session:
+                    # #735: this is an unauthenticated public write and
+                    # nothing else ever deletes rows. Sweeping stale rows
+                    # on every insert bounds the table by construction.
+                    await session.execute(
+                        delete(DeviceAuthorizationRow).where(
+                            DeviceAuthorizationRow.expires_at < now - _PURGE_AFTER
+                        )
+                    )
                     session.add(row)
                     await session.commit()
             except IntegrityError as exc:

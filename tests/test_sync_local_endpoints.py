@@ -104,12 +104,15 @@ def test_settings_put_null_token_keeps_stored_token(tmp_path: Path) -> None:
         json={"base_url": "https://hosted.example", "token": "secret-token"},
     )
 
+    # Same-host resubmit on purpose: ``token: null`` keeps the stored
+    # token only when the base URL is unchanged. A base-URL change now
+    # revokes and clears it (#737, pinned in test_device_local_endpoints).
     resp = client.put(
         "/api/settings/hosted-sync",
-        json={"base_url": "https://hosted.example/v2", "token": None},
+        json={"base_url": "https://hosted.example", "token": None},
     )
     assert resp.status_code == 200
-    assert resp.json() == {"base_url": "https://hosted.example/v2", "token_set": True, "account": None}
+    assert resp.json() == {"base_url": "https://hosted.example", "token_set": True, "account": None}
     assert user_config.load_global_prefs().hosted_token == "secret-token"
 
 

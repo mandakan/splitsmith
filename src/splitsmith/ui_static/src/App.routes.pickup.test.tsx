@@ -6,8 +6,9 @@
  * /api/server/features resolves. AuthGate's pickup used to be gated on
  * ``mode !== "local"``, which made the feature's only pickup window
  * depend on request-issue ordering: when /api/me answers first, the
- * ordinary route tree mounts, LegacyMatchRedirect's own getHealth()
- * redirect moves off "/", and by the time the mode flips the pathname no
+ * ordinary route tree mounts, the catch-all redirect (then an async
+ * LegacyMatchRedirect, since replaced by a synchronous Navigate) moves
+ * off "/", and by the time the mode flips the pathname no
  * longer matches. The stashed code then survives to ambush a later visit
  * with a long-dead code.
  *
@@ -21,7 +22,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
 /** How long /api/server/features lags /api/me here. Long enough that
- *  LegacyMatchRedirect's own async redirect definitely lands first. */
+ *  the catch-all's redirect (then LegacyMatchRedirect, since replaced by
+ *  a synchronous Navigate) definitely lands first. */
 const FEATURES_DELAY_MS = 300;
 
 vi.mock("@/lib/api", async (importOriginal) => {

@@ -15,9 +15,11 @@
  *
  * The backend's GET returns a bare 404 for an unknown, already-decided,
  * or expired code -- deliberately indistinguishable from each other, so
- * every lookup failure (whatever the cause) renders the same "no longer
- * waiting" copy here rather than guessing at a reason the server itself
- * won't disclose.
+ * a 404 lookup failure renders the same "no longer waiting" copy here
+ * rather than guessing at a reason the server itself won't disclose.
+ * Any other failure (network down, 500, timeout) is not a verdict from
+ * the server and renders a distinct "could not check" message instead,
+ * with a retry (#738).
  */
 
 import { useEffect, useState } from "react";
@@ -31,9 +33,23 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { api, type DevicePendingInfo } from "@/lib/api";
+import { api, ApiError, type DevicePendingInfo } from "@/lib/api";
 
-type Phase = "loading" | "manual" | "pending" | "approved" | "denied" | "not-found";
+type Phase =
+  | "loading"
+  | "manual"
+  | "pending"
+  | "approved"
+  | "denied"
+  | "not-found"
+  | "error";
+
+// A bare 404 is the server's deliberate unknown/decided/expired verdict
+// and keeps the one indistinguishable message. Anything else (network
+// down, 500, timeout) is NOT a verdict and must not read as one (#738).
+function failurePhase(e: unknown): Phase {
+  return e instanceof ApiError && e.status === 404 ? "not-found" : "error";
+}
 
 /** Plain-language gloss for a requested scope. Only "sync" is minted
  *  today (splitsmith.db.device_auth.authorize defaults to it) but the
@@ -55,6 +71,7 @@ export function DesktopApprove() {
   const [manualError, setManualError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [lastTriedCode, setLastTriedCode] = useState("");
 
   // Auto-lookup only fires for a code carried in the URL (either typed
   // by the desktop install into verification_uri_complete, or restored
@@ -64,6 +81,7 @@ export function DesktopApprove() {
     if (!urlCode) return;
     let alive = true;
     setPhase("loading");
+    setLastTriedCode(urlCode);
     api
       .getDevicePending(urlCode)
       .then((info) => {
@@ -72,9 +90,9 @@ export function DesktopApprove() {
         setCode(urlCode);
         setPhase("pending");
       })
-      .catch(() => {
+      .catch((e) => {
         if (!alive) return;
-        setPhase("not-found");
+        setPhase(failurePhase(e));
       });
     return () => {
       alive = false;
@@ -88,14 +106,15 @@ export function DesktopApprove() {
       setManualError("Enter the code shown on the device.");
       return;
     }
+    setLastTriedCode(value);
     setPhase("loading");
     try {
       const info = await api.getDevicePending(value);
       setPending(info);
       setCode(info.user_code);
       setPhase("pending");
-    } catch {
-      setPhase("not-found");
+    } catch (e) {
+      setPhase(failurePhase(e));
     }
   }
 
@@ -247,6 +266,34 @@ export function DesktopApprove() {
             <Button type="button" variant="outline" size="sm" onClick={backToManualEntry}>
               Enter a different code
             </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {phase === "error" ? (
+        <Card>
+          <CardContent className="space-y-3 pt-6 text-sm">
+            <p role="alert" className="text-ink-2">
+              Could not check that code - the server did not answer. This
+              is a connection problem, not a verdict on the code.
+            </p>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => void lookupManualCode(lastTriedCode)}
+              >
+                Try again
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={backToManualEntry}
+              >
+                Enter a different code
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : null}

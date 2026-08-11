@@ -19,7 +19,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from splitsmith.db import Base, DesktopTokenRow, DeviceAuthorizationRow, User, create_engine, sessionmaker
 from splitsmith.db.device_auth import DeviceAuthStore, normalize_user_code
@@ -242,3 +242,51 @@ def test_revoke_token_revokes_the_matching_row(tmp_path: Path) -> None:
             return revoked, row.revoked_at is not None
 
     assert asyncio.run(_run()) == (True, True)
+
+
+def test_authorize_sweeps_rows_a_day_past_expiry(tmp_path: Path) -> None:
+    """#735: the unauthenticated authorize endpoint is the only growth
+    source, so sweeping on insert is what bounds the table."""
+    sf = _factory(tmp_path)
+    store = DeviceAuthStore(sf)
+
+    async def _run() -> tuple[list[str], set[str], str]:
+        stale = await store.authorize("stale-device")
+        async with sf() as s:
+            await s.execute(
+                update(DeviceAuthorizationRow).values(expires_at=datetime.now(UTC) - timedelta(days=2))
+            )
+            await s.commit()
+
+        await store.authorize("fresh-device")
+
+        async with sf() as s:
+            rows = (await s.execute(select(DeviceAuthorizationRow))).scalars().all()
+        return [r.device_name for r in rows], {r.user_code for r in rows}, stale.user_code
+
+    names, codes, stale_code = asyncio.run(_run())
+    assert names == ["fresh-device"]
+    assert stale_code not in codes
+
+
+def test_authorize_keeps_recently_expired_rows(tmp_path: Path) -> None:
+    """Rows inside the one-day grace stay: an expired-but-recent code
+    still answers polls with a proper 'expired' verdict."""
+    sf = _factory(tmp_path)
+    store = DeviceAuthStore(sf)
+
+    async def _run() -> list[str]:
+        await store.authorize("recent-device")
+        async with sf() as s:
+            await s.execute(
+                update(DeviceAuthorizationRow).values(expires_at=datetime.now(UTC) - timedelta(hours=1))
+            )
+            await s.commit()
+
+        await store.authorize("fresh-device")
+
+        async with sf() as s:
+            rows = (await s.execute(select(DeviceAuthorizationRow))).scalars().all()
+        return sorted(r.device_name for r in rows)
+
+    assert asyncio.run(_run()) == ["fresh-device", "recent-device"]

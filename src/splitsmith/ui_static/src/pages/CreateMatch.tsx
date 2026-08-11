@@ -507,10 +507,8 @@ function ScoreboardVariant({
         competitors: picks,
       });
       // Use the match_id from the create response so we land on the
-      // canonical /match/:matchId/ route. Navigating to "/" would
-      // bounce via LegacyMatchRedirect through /api/health, which no
-      // longer carries bound-state (doc 10 Tier 1 step 4) and so falls
-      // through to /pick.
+      // canonical /match/:matchId/ route. Navigating to "/" would just
+      // fall through the catch-all to /pick.
       navigate(health.match_id ? `/match/${health.match_id}/` : "/pick", {
         replace: true,
       });

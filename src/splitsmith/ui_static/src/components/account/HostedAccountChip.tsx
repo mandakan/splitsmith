@@ -36,7 +36,12 @@ import { Button } from "@/components/ui/button";
 import { DeviceLoginDialog } from "@/components/account/DeviceLoginDialog";
 import { useDeploymentMode } from "@/lib/features";
 import { useIsMobile } from "@/lib/useIsMobile";
-import { api, type HostedAccountInfo } from "@/lib/api";
+import {
+  api,
+  HOSTED_ACCOUNT_CHANGED_EVENT,
+  notifyHostedAccountChanged,
+  type HostedAccountInfo,
+} from "@/lib/api";
 
 export function HostedAccountChip({ className }: { className?: string }) {
   const { mode, resolved } = useDeploymentMode();
@@ -46,6 +51,7 @@ export function HostedAccountChip({ className }: { className?: string }) {
   const [loginOpen, setLoginOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [revokeWarning, setRevokeWarning] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   // Same shape as SyncCard's load(): the hosted-sync routes 404 outside
   // local mode, so the request only fires once the deployment mode has
@@ -57,8 +63,12 @@ export function HostedAccountChip({ className }: { className?: string }) {
     try {
       const settings = await api.getSyncSettings();
       setAccount(settings.account);
+      setLoadFailed(false);
     } catch {
-      // Sign-in button is the safe default on any load failure.
+      // A transient failure must not masquerade as "not signed in"
+      // (#738): a genuinely linked operator seeing the sign-in button
+      // is worse than an explicit unavailable state.
+      setLoadFailed(true);
     } finally {
       setLoaded(true);
     }
@@ -67,6 +77,18 @@ export function HostedAccountChip({ className }: { className?: string }) {
   useEffect(() => {
     if (!resolved || mode !== "local") return;
     void load();
+  }, [resolved, mode, load]);
+
+  // Keeps this chip in agreement with its sibling copy (GlobalBar + the
+  // mobile drawer render one each with independent state) and with
+  // SyncSettingsDialog: any of them can change the linked account, and
+  // this refetches on the resulting event instead of going stale until
+  // a hard reload (#736).
+  useEffect(() => {
+    if (!resolved || mode !== "local") return;
+    const onChanged = () => void load();
+    window.addEventListener(HOSTED_ACCOUNT_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(HOSTED_ACCOUNT_CHANGED_EVENT, onChanged);
   }, [resolved, mode, load]);
 
   // Local-only, and only once the initial settings fetch has resolved --
@@ -81,7 +103,8 @@ export function HostedAccountChip({ className }: { className?: string }) {
     try {
       const resp = await api.unlinkHostedAccount();
       setAccount(null);
-      if (!resp.hosted_revoked) setRevokeWarning(true);
+      setLoadFailed(false);
+      if (resp.hosted_revoked === false) setRevokeWarning(true);
     } finally {
       setBusy(false);
     }
@@ -122,6 +145,15 @@ export function HostedAccountChip({ className }: { className?: string }) {
               <LogOut className="size-3.5" />
             </IconButton>
           </>
+        ) : loadFailed ? (
+          <button
+            type="button"
+            onClick={() => void load()}
+            title="Could not load the linked-account status - click to retry"
+            className="text-[0.8125rem] text-muted transition-colors hover:text-ink"
+          >
+            Account status unavailable - retry
+          </button>
         ) : (
           <Button
             type="button"
@@ -146,6 +178,7 @@ export function HostedAccountChip({ className }: { className?: string }) {
             setAccount(linked);
             setRevokeWarning(false);
             setLoginOpen(false);
+            notifyHostedAccountChanged();
           }}
         />
       ) : null}

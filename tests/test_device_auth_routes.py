@@ -161,6 +161,35 @@ def test_device_session_delete_revokes_the_calling_token(
     )
 
 
+def test_delete_session_with_cookie_but_no_bearer_is_400(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The 400 branch is the one auth-adjacent decision this route makes
+    itself (#738): a browser session must not be able to unlink an
+    arbitrary device by omitting the bearer."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    resp = client.delete("/api/device/session")
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "a bearer token is required"
+
+
+def test_token_poll_too_fast_surfaces_slow_down(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The hosted side of the slow_down path (#738): two polls inside the
+    5s interval - the second must say slow_down, which the local server
+    then remaps to pending (covered in test_device_local_endpoints)."""
+    client, _ = hosted_app
+    body = _authorize(client)
+    first = client.post("/api/device/token", json={"device_code": body["device_code"]})
+    assert first.status_code == 200
+    assert first.json()["status"] == "pending"
+    second = client.post("/api/device/token", json={"device_code": body["device_code"]})
+    assert second.status_code == 200
+    assert second.json()["status"] == "slow_down"
+
+
 def test_device_routes_404_in_local_mode(tmp_path) -> None:
     """Same hosted-gate idiom as sync_api: a local install has no accounts
     to authorize against, so the whole surface is simply absent.
