@@ -148,3 +148,44 @@ def test_accept_refuses_unclassifiable(
 def test_accept_unknown_stage_404(client: _MatchClient) -> None:
     resp = client.post("/api/shooters/alice/stages/99/audit/accept")
     assert resp.status_code == 404
+
+
+def test_flag_sets_needs_attention(client: _MatchClient, seeded_stage: dict) -> None:
+    resp = client.post(
+        "/api/shooters/alice/stages/1/attention",
+        json={"flagged": True, "note": "beep sounds off"},
+    )
+    assert resp.status_code == 200
+    doc = client.get("/api/shooters/alice/stages/1/audit").json()
+    na = doc["needs_attention"]
+    assert na["flagged"] is True
+    assert na["note"] == "beep sounds off"
+    assert na["flagged_at"] and na["updated_at"]
+
+
+def test_unflag_keeps_object_with_timestamp(client: _MatchClient, seeded_stage: dict) -> None:
+    client.post("/api/shooters/alice/stages/1/attention", json={"flagged": True})
+    resp = client.post(
+        "/api/shooters/alice/stages/1/attention", json={"flagged": False}
+    )
+    assert resp.status_code == 200
+    na = client.get("/api/shooters/alice/stages/1/audit").json()["needs_attention"]
+    assert na["flagged"] is False and na["note"] is None and na["flagged_at"] is None
+    assert na["updated_at"]
+
+
+def test_flag_stage_without_audit_doc(client: _MatchClient, empty_stage: None) -> None:
+    resp = client.post(
+        "/api/shooters/alice/stages/2/attention", json={"flagged": True}
+    )
+    assert resp.status_code == 200
+    doc = client.get("/api/shooters/alice/stages/2/audit").json()
+    assert doc["needs_attention"]["flagged"] is True
+
+
+def test_flag_note_too_long_422(client: _MatchClient, seeded_stage: dict) -> None:
+    resp = client.post(
+        "/api/shooters/alice/stages/1/attention",
+        json={"flagged": True, "note": "x" * 281},
+    )
+    assert resp.status_code == 422

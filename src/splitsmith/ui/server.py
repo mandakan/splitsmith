@@ -3855,6 +3855,13 @@ class MoveShooterResponse(BaseModel):
     source_project: MatchProject
 
 
+class StageAttentionBody(BaseModel):
+    """POST .../attention body (triage slice 4)."""
+
+    flagged: bool
+    note: str | None = Field(default=None, max_length=280)
+
+
 class CompareShotPoint(BaseModel):
     """One shot for a shooter on a stage (#328 timeline)."""
 
@@ -10459,6 +10466,34 @@ def create_app(
                 }
             )
             _set_needs_attention(payload, flagged=False)
+            try:
+                state.save_audit(slug, stage_number, payload, version=version)
+            except conflict_excs:
+                continue
+            return JSONResponse({"ok": True})
+        raise HTTPException(status_code=409, detail="version_conflict")
+
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/attention")
+    def set_stage_attention(
+        slug: str, stage_number: int, body: StageAttentionBody
+    ) -> JSONResponse:
+        """Flag or clear a stage for desktop follow-up (slice 4).
+
+        The flag lives in the schemaless audit doc so it syncs with the
+        other triage writes; flagging a stage that has no audit doc yet
+        creates one holding only the flag.
+        """
+        project = state.shooter_project(slug)
+        try:
+            project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        conflict_excs = _state_conflict_excs()
+        for _attempt in range(3):
+            payload, version = state.load_audit(slug, stage_number)
+            if payload is None:
+                payload, version = {}, 0
+            _set_needs_attention(payload, flagged=body.flagged, note=body.note)
             try:
                 state.save_audit(slug, stage_number, payload, version=version)
             except conflict_excs:
