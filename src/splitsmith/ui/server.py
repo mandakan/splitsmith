@@ -5951,6 +5951,20 @@ def _resolve_compare_trim(
     return None
 
 
+def _proxy_ready_for(storage: Storage | None, proxy_keys: set[str], path_str: str) -> bool:
+    """One honest answer for every endpoint (#821). Local mode streams
+    the source directly (ready). Hosted: only ``raw/`` uploads ever get
+    a proxy object; a desktop-pushed mirror path has nothing to stream,
+    and saying otherwise mounts a player the server errors on."""
+    from ..proxy import proxy_key_for
+
+    if storage is None:
+        return True
+    if not path_str.startswith("raw/"):
+        return False
+    return proxy_key_for(path_str) in proxy_keys
+
+
 def create_app(
     *,
     project_root: Path | None = None,
@@ -6924,8 +6938,6 @@ def create_app(
 
     @app.get("/api/shooters/{slug}/project")
     def get_project(slug: str) -> JSONResponse:
-        from ..proxy import proxy_key_for
-
         project = state.shooter_project(slug)
         root = state.shooter_root(slug)
         # Hosted: audit docs live in state_docs, not on this container's
@@ -6944,13 +6956,6 @@ def create_app(
         if _storage is not None:
             proxy_keys = {obj.path for obj in _storage.list("raw_proxy/")}
 
-        def _proxy_ready(path_str: str) -> bool:
-            if _storage is None:
-                return True
-            if not path_str.startswith("raw/"):
-                return True
-            return proxy_key_for(path_str) in proxy_keys
-
         # Enrich each stage's serialized dict with its computed status
         # so the SPA never recomputes "is this audited?" client-side.
         # The status field is read-only (not on the StageEntry model);
@@ -6964,9 +6969,17 @@ def create_app(
             if status is not None:
                 stage_dict["status"] = status.value
             for video_dict in stage_dict.get("videos", []):
-                video_dict["proxy_ready"] = _proxy_ready(str(video_dict.get("path", "")))
+                video_dict["proxy_ready"] = _proxy_ready_for(
+                    _storage, proxy_keys, str(video_dict.get("path", ""))
+                )
         for video_dict in payload.get("unassigned_videos", []):
-            video_dict["proxy_ready"] = _proxy_ready(str(video_dict.get("path", "")))
+            video_dict["proxy_ready"] = _proxy_ready_for(
+                _storage, proxy_keys, str(video_dict.get("path", ""))
+            )
+        # Which media surface is honest for this match (#821): mirrors
+        # have no proxies and never will - the SPA copy must not promise
+        # one is coming.
+        payload["origin"] = current_match_origin.get() or "local"
         # Strip owner-local scan directory from anonymous share responses -
         # it is a server path that serves no purpose for read-only viewers.
         # Video/trim paths are load-bearing for streaming and are kept.
@@ -13468,28 +13481,22 @@ def create_app(
         # placeholder. Raw uploads and their proxies live in the tenant-root
         # pool shared across the match's shooters, so one list covers every
         # item. Local mode (no storage) reports ready - source streams direct.
-        from ..proxy import proxy_key_for
-
         _storage = state.storage
         _proxy_keys: set[str] = set()
         if _storage is not None:
             _proxy_keys = {obj.path for obj in _storage.list("raw_proxy/")}
 
-        def _proxy_ready(path_str: str) -> bool:
-            if _storage is None:
-                return True
-            if not path_str.startswith("raw/"):
-                # Hosted but not a hosted-native upload (a desktop-pushed
-                # mirror): there is no proxy object to stream.
-                return False
-            return proxy_key_for(path_str) in _proxy_keys
-
         # Snippet artifacts pushed by desktop for unconfirmed videos
-        # (slice 3). One list per request covers every shooter.
+        # (slice 3). One list per shooter, scoped to beep_review/ - the
+        # shooters/ prefix as a whole is dominated by trimmed clips that
+        # this endpoint never reads (#821).
         _match_id = current_match_id.get()
         _snippet_keys: set[str] = set()
         if _storage is not None and _match_id:
-            _snippet_keys = {obj.path for obj in _storage.list(f"matches/{_match_id}/shooters/")}
+            for _slug in match.shooters:
+                _snippet_keys.update(
+                    obj.path for obj in _storage.list(f"matches/{_match_id}/shooters/{_slug}/beep_review/")
+                )
 
         def _snippet_ready(slug: str, video_id: str) -> bool:
             if not _snippet_keys:
@@ -13566,7 +13573,7 @@ def create_app(
                             beep_reviewed=video.beep_reviewed,
                             status=status,
                             alt_candidates=alts,
-                            proxy_ready=_proxy_ready(video.path.as_posix()),
+                            proxy_ready=_proxy_ready_for(_storage, _proxy_keys, video.path.as_posix()),
                             snippet_ready=_snippet_ready(slug, video.video_id),
                             trim_stale=(
                                 video.beep_time is not None and not video.processed.get("trim", False)

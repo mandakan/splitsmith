@@ -47,6 +47,11 @@ Cases:
  10. Concurrent part PUTs (#713): parts overlap in flight, ``complete``
      receives them sorted by part_number with per-part etags, and a
      multi-part failure still aborts exactly once.
+ 12. Beep review snippet generation runs before planning (slice 3).
+ 13. Remote snippet GC on push (#821 a): a reviewed video's local
+     beep_review files disappear pre-push, so the gc phase deletes the
+     matching remote objects and drops them from sync_state; a gc
+     failure never fails the push and leaves the key for retry.
 """
 
 from __future__ import annotations
@@ -129,6 +134,7 @@ class _FakeHosted:
         self.fail_keys: set[str] = set()  # remote keys whose part PUT 500s
         self.fail_doc_paths: set[str] = set()  # doc URL paths whose PUT 500s (#797)
         self.abort_status = 200
+        self.delete_status = 200
         #: Optional (key, part_number) callback invoked inside each part
         #: PUT handler, before the response is built - lets a test block
         #: one part until another is in flight to prove concurrency (#713).
@@ -185,6 +191,12 @@ class _FakeHosted:
                 return httpx.Response(self.abort_status, json={"detail": "could not abort"})
             return httpx.Response(200, json={})
 
+        if method == "POST" and path.endswith("/media/delete"):
+            self.calls.append(f"media_delete:{body['key']}")
+            if self.delete_status != 200:
+                return httpx.Response(self.delete_status, json={"detail": "boom"})
+            return httpx.Response(200, json={"deleted": True})
+
         if method == "PUT" and "/docs/" in path:
             self.calls.append(f"doc_put:{path}")
             if path in self.fail_doc_paths:
@@ -225,7 +237,7 @@ def test_happy_path_pushes_media_before_docs_and_reports_correctly(tmp_path: Pat
     # run on a successful push, bytes_uploaded is the sum of the two
     # uploaded items' sizes, and media_items lists exactly those two
     # items (skipped items - none here - are excluded).
-    assert set(report.timings) == {"plan", "ensure_match", "media", "docs"}
+    assert set(report.timings) == {"plan", "ensure_match", "media", "gc", "docs"}
     for seconds in report.timings.values():
         assert seconds >= 0
     trimmed_dir = root / "shooters" / "alice" / "trimmed"
@@ -296,7 +308,7 @@ def test_second_run_with_nothing_touched_uploads_zero_media_and_zero_docs(tmp_pa
     # bytes_uploaded is 0, even though the phases still ran.
     assert report2.media_items == []
     assert report2.bytes_uploaded == 0
-    assert set(report2.timings) == {"plan", "ensure_match", "media", "docs"}
+    assert set(report2.timings) == {"plan", "ensure_match", "media", "gc", "docs"}
 
 
 # ---------------------------------------------------------------------------
@@ -555,12 +567,12 @@ def test_provided_timer_records_the_four_phases_in_order(tmp_path: Path) -> None
     report = run_push(root, client=fake.clients(), timer=timer)
 
     built = timer.build()
-    assert [phase["name"] for phase in built["phases"]] == ["plan", "ensure_match", "media", "docs"]
+    assert [phase["name"] for phase in built["phases"]] == ["plan", "ensure_match", "media", "gc", "docs"]
     for phase in built["phases"]:
         assert phase["ms"] >= 0
     # The internal accounting (always populated, regardless of ``timer``)
     # reports the same four phase names.
-    assert set(report.timings) == {"plan", "ensure_match", "media", "docs"}
+    assert set(report.timings) == {"plan", "ensure_match", "media", "gc", "docs"}
 
 
 def test_no_timer_still_populates_internal_timings(tmp_path: Path) -> None:
@@ -569,7 +581,7 @@ def test_no_timer_still_populates_internal_timings(tmp_path: Path) -> None:
 
     report = run_push(root, client=fake.clients())
 
-    assert set(report.timings) == {"plan", "ensure_match", "media", "docs"}
+    assert set(report.timings) == {"plan", "ensure_match", "media", "gc", "docs"}
     for seconds in report.timings.values():
         assert seconds >= 0
 
@@ -585,6 +597,7 @@ def test_push_report_new_fields_default_empty() -> None:
     assert report.bytes_uploaded == 0
     assert report.media_items == []
     assert report.docs_skipped == 0
+    assert report.media_deleted == 0
     # Defaults are per-instance, not a shared mutable object (the
     # pydantic default_factory footgun this guards against).
     report.timings["x"] = 1.0
@@ -700,3 +713,78 @@ def test_run_push_regenerates_beep_snippets_before_planning(
     beep_key = f"matches/{match_id}/shooters/alice/beep_review/vid1.m4a"
     assert beep_key in {mi.remote_key for mi in report.media_items}
     assert any(c.startswith(f"media_create:{beep_key}") for c in fake.calls)
+
+
+# ---------------------------------------------------------------------------
+# Case 13: remote snippet GC on push (#821 a)
+# ---------------------------------------------------------------------------
+
+
+def test_push_deletes_remote_snippets_for_reviewed_videos(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """#821: a confirmed video's local snippets are swept pre-push; the
+    remote copies must follow, and the sync_state entries with them -
+    otherwise snippet_ready lies forever for reopened items."""
+    root, match_id = _build_match(tmp_path)
+    reviewed = False
+
+    def _spy(match_root: Path, **_kwargs: object) -> beep_snippets.BeepSnippetReport:
+        out_dir = match_root / "shooters" / "alice" / "beep_review"
+        if not reviewed:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "vid1.m4a").write_bytes(b"aac")
+            (out_dir / "vid1.peaks.json").write_bytes(b"{}")
+            return beep_snippets.BeepSnippetReport(generated=1)
+        for name in ("vid1.m4a", "vid1.peaks.json"):
+            stale = out_dir / name
+            if stale.exists():
+                stale.unlink()
+        return beep_snippets.BeepSnippetReport(removed=1)
+
+    monkeypatch.setattr(push, "generate_beep_snippets", _spy)
+    fake = _FakeHosted()
+    run_push(root, client=fake.clients())
+    m4a_key = f"matches/{match_id}/shooters/alice/beep_review/vid1.m4a"
+    peaks_key = f"matches/{match_id}/shooters/alice/beep_review/vid1.peaks.json"
+    assert {m4a_key, peaks_key} <= set(load_sync_state(root).items)
+
+    reviewed = True
+    report = run_push(root, client=fake.clients())
+
+    assert f"media_delete:{m4a_key}" in fake.calls
+    assert f"media_delete:{peaks_key}" in fake.calls
+    assert report.media_deleted == 2
+    remaining = set(load_sync_state(root).items)
+    assert m4a_key not in remaining and peaks_key not in remaining
+
+
+def test_push_gc_failure_keeps_the_key_for_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """GC must never fail a push that already moved the operator's data;
+    the key stays in sync_state so the next push retries."""
+    root, match_id = _build_match(tmp_path)
+    reviewed = False
+
+    def _spy(match_root: Path, **_kwargs: object) -> beep_snippets.BeepSnippetReport:
+        out_dir = match_root / "shooters" / "alice" / "beep_review"
+        if not reviewed:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            (out_dir / "vid1.m4a").write_bytes(b"aac")
+            return beep_snippets.BeepSnippetReport(generated=1)
+        stale = out_dir / "vid1.m4a"
+        if stale.exists():
+            stale.unlink()
+        return beep_snippets.BeepSnippetReport(removed=1)
+
+    monkeypatch.setattr(push, "generate_beep_snippets", _spy)
+    fake = _FakeHosted()
+    run_push(root, client=fake.clients())
+    m4a_key = f"matches/{match_id}/shooters/alice/beep_review/vid1.m4a"
+    assert m4a_key in load_sync_state(root).items
+
+    reviewed = True
+    fake.delete_status = 500
+    report = run_push(root, client=fake.clients())
+
+    assert report.media_deleted == 0
+    assert m4a_key in load_sync_state(root).items

@@ -273,6 +273,10 @@ export interface MatchProject {
    *  ``covers_stages = [1, 2, 3, 4]``. StageVideo entries reference
    *  these by ``storage_path``. */
   raw_videos: RawVideoManifestEntry[];
+  /** Which install owns the media ("desktop" mirror / "hosted" native /
+   *  "local"). Only GET .../project injects it - mutating routes echo the
+   *  doc without it, so treat absence as "unknown, not a mirror". */
+  origin?: MatchOrigin;
 }
 
 /** GET /api/scoreboard/source response. ``mode === "local"`` means the
@@ -1768,10 +1772,10 @@ export interface BeepQueueResponse {
   pending_count: number;
   confirmed_count: number;
   stages: BeepQueueStageGroup[];
-  /** "desktop" on a hosted mirror, "local" everywhere else - lets the SPA
-   *  pick the honest media surface (snippet vs proxy) without a second
-   *  round trip. */
-  origin: string;
+  /** "desktop" on a hosted mirror, "hosted" on a hosted-native match,
+   *  "local" in local mode - lets the SPA pick the honest media surface
+   *  (snippet vs proxy) without a second round trip. */
+  origin: MatchOrigin;
 }
 
 /** Desktop-pushed beep review snippet peaks for a mirror video (slice 3).

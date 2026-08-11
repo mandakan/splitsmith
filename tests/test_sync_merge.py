@@ -38,6 +38,22 @@ def test_remote_only_beep_change_wins_and_invalidates():
     assert r.conflicts == [] and r.changed_vs_local is True
 
 
+def test_confirm_only_remote_change_wins_without_invalidating() -> None:
+    """#821: a phone confirm flips beep_reviewed with beep_time unchanged.
+    The group still moves atomically, but trim/shot_detect derive from
+    beep_time alone - re-running them would burn ffmpeg minutes to
+    produce identical output."""
+    base = _project(_video(beep_time=2.5))
+    local = _project(_video(beep_time=2.5))
+    remote = _project(_video(beep_time=2.5, beep_reviewed=True))
+    r = merge_project_doc(base, local, remote, doc_key="project/anna", local_ts=T_OLD, remote_ts=T_NEW)
+    v = r.doc["stages"][0]["videos"][0]
+    assert v["beep_reviewed"] is True
+    assert v["processed"].get("trim") is not False
+    assert r.reprocess_video_ids == []
+    assert r.changed_vs_local is True
+
+
 def test_local_only_beep_change_kept_no_reprocess():
     base = _project(_video())
     local = _project(_video(beep_time=9.9, beep_source="manual"))

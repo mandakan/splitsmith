@@ -79,6 +79,7 @@ function makeProject(stages: MatchProject["stages"]): MatchProject {
     nudges_dismissed_stages: [],
     compare_camera: null,
     raw_videos: [],
+    origin: "local",
   };
 }
 

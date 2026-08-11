@@ -2128,6 +2128,7 @@ export function Audit() {
                     onActiveIndexChange={setActiveVideoIndex}
                     videoSrc={videoSrc}
                     proxyReady={activeVideo?.proxy_ready}
+                    mediaOnDesktop={project?.origin === "desktop"}
                     // v2 column: focus mode shows a single tile in the
                     // primary slot; secondaries surface as picker tiles
                     // below (CamStrip / CamThumb) rather than as live

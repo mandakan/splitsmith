@@ -34,11 +34,13 @@ SLUG = "me"
 EMAIL = "sync-media@example.com"
 
 VALID_KEY = f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed/stage1_cam_abc123_trimmed.mp4"
+BEEP_KEY = f"matches/{MATCH_ID}/shooters/{SLUG}/beep_review/vid123.m4a"
 
 CREATE_URL = f"/api/sync/matches/{MATCH_ID}/media/create"
 PART_URL_URL = f"/api/sync/matches/{MATCH_ID}/media/part-url"
 COMPLETE_URL = f"/api/sync/matches/{MATCH_ID}/media/complete"
 ABORT_URL = f"/api/sync/matches/{MATCH_ID}/media/abort"
+DELETE_URL = f"/api/sync/matches/{MATCH_ID}/media/delete"
 
 
 @pytest.fixture
@@ -137,6 +139,47 @@ def test_abort_discards_upload(
     assert not storage.exists(VALID_KEY)
 
 
+# --- remote snippet GC (#821) -----------------------------------------------
+
+
+def test_delete_media_removes_a_beep_review_object(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+) -> None:
+    client, sender, captured = hosted_app_with_storage
+    storage = _login_and_adopt(client, sender, captured)
+
+    key = f"matches/{MATCH_ID}/shooters/{SLUG}/beep_review/vid123.m4a"
+    storage.write_bytes(key, b"snippet")
+    resp = client.post(DELETE_URL, json={"key": key})
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"deleted": True}
+    assert not storage.exists(key)
+
+
+def test_delete_media_is_idempotent(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+) -> None:
+    client, sender, captured = hosted_app_with_storage
+    _login_and_adopt(client, sender, captured)
+
+    key = f"matches/{MATCH_ID}/shooters/{SLUG}/beep_review/vid123.m4a"
+    resp = client.post(DELETE_URL, json={"key": key})
+    assert resp.status_code == 200
+
+
+def test_delete_media_rejects_trimmed_keys(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+) -> None:
+    """GC is beep_review-only: trimmed clips are what the mirror streams,
+    and nothing on the desktop side ever needs to delete one remotely."""
+    client, sender, captured = hosted_app_with_storage
+    _login_and_adopt(client, sender, captured)
+
+    key = f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed/stage1_cam_abc123_trimmed.mp4"
+    resp = client.post(DELETE_URL, json={"key": key})
+    assert resp.status_code == 422
+
+
 # --- key containment ---------------------------------------------------
 
 
@@ -170,6 +213,17 @@ def test_wav_extension_rejected(
     wav_key = f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed/stage1_cam_abc123_audit.wav"
     resp = client.post(CREATE_URL, json={"key": wav_key})
     assert resp.status_code == 422, resp.text
+
+
+def test_trimmed_params_json_key_accepted(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+) -> None:
+    client, sender, captured = hosted_app_with_storage
+    _login_and_adopt(client, sender, captured)
+
+    key = f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed/stage1_cam_abc123_trimmed.params.json"
+    resp = client.post(CREATE_URL, json={"key": key})
+    assert resp.status_code == 200, resp.text
 
 
 # --- beep_review media keys (slice 3, #631) ---------------------------------
@@ -210,7 +264,32 @@ def test_beep_review_foreign_subdir_rejected(
     assert resp.status_code == 422, resp.text
 
 
-@pytest.mark.parametrize("route", [CREATE_URL, PART_URL_URL, COMPLETE_URL, ABORT_URL])
+def test_trimmed_m4a_cross_product_rejected(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+) -> None:
+    """#821: the extension set is per-subdir. trimmed/ never holds audio
+    snippets; admitting the cross-product widens the write surface."""
+    client, sender, captured = hosted_app_with_storage
+    _login_and_adopt(client, sender, captured)
+
+    key = f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed/stage1_cam_abc123.m4a"
+    resp = client.post(CREATE_URL, json={"key": key})
+    assert resp.status_code == 422, resp.text
+
+
+def test_beep_review_mp4_cross_product_rejected(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+) -> None:
+    """#821: beep_review/ holds .m4a snippets and .peaks.json only."""
+    client, sender, captured = hosted_app_with_storage
+    _login_and_adopt(client, sender, captured)
+
+    key = f"matches/{MATCH_ID}/shooters/{SLUG}/beep_review/vid123.mp4"
+    resp = client.post(CREATE_URL, json={"key": key})
+    assert resp.status_code == 422, resp.text
+
+
+@pytest.mark.parametrize("route", [CREATE_URL, PART_URL_URL, COMPLETE_URL, ABORT_URL, DELETE_URL])
 def test_key_containment_enforced_on_every_route(
     hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict], route: str
 ) -> None:
@@ -219,7 +298,7 @@ def test_key_containment_enforced_on_every_route(
     _login_and_adopt(client, sender, captured)
 
     bad_key = "../../users/other/x.mp4"
-    if route == CREATE_URL:
+    if route == CREATE_URL or route == DELETE_URL:
         body = {"key": bad_key}
     elif route == PART_URL_URL:
         body = {"key": bad_key, "upload_id": "whatever", "part_number": 1}
@@ -235,8 +314,9 @@ def test_key_containment_enforced_on_every_route(
 # --- mirror contract -----------------------------------------------------
 
 
+@pytest.mark.parametrize("route", [CREATE_URL, DELETE_URL])
 def test_native_hosted_match_rejected_with_409(
-    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict], route: str
 ) -> None:
     client, sender, captured = hosted_app_with_storage
     login(client, sender, EMAIL)
@@ -244,34 +324,37 @@ def test_native_hosted_match_rejected_with_409(
     client.get("/api/me/recent-projects")
     seed_match(_db_url_for(client), EMAIL, MATCH_ID)
 
-    resp = client.post(CREATE_URL, json={"key": VALID_KEY})
+    resp = client.post(route, json={"key": VALID_KEY})
     assert resp.status_code == 409, resp.text
     assert resp.json() == {"detail": "not_a_mirror"}
 
 
+@pytest.mark.parametrize("route", [CREATE_URL, DELETE_URL])
 def test_unknown_match_404(
-    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict], route: str
 ) -> None:
     client, sender, captured = hosted_app_with_storage
     login(client, sender, EMAIL)
 
-    resp = client.post(CREATE_URL, json={"key": VALID_KEY})
+    resp = client.post(route, json={"key": VALID_KEY})
     assert resp.status_code == 404, resp.text
 
 
 # --- hosted-only surface ---------------------------------------------------
 
 
-def test_local_mode_404() -> None:
+@pytest.mark.parametrize("route", [CREATE_URL, DELETE_URL])
+def test_local_mode_404(route: str) -> None:
     from splitsmith.ui.server import create_app
 
     app = create_app()
     with TestClient(app, follow_redirects=False) as client:
-        resp = client.post(CREATE_URL, json={"key": VALID_KEY})
+        resp = client.post(route, json={"key": VALID_KEY})
     assert resp.status_code == 404
 
 
-def test_503_when_storage_unwired(hosted_env: str) -> None:
+@pytest.mark.parametrize("route", [CREATE_URL, DELETE_URL])
+def test_503_when_storage_unwired(hosted_env: str, route: str) -> None:
     """A mirror exists and belongs to the caller, but storage isn't
     configured - the route must refuse cleanly rather than 500."""
     from splitsmith.ui.server import create_app
@@ -286,5 +369,6 @@ def test_503_when_storage_unwired(hosted_env: str) -> None:
             == 200
         )
 
-        resp = client.post(CREATE_URL, json={"key": VALID_KEY})
+        key = BEEP_KEY if route == DELETE_URL else VALID_KEY
+        resp = client.post(route, json={"key": key})
     assert resp.status_code == 503, resp.text

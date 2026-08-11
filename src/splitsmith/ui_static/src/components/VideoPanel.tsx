@@ -55,6 +55,11 @@ interface VideoPanelProps {
    *  player renders an explicit "Preview generating" placeholder instead
    *  of a broken video element. Undefined = ready (or local mode). */
   proxyReady?: boolean;
+  /** True when this match is a desktop-pushed mirror (#821): raw footage
+   *  never leaves the desktop install, so a proxy is never coming. Switches
+   *  the not-ready placeholder from "Preview generating" (a promise) to
+   *  "Video stays on the desktop install" (the honest state). */
+  mediaOnDesktop?: boolean;
   gridMode: boolean;
   onGridModeToggle: () => void;
   onSecondaryRef: (path: string, el: HTMLVideoElement | null) => void;
@@ -220,6 +225,7 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
       onActiveIndexChange,
       videoSrc,
       proxyReady,
+      mediaOnDesktop,
       gridMode,
       onGridModeToggle,
       onSecondaryRef,
@@ -438,7 +444,9 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
             {proxyReady === false ? (
               <div
                 role="status"
-                aria-label="Preview still generating"
+                aria-label={
+                  mediaOnDesktop ? "Video available on desktop only" : "Preview still generating"
+                }
                 className={cn(
                   "flex flex-col items-center justify-center gap-2 bg-black p-4 text-center text-white/70",
                   showGrid ? "max-h-[40vh]" : "max-h-[60vh]",
@@ -446,8 +454,17 @@ export const VideoPanel = forwardRef<HTMLVideoElement, VideoPanelProps>(
                 )}
               >
                 <Clock className="size-5 opacity-60" aria-hidden />
-                <span className="text-sm">Preview generating</span>
-                <span className="text-xs text-white/40">Check back shortly</span>
+                {mediaOnDesktop ? (
+                  <>
+                    <span className="text-sm">Video stays on the desktop install</span>
+                    <span className="text-xs text-white/40">Raw footage is not synced to hosted</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-sm">Preview generating</span>
+                    <span className="text-xs text-white/40">Check back shortly</span>
+                  </>
+                )}
               </div>
             ) : (
               <video

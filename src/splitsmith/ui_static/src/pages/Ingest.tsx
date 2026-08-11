@@ -181,6 +181,10 @@ function IngestInner({ slug }: { slug: string }) {
   // refetch the project every ~5s so badges update without SSE.
   const anyProxyPending = useMemo(() => {
     if (!project) return false;
+    // A proxy can only be pending when one is actually coming: mirror
+    // matches never get proxies (raw media stays on desktop), so an
+    // honest proxy_ready=false there must not arm the poll (#821).
+    if (project.origin === "desktop") return false;
     const allVideos = [
       ...project.stages.flatMap((s) => s.videos ?? []),
       ...(project.unassigned_videos ?? []),
