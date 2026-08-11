@@ -529,7 +529,11 @@ def stage_audit_status(
         # Beep-confirm placeholder: same meaning as no audit document.
         return StageStatus.ready
     events = payload.get("audit_events") or []
-    saved = any(isinstance(e, dict) and e.get("kind") == "save" for e in events)
+    # A mobile-triage accept flips a stage to audited without a full
+    # desktop audit save (slice 4) - both kinds mark the stage done.
+    saved = any(
+        isinstance(e, dict) and e.get("kind") in ("save", "accept") for e in events
+    )
     if saved:
         return StageStatus.audited
     return StageStatus.in_progress
