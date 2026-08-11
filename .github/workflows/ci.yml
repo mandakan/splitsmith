@@ -75,6 +75,19 @@ jobs:
       - name: Format check (black)
         run: uv run black --check src tests scripts
 
+      - name: Warm numba/librosa JIT cache (avoids the xdist compile race, #742)
+        # librosa's numba kernels compile on first use into a shared
+        # ``.nbi``/``.nbc`` cache inside site-packages, and those writes are
+        # not atomic across processes. Under the ``-n auto`` run below the
+        # restored venv carries stale ``.nbi`` that get invalidated and
+        # recompiled, so several xdist workers race to rewrite the same file
+        # and one segfaults ("worker 'gwN' crashed"). Compiling once here, in
+        # a single process after the venv is restored, populates the cache so
+        # workers only *read* it (concurrent reads are safe). See #742 for the
+        # full diagnosis; it is GitHub-runner-specific and does not repro
+        # locally, so CI staying green across several runs is the only gate.
+        run: uv run python scripts/warm_numba_cache.py
+
       - name: Run unit + integration tests
         env:
           # Asserts this environment really can run the integration
