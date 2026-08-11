@@ -417,6 +417,32 @@ def test_repointing_the_base_url_revokes_and_clears_the_token(tmp_path: Path, mo
     assert prefs.hosted_account is None
 
 
+def test_repoint_with_new_token_revokes_old_then_stores_new(tmp_path: Path, monkeypatch) -> None:
+    """Repoint and paste a new token in one PUT: the OLD token is revoked
+    against the OLD host first, then the new token is stored for the new
+    host - the revoke client must not be built with the new credentials."""
+    monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
+    client = _local_app(tmp_path)
+    client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
+    fake = _FakeHosted([dict(_APPROVED)])
+    _install_fake(monkeypatch, fake)
+    client.post(START)
+    assert client.get(STATUS).json()["status"] == "approved"
+
+    resp = client.put(
+        "/api/settings/hosted-sync",
+        json={"base_url": "https://staging.hosted.example", "token": "fresh-token"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert fake.revokes == 1
+    # The revoke client was built against the OLD host, not the new one.
+    assert fake.built_against[-1] == "https://hosted.example"
+    assert resp.json()["token_set"] is True
+    prefs = user_config.load_global_prefs()
+    assert prefs.hosted_token == "fresh-token"
+    assert prefs.hosted_account is None
+
+
 def test_repoint_revoke_failure_still_clears_the_token(tmp_path: Path, monkeypatch) -> None:
     """Old host unreachable: the local copy still goes. A dead token in
     config.yaml is the worse failure, same rule as sign-out."""

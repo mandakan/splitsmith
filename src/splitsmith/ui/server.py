@@ -13697,9 +13697,11 @@ def create_app(
                 try:
                     await run_in_threadpool(client.device_revoke_session)
                 except (SyncClientError, httpx.HTTPError):
-                    # Old host unreachable. The existing warning copy
-                    # already points the operator at that host's account
-                    # page; nothing more to do here.
+                    # Best-effort by design: the PUT response carries no
+                    # revoke outcome, so an unreachable old host means the
+                    # credential may stay live there with no in-app signal.
+                    # Surfacing this in the settings dialog is a known gap
+                    # noted on #737.
                     pass
                 finally:
                     client.close()

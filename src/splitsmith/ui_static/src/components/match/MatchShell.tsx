@@ -7,8 +7,9 @@
  * Routes children via <Outlet/> so each surface (Overview, Audit, Compare,
  * ...) owns its own content area but shares the same chrome.
  *
- * Carries the bound-check that AppShell used to do: when /api/health
- * reports unbound, redirect to /pick. Background jobs surface in the
+ * Redirects to /pick when the URL's match_id doesn't resolve on the
+ * server (matchValid flips to false); AppShell's old health.bound
+ * check is gone. Background jobs surface in the
  * sidebar footer rail (v2 audit chrome -- no more floating FAB).
  */
 
@@ -275,9 +276,10 @@ export function MatchShell() {
   // Server-state drift recovery: when ANY request returns 409 ``no_project``
   // (typical cause: dev server restart wiped the in-memory bind state),
   // ``api.ts`` fires this custom event. We bump ``refreshKey`` so the
-  // health-load effect re-runs, sees ``bound: false``, and the redirect
-  // below sends the user to /pick. Without this, the page sits with
-  // every endpoint failing and the jobs rail silently empty.
+  // match-load effect re-runs; ``listMatchShooters`` then fails and flips
+  // ``matchValid`` to false, so the redirect below sends the user to
+  // /pick. Without this, the page sits with every endpoint failing and
+  // the jobs rail silently empty.
   useEffect(() => {
     const onNoProject = () => setRefreshKey((k) => k + 1);
     window.addEventListener("splitsmith:no-project", onNoProject);
