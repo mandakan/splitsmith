@@ -76,6 +76,19 @@ def read_audit_data(audit_path: Path) -> dict[str, Any]:
         raise StageExportError(f"failed to read audit JSON {audit_path}: {exc}") from exc
 
 
+def is_kept_shot(shot: Any) -> bool:
+    """True when an audit-JSON shot dict represents a kept shot.
+
+    A kept shot carries a beep-relative timestamp (``ms_after_beep``);
+    everything else (raw detector candidates the user rejected, malformed
+    rows) does not belong in the engine's shot list. This is the single
+    definition of "kept" -- :func:`audit_shots_to_engine_shots` and the
+    triage accept endpoint (``ui/server.py``) both call it so the notion
+    never drifts into two parallel filters.
+    """
+    return isinstance(shot, dict) and shot.get("ms_after_beep") is not None
+
+
 def audit_shots_to_engine_shots(
     audit_data: dict[str, Any],
     *,
@@ -118,11 +131,9 @@ def audit_shots_to_engine_shots(
     out: list[Shot] = []
     prev_time_from_beep: float | None = None
     for raw in ordered:
-        if not isinstance(raw, dict):
+        if not is_kept_shot(raw):
             continue
         ms = raw.get("ms_after_beep")
-        if ms is None:
-            continue
         time_from_beep = float(ms) / 1000.0
         time_absolute = beep_time_in_source + time_from_beep
         cand_num = raw.get("candidate_number")

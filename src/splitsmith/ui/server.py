@@ -148,7 +148,7 @@ from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy
 from .. import thumbnail as thumbnail_helpers
 from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
-from ..audit_data import StageExportError, audit_shots_to_engine_shots
+from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
 from ..auth import AuthBackend, CompositeAuth, LoopbackAuth, User
 from ..compare import mp4_grid, project_loader
 from ..compute import ComputeBackend, LocalComputeBackend
@@ -624,6 +624,16 @@ def _new_event_id() -> str:
     hex, not ULID: ordering comes from ``ts``, and the ulid package is a
     hosted-only extra while events are stamped on slim local installs too."""
     return uuid.uuid4().hex
+
+
+def _kept_audit_shots(shots: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Kept shots from an audit doc's ``shots[]``.
+
+    Thin wrapper over :func:`splitsmith.audit_data.is_kept_shot` -- the
+    same filter :func:`audit_shots_to_engine_shots` applies -- so "kept"
+    has exactly one definition project-wide, not a parallel one here.
+    """
+    return [s for s in shots if is_kept_shot(s)]
 
 
 def _load_env_files(project_root: Path | None = None) -> list[Path]:
@@ -10400,6 +10410,61 @@ def create_app(
         _, version = state.load_audit(slug, stage_number)
         state.save_audit(slug, stage_number, payload, version=version)
         return JSONResponse(payload)
+
+    def _set_needs_attention(payload: dict[str, Any], *, flagged: bool, note: str | None = None) -> None:
+        """Write the triage flag as a full object so sync LWW always has a
+        timestamp to compare - clears keep the object with flagged=False."""
+        now = _now_iso()
+        payload["needs_attention"] = {
+            "flagged": flagged,
+            "flagged_at": now if flagged else None,
+            "note": (note or None) if flagged else None,
+            "updated_at": now,
+        }
+
+    @app.post("/api/shooters/{slug}/stages/{stage_number}/audit/accept")
+    def accept_stage_audit(slug: str, stage_number: int) -> JSONResponse:
+        """Mark a stage audited from the triage surface (slice 4).
+
+        Appends an explicit ``accept`` audit event instead of the desktop
+        ``save`` so provenance stays distinguishable; ``stage_audit_status``
+        treats both as audited. Runs the auto-classifier first (#775) and
+        refuses when the stage has nothing to accept or a kept shot cannot
+        be classified (#778 invariant, enforced not just healed).
+        """
+        project = state.shooter_project(slug)
+        try:
+            project.stage(stage_number)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        conflict_excs = _state_conflict_excs()
+        for _attempt in range(3):
+            payload, version = state.load_audit(slug, stage_number)
+            if payload is None:
+                raise HTTPException(status_code=409, detail="nothing_to_accept")
+            shots = [s for s in payload.get("shots") or [] if isinstance(s, dict)]
+            kept = _kept_audit_shots(shots)
+            if not kept:
+                raise HTTPException(status_code=409, detail="nothing_to_accept")
+            coach_module.classify_intervals_in_dicts(shots, CoachAutoClassifyConfig())
+            if any(s.get("ms_after_beep") is not None and not s.get("interval_class") for s in kept):
+                raise HTTPException(status_code=409, detail="not_fully_classified")
+            events = payload.setdefault("audit_events", [])
+            events.append(
+                {
+                    "id": _new_event_id(),
+                    "ts": _now_iso(),
+                    "kind": "accept",
+                    "payload": {"source": "triage"},
+                }
+            )
+            _set_needs_attention(payload, flagged=False)
+            try:
+                state.save_audit(slug, stage_number, payload, version=version)
+            except conflict_excs:
+                continue
+            return JSONResponse({"ok": True})
+        raise HTTPException(status_code=409, detail="version_conflict")
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/anomalies")
     def get_stage_anomalies(slug: str, stage_number: int) -> JSONResponse:
