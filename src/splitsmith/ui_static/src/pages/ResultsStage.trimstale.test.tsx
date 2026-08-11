@@ -189,4 +189,22 @@ describe("ResultsStage staleness chip", () => {
     await screen.findByText(/steel rush/i);
     expect(screen.queryByText(/awaiting desktop re-process/i)).not.toBeInTheDocument();
   });
+
+  it("hides the chip when the only stale video has role ignored", async () => {
+    renderStage([
+      makeVideo({
+        role: "ignored",
+        beep_time: 2.0,
+        processed: { beep: true, trim: false, shot_detect: false },
+      }),
+    ]);
+    await screen.findByText(/steel rush/i);
+    expect(screen.queryByText(/awaiting desktop re-process/i)).not.toBeInTheDocument();
+  });
+
+  it("hides the chip when a video has beep_time null and trim false", async () => {
+    renderStage([makeVideo({ beep_time: null, processed: { beep: true, trim: false, shot_detect: false } })]);
+    await screen.findByText(/steel rush/i);
+    expect(screen.queryByText(/awaiting desktop re-process/i)).not.toBeInTheDocument();
+  });
 });

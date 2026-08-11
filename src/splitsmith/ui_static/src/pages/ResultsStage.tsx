@@ -134,7 +134,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
         setScorecardUpdatedAt(stageEntry?.scorecard_updated_at ?? null);
         setTrimStale(
           (stageEntry?.videos ?? []).some(
-            (v) => v.beep_time != null && !v.processed.trim,
+            (v) => v.role !== "ignored" && v.beep_time != null && !v.processed.trim,
           ),
         );
       }
