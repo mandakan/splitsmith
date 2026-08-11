@@ -6382,6 +6382,11 @@ def create_app(
     # jobs, and stays read-only on mirrors.
     _mirror_beep_write_re = re.compile(r"^shooters/[^/]+/stages/\d+/videos/[^/]+/beep$")
 
+    # Slice 4 (mobile audit triage): the two stage-level writes a mirror
+    # accepts - accept-stage and flag-for-desktop. Everything else stays
+    # desktop-owned until its slice ships a whitelist entry.
+    _mirror_triage_write_re = re.compile(r"^shooters/[^/]+/stages/\d+/(audit/accept|attention)$")
+
     @app.middleware("http")
     async def _match_id_alias(request, call_next):
         path = request.url.path
@@ -6449,6 +6454,7 @@ def create_app(
                     or rest.startswith("match/shares/")
                     or (request.method == "POST" and rest == "match/beep-queue/confirm")
                     or (request.method == "POST" and _mirror_beep_write_re.match(rest) is not None)
+                    or (request.method == "POST" and _mirror_triage_write_re.match(rest) is not None)
                 )
             ):
                 return JSONResponse(status_code=403, content={"detail": "read_only_mirror"})

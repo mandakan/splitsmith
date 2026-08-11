@@ -312,6 +312,56 @@ def test_mirror_destructive_beep_paths_still_blocked(
         assert resp.json()["detail"] == "read_only_mirror"
 
 
+# Triage writes pass the read-only gate on mirrors (Slice 4); everything
+# else stage-level (e.g. the audit PUT) stays blocked.
+
+
+def test_mirror_allows_triage_accept(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The gate no longer 403s the accept-stage triage write on a mirror.
+
+    Only the middleware is under test: with no shooter seeded the handler
+    itself 404s, which proves the request got past the 403."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRTRIAGEGATE000000001"
+    _seed_mirror(client, match_id, "gate-triage-accept")
+    resp = client.post(f"/api/matches/{match_id}/shooters/alice/stages/1/audit/accept")
+    assert resp.status_code != 403, resp.text
+
+
+def test_mirror_allows_triage_attention(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The gate no longer 403s the flag-for-desktop triage write on a mirror."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRTRIAGEGATE000000002"
+    _seed_mirror(client, match_id, "gate-triage-attention")
+    resp = client.post(
+        f"/api/matches/{match_id}/shooters/alice/stages/1/attention",
+        json={"flagged": True},
+    )
+    assert resp.status_code != 403, resp.text
+
+
+def test_mirror_still_blocks_audit_put(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The full audit PUT stays desktop-owned - only accept/attention are exempt."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRTRIAGEGATE000000003"
+    _seed_mirror(client, match_id, "gate-triage-blocked")
+    resp = client.put(f"/api/matches/{match_id}/shooters/alice/stages/1/audit", json={})
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"] == "read_only_mirror"
+
+
 # Deleting a mirror still works - delete-match is a non-alias-routed
 # picker action (POST /api/me/recent-projects/delete), untouched by the
 # gate, but covered here so the exemption stays honest.
