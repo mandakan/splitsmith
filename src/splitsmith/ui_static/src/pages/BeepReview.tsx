@@ -40,26 +40,19 @@ import {
   Undo2,
   Volume2,
 } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { BeepWaveformPicker } from "@/components/BeepSection";
 import { Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/useConfirm";
 import {
-  ApiError,
   api,
   type BeepQueueItem,
-  type BeepQueueResponse,
   type RawVideoManifestEntry,
 } from "@/lib/api";
+import { DESTRUCTIVE_RERUN_WARNING, keyOf, useBeepQueue } from "@/lib/useBeepQueue";
 import { takeHref, useMatchHref } from "@/lib/matchHref";
 import { findTakeForPath, takeFilename } from "@/lib/takes";
 import { modKeyGlyph } from "@/lib/platform";
@@ -68,21 +61,23 @@ import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
 export function BeepReview() {
   const navigate = useNavigate();
   const href = useMatchHref();
-  const [searchParams, setSearchParams] = useSearchParams();
   const confirmDialog = useConfirm();
-  const [data, setData] = useState<BeepQueueResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [activeKey, setActiveKey] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  // Re-detect runs an async job; surface its progress inline on the
-  // Re-detect button. Null pct = running with no reported progress yet.
-  const [redetecting, setRedetecting] = useState(false);
-  const [redetectPct, setRedetectPct] = useState<number | null>(null);
-  // Deep-link from Audit's anomaly banner: ?focus=slug::stage::video.
-  // Honored once on first queue load; cleared from the URL afterwards so
-  // the focus doesn't keep snapping back as the user works the queue.
-  const focusParam = searchParams.get("focus");
-  const focusConsumedRef = useRef(false);
+  const {
+    data,
+    activeKey,
+    setActiveKey,
+    active,
+    busy,
+    error,
+    setError,
+    redetecting,
+    redetectPct,
+    confirm,
+    redetect,
+    skip,
+    prevItem,
+    nextItem,
+  } = useBeepQueue();
 
   // The sidebar link we just clicked is still the focused element on
   // mount; the focus ring lingers and the next Space press wants to
@@ -98,115 +93,12 @@ export function BeepReview() {
     }
   }, []);
 
-  const reload = useCallback(async () => {
-    try {
-      // Include confirmed items so the operator can reopen an
-      // already-confirmed beep to edit or re-detect it (not just work
-      // the pending backlog). Confirmed items render collapsed under
-      // each stage; the pending workflow below filters them back out.
-      const q = await api.getBeepQueue(true);
-      setData(q);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
-    }
-  }, []);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  // Every item, pending + confirmed, in stage/shooter order. ``active``
-  // resolves against this so a reopened confirmed item can be selected.
-  const flatItems: BeepQueueItem[] = useMemo(
-    () => (data?.stages ?? []).flatMap((g) => g.items),
-    [data],
-  );
-  // The pending backlog drives the confirm workflow: auto-select,
-  // keyboard next/prev/skip, and "save & continue" advance. Confirmed
-  // items are reachable only by clicking them in the collapsed section.
-  const pendingItems: BeepQueueItem[] = useMemo(
-    () => flatItems.filter((it) => it.status !== "confirmed"),
-    [flatItems],
-  );
-
-  // Pick the first pending if nothing's selected -- or the deep-link
-  // target if ?focus=slug::stage::video matches any item (now that
-  // confirmed items are in the queue, a link may land on one).
-  useEffect(() => {
-    if (activeKey) return;
-    if (focusParam && !focusConsumedRef.current) {
-      focusConsumedRef.current = true;
-      const match = flatItems.find((it) => keyOf(it) === focusParam);
-      const next = new URLSearchParams(searchParams);
-      next.delete("focus");
-      setSearchParams(next, { replace: true });
-      if (match) {
-        setActiveKey(focusParam);
-        return;
-      }
-      // Item not in the queue (missing or wrong slug). Fall through to
-      // the first-pending default and surface a note so the user knows
-      // their link didn't land where they aimed.
-      setError(
-        `Beep ${focusParam} isn't in the queue right now -- it may have been removed.`,
-      );
-    }
-    // Default selection is the first *pending* item. When everything is
-    // confirmed we leave nothing selected so the right pane shows the
-    // "nothing pending" state instead of a confirmed item.
-    if (pendingItems.length > 0) setActiveKey(keyOf(pendingItems[0]));
-  }, [flatItems, pendingItems, activeKey, focusParam, searchParams, setSearchParams]);
-
-  const active = activeKey
-    ? flatItems.find((it) => keyOf(it) === activeKey) ?? null
-    : null;
-
-  // Single confirm path: when ``draftTime`` is provided we first push it
-  // through the per-video override endpoint (sets source=manual, fires
-  // the trim + shot-detect re-run chain, discarding stale processed
-  // state), then mark the queue item reviewed. The detector candidate
-  // path (no draft) just marks reviewed, no chain to re-run.
-  const confirm = useCallback(
-    async (item: BeepQueueItem, draftTime?: number) => {
-      setBusy(true);
-      try {
-        if (draftTime != null) {
-          await api.overrideBeepForVideo(
-            item.slug,
-            item.stage_number,
-            item.video_id,
-            draftTime,
-          );
-        }
-        const next = await api.confirmBeepInQueue({
-          slug: item.slug,
-          stage_number: item.stage_number,
-          video_id: item.video_id,
-          time: draftTime ?? null,
-          source: draftTime != null ? "manual" : "detected",
-        });
-        setData(next);
-        // Advance to the next *pending* item after the one just
-        // confirmed, in stage/shooter order -- not the global first
-        // pending. The old code selected ``updatedFlat[0]`` every time,
-        // which yanked the operator back to stage 1 on every save.
-        setActiveKey(nextPendingKey(next, keyOf(item)));
-      } catch (e) {
-        setError(e instanceof ApiError ? e.detail : String(e));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [],
-  );
-
   // Re-detect a beep from scratch. Destructive: it discards the current
   // (possibly confirmed) beep, this stage's trim cache, and any
   // shot-detection audit, then re-runs auto-detection. Gated behind a
   // confirm dialog because the operator may be reaching back into an
   // already-confirmed stage.
-  const redetect = useCallback(
+  const redetectWithDialog = useCallback(
     async (item: BeepQueueItem) => {
       const res = await confirmDialog({
         title: "Re-detect this beep?",
@@ -224,56 +116,10 @@ export function BeepReview() {
         confirmLabel: "Re-detect",
       });
       if (!res.confirmed) return;
-      setBusy(true);
-      setRedetecting(true);
-      setRedetectPct(null);
-      setError(null);
-      try {
-        const job = await api.detectBeepForVideo(
-          item.slug,
-          item.stage_number,
-          item.video_id,
-          true,
-        );
-        await api.pollJob(job.id, (j) => {
-          setRedetectPct(j.progress != null ? Math.round(j.progress * 100) : null);
-        });
-        const next = await api.getBeepQueue(true);
-        setData(next);
-        // Keep this item selected so the operator lands on the fresh
-        // beep to review it.
-        setActiveKey(keyOf(item));
-      } catch (e) {
-        setError(e instanceof ApiError ? e.detail : String(e));
-      } finally {
-        setBusy(false);
-        setRedetecting(false);
-        setRedetectPct(null);
-      }
+      await redetect(item);
     },
-    [confirmDialog],
+    [confirmDialog, redetect],
   );
-
-  const skip = useCallback(() => {
-    if (!active || !data) return;
-    // Skip = defer this one and move to the next pending in order (same
-    // advance rule as save & continue), not the global first item.
-    setActiveKey(nextPendingKey(data, keyOf(active)));
-  }, [active, data]);
-
-  const prevItem = useCallback(() => {
-    if (!active) return;
-    const idx = flatItems.findIndex((it) => keyOf(it) === keyOf(active));
-    if (idx > 0) setActiveKey(keyOf(flatItems[idx - 1]));
-  }, [active, flatItems]);
-
-  const nextItem = useCallback(() => {
-    if (!active) return;
-    const idx = flatItems.findIndex((it) => keyOf(it) === keyOf(active));
-    if (idx >= 0 && idx < flatItems.length - 1) {
-      setActiveKey(keyOf(flatItems[idx + 1]));
-    }
-  }, [active, flatItems]);
 
   // Keyboard handlers.
   useEffect(() => {
@@ -369,7 +215,7 @@ export function BeepReview() {
             onConfirm={(draftTime) =>
               void confirm(active, draftTime ?? undefined)
             }
-            onRedetect={() => void redetect(active)}
+            onRedetect={() => void redetectWithDialog(active)}
             redetecting={redetecting}
             redetectPct={redetectPct}
             onSkip={skip}
@@ -415,30 +261,6 @@ function CheckCircle() {
       <Check className="size-7" strokeWidth={2.5} />
     </span>
   );
-}
-
-function keyOf(item: BeepQueueItem): string {
-  return `${item.slug}::${item.stage_number}::${item.video_id}`;
-}
-
-/** Next item still needing review after ``afterKey``, in stage/shooter
- *  order. Prefers the first pending item *after* the current position;
- *  failing that, wraps to the first pending anywhere (to mop up items
- *  skipped earlier); returns null only when the whole queue is clean.
- *  This is the "save & continue" advance -- it must not snap back to the
- *  first stage while later stages are still pending. */
-function nextPendingKey(
-  resp: BeepQueueResponse,
-  afterKey: string,
-): string | null {
-  const all = resp.stages.flatMap((g) => g.items);
-  const isPending = (it: BeepQueueItem) => it.status !== "confirmed";
-  const idx = all.findIndex((it) => keyOf(it) === afterKey);
-  for (let i = idx + 1; i < all.length; i++) {
-    if (isPending(all[i])) return keyOf(all[i]);
-  }
-  const firstPending = all.find(isPending);
-  return firstPending ? keyOf(firstPending) : null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -880,10 +702,7 @@ function ActiveDetail({
                 {item.role === "secondary" ? (
                   <>. Applying will re-cut this angle&apos;s trim around the new beep.</>
                 ) : (
-                  <>
-                    . Applying will discard any kept shots on this stage and
-                    re-run trim + shot detection on the new beep.
-                  </>
+                  <>. {DESTRUCTIVE_RERUN_WARNING}</>
                 )}
               </>
             ) : mode === "empty" ? (
