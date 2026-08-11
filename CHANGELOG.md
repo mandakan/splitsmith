@@ -1,5 +1,71 @@
 # Changelog
 
+## [0.25.0](https://github.com/mandakan/splitsmith/compare/v0.24.0...v0.25.0) (2026-08-11)
+
+
+### Features
+
+* **audit:** desktop surfaces triage flag; audit save resolves it ([#823](https://github.com/mandakan/splitsmith/issues/823)) ([0afee37](https://github.com/mandakan/splitsmith/commit/0afee37905eebf847989b2c62a7ba06b8fcbe6f5))
+* **coach:** exempt coach writes from the mirror read-only gate ([75f62d3](https://github.com/mandakan/splitsmith/commit/75f62d3050723eaa7d4044569feaee6d91e9a3fc))
+* mobile audit triage surface (operator surfaces slice 4) ([162fc38](https://github.com/mandakan/splitsmith/commit/162fc3887ec80be574430becf68f356c4f83b137))
+* mobile beep review (mobile operator surfaces slice 3) ([0fa1a1b](https://github.com/mandakan/splitsmith/commit/0fa1a1b603c6d076248a3c4742462a41e3ff58a5))
+* mobile interval reclassify (slice 5) ([4fbe3eb](https://github.com/mandakan/splitsmith/commit/4fbe3ebc25c301a3da029b3a00ad7f42e5405f29))
+* **sync:** generate beep review snippets for unconfirmed videos ([dfb2095](https://github.com/mandakan/splitsmith/commit/dfb2095607089baaf001a66f13a58f4524a5e642))
+* **sync:** needs_attention LWW merge unit; exempt updated_at stamp from tripwire ([c54beac](https://github.com/mandakan/splitsmith/commit/c54beac9ccf253c9c02335eb4568b7f3c3cda7ca))
+* **sync:** push beep review snippets with the media plan ([798e7bc](https://github.com/mandakan/splitsmith/commit/798e7bc505b303146a8ad79447fe8378af282135))
+* **triage:** accept audit events count as audited status ([e63ce70](https://github.com/mandakan/splitsmith/commit/e63ce702d74c8d1a8164124aee07e71560fd0f78))
+* **triage:** accept-stage endpoint with classification enforcement ([4b2a915](https://github.com/mandakan/splitsmith/commit/4b2a9152ef89aaa681f62a1642900860299f2164))
+* **triage:** flag-for-desktop attention endpoint ([e4ee8d5](https://github.com/mandakan/splitsmith/commit/e4ee8d55e5c7369ee52ef0f61d468c2c3cd96187))
+* **triage:** match triage aggregation endpoint ([fb1167d](https://github.com/mandakan/splitsmith/commit/fb1167d9f7a8ba477c428f79fd343ca6fed5968d))
+* **triage:** mirror write gate admits accept and attention posts ([6979afb](https://github.com/mandakan/splitsmith/commit/6979afb50ba13ded965a624d8a0eb5d2973ab480))
+* **triage:** summary endpoint and resolved threshold in payload ([#823](https://github.com/mandakan/splitsmith/issues/823)) ([42aca8f](https://github.com/mandakan/splitsmith/commit/42aca8f6d11f231295800c60b8cbc9d6740113e7))
+* **ui:** awaiting-desktop-reprocess chip on stale stages ([a5dac8e](https://github.com/mandakan/splitsmith/commit/a5dac8ebde5628b609c2131d781132b6fb6104f1))
+* **ui:** coach patch/undo builders + isShareView moved to lib ([ad4bd2c](https://github.com/mandakan/splitsmith/commit/ad4bd2cec7bed3aeae3f3ee0371967954091060b))
+* **ui:** interval reclassify sheet + undo snackbar on ResultsStage ([9923b5a](https://github.com/mandakan/splitsmith/commit/9923b5a8c7a031d9e6d10eedab1f9333f8121f96))
+* **ui:** mobile beep review card pager replaces DesktopGate ([ae4cc1e](https://github.com/mandakan/splitsmith/commit/ae4cc1e835296bfb80687065e7d64efd6f28bab3))
+* **ui:** ReclassifySheet bottom sheet for interval classes ([470eb94](https://github.com/mandakan/splitsmith/commit/470eb944ce3f4b7d2225ad6bd87bf13182413264))
+* **ui:** responsive stage triage surface at /match/:matchId/triage ([54fbd9c](https://github.com/mandakan/splitsmith/commit/54fbd9c77cd2f696e887a2068d37b45162d13c8c))
+* **ui:** sheet busy feedback + roving tabindex for class chips ([eafd723](https://github.com/mandakan/splitsmith/commit/eafd723c5c899429ddf10f717cc0dded4c73dcdb))
+* **ui:** Snackbar component with action button ([7422e01](https://github.com/mandakan/splitsmith/commit/7422e01d26d3b25c915fb2a2d44d2d202f675051))
+* **ui:** tappable interval chips in SplitsList ([9f65800](https://github.com/mandakan/splitsmith/commit/9f658004bad676c2db5cb5ef154814fb9df98229))
+* **ui:** triage api client types and mutations ([dc01649](https://github.com/mandakan/splitsmith/commit/dc01649f5d7c4960d9e01514e8004c70a74ea8d7))
+* **ui:** triage nav item with flagged-for-desktop badge ([df2d895](https://github.com/mandakan/splitsmith/commit/df2d8953c8a3015c340f13df52a0832a6f5bfb18))
+
+
+### Bug Fixes
+
+* interval reclassify polish ([#826](https://github.com/mandakan/splitsmith/issues/826)) ([54f4b23](https://github.com/mandakan/splitsmith/commit/54f4b232810f66a8dc5813818f0b5b6d5600ed3f))
+* **sync:** beep_review media keys pass sync validation; window + ffmpeg-error fixes ([89c6c9a](https://github.com/mandakan/splitsmith/commit/89c6c9a54f27cac3734a496bcb08b45c52c0198e))
+* **sync:** needs_attention conflicts compare content, not stamps ([23a06d6](https://github.com/mandakan/splitsmith/commit/23a06d6f1d20c5919f92aff8e160bd9b10f70b00))
+* **sync:** pull materializes metadata-only audit flags, tolerate naive ts ([a1bd5f5](https://github.com/mandakan/splitsmith/commit/a1bd5f59c717d80af47ad8dccae9bd171351dab8))
+* triage follow-ups - flag on desktop Audit, cheap badge poll, threshold resolution ([#823](https://github.com/mandakan/splitsmith/issues/823)) ([b5df7a0](https://github.com/mandakan/splitsmith/commit/b5df7a0e4b6639b93dd00cb2c032fa093c884f0a))
+* **triage:** beep-queue threshold resolution, gate pin tests, chip DOM cleanup ([#823](https://github.com/mandakan/splitsmith/issues/823)) ([17872b1](https://github.com/mandakan/splitsmith/commit/17872b110725beb01d719bf67f6c9021bed70ccf))
+* **triage:** stub the doc-less flag so status doesn't stick in_progress ([d014b56](https://github.com/mandakan/splitsmith/commit/d014b569061d4ebfccda13ad1fd15bd221f5422d))
+* **ui:** mirror banner constant stays sentence case - CSS uppercases the banner, apiErrorText reuses it inline ([f12c6b1](https://github.com/mandakan/splitsmith/commit/f12c6b13e9d61c40021156ccbf894e00dbcd7692))
+* **ui:** mirror banner copy reflects phone-writable review actions ([16e4e53](https://github.com/mandakan/splitsmith/commit/16e4e53d949e095064f8a1189401a6bbf55fbdf8))
+* **ui:** mobile beep review draft reset, timer cleanup, slider a11y ([fc3e5af](https://github.com/mandakan/splitsmith/commit/fc3e5af12890c90a08db522b7a7921b157706164))
+* **ui:** stable Snackbar auto-dismiss timer + destructive error tone ([3dd41e8](https://github.com/mandakan/splitsmith/commit/3dd41e8c43f224a2df514af7cb5be7f19cf97258))
+* **ui:** staleness chip ignores ignored videos and missing beeps ([30fc697](https://github.com/mandakan/splitsmith/commit/30fc697c2d7c0c3e5a845bb747815fdd37ed3e09))
+* **ui:** trim both sides of coach note comparison; exact seek-row test name ([972bc1f](https://github.com/mandakan/splitsmith/commit/972bc1f033bf5f7982532413bdbe788dd6ad7cb7))
+* **ui:** undo double-tap guard, stale-close guard, friendly patch error ([6cf7503](https://github.com/mandakan/splitsmith/commit/6cf7503a603e820d7ec0e3b94c5623a7c8dff79f))
+
+
+### Refactors
+
+* **ui:** BeepQueueResponse.origin is required, matching the backend ([88a32fa](https://github.com/mandakan/splitsmith/commit/88a32fa340474f4e483a88269970b2aaa2ca27fe))
+* **ui:** extract useBeepQueue hook from BeepReview ([4b9d3b6](https://github.com/mandakan/splitsmith/commit/4b9d3b602c0bf1cbd3645882ae401dad0fc39370))
+* **ui:** optional AnomalyChips onJump; MobileConfirmSheet ReactNode body ([4ff445e](https://github.com/mandakan/splitsmith/commit/4ff445eeb4ba669db225138671881e59b6be2ddd))
+* **ui:** triage summary poll and payload-driven confidence threshold ([#823](https://github.com/mandakan/splitsmith/issues/823)) ([5a405fb](https://github.com/mandakan/splitsmith/commit/5a405fbcaae8d806c2469a4121c6f0eb64ed7273))
+
+
+### Documentation
+
+* mobile audit triage plan (slice 4) ([e722770](https://github.com/mandakan/splitsmith/commit/e722770f3364c0b5e9b1a16280a0b31337290bb1))
+* mobile interval reclassify (slice 5) implementation plan ([8629024](https://github.com/mandakan/splitsmith/commit/86290242594eae66e250d0029767659642cc8bfb))
+* reclassify polish ([#826](https://github.com/mandakan/splitsmith/issues/826)) implementation plan ([b5efced](https://github.com/mandakan/splitsmith/commit/b5efced525a62d27997599790c395ed309ce865e))
+* triage follow-ups plan ([#823](https://github.com/mandakan/splitsmith/issues/823)) ([b45804a](https://github.com/mandakan/splitsmith/commit/b45804a82861d6cd7b628a3835c3335934608886))
+* **ui:** update stale isShareView comments after lib move ([456739c](https://github.com/mandakan/splitsmith/commit/456739c4edd289ca587492a5622cb29b53f992a8))
+
 ## [0.24.0](https://github.com/mandakan/splitsmith/compare/v0.23.1...v0.24.0) (2026-08-11)
 
 
