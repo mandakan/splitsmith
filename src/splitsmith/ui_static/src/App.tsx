@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import {
   BrowserRouter,
   Navigate,
@@ -54,7 +54,6 @@ import { Results } from "@/pages/Results";
 import { ResultsStage } from "@/pages/ResultsStage";
 import { Review } from "@/pages/Review";
 import { Triage } from "@/pages/Triage";
-import { api } from "@/lib/api";
 
 function RedirectLabSlug() {
   const { slug } = useParams<{ slug: string }>();
@@ -68,41 +67,6 @@ function RedirectLabSlug() {
 function BeepReviewRoute() {
   const isMobile = useIsMobile();
   return isMobile ? <MobileBeepReview /> : <BeepReview />;
-}
-
-/* Catch-all for bare match-scoped paths (``/audit/...``, ``/ingest``,
- * ``/shooters``, etc.) hit directly via bookmark or external link. Reads
- * the server's bound ``match_id`` via ``/api/health`` and redirects into
- * ``/match/:matchId/<original path>``. Falls through to ``/pick`` when no
- * match is bound. */
-function LegacyMatchRedirect() {
-  const location = useLocation();
-  const [target, setTarget] = useState<string | null>(null);
-  useEffect(() => {
-    let alive = true;
-    api
-      .getHealth()
-      .then((h) => {
-        if (!alive) return;
-        if (h.bound && h.match_id) {
-          const rest =
-            location.pathname.startsWith("/") && location.pathname !== "/"
-              ? location.pathname
-              : "";
-          setTarget(`/match/${h.match_id}${rest}${location.search}`);
-        } else {
-          setTarget("/pick");
-        }
-      })
-      .catch(() => {
-        if (alive) setTarget("/pick");
-      });
-    return () => {
-      alive = false;
-    };
-  }, [location.pathname, location.search]);
-  if (target == null) return null;
-  return <Navigate to={target} replace />;
 }
 
 function Standby() {
@@ -136,12 +100,14 @@ function AuthGate({ children }: { children: ReactNode }) {
 
   // Device-flow pickup (#719). Whether to redirect has to be decided
   // synchronously, in THIS render, using the render-safe peek -- not an
-  // effect. If {children} (the ordinary route tree) were allowed to mount
-  // for even one commit while a pickup is pending, its own routing (e.g.
-  // LegacyMatchRedirect's async getHealth()-driven redirect to /pick)
-  // races the pickup and can win, since both write history with
-  // ``replace``. Rendering <Navigate> here instead of {children} means
-  // that competing tree never mounts at all.
+  // effect. This used to matter because the ordinary route tree's own
+  // catch-all raced the pickup with an async getHealth()-driven redirect
+  // to /pick (both wrote history with ``replace``); that race is gone now
+  // that the catch-all is a synchronous <Navigate> (#739). The peek stays
+  // synchronous regardless, since {children} mounting for even one commit
+  // before a pending pickup is handled would still be wrong - it is kept
+  // for the reasons that remain: StrictMode stash semantics (see the
+  // effect below) and mode-independence (see the comment further down).
   //
   // Consuming the stash (the actual sessionStorage mutation) is a
   // separate, effect-only step below: takeApproveCode() is a
@@ -156,10 +122,10 @@ function AuthGate({ children }: { children: ReactNode }) {
   // starts at "local" and flips async once /api/server/features lands,
   // so a mode check here is a race against /api/me: if auth resolves
   // first, the local-mode early return below mounts the ordinary tree,
-  // LegacyMatchRedirect navigates off "/", and by the time mode flips
-  // the pathname no longer matches -- the only pickup window this
-  // feature gets, missed, with a dead code left to ambush a later
-  // visit. The check bought nothing anyway: sessionStorage is
+  // the catch-all navigates off "/", and by the time mode flips the
+  // pathname no longer matches - the only pickup window this feature
+  // gets, missed, with a dead code left to ambush a later visit. The
+  // check bought nothing anyway: sessionStorage is
   // origin-scoped and stashApproveCode() only ever runs on the hosted
   // anonymous path, so a local install cannot hold a stash (pinned by a
   // test in App.routes.test.tsx). The unresolved-mode gate below (#734)
@@ -246,9 +212,7 @@ export function App() {
           </Route>
 
           <Route element={<RootLayout />}>
-          {/* Picker: no context sidebar, inherits the global bar.
-              MatchShell redirects here when it sees
-              /api/health.bound === false. */}
+          {/* Picker: no context sidebar, inherits the global bar. */}
           <Route path="pick" element={<Pick />} />
           <Route path="pick/new" element={<DesktopGate screen="Match creation" links={false}><CreateMatch /></DesktopGate>} />
           <Route path="pick/merge" element={<DesktopGate screen="Match merge" links={false}><MergeMatches /></DesktopGate>} />
@@ -265,9 +229,7 @@ export function App() {
           {/* Canonical match-scoped surfaces (#353 Phase 3 PR C). All
               shooter / stage / overview / picker-within-match routes
               live under ``/match/:matchId/...``. Bare match-scoped paths
-              are caught by LegacyMatchRedirect and re-routed into the
-              prefix using ``/api/health.match_id`` so old bookmarks land
-              on the right place. */}
+              fall through to the catch-all below and land on /pick. */}
           <Route path="match/:matchId">
             <Route
               path="ingest/:slug"
@@ -355,11 +317,11 @@ export function App() {
             <Route path="lab/:slug" element={<RedirectLabSlug />} />
           </Route>
           </Route>
-          {/* Bare match-scoped paths -- caught here and bounced into the
-              ``/match/:matchId/`` prefix via LegacyMatchRedirect. ``/``
-              also goes through here so a fresh-bound match lands on its
-              own overview without the picker needing to plumb the id. */}
-          <Route path="*" element={<LegacyMatchRedirect />} />
+          {/* Catch-all: /api/health retired the bound-state concept, so a
+              bare or unknown path has exactly one destination - the
+              picker. Synchronous on purpose: an async redirect here is
+              what used to race effect-driven navigation (#739). */}
+          <Route path="*" element={<Navigate to="/pick" replace />} />
             </Routes>
           </AuthGate>
           </BrowserRouter>

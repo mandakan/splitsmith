@@ -28,8 +28,8 @@ export function stashApproveCode(code: string): void {
  *  under StrictMode's double-render on mount: reading the same value twice
  *  changes nothing. ``AuthGate`` uses this to decide, synchronously during
  *  render, whether to redirect -- so the ordinary route tree never mounts
- *  (and never kicks off its own competing redirect, e.g. via
- *  LegacyMatchRedirect) on the same commit where a pickup is pending. */
+ *  (and never kicks off its own competing navigation) on the same commit
+ *  where a pickup is pending. */
 export function peekApproveCode(): string | null {
   const value = sessionStorage.getItem(KEY);
   return value !== null && USER_CODE_RE.test(value) ? value : null;

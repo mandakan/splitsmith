@@ -3,16 +3,14 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Palette,
-  Repeat,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { Navigate, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { JobsSurface } from "@/components/Jobs";
 import { useShellContextSlot } from "@/components/layout/shellChromeContext";
 import { useJobs } from "@/lib/jobs";
-import { api, type ServerHealth } from "@/lib/api";
 import { useMode } from "@/lib/mode";
 import { cn } from "@/lib/utils";
 
@@ -74,35 +72,6 @@ export function AppShell() {
     });
   }, []);
 
-  // Server bind-state. When the user launches ``splitsmith ui`` with no
-  // ``--project`` the server boots unbound; we redirect to /pick so the
-  // user can choose. The fixture-mode (review) branch keeps working
-  // since /review boots its own throwaway project that always reads as
-  // bound. Null while loading; ``null`` skips the redirect to avoid a
-  // flicker through /pick on bound boots.
-  const [health, setHealth] = useState<ServerHealth | null>(null);
-  useEffect(() => {
-    if (bindExempt) return;
-    let alive = true;
-    api
-      .getHealth()
-      .then((h) => {
-        if (alive) setHealth(h);
-      })
-      .catch(() => {
-        // Network failure: keep rendering the shell rather than yanking
-        // the user to /pick on a transient hiccup.
-        if (alive) setHealth(null);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [bindExempt]);
-
-  if (!bindExempt && health && !health.bound) {
-    return <Navigate to="/pick" replace />;
-  }
-
   // See the ``slot`` declaration above for what this portals into.
   const contextRow = (
     <div className="flex h-14 items-center border-t border-rule bg-bg px-7">
@@ -112,7 +81,7 @@ export function AppShell() {
           splitsmith review
         </div>
       ) : (
-        <ProjectHeader health={health} />
+        <ProjectHeader />
       )}
     </div>
   );
@@ -198,47 +167,6 @@ export function AppShell() {
   );
 }
 
-function ProjectHeader({ health }: { health: ServerHealth | null }) {
-  const navigate = useNavigate();
-  const [switching, setSwitching] = useState(false);
-
-  async function switchProject() {
-    setSwitching(true);
-    try {
-      await api.unbindProject();
-    } catch {
-      // Best-effort: even if unbind fails the picker can re-bind a
-      // different project on top.
-    }
-    // Replace, not push: the project is now unbound, so a back-button
-    // would return to a bound-only URL (e.g. /audit/3) that immediately
-    // redirects back to /pick. That wastes a history slot and breaks
-    // the user's mental model of "back undoes my last action".
-    navigate("/pick", { replace: true });
-  }
-
-  if (!health || !health.bound) {
-    return <div className="text-sm text-muted">splitsmith</div>;
-  }
-
-  return (
-    <div className="flex items-center gap-3 text-sm">
-      <div className="flex flex-col leading-tight">
-        <span className="font-medium tracking-tight">{health.project_name}</span>
-        <span className="font-mono text-xs text-muted truncate max-w-[420px]">
-          {health.project_root}
-        </span>
-      </div>
-      <button
-        type="button"
-        onClick={switchProject}
-        disabled={switching}
-        className="flex items-center gap-1.5 rounded-md border border-rule bg-surface px-2 py-1 text-xs text-muted transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-50"
-        title="Switch to a different project"
-      >
-        <Repeat className="size-3.5" />
-        Switch
-      </button>
-    </div>
-  );
+function ProjectHeader() {
+  return <div className="text-sm text-muted">splitsmith</div>;
 }
