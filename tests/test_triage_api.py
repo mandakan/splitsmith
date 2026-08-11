@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from splitsmith import match_model
+from splitsmith.automation import AutomationOverride
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from tests.conftest import bound_match_id
 from tests.conftest import scaffold_match as _scaffold_match
@@ -312,6 +313,38 @@ def test_triage_excludes_placeholder_stages(client: _MatchClient) -> None:
     stage_numbers = {c["stage_number"] for c in body["cells"]}
     assert 3 not in stage_numbers
     assert stage_numbers == {1, 2}
+
+
+def test_triage_carries_resolved_threshold(client: _MatchClient, seeded_match: None) -> None:
+    """The triage payload's threshold is the resolved per-project value
+    (same resolution path as ``get_hitl_queue``), not the automation
+    default of 0.95."""
+    match_id = bound_match_id(client.app)
+    match_root = client.app.state.splitsmith_state.matches.resolve(match_id)
+    alice_root = match_model.Match.shooter_root(match_root, "alice")
+    project = MatchProject.load(alice_root)
+    project.automation = AutomationOverride(beep_low_confidence_threshold=0.5)
+    project.save(alice_root)
+
+    body = client.get("/api/match/triage").json()
+    assert body["beep_low_confidence_threshold"] == 0.5
+
+
+def test_triage_summary_counts_flags_only(client: _MatchClient, seeded_match: None) -> None:
+    resp = client.post(
+        "/api/shooters/alice/stages/2/attention",
+        json={"flagged": True, "note": "recheck"},
+    )
+    assert resp.status_code == 200
+
+    body = client.get("/api/match/triage/summary").json()
+    assert body == {"flagged_count": 1}
+
+    unflag_resp = client.post("/api/shooters/alice/stages/2/attention", json={"flagged": False})
+    assert unflag_resp.status_code == 200
+
+    body2 = client.get("/api/match/triage/summary").json()
+    assert body2 == {"flagged_count": 0}
 
 
 def test_triage_includes_skipped_stages_with_skipped_status(client: _MatchClient) -> None:
