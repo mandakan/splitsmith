@@ -9042,7 +9042,7 @@ def test_beep_queue_threshold_respects_project_override(tmp_path: Path) -> None:
     Regression test for #823: ``get_beep_queue`` called
     ``resolve_automation`` positionally, which raises ``TypeError``
     against the keyword-only signature and gets swallowed by the
-    surrounding ``except Exception: continue`` -- the threshold silently
+    surrounding ``except Exception: continue`` - the threshold silently
     stuck at the 0.5 fallback instead of reflecting the override. At
     confidence=0.65 that bug classifies the item as ``unreviewed``
     (0.65 > 0.5); with the override correctly resolved to 0.9, the same
