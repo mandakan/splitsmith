@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import type {
@@ -22,6 +22,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getStageCoach: vi.fn(),
       getProject: vi.fn().mockRejectedValue(new Error("no project")),
       getMatchCoachDistributions: vi.fn().mockRejectedValue(new Error("no dist")),
+      patchStageShotCoach: vi.fn(),
       videoStreamUrl: () => "http://localhost/video.mp4",
     },
   };
@@ -186,5 +187,82 @@ describe("ResultsStage shooter switcher", () => {
       expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
     });
     expect(screen.getByText("Anna")).toBeInTheDocument();
+  });
+});
+
+describe("ResultsStage reclassify flow", () => {
+  beforeEach(() => {
+    vi.mocked(api.patchStageShotCoach).mockReset();
+  });
+
+  it("apply flow: chip -> sheet -> Apply patches and shows the undo snack", async () => {
+    const shots = [makeShot(1, 1.5, 1.5, "split")];
+    renderStage("/match/m1/results/anna/2", SOLO, shots);
+    vi.mocked(api.patchStageShotCoach).mockResolvedValue(makeCoach(shots));
+
+    const chip = await screen.findByRole("button", { name: /^Reclassify shot 1 / });
+    fireEvent.click(chip);
+
+    fireEvent.click(screen.getByRole("radio", { name: "Movement" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    await waitFor(() => {
+      expect(api.patchStageShotCoach).toHaveBeenCalledWith("anna", 2, 1, {
+        interval_class: "movement",
+        interval_class_source: "manual",
+      });
+    });
+
+    expect(await screen.findByText("Shot 1 - Movement")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Undo" })).toBeInTheDocument();
+  });
+
+  it("undo dismisses the snack on first tap and re-patches the inverse", async () => {
+    const shots = [makeShot(1, 1.5, 1.5, "split")];
+    renderStage("/match/m1/results/anna/2", SOLO, shots);
+    vi.mocked(api.patchStageShotCoach).mockResolvedValueOnce(makeCoach(shots));
+
+    const chip = await screen.findByRole("button", { name: /^Reclassify shot 1 / });
+    fireEvent.click(chip);
+    fireEvent.click(screen.getByRole("radio", { name: "Movement" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    const undoButton = await screen.findByRole("button", { name: "Undo" });
+
+    let resolveUndo!: (value: CoachStageResponse) => void;
+    const pendingUndo = new Promise<CoachStageResponse>((resolve) => {
+      resolveUndo = resolve;
+    });
+    vi.mocked(api.patchStageShotCoach).mockReturnValueOnce(pendingUndo);
+
+    fireEvent.click(undoButton);
+
+    // Double-tap guard: the snack (and its Undo button) is gone
+    // immediately, before the re-patch resolves.
+    expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
+    expect(api.patchStageShotCoach).toHaveBeenCalledTimes(2);
+    expect(api.patchStageShotCoach).toHaveBeenLastCalledWith("anna", 2, 1, {
+      clear_class: true,
+    });
+
+    resolveUndo(makeCoach(shots));
+    expect(await screen.findByText("Change undone")).toBeInTheDocument();
+  });
+
+  it("a non-API patch failure shows the friendly fallback, not String(e)", async () => {
+    const shots = [makeShot(1, 1.5, 1.5, "split")];
+    renderStage("/match/m1/results/anna/2", SOLO, shots);
+    vi.mocked(api.patchStageShotCoach).mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const chip = await screen.findByRole("button", { name: /^Reclassify shot 1 / });
+    fireEvent.click(chip);
+    fireEvent.click(screen.getByRole("radio", { name: "Movement" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Could not save the change - check the connection and retry.",
+    );
+    expect(alert).not.toHaveTextContent("TypeError");
   });
 });

@@ -28,6 +28,7 @@ import { Kicker } from "@/components/ui";
 import {
   ApiError,
   api,
+  apiErrorText,
   type CoachShot,
   type CoachShotPatch,
   type CoachStageResponse,
@@ -48,6 +49,9 @@ import { cn } from "@/lib/utils";
 function pad2(n: number): string {
   return n.toString().padStart(2, "0");
 }
+
+// Sentence case - display CSS owns any uppercasing.
+const PATCH_FAILED_FALLBACK = "Could not save the change - check the connection and retry.";
 
 function formatTimestamp(iso: string): string {
   const d = new Date(iso);
@@ -106,7 +110,11 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
       try {
         const updated = await api.patchStageShotCoach(slug, stage, shot.shot_number, patch);
         setCoach(updated);
-        setSheetShot(null);
+        // Stale-close guard: only dismiss the sheet if it still shows the
+        // shot this patch was for - a slower in-flight patch resolving
+        // after the operator has already reopened the sheet on a
+        // different shot must not yank it closed under them.
+        setSheetShot((cur) => (cur && cur.shot_number === shot.shot_number ? null : cur));
         if (undoable) {
           const undoPatch = buildUndoPatch(shot, patch);
           setSnack({
@@ -115,13 +123,19 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
               : `Shot ${shot.shot_number} note saved`,
             tone: "status",
             actionLabel: "Undo",
-            onAction: () => void applyShotPatch(shot, undoPatch, false),
+            // Double-tap guard: clear the snack synchronously so a second
+            // tap on Undo (before the re-patch round-trip resolves) has
+            // no button left to hit.
+            onAction: () => {
+              setSnack(null);
+              void applyShotPatch(shot, undoPatch, false);
+            },
           });
         } else {
           setSnack({ message: "Change undone", tone: "status" });
         }
       } catch (e) {
-        setSnack({ message: e instanceof ApiError ? e.detail : String(e), tone: "error" });
+        setSnack({ message: apiErrorText(e, PATCH_FAILED_FALLBACK), tone: "error" });
       } finally {
         setPatchBusy(false);
       }
