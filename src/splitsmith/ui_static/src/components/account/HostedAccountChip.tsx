@@ -51,6 +51,7 @@ export function HostedAccountChip({ className }: { className?: string }) {
   const [loginOpen, setLoginOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [revokeWarning, setRevokeWarning] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   // Same shape as SyncCard's load(): the hosted-sync routes 404 outside
   // local mode, so the request only fires once the deployment mode has
@@ -62,8 +63,12 @@ export function HostedAccountChip({ className }: { className?: string }) {
     try {
       const settings = await api.getSyncSettings();
       setAccount(settings.account);
+      setLoadFailed(false);
     } catch {
-      // Sign-in button is the safe default on any load failure.
+      // A transient failure must not masquerade as "not signed in"
+      // (#738): a genuinely linked operator seeing the sign-in button
+      // is worse than an explicit unavailable state.
+      setLoadFailed(true);
     } finally {
       setLoaded(true);
     }
@@ -115,7 +120,16 @@ export function HostedAccountChip({ className }: { className?: string }) {
           while the nav's own scrollWidth still reads a healthy 390. Only
           looking at the rendered bar catches that one. */}
       <div className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-full border border-rule bg-surface-2 py-1 pl-3 pr-1">
-        {account ? (
+        {loadFailed ? (
+          <button
+            type="button"
+            onClick={() => void load()}
+            title="Could not load the linked-account status - click to retry"
+            className="text-[0.8125rem] text-muted transition-colors hover:text-ink"
+          >
+            Account status unavailable - retry
+          </button>
+        ) : account ? (
           <>
             <span
               className="min-w-0 max-w-[16rem] truncate text-[0.8125rem] text-ink-2"

@@ -118,4 +118,23 @@ describe("HostedAccountChip (local mode)", () => {
     });
     expect(await screen.findByText("shooter@example.com")).toBeInTheDocument();
   });
+
+  it("surfaces a settings load failure instead of the sign-in button (#738)", async () => {
+    getSyncSettings.mockRejectedValueOnce(new Error("boom"));
+    render(<HostedAccountChip />);
+    const retry = await screen.findByRole("button", {
+      name: /account status unavailable/i,
+    });
+    expect(
+      screen.queryByRole("button", { name: /sign in/i }),
+    ).not.toBeInTheDocument();
+
+    getSyncSettings.mockResolvedValueOnce({
+      base_url: "https://hosted.example",
+      token_set: true,
+      account: ACCOUNT,
+    });
+    await userEvent.click(retry);
+    expect(await screen.findByText(/shooter@example\.com/)).toBeInTheDocument();
+  });
 });
