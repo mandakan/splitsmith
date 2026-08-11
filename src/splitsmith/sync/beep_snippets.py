@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import subprocess
 from pathlib import Path
 
@@ -26,8 +25,6 @@ from pydantic import BaseModel, Field
 from ..match_model import load_match_or_legacy
 from ..match_project import MatchProject, StageVideo
 from ..waveform import cache_path, ensure_peaks
-
-logger = logging.getLogger(__name__)
 
 SNIPPET_MARGIN_S = 5.0
 DEFAULT_WINDOW_END_S = 30.0
@@ -44,14 +41,18 @@ class BeepSnippetReport(BaseModel):
 
 
 def _window(video: StageVideo) -> tuple[float, float]:
-    """Snippet range in source seconds: candidates and beep +/- margin,
-    else the default detection window from t=0."""
+    """Snippet range in source seconds: candidates and beep +/- margin;
+    else the video's own beep search window, if it has one; else the
+    default detection window from t=0."""
     times = [c.time for c in (video.beep_candidates or [])]
     if video.beep_time is not None:
         times.append(video.beep_time)
     if times:
         start = max(0.0, min(times) - SNIPPET_MARGIN_S)
         end = max(times) + SNIPPET_MARGIN_S
+    elif video.beep_window is not None:
+        start = max(0.0, video.beep_window[0])
+        end = video.beep_window[1]
     else:
         start, end = 0.0, DEFAULT_WINDOW_END_S
     return start, max(end, start + MIN_SNIPPET_S)
@@ -200,8 +201,11 @@ def _process_video(
             encoding="utf-8",
         )
         report.generated += 1
-    except subprocess.CalledProcessError as exc:
-        stderr = (exc.stderr or b"").decode("utf-8", "replace")[-500:]
+    except (subprocess.CalledProcessError, OSError) as exc:
+        # OSError covers a missing ffmpeg binary (FileNotFoundError) as
+        # well as other exec failures - none of those carry .stderr, so
+        # fall back to an empty message rather than crashing the push.
+        stderr = (getattr(exc, "stderr", b"") or b"").decode("utf-8", "replace")[-500:]
         report.errors.append(f"{slug}/{video.video_id}: ffmpeg failed: {stderr}")
     finally:
         # ensure_peaks (waveform.py) caches its result next to its input as

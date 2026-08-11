@@ -136,3 +136,56 @@ def test_reviewed_video_gets_no_snippet_and_stale_one_is_removed(tmp_path: Path)
     out = shooter_root / "beep_review"
     assert not (out / f"{video.video_id}.m4a").exists()
     assert not (out / f"{video.video_id}.peaks.json").exists()
+
+
+def test_missing_beep_uses_video_beep_window(tmp_path: Path):
+    """No beep_time, no candidates, but the video carries a search window
+    from a prior detection run - the snippet should be cut from that
+    window rather than falling back to the 0..30 default."""
+    match_root, shooter_root, project = _build_match_root(tmp_path)
+    video = project.stages[0].videos[0]
+    video.beep_time = None
+    video.beep_window = (5.0, 15.0)
+    project.save(shooter_root)
+    src = shooter_root / str(video.path)
+    src.parent.mkdir(parents=True, exist_ok=True)
+    _make_source(src, seconds=20.0)
+
+    report = generate_beep_snippets(match_root)
+    assert report.generated == 1 and not report.errors
+    out = shooter_root / "beep_review"
+    peaks = json.loads((out / f"{video.video_id}.peaks.json").read_text())
+    assert peaks["snippet_start"] == pytest.approx(5.0)
+    assert peaks["beep_time"] is None
+
+
+def test_missing_beep_no_window_uses_default(tmp_path: Path):
+    """No beep_time, no candidates, and no beep_window either - falls
+    back to the plain 0..30 default window."""
+    match_root, shooter_root, project = _build_match_root(tmp_path)
+    video = project.stages[0].videos[0]
+    video.beep_time = None
+    project.save(shooter_root)
+    src = shooter_root / str(video.path)
+    src.parent.mkdir(parents=True, exist_ok=True)
+    _make_source(src, seconds=35.0)
+
+    report = generate_beep_snippets(match_root)
+    assert report.generated == 1 and not report.errors
+    out = shooter_root / "beep_review"
+    peaks = json.loads((out / f"{video.video_id}.peaks.json").read_text())
+    assert peaks["snippet_start"] == pytest.approx(0.0)
+
+
+def test_missing_ffmpeg_binary_reports_error_without_crashing(tmp_path: Path):
+    """A missing ffmpeg binary must not raise FileNotFoundError out of
+    generate_beep_snippets - it should be collected as a per-video error
+    with no partial output left behind."""
+    match_root, shooter_root, _project, video = _seed(tmp_path)
+
+    report = generate_beep_snippets(match_root, ffmpeg_binary="definitely-not-a-binary-xyz")
+    assert report.generated == 0
+    assert report.errors
+    out = shooter_root / "beep_review"
+    assert not (out / f"{video.video_id}.m4a").exists()
+    assert not (out / f"{video.video_id}.peaks.json").exists()

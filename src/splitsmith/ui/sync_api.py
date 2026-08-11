@@ -55,7 +55,8 @@ router = APIRouter(prefix="/api/sync")
 # match_id equality check in _validate_media_key is the entire guard;
 # there is no filesystem boundary to fall back on the way local mode has.
 _SYNC_MEDIA_KEY_RE = re.compile(
-    r"^matches/(?P<match_id>[A-Za-z0-9._-]+)/shooters/[A-Za-z0-9_-]+/trimmed/[A-Za-z0-9._-]+\.(?:mp4|json)$"
+    r"^matches/(?P<match_id>[A-Za-z0-9._-]+)/shooters/[A-Za-z0-9_-]+/"
+    r"(?:trimmed|beep_review)/[A-Za-z0-9._-]+\.(?:mp4|json|m4a)$"
 )
 
 
