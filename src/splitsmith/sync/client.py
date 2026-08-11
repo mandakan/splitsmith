@@ -246,6 +246,14 @@ class HostedSyncClient:
             raise
         return digest.hexdigest()
 
+    def delete_media(self, match_id: str, remote_key: str) -> None:
+        """Remove a pushed beep_review object (#821). Idempotent."""
+        resp = self._http.post(
+            f"/api/sync/matches/{match_id}/media/delete",
+            json={"key": remote_key},
+        )
+        self._raise_for_status(resp)
+
     @staticmethod
     def _doc_path(kind: str, slug: str | None, stage_number: int | None) -> str:
         """The ``docs/...`` URL suffix for one doc identity - shared by

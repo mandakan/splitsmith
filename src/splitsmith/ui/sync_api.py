@@ -174,6 +174,18 @@ class SyncMediaAbortResponse(BaseModel):
     """Empty response for ``POST /api/sync/matches/{match_id}/media/abort``."""
 
 
+class SyncMediaDelete(BaseModel):
+    """Body for ``POST /api/sync/matches/{match_id}/media/delete``."""
+
+    key: str
+
+
+class SyncMediaDeleteResponse(BaseModel):
+    """Response for ``POST /api/sync/matches/{match_id}/media/delete``."""
+
+    deleted: bool
+
+
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -581,3 +593,26 @@ async def abort_media_upload(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"could not abort upload: {exc}") from exc
     return SyncMediaAbortResponse()
+
+
+@router.post("/matches/{match_id}/media/delete", response_model=SyncMediaDeleteResponse)
+async def delete_media(
+    match_id: str,
+    body: SyncMediaDelete,
+    request: Request,
+    user: Any = Depends(_current_user),
+) -> SyncMediaDeleteResponse:
+    """Remove a pushed beep_review object (#821). Desktop calls this when
+    a video's beep is confirmed: the local snippet files are deleted by
+    the pre-push sweep, and leaving the remote copy makes snippet_ready
+    lie forever for reopened items. beep_review-only on purpose - trimmed
+    clips are what the mirror streams. Idempotent: deleting a missing key
+    is success, so a crashed push can retry safely."""
+    _hosted_gate()
+    await _resolve_mirror(request, match_id)
+    _validate_media_key(body.key, match_id)
+    if "/beep_review/" not in body.key:
+        raise HTTPException(status_code=422, detail="delete is beep_review-only")
+    storage = _require_storage(request)
+    storage.delete(body.key)
+    return SyncMediaDeleteResponse(deleted=True)
