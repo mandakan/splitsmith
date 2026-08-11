@@ -172,6 +172,17 @@ def test_wav_extension_rejected(
     assert resp.status_code == 422, resp.text
 
 
+def test_trimmed_params_json_key_accepted(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+) -> None:
+    client, sender, captured = hosted_app_with_storage
+    _login_and_adopt(client, sender, captured)
+
+    key = f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed/stage1_cam_abc123_trimmed.params.json"
+    resp = client.post(CREATE_URL, json={"key": key})
+    assert resp.status_code == 200, resp.text
+
+
 # --- beep_review media keys (slice 3, #631) ---------------------------------
 
 
