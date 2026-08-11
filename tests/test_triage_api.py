@@ -268,3 +268,42 @@ def test_triage_carries_flag_and_count(client: _MatchClient, seeded_match: None)
 def test_accept_returns_fresh_triage_list(client: _MatchClient, seeded_match: None) -> None:
     body = client.post("/api/shooters/alice/stages/1/audit/accept").json()
     assert "cells" in body and "flagged_count" in body
+
+
+def test_triage_excludes_placeholder_stages(client: _MatchClient) -> None:
+    """A placeholder stage (no scoreboard data yet) has nothing meaningful
+    to triage, so ``_build_triage_response`` skips it via ``if
+    stg.placeholder: continue`` (server.py). Add one alongside the
+    client fixture's two real stages and confirm it never reaches the
+    grid."""
+    match_id = bound_match_id(client.app)
+    match_root = client.app.state.splitsmith_state.matches.resolve(match_id)
+    shooter_root = match_model.Match.shooter_root(match_root, "alice")
+    project = MatchProject.load(shooter_root)
+    project.stages.append(
+        StageEntry(stage_number=3, stage_name="Stage 3", time_seconds=0.0, placeholder=True)
+    )
+    project.save(shooter_root)
+
+    body = client.get("/api/match/triage").json()
+    stage_numbers = {c["stage_number"] for c in body["cells"]}
+    assert 3 not in stage_numbers
+    assert stage_numbers == {1, 2}
+
+
+def test_triage_includes_skipped_stages_with_skipped_status(client: _MatchClient) -> None:
+    """A skipped stage (shooter DNF'd or the RO called it) still needs a
+    triage cell so the coach sees it in the grid - it just carries status
+    ``skipped`` instead of ``ready``/``audited``/etc."""
+    match_id = bound_match_id(client.app)
+    match_root = client.app.state.splitsmith_state.matches.resolve(match_id)
+    shooter_root = match_model.Match.shooter_root(match_root, "alice")
+    project = MatchProject.load(shooter_root)
+    project.stages.append(
+        StageEntry(stage_number=3, stage_name="Stage 3", time_seconds=10.0, skipped=True)
+    )
+    project.save(shooter_root)
+
+    body = client.get("/api/match/triage").json()
+    cell = next(c for c in body["cells"] if c["slug"] == "alice" and c["stage_number"] == 3)
+    assert cell["status"] == "skipped"
