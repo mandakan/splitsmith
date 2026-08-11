@@ -48,11 +48,22 @@ export function ReclassifySheet({
     onApply(shot, patch);
   };
 
+  const move = (from: CoachIntervalClass, delta: number) => {
+    const i = CLASSES.indexOf(from);
+    const next = CLASSES[(i + delta + CLASSES.length) % CLASSES.length];
+    setSelected(next);
+    // Roving tabindex: focus follows selection (APG radio group pattern).
+    requestAnimationFrame(() => {
+      document.getElementById(`reclass-chip-${next}`)?.focus();
+    });
+  };
+
   return (
     <MobileConfirmSheet
       open
       title={`Shot ${shot.shot_number} - ${shot.split.toFixed(3)}s`}
-      confirmLabel="Apply"
+      confirmLabel={busy ? "Applying..." : "Apply"}
+      confirmDisabled={busy}
       onConfirm={apply}
       onCancel={onCancel}
       body={
@@ -63,10 +74,21 @@ export function ReclassifySheet({
               return (
                 <button
                   key={c}
+                  id={`reclass-chip-${c}`}
                   type="button"
                   role="radio"
                   aria-checked={picked}
+                  tabIndex={(selected ? c === selected : c === CLASSES[0]) ? 0 : -1}
                   onClick={() => setSelected(c)}
+                  onKeyDown={(e) => {
+                    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+                      e.preventDefault();
+                      move(c, 1);
+                    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+                      e.preventDefault();
+                      move(c, -1);
+                    }
+                  }}
                   className={cn(
                     "min-h-11 rounded border px-3 font-mono text-xs uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
                     INTERVAL_TONE[c],

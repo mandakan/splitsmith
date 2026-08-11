@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { ReclassifySheet } from "@/components/results/ReclassifySheet";
@@ -59,5 +59,24 @@ describe("ReclassifySheet", () => {
     fireEvent.change(screen.getByLabelText(/note/i), { target: { value: "slow entry" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     expect(onApply).toHaveBeenCalledWith(expect.anything(), { coaching_note: "slow entry" });
+  });
+
+  it("busy disables Apply and labels it Applying...", () => {
+    render(<ReclassifySheet shot={shot()} busy={true} onApply={() => {}} onCancel={() => {}} />);
+    const btn = screen.getByRole("button", { name: "Applying..." });
+    expect(btn).toBeDisabled();
+  });
+
+  it("radios rove: only the selected chip is tabbable and arrows move selection", async () => {
+    render(<ReclassifySheet shot={shot()} busy={false} onApply={() => {}} onCancel={() => {}} />);
+    const fire = screen.getByRole("radio", { name: "Fire" });
+    expect(fire).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("radio", { name: "Draw" })).toHaveAttribute("tabindex", "-1");
+    fire.focus();
+    fireEvent.keyDown(fire, { key: "ArrowRight" });
+    const transition = screen.getByRole("radio", { name: "Transition" });
+    expect(transition).toHaveAttribute("aria-checked", "true");
+    expect(transition).toHaveAttribute("tabindex", "0");
+    await waitFor(() => expect(transition).toHaveFocus());
   });
 });
