@@ -105,4 +105,22 @@ describe("DesktopApprove", () => {
     expect(await screen.findByText(/no longer waiting/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /approve/i })).not.toBeInTheDocument();
   });
+
+  it("distinguishes a transport failure from a decided/expired code", async () => {
+    getDevicePending.mockRejectedValueOnce(new TypeError("failed to fetch"));
+    renderAt("?code=ABCD-2345");
+    expect(await screen.findByText(/could not check that code/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no longer waiting/i)).not.toBeInTheDocument();
+
+    // Retry with the same code once the server is back.
+    getDevicePending.mockResolvedValueOnce({
+      user_code: "ABCD-2345",
+      device_name: "gaspode",
+      scope: "sync",
+      created_at: "2026-08-11T10:00:00Z",
+      expires_at: "2026-08-11T10:10:00Z",
+    });
+    await userEvent.click(screen.getByRole("button", { name: /try again/i }));
+    expect(await screen.findByText(/gaspode/)).toBeInTheDocument();
+  });
 });
