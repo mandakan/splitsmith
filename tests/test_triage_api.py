@@ -231,6 +231,29 @@ def test_flag_stage_without_audit_doc(client: _MatchClient, empty_stage: None) -
     assert doc["needs_attention"]["flagged"] is True
 
 
+def test_flag_and_unflag_doc_less_stage_keeps_ready_status(client: _MatchClient, empty_stage: None) -> None:
+    """A stage with no audit doc reads "ready". Flagging it for desktop
+    must not flip that to "in_progress" forever (regression for the
+    doc-less-flag status bug: the created doc has to seed the same
+    beep-confirm stub shape the beep-review endpoint uses, or
+    ``is_stub_audit`` stops recognizing it and status falls through to
+    ``in_progress`` even after the flag is cleared)."""
+
+    def status_of(stage_number: int) -> str:
+        stages = client.get("/api/shooters/alice/project").json()["stages"]
+        return next(s["status"] for s in stages if s["stage_number"] == stage_number)
+
+    assert status_of(2) == "ready"
+
+    resp = client.post("/api/shooters/alice/stages/2/attention", json={"flagged": True})
+    assert resp.status_code == 200
+    assert status_of(2) == "ready"
+
+    resp = client.post("/api/shooters/alice/stages/2/attention", json={"flagged": False})
+    assert resp.status_code == 200
+    assert status_of(2) == "ready"
+
+
 def test_flag_note_too_long_422(client: _MatchClient, seeded_stage: dict) -> None:
     resp = client.post(
         "/api/shooters/alice/stages/1/attention",

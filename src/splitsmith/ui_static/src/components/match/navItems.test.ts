@@ -38,4 +38,18 @@ describe("matchNavItems triage entry", () => {
       badgeAriaLabel: "2 stages flagged for desktop",
     });
   });
+
+  it("singularizes the aria-label when exactly one stage is flagged", () => {
+    const items = matchNavItems({
+      base: "/match/m1",
+      hasFootage: true,
+      beepReviewPendingCount: 0,
+      triageFlaggedCount: 1,
+      jobsAttentionCount: 0,
+    });
+    const triage = items.find((i) => i.key === "triage");
+    expect(triage).toMatchObject({
+      badgeAriaLabel: "1 stage flagged for desktop",
+    });
+  });
 });

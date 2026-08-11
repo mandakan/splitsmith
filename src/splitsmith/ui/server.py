@@ -10492,7 +10492,7 @@ def create_app(
             if not kept:
                 raise HTTPException(status_code=409, detail="nothing_to_accept")
             coach_module.classify_intervals_in_dicts(shots, CoachAutoClassifyConfig())
-            if any(s.get("ms_after_beep") is not None and not s.get("interval_class") for s in kept):
+            if any(not s.get("interval_class") for s in kept):
                 raise HTTPException(status_code=409, detail="not_fully_classified")
             events = payload.setdefault("audit_events", [])
             events.append(
@@ -10529,7 +10529,13 @@ def create_app(
         for _attempt in range(3):
             payload, version = state.load_audit(slug, stage_number)
             if payload is None:
-                payload, version = {}, 0
+                # Seed the same beep-confirm stub shape as the beep-review
+                # endpoint (line ~9897): is_stub_audit ignores the
+                # needs_attention key, so a flagged doc-less stage still
+                # reads as "ready" (derived from real shots/events) instead
+                # of falling to "in_progress" and getting stuck flagged
+                # forever once cleared.
+                payload, version = {"shots": [], "detection": STUB_AUDIT_DETECTION}, 0
             _set_needs_attention(payload, flagged=body.flagged, note=body.note)
             try:
                 state.save_audit(slug, stage_number, payload, version=version)

@@ -106,7 +106,7 @@ export function matchNavItems(args: {
       label: "Triage",
       count: triageFlaggedCount,
       badgeKind: "pending",
-      badgeAriaLabel: `${triageFlaggedCount} stages flagged for desktop`,
+      badgeAriaLabel: `${triageFlaggedCount} stage${triageFlaggedCount === 1 ? "" : "s"} flagged for desktop`,
     },
     {
       key: "jobs",
