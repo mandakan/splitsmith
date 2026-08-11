@@ -50,6 +50,7 @@ import {
   type MatchProject,
 } from "@/lib/api";
 import { useMatchHref } from "@/lib/matchHref";
+import { isShareView } from "@/lib/shareView";
 import { cn } from "@/lib/utils";
 
 import { initials } from "./compare/format";
@@ -60,14 +61,6 @@ type Layout = "grid" | "row" | "stack";
 
 const SYNC_DRIFT_THRESHOLD_S = 0.15;
 const SYNC_INTERVAL_MS = 120;
-
-/** Share-mode detection (#700), path-based like useMatchHref/AuthGate.
- *  Gates the operator-only affordances (Audit/Coach tabs, "Open in
- *  audit", "Build trim cache", the empty-state "Audit {name}" CTAs) off
- *  the anonymous share surface. */
-export function isShareView(pathname: string): boolean {
-  return /^\/share\//.test(pathname);
-}
 
 export function Compare() {
   const { stage: stageParam } = useParams();
