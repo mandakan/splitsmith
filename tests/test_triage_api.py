@@ -12,9 +12,11 @@ from pathlib import Path
 
 import pytest
 
+from splitsmith import match_model
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
+from tests.conftest import bound_match_id
 from tests.conftest import scaffold_match as _scaffold_match
-from tests.test_ui_server import _MatchClient, _match_create_app
+from tests.test_ui_server import _match_create_app, _MatchClient
 
 
 @pytest.fixture
@@ -93,6 +95,53 @@ def seeded_stage_unclassified(client: _MatchClient) -> dict:
     return resp.json()
 
 
+@pytest.fixture
+def seeded_match(client: _MatchClient) -> None:
+    """Adds a second shooter, "bob", carrying the same two stages as
+    "alice" to the match ``client`` is bound to, then accepts alice's
+    stage 1 with a 4.2 s gap between its two shots (both a ``long_pause``
+    and a ``stage_time_mismatch`` against the 10 s stage clock) so the
+    triage aggregation has a real anomaly to surface. Bob's stages and
+    alice's stage 2 stay untouched - "ready" cells with no audit doc.
+    """
+    match_id = bound_match_id(client.app)
+    match_root = client.app.state.splitsmith_state.matches.resolve(match_id)
+    match = match_model.Match.load(match_root)
+    match.add_shooter(match_root, match_model.Shooter(slug="bob", name="Bob"))
+
+    bob_root = match_model.Match.shooter_root(match_root, "bob")
+    MatchProject.init(bob_root, name="Triage Match")
+    bob_project = MatchProject.load(bob_root)
+    bob_project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="S1",
+            time_seconds=10.0,
+            videos=[StageVideo(path=Path("raw/v1.mp4"), role="primary", beep_time=5.0)],
+        ),
+        StageEntry(
+            stage_number=2,
+            stage_name="S2",
+            time_seconds=10.0,
+            videos=[StageVideo(path=Path("raw/v2.mp4"), role="primary", beep_time=5.0)],
+        ),
+    ]
+    bob_project.save(bob_root)
+
+    doc = {
+        "stage_number": 1,
+        "shots": [
+            {"shot_number": 1, "ms_after_beep": 400},
+            {"shot_number": 2, "ms_after_beep": 4600},
+        ],
+        "audit_events": [],
+    }
+    put_resp = client.put("/api/shooters/alice/stages/1/audit", json=doc)
+    assert put_resp.status_code == 200
+    accept_resp = client.post("/api/shooters/alice/stages/1/audit/accept")
+    assert accept_resp.status_code == 200
+
+
 def test_accept_appends_event_and_flips_status(client: _MatchClient, seeded_stage: dict) -> None:
     resp = client.post("/api/shooters/alice/stages/1/audit/accept")
     assert resp.status_code == 200
@@ -137,9 +186,7 @@ def test_accept_refuses_empty_stage(client: _MatchClient, empty_stage: None) -> 
     assert resp.json()["detail"] == "nothing_to_accept"
 
 
-def test_accept_refuses_unclassifiable(
-    client: _MatchClient, seeded_stage_unclassified: dict
-) -> None:
+def test_accept_refuses_unclassifiable(client: _MatchClient, seeded_stage_unclassified: dict) -> None:
     resp = client.post("/api/shooters/alice/stages/1/audit/accept")
     assert resp.status_code == 409
     assert resp.json()["detail"] == "not_fully_classified"
@@ -147,6 +194,11 @@ def test_accept_refuses_unclassifiable(
 
 def test_accept_unknown_stage_404(client: _MatchClient) -> None:
     resp = client.post("/api/shooters/alice/stages/99/audit/accept")
+    assert resp.status_code == 404
+
+
+def test_flag_unknown_stage_404(client: _MatchClient) -> None:
+    resp = client.post("/api/shooters/alice/stages/99/attention", json={"flagged": True})
     assert resp.status_code == 404
 
 
@@ -165,9 +217,7 @@ def test_flag_sets_needs_attention(client: _MatchClient, seeded_stage: dict) -> 
 
 def test_unflag_keeps_object_with_timestamp(client: _MatchClient, seeded_stage: dict) -> None:
     client.post("/api/shooters/alice/stages/1/attention", json={"flagged": True})
-    resp = client.post(
-        "/api/shooters/alice/stages/1/attention", json={"flagged": False}
-    )
+    resp = client.post("/api/shooters/alice/stages/1/attention", json={"flagged": False})
     assert resp.status_code == 200
     na = client.get("/api/shooters/alice/stages/1/audit").json()["needs_attention"]
     assert na["flagged"] is False and na["note"] is None and na["flagged_at"] is None
@@ -175,9 +225,7 @@ def test_unflag_keeps_object_with_timestamp(client: _MatchClient, seeded_stage: 
 
 
 def test_flag_stage_without_audit_doc(client: _MatchClient, empty_stage: None) -> None:
-    resp = client.post(
-        "/api/shooters/alice/stages/2/attention", json={"flagged": True}
-    )
+    resp = client.post("/api/shooters/alice/stages/2/attention", json={"flagged": True})
     assert resp.status_code == 200
     doc = client.get("/api/shooters/alice/stages/2/audit").json()
     assert doc["needs_attention"]["flagged"] is True
@@ -189,3 +237,34 @@ def test_flag_note_too_long_422(client: _MatchClient, seeded_stage: dict) -> Non
         json={"flagged": True, "note": "x" * 281},
     )
     assert resp.status_code == 422
+
+
+def test_triage_lists_cells_with_status_and_anomalies(client: _MatchClient, seeded_match: None) -> None:
+    body = client.get("/api/match/triage").json()
+    cells = body["cells"]
+    assert [(c["slug"], c["stage_number"]) for c in cells] == [
+        ("alice", 1),
+        ("bob", 1),
+        ("alice", 2),
+        ("bob", 2),
+    ]
+    a1 = cells[0]
+    assert a1["status"] == "audited"
+    assert any(a["kind"] == "long_pause" for a in a1["anomalies"])
+    assert body["flagged_count"] == 0
+
+
+def test_triage_carries_flag_and_count(client: _MatchClient, seeded_match: None) -> None:
+    client.post(
+        "/api/shooters/alice/stages/2/attention",
+        json={"flagged": True, "note": "recheck"},
+    )
+    body = client.get("/api/match/triage").json()
+    flagged = [c for c in body["cells"] if c["needs_attention"] and c["needs_attention"]["flagged"]]
+    assert [(c["slug"], c["stage_number"]) for c in flagged] == [("alice", 2)]
+    assert body["flagged_count"] == 1
+
+
+def test_accept_returns_fresh_triage_list(client: _MatchClient, seeded_match: None) -> None:
+    body = client.post("/api/shooters/alice/stages/1/audit/accept").json()
+    assert "cells" in body and "flagged_count" in body

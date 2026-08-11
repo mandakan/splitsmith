@@ -122,7 +122,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, ValidationError
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
@@ -3860,6 +3860,36 @@ class StageAttentionBody(BaseModel):
 
     flagged: bool
     note: str | None = Field(default=None, max_length=280)
+
+
+class TriageAttentionOut(BaseModel):
+    """The ``needs_attention`` object as read back on a triage cell."""
+
+    flagged: bool
+    flagged_at: str | None = None
+    note: str | None = None
+    updated_at: str
+
+
+class TriageCell(BaseModel):
+    """One (shooter, stage) cell of GET /api/match/triage (slice 4)."""
+
+    slug: str
+    shooter_name: str
+    stage_number: int
+    stage_name: str
+    status: str  # StageStatus value, backend-authoritative
+    beep_confidence: float | None  # min across stage videos that have one
+    anomalies: list[dict]  # report.Anomaly.model_dump() records
+    needs_attention: TriageAttentionOut | None = None
+
+
+class TriageResponse(BaseModel):
+    """GET /api/match/triage payload (slice 4): the cross-shooter,
+    cross-stage triage grid the mobile audit-triage surface renders."""
+
+    cells: list[TriageCell]
+    flagged_count: int
 
 
 class CompareShotPoint(BaseModel):
@@ -10437,7 +10467,9 @@ def create_app(
         ``save`` so provenance stays distinguishable; ``stage_audit_status``
         treats both as audited. Runs the auto-classifier first (#775) and
         refuses when the stage has nothing to accept or a kept shot cannot
-        be classified (#778 invariant, enforced not just healed).
+        be classified (#778 invariant, enforced not just healed). Returns
+        the fresh triage list (task 4) so the SPA never has to re-fetch
+        after a write.
         """
         project = state.shooter_project(slug)
         try:
@@ -10470,18 +10502,17 @@ def create_app(
                 state.save_audit(slug, stage_number, payload, version=version)
             except conflict_excs:
                 continue
-            return JSONResponse({"ok": True})
+            return JSONResponse(_build_triage_response().model_dump())
         raise HTTPException(status_code=409, detail="version_conflict")
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/attention")
-    def set_stage_attention(
-        slug: str, stage_number: int, body: StageAttentionBody
-    ) -> JSONResponse:
+    def set_stage_attention(slug: str, stage_number: int, body: StageAttentionBody) -> JSONResponse:
         """Flag or clear a stage for desktop follow-up (slice 4).
 
         The flag lives in the schemaless audit doc so it syncs with the
         other triage writes; flagging a stage that has no audit doc yet
-        creates one holding only the flag.
+        creates one holding only the flag. Returns the fresh triage list
+        (task 4), same fresh-list contract as accept.
         """
         project = state.shooter_project(slug)
         try:
@@ -10498,7 +10529,7 @@ def create_app(
                 state.save_audit(slug, stage_number, payload, version=version)
             except conflict_excs:
                 continue
-            return JSONResponse({"ok": True})
+            return JSONResponse(_build_triage_response().model_dump())
         raise HTTPException(status_code=409, detail="version_conflict")
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/anomalies")
@@ -12516,6 +12547,80 @@ def create_app(
             shooters=entries,
             origin=current_match_origin.get() or "local",
         )
+
+    def _build_triage_response() -> TriageResponse:
+        """Assemble the cross-shooter, cross-stage triage grid (slice 4).
+
+        Enumerates shooters exactly as :func:`list_match_shooters` does,
+        then per shooter bulk-loads audit docs once via
+        ``state.load_audit_docs`` (hosted: one query; local: ``None``,
+        falling back to per-stage ``state.load_audit`` below) and derives
+        statuses via the same ``stage_statuses`` walk used by the project
+        GET. Per non-placeholder stage, the anomaly computation mirrors
+        :func:`get_stage_anomalies` exactly: same beep-time fallback, same
+        ``audit_shots_to_engine_shots`` + ``report.detect_anomalies_structured``
+        call. Both the accept and attention endpoints return this so the
+        SPA never has to re-fetch after a write (the confirm-returns-
+        fresh-list contract from slice 3).
+        """
+        match_root, match = _resolve_match_context()
+        cells: list[TriageCell] = []
+        for slug in match.shooters:
+            shooter_root = match_model.Match.shooter_root(match_root, slug)
+            try:
+                legacy = state.shooter_project(slug)
+            except Exception as exc:  # noqa: BLE001 - mirror list_match_shooters's per-shooter skip
+                logger.warning("Skipping shooter %s in triage: %s", slug, exc)
+                continue
+            name = legacy.competitor_name or slug
+            audit_docs = state.load_audit_docs(slug)
+            status_map = legacy.stage_statuses(shooter_root, audit_docs=audit_docs)
+            for stg in legacy.stages:
+                if stg.placeholder:
+                    continue
+                prim = stg.primary()
+                beep = prim.beep_time if prim is not None and prim.beep_time is not None else 0.0
+                doc = (audit_docs or {}).get(stg.stage_number)
+                if doc is None and audit_docs is None:
+                    doc, _ = state.load_audit(slug, stg.stage_number)
+                anomalies: list[dict] = []
+                if doc is not None:
+                    engine_shots = audit_shots_to_engine_shots(doc, beep_time_in_source=beep)
+                    anomalies = [
+                        a.model_dump()
+                        for a in report.detect_anomalies_structured(engine_shots, beep, stg.time_seconds)
+                    ]
+                confs = [v.beep_confidence for v in stg.videos if v.beep_confidence is not None]
+                na_raw = doc.get("needs_attention") if isinstance(doc, dict) else None
+                needs_attention: TriageAttentionOut | None = None
+                if isinstance(na_raw, dict):
+                    try:
+                        needs_attention = TriageAttentionOut(**na_raw)
+                    except ValidationError:
+                        needs_attention = None
+                cells.append(
+                    TriageCell(
+                        slug=slug,
+                        shooter_name=name,
+                        stage_number=stg.stage_number,
+                        stage_name=stg.stage_name,
+                        status=str(status_map[stg.stage_number]),
+                        beep_confidence=min(confs) if confs else None,
+                        anomalies=anomalies,
+                        needs_attention=needs_attention,
+                    )
+                )
+        cells.sort(key=lambda c: (c.stage_number, c.shooter_name.lower()))
+        flagged_count = sum(1 for c in cells if c.needs_attention is not None and c.needs_attention.flagged)
+        return TriageResponse(cells=cells, flagged_count=flagged_count)
+
+    @app.get("/api/match/triage", response_model=TriageResponse)
+    def get_match_triage() -> TriageResponse:
+        """Cross-shooter, cross-stage triage grid for the mobile audit-
+        triage surface (slice 4). Placeholder stages are excluded; skipped
+        stages are included with status ``skipped`` (the SPA collapses
+        them client-side)."""
+        return _build_triage_response()
 
     @app.post("/api/match/shooters", response_model=ShooterListResponse)
     def add_match_shooter(req: AddShooterRequest) -> ShooterListResponse:
