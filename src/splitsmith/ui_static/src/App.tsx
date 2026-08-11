@@ -217,7 +217,7 @@ export function App() {
             <Route path="results" element={<Results />} />
             <Route path="results/:slug/:stage" element={<ResultsStage />} />
             {/* Compare-behind-a-token (#700): read-only, desktop-only.
-                Compare.tsx's own isShareView() gates the operator-only
+                isShareView() (lib/shareView) gates the operator-only
                 affordances (Audit/Coach tabs, audit CTAs) off this
                 mount; api plumbing needs no changes here since
                 scopeRequestPath already rewrites Compare's fetches into

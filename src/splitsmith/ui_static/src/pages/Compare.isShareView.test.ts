@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { isShareView } from "./Compare";
+import { isShareView } from "@/lib/shareView";
 
 describe("isShareView", () => {
   it("is true under the share tree", () => {
