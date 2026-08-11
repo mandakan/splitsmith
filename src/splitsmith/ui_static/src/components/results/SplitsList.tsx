@@ -1,12 +1,17 @@
 /**
- * SplitsList - read-only per-shot list for the Results stage view.
- * One button row per shot: number, time from beep, split, tier chip
- * (text label + color dot - never color alone; omitted when no baseline
- * judgment is possible), interval-class chip,
- * improvement flag + coaching note when present. Tap seeks the video.
- * The active row highlights and, while playing, scrolls into view
- * (instant under prefers-reduced-motion). Read-only by contract: part
- * of the future share-link surface - no mutations here.
+ * SplitsList - per-shot list for the Results stage view. One row per
+ * shot: a seek button (number, time from beep, split, tier chip - text
+ * label + color dot, never color alone; omitted when no baseline
+ * judgment is possible) plus a trailing interval-class chip and
+ * improvement flag, with the coaching note when present. Tap the row to
+ * seek the video. The active row highlights and, while playing, scrolls
+ * into view (instant under prefers-reduced-motion).
+ *
+ * Share mounts render read-only: the chip is a plain span (unclassified
+ * shots get no affordance at all). Operator mounts pass onReclassify,
+ * which turns the chip into its own button - the slice-5 reclassify
+ * entry point - kept a sibling of the seek button since nested buttons
+ * are invalid HTML.
  */
 import { Flag } from "lucide-react";
 import { useEffect, useRef } from "react";
@@ -24,6 +29,10 @@ interface SplitsListProps {
   isPlaying: boolean;
   /** Match-scope per-class baselines; null degrades to unjudged rows. */
   baselines: TierBaselines | null;
+  /** Operator-only: makes the interval chip a tap target that opens the
+   *  reclassify sheet. Omitted on share mounts, where the chip stays a
+   *  read-only span (and unclassified shots get no affordance at all). */
+  onReclassify?: (shot: CoachShot) => void;
 }
 
 function pad2(n: number): string {
@@ -36,6 +45,7 @@ export function SplitsList({
   onSeek,
   isPlaying,
   baselines,
+  onReclassify,
 }: SplitsListProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -61,16 +71,26 @@ export function SplitsList({
         {shots.map((shot) => {
           const tier = gapTier(shot.split, shot.interval_class, baselines);
           const active = activeShotNumber === shot.shot_number;
-          return (
-            <button
-              key={shot.shot_number}
-              type="button"
-              data-shot-number={shot.shot_number}
-              onClick={() => onSeek(shot)}
+          const chipTone = shot.interval_class
+            ? INTERVAL_TONE[shot.interval_class]
+            : "text-muted border-rule bg-surface-2";
+          const chipLabel = shot.interval_class ? INTERVAL_LABEL[shot.interval_class] : "Classify";
+          const chip = (
+            <span
               className={cn(
-                "relative block w-full min-h-11 px-4 py-2 text-left transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led focus-visible:ring-inset",
-                // Mobile auto-scroll target must land below the sticky
-                // player (document scroll can't see the pinned overlay).
+                "inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 font-mono text-[0.625rem] uppercase",
+                chipTone,
+              )}
+            >
+              {chipLabel}
+            </span>
+          );
+          return (
+            <div
+              key={shot.shot_number}
+              data-shot-number={shot.shot_number}
+              className={cn(
+                "relative flex min-h-11 items-center transition-colors hover:bg-surface-2",
                 "max-lg:scroll-mt-[calc(var(--shell-header-h,0px)+var(--results-player-h,0px)+8px)]",
                 active && "bg-surface-2",
               )}
@@ -82,48 +102,56 @@ export function SplitsList({
                   active ? "opacity-100" : "opacity-0",
                 )}
               />
-              <span className="flex items-center gap-3">
-                <span className="w-8 shrink-0 font-mono text-xs font-bold tabular-nums text-muted">
-                  {pad2(shot.shot_number)}
-                </span>
-                <span className="w-14 shrink-0 text-right font-mono text-sm tabular-nums text-ink-2">
-                  {shot.time_from_beep.toFixed(2)}
-                </span>
-                <span className="w-16 shrink-0 text-right font-mono text-sm font-bold tabular-nums text-ink">
-                  {shot.split.toFixed(3)}
-                </span>
-                {tier ? (
-                  <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-                    <span
-                      aria-hidden
-                      className="size-2 rounded-full"
-                      style={{ backgroundColor: tier.color }}
-                    />
-                    {tier.label}
+              <button
+                type="button"
+                onClick={() => onSeek(shot)}
+                className="min-h-11 flex-1 px-4 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led focus-visible:ring-inset"
+              >
+                <span className="flex items-center gap-3">
+                  <span className="w-8 shrink-0 font-mono text-xs font-bold tabular-nums text-muted">
+                    {pad2(shot.shot_number)}
                   </span>
+                  <span className="w-14 shrink-0 text-right font-mono text-sm tabular-nums text-ink-2">
+                    {shot.time_from_beep.toFixed(2)}
+                  </span>
+                  <span className="w-16 shrink-0 text-right font-mono text-sm font-bold tabular-nums text-ink">
+                    {shot.split.toFixed(3)}
+                  </span>
+                  {tier ? (
+                    <span className="inline-flex shrink-0 items-center gap-1 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+                      <span aria-hidden className="size-2 rounded-full" style={{ backgroundColor: tier.color }} />
+                      {tier.label}
+                    </span>
+                  ) : null}
+                </span>
+                {shot.coaching_note ? (
+                  <span className="mt-1 block pl-11 text-xs text-muted">{shot.coaching_note}</span>
                 ) : null}
-                {shot.interval_class ? (
-                  <span
-                    className={cn(
-                      "inline-flex shrink-0 items-center rounded border px-1.5 py-0.5 font-mono text-[0.625rem] uppercase",
-                      INTERVAL_TONE[shot.interval_class],
-                    )}
+              </button>
+              <span className="flex shrink-0 items-center gap-2 pr-4">
+                {onReclassify ? (
+                  <button
+                    type="button"
+                    aria-label={`Reclassify shot ${shot.shot_number} (${
+                      shot.interval_class ? INTERVAL_LABEL[shot.interval_class] : "unclassified"
+                    })`}
+                    onClick={() => onReclassify(shot)}
+                    className="flex min-h-11 min-w-11 items-center justify-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
                   >
-                    {INTERVAL_LABEL[shot.interval_class]}
-                  </span>
+                    {chip}
+                  </button>
+                ) : shot.interval_class ? (
+                  chip
                 ) : null}
                 {shot.improvement_flag ? (
                   <Flag
                     role="img"
                     aria-label="Flagged for improvement"
-                    className="ml-auto size-3.5 shrink-0 text-led"
+                    className="size-3.5 shrink-0 text-led"
                   />
                 ) : null}
               </span>
-              {shot.coaching_note ? (
-                <span className="mt-1 block pl-11 text-xs text-muted">{shot.coaching_note}</span>
-              ) : null}
-            </button>
+            </div>
           );
         })}
       </div>
