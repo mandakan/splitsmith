@@ -9617,7 +9617,10 @@ def create_app(
             raise HTTPException(status_code=400, detail="beep_time must be >= 0")
         _apply_beep_override(slug, project, stage, video, req.beep_time)
         project.save(state.shooter_root(slug))
-        if req.beep_time is not None:
+        # Mirrors mark state only: no raw media exists hosted-side, so
+        # there is nothing to trim or detect against. Desktop re-derives
+        # on its next sync pull (bidirectional sync design).
+        if req.beep_time is not None and current_match_origin.get() != "desktop":
             await _maybe_chain_trim(slug, stage, video)
             await _advance_sequential_chain(state, slug, project, video, stage_number)
         return JSONResponse(project.model_dump(mode="json"))

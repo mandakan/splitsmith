@@ -21,6 +21,7 @@ from sqlalchemy import select as _select
 
 from splitsmith import match_model
 from splitsmith.db import MatchRow, ProjectStateStore, RecentProjectRow, User, create_engine, sessionmaker
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from tests.hosted_helpers import _CapturingSender, login, seed_match
 
 CREATE_URL = "/api/sync/matches"
@@ -46,6 +47,47 @@ def _seed_mirror(client: TestClient, match_id: str, name: str) -> None:
     doc = match_model.Match(match_id=match_id, name=name, shooters=[], stages=[]).model_dump(mode="json")
     put = client.put(_sync_docs_url(match_id, "match"), params={"expected_version": 0}, json=doc)
     assert put.status_code == 200, put.text
+
+
+def _seed_mirror_with_video(client: TestClient, match_id: str, name: str) -> str:
+    """Adopt ``match_id`` as a mirror with one shooter "alice", stage 1, and
+    one primary video.
+
+    Reuses ``_seed_mirror`` for the match-doc create, then registers
+    "alice" on the roster (a second PUT to the match doc, since the
+    version moved to 1 on insert) and pushes a project doc through the
+    same sync-doc PUT surface. ``video_id`` on ``StageVideo`` is a
+    computed field (blake2s of path + stage_number) - built from a real
+    ``StageVideo``/``MatchProject`` instance rather than a hand-rolled
+    dict so the value returned here always matches what the server
+    resolves. Returns that real video_id for the caller's request URLs.
+    """
+    _seed_mirror(client, match_id, name)
+    roster_doc = match_model.Match(
+        match_id=match_id, name=name, shooters=["alice"], stages=[]
+    ).model_dump(mode="json")
+    put_roster = client.put(_sync_docs_url(match_id, "match"), params={"expected_version": 1}, json=roster_doc)
+    assert put_roster.status_code == 200, put_roster.text
+
+    video = StageVideo(
+        path=Path("videos/stage1.mp4"),
+        role="primary",
+        stage_number=1,
+        beep_time=2.0,
+        beep_source="auto",
+        beep_confidence=0.4,
+        beep_reviewed=False,
+        processed={"beep": True, "trim": True, "shot_detect": True},
+    )
+    stage = StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=12.5, videos=[video])
+    project_doc = MatchProject(name=name, competitor_name="Alice", stages=[stage]).model_dump(mode="json")
+    put_project = client.put(
+        f"/api/sync/matches/{match_id}/docs/project/alice",
+        params={"expected_version": 0},
+        json=project_doc,
+    )
+    assert put_project.status_code == 200, put_project.text
+    return video.video_id
 
 
 def _seed_match_doc(db_url: str, user_email: str, match_id: str, name: str) -> None:
@@ -282,3 +324,54 @@ def test_mirror_delete_match_succeeds(
     assert resp.status_code == 200, resp.text
     assert resp.json()["summary"]["match_row_removed"] is True
     assert not _match_row_exists(hosted_env, "mirror4")
+
+
+# Mirror beep overrides mark state only - no job chain (Slice 3, Task 2).
+
+
+def test_mirror_override_marks_state_only(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """A manual beep override on a mirror writes the fields and returns,
+    without chaining a trim job - there's no raw media hosted-side to
+    trim against. Desktop re-derives on its next sync pull."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRBEEPSTATE000000001"
+    video_id = _seed_mirror_with_video(client, match_id, "state-only")
+
+    resp = client.post(
+        f"/api/matches/{match_id}/shooters/alice/stages/1/videos/{video_id}/beep",
+        json={"beep_time": 3.75},
+    )
+    assert resp.status_code == 200, resp.text
+    video = resp.json()["stages"][0]["videos"][0]
+    assert video["beep_time"] == 3.75
+    assert video["beep_source"] == "manual"
+    assert video["processed"]["trim"] is False
+    assert video["processed"]["shot_detect"] is False
+
+    jobs = client.get("/api/me/jobs").json()
+    assert jobs == [], f"mirror override must not enqueue jobs: {jobs}"
+
+
+def test_mirror_confirm_sets_reviewed(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """Beep-queue confirm on a mirror never enqueued jobs to begin with -
+    covered here so the exemption stays honest alongside the override
+    test above."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRBEEPSTATE000000002"
+    video_id = _seed_mirror_with_video(client, match_id, "confirm-flag")
+
+    resp = client.post(
+        f"/api/matches/{match_id}/match/beep-queue/confirm",
+        json={"slug": "alice", "stage_number": 1, "video_id": video_id},
+    )
+    assert resp.status_code == 200, resp.text
+    jobs = client.get("/api/me/jobs").json()
+    assert jobs == []
