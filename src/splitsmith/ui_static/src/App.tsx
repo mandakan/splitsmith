@@ -105,6 +105,20 @@ function LegacyMatchRedirect() {
   return <Navigate to={target} replace />;
 }
 
+function Standby() {
+  return (
+    <div
+      className="grid min-h-dvh place-items-center bg-bg"
+      role="status"
+      aria-label="Loading"
+    >
+      <span className="font-mono text-xs uppercase tracking-[0.16em] text-subtle">
+        Standby...
+      </span>
+    </div>
+  );
+}
+
 /* Auth gate. Blocks the app on the initial ``/api/me`` resolve so an
  * anonymous hosted visitor never flashes protected chrome, then:
  *  - ``authed`` (hosted, when the session cookie resolves) -> render the app,
@@ -117,7 +131,7 @@ function LegacyMatchRedirect() {
  * is the normal-case reason status stays ``authed`` there. */
 function AuthGate({ children }: { children: ReactNode }) {
   const { status } = useAuth();
-  const { mode } = useDeploymentMode();
+  const { mode, resolved } = useDeploymentMode();
   const location = useLocation();
 
   // Device-flow pickup (#719). Whether to redirect has to be decided
@@ -148,7 +162,10 @@ function AuthGate({ children }: { children: ReactNode }) {
   // visit. The check bought nothing anyway: sessionStorage is
   // origin-scoped and stashApproveCode() only ever runs on the hosted
   // anonymous path, so a local install cannot hold a stash (pinned by a
-  // test in App.routes.test.tsx).
+  // test in App.routes.test.tsx). The unresolved-mode gate below (#734)
+  // still applies to everything else: it stops the ordinary tree from
+  // mounting on the provisional "local" default, closing the same race
+  // for every other mode-dependent feature.
   const pendingPickupCode =
     status === "authed" && location.pathname === "/" ? peekApproveCode() : null;
 
@@ -160,25 +177,21 @@ function AuthGate({ children }: { children: ReactNode }) {
   // gate has no say there. Bypass before the loading branch so a share
   // link renders without waiting on /api/me.
   if (location.pathname.startsWith("/share/")) return <>{children}</>;
-  if (status === "loading") {
-    return (
-      <div
-        className="grid min-h-dvh place-items-center bg-bg"
-        role="status"
-        aria-label="Loading"
-      >
-        <span className="font-mono text-xs uppercase tracking-[0.16em] text-subtle">
-          Standby...
-        </span>
-      </div>
-    );
-  }
+  if (status === "loading") return <Standby />;
   // Ahead of the local-mode early return on purpose: see the comment on
   // pendingPickupCode. A pending pickup implies a stash, which only the
   // hosted anonymous path can ever write.
   if (pendingPickupCode) {
     return <Navigate to={`/desktop/approve?code=${pendingPickupCode}`} replace />;
   }
+  // Hold the route tree until the deployment mode has genuinely resolved
+  // (#734). Mounting on the provisional "local" default lets mode-gated
+  // surfaces fire local-only requests against a hosted server and
+  // reintroduces the mount-then-navigate races described above for every
+  // future mode-dependent feature. The share and pickup branches stay
+  // above this line: neither depends on mode, and the pickup must win
+  // the first commit regardless of how slow /api/server/features is.
+  if (!resolved) return <Standby />;
   // Desktop is never gated -- no login route, no redirect, whatever /api/me did.
   if (mode === "local") return <>{children}</>;
   if (status === "anon" && location.pathname !== "/login") {
