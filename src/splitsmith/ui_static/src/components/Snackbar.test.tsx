@@ -43,4 +43,24 @@ describe("Snackbar", () => {
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
+
+  it("does not reset auto-dismiss timer when onDismiss identity changes", () => {
+    const snack = { message: "saved", tone: "status" as const };
+    const firstOnDismiss = vi.fn();
+    const { rerender } = render(<Snackbar snack={snack} onDismiss={firstOnDismiss} />);
+
+    // Advance 3 seconds into the 6 second timeout
+    act(() => vi.advanceTimersByTime(3000));
+
+    // Re-render with a new onDismiss function identity (but same snack object)
+    const secondOnDismiss = vi.fn();
+    rerender(<Snackbar snack={snack} onDismiss={secondOnDismiss} />);
+
+    // Advance past the original 6 second mark (3 more seconds total)
+    act(() => vi.advanceTimersByTime(3000));
+
+    // The timer should fire at the 6s mark with the current ref value (secondOnDismiss),
+    // proving the timer was not reset by the identity change
+    expect(secondOnDismiss).toHaveBeenCalledTimes(1);
+  });
 });

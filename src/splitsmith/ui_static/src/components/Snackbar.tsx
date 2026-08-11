@@ -11,7 +11,7 @@
  * the sheet can always re-apply the previous class, so the 6 s limit is
  * acceptable.
  */
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 import { Portal } from "@/components/ui/Portal";
 import { cn } from "@/lib/utils";
@@ -33,12 +33,17 @@ export function Snackbar({
   onDismiss: () => void;
 }) {
   const isError = snack?.tone === "error";
+  const onDismissRef = useRef(onDismiss);
+
+  useEffect(() => {
+    onDismissRef.current = onDismiss;
+  });
 
   useEffect(() => {
     if (!snack || snack.tone === "error") return;
-    const id = window.setTimeout(onDismiss, SNACK_MS);
+    const id = window.setTimeout(() => onDismissRef.current(), SNACK_MS);
     return () => window.clearTimeout(id);
-  }, [snack, onDismiss]);
+  }, [snack]);
 
   return (
     <Portal>
@@ -51,7 +56,7 @@ export function Snackbar({
           <div
             className={cn(
               "pointer-events-auto flex min-h-11 items-center gap-3 rounded-md border bg-surface px-4 py-2 text-sm shadow-md",
-              isError ? "border-led text-led" : "border-rule-strong text-ink",
+              isError ? "border-destructive/40 text-destructive" : "border-rule-strong text-ink",
             )}
           >
             <span>{snack.message}</span>
