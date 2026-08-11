@@ -6315,6 +6315,13 @@ def create_app(
     # because each runs in its own contextvar scope. The singleton
     # ``state._bound_root`` is only consulted for legacy bare-path
     # traffic that hasn't migrated to the new prefix.
+
+    # Slice 3 (mobile beep review): the only two beep writes a mirror
+    # accepts. Everything else beep-shaped (detect-beep, beep-window,
+    # select, snap, the legacy primary shim) needs source audio or fires
+    # jobs, and stays read-only on mirrors.
+    _mirror_beep_write_re = re.compile(r"^shooters/[^/]+/stages/\d+/videos/[^/]+/beep$")
+
     @app.middleware("http")
     async def _match_id_alias(request, call_next):
         path = request.url.path
@@ -6377,7 +6384,12 @@ def create_app(
             if (
                 owner_row.origin == "desktop"
                 and request.method not in ("GET", "HEAD", "OPTIONS")
-                and not (rest == "match/shares" or rest.startswith("match/shares/"))
+                and not (
+                    rest == "match/shares"
+                    or rest.startswith("match/shares/")
+                    or (request.method == "POST" and rest == "match/beep-queue/confirm")
+                    or (request.method == "POST" and _mirror_beep_write_re.match(rest) is not None)
+                )
             ):
                 return JSONResponse(status_code=403, content={"detail": "read_only_mirror"})
             work_root = (

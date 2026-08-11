@@ -192,6 +192,69 @@ def test_native_match_add_shooter_unchanged(
     assert [s["name"] for s in body["shooters"]] == ["Bob"]
 
 
+# Beep write paths pass the read-only gate on mirrors (Slice 3).
+
+
+def test_mirror_beep_confirm_passes_gate(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The gate no longer 403s beep-queue confirm on a mirror.
+
+    Only the middleware is under test: with no shooter seeded the handler
+    itself 404s, which proves the request got past the 403."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRBEEPGATE0000000001"
+    _seed_mirror(client, match_id, "gate-confirm")
+    resp = client.post(
+        f"/api/matches/{match_id}/match/beep-queue/confirm",
+        json={"slug": "ghost", "stage_number": 1, "video_id": "v1"},
+    )
+    assert resp.status_code != 403, resp.text
+
+
+def test_mirror_beep_override_passes_gate(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The gate no longer 403s per-video beep override on a mirror."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRBEEPGATE0000000002"
+    _seed_mirror(client, match_id, "gate-override")
+    resp = client.post(
+        f"/api/matches/{match_id}/shooters/ghost/stages/1/videos/v1/beep",
+        json={"beep_time": 1.25},
+    )
+    assert resp.status_code != 403, resp.text
+
+
+def test_mirror_destructive_beep_paths_still_blocked(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """detect-beep, beep-window, select, and snap stay read-only on mirrors."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRBEEPGATE0000000003"
+    _seed_mirror(client, match_id, "gate-blocked")
+    blocked = [
+        ("POST", f"/api/matches/{match_id}/shooters/g/stages/1/videos/v1/detect-beep", None),
+        ("PUT", f"/api/matches/{match_id}/shooters/g/stages/1/videos/v1/beep-window",
+         {"start": 0.0, "end": 5.0}),
+        ("POST", f"/api/matches/{match_id}/shooters/g/stages/1/videos/v1/beep/select",
+         {"time": 1.0}),
+        ("POST", f"/api/matches/{match_id}/shooters/g/stages/1/videos/v1/beep/snap",
+         {"time": 1.0}),
+        ("POST", f"/api/matches/{match_id}/shooters/g/stages/1/beep", {"beep_time": 1.0}),
+    ]
+    for method, url, body in blocked:
+        resp = client.request(method, url, json=body)
+        assert resp.status_code == 403, f"{method} {url} -> {resp.status_code}"
+        assert resp.json()["detail"] == "read_only_mirror"
+
+
 # Deleting a mirror still works - delete-match is a non-alias-routed
 # picker action (POST /api/me/recent-projects/delete), untouched by the
 # gate, but covered here so the exemption stays honest.
