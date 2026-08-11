@@ -1,27 +1,43 @@
 /**
- * ResultsStage - read-only stage playback page (/results/:slug/:stage).
+ * ResultsStage - stage playback page (/results/:slug/:stage), also
+ * mounted anonymously at /share/:token/results/:slug/:stage.
  *
  * Video + marker scrub bar + stats strip + splits list, synced through
  * one <video> element owned here. shots[].time_absolute and beep_time
  * arrive already in the served clip's coordinate system, so seeking is
  * plain currentTime assignment.
  *
- * Read-only by contract: this surface is the future share-link view -
- * no mutations, no localStorage, no operator-only assumptions.
+ * Read-only on share mounts only: operator mounts (desktop and mobile)
+ * carry the slice-5 interval-reclassify write path (mobile operator
+ * surfaces program), deliberately breaking the old blanket read-only
+ * contract for this page. isShareView gates the affordance client-side;
+ * the server share whitelist is the backstop that actually enforces it.
  */
 import { ArrowLeft, ArrowRight, ChevronDown, ChevronLeft, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
 
+import { Snackbar, type SnackState } from "@/components/Snackbar";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
+import { ReclassifySheet } from "@/components/results/ReclassifySheet";
 import { ResultsPlayer, type FullscreenMode } from "@/components/results/ResultsPlayer";
 import { Scorecard } from "@/components/results/Scorecard";
 import { SplitsList } from "@/components/results/SplitsList";
 import { StageStats } from "@/components/results/StageStats";
 import { Kicker } from "@/components/ui";
-import { ApiError, api, type CoachStageResponse, type StageScorecard } from "@/lib/api";
-import { useMatchHref } from "@/lib/matchHref";
 import {
+  ApiError,
+  api,
+  type CoachShot,
+  type CoachShotPatch,
+  type CoachStageResponse,
+  type StageScorecard,
+} from "@/lib/api";
+import { buildUndoPatch } from "@/lib/coachPatch";
+import { useMatchHref } from "@/lib/matchHref";
+import { isShareView } from "@/lib/shareView";
+import {
+  INTERVAL_LABEL,
   type TierBaselines,
   baselinesFromMatchDistributions,
   currentShotIndex,
@@ -74,6 +90,44 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const [fsMode, setFsMode] = useState<FullscreenMode>("off");
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [playerBox, setPlayerBox] = useState<HTMLDivElement | null>(null);
+  const location = useLocation();
+  const canReclassify = !isShareView(location.pathname);
+  const [sheetShot, setSheetShot] = useState<CoachShot | null>(null);
+  const [patchBusy, setPatchBusy] = useState(false);
+  const [snack, setSnack] = useState<SnackState | null>(null);
+
+  // Non-optimistic write, per the desktop Coach precedent: PATCH returns
+  // the full CoachStageResponse, which replaces coach state wholesale -
+  // no refetch, no local mirror to desync. Undo re-patches the inverse
+  // (buildUndoPatch) of exactly the fields the apply touched.
+  const applyShotPatch = useCallback(
+    async (shot: CoachShot, patch: CoachShotPatch, undoable: boolean) => {
+      setPatchBusy(true);
+      try {
+        const updated = await api.patchStageShotCoach(slug, stage, shot.shot_number, patch);
+        setCoach(updated);
+        setSheetShot(null);
+        if (undoable) {
+          const undoPatch = buildUndoPatch(shot, patch);
+          setSnack({
+            message: patch.interval_class
+              ? `Shot ${shot.shot_number} - ${INTERVAL_LABEL[patch.interval_class]}`
+              : `Shot ${shot.shot_number} note saved`,
+            tone: "status",
+            actionLabel: "Undo",
+            onAction: () => void applyShotPatch(shot, undoPatch, false),
+          });
+        } else {
+          setSnack({ message: "Change undone", tone: "status" });
+        }
+      } catch (e) {
+        setSnack({ message: e instanceof ApiError ? e.detail : String(e), tone: "error" });
+      } finally {
+        setPatchBusy(false);
+      }
+    },
+    [slug, stage],
+  );
 
   // The pinned player's height varies with viewport width, so no
   // constant is safe (same rationale as useShellHeaderHeight). Measured
@@ -405,6 +459,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           onSeek={seekToShot}
           isPlaying={isPlaying}
           baselines={baselines}
+          onReclassify={canReclassify ? setSheetShot : undefined}
         />
         {scorecard ? (
           <div className="flex flex-col gap-2">
@@ -417,6 +472,14 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           </div>
         ) : null}
       </div>
+      <ReclassifySheet
+        key={sheetShot?.shot_number ?? "closed"}
+        shot={sheetShot}
+        busy={patchBusy}
+        onApply={(shot, patch) => void applyShotPatch(shot, patch, true)}
+        onCancel={() => setSheetShot(null)}
+      />
+      <Snackbar snack={snack} onDismiss={() => setSnack(null)} />
     </div>
   );
 }
