@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.24.0](https://github.com/mandakan/splitsmith/compare/v0.23.1...v0.24.0) (2026-08-11)
+
+
+### Features
+
+* **agent:** GPU agent image (NVENC + CUDA) for NVIDIA self-hosted hosts ([#796](https://github.com/mandakan/splitsmith/issues/796)) ([#809](https://github.com/mandakan/splitsmith/issues/809)) ([6db7092](https://github.com/mandakan/splitsmith/commit/6db70923680612abcc8b4238e37d242af90c1f50))
+* **agent:** native (no-Docker) GPU agent for WSL2, zero env setup ([#796](https://github.com/mandakan/splitsmith/issues/796)) ([#810](https://github.com/mandakan/splitsmith/issues/810)) ([fa78737](https://github.com/mandakan/splitsmith/commit/fa78737d82364308cbbc97d25da75d7141778cfd))
+* **agent:** opportunistic NVENC audit encoding + GPU capability advertisement ([#796](https://github.com/mandakan/splitsmith/issues/796)) ([#806](https://github.com/mandakan/splitsmith/issues/806)) ([5c233b2](https://github.com/mandakan/splitsmith/commit/5c233b210a423c1246aab9b4ad26f187d5501f1e))
+* **db:** add retry for failed jobs in the postgres job backend ([f66017c](https://github.com/mandakan/splitsmith/commit/f66017c9447c4b57b3ba05b71762cb12a199b888))
+* **db:** persist wire submit args on compute_jobs for retry ([b7c315a](https://github.com/mandakan/splitsmith/commit/b7c315adc9c721445852487bb3525237a93dd6aa))
+* **ensemble:** CUDA execution provider for ONNX inference, opportunistic ([#796](https://github.com/mandakan/splitsmith/issues/796)) ([#808](https://github.com/mandakan/splitsmith/issues/808)) ([b210a69](https://github.com/mandakan/splitsmith/commit/b210a698c5b149c50a942277e66ed24b31717189))
+* mobile-first jobs page with retry ([3b63306](https://github.com/mandakan/splitsmith/commit/3b633064ff9fddc642b0506eb741eaa320c701ca))
+* retry endpoint for failed jobs ([dc9d38f](https://github.com/mandakan/splitsmith/commit/dc9d38ffc2231eee211576f866720f2a230d38a2))
+* retry for failed jobs in the in-memory job registry ([62f5cda](https://github.com/mandakan/splitsmith/commit/62f5cdafe1cd7555050067d29954166a1408d803))
+* **sync:** bidirectional pull-merge-push desktop sync ([6ab7180](https://github.com/mandakan/splitsmith/commit/6ab7180eed866d7de1ac79b6c68acfc9b493c048))
+* **sync:** hosted doc manifest + GET routes, version-guarded PUTs ([60646da](https://github.com/mandakan/splitsmith/commit/60646dacfb4eb64e2577898ba37f83923fe7ae05))
+* **sync:** pull planning via manifest version diff ([a3d2651](https://github.com/mandakan/splitsmith/commit/a3d265171a12216fff963df374ea2cc25a9151b2))
+* **sync:** pull-merge-push orchestration with bounded conflict retry ([3714d6e](https://github.com/mandakan/splitsmith/commit/3714d6ecaf3cca13a8413228185aad367234b448))
+* **sync:** pure three-way merge engine with conflict matrix ([87bcb3f](https://github.com/mandakan/splitsmith/commit/87bcb3f0632acc5890ad4f906fb61efc2b1afc5a))
+* **sync:** remote-staleness hint on sync status + SyncCard ([18809cc](https://github.com/mandakan/splitsmith/commit/18809cce8753d46a3a403b7f200ad2fea0b22f85))
+* **sync:** stamp ids on the MCP shot-detect audit_events append too ([263c6ac](https://github.com/mandakan/splitsmith/commit/263c6ac00752ceebbc24bb828ec06d54151f49b7))
+* **sync:** stamp unique ids on audit_events entries ([cacafac](https://github.com/mandakan/splitsmith/commit/cacafac485bc711e8f5d63ecaf7a76387f3dbb93))
+* **sync:** state-doc manifest query on ProjectStateStore ([86fdc7d](https://github.com/mandakan/splitsmith/commit/86fdc7d6c8a11e058d443f85f8806c9a02e25de0))
+* **sync:** sync_state v2 doc_versions + sync_base snapshot store ([7b6c96f](https://github.com/mandakan/splitsmith/commit/7b6c96fd926e6b90af02f47f5d65732afcb7b6f1))
+* **ui:** job timings type and retry action in the jobs data layer ([bb75166](https://github.com/mandakan/splitsmith/commit/bb75166b811f82255f50d031c60559b4a40b16f9))
+* **ui:** jobs route, nav item and failed-count badge ([be19e13](https://github.com/mandakan/splitsmith/commit/be19e1326f67da839b6b285b381a4f78efbfcfa7))
+* **ui:** mobile-first jobs page with retry and phase timings ([1059506](https://github.com/mandakan/splitsmith/commit/10595061ef1c43c733e60102fc907a699b4a13a4))
+
+
+### Bug Fixes
+
+* **docker:** GPU image build must not assert runtime CUDA on a GPU-less builder ([#796](https://github.com/mandakan/splitsmith/issues/796)) ([#813](https://github.com/mandakan/splitsmith/issues/813)) ([13a7e8c](https://github.com/mandakan/splitsmith/commit/13a7e8c0bae8e8b44c641e1c7982b16193949de0))
+* **docker:** pin the onnxruntime-gpu swap to the project venv ([#796](https://github.com/mandakan/splitsmith/issues/796)) ([#815](https://github.com/mandakan/splitsmith/issues/815)) ([513d4d8](https://github.com/mandakan/splitsmith/commit/513d4d8fc5d8561cefc70c108ec1e5757b9a3bd0))
+* **docker:** verify GPU wheel by provider .so, not dist metadata ([#796](https://github.com/mandakan/splitsmith/issues/796)) ([#814](https://github.com/mandakan/splitsmith/issues/814)) ([daf0b10](https://github.com/mandakan/splitsmith/commit/daf0b104b90b241c88543c6ab5f104c056a911d9))
+* **jobs:** make retry's acknowledged flip an atomic claim ([8b0921a](https://github.com/mandakan/splitsmith/commit/8b0921ab8ac0b6d446b230f2c536122146934024))
+* **jobs:** retry rebinds the original job's match context ([7c2ef83](https://github.com/mandakan/splitsmith/commit/7c2ef832e605682d618ad0ccb0f25cdda3f509d6))
+* **sync:** base snapshot path must append .json, not replace key suffix ([8e28a87](https://github.com/mandakan/splitsmith/commit/8e28a87f812e97485a421a01858c25f4eb5aa02c))
+* **sync:** malformed manifest degrades status hint to unknown ([ff7963a](https://github.com/mandakan/splitsmith/commit/ff7963a5897164b9afa5d0c71a5627f4a02a9657))
+* **sync:** skip pulled audit docs with no local counterpart ([972139f](https://github.com/mandakan/splitsmith/commit/972139f98f17fa7de2339f9ab4ae6593acd789dd))
+* **test:** seed_mirror sends required expected_version on doc PUT ([6e62a1e](https://github.com/mandakan/splitsmith/commit/6e62a1e13efa045d0c652253879607dbad7f219c))
+* **test:** seed_mirror sends required expected_version on doc PUT ([098c185](https://github.com/mandakan/splitsmith/commit/098c1850065db1315c1eea19aa129dd6787934a5))
+* **ui:** address Jobs page review findings ([1e9c9af](https://github.com/mandakan/splitsmith/commit/1e9c9af4fbcd44dea187d81d6881fc667a97e772))
+* **ui:** match breadcrumb labels against the match-relative path, show shooter on job cards ([f49744e](https://github.com/mandakan/splitsmith/commit/f49744e86c775fafe85694b49abf0ef5850e0d0a))
+
+
+### Documentation
+
+* bidirectional sync slice design (mobile program slice 2) ([9f4ef9f](https://github.com/mandakan/splitsmith/commit/9f4ef9fb268be5b06e380bd61ff76cff197849ac))
+* bidirectional sync slice implementation plan ([0ee2ef8](https://github.com/mandakan/splitsmith/commit/0ee2ef8a28b4f6f42691ad1d1b709f73c0d209f4))
+* mobile operator surfaces spec + jobs page plan ([678aa20](https://github.com/mandakan/splitsmith/commit/678aa20354fd304a5b1c4314a5ec7300f7bb5936))
+
+
+### Build / CI
+
+* **publish-image:** publish the GPU agent image under -gpu tags ([#796](https://github.com/mandakan/splitsmith/issues/796)) ([#812](https://github.com/mandakan/splitsmith/issues/812)) ([3346588](https://github.com/mandakan/splitsmith/commit/3346588d2a45ab9c90454054da6f9390e4066d33))
+* **test:** warm librosa/numba JIT cache before the xdist run ([#742](https://github.com/mandakan/splitsmith/issues/742)) ([#816](https://github.com/mandakan/splitsmith/issues/816)) ([164c919](https://github.com/mandakan/splitsmith/commit/164c919a678a1dbe427a967c3518982dc220c000))
+
 ## [0.23.1](https://github.com/mandakan/splitsmith/compare/v0.23.0...v0.23.1) (2026-08-10)
 
 
