@@ -210,6 +210,31 @@ def test_beep_review_foreign_subdir_rejected(
     assert resp.status_code == 422, resp.text
 
 
+def test_trimmed_m4a_cross_product_rejected(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+) -> None:
+    """#821: the extension set is per-subdir. trimmed/ never holds audio
+    snippets; admitting the cross-product widens the write surface."""
+    client, sender, captured = hosted_app_with_storage
+    _login_and_adopt(client, sender, captured)
+
+    key = f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed/stage1_cam_abc123.m4a"
+    resp = client.post(CREATE_URL, json={"key": key})
+    assert resp.status_code == 422, resp.text
+
+
+def test_beep_review_mp4_cross_product_rejected(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+) -> None:
+    """#821: beep_review/ holds .m4a snippets and .peaks.json only."""
+    client, sender, captured = hosted_app_with_storage
+    _login_and_adopt(client, sender, captured)
+
+    key = f"matches/{MATCH_ID}/shooters/{SLUG}/beep_review/vid123.mp4"
+    resp = client.post(CREATE_URL, json={"key": key})
+    assert resp.status_code == 422, resp.text
+
+
 @pytest.mark.parametrize("route", [CREATE_URL, PART_URL_URL, COMPLETE_URL, ABORT_URL])
 def test_key_containment_enforced_on_every_route(
     hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict], route: str

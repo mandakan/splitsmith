@@ -54,9 +54,15 @@ router = APIRouter(prefix="/api/sync")
 # users/<uid>/ prefix, never the client - so this regex plus the
 # match_id equality check in _validate_media_key is the entire guard;
 # there is no filesystem boundary to fall back on the way local mode has.
+#
+# Per-subdir extension sets (#821): trimmed/ holds .mp4 clips plus their
+# .params.json sidecars; beep_review/ holds .m4a snippets plus their
+# .peaks.json. The cross-product (trimmed/*.m4a, beep_review/*.mp4) is
+# not a thing the desktop push ever writes, so the gate rejects it.
 _SYNC_MEDIA_KEY_RE = re.compile(
     r"^matches/(?P<match_id>[A-Za-z0-9._-]+)/shooters/[A-Za-z0-9_-]+/"
-    r"(?:trimmed|beep_review)/[A-Za-z0-9._-]+\.(?:mp4|json|m4a)$"
+    r"(?:trimmed/[A-Za-z0-9._-]+\.(?:mp4|json)"
+    r"|beep_review/[A-Za-z0-9._-]+\.(?:m4a|json))$"
 )
 
 
