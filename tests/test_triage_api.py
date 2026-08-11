@@ -299,9 +299,7 @@ def test_triage_includes_skipped_stages_with_skipped_status(client: _MatchClient
     match_root = client.app.state.splitsmith_state.matches.resolve(match_id)
     shooter_root = match_model.Match.shooter_root(match_root, "alice")
     project = MatchProject.load(shooter_root)
-    project.stages.append(
-        StageEntry(stage_number=3, stage_name="Stage 3", time_seconds=10.0, skipped=True)
-    )
+    project.stages.append(StageEntry(stage_number=3, stage_name="Stage 3", time_seconds=10.0, skipped=True))
     project.save(shooter_root)
 
     body = client.get("/api/match/triage").json()
