@@ -13474,11 +13474,16 @@ def create_app(
             return proxy_key_for(path_str) in _proxy_keys
 
         # Snippet artifacts pushed by desktop for unconfirmed videos
-        # (slice 3). One list per request covers every shooter.
+        # (slice 3). One list per shooter, scoped to beep_review/ - the
+        # shooters/ prefix as a whole is dominated by trimmed clips that
+        # this endpoint never reads (#821).
         _match_id = current_match_id.get()
         _snippet_keys: set[str] = set()
         if _storage is not None and _match_id:
-            _snippet_keys = {obj.path for obj in _storage.list(f"matches/{_match_id}/shooters/")}
+            for _slug in match.shooters:
+                _snippet_keys.update(
+                    obj.path for obj in _storage.list(f"matches/{_match_id}/shooters/{_slug}/beep_review/")
+                )
 
         def _snippet_ready(slug: str, video_id: str) -> bool:
             if not _snippet_keys:

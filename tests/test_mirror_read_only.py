@@ -618,6 +618,45 @@ def test_mirror_beep_queue_media_flags(
     assert item["snippet_ready"] is True
 
 
+def test_beep_queue_lists_only_beep_review_prefixes(
+    hosted_env: str,
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict[str, object]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#821: the snippet listing must not enumerate every trimmed clip.
+    Pin the prefixes so a regression shows up as a wrong prefix, not as
+    a silent hosted-list cost.
+
+    Every request rebuilds an equivalent ``S3Storage`` instance against
+    the same moto bucket (see ``moto_s3_storage``'s docstring), so the
+    recording wrapper has to sit on the class, not on one captured
+    instance - an instance-level patch would only see calls made before
+    the beep-queue request builds its own storage object.
+    """
+    client, sender, _captured = hosted_app_with_storage
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRBEEPQUEUE00000003"
+    _seed_mirror_with_video(client, match_id, "queue-prefixes")
+
+    from splitsmith.storage import S3Storage
+
+    prefixes: list[str] = []
+    original_list = S3Storage.list
+
+    def _recording_list(self: S3Storage, prefix: str):
+        prefixes.append(prefix)
+        return original_list(self, prefix)
+
+    monkeypatch.setattr(S3Storage, "list", _recording_list)
+
+    resp = client.get(f"/api/matches/{match_id}/match/beep-queue")
+    assert resp.status_code == 200, resp.text
+
+    snippet_prefixes = [p for p in prefixes if p.startswith("matches/")]
+    assert snippet_prefixes, "expected at least one snippet listing"
+    assert all(p.endswith("/beep_review/") for p in snippet_prefixes), snippet_prefixes
+
+
 def test_mirror_beep_queue_trim_stale_when_trim_not_processed(
     hosted_env: str,
     hosted_app: tuple[TestClient, _CapturingSender],
