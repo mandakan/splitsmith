@@ -268,8 +268,9 @@ def test_second_start_while_one_is_pending_resumes_it(tmp_path: Path, monkeypatc
     assert body["verification_uri"] == first.json()["verification_uri"]
     assert body["verification_uri_complete"] == first.json()["verification_uri_complete"]
     assert body["interval"] == 5
-    # The remaining window, not a fresh 600s one, and still positive.
-    assert 0 < body["expires_in"] <= 600
+    # Strict: a resumed start counts down the REMAINDER. A hardcoded 600
+    # would pass <=; the strict bound is what makes this falsifiable.
+    assert 0 < body["expires_in"] < 600
     # The hosted side was asked for exactly one authorization.
     assert fake.authorizes == 1
     # The secret never appears in a resume response either.
