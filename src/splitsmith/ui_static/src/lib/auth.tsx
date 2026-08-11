@@ -34,9 +34,9 @@ const AuthContext = React.createContext<AuthContextValue | null>(null);
 
 // Anonymous share pages (`/share/:token/...`) never have a session -
 // the request is guaranteed to 401. Same path-prefix idiom as
-// matchHref.ts and AuthGate's bypass in App.tsx (Compare.tsx's
-// isShareView() is page-level; a lib importing from a page would be
-// backwards). A share session never navigates out of `/share/` (every
+// matchHref.ts, AuthGate's bypass in App.tsx, and
+// lib/shareView's isShareView (which takes a pathname argument; this
+// helper reads window.location once at mount instead). A share session never navigates out of `/share/` (every
 // link inside one resolves via the share-aware useMatchHref), so
 // checking once at mount is sound - no need to react to route changes.
 function isShareRoute(): boolean {
