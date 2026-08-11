@@ -21,6 +21,7 @@ import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 import { ShareDialog } from "@/components/results/ShareDialog";
+import { StageCompareLink } from "@/components/match/StageCompareLink";
 import { matchTotals as scorecardTotals } from "@/components/results/Scorecard";
 
 /* -------------------------------------------------------------------------- */
@@ -560,9 +561,13 @@ export function Results() {
                   <span className="font-mono text-xs font-bold tabular-nums text-muted">
                     {pad2(row.stageNumber)}
                   </span>
-                  <span className="truncate font-display text-xs font-semibold uppercase tracking-[0.04em] text-ink">
+                  <span className="min-w-0 flex-1 truncate font-display text-xs font-semibold uppercase tracking-[0.04em] text-ink">
                     {row.stageName || `Stage ${row.stageNumber}`}
                   </span>
+                  <StageCompareLink
+                    stageNumber={row.stageNumber}
+                    comparableCount={row.auditedCount}
+                  />
                 </div>
                 {/* Shooter cells. Same share-view collapse as the mobile
                     cards: an all-unwatchable stage spans one quiet cell

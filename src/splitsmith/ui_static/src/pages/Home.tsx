@@ -34,6 +34,7 @@ import { Avatar, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import { EditStagesDrawer } from "@/components/match/EditStagesDrawer";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
+import { StageCompareLink } from "@/components/match/StageCompareLink";
 import { SyncCard } from "@/components/match/SyncCard";
 import {
   api,
@@ -962,9 +963,13 @@ function AggregateStageTile({
         <span className="font-mono text-xs font-bold text-muted">
           {pad2(row.stageNumber)}
         </span>
-        <span className="truncate font-display text-sm font-semibold uppercase tracking-[0.04em] text-ink">
+        <span className="min-w-0 flex-1 truncate font-display text-sm font-semibold uppercase tracking-[0.04em] text-ink">
           {row.stageName}
         </span>
+        <StageCompareLink
+          stageNumber={row.stageNumber}
+          comparableCount={row.auditedCount}
+        />
       </div>
       <div className="mb-2.5 flex flex-wrap gap-1.5">
         {row.cells.map((cell) => (
