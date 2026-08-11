@@ -158,4 +158,34 @@ describe("HostedAccountChip (local mode)", () => {
       screen.queryByRole("button", { name: /account status unavailable/i }),
     ).not.toBeInTheDocument();
   });
+
+  it("clears a stale load-failure flag on sign-out (#738)", async () => {
+    getSyncSettings.mockResolvedValueOnce({
+      base_url: "https://hosted.example",
+      token_set: true,
+      account: ACCOUNT,
+    });
+    render(<HostedAccountChip />);
+    expect(await screen.findByText("shooter@example.com")).toBeInTheDocument();
+
+    // A background refetch fails silently behind the still-displayed
+    // account (loadFailed is true but hidden - the account wins the render).
+    getSyncSettings.mockRejectedValueOnce(new Error("boom"));
+    act(() => {
+      window.dispatchEvent(new CustomEvent(HOSTED_ACCOUNT_CHANGED_EVENT));
+    });
+    await waitFor(() => expect(getSyncSettings).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("shooter@example.com")).toBeInTheDocument();
+
+    unlinkHostedAccount.mockResolvedValue({ cleared: true, hosted_revoked: true });
+    await userEvent.click(await screen.findByRole("button", { name: /sign out/i }));
+    await waitFor(() => expect(unlinkHostedAccount).toHaveBeenCalled());
+
+    expect(
+      await screen.findByRole("button", { name: /sign in to splitsmith\.app/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /account status unavailable/i }),
+    ).not.toBeInTheDocument();
+  });
 });
