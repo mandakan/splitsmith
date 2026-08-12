@@ -107,7 +107,8 @@ def render_card_png(
     try:
         with rasterizer_factory() as rasterizer:
             return RenderedCard(png=render_card(card, theme=theme, rasterizer=rasterizer), fell_back=False)
-    except RasterizerUnavailableError:
+    except RasterizerUnavailableError as exc:
+        logger.warning("share card render unavailable, serving fallback plate: %s", exc.detail)
         return RenderedCard(png=FALLBACK_PNG_PATH.read_bytes(), fell_back=True)
 
 
@@ -138,8 +139,8 @@ def cached_card_png(
         # Deliberately not cached: a browser-less host must not pin the
         # fallback plate onto this key forever. ``fell_back=True`` carries
         # the same rule outward, so the HTTP layer does not pin it in a
-        # crawler's cache either.
-        logger.warning("share card render unavailable, serving fallback plate")
+        # crawler's cache either. The failure is already logged in
+        # render_card_png with full exception detail.
         return rendered
     storage.write_bytes(key, rendered.png)
     return rendered
