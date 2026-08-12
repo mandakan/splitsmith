@@ -502,6 +502,56 @@ def test_run_sync_migration_lets_the_next_pull_merge_shots(tmp_path):
     assert merged[1]["coaching_note"] == "from-hosted"
 
 
+def test_run_sync_reports_the_unstamped_shot_refusal_to_the_operator(tmp_path):
+    """The refusal path itself, end to end (#846).
+
+    ``test_run_sync_migration_lets_the_next_pull_merge_shots`` drives a
+    legacy document through ``run_sync`` but asserts the refusal does
+    *not* fire, because the migration stamped it first. Nothing drove a
+    document that is still unstamped when the merge runs, so the branch
+    that appends the note had no end-to-end coverage at all.
+
+    The remote side is where an unstamped shot still reaches a merge:
+    ``migrate_shot_ids`` stamps every *local* audit doc before the pull,
+    but a hosted document is not its to rewrite, and the hosted save
+    boundary deliberately leaves a legacy manual shot unstamped on a
+    mirror rather than minting a non-convergent id for it
+    (``_may_mint_shot_ids``). So this is the shape a phone's save of a
+    pre-#848 document actually stores.
+
+    Asserting on ``format_sync_message`` and not just ``report.notes`` is
+    the point: the gate's guarantee is "a stated refusal, not a silent
+    duplicate", and a refusal that only reaches a field nobody renders is
+    a silent one.
+    """
+    match_root = make_synced_match(tmp_path)
+    audit_path = match_root / "shooters" / "anna" / "audit" / "stage1.json"
+    client = _first_sync(match_root)
+    local_before = json.loads(audit_path.read_text(encoding="utf-8"))["shots"]
+
+    audit_key = next(k for k in client.docs if k.startswith("audit/"))
+    body, version = client.docs[audit_key]
+    hosted = {
+        **body,
+        "shots": [
+            *body["shots"],
+            # No id and no candidate_number: nothing to key it on, and the
+            # one shape a mirror's save boundary refuses to stamp.
+            {"shot_number": 2, "candidate_number": None, "time": 1.25, "ms_after_beep": 750},
+        ],
+    }
+    client.docs[audit_key] = (hosted, version + 1)
+
+    report = run_sync(match_root, client=client)
+
+    assert any("without a persisted id" in note for note in report.notes), report.notes
+    assert f"{len(report.notes)} note(s) - see job details" in format_sync_message(report)
+    # The guarantee the refusal buys: local's shots stand exactly as they
+    # were - the remote shot is not adopted, and no local shot is dropped
+    # or duplicated.
+    assert json.loads(audit_path.read_text(encoding="utf-8"))["shots"] == local_before
+
+
 def test_run_sync_missing_local_audit_is_skipped_not_synthesized(tmp_path):
     """Remote has an audit doc for a stage whose local audit file does not
     exist - pull must note and skip, never synthesize an events-only local
