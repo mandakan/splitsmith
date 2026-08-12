@@ -476,11 +476,14 @@ def merge_audit_doc(
     # round-trips only shot_number/candidate_number/time/ms_after_beep/
     # source/note/id -- it drops the detector's ensemble_votes,
     # apriori_boost, ensemble_score and confidence, none of which are in
-    # ``merged_keys``. A plain, correct phone save of a detector-seeded
-    # stage therefore lands here every time. The fields stay desktop-owned
-    # (widening merged_keys would let a phone save erase them for real), so
-    # the note stays -- but it says which shots and which fields, and makes
-    # no claim about a gate.
+    # ``merged_keys``. Those fields stay desktop-owned (widening
+    # merged_keys would let a phone save erase them for real), but a field
+    # a side never sent is not a field it *changed* -- the shot residue
+    # comparison below (``_differing_shared_keys``) only looks at keys
+    # present on both sides, so a plain SPA save of a detector-seeded stage
+    # does not light this note up on every one of its shots. A field that
+    # travels on both sides and actually differs still fires it, saying
+    # which shots and which fields, and making no claim about a gate.
     def _strip_audit(doc: dict | None) -> dict:
         """Project a doc down to the fields that are still desktop-owned.
 
@@ -505,6 +508,20 @@ def merge_audit_doc(
     def _differing_keys(left: dict, right: dict) -> list[str]:
         return sorted(k for k in left.keys() | right.keys() if left.get(k) != right.get(k))
 
+    def _differing_shared_keys(left: dict, right: dict) -> list[str]:
+        """Like ``_differing_keys``, but only over keys present on both sides.
+
+        A residue field one side simply omits is not a change to that
+        field -- it is a field that side's writer never carries at all
+        (``buildAuditJson`` in audit-doc.ts never sends the detector's
+        ensemble_votes/apriori_boost/ensemble_score/confidence). Comparing
+        over the key union would read every one of those as "changed" on
+        every SPA save of a detector-seeded shot; comparing only shared
+        keys keeps this a tripwire for a field that *did* travel on both
+        sides and diverged.
+        """
+        return sorted(k for k in left.keys() & right.keys() if left[k] != right[k])
+
     if base is not None:
         base_residue, remote_residue = _shot_residue(base), _shot_residue(remote)
         details: list[str] = []
@@ -513,7 +530,7 @@ def merge_audit_doc(
         if doc_fields:
             details.append(f"document: {', '.join(doc_fields)}")
         for shot_id in sorted(base_residue.keys() & remote_residue.keys()):
-            fields = _differing_keys(base_residue[shot_id], remote_residue[shot_id])
+            fields = _differing_shared_keys(base_residue[shot_id], remote_residue[shot_id])
             if fields:
                 details.append(f"shot {shot_id}: {', '.join(fields)}")
         if details:

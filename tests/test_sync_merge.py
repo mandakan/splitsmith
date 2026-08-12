@@ -1057,13 +1057,17 @@ def _spa_shot(**over: object) -> dict:
     return shot
 
 
-def test_the_tripwire_note_names_the_shot_and_the_fields() -> None:
-    """A plain, correct phone save of a detector-seeded stage lands here.
+def test_spa_shaped_remote_shot_is_not_a_tripwire() -> None:
+    """A plain, correct phone save of a detector-seeded stage must not note.
 
-    The audit PUT is whitelisted now, so the old text - "mirror write gate
-    should make this impossible - investigate" - was false on the happy
-    path. The fields are still desktop-owned, so the note stays; it just has
-    to say what actually differs.
+    ``buildAuditJson`` (audit-doc.ts) never sends ensemble_votes/
+    ensemble_score/apriori_boost/confidence at all - it only round-trips
+    shot_number/candidate_number/time/ms_after_beep/source(/note/id). Those
+    fields are simply absent from the remote shot, not changed on it, so
+    the residue comparison - now projected to keys present on both sides -
+    must not read the omission as a change. This used to fire the note on
+    every shot of every detector-seeded stage a phone saved; that was the
+    bug (issue found on this branch).
     """
     base = _id_doc([_detector_shot()])
     local = _id_doc([_detector_shot()])
@@ -1071,16 +1075,37 @@ def test_the_tripwire_note_names_the_shot_and_the_fields() -> None:
 
     result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
 
-    note = next(n for n in result.notes if "non-whitelisted" in n)
-    assert "should make this impossible" not in note
-    assert "shot cand-1" in note
-    for field in ("apriori_boost", "confidence", "ensemble_score", "ensemble_votes"):
-        assert field in note, note
-    # Named, not merged: the desktop's values still stand, and the phone's
+    assert not any("non-whitelisted" in n for n in result.notes)
+    # The desktop-only fields still stand untouched, and the phone's
     # whitelisted nudge still lands.
     merged = result.doc["shots"][0]
     assert merged["confidence"] == 0.91 and merged["ensemble_votes"] == 3
     assert merged["time"] == 6.05
+
+
+def test_tripwire_still_fires_when_a_shared_desktop_field_actually_changes() -> None:
+    """The fix narrows the comparison to shared keys; it must not gut it.
+
+    Here ``confidence`` is present on *both* sides (unlike a real SPA
+    payload) but the remote's value genuinely differs from base's - a
+    surface that does send the field but changes it must still be caught.
+    Only ``confidence`` differs, so only it is named; the untouched
+    detector fields must not appear.
+    """
+    base = _id_doc([_detector_shot()])
+    local = _id_doc([_detector_shot()])
+    remote = _id_doc([_detector_shot(confidence=0.45)])
+
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+
+    note = next(n for n in result.notes if "non-whitelisted" in n)
+    assert "should make this impossible" not in note
+    assert "shot cand-1" in note
+    assert "confidence" in note
+    for field in ("apriori_boost", "ensemble_score", "ensemble_votes"):
+        assert field not in note, note
+    # Named, not merged: local's value still stands.
+    assert result.doc["shots"][0]["confidence"] == 0.91
 
 
 def test_the_tripwire_note_names_a_doc_level_field_too() -> None:
