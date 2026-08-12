@@ -384,9 +384,11 @@ One PR per step, matching the parent programme's convention.
 2. The renumbering fix: id-addressed coach PATCH plus version guard. Still no
    user-visible change, and it must precede anything that can insert a shot.
 3. The merge unit, against the ids.
-4. **The id migration** (added after the Task 5 review): a one-time, idempotent
-   desktop pass that stamps ids across every audit document before the first
-   pull-merge. See the correction below.
+4. **One minter, plus the id migration** (added after the Task 5 review,
+   extended after its re-review). On a `desktop`-origin match only the desktop
+   mints shot ids; the hosted save boundary preserves them and never invents one.
+   Plus a one-time idempotent desktop pass that stamps every audit document and
+   pushes it. See the correction below.
 5. The gate exemption.
 6. The mobile UI.
 
@@ -399,7 +401,15 @@ to reconcile. Measured during implementation: a legacy manual shot at 6.5 s on
 one side and 6.52 s on the other merged into *two* shots, silently. Detected
 shots are unaffected (`cand-<n>` is nudge-stable). The merge therefore refuses to
 merge the shot section of any document where either side still carries an
-unstamped shot, and the migration exists to make that case not arise.
+unstamped shot.
+
+That refusal narrows the class but does not close it, which the re-review then
+measured too: the merge can only see whether a shot was unstamped *in this
+merge*, never whether the two sides stamped *independently*. A desktop that
+nudges the shot and saves stamps one id while a phone tapping Accept on the
+mirror stamps another, both counts read zero, and the shot still duplicates. What
+closes it is making the desktop the only minter for a mirror - two sides cannot
+derive different ids for one shot if only one side ever derives.
 
 Steps 1 to 5 ship before the UI, for the same reason the parent design put
 pull-merge before any mobile write surface: otherwise a desktop push clobbers

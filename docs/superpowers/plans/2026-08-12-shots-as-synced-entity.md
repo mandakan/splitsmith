@@ -994,7 +994,18 @@ git commit -m "feat(sync): resolve shot membership from the existing marker even
   the uuid4 collision fallback fires, and a shot carrying a truthy *non-string*
   `id` vanished entirely.
 
-- **Only shots that arrived carrying a persisted, non-empty string `id` are mergeable.** Record, per side, how many shots lacked one *before* stamping. If either side had any, do not merge the shot section at all: keep local's shots (now stamped) and append a loud note naming the counts. No union, no membership resolution, no time or coach merging for that document. This cannot duplicate and cannot lose, and the condition clears itself the first time each side saves the stage.
+- **Only shots that arrived carrying a persisted, non-empty string `id` are mergeable.** Record, per side, how many shots lacked one *before* stamping. If either side had any, do not merge the shot section at all: keep local's shots (now stamped) and append a loud note naming the counts. No union, no membership resolution, no time or coach merging for that document. This cannot duplicate and cannot lose.
+
+  **The gate narrows this class, it does not close it** (measured in the Task 5
+  re-review). It can only ask whether a shot was unstamped *in this merge*, never
+  whether the two sides stamped *independently*. Because `ensure_shot_ids` runs at
+  the save boundary on both sides, and `accept_stage_audit` is already mirror-exempt
+  from slice 4, a desktop that nudges a legacy manual shot to 6.52 and saves stamps
+  `manual-t6520`, while a phone tapping Accept on the mirror stamps `manual-t6500`.
+  Both unstamped counts read zero, the gate passes, and the shot duplicates
+  silently. **Do not describe the gate as the safeguard, and the note must not
+  promise that the next sync will merge.** What closes the class is the identity
+  rule in Task 5b.
 - **A non-string `id` counts as missing.** `ensure_shot_ids` must treat a truthy non-string `id` as absent and stamp a real one, otherwise the shot is invisible to both the keying and the guard.
 - **Shots with no derivable identity are not merged.** A shot carrying neither `candidate_number` nor `time` has nothing stable to key on, so `ensure_shot_ids` mints a *non-convergent* id for it and the two sides would disagree. Keying such a shot would therefore duplicate it on every merge. Match them by position among the other no-key shots instead, keep local's copy, and note it. `Audit.tsx:2829` documents where this shape comes from - promoted fixtures whose anchor shot the secondary could not snap. No document in the corpus or the fixtures currently contains one (verified: 0 of 1036 real shots), so this is a guard, not a hot path.
 - Membership: union both sides by id, then apply the verdicts. A shot with no verdict is original detector output and is kept.
@@ -1527,3 +1538,58 @@ After Task 6, verify end to end rather than by suite alone:
 - [ ] Start the hosted server against a seeded mirror and confirm the desktop audit screen can now save a stage that previously returned 403.
 - [ ] Round-trip a nudge: save, note the shot id, nudge, save, confirm the id is unchanged in the stored document.
 - [ ] Run a desktop pull against a hosted doc carrying a remote-added shot and confirm the shot survives and the sync report names no conflict.
+
+---
+
+### Task 7: One minter for mirrors, plus the id migration
+
+**Execution order:** this task must be implemented **before Task 6**, despite its
+number. Task 6 opens the hosted write gate; until this task lands, a mirror can
+mint ids independently of the desktop and the merge will duplicate shots.
+
+**Files:**
+- Modify: `src/splitsmith/ui/server.py` (`put_stage_audit`, `accept_stage_audit` — the two `ensure_shot_ids` call sites)
+- Modify: `src/splitsmith/shot_id.py` (a `mint` switch on `ensure_shot_ids`)
+- Modify: `src/splitsmith/sync/run.py` (the migration pass, at the start of a sync run before the pull)
+- Test: `tests/test_shot_id.py`, `tests/test_mirror_read_only.py`, `tests/test_sync_pull.py`
+
+**Interfaces:**
+- Consumes: `ensure_shot_ids(shots) -> int` from Task 1; the merge gate from Task 5.
+- Produces: `ensure_shot_ids(shots, *, mint: bool = True) -> int` — with `mint=False`, existing ids are still normalised but no new id is invented; the return value counts only ids actually added.
+
+**Why this exists.** The Task 5 re-review measured that the merge's unstamped-shot
+gate narrows the duplication class without closing it. `ensure_shot_ids` runs at
+the save boundary on both sides, and `accept_stage_audit` is mirror-exempt from
+slice 4, so a desktop and a phone can independently mint two different ids for one
+pre-existing manual shot — `manual-t6520` and `manual-t6500` for the same shot
+nudged 20 ms. Both unstamped counts then read zero, the gate passes, and the shot
+duplicates silently. Two sides cannot derive different ids for one shot if only
+one side ever derives.
+
+**Part A — only the desktop mints for a mirror.**
+
+- `ensure_shot_ids` gains a keyword-only `mint: bool = True`. With `mint=False` it
+  leaves a shot with no usable id untouched rather than deriving one.
+- Both save-boundary call sites pass `mint=False` when the match is a
+  `desktop`-origin mirror, and `mint=True` otherwise. Hosted-native matches keep
+  today's behaviour — with no desktop there is no second minter.
+- A shot that arrives carrying a client-supplied id is unaffected either way:
+  preserving an id is not minting one. This is what lets a phone add a genuinely
+  new shot, because the SPA mints that id itself (Task 2).
+
+**Part B — the migration.**
+
+- At the start of a sync run, before the pull, stamp ids across every local audit
+  document that lacks them and save. Idempotent: a second run stamps nothing.
+- Report how many documents were stamped, through the same channel the sync report
+  uses for its other counts. Silent migrations are how a bad one goes unnoticed.
+
+**Tests that must exist:**
+- `ensure_shot_ids(shots, mint=False)` leaves an unstamped shot unstamped and returns 0.
+- A hosted save on a mirror does not invent an id; the same save on a hosted-native match does.
+- After the migration pass, a previously legacy document has ids and a second pass is a no-op.
+- An end-to-end pull over a legacy document: the first sync migrates and the merge's refusal note does not fire on the second.
+
+**Verification:** the failure this closes is the two-sided independent mint. Write
+a test that stamps the same legacy manual shot on two sides at two different times
+and asserts one shot out, and confirm it fails with `mint=True` on both sides.
