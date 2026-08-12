@@ -61,6 +61,7 @@ import {
 import { useMatchHref } from "@/lib/matchHref";
 import { momentHref, momentToSearch, parseMoment, resolveMomentView } from "@/lib/moment";
 import { isShareView } from "@/lib/shareView";
+import { useActiveShare } from "@/lib/useActiveShare";
 import { cn } from "@/lib/utils";
 
 import { initials } from "./compare/format";
@@ -91,6 +92,7 @@ export function Compare() {
   // mirror guard 403s. Hidden (not disabled) here: it's one action among
   // several on a page whose primary value is reading.
   const editDenied = capabilityDenied(ctx?.capabilities, "edit");
+  const { shareUrl } = useActiveShare();
 
   const [project, setProject] = useState<MatchProject | null>(null);
   const [bundle, setBundle] = useState<CompareStageResponse | null>(null);
@@ -323,23 +325,40 @@ export function Compare() {
   // Copies a shareable moment link: current time-since-beep, the audio
   // camera, and whichever shooters are currently visible - mirrors
   // ResultsStage's handleCopyMoment (single-shooter) but adds cam/who.
+  // When the match has a live share, copy the share-scoped moment URL
+  // instead of the operator one, so the link works for whoever the
+  // owner actually shares it with. Share viewers never reach this
+  // branch: useActiveShare returns null by construction on a share
+  // mount, so they keep copying their own share-relative URL.
   const handleCopyMoment = useCallback(async () => {
     const t = Math.round(timeSinceBeep * 100) / 100;
     const who = playableShooters
       .filter((s) => visibleSlugs.has(s.slug))
       .map((s) => s.slug);
-    const link = `${window.location.origin}${momentHref(location.pathname, {
-      t,
-      cam: audioSlug ?? undefined,
-      who,
-    })}`;
+    const moment = { t, cam: audioSlug ?? undefined, who };
+    const link = shareUrl
+      ? `${shareUrl}/compare/${stageNumber}?${momentToSearch(moment).toString()}`
+      : `${window.location.origin}${momentHref(location.pathname, moment)}`;
     try {
       await navigator.clipboard.writeText(link);
-      setSnack({ message: `Link copied at ${t.toFixed(2)}s`, tone: "status" });
+      setSnack({
+        message: shareUrl
+          ? `Share link copied at ${t.toFixed(2)}s`
+          : `Link copied at ${t.toFixed(2)}s`,
+        tone: "status",
+      });
     } catch {
       setSnack({ message: "Could not copy link", tone: "error" });
     }
-  }, [timeSinceBeep, playableShooters, visibleSlugs, audioSlug, location.pathname]);
+  }, [
+    timeSinceBeep,
+    playableShooters,
+    visibleSlugs,
+    audioSlug,
+    location.pathname,
+    shareUrl,
+    stageNumber,
+  ]);
 
   function toggleVisibility(slug: string) {
     setVisibleSlugs((prev) => {
