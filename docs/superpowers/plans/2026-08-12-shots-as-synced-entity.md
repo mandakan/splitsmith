@@ -980,6 +980,7 @@ git commit -m "feat(sync): resolve shot membership from the existing marker even
 
 **Merge rules:**
 - **Ids first.** Both sides are passed through `ensure_shot_ids` before anything is keyed. A document written before Task 1 shipped has no ids at all, and keying it would drop every shot; the derivation is deterministic, so stamping here mints the same id on both sides for the same pre-existing shot. This is a pure function, so it does not violate the module's no-I/O rule.
+- **Shots with no derivable identity are not merged.** A shot carrying neither `candidate_number` nor `time` has nothing stable to key on, so `ensure_shot_ids` mints a *non-convergent* id for it and the two sides would disagree. Keying such a shot would therefore duplicate it on every merge. Match them by position among the other no-key shots instead, keep local's copy, and note it. `Audit.tsx:2829` documents where this shape comes from - promoted fixtures whose anchor shot the secondary could not snap. No document in the corpus or the fixtures currently contains one (verified: 0 of 1036 real shots), so this is a guard, not a hot path.
 - Membership: union both sides by id, then apply the verdicts. A shot with no verdict is original detector output and is kept.
 - `time`: last-writer-wins per id, using the existing `_resolve_unit` against the base, with the doc timestamps as tie-break - the same machinery the beep group already uses.
 - `ms_after_beep`: recomputed from the merged `time` and the doc's `beep_time`, never merged directly. It is derived, so merging it independently could contradict the time.
@@ -1103,6 +1104,23 @@ def test_a_legacy_doc_with_no_ids_keeps_its_shots() -> None:
     assert [s["id"] for s in result.doc["shots"]] == ["cand-4", "manual-t6500"]
 
 
+def test_a_shot_with_no_identity_is_kept_once_not_duplicated() -> None:
+    """A shot with neither candidate_number nor time has no convergent id.
+
+    Both sides mint different ids for it, so keying it would emit two copies
+    of one shot on every merge. It must be carried through exactly once.
+    """
+    anchor = {"shot_number": 1, "candidate_number": None, "time": None}
+    base = {"beep_time": 5.0, "shots": [dict(anchor)], "audit_events": []}
+    local = {"beep_time": 5.0, "shots": [dict(anchor)], "audit_events": []}
+    remote = {"beep_time": 5.0, "shots": [dict(anchor)], "audit_events": []}
+    result = merge_audit_doc(
+        base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS
+    )
+    assert len(result.doc["shots"]) == 1
+    assert any("no convergent id" in note for note in result.notes)
+
+
 def test_promote_then_delete_round_trips_to_absent() -> None:
     """Promote a rejected candidate, then delete it again on the other side.
 
@@ -1202,9 +1220,32 @@ Delete the existing per-shot coach loop and the remote-only note loop (lines
         if isinstance(shots_list, list):
             ensure_shot_ids([s for s in shots_list if isinstance(s, dict)])
 
-    base_shots = _shots_by_id(base)
-    local_shots = _shots_by_id(merged)
-    remote_shots = _shots_by_id(remote_for_merge)
+    # A shot with neither candidate_number nor time got a minted,
+    # non-convergent id, so the two sides disagree about it and keying it
+    # would duplicate it on every merge. Hold those aside: local's copies
+    # win untouched. See Audit.tsx:2829 for where the shape comes from.
+    def _has_identity(shot: dict) -> bool:
+        return shot.get("candidate_number") is not None or shot.get("time") is not None
+
+    unkeyable = [
+        s for s in (merged.get("shots") or []) if isinstance(s, dict) and not _has_identity(s)
+    ]
+    if unkeyable:
+        result.notes.append(
+            f"{doc_key}: {len(unkeyable)} shot(s) carry neither candidate_number nor "
+            "time, so they have no convergent id; local copies kept unmerged"
+        )
+
+    def _keyable(doc: dict | None) -> dict[str, dict]:
+        return {
+            shot_id: shot
+            for shot_id, shot in _shots_by_id(doc).items()
+            if _has_identity(shot)
+        }
+
+    base_shots = _keyable(base)
+    local_shots = _keyable(merged)
+    remote_shots = _keyable(remote_for_merge)
 
     resolved: dict[str, dict] = {}
     for shot_id in list(local_shots) + [k for k in remote_shots if k not in local_shots]:
@@ -1258,7 +1299,7 @@ Delete the existing per-shot coach loop and the remote-only note loop (lines
     # independently could contradict the time it is derived from.
     beep_time = merged.get("beep_time")
     ordered = sorted(
-        resolved.values(),
+        [*resolved.values(), *unkeyable],
         key=lambda s: (s.get("time") is None, s.get("time") or 0.0, s.get("id") or ""),
     )
     for index, shot in enumerate(ordered, start=1):
