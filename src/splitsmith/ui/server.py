@@ -185,6 +185,7 @@ from ..match_project import (
 from ..match_registry import MatchRegistry
 from ..observability import StructuredJsonFormatter, init_sentry
 from ..runtime import runtime as process_runtime
+from ..shot_id import ensure_shot_ids
 from ..storage import Storage
 from ..sync.client import HostedSyncClient, SyncClientError
 from ..sync.plan import build_push_plan
@@ -10494,10 +10495,12 @@ def create_app(
         # are left unclassified (they never reach statistics).
         shots = payload.get("shots")
         if isinstance(shots, list):
-            coach_module.classify_intervals_in_dicts(
-                [s for s in shots if isinstance(s, dict)],
-                CoachAutoClassifyConfig(),
-            )
+            shot_dicts = [s for s in shots if isinstance(s, dict)]
+            # Identity before anything else: the sync merge keys shot
+            # membership on this, and shot_number cannot serve because it
+            # renumbers on every insert.
+            ensure_shot_ids(shot_dicts)
+            coach_module.classify_intervals_in_dicts(shot_dicts, CoachAutoClassifyConfig())
         # Sync merge unions audit_events by id (bidirectional sync
         # slice); the SPA authors events without one, so stamp them here
         # at the save boundary.
@@ -10566,6 +10569,7 @@ def create_app(
             kept = _kept_audit_shots(shots)
             if not kept:
                 raise HTTPException(status_code=409, detail="nothing_to_accept")
+            ensure_shot_ids(shots)
             coach_module.classify_intervals_in_dicts(shots, CoachAutoClassifyConfig())
             if any(not s.get("interval_class") for s in kept):
                 raise HTTPException(status_code=409, detail="not_fully_classified")
