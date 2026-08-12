@@ -384,10 +384,24 @@ One PR per step, matching the parent programme's convention.
 2. The renumbering fix: id-addressed coach PATCH plus version guard. Still no
    user-visible change, and it must precede anything that can insert a shot.
 3. The merge unit, against the ids.
-4. The gate exemption.
-5. The mobile UI.
+4. **The id migration** (added after the Task 5 review): a one-time, idempotent
+   desktop pass that stamps ids across every audit document before the first
+   pull-merge. See the correction below.
+5. The gate exemption.
+6. The mobile UI.
 
-Steps 1 to 4 ship before the UI, for the same reason the parent design put
+**Correction to "no migration is needed".** The shot-identity section above
+claims the derivation is deterministic for every existing shot, so both sides
+mint the same id and nothing has to migrate. That holds only for a shot nobody
+moved. `derive_shot_id` keys a candidate-less manual shot off its rounded time,
+so a nudge changes its derived id - and a nudge is exactly what the merge exists
+to reconcile. Measured during implementation: a legacy manual shot at 6.5 s on
+one side and 6.52 s on the other merged into *two* shots, silently. Detected
+shots are unaffected (`cand-<n>` is nudge-stable). The merge therefore refuses to
+merge the shot section of any document where either side still carries an
+unstamped shot, and the migration exists to make that case not arise.
+
+Steps 1 to 5 ship before the UI, for the same reason the parent design put
 pull-merge before any mobile write surface: otherwise a desktop push clobbers
 phone edits. The UI is independently demonstrable on a hosted-native match
 earlier than that, which is a useful checkpoint but not a shipping state.

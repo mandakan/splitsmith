@@ -979,7 +979,23 @@ git commit -m "feat(sync): resolve shot membership from the existing marker even
 - Produces: `merge_audit_doc` merging shot membership, `time`, `ms_after_beep` and coach fields keyed on `id`; `_shots_by_id(doc) -> dict[str, dict]` replacing `_shots_by_number`.
 
 **Merge rules:**
-- **Ids first.** Both sides are passed through `ensure_shot_ids` before anything is keyed. A document written before Task 1 shipped has no ids at all, and keying it would drop every shot; the derivation is deterministic, so stamping here mints the same id on both sides for the same pre-existing shot. This is a pure function, so it does not violate the module's no-I/O rule.
+- **Ids first, but a minted id is not a persisted id.** Both sides are passed through `ensure_shot_ids` so the document stops being legacy going forward. This is a pure function, so it does not violate the module's no-I/O rule.
+
+  **Correction (2026-08-12, after the Task 5 review).** An earlier version of this
+  plan claimed the derivation is deterministic, so stamping inside the merge mints
+  the same id on both sides for the same pre-existing shot, and therefore no
+  migration is needed. **That is false for exactly the shots this merge exists to
+  reconcile.** `derive_shot_id` keys a candidate-less manual shot off its rounded
+  time, so a nudge changes the derived id. Measured against the first
+  implementation: a legacy manual shot at 6.5 s on one side and 6.52 s on the
+  other produced *two* shots, `manual-t6500` and `manual-t6520`, with no note and
+  `changed_vs_local` true. Detected shots are safe, because `cand-<n>` is
+  nudge-stable; manual ones are not. The same root cause duplicates a shot when
+  the uuid4 collision fallback fires, and a shot carrying a truthy *non-string*
+  `id` vanished entirely.
+
+- **Only shots that arrived carrying a persisted, non-empty string `id` are mergeable.** Record, per side, how many shots lacked one *before* stamping. If either side had any, do not merge the shot section at all: keep local's shots (now stamped) and append a loud note naming the counts. No union, no membership resolution, no time or coach merging for that document. This cannot duplicate and cannot lose, and the condition clears itself the first time each side saves the stage.
+- **A non-string `id` counts as missing.** `ensure_shot_ids` must treat a truthy non-string `id` as absent and stamp a real one, otherwise the shot is invisible to both the keying and the guard.
 - **Shots with no derivable identity are not merged.** A shot carrying neither `candidate_number` nor `time` has nothing stable to key on, so `ensure_shot_ids` mints a *non-convergent* id for it and the two sides would disagree. Keying such a shot would therefore duplicate it on every merge. Match them by position among the other no-key shots instead, keep local's copy, and note it. `Audit.tsx:2829` documents where this shape comes from - promoted fixtures whose anchor shot the secondary could not snap. No document in the corpus or the fixtures currently contains one (verified: 0 of 1036 real shots), so this is a guard, not a hot path.
 - Membership: union both sides by id, then apply the verdicts. A shot with no verdict is original detector output and is kept.
 - `time`: last-writer-wins per id, using the existing `_resolve_unit` against the base, with the doc timestamps as tie-break - the same machinery the beep group already uses.
