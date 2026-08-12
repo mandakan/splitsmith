@@ -556,7 +556,11 @@ function IngestInner({ slug }: { slug: string }) {
             }}
             onMoveShooter={moveShooterBatch}
             onAddMore={() => {
-              if (!editDenied) setShowAddFootage(true);
+              if (editDenied) {
+                setError(READ_ONLY_MIRROR_MESSAGE);
+                return;
+              }
+              setShowAddFootage(true);
             }}
             onMoveAssignment={moveAssignment}
             onRemoveVideo={removeVideo}
