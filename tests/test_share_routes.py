@@ -743,6 +743,84 @@ def test_share_last_scanned_dir_nulled_for_anonymous_viewer(
     client.cookies.clear()
 
 
+# -- byte-identity net over the share whitelist (Task 5, #779) ----------
+
+
+def _dump_state_docs(db_url: str, user_email: str) -> list[tuple]:
+    """Serialize every state_docs row for the user as sorted tuples of
+    all mapped columns - byte-identity means nothing changed, version
+    and timestamps included."""
+    import json
+
+    from sqlalchemy import inspect as sa_inspect
+
+    from splitsmith.db.models import StateDocRow
+
+    engine = create_engine(db_url)
+    sf = sessionmaker(engine)
+    cols = sorted(c.key for c in sa_inspect(StateDocRow).mapper.column_attrs)
+
+    async def _dump() -> list[tuple]:
+        async with sf() as s:
+            row = (await s.execute(_select(User).where(User.email == user_email))).scalar_one()
+            rows = (
+                (await s.execute(_select(StateDocRow).where(StateDocRow.user_id == row.id))).scalars().all()
+            )
+        return sorted(
+            tuple(json.dumps(getattr(r, k), default=str, sort_keys=True) for k in cols) for r in rows
+        )
+
+    return asyncio.run(_dump())
+
+
+# One concrete instantiation per _SHARE_PATH_RE alternative (server.py).
+# When the whitelist grows an entry, this list must grow one too - the
+# assertion below is the promise every share route is write-free.
+_SHARE_WHITELIST_INSTANCES = [
+    "match/shooters",
+    f"shooters/{SLUG}/project",
+    f"shooters/{SLUG}/stages/1/coach",
+    f"shooters/{SLUG}/coach/distributions",
+    f"shooters/{SLUG}/videos/stream",
+    "match/stage/1/compare",
+    f"match/shooters/{SLUG}/videos/stream",
+    "og.png",
+    f"og/{SLUG}/1.png",
+    "og-meta",
+    f"og-meta/{SLUG}/1",
+]
+
+
+@pytest.mark.parametrize("rest", _SHARE_WHITELIST_INSTANCES)
+def test_share_whitelist_routes_leave_state_docs_untouched(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+    rest: str,
+) -> None:
+    """#779 test net: walk every whitelisted share shape against a
+    seeded match carrying a legacy (unclassified) audit doc - the shape
+    known to tempt read paths into healing writes (#775) - and assert
+    the owner's state_docs rows are byte-identical before and after."""
+    token = _setup_shared_match(hosted_env, hosted_app)
+    legacy_doc = {
+        "stage_number": 1,
+        "shots": [
+            {"shot_number": 1, "ms_after_beep": 1500},
+            {"shot_number": 2, "ms_after_beep": 1800},
+        ],
+    }
+    _seed_stage_audit(hosted_env, "owner@example.com", MID, SLUG, legacy_doc)
+
+    client, _ = hosted_app
+    before = _dump_state_docs(hosted_env, "owner@example.com")
+    resp = client.get(_share_url(token, rest))
+    # Routes without seeded media legitimately 404/422; the invariant
+    # under test is the absence of writes, not the status code.
+    assert resp.status_code < 500, f"{rest}: {resp.status_code} {resp.text[:200]}"
+    after = _dump_state_docs(hosted_env, "owner@example.com")
+    assert after == before, f"share GET {rest!r} mutated state_docs"
+
+
 def test_share_deleted_match_uniform_404(
     hosted_env: str,
     hosted_app: tuple[TestClient, _CapturingSender],
