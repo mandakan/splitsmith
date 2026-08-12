@@ -197,6 +197,11 @@ from . import export_storage, stage_edit
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from . import shooter_move as shooter_move_module
+from .capabilities import (
+    capabilities_for_origin,
+    required_capability,
+    share_scope_capabilities,
+)
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
 from .jobs import (
     Job,
@@ -1050,6 +1055,14 @@ current_match_id: ContextVar[str | None] = ContextVar("splitsmith_current_match_
 # shooter list) don't issue a second matches_store query. ``None`` outside
 # an aliased request (e.g. legacy bare-path traffic).
 current_match_origin: ContextVar[str | None] = ContextVar("splitsmith_current_match_origin", default=None)
+# The bound match's capability set (#756), computed by the alias
+# middleware from the same origin fact (or, on share requests, from the
+# token's scope) that decides the 403 - handlers serialize it so the SPA
+# gates affordances on the same truth the guard enforces. None outside
+# an aliased request.
+current_match_capabilities: ContextVar[frozenset[str] | None] = ContextVar(
+    "splitsmith_current_match_capabilities", default=None
+)
 # Set True by _share_alias for anonymous read requests so handlers can
 # strip server-local fields (e.g. match_root, last_scanned_dir) from their
 # response payloads before returning them to anonymous viewers.
@@ -6426,25 +6439,6 @@ def create_app(
     # ``state._bound_root`` is only consulted for legacy bare-path
     # traffic that hasn't migrated to the new prefix.
 
-    # Slice 3 (mobile beep review): the only two beep writes a mirror
-    # accepts. Everything else beep-shaped (detect-beep, beep-window,
-    # select, snap, the legacy primary shim) needs source audio or fires
-    # jobs, and stays read-only on mirrors.
-    _mirror_beep_write_re = re.compile(r"^shooters/[^/]+/stages/\d+/videos/[^/]+/beep$")
-
-    # Slice 4 (mobile audit triage): the two stage-level writes a mirror
-    # accepts - accept-stage and flag-for-desktop. Everything else stays
-    # desktop-owned until its slice ships a whitelist entry.
-    _mirror_triage_write_re = re.compile(r"^shooters/[^/]+/stages/\d+/(audit/accept|attention)$")
-
-    # Slice 5 (mobile interval reclassify): the two coach writes a mirror
-    # accepts - the per-shot coach PATCH and the bulk reclassify POST.
-    # Both are pure state-doc writes (no job chaining), and COACH_FIELDS
-    # already merge per-shot LWW on desktop pull. Note the per-shot patch
-    # is a PATCH, so its exemption is method-gated separately below.
-    _mirror_coach_patch_re = re.compile(r"^shooters/[^/]+/stages/\d+/shots/\d+/coach$")
-    _mirror_coach_reclassify_re = re.compile(r"^shooters/[^/]+/stages/\d+/coach/reclassify$")
-
     @app.middleware("http")
     async def _match_id_alias(request, call_next):
         path = request.url.path
@@ -6497,26 +6491,20 @@ def create_app(
                         }
                     },
                 )
-            # Read-only mirror gate (#631 Task 6). A ``desktop``-origin row
-            # is a mirror of a match desktop still owns - only ``/api/sync/*``
-            # (not alias-routed, so this middleware never sees it) may write
-            # to it. Every non-safe method through this alias 403s, except
-            # share management: creating/revoking a share link on a mirror
-            # is the whole point of exposing it hosted-side, so
-            # ``match/shares`` stays writable.
-            if (
-                owner_row.origin == "desktop"
-                and request.method not in ("GET", "HEAD", "OPTIONS")
-                and not (
-                    rest == "match/shares"
-                    or rest.startswith("match/shares/")
-                    or (request.method == "POST" and rest == "match/beep-queue/confirm")
-                    or (request.method == "POST" and _mirror_beep_write_re.match(rest) is not None)
-                    or (request.method == "POST" and _mirror_triage_write_re.match(rest) is not None)
-                    or (request.method == "PATCH" and _mirror_coach_patch_re.match(rest) is not None)
-                    or (request.method == "POST" and _mirror_coach_reclassify_re.match(rest) is not None)
-                )
-            ):
+            # Capability gate (#756, formerly the read-only mirror gate,
+            # #631 Task 6). One table decides both this 403 and the
+            # ``capabilities`` payload field - see capabilities.py. On a
+            # share request the set comes from the token's scope instead
+            # of the origin (#779); share traffic is GET-only at the
+            # share alias, so the gate is payload-only there today.
+            if current_share_request.get():
+                from ..db.share_guard import current_share_scope
+
+                match_capabilities = share_scope_capabilities(current_share_scope.get())
+            else:
+                match_capabilities = capabilities_for_origin(owner_row.origin)
+            needed = required_capability(request.method, rest)
+            if needed is not None and needed not in match_capabilities:
                 return JSONResponse(status_code=403, content={"detail": "read_only_mirror"})
             work_root = (
                 Path(
@@ -6544,18 +6532,21 @@ def create_app(
                     },
                 )
             match_origin = "local"
+            match_capabilities = capabilities_for_origin("local")
         rewritten = "/api/" + rest
         request.scope["path"] = rewritten
         request.scope["raw_path"] = rewritten.encode("utf-8")
         root_token = current_match_root.set(match_root)
         id_token = current_match_id.set(match_id)
         origin_token = current_match_origin.set(match_origin)
+        capabilities_token = current_match_capabilities.set(match_capabilities)
         try:
             return await call_next(request)
         finally:
-            current_match_root.reset(root_token)
-            current_match_id.reset(id_token)
+            current_match_capabilities.reset(capabilities_token)
             current_match_origin.reset(origin_token)
+            current_match_id.reset(id_token)
+            current_match_root.reset(root_token)
 
     # ----------------------------------------------------------------------
     # Share-link anonymous read middleware (issue #349)
