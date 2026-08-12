@@ -50,6 +50,7 @@ def test_compare_card_lists_shooters_and_escapes() -> None:
     assert "Standards &lt;b&gt;" in html
     assert "Bob &amp; Carol" in html
     assert "MOMENT" not in html
+    assert '<div class="display" style="font-size:96px">Alice vs Bob &amp; Carol</div>' in html
 
 
 def test_compare_card_with_moment_renders_badge() -> None:

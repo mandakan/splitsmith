@@ -206,23 +206,21 @@ def stage_card_html(card: StageCard, *, theme: OverlayTheme) -> str:
 
 def compare_card_html(card: CompareCard, *, theme: OverlayTheme) -> str:
     """Who is being compared, on which stage. Mirrors ``match_card_html``'s
-    identity-plus-roster shape: the meta line carries the stage and match
-    identity, the roster column carries the compared shooters.
+    headline: the compared shooters' names, joined " vs ", carry the
+    96px ``.display`` slot -- the card's most identifying string --
+    rather than a static "Compare" label. The meta line still carries
+    the stage and match identity; there is no separate roster listing
+    because it would just repeat the same names a second time.
     """
     meta = [f"Stage {card.stage_number} - {escape(card.stage_name)}", escape(card.match_name)]
-    rows = "".join(
-        f'<div class="rrow"><div class="display" style="font-size:34px">{escape(name)}</div></div>'
-        for name in card.shooter_names
-    )
-    label = f"{len(card.shooter_names)} shooters" if len(card.shooter_names) != 1 else "Shooter"
+    headline = " vs ".join(escape(name) for name in card.shooter_names)
     body = (
         f'<div class="top">{_brand_row(theme)}'
         f'<div class="kick">{" &middot; ".join(meta)}</div></div>'
         f"{_moment_badge(card.moment_t)}"
         '<div class="body">'
-        '<div class="col"><div class="display" style="font-size:96px">Compare</div></div>'
-        '<div class="vrule"></div>'
-        f'<div class="roster"><div class="kick">{escape(label)}</div>{rows}</div>'
+        f'<div class="col"><div class="display" style="font-size:96px">'
+        f"{headline}</div></div>"
         "</div>" + _FOOTER
     )
     return _document(theme, body)
