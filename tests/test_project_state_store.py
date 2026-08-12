@@ -375,3 +375,40 @@ def test_list_doc_meta_tenant_isolation() -> None:
     asyncio.run(a.save_match("m1", {"name": "x"}, expected_version=0))
 
     assert asyncio.run(b.list_doc_meta("m1")) == []
+
+
+# -- share read-only enforcement (#779) ---------------------------------
+
+
+def test_mutations_refused_during_read_scoped_share_request() -> None:
+    """#779: the store is the choke point every state_docs write flows
+    through - under a read-scoped share request each mutation entry
+    point must raise instead of writing as the impersonated owner."""
+    from splitsmith.db.share_guard import ShareReadOnlyError, current_share_scope
+
+    sf, (uid,) = _engine_with_users("m@thias.se")
+    store = ProjectStateStore(sf, user_id=uid)
+    # Seed one doc outside the share scope so delete paths have a target.
+    asyncio.run(store.save_match("m1", {"name": "seed"}, expected_version=0))
+
+    token = current_share_scope.set("read")
+    try:
+        with pytest.raises(ShareReadOnlyError):
+            asyncio.run(store.save_match("m1", {"name": "x"}, expected_version=1))
+        with pytest.raises(ShareReadOnlyError):
+            asyncio.run(store.save_project("m1", "anna", {"slug": "anna"}, expected_version=0))
+        with pytest.raises(ShareReadOnlyError):
+            asyncio.run(store.save_audit("m1", "anna", 1, {"stage_number": 1}, expected_version=0))
+        with pytest.raises(ShareReadOnlyError):
+            asyncio.run(store.delete_shooter("m1", "anna"))
+        with pytest.raises(ShareReadOnlyError):
+            asyncio.run(store.delete_audit("m1", "anna", 1))
+        with pytest.raises(ShareReadOnlyError):
+            asyncio.run(store.delete_match("m1"))
+        # Reads stay open - the share surface depends on them.
+        doc, version = asyncio.run(store.load_match("m1"))
+        assert version == 1 and doc == {"name": "seed"}
+    finally:
+        current_share_scope.reset(token)
+    # Outside the scope the store mutates normally again.
+    assert asyncio.run(store.delete_match("m1")) == 1
