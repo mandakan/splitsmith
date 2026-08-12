@@ -94,9 +94,12 @@ def ensure_shot_ids(shots: list[dict[str, Any]], *, mint: bool = True) -> int:
     """Stamp ``id`` on every shot that lacks a usable one; return how many.
 
     An existing *string* id is never rewritten -- that is what makes a nudge
-    a move rather than a delete plus an add. A derived id that collides with
-    one already used in this document falls back to a minted id, so two
-    manual shots on the same millisecond stay distinct.
+    a move rather than a delete plus an add. Under ``mint=True`` a derived id
+    that collides with one already used in this document falls back to a
+    minted id, so two manual shots on the same millisecond stay distinct;
+    under ``mint=False`` the colliding shot is left unstamped instead, since
+    that fallback is a uuid4 and so non-convergent -- see the collision
+    paragraph below.
 
     ``mint=False`` does *not* mean "no id is invented" -- it means "no
     *non-convergent* id is invented". A shot carrying a ``candidate_number``

@@ -701,7 +701,10 @@ def _promoted_collision_doc() -> dict:
     a promoted stage can put two shots on one candidate. This repo's own
     fixtures contain it -- ``stage-shots-blacksmith-2026-stage6-...`` has
     candidate 18, 21 and 25 twice each, all ``"source": "promoted"`` -- and
-    these values are that fixture's candidate-18 pair verbatim.
+    the two ``time`` values here are that fixture's candidate-18 pair
+    verbatim. The ``beep_time`` and ``ms_after_beep`` are not: the fixture
+    beeps at 3.292 s and carries 5504/6188, while this doc restates the pair
+    against the round 5.0 s beep the rest of this file's audit docs use.
     """
     return {
         "stage_number": 1,
