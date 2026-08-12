@@ -90,6 +90,7 @@ from contextlib import asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
+from math import isfinite
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO, Literal
 
@@ -511,6 +512,40 @@ _RAW_UPLOAD_PART_SIZE = 16 * 1024 * 1024
 # this sentinel rather than inventing a real-looking time -- same approach
 # as ``splitsmith.mcp.export_tools``.
 _PLACEHOLDER_SCORECARD_TIME = datetime(2000, 1, 1, tzinfo=UTC)
+
+
+def _reject_non_finite(payload: Any, *, what: str) -> None:
+    """Refuse a document carrying ``Infinity``, ``-Infinity`` or ``NaN``.
+
+    ``json.loads`` accepts those three bare tokens, but Starlette's
+    ``JSONResponse`` encodes with ``allow_nan=False`` -- so an audit PUT
+    carrying one persisted the document and *then* 500'd on the way out,
+    and every subsequent read of that stage 500'd too. Nothing but a
+    later valid PUT could recover it (#843).
+
+    The guard belongs here, at the save boundary, rather than in any one
+    field's handling: the same body reaches disk with ``time``,
+    ``ms_after_beep``, ``candidate_number`` and whatever numeric field a
+    future document shape adds, and each would otherwise need its own
+    check. Raising *before* the write is what makes the failure
+    recoverable -- the stage keeps its last good document.
+
+    Not reachable from the SPA: ``JSON.stringify(Infinity)`` emits
+    ``null``. It takes a hand-crafted request, so this is a
+    self-inflicted-damage guard, not a hostile-input one.
+    """
+    stack = [payload]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, float) and not isfinite(node):
+            raise HTTPException(
+                status_code=422,
+                detail=f"{what} contains a non-finite number (NaN or Infinity)",
+            )
+        if isinstance(node, dict):
+            stack.extend(node.values())
+        elif isinstance(node, (list, tuple)):
+            stack.extend(node)
 
 
 def _save_audit_with_remerge(
@@ -10571,6 +10606,9 @@ def create_app(
             project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        # #843: before anything touches disk. A non-finite float survives
+        # json.loads, persists, and then makes this stage unreadable.
+        _reject_non_finite(payload, what="audit document")
         # #775: an audited stage is fully classified. Run the auto-classifier
         # on every save so statistic_splits never sees a partial stage; shots
         # whose source is "manual" are preserved, shots with no ms_after_beep
@@ -11192,6 +11230,10 @@ def create_app(
         ``/api/stages/{n}/audit``: serialize -> .tmp -> rename existing
         target to .bak (replacing any prior backup) -> rename .tmp to
         target. A crashed write never leaves the SPA without a JSON."""
+        # #843: same trap as the stage audit PUT, and worse here -- an
+        # unguarded ``json.dumps`` writes the bare token, so the fixture on
+        # disk stops being standard JSON for every other reader of it.
+        _reject_non_finite(payload, what="fixture document")
         target = _resolve_fixture_path(path)
         tmp = target.with_suffix(target.suffix + ".tmp")
         backup = target.with_suffix(target.suffix + ".bak")
