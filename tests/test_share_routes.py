@@ -853,3 +853,39 @@ def test_share_path_re_rejects(rest: str) -> None:
     from splitsmith.ui.server import _SHARE_PATH_RE
 
     assert _SHARE_PATH_RE.fullmatch(rest) is None
+
+
+def test_share_request_carries_read_scope(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#779: _share_alias must pin the resolved token's scope for the
+    duration of the request, and reset it afterwards. Probed from inside
+    the request via the store loader the project route calls."""
+    from splitsmith.db.project_state import ProjectStateStore
+    from splitsmith.db.share_guard import current_share_scope
+
+    token = _setup_shared_match(hosted_env, hosted_app)
+    client, sender = hosted_app
+
+    seen: list[str | None] = []
+    orig = ProjectStateStore.load_project
+
+    async def probe(self, match_id: str, slug: str):
+        seen.append(current_share_scope.get())
+        return await orig(self, match_id, slug)
+
+    monkeypatch.setattr(ProjectStateStore, "load_project", probe)
+
+    resp = client.get(_share_url(token, f"shooters/{SLUG}/project"))
+    assert resp.status_code == 200, resp.text
+    assert seen == ["read"]
+
+    # Owner path: same route, no share scope.
+    seen.clear()
+    login(client, sender, "owner@example.com")
+    owner = client.get(f"/api/matches/{MID}/shooters/{SLUG}/project")
+    assert owner.status_code == 200, owner.text
+    assert seen == [None]
+    client.cookies.clear()
