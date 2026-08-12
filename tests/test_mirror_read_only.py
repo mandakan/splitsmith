@@ -501,7 +501,7 @@ def test_mirror_audit_exemption_boundary_pins(
     A trailing-newline variant (``.../audit%0a``) is deliberately NOT a
     case here even though plain ``$`` also matches just before a single
     trailing ``\\n`` (which is why the regexes were switched to ``\\Z`` --
-    see the comment above ``_mirror_beep_write_re``): verified empirically
+    see the comment above ``capabilities._REVIEW_ROUTES``): verified empirically
     that ``request.url.path`` can never actually carry that byte all the
     way to this middleware's ``rest`` regardless of anchor choice.
     Starlette's ``URL.path`` property is built from
@@ -840,7 +840,7 @@ def test_mirror_triage_exemption_boundary_pins(
     method: str,
     rest: str,
 ) -> None:
-    """Pin the edges of ``_mirror_triage_write_re``.
+    """Pin the edges of the triage entries in ``capabilities._REVIEW_ROUTES``.
 
     The exemption regex is anchored with ``$`` and only fires for POST -
     an extra path segment after ``attention``, the wrong HTTP method, or

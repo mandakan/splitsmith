@@ -69,7 +69,7 @@ def test_patch_by_id_targets_the_right_shot(
 # desktop-sync doc routes (``/api/sync/matches/.../docs/...``), the same
 # surface ``_seed_mirror`` already uses, and issues the PATCH itself through
 # the ``/api/matches/{id}/...`` alias -- the coach-by-number PATCH is on the
-# mirror's write whitelist (``_mirror_coach_patch_re``), so it reaches the
+# mirror's review capability (``capabilities._REVIEW_ROUTES``), so it reaches the
 # handler under test even though the match is a read-only mirror.
 def test_stale_shot_number_patch_is_refused_after_an_insert(
     hosted_env: str,

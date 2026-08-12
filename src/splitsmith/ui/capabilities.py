@@ -58,8 +58,12 @@ def share_scope_capabilities(scope: str | None) -> frozenset[str]:
     return _SHARE_SCOPE_CAPABILITIES.get(scope or "", frozenset())
 
 
-# The review-writable route shapes, verbatim from the retired per-slice
-# mirror regexes (server.py) - method-gated exactly as the old guard was.
+# The review-writable route shapes, carried over from the retired
+# per-slice mirror regexes (server.py) and method-gated exactly as the old
+# guard was. Two entries have since widened past what any of those regexes
+# held: the by-id coach PATCH and the full audit PUT (#631 shots-as-a-
+# synced-entity), both of which a mirror accepts for the same reason the
+# slice 3-5 writes are here - they sync back rather than editing in place.
 #
 # Every entry anchors with ``\A``/``\Z``, not ``^``/``$``: plain ``$``
 # also matches just before a single trailing ``\n``, so ``.../audit$``

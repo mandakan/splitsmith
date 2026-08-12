@@ -333,7 +333,7 @@ def _accept_a_legacy_shot_on_a_mirror(client: TestClient, match_id: str, name: s
 
     Goes through the real triage-accept handler on a ``desktop``-origin
     match -- the one hosted save boundary a phone can reach on a mirror
-    (``_mirror_triage_write_re`` exempts it from the read-only gate) and
+    (``capabilities._REVIEW_ROUTES`` grants it the review capability) and
     therefore the one that must not mint. Seeds through the desktop-sync
     doc routes, exactly as ``_seed_mirror`` does, and returns the stored
     audit doc as it stands after the accept.
