@@ -321,8 +321,13 @@ def merge_audit_doc(
     if local_unstamped or remote_unstamped:
         # Refuse the whole section, not just the unstamped shots: a document
         # this old cannot be trusted to key any of its shots. Local's shots
-        # stand as they are, so nothing can duplicate and nothing can be lost
-        # in *this* merge.
+        # stand exactly as they are, so this merge cannot duplicate one of
+        # them or drop one of them.
+        #
+        # That is a guarantee about the local document, not about the user's
+        # data. Remote's shots are discarded wholesale here, so a shot the
+        # phone added is not adopted, and the desktop's next push overwrites
+        # it.
         #
         # The gate only sees shots still unstamped when the merge runs, and it
         # cannot detect that the two sides stamped independently beforehand --
@@ -482,12 +487,28 @@ def _merge_shot_section(
             "holds no shots to merge; replaced with the merged list - the document is malformed"
         )
 
-    # Deduplicated by id, first wins: _shots_by_id already counted a repeated
-    # id and the caller notes it, so keeping both copies here would make that
-    # note's "kept the first and dropped 1" untrue and put one id on two
-    # entries.
+    # Entries that are not dicts at all are not shots and cannot be merged -
+    # but they are not ours to discard either, and the rebuild below would
+    # swallow them. Carry them through at their original index.
+    foreign = [(position, e) for position, e in enumerate(merged_shots_list) if not isinstance(e, dict)]
+
+    def _keyable(doc: dict | None) -> tuple[dict[str, dict], dict[str, int]]:
+        index, duplicates = _shots_by_id(doc)
+        return {shot_id: shot for shot_id, shot in index.items() if _has_identity(shot)}, duplicates
+
+    base_shots, _ = _keyable(base)
+    local_shots, local_duplicates = _keyable(merged)
+    remote_shots, remote_duplicates = _keyable(remote_for_merge)
+
+    # Deduplicated by id, first wins, and seeded from the keyable local index
+    # so an id already claimed there cannot also land here: one document can
+    # carry two entries for one id that differ in keyability, and keying the
+    # first while holding the second aside put that id in resolved AND in
+    # unkeyable. _shots_by_id has already counted the repeat and the caller
+    # notes it, so keeping the second copy would also make that note's "kept
+    # the first and dropped 1" untrue.
     unkeyable: list[dict] = []
-    unkeyable_ids: set[str] = set()
+    unkeyable_ids: set[str] = set(local_shots)
     for shot in merged_shots_list:
         if not isinstance(shot, dict) or _has_identity(shot):
             continue
@@ -502,19 +523,6 @@ def _merge_shot_section(
             f"{doc_key}: {len(unkeyable)} shot(s) carry neither candidate_number nor "
             "time, so they have no convergent id; local copies kept unmerged"
         )
-
-    # Entries that are not dicts at all are not shots and cannot be merged -
-    # but they are not ours to discard either, and the rebuild below would
-    # swallow them. Carry them through at their original index.
-    foreign = [(position, e) for position, e in enumerate(merged_shots_list) if not isinstance(e, dict)]
-
-    def _keyable(doc: dict | None) -> tuple[dict[str, dict], dict[str, int]]:
-        index, duplicates = _shots_by_id(doc)
-        return {shot_id: shot for shot_id, shot in index.items() if _has_identity(shot)}, duplicates
-
-    base_shots, _ = _keyable(base)
-    local_shots, local_duplicates = _keyable(merged)
-    remote_shots, remote_duplicates = _keyable(remote_for_merge)
 
     # A collision drops a shot no matter what we do; the one thing that must
     # not happen is dropping it quietly.

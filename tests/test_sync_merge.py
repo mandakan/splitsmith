@@ -3,6 +3,8 @@
 import copy
 from datetime import UTC, datetime
 
+import pytest
+
 from splitsmith.sync.merge import _membership_verdicts, merge_audit_doc, merge_project_doc
 
 T_OLD = datetime(2026, 8, 10, 10, 0, tzinfo=UTC)
@@ -816,7 +818,11 @@ def test_two_identity_less_shots_sharing_an_id_appear_once() -> None:
 
 
 def test_no_id_appears_twice_across_the_keyability_matrix() -> None:
-    """Every combination of keyable/identity-less on each side, at once."""
+    """Every combination of keyable/identity-less on each side, at once.
+
+    One entry per id per side. The sibling test below covers the family this
+    one structurally cannot reach: two entries for one id on a single side.
+    """
     local_shots = [
         {"id": "both-keyable", "candidate_number": 1, "time": 1.0},
         {"id": "local-aside", "shot_number": 2, "time": None},
@@ -851,31 +857,36 @@ def test_no_id_appears_twice_across_the_keyability_matrix() -> None:
     }
 
 
-def test_independent_stamping_still_duplicates_pending_task_7() -> None:
-    """PINS A KNOWN GAP -- this asserts the WRONG output on purpose.
+@pytest.mark.parametrize("keyable_first", [True, False])
+@pytest.mark.parametrize("side", ["local", "remote"])
+def test_one_side_carrying_two_entries_for_one_id(side: str, keyable_first: bool) -> None:
+    """Two entries for one id on a single side, differing in keyability.
 
-    The gate only sees shots still unstamped when the merge runs. Each side
-    stamping independently beforehand is exactly what produces divergence:
-    the desktop nudges a legacy manual shot to 6.52 and saves manual-t6520
-    while the phone accepts the mirror unchanged and saves manual-t6500.
-    Both counts read zero, the gate passes, and one shot unions into two
-    with no note at all.
-
-    Task 7 (desktop as sole minter for a mirror) is what closes this. When
-    it lands this test must fail -- delete it then; it exists so the gap is
-    executable rather than a paragraph nobody re-reads.
+    The dedupe seeded unkeyable_ids only from ids it had already seen inside
+    its own loop, so it never noticed the id was also claimed by a keyable
+    shot in local_shots: the id landed in resolved AND in unkeyable, and
+    ordered emitted it twice. Only the keyable-first ordering exposes it,
+    which is why the single-entry matrix above missed it entirely.
     """
-    base = {"beep_time": 5.0, "shots": [{"shot_number": 1, "time": 6.5}], "audit_events": []}
-    local = {
-        "beep_time": 5.0,
-        "shots": [{"id": "manual-t6520", "shot_number": 1, "time": 6.52}],
-        "audit_events": [],
-    }
-    remote = {
-        "beep_time": 5.0,
-        "shots": [{"id": "manual-t6500", "shot_number": 1, "time": 6.5}],
-        "audit_events": [],
-    }
-    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
-    assert len(result.doc["shots"]) == 2  # the gap: one shot, two entries
-    assert result.notes == []  # and silent, which is why Task 7 exists
+    pair = [
+        {"id": "X", "shot_number": 1, "candidate_number": 1, "time": 1.0},
+        {"id": "X", "shot_number": 2, "time": None},
+    ]
+    if not keyable_first:
+        pair.reverse()
+    other = [{"id": "Y", "candidate_number": 9, "time": 9.0}]
+    doubled = {"beep_time": 5.0, "shots": copy.deepcopy(pair), "audit_events": []}
+    single = {"beep_time": 5.0, "shots": copy.deepcopy(other), "audit_events": []}
+
+    local, remote = (doubled, single) if side == "local" else (single, doubled)
+    result = merge_audit_doc(
+        copy.deepcopy(local),
+        copy.deepcopy(local),
+        copy.deepcopy(remote),
+        doc_key="stage1",
+        local_ts=_LOCAL_TS,
+        remote_ts=_REMOTE_TS,
+    )
+    ids = [s["id"] for s in result.doc["shots"] if isinstance(s, dict)]
+    assert len(ids) == len(set(ids)), f"duplicate id in merged output: {ids}"
+    assert any("malformed" in note for note in result.notes)

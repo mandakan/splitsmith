@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import copy
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
+from splitsmith import match_model
 from splitsmith.match_project import MatchProject, StageEntry
 from splitsmith.shot_id import derive_shot_id, ensure_shot_ids
+from splitsmith.sync.merge import merge_audit_doc
 from splitsmith.ui.server import create_app
 from tests.conftest import bound_match_id, scaffold_match
 
@@ -139,3 +143,79 @@ def test_a_real_string_id_is_never_rewritten() -> None:
     shots = [{"id": "manual-t1000", "candidate_number": 4, "time": 6.0}]
     assert ensure_shot_ids(shots) == 0
     assert shots[0]["id"] == "manual-t1000"
+
+
+def _stamp_through_the_save_boundary(tmp_path: Path, subdir: str, time: float) -> dict:
+    """PUT one legacy manual shot through the real audit save handler.
+
+    Deliberately goes through ``ui/server.py``'s ``ensure_shot_ids`` call
+    site rather than calling ``ensure_shot_ids`` here: the whole point of
+    the test below is which id the *save boundary* mints.
+    """
+    # Each side gets its own parent directory: an app discovers sibling
+    # matches, and two under one root would both register.
+    side_root = tmp_path / subdir
+    side_root.mkdir(parents=True, exist_ok=True)
+    root, shooter_root = scaffold_match(side_root, name="Divergence")
+    project = MatchProject.load(shooter_root)
+    project.stages = [StageEntry(stage_number=1, stage_name="Stage One", time_seconds=30.0)]
+    project.save(shooter_root)
+    client = TestClient(create_app(project_root=root, project_name="Divergence"))
+    # Not bound_match_id: the registry refreshes from the user-level recent
+    # projects list, so both sides' matches register in either app.
+    url_base = f"/api/matches/{match_model.Match.load(root).match_id}"
+    doc = {
+        "stage_number": 1,
+        "beep_time": 5.0,
+        # No id and no candidate_number: a legacy manual shot, the one shape
+        # whose derived id moves when the time moves.
+        "shots": [
+            {
+                "shot_number": 1,
+                "candidate_number": None,
+                "time": time,
+                "ms_after_beep": int(round((time - 5.0) * 1000)),
+            }
+        ],
+        "audit_events": [],
+    }
+    response = client.put(f"{url_base}/shooters/me/stages/1/audit", json=doc)
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_independent_stamping_diverges_pending_task_7(tmp_path: Path) -> None:
+    """PINS A KNOWN GAP -- this asserts the WRONG outcome on purpose.
+
+    ``ensure_shot_ids`` runs at the save boundary on *both* sides, and
+    ``derive_shot_id`` keys a candidate-less shot off its rounded time. So a
+    desktop that nudges a legacy manual shot to 6.52 and saves stamps
+    ``manual-t6520``, while a phone that accepts the mirror unchanged stamps
+    ``manual-t6500``. Both documents are then fully stamped, the sync
+    merge's unstamped gate passes, and one shot unions into two with no note
+    at all.
+
+    Task 7 makes the desktop the sole minter for a mirror, which is what
+    closes this. It changes the save boundary this test drives, so when it
+    lands this test breaks -- delete it then. It exists so the gap fails
+    loudly rather than sitting in a comment nobody re-reads.
+    """
+    desktop = _stamp_through_the_save_boundary(tmp_path, "desktop", 6.52)
+    mirror = _stamp_through_the_save_boundary(tmp_path, "mirror", 6.5)
+    assert desktop["shots"][0]["id"] == "manual-t6520"
+    assert mirror["shots"][0]["id"] == "manual-t6500"
+
+    # Base is what the desktop last pulled: the mirror as it stands. The
+    # divergence is then purely the two independent stampings.
+    result = merge_audit_doc(
+        copy.deepcopy(mirror),
+        desktop,
+        mirror,
+        doc_key="audit/me/1",
+        local_ts=datetime(2026, 8, 12, 12, 0, tzinfo=UTC),
+        remote_ts=datetime(2026, 8, 12, 13, 0, tzinfo=UTC),
+    )
+    ids = [s["id"] for s in result.doc["shots"]]
+    assert ids == ["manual-t6500", "manual-t6520"]  # the gap: one shot, two entries
+    assert result.notes == []  # and silent, which is why Task 7 exists
+    assert result.conflicts == []
