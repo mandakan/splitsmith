@@ -4504,6 +4504,68 @@ def test_put_stage_audit_keeps_previous_version_as_bak(tmp_path: Path) -> None:
     assert backup["shots"][0]["time"] == 0.5
 
 
+@pytest.mark.parametrize(
+    ("token", "field"),
+    [
+        ("Infinity", "candidate_number"),
+        ("-Infinity", "time"),
+        ("NaN", "ms_after_beep"),
+    ],
+)
+def test_put_stage_audit_rejects_non_finite_float(tmp_path: Path, token: str, field: str) -> None:
+    """#843: a non-finite float used to persist and *then* 500 on the way
+    out, because ``json.loads`` accepts the bare token but
+    ``JSONResponse`` encodes with ``allow_nan=False``. Every later read of
+    that stage 500'd too. Reject at the save boundary instead, so the
+    stage keeps its last good document.
+
+    Hand-crafted body on purpose: ``httpx``'s ``json=`` refuses to encode
+    these, exactly as a browser's ``JSON.stringify`` does.
+    """
+    import json as _json
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    good = {"stage_number": 1, "shots": [{"shot_number": 1, "time": 1.5, "source": "detected"}]}
+    assert client.put("/api/shooters/me/stages/1/audit", json=good).status_code == 200
+
+    raw = f'{{"stage_number": 1, "shots": [{{"shot_number": 1, "{field}": {token}}}]}}'
+    resp = client.put(
+        "/api/shooters/me/stages/1/audit",
+        content=raw,
+        headers={"content-type": "application/json"},
+    )
+    assert resp.status_code == 422
+    assert "non-finite" in resp.json()["detail"]
+
+    # The bad document never reached disk, so the stage is still readable.
+    on_disk = tmp_path / "match" / "shooters" / "me" / "audit" / "stage1.json"
+    assert _json.loads(on_disk.read_text(encoding="utf-8"))["shots"][0]["time"] == 1.5
+    reread = client.get("/api/shooters/me/stages/1/audit")
+    assert reread.status_code == 200
+    assert reread.json()["shots"][0]["time"] == 1.5
+
+
+def test_put_fixture_audit_rejects_non_finite_float(tmp_path: Path) -> None:
+    """#843, lab surface: the same trap, and worse -- an unguarded
+    ``json.dumps`` writes the bare token, so the fixture on disk stops
+    being standard JSON for every other reader of it."""
+    import json as _json
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    fixture = tmp_path / "fixture-nonfinite.json"
+    fixture.write_text(
+        _json.dumps({"stage_number": 3, "shots": [{"shot_number": 1, "time": 0.6}]}),
+        encoding="utf-8",
+    )
+    resp = client.put(
+        f"/api/fixture/audit?path={fixture}",
+        content='{"stage_number": 3, "shots": [{"shot_number": 1, "time": Infinity}]}',
+        headers={"content-type": "application/json"},
+    )
+    assert resp.status_code == 422
+    assert _json.loads(fixture.read_text(encoding="utf-8"))["shots"][0]["time"] == 0.6
+
+
 def test_put_stage_audit_404_when_stage_unknown(tmp_path: Path) -> None:
     client, _ = _seed_project_with_primary(tmp_path)
     resp = client.put("/api/shooters/me/stages/99/audit", json={"stage_number": 99, "shots": []})
