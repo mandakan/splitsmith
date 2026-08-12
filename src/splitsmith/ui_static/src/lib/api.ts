@@ -1052,6 +1052,9 @@ export interface AuditShot {
    *  in the per-stage audit JSON and rendered in the splits CSV. Optional
    *  for backwards compatibility with audit JSONs written before #17. */
   notes?: string;
+  /** Stable identity, stamped server-side at the save boundary. Absent on
+   *  documents saved before shot ids shipped. */
+  id?: string;
 }
 
 export interface AuditEvent {

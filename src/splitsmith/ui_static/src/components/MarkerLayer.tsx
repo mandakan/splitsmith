@@ -67,6 +67,10 @@ export interface AuditMarker {
   /** Per-shot freeform note. Persisted into the audit JSON in step 5;
    *  in-memory only for now. */
   note: string;
+  /** The persisted audit-document shot id, when this marker came from a
+   *  saved shot. Detected markers leave this null: the server derives
+   *  `cand-<candidate_number>` for them. */
+  shotId?: string | null;
 }
 
 export interface MarkerLayerProps {
