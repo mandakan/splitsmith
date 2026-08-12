@@ -232,10 +232,12 @@ for detected markers.
 
 - Detected or promoted: `cand-<candidate_number>`. Stable, and identical on
   both sides for every existing doc, so no migration is needed.
-- Manual, newly created: a minted id. **uuid4 hex, not ULID** - matching
-  `_new_event_id` (`server.py:621`), whose docstring gives the reason: the
-  ulid package is a hosted-only extra while these documents are also written
-  on slim local installs.
+- Manual, newly created: the id the SPA already mints
+  (`manual-${Date.now()}-${random}`, `Audit.tsx:965`), now persisted rather
+  than discarded. Where the server has to mint one itself it uses **uuid4 hex,
+  not ULID** - matching `_new_event_id` (`server.py:621`), whose docstring
+  gives the reason: the ulid package is a hosted-only extra while these
+  documents are also written on slim local installs.
 - Manual, legacy with no id: `manual-t<milliseconds>` derived from the rounded
   time. Deterministic, so both sides mint the same id for the same pre-existing
   shot without coordination.
@@ -259,9 +261,28 @@ desktop-owned" note at line 223.
 - **Coach fields** keep their existing per-shot unit, rekeyed from
   `shot_number` to `id`.
 
-New event kinds, following the existing vocabulary (`marker_deleted`,
-`marker_time_changed`, `note_changed`, `save`): `shot_added`, `shot_removed`,
-`shot_moved`, `candidate_promoted`. Each carries the shot id.
+**No new event kinds are needed.** The desktop already emits a complete
+membership vocabulary, every payload keyed on `id`:
+
+| event | payload | meaning |
+|---|---|---|
+| `marker_added_manual` | `{id, time}` | present |
+| `marker_kept` | `{id, time, candidate_number}` | present |
+| `marker_rejected` | `{id, time, candidate_number}` | absent |
+| `marker_deleted` | `{id, time, kind}` | absent |
+| `marker_time_changed` | `{id, from_time, to_time}` | move |
+
+So the merge works against documents the desktop has been writing all along,
+and the mobile screen emits the same kinds rather than a parallel vocabulary.
+Promoting a candidate is `marker_kept`; deleting a detected shot is
+`marker_rejected`, which is already how the desktop returns one to the
+candidate pool.
+
+This works only if the persisted shot `id` equals the marker id the SPA uses
+in those payloads. It already does for detected shots (`cand-<n>` on both
+sides), and `Audit.tsx:965` already mints `manual-${Date.now()}-${random}` for
+a new manual marker - it is simply discarded at save today. Persisting it is
+what closes the loop.
 
 `shot_number` stays in the document as a positional display field, recomputed
 on save. It is no longer an identity.
