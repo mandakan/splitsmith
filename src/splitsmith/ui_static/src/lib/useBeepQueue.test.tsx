@@ -12,24 +12,24 @@ import { MemoryRouter } from "react-router-dom";
 import { useBeepQueue } from "./useBeepQueue";
 import * as api from "./api";
 
-vi.mock("./api", () => ({
-  api: {
-    getBeepQueue: vi.fn(),
-    confirmBeepInQueue: vi.fn(),
-    overrideBeepForVideo: vi.fn(),
-    detectBeepForVideo: vi.fn(),
-    pollJob: vi.fn(),
-  },
-  ApiError: class ApiError extends Error {
-    detail = "boom";
-  },
-  // Real implementation (not a stub): the hook under test calls this
-  // directly, so a stub would just relocate the bug this test catches.
-  capabilityDenied: (
-    caps: api.MatchCapability[] | null | undefined,
-    cap: api.MatchCapability,
-  ) => Array.isArray(caps) && !caps.includes(cap),
-}));
+vi.mock("./api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./api")>();
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      getBeepQueue: vi.fn(),
+      confirmBeepInQueue: vi.fn(),
+      overrideBeepForVideo: vi.fn(),
+      detectBeepForVideo: vi.fn(),
+      pollJob: vi.fn(),
+    },
+    // capabilityDenied and ApiError come from ``actual`` above (real
+    // implementations) - the hook under test calls capabilityDenied
+    // directly, so a hand-rolled duplicate here could silently drift
+    // from the source of truth instead of catching a regression in it.
+  };
+});
 
 const item = (over: Partial<api.BeepQueueItem> = {}): api.BeepQueueItem => ({
   slug: "alice",

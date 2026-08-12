@@ -617,6 +617,12 @@ export function MatchShell() {
       {slot ? createPortal(contextRow, slot) : null}
 
       {capabilityDenied(capabilities, "edit") ? (
+        // READ_ONLY_MIRROR_MESSAGE's copy ("this is a desktop mirror...")
+        // assumes every edit-denied, non-share context is a desktop
+        // mirror - true for every caller today. If a second edit-denied
+        // context shows up (something other than a mirror or a share
+        // view), this banner needs capability-specific copy instead of
+        // reusing this string as-is.
         <div
           role="status"
           className="flex items-center gap-2.5 border-b border-amber-400/40 bg-amber-400/10 px-4 py-2 font-mono text-xs uppercase tracking-[0.06em] text-amber-600 sm:px-7"

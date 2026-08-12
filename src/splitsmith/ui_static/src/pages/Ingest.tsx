@@ -162,7 +162,11 @@ function IngestInner({ slug }: { slug: string }) {
   // DropGuard (App root) preventDefaults the same event so the browser
   // never navigates; it does not stop propagation, so this listener
   // always sees the drop.
-  const hostedDropActive = modeResolved && mode === "hosted";
+  // #756: also require !editDenied -- a mirror is "hosted" too, and
+  // arming this on mode alone let the overlay invite a drop that then
+  // 403s on attachRawVideo. Gating the arming (not just the enqueue)
+  // means the misleading overlay never shows at all.
+  const hostedDropActive = modeResolved && mode === "hosted" && !editDenied;
   const pageDragActive = useWindowFileDrag(hostedDropActive);
   const stagesRef = useRef<{ stage_number: number; stage_name: string }[]>([]);
   useEffect(() => {
