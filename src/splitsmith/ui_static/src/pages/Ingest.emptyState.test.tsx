@@ -13,6 +13,9 @@
  *   capability) never arms the drop listener at all - the misleading
  *   overlay must not show, let alone enqueue an upload that 403s on
  *   attachRawVideo (#756 review fix 1).
+ * - that same mirror's empty-state card swaps its copy to a read-only
+ *   explanation instead of inviting a drop the listener is deliberately
+ *   unarmed for (#836).
  */
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -213,5 +216,36 @@ describe("Ingest empty state", () => {
     // full-page "Drop videos to upload" overlay must never appear even
     // after a real drag-enter.
     expect(screen.queryByText(/drop videos to upload/i)).not.toBeInTheDocument();
+  });
+
+  it("a hosted mirror without edit shows read-only copy instead of the drop invite (#836)", async () => {
+    vi.mocked(useDeploymentMode).mockReturnValue({ mode: "hosted", resolved: true });
+    vi.mocked(api.getProject).mockResolvedValue(mirrorProject);
+    renderIngest();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /browse files/i })).toBeDisabled(),
+    );
+    expect(
+      screen.getByText(
+        /footage for this match is added on the desktop install and syncs here/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/drop video files anywhere on this page/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hosted mode with edit keeps the original drop-invite copy", async () => {
+    vi.mocked(useDeploymentMode).mockReturnValue({ mode: "hosted", resolved: true });
+    renderIngest();
+    await screen.findByRole("button", { name: /browse files/i });
+    expect(
+      screen.getByText(/drop video files anywhere on this page/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(
+        /footage for this match is added on the desktop install and syncs here/i,
+      ),
+    ).not.toBeInTheDocument();
   });
 });

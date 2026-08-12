@@ -3,7 +3,7 @@
  *
  * Shooters is mounted under <MatchShell/> and reads its capability set
  * from the outlet context (the same ``capabilities`` field Home reads,
- * not ``project.capabilities`` -- see MatchShellOutletContext). Its
+ * not ``project.capabilities`` - see MatchShellOutletContext). Its
  * primary purpose is the add-shooter form, so that's DISABLED (with
  * READ_ONLY_MIRROR_MESSAGE as the visible reason) rather than hidden --
  * an Ingest-style page with no controls at all would read as broken.
@@ -157,12 +157,31 @@ describe("Shooters capability gating", () => {
       screen.getByRole("button", { name: /add shooter/i }),
     ).toBeDisabled();
 
+    const rebuildButton = screen.getByRole("button", {
+      name: /rebuild missing trim caches/i,
+    });
+    expect(rebuildButton).toBeDisabled();
+    expect(rebuildButton).toHaveAttribute("title", READ_ONLY_MIRROR_MESSAGE);
+
+    const removeButton = screen.getByRole("button", { name: "Remove shooter" });
+    expect(removeButton).toBeDisabled();
+    expect(removeButton).toHaveAttribute("title", READ_ONLY_MIRROR_MESSAGE);
+  });
+
+  // #836: scoreboard linking is a write that 403s on a mirror - managed
+  // from the desktop install there. The CTA + its banner are hidden (not
+  // disabled) when edit is denied, same reasoning as Home's help cards.
+  it("hides the connect-to-scoreboard CTA and banner when edit is denied", async () => {
+    renderShooters({ capabilities: ["review", "share_manage"] });
+    await waitFor(() => expect(api.listMatchShooters).toHaveBeenCalled());
+    await screen.findByText("Mathias");
+
     expect(
-      screen.getByRole("button", { name: /rebuild missing trim caches/i }),
-    ).toBeDisabled();
+      screen.queryByRole("button", { name: /connect to scoreboard/i }),
+    ).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Remove shooter" }),
-    ).toBeDisabled();
+      screen.queryByText(/not linked to the scoreboard yet/i),
+    ).toBeNull();
   });
 
   it("enables every affordance on a desktop-origin match with full capabilities (forward-compat)", async () => {
@@ -175,6 +194,15 @@ describe("Shooters capability gating", () => {
 
     expect(screen.queryByText(READ_ONLY_MIRROR_MESSAGE)).toBeNull();
 
+    // Forward-compat: the CTA + banner reappear once edit is granted on an
+    // unlinked match.
+    expect(
+      screen.getByRole("button", { name: /connect to scoreboard/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/not linked to the scoreboard yet/i),
+    ).toBeInTheDocument();
+
     expect(screen.getByPlaceholderText("Johan Larsson")).toBeEnabled();
     // The manual-add button is also disabled while the name field is
     // empty (independent of capability); type a name to isolate the
@@ -185,11 +213,14 @@ describe("Shooters capability gating", () => {
       screen.getByRole("button", { name: /add shooter/i }),
     ).toBeEnabled();
 
-    expect(
-      screen.getByRole("button", { name: /rebuild missing trim caches/i }),
-    ).toBeEnabled();
-    expect(
-      screen.getByRole("button", { name: "Remove shooter" }),
-    ).toBeEnabled();
+    const rebuildButton = screen.getByRole("button", {
+      name: /rebuild missing trim caches/i,
+    });
+    expect(rebuildButton).toBeEnabled();
+    expect(rebuildButton).not.toHaveAttribute("title", READ_ONLY_MIRROR_MESSAGE);
+
+    const removeButton = screen.getByRole("button", { name: "Remove shooter" });
+    expect(removeButton).toBeEnabled();
+    expect(removeButton).toHaveAttribute("title", "Remove Mathias");
   });
 });
