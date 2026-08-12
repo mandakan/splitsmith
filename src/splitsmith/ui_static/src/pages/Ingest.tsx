@@ -40,6 +40,8 @@ import { Portal } from "@/components/ui/Portal";
 import {
   ApiError,
   api,
+  capabilityDenied,
+  READ_ONLY_MIRROR_MESSAGE,
   type MatchProject,
   type MoveShooterBlocked,
   type ServerHealth,
@@ -78,6 +80,11 @@ function IngestInner({ slug }: { slug: string }) {
   const [project, setProject] = useState<MatchProject | null>(null);
   const [health, setHealth] = useState<ServerHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // #756: mirrors (and any future non-editable match) get a read-only
+  // Ingest - the page's whole surface is edit-class writes. Disable
+  // with the banner's reason rather than hide: an Ingest page with no
+  // controls at all would read as broken (the issue's per-surface rule).
+  const editDenied = capabilityDenied(project?.capabilities, "edit");
   // Default storage mode for the ingest modal. Rendered as a toggle in
   // the FolderPicker footer (add-footage call site only).
   const [storage, setStorage] = useState<StorageMode>("symlink");
@@ -237,6 +244,7 @@ function IngestInner({ slug }: { slug: string }) {
   // the "success but nothing imported" case, which must not look like a
   // silent no-op (the page behind is unchanged when 0 register).
   async function commitFolder(path: string): Promise<void> {
+    if (editDenied) throw new Error(READ_ONLY_MIRROR_MESSAGE);
     const result = await api.scanVideos(slug, path, true, storage);
     await afterImport(result.registered.length, result.registered);
     if (result.registered.length === 0) {
@@ -249,6 +257,7 @@ function IngestInner({ slug }: { slug: string }) {
   }
 
   async function commitFiles(files: FolderPickerCommitFile[]): Promise<void> {
+    if (editDenied) throw new Error(READ_ONLY_MIRROR_MESSAGE);
     const result = await api.scanFiles(
       slug,
       files.map((f) => f.path),
@@ -262,6 +271,10 @@ function IngestInner({ slug }: { slug: string }) {
   }
 
   async function moveShooterBatch(targetSlug: string, videoPaths: string[]) {
+    if (editDenied) {
+      setError(READ_ONLY_MIRROR_MESSAGE);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -300,6 +313,10 @@ function IngestInner({ slug }: { slug: string }) {
     toStage: number | null,
     role: VideoRole,
   ): Promise<boolean> {
+    if (editDenied) {
+      setError(READ_ONLY_MIRROR_MESSAGE);
+      return Promise.resolve(false);
+    }
     setError(null);
     // Build on the latest state (functional update) so a burst of clicks stacks
     // correctly - each move layers onto the previous optimistic result.
@@ -342,6 +359,10 @@ function IngestInner({ slug }: { slug: string }) {
   // later optimistic edits and would revert them). Any failure resyncs via
   // reload(). Returns a resolved promise so callers that `void` it stay simple.
   async function removeVideo(videoPath: string): Promise<void> {
+    if (editDenied) {
+      setError(READ_ONLY_MIRROR_MESSAGE);
+      return;
+    }
     // Guard the destructive action: removal drops the video from the project
     // and clears its regenerable caches. It's recoverable in both deployment
     // modes: local unlinks only the raw/ symlink (source on disk untouched);
@@ -464,6 +485,13 @@ function IngestInner({ slug }: { slug: string }) {
               ? "Splitsmith auto-matches each video to a stage by recording timestamp."
               : "Auto-matched to stages by recording timestamp. Review the assignments and confirm to start processing."}
           </p>
+          {/* #756: one note for the whole page rather than repeating the
+           *  reason on every disabled control below. */}
+          {editDenied && (
+            <p className="mt-2 text-[0.75rem] uppercase tracking-[0.06em] text-muted">
+              {READ_ONLY_MIRROR_MESSAGE}
+            </p>
+          )}
         </div>
 
         {/* Top-level actions. The relink dialog handles the "I moved my
@@ -510,6 +538,7 @@ function IngestInner({ slug }: { slug: string }) {
               mode={mode}
               onAdd={() => setShowAddFootage(true)}
               lastScannedDir={lastScannedDir}
+              disabled={editDenied}
             />
           ) : (
             <AddFootageSkeleton />
@@ -526,7 +555,9 @@ function IngestInner({ slug }: { slug: string }) {
               setMoveBlocked([]);
             }}
             onMoveShooter={moveShooterBatch}
-            onAddMore={() => setShowAddFootage(true)}
+            onAddMore={() => {
+              if (!editDenied) setShowAddFootage(true);
+            }}
             onMoveAssignment={moveAssignment}
             onRemoveVideo={removeVideo}
             onConfirm={() => navigate(href(""), { replace: true })}
@@ -601,15 +632,17 @@ function EmptyState({
   mode,
   onAdd,
   lastScannedDir,
+  disabled,
 }: {
   mode: "local" | "hosted";
   onAdd: () => void;
   lastScannedDir: string | null;
+  disabled: boolean;
 }) {
   return (
     <>
-      <AddFootageCard mode={mode} onAdd={onAdd} />
-      {mode === "local" && lastScannedDir && (
+      <AddFootageCard mode={mode} onAdd={onAdd} disabled={disabled} />
+      {mode === "local" && lastScannedDir && !disabled && (
         <RecentSources
           items={[
             {
@@ -646,9 +679,11 @@ function AddFootageSkeleton() {
 function AddFootageCard({
   mode,
   onAdd,
+  disabled,
 }: {
   mode: "local" | "hosted";
   onAdd: () => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="relative mb-5 overflow-hidden rounded-2xl border border-rule-strong bg-surface px-10 py-14 text-center">
@@ -670,6 +705,7 @@ function AddFootageCard({
       <div className="inline-flex gap-2.5">
         <Button
           onClick={onAdd}
+          disabled={disabled}
           className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
         >
           <Folder className="size-3.5" />
