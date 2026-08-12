@@ -263,7 +263,9 @@ function setUpApiWithOrigin(
     overrides?.capabilities ??
     (origin === "desktop"
       ? ["review", "share_manage"]
-      : ["edit", "review", "share_manage"]);
+      : origin === "local"
+        ? ["edit", "review"]
+        : ["edit", "review", "share_manage"]);
   vi.mocked(api.getHealth).mockResolvedValue(HEALTH);
   vi.mocked(api.getScoreboardIdentity).mockResolvedValue(null);
   vi.mocked(api.getServerFeatures).mockResolvedValue({
@@ -289,8 +291,8 @@ function setUpApiWithOrigin(
     pending_count: 0,
     confirmed_count: 0,
     stages: [],
-    origin: "local",
-    capabilities: ["edit", "review", "share_manage"],
+    origin,
+    capabilities,
   });
   vi.mocked(api.getTriageSummary).mockResolvedValue({ flagged_count: 0 });
   vi.mocked(api.listJobs).mockResolvedValue([]);
