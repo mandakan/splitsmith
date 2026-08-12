@@ -523,6 +523,35 @@ def test_promote_then_delete_round_trips_to_absent() -> None:
     assert result.doc["shots"] == []
 
 
+def test_a_delete_verdict_acts_when_base_holds_the_shot_and_remote_dropped_it() -> None:
+    """Pins the ``base_shots`` clause of ``_remote_knows`` (#846).
+
+    ``_remote_knows`` corroborates a delete verdict three ways, and only
+    the ``remote_event_ids`` one was pinned -- deleting either of the
+    other two left the whole suite green. This is the ``base_shots``
+    case, and it is the ordinary three-way-merge shape: the shot existed
+    at base, remote's document no longer carries it, so remote deleted
+    it.
+
+    Local still holds the shot *and* a ``marker_rejected`` for it, which
+    is the Ctrl+Z shape ``_merge_shot_section`` documents: undo restores
+    a rejected marker without writing a compensating event, so the log
+    disagrees with the document it was saved beside. The verdict is
+    stale on its own and must not act on its own -- but here remote's
+    document independently corroborates it, and remote's log says
+    nothing at all, so ``base_shots`` is the only clause that can carry
+    the delete.
+    """
+    base = _id_doc([_id_shot("cand-4", 1, 6.0, 4)])
+    local = _id_doc(
+        [_id_shot("cand-4", 1, 6.0, 4)],
+        [_ev("marker_rejected", "cand-4", "2026-08-12T12:10:00Z")],
+    )
+    remote = _id_doc([])
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+    assert result.doc["shots"] == []
+
+
 def test_delete_then_promote_round_trips_to_present() -> None:
     """The reverse order, to prove the verdict is time-ordered not kind-ordered."""
     base = _id_doc([_id_shot("cand-9", 1, 6.5, 9)])

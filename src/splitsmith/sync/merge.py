@@ -655,6 +655,13 @@ def _merge_shot_section(
     remote_event_ids = _membership_event_ids(remote_for_merge.get("audit_events"))
 
     def _remote_knows(shot_id: str) -> bool:
+        # ``remote_shots`` is unreachable through the only caller: ``_dropped``
+        # has already returned False for anything remote still carries. Kept so
+        # this reads as the total predicate its name claims, rather than as one
+        # that silently depends on its caller's guard -- but that means it
+        # cannot be pinned by a test, and an ablation of it stays green.
+        # ``base_shots`` and ``remote_event_ids`` are each load-bearing and each
+        # pinned by exactly one test (#846).
         return shot_id in base_shots or shot_id in remote_shots or shot_id in remote_event_ids
 
     def _dropped(shot_id: str) -> bool:
