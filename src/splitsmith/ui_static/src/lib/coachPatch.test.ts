@@ -5,6 +5,7 @@ import { buildCoachPatch, buildUndoPatch } from "@/lib/coachPatch";
 
 function shot(overrides: Partial<CoachShot> = {}): CoachShot {
   return {
+    id: null,
     shot_number: 3,
     ms_after_beep: 1500,
     time_from_beep: 1.5,

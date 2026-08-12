@@ -185,7 +185,7 @@ def test_mint_false_leaves_a_non_convergent_unusable_id_untouched() -> None:
     """A non-string id is not an id, and for a candidate-less shot -- so no
     convergent derivation is available under ``mint=False`` -- there is
     nothing safe to replace it with. Leaving it is the outcome: the
-    merge's unstamped-shot guard uses the same ``_has_usable_id``
+    merge's unstamped-shot guard uses the same ``has_usable_id``
     predicate, so the shot still reads as unstamped there and the gate
     refuses the section rather than keying on 42.
     """

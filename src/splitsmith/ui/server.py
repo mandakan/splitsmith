@@ -185,7 +185,7 @@ from ..match_project import (
 from ..match_registry import MatchRegistry
 from ..observability import StructuredJsonFormatter, init_sentry
 from ..runtime import runtime as process_runtime
-from ..shot_id import ensure_shot_ids
+from ..shot_id import ensure_shot_ids, has_usable_id
 from ..storage import Storage
 from ..sync.client import HostedSyncClient, SyncClientError
 from ..sync.plan import build_push_plan
@@ -5065,6 +5065,18 @@ class CoachShotPatchRequest(BaseModel):
     renumbers the target. When supplied, a version that no longer matches
     the stored document is refused rather than applied to whatever now sits
     at that index.
+
+    Only meaningful on the by-number route, and only hosted. Local mode has
+    no locking on plain files, so ``AppState.load_audit`` /
+    ``save_audit`` hard-code version 0 on every read and write: a local
+    client sends 0, the stored version is 0, and the guard never bites. The
+    by-id route ignores it in effect -- an id does not renumber -- and a
+    client should not send it there, since a version that has legitimately
+    moved on (an Undo re-patch, say) would 409 for no reason.
+
+    Clients read the version from the coach payload's own ``version``
+    field, which every coach response carries as of the save it just made
+    (#844).
     """
 
 
@@ -10837,10 +10849,17 @@ def create_app(
         )
         return payload, version, primary_beep_in_clip, stg, project
 
-    def _coach_save(slug: str, stage_number: int, payload: dict[str, Any], version: int) -> None:
+    def _coach_save(slug: str, stage_number: int, payload: dict[str, Any], version: int) -> int:
         """Persist a coach-mutated audit doc under optimistic locking
-        (hosted) / atomically to disk (local). A lost race -> 409."""
-        state.save_audit(slug, stage_number, payload, version=version)
+        (hosted) / atomically to disk (local). A lost race -> 409.
+
+        Returns the *new* version. Every caller then serves that version in
+        its response rather than the one it read (#844): the client uses it
+        as the ``expected_version`` on its next positional patch, so handing
+        back the pre-save version would make the guard value stale the
+        moment it arrived.
+        """
+        return state.save_audit(slug, stage_number, payload, version=version)
 
     def _build_coach_response(
         slug: str,
@@ -10849,6 +10868,7 @@ def create_app(
         stg: Any,
         project: MatchProject,
         cfg: CoachAutoClassifyConfig,
+        version: int,
     ) -> dict[str, Any]:
         # Coach plays the same clip the audit screen serves -- typically
         # the project-local trimmed MP4 -- so every "absolute" time must
@@ -10880,6 +10900,14 @@ def create_app(
             coach_shots.append(
                 {
                     "shot_number": int(s.get("shot_number", 0)),
+                    # #844: the stable id, so a client can address the by-id
+                    # PATCH instead of the positional one. ``null`` for a
+                    # shot whose id is missing or unusable (an int from a
+                    # hand-edited doc) -- the by-id route matches on a
+                    # string, so anything else would only ever 404, and the
+                    # client is meant to fall back to the positional route
+                    # plus ``expected_version`` for exactly these.
+                    "id": s["id"] if has_usable_id(s) else None,
                     "ms_after_beep": int(ms),
                     "time_from_beep": time_from_beep,
                     # In the served clip's coordinate system: where the
@@ -10904,6 +10932,11 @@ def create_app(
             # secondaries (each ``videos[i].beep_in_clip`` mirrors this
             # field for that camera's served clip).
             "beep_time": clip_anchor,
+            # The audit doc's version as of this response (#844) -- what a
+            # client sends as ``expected_version`` on the positional shot
+            # PATCH. Always 0 in local mode, where nothing locks a file, so
+            # the guard is hosted-only in practice.
+            "version": version,
             "videos": _coach_video_entries(slug, project, stg),
             "shots": coach_shots,
         }
@@ -10941,7 +10974,7 @@ def create_app(
         # off the return value so an untouched doc costs no version bump.
         if coach_module.heal_unclassified(payload.get("shots"), cfg) and not current_share_request.get():
             try:
-                _coach_save(slug, stage_number, payload, version)
+                version = _coach_save(slug, stage_number, payload, version)
             except _state_conflict_excs():
                 # A concurrent writer won the version race; serve the
                 # in-memory heal and let the next read persist it.
@@ -10950,7 +10983,7 @@ def create_app(
                 # has no db extras, and an unguarded import here 500ed
                 # every heal-triggering coach GET.
                 pass
-        return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
+        return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg, version))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/coach/reclassify")
     def reclassify_stage_coach(slug: str, stage_number: int) -> JSONResponse:
@@ -10974,8 +11007,8 @@ def create_app(
             }
         )
         payload["audit_events"] = events
-        _coach_save(slug, stage_number, payload, version)
-        return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
+        version = _coach_save(slug, stage_number, payload, version)
+        return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg, version))
 
     def _apply_shot_coach_patch(
         slug: str,
@@ -11033,8 +11066,8 @@ def create_app(
             }
         )
         payload["audit_events"] = events
-        _coach_save(slug, stage_number, payload, version)
-        return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
+        version = _coach_save(slug, stage_number, payload, version)
+        return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg, version))
 
     @app.patch("/api/shooters/{slug}/stages/{stage_number}/shots/{shot_number}/coach")
     def patch_stage_shot_coach(

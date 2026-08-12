@@ -6,6 +6,7 @@ import type { CoachShot } from "@/lib/api";
 
 function shot(n: number, overrides: Partial<CoachShot> = {}): CoachShot {
   return {
+    id: null,
     shot_number: n,
     ms_after_beep: n * 1000,
     time_from_beep: n,

@@ -90,6 +90,12 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const href = useMatchHref();
   const navigate = useNavigate();
   const [coach, setCoach] = useState<CoachStageResponse | null>(null);
+  // The audit version the next positional shot PATCH must guard on (#844).
+  // A ref, not the ``coach`` state: applyShotPatch hands its own Undo
+  // closure to the snack, and that closure outlives the render it was made
+  // in - reading ``coach`` there would send the version from *before* the
+  // apply, which the apply itself has just superseded.
+  const coachVersionRef = useRef<number | undefined>(undefined);
   const [baselines, setBaselines] = useState<TierBaselines | null>(null);
   const [scorecard, setScorecard] = useState<StageScorecard | null>(null);
   const [scorecardUpdatedAt, setScorecardUpdatedAt] = useState<string | null>(null);
@@ -138,6 +144,15 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
     }
   }, [coach, location.pathname, shareUrl, slug, stage]);
 
+  // The only writer of coach state, so the guard value cannot fall out of
+  // step with the document it guards. Written here rather than in an effect
+  // on ``coach``: an effect lands a commit later, and a second patch fired
+  // before that commit would send the version the first one just replaced.
+  const applyCoach = useCallback((next: CoachStageResponse | null) => {
+    coachVersionRef.current = next?.version;
+    setCoach(next);
+  }, []);
+
   // Non-optimistic write, per the desktop Coach precedent: PATCH returns
   // the full CoachStageResponse, which replaces coach state wholesale -
   // no refetch, no local mirror to desync. Undo re-patches the inverse
@@ -146,8 +161,17 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
     async (shot: CoachShot, patch: CoachShotPatch, undoable: boolean) => {
       setPatchBusy(true);
       try {
-        const updated = await api.patchStageShotCoach(slug, stage, shot.shot_number, patch);
-        setCoach(updated);
+        // Addressed by id where the shot has one, so a concurrent insert
+        // cannot slide this annotation onto the neighbouring shot; the
+        // version is only the fallback's guard (#844).
+        const updated = await api.patchStageShotCoach(
+          slug,
+          stage,
+          shot,
+          patch,
+          coachVersionRef.current,
+        );
+        applyCoach(updated);
         // Stale-close guard: only dismiss the sheet if it still shows the
         // shot this patch was for - a slower in-flight patch resolving
         // after the operator has already reopened the sheet on a
@@ -178,7 +202,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
         setPatchBusy(false);
       }
     },
-    [slug, stage],
+    [applyCoach, slug, stage],
   );
 
   // The pinned player's height varies with viewport width, so no
@@ -217,7 +241,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
       if (!alive) return;
 
       if (coachResult.status === "fulfilled") {
-        setCoach(coachResult.value);
+        applyCoach(coachResult.value);
         setLoaded(true);
       } else {
         const e = coachResult.reason;
@@ -248,7 +272,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
     return () => {
       alive = false;
     };
-  }, [slug, stage, attempt]);
+  }, [applyCoach, slug, stage, attempt]);
 
   const shooter = shooters.find((s) => s.slug === slug) ?? null;
 

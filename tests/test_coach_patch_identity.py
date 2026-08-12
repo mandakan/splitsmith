@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -16,15 +17,28 @@ from tests.test_mirror_read_only import _alias_url, _seed_mirror
 
 
 @pytest.fixture
-def local_app_with_stage(tmp_path: Path) -> tuple[TestClient, str]:
-    """Local-mode TestClient for a project with one shooter and one stage."""
+def local_app_with_stage_root(tmp_path: Path) -> tuple[TestClient, str, Path]:
+    """As :func:`local_app_with_stage`, plus the shooter root on disk.
+
+    The extra path is only for the tests that have to hand-write an audit
+    doc the save boundary would otherwise normalise away.
+    """
     root, shooter_root = scaffold_match(tmp_path, name="Coach Identity Match")
     project = MatchProject.load(shooter_root)
     project.stages = [StageEntry(stage_number=1, stage_name="Stage One", time_seconds=30.0)]
     project.save(shooter_root)
     app = create_app(project_root=root, project_name="Coach Identity Match")
     client = TestClient(app)
-    return client, f"/api/matches/{bound_match_id(app)}"
+    return client, f"/api/matches/{bound_match_id(app)}", shooter_root
+
+
+@pytest.fixture
+def local_app_with_stage(
+    local_app_with_stage_root: tuple[TestClient, str, Path],
+) -> tuple[TestClient, str]:
+    """Local-mode TestClient for a project with one shooter and one stage."""
+    client, url_base, _shooter_root = local_app_with_stage_root
+    return client, url_base
 
 
 def _doc(shots: list[dict]) -> dict:
@@ -122,3 +136,108 @@ def test_stale_shot_number_patch_is_refused_after_an_insert(
     )
     assert resp.status_code == 409, resp.text
     assert resp.json()["detail"] == "version_conflict"
+
+
+# --- #844: the client can only use the by-id route if the coach payload
+# carries the id, and can only send ``expected_version`` on the positional
+# fallback if the coach payload carries the version. Both were absent, which
+# is why the SPA still addressed shots positionally with no guard at all.
+
+
+def test_coach_response_exposes_each_shot_id(
+    local_app_with_stage: tuple[TestClient, str],
+) -> None:
+    client, url_base = local_app_with_stage
+    saved = client.put(f"{url_base}/shooters/me/stages/1/audit", json=_doc(list(_TWO_SHOTS)))
+    assert saved.status_code == 200, saved.text
+
+    coach = client.get(f"{url_base}/shooters/me/stages/1/coach")
+    assert coach.status_code == 200, coach.text
+    assert [s["id"] for s in coach.json()["shots"]] == ["cand-4", "cand-9"]
+
+
+def test_coach_response_reports_no_id_for_an_unusable_one(
+    local_app_with_stage_root: tuple[TestClient, str, Path],
+) -> None:
+    """A non-string ``id`` must reach the client as ``null``, not as itself.
+
+    ``shot_id.has_usable_id`` already rules an int id out everywhere else --
+    the by-id route matches ``s.get("id") == shot_id`` against a *string*
+    path segment, so handing the client a ``7`` would send it to a route
+    that can only 404. ``null`` is what routes it to the positional
+    fallback instead. Written to disk directly because the save boundary
+    would stamp a derived id over the junk one.
+    """
+    client, url_base, shooter_root = local_app_with_stage_root
+    audit_file = shooter_root / "audit" / "stage1.json"
+    audit_file.parent.mkdir(parents=True, exist_ok=True)
+    audit_file.write_text(
+        json.dumps(_doc([{"shot_number": 1, "time": 6.0, "ms_after_beep": 1000, "id": 7}])),
+        encoding="utf-8",
+    )
+
+    coach = client.get(f"{url_base}/shooters/me/stages/1/coach")
+    assert coach.status_code == 200, coach.text
+    assert [s["id"] for s in coach.json()["shots"]] == [None]
+
+
+def test_coach_patch_response_carries_the_version_a_follow_up_patch_needs(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """Two positional patches in a row must both land.
+
+    The PATCH handler saves under the version it read, so the *new* version
+    is the one the client now holds. Serving the pre-save version instead
+    would make the response's own guard value stale on arrival: every
+    second annotation on a stage would 409 with nothing having changed.
+    Hosted, because local hard-codes version 0 on every read and write and
+    so cannot tell a fresh version from a stale one.
+    """
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JCOACHPATCHVERSION00001"
+    name = "coach-patch-version"
+    _seed_mirror(client, match_id, name)
+
+    roster_doc = match_model.Match(match_id=match_id, name=name, shooters=["alice"], stages=[]).model_dump(
+        mode="json"
+    )
+    put_roster = client.put(
+        f"/api/sync/matches/{match_id}/docs/match", params={"expected_version": 1}, json=roster_doc
+    )
+    assert put_roster.status_code == 200, put_roster.text
+
+    stage = StageEntry(stage_number=1, stage_name="Stage One", time_seconds=30.0)
+    project_doc = MatchProject(name=name, competitor_name="Alice", stages=[stage]).model_dump(mode="json")
+    put_project = client.put(
+        f"/api/sync/matches/{match_id}/docs/project/alice",
+        params={"expected_version": 0},
+        json=project_doc,
+    )
+    assert put_project.status_code == 200, put_project.text
+
+    put_audit = client.put(
+        f"/api/sync/matches/{match_id}/docs/audit/alice/1",
+        params={"expected_version": 0},
+        json=_doc(list(_TWO_SHOTS)),
+    )
+    assert put_audit.status_code == 200, put_audit.text
+
+    read = client.get(_alias_url(match_id, "shooters/alice/stages/1/coach"))
+    assert read.status_code == 200, read.text
+    held_version = read.json()["version"]
+
+    first = client.patch(
+        _alias_url(match_id, "shooters/alice/stages/1/shots/1/coach"),
+        json={"coaching_note": "first", "expected_version": held_version},
+    )
+    assert first.status_code == 200, first.text
+    next_version = first.json()["version"]
+    assert next_version != held_version, "a save that changed the doc must move the version"
+
+    second = client.patch(
+        _alias_url(match_id, "shooters/alice/stages/1/shots/1/coach"),
+        json={"coaching_note": "second", "expected_version": next_version},
+    )
+    assert second.status_code == 200, second.text

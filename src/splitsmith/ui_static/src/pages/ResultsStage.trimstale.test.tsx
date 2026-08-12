@@ -59,6 +59,7 @@ function makeCoach(): CoachStageResponse {
     stage_number: 3,
     stage_name: "Steel Rush",
     beep_time: 2,
+    version: 1,
     videos: [{ path: "trimmed/stage3.mp4", role: "primary", beep_in_clip: 2 }],
     shots: [],
   };
