@@ -19,6 +19,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   api,
   type Job,
+  type MatchCapability,
   type MatchProject,
   type ServerHealth,
   type ShooterListEntry,
@@ -217,6 +218,7 @@ function setUpApi(listJobsImpl: () => Promise<Job[]>) {
     match_name: "Bromma Classic 2026",
     shooters: [makeShooter("mathias", "Mathias")],
     origin: "local",
+    capabilities: ["edit", "review"],
   });
   vi.mocked(api.getProject).mockResolvedValue(makeProject());
   vi.mocked(api.getBeepQueue).mockResolvedValue({
@@ -225,6 +227,7 @@ function setUpApi(listJobsImpl: () => Promise<Job[]>) {
     confirmed_count: 0,
     stages: [],
     origin: "local",
+    capabilities: ["edit", "review"],
   });
   vi.mocked(api.getTriageSummary).mockResolvedValue({ flagged_count: 0 });
   vi.mocked(api.listJobs).mockImplementation(listJobsImpl);
@@ -252,7 +255,15 @@ function renderShell() {
  *  with one shooter, no jobs. Used by the chrome-ownership tests below and
  *  reused from the #631 mirror-banner describe (same shape, different
  *  origin per test there). */
-function setUpApiWithOrigin(origin: "hosted" | "desktop" | "local") {
+function setUpApiWithOrigin(
+  origin: "hosted" | "desktop" | "local",
+  overrides?: { capabilities?: MatchCapability[] },
+) {
+  const capabilities =
+    overrides?.capabilities ??
+    (origin === "desktop"
+      ? ["review", "share_manage"]
+      : ["edit", "review", "share_manage"]);
   vi.mocked(api.getHealth).mockResolvedValue(HEALTH);
   vi.mocked(api.getScoreboardIdentity).mockResolvedValue(null);
   vi.mocked(api.getServerFeatures).mockResolvedValue({
@@ -270,6 +281,7 @@ function setUpApiWithOrigin(origin: "hosted" | "desktop" | "local") {
     match_name: "Bromma Classic 2026",
     shooters: [makeShooter("mathias", "Mathias")],
     origin,
+    capabilities,
   });
   vi.mocked(api.getProject).mockResolvedValue(makeProject());
   vi.mocked(api.getBeepQueue).mockResolvedValue({
@@ -278,6 +290,7 @@ function setUpApiWithOrigin(origin: "hosted" | "desktop" | "local") {
     confirmed_count: 0,
     stages: [],
     origin: "local",
+    capabilities: ["edit", "review", "share_manage"],
   });
   vi.mocked(api.getTriageSummary).mockResolvedValue({ flagged_count: 0 });
   vi.mocked(api.listJobs).mockResolvedValue([]);
@@ -407,6 +420,20 @@ describe("MatchShell mirror banner (#631 Task 10)", () => {
     expect(
       screen.queryByText(/synced from a desktop install/i),
     ).not.toBeInTheDocument();
+  });
+
+  it("keeps the banner off when a desktop-origin match has edit capability", async () => {
+    // #756 forward-compat: the banner keys off the capability set, not
+    // provenance - a fully-transferred mirror must not claim read-only.
+    setUpApiWithOrigin("desktop", {
+      capabilities: ["edit", "review", "share_manage"],
+    });
+    renderShell();
+
+    await screen.findByText(/shooters/i);
+    expect(
+      screen.queryByText(/synced from a desktop install/i),
+    ).toBeNull();
   });
 });
 

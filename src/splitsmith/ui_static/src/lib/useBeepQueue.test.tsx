@@ -52,6 +52,8 @@ const queue = (
   pending_count: items.length,
   confirmed_count: 0,
   origin,
+  capabilities:
+    origin === "desktop" ? ["review", "share_manage"] : ["edit", "review"],
   stages: [
     {
       stage_number: 1,
