@@ -6602,9 +6602,9 @@ def create_app(
         request.scope["raw_path"] = rewritten.encode("utf-8")
         # Lazy import: this middleware runs for every request in both local
         # and hosted mode (local returns 404 above via ``resolver is None``),
-        # so a module-level import here would force ``splitsmith.db`` -- and
-        # its sqlalchemy/procrastinate/psycopg deps -- onto local-mode
-        # installs that don't have the ``hosted`` extra. By this point the
+        # so a module-level import here would force ``splitsmith.db`` - and
+        # its sqlalchemy dependency - onto local-mode installs that don't
+        # have the ``hosted`` extra. By this point the
         # resolver already came from ``_apply_hosted_mode_wiring``, which
         # has imported the db package, so this is a free (cached) import.
         from ..db.share_guard import current_share_scope
