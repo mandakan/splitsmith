@@ -64,6 +64,17 @@ def test_shot_with_no_time_still_gets_an_id() -> None:
     assert shots[0]["id"]
 
 
+def test_a_shot_with_no_candidate_and_no_time_has_no_convergent_id() -> None:
+    """Documented limitation, not an accident: a shot with neither key has
+    nothing stable to derive from, so two independent stamps of equivalent
+    no-key shots do not converge on the same id."""
+    first = [{"candidate_number": None, "time": None}]
+    second = [{"candidate_number": None, "time": None}]
+    ensure_shot_ids(first)
+    ensure_shot_ids(second)
+    assert first[0]["id"] != second[0]["id"]
+
+
 @pytest.fixture
 def local_app_with_stage(tmp_path: Path) -> tuple[TestClient, str]:
     """Local-mode TestClient for a project with one shooter and one stage."""

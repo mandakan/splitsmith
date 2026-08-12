@@ -6,9 +6,13 @@ therefore carry an ``id``.
 
 The derivation is what the SPA already computes client-side (``Audit.tsx``
 builds ``cand-<n>`` for detected markers) and simply did not persist, so it is
-deterministic for every shot that already exists: desktop and hosted
-independently mint the same id for the same pre-existing shot and no migration
-is needed.
+deterministic for every shot carrying a ``candidate_number`` or a ``time`` --
+which in practice is every shot -- and desktop and hosted independently mint
+the same id for the same pre-existing shot, so no migration is needed for
+those. A shot with neither key (``Audit.tsx`` documents this shape: a derived
+anchor shot the secondary couldn't snap, left with ``time: null``) has
+nothing stable to derive from and gets a minted, non-convergent id instead --
+see ``derive_shot_id``.
 
 uuid4 hex, not ULID, for the minted case -- matching ``_new_event_id`` in
 ``ui/server.py``, whose reasoning applies verbatim: the ulid package is a
