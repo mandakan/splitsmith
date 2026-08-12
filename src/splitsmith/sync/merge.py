@@ -17,7 +17,10 @@ Only a shot that *arrived* carrying a persisted string ``id`` is
 mergeable: an id minted inside the merge is not convergent across sides,
 because ``derive_shot_id`` keys a candidate-less shot off its rounded
 time and a nudge therefore changes it. If either side carries an
-unstamped shot the whole shot section is skipped with a note.
+unstamped shot the whole shot section is skipped with a note. That gate
+narrows the divergence class without closing it -- it cannot see two
+sides that stamped independently before the merge ran; Task 7 (desktop
+as sole minter for a mirror) is what closes it.
 
 ``merge_audit_doc`` is consequently not a deterministic function of its
 inputs: ``ensure_shot_ids`` mints a uuid4 for a shot that can derive no
@@ -318,13 +321,22 @@ def merge_audit_doc(
     if local_unstamped or remote_unstamped:
         # Refuse the whole section, not just the unstamped shots: a document
         # this old cannot be trusted to key any of its shots. Local's shots
-        # stand as they are (now stamped), so nothing can duplicate and
-        # nothing can be lost. The condition clears the first time each side
-        # saves the stage.
+        # stand as they are, so nothing can duplicate and nothing can be lost
+        # in *this* merge.
+        #
+        # The gate only sees shots still unstamped when the merge runs, and it
+        # cannot detect that the two sides stamped independently beforehand --
+        # which is exactly what produces the divergence. ensure_shot_ids runs
+        # at the save boundary on both sides: a desktop that nudges a legacy
+        # manual shot to 6.52 and saves stamps manual-t6520, while a phone
+        # that accepts the mirror unchanged stamps manual-t6500. Both counts
+        # then read zero, this gate passes, and one shot unions into two with
+        # no note. Making the desktop the sole minter for a mirror is what
+        # closes that class - Task 7 in the plan. This gate narrows it.
         result.notes.append(
             f"{doc_key}: {local_unstamped} local and {remote_unstamped} remote shot(s) "
-            "arrived without a persisted id, so the shot section was not merged and "
-            "local shots stand; they are stamped now, so the next sync can merge them"
+            "arrived without a persisted id, so the shot section was not merged; "
+            "local shots stand"
         )
     else:
         _merge_shot_section(
@@ -470,7 +482,21 @@ def _merge_shot_section(
             "holds no shots to merge; replaced with the merged list - the document is malformed"
         )
 
-    unkeyable = [s for s in merged_shots_list if isinstance(s, dict) and not _has_identity(s)]
+    # Deduplicated by id, first wins: _shots_by_id already counted a repeated
+    # id and the caller notes it, so keeping both copies here would make that
+    # note's "kept the first and dropped 1" untrue and put one id on two
+    # entries.
+    unkeyable: list[dict] = []
+    unkeyable_ids: set[str] = set()
+    for shot in merged_shots_list:
+        if not isinstance(shot, dict) or _has_identity(shot):
+            continue
+        shot_id = shot.get("id")
+        if isinstance(shot_id, str) and shot_id:
+            if shot_id in unkeyable_ids:
+                continue
+            unkeyable_ids.add(shot_id)
+        unkeyable.append(shot)
     if unkeyable:
         result.notes.append(
             f"{doc_key}: {len(unkeyable)} shot(s) carry neither candidate_number nor "
@@ -501,8 +527,15 @@ def _merge_shot_section(
                 f"{dropped} - the document is malformed"
             )
 
+    # unkeyable and resolved are disjoint only when a shot's keyability is the
+    # same on both sides. Local holding an id aside while remote's copy of
+    # that id keys (local has no time, remote has one) would otherwise adopt
+    # remote's as a remote-only addition and put the id on two entries. Local
+    # wins, as everywhere else a shot is held aside.
+    remote_only = [k for k in remote_shots if k not in local_shots and k not in unkeyable_ids]
+
     resolved: dict[str, dict] = {}
-    for shot_id in list(local_shots) + [k for k in remote_shots if k not in local_shots]:
+    for shot_id in list(local_shots) + remote_only:
         if verdicts.get(shot_id) is False:
             continue
         local_shot = local_shots.get(shot_id)

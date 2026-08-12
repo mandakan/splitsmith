@@ -457,8 +457,11 @@ def test_a_deleted_shot_is_not_resurrected_by_the_other_side() -> None:
 def test_a_legacy_doc_with_no_ids_keeps_its_shots() -> None:
     """Documents written before shot ids shipped must survive a merge.
 
-    Without the ensure_shot_ids pass these shots key to nothing and are
-    dropped when the merged list is rebuilt -- a silent total data loss.
+    These shots carry no id, so the document fails the unstamped gate and
+    the shot section is refused outright: local's list is never rebuilt and
+    the shots come through untouched, stamped for the future. (Before the
+    gate they were keyed on ids minted mid-merge, which is what let a nudged
+    manual shot duplicate.)
     """
     legacy = {
         "beep_time": 5.0,
@@ -759,3 +762,120 @@ def test_ms_after_beep_travels_with_its_time_when_beep_time_is_absent() -> None:
     merged = result.doc["shots"][0]
     assert merged["time"] == 9.0
     assert merged["ms_after_beep"] == 4000  # remote's, not local's stale 1000
+
+
+# -- one id, one entry (fix round 3) ------------------------------------
+
+
+def test_a_remote_shot_is_not_adopted_when_local_holds_its_id_aside() -> None:
+    """unkeyable and resolved are only disjoint when keyability agrees.
+
+    Local's copy has no time, so it is diverted to the hold-aside; remote's
+    has one, so it keys and was adopted as a remote-only addition. Same id,
+    two entries -- and the document then self-inflicts the duplicate-id note
+    on the next merge.
+    """
+    base = {
+        "beep_time": 5.0,
+        "shots": [{"id": "anchor-1", "shot_number": 1, "time": None}],
+        "audit_events": [],
+    }
+    local = copy.deepcopy(base)
+    remote = {
+        "beep_time": 5.0,
+        "shots": [{"id": "anchor-1", "shot_number": 1, "time": 6.0}],
+        "audit_events": [],
+    }
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+    assert [s["id"] for s in result.doc["shots"]] == ["anchor-1"]
+    assert result.doc["shots"][0]["time"] is None  # local's copy wins
+
+
+def test_two_identity_less_shots_sharing_an_id_appear_once() -> None:
+    """The hold-aside must not smuggle a duplicate id past _shots_by_id.
+
+    _shots_by_id counts the collision and the note fires, but unkeyable kept
+    both copies, so the note's "kept the first and dropped 1" was a lie.
+    """
+
+    def build() -> dict:
+        return {
+            "beep_time": 5.0,
+            "shots": [
+                {"id": "anchor-1", "shot_number": 1, "time": None},
+                {"id": "anchor-1", "shot_number": 2, "time": None},
+            ],
+            "audit_events": [],
+        }
+
+    result = merge_audit_doc(
+        build(), build(), build(), doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS
+    )
+    assert len(result.doc["shots"]) == 1
+    assert any("malformed" in note for note in result.notes)
+
+
+def test_no_id_appears_twice_across_the_keyability_matrix() -> None:
+    """Every combination of keyable/identity-less on each side, at once."""
+    local_shots = [
+        {"id": "both-keyable", "candidate_number": 1, "time": 1.0},
+        {"id": "local-aside", "shot_number": 2, "time": None},
+        {"id": "remote-aside", "candidate_number": 3, "time": 3.0},
+        {"id": "both-aside", "shot_number": 4, "time": None},
+        {"id": "local-only", "candidate_number": 5, "time": 5.0},
+    ]
+    remote_shots = [
+        {"id": "both-keyable", "candidate_number": 1, "time": 1.5},
+        {"id": "local-aside", "candidate_number": 2, "time": 2.0},
+        {"id": "remote-aside", "shot_number": 3, "time": None},
+        {"id": "both-aside", "shot_number": 4, "time": None},
+        {"id": "remote-only", "candidate_number": 6, "time": 6.0},
+    ]
+    result = merge_audit_doc(
+        {"beep_time": 5.0, "shots": copy.deepcopy(local_shots), "audit_events": []},
+        {"beep_time": 5.0, "shots": copy.deepcopy(local_shots), "audit_events": []},
+        {"beep_time": 5.0, "shots": copy.deepcopy(remote_shots), "audit_events": []},
+        doc_key="stage1",
+        local_ts=_LOCAL_TS,
+        remote_ts=_REMOTE_TS,
+    )
+    ids = [s["id"] for s in result.doc["shots"] if isinstance(s, dict)]
+    assert len(ids) == len(set(ids)), f"duplicate id in merged output: {ids}"
+    assert set(ids) == {
+        "both-keyable",
+        "local-aside",
+        "remote-aside",
+        "both-aside",
+        "local-only",
+        "remote-only",
+    }
+
+
+def test_independent_stamping_still_duplicates_pending_task_7() -> None:
+    """PINS A KNOWN GAP -- this asserts the WRONG output on purpose.
+
+    The gate only sees shots still unstamped when the merge runs. Each side
+    stamping independently beforehand is exactly what produces divergence:
+    the desktop nudges a legacy manual shot to 6.52 and saves manual-t6520
+    while the phone accepts the mirror unchanged and saves manual-t6500.
+    Both counts read zero, the gate passes, and one shot unions into two
+    with no note at all.
+
+    Task 7 (desktop as sole minter for a mirror) is what closes this. When
+    it lands this test must fail -- delete it then; it exists so the gap is
+    executable rather than a paragraph nobody re-reads.
+    """
+    base = {"beep_time": 5.0, "shots": [{"shot_number": 1, "time": 6.5}], "audit_events": []}
+    local = {
+        "beep_time": 5.0,
+        "shots": [{"id": "manual-t6520", "shot_number": 1, "time": 6.52}],
+        "audit_events": [],
+    }
+    remote = {
+        "beep_time": 5.0,
+        "shots": [{"id": "manual-t6500", "shot_number": 1, "time": 6.5}],
+        "audit_events": [],
+    }
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+    assert len(result.doc["shots"]) == 2  # the gap: one shot, two entries
+    assert result.notes == []  # and silent, which is why Task 7 exists
