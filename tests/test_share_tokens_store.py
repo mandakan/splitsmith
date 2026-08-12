@@ -163,3 +163,16 @@ def test_revoke_wrong_match_id_returns_false() -> None:
     # Share is still live.
     rows = asyncio.run(store.list_for_match("match-1"))
     assert rows[0].revoked_at is None
+
+
+# - resolve_share_token(): resolved share surfaces the token's scope (#779)
+def test_created_token_resolves_with_read_scope() -> None:
+    """#779: every token minted by the MVP UI is read-scoped; the resolver
+    must surface the scope so the share middleware can key enforcement
+    off it."""
+    sf, (uid,) = _engine_with_users("a@thias.se")
+    store = ShareTokenStore(sf, user_id=uid)
+    created = asyncio.run(store.create("match-1"))
+    resolved = asyncio.run(resolve_share_token(sf, created.token))
+    assert resolved is not None
+    assert resolved.scope == "read"

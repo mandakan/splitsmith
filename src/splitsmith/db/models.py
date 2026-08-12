@@ -543,6 +543,12 @@ class ShareTokenRow(Base):
     )
     match_id: Mapped[str] = mapped_column(String, nullable=False)
     token: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    # #779: named scope keying what a share request may do. "read" (the
+    # only value shipped today) maps to zero write capabilities - the
+    # share middleware and engine enforce a READ ONLY transaction for it.
+    # A later write-capable scope (e.g. "coach") is one new mapping, not
+    # a schema change.
+    scope: Mapped[str] = mapped_column(String, nullable=False, server_default="read")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
