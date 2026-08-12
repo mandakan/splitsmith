@@ -13,6 +13,7 @@ body after each successful PUT, so a crash anywhere replays correctly.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -48,7 +49,15 @@ class SyncReport(PushReport):
 
 
 def format_sync_message(report: SyncReport) -> str:
-    """One-line summary for the sync job's final progress message."""
+    """One-line summary for the sync job's final progress message.
+
+    ``notes`` is counted here for the same reason ``conflicts`` is: it is
+    where the merge states a refusal. The unstamped-shot gate's whole
+    guarantee is "a stated refusal, not a silent duplicate"
+    (``shot_id.ensure_shot_ids``), and a refusal nobody sees is a silent
+    one -- ``handle.set_result(...)`` carries the full list, but this
+    message is what the jobs panel shows without expanding it.
+    """
     message = (
         f"Synced: {report.pulled} pulled, {report.uploaded} uploaded, "
         f"{report.skipped} skipped, {report.docs} docs"
@@ -57,6 +66,8 @@ def format_sync_message(report: SyncReport) -> str:
         message += f" ({report.docs_skipped} unchanged)"
     if report.conflicts:
         message += f"; {len(report.conflicts)} conflict(s) resolved - see job details"
+    if report.notes:
+        message += f"; {len(report.notes)} note(s) - see job details"
     if report.reprocess_videos:
         message += f"; {report.reprocess_videos} video(s) need re-processing"
     if report.shot_ids_migrated:
@@ -117,6 +128,7 @@ def migrate_shot_ids(match_root: Path) -> int:
             if not isinstance(shots, list):
                 continue
             if ensure_shot_ids([s for s in shots if isinstance(s, dict)]):
+                stamps = audit_path.stat()
                 try:
                     atomic_write_json(audit_path, doc)
                 except OSError as exc:
@@ -124,6 +136,14 @@ def migrate_shot_ids(match_root: Path) -> int:
                         f"could not stamp shot ids on {audit_path} - check that the "
                         f"match directory is writable ({exc})"
                     ) from exc
+                # Restore the original mtime. ``_local_doc_ts`` reads file
+                # mtime as the merge's LWW tiebreak, so a doc this pass just
+                # stamped would otherwise look freshly edited and beat a
+                # genuinely newer phone edit in every true conflict on the
+                # first sync after upgrade. Pushes are content-hashed
+                # (``sync/plan.py``), not mtime-based, so restoring it does
+                # not suppress the push of the ids we just wrote.
+                os.utime(audit_path, ns=(stamps.st_atime_ns, stamps.st_mtime_ns))
                 migrated += 1
     return migrated
 
