@@ -13,7 +13,12 @@ const T_LIMIT = 3600;
 
 export function momentToSearch(m: Moment): URLSearchParams {
   const params = new URLSearchParams();
-  params.set("t", m.t.toFixed(2));
+  // Clamp to the same bound parseMoment enforces (|t| <= T_LIMIT), or a
+  // moment captured past the hour mark (a long clip) would round-trip
+  // through a link our own UI just minted and get rejected on the other
+  // end.
+  const t = Math.max(-T_LIMIT, Math.min(T_LIMIT, m.t));
+  params.set("t", t.toFixed(2));
   if (m.cam) params.set("cam", m.cam);
   if (m.who && m.who.length > 0) params.set("who", m.who.join(","));
   return params;

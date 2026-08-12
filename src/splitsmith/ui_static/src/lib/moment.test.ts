@@ -29,6 +29,11 @@ describe("momentToSearch / parseMoment", () => {
     expect(m).toEqual({ t: 2, who: ["alice"] });
   });
 
+  it("clamps an out-of-range t so our own links never mint a dead moment", () => {
+    expect(parseMoment(momentToSearch({ t: 3700 }))).toEqual({ t: 3600 });
+    expect(parseMoment(momentToSearch({ t: -3700 }))).toEqual({ t: -3600 });
+  });
+
   it("momentHref builds pathname?query", () => {
     expect(momentHref("/share/tok/compare/3", { t: 4.32, cam: "alice" })).toBe(
       "/share/tok/compare/3?t=4.32&cam=alice",

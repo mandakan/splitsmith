@@ -631,6 +631,45 @@ def test_compare_png_with_moment_skips_storage(
     assert put_count_after == put_count_before
 
 
+def test_compare_png_for_an_unknown_stage_falls_back_to_the_match_card(
+    hosted_env: str,
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender],
+) -> None:
+    """Regression test: ``build_compare_card`` must validate ``stage_number``
+    against the match before rendering anything. Without that check, a
+    caller holding nothing but the share token could iterate ``N`` through
+    ``GET /api/share/{token}/og/compare/{N}.png`` and, moment- and
+    who-free, mint one cached object per distinct ``N`` under
+    ``share-cards/{token}/compare-{N}-*`` - unbounded storage writes from a
+    fabricated "Stage N" card that was never real. An unknown stage must
+    instead fall back to the match card, exactly like ``build_stage_card``'s
+    unknown-stage behavior (``test_stage_png_for_an_unknown_stage_falls_back_to_the_match_card``)."""
+    import boto3
+
+    token = _setup_shared_stage(hosted_env, hosted_app_with_storage)
+    client, _sender = hosted_app_with_storage
+
+    s3 = boto3.client("s3", region_name="us-east-1")
+
+    match_resp = client.get(f"/api/share/{token}/og.png")
+    compare_resp = client.get(f"/api/share/{token}/og/compare/999.png")
+    for resp in (match_resp, compare_resp):
+        assert resp.status_code == 200
+        assert resp.content[:8] == _PNG_MAGIC
+        assert resp.content != FALLBACK_PNG_PATH.read_bytes()
+    assert compare_resp.content == match_resp.content
+
+    listing = s3.list_objects_v2(Bucket=BUCKET, Prefix=f"share-cards/{token}/")
+    keys = [obj["Key"] for obj in listing.get("Contents", [])]
+    assert not any(f"share-cards/{token}/compare-" in key for key in keys)
+
+    meta_resp = client.get(f"/api/share/{token}/og-meta/compare/999")
+    match_meta_resp = client.get(f"/api/share/{token}/og-meta")
+    assert meta_resp.status_code == 200
+    assert match_meta_resp.status_code == 200
+    assert meta_resp.json()["title"] == match_meta_resp.json()["title"]
+
+
 def test_compare_route_wins_over_a_shooter_slugged_compare(
     hosted_env: str,
     hosted_app_with_storage: tuple[TestClient, _CapturingSender],

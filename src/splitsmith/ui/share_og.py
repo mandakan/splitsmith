@@ -200,12 +200,21 @@ def _parse_who(value: str | None) -> list[str] | None:
 def build_compare_card(
     state: Any, stage_number: int, *, who: list[str] | None = None, moment_t: float | None = None
 ) -> CompareCard | None:
-    """``None`` only when no shooter survives filtering - the caller then
-    serves the match card, mirroring ``build_stage_card``'s ladder. An
-    unknown ``who`` entry is dropped, not an error; a ``who`` that filters
-    everyone away falls back to the full roster (a wrong-but-plausible
-    ``who`` must not blank the card)."""
+    """``None`` when ``stage_number`` isn't one of the match's stages, or
+    when no shooter survives filtering - the caller then serves the match
+    card, mirroring ``build_stage_card``'s ladder. Validating
+    ``stage_number`` first matters beyond correctness: without it, any
+    caller holding a share token could iterate ``N`` through
+    ``GET /api/share/{token}/og/compare/{N}.png`` and, for every ``N``
+    with no ``t``/``who``, mint a distinct cached object under
+    ``share-cards/{token}/compare-{N}-*`` - unbounded storage writes from
+    a fabricated "Stage N" card that was never real. An unknown ``who``
+    entry is dropped, not an error; a ``who`` that filters everyone away
+    falls back to the full roster (a wrong-but-plausible ``who`` must not
+    blank the card)."""
     match = state.match()
+    if not any(s.stage_number == stage_number for s in match.stages):
+        return None
     slugs = [s for s in match.shooters if who is None or s in who]
     if not slugs and who is not None:
         slugs = list(match.shooters)
@@ -377,7 +386,9 @@ async def warm_match_card_bounded(state: Any, token: str) -> None:
         logger.warning("failed to warm match card for share token=%s", token, exc_info=exc)
 
 
-def _png_response(state: Any, token: str, card: MatchCard | StageCard, slug: str | None) -> Response:
+def _png_response(
+    state: Any, token: str, card: MatchCard | StageCard | CompareCard, slug: str | None
+) -> Response:
     if state.storage is None:
         # Not a 503: the anonymous surface's invariant is that every
         # failure looks the same (_share_alias rewrites only a 404 into
