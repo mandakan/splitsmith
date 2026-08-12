@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import Session, SessionTransaction
 from sqlalchemy.pool import NullPool
 
+from .share_guard import share_request_is_read_only
+
 
 def create_engine(url: str, *, echo: bool = False, pool_disabled: bool = False) -> AsyncEngine:
     """Build an async SQLAlchemy engine.
@@ -77,6 +79,14 @@ def _tenant_guc_after_begin(user_id: str) -> Callable[[Session, SessionTransacti
     No-op on non-PostgreSQL backends (SQLite has no ``set_config`` / RLS),
     so the unit-test engine is untouched; RLS itself is proven by the
     ``pytest -m docker`` isolation test.
+
+    #779 addition: when the current request is a read-scoped share
+    request (see splitsmith.db.share_guard), the listener also issues
+    SET TRANSACTION READ ONLY so any accidental write fails at Postgres
+    with SQLSTATE 25006 instead of succeeding as the impersonated owner.
+    Only tenant-factory sessions get the listener; raw-factory sessions
+    (auth, share-token resolution) carry no tenant GUC, so RLS already
+    fails their owner-state writes closed.
     """
 
     def _after_begin(
@@ -86,6 +96,14 @@ def _tenant_guc_after_begin(user_id: str) -> Callable[[Session, SessionTransacti
     ) -> None:
         if connection.dialect.name != "postgresql":
             return
+        # #779: a read-scoped share request must not write anything, no
+        # matter which code path tries - including code that never heard
+        # of the share ContextVars. SET TRANSACTION must precede the
+        # transaction's first query, so it goes before the GUC SELECT.
+        # Same per-transaction reasoning as the GUC itself: NullPool
+        # hands each transaction a fresh connection.
+        if share_request_is_read_only():
+            connection.execute(text("SET TRANSACTION READ ONLY"))
         connection.execute(
             text("SELECT set_config('app.user_id', :uid, true)"),
             {"uid": user_id},
