@@ -708,7 +708,9 @@ function AddFootageCard({
       <p className="mx-auto mb-5 max-w-xl text-[0.9375rem] leading-relaxed text-muted">
         {mode === "local"
           ? "Pick the folder your camera footage lives in. Splitsmith scans it for video files and groups them by camera."
-          : "Drop video files anywhere on this page, or browse for them. Uploads land in your hosted storage and attach to this shooter."}
+          : disabled
+            ? "Footage for this match is added on the desktop install and syncs here."
+            : "Drop video files anywhere on this page, or browse for them. Uploads land in your hosted storage and attach to this shooter."}
       </p>
       <div className="inline-flex gap-2.5">
         <Button

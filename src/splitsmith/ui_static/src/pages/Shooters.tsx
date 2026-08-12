@@ -338,12 +338,17 @@ export function Shooters() {
             </p>
           )}
         </div>
-        {!isLinked && (
+        {/* #836: scoreboard linking is a write (attaches the match server-
+         *  side) that 403s on a mirror -- it's managed from the desktop
+         *  install there. Hide the invitation rather than disable it,
+         *  same reasoning as Home hiding its help cards: this is an
+         *  optional prompt, not a core control. */}
+        {!isLinked && !editDenied && (
           <ConnectMatchButton onClick={() => setConnectOpen(true)} />
         )}
       </div>
 
-      {!isLinked && (
+      {!isLinked && !editDenied && (
         <div className="mb-4 rounded-md border border-rule-strong bg-surface-2 px-3 py-2 text-sm text-ink-2">
           Not linked to the scoreboard yet -- connect it to pull official
           stage scores and give shot detection an expected-rounds prior
