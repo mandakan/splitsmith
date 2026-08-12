@@ -1,5 +1,5 @@
 /**
- * Shooters route (/shooters) -- multi-camera per shooter (#324).
+ * Shooters route (/shooters) - multi-camera per shooter (#324).
  *
  * Per-shooter card per polished/16:
  *   - racing-color identity rail (MA red / JL amber / PE green / RJ blue
@@ -47,6 +47,8 @@ import { useConfirm } from "@/components/useConfirm";
 import {
   ApiError,
   api,
+  capabilityDenied,
+  READ_ONLY_MIRROR_MESSAGE,
   type ScoreboardMatchCompetitor,
   type ShooterCameraInfo,
   type ShooterListEntry,
@@ -125,7 +127,13 @@ export function Shooters() {
   const navigate = useNavigate();
   const confirm = useConfirm();
   const href = useMatchHref();
-  const { project, refresh } = useOutletContext<MatchShellOutletContext>();
+  const { project, refresh, capabilities } =
+    useOutletContext<MatchShellOutletContext>();
+  // #756: add/remove shooter and rebuild-trims are edit-class writes that
+  // 403 on a mirror. Gate on the outlet context's capability set (same
+  // pattern as Home/Ingest), never on origin - see MatchShell's
+  // capabilities comment for why.
+  const editDenied = capabilityDenied(capabilities, "edit");
   const [searchParams] = useSearchParams();
   const pickSection = PICK_SECTION_LABELS[searchParams.get("pick") ?? ""] ?? null;
   const [data, setData] = useState<ShooterListResponse | null>(null);
@@ -185,7 +193,7 @@ export function Shooters() {
   }, [scoreboardMatchId, scoreboardContentType]);
 
   // Competitors already claimed by a local shooter never show up as
-  // pickable -- picking them again would just re-run the same bind.
+  // pickable - picking them again would just re-run the same bind.
   const claimedCompetitorIds = useMemo(() => {
     const ids = new Set<number>();
     for (const s of data?.shooters ?? []) {
@@ -205,6 +213,10 @@ export function Shooters() {
   }, [roster, claimedCompetitorIds, rosterFilter]);
 
   async function pickCompetitor(c: ScoreboardMatchCompetitor) {
+    if (editDenied) {
+      setError(READ_ONLY_MIRROR_MESSAGE);
+      return;
+    }
     setPickingId(c.id);
     setError(null);
     try {
@@ -237,6 +249,10 @@ export function Shooters() {
   }, [reload]);
 
   async function remove(slug: string, name: string) {
+    if (editDenied) {
+      setError(READ_ONLY_MIRROR_MESSAGE);
+      return;
+    }
     const ok = await confirm({
       title: `Remove ${name}?`,
       body: "Their footage, audit, and exports inside the match folder will be deleted. This cannot be undone.",
@@ -255,7 +271,7 @@ export function Shooters() {
   }
 
   async function add() {
-    if (!newName.trim()) return;
+    if (editDenied || !newName.trim()) return;
     setAdding(true);
     setError(null);
     try {
@@ -270,6 +286,10 @@ export function Shooters() {
   }
 
   async function rebuildTrims(slug: string, name: string, count: number) {
+    if (editDenied) {
+      setError(READ_ONLY_MIRROR_MESSAGE);
+      return;
+    }
     setBusy(slug);
     setError(null);
     try {
@@ -283,7 +303,7 @@ export function Shooters() {
       const submitted = result.jobs_submitted.length;
       if (submitted === 0) {
         setError(
-          `No trim jobs to run for ${name} -- ${count} stages were eligible by count but every angle on them was already cached, missing prerequisites, or already queued.`,
+          `No trim jobs to run for ${name} - ${count} stages were eligible by count but every angle on them was already cached, missing prerequisites, or already queued.`,
         );
       }
     } catch (e) {
@@ -309,15 +329,28 @@ export function Shooters() {
             &middot; manage cameras, role assignments, and per-stage
             coverage.
           </p>
+          {/* #756: one note for the whole page, same placement idiom as
+           *  Ingest, rather than repeating the reason on every disabled
+           *  control below. */}
+          {editDenied && (
+            <p className="mt-2 text-[0.75rem] uppercase tracking-[0.06em] text-muted">
+              {READ_ONLY_MIRROR_MESSAGE}
+            </p>
+          )}
         </div>
-        {!isLinked && (
+        {/* #836: scoreboard linking is a write (attaches the match server-
+         *  side) that 403s on a mirror - it's managed from the desktop
+         *  install there. Hide the invitation rather than disable it,
+         *  same reasoning as Home hiding its help cards: this is an
+         *  optional prompt, not a core control. */}
+        {!isLinked && !editDenied && (
           <ConnectMatchButton onClick={() => setConnectOpen(true)} />
         )}
       </div>
 
-      {!isLinked && (
+      {!isLinked && !editDenied && (
         <div className="mb-4 rounded-md border border-rule-strong bg-surface-2 px-3 py-2 text-sm text-ink-2">
-          Not linked to the scoreboard yet -- connect it to pull official
+          Not linked to the scoreboard yet - connect it to pull official
           stage scores and give shot detection an expected-rounds prior
           for every shooter.
         </div>
@@ -348,6 +381,7 @@ export function Shooters() {
               shooter={shooter}
               stagesTotal={stagesTotal}
               busy={busy === shooter.slug}
+              editDenied={editDenied}
               onRemove={() => void remove(shooter.slug, shooter.name)}
               onOpenAudit={() => navigate(href("audit", shooter.slug))}
               onOpenIngest={() => navigate(href("ingest", shooter.slug))}
@@ -397,7 +431,7 @@ export function Shooters() {
           {isLinked && !manualRoster ? (
             <>
               <p className="mb-4 text-[0.8125rem] text-muted">
-                This match is linked to the scoreboard -- pick a competitor
+                This match is linked to the scoreboard - pick a competitor
                 below to add them with their scoreboard identity already
                 bound, so their splits get an expected-rounds prior for
                 free.
@@ -444,7 +478,7 @@ export function Shooters() {
                       key={c.id}
                       competitor={c}
                       checked={false}
-                      disabled={pickingId !== null}
+                      disabled={pickingId !== null || editDenied}
                       onToggle={() => void pickCompetitor(c)}
                     />
                   ))
@@ -470,7 +504,8 @@ export function Shooters() {
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="Johan Larsson"
-                  className="flex-1 min-w-[260px] rounded-md border border-rule bg-surface-3 px-3.5 py-2.5 text-sm text-ink outline-none focus:border-led focus:shadow-[0_0_0_3px_var(--color-led-tint)]"
+                  disabled={editDenied}
+                  className="flex-1 min-w-[260px] rounded-md border border-rule bg-surface-3 px-3.5 py-2.5 text-sm text-ink outline-none focus:border-led focus:shadow-[0_0_0_3px_var(--color-led-tint)] disabled:opacity-50"
                   onKeyDown={(e) => {
                     if (e.key === "Enter") void add();
                   }}
@@ -478,7 +513,7 @@ export function Shooters() {
                 <Button
                   type="button"
                   onClick={() => void add()}
-                  disabled={adding || !newName.trim()}
+                  disabled={adding || !newName.trim() || editDenied}
                   className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
                 >
                   <Plus className="size-3.5" />
@@ -523,6 +558,7 @@ function ShooterCard({
   shooter,
   stagesTotal,
   busy,
+  editDenied,
   onRemove,
   onOpenAudit,
   onOpenIngest,
@@ -531,6 +567,10 @@ function ShooterCard({
   shooter: ShooterListEntry;
   stagesTotal: number;
   busy: boolean;
+  /** #756: disables Remove + Rebuild trims (edit-class writes) on a
+   *  mirror, matching this card's existing disabled-with-title idiom
+   *  (see the Audit button below) rather than hiding the controls. */
+  editDenied: boolean;
   onRemove: () => void;
   onOpenAudit: () => void;
   onOpenIngest: () => void;
@@ -609,8 +649,12 @@ function ShooterCard({
             <button
               type="button"
               onClick={onRebuildTrims}
-              disabled={busy}
-              title={`Rebuild missing trim caches on ${shooter.stages_missing_trim} stage${shooter.stages_missing_trim === 1 ? "" : "s"} for ${shooter.name} (every angle, not just the primary)`}
+              disabled={busy || editDenied}
+              title={
+                editDenied
+                  ? READ_ONLY_MIRROR_MESSAGE
+                  : `Rebuild missing trim caches on ${shooter.stages_missing_trim} stage${shooter.stages_missing_trim === 1 ? "" : "s"} for ${shooter.name} (every angle, not just the primary)`
+              }
               aria-label={`Rebuild missing trim caches on ${shooter.stages_missing_trim} stages for ${shooter.name}`}
               className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-rule bg-surface-2 px-2.5 font-display text-[0.625rem] font-semibold uppercase tracking-[0.08em] text-ink-2 transition-colors hover:border-led hover:bg-led/10 hover:text-led disabled:opacity-50"
             >
@@ -635,8 +679,8 @@ function ShooterCard({
           <button
             type="button"
             onClick={onRemove}
-            disabled={busy}
-            title={`Remove ${shooter.name}`}
+            disabled={busy || editDenied}
+            title={editDenied ? READ_ONLY_MIRROR_MESSAGE : `Remove ${shooter.name}`}
             aria-label="Remove shooter"
             className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-subtle transition-colors hover:border-led/40 hover:bg-led/10 hover:text-led disabled:opacity-30 disabled:hover:bg-surface-2 disabled:hover:text-subtle"
           >

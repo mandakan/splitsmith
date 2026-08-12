@@ -1,5 +1,90 @@
 # Changelog
 
+## [0.28.0](https://github.com/mandakan/splitsmith/compare/v0.27.0...v0.28.0) (2026-08-12)
+
+
+### Features
+
+* compare share OG shell, meta and card - closes the compare unfurl gap ([95bad24](https://github.com/mandakan/splitsmith/commit/95bad242d1e3125f51650868e76ca0fb28d10053))
+* moment badge on stage cards and new CompareCard model ([4aec17d](https://github.com/mandakan/splitsmith/commit/4aec17d3c76be8d9a64f64c394d0aed0b3a8bf71))
+* moment deep links - share exact timestamps on video and compare pages ([0a8b3b6](https://github.com/mandakan/splitsmith/commit/0a8b3b6e394b013c5ab7a7383096fec3ae98dcb9))
+* moment-aware stage OG cards, meta and shell forwarding ([eae4f3e](https://github.com/mandakan/splitsmith/commit/eae4f3e959056d44434b61a4d9c955133f587506))
+* **ui:** apply moment deep links on the compare page ([d567641](https://github.com/mandakan/splitsmith/commit/d567641976fb1ca0f79689d234ddaaf4ecd56b54))
+* **ui:** copy link at moment and track marker on the compare page ([8bbea46](https://github.com/mandakan/splitsmith/commit/8bbea46c047310fb093660f714685dcf873bbbcf))
+* **ui:** moment marker, one-shot paused seek and copy hook in ResultsPlayer ([13cc1e1](https://github.com/mandakan/splitsmith/commit/13cc1e1baab301698612104b0c3511762d980942))
+* **ui:** moment polish - dedicated marker color, who cap parity, re-arm on new moment, share-aware copy ([28470a5](https://github.com/mandakan/splitsmith/commit/28470a5dbfd7093d86186a6664532a541a40c863))
+* **ui:** Moment type with URL serializer for timestamp deep links ([b1ce96d](https://github.com/mandakan/splitsmith/commit/b1ce96dcd1b1108d00b4fe3f2cccffb9812bec93))
+* **ui:** share-aware copy-link-at-moment on owner pages ([0061ac3](https://github.com/mandakan/splitsmith/commit/0061ac361656f62db77f877f03e72c0d5202218d))
+* **ui:** timestamp deep links on the results video page ([77ea8c5](https://github.com/mandakan/splitsmith/commit/77ea8c5c938b6b22e38df84d8d61302c5ce301a8))
+* uncached moment-card render path and CompareCard dispatch ([7b59b4e](https://github.com/mandakan/splitsmith/commit/7b59b4ee1772f9295d9f13e1680444b5a6a2c141))
+
+
+### Bug Fixes
+
+* **moment:** dedicated color token, who cap parity, re-arm on moment change ([599c265](https://github.com/mandakan/splitsmith/commit/599c265100918f661f4f1e85a2b42ee103e465db))
+* preserve RasterizerUnavailableError detail in share card render fallback ([8ec089d](https://github.com/mandakan/splitsmith/commit/8ec089dd510f9e33601eece951938539ae059bae))
+* **share-card:** compare card headline carries shooter names, not "Compare" ([be67f77](https://github.com/mandakan/splitsmith/commit/be67f7765be7ed98a7a1591e0bd04424c1131c0a))
+* **share:** validate compare stage number, widen png type, clamp moment t ([99d6b89](https://github.com/mandakan/splitsmith/commit/99d6b89c1eb8dce2ce63d24c71e8200eaf858b58))
+* single ASCII dash in new test docstrings ([f5d6023](https://github.com/mandakan/splitsmith/commit/f5d6023dce6cd1b3337c182b95b5927fb0db466d))
+
+
+### Documentation
+
+* moment deep links design spec ([b06b61e](https://github.com/mandakan/splitsmith/commit/b06b61ea8b4c17093de2a5a5e55339d68605e422))
+* moment deep links implementation plan ([84d2cb5](https://github.com/mandakan/splitsmith/commit/84d2cb575072d76ace81d19962d6f5a086db1ded))
+
+## [0.27.0](https://github.com/mandakan/splitsmith/compare/v0.26.0...v0.27.0) (2026-08-12)
+
+
+### Features
+
+* add scope column to share_tokens, resolver surfaces it ([#779](https://github.com/mandakan/splitsmith/issues/779)) ([fc2eb34](https://github.com/mandakan/splitsmith/commit/fc2eb34cfefc9eaada8dce6e94c8f57f48783f09))
+* match capability model - one table for guard and payload ([#756](https://github.com/mandakan/splitsmith/issues/756)) ([1be2a46](https://github.com/mandakan/splitsmith/commit/1be2a46c46a8032bbf55d90161adb6dc0ffd75b5))
+* match writability as a server-derived capability ([#756](https://github.com/mandakan/splitsmith/issues/756)) ([1266623](https://github.com/mandakan/splitsmith/commit/1266623cab66cad1f0f54aba67bfca08afb939a3))
+* read-scoped share requests run READ ONLY transactions ([#779](https://github.com/mandakan/splitsmith/issues/779)) ([ed19e06](https://github.com/mandakan/splitsmith/commit/ed19e06ce9e34283188c943ffe8bc2b67ae05b03))
+* scope-keyed read-only defense for share requests ([#779](https://github.com/mandakan/splitsmith/issues/779)) ([bb763b5](https://github.com/mandakan/splitsmith/commit/bb763b5647769f491367a4c4f4c45a6dcb992f5b))
+* serialize match capabilities on project, shooter-list, beep-queue payloads ([#756](https://github.com/mandakan/splitsmith/issues/756)) ([acbeb96](https://github.com/mandakan/splitsmith/commit/acbeb962a690510fecf349c74dc171586ca7c5aa))
+* share middleware pins token scope in a db-layer ContextVar ([#779](https://github.com/mandakan/splitsmith/issues/779)) ([e7f2a5a](https://github.com/mandakan/splitsmith/commit/e7f2a5a0da4a077f87e556e045c952f1793d0284))
+* state stores refuse mutations under read-scoped share requests ([#779](https://github.com/mandakan/splitsmith/issues/779)) ([9a2c7b3](https://github.com/mandakan/splitsmith/commit/9a2c7b3a43a9a8009ca94a2055d63d5905ecf2a4))
+* **sync:** remote snippet GC - push deletes beep_review objects for reviewed videos ([#821](https://github.com/mandakan/splitsmith/issues/821)) ([915959e](https://github.com/mandakan/splitsmith/commit/915959e2c484ce181f48f661aecf49c16f3087df))
+* **ui:** capability-gate beep re-detect, exports, and trim rebuild ([#756](https://github.com/mandakan/splitsmith/issues/756)) ([7e5e2ed](https://github.com/mandakan/splitsmith/commit/7e5e2edb94f58b10823376df44aee79c9fdbcc91))
+* **ui:** Home and Ingest gate edit affordances on the capability set ([#756](https://github.com/mandakan/splitsmith/issues/756)) ([123a1bd](https://github.com/mandakan/splitsmith/commit/123a1bda9fca92260470c766c6cb59f8821ef774))
+* **ui:** MatchCapability type, capabilityDenied helper, capability-keyed banner ([#756](https://github.com/mandakan/splitsmith/issues/756)) ([f802cd8](https://github.com/mandakan/splitsmith/commit/f802cd80e26644a721cedecd7c57f5ef18e1db20))
+
+
+### Bug Fixes
+
+* ASCII single-dash + precise dep claim in share_guard import comment ([5bfd830](https://github.com/mandakan/splitsmith/commit/5bfd830f5b8d4066c1812249b915cae5928f811e))
+* device-flow and shell hardening wave ([#734](https://github.com/mandakan/splitsmith/issues/734) [#735](https://github.com/mandakan/splitsmith/issues/735) [#736](https://github.com/mandakan/splitsmith/issues/736) [#737](https://github.com/mandakan/splitsmith/issues/737) [#738](https://github.com/mandakan/splitsmith/issues/738) [#739](https://github.com/mandakan/splitsmith/issues/739) [#725](https://github.com/mandakan/splitsmith/issues/725)) ([78e22f1](https://github.com/mandakan/splitsmith/commit/78e22f12cd672a30ef50c15e558f37cf7512412f))
+* fail-closed share scope check + wider byte-identity net ([#779](https://github.com/mandakan/splitsmith/issues/779) review) ([7ab4128](https://github.com/mandakan/splitsmith/commit/7ab41282a131cc10300114124fc2da90e10890cc))
+* final review wave - honest revoke-failure comment, stale-comment sweep, repoint ordering test ([#737](https://github.com/mandakan/splitsmith/issues/737) [#738](https://github.com/mandakan/splitsmith/issues/738)) ([2a5e326](https://github.com/mandakan/splitsmith/commit/2a5e3260edf165f00f0ec1d4f9454e77d85db45c))
+* one honest proxy_ready everywhere; mirror copy stops promising a proxy ([#821](https://github.com/mandakan/splitsmith/issues/821)) ([d11cc5b](https://github.com/mandakan/splitsmith/commit/d11cc5be62118a187f580f97f105fd9d70c74e14))
+* scope beep-queue snippet listing to beep_review prefixes ([#821](https://github.com/mandakan/splitsmith/issues/821)) ([5cabb02](https://github.com/mandakan/splitsmith/commit/5cabb020e336f711a0e39203c3f5ce8f0956ebfa))
+* **sync:** beep-review sync follow-ups - snippet GC, honest proxy_ready, merge gating ([#821](https://github.com/mandakan/splitsmith/issues/821)) ([5016549](https://github.com/mandakan/splitsmith/commit/5016549652a62375a3357879df5958a8f2999eae))
+* **sync:** confirm-only beep writes merge without re-trim/re-detect ([#821](https://github.com/mandakan/splitsmith/issues/821)) ([9db46a2](https://github.com/mandakan/splitsmith/commit/9db46a27f1a0b9928d84871d32593e244db2fea2))
+* **sync:** per-subdir extension sets in the media key gate ([#821](https://github.com/mandakan/splitsmith/issues/821)) ([4b1a02f](https://github.com/mandakan/splitsmith/commit/4b1a02fdeb340c5a9175e560773778810e893cca))
+* **ui:** Add more click surfaces read-only message instead of silent no-op ([0ee33a3](https://github.com/mandakan/splitsmith/commit/0ee33a31be553297d743ff0135e49de1cbc75695))
+* **ui:** close the [#836](https://github.com/mandakan/splitsmith/issues/836) pre-release findings (scoreboard gate, honest ingest copy) ([a563345](https://github.com/mandakan/splitsmith/commit/a563345e7453b516f622255c3165115b5ef00f79))
+* **ui:** correct Compare share-mount comment, test the trim-rebuild capability gate ([607abaa](https://github.com/mandakan/splitsmith/commit/607abaa751b7e13223fa81de271187d7a208deb4))
+* **ui:** gate hosted drop and Shooters page on edit capability ([#756](https://github.com/mandakan/splitsmith/issues/756) review) ([8f8d835](https://github.com/mandakan/splitsmith/commit/8f8d835286f2c2485f21c747cfd9c6ff8d244690))
+* **ui:** gate scoreboard connect, disable mirror row controls, honest ingest copy ([#836](https://github.com/mandakan/splitsmith/issues/836)) ([fb2182c](https://github.com/mandakan/splitsmith/commit/fb2182c6f85366fcfcfd2223dc7b22a935ef3129))
+* **ui:** mirror matches never arm the proxy poll; origin typed optional ([#821](https://github.com/mandakan/splitsmith/issues/821)) ([c8a7cc5](https://github.com/mandakan/splitsmith/commit/c8a7cc5959d84af6eccbf48ffe67f1db0801eacd))
+* **ui:** sign-out clears a stale load-failure flag ([#738](https://github.com/mandakan/splitsmith/issues/738)) ([9cf58bf](https://github.com/mandakan/splitsmith/commit/9cf58bf3722a1665ca127a3c4c8ff4d931b23d4e))
+* **ui:** three-way origin capability mapping in MatchShell test helper ([3859684](https://github.com/mandakan/splitsmith/commit/385968496672071aa69489f71d2b6160e702a78b))
+
+
+### Refactors
+
+* mirror guard driven by the capability table ([#756](https://github.com/mandakan/splitsmith/issues/756)) ([b5cac43](https://github.com/mandakan/splitsmith/commit/b5cac4390d0cac985dcdd10e145eac066208eb9e))
+* **ui:** BeepQueueResponse.origin is MatchOrigin; comment covers hosted ([#821](https://github.com/mandakan/splitsmith/issues/821)) ([1ad9331](https://github.com/mandakan/splitsmith/commit/1ad933180b3785c177940f2abb58b3c01bd07556))
+
+
+### Documentation
+
+* hardening wave implementation plans (PR 2 branch copy) ([497dd75](https://github.com/mandakan/splitsmith/commit/497dd7582536b7d0fd0dcaab9a20328ce87bc252))
+* implementation plans for share-write foundation PRs A and B ([a99d59d](https://github.com/mandakan/splitsmith/commit/a99d59dd19e46259cafea844c8a2cf515c1c56fc))
+* share-write foundation design spec ([#779](https://github.com/mandakan/splitsmith/issues/779) + [#756](https://github.com/mandakan/splitsmith/issues/756)) ([fd8e5ae](https://github.com/mandakan/splitsmith/commit/fd8e5ae37a25013e17b46d844a6ad24f1929b75e))
+
 ## [0.26.0](https://github.com/mandakan/splitsmith/compare/v0.25.0...v0.26.0) (2026-08-11)
 
 

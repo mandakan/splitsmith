@@ -122,6 +122,18 @@
   --color-manual:       #A78BFA;
   --color-manual-glow:  rgba(167, 139, 250, 0.30);
   --color-manual-tint:  rgba(167, 139, 250, 0.10);
+  /* Shared-moment (?t=&cam=&who=) deep-link marker: the diamond scrub
+   * marker in ResultsPlayer and the TransportDock timeline. Pink is the
+   * one hue not already claimed by a semantic on these same tracks -
+   * led red (identity), live/done/status amber+green, cold gray, beep
+   * cyan (also drawn on the TransportDock timeline as the t=0 line), and
+   * manual violet (detection-source + the shooter track palette) are all
+   * in play there already, so reusing any of them would blend the
+   * moment marker into an unrelated signal. AA-large contrast on the
+   * dark surfaces (#14171C/#0A0B0D). */
+  --color-moment:       #F472B6;
+  --color-moment-glow:  rgba(244, 114, 182, 0.30);
+  --color-moment-tint:  rgba(244, 114, 182, 0.10);
 
   /* Stage status taxonomy -- six tiers, aliased to the existing palette so
    * the meaning is encoded in the token name (not the underlying color).

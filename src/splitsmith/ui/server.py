@@ -198,6 +198,11 @@ from . import export_storage, stage_edit
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from . import shooter_move as shooter_move_module
+from .capabilities import (
+    capabilities_for_origin,
+    required_capability,
+    share_scope_capabilities,
+)
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
 from .jobs import (
     Job,
@@ -997,6 +1002,12 @@ _SHARE_PATH_RE = re.compile(
     # nothing new in-surface.
     r"|match/shooters/[^/]+/videos/stream"
     r"|og\.png"
+    # The compare card routes (share_og.share_compare_png /
+    # share_compare_meta) ride these two alternatives too - "compare" is
+    # just another value for [^/]+ here, admitted deliberately rather than
+    # incidentally. Route registration order (compare defined above the
+    # {slug} routes in share_og.py) is what makes "compare" dispatch to
+    # the compare card instead of a shooter slugged "compare".
     r"|og/[^/]+/\d+\.png"
     r"|og-meta"
     r"|og-meta/[^/]+/\d+)$"
@@ -1051,6 +1062,14 @@ current_match_id: ContextVar[str | None] = ContextVar("splitsmith_current_match_
 # shooter list) don't issue a second matches_store query. ``None`` outside
 # an aliased request (e.g. legacy bare-path traffic).
 current_match_origin: ContextVar[str | None] = ContextVar("splitsmith_current_match_origin", default=None)
+# The bound match's capability set (#756), computed by the alias
+# middleware from the same origin fact (or, on share requests, from the
+# token's scope) that decides the 403 - handlers serialize it so the SPA
+# gates affordances on the same truth the guard enforces. None outside
+# an aliased request.
+current_match_capabilities: ContextVar[frozenset[str] | None] = ContextVar(
+    "splitsmith_current_match_capabilities", default=None
+)
 # Set True by _share_alias for anonymous read requests so handlers can
 # strip server-local fields (e.g. match_root, last_scanned_dir) from their
 # response payloads before returning them to anonymous viewers.
@@ -1085,6 +1104,20 @@ def _may_mint_shot_ids() -> bool:
     mode, legacy bare-path traffic) -> mint, i.e. today's behaviour.
     """
     return current_match_origin.get() != "desktop"
+
+
+def _serialized_capabilities() -> list[str]:
+    """Sorted capability names for the payload ``capabilities`` field.
+
+    ``current_match_capabilities`` is pinned by the alias middleware to a
+    (possibly empty, on a read-scoped share) frozenset - ``None`` only
+    outside an aliased request (legacy bare-path traffic), which falls
+    back to ``capabilities_for_origin(None)``. A plain ``or`` fallback
+    would be wrong here: an empty frozenset is falsy in Python, so it
+    would silently widen a share response's capabilities.
+    """
+    caps = current_match_capabilities.get()
+    return sorted(caps if caps is not None else capabilities_for_origin(None))
 
 
 # TTL (seconds) for presigned media GET URLs. Short for share requests so
@@ -3886,6 +3919,10 @@ class ShooterListResponse(BaseModel):
     # desktop-synced read-only mirror apart from a natively-hosted or
     # local match so it can gate write affordances client-side.
     origin: str = "local"
+    # Sorted capability names (#756) - the same set the server-side guard
+    # enforces, so the SPA renders write affordances from data instead of
+    # re-deriving them from origin.
+    capabilities: list[str] = []
 
 
 class AddShooterRequest(BaseModel):
@@ -4059,6 +4096,10 @@ class BeepQueueResponse(BaseModel):
     # pick the honest media surface (snippet vs proxy) without a second
     # round trip.
     origin: str = "local"
+    # Sorted capability names (#756) - the same set the server-side guard
+    # enforces, so the SPA renders write affordances from data instead of
+    # re-deriving them from origin.
+    capabilities: list[str] = []
 
 
 class BeepQueueConfirmRequest(BaseModel):
@@ -6466,64 +6507,6 @@ def create_app(
     # ``state._bound_root`` is only consulted for legacy bare-path
     # traffic that hasn't migrated to the new prefix.
 
-    # Every mirror-exemption regex below anchors with ``\Z``, not ``$``:
-    # plain ``$`` also matches just before a single trailing ``\n``, so a
-    # pattern like ``.../audit$`` is not really "one exact path", only
-    # "that path, optionally with one trailing newline". In practice a
-    # literal ``\n`` can't reach these regexes through ``rest`` here --
-    # ``rest`` is derived from ``request.url.path``, and Starlette's own
-    # ``URL.path`` routes through ``urllib.parse.urlsplit()``, which
-    # unconditionally strips ASCII CR/LF/TAB from a URL (a CPython
-    # hardening, not app-specific: see bpo-43882), so ``.../audit%0a``
-    # arrives here as the plain, legitimately-exempt ``.../audit`` with
-    # nothing appended -- no bypass, verified against a live request.
-    # ``\Z`` is still correct to use: it is what "one exact path" actually
-    # means, it costs nothing, and it stops relying on an implementation
-    # detail of a caller (``request.url.path``) that these compiled
-    # patterns don't control and could someday be handed a string some
-    # other way.
-
-    # Slice 3 (mobile beep review): the only two beep writes a mirror
-    # accepts. Everything else beep-shaped (detect-beep, beep-window,
-    # select, snap, the legacy primary shim) needs source audio or fires
-    # jobs, and stays read-only on mirrors.
-    _mirror_beep_write_re = re.compile(r"\Ashooters/[^/]+/stages/\d+/videos/[^/]+/beep\Z")
-
-    # Slice 4 (mobile audit triage): the two stage-level writes a mirror
-    # accepts - accept-stage and flag-for-desktop. Everything else stays
-    # desktop-owned until its slice ships a whitelist entry.
-    _mirror_triage_write_re = re.compile(r"\Ashooters/[^/]+/stages/\d+/(audit/accept|attention)\Z")
-
-    # Slice 5 (mobile interval reclassify): the two coach writes a mirror
-    # accepts - the per-shot coach PATCH and the bulk reclassify POST.
-    # Both are pure state-doc writes (no job chaining), and COACH_FIELDS
-    # already merge per-shot LWW on desktop pull. Note the per-shot patch
-    # is a PATCH, so its exemption is method-gated separately below.
-    # Slice 5 also has to cover the by-id coach PATCH (Task 3, shots as a
-    # synced entity): the id form is the one a client that did not just
-    # write the document should use -- shot_number renumbers under it.
-    # Containment for ``[^/]+``/``by-id/[A-Za-z0-9._-]+`` (here and in the
-    # other regexes below) is not this pattern's job: the character class
-    # only keeps the slug/id out of the next path segment. What actually
-    # bounds the slug to a real shooter is the roster-membership check in
-    # ``state.shooter_root`` (``if slug not in shooters: raise 404``, which
-    # ``state.shooter_project`` reaches only by calling it) -- a slug this
-    # regex passes through but the roster doesn't recognize 404s there,
-    # same as any other unknown shooter.
-    _mirror_coach_patch_re = re.compile(
-        r"\Ashooters/[^/]+/stages/\d+/shots/(?:\d+|by-id/[A-Za-z0-9._-]+)/coach\Z"
-    )
-    _mirror_coach_reclassify_re = re.compile(r"\Ashooters/[^/]+/stages/\d+/coach/reclassify\Z")
-
-    # Task 6 (#631): the full audit PUT. Safe now that shots carry a stable
-    # id and sync/merge.py merges their membership by it -- before the
-    # merge unit shipped, opening this would have let a desktop pull
-    # silently discard phone edits. ``_may_mint_shot_ids`` already refuses
-    # to mint a non-convergent id on a mirror at this exact save boundary
-    # (see ``shot_id.ensure_shot_ids``); this is the gate that makes that
-    # path reachable.
-    _mirror_audit_write_re = re.compile(r"\Ashooters/[^/]+/stages/\d+/audit\Z")
-
     @app.middleware("http")
     async def _match_id_alias(request, call_next):
         path = request.url.path
@@ -6576,27 +6559,20 @@ def create_app(
                         }
                     },
                 )
-            # Read-only mirror gate (#631 Task 6). A ``desktop``-origin row
-            # is a mirror of a match desktop still owns - only ``/api/sync/*``
-            # (not alias-routed, so this middleware never sees it) may write
-            # to it. Every non-safe method through this alias 403s, except
-            # share management: creating/revoking a share link on a mirror
-            # is the whole point of exposing it hosted-side, so
-            # ``match/shares`` stays writable.
-            if (
-                owner_row.origin == "desktop"
-                and request.method not in ("GET", "HEAD", "OPTIONS")
-                and not (
-                    rest == "match/shares"
-                    or rest.startswith("match/shares/")
-                    or (request.method == "POST" and rest == "match/beep-queue/confirm")
-                    or (request.method == "POST" and _mirror_beep_write_re.match(rest) is not None)
-                    or (request.method == "POST" and _mirror_triage_write_re.match(rest) is not None)
-                    or (request.method == "PATCH" and _mirror_coach_patch_re.match(rest) is not None)
-                    or (request.method == "POST" and _mirror_coach_reclassify_re.match(rest) is not None)
-                    or (request.method == "PUT" and _mirror_audit_write_re.match(rest) is not None)
-                )
-            ):
+            # Capability gate (#756, formerly the read-only mirror gate,
+            # #631 Task 6). One table decides both this 403 and the
+            # ``capabilities`` payload field - see capabilities.py. On a
+            # share request the set comes from the token's scope instead
+            # of the origin (#779); share traffic is GET-only at the
+            # share alias, so the gate is payload-only there today.
+            if current_share_request.get():
+                from ..db.share_guard import current_share_scope
+
+                match_capabilities = share_scope_capabilities(current_share_scope.get())
+            else:
+                match_capabilities = capabilities_for_origin(owner_row.origin)
+            needed = required_capability(request.method, rest)
+            if needed is not None and needed not in match_capabilities:
                 return JSONResponse(status_code=403, content={"detail": "read_only_mirror"})
             work_root = (
                 Path(
@@ -6624,18 +6600,21 @@ def create_app(
                     },
                 )
             match_origin = "local"
+            match_capabilities = capabilities_for_origin("local")
         rewritten = "/api/" + rest
         request.scope["path"] = rewritten
         request.scope["raw_path"] = rewritten.encode("utf-8")
         root_token = current_match_root.set(match_root)
         id_token = current_match_id.set(match_id)
         origin_token = current_match_origin.set(match_origin)
+        capabilities_token = current_match_capabilities.set(match_capabilities)
         try:
             return await call_next(request)
         finally:
-            current_match_root.reset(root_token)
-            current_match_id.reset(id_token)
+            current_match_capabilities.reset(capabilities_token)
             current_match_origin.reset(origin_token)
+            current_match_id.reset(id_token)
+            current_match_root.reset(root_token)
 
     # ----------------------------------------------------------------------
     # Share-link anonymous read middleware (issue #349)
@@ -6680,8 +6659,18 @@ def create_app(
         rewritten = f"/api/matches/{resolved.match_id}/{rest}"
         request.scope["path"] = rewritten
         request.scope["raw_path"] = rewritten.encode("utf-8")
+        # Lazy import: this middleware runs for every request in both local
+        # and hosted mode (local returns 404 above via ``resolver is None``),
+        # so a module-level import here would force ``splitsmith.db`` - and
+        # its sqlalchemy dependency - onto local-mode installs that don't
+        # have the ``hosted`` extra. By this point the
+        # resolver already came from ``_apply_hosted_mode_wiring``, which
+        # has imported the db package, so this is a free (cached) import.
+        from ..db.share_guard import current_share_scope
+
         tenant_token = current_tenant.set(state.build_tenant(resolved.owner_user_id))
         share_token = current_share_request.set(True)
+        scope_token = current_share_scope.set(resolved.scope)
         # Stashed on request.state (not a ContextVar) because only the two
         # OG PNG handlers need it and they already take ``request`` -- same
         # precedent as ``_auth_gate``'s ``request.state.user``. The card
@@ -6702,6 +6691,7 @@ def create_app(
                 return not_found
             return response
         finally:
+            current_share_scope.reset(scope_token)
             current_share_request.reset(share_token)
             current_tenant.reset(tenant_token)
 
@@ -7060,6 +7050,7 @@ def create_app(
         # have no proxies and never will - the SPA copy must not promise
         # one is coming.
         payload["origin"] = current_match_origin.get() or "local"
+        payload["capabilities"] = _serialized_capabilities()
         # Strip owner-local scan directory from anonymous share responses -
         # it is a server path that serves no purpose for read-only viewers.
         # Video/trim paths are load-bearing for streaming and are kept.
@@ -12762,6 +12753,7 @@ def create_app(
             match_name=match.name,
             shooters=entries,
             origin=current_match_origin.get() or "local",
+            capabilities=_serialized_capabilities(),
         )
 
     def _build_triage_response() -> TriageResponse:
@@ -13717,6 +13709,7 @@ def create_app(
             confirmed_count=total_confirmed,
             stages=ordered_stages,
             origin=current_match_origin.get() or "local",
+            capabilities=_serialized_capabilities(),
         )
 
     @app.post("/api/match/beep-queue/confirm", response_model=BeepQueueResponse)

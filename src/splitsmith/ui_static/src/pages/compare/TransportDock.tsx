@@ -5,7 +5,7 @@
  *  Scrub by dragging anywhere on the tracks or via the range slider
  *  (the keyboard-accessible control). */
 
-import { MoveLeft, MoveRight, Pause, Play, Volume2 } from "lucide-react";
+import { Link2, MoveLeft, MoveRight, Pause, Play, Volume2 } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
 import { type CompareShooterRecord } from "@/lib/api";
@@ -43,6 +43,8 @@ export function TransportDock({
   onTogglePlay,
   onScrub,
   onPickAudio,
+  momentT,
+  onCopyMoment,
 }: {
   shooters: CompareShooterRecord[];
   maxTime: number;
@@ -52,6 +54,11 @@ export function TransportDock({
   onTogglePlay: () => void;
   onScrub: (tsb: number) => void;
   onPickAudio: (slug: string) => void;
+  /** Seconds after beep for a shared moment (?t=). Renders a labelled
+   *  diamond marker on the track, positioned with the same xOf() math
+   *  as the playhead. */
+  momentT?: number | null;
+  onCopyMoment: () => void;
 }) {
   const [trackW, setTrackW] = useState(960);
   const observerRef = useRef<ResizeObserver | null>(null);
@@ -123,6 +130,15 @@ export function TransportDock({
           className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-3 text-muted transition-colors hover:bg-surface-4 hover:text-ink"
         >
           <MoveRight className="size-4" />
+        </button>
+        <button
+          type="button"
+          onClick={onCopyMoment}
+          aria-label="Copy link at moment"
+          title="Copy link at moment"
+          className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-3 text-muted transition-colors hover:bg-surface-4 hover:text-ink"
+        >
+          <Link2 className="size-4" />
         </button>
         <div className="ml-2 flex items-center gap-4 font-mono tabular-nums">
           <span className="flex flex-col items-start gap-0.5">
@@ -324,6 +340,23 @@ export function TransportDock({
             strokeDasharray="4 4"
             strokeOpacity={0.8}
           />
+          {/* Shared-moment marker: diamond + label, matching the
+              ResultsPlayer idiom (shape + text, never color-only). */}
+          {momentT != null && momentT >= 0 && momentT <= maxTime && (
+            <rect
+              role="img"
+              aria-label={`Moment at ${momentT.toFixed(2)}s`}
+              x={xOf(momentT) - 5}
+              y={RULER_H - 5}
+              width={10}
+              height={10}
+              transform={`rotate(45 ${xOf(momentT)} ${RULER_H})`}
+              fill="var(--color-moment)"
+              fillOpacity={0.4}
+              stroke="var(--color-moment)"
+              strokeWidth={2}
+            />
+          )}
           {/* Playhead */}
           <line
             x1={xOf(clampedT)}

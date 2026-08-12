@@ -118,6 +118,7 @@ function renderResults(path: string) {
     shooters: SHOOTERS,
     refresh: vi.fn(),
     origin: null,
+    capabilities: null,
   };
   return render(
     <MemoryRouter initialEntries={[path]}>

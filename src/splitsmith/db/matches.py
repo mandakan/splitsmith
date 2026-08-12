@@ -27,6 +27,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from .models import MatchRow
+from .share_guard import ShareReadOnlyError, share_request_is_read_only
+
+
+def _refuse_share_write() -> None:
+    """#779 store-level complement to the READ ONLY share transaction:
+    refuse mutations at the choke point when serving a read-scoped share
+    request. Postgres enforces the same rule at the database; this check
+    also covers the sqlite test engine and fails with a clearer error."""
+    if share_request_is_read_only():
+        raise ShareReadOnlyError("refusing to mutate owner state during a read-scoped share request")
 
 
 class MatchRecord(BaseModel):
@@ -94,6 +104,7 @@ class PostgresMatchStore:
         (e.g. the hosted UI resaving a match's name) must not reclassify a
         match that a desktop sync push originally created, or vice versa.
         """
+        _refuse_share_write()
         async with self._session_factory() as session:
             existing = (
                 await session.execute(
@@ -162,6 +173,7 @@ class PostgresMatchStore:
         already-gone match returns ``False`` without error. Mirrors
         :meth:`PostgresRecentProjectsStore.remove`.
         """
+        _refuse_share_write()
         async with self._session_factory() as session:
             result = await session.execute(
                 delete(MatchRow).where(

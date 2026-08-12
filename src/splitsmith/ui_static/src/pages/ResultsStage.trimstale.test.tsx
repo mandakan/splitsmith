@@ -165,6 +165,7 @@ function renderStage(videos: StageVideo[]) {
     shooters: [makeShooter("anna", "Anna")],
     refresh: vi.fn(),
     origin: null,
+    capabilities: null,
   };
   return render(
     <MemoryRouter initialEntries={["/match/m1/results/anna/3"]}>

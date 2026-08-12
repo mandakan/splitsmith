@@ -743,6 +743,106 @@ def test_share_last_scanned_dir_nulled_for_anonymous_viewer(
     client.cookies.clear()
 
 
+# -- byte-identity net over the share whitelist (Task 5, #779) ----------
+
+
+def _dump_state_docs(db_url: str, user_email: str) -> list[tuple]:
+    """Serialize every row of the owner's tenant-store tables (state_docs,
+    matches, recent_projects) as sorted tuples of all mapped columns -
+    byte-identity means nothing changed, version and timestamps included.
+    Each tuple is prefixed with a table-name element so rows from
+    different tables can never collide."""
+    import json
+
+    from sqlalchemy import inspect as sa_inspect
+
+    from splitsmith.db.models import MatchRow, RecentProjectRow, StateDocRow
+
+    engine = create_engine(db_url)
+    sf = sessionmaker(engine)
+
+    async def _dump() -> list[tuple]:
+        async with sf() as s:
+            row = (await s.execute(_select(User).where(User.email == user_email))).scalar_one()
+            user_id = row.id
+        dumped: list[tuple] = []
+        for table_name, model in (
+            ("state_docs", StateDocRow),
+            ("matches", MatchRow),
+            ("recent_projects", RecentProjectRow),
+        ):
+            cols = sorted(c.key for c in sa_inspect(model).mapper.column_attrs)
+            async with sf() as s:
+                model_rows = (await s.execute(_select(model).where(model.user_id == user_id))).scalars().all()
+            dumped.extend(
+                (table_name, *(json.dumps(getattr(r, k), default=str, sort_keys=True) for k in cols))
+                for r in model_rows
+            )
+        return sorted(dumped)
+
+    return asyncio.run(_dump())
+
+
+# One concrete instantiation per _SHARE_PATH_RE alternative (server.py).
+# When the whitelist grows an entry, this list must grow one too - the
+# assertion below is the promise every share route is write-free.
+_SHARE_WHITELIST_INSTANCES = [
+    "match/shooters",
+    f"shooters/{SLUG}/project",
+    f"shooters/{SLUG}/stages/1/coach",
+    f"shooters/{SLUG}/coach/distributions",
+    f"shooters/{SLUG}/videos/stream",
+    "match/stage/1/compare",
+    f"match/shooters/{SLUG}/videos/stream",
+    "og.png",
+    f"og/{SLUG}/1.png",
+    "og-meta",
+    f"og-meta/{SLUG}/1",
+]
+
+
+def test_share_whitelist_instances_cover_every_alternative() -> None:
+    """Couples the net's instance list to the regex: when the whitelist
+    grows an alternative without a matching byte-identity instantiation,
+    this fails loudly instead of the net silently covering less ground."""
+    from splitsmith.ui.server import _SHARE_PATH_RE
+
+    alternatives = _SHARE_PATH_RE.pattern.count("|") + 1
+    assert (
+        len(_SHARE_WHITELIST_INSTANCES) == alternatives
+    ), "share whitelist grew an alternative without a byte-identity instantiation"
+
+
+@pytest.mark.parametrize("rest", _SHARE_WHITELIST_INSTANCES)
+def test_share_whitelist_routes_leave_state_docs_untouched(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+    rest: str,
+) -> None:
+    """#779 test net: walk every whitelisted share shape against a
+    seeded match carrying a legacy (unclassified) audit doc - the shape
+    known to tempt read paths into healing writes (#775) - and assert
+    the owner's state_docs rows are byte-identical before and after."""
+    token = _setup_shared_match(hosted_env, hosted_app)
+    legacy_doc = {
+        "stage_number": 1,
+        "shots": [
+            {"shot_number": 1, "ms_after_beep": 1500},
+            {"shot_number": 2, "ms_after_beep": 1800},
+        ],
+    }
+    _seed_stage_audit(hosted_env, "owner@example.com", MID, SLUG, legacy_doc)
+
+    client, _ = hosted_app
+    before = _dump_state_docs(hosted_env, "owner@example.com")
+    resp = client.get(_share_url(token, rest))
+    # Routes without seeded media legitimately 404/422; the invariant
+    # under test is the absence of writes, not the status code.
+    assert resp.status_code < 500, f"{rest}: {resp.status_code} {resp.text[:200]}"
+    after = _dump_state_docs(hosted_env, "owner@example.com")
+    assert after == before, f"share GET {rest!r} mutated state_docs"
+
+
 def test_share_deleted_match_uniform_404(
     hosted_env: str,
     hosted_app: tuple[TestClient, _CapturingSender],
@@ -853,3 +953,57 @@ def test_share_path_re_rejects(rest: str) -> None:
     from splitsmith.ui.server import _SHARE_PATH_RE
 
     assert _SHARE_PATH_RE.fullmatch(rest) is None
+
+
+def test_share_request_carries_read_scope(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#779: _share_alias must pin the resolved token's scope for the
+    duration of the request, and reset it afterwards. Probed from inside
+    the request via the store loader the project route calls."""
+    from splitsmith.db.project_state import ProjectStateStore
+    from splitsmith.db.share_guard import current_share_scope
+
+    token = _setup_shared_match(hosted_env, hosted_app)
+    client, sender = hosted_app
+
+    seen: list[str | None] = []
+    orig = ProjectStateStore.load_project
+
+    async def probe(self, match_id: str, slug: str):
+        seen.append(current_share_scope.get())
+        return await orig(self, match_id, slug)
+
+    monkeypatch.setattr(ProjectStateStore, "load_project", probe)
+
+    resp = client.get(_share_url(token, f"shooters/{SLUG}/project"))
+    assert resp.status_code == 200, resp.text
+    assert seen == ["read"]
+
+    # Owner path: same route, no share scope.
+    seen.clear()
+    login(client, sender, "owner@example.com")
+    owner = client.get(f"/api/matches/{MID}/shooters/{SLUG}/project")
+    assert owner.status_code == 200, owner.text
+    assert seen == [None]
+    client.cookies.clear()
+
+
+def test_share_payload_capabilities_empty(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """#779/#756: a read-scoped share response advertises no
+    capabilities - the anonymous surface renders zero write CTAs from
+    data, not from route-shape assumptions."""
+    token = _setup_shared_match(hosted_env, hosted_app)
+    client, _ = hosted_app
+    resp = client.get(_share_url(token, "match/shooters"))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["capabilities"] == []
+
+    project = client.get(_share_url(token, f"shooters/{SLUG}/project"))
+    assert project.status_code == 200, project.text
+    assert project.json()["capabilities"] == []

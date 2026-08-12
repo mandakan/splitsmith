@@ -30,8 +30,14 @@ from typing import NamedTuple
 
 from .overlay_raster import Rasterizer, RasterizerUnavailableError
 from .overlay_theme import OverlayTheme
-from .share_card import MatchCard, StageCard, card_hash
-from .share_card_html import CARD_HEIGHT, CARD_WIDTH, match_card_html, stage_card_html
+from .share_card import CompareCard, MatchCard, StageCard, card_hash
+from .share_card_html import (
+    CARD_HEIGHT,
+    CARD_WIDTH,
+    compare_card_html,
+    match_card_html,
+    stage_card_html,
+)
 from .storage import Storage
 
 logger = logging.getLogger(__name__)
@@ -60,26 +66,54 @@ class RenderedCard(NamedTuple):
     fell_back: bool
 
 
-def storage_key(token: str, card: MatchCard | StageCard, *, slug: str | None = None) -> str:
+def storage_key(token: str, card: MatchCard | StageCard | CompareCard, *, slug: str | None = None) -> str:
     """Content-addressed object key, scoped to the share token."""
     digest = card_hash(card)
     if isinstance(card, StageCard):
         return f"share-cards/{token}/stage-{slug}-{card.stage_number}-{digest}.png"
+    if isinstance(card, CompareCard):
+        return f"share-cards/{token}/compare-{card.stage_number}-{digest}.png"
     return f"share-cards/{token}/match-{digest}.png"
 
 
-def render_card(card: MatchCard | StageCard, *, theme: OverlayTheme, rasterizer: Rasterizer) -> bytes:
+def render_card(
+    card: MatchCard | StageCard | CompareCard, *, theme: OverlayTheme, rasterizer: Rasterizer
+) -> bytes:
     """Card model to PNG bytes. Raises ``RasterizerUnavailableError``."""
-    html = (
-        stage_card_html(card, theme=theme)
-        if isinstance(card, StageCard)
-        else match_card_html(card, theme=theme)
-    )
+    if isinstance(card, StageCard):
+        html = stage_card_html(card, theme=theme)
+    elif isinstance(card, CompareCard):
+        html = compare_card_html(card, theme=theme)
+    else:
+        html = match_card_html(card, theme=theme)
     return rasterizer.png(html, width=CARD_WIDTH, height=CARD_HEIGHT)
 
 
+def render_card_png(
+    card: MatchCard | StageCard | CompareCard,
+    *,
+    theme: OverlayTheme,
+    rasterizer_factory: Callable[[], AbstractContextManager[Rasterizer]],
+) -> RenderedCard:
+    """Render a card with no storage involved - the moment-variant path.
+
+    Moment cards carry a continuous ``t``; writing one object per distinct
+    ``t`` would let anyone holding a share token mint unbounded storage
+    writes. They are rendered per fetch and HTTP-cached instead (the URL
+    carries ``t`` and ``v``, so it is self-versioning). Same plate rule as
+    the cached path: a fallback plate is a degraded response, flagged via
+    ``fell_back`` so the route can short-cache it.
+    """
+    try:
+        with rasterizer_factory() as rasterizer:
+            return RenderedCard(png=render_card(card, theme=theme, rasterizer=rasterizer), fell_back=False)
+    except RasterizerUnavailableError as exc:
+        logger.warning("share card render unavailable, serving fallback plate: %s", exc.detail)
+        return RenderedCard(png=FALLBACK_PNG_PATH.read_bytes(), fell_back=True)
+
+
 def cached_card_png(
-    card: MatchCard | StageCard,
+    card: MatchCard | StageCard | CompareCard,
     *,
     token: str,
     storage: Storage,
@@ -100,15 +134,13 @@ def cached_card_png(
     key = storage_key(token, card, slug=slug)
     if storage.exists(key):
         return RenderedCard(png=storage.read_bytes(key), fell_back=False)
-    try:
-        with rasterizer_factory() as rasterizer:
-            data = render_card(card, theme=theme, rasterizer=rasterizer)
-    except RasterizerUnavailableError as exc:
+    rendered = render_card_png(card, theme=theme, rasterizer_factory=rasterizer_factory)
+    if rendered.fell_back:
         # Deliberately not cached: a browser-less host must not pin the
         # fallback plate onto this key forever. ``fell_back=True`` carries
         # the same rule outward, so the HTTP layer does not pin it in a
-        # crawler's cache either.
-        logger.warning("share card render unavailable, serving fallback plate: %s", exc.detail)
-        return RenderedCard(png=FALLBACK_PNG_PATH.read_bytes(), fell_back=True)
-    storage.write_bytes(key, data)
-    return RenderedCard(png=data, fell_back=False)
+        # crawler's cache either. The failure is already logged in
+        # render_card_png with full exception detail.
+        return rendered
+    storage.write_bytes(key, rendered.png)
+    return rendered

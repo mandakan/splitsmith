@@ -8,15 +8,17 @@ import pytest
 
 from splitsmith.overlay_raster import RasterizerUnavailableError
 from splitsmith.overlay_theme import load_theme
-from splitsmith.share_card import MatchCard, RosterEntry, StageCard, stage_figures
+from splitsmith.share_card import CompareCard, MatchCard, RosterEntry, StageCard, stage_figures
 from splitsmith.share_card_render import (
     FALLBACK_PNG_PATH,
     cached_card_png,
+    render_card_png,
     storage_key,
 )
 from splitsmith.storage import FilesystemStorage
 
 TOKEN = "tok_abc123"
+THEME = load_theme("splitsmith")
 
 
 @dataclass(frozen=True)
@@ -200,3 +202,34 @@ def test_the_bundled_plate_is_a_1200x630_png() -> None:
     raw = FALLBACK_PNG_PATH.read_bytes()
     assert raw[:8] == b"\x89PNG\r\n\x1a\n"
     assert struct.unpack(">II", raw[16:24]) == (1200, 630)
+
+
+def test_compare_card_storage_key_shape() -> None:
+    card = CompareCard(
+        stage_number=3,
+        stage_name="Standards",
+        match_name="M",
+        shooter_names=["A"],
+    )
+    key = storage_key("tok", card)
+    assert key.startswith("share-cards/tok/compare-3-")
+    assert key.endswith(".png")
+
+
+def test_render_card_png_never_touches_storage() -> None:
+    card = CompareCard(
+        stage_number=3,
+        stage_name="Standards",
+        match_name="M",
+        shooter_names=["A"],
+        moment_t=4.32,
+    )
+    rendered = render_card_png(card, theme=THEME, rasterizer_factory=_Factory(_FakeRasterizer()))
+    assert rendered.fell_back is False
+    assert rendered.png  # the fake's bytes
+
+
+def test_render_card_png_serves_the_plate_when_the_browser_is_gone() -> None:
+    card = CompareCard(stage_number=3, stage_name="S", match_name="M", shooter_names=["A"])
+    rendered = render_card_png(card, theme=THEME, rasterizer_factory=_Factory(_BrokenRasterizer()))
+    assert rendered.fell_back is True

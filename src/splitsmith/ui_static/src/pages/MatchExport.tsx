@@ -35,6 +35,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useOutletContext } from "react-router-dom";
 
 import {
   LedCtaButton,
@@ -42,9 +43,12 @@ import {
   SelectField,
   StageChip,
 } from "@/components/export/primitives";
+import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import {
   ApiError,
   api,
+  capabilityDenied,
+  READ_ONLY_MIRROR_MESSAGE,
   type CompareGridResult,
   type Job,
   type MatchProject,
@@ -59,6 +63,10 @@ import {
 } from "@/pages/matchExportModel";
 
 export function MatchExport() {
+  const ctx = useOutletContext<MatchShellOutletContext>();
+  // #756: gate the compare-grid render on the server-derived capability -
+  // a mirror match 403s the compare-export write.
+  const editDenied = capabilityDenied(ctx?.capabilities, "edit");
   const [shooters, setShooters] = useState<ShooterListEntry[] | null>(null);
   const [matchName, setMatchName] = useState<string>("");
   const [project, setProject] = useState<MatchProject | null>(null);
@@ -147,7 +155,8 @@ export function MatchExport() {
 
   const busy =
     submitting || job?.status === "pending" || job?.status === "running";
-  const canSubmit = !busy && audioFrom !== "" && orderedSelection.length > 0;
+  const canSubmit =
+    !busy && audioFrom !== "" && orderedSelection.length > 0 && !editDenied;
 
   async function submit() {
     if (!canSubmit) return;
@@ -346,6 +355,7 @@ export function MatchExport() {
                 busyLabel="Rendering..."
                 onClick={() => void submit()}
                 disabled={!canSubmit}
+                title={editDenied ? READ_ONLY_MIRROR_MESSAGE : undefined}
               />
               {busy && job?.message && (
                 <div className="mt-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">

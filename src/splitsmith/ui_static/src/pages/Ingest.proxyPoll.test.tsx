@@ -100,6 +100,7 @@ describe("Ingest proxy poll", () => {
       match_name: "Test Match",
       shooters: [],
       origin: "local",
+      capabilities: ["edit", "review"],
     });
     vi.mocked(api.getBeepQueue).mockResolvedValue({
       total_items: 0,
@@ -107,6 +108,7 @@ describe("Ingest proxy poll", () => {
       confirmed_count: 0,
       stages: [],
       origin: "local",
+      capabilities: ["edit", "review"],
     });
   });
 

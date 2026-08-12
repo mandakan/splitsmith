@@ -33,6 +33,7 @@ const baseProps = {
   onTogglePlay: () => {},
   onScrub: () => {},
   onPickAudio: () => {},
+  onCopyMoment: () => {},
 };
 
 describe("timeFromTrackX", () => {

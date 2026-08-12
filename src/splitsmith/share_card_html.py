@@ -28,7 +28,7 @@ from html import escape
 
 from .overlay_html import FONT_FILES, font_face_url
 from .overlay_theme import RGB, OverlayTheme
-from .share_card import MatchCard, StageCard
+from .share_card import CompareCard, MatchCard, StageCard
 
 CARD_WIDTH = 1200
 CARD_HEIGHT = 630
@@ -88,6 +88,9 @@ def _style(theme: OverlayTheme) -> str:
 .roster {{ display: flex; flex-direction: column; gap: 14px; width: 430px; overflow: hidden; }}
 .rrow {{ display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
          overflow: hidden; }}
+.badge {{ display:inline-block; padding: 6px 14px; border: 2px solid {_rgb(theme.accent)};
+          color: {_rgb(theme.accent)}; font-family: "JetBrains Mono"; font-size: 28px;
+          letter-spacing: 0.08em; border-radius: 6px; }}
 </style>"""
 
 
@@ -130,6 +133,18 @@ _FOOTER = (
     '<div class="kick">Per-shot splits from stage video '
     '<span class="hot">&middot;</span> splitsmith.app</div>'
 )
+
+
+def _moment_badge(moment_t: float | None) -> str:
+    """A ``MOMENT {t:.2f}s`` strip for a moment-linked card, or nothing.
+
+    ``moment_t`` is already-safe -- it is a float straight off the
+    request, never user markup -- so this is the one interpolation in
+    the module that skips :func:`escape`.
+    """
+    if moment_t is None:
+        return ""
+    return f'<div class="badge">MOMENT {moment_t:.2f}s</div>'
 
 
 def match_card_html(card: MatchCard, *, theme: OverlayTheme) -> str:
@@ -177,12 +192,35 @@ def stage_card_html(card: StageCard, *, theme: OverlayTheme) -> str:
     body = (
         f'<div class="top">{_brand_row(theme)}'
         f'<div class="kick">{" &middot; ".join(escape(m) for m in meta)}</div></div>'
+        f"{_moment_badge(card.moment_t)}"
         f'<div class="stagebody"><div class="figs">{"".join(figs)}</div>'
         '<div class="vrule"></div>'
         f'<div class="col"><div class="display" style="font-size:44px">'
         f"{escape(card.stage_name)}</div>"
         f'<div class="kick">{escape(card.shooter_name)}</div>'
         f'<div class="kick">{escape(card.match_name)}</div></div>'
+        "</div>" + _FOOTER
+    )
+    return _document(theme, body)
+
+
+def compare_card_html(card: CompareCard, *, theme: OverlayTheme) -> str:
+    """Who is being compared, on which stage. Mirrors ``match_card_html``'s
+    headline: the compared shooters' names, joined " vs ", carry the
+    96px ``.display`` slot -- the card's most identifying string --
+    rather than a static "Compare" label. The meta line still carries
+    the stage and match identity; there is no separate roster listing
+    because it would just repeat the same names a second time.
+    """
+    meta = [f"Stage {card.stage_number} - {escape(card.stage_name)}", escape(card.match_name)]
+    headline = " vs ".join(escape(name) for name in card.shooter_names)
+    body = (
+        f'<div class="top">{_brand_row(theme)}'
+        f'<div class="kick">{" &middot; ".join(meta)}</div></div>'
+        f"{_moment_badge(card.moment_t)}"
+        '<div class="body">'
+        f'<div class="col"><div class="display" style="font-size:96px">'
+        f"{headline}</div></div>"
         "</div>" + _FOOTER
     )
     return _document(theme, body)

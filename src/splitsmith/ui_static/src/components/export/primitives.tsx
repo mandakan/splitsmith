@@ -139,11 +139,17 @@ export function SelectField<T extends string>({
   value,
   onChange,
   options,
+  disabled = false,
+  /** Tooltip/aria reason shown while disabled (e.g. #756's
+   *  `READ_ONLY_MIRROR_MESSAGE`). Ignored while enabled. */
+  title,
 }: {
   label: string;
   value: T;
   onChange: (v: T) => void;
   options: readonly { value: NoInfer<T>; label: string }[];
+  disabled?: boolean;
+  title?: string;
 }) {
   return (
     <label className="flex flex-col gap-1.5">
@@ -154,7 +160,9 @@ export function SelectField<T extends string>({
         <select
           value={value}
           onChange={(e) => onChange(e.target.value as T)}
-          className="w-full appearance-none rounded-md border border-rule bg-surface-3 px-3 py-2 pr-8 font-mono text-sm text-ink outline-none focus:border-led"
+          disabled={disabled}
+          title={disabled ? title : undefined}
+          className="w-full appearance-none rounded-md border border-rule bg-surface-3 px-3 py-2 pr-8 font-mono text-sm text-ink outline-none focus:border-led disabled:cursor-not-allowed disabled:opacity-50"
         >
           {options.map((opt) => (
             <option key={opt.value} value={opt.value}>

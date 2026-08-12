@@ -126,3 +126,32 @@ def test_delete_tenant_isolation_same_match_id() -> None:
     assert asyncio.run(a_store.get("shared-id")) is None
     bob_row = asyncio.run(b_store.get("shared-id"))
     assert bob_row is not None and bob_row.name == "Bob Match"
+
+
+# -- share read-only enforcement (#779) ---------------------------------
+
+
+def test_mutations_refused_during_read_scoped_share_request() -> None:
+    """#779: the store is the choke point every ``matches`` write flows
+    through - under a read-scoped share request each mutation entry
+    point must raise instead of writing as the impersonated owner."""
+    from splitsmith.db.share_guard import ShareReadOnlyError, current_share_scope
+
+    sf, (uid,) = _engine_with_users("m@thias.se")
+    store = PostgresMatchStore(sf, user_id=uid)
+    # Seed one row outside the share scope so delete has a target.
+    asyncio.run(store.upsert("brm-abc", "Bromma", "matches/brm-abc"))
+
+    token = current_share_scope.set("read")
+    try:
+        with pytest.raises(ShareReadOnlyError):
+            asyncio.run(store.upsert("brm-abc", "Bromma 2026", "matches/brm-abc"))
+        with pytest.raises(ShareReadOnlyError):
+            asyncio.run(store.delete("brm-abc"))
+        # Reads stay open - the share surface depends on them.
+        row = asyncio.run(store.get("brm-abc"))
+        assert row is not None and row.name == "Bromma"
+    finally:
+        current_share_scope.reset(token)
+    # Outside the scope the store mutates normally again.
+    assert asyncio.run(store.delete("brm-abc")) is True
