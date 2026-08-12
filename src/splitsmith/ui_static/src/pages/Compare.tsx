@@ -49,6 +49,7 @@ import {
 import { Avatar } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
+import { Snackbar, type SnackState } from "@/components/Snackbar";
 import {
   ApiError,
   api,
@@ -58,7 +59,7 @@ import {
   type MatchProject,
 } from "@/lib/api";
 import { useMatchHref } from "@/lib/matchHref";
-import { parseMoment, resolveMomentView } from "@/lib/moment";
+import { momentHref, parseMoment, resolveMomentView } from "@/lib/moment";
 import { isShareView } from "@/lib/shareView";
 import { cn } from "@/lib/utils";
 
@@ -76,6 +77,7 @@ export function Compare() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
+  const urlMoment = useMemo(() => parseMoment(searchParams), [searchParams]);
   const href = useMatchHref();
   const shareView = isShareView(location.pathname);
   const stageNumber = stageParam ? Number(stageParam) : NaN;
@@ -98,6 +100,7 @@ export function Compare() {
   const [visibleSlugs, setVisibleSlugs] = useState<Set<string>>(() => new Set());
   const [isPlaying, setIsPlaying] = useState(false);
   const [timeSinceBeep, setTimeSinceBeep] = useState(0);
+  const [snack, setSnack] = useState<SnackState | null>(null);
 
   const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map());
   const rafRef = useRef<number | null>(null);
@@ -280,7 +283,7 @@ export function Compare() {
   // re-applying and fighting the user's own scrubbing.
   useEffect(() => {
     if (!bundle || momentAppliedRef.current) return;
-    const moment = parseMoment(searchParams);
+    const moment = urlMoment;
     if (!moment) return;
     momentAppliedRef.current = true;
     const slugs = new Set(bundle.shooters.map((s) => s.slug));
@@ -305,7 +308,28 @@ export function Compare() {
         { once: true },
       );
     });
-  }, [bundle, searchParams, scrubTo]);
+  }, [bundle, urlMoment, scrubTo]);
+
+  // Copies a shareable moment link: current time-since-beep, the audio
+  // camera, and whichever shooters are currently visible - mirrors
+  // ResultsStage's handleCopyMoment (single-shooter) but adds cam/who.
+  const handleCopyMoment = useCallback(async () => {
+    const t = Math.round(timeSinceBeep * 100) / 100;
+    const who = playableShooters
+      .filter((s) => visibleSlugs.has(s.slug))
+      .map((s) => s.slug);
+    const link = `${window.location.origin}${momentHref(location.pathname, {
+      t,
+      cam: audioSlug ?? undefined,
+      who,
+    })}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      setSnack({ message: `Link copied at ${t.toFixed(2)}s`, tone: "status" });
+    } catch {
+      setSnack({ message: "Could not copy link", tone: "error" });
+    }
+  }, [timeSinceBeep, playableShooters, visibleSlugs, audioSlug, location.pathname]);
 
   function toggleVisibility(slug: string) {
     setVisibleSlugs((prev) => {
@@ -562,8 +586,11 @@ export function Compare() {
           onTogglePlay={togglePlay}
           onScrub={scrubTo}
           onPickAudio={(slug) => setAudioSlug(slug)}
+          momentT={urlMoment?.t ?? null}
+          onCopyMoment={handleCopyMoment}
         />
       ) : null}
+      <Snackbar snack={snack} onDismiss={() => setSnack(null)} />
     </div>
   );
 }
