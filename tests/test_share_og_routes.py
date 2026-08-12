@@ -584,6 +584,94 @@ def test_an_abandoned_warm_never_reaches_asyncio_as_an_error(monkeypatch: pytest
     assert not handled, handled
 
 
+def test_compare_png_is_reachable_anonymously(
+    hosted_env: str, hosted_app_with_storage: tuple[TestClient, _CapturingSender]
+) -> None:
+    token = _setup_shared_stage(hosted_env, hosted_app_with_storage)
+    client, _sender = hosted_app_with_storage
+
+    resp = client.get(f"/api/share/{token}/og/compare/1.png")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/png"
+
+
+def test_compare_png_with_moment_skips_storage(
+    hosted_env: str,
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Same shape as ``test_moment_stage_png_renders_without_a_storage_write``
+    - a moment-carrying compare card is rendered per fetch, never written to
+    object storage."""
+    import boto3
+
+    from splitsmith.ui import share_og
+
+    token = _setup_shared_stage(hosted_env, hosted_app_with_storage)
+    client, _sender = hosted_app_with_storage
+
+    calls: list[object] = []
+    real = share_og.render_card_png
+
+    def _spy(card, **kwargs):
+        calls.append(card)
+        return real(card, **kwargs)
+
+    monkeypatch.setattr(share_og, "render_card_png", _spy)
+
+    s3 = boto3.client("s3", region_name="us-east-1")
+    put_count_before = s3.list_objects_v2(Bucket=BUCKET, Prefix="share-cards/").get("KeyCount", 0)
+
+    resp = client.get(f"/api/share/{token}/og/compare/1.png?t=2.5")
+
+    assert resp.status_code == 200
+    assert calls and calls[0].moment_t == 2.5
+
+    put_count_after = s3.list_objects_v2(Bucket=BUCKET, Prefix="share-cards/").get("KeyCount", 0)
+    assert put_count_after == put_count_before
+
+
+def test_compare_route_wins_over_a_shooter_slugged_compare(
+    hosted_env: str,
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A literal 'compare' segment must dispatch to the compare card even
+    though /api/og/{slug}/{stage}.png would also match 'compare' as a slug
+    if it were registered first. Spy on build_compare_card and assert it
+    ran (rather than build_stage_card, which would run if the shooter-slug
+    route won instead)."""
+    from splitsmith.ui import share_og
+
+    token = _setup_shared_stage(hosted_env, hosted_app_with_storage)
+    client, _sender = hosted_app_with_storage
+
+    compare_calls: list[object] = []
+    real_compare = share_og.build_compare_card
+
+    def _spy_compare(state, stage_number, **kwargs):
+        card = real_compare(state, stage_number, **kwargs)
+        compare_calls.append(card)
+        return card
+
+    stage_calls: list[object] = []
+    real_stage = share_og.build_stage_card
+
+    def _spy_stage(state, slug, stage_number, **kwargs):
+        card = real_stage(state, slug, stage_number, **kwargs)
+        stage_calls.append(card)
+        return card
+
+    monkeypatch.setattr(share_og, "build_compare_card", _spy_compare)
+    monkeypatch.setattr(share_og, "build_stage_card", _spy_stage)
+
+    resp = client.get(f"/api/share/{token}/og/compare/1.png")
+
+    assert resp.status_code == 200
+    assert compare_calls, "build_compare_card was never called"
+    assert not stage_calls, "build_stage_card ran - the {slug} route won instead of /compare"
+
+
 def test_share_creation_returns_promptly_when_warming_is_slow(
     hosted_env: str,
     hosted_app: tuple[TestClient, _CapturingSender],

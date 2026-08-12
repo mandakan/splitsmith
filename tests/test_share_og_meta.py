@@ -18,6 +18,10 @@ from tests.hosted_helpers import login, seed_match
 
 MID = "test-match-meta01"
 SLUG = "anna"
+#: _seed_state_docs never sets MatchProject.competitor_name, so
+#: build_compare_card (and build_stage_card) fall back to the slug itself
+#: as the displayed shooter name.
+SHOOTER_NAME = SLUG
 
 #: The whole SPA bundle these tests need. ``_shell`` reads
 #: ``STATIC_DIR/index.html`` and splices the tags in before ``</head>``, so
@@ -508,6 +512,82 @@ def test_stage_shell_drops_junk_t(hosted_env, hosted_app, monkeypatch) -> None:
     monkeypatch.setattr(share_og, "_fetch_og_meta", _capture)
     client.get(f"/share/{token}/results/{SLUG}/1?t=abc")
     assert seen == [f"/api/share/{token}/og-meta/{SLUG}/1"]
+
+
+def test_compare_meta_lists_shooters(hosted_env, hosted_app) -> None:
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed(hosted_env)
+    token = _share_token(client)
+    client.cookies.clear()
+
+    resp = client.get(f"/api/share/{token}/og-meta/compare/1")
+    assert resp.status_code == 200
+    meta = resp.json()
+    assert "comparison" in meta["title"]
+    assert SHOOTER_NAME in meta["description"]
+    assert "/og/compare/1.png?v=" in meta["image_path"]
+
+
+def test_compare_meta_with_moment_and_who(hosted_env, hosted_app) -> None:
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed(hosted_env)
+    token = _share_token(client)
+    client.cookies.clear()
+
+    resp = client.get(f"/api/share/{token}/og-meta/compare/1?t=2.50&who={SLUG}")
+    assert resp.status_code == 200
+    meta = resp.json()
+    assert meta["title"].endswith(" - moment at 2.50s")
+    assert "&t=2.50" in meta["image_path"]
+    assert f"&who={SLUG}" in meta["image_path"]
+
+
+def test_compare_meta_unknown_who_falls_back_to_full_roster(hosted_env, hosted_app) -> None:
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed(hosted_env)
+    token = _share_token(client)
+    client.cookies.clear()
+
+    resp = client.get(f"/api/share/{token}/og-meta/compare/1?who=ghost")
+    assert resp.status_code == 200
+    meta = resp.json()
+    assert SHOOTER_NAME in meta["description"]
+
+
+def test_compare_shell_serves_tags(hosted_env, hosted_app, monkeypatch) -> None:
+    from splitsmith.ui import share_og
+
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed(hosted_env)
+    token = _share_token(client)
+    client.cookies.clear()
+
+    seen: list[str] = []
+
+    async def _capture(request, path):
+        seen.append(path)
+        return None
+
+    monkeypatch.setattr(share_og, "_fetch_og_meta", _capture)
+    resp = client.get(f"/share/{token}/compare/1?t=2.5&who=alice")
+    assert resp.status_code == 200
+    assert seen == [f"/api/share/{token}/og-meta/compare/1?t=2.50&who=alice"]
+
+
+def test_compare_shell_with_junk_stage_serves_generic_tags(hosted_env, hosted_app) -> None:
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed(hosted_env)
+    token = _share_token(client)
+    client.cookies.clear()
+
+    resp = client.get(f"/share/{token}/compare/nope")
+    assert resp.status_code == 200
+    assert "og:image" not in resp.text
 
 
 def test_new_share_og_routes_404_outside_hosted_mode() -> None:
