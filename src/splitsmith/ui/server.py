@@ -185,6 +185,7 @@ from ..match_project import (
 from ..match_registry import MatchRegistry
 from ..observability import StructuredJsonFormatter, init_sentry
 from ..runtime import runtime as process_runtime
+from ..shot_id import ensure_shot_ids
 from ..storage import Storage
 from ..sync.client import HostedSyncClient, SyncClientError
 from ..sync.plan import build_push_plan
@@ -1073,6 +1074,36 @@ current_match_capabilities: ContextVar[frozenset[str] | None] = ContextVar(
 # strip server-local fields (e.g. match_root, last_scanned_dir) from their
 # response payloads before returning them to anonymous viewers.
 current_share_request: ContextVar[bool] = ContextVar("splitsmith_current_share_request", default=False)
+
+
+def _may_mint_shot_ids() -> bool:
+    """Whether this request's save boundary may invent a *non-convergent*
+    shot id (#631 Task 7).
+
+    False on a ``desktop``-origin mirror -- passed straight through as
+    ``ensure_shot_ids``'s ``mint`` argument, see its docstring for exactly
+    what ``mint=False`` still derives (a detected shot's ``cand-<n>``,
+    convergent by construction) versus suppresses (the time-keyed and
+    uuid4 branches). ``derive_shot_id`` keys a candidate-less manual shot
+    off its rounded time, so a desktop that nudged such a shot to 6.52 s
+    and a phone that accepted the mirror at 6.5 s would mint
+    ``manual-t6520`` and ``manual-t6500`` for the same shot. Both sides
+    then look fully stamped, the sync merge's unstamped-shot gate passes,
+    and one shot unions into two with no note at all. The desktop is
+    therefore the sole minter of *that* kind of id for a mirror: it stamps
+    legacy documents in the sync run's migration pass and pushes them
+    here.
+
+    A shot that arrives carrying a client-supplied id keeps it either way
+    -- ``ensure_shot_ids`` never rewrites one -- which is what lets a phone
+    add a genuinely new shot to a mirror.
+
+    Reads the origin the alias middleware already pinned for this request,
+    the same fact the read-only-mirror gate reads, so this costs no extra
+    ``matches_store`` query. ``None`` outside an aliased request (local
+    mode, legacy bare-path traffic) -> mint, i.e. today's behaviour.
+    """
+    return current_match_origin.get() != "desktop"
 
 
 def _serialized_capabilities() -> list[str]:
@@ -5027,6 +5058,14 @@ class CoachShotPatchRequest(BaseModel):
     improvement_flag: bool | None = None
     coaching_note: str | None = None
     clear_note: bool = False
+    expected_version: int | None = None
+    """Audit-doc version the client read before composing this patch.
+
+    ``shot_number`` is positional, so an insert elsewhere in the stage
+    renumbers the target. When supplied, a version that no longer matches
+    the stored document is refused rather than applied to whatever now sits
+    at that index.
+    """
 
 
 class CleanupRequest(BaseModel):
@@ -10526,10 +10565,14 @@ def create_app(
         # are left unclassified (they never reach statistics).
         shots = payload.get("shots")
         if isinstance(shots, list):
-            coach_module.classify_intervals_in_dicts(
-                [s for s in shots if isinstance(s, dict)],
-                CoachAutoClassifyConfig(),
-            )
+            shot_dicts = [s for s in shots if isinstance(s, dict)]
+            # Identity before anything else: the sync merge keys shot
+            # membership on this, and shot_number cannot serve because it
+            # renumbers on every insert. On a mirror the desktop is the sole
+            # minter (see _may_mint_shot_ids) - a client-supplied id is still
+            # kept, so a shot the SPA added arrives with its own identity.
+            ensure_shot_ids(shot_dicts, mint=_may_mint_shot_ids())
+            coach_module.classify_intervals_in_dicts(shot_dicts, CoachAutoClassifyConfig())
         # Sync merge unions audit_events by id (bidirectional sync
         # slice); the SPA authors events without one, so stamp them here
         # at the save boundary.
@@ -10598,6 +10641,11 @@ def create_app(
             kept = _kept_audit_shots(shots)
             if not kept:
                 raise HTTPException(status_code=409, detail="nothing_to_accept")
+            # Mirror-exempt from the read-only gate (slice 4), so this is the
+            # save boundary a phone actually reaches on a mirror - and the one
+            # that must not mint a second id for a legacy shot the desktop
+            # will stamp itself. See _may_mint_shot_ids.
+            ensure_shot_ids(shots, mint=_may_mint_shot_ids())
             coach_module.classify_intervals_in_dicts(shots, CoachAutoClassifyConfig())
             if any(not s.get("interval_class") for s in kept):
                 raise HTTPException(status_code=409, detail="not_fully_classified")
@@ -10929,29 +10977,26 @@ def create_app(
         _coach_save(slug, stage_number, payload, version)
         return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
 
-    @app.patch("/api/shooters/{slug}/stages/{stage_number}/shots/{shot_number}/coach")
-    def patch_stage_shot_coach(
+    def _apply_shot_coach_patch(
         slug: str,
         stage_number: int,
-        shot_number: int,
         body: CoachShotPatchRequest,
+        match_shot: Callable[[dict[str, Any]], bool],
+        describe: str,
     ) -> JSONResponse:
-        """Patch the coaching annotation fields on one shot. Returns the
-        updated coach response for the stage so the client can refresh.
-        """
+        """Shared body for the by-number and by-id coach PATCH routes."""
         payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
+        if body.expected_version is not None and body.expected_version != version:
+            raise HTTPException(status_code=409, detail="version_conflict")
         cfg = CoachAutoClassifyConfig()
         shots = payload.get("shots") or []
         if not isinstance(shots, list):
             raise HTTPException(status_code=500, detail="audit shots is not a list")
-        target = next(
-            (s for s in shots if isinstance(s, dict) and int(s.get("shot_number", -1)) == shot_number),
-            None,
-        )
+        target = next((s for s in shots if isinstance(s, dict) and match_shot(s)), None)
         if target is None:
             raise HTTPException(
                 status_code=404,
-                detail=f"shot {shot_number} not found in stage {stage_number}",
+                detail=f"{describe} not found in stage {stage_number}",
             )
         try:
             coach_module.write_coach_fields(
@@ -10981,7 +11026,8 @@ def create_app(
                 "ts": _now_iso(),
                 "kind": "coach_patch",
                 "payload": {
-                    "shot_number": shot_number,
+                    "shot_id": target.get("id"),
+                    "shot_number": target.get("shot_number"),
                     "fields": coach_module.read_coach_fields(target),
                 },
             }
@@ -10989,6 +11035,48 @@ def create_app(
         payload["audit_events"] = events
         _coach_save(slug, stage_number, payload, version)
         return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
+
+    @app.patch("/api/shooters/{slug}/stages/{stage_number}/shots/{shot_number}/coach")
+    def patch_stage_shot_coach(
+        slug: str,
+        stage_number: int,
+        shot_number: int,
+        body: CoachShotPatchRequest,
+    ) -> JSONResponse:
+        """Patch one shot's coaching annotation, addressed by position.
+
+        Retained for compatibility. Prefer the by-id route: ``shot_number``
+        renumbers whenever a shot is inserted or deleted, so a client holding
+        a stale number can annotate the wrong shot unless it also sends
+        ``expected_version``.
+        """
+        return _apply_shot_coach_patch(
+            slug,
+            stage_number,
+            body,
+            lambda s: int(s.get("shot_number", -1)) == shot_number,
+            f"shot {shot_number}",
+        )
+
+    @app.patch("/api/shooters/{slug}/stages/{stage_number}/shots/by-id/{shot_id}/coach")
+    def patch_stage_shot_coach_by_id(
+        slug: str,
+        stage_number: int,
+        shot_id: str,
+        body: CoachShotPatchRequest,
+    ) -> JSONResponse:
+        """Patch one shot's coaching annotation, addressed by stable id.
+
+        Immune to renumbering, so this is the route any client that did not
+        just write the document should use.
+        """
+        return _apply_shot_coach_patch(
+            slug,
+            stage_number,
+            body,
+            lambda s: s.get("id") == shot_id,
+            f"shot id {shot_id!r}",
+        )
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/coach/distributions")
     def get_stage_coach_distributions(slug: str, stage_number: int) -> JSONResponse:

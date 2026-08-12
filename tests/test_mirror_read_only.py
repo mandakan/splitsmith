@@ -14,8 +14,10 @@ mirror down.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -25,6 +27,8 @@ from sqlalchemy import select as _select
 from splitsmith import match_model
 from splitsmith.db import MatchRow, ProjectStateStore, RecentProjectRow, User, create_engine, sessionmaker
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
+from splitsmith.shot_id import ensure_shot_ids
+from splitsmith.sync.merge import merge_audit_doc
 from tests.hosted_helpers import _CapturingSender, login, moto_s3_storage, seed_match
 
 CREATE_URL = "/api/sync/matches"
@@ -348,18 +352,464 @@ def test_mirror_allows_triage_attention(
     assert resp.status_code != 403, resp.text
 
 
-def test_mirror_still_blocks_audit_put(
+def _legacy_audit_doc(time: float) -> dict:
+    """One kept manual shot with no id and no candidate_number.
+
+    The one shape whose derived id is not convergent across two sides:
+    ``derive_shot_id`` keys it off the rounded time, so a nudge moves it.
+    """
+    return {
+        "stage_number": 1,
+        "beep_time": 5.0,
+        "shots": [
+            {
+                "shot_number": 1,
+                "candidate_number": None,
+                "time": time,
+                "ms_after_beep": int(round((time - 5.0) * 1000)),
+            }
+        ],
+        "audit_events": [],
+    }
+
+
+def _seed_mirror_stage_with_audit(client: TestClient, match_id: str, name: str, doc: dict) -> None:
+    """Mirror with shooter "alice", stage 1, and ``doc`` as her stage-1 audit."""
+    _seed_mirror(client, match_id, name)
+    roster = match_model.Match(match_id=match_id, name=name, shooters=["alice"], stages=[]).model_dump(
+        mode="json"
+    )
+    put_roster = client.put(_sync_docs_url(match_id, "match"), params={"expected_version": 1}, json=roster)
+    assert put_roster.status_code == 200, put_roster.text
+    stage = StageEntry(stage_number=1, stage_name="Stage One", time_seconds=30.0)
+    project_doc = MatchProject(name=name, competitor_name="Alice", stages=[stage]).model_dump(mode="json")
+    put_project = client.put(
+        f"/api/sync/matches/{match_id}/docs/project/alice",
+        params={"expected_version": 0},
+        json=project_doc,
+    )
+    assert put_project.status_code == 200, put_project.text
+    put_audit = client.put(
+        f"/api/sync/matches/{match_id}/docs/audit/alice/1", params={"expected_version": 0}, json=doc
+    )
+    assert put_audit.status_code == 200, put_audit.text
+
+
+def _seed_native_stage_with_audit(db_url: str, user_email: str, match_id: str, name: str, doc: dict) -> None:
+    """Same shape as ``_seed_mirror_stage_with_audit`` for a native match.
+
+    The sync doc routes refuse a native match (409 ``not_a_mirror``), so
+    the docs go in through the store the hosted app reads them from.
+    """
+    engine = create_engine(db_url)
+    sf = sessionmaker(engine)
+
+    async def _seed() -> None:
+        async with sf() as s:
+            row = (await s.execute(_select(User).where(User.email == user_email))).scalar_one()
+            user_id = row.id
+        store = ProjectStateStore(sf, user_id=user_id)
+        match = match_model.Match(match_id=match_id, name=name, shooters=["alice"], stages=[])
+        await store.save_match(match_id, match.model_dump(mode="json"), expected_version=0)
+        stage = StageEntry(stage_number=1, stage_name="Stage One", time_seconds=30.0)
+        project = MatchProject(name=name, competitor_name="Alice", stages=[stage])
+        await store.save_project(match_id, "alice", project.model_dump(mode="json"), expected_version=0)
+        await store.save_audit(match_id, "alice", 1, doc, expected_version=0)
+
+    asyncio.run(_seed())
+
+
+def test_mirror_accept_does_not_mint_a_shot_id(
     hosted_env: str,
     hosted_app: tuple[TestClient, _CapturingSender],
 ) -> None:
-    """The full audit PUT stays desktop-owned - only accept/attention are exempt."""
+    """The desktop is the sole minter of shot ids for a mirror (#631 Task 7).
+
+    ``derive_shot_id`` keys a candidate-less shot off its rounded time, so
+    a hosted mint here and a desktop mint on a nudged copy of the same shot
+    produce two ids for one shot - which the sync merge cannot tell from
+    two shots.
+    """
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
-    match_id = "01JMIRRTRIAGEGATE000000003"
-    _seed_mirror(client, match_id, "gate-triage-blocked")
-    resp = client.put(f"/api/matches/{match_id}/shooters/alice/stages/1/audit", json={})
-    assert resp.status_code == 403, resp.text
-    assert resp.json()["detail"] == "read_only_mirror"
+    match_id = "01JMIRRSHOTIDMINT0000001"
+    _seed_mirror_stage_with_audit(client, match_id, "mirror-mint", _legacy_audit_doc(6.5))
+
+    accepted = client.post(_alias_url(match_id, "shooters/alice/stages/1/audit/accept"))
+    assert accepted.status_code == 200, accepted.text
+
+    stored = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit"))
+    assert stored.status_code == 200, stored.text
+    shot = stored.json()["shots"][0]
+    assert "id" not in shot
+    # Suppressing the mint must not suppress the accept itself.
+    assert shot.get("interval_class")
+
+
+def test_native_match_accept_still_mints_a_shot_id(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """A native hosted match has no desktop, so there is no second minter
+    and the save boundary keeps stamping exactly as it did."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "native-shot-id-mint"
+    seed_match(hosted_env, "owner@example.com", match_id)
+    _seed_native_stage_with_audit(
+        hosted_env, "owner@example.com", match_id, "Native Mint", _legacy_audit_doc(6.5)
+    )
+
+    accepted = client.post(_alias_url(match_id, "shooters/alice/stages/1/audit/accept"))
+    assert accepted.status_code == 200, accepted.text
+
+    stored = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit"))
+    assert stored.status_code == 200, stored.text
+    assert stored.json()["shots"][0]["id"] == "manual-t6500"
+
+
+def test_mirror_allows_audit_put(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The full audit PUT is exempt now that shots merge by stable id.
+
+    Supersedes ``test_mirror_still_blocks_audit_put``: shot membership was
+    desktop-owned until the merge unit shipped, so opening this earlier would
+    have let a desktop pull silently discard phone edits.
+    """
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRAUDITPUTOPEN0000001"
+    _seed_mirror(client, match_id, "gate-audit-open")
+    resp = client.put(
+        _alias_url(match_id, "shooters/alice/stages/1/audit"),
+        json={"stage_number": 1, "shots": [], "audit_events": []},
+    )
+    assert resp.status_code != 403, resp.text
+
+
+def test_mirror_audit_exemption_boundary_pins(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The audit exemption is one exact path and one method.
+
+    A POST to the same path, a trailing slash, a sibling path and a
+    non-numeric stage must all still 403.
+
+    A trailing-newline variant (``.../audit%0a``) is deliberately NOT a
+    case here even though plain ``$`` also matches just before a single
+    trailing ``\\n`` (which is why the regexes were switched to ``\\Z`` --
+    see the comment above ``capabilities._REVIEW_ROUTES``): verified empirically
+    that ``request.url.path`` can never actually carry that byte all the
+    way to this middleware's ``rest`` regardless of anchor choice.
+    Starlette's ``URL.path`` property is built from
+    ``urllib.parse.urlsplit()``, which strips ASCII CR/LF/TAB from a URL
+    unconditionally (CPython's own bpo-43882 hardening) - so
+    ``.../audit%0a`` arrives at this regex as the exact clean string
+    ``.../audit`` with nothing appended, indistinguishable from a
+    legitimate request, and asserting 403 for it here would be pinning a
+    routing path that cannot occur. Confirmed with a raw ASGI scope whose
+    ``path`` was hand-set to include a literal trailing ``\\n``: even then,
+    the first ``request.url.path`` access inside this app's own middleware
+    already came back stripped, before any of our code ran.
+    """
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRAUDITBOUNDARY000001"
+    _seed_mirror(client, match_id, "gate-audit-boundary")
+    for method, rest in (
+        ("post", "shooters/alice/stages/1/audit"),
+        ("put", "shooters/alice/stages/1/audit/"),
+        ("put", "shooters/alice/stages/1/audit/extra"),
+        ("put", "shooters/alice/stages/x/audit"),
+    ):
+        resp = getattr(client, method)(_alias_url(match_id, rest), json={})
+        assert resp.status_code == 403, f"{method} {rest}"
+        assert resp.json()["detail"] == "read_only_mirror"
+
+
+def _mixed_audit_doc(detected_time: float, manual_time: float) -> dict:
+    """One detected shot (``candidate_number`` set, no ``id``) and one
+    candidate-less manual shot (no ``candidate_number``, no ``id``).
+
+    This is exactly the shape the SPA sends: ``buildAuditJson`` omits
+    ``id`` for a detected marker on purpose (``audit-doc.test.ts`` pins
+    it - "omits the id for detected shots -- the server derives
+    ``cand-<n>``"), and a legacy candidate-less manual shot has never
+    carried one either.
+    """
+    return {
+        "stage_number": 1,
+        "beep_time": 5.0,
+        "shots": [
+            {
+                "shot_number": 1,
+                "candidate_number": 2,
+                "time": detected_time,
+                "ms_after_beep": int(round((detected_time - 5.0) * 1000)),
+            },
+            {
+                "shot_number": 2,
+                "candidate_number": None,
+                "time": manual_time,
+                "ms_after_beep": int(round((manual_time - 5.0) * 1000)),
+            },
+        ],
+        "audit_events": [],
+    }
+
+
+def test_mirror_audit_put_mints_convergent_ids_but_not_manual_ones(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The full audit PUT is the path Task 7's ``_may_mint_shot_ids`` guard
+    protects, but it had no end-to-end coverage until this task opened the
+    gate: the read-only 403 meant this exact request never ran before.
+
+    A PUT of the SPA's own shape (a detected shot with ``candidate_number``
+    and no ``id``, plus a candidate-less manual shot with no ``id``) through
+    the alias on a mirror must still derive the detected shot's ``cand-2``
+    -- both sides compute it from the same ``candidate_number``, so there
+    is no second-minter risk (#631 Task 6 fix round 1: the desktop-sole-
+    minter guard was over-broad and suppressed this convergent derivation
+    too, which meant every phone save of a stage with a detected shot
+    produced a document the sync merge's unstamped-shot gate would refuse
+    wholesale on the next desktop pull, reverting the phone's edit). The
+    manual shot must still get no id - that derivation keys off rounded
+    time, which is not convergent across a nudge. The same PUT against a
+    hosted-native match still mints both, exactly as it always has.
+    """
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRAUDITPUTMINT0000001"
+    _seed_mirror_stage_with_audit(client, match_id, "audit-put-mint", _mixed_audit_doc(6.5, 8.0))
+
+    put = client.put(
+        _alias_url(match_id, "shooters/alice/stages/1/audit"),
+        json=_mixed_audit_doc(6.5, 8.0),
+    )
+    assert put.status_code == 200, put.text
+
+    stored = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit"))
+    assert stored.status_code == 200, stored.text
+    shots = stored.json()["shots"]
+    detected = next(s for s in shots if s.get("candidate_number") == 2)
+    manual = next(s for s in shots if s.get("candidate_number") is None)
+    assert detected["id"] == "cand-2"
+    assert "id" not in manual
+
+
+def test_mirror_audit_put_then_desktop_pull_keeps_the_phone_nudge(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """End to end across the alias PUT and the pull-side merge (#631 Task 6
+    fix round 1, Critical).
+
+    Reproduces the bug the review found: a phone PUT of the SPA's own doc
+    shape (a detected shot with ``candidate_number`` and no ``id``, plus a
+    manual shot carrying the id the SPA minted for it itself) used to come
+    back from the mirror with the detected shot still unstamped, because
+    the desktop-sole-minter guard suppressed *all* derivation under
+    ``mint=False``, not just the non-convergent branches. That unstamped
+    remote shot made ``merge_audit_doc``'s unstamped-shot gate refuse the
+    whole shot section on the desktop's next pull -- reverting the phone's
+    nudge and (had there been a genuinely new phone-added shot) dropping it
+    too.
+
+    Drives the real HTTP PUT against a mirror, fetches what a desktop pull
+    would see, and runs the actual pull-side merge over it -- not a
+    reasoned argument about what the merge would do, but the merge itself.
+    """
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRAUDITPUTMERGE000001"
+    # The converged state after some earlier sync: both shots already
+    # stamped, exactly the shape the seed after the FIRST mint (server- or
+    # desktop-derived cand-2; SPA-minted manual-shotid-1) would leave.
+    converged = {
+        "stage_number": 1,
+        "beep_time": 5.0,
+        "shots": [
+            {
+                "shot_number": 1,
+                "candidate_number": 2,
+                "id": "cand-2",
+                "time": 6.5,
+                "ms_after_beep": 1500,
+            },
+            {
+                "shot_number": 2,
+                "candidate_number": None,
+                "id": "manual-shotid-1",
+                "time": 8.0,
+                "ms_after_beep": 3000,
+            },
+        ],
+        "audit_events": [],
+    }
+    _seed_mirror_stage_with_audit(client, match_id, "audit-put-merge", converged)
+
+    # The phone nudges the detected shot to 6.6s and saves. The SPA never
+    # sends an id for a detected shot (buildAuditJson omits it on purpose,
+    # see audit-doc.test.ts) - it re-derives cand-2 client-side for display
+    # only. The manual shot round-trips unchanged, still carrying the id
+    # the SPA minted for it.
+    phone_put = dict(converged)
+    phone_put["shots"] = [
+        {"shot_number": 1, "candidate_number": 2, "time": 6.6, "ms_after_beep": 1600},
+        {
+            "shot_number": 2,
+            "candidate_number": None,
+            "id": "manual-shotid-1",
+            "time": 8.0,
+            "ms_after_beep": 3000,
+        },
+    ]
+    put = client.put(_alias_url(match_id, "shooters/alice/stages/1/audit"), json=phone_put)
+    assert put.status_code == 200, put.text
+
+    # What a desktop pull fetches as "remote".
+    remote = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit")).json()
+
+    # The desktop's own local copy is unchanged since the last sync, i.e.
+    # identical to the pre-nudge converged doc; "base" is that same shared
+    # ancestor.
+    result = merge_audit_doc(
+        converged,
+        converged,
+        remote,
+        doc_key="stage1",
+        local_ts=datetime(2026, 8, 12, 12, 0, tzinfo=UTC),
+        remote_ts=datetime(2026, 8, 12, 13, 0, tzinfo=UTC),
+    )
+
+    assert not any("without a persisted id" in note for note in result.notes), result.notes
+    merged_shots = {s["id"]: s for s in result.doc["shots"]}
+    assert merged_shots["cand-2"]["time"] == 6.6  # the phone's nudge survived
+    assert merged_shots["manual-shotid-1"]["time"] == 8.0
+
+
+def _promoted_collision_doc() -> dict:
+    """Two shots snapped onto one ensemble candidate, neither carrying an id.
+
+    Not a hypothetical: ``lab/promote.py``'s ``_find_candidate_number``
+    picks the nearest ensemble candidate per snapped shot independently, so
+    a promoted stage can put two shots on one candidate. This repo's own
+    fixtures contain it -- ``stage-shots-blacksmith-2026-stage6-...`` has
+    candidate 18, 21 and 25 twice each, all ``"source": "promoted"`` -- and
+    the two ``time`` values here are that fixture's candidate-18 pair
+    verbatim. The ``beep_time`` and ``ms_after_beep`` are not: the fixture
+    beeps at 3.292 s and carries 5504/6188, while this doc restates the pair
+    against the round 5.0 s beep the rest of this file's audit docs use.
+    """
+    return {
+        "stage_number": 1,
+        "beep_time": 5.0,
+        "shots": [
+            {
+                "shot_number": 7,
+                "candidate_number": 18,
+                "time": 8.796,
+                "ms_after_beep": 3796,
+                "source": "promoted",
+            },
+            {
+                "shot_number": 8,
+                "candidate_number": 18,
+                "time": 9.48,
+                "ms_after_beep": 4480,
+                "source": "promoted",
+            },
+        ],
+        "audit_events": [],
+    }
+
+
+def test_mirror_audit_put_leaves_a_colliding_shot_for_the_desktop_to_stamp(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """A derived id that collides is not convergent, so a mirror must not
+    stamp it -- end to end across the real PUT and the real merge.
+
+    ``ensure_shot_ids``' collision fallback (two shots deriving one id) is a
+    uuid4, and it used to run *after* the mint gate, so the second shot of a
+    promoted candidate pair got a randomly minted id on a mirror: the exact
+    non-convergent stamp ``mint=False`` exists to prevent. The mirror minted
+    one uuid4, the desktop another, both documents then read as fully
+    stamped, the merge's unstamped-shot gate passed, and one shot silently
+    unioned into two.
+
+    Now the colliding shot is left unstamped, the gate fires, and local's
+    two shots stand -- a stated refusal instead of a silent duplicate.
+    """
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRAUDITPUTCOLLIDE001"
+    _seed_mirror_stage_with_audit(client, match_id, "audit-put-collide", _promoted_collision_doc())
+
+    put = client.put(
+        _alias_url(match_id, "shooters/alice/stages/1/audit"),
+        json=_promoted_collision_doc(),
+    )
+    assert put.status_code == 200, put.text
+
+    # What a desktop pull fetches as "remote": the first shot took cand-18,
+    # the second is left for the desktop rather than randomly stamped.
+    remote = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit")).json()
+    assert remote["shots"][0]["id"] == "cand-18"
+    assert "id" not in remote["shots"][1]
+
+    # The desktop's own copy, stamped on its own save boundary -- it may
+    # mint, so the collision falls back to a uuid4 there.
+    base = _promoted_collision_doc()
+    local = copy.deepcopy(base)
+    ensure_shot_ids(local["shots"])
+    local_ids = [s["id"] for s in local["shots"]]
+    assert local_ids[0] == "cand-18"
+    assert local_ids[1].startswith("manual-")
+
+    result = merge_audit_doc(
+        base,
+        local,
+        remote,
+        doc_key="stage1",
+        local_ts=datetime(2026, 8, 12, 12, 0, tzinfo=UTC),
+        # Remote is the newer side, so nothing but the gate stops it winning.
+        remote_ts=datetime(2026, 8, 12, 13, 0, tzinfo=UTC),
+    )
+
+    assert any("without a persisted id" in note for note in result.notes), result.notes
+    assert [s["id"] for s in result.doc["shots"]] == local_ids  # two shots, not three
+
+
+def test_native_match_audit_put_still_mints_a_shot_id(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """A native hosted match has no desktop, so there is no second minter
+    and the save boundary keeps stamping the audit PUT exactly as before."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "native-audit-put-mint"
+    seed_match(hosted_env, "owner@example.com", match_id)
+    _seed_native_stage_with_audit(
+        hosted_env, "owner@example.com", match_id, "Native Audit Mint", _legacy_audit_doc(6.5)
+    )
+
+    put = client.put(
+        _alias_url(match_id, "shooters/alice/stages/1/audit"),
+        json=_legacy_audit_doc(6.5),
+    )
+    assert put.status_code == 200, put.text
+
+    stored = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit"))
+    assert stored.status_code == 200, stored.text
+    assert stored.json()["shots"][0]["id"] == "manual-t6500"
 
 
 @pytest.mark.parametrize(
@@ -390,7 +840,7 @@ def test_mirror_triage_exemption_boundary_pins(
     method: str,
     rest: str,
 ) -> None:
-    """Pin the edges of ``_mirror_triage_write_re``.
+    """Pin the edges of the triage entries in ``capabilities._REVIEW_ROUTES``.
 
     The exemption regex is anchored with ``$`` and only fires for POST -
     an extra path segment after ``attention``, the wrong HTTP method, or
@@ -479,6 +929,59 @@ def test_mirror_coach_exemption_boundary_pins(
     resp = client.request(method, f"/api/matches/{match_id}/{rest}", json={})
     assert resp.status_code == 403, resp.text
     assert resp.json() == {"detail": "read_only_mirror"}
+
+
+def test_mirror_coach_by_id_exemption_boundary_pins(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The widened coach pattern must not open anything else.
+
+    A by-id coach PATCH passes the gate; a by-id path that is not ``coach``,
+    a trailing slash, and a non-numeric stage must all still 403. A literal
+    ``..`` traversal-shaped id is a fourth case worth demonstrating rather
+    than reasoning about: the character class excludes ``/`` and Starlette
+    matches path segments literally rather than resolving ``..`` against
+    the filesystem, so ``by-id/..`` is not a traversal at all - it routes
+    to the handler exactly like ``by-id/cand-9`` does, and 404s there for
+    the same reason the ``allowed`` case below would too if it named a
+    slug this match's roster doesn't recognize: ``_seed_mirror`` seeds an
+    empty roster, so the roster-membership check in ``state.shooter_root``
+    (which ``state.shooter_project("alice")`` calls) 404s on
+    "alice" before shot lookup is ever reached - not
+    because no shot matched the id.
+
+    The id is sent percent-encoded (``%2e%2e``) rather than as a literal
+    ``..`` segment: httpx resolves dot-segments client-side per RFC 3986
+    before a request ever leaves the test process, so a literal ``..`` in
+    the URL string never reaches the server at all and would prove
+    nothing about Starlette's own routing.
+    """
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRCOACHBYID0000000001"
+    _seed_mirror(client, match_id, "gate-coach-by-id")
+
+    allowed = client.patch(
+        _alias_url(match_id, "shooters/alice/stages/1/shots/by-id/cand-9/coach"),
+        json={"coaching_note": "x"},
+    )
+    assert allowed.status_code != 403, allowed.text
+
+    traversal = client.patch(
+        _alias_url(match_id, "shooters/alice/stages/1/shots/by-id/%2e%2e/coach"),
+        json={"coaching_note": "x"},
+    )
+    assert traversal.status_code != 403, traversal.text
+
+    for rest in (
+        "shooters/alice/stages/1/shots/by-id/cand-9/audit",
+        "shooters/alice/stages/1/shots/by-id/cand-9/coach/",
+        "shooters/alice/stages/x/shots/by-id/cand-9/coach",
+    ):
+        blocked = client.patch(_alias_url(match_id, rest), json={})
+        assert blocked.status_code == 403, rest
+        assert blocked.json()["detail"] == "read_only_mirror"
 
 
 # Deleting a mirror still works - delete-match is a non-alias-routed

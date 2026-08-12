@@ -7,6 +7,7 @@ against an in-memory ``FakeSyncClient`` (no HTTP).
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -19,7 +20,7 @@ from splitsmith.sync.base import load_base_doc
 from splitsmith.sync.client import SyncClientError, SyncVersionConflict
 from splitsmith.sync.plan import doc_identity_key
 from splitsmith.sync.pull import plan_pull, remote_doc_key
-from splitsmith.sync.run import run_sync
+from splitsmith.sync.run import SyncReport, format_sync_message, run_sync
 from splitsmith.sync.state import SyncState, load_sync_state, save_sync_state
 
 M = [
@@ -86,8 +87,20 @@ def make_synced_match(tmp_path: Path) -> Path:
 
     audit_dir = shooter_root / "audit"
     audit_dir.mkdir(exist_ok=True)
+    # The shot carries a persisted id, a candidate_number and a time because
+    # a real one does. Without the id the merge refuses the whole shot
+    # section as legacy; without the other two it is held aside as having no
+    # convergent id. Either way a stub would quietly stop these tests
+    # exercising the coach-field merge at all.
     (audit_dir / "stage1.json").write_text(
-        json.dumps({"detection": "ensemble", "shots": [{"shot_number": 1}]}), encoding="utf-8"
+        json.dumps(
+            {
+                "detection": "ensemble",
+                "beep_time": 0.5,
+                "shots": [{"id": "cand-1", "shot_number": 1, "candidate_number": 1, "time": 1.0}],
+            }
+        ),
+        encoding="utf-8",
     )
 
     return root
@@ -269,6 +282,224 @@ def test_run_sync_crash_replay_after_merge_before_push(tmp_path):
     assert report.pulled == 0  # remote version already recorded during crash run
     pushed, _ = client.docs[audit_key]
     assert pushed["shots"][0]["coaching_note"] == "survives"
+
+
+def _make_audit_legacy(match_root: Path, slug: str = "anna", stage: int = 1) -> Path:
+    """Rewrite the shooter's audit doc as a pre-``id`` one and return its path.
+
+    Two shots, because the two derivations differ in kind: the detected
+    one keys off ``candidate_number`` (convergent across sides), the manual
+    one off its rounded time (not convergent, which is why only the
+    desktop may mint).
+    """
+    audit_path = match_root / "shooters" / slug / "audit" / f"stage{stage}.json"
+    audit_path.write_text(
+        json.dumps(
+            {
+                "detection": "ensemble",
+                "beep_time": 0.5,
+                "shots": [
+                    {"shot_number": 1, "candidate_number": 1, "time": 1.0, "ms_after_beep": 500},
+                    {"shot_number": 2, "candidate_number": None, "time": 1.25, "ms_after_beep": 750},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return audit_path
+
+
+def test_run_sync_stamps_a_legacy_audit_doc_and_reports_it(tmp_path):
+    """The migration pass: the desktop is the sole minter, so a document
+    written before shots carried an id has to be stamped here."""
+    match_root = make_synced_match(tmp_path)
+    audit_path = _make_audit_legacy(match_root)
+
+    report = run_sync(match_root, client=FakeSyncClient())
+
+    assert report.shot_ids_migrated == 1
+    assert "1 audit doc(s) stamped with shot ids" in format_sync_message(report)
+    ids = [s["id"] for s in json.loads(audit_path.read_text(encoding="utf-8"))["shots"]]
+    assert ids == ["cand-1", "manual-t1250"]
+
+
+def test_sync_message_counts_the_merge_notes():
+    """A refusal nobody sees is a silent refusal.
+
+    ``format_sync_message`` reported pulled/uploaded/docs/conflicts/
+    reprocess/migrated and never ``notes`` - so the unstamped-shot gate's
+    whole guarantee ("a stated refusal, not a silent duplicate") reached
+    only ``handle.set_result``, not the line the jobs panel shows.
+    """
+    quiet = SyncReport(uploaded=0, skipped=0, pulled=1, docs=1)
+    noisy = SyncReport(
+        uploaded=0,
+        skipped=0,
+        pulled=1,
+        docs=1,
+        notes=[
+            "audit/anna/1: 1 local and 0 remote shot(s) arrived without a persisted id",
+            "audit/anna/2: remote differs from base on non-whitelisted audit fields",
+        ],
+    )
+    assert "note(s)" not in format_sync_message(quiet)
+    assert "2 note(s) - see job details" in format_sync_message(noisy)
+
+
+def test_run_sync_surfaces_a_real_merge_note_in_the_message(tmp_path):
+    """Driven through ``run_sync``, not a hand-built report: the note has to
+    survive ``_apply_pull`` -> ``SyncReport.notes`` -> the message."""
+    match_root = make_synced_match(tmp_path)
+    client = _first_sync(match_root)
+    audit_key = next(k for k in client.docs if k.startswith("audit/"))
+    body, version = client.docs[audit_key]
+    # A hosted doc holding a shot with no persisted id trips the gate.
+    hosted = {**body, "shots": [*body["shots"], {"shot_number": 2, "time": 2.0}]}
+    client.docs[audit_key] = (hosted, version + 1)
+
+    report = run_sync(match_root, client=client)
+
+    assert any("without a persisted id" in n for n in report.notes)
+    assert f"{len(report.notes)} note(s) - see job details" in format_sync_message(report)
+
+
+def test_run_sync_migration_preserves_the_audit_doc_mtime(tmp_path):
+    """The migration must not make a stamped doc look freshly edited.
+
+    ``_local_doc_ts`` reads file mtime as the merge's LWW tiebreak, so a doc
+    ``migrate_shot_ids`` rewrote would win every true conflict against a
+    genuinely newer phone edit on the first sync after upgrade. Doc pushes
+    are content-hashed (``sync/plan.py``), not mtime-based, so restoring the
+    mtime does not suppress the push of the ids just written - asserted
+    here, since that is the thing restoring it could plausibly break.
+    """
+    match_root = make_synced_match(tmp_path)
+    audit_path = _make_audit_legacy(match_root)
+    old = datetime(2026, 8, 1, 9, 0, tzinfo=UTC).timestamp()
+    os.utime(audit_path, (old, old))
+
+    client = FakeSyncClient()
+    report = run_sync(match_root, client=client)
+
+    assert report.shot_ids_migrated == 1
+    assert audit_path.stat().st_mtime == pytest.approx(old)
+    stamped = json.loads(audit_path.read_text(encoding="utf-8"))["shots"]
+    assert [s["id"] for s in stamped] == ["cand-1", "manual-t1250"]
+    audit_key = next(k for k in client.docs if k.startswith("audit/"))
+    pushed, _ = client.docs[audit_key]
+    assert [s["id"] for s in pushed["shots"]] == ["cand-1", "manual-t1250"]
+
+
+def test_run_sync_migration_mtime_does_not_beat_a_newer_phone_edit(tmp_path):
+    """The consequence the mtime bump had, in the run where it happens.
+
+    Migration and the conflicting pull are the same sync: the local doc
+    carries one stamped shot and one legacy unstamped one, so
+    ``migrate_shot_ids`` rewrites the file, and the pull then merges a phone
+    nudge against a desktop nudge on the stamped shot. That is a true
+    conflict, resolved last-writer-wins on doc timestamp - and the local
+    file's real mtime is older than the phone's edit, so the phone must win.
+    With the migration bumping the mtime to "now", the desktop won instead
+    and the phone's nudge was reverted on the first sync after upgrade.
+    """
+    match_root = make_synced_match(tmp_path)
+    client = _first_sync(match_root)
+    audit_key = next(k for k in client.docs if k.startswith("audit/"))
+    body, version = client.docs[audit_key]
+    audit_path = match_root / "shooters" / "anna" / "audit" / "stage1.json"
+
+    # Desktop nudges cand-1 and the doc also holds a legacy shot the
+    # migration will stamp. The file keeps a genuinely old mtime.
+    local_doc = json.loads(audit_path.read_text(encoding="utf-8"))
+    local_doc["shots"] = [
+        {**local_doc["shots"][0], "time": 1.1},
+        {"shot_number": 2, "time": 2.0},  # unstamped: this is what migrates
+    ]
+    audit_path.write_text(json.dumps(local_doc), encoding="utf-8")
+    old = datetime(2026, 8, 1, 9, 0, tzinfo=UTC).timestamp()
+    os.utime(audit_path, (old, old))
+
+    # Phone nudges the same shot, later than that mtime.
+    client.docs[audit_key] = ({**body, "shots": [{**body["shots"][0], "time": 1.2}]}, version + 1)
+
+    report = run_sync(match_root, client=client)
+
+    assert report.shot_ids_migrated == 1  # the migration really ran this sync
+    assert [c["unit"] for c in report.conflicts] == ["shot cand-1 time"]
+    assert report.conflicts[0]["winner"] == "remote"
+    merged = json.loads(audit_path.read_text(encoding="utf-8"))["shots"]
+    assert merged[0]["time"] == 1.2
+    assert [s["id"] for s in merged] == ["cand-1", "manual-t2000"]
+
+
+def test_run_sync_migration_is_idempotent(tmp_path):
+    """A second run stamps nothing and rewrites nothing - a migration that
+    keeps touching files is a migration that keeps churning the push."""
+    match_root = make_synced_match(tmp_path)
+    audit_path = _make_audit_legacy(match_root)
+    client = FakeSyncClient()
+    assert run_sync(match_root, client=client).shot_ids_migrated == 1
+    after_first = audit_path.read_bytes()
+
+    report = run_sync(match_root, client=client)
+
+    assert report.shot_ids_migrated == 0
+    assert audit_path.read_bytes() == after_first
+
+
+def test_run_sync_migration_write_failure_raises_sync_client_error(tmp_path, monkeypatch):
+    """An unwritable audit directory must not escape ``run_sync`` as a bare
+    ``OSError``.
+
+    ``migrate_shot_ids``'s write sat outside any ``try`` until this task: a
+    read-only audit directory raised ``PermissionError`` straight out of
+    ``run_sync``, past the ``except SyncClientError`` the sync job body
+    uses to turn a sync failure into a readable message - so the job would
+    have failed with a raw traceback instead of the curated one every
+    other sync failure gets.
+    """
+    match_root = make_synced_match(tmp_path)
+    _make_audit_legacy(match_root)
+
+    def _boom(path: Path, doc: object) -> None:
+        raise PermissionError("read-only filesystem")
+
+    monkeypatch.setattr("splitsmith.sync.run.atomic_write_json", _boom)
+
+    with pytest.raises(SyncClientError):
+        run_sync(match_root, client=FakeSyncClient())
+
+
+def test_run_sync_migration_lets_the_next_pull_merge_shots(tmp_path):
+    """End to end over a legacy document.
+
+    The first sync stamps it locally and pushes the stamped copy, so when
+    the phone's edit comes back on the second sync both sides carry ids,
+    the merge's legacy refusal does not fire, and the hosted edit is
+    adopted. Without the migration the pushed copy is unstamped and every
+    later merge refuses the whole shot section.
+    """
+    match_root = make_synced_match(tmp_path)
+    audit_path = _make_audit_legacy(match_root)
+    client = FakeSyncClient()
+    first = run_sync(match_root, client=client)
+    assert first.shot_ids_migrated == 1
+
+    audit_key = next(k for k in client.docs if k.startswith("audit/"))
+    body, version = client.docs[audit_key]
+    assert [s["id"] for s in body["shots"]] == ["cand-1", "manual-t1250"]  # pushed stamped
+    # Hosted-side edit on the manual shot - the one whose id is not
+    # convergent, so it can only be matched by the persisted id.
+    hosted = {**body, "shots": [body["shots"][0], {**body["shots"][1], "coaching_note": "from-hosted"}]}
+    client.docs[audit_key] = (hosted, version + 1)
+
+    second = run_sync(match_root, client=client)
+
+    assert second.shot_ids_migrated == 0
+    assert not any("without a persisted id" in note for note in second.notes)
+    merged = json.loads(audit_path.read_text(encoding="utf-8"))["shots"]
+    assert [s["id"] for s in merged] == ["cand-1", "manual-t1250"]  # one shot each, not four
+    assert merged[1]["coaching_note"] == "from-hosted"
 
 
 def test_run_sync_missing_local_audit_is_skipped_not_synthesized(tmp_path):

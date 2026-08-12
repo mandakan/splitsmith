@@ -12,7 +12,10 @@ Capabilities:
   exports). The default requirement for any write route not classified
   below - new write routes fail over-restricted, never silently
   writable.
-- ``review``: the phone-triage writes mirrors accept (slices 3-5).
+- ``review``: the phone-triage writes mirrors accept (slices 3-5) plus
+  the full stage audit PUT (#631 Task 6), which became safe to expose
+  once shots carry a stable id and the sync merge unions their
+  membership by it rather than by position.
 - ``share_manage``: the match/shares management routes.
 """
 
@@ -55,14 +58,48 @@ def share_scope_capabilities(scope: str | None) -> frozenset[str]:
     return _SHARE_SCOPE_CAPABILITIES.get(scope or "", frozenset())
 
 
-# The review-writable route shapes, verbatim from the retired per-slice
-# mirror regexes (server.py) - method-gated exactly as the old guard was.
+# The review-writable route shapes, carried over from the retired
+# per-slice mirror regexes (server.py) and method-gated exactly as the old
+# guard was. Two entries have since widened past what any of those regexes
+# held: the by-id coach PATCH and the full audit PUT (#631 shots-as-a-
+# synced-entity), both of which a mirror accepts for the same reason the
+# slice 3-5 writes are here - they sync back rather than editing in place.
+#
+# Every entry anchors with ``\A``/``\Z``, not ``^``/``$``: plain ``$``
+# also matches just before a single trailing ``\n``, so ``.../audit$``
+# reads as "that path, optionally with one trailing newline" rather than
+# "one exact path". On an allow-list that direction is the unsafe one -
+# the widened form grants REVIEW where the intent is EDIT. Today no such
+# string can reach here: ``rest`` is derived from ``request.url.path``,
+# and Starlette builds that through ``urllib.parse.urlsplit()``, which
+# strips ASCII CR/LF/TAB from a URL unconditionally (CPython hardening,
+# bpo-43882), so ``.../audit%0a`` arrives as the plain, legitimately
+# exempt ``.../audit``. That makes ``\Z`` defensive rather than a fix --
+# but this table is now a standalone authorization surface that neither
+# sees nor controls the caller that builds ``rest``, so it should not
+# rest on an implementation detail of one of them.
+#
+# Containment for ``[^/]+`` / ``by-id/[A-Za-z0-9._-]+`` is not this
+# table's job: the character classes only keep a slug or id out of the
+# next path segment. What bounds a slug to a real shooter is the
+# roster-membership check in ``state.shooter_root`` - a slug these
+# patterns pass but the roster doesn't recognize 404s there.
 _REVIEW_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("POST", re.compile(r"^match/beep-queue/confirm$")),
-    ("POST", re.compile(r"^shooters/[^/]+/stages/\d+/videos/[^/]+/beep$")),
-    ("POST", re.compile(r"^shooters/[^/]+/stages/\d+/(audit/accept|attention)$")),
-    ("PATCH", re.compile(r"^shooters/[^/]+/stages/\d+/shots/\d+/coach$")),
-    ("POST", re.compile(r"^shooters/[^/]+/stages/\d+/coach/reclassify$")),
+    ("POST", re.compile(r"\Amatch/beep-queue/confirm\Z")),
+    ("POST", re.compile(r"\Ashooters/[^/]+/stages/\d+/videos/[^/]+/beep\Z")),
+    ("POST", re.compile(r"\Ashooters/[^/]+/stages/\d+/(audit/accept|attention)\Z")),
+    # Both the by-number and the by-id coach PATCH (#631 Task 3). The id
+    # form is the one a client that did not just write the document should
+    # use - ``shot_number`` renumbers under it on any insert or delete.
+    ("PATCH", re.compile(r"\Ashooters/[^/]+/stages/\d+/shots/(?:\d+|by-id/[A-Za-z0-9._-]+)/coach\Z")),
+    ("POST", re.compile(r"\Ashooters/[^/]+/stages/\d+/coach/reclassify\Z")),
+    # The full stage audit PUT (#631 Task 6). Safe now that shots carry a
+    # stable id and sync/merge.py merges their membership by it - before
+    # the merge unit shipped, opening this would have let a desktop pull
+    # silently discard phone edits. ``server._may_mint_shot_ids`` refuses
+    # to mint a non-convergent id on a mirror at that save boundary; this
+    # entry is what makes the path reachable at all.
+    ("PUT", re.compile(r"\Ashooters/[^/]+/stages/\d+/audit\Z")),
 )
 
 
