@@ -88,7 +88,15 @@ def migrate_shot_ids(match_root: Path) -> int:
     caller can report it: a second run finds nothing missing, stamps
     nothing, writes nothing, and returns 0. Unparseable or oddly-shaped
     documents are left alone -- ``build_push_plan``'s preflight is what
-    reports those, and it has already run.
+    reports those, and it has already run. An unwritable audit directory
+    (e.g. a read-only filesystem) raises :class:`SyncClientError` instead
+    of letting the underlying ``OSError`` escape -- the migration is
+    idempotent and self-healing, so this is a presentation concern, not
+    data loss: fixing the permission and re-running finds the same
+    documents still missing their ids and stamps them then. ``run_sync``'s
+    caller already turns ``SyncClientError`` into the same curated message
+    every other sync failure gets, so a bare traceback never reaches the
+    jobs panel.
     """
     _, shooter_roots = load_match_or_legacy(match_root)
     migrated = 0
@@ -109,7 +117,13 @@ def migrate_shot_ids(match_root: Path) -> int:
             if not isinstance(shots, list):
                 continue
             if ensure_shot_ids([s for s in shots if isinstance(s, dict)]):
-                atomic_write_json(audit_path, doc)
+                try:
+                    atomic_write_json(audit_path, doc)
+                except OSError as exc:
+                    raise SyncClientError(
+                        f"could not stamp shot ids on {audit_path} - check that the "
+                        f"match directory is writable ({exc})"
+                    ) from exc
                 migrated += 1
     return migrated
 

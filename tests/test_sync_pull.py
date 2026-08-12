@@ -337,6 +337,29 @@ def test_run_sync_migration_is_idempotent(tmp_path):
     assert audit_path.read_bytes() == after_first
 
 
+def test_run_sync_migration_write_failure_raises_sync_client_error(tmp_path, monkeypatch):
+    """An unwritable audit directory must not escape ``run_sync`` as a bare
+    ``OSError``.
+
+    ``migrate_shot_ids``'s write sat outside any ``try`` until this task: a
+    read-only audit directory raised ``PermissionError`` straight out of
+    ``run_sync``, past the ``except SyncClientError`` the sync job body
+    uses to turn a sync failure into a readable message - so the job would
+    have failed with a raw traceback instead of the curated one every
+    other sync failure gets.
+    """
+    match_root = make_synced_match(tmp_path)
+    _make_audit_legacy(match_root)
+
+    def _boom(path: Path, doc: object) -> None:
+        raise PermissionError("read-only filesystem")
+
+    monkeypatch.setattr("splitsmith.sync.run.atomic_write_json", _boom)
+
+    with pytest.raises(SyncClientError):
+        run_sync(match_root, client=FakeSyncClient())
+
+
 def test_run_sync_migration_lets_the_next_pull_merge_shots(tmp_path):
     """End to end over a legacy document.
 

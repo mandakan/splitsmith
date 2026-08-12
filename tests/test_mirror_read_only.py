@@ -464,18 +464,104 @@ def test_native_match_accept_still_mints_a_shot_id(
     assert stored.json()["shots"][0]["id"] == "manual-t6500"
 
 
-def test_mirror_still_blocks_audit_put(
+def test_mirror_allows_audit_put(
     hosted_env: str,
     hosted_app: tuple[TestClient, _CapturingSender],
 ) -> None:
-    """The full audit PUT stays desktop-owned - only accept/attention are exempt."""
+    """The full audit PUT is exempt now that shots merge by stable id.
+
+    Supersedes ``test_mirror_still_blocks_audit_put``: shot membership was
+    desktop-owned until the merge unit shipped, so opening this earlier would
+    have let a desktop pull silently discard phone edits.
+    """
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
-    match_id = "01JMIRRTRIAGEGATE000000003"
-    _seed_mirror(client, match_id, "gate-triage-blocked")
-    resp = client.put(f"/api/matches/{match_id}/shooters/alice/stages/1/audit", json={})
-    assert resp.status_code == 403, resp.text
-    assert resp.json()["detail"] == "read_only_mirror"
+    match_id = "01JMIRRAUDITPUTOPEN0000001"
+    _seed_mirror(client, match_id, "gate-audit-open")
+    resp = client.put(
+        _alias_url(match_id, "shooters/alice/stages/1/audit"),
+        json={"stage_number": 1, "shots": [], "audit_events": []},
+    )
+    assert resp.status_code != 403, resp.text
+
+
+def test_mirror_audit_exemption_boundary_pins(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The audit exemption is one exact path and one method.
+
+    A POST to the same path, a trailing slash, a sibling path and a
+    non-numeric stage must all still 403.
+    """
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRAUDITBOUNDARY000001"
+    _seed_mirror(client, match_id, "gate-audit-boundary")
+    for method, rest in (
+        ("post", "shooters/alice/stages/1/audit"),
+        ("put", "shooters/alice/stages/1/audit/"),
+        ("put", "shooters/alice/stages/1/audit/extra"),
+        ("put", "shooters/alice/stages/x/audit"),
+    ):
+        resp = getattr(client, method)(_alias_url(match_id, rest), json={})
+        assert resp.status_code == 403, f"{method} {rest}"
+        assert resp.json()["detail"] == "read_only_mirror"
+
+
+def test_mirror_audit_put_does_not_mint_a_shot_id(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The full audit PUT is the path Task 7's ``_may_mint_shot_ids`` guard
+    protects, but it had no end-to-end coverage until this task opened the
+    gate: the read-only 403 meant this exact request never ran before.
+
+    A PUT of an unstamped legacy shot through the alias on a mirror must
+    succeed and must not mint an id - the desktop is the sole minter for a
+    mirror (#631 Task 7). The same PUT against a hosted-native match still
+    mints, exactly as it always has.
+    """
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRAUDITPUTMINT0000001"
+    _seed_mirror_stage_with_audit(client, match_id, "audit-put-mint", _legacy_audit_doc(6.5))
+
+    put = client.put(
+        _alias_url(match_id, "shooters/alice/stages/1/audit"),
+        json=_legacy_audit_doc(6.5),
+    )
+    assert put.status_code == 200, put.text
+
+    stored = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit"))
+    assert stored.status_code == 200, stored.text
+    shot = stored.json()["shots"][0]
+    assert "id" not in shot
+
+
+def test_native_match_audit_put_still_mints_a_shot_id(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """A native hosted match has no desktop, so there is no second minter
+    and the save boundary keeps stamping the audit PUT exactly as before."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "native-audit-put-mint"
+    seed_match(hosted_env, "owner@example.com", match_id)
+    _seed_native_stage_with_audit(
+        hosted_env, "owner@example.com", match_id, "Native Audit Mint", _legacy_audit_doc(6.5)
+    )
+
+    put = client.put(
+        _alias_url(match_id, "shooters/alice/stages/1/audit"),
+        json=_legacy_audit_doc(6.5),
+    )
+    assert put.status_code == 200, put.text
+
+    stored = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit"))
+    assert stored.status_code == 200, stored.text
+    assert stored.json()["shots"][0]["id"] == "manual-t6500"
 
 
 @pytest.mark.parametrize(
@@ -604,7 +690,19 @@ def test_mirror_coach_by_id_exemption_boundary_pins(
     """The widened coach pattern must not open anything else.
 
     A by-id coach PATCH passes the gate; a by-id path that is not ``coach``,
-    a traversal attempt, and a trailing slash must all still 403.
+    a trailing slash, and a non-numeric stage must all still 403. A literal
+    ``..`` traversal-shaped id is a fourth case worth demonstrating rather
+    than reasoning about: the character class excludes ``/`` and Starlette
+    matches path segments literally rather than resolving ``..`` against
+    the filesystem, so ``by-id/..`` is not a traversal at all - it routes
+    to the handler exactly like ``by-id/cand-9`` does (and 404s there, for
+    lack of a matching shot), rather than escaping the gate.
+
+    The id is sent percent-encoded (``%2e%2e``) rather than as a literal
+    ``..`` segment: httpx resolves dot-segments client-side per RFC 3986
+    before a request ever leaves the test process, so a literal ``..`` in
+    the URL string never reaches the server at all and would prove
+    nothing about Starlette's own routing.
     """
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
@@ -616,6 +714,12 @@ def test_mirror_coach_by_id_exemption_boundary_pins(
         json={"coaching_note": "x"},
     )
     assert allowed.status_code != 403, allowed.text
+
+    traversal = client.patch(
+        _alias_url(match_id, "shooters/alice/stages/1/shots/by-id/%2e%2e/coach"),
+        json={"coaching_note": "x"},
+    )
+    assert traversal.status_code != 403, traversal.text
 
     for rest in (
         "shooters/alice/stages/1/shots/by-id/cand-9/audit",

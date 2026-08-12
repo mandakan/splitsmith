@@ -18,9 +18,11 @@ mergeable: an id minted inside the merge is not convergent across sides,
 because ``derive_shot_id`` keys a candidate-less shot off its rounded
 time and a nudge therefore changes it. If either side carries an
 unstamped shot the whole shot section is skipped with a note. That gate
-narrows the divergence class without closing it -- it cannot see two
-sides that stamped independently before the merge ran; Task 7 (desktop
-as sole minter for a mirror) is what closes it.
+narrows the divergence class; the desktop being the sole minter for a
+mirror (``_may_mint_shot_ids`` in ui/server.py, ``migrate_shot_ids`` in
+sync/run.py, #631 Task 7, shipped) is what closes it -- a hosted save
+boundary never mints on a mirror, so the only way this gate still fires
+is a genuinely stale document that predates both sides' stamping.
 
 ``merge_audit_doc`` is consequently not a deterministic function of its
 inputs: ``ensure_shot_ids`` mints a uuid4 for a shot that can derive no
@@ -331,13 +333,19 @@ def merge_audit_doc(
         #
         # The gate only sees shots still unstamped when the merge runs, and it
         # cannot detect that the two sides stamped independently beforehand --
-        # which is exactly what produces the divergence. ensure_shot_ids runs
-        # at the save boundary on both sides: a desktop that nudges a legacy
-        # manual shot to 6.52 and saves stamps manual-t6520, while a phone
-        # that accepts the mirror unchanged stamps manual-t6500. Both counts
-        # then read zero, this gate passes, and one shot unions into two with
-        # no note. Making the desktop the sole minter for a mirror is what
-        # closes that class - Task 7 in the plan. This gate narrows it.
+        # which is exactly what would produce the divergence if both sides
+        # could still mint. That class is closed now (#631 Task 7, shipped):
+        # the desktop is the sole minter for a mirror -- ``migrate_shot_ids``
+        # (sync/run.py) stamps every local legacy document before the pull,
+        # and the hosted save boundary (``_may_mint_shot_ids`` in
+        # ui/server.py) refuses to mint on a mirror at all. A hosted PUT of a
+        # legacy manual shot is therefore stored unstamped rather than
+        # minting its own diverging id, so the pair described above -- a
+        # desktop nudge stamping manual-t6520 against a phone accept stamping
+        # manual-t6500 for the same shot -- can no longer happen through the
+        # normal save boundaries. This gate remains as a backstop for a
+        # document that predates the migration and reaches merge before
+        # either side has run it.
         result.notes.append(
             f"{doc_key}: {local_unstamped} local and {remote_unstamped} remote shot(s) "
             "arrived without a persisted id, so the shot section was not merged; "

@@ -6485,6 +6485,14 @@ def create_app(
     )
     _mirror_coach_reclassify_re = re.compile(r"^shooters/[^/]+/stages/\d+/coach/reclassify$")
 
+    # Task 6 (#631): the full audit PUT. Safe now that shots carry a stable
+    # id and sync/merge.py merges their membership by it -- before the
+    # merge unit shipped, opening this would have let a desktop pull
+    # silently discard phone edits. ``_may_mint_shot_ids`` already refuses
+    # to mint on a mirror at this exact save boundary; this is the gate
+    # that makes that path reachable.
+    _mirror_audit_write_re = re.compile(r"^shooters/[^/]+/stages/\d+/audit$")
+
     @app.middleware("http")
     async def _match_id_alias(request, call_next):
         path = request.url.path
@@ -6555,6 +6563,7 @@ def create_app(
                     or (request.method == "POST" and _mirror_triage_write_re.match(rest) is not None)
                     or (request.method == "PATCH" and _mirror_coach_patch_re.match(rest) is not None)
                     or (request.method == "POST" and _mirror_coach_reclassify_re.match(rest) is not None)
+                    or (request.method == "PUT" and _mirror_audit_write_re.match(rest) is not None)
                 )
             ):
                 return JSONResponse(status_code=403, content={"detail": "read_only_mirror"})
