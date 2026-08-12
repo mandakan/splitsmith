@@ -341,6 +341,7 @@ def test_unrelated_and_malformed_events_are_ignored() -> None:
             {"kind": "save", "ts": "2026-08-12T10:00:00Z", "payload": {}},
             {"kind": "marker_time_changed", "ts": "2026-08-12T10:01:00Z", "payload": {"id": "cand-4"}},
             {"kind": "marker_kept", "ts": "2026-08-12T10:02:00Z"},
+            {"kind": ["marker_kept"], "ts": "2026-08-12T10:03:00Z", "payload": {"id": "x"}},
             "not a dict",
         ]
     )

@@ -185,6 +185,8 @@ def _membership_verdicts(events: list) -> dict[str, bool]:
         if not isinstance(event, dict):
             continue
         kind = event.get("kind")
+        if not isinstance(kind, str):
+            continue
         if kind in _MEMBERSHIP_PRESENT:
             present = True
         elif kind in _MEMBERSHIP_ABSENT:
@@ -197,6 +199,9 @@ def _membership_verdicts(events: list) -> dict[str, bool]:
             continue
         ts = str(event.get("ts") or "")
         previous = latest.get(shot_id)
+        # When two events for the same shot share identical ts, the later entry
+        # in the sorted list wins; merge_audit_doc stable-sorts local_events first,
+        # so >= implicitly favors remote on tie.
         if previous is None or ts >= previous[0]:
             latest[shot_id] = (ts, present)
     return {shot_id: present for shot_id, (_, present) in latest.items()}
