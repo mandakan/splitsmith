@@ -38,7 +38,13 @@ import {
   useRef,
   useState,
 } from "react";
-import { useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import {
+  useLocation,
+  useNavigate,
+  useOutletContext,
+  useParams,
+  useSearchParams,
+} from "react-router-dom";
 
 import { Avatar } from "@/components/ui";
 import { Button } from "@/components/ui/button";
@@ -52,6 +58,7 @@ import {
   type MatchProject,
 } from "@/lib/api";
 import { useMatchHref } from "@/lib/matchHref";
+import { parseMoment, resolveMomentView } from "@/lib/moment";
 import { isShareView } from "@/lib/shareView";
 import { cn } from "@/lib/utils";
 
@@ -68,6 +75,7 @@ export function Compare() {
   const { stage: stageParam } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const href = useMatchHref();
   const shareView = isShareView(location.pathname);
   const stageNumber = stageParam ? Number(stageParam) : NaN;
@@ -95,6 +103,7 @@ export function Compare() {
   const rafRef = useRef<number | null>(null);
   const maxDriftRef = useRef(0);
   const startedAtRef = useRef(0);
+  const momentAppliedRef = useRef(false);
 
   // Load project + compare data. Stage definitions are identical across
   // every shooter in a match, so we lift them from whichever shooter is
@@ -122,6 +131,7 @@ export function Compare() {
     let alive = true;
     setBundle(null);
     setError(null);
+    momentAppliedRef.current = false;
     api
       .getStageCompare(stageNumber)
       .then((b) => {
@@ -263,6 +273,39 @@ export function Compare() {
     },
     [orderedShooters],
   );
+
+  // Apply a shared moment (?t=&cam=&who=) once per bundle load: focus the
+  // requested camera/shooters and scrub to the requested time. Guarded by
+  // momentAppliedRef so re-renders (or later state changes) don't keep
+  // re-applying and fighting the user's own scrubbing.
+  useEffect(() => {
+    if (!bundle || momentAppliedRef.current) return;
+    const moment = parseMoment(searchParams);
+    if (!moment) return;
+    momentAppliedRef.current = true;
+    const slugs = new Set(bundle.shooters.map((s) => s.slug));
+    const view = resolveMomentView(moment, slugs);
+    if (view.who) setVisibleSlugs(new Set(view.who));
+    if (view.cam) setAudioSlug(view.cam);
+    scrubTo(moment.t);
+    // scrubTo writes currentTime immediately, but a video element that has
+    // not reached HAVE_METADATA can drop that write - re-apply once per
+    // element when its metadata arrives. Arrival is paused (isPlaying
+    // defaults to false), so nothing else moves the clock in between.
+    videoRefs.current.forEach((el, slug) => {
+      if (el.readyState >= 1) return;
+      const shooter = bundle.shooters.find((s) => s.slug === slug);
+      if (!shooter || shooter.beep_offset_in_clip == null) return;
+      const offset = shooter.beep_offset_in_clip;
+      el.addEventListener(
+        "loadedmetadata",
+        () => {
+          el.currentTime = Math.max(0, offset + moment.t);
+        },
+        { once: true },
+      );
+    });
+  }, [bundle, searchParams, scrubTo]);
 
   function toggleVisibility(slug: string) {
     setVisibleSlugs((prev) => {
