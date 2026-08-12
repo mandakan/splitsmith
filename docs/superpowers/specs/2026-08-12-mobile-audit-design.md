@@ -252,10 +252,25 @@ A fourth merge unit in `sync/merge.py`, replacing the "shot membership is
 desktop-owned" note at line 223.
 
 - **Membership** resolves from the merged `audit_events` log, which already
-  unions losslessly by event id. A shot is present unless its most recent
-  membership event says removed. Shots with no membership events are original
-  detector output and are present. This avoids a tombstone field and reuses a
-  mechanism that cannot lose an edit.
+  unions losslessly by event id, **corroborated against the other side's
+  document**. A shot is present unless its most recent membership event says
+  removed *and* the other side's document agrees it is gone. Shots with no
+  membership events are original detector output and are present.
+
+  **Correction (2026-08-12, whole-branch review).** An earlier version of this
+  design treated the event log as an authoritative membership record on its own.
+  It is not - it is one side's session journal, and it can contradict the
+  document carrying it. Two measured cases: **Ctrl+Z** restores a marker without
+  writing a compensating event (`Audit.tsx:860`), so a reject-then-undo-then-save
+  leaves a stale `marker_rejected` in a log that ships verbatim - the merge then
+  deleted a shot the local document still had, silently, and pushed the loss.
+  And **re-detection with `reset`** rewrites `shots[]` with no events at all
+  (`ui/server.py:2983`), so shots from a superseded run were adopted
+  unconditionally - 5 shots became 8. Neither needed the newly-opened PUT; the
+  shipped triage surface bumps the version, which is enough to route the document
+  into the merge. A verdict must therefore be corroborated by the other side's
+  document before it acts. Teaching the client to emit compensating events is a
+  worthwhile follow-up, but it cannot help the logs already on disk.
 - **Time** merges last-writer-wins per id, by the timestamp of the newest
   `shot_moved` event for that id, falling back to the doc timestamp.
 - **Coach fields** keep their existing per-shot unit, rekeyed from
