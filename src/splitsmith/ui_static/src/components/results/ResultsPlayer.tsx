@@ -158,15 +158,19 @@ export function ResultsPlayer({
     }
   }, [videoRef, seekToWindowStart]);
 
-  // One-shot paused seek to the moment, once video metadata is available.
-  // A ref (not state) guards the "once" - re-renders must not re-arm it.
-  const momentAppliedRef = useRef(false);
+  // Paused seek to the moment, once video metadata is available. A ref
+  // (not state) tracks the last APPLIED momentTime - same-value
+  // re-renders must not re-seek (that would fight the user's own
+  // scrubbing), but a genuinely new momentTime (query-only navigation
+  // to a different moment on an already-mounted player) must re-arm and
+  // seek again.
+  const lastAppliedMomentRef = useRef<number | null>(null);
   useEffect(() => {
     const v = videoRef.current;
-    if (!v || momentTime == null || momentAppliedRef.current) return;
+    if (!v || momentTime == null || lastAppliedMomentRef.current === momentTime) return;
     const apply = () => {
-      if (momentAppliedRef.current) return;
-      momentAppliedRef.current = true;
+      if (lastAppliedMomentRef.current === momentTime) return;
+      lastAppliedMomentRef.current = momentTime;
       const end = Number.isFinite(v.duration) ? v.duration : momentTime;
       v.currentTime = Math.min(Math.max(momentTime, 0), end);
     };
@@ -452,7 +456,7 @@ export function ResultsPlayer({
           <span
             role="img"
             aria-label={`Moment at ${(momentTime - beepTime).toFixed(2)}s`}
-            className="pointer-events-none absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border-2 border-manual bg-manual/40 shadow-[0_0_6px_var(--color-manual-glow)]"
+            className="pointer-events-none absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border-2 border-moment bg-moment/40 shadow-[0_0_6px_var(--color-moment-glow)]"
             style={{ left: `${pct(momentTime)}%` }}
           />
         )}

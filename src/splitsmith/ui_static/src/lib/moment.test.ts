@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { momentHref, momentToSearch, parseMoment, resolveMomentView } from "@/lib/moment";
+import { momentHref, momentToSearch, parseMoment, resolveMomentView, WHO_MAX } from "@/lib/moment";
 
 describe("momentToSearch / parseMoment", () => {
   it("round-trips a full compare moment", () => {
@@ -38,6 +38,14 @@ describe("momentToSearch / parseMoment", () => {
     expect(momentHref("/share/tok/compare/3", { t: 4.32, cam: "alice" })).toBe(
       "/share/tok/compare/3?t=4.32&cam=alice",
     );
+  });
+
+  it("caps who at WHO_MAX entries, matching the backend's _WHO_MAX", () => {
+    expect(WHO_MAX).toBe(12);
+    const who = Array.from({ length: 15 }, (_, i) => `shooter-${i}`);
+    const params = momentToSearch({ t: 1, who });
+    expect(params.get("who")).toBe(who.slice(0, WHO_MAX).join(","));
+    expect(params.get("who")?.split(",")).toHaveLength(WHO_MAX);
   });
 });
 
