@@ -528,3 +528,60 @@ def test_shots_with_no_membership_event_are_kept() -> None:
     remote = _id_doc([_id_shot("cand-4", 1, 6.0, 4)])
     result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
     assert [s["id"] for s in result.doc["shots"]] == ["cand-4"]
+
+
+def test_duplicate_persisted_shot_id_keeps_one_and_says_so() -> None:
+    """Two shots sharing one persisted id means a malformed document.
+
+    ensure_shot_ids never mints a colliding id -- it falls back to a uuid4 --
+    so this can only come from a bad writer. One copy is unavoidably lost;
+    the point is that it is lost loudly, per merge.py's never-silent contract.
+    """
+    doc = _id_doc([_id_shot("cand-4", 1, 6.0, 4), _id_shot("cand-4", 2, 6.5, 4)])
+    result = merge_audit_doc(
+        copy.deepcopy(doc),
+        copy.deepcopy(doc),
+        copy.deepcopy(doc),
+        doc_key="stage1",
+        local_ts=_LOCAL_TS,
+        remote_ts=_REMOTE_TS,
+    )
+    assert [s["id"] for s in result.doc["shots"]] == ["cand-4"]
+    assert result.doc["shots"][0]["time"] == 6.0  # the first occurrence, not the last
+    assert any("cand-4" in note and "malformed" in note for note in result.notes)
+
+
+def test_non_dict_entries_in_shots_survive_the_rebuild() -> None:
+    """The rebuild must not swallow data it does not understand.
+
+    Before the rebuild existed these rode through untouched; dropping them
+    now would be a silent loss of exactly the kind this module refuses.
+    """
+
+    def build() -> dict:
+        return {
+            "beep_time": 5.0,
+            "shots": ["junk", _id_shot("cand-4", 2, 6.0, 4), 42],
+            "audit_events": [],
+        }
+
+    result = merge_audit_doc(
+        build(), build(), build(), doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS
+    )
+    assert result.doc["shots"][0] == "junk"
+    assert result.doc["shots"][1]["id"] == "cand-4"
+    assert result.doc["shots"][2] == 42
+    assert result.doc["shots"][1]["shot_number"] == 1  # real shots number 1..n
+
+
+def test_a_shots_value_that_is_not_a_list_is_replaced_loudly() -> None:
+    """A shots value that is not a list holds no shots, but say so."""
+
+    def build() -> dict:
+        return {"beep_time": 5.0, "shots": {"not": "a list"}, "audit_events": []}
+
+    result = merge_audit_doc(
+        build(), build(), build(), doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS
+    )
+    assert result.doc["shots"] == []
+    assert any("not a list" in note for note in result.notes)

@@ -161,19 +161,31 @@ def _event_key(event: dict) -> object:
     return event.get("id") or (event.get("ts"), event.get("kind"))
 
 
-def _shots_by_id(doc: dict | None) -> dict[str, dict]:
-    """Index a doc's shots by their stable id.
+def _shots_by_id(doc: dict | None) -> tuple[dict[str, dict], dict[str, int]]:
+    """Index a doc's shots by their stable id, plus a count of any collisions.
 
     ``shot_number`` is positional and renumbers on every insert, so it
     cannot key a merge; ``splitsmith.shot_id`` stamps ``id`` at the save
     boundary. Shots without one predate that and are skipped -- they cannot
     be matched across sides.
+
+    Two shots sharing one persisted id means the source document is
+    malformed: ``ensure_shot_ids`` never mints a colliding id, falling back
+    to a uuid4 instead. The first occurrence wins and the rest are counted
+    rather than silently overwritten, so the caller can say so - this
+    module's contract is that nothing is dropped quietly.
     """
     out: dict[str, dict] = {}
+    duplicates: dict[str, int] = {}
     for shot in (doc or {}).get("shots") or []:
-        if isinstance(shot, dict) and isinstance(shot.get("id"), str) and shot["id"]:
-            out[shot["id"]] = shot
-    return out
+        if not (isinstance(shot, dict) and isinstance(shot.get("id"), str) and shot["id"]):
+            continue
+        shot_id = shot["id"]
+        if shot_id in out:
+            duplicates[shot_id] = duplicates.get(shot_id, 0) + 1
+            continue
+        out[shot_id] = shot
+    return out, duplicates
 
 
 #: Membership is expressed in the event vocabulary the desktop audit screen
@@ -269,19 +281,44 @@ def merge_audit_doc(
     def _has_identity(shot: dict) -> bool:
         return shot.get("candidate_number") is not None or shot.get("time") is not None
 
-    unkeyable = [s for s in (merged.get("shots") or []) if isinstance(s, dict) and not _has_identity(s)]
+    merged_shots_raw = merged.get("shots")
+    merged_shots_list = merged_shots_raw if isinstance(merged_shots_raw, list) else []
+    if merged_shots_raw is not None and not isinstance(merged_shots_raw, list):
+        result.notes.append(
+            f"{doc_key}: local shots is a {type(merged_shots_raw).__name__}, not a list, so it "
+            "holds no shots to merge; replaced with the merged list - the document is malformed"
+        )
+
+    unkeyable = [s for s in merged_shots_list if isinstance(s, dict) and not _has_identity(s)]
     if unkeyable:
         result.notes.append(
             f"{doc_key}: {len(unkeyable)} shot(s) carry neither candidate_number nor "
             "time, so they have no convergent id; local copies kept unmerged"
         )
 
-    def _keyable(doc: dict | None) -> dict[str, dict]:
-        return {shot_id: shot for shot_id, shot in _shots_by_id(doc).items() if _has_identity(shot)}
+    # Entries that are not dicts at all are not shots and cannot be merged -
+    # but they are not ours to discard either, and the rebuild below would
+    # swallow them. Carry them through at their original index.
+    foreign = [(position, e) for position, e in enumerate(merged_shots_list) if not isinstance(e, dict)]
 
-    base_shots = _keyable(base)
-    local_shots = _keyable(merged)
-    remote_shots = _keyable(remote_for_merge)
+    def _keyable(doc: dict | None) -> tuple[dict[str, dict], dict[str, int]]:
+        index, duplicates = _shots_by_id(doc)
+        return {shot_id: shot for shot_id, shot in index.items() if _has_identity(shot)}, duplicates
+
+    base_shots, _ = _keyable(base)
+    local_shots, local_duplicates = _keyable(merged)
+    remote_shots, remote_duplicates = _keyable(remote_for_merge)
+
+    # A collision drops a shot no matter what we do; the one thing that must
+    # not happen is dropping it quietly.
+    for side, duplicates in (("local", local_duplicates), ("remote", remote_duplicates)):
+        for shot_id in sorted(duplicates):
+            dropped = duplicates[shot_id]
+            result.notes.append(
+                f"{doc_key}: shot id {shot_id} appears {dropped + 1} times in the {side} "
+                f"document, which no writer should produce; kept the first and dropped "
+                f"{dropped} - the document is malformed"
+            )
 
     resolved: dict[str, dict] = {}
     for shot_id in list(local_shots) + [k for k in remote_shots if k not in local_shots]:
@@ -342,6 +379,11 @@ def merge_audit_doc(
         shot["shot_number"] = index
         if beep_time is not None and shot.get("time") is not None:
             shot["ms_after_beep"] = int(round((float(shot["time"]) - float(beep_time)) * 1000))
+    # After the renumber, never before: a non-dict entry has no shot_number
+    # to assign, and numbering the real shots 1..n contiguously is what the
+    # display wants. Ascending positions, so each insert shifts the next.
+    for position, entry in foreign:
+        ordered.insert(min(position, len(ordered)), entry)
     merged["shots"] = ordered
 
     # needs_attention: doc-level LWW unit (triage slice 4). Change
@@ -422,9 +464,10 @@ def merge_audit_doc(
 
     def _shot_residue(doc: dict | None) -> dict[str, dict]:
         merged_keys = {"id", "time", "ms_after_beep", "shot_number", *COACH_FIELDS}
+        index, _ = _shots_by_id(doc)
         return {
             shot_id: {k: v for k, v in shot.items() if k not in merged_keys}
-            for shot_id, shot in _shots_by_id(doc).items()
+            for shot_id, shot in index.items()
         }
 
     if base is not None:
