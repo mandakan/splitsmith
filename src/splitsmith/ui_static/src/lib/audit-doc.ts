@@ -64,6 +64,7 @@ function round3(n: number): number {
 export function deriveMarkers(audit: StageAudit | null): AuditMarker[] {
   if (!audit) return [];
   const candidates = audit._candidates_pending_audit?.candidates ?? [];
+  const candidateNumbers = new Set(candidates.map((c) => c.candidate_number));
   const shotsByCandidateNumber = new Map<number, true>();
   for (const s of audit.shots ?? []) {
     if (s.candidate_number != null) shotsByCandidateNumber.set(s.candidate_number, true);
@@ -78,13 +79,27 @@ export function deriveMarkers(audit: StageAudit | null): AuditMarker[] {
     note: "",
     shotId: null,
   }));
-  // Manual shots: those without a matching candidate_number.
+  // Manual shots: the ones the candidate pass above did *not* already emit
+  // a marker for -- a shot with no ``candidate_number``, or one whose
+  // ``candidate_number`` names no candidate in this document.
+  //
+  // #847: this used to test ``source === "manual"`` instead, which got both
+  // halves wrong. A shot carrying a ``candidate_number`` *and*
+  // ``source: "manual"`` was emitted twice -- once as the detected
+  // candidate, once again here -- and the duplicate carried no ``shotId``,
+  // so it minted a fresh id on every save. Meanwhile a shot whose
+  // ``candidate_number`` matched no candidate (a stale reference to a
+  // superseded detection run, whose candidates renumber -- #842) was
+  // emitted by neither pass and silently disappeared from the document on
+  // the next save. Keying on "did the candidate pass cover this shot"
+  // rather than on ``source`` closes both.
+  //
   // Derived (promoted) fixtures may include shots with ``time: null`` for
   // anchor shots that the secondary couldn't snap; skip those here so the
   // marker drawer doesn't crash on ``time.toFixed(...)``.
   for (const s of audit.shots ?? []) {
     if (s.time == null) continue;
-    if (s.candidate_number == null || s.source === "manual") {
+    if (s.candidate_number == null || !candidateNumbers.has(s.candidate_number)) {
       markers.push({
         id: s.id ?? `manual-shot-${s.shot_number}`,
         shotId: s.id ?? null,

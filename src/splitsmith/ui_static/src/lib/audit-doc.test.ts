@@ -47,6 +47,29 @@ describe("shot id round-trip", () => {
     expect(doc.shots[0].id).toBe("manual-abc123");
   });
 
+  it("emits one marker for a shot carrying both a candidate_number and source: manual", () => {
+    const markers = deriveMarkers({
+      shots: [
+        { shot_number: 1, candidate_number: 3, time: 7.0, source: "manual", id: "cand-3" },
+      ],
+      _candidates_pending_audit: { candidates: [{ candidate_number: 3, time: 7.0 }] },
+    } as never);
+    expect(markers).toHaveLength(1);
+    expect(markers[0].kind).toBe("detected");
+  });
+
+  it("still emits a shot whose candidate_number names no candidate in the doc", () => {
+    const markers = deriveMarkers({
+      shots: [
+        { shot_number: 1, candidate_number: 9, time: 7.0, source: "promoted", id: "cand-9" },
+      ],
+      _candidates_pending_audit: { candidates: [{ candidate_number: 3, time: 6.0 }] },
+    } as never);
+    const orphan = markers.find((m) => m.candidateNumber === 9);
+    expect(orphan?.kind).toBe("manual");
+    expect(orphan?.shotId).toBe("cand-9");
+  });
+
   it("omits the id for detected shots -- the server derives cand-<n>", () => {
     const doc = buildAuditJson({
       base: null,

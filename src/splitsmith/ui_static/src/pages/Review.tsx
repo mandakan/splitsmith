@@ -1059,6 +1059,7 @@ function round3(n: number): number {
 function deriveMarkers(audit: StageAudit | null): AuditMarker[] {
   if (!audit) return [];
   const candidates = audit._candidates_pending_audit?.candidates ?? [];
+  const candidateNumbers = new Set(candidates.map((c) => c.candidate_number));
   const shotsByCandidateNumber = new Map<number, true>();
   for (const s of audit.shots ?? []) {
     if (s.candidate_number != null) shotsByCandidateNumber.set(s.candidate_number, true);
@@ -1072,9 +1073,14 @@ function deriveMarkers(audit: StageAudit | null): AuditMarker[] {
     peakAmplitude: c.peak_amplitude ?? null,
     note: "",
   }));
+  // #847: same rule as ``lib/audit-doc.ts`` -- emit a manual marker only for
+  // a shot the candidate pass above did not already cover. This page keeps
+  // its own copy because it saves fixtures through ``saveFixtureAudit``
+  // rather than the production audit endpoint, and its documents carry no
+  // shot ids; the double-emit defect was identical in both.
   for (const s of audit.shots ?? []) {
     if (s.time == null) continue;
-    if (s.candidate_number == null || s.source === "manual") {
+    if (s.candidate_number == null || !candidateNumbers.has(s.candidate_number)) {
       markers.push({
         id: `manual-shot-${s.shot_number}`,
         kind: "manual",
