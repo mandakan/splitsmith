@@ -890,3 +890,207 @@ def test_one_side_carrying_two_entries_for_one_id(side: str, keyable_first: bool
     ids = [s["id"] for s in result.doc["shots"] if isinstance(s, dict)]
     assert len(ids) == len(set(ids)), f"duplicate id in merged output: {ids}"
     assert any("malformed" in note for note in result.notes)
+
+
+# -- a verdict acts only when the other side corroborates it -------------
+#
+# ``audit_events`` is one side's session journal, never pruned. Both probes
+# below were measured against the pre-fix merge; neither needs the newly
+# opened audit PUT, since the shipped triage accept surface bumps the
+# remote version, which is enough to route a document into the merge.
+
+
+def _triaged(doc: dict) -> dict:
+    """The same doc after a phone triage accept bumped its remote version.
+
+    ``needs_attention`` is a whitelisted doc-level unit and is stripped by
+    the tripwire projection, so this changes nothing about the shot merge -
+    it is only what makes the document eligible to be pulled at all.
+    """
+    out = copy.deepcopy(doc)
+    out["needs_attention"] = {
+        "flagged": True,
+        "flagged_at": "2026-08-12T12:40:00+00:00",
+        "note": None,
+        "updated_at": "2026-08-12T12:40:00+00:00",
+    }
+    return out
+
+
+def test_an_undone_reject_does_not_delete_the_shot_it_restored() -> None:
+    """Ctrl+Z restores the marker but writes no compensating event.
+
+    ``Audit.tsx``'s ``undo`` puts the marker back and ``performSave`` ships
+    ``sessionEventsRef.current`` verbatim, so the stale ``marker_rejected``
+    is saved alongside the shot it rejected. Measured against the pre-fix
+    merge: local ['cand-1', 'cand-2', 'cand-3'] merged to
+    ['cand-1', 'cand-3'] with no note - the desktop deletes a shot from its
+    own document and pushes the loss.
+    """
+    shots = [_id_shot("cand-1", 1, 6.0, 1), _id_shot("cand-2", 2, 6.4, 2), _id_shot("cand-3", 3, 6.9, 3)]
+    base = _id_doc(copy.deepcopy(shots))
+    local = _id_doc(
+        copy.deepcopy(shots),
+        [_ev("marker_rejected", "cand-2", "2026-08-12T12:30:00Z")],
+    )
+    remote = _triaged(base)
+
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+
+    assert [s["id"] for s in result.doc["shots"]] == ["cand-1", "cand-2", "cand-3"]
+    assert result.notes == []
+
+
+def test_a_superseded_detection_run_is_not_readopted_from_remote() -> None:
+    """``_run_shot_detect`` with ``reset`` writes no ``marker_*`` events.
+
+    It sets ``doc["shots"] = []`` and reseeds from the new candidates, so
+    the superseded run's shots carry no verdict at all and were adopted back
+    unconditionally as remote-only additions. Measured against the pre-fix
+    merge: a re-detection that went 8 candidates -> 5 came out of the merge
+    with 8 shots and no note. ``cand-<n>`` also aliases two different
+    physical shots across runs - remote's cand-4 is at a different time
+    from local's - so this is not even a stale copy of the same shot.
+    """
+    previous_run = [_id_shot(f"cand-{n}", n, 6.0 + 0.3 * n, n) for n in range(1, 9)]
+    new_run = [_id_shot(f"cand-{n}", n, 6.1 + 0.5 * n, n) for n in range(1, 6)]
+    base = _id_doc(copy.deepcopy(previous_run))
+    local = _id_doc(copy.deepcopy(new_run))
+    remote = _triaged(base)
+
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+
+    assert [s["id"] for s in result.doc["shots"]] == ["cand-1", "cand-2", "cand-3", "cand-4", "cand-5"]
+    assert [s["time"] for s in result.doc["shots"]] == [t["time"] for t in new_run]
+    assert result.notes == []
+
+
+def test_a_genuinely_new_remote_shot_is_still_adopted() -> None:
+    """The corroboration must not close the door the branch opened.
+
+    A shot the phone added is absent from base, so it is adopted whether or
+    not its ``marker_added_manual`` event survived the round trip.
+    """
+    base = _id_doc([_id_shot("cand-4", 1, 6.0, 4)])
+    local = _id_doc([_id_shot("cand-4", 1, 6.0, 4)])
+    remote = _id_doc([_id_shot("cand-4", 1, 6.0, 4), _id_shot("manual-x", 2, 6.5)])
+
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+
+    assert [s["id"] for s in result.doc["shots"]] == ["cand-4", "manual-x"]
+
+
+def test_a_stale_delete_stays_inert_after_it_has_been_pushed() -> None:
+    """The self-consistency property, pinned.
+
+    Once the poisoned log has been pushed, ``remote["audit_events"]`` carries
+    the stale ``marker_rejected`` too - so "the log knows about it" is true
+    on both sides. ``remote_shots`` carries the shot with it, and that clause
+    is what keeps it. A verdict must not become actionable merely by being
+    echoed back.
+    """
+    shots = [_id_shot("cand-1", 1, 6.0, 1), _id_shot("cand-2", 2, 6.4, 2)]
+    events = [_ev("marker_rejected", "cand-2", "2026-08-12T12:30:00Z")]
+    base = _id_doc(copy.deepcopy(shots), copy.deepcopy(events))
+    local = _id_doc(copy.deepcopy(shots), copy.deepcopy(events))
+    remote = _triaged(base)
+
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+
+    assert [s["id"] for s in result.doc["shots"]] == ["cand-1", "cand-2"]
+
+
+def test_a_corroborated_delete_still_acts() -> None:
+    """The guard narrows the rule; it must not disable it.
+
+    Remote dropped the shot and its log says why, so the delete acts - this
+    is the ordinary phone-deletes-a-shot path and it has to keep working.
+    """
+    base = _id_doc([_id_shot("cand-4", 1, 6.0, 4), _id_shot("cand-9", 2, 6.5, 9)])
+    local = _id_doc([_id_shot("cand-4", 1, 6.0, 4), _id_shot("cand-9", 2, 6.5, 9)])
+    remote = _id_doc(
+        [_id_shot("cand-4", 1, 6.0, 4)],
+        [_ev("marker_rejected", "cand-9", "2026-08-12T12:30:00Z")],
+    )
+
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+
+    assert [s["id"] for s in result.doc["shots"]] == ["cand-4"]
+
+
+# -- the tripwire note has to be true ------------------------------------
+
+
+def _detector_shot(**over: object) -> dict:
+    """One detector-seeded shot as the desktop writes it."""
+    shot = {
+        "id": "cand-1",
+        "shot_number": 1,
+        "candidate_number": 1,
+        "time": 6.0,
+        "ms_after_beep": 1000,
+        "source": "detected",
+        "confidence": 0.91,
+        "ensemble_votes": 3,
+        "ensemble_score": 0.84,
+        "apriori_boost": 0.0,
+    }
+    shot.update(over)
+    return shot
+
+
+def _spa_shot(**over: object) -> dict:
+    """The same shot as ``buildAuditJson`` (audit-doc.ts) round-trips it.
+
+    Only shot_number/candidate_number/time/ms_after_beep/source (plus note
+    and id when present) survive; the detector's own fields are dropped.
+    """
+    shot = {
+        "id": "cand-1",
+        "shot_number": 1,
+        "candidate_number": 1,
+        "time": 6.0,
+        "ms_after_beep": 1000,
+        "source": "detected",
+    }
+    shot.update(over)
+    return shot
+
+
+def test_the_tripwire_note_names_the_shot_and_the_fields() -> None:
+    """A plain, correct phone save of a detector-seeded stage lands here.
+
+    The audit PUT is whitelisted now, so the old text - "mirror write gate
+    should make this impossible - investigate" - was false on the happy
+    path. The fields are still desktop-owned, so the note stays; it just has
+    to say what actually differs.
+    """
+    base = _id_doc([_detector_shot()])
+    local = _id_doc([_detector_shot()])
+    remote = _id_doc([_spa_shot(time=6.05, ms_after_beep=1050)])
+
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+
+    note = next(n for n in result.notes if "non-whitelisted" in n)
+    assert "should make this impossible" not in note
+    assert "shot cand-1" in note
+    for field in ("apriori_boost", "confidence", "ensemble_score", "ensemble_votes"):
+        assert field in note, note
+    # Named, not merged: the desktop's values still stand, and the phone's
+    # whitelisted nudge still lands.
+    merged = result.doc["shots"][0]
+    assert merged["confidence"] == 0.91 and merged["ensemble_votes"] == 3
+    assert merged["time"] == 6.05
+
+
+def test_the_tripwire_note_names_a_doc_level_field_too() -> None:
+    base = _id_doc([_detector_shot()])
+    local = _id_doc([_detector_shot()])
+    remote = _id_doc([_detector_shot()])
+    remote["detection"] = "manual"
+
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+
+    note = next(n for n in result.notes if "non-whitelisted" in n)
+    assert "document: detection" in note
+    assert "should make this impossible" not in note

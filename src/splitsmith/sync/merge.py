@@ -12,7 +12,11 @@ silent. Structural membership of stages and videos is
 desktop-authoritative: remote-only additions/removals are noted, not
 merged. Shots are the exception -- they carry a stable ``id``
 (``splitsmith.shot_id``) and their membership resolves from the
-append-only marker events, so a phone can add, move and remove shots.
+append-only marker events *corroborated by the other side's shot list*,
+so a phone can add, move and remove shots. The corroboration is not
+belt-and-braces: ``audit_events`` is a session journal that is never
+pruned, so on its own it deletes shots its own writer still holds and
+resurrects shots a re-detection superseded -- see ``_merge_shot_section``.
 Only a shot that *arrived* carrying a persisted string ``id`` is
 mergeable: an id minted inside the merge is not convergent across sides,
 because ``derive_shot_id`` keys a candidate-less shot off its rounded
@@ -250,6 +254,15 @@ def _membership_verdicts(events: list) -> dict[str, bool]:
 
     Ordered by ``ts``, not list position: the event union concatenates two
     histories, so the list order after a merge is not chronological.
+
+    ``ts`` is client-authored -- the SPA stamps it from the browser's clock
+    when the event is recorded, and nothing on the way in re-stamps or
+    validates it. A skewed clock on either side therefore influences which
+    of two competing verdicts for one shot wins, and a badly skewed one can
+    make an older verdict outrank a newer one outright. That is why a
+    verdict is only allowed to *act* when the other side's document
+    corroborates it (see ``_merge_shot_section``): the ordering is a
+    heuristic, the corroboration is not.
     """
     latest: dict[str, tuple[str, bool]] = {}
     for event in events or []:
@@ -276,6 +289,27 @@ def _membership_verdicts(events: list) -> dict[str, bool]:
         if previous is None or ts >= previous[0]:
             latest[shot_id] = (ts, present)
     return {shot_id: present for shot_id, (_, present) in latest.items()}
+
+
+def _membership_event_ids(events: object) -> set[str]:
+    """Shot ids one document's own event log mentions in a membership event.
+
+    Not a verdict -- just "this log has an opinion about this shot at all".
+    ``_merge_shot_section`` uses it as one of the three ways a side can
+    corroborate that it knows a shot exists.
+    """
+    out: set[str] = set()
+    for event in events if isinstance(events, list) else []:
+        if not isinstance(event, dict):
+            continue
+        kind = event.get("kind")
+        if not isinstance(kind, str) or (kind not in _MEMBERSHIP_PRESENT and kind not in _MEMBERSHIP_ABSENT):
+            continue
+        payload = event.get("payload")
+        shot_id = payload.get("id") if isinstance(payload, dict) else None
+        if isinstance(shot_id, str) and shot_id:
+            out.add(shot_id)
+    return out
 
 
 def _coach_unit(shot: dict) -> dict:
@@ -434,9 +468,19 @@ def merge_audit_doc(
         else:
             merged.pop("needs_attention", None)
 
-    # Same tripwire as the project merge: remote edits outside the audit
-    # whitelist (events + coach fields) should be impossible while the
-    # mirror write gate is closed - note them loudly, local wins.
+    # Same shape as the project merge's tripwire: remote's copy differs from
+    # base on a field this merge does not carry, so local's value stands.
+    #
+    # This is NOT "should be impossible" any more. The audit PUT is
+    # whitelisted for a mirror now, and ``buildAuditJson`` (audit-doc.ts)
+    # round-trips only shot_number/candidate_number/time/ms_after_beep/
+    # source/note/id -- it drops the detector's ensemble_votes,
+    # apriori_boost, ensemble_score and confidence, none of which are in
+    # ``merged_keys``. A plain, correct phone save of a detector-seeded
+    # stage therefore lands here every time. The fields stay desktop-owned
+    # (widening merged_keys would let a phone save erase them for real), so
+    # the note stays -- but it says which shots and which fields, and makes
+    # no claim about a gate.
     def _strip_audit(doc: dict | None) -> dict:
         """Project a doc down to the fields that are still desktop-owned.
 
@@ -458,14 +502,26 @@ def merge_audit_doc(
             for shot_id, shot in index.items()
         }
 
+    def _differing_keys(left: dict, right: dict) -> list[str]:
+        return sorted(k for k in left.keys() | right.keys() if left.get(k) != right.get(k))
+
     if base is not None:
         base_residue, remote_residue = _shot_residue(base), _shot_residue(remote)
-        shared = base_residue.keys() & remote_residue.keys()
-        residue_changed = any(base_residue[k] != remote_residue[k] for k in shared)
-        if _strip_audit(remote) != _strip_audit(base) or residue_changed:
+        details: list[str] = []
+        stripped_base, stripped_remote = _strip_audit(base), _strip_audit(remote)
+        doc_fields = _differing_keys(stripped_base, stripped_remote)
+        if doc_fields:
+            details.append(f"document: {', '.join(doc_fields)}")
+        for shot_id in sorted(base_residue.keys() & remote_residue.keys()):
+            fields = _differing_keys(base_residue[shot_id], remote_residue[shot_id])
+            if fields:
+                details.append(f"shot {shot_id}: {', '.join(fields)}")
+        if details:
             result.notes.append(
-                f"{doc_key}: remote changed non-whitelisted audit fields; local wins "
-                "(mirror write gate should make this impossible - investigate)"
+                f"{doc_key}: remote differs from base on non-whitelisted audit fields, "
+                f"which this merge does not carry, so local's values stand - "
+                f"{'; '.join(details)}. A mobile save round-trips only the merged "
+                f"fields, so a detector field it never carried reads as a change here."
             )
 
     result.changed_vs_local = merged != local
@@ -554,16 +610,61 @@ def _merge_shot_section(
                 f"{dropped} - the document is malformed"
             )
 
+    # A verdict acts only when the other side's document corroborates it.
+    #
+    # ``audit_events`` is append-only and never pruned (audit-doc.ts
+    # concatenates history on every save), so it is one side's *session
+    # journal*, not an authoritative record of what that side's shot list
+    # holds. Two measured ways it lies:
+    #
+    #  - Ctrl+Z in the audit screen restores a rejected marker but writes no
+    #    compensating event (Audit.tsx's ``undo``), and ``performSave`` ships
+    #    the session's events verbatim. The stale ``marker_rejected`` then
+    #    deletes a shot that is present in the saver's own document.
+    #  - Re-detection with ``reset`` rewrites ``doc["shots"]`` wholesale and
+    #    writes no ``marker_*`` events at all, so the superseded run's shots
+    #    have no verdict and were adopted back unconditionally as
+    #    "remote-only additions" - phantom shots, and ``cand-<n>`` aliases
+    #    two different physical shots across runs.
+    #
+    # So a delete acts only if the other side actually dropped the shot, and
+    # an adoption of a shot the other side has but we do not requires either
+    # that it is new since base or that an event says to keep it.
+    #
+    # Self-consistent once a poisoned log has been pushed: the stale delete
+    # then reaches ``remote["audit_events"]`` too, but the shot reaches
+    # ``remote_shots`` with it, and the ``not in remote_shots`` clause keeps
+    # it. The verdict never becomes actionable by being echoed back.
+    remote_event_ids = _membership_event_ids(remote_for_merge.get("audit_events"))
+
+    def _remote_knows(shot_id: str) -> bool:
+        return shot_id in base_shots or shot_id in remote_shots or shot_id in remote_event_ids
+
+    def _dropped(shot_id: str) -> bool:
+        if verdicts.get(shot_id) is not False:
+            return False
+        # Remote still carries it: whatever the log says, the other side's
+        # own document contradicts the delete.
+        if shot_id in remote_shots:
+            return False
+        return _remote_knows(shot_id)
+
     # unkeyable and resolved are disjoint only when a shot's keyability is the
     # same on both sides. Local holding an id aside while remote's copy of
     # that id keys (local has no time, remote has one) would otherwise adopt
     # remote's as a remote-only addition and put the id on two entries. Local
     # wins, as everywhere else a shot is held aside.
-    remote_only = [k for k in remote_shots if k not in local_shots and k not in unkeyable_ids]
+    remote_only = [
+        k
+        for k in remote_shots
+        if k not in local_shots
+        and k not in unkeyable_ids
+        and (k not in base_shots or verdicts.get(k) is True)
+    ]
 
     resolved: dict[str, dict] = {}
     for shot_id in list(local_shots) + remote_only:
-        if verdicts.get(shot_id) is False:
+        if _dropped(shot_id):
             continue
         local_shot = local_shots.get(shot_id)
         remote_shot = remote_shots.get(shot_id)
@@ -620,6 +721,19 @@ def _merge_shot_section(
     # Renumber and re-derive. shot_number is display-only now, and
     # ms_after_beep is a function of the merged time -- merging it
     # independently could contradict the time it is derived from.
+    #
+    # ``interval_class`` is NOT re-derived here, and it can end up stale
+    # relative to the times it describes: it classifies the gap to the
+    # preceding shot, so a phone-side delete combined with a desktop-side add
+    # (or a nudge on either) re-partners a shot with a different neighbour
+    # while its stored class still describes the old one. Re-deriving it here
+    # is the wrong call -- ``coach.classify_intervals_in_dicts`` walks the
+    # whole stage in time order, which is not this function's job, and the
+    # class is also hand-settable (``interval_class_source: "manual"``). It
+    # self-heals on the next audit save: the save boundary in ui/server.py
+    # runs that classifier over the whole list (#775) and leaves manual
+    # classes alone. Until then a merged doc can show a class describing a
+    # neighbour it no longer has.
     # A time that is not a number sorts with the missing ones rather than
     # raising: audit docs are hand-editable JSON, and the positional merge
     # this replaced never looked at the value, so junk used to survive.
