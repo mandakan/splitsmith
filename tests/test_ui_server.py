@@ -2958,6 +2958,178 @@ def test_shot_detect_endpoint_writes_candidates(tmp_path: Path, monkeypatch) -> 
     assert proj_after["stages"][0]["videos"][0]["processed"]["shot_detect"] is True
 
 
+def test_shot_detect_reset_records_a_delete_for_every_shot_it_wipes(tmp_path: Path, monkeypatch) -> None:
+    """#842: a reset re-detect used to wipe ``shots[]`` in silence.
+
+    ``audit_events`` is append-only and the sync merge reads it for shot
+    membership, so a superseded shot whose id still carried a
+    ``marker_kept`` stayed "present" as far as the merge was concerned
+    and was re-adopted from the other side's document. Recording the
+    delete makes the newest verdict for those ids the delete.
+
+    The events must land *before* this run's ``shot_detect_run`` entry:
+    they describe the state the run superseded, and the merge orders a
+    shot's verdicts by ``ts``.
+    """
+    import json as _json
+
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
+
+    audio_dir = _shooter_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav = audio_dir / "stage1_audit.wav"
+    sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
+    trimmed_dir = _shooter_root / "trimmed"
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00")
+
+    from splitsmith import ensemble as ensemble_module
+    from splitsmith.ui import audio as audio_helpers
+    from splitsmith.ui import server as server_module
+
+    class FakeAudit:
+        audio_path = wav
+        beep_in_clip = 5.0
+        trimmed = True
+
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    fake_result = _fake_ensemble_result(
+        [{"time": 5.5, "confidence": 0.8, "ensemble_score": 3.0, "kept": True}],
+        consensus=2,
+    )
+    monkeypatch.setattr(ensemble_module, "detect_shots_ensemble", lambda *a, **kw: fake_result)
+
+    # An audited stage, saved through the real boundary so its shots carry
+    # ids -- the whole point is which ids the reset names.
+    saved = client.put(
+        "/api/shooters/me/stages/1/audit",
+        json={
+            "stage_number": 1,
+            "beep_time": 5.0,
+            "shots": [
+                {"shot_number": 1, "candidate_number": 4, "time": 5.5, "source": "detected"},
+                {"shot_number": 2, "candidate_number": 9, "time": 6.5, "source": "detected"},
+            ],
+            "audit_events": [{"ts": "2026-08-12T12:00:00Z", "kind": "save", "payload": {}}],
+        },
+    )
+    assert saved.status_code == 200
+    assert [s["id"] for s in saved.json()["shots"]] == ["cand-4", "cand-9"]
+
+    resp = client.post("/api/shooters/me/stages/1/shot-detect?reset=true")
+    assert resp.status_code == 200
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+
+    doc = _json.loads((_shooter_root / "audit" / "stage1.json").read_text(encoding="utf-8"))
+    events = doc["audit_events"]
+    deleted = [e for e in events if e["kind"] == "marker_deleted"]
+    assert [e["payload"]["id"] for e in deleted] == ["cand-4", "cand-9"]
+    assert all(e["id"] for e in deleted), "every event needs an id -- the merge unions on it"
+    kinds = [e["kind"] for e in events]
+    assert kinds.index("marker_deleted") < kinds.index("shot_detect_run")
+
+
+def test_shot_detect_without_reset_records_no_deletes(tmp_path: Path, monkeypatch) -> None:
+    """The other half of #842's guard: a non-reset run supersedes nothing,
+    so it must not claim to have deleted anything. ``shots[]`` is only
+    seeded when empty, so an audited stage's shots survive untouched."""
+    import json as _json
+
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
+
+    audio_dir = _shooter_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav = audio_dir / "stage1_audit.wav"
+    sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
+    trimmed_dir = _shooter_root / "trimmed"
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00")
+
+    from splitsmith import ensemble as ensemble_module
+    from splitsmith.ui import audio as audio_helpers
+    from splitsmith.ui import server as server_module
+
+    class FakeAudit:
+        audio_path = wav
+        beep_in_clip = 5.0
+        trimmed = True
+
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    fake_result = _fake_ensemble_result(
+        [{"time": 5.5, "confidence": 0.8, "ensemble_score": 3.0, "kept": True}],
+        consensus=2,
+    )
+    monkeypatch.setattr(ensemble_module, "detect_shots_ensemble", lambda *a, **kw: fake_result)
+
+    saved = client.put(
+        "/api/shooters/me/stages/1/audit",
+        json={
+            "stage_number": 1,
+            "beep_time": 5.0,
+            "shots": [{"shot_number": 1, "candidate_number": 4, "time": 5.5, "source": "detected"}],
+            "audit_events": [{"ts": "2026-08-12T12:00:00Z", "kind": "save", "payload": {}}],
+        },
+    )
+    assert saved.status_code == 200
+
+    final = _wait_for_job(client, client.post("/api/shooters/me/stages/1/shot-detect").json()["id"])
+    assert final["status"] == "succeeded", final
+
+    doc = _json.loads((_shooter_root / "audit" / "stage1.json").read_text(encoding="utf-8"))
+    assert [e for e in doc["audit_events"] if e["kind"] == "marker_deleted"] == []
+    assert [s["id"] for s in doc["shots"]] == ["cand-4"]
+
+
+def test_reset_deletion_events_names_only_identified_shots() -> None:
+    """Unit: an event keys on the shot id, so a shot without a usable one
+    cannot be named. That is not a gap -- an unstamped shot makes the sync
+    merge refuse the whole shot section out loud, so it cannot produce the
+    silent re-adoption these events close."""
+    from splitsmith.ui.server import _reset_deletion_events
+
+    events = _reset_deletion_events(
+        [
+            {"id": "cand-4", "time": 5.5},
+            {"time": 6.0},  # never stamped
+            {"id": "", "time": 6.5},  # empty string is not an id
+            {"id": 7, "time": 7.0},  # nor is an int from a hand-edited doc
+            "not-a-shot",
+        ]
+    )
+    assert [e["payload"]["id"] for e in events] == ["cand-4"]
+    assert events[0]["kind"] == "marker_deleted"
+    assert events[0]["payload"]["reason"] == "shot_detect_reset"
+    assert _reset_deletion_events(None) == []
+    assert _reset_deletion_events([]) == []
+
+
 def test_shot_detect_clears_beep_confirm_stub_marker(tmp_path: Path, monkeypatch) -> None:
     """A beep-confirm run seeds ``{"shots": [], "detection": "none"}`` and
     shot-detect merges its real results into that same doc rather than

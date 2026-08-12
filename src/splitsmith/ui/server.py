@@ -667,6 +667,45 @@ def _new_event_id() -> str:
     return uuid.uuid4().hex
 
 
+def _reset_deletion_events(shots: Any) -> list[dict[str, Any]]:
+    """One ``marker_deleted`` per identified shot a reset re-detect wipes.
+
+    A ``reset`` re-detect rewrites ``doc["shots"]`` wholesale but used to
+    write no ``marker_*`` event at all, so the append-only ``audit_events``
+    log went on carrying whatever verdict those shots last had. The sync
+    merge reads that log for shot membership, and its
+    ``verdicts.get(k) is True`` escape hatch then re-adopted a superseded
+    shot from the other side's document whenever the shot's id still
+    carried a ``marker_kept`` -- which every rejected marker the user
+    clicked back on has written. Measured on #842: a 5-shot local document
+    merged to 6 with no note, and 18 of this repo's 57 audited fixtures
+    carrying events hold at least one live present-verdict id.
+
+    Emitting the delete makes the local log carry the *newest* verdict for
+    the shots this run removes, instead of falling silent and letting an
+    older one stay live.
+
+    Only shots that already carry a usable id are named. An event keys on
+    the shot id and there is nothing to key on otherwise -- and an
+    unstamped shot makes the merge refuse the whole shot section out loud
+    anyway (``sync/merge.py``'s unstamped-shot gate), so it cannot produce
+    the silent re-adoption this closes.
+    """
+    if not isinstance(shots, list):
+        return []
+    now = _now_iso()
+    return [
+        {
+            "id": _new_event_id(),
+            "ts": now,
+            "kind": "marker_deleted",
+            "payload": {"id": shot["id"], "reason": "shot_detect_reset"},
+        }
+        for shot in shots
+        if isinstance(shot, dict) and has_usable_id(shot)
+    ]
+
+
 def _kept_audit_shots(shots: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Kept shots from an audit doc's ``shots[]``.
 
@@ -3048,7 +3087,13 @@ def register_job_bodies(state: AppState) -> None:
                 "expected_rounds": result.expected_rounds,
                 "candidates": candidates,
             }
+            reset_deletions: list[dict[str, Any]] = []
             if reset:
+                # #842: record the wipe before performing it. Without this the
+                # log falls silent and an older ``marker_kept`` on a superseded
+                # shot stays the newest verdict for that id, which the sync
+                # merge then reads as "keep" and re-adopts from the other side.
+                reset_deletions = _reset_deletion_events(doc.get("shots"))
                 doc["shots"] = []
             seeded_shots = False
             if not doc.get("shots"):
@@ -3068,6 +3113,9 @@ def register_job_bodies(state: AppState) -> None:
                 ]
                 seeded_shots = True
             events = list(doc.get("audit_events") or [])
+            # Deletions first: they describe the state this run superseded,
+            # and the merge orders a shot's verdicts by ``ts``.
+            events.extend(reset_deletions)
             events.append(
                 {
                     "id": _new_event_id(),

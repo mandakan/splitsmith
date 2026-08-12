@@ -552,6 +552,55 @@ def test_a_delete_verdict_acts_when_base_holds_the_shot_and_remote_dropped_it() 
     assert result.doc["shots"] == []
 
 
+def test_a_reset_redetect_that_records_its_deletes_stops_the_phantom_re_adoption() -> None:
+    """#842, first of the two surviving cases -- and the measured symptom.
+
+    A ``reset`` re-detect wipes ``shots[]`` and reseeds from the new
+    candidates. It used to write no ``marker_*`` event, so the
+    append-only log went on carrying whatever verdict the superseded
+    shots last had. ``remote_only``'s escape hatch adopts a shot the
+    other side has and this side does not whenever ``verdicts`` says
+    True -- which a ``marker_kept`` says, and every rejected marker the
+    user clicks back on writes one.
+
+    Both halves are asserted here so neither can quietly stop testing
+    anything: with the log silent the superseded ``cand-6`` comes back as
+    a sixth shot, and with the delete recorded it does not.
+    """
+    shots_before = [_id_shot(f"cand-{n}", n, 6.0 + n / 10, n) for n in range(1, 7)]
+    after_reset = shots_before[:5]
+    kept_cand_6 = _ev("marker_kept", "cand-6", "2026-08-12T12:00:00Z")
+
+    base = _id_doc(shots_before, [kept_cand_6])
+    remote = _id_doc(shots_before, [kept_cand_6])
+
+    # Silent log: the shape before this fix.
+    silent = merge_audit_doc(
+        base,
+        _id_doc(after_reset, [kept_cand_6]),
+        remote,
+        doc_key="stage1",
+        local_ts=_LOCAL_TS,
+        remote_ts=_REMOTE_TS,
+    )
+    assert [s["id"] for s in silent.doc["shots"]] == [f"cand-{n}" for n in range(1, 7)]
+    assert silent.notes == []  # and it came back with nothing said about it
+
+    # The reset now records what it wiped, so the newest verdict is the delete.
+    recorded = merge_audit_doc(
+        base,
+        _id_doc(
+            after_reset,
+            [kept_cand_6, _ev("marker_deleted", "cand-6", "2026-08-12T12:30:00Z")],
+        ),
+        remote,
+        doc_key="stage1",
+        local_ts=_LOCAL_TS,
+        remote_ts=_REMOTE_TS,
+    )
+    assert [s["id"] for s in recorded.doc["shots"]] == [f"cand-{n}" for n in range(1, 6)]
+
+
 def test_delete_then_promote_round_trips_to_present() -> None:
     """The reverse order, to prove the verdict is time-ordered not kind-ordered."""
     base = _id_doc([_id_shot("cand-9", 1, 6.5, 9)])
