@@ -131,9 +131,25 @@ class StageCard(BaseModel):
     shot_count: int
     stage_time: float | None = None
     figures: StageFigures
+    #: Seconds after the beep a moment link points at, or None for the
+    #: plain stage card. Part of the model dump, so part of card_hash -
+    #: a moment variant hashes (and caches) differently by construction.
+    moment_t: float | None = None
 
 
-def card_hash(card: MatchCard | StageCard) -> str:
+class CompareCard(BaseModel):
+    """A stage comparison: who is being compared, on which stage."""
+
+    model_config = ConfigDict(frozen=True)
+
+    stage_number: int
+    stage_name: str
+    match_name: str
+    shooter_names: list[str] = Field(default_factory=list)
+    moment_t: float | None = None
+
+
+def card_hash(card: MatchCard | StageCard | CompareCard) -> str:
     """Content hash over everything the card displays.
 
     The ``og:image`` URL carries this, so a re-audit that moves any
