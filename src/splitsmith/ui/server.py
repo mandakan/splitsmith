@@ -1001,6 +1001,12 @@ _SHARE_PATH_RE = re.compile(
     # nothing new in-surface.
     r"|match/shooters/[^/]+/videos/stream"
     r"|og\.png"
+    # The compare card routes (share_og.share_compare_png /
+    # share_compare_meta) ride these two alternatives too - "compare" is
+    # just another value for [^/]+ here, admitted deliberately rather than
+    # incidentally. Route registration order (compare defined above the
+    # {slug} routes in share_og.py) is what makes "compare" dispatch to
+    # the compare card instead of a shooter slugged "compare".
     r"|og/[^/]+/\d+\.png"
     r"|og-meta"
     r"|og-meta/[^/]+/\d+)$"

@@ -36,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import math
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
@@ -45,8 +46,8 @@ from pydantic import BaseModel
 from .. import coach as coach_module
 from ..audit_data import audit_shots_to_engine_shots
 from ..overlay_theme import load_theme
-from ..share_card import MatchCard, RosterEntry, StageCard, card_hash, stage_figures
-from ..share_card_render import cached_card_png
+from ..share_card import CompareCard, MatchCard, RosterEntry, StageCard, card_hash, stage_figures
+from ..share_card_render import cached_card_png, render_card_png
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
@@ -97,7 +98,28 @@ def build_match_card(state: Any) -> MatchCard:
     )
 
 
-def build_stage_card(state: Any, slug: str, stage_number: int) -> StageCard | None:
+def _parse_moment_t(value: str | None) -> float | None:
+    """A moment timestamp from a query string, or None for anything else.
+
+    Same defensive stance as _parse_positive_int: a malformed value
+    degrades to the moment-free variant, never an error. Clamp bounds and
+    2-decimal rounding are the spec's cache-cardinality bound - at most
+    100 distinct keys per clamped second.
+    """
+    if value is None:
+        return None
+    try:
+        t = float(value)
+    except ValueError:
+        return None
+    if not math.isfinite(t):
+        return None
+    return round(max(-60.0, min(3600.0, t)), 2)
+
+
+def build_stage_card(
+    state: Any, slug: str, stage_number: int, *, moment_t: float | None = None
+) -> StageCard | None:
     """``None`` for an unknown slug or stage, or a stage with no shots --
     the caller then serves the match card instead."""
     try:
@@ -149,6 +171,75 @@ def build_stage_card(state: Any, slug: str, stage_number: int) -> StageCard | No
         # turns that falsy-but-"set" value into the omit case.
         stage_time=stg.time_seconds or None,
         figures=figures,
+        moment_t=moment_t,
+    )
+
+
+#: Bounds a compare card's roster size. ``who`` is client-controlled and
+#: comma-split, so an unbounded value could pad an arbitrarily long roster
+#: into the card; capped here rather than in the render layer so the cap
+#: applies uniformly to the PNG, the meta description, and the shell.
+_WHO_MAX = 12
+
+
+def _parse_who(value: str | None) -> list[str] | None:
+    """Comma-split shooter slugs from a query string, or ``None`` absent.
+
+    Same defensive stance as ``_parse_moment_t``: an empty or missing
+    value degrades to "no filter" rather than an error, and each entry is
+    stripped and empties dropped so ``"a,,b"`` or trailing commas don't
+    produce blank slugs. Capped at ``_WHO_MAX`` entries.
+    """
+    if not value:
+        return None
+    slugs = [s.strip() for s in value.split(",")]
+    slugs = [s for s in slugs if s][:_WHO_MAX]
+    return slugs or None
+
+
+def build_compare_card(
+    state: Any, stage_number: int, *, who: list[str] | None = None, moment_t: float | None = None
+) -> CompareCard | None:
+    """``None`` when ``stage_number`` isn't one of the match's stages, or
+    when no shooter survives filtering - the caller then serves the match
+    card, mirroring ``build_stage_card``'s ladder. Validating
+    ``stage_number`` first matters beyond correctness: without it, any
+    caller holding a share token could iterate ``N`` through
+    ``GET /api/share/{token}/og/compare/{N}.png`` and, for every ``N``
+    with no ``t``/``who``, mint a distinct cached object under
+    ``share-cards/{token}/compare-{N}-*`` - unbounded storage writes from
+    a fabricated "Stage N" card that was never real. An unknown ``who``
+    entry is dropped, not an error; a ``who`` that filters everyone away
+    falls back to the full roster (a wrong-but-plausible ``who`` must not
+    blank the card)."""
+    match = state.match()
+    if not any(s.stage_number == stage_number for s in match.stages):
+        return None
+    slugs = [s for s in match.shooters if who is None or s in who]
+    if not slugs and who is not None:
+        slugs = list(match.shooters)
+    names: list[str] = []
+    stage_name: str | None = None
+    for slug in slugs:
+        try:
+            project = state.shooter_project(slug)
+        except HTTPException:
+            names.append(slug)
+            continue
+        names.append(project.competitor_name or slug)
+        if stage_name is None:
+            try:
+                stage_name = project.stage(stage_number).stage_name or None
+            except (KeyError, ValueError, HTTPException):
+                pass
+    if not names:
+        return None
+    return CompareCard(
+        stage_number=stage_number,
+        stage_name=stage_name or f"Stage {stage_number}",
+        match_name=match.name or "Splitsmith match",
+        shooter_names=names,
+        moment_t=moment_t,
     )
 
 
@@ -295,7 +386,9 @@ async def warm_match_card_bounded(state: Any, token: str) -> None:
         logger.warning("failed to warm match card for share token=%s", token, exc_info=exc)
 
 
-def _png_response(state: Any, token: str, card: MatchCard | StageCard, slug: str | None) -> Response:
+def _png_response(
+    state: Any, token: str, card: MatchCard | StageCard | CompareCard, slug: str | None
+) -> Response:
     if state.storage is None:
         # Not a 503: the anonymous surface's invariant is that every
         # failure looks the same (_share_alias rewrites only a 404 into
@@ -313,6 +406,18 @@ def _png_response(state: Any, token: str, card: MatchCard | StageCard, slug: str
         rasterizer_factory=_chromium_factory,
         slug=slug,
     )
+    headers = _FALLBACK_PNG_HEADERS if rendered.fell_back else _PNG_HEADERS
+    return Response(content=rendered.png, media_type="image/png", headers=headers)
+
+
+def _uncached_png_response(state: Any, card: MatchCard | StageCard | CompareCard) -> Response:
+    """Moment-variant cards: rendered per fetch, HTTP-cached only.
+
+    No storage involved by design - see render_card_png's docstring. The
+    plate keeps the short cache for the same reason _FALLBACK_PNG_HEADERS
+    exists on the cached path.
+    """
+    rendered = render_card_png(card, theme=load_theme("splitsmith"), rasterizer_factory=_chromium_factory)
     headers = _FALLBACK_PNG_HEADERS if rendered.fell_back else _PNG_HEADERS
     return Response(content=rendered.png, media_type="image/png", headers=headers)
 
@@ -338,14 +443,39 @@ def share_match_png(request: Request) -> Response:
     return _png_response(state, token, build_match_card(state), None)
 
 
+#: Must be registered ABOVE ``share_stage_png`` - FastAPI matches routes in
+#: registration order, and ``/api/og/{slug}/{stage}.png`` would otherwise
+#: capture a literal ``compare`` segment as ``slug``. A shooter actually
+#: slugged "compare" loses the stage-card URL shape as a result; accepted
+#: per spec.
+@router.get("/api/og/compare/{stage}.png", include_in_schema=False)
+def share_compare_png(stage: int, request: Request) -> Response:
+    _hosted_gate()
+    state = _state(request)
+    token = _share_token(request)
+    moment_t = _parse_moment_t(request.query_params.get("t"))
+    who = _parse_who(request.query_params.get("who"))
+    card = build_compare_card(state, stage, who=who, moment_t=moment_t)
+    if card is None:
+        return _png_response(state, token, build_match_card(state), None)
+    # who-only requests also skip storage: who is client-controlled with
+    # combinatorial cardinality, same abuse vector as t.
+    if moment_t is not None or who is not None:
+        return _uncached_png_response(state, card)
+    return _png_response(state, token, card, None)
+
+
 @router.get("/api/og/{slug}/{stage}.png", include_in_schema=False)
 def share_stage_png(slug: str, stage: int, request: Request) -> Response:
     _hosted_gate()
     state = _state(request)
     token = _share_token(request)
-    card = build_stage_card(state, slug, stage)
+    moment_t = _parse_moment_t(request.query_params.get("t"))
+    card = build_stage_card(state, slug, stage, moment_t=moment_t)
     if card is None:
         return _png_response(state, token, build_match_card(state), None)
+    if moment_t is not None:
+        return _uncached_png_response(state, card)
     return _png_response(state, token, card, slug)
 
 
@@ -382,12 +512,41 @@ def share_match_meta(request: Request) -> OgMeta:
     )
 
 
+#: Same ordering constraint as ``share_compare_png`` above: must be
+#: registered ABOVE ``share_stage_meta``, or ``/api/og-meta/{slug}/{stage}``
+#: would capture a literal ``compare`` segment as ``slug`` first.
+@router.get("/api/og-meta/compare/{stage}", response_model=OgMeta, include_in_schema=False)
+def share_compare_meta(stage: int, request: Request) -> OgMeta:
+    _hosted_gate()
+    state = _state(request)
+    token = _share_token(request)
+    moment_t = _parse_moment_t(request.query_params.get("t"))
+    who = _parse_who(request.query_params.get("who"))
+    card = build_compare_card(state, stage, who=who, moment_t=moment_t)
+    if card is None:
+        return share_match_meta(request)
+    title = f"{card.stage_name} comparison ({card.match_name})"
+    image_path = f"/api/share/{token}/og/compare/{stage}.png?v={card_hash(card)}"
+    if moment_t is not None:
+        title = f"{title} - moment at {moment_t:.2f}s"
+        image_path = f"{image_path}&t={moment_t:.2f}"
+    if who is not None:
+        image_path = f"{image_path}&who={quote(','.join(who), safe=',')}"
+    return OgMeta(
+        title=title,
+        description=", ".join(card.shooter_names),
+        image_path=image_path,
+        alt=f"Splitsmith compare card for {card.stage_name}",
+    )
+
+
 @router.get("/api/og-meta/{slug}/{stage}", response_model=OgMeta, include_in_schema=False)
 def share_stage_meta(slug: str, stage: int, request: Request) -> OgMeta:
     _hosted_gate()
     state = _state(request)
     token = _share_token(request)
-    card = build_stage_card(state, slug, stage)
+    moment_t = _parse_moment_t(request.query_params.get("t"))
+    card = build_stage_card(state, slug, stage, moment_t=moment_t)
     if card is None:
         # Mirrors share_stage_png's fallback: an unknown slug/stage, or a
         # stage with no audited shots, degrades to the match card rather
@@ -396,10 +555,15 @@ def share_stage_meta(slug: str, stage: int, request: Request) -> OgMeta:
     summary = f"{card.shot_count} shots"
     if card.stage_time is not None:
         summary = f"{summary} - {card.stage_time:.2f}s"
+    title = f"{card.shooter_name} - {card.stage_name} ({card.match_name})"
+    image_path = f"/api/share/{token}/og/{slug}/{stage}.png?v={card_hash(card)}"
+    if moment_t is not None:
+        title = f"{title} - moment at {moment_t:.2f}s"
+        image_path = f"{image_path}&t={moment_t:.2f}"
     return OgMeta(
-        title=f"{card.shooter_name} - {card.stage_name} ({card.match_name})",
+        title=title,
         description=summary,
-        image_path=f"/api/share/{token}/og/{slug}/{stage}.png?v={card_hash(card)}",
+        image_path=image_path,
         alt=f"Splitsmith stage card for {card.shooter_name}, {card.stage_name}",
     )
 
@@ -594,6 +758,24 @@ def _parse_positive_int(value: str) -> int | None:
     return int(value)
 
 
+def _moment_query(request: Request, *, include_who: bool) -> str:
+    """The ``?t=...&who=...`` suffix a shell forwards onto its og-meta
+    sub-request, built from validated query params only - junk or absent
+    values simply drop their part (or the whole ``?``), never forward raw
+    client input. ``include_who`` is ``False`` for the stage shell (whose
+    URL has no shooter-set concept) and ``True`` for the compare shell.
+    """
+    parts: list[str] = []
+    moment_t = _parse_moment_t(request.query_params.get("t"))
+    if moment_t is not None:
+        parts.append(f"t={moment_t:.2f}")
+    if include_who:
+        who = _parse_who(request.query_params.get("who"))
+        if who:
+            parts.append("who=" + quote(",".join(who), safe=","))
+    return f"?{'&'.join(parts)}" if parts else ""
+
+
 async def _match_shell(token: str, request: Request) -> Response:
     return await _shell_response(request, f"/api/share/{quote(token, safe='')}/og-meta")
 
@@ -621,5 +803,21 @@ async def share_stage_shell(token: str, slug: str, stage: str, request: Request)
     stage_number = _parse_positive_int(stage)
     if stage_number is None:
         return _shell(_generic_tags())
-    og_meta_path = f"/api/share/{quote(token, safe='')}/og-meta/{quote(slug, safe='')}/{stage_number}"
+    og_meta_path = (
+        f"/api/share/{quote(token, safe='')}/og-meta/{quote(slug, safe='')}/{stage_number}"
+        f"{_moment_query(request, include_who=False)}"
+    )
+    return await _shell_response(request, og_meta_path)
+
+
+@router.get("/share/{token}/compare/{stage}", include_in_schema=False)
+async def share_compare_shell(token: str, stage: str, request: Request) -> Response:
+    _hosted_gate()
+    stage_number = _parse_positive_int(stage)
+    if stage_number is None:
+        return _shell(_generic_tags())
+    og_meta_path = (
+        f"/api/share/{quote(token, safe='')}/og-meta/compare/{stage_number}"
+        f"{_moment_query(request, include_who=True)}"
+    )
     return await _shell_response(request, og_meta_path)

@@ -14,7 +14,7 @@
  *
  * Read-only by contract: part of the future share-link surface.
  */
-import { Maximize, Minimize, Pause, Play } from "lucide-react";
+import { Link2, Maximize, Minimize, Pause, Play } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -51,6 +51,13 @@ interface ResultsPlayerProps {
   /** Match-scope per-class baselines for tier-colored markers; null
    *  degrades to neutral dots. */
   baselines: TierBaselines | null;
+  /** Moment position in absolute clip seconds (the page converts from
+   *  seconds-after-beep). Renders a scrub-bar marker and performs a
+   *  one-shot paused seek once video metadata is available. */
+  momentTime?: number | null;
+  /** When set, renders a "Copy link at moment" button in the transport
+   *  row. */
+  onCopyMoment?: () => void;
 }
 
 function clamp(t: number, lo: number, hi: number): number {
@@ -74,6 +81,8 @@ export function ResultsPlayer({
   onPlayingChange,
   onFullscreenChange,
   baselines,
+  momentTime,
+  onCopyMoment,
 }: ResultsPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState<number | null>(null);
@@ -148,6 +157,26 @@ export function ResultsPlayer({
       seekToWindowStart();
     }
   }, [videoRef, seekToWindowStart]);
+
+  // One-shot paused seek to the moment, once video metadata is available.
+  // A ref (not state) guards the "once" - re-renders must not re-arm it.
+  const momentAppliedRef = useRef(false);
+  useEffect(() => {
+    const v = videoRef.current;
+    if (!v || momentTime == null || momentAppliedRef.current) return;
+    const apply = () => {
+      if (momentAppliedRef.current) return;
+      momentAppliedRef.current = true;
+      const end = Number.isFinite(v.duration) ? v.duration : momentTime;
+      v.currentTime = Math.min(Math.max(momentTime, 0), end);
+    };
+    if (v.readyState >= 1) {
+      apply();
+      return;
+    }
+    v.addEventListener("loadedmetadata", apply, { once: true });
+    return () => v.removeEventListener("loadedmetadata", apply);
+  }, [momentTime, videoRef]);
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -359,6 +388,17 @@ export function ResultsPlayer({
         >
           {isFs ? <Minimize className="size-4" /> : <Maximize className="size-4" />}
         </button>
+        {onCopyMoment && (
+          <button
+            type="button"
+            onClick={onCopyMoment}
+            aria-label="Copy link at moment"
+            title="Copy link at moment"
+            className="inline-flex size-11 shrink-0 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
+          >
+            <Link2 className="size-4" />
+          </button>
+        )}
       </div>
 
       {/* Marker scrub bar. The whole 44px track is the hit area; markers
@@ -406,6 +446,16 @@ export function ResultsPlayer({
         >
           beep
         </span>
+        {/* Moment marker: distinct diamond shape + label - never
+            color-only, matches the beep marker's "shape + text" idiom. */}
+        {momentTime != null && (
+          <span
+            role="img"
+            aria-label={`Moment at ${(momentTime - beepTime).toFixed(2)}s`}
+            className="pointer-events-none absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[2px] border-2 border-manual bg-manual/40 shadow-[0_0_6px_var(--color-manual-glow)]"
+            style={{ left: `${pct(momentTime)}%` }}
+          />
+        )}
         {/* Shot dots, colored by gap tier (neutral when unjudged) */}
         {shots.map((shot) => (
           <span
