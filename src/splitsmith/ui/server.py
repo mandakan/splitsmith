@@ -6600,8 +6600,18 @@ def create_app(
         rewritten = f"/api/matches/{resolved.match_id}/{rest}"
         request.scope["path"] = rewritten
         request.scope["raw_path"] = rewritten.encode("utf-8")
+        # Lazy import: this middleware runs for every request in both local
+        # and hosted mode (local returns 404 above via ``resolver is None``),
+        # so a module-level import here would force ``splitsmith.db`` - and
+        # its sqlalchemy dependency - onto local-mode installs that don't
+        # have the ``hosted`` extra. By this point the
+        # resolver already came from ``_apply_hosted_mode_wiring``, which
+        # has imported the db package, so this is a free (cached) import.
+        from ..db.share_guard import current_share_scope
+
         tenant_token = current_tenant.set(state.build_tenant(resolved.owner_user_id))
         share_token = current_share_request.set(True)
+        scope_token = current_share_scope.set(resolved.scope)
         # Stashed on request.state (not a ContextVar) because only the two
         # OG PNG handlers need it and they already take ``request`` -- same
         # precedent as ``_auth_gate``'s ``request.state.user``. The card
@@ -6622,6 +6632,7 @@ def create_app(
                 return not_found
             return response
         finally:
+            current_share_scope.reset(scope_token)
             current_share_request.reset(share_token)
             current_tenant.reset(tenant_token)
 

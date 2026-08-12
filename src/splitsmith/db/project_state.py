@@ -32,6 +32,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from .models import StateDocRow
+from .share_guard import ShareReadOnlyError, share_request_is_read_only
+
+
+def _refuse_share_write() -> None:
+    """#779 store-level complement to the READ ONLY share transaction:
+    refuse mutations at the choke point when serving a read-scoped share
+    request. Postgres enforces the same rule at the database; this check
+    also covers the sqlite test engine and fails with a clearer error."""
+    if share_request_is_read_only():
+        raise ShareReadOnlyError("refusing to mutate owner state during a read-scoped share request")
 
 
 @dataclass(frozen=True)
@@ -228,6 +238,7 @@ class ProjectStateStore:
         untouched. Called when a single shooter is removed from a match,
         the per-shooter analogue of :meth:`delete_match`. Idempotent.
         """
+        _refuse_share_write()
         async with self._session_factory() as session:
             result = await session.execute(
                 delete(StateDocRow).where(
@@ -247,6 +258,7 @@ class ProjectStateStore:
         move to clear the source audit after the target write succeeds.
         Idempotent -- a missing row returns 0 without raising.
         """
+        _refuse_share_write()
         async with self._session_factory() as session:
             result = await session.execute(
                 delete(StateDocRow).where(*self._identity_where(match_id, _KIND_AUDIT, slug, stage_number))
@@ -264,6 +276,7 @@ class ProjectStateStore:
         long-standing orphaned-``state_docs`` gap left by shooter/match
         removal (see ``remove_match_shooter`` in the UI server). Idempotent.
         """
+        _refuse_share_write()
         async with self._session_factory() as session:
             result = await session.execute(
                 delete(StateDocRow).where(
@@ -320,6 +333,7 @@ class ProjectStateStore:
         slug: str | None,
         stage_number: int | None,
     ) -> int:
+        _refuse_share_write()
         if expected_version == 0:
             return await self._insert(match_id, doc_kind, doc, slug=slug, stage_number=stage_number)
         return await self._update(
