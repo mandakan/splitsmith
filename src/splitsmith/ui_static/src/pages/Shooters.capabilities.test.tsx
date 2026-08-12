@@ -3,7 +3,7 @@
  *
  * Shooters is mounted under <MatchShell/> and reads its capability set
  * from the outlet context (the same ``capabilities`` field Home reads,
- * not ``project.capabilities`` -- see MatchShellOutletContext). Its
+ * not ``project.capabilities`` - see MatchShellOutletContext). Its
  * primary purpose is the add-shooter form, so that's DISABLED (with
  * READ_ONLY_MIRROR_MESSAGE as the visible reason) rather than hidden --
  * an Ingest-style page with no controls at all would read as broken.
@@ -168,7 +168,7 @@ describe("Shooters capability gating", () => {
     expect(removeButton).toHaveAttribute("title", READ_ONLY_MIRROR_MESSAGE);
   });
 
-  // #836: scoreboard linking is a write that 403s on a mirror -- managed
+  // #836: scoreboard linking is a write that 403s on a mirror - managed
   // from the desktop install there. The CTA + its banner are hidden (not
   // disabled) when edit is denied, same reasoning as Home's help cards.
   it("hides the connect-to-scoreboard CTA and banner when edit is denied", async () => {

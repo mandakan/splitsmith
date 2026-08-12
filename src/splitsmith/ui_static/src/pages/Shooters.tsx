@@ -1,5 +1,5 @@
 /**
- * Shooters route (/shooters) -- multi-camera per shooter (#324).
+ * Shooters route (/shooters) - multi-camera per shooter (#324).
  *
  * Per-shooter card per polished/16:
  *   - racing-color identity rail (MA red / JL amber / PE green / RJ blue
@@ -131,7 +131,7 @@ export function Shooters() {
     useOutletContext<MatchShellOutletContext>();
   // #756: add/remove shooter and rebuild-trims are edit-class writes that
   // 403 on a mirror. Gate on the outlet context's capability set (same
-  // pattern as Home/Ingest), never on origin -- see MatchShell's
+  // pattern as Home/Ingest), never on origin - see MatchShell's
   // capabilities comment for why.
   const editDenied = capabilityDenied(capabilities, "edit");
   const [searchParams] = useSearchParams();
@@ -193,7 +193,7 @@ export function Shooters() {
   }, [scoreboardMatchId, scoreboardContentType]);
 
   // Competitors already claimed by a local shooter never show up as
-  // pickable -- picking them again would just re-run the same bind.
+  // pickable - picking them again would just re-run the same bind.
   const claimedCompetitorIds = useMemo(() => {
     const ids = new Set<number>();
     for (const s of data?.shooters ?? []) {
@@ -303,7 +303,7 @@ export function Shooters() {
       const submitted = result.jobs_submitted.length;
       if (submitted === 0) {
         setError(
-          `No trim jobs to run for ${name} -- ${count} stages were eligible by count but every angle on them was already cached, missing prerequisites, or already queued.`,
+          `No trim jobs to run for ${name} - ${count} stages were eligible by count but every angle on them was already cached, missing prerequisites, or already queued.`,
         );
       }
     } catch (e) {
@@ -339,7 +339,7 @@ export function Shooters() {
           )}
         </div>
         {/* #836: scoreboard linking is a write (attaches the match server-
-         *  side) that 403s on a mirror -- it's managed from the desktop
+         *  side) that 403s on a mirror - it's managed from the desktop
          *  install there. Hide the invitation rather than disable it,
          *  same reasoning as Home hiding its help cards: this is an
          *  optional prompt, not a core control. */}
@@ -350,7 +350,7 @@ export function Shooters() {
 
       {!isLinked && !editDenied && (
         <div className="mb-4 rounded-md border border-rule-strong bg-surface-2 px-3 py-2 text-sm text-ink-2">
-          Not linked to the scoreboard yet -- connect it to pull official
+          Not linked to the scoreboard yet - connect it to pull official
           stage scores and give shot detection an expected-rounds prior
           for every shooter.
         </div>
@@ -431,7 +431,7 @@ export function Shooters() {
           {isLinked && !manualRoster ? (
             <>
               <p className="mb-4 text-[0.8125rem] text-muted">
-                This match is linked to the scoreboard -- pick a competitor
+                This match is linked to the scoreboard - pick a competitor
                 below to add them with their scoreboard identity already
                 bound, so their splits get an expected-rounds prior for
                 free.
