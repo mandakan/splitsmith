@@ -1068,6 +1068,21 @@ current_match_capabilities: ContextVar[frozenset[str] | None] = ContextVar(
 # response payloads before returning them to anonymous viewers.
 current_share_request: ContextVar[bool] = ContextVar("splitsmith_current_share_request", default=False)
 
+
+def _serialized_capabilities() -> list[str]:
+    """Sorted capability names for the payload ``capabilities`` field.
+
+    ``current_match_capabilities`` is pinned by the alias middleware to a
+    (possibly empty, on a read-scoped share) frozenset - ``None`` only
+    outside an aliased request (legacy bare-path traffic), which falls
+    back to ``capabilities_for_origin(None)``. A plain ``or`` fallback
+    would be wrong here: an empty frozenset is falsy in Python, so it
+    would silently widen a share response's capabilities.
+    """
+    caps = current_match_capabilities.get()
+    return sorted(caps if caps is not None else capabilities_for_origin(None))
+
+
 # TTL (seconds) for presigned media GET URLs. Short for share requests so
 # that revoking a token takes effect within one window; generous for owner
 # sessions that span a long editing or review session.
@@ -3867,6 +3882,10 @@ class ShooterListResponse(BaseModel):
     # desktop-synced read-only mirror apart from a natively-hosted or
     # local match so it can gate write affordances client-side.
     origin: str = "local"
+    # Sorted capability names (#756) - the same set the server-side guard
+    # enforces, so the SPA renders write affordances from data instead of
+    # re-deriving them from origin.
+    capabilities: list[str] = []
 
 
 class AddShooterRequest(BaseModel):
@@ -4040,6 +4059,10 @@ class BeepQueueResponse(BaseModel):
     # pick the honest media surface (snippet vs proxy) without a second
     # round trip.
     origin: str = "local"
+    # Sorted capability names (#756) - the same set the server-side guard
+    # enforces, so the SPA renders write affordances from data instead of
+    # re-deriving them from origin.
+    capabilities: list[str] = []
 
 
 class BeepQueueConfirmRequest(BaseModel):
@@ -6982,6 +7005,7 @@ def create_app(
         # have no proxies and never will - the SPA copy must not promise
         # one is coming.
         payload["origin"] = current_match_origin.get() or "local"
+        payload["capabilities"] = _serialized_capabilities()
         # Strip owner-local scan directory from anonymous share responses -
         # it is a server path that serves no purpose for read-only viewers.
         # Video/trim paths are load-bearing for streaming and are kept.
@@ -12635,6 +12659,7 @@ def create_app(
             match_name=match.name,
             shooters=entries,
             origin=current_match_origin.get() or "local",
+            capabilities=_serialized_capabilities(),
         )
 
     def _build_triage_response() -> TriageResponse:
@@ -13590,6 +13615,7 @@ def create_app(
             confirmed_count=total_confirmed,
             stages=ordered_stages,
             origin=current_match_origin.get() or "local",
+            capabilities=_serialized_capabilities(),
         )
 
     @app.post("/api/match/beep-queue/confirm", response_model=BeepQueueResponse)

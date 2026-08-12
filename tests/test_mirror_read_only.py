@@ -838,3 +838,22 @@ def test_guard_follows_capability_set_not_origin(
     # The middleware no longer blocks it; whatever the handler says, it
     # must not be the mirror 403.
     assert resp.status_code != 403, resp.text
+
+
+def test_payload_capabilities_match_guard(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """#756: the serialized set is the same one the guard enforces - a
+    mirror advertises review+share_manage, never edit."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed_mirror(client, "mirror-caps", "Caps Match")
+
+    shooters = client.get(_alias_url("mirror-caps", "match/shooters"))
+    assert shooters.status_code == 200, shooters.text
+    assert shooters.json()["capabilities"] == ["review", "share_manage"]
+
+    queue = client.get(_alias_url("mirror-caps", "match/beep-queue"))
+    assert queue.status_code == 200, queue.text
+    assert queue.json()["capabilities"] == ["review", "share_manage"]

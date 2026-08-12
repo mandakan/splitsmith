@@ -989,3 +989,21 @@ def test_share_request_carries_read_scope(
     assert owner.status_code == 200, owner.text
     assert seen == [None]
     client.cookies.clear()
+
+
+def test_share_payload_capabilities_empty(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """#779/#756: a read-scoped share response advertises no
+    capabilities - the anonymous surface renders zero write CTAs from
+    data, not from route-shape assumptions."""
+    token = _setup_shared_match(hosted_env, hosted_app)
+    client, _ = hosted_app
+    resp = client.get(_share_url(token, "match/shooters"))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["capabilities"] == []
+
+    project = client.get(_share_url(token, f"shooters/{SLUG}/project"))
+    assert project.status_code == 200, project.text
+    assert project.json()["capabilities"] == []
