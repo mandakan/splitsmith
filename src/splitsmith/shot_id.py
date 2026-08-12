@@ -14,7 +14,9 @@ it independently mint two different ids for one shot. Only one side may
 therefore mint *that* non-convergent id -- the desktop -- see the ``mint``
 argument to ``ensure_shot_ids``; the ``candidate_number`` case is convergent
 regardless of ``mint``, since both sides derive the same id from the same
-number. A shot with neither key (``Audit.tsx`` documents this
+number, unless two shots in one document share a ``candidate_number`` and the
+second one collides -- the collision fallback is a uuid4, so it is suppressed
+under ``mint=False`` too. A shot with neither key (``Audit.tsx`` documents this
 shape: a derived anchor shot the secondary couldn't snap, left with
 ``time: null``) has nothing stable to derive from and gets a minted,
 non-convergent id instead -- see ``derive_shot_id``.
@@ -31,17 +33,44 @@ import uuid
 from typing import Any
 
 
+def _candidate_number(shot: dict[str, Any]) -> int | None:
+    """A shot's ``candidate_number`` as an ``int``, or ``None`` if it has none.
+
+    A value that is not integer-like counts as *absent* rather than as an
+    error: these documents arrive from an unvalidated client field, and
+    ``int("abc")`` / ``int([])`` would otherwise raise out of a derivation
+    that now runs on the hosted save boundary for a mirror too -- a 500 on a
+    phone save. Falling through to the time branch is the conservative
+    outcome, and it matches what the shot actually is: no usable candidate.
+
+    ``0`` is a real candidate number and yields ``cand-0``; only ``None``
+    and junk are absent.
+
+    A ``bool`` is deliberately absent even though ``bool`` is an ``int`` in
+    Python: ``True`` would derive ``cand-1`` and alias onto the real
+    candidate 1, which is worse than having no candidate at all.
+    """
+    candidate = shot.get("candidate_number")
+    if candidate is None or isinstance(candidate, bool):
+        return None
+    try:
+        return int(candidate)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 def derive_shot_id(shot: dict[str, Any]) -> str:
     """Deterministic id for one shot dict.
 
     Detected and promoted shots key off ``candidate_number``; a manual shot
-    with no candidate keys off its rounded time. A shot with neither gets a
-    minted id, which is not deterministic -- callers that need convergence
-    must persist it.
+    with no candidate -- or one whose ``candidate_number`` is not
+    integer-like, see ``_candidate_number`` -- keys off its rounded time. A
+    shot with neither gets a minted id, which is not deterministic --
+    callers that need convergence must persist it.
     """
-    candidate = shot.get("candidate_number")
+    candidate = _candidate_number(shot)
     if candidate is not None:
-        return f"cand-{int(candidate)}"
+        return f"cand-{candidate}"
     time = shot.get("time")
     if time is not None:
         return f"manual-t{int(round(float(time) * 1000))}"
@@ -97,6 +126,21 @@ def ensure_shot_ids(shots: list[dict[str, Any]], *, mint: bool = True) -> int:
     to the desktop (which does it on its own save boundary, in the sync
     migration pass, and in the merge itself).
 
+    A collision is the one place where even the convergent branch stops
+    being convergent, so ``mint=False`` suppresses it too: two shots can
+    carry the *same* ``candidate_number`` (``lab/promote.py``'s
+    ``_find_candidate_number`` picks the nearest ensemble candidate per
+    snapped shot independently, so a promoted stage can snap two shots onto
+    one candidate -- this repo's own promoted fixtures contain that shape),
+    and the second of them derives a ``cand-<n>`` that is already taken.
+    The fallback for that is a uuid4, which is non-convergent by
+    construction: a mirror and a desktop stamping the same colliding shot
+    would mint two different ids, both documents would then read as fully
+    stamped, the sync merge's unstamped-shot gate would pass, and one shot
+    would silently become two. Under ``mint=False`` the colliding shot is
+    therefore left unstamped instead, which makes that gate refuse the
+    section out loud -- a stated refusal, not a silent duplicate.
+
     Preserving an id is not minting one: a shot that arrives carrying a
     client-supplied id keeps it either way, which is what lets a phone add
     a genuinely new shot to a mirror -- the SPA mints that id itself.
@@ -106,11 +150,14 @@ def ensure_shot_ids(shots: list[dict[str, Any]], *, mint: bool = True) -> int:
     for shot in shots:
         if not isinstance(shot, dict) or _has_usable_id(shot):
             continue
-        convergent = shot.get("candidate_number") is not None
+        convergent = _candidate_number(shot) is not None
         if not mint and not convergent:
             continue
         candidate_id = derive_shot_id(shot)
         if candidate_id in taken:
+            if not mint:
+                # Leave it unstamped; the merge's gate handles it loudly.
+                continue
             candidate_id = f"manual-{uuid.uuid4().hex}"
         shot["id"] = candidate_id
         taken.add(candidate_id)

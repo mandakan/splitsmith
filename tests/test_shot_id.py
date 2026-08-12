@@ -205,6 +205,82 @@ def test_mint_false_replaces_an_unusable_id_when_convergent() -> None:
     assert shots[0]["id"] == "cand-4"
 
 
+def test_mint_false_leaves_a_shot_with_no_key_at_all_unstamped() -> None:
+    """The uuid4 branch is non-convergent by construction, so ``mint=False``
+    suppresses it exactly as it suppresses the time-keyed branch.
+
+    ``Audit.tsx`` documents this shape: a derived anchor shot the secondary
+    couldn't snap, left with ``time: null``. Two sides stamping it
+    independently would mint two random ids for one shot.
+    """
+    shots = [{"candidate_number": None, "time": None}]
+    assert ensure_shot_ids(shots, mint=False) == 0
+    assert "id" not in shots[0]
+
+
+def test_mint_false_leaves_a_colliding_convergent_id_unstamped() -> None:
+    """Two shots sharing one ``candidate_number`` -- the shape a promoted
+    stage actually produces.
+
+    ``lab/promote.py``'s ``_find_candidate_number`` picks the nearest
+    ensemble candidate per snapped shot independently, so two shots can land
+    on the same one; this repo's promoted fixtures contain it (e.g.
+    ``stage-shots-blacksmith-2026-stage6-...`` has candidate 18 twice). The
+    second shot's derived ``cand-18`` is already taken, and the collision
+    fallback is a uuid4 -- non-convergent, i.e. the exact thing ``mint=False``
+    exists to prevent. It must leave the shot unstamped instead, so the sync
+    merge's unstamped-shot gate refuses out loud rather than the two sides
+    minting two different ids for one shot and unioning it into two.
+    """
+    shots = [
+        {"shot_number": 7, "candidate_number": 18, "time": 8.796, "source": "promoted"},
+        {"shot_number": 8, "candidate_number": 18, "time": 9.48, "source": "promoted"},
+    ]
+    assert ensure_shot_ids(shots, mint=False) == 1
+    assert shots[0]["id"] == "cand-18"
+    assert "id" not in shots[1]
+
+
+def test_a_colliding_convergent_id_still_falls_back_when_minting() -> None:
+    """The desktop, which may mint, keeps the fallback: it is the only side
+    stamping, so a uuid4 here is not divergent -- and the two shots must not
+    share an id."""
+    shots = [
+        {"shot_number": 7, "candidate_number": 18, "time": 8.796, "source": "promoted"},
+        {"shot_number": 8, "candidate_number": 18, "time": 9.48, "source": "promoted"},
+    ]
+    assert ensure_shot_ids(shots) == 2
+    assert shots[0]["id"] == "cand-18"
+    assert shots[1]["id"].startswith("manual-")
+    assert shots[0]["id"] != shots[1]["id"]
+
+
+@pytest.mark.parametrize("junk", ["abc", [], {}, object()], ids=["str", "list", "dict", "object"])
+def test_a_junk_candidate_number_is_treated_as_absent(junk: object) -> None:
+    """``int(candidate)`` used to run unguarded on an unvalidated client
+    field: ``"abc"`` raised ``ValueError`` and ``[]`` raised ``TypeError``,
+    which surfaced as a 500 -- newly reachable on a mirror, where this
+    derivation did not run before. A candidate that is not integer-like is
+    no candidate, so the shot keys off its time instead.
+    """
+    assert derive_shot_id({"candidate_number": junk, "time": 6.5}) == "manual-t6500"
+
+
+def test_a_bool_candidate_number_is_treated_as_absent() -> None:
+    """``bool`` is an ``int`` in Python, so ``True`` would derive ``cand-1``
+    and alias onto the real candidate 1. Deliberately absent instead."""
+    assert derive_shot_id({"candidate_number": True, "time": 6.5}) == "manual-t6500"
+    assert derive_shot_id({"candidate_number": False, "time": 6.5}) == "manual-t6500"
+
+
+def test_candidate_number_zero_still_derives_cand_zero() -> None:
+    """The guard must not turn a falsy-but-real candidate into no candidate."""
+    assert derive_shot_id({"candidate_number": 0, "time": 6.5}) == "cand-0"
+    shots = [{"candidate_number": 0, "time": 6.5}]
+    assert ensure_shot_ids(shots, mint=False) == 1
+    assert shots[0]["id"] == "cand-0"
+
+
 def test_a_real_string_id_is_never_rewritten() -> None:
     """The invariant the above must not break: a persisted id is a shot's
     identity across a nudge, so it survives even when it looks derivable."""

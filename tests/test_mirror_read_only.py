@@ -14,6 +14,7 @@ mirror down.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -26,6 +27,7 @@ from sqlalchemy import select as _select
 from splitsmith import match_model
 from splitsmith.db import MatchRow, ProjectStateStore, RecentProjectRow, User, create_engine, sessionmaker
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
+from splitsmith.shot_id import ensure_shot_ids
 from splitsmith.sync.merge import merge_audit_doc
 from tests.hosted_helpers import _CapturingSender, login, moto_s3_storage, seed_match
 
@@ -691,6 +693,97 @@ def test_mirror_audit_put_then_desktop_pull_keeps_the_phone_nudge(
     assert merged_shots["manual-shotid-1"]["time"] == 8.0
 
 
+def _promoted_collision_doc() -> dict:
+    """Two shots snapped onto one ensemble candidate, neither carrying an id.
+
+    Not a hypothetical: ``lab/promote.py``'s ``_find_candidate_number``
+    picks the nearest ensemble candidate per snapped shot independently, so
+    a promoted stage can put two shots on one candidate. This repo's own
+    fixtures contain it -- ``stage-shots-blacksmith-2026-stage6-...`` has
+    candidate 18, 21 and 25 twice each, all ``"source": "promoted"`` -- and
+    these values are that fixture's candidate-18 pair verbatim.
+    """
+    return {
+        "stage_number": 1,
+        "beep_time": 5.0,
+        "shots": [
+            {
+                "shot_number": 7,
+                "candidate_number": 18,
+                "time": 8.796,
+                "ms_after_beep": 3796,
+                "source": "promoted",
+            },
+            {
+                "shot_number": 8,
+                "candidate_number": 18,
+                "time": 9.48,
+                "ms_after_beep": 4480,
+                "source": "promoted",
+            },
+        ],
+        "audit_events": [],
+    }
+
+
+def test_mirror_audit_put_leaves_a_colliding_shot_for_the_desktop_to_stamp(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """A derived id that collides is not convergent, so a mirror must not
+    stamp it -- end to end across the real PUT and the real merge.
+
+    ``ensure_shot_ids``' collision fallback (two shots deriving one id) is a
+    uuid4, and it used to run *after* the mint gate, so the second shot of a
+    promoted candidate pair got a randomly minted id on a mirror: the exact
+    non-convergent stamp ``mint=False`` exists to prevent. The mirror minted
+    one uuid4, the desktop another, both documents then read as fully
+    stamped, the merge's unstamped-shot gate passed, and one shot silently
+    unioned into two.
+
+    Now the colliding shot is left unstamped, the gate fires, and local's
+    two shots stand -- a stated refusal instead of a silent duplicate.
+    """
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRAUDITPUTCOLLIDE001"
+    _seed_mirror_stage_with_audit(client, match_id, "audit-put-collide", _promoted_collision_doc())
+
+    put = client.put(
+        _alias_url(match_id, "shooters/alice/stages/1/audit"),
+        json=_promoted_collision_doc(),
+    )
+    assert put.status_code == 200, put.text
+
+    # What a desktop pull fetches as "remote": the first shot took cand-18,
+    # the second is left for the desktop rather than randomly stamped.
+    remote = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit")).json()
+    assert remote["shots"][0]["id"] == "cand-18"
+    assert "id" not in remote["shots"][1]
+
+    # The desktop's own copy, stamped on its own save boundary -- it may
+    # mint, so the collision falls back to a uuid4 there.
+    base = _promoted_collision_doc()
+    local = copy.deepcopy(base)
+    ensure_shot_ids(local["shots"])
+    local_ids = [s["id"] for s in local["shots"]]
+    assert local_ids[0] == "cand-18"
+    assert local_ids[1].startswith("manual-")
+
+    result = merge_audit_doc(
+        base,
+        local,
+        remote,
+        doc_key="stage1",
+        local_ts=datetime(2026, 8, 12, 12, 0, tzinfo=UTC),
+        # Remote is the newer side, so nothing but the gate stops it winning.
+        remote_ts=datetime(2026, 8, 12, 13, 0, tzinfo=UTC),
+    )
+
+    assert any("without a persisted id" in note for note in result.notes), result.notes
+    assert [s["id"] for s in result.doc["shots"]] == local_ids  # two shots, not three
+
+
 def test_native_match_audit_put_still_mints_a_shot_id(
     hosted_env: str,
     hosted_app: tuple[TestClient, _CapturingSender],
@@ -850,8 +943,9 @@ def test_mirror_coach_by_id_exemption_boundary_pins(
     to the handler exactly like ``by-id/cand-9`` does, and 404s there for
     the same reason the ``allowed`` case below would too if it named a
     slug this match's roster doesn't recognize: ``_seed_mirror`` seeds an
-    empty roster, so ``state.shooter_project("alice")`` 404s on that
-    roster-membership check before shot lookup is ever reached - not
+    empty roster, so the roster-membership check in ``state.shooter_root``
+    (which ``state.shooter_project("alice")`` calls) 404s on
+    "alice" before shot lookup is ever reached - not
     because no shot matched the id.
 
     The id is sent percent-encoded (``%2e%2e``) rather than as a literal

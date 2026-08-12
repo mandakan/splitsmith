@@ -6505,8 +6505,9 @@ def create_app(
     # Containment for ``[^/]+``/``by-id/[A-Za-z0-9._-]+`` (here and in the
     # other regexes below) is not this pattern's job: the character class
     # only keeps the slug/id out of the next path segment. What actually
-    # bounds the slug to a real shooter is ``state.shooter_project``'s
-    # roster-membership check inside the handler itself -- a slug this
+    # bounds the slug to a real shooter is the roster-membership check in
+    # ``state.shooter_root`` (``if slug not in shooters: raise 404``, which
+    # ``state.shooter_project`` reaches only by calling it) -- a slug this
     # regex passes through but the roster doesn't recognize 404s there,
     # same as any other unknown shooter.
     _mirror_coach_patch_re = re.compile(
