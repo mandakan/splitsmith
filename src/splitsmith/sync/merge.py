@@ -8,9 +8,11 @@ from a deep copy of the local doc and resolves whitelisted units
 three-way against the base snapshot: changed on one side wins outright;
 changed on both is a true conflict resolved last-writer-wins by doc
 timestamp and always surfaced on :attr:`MergeResult.conflicts` - never
-silent. Structural membership (stages, videos, shots) is
+silent. Structural membership of stages and videos is
 desktop-authoritative: remote-only additions/removals are noted, not
-merged.
+merged. Shots are the exception -- they carry a stable ``id``
+(``splitsmith.shot_id``) and their membership resolves from the
+append-only marker events, so a phone can add, move and remove shots.
 
 Taking a remote beep group applies the same derivation invalidation a
 local beep override does (``_apply_beep_override`` in ui/server.py) -
@@ -33,6 +35,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from ..coach import COACH_FIELDS
+from ..shot_id import ensure_shot_ids
 
 #: Every key on a video dict starting with this prefix moves as one
 #: atomic merge unit - beep_time without its confidence/candidates
@@ -158,11 +161,18 @@ def _event_key(event: dict) -> object:
     return event.get("id") or (event.get("ts"), event.get("kind"))
 
 
-def _shots_by_number(doc: dict | None) -> dict[int, dict]:
-    out: dict[int, dict] = {}
+def _shots_by_id(doc: dict | None) -> dict[str, dict]:
+    """Index a doc's shots by their stable id.
+
+    ``shot_number`` is positional and renumbers on every insert, so it
+    cannot key a merge; ``splitsmith.shot_id`` stamps ``id`` at the save
+    boundary. Shots without one predate that and are skipped -- they cannot
+    be matched across sides.
+    """
+    out: dict[str, dict] = {}
     for shot in (doc or {}).get("shots") or []:
-        if isinstance(shot, dict) and shot.get("shot_number") is not None:
-            out[int(shot["shot_number"])] = shot
+        if isinstance(shot, dict) and isinstance(shot.get("id"), str) and shot["id"]:
+            out[shot["id"]] = shot
     return out
 
 
@@ -238,34 +248,101 @@ def merge_audit_doc(
             local_events + copy.deepcopy(remote_new), key=lambda e: str(e.get("ts") or "")
         )
 
-    base_shots = _shots_by_number(base)
-    remote_shots = _shots_by_number(remote)
-    for shot_number, merged_shot in _shots_by_number(merged).items():
-        remote_shot = remote_shots.get(shot_number)
+    merged_events = merged.get("audit_events") or []
+    verdicts = _membership_verdicts(merged_events)
+
+    # Stamp ids before keying anything. A doc written before shot ids
+    # shipped has none, and _shots_by_id would skip every shot -- which
+    # would then be dropped when merged["shots"] is rebuilt below. The
+    # derivation is deterministic, so both sides mint the same id for the
+    # same pre-existing shot.
+    remote_for_merge = copy.deepcopy(remote)
+    for doc in (merged, remote_for_merge):
+        shots_list = doc.get("shots")
+        if isinstance(shots_list, list):
+            ensure_shot_ids([s for s in shots_list if isinstance(s, dict)])
+
+    # A shot with neither candidate_number nor time got a minted,
+    # non-convergent id, so the two sides disagree about it and keying it
+    # would duplicate it on every merge. Hold those aside: local's copies
+    # win untouched. See Audit.tsx:2829 for where the shape comes from.
+    def _has_identity(shot: dict) -> bool:
+        return shot.get("candidate_number") is not None or shot.get("time") is not None
+
+    unkeyable = [s for s in (merged.get("shots") or []) if isinstance(s, dict) and not _has_identity(s)]
+    if unkeyable:
+        result.notes.append(
+            f"{doc_key}: {len(unkeyable)} shot(s) carry neither candidate_number nor "
+            "time, so they have no convergent id; local copies kept unmerged"
+        )
+
+    def _keyable(doc: dict | None) -> dict[str, dict]:
+        return {shot_id: shot for shot_id, shot in _shots_by_id(doc).items() if _has_identity(shot)}
+
+    base_shots = _keyable(base)
+    local_shots = _keyable(merged)
+    remote_shots = _keyable(remote_for_merge)
+
+    resolved: dict[str, dict] = {}
+    for shot_id in list(local_shots) + [k for k in remote_shots if k not in local_shots]:
+        if verdicts.get(shot_id) is False:
+            continue
+        local_shot = local_shots.get(shot_id)
+        remote_shot = remote_shots.get(shot_id)
+        if local_shot is None:
+            resolved[shot_id] = copy.deepcopy(remote_shot)
+            continue
+        shot = local_shot
+        resolved[shot_id] = shot
         if remote_shot is None:
             continue
+        base_shot = base_shots.get(shot_id, {})
+
         winner, is_conflict = _resolve_unit(
-            _coach_unit(base_shots.get(shot_number, {})),
-            _coach_unit(merged_shot),
+            base_shot.get("time"),
+            shot.get("time"),
+            remote_shot.get("time"),
+            local_ts=local_ts,
+            remote_ts=remote_ts,
+        )
+        if is_conflict:
+            result.conflicts.append(
+                MergeConflict(doc_key=doc_key, unit=f"shot {shot_id} time", winner=winner)
+            )
+        if winner == "remote":
+            shot["time"] = copy.deepcopy(remote_shot.get("time"))
+
+        winner, is_conflict = _resolve_unit(
+            _coach_unit(base_shot),
+            _coach_unit(shot),
             _coach_unit(remote_shot),
             local_ts=local_ts,
             remote_ts=remote_ts,
         )
-        unit_name = f"shot {shot_number} coach"
         if is_conflict:
-            result.conflicts.append(MergeConflict(doc_key=doc_key, unit=unit_name, winner=winner))
-        if winner == "remote" and _coach_unit(remote_shot) != _coach_unit(merged_shot):
-            for k in COACH_FIELDS:
-                if k in remote_shot:
-                    merged_shot[k] = copy.deepcopy(remote_shot[k])
+            result.conflicts.append(
+                MergeConflict(doc_key=doc_key, unit=f"shot {shot_id} coach", winner=winner)
+            )
+        if winner == "remote" and _coach_unit(remote_shot) != _coach_unit(shot):
+            for key in COACH_FIELDS:
+                if key in remote_shot:
+                    shot[key] = copy.deepcopy(remote_shot[key])
                 else:
-                    merged_shot.pop(k, None)
+                    shot.pop(key, None)
 
-    for shot_number in remote_shots.keys() - _shots_by_number(merged).keys():
-        result.notes.append(
-            f"{doc_key}: remote has shot {shot_number} that local lacks - "
-            "shot membership is desktop-owned; ignored"
-        )
+    # Renumber and re-derive. shot_number is display-only now, and
+    # ms_after_beep is a function of the merged time -- merging it
+    # independently could contradict the time it is derived from.
+    beep_time = merged.get("beep_time")
+    ordered = sorted(
+        [*resolved.values(), *unkeyable],
+        key=lambda s: (s.get("time") is None, s.get("time") or 0.0, s.get("id") or ""),
+    )
+    for index, shot in enumerate(ordered, start=1):
+        shot["shot_number"] = index
+        if beep_time is not None and shot.get("time") is not None:
+            shot["ms_after_beep"] = int(round((float(shot["time"]) - float(beep_time)) * 1000))
+    merged["shots"] = ordered
 
     # needs_attention: doc-level LWW unit (triage slice 4). Change
     # detection and equality compare a CONTENT projection - flagged and
@@ -331,20 +408,34 @@ def merge_audit_doc(
     # whitelist (events + coach fields) should be impossible while the
     # mirror write gate is closed - note them loudly, local wins.
     def _strip_audit(doc: dict | None) -> dict:
+        """Project a doc down to the fields that are still desktop-owned.
+
+        Shots are compared by id, and only for ids present on both sides:
+        membership itself is now merged, so a legitimate add or delete must
+        not read as a non-whitelisted change.
+        """
         clone = copy.deepcopy(doc or {})
         clone.pop("audit_events", None)
         clone.pop("needs_attention", None)
-        for shot in clone.get("shots") or []:
-            if isinstance(shot, dict):
-                for k in COACH_FIELDS:
-                    shot.pop(k, None)
+        clone.pop("shots", None)
         return clone
 
-    if base is not None and _strip_audit(remote) != _strip_audit(base):
-        result.notes.append(
-            f"{doc_key}: remote changed non-whitelisted audit fields; local wins "
-            "(mirror write gate should make this impossible - investigate)"
-        )
+    def _shot_residue(doc: dict | None) -> dict[str, dict]:
+        merged_keys = {"id", "time", "ms_after_beep", "shot_number", *COACH_FIELDS}
+        return {
+            shot_id: {k: v for k, v in shot.items() if k not in merged_keys}
+            for shot_id, shot in _shots_by_id(doc).items()
+        }
+
+    if base is not None:
+        base_residue, remote_residue = _shot_residue(base), _shot_residue(remote)
+        shared = base_residue.keys() & remote_residue.keys()
+        residue_changed = any(base_residue[k] != remote_residue[k] for k in shared)
+        if _strip_audit(remote) != _strip_audit(base) or residue_changed:
+            result.notes.append(
+                f"{doc_key}: remote changed non-whitelisted audit fields; local wins "
+                "(mirror write gate should make this impossible - investigate)"
+            )
 
     result.changed_vs_local = merged != local
     return result

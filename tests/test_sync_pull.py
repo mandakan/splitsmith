@@ -86,8 +86,20 @@ def make_synced_match(tmp_path: Path) -> Path:
 
     audit_dir = shooter_root / "audit"
     audit_dir.mkdir(exist_ok=True)
+    # The shot carries a candidate_number and a time because a real one
+    # always does: those are what splitsmith.shot_id derives a stable id
+    # from, and a shot with neither is held out of the merge entirely
+    # (merge.py: "no convergent id"), so a stub without them would quietly
+    # stop these tests exercising the coach-field merge at all.
     (audit_dir / "stage1.json").write_text(
-        json.dumps({"detection": "ensemble", "shots": [{"shot_number": 1}]}), encoding="utf-8"
+        json.dumps(
+            {
+                "detection": "ensemble",
+                "beep_time": 0.5,
+                "shots": [{"shot_number": 1, "candidate_number": 1, "time": 1.0}],
+            }
+        ),
+        encoding="utf-8",
     )
 
     return root

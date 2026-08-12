@@ -1,5 +1,6 @@
 """Three-way merge engine conflict matrix (bidirectional sync slice)."""
 
+import copy
 from datetime import UTC, datetime
 
 from splitsmith.sync.merge import _membership_verdicts, merge_audit_doc, merge_project_doc
@@ -181,12 +182,27 @@ def test_coach_conflict_lww_and_shot_membership_is_local():
 
 
 def test_audit_non_whitelisted_remote_change_noted_local_wins():
-    base = _audit([_shot(1)], [])
-    local = _audit([_shot(1)], [])
-    remote = _audit([_shot(1, time=9.9)], [])  # shot time is not whitelisted
+    # Shot ``time`` used to be the non-whitelisted field this asserted on;
+    # it is merged now, so the tripwire needs a field that still isn't -
+    # here the detector's own ``confidence`` on a shot both sides carry.
+    base = _audit([_shot(1, id="cand-1", candidate_number=1, confidence=0.9)], [])
+    local = _audit([_shot(1, id="cand-1", candidate_number=1, confidence=0.9)], [])
+    remote = _audit([_shot(1, id="cand-1", candidate_number=1, confidence=0.1)], [])
     r = merge_audit_doc(base, local, remote, doc_key="audit/anna/3", local_ts=T_OLD, remote_ts=T_NEW)
-    assert r.doc["shots"][0]["time"] == 1.0
+    assert r.doc["shots"][0]["confidence"] == 0.9
     assert any("non-whitelisted" in n for n in r.notes)
+
+
+def test_audit_remote_shot_nudge_is_not_a_tripwire():
+    # The converse of the above, and the reason it had to change: a phone
+    # moving a shot is a whitelisted write now, so it must merge silently
+    # rather than log "remote changed non-whitelisted audit fields".
+    base = _audit([_shot(1, id="cand-1", candidate_number=1)], [])
+    local = _audit([_shot(1, id="cand-1", candidate_number=1)], [])
+    remote = _audit([_shot(1, id="cand-1", candidate_number=1, time=9.9)], [])
+    r = merge_audit_doc(base, local, remote, doc_key="audit/anna/3", local_ts=T_OLD, remote_ts=T_NEW)
+    assert r.doc["shots"][0]["time"] == 9.9
+    assert not r.notes
 
 
 # needs_attention (triage slice 4)
@@ -346,3 +362,169 @@ def test_unrelated_and_malformed_events_are_ignored() -> None:
         ]
     )
     assert verdicts == {}
+
+
+# -- shot membership and timing merged by id (Task 5) --------------------
+#
+# ``_id_shot``/``_id_doc`` rather than reusing ``_shot``/``_audit`` above:
+# a second module-level ``_shot`` would shadow the first and break every
+# pre-existing audit test in this file.
+
+_LOCAL_TS = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+_REMOTE_TS = datetime(2026, 8, 12, 13, 0, tzinfo=UTC)
+
+
+def _id_shot(shot_id: str, number: int, time: float, candidate: int | None = None) -> dict:
+    return {
+        "id": shot_id,
+        "shot_number": number,
+        "candidate_number": candidate,
+        "time": time,
+        "ms_after_beep": int(round((time - 5.0) * 1000)),
+        "source": "manual" if candidate is None else "detected",
+    }
+
+
+def _id_doc(shots: list[dict], events: list[dict] | None = None) -> dict:
+    return {"beep_time": 5.0, "shots": shots, "audit_events": events or []}
+
+
+def test_remote_added_shot_is_adopted() -> None:
+    """This is the behaviour merge.py previously refused outright."""
+    base = _id_doc([_id_shot("cand-4", 1, 6.0, 4)])
+    local = _id_doc([_id_shot("cand-4", 1, 6.0, 4)])
+    remote = _id_doc(
+        [_id_shot("cand-4", 1, 6.0, 4), _id_shot("manual-x", 2, 6.5)],
+        [_ev("marker_added_manual", "manual-x", "2026-08-12T12:30:00Z")],
+    )
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+    assert [s["id"] for s in result.doc["shots"]] == ["cand-4", "manual-x"]
+    assert [s["shot_number"] for s in result.doc["shots"]] == [1, 2]
+
+
+def test_remote_delete_removes_a_locally_present_shot() -> None:
+    base = _id_doc([_id_shot("cand-4", 1, 6.0, 4), _id_shot("cand-9", 2, 6.5, 9)])
+    local = _id_doc([_id_shot("cand-4", 1, 6.0, 4), _id_shot("cand-9", 2, 6.5, 9)])
+    remote = _id_doc(
+        [_id_shot("cand-4", 1, 6.0, 4)],
+        [_ev("marker_rejected", "cand-9", "2026-08-12T12:30:00Z")],
+    )
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+    assert [s["id"] for s in result.doc["shots"]] == ["cand-4"]
+
+
+def test_remote_nudge_wins_and_recomputes_ms_after_beep() -> None:
+    base = _id_doc([_id_shot("cand-4", 1, 6.0, 4)])
+    local = _id_doc([_id_shot("cand-4", 1, 6.0, 4)])
+    remote = _id_doc([_id_shot("cand-4", 1, 6.02, 4)])
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+    merged = result.doc["shots"][0]
+    assert merged["time"] == 6.02
+    assert merged["ms_after_beep"] == 1020
+
+
+def test_both_sides_nudged_is_a_surfaced_conflict() -> None:
+    base = _id_doc([_id_shot("cand-4", 1, 6.0, 4)])
+    local = _id_doc([_id_shot("cand-4", 1, 6.01, 4)])
+    remote = _id_doc([_id_shot("cand-4", 1, 6.02, 4)])
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+    assert result.doc["shots"][0]["time"] == 6.02  # remote_ts is newer
+    assert [c.unit for c in result.conflicts] == ["shot cand-4 time"]
+
+
+def test_a_deleted_shot_is_not_resurrected_by_the_other_side() -> None:
+    """Local deleted it; remote still carries it with no newer verdict."""
+    base = _id_doc([_id_shot("cand-9", 1, 6.5, 9)])
+    local = _id_doc([], [_ev("marker_rejected", "cand-9", "2026-08-12T12:30:00Z")])
+    remote = _id_doc([_id_shot("cand-9", 1, 6.5, 9)])
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+    assert result.doc["shots"] == []
+
+
+def test_a_legacy_doc_with_no_ids_keeps_its_shots() -> None:
+    """Documents written before shot ids shipped must survive a merge.
+
+    Without the ensure_shot_ids pass these shots key to nothing and are
+    dropped when the merged list is rebuilt -- a silent total data loss.
+    """
+    legacy = {
+        "beep_time": 5.0,
+        "shots": [
+            {"shot_number": 1, "candidate_number": 4, "time": 6.0, "ms_after_beep": 1000},
+            {"shot_number": 2, "candidate_number": None, "time": 6.5, "ms_after_beep": 1500},
+        ],
+        "audit_events": [],
+    }
+    result = merge_audit_doc(
+        copy.deepcopy(legacy),
+        copy.deepcopy(legacy),
+        copy.deepcopy(legacy),
+        doc_key="stage1",
+        local_ts=_LOCAL_TS,
+        remote_ts=_REMOTE_TS,
+    )
+    assert len(result.doc["shots"]) == 2
+    assert [s["id"] for s in result.doc["shots"]] == ["cand-4", "manual-t6500"]
+
+
+def test_a_shot_with_no_identity_is_kept_once_not_duplicated() -> None:
+    """A shot with neither candidate_number nor time has no convergent id.
+
+    Both sides mint different ids for it, so keying it would emit two copies
+    of one shot on every merge. It must be carried through exactly once.
+    """
+    anchor = {"shot_number": 1, "candidate_number": None, "time": None}
+    base = {"beep_time": 5.0, "shots": [dict(anchor)], "audit_events": []}
+    local = {"beep_time": 5.0, "shots": [dict(anchor)], "audit_events": []}
+    remote = {"beep_time": 5.0, "shots": [dict(anchor)], "audit_events": []}
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+    assert len(result.doc["shots"]) == 1
+    assert any("no convergent id" in note for note in result.notes)
+
+
+def test_promote_then_delete_round_trips_to_absent() -> None:
+    """Promote a rejected candidate, then delete it again on the other side.
+
+    The newest verdict must win, not the fact that a promote happened at all.
+    """
+    base = _id_doc([])
+    local = _id_doc(
+        [_id_shot("cand-9", 1, 6.5, 9)],
+        [_ev("marker_kept", "cand-9", "2026-08-12T12:10:00Z")],
+    )
+    remote = _id_doc(
+        [],
+        [
+            _ev("marker_kept", "cand-9", "2026-08-12T12:10:00Z"),
+            _ev("marker_rejected", "cand-9", "2026-08-12T12:20:00Z"),
+        ],
+    )
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+    assert result.doc["shots"] == []
+
+
+def test_delete_then_promote_round_trips_to_present() -> None:
+    """The reverse order, to prove the verdict is time-ordered not kind-ordered."""
+    base = _id_doc([_id_shot("cand-9", 1, 6.5, 9)])
+    local = _id_doc(
+        [],
+        [_ev("marker_rejected", "cand-9", "2026-08-12T12:10:00Z")],
+    )
+    remote = _id_doc(
+        [_id_shot("cand-9", 1, 6.5, 9)],
+        [
+            _ev("marker_rejected", "cand-9", "2026-08-12T12:10:00Z"),
+            _ev("marker_kept", "cand-9", "2026-08-12T12:20:00Z"),
+        ],
+    )
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+    assert [s["id"] for s in result.doc["shots"]] == ["cand-9"]
+
+
+def test_shots_with_no_membership_event_are_kept() -> None:
+    """Original detector output carries no events and must survive."""
+    base = _id_doc([_id_shot("cand-4", 1, 6.0, 4)])
+    local = _id_doc([_id_shot("cand-4", 1, 6.0, 4)])
+    remote = _id_doc([_id_shot("cand-4", 1, 6.0, 4)])
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+    assert [s["id"] for s in result.doc["shots"]] == ["cand-4"]
