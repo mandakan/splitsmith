@@ -15,6 +15,8 @@ from splitsmith.shot_id import derive_shot_id, ensure_shot_ids
 from splitsmith.sync.merge import merge_audit_doc
 from splitsmith.ui.server import create_app
 from tests.conftest import bound_match_id, scaffold_match
+from tests.hosted_helpers import _CapturingSender, login
+from tests.test_mirror_read_only import _alias_url, _seed_mirror
 
 
 def test_detected_shot_keys_off_candidate_number() -> None:
@@ -137,6 +139,37 @@ def test_an_empty_string_id_is_replaced() -> None:
     assert shots[0]["id"] == "cand-4"
 
 
+def test_mint_false_leaves_an_unstamped_shot_alone() -> None:
+    """The mirror's contract: only the desktop invents an id."""
+    shots = [{"candidate_number": None, "time": 6.5}]
+    assert ensure_shot_ids(shots, mint=False) == 0
+    assert "id" not in shots[0]
+
+
+def test_mint_false_still_keeps_a_client_supplied_id() -> None:
+    """Preserving an id is not minting one -- this is how a phone adds a
+    genuinely new shot to a mirror: the SPA mints the id itself."""
+    shots = [
+        {"id": "manual-from-the-spa", "candidate_number": None, "time": 6.5},
+        {"candidate_number": 4, "time": 7.0},
+    ]
+    assert ensure_shot_ids(shots, mint=False) == 0
+    assert shots[0]["id"] == "manual-from-the-spa"
+    assert "id" not in shots[1]
+
+
+def test_mint_false_leaves_an_unusable_id_untouched() -> None:
+    """A non-string id is not an id, and with minting off there is nothing
+    to replace it with. Leaving it is the safe outcome, not an oversight:
+    the merge's unstamped-shot guard uses the same ``_has_usable_id``
+    predicate, so the shot still reads as unstamped there and the gate
+    refuses the section rather than keying on 42.
+    """
+    shots = [{"id": 42, "candidate_number": 4, "time": 6.0}]
+    assert ensure_shot_ids(shots, mint=False) == 0
+    assert shots[0]["id"] == 42
+
+
 def test_a_real_string_id_is_never_rewritten() -> None:
     """The invariant the above must not break: a persisted id is a shot's
     identity across a nudge, so it survives even when it looks derivable."""
@@ -184,29 +217,109 @@ def _stamp_through_the_save_boundary(tmp_path: Path, subdir: str, time: float) -
     return response.json()
 
 
-def test_independent_stamping_diverges_pending_task_7(tmp_path: Path) -> None:
-    """PINS A KNOWN GAP -- this asserts the WRONG outcome on purpose.
+def _accept_a_legacy_shot_on_a_mirror(client: TestClient, match_id: str, name: str, *, time: float) -> dict:
+    """Seed a mirror holding one unstamped legacy manual shot, then accept it.
 
-    ``ensure_shot_ids`` runs at the save boundary on *both* sides, and
-    ``derive_shot_id`` keys a candidate-less shot off its rounded time. So a
-    desktop that nudges a legacy manual shot to 6.52 and saves stamps
-    ``manual-t6520``, while a phone that accepts the mirror unchanged stamps
-    ``manual-t6500``. Both documents are then fully stamped, the sync
-    merge's unstamped gate passes, and one shot unions into two with no note
-    at all.
-
-    Task 7 makes the desktop the sole minter for a mirror, which is what
-    closes this. It changes the save boundary this test drives, so when it
-    lands this test breaks -- delete it then. It exists so the gap fails
-    loudly rather than sitting in a comment nobody re-reads.
+    Goes through the real triage-accept handler on a ``desktop``-origin
+    match -- the one hosted save boundary a phone can reach on a mirror
+    (``_mirror_triage_write_re`` exempts it from the read-only gate) and
+    therefore the one that must not mint. Seeds through the desktop-sync
+    doc routes, exactly as ``_seed_mirror`` does, and returns the stored
+    audit doc as it stands after the accept.
     """
-    desktop = _stamp_through_the_save_boundary(tmp_path, "desktop", 6.52)
-    mirror = _stamp_through_the_save_boundary(tmp_path, "mirror", 6.5)
-    assert desktop["shots"][0]["id"] == "manual-t6520"
-    assert mirror["shots"][0]["id"] == "manual-t6500"
+    _seed_mirror(client, match_id, name)
+    roster = match_model.Match(match_id=match_id, name=name, shooters=["alice"], stages=[]).model_dump(
+        mode="json"
+    )
+    put_roster = client.put(
+        f"/api/sync/matches/{match_id}/docs/match", params={"expected_version": 1}, json=roster
+    )
+    assert put_roster.status_code == 200, put_roster.text
 
-    # Base is what the desktop last pulled: the mirror as it stands. The
-    # divergence is then purely the two independent stampings.
+    stage = StageEntry(stage_number=1, stage_name="Stage One", time_seconds=30.0)
+    project_doc = MatchProject(name=name, competitor_name="Alice", stages=[stage]).model_dump(mode="json")
+    put_project = client.put(
+        f"/api/sync/matches/{match_id}/docs/project/alice",
+        params={"expected_version": 0},
+        json=project_doc,
+    )
+    assert put_project.status_code == 200, put_project.text
+
+    audit_url = f"/api/sync/matches/{match_id}/docs/audit/alice/1"
+    doc = {
+        "stage_number": 1,
+        "beep_time": 5.0,
+        # No id and no candidate_number: a legacy manual shot, the one
+        # shape whose derived id moves when the time moves.
+        "shots": [
+            {
+                "shot_number": 1,
+                "candidate_number": None,
+                "time": time,
+                "ms_after_beep": int(round((time - 5.0) * 1000)),
+            }
+        ],
+        "audit_events": [],
+    }
+    seeded = client.put(audit_url, params={"expected_version": 0}, json=doc)
+    assert seeded.status_code == 200, seeded.text
+
+    accepted = client.post(_alias_url(match_id, "shooters/alice/stages/1/audit/accept"))
+    assert accepted.status_code == 200, accepted.text
+    stored = client.get(audit_url)
+    assert stored.status_code == 200, stored.text
+    return stored.json()["doc"]
+
+
+def test_a_mirror_accept_does_not_invent_an_id(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The desktop is the sole minter for a mirror."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    doc = _accept_a_legacy_shot_on_a_mirror(client, "01JSHOTIDMIRRORMINT00001", "mirror-mint", time=6.5)
+    assert "id" not in doc["shots"][0]
+    # The accept itself still ran: this is a suppressed mint, not a
+    # suppressed save.
+    assert doc["shots"][0].get("interval_class")
+    assert [e["kind"] for e in doc["audit_events"]] == ["accept"]
+
+
+def test_two_sided_stamping_no_longer_duplicates_a_legacy_shot(
+    tmp_path: Path,
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The failure Task 7 closes, driven through both real save boundaries.
+
+    One legacy manual shot exists on both sides. The desktop nudges it to
+    6.52 and saves; the phone accepts the mirror, still at 6.5. Before this
+    task both sides minted -- ``manual-t6520`` and ``manual-t6500`` for the
+    same shot -- both documents then read as fully stamped, the merge's
+    unstamped-shot gate passed, and the shot unioned into two entries with
+    no note at all.
+
+    Now only the desktop mints. The mirror's copy reaches the merge
+    unstamped, so the gate fires: one shot out, local's, and the refusal is
+    stated. The desktop's next sync stamps its local doc in the migration
+    pass and pushes it, which is what gets both sides onto one id.
+    """
+    # The desktop side is a *local*-mode app, so it has to be built with the
+    # hosted env vars out of the way -- ``create_app`` reads them once, at
+    # creation, and the hosted client above is already built.
+    with pytest.MonkeyPatch.context() as env:
+        env.delenv("SPLITSMITH_MODE", raising=False)
+        env.delenv("SPLITSMITH_DATABASE_URL", raising=False)
+        desktop = _stamp_through_the_save_boundary(tmp_path, "desktop", 6.52)
+    assert desktop["shots"][0]["id"] == "manual-t6520"
+
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    mirror = _accept_a_legacy_shot_on_a_mirror(client, "01JSHOTIDMIRRORMINT00002", "two-sided", time=6.5)
+    assert "id" not in mirror["shots"][0]
+
+    # Base is what the desktop last pulled: the mirror as it stood.
     result = merge_audit_doc(
         copy.deepcopy(mirror),
         desktop,
@@ -215,7 +328,6 @@ def test_independent_stamping_diverges_pending_task_7(tmp_path: Path) -> None:
         local_ts=datetime(2026, 8, 12, 12, 0, tzinfo=UTC),
         remote_ts=datetime(2026, 8, 12, 13, 0, tzinfo=UTC),
     )
-    ids = [s["id"] for s in result.doc["shots"]]
-    assert ids == ["manual-t6500", "manual-t6520"]  # the gap: one shot, two entries
-    assert result.notes == []  # and silent, which is why Task 7 exists
+    assert [s["id"] for s in result.doc["shots"]] == ["manual-t6520"]  # one shot, not two
+    assert any("without a persisted id" in note for note in result.notes)  # and not silent
     assert result.conflicts == []

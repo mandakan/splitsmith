@@ -23,10 +23,11 @@ from pydantic import Field
 from ..match_model import load_match_or_legacy
 from ..match_project import PROJECT_FILE, MatchProject, atomic_write_json
 from ..observability import PhaseTimer
+from ..shot_id import ensure_shot_ids
 from .base import load_base_doc, save_base_doc
 from .client import HostedSyncClient, SyncClientError, SyncVersionConflict
 from .merge import MergeResult, merge_audit_doc, merge_project_doc
-from .plan import build_push_plan
+from .plan import _AUDIT_FILENAME_RE, build_push_plan
 from .pull import RemoteDoc, plan_pull, remote_doc_key
 from .push import PushReport, _timed_phase, run_push
 from .state import SyncState, load_sync_state, save_sync_state
@@ -43,6 +44,7 @@ class SyncReport(PushReport):
     notes: list[str] = Field(default_factory=list)
     reprocess_videos: int = 0
     attempts: int = 1
+    shot_ids_migrated: int = 0
 
 
 def format_sync_message(report: SyncReport) -> str:
@@ -57,6 +59,8 @@ def format_sync_message(report: SyncReport) -> str:
         message += f"; {len(report.conflicts)} conflict(s) resolved - see job details"
     if report.reprocess_videos:
         message += f"; {report.reprocess_videos} video(s) need re-processing"
+    if report.shot_ids_migrated:
+        message += f"; {report.shot_ids_migrated} audit doc(s) stamped with shot ids"
     return message
 
 
@@ -67,6 +71,47 @@ def _local_doc_ts(path: Path) -> datetime:
         return datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
     except OSError:
         return datetime.fromtimestamp(0, tz=UTC)
+
+
+def migrate_shot_ids(match_root: Path) -> int:
+    """Stamp shot ids across every local audit doc that lacks them.
+
+    The desktop is the sole minter of shot ids for a mirror (#631 Task 7),
+    so a legacy document -- one written before shots carried an ``id`` --
+    has to be stamped *here*, on the desktop, before the pull. Otherwise
+    nothing stamps it: the hosted save boundary no longer mints for a
+    mirror, and the merge's unstamped-shot gate would refuse the whole shot
+    section on every sync, so a phone's edits to that stage would never be
+    adopted.
+
+    Returns the number of documents actually rewritten, which is why the
+    caller can report it: a second run finds nothing missing, stamps
+    nothing, writes nothing, and returns 0. Unparseable or oddly-shaped
+    documents are left alone -- ``build_push_plan``'s preflight is what
+    reports those, and it has already run.
+    """
+    _, shooter_roots = load_match_or_legacy(match_root)
+    migrated = 0
+    for shooter_root in shooter_roots.values():
+        audit_dir = shooter_root / "audit"
+        if not audit_dir.is_dir():
+            continue
+        for audit_path in sorted(audit_dir.iterdir()):
+            if not _AUDIT_FILENAME_RE.match(audit_path.name):
+                continue
+            try:
+                doc = json.loads(audit_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(doc, dict):
+                continue
+            shots = doc.get("shots")
+            if not isinstance(shots, list):
+                continue
+            if ensure_shot_ids([s for s in shots if isinstance(s, dict)]):
+                atomic_write_json(audit_path, doc)
+                migrated += 1
+    return migrated
 
 
 def run_sync(
@@ -85,6 +130,14 @@ def run_sync(
         if preflight.errors:
             raise SyncClientError("\n".join(preflight.errors))
         match_id, match_name = preflight.match_id, preflight.match_name
+
+    # After the preflight (a tree that can't push isn't rewritten) and
+    # before the pull: the merge keys shot membership on the id, so every
+    # local audit doc must carry one before the first remote doc arrives.
+    with _timed_phase(timings, timer, "migrate_shot_ids"):
+        shot_ids_migrated = migrate_shot_ids(match_root)
+        if shot_ids_migrated:
+            on_progress(0.0, f"stamped shot ids on {shot_ids_migrated} audit doc(s)")
 
     with _timed_phase(timings, timer, "ensure_match"):
         client.ensure_match(match_id, match_name)
@@ -136,6 +189,7 @@ def run_sync(
         notes=all_notes,
         reprocess_videos=len(reprocess),
         attempts=attempt,
+        shot_ids_migrated=shot_ids_migrated,
     )
     report.timings.update(timings)
     return report

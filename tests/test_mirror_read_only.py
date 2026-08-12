@@ -348,6 +348,122 @@ def test_mirror_allows_triage_attention(
     assert resp.status_code != 403, resp.text
 
 
+def _legacy_audit_doc(time: float) -> dict:
+    """One kept manual shot with no id and no candidate_number.
+
+    The one shape whose derived id is not convergent across two sides:
+    ``derive_shot_id`` keys it off the rounded time, so a nudge moves it.
+    """
+    return {
+        "stage_number": 1,
+        "beep_time": 5.0,
+        "shots": [
+            {
+                "shot_number": 1,
+                "candidate_number": None,
+                "time": time,
+                "ms_after_beep": int(round((time - 5.0) * 1000)),
+            }
+        ],
+        "audit_events": [],
+    }
+
+
+def _seed_mirror_stage_with_audit(client: TestClient, match_id: str, name: str, doc: dict) -> None:
+    """Mirror with shooter "alice", stage 1, and ``doc`` as her stage-1 audit."""
+    _seed_mirror(client, match_id, name)
+    roster = match_model.Match(match_id=match_id, name=name, shooters=["alice"], stages=[]).model_dump(
+        mode="json"
+    )
+    put_roster = client.put(_sync_docs_url(match_id, "match"), params={"expected_version": 1}, json=roster)
+    assert put_roster.status_code == 200, put_roster.text
+    stage = StageEntry(stage_number=1, stage_name="Stage One", time_seconds=30.0)
+    project_doc = MatchProject(name=name, competitor_name="Alice", stages=[stage]).model_dump(mode="json")
+    put_project = client.put(
+        f"/api/sync/matches/{match_id}/docs/project/alice",
+        params={"expected_version": 0},
+        json=project_doc,
+    )
+    assert put_project.status_code == 200, put_project.text
+    put_audit = client.put(
+        f"/api/sync/matches/{match_id}/docs/audit/alice/1", params={"expected_version": 0}, json=doc
+    )
+    assert put_audit.status_code == 200, put_audit.text
+
+
+def _seed_native_stage_with_audit(db_url: str, user_email: str, match_id: str, name: str, doc: dict) -> None:
+    """Same shape as ``_seed_mirror_stage_with_audit`` for a native match.
+
+    The sync doc routes refuse a native match (409 ``not_a_mirror``), so
+    the docs go in through the store the hosted app reads them from.
+    """
+    engine = create_engine(db_url)
+    sf = sessionmaker(engine)
+
+    async def _seed() -> None:
+        async with sf() as s:
+            row = (await s.execute(_select(User).where(User.email == user_email))).scalar_one()
+            user_id = row.id
+        store = ProjectStateStore(sf, user_id=user_id)
+        match = match_model.Match(match_id=match_id, name=name, shooters=["alice"], stages=[])
+        await store.save_match(match_id, match.model_dump(mode="json"), expected_version=0)
+        stage = StageEntry(stage_number=1, stage_name="Stage One", time_seconds=30.0)
+        project = MatchProject(name=name, competitor_name="Alice", stages=[stage])
+        await store.save_project(match_id, "alice", project.model_dump(mode="json"), expected_version=0)
+        await store.save_audit(match_id, "alice", 1, doc, expected_version=0)
+
+    asyncio.run(_seed())
+
+
+def test_mirror_accept_does_not_mint_a_shot_id(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The desktop is the sole minter of shot ids for a mirror (#631 Task 7).
+
+    ``derive_shot_id`` keys a candidate-less shot off its rounded time, so
+    a hosted mint here and a desktop mint on a nudged copy of the same shot
+    produce two ids for one shot - which the sync merge cannot tell from
+    two shots.
+    """
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRSHOTIDMINT0000001"
+    _seed_mirror_stage_with_audit(client, match_id, "mirror-mint", _legacy_audit_doc(6.5))
+
+    accepted = client.post(_alias_url(match_id, "shooters/alice/stages/1/audit/accept"))
+    assert accepted.status_code == 200, accepted.text
+
+    stored = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit"))
+    assert stored.status_code == 200, stored.text
+    shot = stored.json()["shots"][0]
+    assert "id" not in shot
+    # Suppressing the mint must not suppress the accept itself.
+    assert shot.get("interval_class")
+
+
+def test_native_match_accept_still_mints_a_shot_id(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """A native hosted match has no desktop, so there is no second minter
+    and the save boundary keeps stamping exactly as it did."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "native-shot-id-mint"
+    seed_match(hosted_env, "owner@example.com", match_id)
+    _seed_native_stage_with_audit(
+        hosted_env, "owner@example.com", match_id, "Native Mint", _legacy_audit_doc(6.5)
+    )
+
+    accepted = client.post(_alias_url(match_id, "shooters/alice/stages/1/audit/accept"))
+    assert accepted.status_code == 200, accepted.text
+
+    stored = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit"))
+    assert stored.status_code == 200, stored.text
+    assert stored.json()["shots"][0]["id"] == "manual-t6500"
+
+
 def test_mirror_still_blocks_audit_put(
     hosted_env: str,
     hosted_app: tuple[TestClient, _CapturingSender],

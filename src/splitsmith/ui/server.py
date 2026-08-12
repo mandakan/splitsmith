@@ -1056,6 +1056,32 @@ current_match_origin: ContextVar[str | None] = ContextVar("splitsmith_current_ma
 # response payloads before returning them to anonymous viewers.
 current_share_request: ContextVar[bool] = ContextVar("splitsmith_current_share_request", default=False)
 
+
+def _may_mint_shot_ids() -> bool:
+    """Whether this request's save boundary may invent a shot id (#631 Task 7).
+
+    False on a ``desktop``-origin mirror. ``derive_shot_id`` keys a
+    candidate-less manual shot off its rounded time, so a desktop that
+    nudged such a shot to 6.52 s and a phone that accepted the mirror at
+    6.5 s would mint ``manual-t6520`` and ``manual-t6500`` for the same
+    shot. Both sides then look fully stamped, the sync merge's
+    unstamped-shot gate passes, and one shot unions into two with no note
+    at all. The desktop is therefore the sole minter for a mirror: it
+    stamps legacy documents in the sync run's migration pass and pushes
+    them here.
+
+    A shot that arrives carrying a client-supplied id keeps it either way
+    -- ``ensure_shot_ids`` never rewrites one -- which is what lets a phone
+    add a genuinely new shot to a mirror.
+
+    Reads the origin the alias middleware already pinned for this request,
+    the same fact the read-only-mirror gate reads, so this costs no extra
+    ``matches_store`` query. ``None`` outside an aliased request (local
+    mode, legacy bare-path traffic) -> mint, i.e. today's behaviour.
+    """
+    return current_match_origin.get() != "desktop"
+
+
 # TTL (seconds) for presigned media GET URLs. Short for share requests so
 # that revoking a token takes effect within one window; generous for owner
 # sessions that span a long editing or review session.
@@ -10511,8 +10537,10 @@ def create_app(
             shot_dicts = [s for s in shots if isinstance(s, dict)]
             # Identity before anything else: the sync merge keys shot
             # membership on this, and shot_number cannot serve because it
-            # renumbers on every insert.
-            ensure_shot_ids(shot_dicts)
+            # renumbers on every insert. On a mirror the desktop is the sole
+            # minter (see _may_mint_shot_ids) - a client-supplied id is still
+            # kept, so a shot the SPA added arrives with its own identity.
+            ensure_shot_ids(shot_dicts, mint=_may_mint_shot_ids())
             coach_module.classify_intervals_in_dicts(shot_dicts, CoachAutoClassifyConfig())
         # Sync merge unions audit_events by id (bidirectional sync
         # slice); the SPA authors events without one, so stamp them here
@@ -10582,7 +10610,11 @@ def create_app(
             kept = _kept_audit_shots(shots)
             if not kept:
                 raise HTTPException(status_code=409, detail="nothing_to_accept")
-            ensure_shot_ids(shots)
+            # Mirror-exempt from the read-only gate (slice 4), so this is the
+            # save boundary a phone actually reaches on a mirror - and the one
+            # that must not mint a second id for a legacy shot the desktop
+            # will stamp itself. See _may_mint_shot_ids.
+            ensure_shot_ids(shots, mint=_may_mint_shot_ids())
             coach_module.classify_intervals_in_dicts(shots, CoachAutoClassifyConfig())
             if any(not s.get("interval_class") for s in kept):
                 raise HTTPException(status_code=409, detail="not_fully_classified")
