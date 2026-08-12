@@ -166,6 +166,42 @@ def _shots_by_number(doc: dict | None) -> dict[int, dict]:
     return out
 
 
+#: Membership is expressed in the event vocabulary the desktop audit screen
+#: already writes -- no new kinds. A shot is present after the newest of
+#: these events mentioning its id, and shots with no membership event at all
+#: are original detector output.
+_MEMBERSHIP_PRESENT = frozenset({"marker_added_manual", "marker_kept"})
+_MEMBERSHIP_ABSENT = frozenset({"marker_rejected", "marker_deleted"})
+
+
+def _membership_verdicts(events: list) -> dict[str, bool]:
+    """Latest present/absent verdict per shot id, by event timestamp.
+
+    Ordered by ``ts``, not list position: the event union concatenates two
+    histories, so the list order after a merge is not chronological.
+    """
+    latest: dict[str, tuple[str, bool]] = {}
+    for event in events or []:
+        if not isinstance(event, dict):
+            continue
+        kind = event.get("kind")
+        if kind in _MEMBERSHIP_PRESENT:
+            present = True
+        elif kind in _MEMBERSHIP_ABSENT:
+            present = False
+        else:
+            continue
+        payload = event.get("payload")
+        shot_id = payload.get("id") if isinstance(payload, dict) else None
+        if not isinstance(shot_id, str) or not shot_id:
+            continue
+        ts = str(event.get("ts") or "")
+        previous = latest.get(shot_id)
+        if previous is None or ts >= previous[0]:
+            latest[shot_id] = (ts, present)
+    return {shot_id: present for shot_id, (_, present) in latest.items()}
+
+
 def _coach_unit(shot: dict) -> dict:
     return {k: shot.get(k) for k in COACH_FIELDS}
 

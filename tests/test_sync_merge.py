@@ -2,7 +2,7 @@
 
 from datetime import UTC, datetime
 
-from splitsmith.sync.merge import merge_audit_doc, merge_project_doc
+from splitsmith.sync.merge import _membership_verdicts, merge_audit_doc, merge_project_doc
 
 T_OLD = datetime(2026, 8, 10, 10, 0, tzinfo=UTC)
 T_NEW = datetime(2026, 8, 10, 12, 0, tzinfo=UTC)
@@ -298,3 +298,50 @@ def test_project_updated_at_stamp_is_not_a_tripwire():
     remote["updated_at"] = "2026-08-11T10:00:00+00:00"
     r = merge_project_doc(base, local, remote, doc_key="project/alice", local_ts=T_OLD, remote_ts=T_NEW)
     assert not r.notes
+
+
+# -- membership verdicts (Task 4) ----------------------------------------
+
+
+def _ev(kind: str, shot_id: str, ts: str) -> dict:
+    return {"id": f"{kind}-{ts}", "ts": ts, "kind": kind, "payload": {"id": shot_id}}
+
+
+def test_membership_reads_the_existing_marker_vocabulary() -> None:
+    verdicts = _membership_verdicts(
+        [
+            _ev("marker_added_manual", "manual-a", "2026-08-12T10:00:00Z"),
+            _ev("marker_kept", "cand-4", "2026-08-12T10:01:00Z"),
+            _ev("marker_rejected", "cand-9", "2026-08-12T10:02:00Z"),
+            _ev("marker_deleted", "manual-b", "2026-08-12T10:03:00Z"),
+        ]
+    )
+    assert verdicts == {
+        "manual-a": True,
+        "cand-4": True,
+        "cand-9": False,
+        "manual-b": False,
+    }
+
+
+def test_latest_event_wins_regardless_of_list_order() -> None:
+    """A union merge concatenates two histories; order is not chronological."""
+    verdicts = _membership_verdicts(
+        [
+            _ev("marker_rejected", "cand-4", "2026-08-12T11:00:00Z"),
+            _ev("marker_kept", "cand-4", "2026-08-12T10:00:00Z"),
+        ]
+    )
+    assert verdicts == {"cand-4": False}
+
+
+def test_unrelated_and_malformed_events_are_ignored() -> None:
+    verdicts = _membership_verdicts(
+        [
+            {"kind": "save", "ts": "2026-08-12T10:00:00Z", "payload": {}},
+            {"kind": "marker_time_changed", "ts": "2026-08-12T10:01:00Z", "payload": {"id": "cand-4"}},
+            {"kind": "marker_kept", "ts": "2026-08-12T10:02:00Z"},
+            "not a dict",
+        ]
+    )
+    assert verdicts == {}
