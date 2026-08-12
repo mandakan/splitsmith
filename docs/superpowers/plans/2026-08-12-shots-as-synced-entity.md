@@ -975,10 +975,11 @@ git commit -m "feat(sync): resolve shot membership from the existing marker even
 - Modify: `tests/test_sync_merge.py`
 
 **Interfaces:**
-- Consumes: `_membership_verdicts` from Task 4, shot ids from Task 1.
+- Consumes: `_membership_verdicts` from Task 4; `ensure_shot_ids` from Task 1, imported into `merge.py` as `from ..shot_id import ensure_shot_ids`.
 - Produces: `merge_audit_doc` merging shot membership, `time`, `ms_after_beep` and coach fields keyed on `id`; `_shots_by_id(doc) -> dict[str, dict]` replacing `_shots_by_number`.
 
 **Merge rules:**
+- **Ids first.** Both sides are passed through `ensure_shot_ids` before anything is keyed. A document written before Task 1 shipped has no ids at all, and keying it would drop every shot; the derivation is deterministic, so stamping here mints the same id on both sides for the same pre-existing shot. This is a pure function, so it does not violate the module's no-I/O rule.
 - Membership: union both sides by id, then apply the verdicts. A shot with no verdict is original detector output and is kept.
 - `time`: last-writer-wins per id, using the existing `_resolve_unit` against the base, with the doc timestamps as tie-break - the same machinery the beep group already uses.
 - `ms_after_beep`: recomputed from the merged `time` and the doc's `beep_time`, never merged directly. It is derived, so merging it independently could contradict the time.
@@ -990,6 +991,7 @@ git commit -m "feat(sync): resolve shot membership from the existing marker even
 Append to `tests/test_sync_merge.py`:
 
 ```python
+import copy
 from datetime import UTC, datetime
 
 from splitsmith.sync.merge import merge_audit_doc
@@ -1073,6 +1075,32 @@ def test_a_deleted_shot_is_not_resurrected_by_the_other_side() -> None:
         base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS
     )
     assert result.doc["shots"] == []
+
+
+def test_a_legacy_doc_with_no_ids_keeps_its_shots() -> None:
+    """Documents written before shot ids shipped must survive a merge.
+
+    Without the ensure_shot_ids pass these shots key to nothing and are
+    dropped when the merged list is rebuilt -- a silent total data loss.
+    """
+    legacy = {
+        "beep_time": 5.0,
+        "shots": [
+            {"shot_number": 1, "candidate_number": 4, "time": 6.0, "ms_after_beep": 1000},
+            {"shot_number": 2, "candidate_number": None, "time": 6.5, "ms_after_beep": 1500},
+        ],
+        "audit_events": [],
+    }
+    result = merge_audit_doc(
+        copy.deepcopy(legacy),
+        copy.deepcopy(legacy),
+        copy.deepcopy(legacy),
+        doc_key="stage1",
+        local_ts=_LOCAL_TS,
+        remote_ts=_REMOTE_TS,
+    )
+    assert len(result.doc["shots"]) == 2
+    assert [s["id"] for s in result.doc["shots"]] == ["cand-4", "manual-t6500"]
 
 
 def test_promote_then_delete_round_trips_to_absent() -> None:
@@ -1163,9 +1191,20 @@ Delete the existing per-shot coach loop and the remote-only note loop (lines
     merged_events = merged.get("audit_events") or []
     verdicts = _membership_verdicts(merged_events)
 
+    # Stamp ids before keying anything. A doc written before shot ids
+    # shipped has none, and _shots_by_id would skip every shot -- which
+    # would then be dropped when merged["shots"] is rebuilt below. The
+    # derivation is deterministic, so both sides mint the same id for the
+    # same pre-existing shot.
+    remote_for_merge = copy.deepcopy(remote)
+    for doc in (merged, remote_for_merge):
+        shots_list = doc.get("shots")
+        if isinstance(shots_list, list):
+            ensure_shot_ids([s for s in shots_list if isinstance(s, dict)])
+
     base_shots = _shots_by_id(base)
     local_shots = _shots_by_id(merged)
-    remote_shots = _shots_by_id(remote)
+    remote_shots = _shots_by_id(remote_for_merge)
 
     resolved: dict[str, dict] = {}
     for shot_id in list(local_shots) + [k for k in remote_shots if k not in local_shots]:
