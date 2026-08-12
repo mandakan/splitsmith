@@ -77,7 +77,7 @@ def derive_shot_id(shot: dict[str, Any]) -> str:
     return f"manual-{uuid.uuid4().hex}"
 
 
-def _has_usable_id(shot: dict[str, Any]) -> bool:
+def has_usable_id(shot: dict[str, Any]) -> bool:
     """Whether a shot already carries an id worth keeping.
 
     Only a non-empty string counts. A truthy *non-string* ``id`` -- an int
@@ -85,6 +85,11 @@ def _has_usable_id(shot: dict[str, Any]) -> bool:
     key on it, and treating it as present made the shot invisible to the
     keying and to the merge's unstamped guard at the same time, so it
     vanished from a merge with no note at all.
+
+    Public because the coach payload has to answer the same question (#844):
+    an id it cannot address the by-id route with must reach the client as
+    ``null`` so the client falls back to the positional route, rather than
+    as itself, which would send it to a route that can only 404.
     """
     shot_id = shot.get("id")
     return isinstance(shot_id, str) and bool(shot_id)
@@ -148,10 +153,10 @@ def ensure_shot_ids(shots: list[dict[str, Any]], *, mint: bool = True) -> int:
     client-supplied id keeps it either way, which is what lets a phone add
     a genuinely new shot to a mirror -- the SPA mints that id itself.
     """
-    taken = {shot["id"] for shot in shots if isinstance(shot, dict) and _has_usable_id(shot)}
+    taken = {shot["id"] for shot in shots if isinstance(shot, dict) and has_usable_id(shot)}
     added = 0
     for shot in shots:
-        if not isinstance(shot, dict) or _has_usable_id(shot):
+        if not isinstance(shot, dict) or has_usable_id(shot):
             continue
         convergent = _candidate_number(shot) is not None
         if not mint and not convergent:

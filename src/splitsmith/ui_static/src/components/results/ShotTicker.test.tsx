@@ -19,6 +19,7 @@ const BEEP = 5;
 
 function makeShot(n: number, timeFromBeep: number): CoachShot {
   return {
+    id: null,
     shot_number: n,
     ms_after_beep: timeFromBeep * 1000,
     time_from_beep: timeFromBeep,

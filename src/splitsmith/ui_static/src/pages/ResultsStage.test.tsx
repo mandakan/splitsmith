@@ -49,11 +49,12 @@ beforeAll(() => {
   })) as unknown as typeof window.matchMedia;
 });
 
-function makeCoach(shots: CoachShot[] = []): CoachStageResponse {
+function makeCoach(shots: CoachShot[] = [], version = 4): CoachStageResponse {
   return {
     stage_number: 2,
     stage_name: "Steel Rush",
     beep_time: 5,
+    version,
     videos: [{ path: "trimmed/stage2.mp4", role: "primary", beep_in_clip: 5 }],
     shots,
   };
@@ -66,6 +67,7 @@ function makeShot(
   cls: CoachIntervalClass | null,
 ): CoachShot {
   return {
+    id: `cand-${n}`,
     shot_number: n,
     ms_after_beep: timeFromBeep * 1000,
     time_from_beep: timeFromBeep,
@@ -208,10 +210,13 @@ describe("ResultsStage reclassify flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
 
     await waitFor(() => {
-      expect(api.patchStageShotCoach).toHaveBeenCalledWith("anna", 2, 1, {
-        interval_class: "movement",
-        interval_class_source: "manual",
-      });
+      expect(api.patchStageShotCoach).toHaveBeenCalledWith(
+        "anna",
+        2,
+        expect.objectContaining({ id: "cand-1", shot_number: 1 }),
+        { interval_class: "movement", interval_class_source: "manual" },
+        4,
+      );
     });
 
     expect(await screen.findByText("Shot 1 - Movement")).toBeInTheDocument();
@@ -242,12 +247,40 @@ describe("ResultsStage reclassify flow", () => {
     // immediately, before the re-patch resolves.
     expect(screen.queryByRole("button", { name: "Undo" })).not.toBeInTheDocument();
     expect(api.patchStageShotCoach).toHaveBeenCalledTimes(2);
-    expect(api.patchStageShotCoach).toHaveBeenLastCalledWith("anna", 2, 1, {
-      clear_class: true,
-    });
+    expect(api.patchStageShotCoach).toHaveBeenLastCalledWith(
+      "anna",
+      2,
+      expect.objectContaining({ shot_number: 1 }),
+      { clear_class: true },
+      expect.any(Number),
+    );
 
     resolveUndo(makeCoach(shots));
     expect(await screen.findByText("Change undone")).toBeInTheDocument();
+  });
+
+  it("undo sends the version the apply's response returned, not the one the page loaded", async () => {
+    // #844: the guard value is only useful if it is current. The apply
+    // bumps the doc, so the version the page first read is stale by the
+    // time Undo re-patches -- sending it would 409 every undo on a shot
+    // that has to use the positional fallback.
+    const shots = [makeShot(1, 1.5, 1.5, "split")];
+    renderStage("/match/m1/results/anna/2", SOLO, shots); // loads at version 4
+    vi.mocked(api.patchStageShotCoach).mockResolvedValueOnce(makeCoach(shots, 5));
+
+    const chip = await screen.findByRole("button", { name: /^Reclassify shot 1 / });
+    fireEvent.click(chip);
+    fireEvent.click(screen.getByRole("radio", { name: "Movement" }));
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+
+    const undoButton = await screen.findByRole("button", { name: "Undo" });
+    vi.mocked(api.patchStageShotCoach).mockResolvedValueOnce(makeCoach(shots, 6));
+    fireEvent.click(undoButton);
+
+    await waitFor(() => {
+      expect(api.patchStageShotCoach).toHaveBeenCalledTimes(2);
+    });
+    expect(vi.mocked(api.patchStageShotCoach).mock.calls[1][4]).toBe(5);
   });
 
   it("stale-close guard: a slower in-flight patch resolving must not yank a newer sheet closed", async () => {

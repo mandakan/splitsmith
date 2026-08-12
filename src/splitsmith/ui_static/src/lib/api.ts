@@ -1087,6 +1087,12 @@ export type CoachIntervalClass =
 export type CoachIntervalClassSource = "auto" | "manual";
 
 export interface CoachShot {
+  /** Stable shot id (#844) -- what ``patchStageShotCoach`` addresses the
+   *  by-id route with. ``null`` when the stored doc has no usable id for
+   *  this shot (a legacy doc no save boundary has stamped, or a
+   *  hand-edited non-string id); the patch then falls back to the
+   *  positional route guarded by ``expected_version``. */
+  id: string | null;
   shot_number: number;
   ms_after_beep: number;
   /** Seconds from the beep. */
@@ -1120,6 +1126,12 @@ export interface CoachStageResponse {
   /** Where the beep falls in the served primary clip; same coordinate
    *  system as ``shots[i].time_absolute``. */
   beep_time: number;
+  /** Version of the audit doc this response was built from (#844). Feed it
+   *  back as ``expected_version`` on a positional shot PATCH. Every coach
+   *  response carries the version *after* whatever save produced it, so
+   *  replacing coach state with a PATCH's response keeps the value fresh
+   *  for the next patch. Always 0 in local mode, where files do not lock. */
+  version: number;
   videos: CoachVideoEntry[];
   shots: CoachShot[];
 }
@@ -1191,6 +1203,9 @@ export interface CoachShotPatch {
   improvement_flag?: boolean | null;
   coaching_note?: string | null;
   clear_note?: boolean;
+  /** Set by ``patchStageShotCoach`` on the positional fallback only --
+   *  callers pass the version separately rather than composing it in. */
+  expected_version?: number;
 }
 
 export interface StageAudit {
@@ -3370,16 +3385,44 @@ export const api = {
       },
     ),
 
+  /** Patch one shot's coach annotation (#844).
+   *
+   *  Prefers the by-id route, which is immune to renumbering: ``shot_number``
+   *  is positional, so an insert or delete anywhere earlier in the stage
+   *  shifts it and an annotation composed against a stale number lands on
+   *  the neighbouring shot. A shot the server could not give a usable id
+   *  falls back to the positional route, guarded by ``expectedVersion`` --
+   *  the server refuses the patch outright rather than applying it to
+   *  whatever now sits at that index.
+   *
+   *  ``expectedVersion`` is deliberately *not* sent on the by-id route: an
+   *  id does not renumber, so the guard buys nothing there and would 409
+   *  whenever the client's version has legitimately moved on (an Undo
+   *  re-patch after the first patch bumped the doc, say). Pass
+   *  ``coach.version`` from the response the shot was read out of; each
+   *  PATCH returns a fresh ``CoachStageResponse`` that replaces it. */
   patchStageShotCoach: (
     slug: string,
     stageNumber: number,
-    shotNumber: number,
+    shot: Pick<CoachShot, "id" | "shot_number">,
     patch: CoachShotPatch,
-  ) =>
-    request<CoachStageResponse>(
-      `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/shots/${shotNumber}/coach`,
-      { method: "PATCH", json: patch },
-    ),
+    expectedVersion?: number,
+  ) => {
+    const shots = `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/shots`;
+    if (shot.id) {
+      return request<CoachStageResponse>(
+        `${shots}/by-id/${encodeURIComponent(shot.id)}/coach`,
+        { method: "PATCH", json: patch },
+      );
+    }
+    return request<CoachStageResponse>(`${shots}/${shot.shot_number}/coach`, {
+      method: "PATCH",
+      json:
+        expectedVersion === undefined
+          ? patch
+          : { ...patch, expected_version: expectedVersion },
+    });
+  },
 
   /** Per-stage histograms + summary stats for the Coach distributions
    *  panel (#163). Empty classes still appear with count=0 so the UI

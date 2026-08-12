@@ -982,6 +982,20 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   const [noteDraft, setNoteDraft] = useState("");
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const shotListRef = useRef<HTMLDivElement | null>(null);
+  // Guard value for the positional shot PATCH (#844). A ref rather than
+  // reading ``coach``: patchShot is memoised on [slug, stage], so the
+  // ``coach`` it closes over is the one from the render that created it -
+  // null on mount, and stale after every patch that follows.
+  const coachVersionRef = useRef<number | undefined>(undefined);
+
+  // The only writer of coach state, so the guard value cannot fall out of
+  // step with the document it guards. Written here rather than in an effect
+  // on ``coach``: an effect lands a commit later, and a second patch fired
+  // before that commit would send the version the first one just replaced.
+  const applyCoach = useCallback((next: CoachStageResponse | null) => {
+    coachVersionRef.current = next?.version;
+    setCoach(next);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -996,7 +1010,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
         ]);
         if (!alive) return;
         setProject(p);
-        setCoach(c);
+        applyCoach(c);
         setBaselines(baselinesFromMatchDistributions(dist));
         if (c && c.shots.length > 0) {
           setActiveShotNumber(c.shots[0].shot_number);
@@ -1008,7 +1022,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
     return () => {
       alive = false;
     };
-  }, [slug, stage]);
+  }, [applyCoach, slug, stage]);
 
   useEffect(() => {
     if (!coach || activeShotNumber == null) return;
@@ -1061,27 +1075,33 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
     setReclassifying(true);
     try {
       const c = await api.reclassifyStageCoach(slug, stage);
-      setCoach(c);
+      applyCoach(c);
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
     } finally {
       setReclassifying(false);
     }
-  }, [slug, stage]);
+  }, [applyCoach, slug, stage]);
 
   const patchShot = useCallback(
     async (
-      shotNumber: number,
+      shot: CoachShot,
       patch: Parameters<typeof api.patchStageShotCoach>[3],
     ) => {
       try {
-        const c = await api.patchStageShotCoach(slug, stage, shotNumber, patch);
-        setCoach(c);
+        const c = await api.patchStageShotCoach(
+          slug,
+          stage,
+          shot,
+          patch,
+          coachVersionRef.current,
+        );
+        applyCoach(c);
       } catch (e) {
         setError(e instanceof ApiError ? e.detail : String(e));
       }
     },
-    [slug, stage],
+    [applyCoach, slug, stage],
   );
 
   const seekToShot = useCallback((shot: CoachShot) => {
@@ -1295,18 +1315,18 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
               noteDraft={noteDraft}
               onNoteChange={setNoteDraft}
               onSave={() =>
-                void patchShot(activeShot.shot_number, {
+                void patchShot(activeShot, {
                   coaching_note: noteDraft || null,
                 })
               }
               onClassify={(cls) =>
-                void patchShot(activeShot.shot_number, {
+                void patchShot(activeShot, {
                   interval_class: cls,
                   interval_class_source: "manual",
                 })
               }
               onToggleFlag={() =>
-                void patchShot(activeShot.shot_number, {
+                void patchShot(activeShot, {
                   improvement_flag: !activeShot.improvement_flag,
                 })
               }
