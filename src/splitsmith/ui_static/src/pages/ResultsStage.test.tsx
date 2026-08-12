@@ -111,6 +111,7 @@ function renderStage(path: string, shooters: ShooterListEntry[], shots: CoachSho
     shooters,
     refresh: vi.fn(),
     origin: null,
+    capabilities: null,
   };
   return render(
     <MemoryRouter initialEntries={[path]}>

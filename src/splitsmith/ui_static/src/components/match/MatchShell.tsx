@@ -44,8 +44,10 @@ import {
 } from "@/components/match/MatchSidebar";
 import {
   api,
+  capabilityDenied,
   READ_ONLY_MIRROR_MESSAGE,
   type Job,
+  type MatchCapability,
   type MatchOrigin,
   type MatchProject,
   type ScoreboardIdentity,
@@ -119,6 +121,11 @@ export interface MatchShellOutletContext {
    *  The shell itself already renders the persistent banner and relies on
    *  the server's 403 as the enforcement backstop. */
   origin: MatchOrigin | null;
+  /** Null until the shooter list has loaded once. Gate write affordances
+   *  on `capabilityDenied(capabilities, "edit")` (#756), never on
+   *  `origin` - origin is provenance, capabilities are the authoritative
+   *  writability signal and stay in lockstep with the server's 403 guard. */
+  capabilities: MatchCapability[] | null;
   /** The shell's one jobs-poller snapshot (#631 Task 11's SyncCard reads
    *  this for its "a sync_match job is pending/running" check rather than
    *  running a second poller - lib/jobs.ts's "one poller per shell"
@@ -246,6 +253,9 @@ export function MatchShell() {
   // renders once we actually know the match is a desktop mirror, not on
   // every load by default (#631 Task 10).
   const [origin, setOrigin] = useState<MatchOrigin | null>(null);
+  const [capabilities, setCapabilities] = useState<MatchCapability[] | null>(
+    null,
+  );
   const [identity, setIdentity] = useState<ScoreboardIdentity | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [beepReviewPending, setBeepReviewPending] = useState<number>(0);
@@ -334,6 +344,7 @@ export function MatchShell() {
         if (!alive) return;
         setShooters(r.shooters);
         setOrigin(r.origin);
+        setCapabilities(r.capabilities);
         setMatchValid(true);
         // No URL slug -> fall back to the footage-bearing default shooter
         // (same rule the nav links use) so the sidebar + Overview base
@@ -355,6 +366,7 @@ export function MatchShell() {
         if (!alive) return;
         setShooters([]);
         setOrigin(null);
+        setCapabilities(null);
         // Unknown match_id (alias middleware 404) -- bounce to picker.
         // Other failures (409 no_match for legacy single-shooter
         // projects) also land here; the picker handles both.
@@ -604,7 +616,13 @@ export function MatchShell() {
     >
       {slot ? createPortal(contextRow, slot) : null}
 
-      {origin === "desktop" ? (
+      {capabilityDenied(capabilities, "edit") ? (
+        // READ_ONLY_MIRROR_MESSAGE's copy ("this is a desktop mirror...")
+        // assumes every edit-denied, non-share context is a desktop
+        // mirror - true for every caller today. If a second edit-denied
+        // context shows up (something other than a mirror or a share
+        // view), this banner needs capability-specific copy instead of
+        // reusing this string as-is.
         <div
           role="status"
           className="flex items-center gap-2.5 border-b border-amber-400/40 bg-amber-400/10 px-4 py-2 font-mono text-xs uppercase tracking-[0.06em] text-amber-600 sm:px-7"
@@ -700,6 +718,7 @@ export function MatchShell() {
               shooters,
               refresh: () => setRefreshKey((k) => k + 1),
               origin,
+              capabilities,
               jobs,
               jobsState,
             }}

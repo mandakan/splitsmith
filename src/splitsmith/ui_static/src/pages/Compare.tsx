@@ -38,13 +38,15 @@ import {
   useRef,
   useState,
 } from "react";
-import { useLocation, useNavigate, useParams } from "react-router-dom";
+import { useLocation, useNavigate, useOutletContext, useParams } from "react-router-dom";
 
 import { Avatar } from "@/components/ui";
 import { Button } from "@/components/ui/button";
+import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import {
   ApiError,
   api,
+  capabilityDenied,
   type CompareShooterRecord,
   type CompareStageResponse,
   type MatchProject,
@@ -69,6 +71,16 @@ export function Compare() {
   const href = useMatchHref();
   const shareView = isShareView(location.pathname);
   const stageNumber = stageParam ? Number(stageParam) : NaN;
+  // Compare also mounts under ShareShell, which does supply a full
+  // MatchShellOutletContext (capabilities: [] - see ShareShell.tsx). The
+  // pre-existing `shareView` guard below excludes the rebuild-trim-cache
+  // button entirely on that mount, before `editDenied` is ever consulted,
+  // so the (always-empty) capabilities on the share mount never matter.
+  const ctx = useOutletContext<MatchShellOutletContext | undefined>();
+  // #756: rebuild-trim-caches POSTs a job - an edit-class write the
+  // mirror guard 403s. Hidden (not disabled) here: it's one action among
+  // several on a page whose primary value is reading.
+  const editDenied = capabilityDenied(ctx?.capabilities, "edit");
 
   const [project, setProject] = useState<MatchProject | null>(null);
   const [bundle, setBundle] = useState<CompareStageResponse | null>(null);
@@ -445,6 +457,7 @@ export function Compare() {
             navigate(href("audit", slug, String(stageNumber)))
           }
           shareView={shareView}
+          editDenied={editDenied}
         />
       ) : null}
 
@@ -520,10 +533,15 @@ function UnfinishedShootersBanner({
   unfinished,
   onOpenInAudit,
   shareView,
+  editDenied,
 }: {
   unfinished: CompareShooterRecord[];
   onOpenInAudit: (slug: string) => void | Promise<void>;
   shareView: boolean;
+  /** #756: rebuild-trim-caches is an edit-class write the mirror guard
+   *  403s. Hidden alongside the share-view branch below - it's one
+   *  action among several here, not the page's primary value. */
+  editDenied: boolean;
 }) {
   const [busySlug, setBusySlug] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -588,13 +606,16 @@ function UnfinishedShootersBanner({
               <span className="font-semibold text-ink-2">{s.name}</span>
               {/* Both CTAs are operator actions (rebuild POSTs, audit
                   needs a session) - a share viewer just sees the name
-                  and the "missing footage" status above (#700). */}
+                  and the "missing footage" status above (#700). Rebuild
+                  is additionally hidden (not disabled) on a read-only
+                  mirror (#756): one action among several here, on a
+                  page whose primary value is reading. */}
               {shareView ? null : auditedButUncached ? (
                 queued ? (
                   <span className="text-[0.6875rem] uppercase tracking-[0.08em] text-done">
                     Build queued -- check Jobs
                   </span>
-                ) : (
+                ) : editDenied ? null : (
                   <button
                     type="button"
                     onClick={() => rebuild(s.slug)}

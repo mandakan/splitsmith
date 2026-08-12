@@ -204,6 +204,7 @@ describe("MatchShell mobile drawer account menu (#550)", () => {
       match_name: "Bromma Classic 2026",
       shooters: [makeShooter("mathias", "Mathias")],
       origin: "local",
+      capabilities: ["edit", "review"],
     });
     vi.mocked(api.getProject).mockResolvedValue(makeProject());
     vi.mocked(api.getBeepQueue).mockResolvedValue({
@@ -212,6 +213,7 @@ describe("MatchShell mobile drawer account menu (#550)", () => {
       confirmed_count: 0,
       stages: [],
       origin: "local",
+      capabilities: ["edit", "review"],
     });
     vi.mocked(api.getTriageSummary).mockResolvedValue({ flagged_count: 0 });
     vi.mocked(api.listJobs).mockResolvedValue([]);

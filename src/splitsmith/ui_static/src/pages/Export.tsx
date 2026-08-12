@@ -40,7 +40,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { Navigate, useParams } from "react-router-dom";
+import { Navigate, useOutletContext, useParams } from "react-router-dom";
 
 import {
   LedCtaButton,
@@ -48,9 +48,12 @@ import {
   SelectField,
   StageChip,
 } from "@/components/export/primitives";
+import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import {
   ApiError,
   api,
+  capabilityDenied,
+  READ_ONLY_MIRROR_MESSAGE,
   type ExportOverview,
   type Job,
   type MatchExportResult,
@@ -133,6 +136,11 @@ export function Export() {
 
 function ExportInner({ slug }: { slug: string }) {
   const { mode: deploymentMode } = useDeploymentMode();
+  const ctx = useOutletContext<MatchShellOutletContext>();
+  // #756: gate on the server-derived capability, not this page's own
+  // `project` (that's the per-shooter export overview, not the match
+  // capability set) - a mirror match 403s every write here.
+  const editDenied = capabilityDenied(ctx?.capabilities, "edit");
   const [project, setProject] = useState<MatchProject | null>(null);
   const [overview, setOverview] = useState<ExportOverview | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -320,6 +328,10 @@ function ExportInner({ slug }: { slug: string }) {
   }, [cameraSelectors, project]);
 
   async function changeCamera(value: string) {
+    // Belt-and-suspenders: the control itself is disabled below, this
+    // guards the rare path where onChange still fires (e.g. programmatic
+    // dispatch) before the server 403s it anyway.
+    if (editDenied) return;
     const next = value || null;
     if (next === (project?.compare_camera ?? null)) return;
     setError(null);
@@ -421,7 +433,11 @@ function ExportInner({ slug }: { slug: string }) {
   const busy =
     job?.status === "pending" || job?.status === "running" || queueing;
   const canExport =
-    !busy && mode !== "compare" && orderedSelection.length > 0 && !!project;
+    !busy &&
+    mode !== "compare" &&
+    orderedSelection.length > 0 &&
+    !!project &&
+    !editDenied;
 
   /** Queue one trim-only job per selected stage through the per-stage
    *  export endpoint. The write flags are literals rather than the
@@ -617,6 +633,8 @@ function ExportInner({ slug }: { slug: string }) {
                   value={project?.compare_camera ?? ""}
                   onChange={(v) => void changeCamera(v)}
                   options={cameraOptions}
+                  disabled={editDenied}
+                  title={READ_ONLY_MIRROR_MESSAGE}
                 />
                 <p className="self-end text-[0.75rem] leading-relaxed text-muted">
                   Which of this shooter's cameras the compare grid uses.
@@ -995,6 +1013,7 @@ function ExportInner({ slug }: { slug: string }) {
                 busyLabel={trimsOnly ? "Queueing..." : "Exporting..."}
                 onClick={() => void submitExport()}
                 disabled={!canExport}
+                title={editDenied ? READ_ONLY_MIRROR_MESSAGE : undefined}
               />
               {busy && job?.message && (
                 <div className="mt-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">

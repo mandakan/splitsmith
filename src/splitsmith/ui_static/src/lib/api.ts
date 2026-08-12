@@ -277,6 +277,9 @@ export interface MatchProject {
    *  "local"). Only GET .../project injects it - mutating routes echo the
    *  doc without it, so treat absence as "unknown, not a mirror". */
   origin?: MatchOrigin;
+  /** See :type:`MatchCapability` (#756). Only GET .../project injects it,
+   *  same as `origin` - mutating routes echo the doc without it. */
+  capabilities?: MatchCapability[];
 }
 
 /** GET /api/scoreboard/source response. ``mode === "local"`` means the
@@ -1461,6 +1464,23 @@ export interface DeleteProjectOptions {
  *  its own matches (the field is always "local" there). */
 export type MatchOrigin = "hosted" | "desktop" | "local";
 
+/** Server-derived per-match capability set (#756), computed next to the
+ *  403 guard so payload and enforcement can never disagree. Gate write
+ *  affordances on these, never on `origin` - origin is provenance
+ *  (picker flag) and media-surface behavior (#821), not writability. */
+export type MatchCapability = "edit" | "review" | "share_manage";
+
+/** True when the capability set is KNOWN and lacks `cap`. Null or
+ *  undefined means "not loaded yet" and denies nothing - pages keep
+ *  their current optimistic render until the shell's first fetch
+ *  resolves, exactly as the origin-based gates behaved. */
+export function capabilityDenied(
+  caps: MatchCapability[] | null | undefined,
+  cap: MatchCapability,
+): boolean {
+  return Array.isArray(caps) && !caps.includes(cap);
+}
+
 /** Detailed RecentProject with on-disk metadata (`?detail=true`, #322). */
 export interface RecentProjectDetail {
   path: string;
@@ -1628,6 +1648,8 @@ export interface ShooterListResponse {
   shooters: ShooterListEntry[];
   /** See :type:`MatchOrigin` (#631). */
   origin: MatchOrigin;
+  /** See :type:`MatchCapability` (#756). */
+  capabilities: MatchCapability[];
 }
 
 /** One uploaded raw video in the operator's hosted-mode object
@@ -1776,6 +1798,8 @@ export interface BeepQueueResponse {
    *  "local" in local mode - lets the SPA pick the honest media surface
    *  (snippet vs proxy) without a second round trip. */
   origin: MatchOrigin;
+  /** See :type:`MatchCapability` (#756). */
+  capabilities: MatchCapability[];
 }
 
 /** Desktop-pushed beep review snippet peaks for a mirror video (slice 3).

@@ -144,6 +144,10 @@ export function ShareShell() {
     shooters,
     refresh,
     origin,
+    // The public share surface advertises no capabilities today - it
+    // never renders a write CTA regardless of origin. When write-scoped
+    // share tokens land, this reads the share payload's own field instead.
+    capabilities: [],
   };
   return (
     <ShareFrame>

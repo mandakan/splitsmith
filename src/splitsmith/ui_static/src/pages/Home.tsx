@@ -39,6 +39,7 @@ import { SyncCard } from "@/components/match/SyncCard";
 import {
   api,
   apiErrorText,
+  capabilityDenied,
   type MatchProject,
   type MatchStageDefinition,
   type ShooterListEntry,
@@ -83,11 +84,13 @@ export function Home() {
   const project = ctx?.project ?? null;
   const { matchId } = useParams<{ matchId: string }>();
   const { mode: deploymentMode } = useDeploymentMode();
-  // A desktop-origin mirror is read-only here (#631 Task 10): the server
-  // 403s every mutation except share management and match deletion, so
-  // the add-shooter and stage-editor entry points this page renders are
-  // hidden rather than left as dead ends that just bounce off a 403.
-  const readOnlyMirror = ctx?.origin === "desktop";
+  // #756: gate on the server-derived capability, not origin - a mirror
+  // that completes its transfer becomes editable with no change here.
+  // Origin stays provenance-only. The server 403s every mutation except
+  // share management and match deletion, so the add-shooter and
+  // stage-editor entry points this page renders are hidden rather than
+  // left as dead ends that just bounce off a 403.
+  const editDenied = capabilityDenied(ctx?.capabilities, "edit");
   const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
   // The stage editor's read model is the MATCH's stage list, not
   // ``project.stages``. Those are different documents and they diverge
@@ -302,7 +305,7 @@ export function Home() {
               Export Match
             </span>
           </Button>
-          {readOnlyMirror ? null : (
+          {editDenied ? null : (
             <Button
               variant="outline"
               onClick={openEditStages}
@@ -333,7 +336,7 @@ export function Home() {
             shooters={shooters}
             navSlug={navSlug}
             onEditStages={openEditStages}
-            readOnlyMirror={readOnlyMirror}
+            editDenied={editDenied}
           />
         ) : (
           <ActiveVariant
@@ -341,12 +344,12 @@ export function Home() {
             rows={stageRows}
             totals={totals}
             shooters={shooters}
-            readOnlyMirror={readOnlyMirror}
+            editDenied={editDenied}
           />
         )}
       </div>
 
-      {matchStages && !readOnlyMirror ? (
+      {matchStages && !editDenied ? (
         <EditStagesDrawer
           open={editStagesOpen}
           onClose={() => setEditStagesOpen(false)}
@@ -368,13 +371,13 @@ function ActiveVariant({
   rows,
   totals,
   shooters,
-  readOnlyMirror,
+  editDenied,
 }: {
   project: MatchProject;
   rows: StageMatrixRow[];
   totals: MatchTotals;
   shooters: ShooterListEntry[];
-  readOnlyMirror: boolean;
+  editDenied: boolean;
 }) {
   const navigate = useNavigate();
   const href = useMatchHref();
@@ -533,7 +536,7 @@ function ActiveVariant({
             }
           />
         )}
-        {readOnlyMirror ? null : (
+        {editDenied ? null : (
           <AddShooterCard onClick={() => navigate(href("shooters"))} />
         )}
       </div>
@@ -574,14 +577,14 @@ function EmptyVariant({
   shooters,
   navSlug,
   onEditStages,
-  readOnlyMirror,
+  editDenied,
 }: {
   project: MatchProject;
   stageViews: StageView[];
   shooters: ShooterListEntry[];
   navSlug: string | null;
   onEditStages: () => void;
-  readOnlyMirror: boolean;
+  editDenied: boolean;
 }) {
   const navigate = useNavigate();
   const href = useMatchHref();
@@ -679,7 +682,7 @@ function EmptyVariant({
             onAddLink={() => navigate(ingestHref)}
           />
         )}
-        {readOnlyMirror ? null : (
+        {editDenied ? null : (
           <div
             className="flex items-center gap-3.5 rounded-xl border border-dashed border-rule-strong bg-transparent px-4 py-4 text-led"
             role="button"
@@ -720,7 +723,7 @@ function EmptyVariant({
           cta="Start ingest"
           onClick={() => navigate(ingestHref)}
         />
-        {readOnlyMirror ? null : (
+        {editDenied ? null : (
           <HelpCard
             icon={<Users className="size-4" />}
             title="Bring squadmates"
@@ -729,7 +732,7 @@ function EmptyVariant({
             onClick={() => navigate(href("shooters"))}
           />
         )}
-        {readOnlyMirror ? null : (
+        {editDenied ? null : (
           <HelpCard
             icon={<Layers className="size-4" />}
             title="Adjust the stage list"

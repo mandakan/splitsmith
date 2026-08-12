@@ -8,9 +8,13 @@
  * - hosted renders "Browse files" and no picker affordance;
  * - a window-level drop on the hosted page enqueues into useUploads;
  * - the same drop in local mode enqueues nothing (DropGuard owns the
- *   toast; covered in DropGuard.test.tsx).
+ *   toast; covered in DropGuard.test.tsx);
+ * - a "hosted" mirror (desktop-origin project lacking the edit
+ *   capability) never arms the drop listener at all - the misleading
+ *   overlay must not show, let alone enqueue an upload that 403s on
+ *   attachRawVideo (#756 review fix 1).
  */
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -58,6 +62,18 @@ const emptyProject = {
   stages: [],
   unassigned_videos: [],
   last_scanned_dir: null,
+} as unknown as MatchProject;
+
+// A desktop-origin mirror: "hosted" deployment mode (the SPA is served
+// from the cloud), but the project's server-derived capability set lacks
+// "edit" - the shape fix 1 targets.
+const mirrorProject = {
+  name: "Test Match",
+  stages: [],
+  unassigned_videos: [],
+  last_scanned_dir: null,
+  origin: "desktop",
+  capabilities: ["review"],
 } as unknown as MatchProject;
 
 const health = {
@@ -161,5 +177,41 @@ describe("Ingest empty state", () => {
       fireEvent.drop(window, { dataTransfer: { files: [file], types: ["Files"] } });
     });
     expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("a hosted mirror without edit never enqueues a window-level drop (#756)", async () => {
+    vi.mocked(useDeploymentMode).mockReturnValue({ mode: "hosted", resolved: true });
+    vi.mocked(api.getProject).mockResolvedValue(mirrorProject);
+    renderIngest();
+    // The project loads async; the gate is optimistic (editDenied=false)
+    // until it resolves, so wait for the settled, disabled control
+    // before asserting the drop is a no-op - otherwise the drop can race
+    // ahead of the project fetch and pass for the wrong reason.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /browse files/i })).toBeDisabled(),
+    );
+    const file = new File(["x"], "GH010001.MP4", { type: "video/mp4" });
+    act(() => {
+      fireEvent.drop(window, { dataTransfer: { files: [file], types: ["Files"] } });
+    });
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("a hosted mirror without edit never arms the full-page drop overlay (#756)", async () => {
+    vi.mocked(useDeploymentMode).mockReturnValue({ mode: "hosted", resolved: true });
+    vi.mocked(api.getProject).mockResolvedValue(mirrorProject);
+    renderIngest();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /browse files/i })).toBeDisabled(),
+    );
+    const file = new File(["x"], "GH010001.MP4", { type: "video/mp4" });
+    act(() => {
+      fireEvent.dragEnter(window, { dataTransfer: { files: [file], types: ["Files"] } });
+    });
+    // hostedDropActive gates useWindowFileDrag's `enabled` -- if it's
+    // false, the hook never attaches its dragenter listener, so the
+    // full-page "Drop videos to upload" overlay must never appear even
+    // after a real drag-enter.
+    expect(screen.queryByText(/drop videos to upload/i)).not.toBeInTheDocument();
   });
 });

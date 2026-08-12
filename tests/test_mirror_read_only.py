@@ -809,3 +809,51 @@ def test_beep_snippet_404_when_absent(
     )
     assert peaks.status_code == 404
     assert peaks.json()["detail"] == "beep_snippet_not_available"
+
+
+# Forward-compat: the guard is driven by the capability table, not origin.
+
+
+def test_guard_follows_capability_set_not_origin(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#756 forward-compat: the 403 must be derived from the capability
+    set, not from origin directly - flipping the set for a desktop
+    mirror (what the #631 transfer endgame will do) must open the guard
+    with no other change."""
+    import splitsmith.ui.server as server_module
+
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed_mirror(client, "mirror-fc", "Forward Compat")
+
+    monkeypatch.setattr(
+        server_module,
+        "capabilities_for_origin",
+        lambda origin: frozenset({"edit", "review", "share_manage"}),
+    )
+    resp = client.post(_alias_url("mirror-fc", "match/shooters"), json={"name": "Anna"})
+    # The middleware no longer blocks it; whatever the handler says, it
+    # must not be the mirror 403.
+    assert resp.status_code != 403, resp.text
+
+
+def test_payload_capabilities_match_guard(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """#756: the serialized set is the same one the guard enforces - a
+    mirror advertises review+share_manage, never edit."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed_mirror(client, "mirror-caps", "Caps Match")
+
+    shooters = client.get(_alias_url("mirror-caps", "match/shooters"))
+    assert shooters.status_code == 200, shooters.text
+    assert shooters.json()["capabilities"] == ["review", "share_manage"]
+
+    queue = client.get(_alias_url("mirror-caps", "match/beep-queue"))
+    assert queue.status_code == 200, queue.text
+    assert queue.json()["capabilities"] == ["review", "share_manage"]

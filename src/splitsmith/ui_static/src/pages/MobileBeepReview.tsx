@@ -18,7 +18,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { Loader2 } from "lucide-react";
 
-import { api } from "@/lib/api";
+import { api, READ_ONLY_MIRROR_MESSAGE } from "@/lib/api";
 import type { BeepQueueItem, BeepSnippetPeaks } from "@/lib/api";
 import { useBeepQueue, DESTRUCTIVE_RERUN_WARNING, keyOf } from "@/lib/useBeepQueue";
 import { BeepWaveformPicker } from "@/components/BeepSection";
@@ -98,16 +98,18 @@ export function MobileBeepReview() {
             >
               Skip
             </button>
-            {!q.isMirror ? (
-              <button
-                type="button"
-                disabled={q.busy}
-                onClick={() => setSheet("redetect")}
-                className="min-h-11 flex-1 rounded border border-rule px-4 text-sm text-ink"
-              >
-                Re-detect
-              </button>
-            ) : null}
+            {/* #756: disabled (not hidden) when edit is denied - a
+             *  missing Re-detect next to a live Confirm would read as a
+             *  bug. Confirm/skip stay live regardless (review-class). */}
+            <button
+              type="button"
+              disabled={q.busy || q.editDenied}
+              onClick={() => setSheet("redetect")}
+              title={q.editDenied ? READ_ONLY_MIRROR_MESSAGE : undefined}
+              className="min-h-11 flex-1 rounded border border-rule px-4 text-sm text-ink disabled:opacity-40"
+            >
+              Re-detect
+            </button>
           </div>
           <div className="flex gap-2">
             <button

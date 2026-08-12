@@ -130,6 +130,7 @@ describe("Ingest add-footage (local)", () => {
       match_name: "Test Match",
       shooters: [],
       origin: "local",
+      capabilities: ["edit", "review"],
     });
     vi.mocked(api.getBeepQueue).mockResolvedValue({
       total_items: 0,
@@ -137,6 +138,7 @@ describe("Ingest add-footage (local)", () => {
       confirmed_count: 0,
       stages: [],
       origin: "local",
+      capabilities: ["edit", "review"],
     });
     vi.mocked(api.listFolder).mockResolvedValue(listing);
     vi.mocked(api.scanVideos).mockResolvedValue({

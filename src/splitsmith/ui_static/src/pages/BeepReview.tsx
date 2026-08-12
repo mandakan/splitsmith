@@ -49,6 +49,7 @@ import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/useConfirm";
 import {
   api,
+  READ_ONLY_MIRROR_MESSAGE,
   type BeepQueueItem,
   type RawVideoManifestEntry,
 } from "@/lib/api";
@@ -68,6 +69,7 @@ export function BeepReview() {
     setActiveKey,
     active,
     isMirror,
+    editDenied,
     busy,
     error,
     setError,
@@ -214,6 +216,7 @@ export function BeepReview() {
             item={active}
             mediaOnDesktop={isMirror}
             busy={busy}
+            editDenied={editDenied}
             onConfirm={(draftTime) =>
               void confirm(active, draftTime ?? undefined)
             }
@@ -520,6 +523,7 @@ function ActiveDetail({
   item,
   mediaOnDesktop,
   busy,
+  editDenied,
   onConfirm,
   onRedetect,
   redetecting,
@@ -533,6 +537,10 @@ function ActiveDetail({
    *  tell "generating" apart from "never coming". */
   mediaOnDesktop: boolean;
   busy: boolean;
+  /** #756: re-detect is an edit-class write the mirror guard 403s -
+   *  disabled (not hidden) so a missing re-detect next to a live
+   *  confirm button doesn't read as a bug. Confirm/skip stay live. */
+  editDenied: boolean;
   /** ``draftTime`` is the operator's manually-picked beep time (null
    *  when confirming the detector's candidate as-is). When set, the
    *  parent fires the override + re-trim chain before marking reviewed. */
@@ -963,8 +971,12 @@ function ActiveDetail({
                 type="button"
                 variant="outline"
                 onClick={onRedetect}
-                disabled={busy}
-                title="Discard this beep and re-run auto-detection from scratch"
+                disabled={busy || editDenied}
+                title={
+                  editDenied
+                    ? READ_ONLY_MIRROR_MESSAGE
+                    : "Discard this beep and re-run auto-detection from scratch"
+                }
               >
                 {redetecting ? (
                   <Loader2 className="size-3.5 animate-spin" aria-hidden />

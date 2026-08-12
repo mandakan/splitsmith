@@ -12,18 +12,24 @@ import { MemoryRouter } from "react-router-dom";
 import { useBeepQueue } from "./useBeepQueue";
 import * as api from "./api";
 
-vi.mock("./api", () => ({
-  api: {
-    getBeepQueue: vi.fn(),
-    confirmBeepInQueue: vi.fn(),
-    overrideBeepForVideo: vi.fn(),
-    detectBeepForVideo: vi.fn(),
-    pollJob: vi.fn(),
-  },
-  ApiError: class ApiError extends Error {
-    detail = "boom";
-  },
-}));
+vi.mock("./api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./api")>();
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      getBeepQueue: vi.fn(),
+      confirmBeepInQueue: vi.fn(),
+      overrideBeepForVideo: vi.fn(),
+      detectBeepForVideo: vi.fn(),
+      pollJob: vi.fn(),
+    },
+    // capabilityDenied and ApiError come from ``actual`` above (real
+    // implementations) - the hook under test calls capabilityDenied
+    // directly, so a hand-rolled duplicate here could silently drift
+    // from the source of truth instead of catching a regression in it.
+  };
+});
 
 const item = (over: Partial<api.BeepQueueItem> = {}): api.BeepQueueItem => ({
   slug: "alice",
@@ -52,6 +58,8 @@ const queue = (
   pending_count: items.length,
   confirmed_count: 0,
   origin,
+  capabilities:
+    origin === "desktop" ? ["review", "share_manage"] : ["edit", "review"],
   stages: [
     {
       stage_number: 1,
@@ -76,6 +84,16 @@ describe("useBeepQueue", () => {
     await waitFor(() => expect(result.current.data).not.toBeNull());
     expect(result.current.active?.video_id).toBe("v1");
     expect(result.current.isMirror).toBe(true);
+    // Desktop-origin queue() default is ["review", "share_manage"] -
+    // no "edit", so re-detect (an edit-class write) is denied.
+    expect(result.current.editDenied).toBe(true);
+  });
+
+  it("reports editDenied false when capabilities include edit", async () => {
+    vi.mocked(api.api.getBeepQueue).mockResolvedValue(queue([item()], "local"));
+    const { result } = renderHook(() => useBeepQueue(), { wrapper });
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+    expect(result.current.editDenied).toBe(false);
   });
 
   it("confirm with a draft calls override first, then confirm, then advances", async () => {
