@@ -36,6 +36,7 @@ from __future__ import annotations
 import asyncio
 import html
 import logging
+import math
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
@@ -45,8 +46,8 @@ from pydantic import BaseModel
 from .. import coach as coach_module
 from ..audit_data import audit_shots_to_engine_shots
 from ..overlay_theme import load_theme
-from ..share_card import MatchCard, RosterEntry, StageCard, card_hash, stage_figures
-from ..share_card_render import cached_card_png
+from ..share_card import CompareCard, MatchCard, RosterEntry, StageCard, card_hash, stage_figures
+from ..share_card_render import cached_card_png, render_card_png
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
@@ -97,7 +98,28 @@ def build_match_card(state: Any) -> MatchCard:
     )
 
 
-def build_stage_card(state: Any, slug: str, stage_number: int) -> StageCard | None:
+def _parse_moment_t(value: str | None) -> float | None:
+    """A moment timestamp from a query string, or None for anything else.
+
+    Same defensive stance as _parse_positive_int: a malformed value
+    degrades to the moment-free variant, never an error. Clamp bounds and
+    2-decimal rounding are the spec's cache-cardinality bound - at most
+    100 distinct keys per clamped second.
+    """
+    if value is None:
+        return None
+    try:
+        t = float(value)
+    except ValueError:
+        return None
+    if not math.isfinite(t):
+        return None
+    return round(max(-60.0, min(3600.0, t)), 2)
+
+
+def build_stage_card(
+    state: Any, slug: str, stage_number: int, *, moment_t: float | None = None
+) -> StageCard | None:
     """``None`` for an unknown slug or stage, or a stage with no shots --
     the caller then serves the match card instead."""
     try:
@@ -149,6 +171,7 @@ def build_stage_card(state: Any, slug: str, stage_number: int) -> StageCard | No
         # turns that falsy-but-"set" value into the omit case.
         stage_time=stg.time_seconds or None,
         figures=figures,
+        moment_t=moment_t,
     )
 
 
@@ -317,6 +340,18 @@ def _png_response(state: Any, token: str, card: MatchCard | StageCard, slug: str
     return Response(content=rendered.png, media_type="image/png", headers=headers)
 
 
+def _uncached_png_response(state: Any, card: MatchCard | StageCard | CompareCard) -> Response:
+    """Moment-variant cards: rendered per fetch, HTTP-cached only.
+
+    No storage involved by design - see render_card_png's docstring. The
+    plate keeps the short cache for the same reason _FALLBACK_PNG_HEADERS
+    exists on the cached path.
+    """
+    rendered = render_card_png(card, theme=load_theme("splitsmith"), rasterizer_factory=_chromium_factory)
+    headers = _FALLBACK_PNG_HEADERS if rendered.fell_back else _PNG_HEADERS
+    return Response(content=rendered.png, media_type="image/png", headers=headers)
+
+
 def _share_token(request: Request) -> str:
     """The raw share token, stashed by ``_share_alias`` on ``request.state``
     before it rewrites the URL down to the plain ``/api/{rest}`` path these
@@ -343,9 +378,12 @@ def share_stage_png(slug: str, stage: int, request: Request) -> Response:
     _hosted_gate()
     state = _state(request)
     token = _share_token(request)
-    card = build_stage_card(state, slug, stage)
+    moment_t = _parse_moment_t(request.query_params.get("t"))
+    card = build_stage_card(state, slug, stage, moment_t=moment_t)
     if card is None:
         return _png_response(state, token, build_match_card(state), None)
+    if moment_t is not None:
+        return _uncached_png_response(state, card)
     return _png_response(state, token, card, slug)
 
 
@@ -387,7 +425,8 @@ def share_stage_meta(slug: str, stage: int, request: Request) -> OgMeta:
     _hosted_gate()
     state = _state(request)
     token = _share_token(request)
-    card = build_stage_card(state, slug, stage)
+    moment_t = _parse_moment_t(request.query_params.get("t"))
+    card = build_stage_card(state, slug, stage, moment_t=moment_t)
     if card is None:
         # Mirrors share_stage_png's fallback: an unknown slug/stage, or a
         # stage with no audited shots, degrades to the match card rather
@@ -396,10 +435,15 @@ def share_stage_meta(slug: str, stage: int, request: Request) -> OgMeta:
     summary = f"{card.shot_count} shots"
     if card.stage_time is not None:
         summary = f"{summary} - {card.stage_time:.2f}s"
+    title = f"{card.shooter_name} - {card.stage_name} ({card.match_name})"
+    image_path = f"/api/share/{token}/og/{slug}/{stage}.png?v={card_hash(card)}"
+    if moment_t is not None:
+        title = f"{title} - moment at {moment_t:.2f}s"
+        image_path = f"{image_path}&t={moment_t:.2f}"
     return OgMeta(
-        title=f"{card.shooter_name} - {card.stage_name} ({card.match_name})",
+        title=title,
         description=summary,
-        image_path=f"/api/share/{token}/og/{slug}/{stage}.png?v={card_hash(card)}",
+        image_path=image_path,
         alt=f"Splitsmith stage card for {card.shooter_name}, {card.stage_name}",
     )
 
@@ -622,4 +666,7 @@ async def share_stage_shell(token: str, slug: str, stage: str, request: Request)
     if stage_number is None:
         return _shell(_generic_tags())
     og_meta_path = f"/api/share/{quote(token, safe='')}/og-meta/{quote(slug, safe='')}/{stage_number}"
+    moment_t = _parse_moment_t(request.query_params.get("t"))
+    if moment_t is not None:
+        og_meta_path = f"{og_meta_path}?t={moment_t:.2f}"
     return await _shell_response(request, og_meta_path)

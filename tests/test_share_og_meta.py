@@ -455,6 +455,61 @@ def test_a_stage_name_with_markup_does_not_break_out_of_the_meta_tag(hosted_env,
     assert payload not in html
 
 
+def test_stage_meta_with_moment_suffixes_title_and_image(hosted_env, hosted_app) -> None:
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed(hosted_env)
+    token = _share_token(client)
+    client.cookies.clear()
+
+    resp = client.get(f"/api/share/{token}/og-meta/{SLUG}/1?t=4.32")
+    assert resp.status_code == 200
+    meta = resp.json()
+    assert meta["title"].endswith(" - moment at 4.32s")
+    assert "&t=4.32" in meta["image_path"]
+
+
+def test_stage_shell_forwards_t_to_og_meta(hosted_env, hosted_app, monkeypatch) -> None:
+    from splitsmith.ui import share_og
+
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed(hosted_env)
+    token = _share_token(client)
+    client.cookies.clear()
+
+    seen: list[str] = []
+
+    async def _capture(request, path):
+        seen.append(path)
+        return None
+
+    monkeypatch.setattr(share_og, "_fetch_og_meta", _capture)
+    client.get(f"/share/{token}/results/{SLUG}/1?t=4.32")
+    assert seen == [f"/api/share/{token}/og-meta/{SLUG}/1?t=4.32"]
+
+
+def test_stage_shell_drops_junk_t(hosted_env, hosted_app, monkeypatch) -> None:
+    """?t=abc -> og_meta_path has no query string."""
+    from splitsmith.ui import share_og
+
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    _seed(hosted_env)
+    token = _share_token(client)
+    client.cookies.clear()
+
+    seen: list[str] = []
+
+    async def _capture(request, path):
+        seen.append(path)
+        return None
+
+    monkeypatch.setattr(share_og, "_fetch_og_meta", _capture)
+    client.get(f"/share/{token}/results/{SLUG}/1?t=abc")
+    assert seen == [f"/api/share/{token}/og-meta/{SLUG}/1"]
+
+
 def test_new_share_og_routes_404_outside_hosted_mode() -> None:
     """The whole share-og surface -- both og-meta JSON endpoints and all
     three shells -- is hosted-only, same idiom as the PNG routes. The

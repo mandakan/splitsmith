@@ -312,8 +312,8 @@ def test_a_legacy_unclassified_audit_is_healed_for_the_card(
     captured: list = []
     original_build_stage_card = share_og.build_stage_card
 
-    def _capturing_build_stage_card(state: object, slug: str, stage_number: int):
-        card = original_build_stage_card(state, slug, stage_number)
+    def _capturing_build_stage_card(state: object, slug: str, stage_number: int, **kwargs: object):
+        card = original_build_stage_card(state, slug, stage_number, **kwargs)
         captured.append(card)
         return card
 
@@ -344,6 +344,124 @@ def test_a_legacy_unclassified_audit_is_healed_for_the_card(
     assert version_after == version_before
     assert doc_after == doc_before
     assert all(s.get("interval_class") is None for s in doc_after["shots"])
+
+
+def _setup_shared_stage(hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender]) -> str:
+    """Same shape as ``_setup_shared_match``, but the shooter's stage 1
+    carries real audited shots -- ``_seed_state_docs`` alone (used by
+    ``_setup_shared_match``) leaves ``MatchProject`` with no stages at
+    all, so ``build_stage_card`` always returns ``None`` and every
+    request falls back to the match card, which would make the moment-t
+    plumbing below untestable."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    seed_match(hosted_env, "owner@example.com", MID)
+    _seed_legacy_stage_audit(hosted_env, "owner@example.com", MID, SLUG)
+    token = _create_share(client)
+    client.cookies.clear()
+    return token
+
+
+def test_moment_stage_png_renders_without_a_storage_write(
+    hosted_env: str,
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A moment card is rendered per fetch, never written to object
+    storage -- see ``render_card_png``'s docstring on why an unbounded
+    ``t`` cannot be cached by key. The share-creation warm already wrote
+    the moment-free match card under ``share-cards/``, so this pins that
+    the count does not move again on top of that."""
+    import boto3
+
+    from splitsmith.ui import share_og
+
+    token = _setup_shared_stage(hosted_env, hosted_app_with_storage)
+    client, _sender = hosted_app_with_storage
+
+    calls: list[object] = []
+    real = share_og.render_card_png
+
+    def _spy(card, **kwargs):
+        calls.append(card)
+        return real(card, **kwargs)
+
+    monkeypatch.setattr(share_og, "render_card_png", _spy)
+
+    s3 = boto3.client("s3", region_name="us-east-1")
+    put_count_before = s3.list_objects_v2(Bucket=BUCKET, Prefix="share-cards/").get("KeyCount", 0)
+
+    resp = client.get(f"/api/share/{token}/og/{SLUG}/1.png?t=4.32")
+
+    assert resp.status_code == 200
+    assert calls and calls[0].moment_t == 4.32
+
+    put_count_after = s3.list_objects_v2(Bucket=BUCKET, Prefix="share-cards/").get("KeyCount", 0)
+    assert put_count_after == put_count_before
+
+
+def test_moment_t_is_clamped_and_rounded(
+    hosted_env: str,
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """t=999999 clamps to 3600.0; t=-500 clamps to -60.0; junk t falls back
+    to the cached moment-free card (route behaves as if t were absent)."""
+    from splitsmith.ui import share_og
+
+    token = _setup_shared_stage(hosted_env, hosted_app_with_storage)
+    client, _sender = hosted_app_with_storage
+
+    calls: list[object] = []
+    real = share_og.render_card_png
+
+    def _spy(card, **kwargs):
+        calls.append(card)
+        return real(card, **kwargs)
+
+    monkeypatch.setattr(share_og, "render_card_png", _spy)
+
+    resp_high = client.get(f"/api/share/{token}/og/{SLUG}/1.png?t=999999")
+    assert resp_high.status_code == 200
+    assert calls[-1].moment_t == 3600.0
+
+    resp_low = client.get(f"/api/share/{token}/og/{SLUG}/1.png?t=-500")
+    assert resp_low.status_code == 200
+    assert calls[-1].moment_t == -60.0
+
+    # Junk t must behave exactly as if t were absent: the cached,
+    # storage-backed path (not render_card_png at all), same bytes and
+    # same year-long cache header as a request with no t.
+    no_t = client.get(f"/api/share/{token}/og/{SLUG}/1.png")
+    junk = client.get(f"/api/share/{token}/og/{SLUG}/1.png?t=abc")
+    assert junk.status_code == 200
+    assert junk.content == no_t.content
+    assert junk.headers["cache-control"] == no_t.headers["cache-control"]
+
+
+def test_junk_t_serves_the_plain_stage_card(
+    hosted_env: str,
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from splitsmith.ui import share_og
+
+    token = _setup_shared_stage(hosted_env, hosted_app_with_storage)
+    client, _sender = hosted_app_with_storage
+
+    calls: list[float | None] = []
+    real = share_og.build_stage_card
+
+    def _spy(state, slug, stage_number, **kwargs):
+        calls.append(kwargs.get("moment_t"))
+        return real(state, slug, stage_number, **kwargs)
+
+    monkeypatch.setattr(share_og, "build_stage_card", _spy)
+
+    resp = client.get(f"/api/share/{token}/og/{SLUG}/1.png?t=abc")
+
+    assert resp.status_code == 200
+    assert calls == [None]
 
 
 def test_png_routes_404_outside_hosted_mode() -> None:
