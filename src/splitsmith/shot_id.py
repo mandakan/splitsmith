@@ -11,8 +11,10 @@ which in practice is every shot. It is *convergent* across two sides only for
 the ``candidate_number`` case, though: a candidate-less manual shot keys off
 its rounded time, which moves when the shot is nudged, so two sides stamping
 it independently mint two different ids for one shot. Only one side may
-therefore mint -- the desktop -- see the ``mint`` argument to
-``ensure_shot_ids``. A shot with neither key (``Audit.tsx`` documents this
+therefore mint *that* non-convergent id -- the desktop -- see the ``mint``
+argument to ``ensure_shot_ids``; the ``candidate_number`` case is convergent
+regardless of ``mint``, since both sides derive the same id from the same
+number. A shot with neither key (``Audit.tsx`` documents this
 shape: a derived anchor shot the secondary couldn't snap, left with
 ``time: null``) has nothing stable to derive from and gets a minted,
 non-convergent id instead -- see ``derive_shot_id``.
@@ -67,17 +69,31 @@ def ensure_shot_ids(shots: list[dict[str, Any]], *, mint: bool = True) -> int:
     one already used in this document falls back to a minted id, so two
     manual shots on the same millisecond stay distinct.
 
-    ``mint=False`` leaves a shot with no usable id exactly as it arrived and
-    returns 0 for it. It exists because ``derive_shot_id`` is only
-    convergent for a shot carrying a ``candidate_number``: a candidate-less
-    manual shot keys off its *rounded time*, so two sides that stamp one
-    pre-existing shot independently -- a desktop that nudged it to 6.52 s,
-    a phone that accepted the mirror at 6.5 s -- mint ``manual-t6520`` and
-    ``manual-t6500`` for the same shot. Both documents then look fully
-    stamped, the sync merge's unstamped-shot gate passes, and the shot
-    unions into two. Two sides cannot derive different ids for one shot if
-    only one side ever derives, so the hosted save boundary passes
-    ``mint=False`` for a ``desktop``-origin mirror and leaves the minting
+    ``mint=False`` does *not* mean "no id is invented" -- it means "no
+    *non-convergent* id is invented". A shot carrying a ``candidate_number``
+    still gets ``cand-<n>`` derived under ``mint=False``: both sides compute
+    it from the same detector-assigned number, so there is no second-minter
+    risk, and the SPA relies on exactly this -- it omits ``id`` for a
+    detected shot on purpose and expects the server to derive ``cand-<n>``
+    (see ``audit-doc.test.ts``). Suppressing that derivation on a mirror
+    left every detected shot in a phone save unstamped, which made the
+    sync merge's unstamped-shot gate refuse the whole shot section on the
+    next desktop pull -- reverting the phone's edits, not just declining to
+    mint an id.
+
+    What ``mint=False`` does suppress is the two non-convergent branches of
+    ``derive_shot_id``: a candidate-less manual shot keys off its *rounded
+    time*, so two sides that stamp one pre-existing shot independently -- a
+    desktop that nudged it to 6.52 s, a phone that accepted the mirror at
+    6.5 s -- mint ``manual-t6520`` and ``manual-t6500`` for the same shot.
+    Both documents then look fully stamped, the sync merge's unstamped-shot
+    gate passes, and the shot unions into two. A shot with neither key would
+    otherwise get a random uuid4 id, which is non-convergent by
+    construction. Those two branches are left with no usable id exactly as
+    they arrived, and this function returns 0 for them. Two sides cannot
+    derive different ids for one shot if only one side ever derives the
+    non-convergent branches, so the hosted save boundary passes
+    ``mint=False`` for a ``desktop``-origin mirror and leaves *that* minting
     to the desktop (which does it on its own save boundary, in the sync
     migration pass, and in the merge itself).
 
@@ -90,7 +106,8 @@ def ensure_shot_ids(shots: list[dict[str, Any]], *, mint: bool = True) -> int:
     for shot in shots:
         if not isinstance(shot, dict) or _has_usable_id(shot):
             continue
-        if not mint:
+        convergent = shot.get("candidate_number") is not None
+        if not mint and not convergent:
             continue
         candidate_id = derive_shot_id(shot)
         if candidate_id in taken:

@@ -148,26 +148,61 @@ def test_mint_false_leaves_an_unstamped_shot_alone() -> None:
 
 def test_mint_false_still_keeps_a_client_supplied_id() -> None:
     """Preserving an id is not minting one -- this is how a phone adds a
-    genuinely new shot to a mirror: the SPA mints the id itself."""
+    genuinely new manual shot to a mirror: the SPA mints the id itself.
+
+    Both shots here are candidate-less (non-convergent), so neither gets a
+    derived id under ``mint=False``: the first already carries one and is
+    left alone, the second has none and stays that way.
+    """
     shots = [
         {"id": "manual-from-the-spa", "candidate_number": None, "time": 6.5},
-        {"candidate_number": 4, "time": 7.0},
+        {"candidate_number": None, "time": 7.0},
     ]
     assert ensure_shot_ids(shots, mint=False) == 0
     assert shots[0]["id"] == "manual-from-the-spa"
     assert "id" not in shots[1]
 
 
-def test_mint_false_leaves_an_unusable_id_untouched() -> None:
-    """A non-string id is not an id, and with minting off there is nothing
-    to replace it with. Leaving it is the safe outcome, not an oversight:
-    the merge's unstamped-shot guard uses the same ``_has_usable_id``
+def test_mint_false_still_derives_the_convergent_candidate_id() -> None:
+    """``mint=False`` does not mean "no id is invented" -- only the two
+    non-convergent branches of ``derive_shot_id`` are suppressed (#631
+    Task 6 fix round 1, Critical). A detected shot's ``cand-<n>`` is
+    convergent by construction: both sides derive it from the same
+    ``candidate_number``, so there is no second-minter risk, and it is
+    still derived with minting off. The SPA relies on exactly this -- it
+    omits ``id`` for a detected shot on purpose and expects the server to
+    derive ``cand-<n>`` -- so suppressing this branch on a mirror left
+    every detected shot in a phone save unstamped, which made the sync
+    merge's unstamped-shot gate refuse the whole shot section on the next
+    desktop pull.
+    """
+    shots = [{"candidate_number": 4, "time": 7.0}]
+    assert ensure_shot_ids(shots, mint=False) == 1
+    assert shots[0]["id"] == "cand-4"
+
+
+def test_mint_false_leaves_a_non_convergent_unusable_id_untouched() -> None:
+    """A non-string id is not an id, and for a candidate-less shot -- so no
+    convergent derivation is available under ``mint=False`` -- there is
+    nothing safe to replace it with. Leaving it is the outcome: the
+    merge's unstamped-shot guard uses the same ``_has_usable_id``
     predicate, so the shot still reads as unstamped there and the gate
     refuses the section rather than keying on 42.
     """
-    shots = [{"id": 42, "candidate_number": 4, "time": 6.0}]
+    shots = [{"id": 42, "candidate_number": None, "time": 6.0}]
     assert ensure_shot_ids(shots, mint=False) == 0
     assert shots[0]["id"] == 42
+
+
+def test_mint_false_replaces_an_unusable_id_when_convergent() -> None:
+    """Unlike the non-convergent case above, a candidate-carrying shot's
+    unusable id IS replaced under ``mint=False`` -- ``cand-<n>`` is
+    derivable and convergent regardless of what junk sat in ``id``
+    beforehand.
+    """
+    shots = [{"id": 42, "candidate_number": 4, "time": 6.0}]
+    assert ensure_shot_ids(shots, mint=False) == 1
+    assert shots[0]["id"] == "cand-4"
 
 
 def test_a_real_string_id_is_never_rewritten() -> None:

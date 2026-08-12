@@ -18,11 +18,17 @@ mergeable: an id minted inside the merge is not convergent across sides,
 because ``derive_shot_id`` keys a candidate-less shot off its rounded
 time and a nudge therefore changes it. If either side carries an
 unstamped shot the whole shot section is skipped with a note. That gate
-narrows the divergence class; the desktop being the sole minter for a
-mirror (``_may_mint_shot_ids`` in ui/server.py, ``migrate_shot_ids`` in
-sync/run.py, #631 Task 7, shipped) is what closes it -- a hosted save
-boundary never mints on a mirror, so the only way this gate still fires
-is a genuinely stale document that predates both sides' stamping.
+narrows the divergence class; the desktop being the sole minter of a
+*non-convergent* id for a mirror (``_may_mint_shot_ids`` in ui/server.py,
+``migrate_shot_ids`` in sync/run.py, #631 Task 7, shipped) is what closes
+it. A hosted save boundary still derives the convergent ``cand-<n>`` for a
+detected shot on a mirror -- both sides compute the same id from the same
+``candidate_number``, so there is no second-minter risk there (#631 Task 6
+fix round 1) -- it only declines to mint the two non-convergent branches
+(the time-keyed manual id and the no-key uuid4). So the only way this
+gate still fires is a genuinely stale document -- one predating both
+sides' stamping, or one holding a legacy candidate-less shot neither side
+has migrated yet.
 
 ``merge_audit_doc`` is consequently not a deterministic function of its
 inputs: ``ensure_shot_ids`` mints a uuid4 for a shot that can derive no
@@ -334,18 +340,23 @@ def merge_audit_doc(
         # The gate only sees shots still unstamped when the merge runs, and it
         # cannot detect that the two sides stamped independently beforehand --
         # which is exactly what would produce the divergence if both sides
-        # could still mint. That class is closed now (#631 Task 7, shipped):
-        # the desktop is the sole minter for a mirror -- ``migrate_shot_ids``
-        # (sync/run.py) stamps every local legacy document before the pull,
-        # and the hosted save boundary (``_may_mint_shot_ids`` in
-        # ui/server.py) refuses to mint on a mirror at all. A hosted PUT of a
-        # legacy manual shot is therefore stored unstamped rather than
-        # minting its own diverging id, so the pair described above -- a
-        # desktop nudge stamping manual-t6520 against a phone accept stamping
-        # manual-t6500 for the same shot -- can no longer happen through the
-        # normal save boundaries. This gate remains as a backstop for a
-        # document that predates the migration and reaches merge before
-        # either side has run it.
+        # could still mint a *non-convergent* id. That class is closed now
+        # (#631 Task 7, shipped): the desktop is the sole minter of that kind
+        # of id for a mirror -- ``migrate_shot_ids`` (sync/run.py) stamps
+        # every local legacy document before the pull, and the hosted save
+        # boundary (``_may_mint_shot_ids`` in ui/server.py, via
+        # ``shot_id.ensure_shot_ids``'s ``mint`` argument) refuses to mint
+        # the time-keyed or uuid4 branches on a mirror -- though it still
+        # derives the convergent ``cand-<n>`` for a detected shot there
+        # (#631 Task 6 fix round 1), which is safe because both sides
+        # compute the same id from the same ``candidate_number``. A hosted
+        # PUT of a legacy *manual* shot is therefore stored unstamped rather
+        # than minting its own diverging id, so the pair described above --
+        # a desktop nudge stamping manual-t6520 against a phone accept
+        # stamping manual-t6500 for the same shot -- can no longer happen
+        # through the normal save boundaries. This gate remains as a
+        # backstop for a document that predates the migration and reaches
+        # merge before either side has run it.
         result.notes.append(
             f"{doc_key}: {local_unstamped} local and {remote_unstamped} remote shot(s) "
             "arrived without a persisted id, so the shot section was not merged; "

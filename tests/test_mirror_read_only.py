@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,7 @@ from sqlalchemy import select as _select
 from splitsmith import match_model
 from splitsmith.db import MatchRow, ProjectStateStore, RecentProjectRow, User, create_engine, sessionmaker
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
+from splitsmith.sync.merge import merge_audit_doc
 from tests.hosted_helpers import _CapturingSender, login, moto_s3_storage, seed_match
 
 CREATE_URL = "/api/sync/matches"
@@ -493,6 +495,23 @@ def test_mirror_audit_exemption_boundary_pins(
 
     A POST to the same path, a trailing slash, a sibling path and a
     non-numeric stage must all still 403.
+
+    A trailing-newline variant (``.../audit%0a``) is deliberately NOT a
+    case here even though plain ``$`` also matches just before a single
+    trailing ``\\n`` (which is why the regexes were switched to ``\\Z`` --
+    see the comment above ``_mirror_beep_write_re``): verified empirically
+    that ``request.url.path`` can never actually carry that byte all the
+    way to this middleware's ``rest`` regardless of anchor choice.
+    Starlette's ``URL.path`` property is built from
+    ``urllib.parse.urlsplit()``, which strips ASCII CR/LF/TAB from a URL
+    unconditionally (CPython's own bpo-43882 hardening) - so
+    ``.../audit%0a`` arrives at this regex as the exact clean string
+    ``.../audit`` with nothing appended, indistinguishable from a
+    legitimate request, and asserting 403 for it here would be pinning a
+    routing path that cannot occur. Confirmed with a raw ASGI scope whose
+    ``path`` was hand-set to include a literal trailing ``\\n``: even then,
+    the first ``request.url.path`` access inside this app's own middleware
+    already came back stripped, before any of our code ran.
     """
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
@@ -509,7 +528,38 @@ def test_mirror_audit_exemption_boundary_pins(
         assert resp.json()["detail"] == "read_only_mirror"
 
 
-def test_mirror_audit_put_does_not_mint_a_shot_id(
+def _mixed_audit_doc(detected_time: float, manual_time: float) -> dict:
+    """One detected shot (``candidate_number`` set, no ``id``) and one
+    candidate-less manual shot (no ``candidate_number``, no ``id``).
+
+    This is exactly the shape the SPA sends: ``buildAuditJson`` omits
+    ``id`` for a detected marker on purpose (``audit-doc.test.ts`` pins
+    it - "omits the id for detected shots -- the server derives
+    ``cand-<n>``"), and a legacy candidate-less manual shot has never
+    carried one either.
+    """
+    return {
+        "stage_number": 1,
+        "beep_time": 5.0,
+        "shots": [
+            {
+                "shot_number": 1,
+                "candidate_number": 2,
+                "time": detected_time,
+                "ms_after_beep": int(round((detected_time - 5.0) * 1000)),
+            },
+            {
+                "shot_number": 2,
+                "candidate_number": None,
+                "time": manual_time,
+                "ms_after_beep": int(round((manual_time - 5.0) * 1000)),
+            },
+        ],
+        "audit_events": [],
+    }
+
+
+def test_mirror_audit_put_mints_convergent_ids_but_not_manual_ones(
     hosted_env: str,
     hosted_app: tuple[TestClient, _CapturingSender],
 ) -> None:
@@ -517,26 +567,128 @@ def test_mirror_audit_put_does_not_mint_a_shot_id(
     protects, but it had no end-to-end coverage until this task opened the
     gate: the read-only 403 meant this exact request never ran before.
 
-    A PUT of an unstamped legacy shot through the alias on a mirror must
-    succeed and must not mint an id - the desktop is the sole minter for a
-    mirror (#631 Task 7). The same PUT against a hosted-native match still
-    mints, exactly as it always has.
+    A PUT of the SPA's own shape (a detected shot with ``candidate_number``
+    and no ``id``, plus a candidate-less manual shot with no ``id``) through
+    the alias on a mirror must still derive the detected shot's ``cand-2``
+    -- both sides compute it from the same ``candidate_number``, so there
+    is no second-minter risk (#631 Task 6 fix round 1: the desktop-sole-
+    minter guard was over-broad and suppressed this convergent derivation
+    too, which meant every phone save of a stage with a detected shot
+    produced a document the sync merge's unstamped-shot gate would refuse
+    wholesale on the next desktop pull, reverting the phone's edit). The
+    manual shot must still get no id - that derivation keys off rounded
+    time, which is not convergent across a nudge. The same PUT against a
+    hosted-native match still mints both, exactly as it always has.
     """
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     match_id = "01JMIRRAUDITPUTMINT0000001"
-    _seed_mirror_stage_with_audit(client, match_id, "audit-put-mint", _legacy_audit_doc(6.5))
+    _seed_mirror_stage_with_audit(client, match_id, "audit-put-mint", _mixed_audit_doc(6.5, 8.0))
 
     put = client.put(
         _alias_url(match_id, "shooters/alice/stages/1/audit"),
-        json=_legacy_audit_doc(6.5),
+        json=_mixed_audit_doc(6.5, 8.0),
     )
     assert put.status_code == 200, put.text
 
     stored = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit"))
     assert stored.status_code == 200, stored.text
-    shot = stored.json()["shots"][0]
-    assert "id" not in shot
+    shots = stored.json()["shots"]
+    detected = next(s for s in shots if s.get("candidate_number") == 2)
+    manual = next(s for s in shots if s.get("candidate_number") is None)
+    assert detected["id"] == "cand-2"
+    assert "id" not in manual
+
+
+def test_mirror_audit_put_then_desktop_pull_keeps_the_phone_nudge(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """End to end across the alias PUT and the pull-side merge (#631 Task 6
+    fix round 1, Critical).
+
+    Reproduces the bug the review found: a phone PUT of the SPA's own doc
+    shape (a detected shot with ``candidate_number`` and no ``id``, plus a
+    manual shot carrying the id the SPA minted for it itself) used to come
+    back from the mirror with the detected shot still unstamped, because
+    the desktop-sole-minter guard suppressed *all* derivation under
+    ``mint=False``, not just the non-convergent branches. That unstamped
+    remote shot made ``merge_audit_doc``'s unstamped-shot gate refuse the
+    whole shot section on the desktop's next pull -- reverting the phone's
+    nudge and (had there been a genuinely new phone-added shot) dropping it
+    too.
+
+    Drives the real HTTP PUT against a mirror, fetches what a desktop pull
+    would see, and runs the actual pull-side merge over it -- not a
+    reasoned argument about what the merge would do, but the merge itself.
+    """
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRAUDITPUTMERGE000001"
+    # The converged state after some earlier sync: both shots already
+    # stamped, exactly the shape the seed after the FIRST mint (server- or
+    # desktop-derived cand-2; SPA-minted manual-shotid-1) would leave.
+    converged = {
+        "stage_number": 1,
+        "beep_time": 5.0,
+        "shots": [
+            {
+                "shot_number": 1,
+                "candidate_number": 2,
+                "id": "cand-2",
+                "time": 6.5,
+                "ms_after_beep": 1500,
+            },
+            {
+                "shot_number": 2,
+                "candidate_number": None,
+                "id": "manual-shotid-1",
+                "time": 8.0,
+                "ms_after_beep": 3000,
+            },
+        ],
+        "audit_events": [],
+    }
+    _seed_mirror_stage_with_audit(client, match_id, "audit-put-merge", converged)
+
+    # The phone nudges the detected shot to 6.6s and saves. The SPA never
+    # sends an id for a detected shot (buildAuditJson omits it on purpose,
+    # see audit-doc.test.ts) - it re-derives cand-2 client-side for display
+    # only. The manual shot round-trips unchanged, still carrying the id
+    # the SPA minted for it.
+    phone_put = dict(converged)
+    phone_put["shots"] = [
+        {"shot_number": 1, "candidate_number": 2, "time": 6.6, "ms_after_beep": 1600},
+        {
+            "shot_number": 2,
+            "candidate_number": None,
+            "id": "manual-shotid-1",
+            "time": 8.0,
+            "ms_after_beep": 3000,
+        },
+    ]
+    put = client.put(_alias_url(match_id, "shooters/alice/stages/1/audit"), json=phone_put)
+    assert put.status_code == 200, put.text
+
+    # What a desktop pull fetches as "remote".
+    remote = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit")).json()
+
+    # The desktop's own local copy is unchanged since the last sync, i.e.
+    # identical to the pre-nudge converged doc; "base" is that same shared
+    # ancestor.
+    result = merge_audit_doc(
+        converged,
+        converged,
+        remote,
+        doc_key="stage1",
+        local_ts=datetime(2026, 8, 12, 12, 0, tzinfo=UTC),
+        remote_ts=datetime(2026, 8, 12, 13, 0, tzinfo=UTC),
+    )
+
+    assert not any("without a persisted id" in note for note in result.notes), result.notes
+    merged_shots = {s["id"]: s for s in result.doc["shots"]}
+    assert merged_shots["cand-2"]["time"] == 6.6  # the phone's nudge survived
+    assert merged_shots["manual-shotid-1"]["time"] == 8.0
 
 
 def test_native_match_audit_put_still_mints_a_shot_id(
@@ -695,8 +847,12 @@ def test_mirror_coach_by_id_exemption_boundary_pins(
     than reasoning about: the character class excludes ``/`` and Starlette
     matches path segments literally rather than resolving ``..`` against
     the filesystem, so ``by-id/..`` is not a traversal at all - it routes
-    to the handler exactly like ``by-id/cand-9`` does (and 404s there, for
-    lack of a matching shot), rather than escaping the gate.
+    to the handler exactly like ``by-id/cand-9`` does, and 404s there for
+    the same reason the ``allowed`` case below would too if it named a
+    slug this match's roster doesn't recognize: ``_seed_mirror`` seeds an
+    empty roster, so ``state.shooter_project("alice")`` 404s on that
+    roster-membership check before shot lookup is ever reached - not
+    because no shot matched the id.
 
     The id is sent percent-encoded (``%2e%2e``) rather than as a literal
     ``..`` segment: httpx resolves dot-segments client-side per RFC 3986

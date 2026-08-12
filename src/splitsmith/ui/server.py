@@ -1058,17 +1058,22 @@ current_share_request: ContextVar[bool] = ContextVar("splitsmith_current_share_r
 
 
 def _may_mint_shot_ids() -> bool:
-    """Whether this request's save boundary may invent a shot id (#631 Task 7).
+    """Whether this request's save boundary may invent a *non-convergent*
+    shot id (#631 Task 7).
 
-    False on a ``desktop``-origin mirror. ``derive_shot_id`` keys a
-    candidate-less manual shot off its rounded time, so a desktop that
-    nudged such a shot to 6.52 s and a phone that accepted the mirror at
-    6.5 s would mint ``manual-t6520`` and ``manual-t6500`` for the same
-    shot. Both sides then look fully stamped, the sync merge's
-    unstamped-shot gate passes, and one shot unions into two with no note
-    at all. The desktop is therefore the sole minter for a mirror: it
-    stamps legacy documents in the sync run's migration pass and pushes
-    them here.
+    False on a ``desktop``-origin mirror -- passed straight through as
+    ``ensure_shot_ids``'s ``mint`` argument, see its docstring for exactly
+    what ``mint=False`` still derives (a detected shot's ``cand-<n>``,
+    convergent by construction) versus suppresses (the time-keyed and
+    uuid4 branches). ``derive_shot_id`` keys a candidate-less manual shot
+    off its rounded time, so a desktop that nudged such a shot to 6.52 s
+    and a phone that accepted the mirror at 6.5 s would mint
+    ``manual-t6520`` and ``manual-t6500`` for the same shot. Both sides
+    then look fully stamped, the sync merge's unstamped-shot gate passes,
+    and one shot unions into two with no note at all. The desktop is
+    therefore the sole minter of *that* kind of id for a mirror: it stamps
+    legacy documents in the sync run's migration pass and pushes them
+    here.
 
     A shot that arrives carrying a client-supplied id keeps it either way
     -- ``ensure_shot_ids`` never rewrites one -- which is what lets a phone
@@ -6461,16 +6466,33 @@ def create_app(
     # ``state._bound_root`` is only consulted for legacy bare-path
     # traffic that hasn't migrated to the new prefix.
 
+    # Every mirror-exemption regex below anchors with ``\Z``, not ``$``:
+    # plain ``$`` also matches just before a single trailing ``\n``, so a
+    # pattern like ``.../audit$`` is not really "one exact path", only
+    # "that path, optionally with one trailing newline". In practice a
+    # literal ``\n`` can't reach these regexes through ``rest`` here --
+    # ``rest`` is derived from ``request.url.path``, and Starlette's own
+    # ``URL.path`` routes through ``urllib.parse.urlsplit()``, which
+    # unconditionally strips ASCII CR/LF/TAB from a URL (a CPython
+    # hardening, not app-specific: see bpo-43882), so ``.../audit%0a``
+    # arrives here as the plain, legitimately-exempt ``.../audit`` with
+    # nothing appended -- no bypass, verified against a live request.
+    # ``\Z`` is still correct to use: it is what "one exact path" actually
+    # means, it costs nothing, and it stops relying on an implementation
+    # detail of a caller (``request.url.path``) that these compiled
+    # patterns don't control and could someday be handed a string some
+    # other way.
+
     # Slice 3 (mobile beep review): the only two beep writes a mirror
     # accepts. Everything else beep-shaped (detect-beep, beep-window,
     # select, snap, the legacy primary shim) needs source audio or fires
     # jobs, and stays read-only on mirrors.
-    _mirror_beep_write_re = re.compile(r"^shooters/[^/]+/stages/\d+/videos/[^/]+/beep$")
+    _mirror_beep_write_re = re.compile(r"\Ashooters/[^/]+/stages/\d+/videos/[^/]+/beep\Z")
 
     # Slice 4 (mobile audit triage): the two stage-level writes a mirror
     # accepts - accept-stage and flag-for-desktop. Everything else stays
     # desktop-owned until its slice ships a whitelist entry.
-    _mirror_triage_write_re = re.compile(r"^shooters/[^/]+/stages/\d+/(audit/accept|attention)$")
+    _mirror_triage_write_re = re.compile(r"\Ashooters/[^/]+/stages/\d+/(audit/accept|attention)\Z")
 
     # Slice 5 (mobile interval reclassify): the two coach writes a mirror
     # accepts - the per-shot coach PATCH and the bulk reclassify POST.
@@ -6480,18 +6502,26 @@ def create_app(
     # Slice 5 also has to cover the by-id coach PATCH (Task 3, shots as a
     # synced entity): the id form is the one a client that did not just
     # write the document should use -- shot_number renumbers under it.
+    # Containment for ``[^/]+``/``by-id/[A-Za-z0-9._-]+`` (here and in the
+    # other regexes below) is not this pattern's job: the character class
+    # only keeps the slug/id out of the next path segment. What actually
+    # bounds the slug to a real shooter is ``state.shooter_project``'s
+    # roster-membership check inside the handler itself -- a slug this
+    # regex passes through but the roster doesn't recognize 404s there,
+    # same as any other unknown shooter.
     _mirror_coach_patch_re = re.compile(
-        r"^shooters/[^/]+/stages/\d+/shots/(?:\d+|by-id/[A-Za-z0-9._-]+)/coach$"
+        r"\Ashooters/[^/]+/stages/\d+/shots/(?:\d+|by-id/[A-Za-z0-9._-]+)/coach\Z"
     )
-    _mirror_coach_reclassify_re = re.compile(r"^shooters/[^/]+/stages/\d+/coach/reclassify$")
+    _mirror_coach_reclassify_re = re.compile(r"\Ashooters/[^/]+/stages/\d+/coach/reclassify\Z")
 
     # Task 6 (#631): the full audit PUT. Safe now that shots carry a stable
     # id and sync/merge.py merges their membership by it -- before the
     # merge unit shipped, opening this would have let a desktop pull
     # silently discard phone edits. ``_may_mint_shot_ids`` already refuses
-    # to mint on a mirror at this exact save boundary; this is the gate
-    # that makes that path reachable.
-    _mirror_audit_write_re = re.compile(r"^shooters/[^/]+/stages/\d+/audit$")
+    # to mint a non-convergent id on a mirror at this exact save boundary
+    # (see ``shot_id.ensure_shot_ids``); this is the gate that makes that
+    # path reachable.
+    _mirror_audit_write_re = re.compile(r"\Ashooters/[^/]+/stages/\d+/audit\Z")
 
     @app.middleware("http")
     async def _match_id_alias(request, call_next):
