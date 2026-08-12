@@ -57,4 +57,50 @@ describe("ResultsPlayer moment support", () => {
     fireEvent.click(screen.getByRole("button", { name: /copy link at moment/i }));
     expect(onCopyMoment).toHaveBeenCalledTimes(1);
   });
+
+  it("re-arms and seeks again when momentTime changes to a new value", () => {
+    const { videoRef, rerender } = renderPlayer({ momentTime: 7.32 });
+    const video = videoRef.current!;
+    Object.defineProperty(video, "duration", { value: 20, configurable: true });
+    fireEvent(video, new Event("loadedmetadata"));
+    expect(video.currentTime).toBeCloseTo(7.32, 2);
+
+    rerender(
+      <ResultsPlayer
+        src="blob:test"
+        beepTime={3}
+        shots={[]}
+        videoRef={videoRef}
+        onTimeChange={() => {}}
+        baselines={null}
+        momentTime={12.5}
+      />,
+    );
+    fireEvent(video, new Event("loadedmetadata"));
+    expect(video.currentTime).toBeCloseTo(12.5, 2);
+  });
+
+  it("does not re-seek when re-rendered with the same momentTime after the user moved the playhead", () => {
+    const { videoRef, rerender } = renderPlayer({ momentTime: 7.32 });
+    const video = videoRef.current!;
+    Object.defineProperty(video, "duration", { value: 20, configurable: true });
+    fireEvent(video, new Event("loadedmetadata"));
+    expect(video.currentTime).toBeCloseTo(7.32, 2);
+
+    video.currentTime = 15;
+
+    rerender(
+      <ResultsPlayer
+        src="blob:test"
+        beepTime={3}
+        shots={[]}
+        videoRef={videoRef}
+        onTimeChange={() => {}}
+        baselines={null}
+        momentTime={7.32}
+      />,
+    );
+    fireEvent(video, new Event("loadedmetadata"));
+    expect(video.currentTime).toBe(15);
+  });
 });

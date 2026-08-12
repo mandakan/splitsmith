@@ -59,8 +59,9 @@ import {
   type MatchProject,
 } from "@/lib/api";
 import { useMatchHref } from "@/lib/matchHref";
-import { momentHref, parseMoment, resolveMomentView } from "@/lib/moment";
+import { momentHref, momentToSearch, parseMoment, resolveMomentView } from "@/lib/moment";
 import { isShareView } from "@/lib/shareView";
+import { useActiveShare } from "@/lib/useActiveShare";
 import { cn } from "@/lib/utils";
 
 import { initials } from "./compare/format";
@@ -91,6 +92,7 @@ export function Compare() {
   // mirror guard 403s. Hidden (not disabled) here: it's one action among
   // several on a page whose primary value is reading.
   const editDenied = capabilityDenied(ctx?.capabilities, "edit");
+  const { shareUrl } = useActiveShare();
 
   const [project, setProject] = useState<MatchProject | null>(null);
   const [bundle, setBundle] = useState<CompareStageResponse | null>(null);
@@ -106,7 +108,12 @@ export function Compare() {
   const rafRef = useRef<number | null>(null);
   const maxDriftRef = useRef(0);
   const startedAtRef = useRef(0);
-  const momentAppliedRef = useRef(false);
+  // Tracks the serialized form of the last APPLIED moment so a
+  // query-only navigation to a *different* moment on an already-loaded
+  // bundle re-arms and applies again, while a re-render with the same
+  // moment (or no moment) does not keep re-scrubbing over the user's
+  // own interaction. Reset to null on stage change alongside the bundle.
+  const lastAppliedMomentRef = useRef<string | null>(null);
 
   // Load project + compare data. Stage definitions are identical across
   // every shooter in a match, so we lift them from whichever shooter is
@@ -134,7 +141,7 @@ export function Compare() {
     let alive = true;
     setBundle(null);
     setError(null);
-    momentAppliedRef.current = false;
+    lastAppliedMomentRef.current = null;
     api
       .getStageCompare(stageNumber)
       .then((b) => {
@@ -277,15 +284,20 @@ export function Compare() {
     [orderedShooters],
   );
 
-  // Apply a shared moment (?t=&cam=&who=) once per bundle load: focus the
-  // requested camera/shooters and scrub to the requested time. Guarded by
-  // momentAppliedRef so re-renders (or later state changes) don't keep
-  // re-applying and fighting the user's own scrubbing.
+  // Apply a shared moment (?t=&cam=&who=) on bundle load and whenever the
+  // moment itself changes (query-only navigation, e.g. clicking another
+  // shared link while Compare stays mounted): focus the requested
+  // camera/shooters and scrub to the requested time. Guarded by
+  // lastAppliedMomentRef (the last applied moment's serialized form) so
+  // re-renders with the same moment don't keep re-applying and fighting
+  // the user's own scrubbing, while a genuinely new moment re-arms.
   useEffect(() => {
-    if (!bundle || momentAppliedRef.current) return;
+    if (!bundle) return;
     const moment = urlMoment;
     if (!moment) return;
-    momentAppliedRef.current = true;
+    const serialized = momentToSearch(moment).toString();
+    if (lastAppliedMomentRef.current === serialized) return;
+    lastAppliedMomentRef.current = serialized;
     const slugs = new Set(bundle.shooters.map((s) => s.slug));
     const view = resolveMomentView(moment, slugs);
     if (view.who) setVisibleSlugs(new Set(view.who));
@@ -313,23 +325,40 @@ export function Compare() {
   // Copies a shareable moment link: current time-since-beep, the audio
   // camera, and whichever shooters are currently visible - mirrors
   // ResultsStage's handleCopyMoment (single-shooter) but adds cam/who.
+  // When the match has a live share, copy the share-scoped moment URL
+  // instead of the operator one, so the link works for whoever the
+  // owner actually shares it with. Share viewers never reach this
+  // branch: useActiveShare returns null by construction on a share
+  // mount, so they keep copying their own share-relative URL.
   const handleCopyMoment = useCallback(async () => {
     const t = Math.round(timeSinceBeep * 100) / 100;
     const who = playableShooters
       .filter((s) => visibleSlugs.has(s.slug))
       .map((s) => s.slug);
-    const link = `${window.location.origin}${momentHref(location.pathname, {
-      t,
-      cam: audioSlug ?? undefined,
-      who,
-    })}`;
+    const moment = { t, cam: audioSlug ?? undefined, who };
+    const link = shareUrl
+      ? `${shareUrl}/compare/${stageNumber}?${momentToSearch(moment).toString()}`
+      : `${window.location.origin}${momentHref(location.pathname, moment)}`;
     try {
       await navigator.clipboard.writeText(link);
-      setSnack({ message: `Link copied at ${t.toFixed(2)}s`, tone: "status" });
+      setSnack({
+        message: shareUrl
+          ? `Share link copied at ${t.toFixed(2)}s`
+          : `Link copied at ${t.toFixed(2)}s`,
+        tone: "status",
+      });
     } catch {
       setSnack({ message: "Could not copy link", tone: "error" });
     }
-  }, [timeSinceBeep, playableShooters, visibleSlugs, audioSlug, location.pathname]);
+  }, [
+    timeSinceBeep,
+    playableShooters,
+    visibleSlugs,
+    audioSlug,
+    location.pathname,
+    shareUrl,
+    stageNumber,
+  ]);
 
   function toggleVisibility(slug: string) {
     setVisibleSlugs((prev) => {

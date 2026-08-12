@@ -11,6 +11,11 @@ export type Moment = {
 
 const T_LIMIT = 3600;
 
+// Mirrors _WHO_MAX in src/splitsmith/ui/share_og.py: caps a compare
+// moment's roster so an unbounded who= can't pad an arbitrarily long
+// list into the URL (and, downstream, the OG card render).
+export const WHO_MAX = 12;
+
 export function momentToSearch(m: Moment): URLSearchParams {
   const params = new URLSearchParams();
   // Clamp to the same bound parseMoment enforces (|t| <= T_LIMIT), or a
@@ -20,7 +25,7 @@ export function momentToSearch(m: Moment): URLSearchParams {
   const t = Math.max(-T_LIMIT, Math.min(T_LIMIT, m.t));
   params.set("t", t.toFixed(2));
   if (m.cam) params.set("cam", m.cam);
-  if (m.who && m.who.length > 0) params.set("who", m.who.join(","));
+  if (m.who && m.who.length > 0) params.set("who", m.who.slice(0, WHO_MAX).join(","));
   return params;
 }
 

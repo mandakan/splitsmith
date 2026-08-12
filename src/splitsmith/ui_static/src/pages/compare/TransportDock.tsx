@@ -351,9 +351,9 @@ export function TransportDock({
               width={10}
               height={10}
               transform={`rotate(45 ${xOf(momentT)} ${RULER_H})`}
-              fill="var(--color-manual)"
+              fill="var(--color-moment)"
               fillOpacity={0.4}
-              stroke="var(--color-manual)"
+              stroke="var(--color-moment)"
               strokeWidth={2}
             />
           )}

@@ -43,7 +43,7 @@ import {
 } from "@/lib/api";
 import { buildUndoPatch } from "@/lib/coachPatch";
 import { useMatchHref } from "@/lib/matchHref";
-import { momentHref, parseMoment } from "@/lib/moment";
+import { momentHref, momentToSearch, parseMoment } from "@/lib/moment";
 import { isShareView } from "@/lib/shareView";
 import {
   INTERVAL_LABEL,
@@ -52,6 +52,7 @@ import {
   currentShotIndex,
   statisticSplits,
 } from "@/lib/splits";
+import { useActiveShare } from "@/lib/useActiveShare";
 import { cn } from "@/lib/utils";
 
 function pad2(n: number): string {
@@ -104,6 +105,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const [playerBox, setPlayerBox] = useState<HTMLDivElement | null>(null);
   const location = useLocation();
   const canReclassify = !isShareView(location.pathname);
+  const { shareUrl } = useActiveShare();
   const [sheetShot, setSheetShot] = useState<CoachShot | null>(null);
   const [patchBusy, setPatchBusy] = useState(false);
   const [snack, setSnack] = useState<SnackState | null>(null);
@@ -111,18 +113,30 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const moment = useMemo(() => parseMoment(searchParams), [searchParams]);
   const momentTime = moment != null && coach != null ? coach.beep_time + moment.t : null;
 
+  // When the match has a live share, copy the share-scoped moment URL
+  // instead of the operator one - it works for whoever the owner
+  // actually shares it with. Share viewers never reach this branch:
+  // useActiveShare returns null by construction on a share mount, so
+  // they keep copying their own share-relative URL.
   const handleCopyMoment = useCallback(async () => {
     const v = videoRef.current;
     if (!v || !coach) return;
     const t = Math.round((v.currentTime - coach.beep_time) * 100) / 100;
-    const link = `${window.location.origin}${momentHref(location.pathname, { t })}`;
+    const link = shareUrl
+      ? `${shareUrl}/results/${slug}/${stage}?${momentToSearch({ t }).toString()}`
+      : `${window.location.origin}${momentHref(location.pathname, { t })}`;
     try {
       await navigator.clipboard.writeText(link);
-      setSnack({ message: `Link copied at ${t.toFixed(2)}s`, tone: "status" });
+      setSnack({
+        message: shareUrl
+          ? `Share link copied at ${t.toFixed(2)}s`
+          : `Link copied at ${t.toFixed(2)}s`,
+        tone: "status",
+      });
     } catch {
       setSnack({ message: "Could not copy link", tone: "error" });
     }
-  }, [coach, location.pathname]);
+  }, [coach, location.pathname, shareUrl, slug, stage]);
 
   // Non-optimistic write, per the desktop Coach precedent: PATCH returns
   // the full CoachStageResponse, which replaces coach state wholesale -
