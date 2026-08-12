@@ -4986,6 +4986,14 @@ class CoachShotPatchRequest(BaseModel):
     improvement_flag: bool | None = None
     coaching_note: str | None = None
     clear_note: bool = False
+    expected_version: int | None = None
+    """Audit-doc version the client read before composing this patch.
+
+    ``shot_number`` is positional, so an insert elsewhere in the stage
+    renumbers the target. When supplied, a version that no longer matches
+    the stored document is refused rather than applied to whatever now sits
+    at that index.
+    """
 
 
 class CleanupRequest(BaseModel):
@@ -6443,7 +6451,12 @@ def create_app(
     # Both are pure state-doc writes (no job chaining), and COACH_FIELDS
     # already merge per-shot LWW on desktop pull. Note the per-shot patch
     # is a PATCH, so its exemption is method-gated separately below.
-    _mirror_coach_patch_re = re.compile(r"^shooters/[^/]+/stages/\d+/shots/\d+/coach$")
+    # Slice 5 also has to cover the by-id coach PATCH (Task 3, shots as a
+    # synced entity): the id form is the one a client that did not just
+    # write the document should use -- shot_number renumbers under it.
+    _mirror_coach_patch_re = re.compile(
+        r"^shooters/[^/]+/stages/\d+/shots/(?:\d+|by-id/[A-Za-z0-9._-]+)/coach$"
+    )
     _mirror_coach_reclassify_re = re.compile(r"^shooters/[^/]+/stages/\d+/coach/reclassify$")
 
     @app.middleware("http")
@@ -10901,29 +10914,26 @@ def create_app(
         _coach_save(slug, stage_number, payload, version)
         return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
 
-    @app.patch("/api/shooters/{slug}/stages/{stage_number}/shots/{shot_number}/coach")
-    def patch_stage_shot_coach(
+    def _apply_shot_coach_patch(
         slug: str,
         stage_number: int,
-        shot_number: int,
         body: CoachShotPatchRequest,
+        match_shot: Callable[[dict[str, Any]], bool],
+        describe: str,
     ) -> JSONResponse:
-        """Patch the coaching annotation fields on one shot. Returns the
-        updated coach response for the stage so the client can refresh.
-        """
+        """Shared body for the by-number and by-id coach PATCH routes."""
         payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
+        if body.expected_version is not None and body.expected_version != version:
+            raise HTTPException(status_code=409, detail="version_conflict")
         cfg = CoachAutoClassifyConfig()
         shots = payload.get("shots") or []
         if not isinstance(shots, list):
             raise HTTPException(status_code=500, detail="audit shots is not a list")
-        target = next(
-            (s for s in shots if isinstance(s, dict) and int(s.get("shot_number", -1)) == shot_number),
-            None,
-        )
+        target = next((s for s in shots if isinstance(s, dict) and match_shot(s)), None)
         if target is None:
             raise HTTPException(
                 status_code=404,
-                detail=f"shot {shot_number} not found in stage {stage_number}",
+                detail=f"{describe} not found in stage {stage_number}",
             )
         try:
             coach_module.write_coach_fields(
@@ -10953,7 +10963,8 @@ def create_app(
                 "ts": _now_iso(),
                 "kind": "coach_patch",
                 "payload": {
-                    "shot_number": shot_number,
+                    "shot_id": target.get("id"),
+                    "shot_number": target.get("shot_number"),
                     "fields": coach_module.read_coach_fields(target),
                 },
             }
@@ -10961,6 +10972,48 @@ def create_app(
         payload["audit_events"] = events
         _coach_save(slug, stage_number, payload, version)
         return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg))
+
+    @app.patch("/api/shooters/{slug}/stages/{stage_number}/shots/{shot_number}/coach")
+    def patch_stage_shot_coach(
+        slug: str,
+        stage_number: int,
+        shot_number: int,
+        body: CoachShotPatchRequest,
+    ) -> JSONResponse:
+        """Patch one shot's coaching annotation, addressed by position.
+
+        Retained for compatibility. Prefer the by-id route: ``shot_number``
+        renumbers whenever a shot is inserted or deleted, so a client holding
+        a stale number can annotate the wrong shot unless it also sends
+        ``expected_version``.
+        """
+        return _apply_shot_coach_patch(
+            slug,
+            stage_number,
+            body,
+            lambda s: int(s.get("shot_number", -1)) == shot_number,
+            f"shot {shot_number}",
+        )
+
+    @app.patch("/api/shooters/{slug}/stages/{stage_number}/shots/by-id/{shot_id}/coach")
+    def patch_stage_shot_coach_by_id(
+        slug: str,
+        stage_number: int,
+        shot_id: str,
+        body: CoachShotPatchRequest,
+    ) -> JSONResponse:
+        """Patch one shot's coaching annotation, addressed by stable id.
+
+        Immune to renumbering, so this is the route any client that did not
+        just write the document should use.
+        """
+        return _apply_shot_coach_patch(
+            slug,
+            stage_number,
+            body,
+            lambda s: s.get("id") == shot_id,
+            f"shot id {shot_id!r}",
+        )
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/coach/distributions")
     def get_stage_coach_distributions(slug: str, stage_number: int) -> JSONResponse:

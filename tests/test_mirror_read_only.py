@@ -481,6 +481,36 @@ def test_mirror_coach_exemption_boundary_pins(
     assert resp.json() == {"detail": "read_only_mirror"}
 
 
+def test_mirror_coach_by_id_exemption_boundary_pins(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The widened coach pattern must not open anything else.
+
+    A by-id coach PATCH passes the gate; a by-id path that is not ``coach``,
+    a traversal attempt, and a trailing slash must all still 403.
+    """
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRCOACHBYID0000000001"
+    _seed_mirror(client, match_id, "gate-coach-by-id")
+
+    allowed = client.patch(
+        _alias_url(match_id, "shooters/alice/stages/1/shots/by-id/cand-9/coach"),
+        json={"coaching_note": "x"},
+    )
+    assert allowed.status_code != 403, allowed.text
+
+    for rest in (
+        "shooters/alice/stages/1/shots/by-id/cand-9/audit",
+        "shooters/alice/stages/1/shots/by-id/cand-9/coach/",
+        "shooters/alice/stages/x/shots/by-id/cand-9/coach",
+    ):
+        blocked = client.patch(_alias_url(match_id, rest), json={})
+        assert blocked.status_code == 403, rest
+        assert blocked.json()["detail"] == "read_only_mirror"
+
+
 # Deleting a mirror still works - delete-match is a non-alias-routed
 # picker action (POST /api/me/recent-projects/delete), untouched by the
 # gate, but covered here so the exemption stays honest.
