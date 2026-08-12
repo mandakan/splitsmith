@@ -348,7 +348,7 @@ def test_a_legacy_unclassified_audit_is_healed_for_the_card(
 
 def _setup_shared_stage(hosted_env: str, hosted_app: tuple[TestClient, _CapturingSender]) -> str:
     """Same shape as ``_setup_shared_match``, but the shooter's stage 1
-    carries real audited shots -- ``_seed_state_docs`` alone (used by
+    carries real audited shots - ``_seed_state_docs`` alone (used by
     ``_setup_shared_match``) leaves ``MatchProject`` with no stages at
     all, so ``build_stage_card`` always returns ``None`` and every
     request falls back to the match card, which would make the moment-t
@@ -368,7 +368,7 @@ def test_moment_stage_png_renders_without_a_storage_write(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A moment card is rendered per fetch, never written to object
-    storage -- see ``render_card_png``'s docstring on why an unbounded
+    storage - see ``render_card_png``'s docstring on why an unbounded
     ``t`` cannot be cached by key. The share-creation warm already wrote
     the moment-free match card under ``share-cards/``, so this pins that
     the count does not move again on top of that."""
