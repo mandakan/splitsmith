@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.28.0](https://github.com/mandakan/splitsmith/compare/v0.27.0...v0.28.0) (2026-08-12)
+
+
+### Features
+
+* compare share OG shell, meta and card - closes the compare unfurl gap ([95bad24](https://github.com/mandakan/splitsmith/commit/95bad242d1e3125f51650868e76ca0fb28d10053))
+* moment badge on stage cards and new CompareCard model ([4aec17d](https://github.com/mandakan/splitsmith/commit/4aec17d3c76be8d9a64f64c394d0aed0b3a8bf71))
+* moment deep links - share exact timestamps on video and compare pages ([0a8b3b6](https://github.com/mandakan/splitsmith/commit/0a8b3b6e394b013c5ab7a7383096fec3ae98dcb9))
+* moment-aware stage OG cards, meta and shell forwarding ([eae4f3e](https://github.com/mandakan/splitsmith/commit/eae4f3e959056d44434b61a4d9c955133f587506))
+* **ui:** apply moment deep links on the compare page ([d567641](https://github.com/mandakan/splitsmith/commit/d567641976fb1ca0f79689d234ddaaf4ecd56b54))
+* **ui:** copy link at moment and track marker on the compare page ([8bbea46](https://github.com/mandakan/splitsmith/commit/8bbea46c047310fb093660f714685dcf873bbbcf))
+* **ui:** moment marker, one-shot paused seek and copy hook in ResultsPlayer ([13cc1e1](https://github.com/mandakan/splitsmith/commit/13cc1e1baab301698612104b0c3511762d980942))
+* **ui:** moment polish - dedicated marker color, who cap parity, re-arm on new moment, share-aware copy ([28470a5](https://github.com/mandakan/splitsmith/commit/28470a5dbfd7093d86186a6664532a541a40c863))
+* **ui:** Moment type with URL serializer for timestamp deep links ([b1ce96d](https://github.com/mandakan/splitsmith/commit/b1ce96dcd1b1108d00b4fe3f2cccffb9812bec93))
+* **ui:** share-aware copy-link-at-moment on owner pages ([0061ac3](https://github.com/mandakan/splitsmith/commit/0061ac361656f62db77f877f03e72c0d5202218d))
+* **ui:** timestamp deep links on the results video page ([77ea8c5](https://github.com/mandakan/splitsmith/commit/77ea8c5c938b6b22e38df84d8d61302c5ce301a8))
+* uncached moment-card render path and CompareCard dispatch ([7b59b4e](https://github.com/mandakan/splitsmith/commit/7b59b4ee1772f9295d9f13e1680444b5a6a2c141))
+
+
+### Bug Fixes
+
+* **moment:** dedicated color token, who cap parity, re-arm on moment change ([599c265](https://github.com/mandakan/splitsmith/commit/599c265100918f661f4f1e85a2b42ee103e465db))
+* preserve RasterizerUnavailableError detail in share card render fallback ([8ec089d](https://github.com/mandakan/splitsmith/commit/8ec089dd510f9e33601eece951938539ae059bae))
+* **share-card:** compare card headline carries shooter names, not "Compare" ([be67f77](https://github.com/mandakan/splitsmith/commit/be67f7765be7ed98a7a1591e0bd04424c1131c0a))
+* **share:** validate compare stage number, widen png type, clamp moment t ([99d6b89](https://github.com/mandakan/splitsmith/commit/99d6b89c1eb8dce2ce63d24c71e8200eaf858b58))
+* single ASCII dash in new test docstrings ([f5d6023](https://github.com/mandakan/splitsmith/commit/f5d6023dce6cd1b3337c182b95b5927fb0db466d))
+
+
+### Documentation
+
+* moment deep links design spec ([b06b61e](https://github.com/mandakan/splitsmith/commit/b06b61ea8b4c17093de2a5a5e55339d68605e422))
+* moment deep links implementation plan ([84d2cb5](https://github.com/mandakan/splitsmith/commit/84d2cb575072d76ace81d19962d6f5a086db1ded))
+
 ## [0.27.0](https://github.com/mandakan/splitsmith/compare/v0.26.0...v0.27.0) (2026-08-12)
 
 
