@@ -16,7 +16,7 @@ from splitsmith.sync.merge import merge_audit_doc
 from splitsmith.ui.server import create_app
 from tests.conftest import bound_match_id, scaffold_match
 from tests.hosted_helpers import _CapturingSender, login
-from tests.test_mirror_read_only import _alias_url, _seed_mirror
+from tests.mirror_helpers import alias_url, legacy_audit_doc, seed_mirror_stage_with_audit
 
 
 def test_detected_shot_keys_off_candidate_number() -> None:
@@ -335,47 +335,17 @@ def _accept_a_legacy_shot_on_a_mirror(client: TestClient, match_id: str, name: s
     match -- the one hosted save boundary a phone can reach on a mirror
     (``capabilities._REVIEW_ROUTES`` grants it the review capability) and
     therefore the one that must not mint. Seeds through the desktop-sync
-    doc routes, exactly as ``_seed_mirror`` does, and returns the stored
-    audit doc as it stands after the accept.
+    doc routes and returns the stored audit doc as it stands after the
+    accept.
+
+    ``legacy_audit_doc`` is the unstamped shape under test: a manual shot
+    with no id and no ``candidate_number``, whose derived id keys off the
+    rounded time and so moves when the shot moves.
     """
-    _seed_mirror(client, match_id, name)
-    roster = match_model.Match(match_id=match_id, name=name, shooters=["alice"], stages=[]).model_dump(
-        mode="json"
-    )
-    put_roster = client.put(
-        f"/api/sync/matches/{match_id}/docs/match", params={"expected_version": 1}, json=roster
-    )
-    assert put_roster.status_code == 200, put_roster.text
-
-    stage = StageEntry(stage_number=1, stage_name="Stage One", time_seconds=30.0)
-    project_doc = MatchProject(name=name, competitor_name="Alice", stages=[stage]).model_dump(mode="json")
-    put_project = client.put(
-        f"/api/sync/matches/{match_id}/docs/project/alice",
-        params={"expected_version": 0},
-        json=project_doc,
-    )
-    assert put_project.status_code == 200, put_project.text
-
+    seed_mirror_stage_with_audit(client, match_id, name, legacy_audit_doc(time))
     audit_url = f"/api/sync/matches/{match_id}/docs/audit/alice/1"
-    doc = {
-        "stage_number": 1,
-        "beep_time": 5.0,
-        # No id and no candidate_number: a legacy manual shot, the one
-        # shape whose derived id moves when the time moves.
-        "shots": [
-            {
-                "shot_number": 1,
-                "candidate_number": None,
-                "time": time,
-                "ms_after_beep": int(round((time - 5.0) * 1000)),
-            }
-        ],
-        "audit_events": [],
-    }
-    seeded = client.put(audit_url, params={"expected_version": 0}, json=doc)
-    assert seeded.status_code == 200, seeded.text
 
-    accepted = client.post(_alias_url(match_id, "shooters/alice/stages/1/audit/accept"))
+    accepted = client.post(alias_url(match_id, "shooters/alice/stages/1/audit/accept"))
     assert accepted.status_code == 200, accepted.text
     stored = client.get(audit_url)
     assert stored.status_code == 200, stored.text

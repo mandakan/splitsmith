@@ -13,7 +13,7 @@ from splitsmith.match_project import MatchProject, StageEntry
 from splitsmith.ui.server import create_app
 from tests.conftest import bound_match_id, scaffold_match
 from tests.hosted_helpers import _CapturingSender, login
-from tests.test_mirror_read_only import _alias_url, _seed_mirror
+from tests.mirror_helpers import alias_url, seed_mirror
 
 
 @pytest.fixture
@@ -81,7 +81,7 @@ def test_patch_by_id_targets_the_right_shot(
 # lock -- so this one test is ported to the hosted fixtures instead of the
 # local ``local_app_with_stage`` fixture used above. It seeds through the
 # desktop-sync doc routes (``/api/sync/matches/.../docs/...``), the same
-# surface ``_seed_mirror`` already uses, and issues the PATCH itself through
+# surface ``seed_mirror`` already uses, and issues the PATCH itself through
 # the ``/api/matches/{id}/...`` alias -- the coach-by-number PATCH is on the
 # mirror's review capability (``capabilities._REVIEW_ROUTES``), so it reaches the
 # handler under test even though the match is a read-only mirror.
@@ -100,7 +100,7 @@ def test_stale_shot_number_patch_is_refused_after_an_insert(
     login(client, sender, "owner@example.com")
     match_id = "01JCOACHPATCHSTALE0000001"
     name = "coach-patch-stale"
-    _seed_mirror(client, match_id, name)
+    seed_mirror(client, match_id, name)
 
     roster_doc = match_model.Match(match_id=match_id, name=name, shooters=["alice"], stages=[]).model_dump(
         mode="json"
@@ -131,7 +131,7 @@ def test_stale_shot_number_patch_is_refused_after_an_insert(
     assert bumped.json()["version"] != held_version
 
     resp = client.patch(
-        _alias_url(match_id, "shooters/alice/stages/1/shots/2/coach"),
+        alias_url(match_id, "shooters/alice/stages/1/shots/2/coach"),
         json={"coaching_note": "meant for the old shot 2", "expected_version": held_version},
     )
     assert resp.status_code == 409, resp.text
@@ -198,7 +198,7 @@ def test_coach_patch_response_carries_the_version_a_follow_up_patch_needs(
     login(client, sender, "owner@example.com")
     match_id = "01JCOACHPATCHVERSION00001"
     name = "coach-patch-version"
-    _seed_mirror(client, match_id, name)
+    seed_mirror(client, match_id, name)
 
     roster_doc = match_model.Match(match_id=match_id, name=name, shooters=["alice"], stages=[]).model_dump(
         mode="json"
@@ -224,12 +224,12 @@ def test_coach_patch_response_carries_the_version_a_follow_up_patch_needs(
     )
     assert put_audit.status_code == 200, put_audit.text
 
-    read = client.get(_alias_url(match_id, "shooters/alice/stages/1/coach"))
+    read = client.get(alias_url(match_id, "shooters/alice/stages/1/coach"))
     assert read.status_code == 200, read.text
     held_version = read.json()["version"]
 
     first = client.patch(
-        _alias_url(match_id, "shooters/alice/stages/1/shots/1/coach"),
+        alias_url(match_id, "shooters/alice/stages/1/shots/1/coach"),
         json={"coaching_note": "first", "expected_version": held_version},
     )
     assert first.status_code == 200, first.text
@@ -237,7 +237,7 @@ def test_coach_patch_response_carries_the_version_a_follow_up_patch_needs(
     assert next_version != held_version, "a save that changed the doc must move the version"
 
     second = client.patch(
-        _alias_url(match_id, "shooters/alice/stages/1/shots/1/coach"),
+        alias_url(match_id, "shooters/alice/stages/1/shots/1/coach"),
         json={"coaching_note": "second", "expected_version": next_version},
     )
     assert second.status_code == 200, second.text
