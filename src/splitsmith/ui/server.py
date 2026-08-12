@@ -706,6 +706,68 @@ def _reset_deletion_events(shots: Any) -> list[dict[str, Any]]:
     ]
 
 
+#: ``cand-<n>`` shot id, as ``shot_id.derive_shot_id`` builds it. Read back
+#: here so a candidate number that survives only in the event log still
+#: counts against the high-water mark (#842).
+_CAND_ID_RE = re.compile(r"^cand-(\d+)$")
+
+
+def _candidate_high_water(doc: Any) -> int:
+    """Highest candidate number this stage's document has ever used.
+
+    A detection run numbers its candidates 1..K, so a re-detect used to
+    hand the same ``cand-<n>`` to a different physical shot. That is the
+    aliasing half of #842: the merge keys shot membership on the id, and
+    an id that names one shot on Monday and another on Tuesday cannot
+    carry a verdict. Numbering the next run from here + 1 means a
+    candidate number is never reused within a stage, so the alias cannot
+    form in the first place.
+
+    Three places a number can survive, and all three count:
+
+    * ``_candidates_pending_audit.candidates`` -- the current run's block.
+      This is the inductive case: each run records its own already-offset
+      numbers, so the next run clears them by construction even though
+      the block is overwritten and earlier runs' candidates are gone.
+    * ``shots[]`` -- an audited shot outlives the block it came from.
+    * ``audit_events`` payload ids -- the log is append-only and never
+      pruned, so it outlives *both*. This is the clause that matters: the
+      second surviving case on #842 is a re-detect recreating a
+      ``cand-<n>`` that only an old ``marker_rejected`` still remembers,
+      and only the log has that number by then.
+
+    Returns 0 for a document that has never been detected, so a first run
+    numbers from 1 exactly as before.
+    """
+    if not isinstance(doc, dict):
+        return 0
+    numbers: list[int] = []
+
+    def _take(value: Any) -> None:
+        # bool is an int in Python and True would count as candidate 1.
+        if isinstance(value, int) and not isinstance(value, bool):
+            numbers.append(value)
+
+    block = doc.get("_candidates_pending_audit")
+    if isinstance(block, dict):
+        for cand in block.get("candidates") or []:
+            if isinstance(cand, dict):
+                _take(cand.get("candidate_number"))
+    for shot in doc.get("shots") or []:
+        if isinstance(shot, dict):
+            _take(shot.get("candidate_number"))
+    for event in doc.get("audit_events") or []:
+        if not isinstance(event, dict):
+            continue
+        payload = event.get("payload")
+        shot_id = payload.get("id") if isinstance(payload, dict) else None
+        match = _CAND_ID_RE.match(shot_id) if isinstance(shot_id, str) else None
+        if match is not None:
+            numbers.append(int(match.group(1)))
+
+    return max(numbers, default=0)
+
+
 def _kept_audit_shots(shots: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Kept shots from an audit doc's ``shots[]``.
 
@@ -3076,16 +3138,28 @@ def register_job_bodies(state: AppState) -> None:
                 del doc["detection"]
             if stg.stage_rounds is not None:
                 doc["stage_rounds"] = stg.stage_rounds.model_dump(mode="json", exclude_none=True)
+            # #842: the ensemble numbers its candidates 1..K every run, so a
+            # re-detect used to hand ``cand-<n>`` to a different physical shot
+            # than the one that id already named. Offset past everything this
+            # document has ever used, so a number is never reused within a
+            # stage. Computed from ``doc`` and applied to a copy rather than to
+            # ``candidates`` in place: this function is re-applied against a
+            # freshly-loaded document when a hosted save loses the version
+            # race, and mutating the closed-over list would offset it twice.
+            offset = _candidate_high_water(doc)
+            numbered = [{**c, "candidate_number": c["candidate_number"] + offset} for c in candidates]
             doc["_candidates_pending_audit"] = {
                 "_note": (
                     "3-voter ensemble (PANN gunshot folded into voter C). "
                     "vote_a/b/c=1 means the voter kept the candidate; "
                     "ensemble_score = vote_total + apriori_boost. shots[] is "
-                    "seeded from candidates with ensemble_score >= consensus."
+                    "seeded from candidates with ensemble_score >= consensus. "
+                    "candidate_number is unique across this stage's detection "
+                    "runs, not 1..K per run -- see _candidate_high_water."
                 ),
                 "consensus": result.consensus,
                 "expected_rounds": result.expected_rounds,
-                "candidates": candidates,
+                "candidates": numbered,
             }
             reset_deletions: list[dict[str, Any]] = []
             if reset:
@@ -3101,7 +3175,7 @@ def register_job_bodies(state: AppState) -> None:
                 doc["shots"] = [
                     {
                         "shot_number": i,
-                        "candidate_number": c.candidate_number,
+                        "candidate_number": c.candidate_number + offset,
                         "time": c.time,
                         "ms_after_beep": c.ms_after_beep,
                         "source": "detected",

@@ -3130,6 +3130,131 @@ def test_reset_deletion_events_names_only_identified_shots() -> None:
     assert _reset_deletion_events([]) == []
 
 
+def test_candidate_high_water_reads_all_three_places_a_number_survives() -> None:
+    """#842: the aliasing half. A number counts wherever it survives, and
+    the event log is the one that matters -- it is append-only and never
+    pruned, so it outlives both the candidate block (overwritten every
+    run) and ``shots[]``."""
+    from splitsmith.ui.server import _candidate_high_water
+
+    assert _candidate_high_water({}) == 0
+    assert _candidate_high_water(None) == 0
+    block = {"_candidates_pending_audit": {"candidates": [{"candidate_number": 6}]}}
+    assert _candidate_high_water(block) == 6
+    assert _candidate_high_water({"shots": [{"candidate_number": 11}]}) == 11
+    # The second surviving case on #842: only the log remembers cand-7.
+    assert (
+        _candidate_high_water({"audit_events": [{"kind": "marker_rejected", "payload": {"id": "cand-7"}}]})
+        == 7
+    )
+    # Highest across all three, not the first one found.
+    assert (
+        _candidate_high_water(
+            {
+                "_candidates_pending_audit": {"candidates": [{"candidate_number": 3}]},
+                "shots": [{"candidate_number": 5}],
+                "audit_events": [{"kind": "marker_rejected", "payload": {"id": "cand-9"}}],
+            }
+        )
+        == 9
+    )
+    # A manual shot's id is not a candidate number, and True is not 1.
+    assert (
+        _candidate_high_water(
+            {
+                "shots": [{"candidate_number": True}],
+                "audit_events": [{"kind": "marker_added_manual", "payload": {"id": "manual-t6500"}}],
+            }
+        )
+        == 0
+    )
+
+
+def test_a_second_detection_run_never_reuses_a_candidate_number(tmp_path: Path, monkeypatch) -> None:
+    """#842: ``cand-<n>`` must not name two different physical shots.
+
+    The ensemble numbers its candidates 1..K every run, so before this a
+    re-detect handed ``cand-1`` to whatever the new run's first candidate
+    happened to be -- and the sync merge keys shot membership on that id.
+    The second run now numbers from the document's high-water mark, so
+    the alias cannot form.
+    """
+    import json as _json
+
+    import numpy as np
+    import soundfile as sf
+
+    client, _ = _seed_project_with_primary(tmp_path)
+    project_root = tmp_path / "match"
+    _shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(_shooter_root)
+    primary = project.stages[0].primary()
+    assert primary is not None
+    primary.beep_time = 5.0
+    project.stages[0].time_seconds = 10.0
+    project.save(_shooter_root)
+    project.resolve_video_path(_shooter_root, primary.path).resolve().write_bytes(b"S")
+
+    audio_dir = _shooter_root / "audio"
+    audio_dir.mkdir(parents=True, exist_ok=True)
+    wav = audio_dir / "stage1_audit.wav"
+    sf.write(wav, np.zeros(48_000, dtype="float32"), 48_000)
+    trimmed_dir = _shooter_root / "trimmed"
+    trimmed_dir.mkdir(parents=True, exist_ok=True)
+    (trimmed_dir / "stage1_trimmed.mp4").write_bytes(b"\x00")
+
+    from splitsmith import ensemble as ensemble_module
+    from splitsmith.ui import audio as audio_helpers
+    from splitsmith.ui import server as server_module
+
+    class FakeAudit:
+        audio_path = wav
+        beep_in_clip = 5.0
+        trimmed = True
+
+    monkeypatch.setattr(audio_helpers, "ensure_audit_audio", lambda *a, **kw: FakeAudit())
+    monkeypatch.setattr(server_module, "_get_ensemble_runtime", lambda: None)
+    fake_result = _fake_ensemble_result(
+        [
+            {"time": 5.5, "confidence": 0.8, "ensemble_score": 3.0, "kept": True},
+            {"time": 6.1, "confidence": 0.6, "ensemble_score": 2.0, "kept": True},
+            {"time": 6.9, "confidence": 0.9, "ensemble_score": 3.0, "kept": True},
+        ],
+        consensus=2,
+    )
+    monkeypatch.setattr(ensemble_module, "detect_shots_ensemble", lambda *a, **kw: fake_result)
+    audit_file = _shooter_root / "audit" / "stage1.json"
+
+    first = _wait_for_job(client, client.post("/api/shooters/me/stages/1/shot-detect").json()["id"])
+    assert first["status"] == "succeeded", first
+    doc = _json.loads(audit_file.read_text(encoding="utf-8"))
+    run_one = [c["candidate_number"] for c in doc["_candidates_pending_audit"]["candidates"]]
+    assert run_one == [1, 2, 3], "a first run on a fresh stage still numbers from 1"
+    assert [s["candidate_number"] for s in doc["shots"]] == [1, 2, 3]
+
+    second = _wait_for_job(
+        client, client.post("/api/shooters/me/stages/1/shot-detect?reset=true").json()["id"]
+    )
+    assert second["status"] == "succeeded", second
+    doc = _json.loads(audit_file.read_text(encoding="utf-8"))
+    run_two = [c["candidate_number"] for c in doc["_candidates_pending_audit"]["candidates"]]
+    assert run_two == [4, 5, 6]
+    assert set(run_one).isdisjoint(run_two), "the whole point: no id names two physical shots"
+    # The reseeded shots carry the new numbers, so their derived ids match
+    # the candidates they actually came from.
+    assert [s["candidate_number"] for s in doc["shots"]] == [4, 5, 6]
+
+    # And a third run clears the second, which is what makes it inductive:
+    # the block is overwritten each run, so each run has to record numbers
+    # the next one can clear.
+    third = _wait_for_job(
+        client, client.post("/api/shooters/me/stages/1/shot-detect?reset=true").json()["id"]
+    )
+    assert third["status"] == "succeeded", third
+    doc = _json.loads(audit_file.read_text(encoding="utf-8"))
+    assert [c["candidate_number"] for c in doc["_candidates_pending_audit"]["candidates"]] == [7, 8, 9]
+
+
 def test_shot_detect_clears_beep_confirm_stub_marker(tmp_path: Path, monkeypatch) -> None:
     """A beep-confirm run seeds ``{"shots": [], "detection": "none"}`` and
     shot-detect merges its real results into that same doc rather than
