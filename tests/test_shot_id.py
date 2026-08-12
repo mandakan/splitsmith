@@ -112,3 +112,30 @@ def test_put_audit_stamps_ids_and_keeps_them_across_a_nudge(
     second = client.put(f"{url_base}/shooters/me/stages/1/audit", json=moved)
     assert second.status_code == 200, second.text
     assert [s["id"] for s in second.json()["shots"]] == ids
+
+
+def test_a_truthy_non_string_id_is_replaced_not_kept() -> None:
+    """A non-string id is not an id -- nothing downstream can key on it.
+
+    Treating it as present made the shot invisible to the sync merge's
+    keying and to its unstamped-shot guard at the same time, so the shot
+    vanished from a merged document with no note at all.
+    """
+    shots = [{"id": 42, "candidate_number": 4, "time": 6.0}]
+    added = ensure_shot_ids(shots)
+    assert added == 1
+    assert shots[0]["id"] == "cand-4"
+
+
+def test_an_empty_string_id_is_replaced() -> None:
+    shots = [{"id": "", "candidate_number": 4, "time": 6.0}]
+    assert ensure_shot_ids(shots) == 1
+    assert shots[0]["id"] == "cand-4"
+
+
+def test_a_real_string_id_is_never_rewritten() -> None:
+    """The invariant the above must not break: a persisted id is a shot's
+    identity across a nudge, so it survives even when it looks derivable."""
+    shots = [{"id": "manual-t1000", "candidate_number": 4, "time": 6.0}]
+    assert ensure_shot_ids(shots) == 0
+    assert shots[0]["id"] == "manual-t1000"

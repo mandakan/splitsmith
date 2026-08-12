@@ -13,6 +13,16 @@ desktop-authoritative: remote-only additions/removals are noted, not
 merged. Shots are the exception -- they carry a stable ``id``
 (``splitsmith.shot_id``) and their membership resolves from the
 append-only marker events, so a phone can add, move and remove shots.
+Only a shot that *arrived* carrying a persisted string ``id`` is
+mergeable: an id minted inside the merge is not convergent across sides,
+because ``derive_shot_id`` keys a candidate-less shot off its rounded
+time and a nudge therefore changes it. If either side carries an
+unstamped shot the whole shot section is skipped with a note.
+
+``merge_audit_doc`` is consequently not a deterministic function of its
+inputs: ``ensure_shot_ids`` mints a uuid4 for a shot that can derive no
+id, so two runs over identical inputs can differ in those ids. Still no
+I/O -- callers own loading, timestamps, and writes.
 
 Taking a remote beep group applies the same derivation invalidation a
 local beep override does (``_apply_beep_override`` in ui/server.py) -
@@ -161,6 +171,34 @@ def _event_key(event: dict) -> object:
     return event.get("id") or (event.get("ts"), event.get("kind"))
 
 
+def _as_number(value: object) -> float | None:
+    """A shot ``time`` / ``beep_time`` as a float, or None if it is not one.
+
+    Audit documents are hand-editable JSON, so a ``time`` can be a string or
+    null. The old positional merge never looked at the value; the rebuild
+    sorts and subtracts, and both raise on junk.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _unstamped_shot_count(doc: dict | None) -> int:
+    """How many of a doc's shots arrived without a persisted string id.
+
+    The gate on the whole shot merge. Non-dict entries are not shots and do
+    not count -- they are carried through untouched either way.
+    """
+    count = 0
+    for shot in (doc or {}).get("shots") or []:
+        if not isinstance(shot, dict):
+            continue
+        shot_id = shot.get("id")
+        if not (isinstance(shot_id, str) and shot_id):
+            count += 1
+    return count
+
+
 def _shots_by_id(doc: dict | None) -> tuple[dict[str, dict], dict[str, int]]:
     """Index a doc's shots by their stable id, plus a count of any collisions.
 
@@ -263,128 +301,42 @@ def merge_audit_doc(
     merged_events = merged.get("audit_events") or []
     verdicts = _membership_verdicts(merged_events)
 
-    # Stamp ids before keying anything. A doc written before shot ids
-    # shipped has none, and _shots_by_id would skip every shot -- which
-    # would then be dropped when merged["shots"] is rebuilt below. The
-    # derivation is deterministic, so both sides mint the same id for the
-    # same pre-existing shot.
+    # Stamp ids on both sides so the document stops being legacy going
+    # forward -- but count what was missing FIRST. An id minted here is not
+    # convergent across sides: derive_shot_id keys a candidate-less shot off
+    # its rounded time, so a nudge changes it, and a nudge is exactly what
+    # this merge exists to reconcile. Only a shot that arrived carrying a
+    # persisted string id can be matched.
+    local_unstamped = _unstamped_shot_count(merged)
+    remote_unstamped = _unstamped_shot_count(remote)
     remote_for_merge = copy.deepcopy(remote)
     for doc in (merged, remote_for_merge):
         shots_list = doc.get("shots")
         if isinstance(shots_list, list):
             ensure_shot_ids([s for s in shots_list if isinstance(s, dict)])
 
-    # A shot with neither candidate_number nor time got a minted,
-    # non-convergent id, so the two sides disagree about it and keying it
-    # would duplicate it on every merge. Hold those aside: local's copies
-    # win untouched. See Audit.tsx:2829 for where the shape comes from.
-    def _has_identity(shot: dict) -> bool:
-        return shot.get("candidate_number") is not None or shot.get("time") is not None
-
-    merged_shots_raw = merged.get("shots")
-    merged_shots_list = merged_shots_raw if isinstance(merged_shots_raw, list) else []
-    if merged_shots_raw is not None and not isinstance(merged_shots_raw, list):
+    if local_unstamped or remote_unstamped:
+        # Refuse the whole section, not just the unstamped shots: a document
+        # this old cannot be trusted to key any of its shots. Local's shots
+        # stand as they are (now stamped), so nothing can duplicate and
+        # nothing can be lost. The condition clears the first time each side
+        # saves the stage.
         result.notes.append(
-            f"{doc_key}: local shots is a {type(merged_shots_raw).__name__}, not a list, so it "
-            "holds no shots to merge; replaced with the merged list - the document is malformed"
+            f"{doc_key}: {local_unstamped} local and {remote_unstamped} remote shot(s) "
+            "arrived without a persisted id, so the shot section was not merged and "
+            "local shots stand; they are stamped now, so the next sync can merge them"
         )
-
-    unkeyable = [s for s in merged_shots_list if isinstance(s, dict) and not _has_identity(s)]
-    if unkeyable:
-        result.notes.append(
-            f"{doc_key}: {len(unkeyable)} shot(s) carry neither candidate_number nor "
-            "time, so they have no convergent id; local copies kept unmerged"
-        )
-
-    # Entries that are not dicts at all are not shots and cannot be merged -
-    # but they are not ours to discard either, and the rebuild below would
-    # swallow them. Carry them through at their original index.
-    foreign = [(position, e) for position, e in enumerate(merged_shots_list) if not isinstance(e, dict)]
-
-    def _keyable(doc: dict | None) -> tuple[dict[str, dict], dict[str, int]]:
-        index, duplicates = _shots_by_id(doc)
-        return {shot_id: shot for shot_id, shot in index.items() if _has_identity(shot)}, duplicates
-
-    base_shots, _ = _keyable(base)
-    local_shots, local_duplicates = _keyable(merged)
-    remote_shots, remote_duplicates = _keyable(remote_for_merge)
-
-    # A collision drops a shot no matter what we do; the one thing that must
-    # not happen is dropping it quietly.
-    for side, duplicates in (("local", local_duplicates), ("remote", remote_duplicates)):
-        for shot_id in sorted(duplicates):
-            dropped = duplicates[shot_id]
-            result.notes.append(
-                f"{doc_key}: shot id {shot_id} appears {dropped + 1} times in the {side} "
-                f"document, which no writer should produce; kept the first and dropped "
-                f"{dropped} - the document is malformed"
-            )
-
-    resolved: dict[str, dict] = {}
-    for shot_id in list(local_shots) + [k for k in remote_shots if k not in local_shots]:
-        if verdicts.get(shot_id) is False:
-            continue
-        local_shot = local_shots.get(shot_id)
-        remote_shot = remote_shots.get(shot_id)
-        if local_shot is None:
-            resolved[shot_id] = copy.deepcopy(remote_shot)
-            continue
-        shot = local_shot
-        resolved[shot_id] = shot
-        if remote_shot is None:
-            continue
-        base_shot = base_shots.get(shot_id, {})
-
-        winner, is_conflict = _resolve_unit(
-            base_shot.get("time"),
-            shot.get("time"),
-            remote_shot.get("time"),
+    else:
+        _merge_shot_section(
+            result,
+            base,
+            merged,
+            remote_for_merge,
+            doc_key,
+            verdicts=verdicts,
             local_ts=local_ts,
             remote_ts=remote_ts,
         )
-        if is_conflict:
-            result.conflicts.append(
-                MergeConflict(doc_key=doc_key, unit=f"shot {shot_id} time", winner=winner)
-            )
-        if winner == "remote":
-            shot["time"] = copy.deepcopy(remote_shot.get("time"))
-
-        winner, is_conflict = _resolve_unit(
-            _coach_unit(base_shot),
-            _coach_unit(shot),
-            _coach_unit(remote_shot),
-            local_ts=local_ts,
-            remote_ts=remote_ts,
-        )
-        if is_conflict:
-            result.conflicts.append(
-                MergeConflict(doc_key=doc_key, unit=f"shot {shot_id} coach", winner=winner)
-            )
-        if winner == "remote" and _coach_unit(remote_shot) != _coach_unit(shot):
-            for key in COACH_FIELDS:
-                if key in remote_shot:
-                    shot[key] = copy.deepcopy(remote_shot[key])
-                else:
-                    shot.pop(key, None)
-
-    # Renumber and re-derive. shot_number is display-only now, and
-    # ms_after_beep is a function of the merged time -- merging it
-    # independently could contradict the time it is derived from.
-    beep_time = merged.get("beep_time")
-    ordered = sorted(
-        [*resolved.values(), *unkeyable],
-        key=lambda s: (s.get("time") is None, s.get("time") or 0.0, s.get("id") or ""),
-    )
-    for index, shot in enumerate(ordered, start=1):
-        shot["shot_number"] = index
-        if beep_time is not None and shot.get("time") is not None:
-            shot["ms_after_beep"] = int(round((float(shot["time"]) - float(beep_time)) * 1000))
-    # After the renumber, never before: a non-dict entry has no shot_number
-    # to assign, and numbering the real shots 1..n contiguously is what the
-    # display wants. Ascending positions, so each insert shifts the next.
-    for position, entry in foreign:
-        ordered.insert(min(position, len(ordered)), entry)
-    merged["shots"] = ordered
 
     # needs_attention: doc-level LWW unit (triage slice 4). Change
     # detection and equality compare a CONTENT projection - flagged and
@@ -482,6 +434,155 @@ def merge_audit_doc(
 
     result.changed_vs_local = merged != local
     return result
+
+
+def _merge_shot_section(
+    result: MergeResult,
+    base: dict | None,
+    merged: dict,
+    remote_for_merge: dict,
+    doc_key: str,
+    *,
+    verdicts: dict[str, bool],
+    local_ts: datetime,
+    remote_ts: datetime,
+) -> None:
+    """Merge membership, time and coach fields for one audit doc's shots.
+
+    Only called when every shot on both sides arrived with a persisted id -
+    see the gate in :func:`merge_audit_doc`. Mutates ``result`` and
+    ``merged`` in place, the same shape as
+    :func:`_note_non_whitelisted_remote_changes`.
+    """
+
+    # A shot with neither candidate_number nor time got a minted,
+    # non-convergent id, so the two sides disagree about it and keying it
+    # would duplicate it on every merge. Hold those aside: local's copies
+    # win untouched. See Audit.tsx:2829 for where the shape comes from.
+    def _has_identity(shot: dict) -> bool:
+        return shot.get("candidate_number") is not None or shot.get("time") is not None
+
+    merged_shots_raw = merged.get("shots")
+    merged_shots_list = merged_shots_raw if isinstance(merged_shots_raw, list) else []
+    if merged_shots_raw is not None and not isinstance(merged_shots_raw, list):
+        result.notes.append(
+            f"{doc_key}: local shots is a {type(merged_shots_raw).__name__}, not a list, so it "
+            "holds no shots to merge; replaced with the merged list - the document is malformed"
+        )
+
+    unkeyable = [s for s in merged_shots_list if isinstance(s, dict) and not _has_identity(s)]
+    if unkeyable:
+        result.notes.append(
+            f"{doc_key}: {len(unkeyable)} shot(s) carry neither candidate_number nor "
+            "time, so they have no convergent id; local copies kept unmerged"
+        )
+
+    # Entries that are not dicts at all are not shots and cannot be merged -
+    # but they are not ours to discard either, and the rebuild below would
+    # swallow them. Carry them through at their original index.
+    foreign = [(position, e) for position, e in enumerate(merged_shots_list) if not isinstance(e, dict)]
+
+    def _keyable(doc: dict | None) -> tuple[dict[str, dict], dict[str, int]]:
+        index, duplicates = _shots_by_id(doc)
+        return {shot_id: shot for shot_id, shot in index.items() if _has_identity(shot)}, duplicates
+
+    base_shots, _ = _keyable(base)
+    local_shots, local_duplicates = _keyable(merged)
+    remote_shots, remote_duplicates = _keyable(remote_for_merge)
+
+    # A collision drops a shot no matter what we do; the one thing that must
+    # not happen is dropping it quietly.
+    for side, duplicates in (("local", local_duplicates), ("remote", remote_duplicates)):
+        for shot_id in sorted(duplicates):
+            dropped = duplicates[shot_id]
+            result.notes.append(
+                f"{doc_key}: shot id {shot_id} appears {dropped + 1} times in the {side} "
+                f"document, which no writer should produce; kept the first and dropped "
+                f"{dropped} - the document is malformed"
+            )
+
+    resolved: dict[str, dict] = {}
+    for shot_id in list(local_shots) + [k for k in remote_shots if k not in local_shots]:
+        if verdicts.get(shot_id) is False:
+            continue
+        local_shot = local_shots.get(shot_id)
+        remote_shot = remote_shots.get(shot_id)
+        if local_shot is None:
+            resolved[shot_id] = copy.deepcopy(remote_shot)
+            continue
+        shot = local_shot
+        resolved[shot_id] = shot
+        if remote_shot is None:
+            continue
+        base_shot = base_shots.get(shot_id, {})
+
+        winner, is_conflict = _resolve_unit(
+            base_shot.get("time"),
+            shot.get("time"),
+            remote_shot.get("time"),
+            local_ts=local_ts,
+            remote_ts=remote_ts,
+        )
+        if is_conflict:
+            result.conflicts.append(
+                MergeConflict(doc_key=doc_key, unit=f"shot {shot_id} time", winner=winner)
+            )
+        if winner == "remote":
+            shot["time"] = copy.deepcopy(remote_shot.get("time"))
+            # ms_after_beep is derived from time and beep_time. The rebuild
+            # below re-derives it whenever it can, but with no usable
+            # beep_time it cannot -- and local's stale value against
+            # remote's time is the exact contradiction re-derivation exists
+            # to prevent. So it travels with the time it belongs to.
+            if "ms_after_beep" in remote_shot:
+                shot["ms_after_beep"] = copy.deepcopy(remote_shot["ms_after_beep"])
+            else:
+                shot.pop("ms_after_beep", None)
+
+        winner, is_conflict = _resolve_unit(
+            _coach_unit(base_shot),
+            _coach_unit(shot),
+            _coach_unit(remote_shot),
+            local_ts=local_ts,
+            remote_ts=remote_ts,
+        )
+        if is_conflict:
+            result.conflicts.append(
+                MergeConflict(doc_key=doc_key, unit=f"shot {shot_id} coach", winner=winner)
+            )
+        if winner == "remote" and _coach_unit(remote_shot) != _coach_unit(shot):
+            for key in COACH_FIELDS:
+                if key in remote_shot:
+                    shot[key] = copy.deepcopy(remote_shot[key])
+                else:
+                    shot.pop(key, None)
+
+    # Renumber and re-derive. shot_number is display-only now, and
+    # ms_after_beep is a function of the merged time -- merging it
+    # independently could contradict the time it is derived from.
+    # A time that is not a number sorts with the missing ones rather than
+    # raising: audit docs are hand-editable JSON, and the positional merge
+    # this replaced never looked at the value, so junk used to survive.
+    beep_time = _as_number(merged.get("beep_time"))
+
+    def _order_key(shot: dict) -> tuple[bool, float, str]:
+        time = _as_number(shot.get("time"))
+        if time is None:
+            return (True, 0.0, str(shot.get("id") or ""))
+        return (False, time, str(shot.get("id") or ""))
+
+    ordered = sorted([*resolved.values(), *unkeyable], key=_order_key)
+    for index, shot in enumerate(ordered, start=1):
+        shot["shot_number"] = index
+        time = _as_number(shot.get("time"))
+        if beep_time is not None and time is not None:
+            shot["ms_after_beep"] = int(round((time - beep_time) * 1000))
+    # After the renumber, never before: a non-dict entry has no shot_number
+    # to assign, and numbering the real shots 1..n contiguously is what the
+    # display wants. Ascending positions, so each insert shifts the next.
+    for position, entry in foreign:
+        ordered.insert(min(position, len(ordered)), entry)
+    merged["shots"] = ordered
 
 
 def _note_non_whitelisted_remote_changes(

@@ -127,7 +127,17 @@ def test_non_whitelisted_remote_change_local_wins_with_note():
 
 
 def _shot(n, **over):
-    s = {"shot_number": n, "time": float(n), "interval_class": "split", "interval_class_source": "auto"}
+    # The persisted id is not decoration: the merge refuses the whole shot
+    # section of a document where either side carries an unstamped shot, so
+    # a helper without one would exercise the refusal, not the merge.
+    s = {
+        "id": f"cand-{n}",
+        "candidate_number": n,
+        "shot_number": n,
+        "time": float(n),
+        "interval_class": "split",
+        "interval_class_source": "auto",
+    }
     s.update(over)
     return s
 
@@ -171,13 +181,16 @@ def test_coach_fields_remote_only_change_wins():
     assert s["interval_class"] == "draw" and s["coaching_note"] == "slow"
 
 
-def test_coach_conflict_lww_and_shot_membership_is_local():
+def test_coach_conflict_lww_and_shot_absent_from_remote_survives():
     base = _audit([_shot(1)], [])
     local = _audit([_shot(1, coaching_note="mine"), _shot(2)], [])
     remote = _audit([_shot(1, coaching_note="theirs")], [])
     r = merge_audit_doc(base, local, remote, doc_key="audit/anna/3", local_ts=T_OLD, remote_ts=T_NEW)
     assert r.doc["shots"][0]["coaching_note"] == "theirs"  # remote newer
-    assert len(r.doc["shots"]) == 2  # local shot list authoritative
+    # Shot 2 survives because no event carries a delete verdict for it, not
+    # because the local shot list is authoritative -- membership is merged
+    # now, and a marker_rejected on cand-2 would remove it.
+    assert len(r.doc["shots"]) == 2
     assert len(r.conflicts) == 1
 
 
@@ -470,10 +483,12 @@ def test_a_legacy_doc_with_no_ids_keeps_its_shots() -> None:
 def test_a_shot_with_no_identity_is_kept_once_not_duplicated() -> None:
     """A shot with neither candidate_number nor time has no convergent id.
 
-    Both sides mint different ids for it, so keying it would emit two copies
-    of one shot on every merge. It must be carried through exactly once.
+    The anchor carries a persisted id, so the document clears the unstamped
+    gate and this exercises the hold-aside rather than the refusal. Keying
+    it would still be wrong -- the id is a uuid4 someone happened to save --
+    so it must be carried through exactly once.
     """
-    anchor = {"shot_number": 1, "candidate_number": None, "time": None}
+    anchor = {"id": "anchor-1", "shot_number": 1, "candidate_number": None, "time": None}
     base = {"beep_time": 5.0, "shots": [dict(anchor)], "audit_events": []}
     local = {"beep_time": 5.0, "shots": [dict(anchor)], "audit_events": []}
     remote = {"beep_time": 5.0, "shots": [dict(anchor)], "audit_events": []}
@@ -585,3 +600,162 @@ def test_a_shots_value_that_is_not_a_list_is_replaced_loudly() -> None:
     )
     assert result.doc["shots"] == []
     assert any("not a list" in note for note in result.notes)
+
+
+# -- only a persisted id is mergeable (fix round 2) ----------------------
+#
+# derive_shot_id keys a candidate-less shot off its ROUNDED TIME, so a nudge
+# changes the derived id -- and a nudge is the case the merge exists for. An
+# id minted inside the merge is therefore not convergent across sides, and
+# the shot section refuses to merge when either side carries an unstamped
+# shot. See the 2026-08-12 correction in the plan.
+
+
+def test_a_truthy_non_string_id_does_not_vanish() -> None:
+    """Critical 1: a shot with id=42 was dropped by every path at once.
+
+    ensure_shot_ids skipped it (truthy), _shots_by_id skipped it (not a str),
+    _has_identity was True so it missed the unkeyable hold-aside, and it is a
+    dict so it missed the non-dict passthrough. 100% loss, no note.
+    """
+
+    def build() -> dict:
+        return {
+            "beep_time": 5.0,
+            "shots": [{"id": 42, "shot_number": 1, "candidate_number": 4, "time": 6.0}],
+            "audit_events": [],
+        }
+
+    result = merge_audit_doc(
+        build(), build(), build(), doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS
+    )
+    assert len(result.doc["shots"]) == 1
+    assert result.doc["shots"][0]["id"] == "cand-4"  # stamped with a real one
+
+
+def test_a_legacy_manual_shot_nudged_on_one_side_does_not_duplicate() -> None:
+    """Critical 2: the exact case the merge exists for, measured duplicating.
+
+    Local has it at 6.5 s and remote at 6.52 s -- one shot someone moved.
+    Derived, those are manual-t6500 and manual-t6520, unioned as two shots.
+    """
+    base = {"beep_time": 5.0, "shots": [{"shot_number": 1, "time": 6.5}], "audit_events": []}
+    local = {"beep_time": 5.0, "shots": [{"shot_number": 1, "time": 6.5}], "audit_events": []}
+    remote = {"beep_time": 5.0, "shots": [{"shot_number": 1, "time": 6.52}], "audit_events": []}
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+    assert len(result.doc["shots"]) == 1
+    assert result.doc["shots"][0]["time"] == 6.5  # local's, unmerged
+    assert any("without a persisted id" in note for note in result.notes)
+
+
+def test_a_legacy_collision_fallback_does_not_multiply_shots() -> None:
+    """Critical 3: same cause via the uuid4 collision fallback -- 2 in, 3 out.
+
+    Two shots share a candidate_number, so the second gets a minted id that
+    differs on each side.
+    """
+
+    def build() -> dict:
+        return {
+            "beep_time": 5.0,
+            "shots": [
+                {"shot_number": 1, "candidate_number": 4, "time": 6.0},
+                {"shot_number": 2, "candidate_number": 4, "time": 6.5},
+            ],
+            "audit_events": [],
+        }
+
+    result = merge_audit_doc(
+        build(), build(), build(), doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS
+    )
+    assert len(result.doc["shots"]) == 2
+    assert any("without a persisted id" in note for note in result.notes)
+
+
+def test_the_unstamped_note_names_both_side_counts() -> None:
+    """The note has to be actionable: which side, and how many."""
+    base = _id_doc([_id_shot("cand-4", 1, 6.0, 4)])
+    local = _id_doc([_id_shot("cand-4", 1, 6.0, 4), {"shot_number": 2, "time": 7.0}])
+    remote = _id_doc([_id_shot("cand-4", 1, 6.0, 4)])
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+    note = next(n for n in result.notes if "without a persisted id" in n)
+    assert "1 local" in note and "0 remote" in note
+
+
+def test_one_unstamped_shot_blocks_the_whole_shot_section() -> None:
+    """The gate is per document, not per shot: a remote nudge on a properly
+    stamped shot is refused too, because the document cannot be trusted."""
+    base = _id_doc([_id_shot("cand-4", 1, 6.0, 4)])
+    local = _id_doc([_id_shot("cand-4", 1, 6.0, 4), {"shot_number": 2, "time": 7.0}])
+    remote = _id_doc([_id_shot("cand-4", 1, 6.5, 4), {"id": "m2", "shot_number": 2, "time": 7.0}])
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+    assert result.doc["shots"][0]["time"] == 6.0  # remote's nudge NOT taken
+    assert result.conflicts == []
+
+
+def test_a_coach_note_on_an_identity_less_shot_is_declined_and_noted() -> None:
+    """The one behaviour this task changes, pinned.
+
+    Both sides carry the same persisted id, so the document passes the
+    stamped gate -- but the shot has neither candidate_number nor time, so
+    the merge still holds it aside rather than trusting the id. The remote
+    coach note must be neither silently applied nor silently lost.
+    """
+
+    def build(**over: object) -> dict:
+        shot = {"id": "anchor-1", "shot_number": 1, "candidate_number": None, "time": None}
+        shot.update(over)
+        return {"beep_time": 5.0, "shots": [shot], "audit_events": []}
+
+    result = merge_audit_doc(
+        build(),
+        build(),
+        build(coaching_note="from-hosted", interval_class="draw"),
+        doc_key="stage1",
+        local_ts=_LOCAL_TS,
+        remote_ts=_REMOTE_TS,
+    )
+    assert len(result.doc["shots"]) == 1
+    assert "coaching_note" not in result.doc["shots"][0]  # declined, not applied
+    assert any("no convergent id" in note for note in result.notes)  # not silent
+
+
+def test_a_non_numeric_time_does_not_crash_the_sort() -> None:
+    """Minor: the old code survived a junk time; the rebuild's sort key did not."""
+
+    def build() -> dict:
+        return {
+            "beep_time": 5.0,
+            "shots": [
+                {"id": "cand-4", "candidate_number": 4, "time": 6.0},
+                {"id": "junk-1", "candidate_number": 7, "time": "not a number"},
+            ],
+            "audit_events": [],
+        }
+
+    result = merge_audit_doc(
+        build(), build(), build(), doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS
+    )
+    assert {s["id"] for s in result.doc["shots"]} == {"cand-4", "junk-1"}
+
+
+def test_ms_after_beep_travels_with_its_time_when_beep_time_is_absent() -> None:
+    """Important 4: without a beep_time the rebuild cannot re-derive, so the
+    winner's ms_after_beep must travel with the winner's time or the two
+    contradict each other -- the exact thing re-derivation exists to prevent."""
+    base = {
+        "shots": [{"id": "cand-4", "candidate_number": 4, "time": 6.0, "ms_after_beep": 1000}],
+        "audit_events": [],
+    }
+    local = {
+        "shots": [{"id": "cand-4", "candidate_number": 4, "time": 6.0, "ms_after_beep": 1000}],
+        "audit_events": [],
+    }
+    remote = {
+        "shots": [{"id": "cand-4", "candidate_number": 4, "time": 9.0, "ms_after_beep": 4000}],
+        "audit_events": [],
+    }
+    result = merge_audit_doc(base, local, remote, doc_key="stage1", local_ts=_LOCAL_TS, remote_ts=_REMOTE_TS)
+    merged = result.doc["shots"][0]
+    assert merged["time"] == 9.0
+    assert merged["ms_after_beep"] == 4000  # remote's, not local's stale 1000

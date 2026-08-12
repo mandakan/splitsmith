@@ -86,17 +86,17 @@ def make_synced_match(tmp_path: Path) -> Path:
 
     audit_dir = shooter_root / "audit"
     audit_dir.mkdir(exist_ok=True)
-    # The shot carries a candidate_number and a time because a real one
-    # always does: those are what splitsmith.shot_id derives a stable id
-    # from, and a shot with neither is held out of the merge entirely
-    # (merge.py: "no convergent id"), so a stub without them would quietly
-    # stop these tests exercising the coach-field merge at all.
+    # The shot carries a persisted id, a candidate_number and a time because
+    # a real one does. Without the id the merge refuses the whole shot
+    # section as legacy; without the other two it is held aside as having no
+    # convergent id. Either way a stub would quietly stop these tests
+    # exercising the coach-field merge at all.
     (audit_dir / "stage1.json").write_text(
         json.dumps(
             {
                 "detection": "ensemble",
                 "beep_time": 0.5,
-                "shots": [{"shot_number": 1, "candidate_number": 1, "time": 1.0}],
+                "shots": [{"id": "cand-1", "shot_number": 1, "candidate_number": 1, "time": 1.0}],
             }
         ),
         encoding="utf-8",

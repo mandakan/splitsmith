@@ -43,22 +43,31 @@ def derive_shot_id(shot: dict[str, Any]) -> str:
     return f"manual-{uuid.uuid4().hex}"
 
 
-def ensure_shot_ids(shots: list[dict[str, Any]]) -> int:
-    """Stamp ``id`` on every shot that lacks one; return how many were added.
+def _has_usable_id(shot: dict[str, Any]) -> bool:
+    """Whether a shot already carries an id worth keeping.
 
-    Existing ids are never rewritten -- that is what makes a nudge a move
-    rather than a delete plus an add. A derived id that collides with one
-    already used in this document falls back to a minted id, so two manual
-    shots on the same millisecond stay distinct.
+    Only a non-empty string counts. A truthy *non-string* ``id`` -- an int
+    from a hand-edited document, say -- is not an id: nothing downstream can
+    key on it, and treating it as present made the shot invisible to the
+    keying and to the merge's unstamped guard at the same time, so it
+    vanished from a merge with no note at all.
     """
-    taken = {
-        shot["id"]
-        for shot in shots
-        if isinstance(shot, dict) and isinstance(shot.get("id"), str) and shot["id"]
-    }
+    shot_id = shot.get("id")
+    return isinstance(shot_id, str) and bool(shot_id)
+
+
+def ensure_shot_ids(shots: list[dict[str, Any]]) -> int:
+    """Stamp ``id`` on every shot that lacks a usable one; return how many.
+
+    An existing *string* id is never rewritten -- that is what makes a nudge
+    a move rather than a delete plus an add. A derived id that collides with
+    one already used in this document falls back to a minted id, so two
+    manual shots on the same millisecond stay distinct.
+    """
+    taken = {shot["id"] for shot in shots if isinstance(shot, dict) and _has_usable_id(shot)}
     added = 0
     for shot in shots:
-        if not isinstance(shot, dict) or shot.get("id"):
+        if not isinstance(shot, dict) or _has_usable_id(shot):
             continue
         candidate_id = derive_shot_id(shot)
         if candidate_id in taken:
