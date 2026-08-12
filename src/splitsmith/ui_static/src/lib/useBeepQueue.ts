@@ -15,7 +15,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import { ApiError, api, type BeepQueueItem, type BeepQueueResponse } from "./api";
+import {
+  ApiError,
+  api,
+  capabilityDenied,
+  type BeepQueueItem,
+  type BeepQueueResponse,
+} from "./api";
 
 /** Shared copy for the destructive re-detect / edit-and-reapply warning.
  *  Verbatim from the desktop draft copy so the mobile sheet (slice 3)
@@ -231,6 +237,10 @@ export function useBeepQueue() {
     // "desktop" origin means this is a hosted mirror reading a
     // desktop-pushed snippet, not the live source/proxy media.
     isMirror: data?.origin === "desktop",
+    // #756: re-detect fires a detection job against source media - an
+    // edit-class write the mirror guard 403s. Confirm/override are the
+    // review writes and stay live regardless.
+    editDenied: capabilityDenied(data?.capabilities, "edit"),
     busy,
     error,
     setError,

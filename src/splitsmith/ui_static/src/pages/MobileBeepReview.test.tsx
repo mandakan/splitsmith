@@ -28,6 +28,8 @@ vi.mock("@/lib/api", () => ({
     }),
     videoStreamUrl: () => "/proxy.mp4",
   },
+  READ_ONLY_MIRROR_MESSAGE:
+    "Synced from a desktop install - review actions sync back, editing stays on desktop.",
 }));
 
 const item = (over: Partial<BeepQueueItem> = {}): BeepQueueItem => ({
@@ -57,6 +59,7 @@ const hookState = (over: Record<string, unknown> = {}) => ({
   activeKey: "alice::1::v1",
   setActiveKey: vi.fn(),
   isMirror: true,
+  editDenied: false,
   busy: false,
   error: null,
   setError: vi.fn(),
@@ -74,13 +77,25 @@ const hookState = (over: Record<string, unknown> = {}) => ({
 describe("MobileBeepReview", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("mirror item with a snippet renders the audio player, no video, no Re-detect", () => {
+  it("mirror item with a snippet renders the audio player, no video", () => {
     vi.mocked(hook.useBeepQueue).mockReturnValue(hookState() as unknown as ReturnType<typeof hook.useBeepQueue>);
     render(<MobileBeepReview />);
     expect(screen.getByText(/video available on desktop/i)).toBeInTheDocument();
     expect(document.querySelector("video")).toBeNull();
-    expect(screen.queryByRole("button", { name: /re-detect/i })).toBeNull();
     expect(screen.getByText("1 of 2")).toBeInTheDocument();
+  });
+
+  it("#756: Re-detect is disabled (not hidden) when edit is denied", () => {
+    vi.mocked(hook.useBeepQueue).mockReturnValue(
+      hookState({ editDenied: true }) as unknown as ReturnType<typeof hook.useBeepQueue>,
+    );
+    render(<MobileBeepReview />);
+    const redetectButton = screen.getByRole("button", { name: /^re-detect$/i });
+    expect(redetectButton).toBeDisabled();
+    expect(redetectButton).toHaveAttribute(
+      "title",
+      "Synced from a desktop install - review actions sync back, editing stays on desktop.",
+    );
   });
 
   it("hosted-native item with a proxy renders video + waveform picker", () => {
@@ -128,7 +143,7 @@ describe("MobileBeepReview", () => {
     // `useEffect(() => setDraft(null), [q.activeKey])` in the component
     // never fires on its own - the redetect sheet's onConfirm must clear
     // the draft itself, or a stale draft survives into the next Confirm.
-    const state = hookState({ isMirror: false }); // Re-detect only renders off-mirror
+    const state = hookState(); // Re-detect renders regardless of mirror; editDenied false by default
     vi.mocked(hook.useBeepQueue).mockReturnValue(state as unknown as ReturnType<typeof hook.useBeepQueue>);
     render(<MobileBeepReview />);
 

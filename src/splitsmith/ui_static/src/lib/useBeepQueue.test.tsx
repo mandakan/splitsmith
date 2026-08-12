@@ -23,6 +23,12 @@ vi.mock("./api", () => ({
   ApiError: class ApiError extends Error {
     detail = "boom";
   },
+  // Real implementation (not a stub): the hook under test calls this
+  // directly, so a stub would just relocate the bug this test catches.
+  capabilityDenied: (
+    caps: api.MatchCapability[] | null | undefined,
+    cap: api.MatchCapability,
+  ) => Array.isArray(caps) && !caps.includes(cap),
 }));
 
 const item = (over: Partial<api.BeepQueueItem> = {}): api.BeepQueueItem => ({
@@ -78,6 +84,16 @@ describe("useBeepQueue", () => {
     await waitFor(() => expect(result.current.data).not.toBeNull());
     expect(result.current.active?.video_id).toBe("v1");
     expect(result.current.isMirror).toBe(true);
+    // Desktop-origin queue() default is ["review", "share_manage"] -
+    // no "edit", so re-detect (an edit-class write) is denied.
+    expect(result.current.editDenied).toBe(true);
+  });
+
+  it("reports editDenied false when capabilities include edit", async () => {
+    vi.mocked(api.api.getBeepQueue).mockResolvedValue(queue([item()], "local"));
+    const { result } = renderHook(() => useBeepQueue(), { wrapper });
+    await waitFor(() => expect(result.current.data).not.toBeNull());
+    expect(result.current.editDenied).toBe(false);
   });
 
   it("confirm with a draft calls override first, then confirm, then advances", async () => {
