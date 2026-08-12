@@ -747,28 +747,38 @@ def test_share_last_scanned_dir_nulled_for_anonymous_viewer(
 
 
 def _dump_state_docs(db_url: str, user_email: str) -> list[tuple]:
-    """Serialize every state_docs row for the user as sorted tuples of
-    all mapped columns - byte-identity means nothing changed, version
-    and timestamps included."""
+    """Serialize every row of the owner's tenant-store tables (state_docs,
+    matches, recent_projects) as sorted tuples of all mapped columns -
+    byte-identity means nothing changed, version and timestamps included.
+    Each tuple is prefixed with a table-name element so rows from
+    different tables can never collide."""
     import json
 
     from sqlalchemy import inspect as sa_inspect
 
-    from splitsmith.db.models import StateDocRow
+    from splitsmith.db.models import MatchRow, RecentProjectRow, StateDocRow
 
     engine = create_engine(db_url)
     sf = sessionmaker(engine)
-    cols = sorted(c.key for c in sa_inspect(StateDocRow).mapper.column_attrs)
 
     async def _dump() -> list[tuple]:
         async with sf() as s:
             row = (await s.execute(_select(User).where(User.email == user_email))).scalar_one()
-            rows = (
-                (await s.execute(_select(StateDocRow).where(StateDocRow.user_id == row.id))).scalars().all()
+            user_id = row.id
+        dumped: list[tuple] = []
+        for table_name, model in (
+            ("state_docs", StateDocRow),
+            ("matches", MatchRow),
+            ("recent_projects", RecentProjectRow),
+        ):
+            cols = sorted(c.key for c in sa_inspect(model).mapper.column_attrs)
+            async with sf() as s:
+                model_rows = (await s.execute(_select(model).where(model.user_id == user_id))).scalars().all()
+            dumped.extend(
+                (table_name, *(json.dumps(getattr(r, k), default=str, sort_keys=True) for k in cols))
+                for r in model_rows
             )
-        return sorted(
-            tuple(json.dumps(getattr(r, k), default=str, sort_keys=True) for k in cols) for r in rows
-        )
+        return sorted(dumped)
 
     return asyncio.run(_dump())
 
@@ -789,6 +799,18 @@ _SHARE_WHITELIST_INSTANCES = [
     "og-meta",
     f"og-meta/{SLUG}/1",
 ]
+
+
+def test_share_whitelist_instances_cover_every_alternative() -> None:
+    """Couples the net's instance list to the regex: when the whitelist
+    grows an alternative without a matching byte-identity instantiation,
+    this fails loudly instead of the net silently covering less ground."""
+    from splitsmith.ui.server import _SHARE_PATH_RE
+
+    alternatives = _SHARE_PATH_RE.pattern.count("|") + 1
+    assert (
+        len(_SHARE_WHITELIST_INSTANCES) == alternatives
+    ), "share whitelist grew an alternative without a byte-identity instantiation"
 
 
 @pytest.mark.parametrize("rest", _SHARE_WHITELIST_INSTANCES)

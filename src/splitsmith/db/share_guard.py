@@ -4,6 +4,11 @@ The share alias middleware records the resolved token's scope here; the
 engine's after_begin listener and the state stores consult it. Lives in
 the db layer so the engine and stores can import it without reaching
 into the UI server module.
+
+The read-only enforcement covers Postgres state only - object-storage
+writes from share paths (e.g. the OG card PNG cache) are governed by
+their token-scoped storage keys, and code bypassing the tenant session
+factory (e.g. the procrastinate connector) is outside this listener.
 """
 
 from __future__ import annotations
@@ -26,12 +31,21 @@ class ShareReadOnlyError(RuntimeError):
     """
 
 
+# Scopes allowed to write through share auth. Empty today - the coach
+# chunk adds entries here (and the capability table decides what they
+# may write). Any scope NOT in this set is treated as read-only, so an
+# unknown or mistyped scope fails closed instead of silently skipping
+# every defense layer.
+_WRITE_CAPABLE_SCOPES: frozenset[str] = frozenset()
+
+
 def share_request_is_read_only() -> bool:
     """True when the current request is a share request whose scope
     grants no writes.
 
-    Keyed off the scope rather than mere share-ness so that write-scoped
-    tokens later skip both the READ ONLY transaction and the store
-    guard without touching this module's callers.
+    Fails closed: any scope outside _WRITE_CAPABLE_SCOPES - including
+    unknown values - is read-only. A write-capable scope added later
+    joins the set without touching this module's callers.
     """
-    return current_share_scope.get() == "read"
+    scope = current_share_scope.get()
+    return scope is not None and scope not in _WRITE_CAPABLE_SCOPES

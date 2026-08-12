@@ -412,3 +412,21 @@ def test_mutations_refused_during_read_scoped_share_request() -> None:
         current_share_scope.reset(token)
     # Outside the scope the store mutates normally again.
     assert asyncio.run(store.delete_match("m1")) == 1
+
+
+def test_mutations_refused_for_unrecognized_scope() -> None:
+    """#779 review: an unrecognized scope value (typo, early 'coach' row,
+    bad backfill) must fail closed - treated as read-only rather than
+    silently skipping the store guard."""
+    from splitsmith.db.share_guard import ShareReadOnlyError, current_share_scope
+
+    sf, (uid,) = _engine_with_users("m@thias.se")
+    store = ProjectStateStore(sf, user_id=uid)
+    asyncio.run(store.save_match("m1", {"name": "seed"}, expected_version=0))
+
+    token = current_share_scope.set("garbage")
+    try:
+        with pytest.raises(ShareReadOnlyError):
+            asyncio.run(store.save_match("m1", {"name": "x"}, expected_version=1))
+    finally:
+        current_share_scope.reset(token)
