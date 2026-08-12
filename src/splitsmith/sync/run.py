@@ -28,9 +28,9 @@ from ..shot_id import ensure_shot_ids
 from .base import load_base_doc, save_base_doc
 from .client import HostedSyncClient, SyncClientError, SyncVersionConflict
 from .merge import MergeResult, merge_audit_doc, merge_project_doc
-from .plan import _AUDIT_FILENAME_RE, build_push_plan
+from .plan import AUDIT_FILENAME_RE, build_push_plan
 from .pull import RemoteDoc, plan_pull, remote_doc_key
-from .push import PushReport, _timed_phase, run_push
+from .push import PushReport, run_push, timed_phase
 from .state import SyncState, load_sync_state, save_sync_state
 
 _MAX_ATTEMPTS = 3
@@ -116,7 +116,7 @@ def migrate_shot_ids(match_root: Path) -> int:
         if not audit_dir.is_dir():
             continue
         for audit_path in sorted(audit_dir.iterdir()):
-            if not _AUDIT_FILENAME_RE.match(audit_path.name):
+            if not AUDIT_FILENAME_RE.match(audit_path.name):
                 continue
             try:
                 doc = json.loads(audit_path.read_text(encoding="utf-8"))
@@ -158,7 +158,7 @@ def run_sync(
     """Pull hosted changes, merge, then push - the bidirectional cycle."""
     timings: dict[str, float] = {}
 
-    with _timed_phase(timings, timer, "preflight"):
+    with timed_phase(timings, timer, "preflight"):
         sync_state = load_sync_state(match_root)
         preflight = build_push_plan(match_root, sync_state=sync_state)
         if preflight.errors:
@@ -168,12 +168,12 @@ def run_sync(
     # After the preflight (a tree that can't push isn't rewritten) and
     # before the pull: the merge keys shot membership on the id, so every
     # local audit doc must carry one before the first remote doc arrives.
-    with _timed_phase(timings, timer, "migrate_shot_ids"):
+    with timed_phase(timings, timer, "migrate_shot_ids"):
         shot_ids_migrated = migrate_shot_ids(match_root)
         if shot_ids_migrated:
             on_progress(0.0, f"stamped shot ids on {shot_ids_migrated} audit doc(s)")
 
-    with _timed_phase(timings, timer, "ensure_match"):
+    with timed_phase(timings, timer, "ensure_match"):
         client.ensure_match(match_id, match_name)
 
     pulled_total = 0
@@ -183,14 +183,14 @@ def run_sync(
     merged_docs = 0
 
     for attempt in range(1, _MAX_ATTEMPTS + 1):
-        with _timed_phase(timings, timer, "pull"):
+        with timed_phase(timings, timer, "pull"):
             on_progress(0.0, "checking hosted changes")
             manifest = client.get_doc_manifest(match_id)
             changed = plan_pull(manifest, sync_state)
             pulled = [(rd, *client.get_doc(match_id, rd.kind, rd.slug, rd.stage_number)) for rd in changed]
             pulled_total += len(pulled)
 
-        with _timed_phase(timings, timer, "merge"):
+        with timed_phase(timings, timer, "merge"):
             result_counts = _apply_pull(match_root, match_id, sync_state, pulled)
             merged_docs += result_counts["merged"]
             all_conflicts.extend(result_counts["conflicts"])

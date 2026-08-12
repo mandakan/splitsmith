@@ -30,30 +30,13 @@ from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.shot_id import ensure_shot_ids
 from splitsmith.sync.merge import merge_audit_doc
 from tests.hosted_helpers import _CapturingSender, login, moto_s3_storage, seed_match
-
-CREATE_URL = "/api/sync/matches"
-
-
-def _sync_docs_url(match_id: str, kind: str) -> str:
-    return f"/api/sync/matches/{match_id}/docs/{kind}"
-
-
-def _alias_url(match_id: str, rest: str) -> str:
-    return f"/api/matches/{match_id}/{rest}"
-
-
-def _seed_mirror(client: TestClient, match_id: str, name: str) -> None:
-    """Adopt ``match_id`` as a desktop mirror and push a minimal match doc.
-
-    Mirrors the create + doc-upsert dance real desktop sync (Task 4) does:
-    ``POST /api/sync/matches`` then ``PUT .../docs/match``. An empty
-    roster is enough for the gate + shooter-list surface under test.
-    """
-    created = client.post(CREATE_URL, json={"match_id": match_id, "name": name})
-    assert created.status_code == 200, created.text
-    doc = match_model.Match(match_id=match_id, name=name, shooters=[], stages=[]).model_dump(mode="json")
-    put = client.put(_sync_docs_url(match_id, "match"), params={"expected_version": 0}, json=doc)
-    assert put.status_code == 200, put.text
+from tests.mirror_helpers import (
+    alias_url,
+    legacy_audit_doc,
+    seed_mirror,
+    seed_mirror_stage_with_audit,
+    sync_docs_url,
+)
 
 
 def _seed_mirror_with_video(
@@ -66,7 +49,7 @@ def _seed_mirror_with_video(
     """Adopt ``match_id`` as a mirror with one shooter "alice", stage 1, and
     one primary video.
 
-    Reuses ``_seed_mirror`` for the match-doc create, then registers
+    Reuses ``seed_mirror`` for the match-doc create, then registers
     "alice" on the roster (a second PUT to the match doc, since the
     version moved to 1 on insert) and pushes a project doc through the
     same sync-doc PUT surface. ``video_id`` on ``StageVideo`` is a
@@ -78,13 +61,11 @@ def _seed_mirror_with_video(
     ``processed`` defaults to a fully-processed video (beep+trim+shot
     detect all done); pass a different dict to seed a trim_stale case.
     """
-    _seed_mirror(client, match_id, name)
+    seed_mirror(client, match_id, name)
     roster_doc = match_model.Match(match_id=match_id, name=name, shooters=["alice"], stages=[]).model_dump(
         mode="json"
     )
-    put_roster = client.put(
-        _sync_docs_url(match_id, "match"), params={"expected_version": 1}, json=roster_doc
-    )
+    put_roster = client.put(sync_docs_url(match_id, "match"), params={"expected_version": 1}, json=roster_doc)
     assert put_roster.status_code == 200, put_roster.text
 
     video = StageVideo(
@@ -176,9 +157,9 @@ def test_mirror_add_shooter_blocked(
 ) -> None:
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
-    _seed_mirror(client, "mirror1", "Mirror Match")
+    seed_mirror(client, "mirror1", "Mirror Match")
 
-    resp = client.post(_alias_url("mirror1", "match/shooters"), json={"name": "Anna"})
+    resp = client.post(alias_url("mirror1", "match/shooters"), json={"name": "Anna"})
     assert resp.status_code == 403, resp.text
     assert resp.json() == {"detail": "read_only_mirror"}
 
@@ -192,9 +173,9 @@ def test_mirror_get_shooters_reports_origin_desktop(
 ) -> None:
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
-    _seed_mirror(client, "mirror2", "Mirror Match 2")
+    seed_mirror(client, "mirror2", "Mirror Match 2")
 
-    resp = client.get(_alias_url("mirror2", "match/shooters"))
+    resp = client.get(alias_url("mirror2", "match/shooters"))
     assert resp.status_code == 200, resp.text
     assert resp.json()["origin"] == "desktop"
 
@@ -208,9 +189,9 @@ def test_mirror_create_share_allowed(
 ) -> None:
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
-    _seed_mirror(client, "mirror3", "Mirror Match 3")
+    seed_mirror(client, "mirror3", "Mirror Match 3")
 
-    resp = client.post(_alias_url("mirror3", "match/shares"))
+    resp = client.post(alias_url("mirror3", "match/shares"))
     assert resp.status_code == 201, resp.text
     assert resp.json()["revoked_at"] is None
 
@@ -226,9 +207,9 @@ def test_mirror_share_exemption_is_segment_anchored(
     """
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
-    _seed_mirror(client, "mirror5", "Mirror Match 5")
+    seed_mirror(client, "mirror5", "Mirror Match 5")
 
-    resp = client.post(_alias_url("mirror5", "match/shares-report"))
+    resp = client.post(alias_url("mirror5", "match/shares-report"))
     assert resp.status_code == 403, resp.text
     assert resp.json() == {"detail": "read_only_mirror"}
 
@@ -245,7 +226,7 @@ def test_native_match_add_shooter_unchanged(
     seed_match(hosted_env, "owner@example.com", "native1")
     _seed_match_doc(hosted_env, "owner@example.com", "native1", "Native Match")
 
-    resp = client.post(_alias_url("native1", "match/shooters"), json={"name": "Bob"})
+    resp = client.post(alias_url("native1", "match/shooters"), json={"name": "Bob"})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["origin"] == "hosted"
@@ -266,7 +247,7 @@ def test_mirror_beep_confirm_passes_gate(
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     match_id = "01JMIRRBEEPGATE0000000001"
-    _seed_mirror(client, match_id, "gate-confirm")
+    seed_mirror(client, match_id, "gate-confirm")
     resp = client.post(
         f"/api/matches/{match_id}/match/beep-queue/confirm",
         json={"slug": "ghost", "stage_number": 1, "video_id": "v1"},
@@ -282,7 +263,7 @@ def test_mirror_beep_override_passes_gate(
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     match_id = "01JMIRRBEEPGATE0000000002"
-    _seed_mirror(client, match_id, "gate-override")
+    seed_mirror(client, match_id, "gate-override")
     resp = client.post(
         f"/api/matches/{match_id}/shooters/ghost/stages/1/videos/v1/beep",
         json={"beep_time": 1.25},
@@ -298,7 +279,7 @@ def test_mirror_destructive_beep_paths_still_blocked(
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     match_id = "01JMIRRBEEPGATE0000000003"
-    _seed_mirror(client, match_id, "gate-blocked")
+    seed_mirror(client, match_id, "gate-blocked")
     blocked = [
         ("POST", f"/api/matches/{match_id}/shooters/g/stages/1/videos/v1/detect-beep", None),
         (
@@ -331,7 +312,7 @@ def test_mirror_allows_triage_accept(
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     match_id = "01JMIRRTRIAGEGATE000000001"
-    _seed_mirror(client, match_id, "gate-triage-accept")
+    seed_mirror(client, match_id, "gate-triage-accept")
     resp = client.post(f"/api/matches/{match_id}/shooters/alice/stages/1/audit/accept")
     assert resp.status_code != 403, resp.text
 
@@ -344,7 +325,7 @@ def test_mirror_allows_triage_attention(
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     match_id = "01JMIRRTRIAGEGATE000000002"
-    _seed_mirror(client, match_id, "gate-triage-attention")
+    seed_mirror(client, match_id, "gate-triage-attention")
     resp = client.post(
         f"/api/matches/{match_id}/shooters/alice/stages/1/attention",
         json={"flagged": True},
@@ -352,51 +333,8 @@ def test_mirror_allows_triage_attention(
     assert resp.status_code != 403, resp.text
 
 
-def _legacy_audit_doc(time: float) -> dict:
-    """One kept manual shot with no id and no candidate_number.
-
-    The one shape whose derived id is not convergent across two sides:
-    ``derive_shot_id`` keys it off the rounded time, so a nudge moves it.
-    """
-    return {
-        "stage_number": 1,
-        "beep_time": 5.0,
-        "shots": [
-            {
-                "shot_number": 1,
-                "candidate_number": None,
-                "time": time,
-                "ms_after_beep": int(round((time - 5.0) * 1000)),
-            }
-        ],
-        "audit_events": [],
-    }
-
-
-def _seed_mirror_stage_with_audit(client: TestClient, match_id: str, name: str, doc: dict) -> None:
-    """Mirror with shooter "alice", stage 1, and ``doc`` as her stage-1 audit."""
-    _seed_mirror(client, match_id, name)
-    roster = match_model.Match(match_id=match_id, name=name, shooters=["alice"], stages=[]).model_dump(
-        mode="json"
-    )
-    put_roster = client.put(_sync_docs_url(match_id, "match"), params={"expected_version": 1}, json=roster)
-    assert put_roster.status_code == 200, put_roster.text
-    stage = StageEntry(stage_number=1, stage_name="Stage One", time_seconds=30.0)
-    project_doc = MatchProject(name=name, competitor_name="Alice", stages=[stage]).model_dump(mode="json")
-    put_project = client.put(
-        f"/api/sync/matches/{match_id}/docs/project/alice",
-        params={"expected_version": 0},
-        json=project_doc,
-    )
-    assert put_project.status_code == 200, put_project.text
-    put_audit = client.put(
-        f"/api/sync/matches/{match_id}/docs/audit/alice/1", params={"expected_version": 0}, json=doc
-    )
-    assert put_audit.status_code == 200, put_audit.text
-
-
 def _seed_native_stage_with_audit(db_url: str, user_email: str, match_id: str, name: str, doc: dict) -> None:
-    """Same shape as ``_seed_mirror_stage_with_audit`` for a native match.
+    """Same shape as ``seed_mirror_stage_with_audit`` for a native match.
 
     The sync doc routes refuse a native match (409 ``not_a_mirror``), so
     the docs go in through the store the hosted app reads them from.
@@ -433,12 +371,12 @@ def test_mirror_accept_does_not_mint_a_shot_id(
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     match_id = "01JMIRRSHOTIDMINT0000001"
-    _seed_mirror_stage_with_audit(client, match_id, "mirror-mint", _legacy_audit_doc(6.5))
+    seed_mirror_stage_with_audit(client, match_id, "mirror-mint", legacy_audit_doc(6.5))
 
-    accepted = client.post(_alias_url(match_id, "shooters/alice/stages/1/audit/accept"))
+    accepted = client.post(alias_url(match_id, "shooters/alice/stages/1/audit/accept"))
     assert accepted.status_code == 200, accepted.text
 
-    stored = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit"))
+    stored = client.get(alias_url(match_id, "shooters/alice/stages/1/audit"))
     assert stored.status_code == 200, stored.text
     shot = stored.json()["shots"][0]
     assert "id" not in shot
@@ -457,13 +395,13 @@ def test_native_match_accept_still_mints_a_shot_id(
     match_id = "native-shot-id-mint"
     seed_match(hosted_env, "owner@example.com", match_id)
     _seed_native_stage_with_audit(
-        hosted_env, "owner@example.com", match_id, "Native Mint", _legacy_audit_doc(6.5)
+        hosted_env, "owner@example.com", match_id, "Native Mint", legacy_audit_doc(6.5)
     )
 
-    accepted = client.post(_alias_url(match_id, "shooters/alice/stages/1/audit/accept"))
+    accepted = client.post(alias_url(match_id, "shooters/alice/stages/1/audit/accept"))
     assert accepted.status_code == 200, accepted.text
 
-    stored = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit"))
+    stored = client.get(alias_url(match_id, "shooters/alice/stages/1/audit"))
     assert stored.status_code == 200, stored.text
     assert stored.json()["shots"][0]["id"] == "manual-t6500"
 
@@ -481,9 +419,9 @@ def test_mirror_allows_audit_put(
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     match_id = "01JMIRRAUDITPUTOPEN0000001"
-    _seed_mirror(client, match_id, "gate-audit-open")
+    seed_mirror(client, match_id, "gate-audit-open")
     resp = client.put(
-        _alias_url(match_id, "shooters/alice/stages/1/audit"),
+        alias_url(match_id, "shooters/alice/stages/1/audit"),
         json={"stage_number": 1, "shots": [], "audit_events": []},
     )
     assert resp.status_code != 403, resp.text
@@ -518,14 +456,14 @@ def test_mirror_audit_exemption_boundary_pins(
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     match_id = "01JMIRRAUDITBOUNDARY000001"
-    _seed_mirror(client, match_id, "gate-audit-boundary")
+    seed_mirror(client, match_id, "gate-audit-boundary")
     for method, rest in (
         ("post", "shooters/alice/stages/1/audit"),
         ("put", "shooters/alice/stages/1/audit/"),
         ("put", "shooters/alice/stages/1/audit/extra"),
         ("put", "shooters/alice/stages/x/audit"),
     ):
-        resp = getattr(client, method)(_alias_url(match_id, rest), json={})
+        resp = getattr(client, method)(alias_url(match_id, rest), json={})
         assert resp.status_code == 403, f"{method} {rest}"
         assert resp.json()["detail"] == "read_only_mirror"
 
@@ -585,15 +523,15 @@ def test_mirror_audit_put_mints_convergent_ids_but_not_manual_ones(
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     match_id = "01JMIRRAUDITPUTMINT0000001"
-    _seed_mirror_stage_with_audit(client, match_id, "audit-put-mint", _mixed_audit_doc(6.5, 8.0))
+    seed_mirror_stage_with_audit(client, match_id, "audit-put-mint", _mixed_audit_doc(6.5, 8.0))
 
     put = client.put(
-        _alias_url(match_id, "shooters/alice/stages/1/audit"),
+        alias_url(match_id, "shooters/alice/stages/1/audit"),
         json=_mixed_audit_doc(6.5, 8.0),
     )
     assert put.status_code == 200, put.text
 
-    stored = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit"))
+    stored = client.get(alias_url(match_id, "shooters/alice/stages/1/audit"))
     assert stored.status_code == 200, stored.text
     shots = stored.json()["shots"]
     detected = next(s for s in shots if s.get("candidate_number") == 2)
@@ -651,7 +589,7 @@ def test_mirror_audit_put_then_desktop_pull_keeps_the_phone_nudge(
         ],
         "audit_events": [],
     }
-    _seed_mirror_stage_with_audit(client, match_id, "audit-put-merge", converged)
+    seed_mirror_stage_with_audit(client, match_id, "audit-put-merge", converged)
 
     # The phone nudges the detected shot to 6.6s and saves. The SPA never
     # sends an id for a detected shot (buildAuditJson omits it on purpose,
@@ -669,11 +607,11 @@ def test_mirror_audit_put_then_desktop_pull_keeps_the_phone_nudge(
             "ms_after_beep": 3000,
         },
     ]
-    put = client.put(_alias_url(match_id, "shooters/alice/stages/1/audit"), json=phone_put)
+    put = client.put(alias_url(match_id, "shooters/alice/stages/1/audit"), json=phone_put)
     assert put.status_code == 200, put.text
 
     # What a desktop pull fetches as "remote".
-    remote = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit")).json()
+    remote = client.get(alias_url(match_id, "shooters/alice/stages/1/audit")).json()
 
     # The desktop's own local copy is unchanged since the last sync, i.e.
     # identical to the pre-nudge converged doc; "base" is that same shared
@@ -750,17 +688,17 @@ def test_mirror_audit_put_leaves_a_colliding_shot_for_the_desktop_to_stamp(
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     match_id = "01JMIRRAUDITPUTCOLLIDE001"
-    _seed_mirror_stage_with_audit(client, match_id, "audit-put-collide", _promoted_collision_doc())
+    seed_mirror_stage_with_audit(client, match_id, "audit-put-collide", _promoted_collision_doc())
 
     put = client.put(
-        _alias_url(match_id, "shooters/alice/stages/1/audit"),
+        alias_url(match_id, "shooters/alice/stages/1/audit"),
         json=_promoted_collision_doc(),
     )
     assert put.status_code == 200, put.text
 
     # What a desktop pull fetches as "remote": the first shot took cand-18,
     # the second is left for the desktop rather than randomly stamped.
-    remote = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit")).json()
+    remote = client.get(alias_url(match_id, "shooters/alice/stages/1/audit")).json()
     assert remote["shots"][0]["id"] == "cand-18"
     assert "id" not in remote["shots"][1]
 
@@ -798,16 +736,16 @@ def test_native_match_audit_put_still_mints_a_shot_id(
     match_id = "native-audit-put-mint"
     seed_match(hosted_env, "owner@example.com", match_id)
     _seed_native_stage_with_audit(
-        hosted_env, "owner@example.com", match_id, "Native Audit Mint", _legacy_audit_doc(6.5)
+        hosted_env, "owner@example.com", match_id, "Native Audit Mint", legacy_audit_doc(6.5)
     )
 
     put = client.put(
-        _alias_url(match_id, "shooters/alice/stages/1/audit"),
-        json=_legacy_audit_doc(6.5),
+        alias_url(match_id, "shooters/alice/stages/1/audit"),
+        json=legacy_audit_doc(6.5),
     )
     assert put.status_code == 200, put.text
 
-    stored = client.get(_alias_url(match_id, "shooters/alice/stages/1/audit"))
+    stored = client.get(alias_url(match_id, "shooters/alice/stages/1/audit"))
     assert stored.status_code == 200, stored.text
     assert stored.json()["shots"][0]["id"] == "manual-t6500"
 
@@ -849,7 +787,7 @@ def test_mirror_triage_exemption_boundary_pins(
     mirror's write surface (#823)."""
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
-    _seed_mirror(client, match_id, "gate-triage-boundary")
+    seed_mirror(client, match_id, "gate-triage-boundary")
     resp = client.request(method, f"/api/matches/{match_id}/{rest}")
     assert resp.status_code == 403, resp.text
     assert resp.json() == {"detail": "read_only_mirror"}
@@ -870,7 +808,7 @@ def test_mirror_allows_coach_shot_patch(
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     match_id = "01JMIRRCOACHGATE0000000001"
-    _seed_mirror(client, match_id, "gate-coach-patch")
+    seed_mirror(client, match_id, "gate-coach-patch")
     resp = client.patch(
         f"/api/matches/{match_id}/shooters/alice/stages/1/shots/3/coach",
         json={"interval_class": "movement", "interval_class_source": "manual"},
@@ -886,7 +824,7 @@ def test_mirror_allows_coach_reclassify(
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     match_id = "01JMIRRCOACHGATE0000000002"
-    _seed_mirror(client, match_id, "gate-coach-reclassify")
+    seed_mirror(client, match_id, "gate-coach-reclassify")
     resp = client.post(f"/api/matches/{match_id}/shooters/alice/stages/1/coach/reclassify")
     assert resp.status_code != 403, resp.text
 
@@ -925,7 +863,7 @@ def test_mirror_coach_exemption_boundary_pins(
     write surface."""
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
-    _seed_mirror(client, match_id, "gate-coach-boundary")
+    seed_mirror(client, match_id, "gate-coach-boundary")
     resp = client.request(method, f"/api/matches/{match_id}/{rest}", json={})
     assert resp.status_code == 403, resp.text
     assert resp.json() == {"detail": "read_only_mirror"}
@@ -945,7 +883,7 @@ def test_mirror_coach_by_id_exemption_boundary_pins(
     the filesystem, so ``by-id/..`` is not a traversal at all - it routes
     to the handler exactly like ``by-id/cand-9`` does, and 404s there for
     the same reason the ``allowed`` case below would too if it named a
-    slug this match's roster doesn't recognize: ``_seed_mirror`` seeds an
+    slug this match's roster doesn't recognize: ``seed_mirror`` seeds an
     empty roster, so the roster-membership check in ``state.shooter_root``
     (which ``state.shooter_project("alice")`` calls) 404s on
     "alice" before shot lookup is ever reached - not
@@ -960,16 +898,16 @@ def test_mirror_coach_by_id_exemption_boundary_pins(
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     match_id = "01JMIRRCOACHBYID0000000001"
-    _seed_mirror(client, match_id, "gate-coach-by-id")
+    seed_mirror(client, match_id, "gate-coach-by-id")
 
     allowed = client.patch(
-        _alias_url(match_id, "shooters/alice/stages/1/shots/by-id/cand-9/coach"),
+        alias_url(match_id, "shooters/alice/stages/1/shots/by-id/cand-9/coach"),
         json={"coaching_note": "x"},
     )
     assert allowed.status_code != 403, allowed.text
 
     traversal = client.patch(
-        _alias_url(match_id, "shooters/alice/stages/1/shots/by-id/%2e%2e/coach"),
+        alias_url(match_id, "shooters/alice/stages/1/shots/by-id/%2e%2e/coach"),
         json={"coaching_note": "x"},
     )
     assert traversal.status_code != 403, traversal.text
@@ -979,7 +917,7 @@ def test_mirror_coach_by_id_exemption_boundary_pins(
         "shooters/alice/stages/1/shots/by-id/cand-9/coach/",
         "shooters/alice/stages/x/shots/by-id/cand-9/coach",
     ):
-        blocked = client.patch(_alias_url(match_id, rest), json={})
+        blocked = client.patch(alias_url(match_id, rest), json={})
         assert blocked.status_code == 403, rest
         assert blocked.json()["detail"] == "read_only_mirror"
 
@@ -996,7 +934,7 @@ def test_mirror_delete_match_succeeds(
 ) -> None:
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
-    _seed_mirror(client, "mirror4", "Mirror Match 4")
+    seed_mirror(client, "mirror4", "Mirror Match 4")
 
     # Hosted delete never touches this path on disk (ephemeral container
     # fs) - it's only the picker-row key the delete route resolves
@@ -1330,14 +1268,14 @@ def test_guard_follows_capability_set_not_origin(
 
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
-    _seed_mirror(client, "mirror-fc", "Forward Compat")
+    seed_mirror(client, "mirror-fc", "Forward Compat")
 
     monkeypatch.setattr(
         server_module,
         "capabilities_for_origin",
         lambda origin: frozenset({"edit", "review", "share_manage"}),
     )
-    resp = client.post(_alias_url("mirror-fc", "match/shooters"), json={"name": "Anna"})
+    resp = client.post(alias_url("mirror-fc", "match/shooters"), json={"name": "Anna"})
     # The middleware no longer blocks it; whatever the handler says, it
     # must not be the mirror 403.
     assert resp.status_code != 403, resp.text
@@ -1351,12 +1289,12 @@ def test_payload_capabilities_match_guard(
     mirror advertises review+share_manage, never edit."""
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
-    _seed_mirror(client, "mirror-caps", "Caps Match")
+    seed_mirror(client, "mirror-caps", "Caps Match")
 
-    shooters = client.get(_alias_url("mirror-caps", "match/shooters"))
+    shooters = client.get(alias_url("mirror-caps", "match/shooters"))
     assert shooters.status_code == 200, shooters.text
     assert shooters.json()["capabilities"] == ["review", "share_manage"]
 
-    queue = client.get(_alias_url("mirror-caps", "match/beep-queue"))
+    queue = client.get(alias_url("mirror-caps", "match/beep-queue"))
     assert queue.status_code == 200, queue.text
     assert queue.json()["capabilities"] == ["review", "share_manage"]

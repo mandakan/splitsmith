@@ -31,8 +31,11 @@ from ..match_project import MatchProject
 from .docs import absolute_path_videos, sanitize_project_doc
 from .state import SyncState
 
-#: ``audit/stage<N>.json`` filename shape.
-_AUDIT_FILENAME_RE = re.compile(r"^stage(\d+)\.json$")
+#: ``audit/stage<N>.json`` filename shape. Public (#845): ``run.py``'s
+#: shot-id migration pass walks the same directory this planner does and
+#: has to agree with it on which files are audit documents, so the shape
+#: is part of this module's interface rather than an internal detail.
+AUDIT_FILENAME_RE = re.compile(r"^stage(\d+)\.json$")
 
 #: ``trimmed/stage<N>_cam_<video_id>_trimmed.mp4`` filename shape.
 _TRIMMED_GLOB = "stage*_cam_*_trimmed.mp4"
@@ -176,7 +179,7 @@ def build_push_plan(match_root: Path, *, sync_state: SyncState) -> PushPlan:
         audit_dir = shooter_root / "audit"
         if audit_dir.is_dir():
             for audit_file in sorted(audit_dir.iterdir()):
-                audit_match = _AUDIT_FILENAME_RE.match(audit_file.name)
+                audit_match = AUDIT_FILENAME_RE.match(audit_file.name)
                 if not audit_match:
                     continue
                 stage_number = int(audit_match.group(1))

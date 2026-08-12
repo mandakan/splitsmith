@@ -107,13 +107,18 @@ def format_push_message(report: PushReport) -> str:
 
 
 @contextlib.contextmanager
-def _timed_phase(timings: dict[str, float], timer: PhaseTimer | None, name: str) -> Iterator[None]:
+def timed_phase(timings: dict[str, float], timer: PhaseTimer | None, name: str) -> Iterator[None]:
     """Time one push phase into ``timings[name]`` (seconds), mirrored onto
     ``timer`` (the job's :class:`~splitsmith.observability.PhaseTimer`)
     when provided - same phase name lands on ``Job.timings`` the way every
     other job body's phases do. Elapsed time is recorded in a ``finally``
     so a raised exception is still timed and always propagates unchanged;
     this never swallows or replaces the body's exception.
+
+    Public because ``run.py`` times the pull/merge half of a bidirectional
+    run with it (#845): a name another module imports is part of this
+    module's interface whatever it is spelled, and the underscore only
+    hid that.
     """
     start = time.monotonic()
     try:
@@ -158,7 +163,7 @@ def run_push(
     bytes_uploaded = 0
     media_items: list[MediaItemTiming] = []
 
-    with _timed_phase(timings, timer, "plan"):
+    with timed_phase(timings, timer, "plan"):
         sync_state = sync_state or load_sync_state(match_root)
         snippet_report = generate_beep_snippets(match_root)
         for err in snippet_report.errors:
@@ -167,13 +172,13 @@ def run_push(
         if plan.errors:
             raise SyncClientError("\n".join(plan.errors))
 
-    with _timed_phase(timings, timer, "ensure_match"):
+    with timed_phase(timings, timer, "ensure_match"):
         client.ensure_match(plan.match_id, plan.match_name)
 
     total_bytes = sum(item.size for item in plan.media)
     bytes_done = 0
 
-    with _timed_phase(timings, timer, "media"):
+    with timed_phase(timings, timer, "media"):
         for item in plan.media:
 
             def _progress(delta: int, item=item) -> None:
@@ -195,7 +200,7 @@ def run_push(
             )
 
     media_deleted = 0
-    with _timed_phase(timings, timer, "gc"):
+    with timed_phase(timings, timer, "gc"):
         # Remote snippet GC (#821): sync_state remembers every key we
         # ever uploaded. A beep_review key whose local file is gone was
         # swept by generate_beep_snippets because the video is now
@@ -219,7 +224,7 @@ def run_push(
         if stale:
             save_sync_state(match_root, sync_state)
 
-    with _timed_phase(timings, timer, "docs"):
+    with timed_phase(timings, timer, "docs"):
         for doc in plan.docs:
             label = doc.kind if doc.slug is None else f"{doc.kind} ({doc.slug})"
             on_progress(1.0, f"syncing {label}")
