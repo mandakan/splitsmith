@@ -71,9 +71,11 @@ export function Compare() {
   const href = useMatchHref();
   const shareView = isShareView(location.pathname);
   const stageNumber = stageParam ? Number(stageParam) : NaN;
-  // Compare also mounts under ShareShell (no MatchShell outlet there);
-  // `shareView` already excludes every write-affordance branch below on
-  // that mount, so `ctx` resolving undefined there is harmless.
+  // Compare also mounts under ShareShell, which does supply a full
+  // MatchShellOutletContext (capabilities: [] - see ShareShell.tsx). The
+  // pre-existing `shareView` guard below excludes the rebuild-trim-cache
+  // button entirely on that mount, before `editDenied` is ever consulted,
+  // so the (always-empty) capabilities on the share mount never matter.
   const ctx = useOutletContext<MatchShellOutletContext | undefined>();
   // #756: rebuild-trim-caches POSTs a job - an edit-class write the
   // mirror guard 403s. Hidden (not disabled) here: it's one action among
