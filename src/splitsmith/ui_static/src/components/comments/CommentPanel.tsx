@@ -254,6 +254,8 @@ export function CommentPanel({
                     <button
                       type="button"
                       aria-label={`Author detail for ${c.author_handle}`}
+                      aria-expanded={openAuthor === c.author_code}
+                      aria-controls={`author-detail-${c.id}`}
                       onClick={() => void openAuthorDetail(c.author_code)}
                       className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted transition-colors hover:text-ink"
                     >
@@ -262,7 +264,10 @@ export function CommentPanel({
                   ) : null}
                 </div>
                 {openAuthor === c.author_code ? (
-                  <span className="mx-4 mt-1 block rounded border border-rule bg-surface-2 p-2 text-[0.6875rem] text-muted">
+                  <span
+                    id={`author-detail-${c.id}`}
+                    className="mx-4 mt-1 block rounded border border-rule bg-surface-2 p-2 text-[0.6875rem] text-muted"
+                  >
                     {(() => {
                       const detail = authors?.find((a) => a.author_code === c.author_code);
                       if (!detail) return "Author detail unavailable.";

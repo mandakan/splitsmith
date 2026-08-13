@@ -308,6 +308,27 @@ describe("CommentPanel author codes (#867)", () => {
     ).toBeInTheDocument();
   });
 
+  it("marks the author-detail trigger as a disclosure toggling an aria-controls target", async () => {
+    mockList([comment({ author_handle: "Anders Berg", author_code: "AAA111" })]);
+    render(<CommentPanel {...baseProps} canModerate />);
+
+    const trigger = await screen.findByRole("button", { name: /author detail/i });
+    // Closed on first render.
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    const controlsId = trigger.getAttribute("aria-controls");
+    expect(controlsId).toBeTruthy();
+
+    await userEvent.click(trigger);
+
+    // Open: aria-expanded flips, and aria-controls now resolves to the
+    // actual detail panel that appeared - a screen reader gets both "this
+    // is a toggle" and "here is what it reveals".
+    expect(trigger).toHaveAttribute("aria-expanded", "true");
+    const panel = document.getElementById(controlsId!);
+    expect(panel).not.toBeNull();
+    expect(panel).toHaveTextContent(/unavailable|comments since/i);
+  });
+
   it("shows every name a code posted under when a moderator opens detail", async () => {
     mockList([comment({ author_handle: "Bertil Lund", author_code: "AAA111" })]);
     vi.mocked(api.listCommentAuthors).mockResolvedValue({
@@ -362,22 +383,33 @@ describe("CommentPanel author codes (#867)", () => {
   });
 
   it("does not nest a button inside the seek button, and clicks route correctly", async () => {
-    // React warns via console.error when validateDOMNesting rejects a
-    // <button> inside a <button> - that warning is the proof the row
-    // restructure actually worked, not just that the new button exists.
+    // React warns via console.error when it rejects a <button> nested
+    // inside a <button> - that warning is the proof the row restructure
+    // actually worked, not just that the new button exists.
+    //
+    // The exact wording is not stable across React versions: 18 said
+    // "validateDOMNesting(...): <button> cannot appear as a descendant
+    // of <button>"; 19.2 dropped the internal function name entirely and
+    // says "In HTML, %s cannot be a descendant of <%s>" (or "cannot be
+    // a child of", for a direct-parent violation), with the tag names
+    // passed as separate %s arguments rather than interpolated into the
+    // string - so a check against one literal sentence, or even one
+    // single string argument, silently stops matching the moment the
+    // wording changes and the test goes on "passing" over real invalid
+    // nesting. Instead this keys on the semantics any phrasing of the
+    // warning carries: the offending tag ("button") plus "descendant" or
+    // "child", found anywhere across a call's arguments once they are
+    // all stringified and joined.
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const onSeek = vi.fn();
     mockList([comment({ author_handle: "Anders Berg", author_code: "AAA111" })]);
     render(<CommentPanel {...baseProps} canModerate onSeek={onSeek} />);
     await screen.findByText("Anders Berg");
 
-    const nestingWarning = errorSpy.mock.calls.some((call) =>
-      call.some(
-        (arg) =>
-          typeof arg === "string" &&
-          /validateDOMNesting|cannot appear as a descendant/i.test(arg),
-      ),
-    );
+    const nestingWarning = errorSpy.mock.calls.some((call) => {
+      const joined = call.map((arg) => String(arg)).join(" ");
+      return /button/i.test(joined) && /descendant|child/i.test(joined);
+    });
     expect(nestingWarning).toBe(false);
     errorSpy.mockRestore();
 
