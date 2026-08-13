@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from splitsmith.ui.capabilities import (
+    COMMENT_WRITE,
     EDIT,
     REVIEW,
     SHARE_MANAGE,
@@ -18,8 +19,11 @@ from splitsmith.ui.capabilities import (
 
 
 def test_origin_capability_sets() -> None:
-    assert capabilities_for_origin("hosted") == {EDIT, REVIEW, SHARE_MANAGE}
-    assert capabilities_for_origin("desktop") == {REVIEW, SHARE_MANAGE}
+    # hosted and desktop both grant COMMENT_WRITE: an authenticated owner
+    # moderates (DELETEs) a comment someone else posted on their own match
+    # through the same route a comment-scoped share token posts through.
+    assert capabilities_for_origin("hosted") == {EDIT, REVIEW, SHARE_MANAGE, COMMENT_WRITE}
+    assert capabilities_for_origin("desktop") == {REVIEW, SHARE_MANAGE, COMMENT_WRITE}
     assert capabilities_for_origin("local") == {EDIT, REVIEW}
     # None means "no aliased match bound" (legacy bare-path local traffic)
     # and gets the local set - same fallback get_project uses for origin.
@@ -56,6 +60,37 @@ def test_share_scope_capability_sets() -> None:
         ("PATCH", "shooters/anna/stages/3/shots/by-id/manual-t6500/coach", REVIEW),
         # The full stage audit PUT (#631 Task 6).
         ("PUT", "shooters/anna/stages/3/audit", REVIEW),
+        # The comment routes on the anonymous share surface (Task 5
+        # fix-round-1, finding 1): mapped explicitly so a comment-scoped
+        # token's admitted write is not refused with a 403 among 404s.
+        ("POST", "shooters/anna/stages/3/comments", COMMENT_WRITE),
+        ("DELETE", "shooters/anna/stages/3/comments/01J000000000000000000000", COMMENT_WRITE),
+        # U+0663 ARABIC-INDIC DIGIT THREE. Python's ``\d`` matches it;
+        # the route's ``int`` path parameter is ASCII-only and 422s on
+        # it, which is a refusal shape distinguishable from the uniform
+        # 404 (final review, I6). ``[0-9]`` sends these to EDIT, which
+        # no share scope grants, so the share alias refuses first.
+        ("POST", "shooters/anna/stages/\u0663/comments", EDIT),
+        ("DELETE", "shooters/anna/stages/\u0663/comments/01J000000000000000000000", EDIT),
+        # Method/shape mismatches on the comment routes fall through to
+        # EDIT, same as every other unmapped write - not COMMENT_WRITE.
+        ("DELETE", "shooters/anna/stages/3/comments", EDIT),
+        ("PATCH", "shooters/anna/stages/3/comments", EDIT),
+        ("POST", "shooters/anna/stages/3/comments/01J000000000000000000000", EDIT),
+        # Task 8's bulk moderation route. It used to fall through to
+        # EDIT, which capabilities_for_origin("desktop") does not grant,
+        # so both selectors 403'd on a mirror match - the origin most
+        # likely to have share links at all (final review, I4).
+        # Moderating comments is COMMENT_WRITE wherever it happens. The
+        # share alias's write allowlist still does not admit it, so no
+        # share token reaches it under any scope.
+        ("DELETE", "match/comments", COMMENT_WRITE),
+        # One exact path and one method: the by-id shape, a trailing
+        # slash and every other method still fall through to EDIT.
+        ("DELETE", "match/comments/01J000000000000000000000", EDIT),
+        ("DELETE", "match/comments/", EDIT),
+        ("POST", "match/comments", EDIT),
+        ("PUT", "match/comments", EDIT),
         # Method mismatches fall through to EDIT - the old guard was
         # method-gated per regex and the table must stay that strict.
         ("DELETE", "shooters/anna/stages/3/videos/v1/beep", EDIT),
@@ -95,14 +130,22 @@ def test_required_capability(method: str, rest: str, expected: str | None) -> No
         ("PATCH", "shooters/anna/stages/3/shots/by-id/cand-2/coach\n"),
         ("POST", "shooters/anna/stages/3/coach/reclassify\n"),
         ("PUT", "shooters/anna/stages/3/audit\n"),
+        ("POST", "shooters/anna/stages/3/comments\n"),
+        ("DELETE", "shooters/anna/stages/3/comments/01J000000000000000000000\n"),
+        ("DELETE", "match/comments\n"),
     ],
 )
 def test_review_routes_do_not_admit_a_trailing_newline(method: str, rest: str) -> None:
     """``\\Z``, not ``$``: an allow-list entry means one exact path.
 
     ``$`` also matches just before a single trailing ``\\n``, which on an
-    allow-list widens REVIEW over a string the table means to send to
-    EDIT. No such ``rest`` reaches the middleware today (``urlsplit()``
+    allow-list widens REVIEW (or, for the comment routes added in Task 5's
+    fix round, COMMENT_WRITE) over a string the table means to send to
+    EDIT. Unlike ``_SHARE_PATH_RE`` (matched with ``fullmatch``, where
+    ``$`` and ``\\Z`` reject a trailing newline identically),
+    ``required_capability`` matches with ``pattern.match()``, so this is
+    the call site where the ``$``-vs-``\\Z`` choice actually changes the
+    result. No such ``rest`` reaches the middleware today (``urlsplit()``
     strips CR/LF/TAB), so this pins the table's own contract rather than a
     reachable bypass - ``required_capability`` is a public function that
     does not see or control who builds its argument.

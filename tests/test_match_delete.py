@@ -94,6 +94,11 @@ def _hosted_state(tmp_path: Path, *, recent_paths: list[str], jobs: int = 1) -> 
         jobs=FakeJobs(count=jobs),
         recent_projects=FakeRecentProjects(recent_paths),
         matches=MatchRegistry(),
+        # No comment store double here -- these tests exercise storage/
+        # state/registry teardown, not the comment purge (that's
+        # test_comments_seams.py, against a real hosted app). None mirrors
+        # AppState.comments in local mode / no tenant pinned.
+        comments=None,
     )
 
 

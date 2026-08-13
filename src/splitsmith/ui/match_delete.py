@@ -50,6 +50,7 @@ class DeletionSummary:
     recent_project_removed: bool = False
     match_row_removed: bool = False
     state_docs_removed: int = 0
+    comments_removed: int = 0
     storage_objects_deleted: int = 0
     raw_uploads_deleted: list[str] = field(default_factory=list)
     raw_uploads_skipped_shared: list[str] = field(default_factory=list)
@@ -181,6 +182,16 @@ async def _delete_hosted(
         except Exception as exc:  # noqa: BLE001
             summary.errors.append(f"delete state docs: {exc}")
 
+    # 6b. Delete the match's comments. Nothing cascades from the registry
+    #     row, so this is explicit for the same reason state docs are.
+    #     A match delete that left other people's comments behind would be
+    #     a data-retention surprise, not a tidiness one.
+    if state.comments is not None:
+        try:
+            summary.comments_removed = await state.comments.purge_match(match_id)
+        except Exception as exc:  # noqa: BLE001
+            summary.errors.append(f"delete comments: {exc}")
+
     # 7. Delete the matches-registry row.
     if state.matches_store is not None:
         try:
@@ -204,6 +215,8 @@ async def _delete_local(
     delete_local_files: bool,
     summary: DeletionSummary,
 ) -> None:
+    # Local desktop mode has no share surface, so no anonymous comments
+    # can exist against this match -- nothing to purge here.
     if delete_local_files:
         _rmtree_match_dir(path, summary)
     if match_id:

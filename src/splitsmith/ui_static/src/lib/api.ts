@@ -7,6 +7,7 @@
  */
 
 import type { Anomaly } from "@/lib/anomalies";
+import { authorKey } from "@/lib/authorKey";
 
 export type VideoRole = "primary" | "secondary" | "ignored";
 /** ``"aligned"`` means the in-stream beep detector failed on a secondary
@@ -1505,8 +1506,10 @@ export type MatchOrigin = "hosted" | "desktop" | "local";
 /** Server-derived per-match capability set (#756), computed next to the
  *  403 guard so payload and enforcement can never disagree. Gate write
  *  affordances on these, never on `origin` - origin is provenance
- *  (picker flag) and media-surface behavior (#821), not writability. */
-export type MatchCapability = "edit" | "review" | "share_manage";
+ *  (picker flag) and media-surface behavior (#821), not writability.
+ *  `comment_write` joined the table in the timestamped-comments Task 5
+ *  work, granted by the same hosted/desktop origin sets as the others. */
+export type MatchCapability = "edit" | "review" | "share_manage" | "comment_write";
 
 /** True when the capability set is KNOWN and lacks `cap`. Null or
  *  undefined means "not loaded yet" and denies nothing - pages keep
@@ -2189,6 +2192,39 @@ export function notifyHostedAccountChanged(): void {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new CustomEvent(HOSTED_ACCOUNT_CHANGED_EVENT));
   }
+}
+
+/** Header carrying the anonymous commenter's opaque per-browser key
+ *  (see lib/authorKey.ts). The server derives the display handle from
+ *  it via HMAC - the client never sends a name. */
+const AUTHOR_KEY_HEADER = "X-Splitsmith-Author-Key";
+
+/** A timestamped comment on a stage, anchored either to a wall-clock
+ *  time in the stage video or to a specific shot. */
+export interface Comment {
+  id: string;
+  anchor_t: number;
+  anchor_kind: "time" | "shot";
+  anchor_shot_id: string | null;
+  author_kind: "handle" | "account";
+  author_handle: string;
+  body: string;
+  created_at: string;
+  mine: boolean;
+  /** Owner view only; absent for anonymous callers. */
+  share_token_id?: string | null;
+  author_key_hash?: string | null;
+}
+
+export interface CommentListResponse {
+  comments: Comment[];
+}
+
+export interface CommentCreateInput {
+  body: string;
+  anchor_t: number;
+  anchor_kind: "time" | "shot";
+  anchor_shot_id?: string | null;
 }
 
 export const api = {
@@ -3368,6 +3404,34 @@ export const api = {
     request<BeepSnippetPeaks>(
       `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep-snippet/peaks`,
     ),
+
+  /** Comments on a stage, newest-first per the server. The author-key
+   *  header is optional here - a caller sending none gets ``mine: false``
+   *  on every row, which is correct for a first-time reader. */
+  listStageComments(slug: string, stage: number): Promise<CommentListResponse> {
+    return request<CommentListResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stage}/comments`,
+      { headers: { [AUTHOR_KEY_HEADER]: authorKey() } },
+    );
+  },
+
+  createStageComment(
+    slug: string,
+    stage: number,
+    input: CommentCreateInput,
+  ): Promise<Comment> {
+    return request<Comment>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stage}/comments`,
+      { method: "POST", json: input, headers: { [AUTHOR_KEY_HEADER]: authorKey() } },
+    );
+  },
+
+  deleteStageComment(slug: string, stage: number, id: string): Promise<void> {
+    return request<void>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stage}/comments/${encodeURIComponent(id)}`,
+      { method: "DELETE", headers: { [AUTHOR_KEY_HEADER]: authorKey() } },
+    );
+  },
 
   /** Returns the saved audit JSON for a stage, or null when none exists yet.
    *  Server returns ``200 null`` for the "no audit yet" state so this

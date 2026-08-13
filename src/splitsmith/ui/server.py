@@ -98,6 +98,7 @@ if TYPE_CHECKING:
     # Hosted-only; imported lazily at runtime inside _apply_hosted_mode_wiring
     # so local mode stays free of the db (procrastinate/psycopg) dependency.
     from ..db import PostgresMatchStore, ProjectStateStore
+    from ..db.comments import CommentStore
     from ..db.desktop_tokens import DesktopTokenRecord, DesktopTokenStore
     from ..db.device_auth import DeviceAuthStore
     from ..db.share_tokens import ResolvedShare, ShareTokenStore
@@ -119,7 +120,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -151,6 +152,7 @@ from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
 from ..auth import AuthBackend, CompositeAuth, LoopbackAuth, User
+from ..comment_identity import MAX_AUTHOR_KEY_LEN, MIN_AUTHOR_KEY_LEN, derive_handle, hash_author_key
 from ..compare import mp4_grid, project_loader
 from ..compute import ComputeBackend, LocalComputeBackend
 from ..config import (
@@ -203,6 +205,16 @@ from .capabilities import (
     capabilities_for_origin,
     required_capability,
     share_scope_capabilities,
+)
+from .comments import (
+    AUTHOR_KEY_HEADER,
+    STAGE_COMMENT_CAP,
+    CommentCreateRequest,
+    CommentListResponse,
+    CommentOut,
+    CommentOwnerListResponse,
+    CommentRateLimiter,
+    to_out,
 )
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
 from .jobs import (
@@ -987,6 +999,18 @@ class AuthBeginRequest(BaseModel):
     email: str
 
 
+class ShareCreateRequest(BaseModel):
+    """Body for minting a link.
+
+    ``scope`` is fixed for the token's whole life. There is deliberately
+    no route that changes it: an owner should be able to reason about a
+    link from the moment they send it, and a toggle would mean a link
+    already in someone's inbox could gain the ability to post.
+    """
+
+    scope: Literal["read", "comment"] = "read"
+
+
 class ShareInfo(BaseModel):
     """One share link as returned by the owner-management routes.
 
@@ -998,6 +1022,7 @@ class ShareInfo(BaseModel):
     url: str
     created_at: datetime
     revoked_at: datetime | None
+    scope: str
 
 
 class ShareListResponse(BaseModel):
@@ -1116,19 +1141,34 @@ _PUBLIC_API_PATHS: frozenset[str] = frozenset(
 )
 
 
-# GET-only path shapes reachable through /api/share/{token}/ - the entire
-# anonymous surface. Anything else under the prefix is a uniform 404. The
-# share middleware impersonates the owner's tenant for the request, so this
+# GET-only path shapes reachable through /api/share/{token}/ - the read
+# half of the anonymous surface. _SHARE_WRITE_ROUTES below is the other
+# half, admitted through the same middleware for POST/DELETE. Anything
+# else under the prefix, on any method, is a uniform 404. The share
+# middleware impersonates the owner's tenant for the request, so this
 # whitelist is the containment boundary: extend it only with read-only,
 # match-scoped routes, and never let the client supply the match id. The
 # pattern is anchored (fullmatch) and case-sensitive by design.
+#
+# ``[0-9]`` rather than ``\d`` for every stage number, here and in
+# _SHARE_WRITE_ROUTES / capabilities._COMMENT_ROUTES. Python's ``\d``
+# matches any Unicode decimal digit, but the ``int`` path parameter on
+# the route behind it is ASCII-only - so ``stages/U+0663/coach`` passed
+# this allowlist and then 422'd at the route, which is a refusal shape
+# distinguishable from the uniform 404 (final review, I6; the GET half
+# predates the comment work). ``[0-9]`` makes the allowlist admit
+# exactly what the route can parse.
 _SHARE_PATH_RE = re.compile(
     r"^(?:match/shooters"
     r"|shooters/[^/]+/project"
-    r"|shooters/[^/]+/stages/\d+/coach"
+    r"|shooters/[^/]+/stages/[0-9]+/coach"
+    # The comment thread. Readable through ANY scope, including plain
+    # "read" - a link already in the wild shows the conversation but
+    # cannot join it. Posting is _SHARE_WRITE_ROUTES's business.
+    r"|shooters/[^/]+/stages/[0-9]+/comments"
     r"|shooters/[^/]+/coach/distributions"
     r"|shooters/[^/]+/videos/stream"
-    r"|match/stage/\d+/compare"
+    r"|match/stage/[0-9]+/compare"
     # Same registry as the "shooters/[^/]+/videos/stream" shape above -
     # this alternative also reaches the registered-video branch of
     # stream_shooter_video (raw sources/proxies), not just Compare's
@@ -1144,10 +1184,82 @@ _SHARE_PATH_RE = re.compile(
     # incidentally. Route registration order (compare defined above the
     # {slug} routes in share_og.py) is what makes "compare" dispatch to
     # the compare card instead of a shooter slugged "compare".
-    r"|og/[^/]+/\d+\.png"
+    r"|og/[^/]+/[0-9]+\.png"
     r"|og-meta"
-    r"|og-meta/[^/]+/\d+)$"
+    r"|og-meta/[^/]+/[0-9]+)$"
 )
+
+
+# The anonymous WRITE surface - deliberately a second table rather than
+# an extension of _SHARE_PATH_RE, whose docstring calls itself GET-only
+# and must stay true. Admission requires all three of: a (method, shape)
+# pair here, and a resolved token whose scope is write-capable
+# (db.share_guard.scope_may_write). Any one missing is the same opaque
+# 404 as an unknown token, so the write surface is not discoverable by
+# probing.
+#
+# Method-paired (fix round 1, F5) rather than a single pattern matched
+# against a separate method set: that earlier shape took the cross
+# product of "any shape here" x "any method in _SHARE_WRITE_METHODS", so
+# POST admitted the DELETE-by-id shape too. That POST then reached
+# ``required_capability``'s ``_COMMENT_ROUTES`` table (ui/capabilities.py)
+# unmapped for POST-on-that-shape, fell through to the EDIT default, and
+# refused 403 among otherwise uniform 404s - the exact discriminator this
+# allowlist exists to deny. Pairing each shape with its one valid method
+# here mirrors the two anonymous entries of ``_COMMENT_ROUTES``, so the
+# two tables cannot drift into a gap. ``_COMMENT_ROUTES`` carries one
+# extra entry this table deliberately does not - ``DELETE
+# match/comments``, the owner's bulk-moderation route, which is
+# authenticated-only and must stay unreachable from a share token (final
+# review, I4). It is absent here, so an anonymous caller gets the uniform
+# 404 on it under any scope.
+#
+# ``\A``/``\Z`` rather than ``^``/``$`` for the reason _REVIEW_ROUTES
+# documents: plain ``$`` also matches just before a single trailing
+# newline, and on an allow-list that direction is the unsafe one.
+# ``[0-9]`` rather than ``\d`` for the reason _SHARE_PATH_RE documents.
+_SHARE_WRITE_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("POST", re.compile(r"\Ashooters/[^/]+/stages/[0-9]+/comments\Z")),
+    ("DELETE", re.compile(r"\Ashooters/[^/]+/stages/[0-9]+/comments/[A-Za-z0-9]+\Z")),
+)
+
+
+def _share_write_admits(method: str, rest: str) -> bool:
+    """Whether (method, path) is an admitted anonymous write shape."""
+    return any(m == method and p.match(rest) is not None for m, p in _SHARE_WRITE_ROUTES)
+
+
+def _json_safe(value: Any) -> Any:
+    """Replace non-finite floats with their text form, recursively.
+
+    Starlette renders every JSONResponse with ``json.dumps(...,
+    allow_nan=False)``, so a ``nan``/``inf`` anywhere in a response body
+    raises ``ValueError`` *while rendering* - which surfaces to the
+    caller as a 500 with a stack trace in the log.
+
+    That was reachable anonymously (final review, I1). ``POST
+    /api/share/{token}/shooters/{slug}/stages/{n}/comments`` with
+    ``{"body":"x","anchor_t":NaN}`` fails validation, and pydantic's
+    error record echoes the offending value back in its ``input`` field;
+    FastAPI puts that record straight into the 422 body. The request
+    dies during validation, before the rate limiter and before the stage
+    cap, so an attacker could drive unbounded 500s for free.
+    ``Field(allow_inf_nan=False)`` does not help - the raw float is still
+    what ``errors()`` reports as ``input``.
+
+    Every other 422 keeps its exact shape: for any structure that is
+    already JSON-clean this is the identity function, so the SPA's
+    ``detail.code`` matching is untouched.
+    """
+    if isinstance(value, float) and not isfinite(value):
+        # repr, not None: "nan"/"inf"/"-inf" tells the caller what was
+        # rejected, and dropping the key would change the record's shape.
+        return repr(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 def _is_loopback(request: Request) -> bool:
@@ -1183,6 +1295,77 @@ def _no_project_error() -> HTTPException:
     )
 
 
+def _valid_author_key_len(raw: str) -> bool:
+    """Whether ``raw`` is a plausible client-minted author key.
+
+    Bounded on both ends (fix round 1, F7): the client always mints 32
+    random bytes hex-encoded (64 chars), well inside ``[MIN, MAX]``. A key
+    below the floor is easy to guess or collide, which turns self-delete
+    into anyone-delete for that handle - identity, ``mine``, and
+    self-delete all key off this value's hash.
+    """
+    return MIN_AUTHOR_KEY_LEN <= len(raw) <= MAX_AUTHOR_KEY_LEN
+
+
+def _caller_author_key_hash(request: Request) -> str | None:
+    """Hashed author key from the request header, or None.
+
+    Optional on reads: a caller who sends none (or an implausible one)
+    gets ``mine=False`` everywhere, which is right for a first-time
+    reader.
+    """
+    raw = request.headers.get(AUTHOR_KEY_HEADER, "").strip()
+    if not _valid_author_key_len(raw):
+        return None
+    return hash_author_key(raw)
+
+
+def _require_author_key(request: Request) -> str:
+    """Author key for a write. 422 rather than 404 when missing or
+    implausible: the caller already passed the scope gate, so an honest
+    error is right."""
+    raw = request.headers.get(AUTHOR_KEY_HEADER, "").strip()
+    if not _valid_author_key_len(raw):
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "author_key_required",
+                "message": (
+                    f"{AUTHOR_KEY_HEADER} must carry an opaque client key between "
+                    f"{MIN_AUTHOR_KEY_LEN} and {MAX_AUTHOR_KEY_LEN} characters"
+                ),
+            },
+        )
+    return raw
+
+
+def _require_comment_scope(state: AppState, slug: str, stage_number: int) -> None:
+    """Bound the (slug, stage_number) path segments before any comment-
+    store call (fix round 1, F1/F2).
+
+    ``state.shooter_root`` is the roster-membership check every other
+    shooter-scoped route on this surface already goes through (e.g. the
+    coach route); the comment routes as first written skipped it, so a
+    comment-scoped token could ``POST`` to
+    ``shooters/does-not-exist/stages/999/comments`` and get 201.
+    ``STAGE_COMMENT_CAP`` does not catch that either - ``count_for_stage``
+    filters on slug + stage_number, the two values the caller chooses, so
+    varying either resets the cap: one admitted link buys unbounded rows
+    at slugs/stages no UI renders and no owner can find to moderate.
+
+    A stage_number large enough additionally overflows the driver's
+    integer column before any predicate is even evaluated - ``OverflowError``
+    on SQLite, ``NumericValueOutOfRange`` on Postgres, and this test suite
+    is SQLite-backed so it cannot see the Postgres class of that bug.
+    Checking against the match's own stage list closes both holes at
+    once: nothing in a real stage list is ever attacker-sized.
+    """
+    state.shooter_root(slug)
+    known_stages = {s.stage_number for s in state.match().stages}
+    if stage_number not in known_stages:
+        raise HTTPException(status_code=404, detail="not found")
+
+
 # Per-request match root resolved by the ``/api/matches/{match_id}/...``
 # alias middleware (#353 Phase 3 PR C). When set, ``AppState.shooter_root``
 # reads from here instead of the process singleton -- which means two
@@ -1210,6 +1393,16 @@ current_match_capabilities: ContextVar[frozenset[str] | None] = ContextVar(
 # strip server-local fields (e.g. match_root, last_scanned_dir) from their
 # response payloads before returning them to anonymous viewers.
 current_share_request: ContextVar[bool] = ContextVar("splitsmith_current_share_request", default=False)
+# The signed-in user behind a share request, or None. Set by
+# _share_alias purely so a comment can carry an account name instead of
+# a generated handle.
+#
+# It grants NOTHING. The tenant stays the match owner's, the allowlist
+# does not widen, and the scope gate does not soften. If a future change
+# makes this value authorize anything, that is the bug - the token is
+# the authorization on this surface, and a second one would mean two
+# answers to "who may do this".
+current_share_viewer: ContextVar[User | None] = ContextVar("splitsmith_current_share_viewer", default=None)
 
 
 def _may_mint_shot_ids() -> bool:
@@ -1299,6 +1492,13 @@ class TenantContext:
     # store's own user_id filter is the real isolation boundary, but the
     # tenant factory is still the established construction pattern here.
     desktop_tokens: DesktopTokenStore | None
+    # Per-user public comment-thread store (timestamped comments). None in
+    # local mode; in hosted mode built per-request with the tenant factory.
+    # Unlike share_tokens and desktop_tokens directly above, match_comments
+    # IS under the tenant_isolation RLS policy (Task 1's migration) - so
+    # here the tenant factory is load-bearing, not merely the established
+    # pattern: it is what sets the ``app.user_id`` GUC the policy keys on.
+    comments: CommentStore | None
 
 
 # Per-request / per-job tenant resolved by the hosted-mode auth gate
@@ -1564,6 +1764,13 @@ class AppState:
         # hosted-only feature. Returns None when no tenant is pinned.
         tenant = current_tenant.get()
         return tenant.desktop_tokens if tenant is not None else None
+
+    @property
+    def comments(self) -> CommentStore | None:
+        # Local mode has no per-user comment store - public comments are a
+        # hosted-only feature. Returns None when no tenant is pinned.
+        tenant = current_tenant.get()
+        return tenant.comments if tenant is not None else None
 
     def build_tenant(self, user_id: str) -> TenantContext:
         """Build the :class:`TenantContext` for ``user_id`` (hosted mode).
@@ -4422,6 +4629,7 @@ class DeletionSummaryModel(BaseModel):
     recent_project_removed: bool
     match_row_removed: bool
     state_docs_removed: int
+    comments_removed: int
     storage_objects_deleted: int
     raw_uploads_deleted: list[str]
     raw_uploads_skipped_shared: list[str]
@@ -5741,6 +5949,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         sessionmaker,
         tenant_session_factory,
     )
+    from ..db.comments import CommentStore
     from ..db.desktop_tokens import DesktopTokenAuth, DesktopTokenStore
     from ..db.device_auth import DeviceAuthStore
     from ..db.share_tokens import ShareTokenStore
@@ -5898,6 +6107,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             storage=_tenant_s3_storage(s3_client, s3_bucket, user_id),
             share_tokens=ShareTokenStore(tenant_factory, user_id=user_id),
             desktop_tokens=DesktopTokenStore(tenant_factory, user_id=user_id),
+            comments=CommentStore(tenant_factory, user_id=user_id),
         )
 
     state._build_tenant = _build_tenant
@@ -6490,13 +6700,14 @@ def create_app(
                     url=f"{state.public_base_url}/share/{s.token}",
                     created_at=s.created_at,
                     revoked_at=s.revoked_at,
+                    scope=s.scope,
                 )
                 for s in shares
             ]
         )
 
     @app.post("/api/match/shares", response_model=ShareInfo, status_code=201)
-    async def _create_match_share() -> ShareInfo:
+    async def _create_match_share(req: ShareCreateRequest = ShareCreateRequest()) -> ShareInfo:
         """Create a new share token for the current match. Returns 201."""
         if not _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
@@ -6506,7 +6717,7 @@ def create_app(
         store = state.share_tokens
         if store is None:
             raise HTTPException(status_code=500, detail="share store unavailable")
-        s = await store.create(mid)
+        s = await store.create(mid, scope=req.scope)
         # Best-effort, timeout-bounded: warm the match card cache so the
         # link the owner immediately pastes previews without a cold
         # Chromium render on first fetch. All of the "never cost the
@@ -6527,6 +6738,7 @@ def create_app(
             url=f"{state.public_base_url}/share/{s.token}",
             created_at=s.created_at,
             revoked_at=s.revoked_at,
+            scope=s.scope,
         )
 
     @app.delete("/api/match/shares/{share_id}", status_code=204)
@@ -6545,6 +6757,184 @@ def create_app(
         if not ok:
             raise HTTPException(status_code=404, detail="not found")
         return Response(status_code=204)
+
+    # ----------------------------------------------------------------------
+    # Timestamped comments (public share surface, #comments)
+    # Reached via the /api/matches/{match_id}/... alias prefix, same as
+    # /api/match/shares - both the owner (authenticated) and an anonymous
+    # caller (through _share_alias's rewrite) hit the same three routes.
+    # ----------------------------------------------------------------------
+
+    # Constructed once per app, not per request: a per-request limiter
+    # would reset on every call and limit nothing. Each test builds a
+    # fresh app (see hosted_app in tests/hosted_helpers.py), which is
+    # what keeps rate-limit state from leaking between test cases.
+    _comment_limiter = CommentRateLimiter()
+
+    @app.get(
+        "/api/shooters/{slug}/stages/{stage_number}/comments",
+        # No single response_model: an owner_view caller gets
+        # CommentOwnerListResponse, everyone else gets CommentListResponse.
+        # See CommentOwnerOut's docstring (fix round 1, F4) for why this is
+        # two types rather than one model plus exclude_none.
+        response_model=None,
+    )
+    async def list_stage_comments(
+        slug: str,
+        stage_number: int,
+        request: Request,
+    ) -> CommentListResponse | CommentOwnerListResponse:
+        """The comment thread. Readable through any share scope, and by
+        the owner on their own routes."""
+        store = state.comments
+        mid = current_match_id.get()
+        if store is None or mid is None:
+            raise HTTPException(status_code=404, detail="not found")
+        _require_comment_scope(state, slug, stage_number)
+        caller_hash = _caller_author_key_hash(request)
+        owner_view = not current_share_request.get()
+        comments = await store.list_for_stage(mid, slug, stage_number)
+        if owner_view:
+            # to_out's declared return type is CommentOut (the narrower,
+            # anonymous-safe type); at runtime, owner_view=True makes it
+            # return the CommentOwnerOut subtype this field actually needs.
+            return CommentOwnerListResponse(
+                comments=[
+                    to_out(c, author_key_hash=caller_hash, owner_view=True)  # type: ignore[misc]
+                    for c in comments
+                ]
+            )
+        return CommentListResponse(
+            comments=[to_out(c, author_key_hash=caller_hash, owner_view=False) for c in comments]
+        )
+
+    @app.post(
+        "/api/shooters/{slug}/stages/{stage_number}/comments",
+        response_model=CommentOut,
+        status_code=201,
+    )
+    async def create_stage_comment(
+        slug: str,
+        stage_number: int,
+        req: CommentCreateRequest,
+        request: Request,
+    ) -> CommentOut:
+        """Post a comment. Reachable only through a comment-scoped share
+        link: the write allowlist plus the scope gate in ``_share_alias``
+        are what admit this, and an owner posting on their own footage is
+        deliberately not a use case v1 serves."""
+        store = state.comments
+        mid = current_match_id.get()
+        share_token_id = getattr(request.state, "share_token_id", None)
+        if store is None or mid is None or share_token_id is None:
+            raise HTTPException(status_code=404, detail="not found")
+        _require_comment_scope(state, slug, stage_number)
+        author_key = _require_author_key(request)
+        # Both keys, token first: the author key is a client-chosen
+        # header, so it bounds nothing on its own (final review, I5).
+        # share_token_id is not attacker-chosen - it is the link they
+        # were given - so it is the bound that holds under rotation.
+        if not _comment_limiter.allow(
+            f"token:{share_token_id}",
+            f"key:{hash_author_key(author_key)}",
+            now=time.monotonic(),
+        ):
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "comment_rate_limited", "message": "too many comments, slow down"},
+            )
+        if await store.count_for_stage(mid, slug, stage_number) >= STAGE_COMMENT_CAP:
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "comment_stage_cap", "message": "this stage has too many comments"},
+            )
+        viewer = current_share_viewer.get()
+        if viewer is not None and isinstance(viewer.display_name, str) and viewer.display_name.strip():
+            author_kind = "account"
+            author_user_id = viewer.id
+            author_handle = viewer.display_name.strip()
+        else:
+            # Includes a signed-in account that never set a display name:
+            # an email address is not a name they chose to publish, and an
+            # empty string is not a name at all.
+            author_kind = "handle"
+            author_user_id = None
+            author_handle = derive_handle(author_key)
+        created = await store.create(
+            match_id=mid,
+            slug=slug,
+            stage_number=stage_number,
+            anchor_t=req.anchor_t,
+            anchor_kind=req.anchor_kind,
+            anchor_shot_id=req.anchor_shot_id,
+            author_kind=author_kind,
+            author_user_id=author_user_id,
+            author_handle=author_handle,
+            author_key_hash=hash_author_key(author_key),
+            share_token_id=share_token_id,
+            body=req.body,
+        )
+        return to_out(created, author_key_hash=created.author_key_hash, owner_view=False)
+
+    @app.delete(
+        "/api/shooters/{slug}/stages/{stage_number}/comments/{comment_id}",
+        status_code=204,
+    )
+    async def delete_stage_comment(
+        slug: str,
+        stage_number: int,
+        comment_id: str,
+        request: Request,
+    ) -> Response:
+        """Delete one comment. An anonymous caller may delete only their
+        own, matched on the hashed author key; the owner may delete any.
+        Both refusals are the same 404."""
+        store = state.comments
+        mid = current_match_id.get()
+        if store is None or mid is None:
+            raise HTTPException(status_code=404, detail="not found")
+        _require_comment_scope(state, slug, stage_number)
+        if current_share_request.get():
+            author_key = _require_author_key(request)
+            ok = await store.delete_own(
+                comment_id,
+                match_id=mid,
+                slug=slug,
+                stage_number=stage_number,
+                author_key_hash=hash_author_key(author_key),
+            )
+        else:
+            ok = await store.delete_as_owner(comment_id, match_id=mid, slug=slug, stage_number=stage_number)
+        if not ok:
+            raise HTTPException(status_code=404, detail="not found")
+        return Response(status_code=204)
+
+    @app.delete("/api/match/comments")
+    async def delete_match_comments(
+        share_token_id: str | None = None,
+        author_key_hash: str | None = None,
+    ) -> dict[str, int]:
+        """Bulk moderation. Exactly one selector, because the two mean
+        very different things and a call with neither would read as
+        'delete everything' - which is not an action this offers."""
+        if (share_token_id is None) == (author_key_hash is None):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "one_selector_required",
+                    "message": "pass exactly one of share_token_id or author_key_hash",
+                },
+            )
+        store = state.comments
+        mid = current_match_id.get()
+        if store is None or mid is None:
+            raise HTTPException(status_code=404, detail="not found")
+        if share_token_id is not None:
+            deleted = await store.delete_by_share_token(mid, share_token_id)
+        else:
+            assert author_key_hash is not None
+            deleted = await store.delete_by_author_key_hash(mid, author_key_hash)
+        return {"deleted": deleted}
 
     # ----------------------------------------------------------------------
     # Match sync trigger/status (desktop-to-hosted sync MVP, #631 Task 9)
@@ -6622,13 +7012,14 @@ def create_app(
     async def _worker_validation_gate(request: Request, exc: RequestValidationError) -> JSONResponse:
         """Return the uniform 404 for malformed /api/workers/register bodies.
 
-        Any other path gets the default FastAPI 422 so existing validation
-        behavior is unchanged.  The worker register endpoint must not leak
-        its existence or expected shape via a 422.
+        Any other path gets the 422 FastAPI would have produced, with one
+        difference: the error detail is passed through ``_json_safe``
+        first. See that helper for why an anonymous caller could
+        otherwise force a 500 out of this handler.
         """
         if request.url.path == "/api/workers/register":
             return JSONResponse(status_code=404, content={"detail": "not found"})
-        return await request_validation_exception_handler(request, exc)
+        return JSONResponse(status_code=422, content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
 
     # Optimistic-locking conflict on a hosted state_docs save -> 409 so the
     # SPA can reload + retry. Registered only when the db layer imports
@@ -6732,8 +7123,12 @@ def create_app(
             # #631 Task 6). One table decides both this 403 and the
             # ``capabilities`` payload field - see capabilities.py. On a
             # share request the set comes from the token's scope instead
-            # of the origin (#779); share traffic is GET-only at the
-            # share alias, so the gate is payload-only there today.
+            # of the origin (#779). Share traffic is no longer GET-only:
+            # a comment-scoped token's admitted POST/DELETE reach this
+            # gate too, and ``_COMMENT_ROUTES`` in capabilities.py maps
+            # them to COMMENT_WRITE - unmapped, they would refuse with a
+            # 403 that enumerates the write allowlist against the share
+            # alias's uniform 404s.
             if current_share_request.get():
                 from ..db.share_guard import current_share_scope
 
@@ -6802,9 +7197,14 @@ def create_app(
     #     here is in scope for the alias's RLS-scoped ownership check.
     #
     # Security invariants: the match id comes ONLY from the resolved token
-    # row (never the URL); every non-token / non-whitelisted / non-GET /
-    # local-mode case returns the same opaque 404 so unknown, revoked, and
-    # expired tokens are indistinguishable.
+    # row (never the URL); every non-token / non-whitelisted-shape /
+    # disallowed-method / local-mode / write-capability-missing case
+    # returns the same opaque 404, so unknown, revoked, and expired
+    # tokens - and a read-scoped token probing the write surface - are
+    # all indistinguishable. GET admits through _SHARE_PATH_RE; POST and
+    # DELETE admit only through the separate method-paired
+    # _SHARE_WRITE_ROUTES table (via _share_write_admits), and only when
+    # the resolved token's scope is write-capable.
     @app.middleware("http")
     async def _share_alias(request, call_next):
         path = request.url.path
@@ -6817,11 +7217,30 @@ def create_app(
             # Local mode: no share surface at all.
             return not_found
         token, sep, rest = path[len(prefix) :].partition("/")
-        if not sep or not token or request.method != "GET" or not _SHARE_PATH_RE.fullmatch(rest):
+        if not sep or not token:
+            return not_found
+        method = request.method
+        if method == "GET":
+            if not _SHARE_PATH_RE.fullmatch(rest):
+                return not_found
+            needs_write_scope = False
+        elif method in ("POST", "DELETE"):
+            if not _share_write_admits(method, rest):
+                return not_found
+            needs_write_scope = True
+        else:
             return not_found
         resolved = await resolver(token)
         if resolved is None:
             return not_found
+        if needs_write_scope:
+            # Lazy import for the same reason the share_guard import below
+            # is lazy: this middleware runs on every request in local mode
+            # too, where splitsmith.db may not be installed.
+            from ..db.share_guard import scope_may_write
+
+            if not scope_may_write(resolved.scope):
+                return not_found
         # Rewrite onto the match-alias prefix with the match id from the
         # token row - never from the URL - and pin the owner's tenant so
         # the downstream ownership check + stores resolve as the owner.
@@ -6837,6 +7256,28 @@ def create_app(
         # has imported the db package, so this is a free (cached) import.
         from ..db.share_guard import current_share_scope
 
+        # Best-effort only: an absent, expired or malformed session is an
+        # anonymous visitor, never an error. Wrapped because the auth
+        # backend may raise on a garbage cookie and a share page must not
+        # 500 for it.
+        viewer = None
+        if needs_write_scope:
+            try:
+                viewer = await state.auth.authenticate_request(request)
+            except Exception:  # noqa: BLE001
+                viewer = None
+            # A credential confined to some other surface (#719's
+            # token_scope - a sync-scoped desktop token today, and any
+            # future scope tomorrow) must not name a comment either, for
+            # the same reason _auth_gate confines it: the share token is
+            # what authorizes the write, and a bearer token that isn't
+            # even allowed onto this surface must not get to pick who it
+            # posts as. Same spelling _auth_gate uses at "user.token_scope
+            # not in (None, "full")" - not a second one.
+            if viewer is not None and viewer.token_scope not in (None, "full"):
+                viewer = None
+        viewer_token = current_share_viewer.set(viewer)
+
         tenant_token = current_tenant.set(state.build_tenant(resolved.owner_user_id))
         share_token = current_share_request.set(True)
         scope_token = current_share_scope.set(resolved.scope)
@@ -6850,6 +7291,7 @@ def create_app(
         # path every route in _SHARE_PATH_RE (og.png included) is actually
         # registered under.
         request.state.share_token = token
+        request.state.share_token_id = resolved.share_token_id
         try:
             response = await call_next(request)
             # Uniform-404 seam: a live token whose underlying resource no
@@ -6860,6 +7302,7 @@ def create_app(
                 return not_found
             return response
         finally:
+            current_share_viewer.reset(viewer_token)
             current_share_scope.reset(scope_token)
             current_share_request.reset(share_token)
             current_tenant.reset(tenant_token)

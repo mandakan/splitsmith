@@ -24,6 +24,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 
+import { CommentPanel } from "@/components/comments/CommentPanel";
 import { Snackbar, type SnackState } from "@/components/Snackbar";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { ReclassifySheet } from "@/components/results/ReclassifySheet";
@@ -36,6 +37,7 @@ import {
   ApiError,
   api,
   apiErrorText,
+  capabilityDenied,
   type CoachShot,
   type CoachShotPatch,
   type CoachStageResponse,
@@ -86,7 +88,28 @@ export function ResultsStage() {
 }
 
 function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
-  const { shooters } = useOutletContext<MatchShellOutletContext>();
+  const { shooters, capabilities } = useOutletContext<MatchShellOutletContext>();
+  const location = useLocation();
+  // `comment_write` is one capability with two meanings, and the two
+  // affordances it drives are not the same affordance (final review,
+  // I2/I3). On a share mount it means "may post": the POST handler
+  // requires a share_token_id, which only the share middleware sets.
+  // On the owner's own mount the very same capability means "may
+  // moderate": posting there 404s, but DELETE on anyone's comment
+  // succeeds. Reading one flag for both put a dead compose box on the
+  // owner's page and left owner delete with no button at all.
+  //
+  // isShareView is legitimate here precisely because it selects which
+  // *affordance* to render, not who is allowed to do what - the server
+  // remains the only enforcement (the write allowlist, the scope gate,
+  // and the capability check). This is not the SPA re-implementing
+  // authorization; a wrong answer here shows or hides a button, it
+  // never grants anything.
+  const commentWrite = !capabilityDenied(capabilities, "comment_write");
+  const shareView = isShareView(location.pathname);
+  const canComment = commentWrite && shareView;
+  const canModerate = commentWrite && !shareView;
+  const [commentAnchors, setCommentAnchors] = useState<number[]>([]);
   const href = useMatchHref();
   const navigate = useNavigate();
   const [coach, setCoach] = useState<CoachStageResponse | null>(null);
@@ -109,8 +132,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const [fsMode, setFsMode] = useState<FullscreenMode>("off");
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [playerBox, setPlayerBox] = useState<HTMLDivElement | null>(null);
-  const location = useLocation();
-  const canReclassify = !isShareView(location.pathname);
+  const canReclassify = !shareView;
   const { shareUrl } = useActiveShare();
   const [sheetShot, setSheetShot] = useState<CoachShot | null>(null);
   const [patchBusy, setPatchBusy] = useState(false);
@@ -307,12 +329,20 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   // The first shot's split is the draw, whatever its classification.
   const draw = shots.length > 0 ? shots[0].split : null;
 
-  const seekToShot = useCallback((shot: { time_absolute: number }) => {
+  // Clip-absolute seconds - shared by shot rows and comment rows, which
+  // both already have their own coordinate math done by the time they
+  // call this (shots via time_absolute, comments via beepTime + anchor_t).
+  const seekToTime = useCallback((t: number) => {
     const v = videoRef.current;
     if (!v) return;
-    v.currentTime = shot.time_absolute;
+    v.currentTime = t;
     void v.play().catch(() => {});
   }, []);
+
+  const seekToShot = useCallback(
+    (shot: { time_absolute: number }) => seekToTime(shot.time_absolute),
+    [seekToTime],
+  );
 
   if (error) {
     return (
@@ -521,6 +551,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           baselines={baselines}
           momentTime={momentTime}
           onCopyMoment={handleCopyMoment}
+          commentTimes={commentAnchors.map((t) => coach.beep_time + t)}
         />
       </div>
       <div className="flex flex-col gap-4 lg:max-h-[calc(100dvh-var(--shell-header-h,86px)-2rem)] lg:overflow-y-auto">
@@ -549,6 +580,17 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
             ) : null}
           </div>
         ) : null}
+        <CommentPanel
+          slug={slug}
+          stage={stage}
+          shots={shots}
+          beepTime={coach.beep_time}
+          currentTime={currentTime}
+          canComment={canComment}
+          canModerate={canModerate}
+          onSeek={seekToTime}
+          onAnchorsChange={setCommentAnchors}
+        />
       </div>
       <ReclassifySheet
         key={sheetShot?.shot_number ?? "closed"}

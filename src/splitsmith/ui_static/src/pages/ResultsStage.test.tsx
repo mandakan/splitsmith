@@ -7,6 +7,7 @@ import type {
   CoachIntervalClass,
   CoachShot,
   CoachStageResponse,
+  MatchCapability,
   ShooterListEntry,
   StageStatus,
 } from "@/lib/api";
@@ -23,6 +24,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getProject: vi.fn().mockRejectedValue(new Error("no project")),
       getMatchCoachDistributions: vi.fn().mockRejectedValue(new Error("no dist")),
       patchStageShotCoach: vi.fn(),
+      listStageComments: vi.fn().mockResolvedValue({ comments: [] }),
       videoStreamUrl: () => "http://localhost/video.mp4",
     },
   };
@@ -105,7 +107,12 @@ function Shell({ ctx }: { ctx: MatchShellOutletContext }) {
   return <Outlet context={ctx} />;
 }
 
-function renderStage(path: string, shooters: ShooterListEntry[], shots: CoachShot[] = []) {
+function renderStage(
+  path: string,
+  shooters: ShooterListEntry[],
+  shots: CoachShot[] = [],
+  capabilities: MatchCapability[] | null = null,
+) {
   vi.mocked(api.getStageCoach).mockResolvedValue(makeCoach(shots));
   const ctx: MatchShellOutletContext = {
     project: null,
@@ -113,7 +120,7 @@ function renderStage(path: string, shooters: ShooterListEntry[], shots: CoachSho
     shooters,
     refresh: vi.fn(),
     origin: null,
-    capabilities: null,
+    capabilities,
   };
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -138,6 +145,22 @@ const MULTI = [
   ]),
 ];
 const SOLO = [makeShooter("anna", "Anna", [[2, "audited"]])];
+
+/** A comment the caller did not post - `mine` false, which is every
+ *  comment an owner has any reason to moderate. */
+function otherPersonsComment() {
+  return {
+    id: "c1",
+    anchor_t: 4.32,
+    anchor_kind: "time" as const,
+    anchor_shot_id: null,
+    author_kind: "handle" as const,
+    author_handle: "Prone Popper 47",
+    body: "someone else said this",
+    created_at: "2026-08-13T10:00:00Z",
+    mine: false,
+  };
+}
 
 describe("ResultsStage back link", () => {
   it("links back to the share overview from a share stage URL", async () => {
@@ -333,5 +356,70 @@ describe("ResultsStage reclassify flow", () => {
       "Could not save the change - check the connection and retry.",
     );
     expect(alert).not.toHaveTextContent("TypeError");
+  });
+});
+
+describe("ResultsStage comment gating", () => {
+  // `comment_write` is necessary for both affordances and sufficient for
+  // neither: it means "may post" on a share mount and "may moderate" on
+  // the owner's own mount, and the two mounts want different controls.
+  //
+  // The capability set still decides - the mount only picks which of the
+  // two it unlocks. A previous version of this block asserted that an
+  // owner mount with `comment_write` shows the compose box; it does not,
+  // because `create_stage_comment` requires a `share_token_id` that only
+  // the share middleware sets, so that box posted into a 404 (final
+  // review, I2). The assertion was pinning the defect and is corrected
+  // here rather than dropped.
+  beforeEach(() => {
+    // The module-level mock is shared across this file, so reset the
+    // thread here rather than leaving these tests order-dependent.
+    vi.mocked(api.listStageComments).mockResolvedValue({ comments: [] });
+  });
+
+  it("shows the compose control on a share mount that carries comment_write", async () => {
+    renderStage("/share/tok1/results/anna/2", SOLO, [], ["comment_write"]);
+    expect(await screen.findByRole("textbox", { name: /comment/i })).toBeInTheDocument();
+  });
+
+  it("hides the compose control on a share mount without comment_write", async () => {
+    renderStage("/share/tok1/results/anna/2", SOLO, [], []);
+    await screen.findByText("Anna");
+    expect(screen.queryByRole("textbox", { name: /comment/i })).not.toBeInTheDocument();
+  });
+
+  it("hides the compose control on the owner's own mount", async () => {
+    // I2: an owner cannot post. The POST 404s without a share token.
+    renderStage("/match/m1/results/anna/2", SOLO, [], ["review", "comment_write"]);
+    await screen.findByText("Anna");
+    expect(screen.queryByRole("textbox", { name: /comment/i })).not.toBeInTheDocument();
+  });
+
+  it("offers delete on someone else's comment on the owner's own mount", async () => {
+    // I3: `mine` is false for every comment an owner moderates, so the
+    // owner's Delete button existed nowhere in the SPA.
+    vi.mocked(api.listStageComments).mockResolvedValue({
+      comments: [otherPersonsComment()],
+    });
+    renderStage("/match/m1/results/anna/2", SOLO, [], ["review", "comment_write"]);
+    expect(await screen.findByRole("button", { name: /delete/i })).toBeInTheDocument();
+  });
+
+  it("offers no delete on someone else's comment on a share mount", async () => {
+    vi.mocked(api.listStageComments).mockResolvedValue({
+      comments: [otherPersonsComment()],
+    });
+    renderStage("/share/tok1/results/anna/2", SOLO, [], ["comment_write"]);
+    await screen.findByText("someone else said this");
+    expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
+  });
+
+  it("offers no delete on the owner's mount without comment_write", async () => {
+    vi.mocked(api.listStageComments).mockResolvedValue({
+      comments: [otherPersonsComment()],
+    });
+    renderStage("/match/m1/results/anna/2", SOLO, [], ["review", "edit"]);
+    await screen.findByText("someone else said this");
+    expect(screen.queryByRole("button", { name: /delete/i })).not.toBeInTheDocument();
   });
 });

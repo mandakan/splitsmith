@@ -28,6 +28,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getStageCoach: vi.fn(),
       getProject: vi.fn(),
       getMatchCoachDistributions: vi.fn().mockRejectedValue(new Error("no dist")),
+      listStageComments: vi.fn().mockResolvedValue({ comments: [] }),
       videoStreamUrl: () => "http://localhost/video.mp4",
     },
   };

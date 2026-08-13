@@ -176,6 +176,26 @@ a cache; there is nothing to invalidate. Meta tags are injected
 server-side in ``ui/share_og.py`` for every client -- crawlers do not run
 JavaScript, so a client-side helmet would reach none of them.
 
+The anonymous ``/api/share/{token}/...`` surface is no longer
+categorically read-only. ``_SHARE_PATH_RE`` (GET) and
+``_SHARE_WRITE_ROUTES`` (POST/DELETE, method-paired) in ``ui/server.py``
+are two separate allowlists on purpose, and must never merge: merging
+them would make ``_SHARE_PATH_RE``'s own GET-only docstring false, and
+would let a write shape be reachable through the read table's fullmatch.
+``comment`` is the only write-capable scope
+(``db.share_guard._WRITE_CAPABLE_SCOPES``) -- a plain ``read`` link can
+list the comment thread (the thread is deliberately in both allowlists)
+but can never post or delete through it; ``scope_may_write`` in
+``_share_alias`` is what enforces that, and every non-admitted
+(method, shape, scope) combination collapses to the same opaque 404 as
+an unknown token. ``author_handle`` on a posted comment is
+server-derived (``comment_identity.derive_handle``, or the signed-in
+viewer's own ``display_name``) and never client-supplied -- the request
+model has no field for it. That is the invariant a future contributor is
+most likely to break by "simplifying" the compose box: adding a
+display-name input to the POST body would let anyone sign a comment with
+someone else's name.
+
 ## Things Claude Code should not do
 
 - Add new dependencies without asking. The dep list is small on purpose.

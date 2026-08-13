@@ -80,6 +80,16 @@ describe("ResultsPlayer moment support", () => {
     expect(video.currentTime).toBeCloseTo(12.5, 2);
   });
 
+  it("renders a labelled pin per comment anchor when commentTimes is set", () => {
+    renderPlayer({ commentTimes: [7.5] });
+    expect(screen.getByLabelText(/comment at 4\.50s/i)).toBeTruthy();
+  });
+
+  it("renders no comment pin without commentTimes", () => {
+    renderPlayer();
+    expect(screen.queryByLabelText(/comment at/i)).toBeNull();
+  });
+
   it("does not re-seek when re-rendered with the same momentTime after the user moved the playhead", () => {
     const { videoRef, rerender } = renderPlayer({ momentTime: 7.32 });
     const video = videoRef.current!;
