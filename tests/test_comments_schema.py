@@ -1,52 +1,61 @@
-"""Schema-level guards for match_comments (timestamped comments)."""
+"""Schema-level guards for match_comments (timestamped comments).
+
+Sync tests calling ``asyncio.run`` - the repo idiom (see
+``tests/test_share_tokens_store.py``). There is no async-test plugin.
+"""
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
+from sqlalchemy import select
 
-sa = pytest.importorskip("sqlalchemy")
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
-
-from splitsmith.db.models import Base, CommentRow, User  # noqa: E402
-
-pytestmark = pytest.mark.anyio
+from splitsmith.db import Base, User, create_engine, sessionmaker
+from splitsmith.db.models import CommentRow
 
 
-@pytest.fixture
-def anyio_backend() -> str:
-    return "asyncio"
+def _session_factory() -> sessionmaker:
+    """Fresh in-memory engine with the schema created and one user seeded."""
+    engine = create_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = sessionmaker(engine)
+
+    async def _setup() -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_factory() as s:
+            s.add(User(id="u1", email="owner@example.com"))
+            await s.commit()
+
+    asyncio.run(_setup())
+    return session_factory
 
 
-@pytest.fixture
-async def session_factory():
-    engine = create_async_engine("sqlite+aiosqlite://")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield async_sessionmaker(engine, expire_on_commit=False)
-    await engine.dispose()
+def test_comment_row_persists_all_columns() -> None:
+    sf = _session_factory()
 
-
-async def test_comment_row_persists_all_columns(session_factory) -> None:
-    async with session_factory() as session:
-        session.add(User(id="u1", email="owner@example.com"))
-        session.add(
-            CommentRow(
-                user_id="u1",
-                match_id="m1",
-                slug="alice",
-                stage_number=3,
-                anchor_t=4.32,
-                anchor_kind="shot",
-                anchor_shot_id="cand-7",
-                author_kind="handle",
-                author_handle="Prone Popper 47",
-                author_key_hash="deadbeef",
-                share_token_id="s1",
-                body="reload looks early here",
+    async def _go() -> CommentRow:
+        async with sf() as session:
+            session.add(
+                CommentRow(
+                    user_id="u1",
+                    match_id="m1",
+                    slug="alice",
+                    stage_number=3,
+                    anchor_t=4.32,
+                    anchor_kind="shot",
+                    anchor_shot_id="cand-7",
+                    author_kind="handle",
+                    author_handle="Prone Popper 47",
+                    author_key_hash="deadbeef",
+                    share_token_id="s1",
+                    body="reload looks early here",
+                )
             )
-        )
-        await session.commit()
-        row = (await session.execute(sa.select(CommentRow))).scalar_one()
+            await session.commit()
+            return (await session.execute(select(CommentRow))).scalar_one()
+
+    row = asyncio.run(_go())
 
     assert row.id  # ULID default assigned
     assert row.anchor_t == pytest.approx(4.32)
@@ -57,7 +66,7 @@ async def test_comment_row_persists_all_columns(session_factory) -> None:
     assert row.created_at is not None
 
 
-async def test_anchor_t_is_required_even_for_a_shot_anchor() -> None:
+def test_anchor_t_is_required_even_for_a_shot_anchor() -> None:
     """The shot id is a label; anchor_t is the truth. A row without it is
     meaningless once a re-detect moves the shot."""
     assert CommentRow.__table__.c.anchor_t.nullable is False
