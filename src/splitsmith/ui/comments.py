@@ -151,6 +151,25 @@ def to_out(comment: Comment, *, author_key_hash: str | None, owner_view: bool) -
     :class:`CommentOwnerOut` (a ``CommentOut`` subtype) when
     ``owner_view``, so a caller that forgets to branch on the type still
     gets every ``CommentOut`` field.
+
+    **The ``owner_view`` branch here is belt-and-braces, not the primary
+    defense.** The actual containment boundary is the response *type* at
+    each call site: the anonymous list route wraps this in
+    ``CommentListResponse`` (``comments: list[CommentOut]``), the POST
+    route declares ``response_model=CommentOut`` - ``CommentOut`` itself
+    has no ``author_key_hash`` / ``share_token_id`` fields to leak, so
+    Pydantic strips them from any ``CommentOwnerOut`` instance handed to
+    a ``CommentOut``-typed slot regardless of what this function does.
+    Task 12's ablation drill confirmed this: removing the ``if
+    owner_view`` gate here (always building ``CommentOwnerOut``) left
+    every anonymous-exposure test green, because the type boundary at
+    the call site caught it independently. Do not read that as "this
+    branch is dead code, delete it" - keep it, because a future call
+    site that returns ``to_out(...)`` directly without an intervening
+    ``CommentOut``-typed wrapper would have nothing else standing
+    between it and a leak. Do treat the *type* declarations at each call
+    site (``CommentOut`` vs ``CommentOwnerOut``, `response_model=`) as
+    the thing that must never regress; this flag alone was never enough.
     """
     mine = author_key_hash is not None and comment.author_key_hash == author_key_hash
     if owner_view:

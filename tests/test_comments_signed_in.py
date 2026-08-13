@@ -199,6 +199,17 @@ def nameless_signed_in_headers(hosted_env: str, hosted_app, _seeded_match: None)
     return _session_headers(hosted_env, client, sender, "nameless@example.com", None)
 
 
+@pytest.fixture
+def whitespace_signed_in_headers(hosted_env: str, hosted_app, _seeded_match: None) -> dict[str, str]:
+    """A valid session for a user whose display_name is set but is
+    whitespace-only ("   "). Distinct from nameless_signed_in_headers
+    (display_name=None): None fails the isinstance(str) check on its
+    own, so it can't observe the separate .strip() truthiness guard.
+    Only a non-None, blank-after-stripping string can."""
+    client, sender = hosted_app
+    return _session_headers(hosted_env, client, sender, "whitespace@example.com", "   ")
+
+
 # ---------------------------------------------------------------------------
 
 
@@ -223,6 +234,20 @@ def test_signed_in_visitor_without_a_display_name_falls_back_to_a_handle(
     an empty string or as their email address."""
     client, token = comment_token_client
     created = _post(client, token, **nameless_signed_in_headers).json()
+    assert created["author_kind"] == "handle"
+    assert created["author_handle"].split(" ")[-1].isdigit()
+
+
+def test_signed_in_visitor_with_a_blank_display_name_falls_back_to_a_handle(
+    comment_token_client, whitespace_signed_in_headers
+) -> None:
+    """display_name="   " is a non-None string, so it passes an
+    isinstance(str) check on its own - only the .strip() truthiness
+    check catches it. Without that check this account would publish a
+    comment signed with an empty string: attributed to nobody, which is
+    worse than a pseudonym."""
+    client, token = comment_token_client
+    created = _post(client, token, **whitespace_signed_in_headers).json()
     assert created["author_kind"] == "handle"
     assert created["author_handle"].split(" ")[-1].isdigit()
 

@@ -11,7 +11,7 @@ from collections.abc import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
-from splitsmith.ui.comments import AUTHOR_KEY_HEADER, BODY_MAX_CHARS
+from splitsmith.ui.comments import AUTHOR_KEY_HEADER, BODY_MAX_CHARS, CommentOut
 from tests.hosted_helpers import login, seed_match
 
 NOT_FOUND = {"detail": "not found"}
@@ -260,6 +260,23 @@ def test_list_never_exposes_author_key_hash_or_share_token(comment_token_client)
         assert "author_key_hash" not in comment
         assert "share_token_id" not in comment
         assert "author_user_id" not in comment
+
+
+def test_comment_out_has_no_owner_only_fields() -> None:
+    """The real containment boundary, named directly: the anonymous
+    response type CommentOut has no slot for author_key_hash or
+    share_token_id at all, so no caller wrapped in it (any route
+    declaring response_model=CommentOut, or a CommentListResponse whose
+    comments field is list[CommentOut]) can leak either field regardless
+    of what to_out's owner_view branch does - Pydantic strips a
+    CommentOwnerOut instance down to CommentOut's own fields whenever it
+    is serialized through a CommentOut-typed slot. to_out's owner_view
+    gate is defense in depth on top of this, not a substitute for it;
+    see to_out's docstring. This is what the ablation drill in Task 12
+    step 7 named "owner_view gating in to_out" is really guarded by."""
+    assert "author_key_hash" not in CommentOut.model_fields
+    assert "share_token_id" not in CommentOut.model_fields
+    assert "author_user_id" not in CommentOut.model_fields
 
 
 # --- read scope sees the thread but cannot join it -----------------------
