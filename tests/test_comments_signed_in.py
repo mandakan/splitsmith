@@ -40,11 +40,11 @@ SLUG = "alice"
 STAGE = 3
 
 
-def _post(client, token, **headers):
+def _post(client, token, key=KEY, **headers):
     return client.post(
         f"/api/share/{token}/shooters/alice/stages/3/comments",
         json={"body": "nice draw", "anchor_t": 1.0},
-        headers={AUTHOR_KEY_HEADER: KEY, **headers},
+        headers={AUTHOR_KEY_HEADER: key, **headers},
     )
 
 
@@ -112,9 +112,17 @@ def _mint_desktop_token(db_url: str, user_email: str, *, scope: str = "sync") ->
 
 
 def _set_display_name(db_url: str, email: str, display_name: str | None) -> None:
-    """Set ``users.display_name`` directly. There is no route that lets
-    an account set its own display name yet, so tests reach the row
-    the same way ``seed_match`` reaches ``matches``."""
+    """Set ``users.display_name`` directly, bypassing PATCH /api/me.
+
+    Kept after #867 for exactly one purpose: seeding states the route
+    refuses to produce. ``"   "`` is the important one -- the route
+    normalizes a blank name to ``None``, so a whitespace-only column
+    value can only be reached by writing the row, and the fallback guard
+    it exercises (a non-None string that is blank after stripping) has no
+    other way to be tested. Any test asserting the *reachable* account
+    branch must go through the route instead; see
+    ``test_a_signed_in_visitor_can_set_a_name_and_comment_under_it``.
+    """
 
     async def _update_row() -> None:
         engine = create_engine(db_url)
@@ -360,3 +368,58 @@ def test_a_session_is_resolved_only_on_writes(
 
     _post(client, token, **signed_in_headers)
     assert len(calls) == 1
+
+
+def test_a_signed_in_visitor_can_set_a_name_and_comment_under_it(
+    hosted_env: str, hosted_app, comment_token_client
+) -> None:
+    """The reachability proof for #867.
+
+    Nothing here writes users.display_name directly. The visitor signs
+    in, sets a name through the same route the /account page calls, and
+    posts through a comment-scoped share link. Before #867 there was no
+    such route, so this branch could not be reached by any sequence of
+    requests a real user could make.
+    """
+    client, sender = hosted_app
+    login(client, sender, "reachable@example.com")
+    secret = client.cookies.get(SESSION_COOKIE_NAME)
+    assert secret is not None
+
+    resp = client.patch("/api/me", json={"display_name": "Anders Berg"})
+    assert resp.status_code == 200
+
+    client.cookies.clear()
+    headers = {"Cookie": f"{SESSION_COOKIE_NAME}={secret}"}
+    share_client, token = comment_token_client
+    created = _post(share_client, token, **headers).json()
+
+    assert created["author_kind"] == "account"
+    assert created["author_handle"] == "Anders Berg"
+    assert len(created["author_code"]) == 6
+
+
+def test_two_accounts_with_the_same_name_get_different_codes(
+    hosted_env: str, hosted_app, comment_token_client
+) -> None:
+    """The disambiguation the code exists for. Two real accounts, one
+    name, two codes."""
+    client, sender = hosted_app
+    share_client, token = comment_token_client
+    codes = []
+    for email in ("twin-a@example.com", "twin-b@example.com"):
+        login(client, sender, email)
+        secret = client.cookies.get(SESSION_COOKIE_NAME)
+        assert secret is not None
+        assert client.patch("/api/me", json={"display_name": "Anders Berg"}).status_code == 200
+        client.cookies.clear()
+        created = _post(
+            share_client,
+            token,
+            key=email.replace("@", "").ljust(64, "x")[:64],
+            **{"Cookie": f"{SESSION_COOKIE_NAME}={secret}"},
+        ).json()
+        assert created["author_handle"] == "Anders Berg"
+        codes.append(created["author_code"])
+
+    assert codes[0] != codes[1]
