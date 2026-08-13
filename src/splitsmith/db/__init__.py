@@ -46,6 +46,7 @@ from .models import (
     User,
     new_ulid,
 )
+from .profile import PostgresProfileStore
 from .project_state import ProjectStateStore, StateConflictError
 from .recent_projects import PostgresRecentProjectsStore
 from .scoreboard_identity import PostgresScoreboardIdentityStore
@@ -67,6 +68,7 @@ __all__ = [
     "MatchRow",
     "PostgresJobBackend",
     "PostgresMatchStore",
+    "PostgresProfileStore",
     "PostgresRecentProjectsStore",
     "PostgresScoreboardIdentityStore",
     "ProjectStateStore",

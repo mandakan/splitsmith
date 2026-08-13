@@ -97,7 +97,7 @@ from typing import TYPE_CHECKING, Any, BinaryIO, Literal
 if TYPE_CHECKING:
     # Hosted-only; imported lazily at runtime inside _apply_hosted_mode_wiring
     # so local mode stays free of the db (procrastinate/psycopg) dependency.
-    from ..db import PostgresMatchStore, ProjectStateStore
+    from ..db import PostgresMatchStore, PostgresProfileStore, ProjectStateStore
     from ..db.comments import CommentStore
     from ..db.desktop_tokens import DesktopTokenRecord, DesktopTokenStore
     from ..db.device_auth import DeviceAuthStore
@@ -1499,6 +1499,10 @@ class TenantContext:
     # here the tenant factory is load-bearing, not merely the established
     # pattern: it is what sets the ``app.user_id`` GUC the policy keys on.
     comments: CommentStore | None
+    # Per-user account-profile writer (#867). None in local mode: the
+    # loopback sentinel has no user row, and the PATCH route that uses
+    # this 404s there.
+    profile: PostgresProfileStore | None = None
 
 
 # Per-request / per-job tenant resolved by the hosted-mode auth gate
@@ -1771,6 +1775,13 @@ class AppState:
         # hosted-only feature. Returns None when no tenant is pinned.
         tenant = current_tenant.get()
         return tenant.comments if tenant is not None else None
+
+    @property
+    def profile(self) -> PostgresProfileStore | None:
+        # Local mode has no per-user profile store - display names are a
+        # hosted-account concept. Returns None when no tenant is pinned.
+        tenant = current_tenant.get()
+        return tenant.profile if tenant is not None else None
 
     def build_tenant(self, user_id: str) -> TenantContext:
         """Build the :class:`TenantContext` for ``user_id`` (hosted mode).
@@ -5940,6 +5951,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         MagicLinkAuth,
         PostgresJobBackend,
         PostgresMatchStore,
+        PostgresProfileStore,
         PostgresRecentProjectsStore,
         PostgresScoreboardIdentityStore,
         ProjectStateStore,
@@ -6108,6 +6120,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             share_tokens=ShareTokenStore(tenant_factory, user_id=user_id),
             desktop_tokens=DesktopTokenStore(tenant_factory, user_id=user_id),
             comments=CommentStore(tenant_factory, user_id=user_id),
+            profile=PostgresProfileStore(tenant_factory, user_id=user_id),
         )
 
     state._build_tenant = _build_tenant
