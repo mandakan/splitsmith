@@ -18,10 +18,11 @@ a different function with different rules, and lives in the frontend
 is trying to defeat someone choosing one on purpose. Do not reuse
 either normalizer for the other's job.
 
-**Control characters are refused outright.** A newline inside an author
-name breaks the single-line rendering the comment thread assumes, and
-C1 codepoints are invisible padding that would let two visually
-identical names differ.
+**Control characters are refused outright,** except tab which is
+collapsed to space. Tabs are the only control character a person plausibly
+types into a text field; newlines, carriage returns, and C1/format codepoints
+are rejected because they break single-line rendering or create invisible
+padding that lets two visually identical names differ.
 """
 
 from __future__ import annotations
@@ -51,10 +52,10 @@ def normalize_display_name(raw: str | None) -> str | None:
     # NFC first: a decomposed name must be measured and compared in the
     # form it will be stored in, not the form it arrived in.
     value = unicodedata.normalize("NFC", raw)
-    # ``Cc`` is C0 + C1; ``Cf`` is the invisible formatting class
-    # (zero-width joiners, bidi overrides) that would let two identical-
-    # looking names differ. Checked before the whitespace collapse so a
-    # newline is a refusal rather than being quietly turned into a space.
+    # Reject Cc (control) and Cf (format) characters, but allow tab which is
+    # the only control character a person plausibly types. Newlines, carriage
+    # returns, and C1/format codepoints are rejected here before the whitespace
+    # collapse so they raise an error rather than being silently converted.
     if any(unicodedata.category(ch) in ("Cc", "Cf") and ch != "\t" for ch in value):
         raise ValueError("display name may not contain control characters")
     value = _WHITESPACE_RUN.sub(" ", value).strip()
