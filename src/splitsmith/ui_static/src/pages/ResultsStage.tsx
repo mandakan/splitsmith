@@ -24,6 +24,7 @@ import {
   useSearchParams,
 } from "react-router-dom";
 
+import { CommentPanel } from "@/components/comments/CommentPanel";
 import { Snackbar, type SnackState } from "@/components/Snackbar";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { ReclassifySheet } from "@/components/results/ReclassifySheet";
@@ -36,6 +37,7 @@ import {
   ApiError,
   api,
   apiErrorText,
+  capabilityDenied,
   type CoachShot,
   type CoachShotPatch,
   type CoachStageResponse,
@@ -86,7 +88,13 @@ export function ResultsStage() {
 }
 
 function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
-  const { shooters } = useOutletContext<MatchShellOutletContext>();
+  const { shooters, capabilities } = useOutletContext<MatchShellOutletContext>();
+  // Server-derived, same fact the 403 guard enforces (#756-family gate) -
+  // never isShareView: a share token can carry comment_write, and an
+  // owner mount's capabilities can just as well lack it, so the URL
+  // shape and the write permission are not the same fact.
+  const canComment = !capabilityDenied(capabilities, "comment_write");
+  const [commentAnchors, setCommentAnchors] = useState<number[]>([]);
   const href = useMatchHref();
   const navigate = useNavigate();
   const [coach, setCoach] = useState<CoachStageResponse | null>(null);
@@ -307,12 +315,20 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   // The first shot's split is the draw, whatever its classification.
   const draw = shots.length > 0 ? shots[0].split : null;
 
-  const seekToShot = useCallback((shot: { time_absolute: number }) => {
+  // Clip-absolute seconds - shared by shot rows and comment rows, which
+  // both already have their own coordinate math done by the time they
+  // call this (shots via time_absolute, comments via beepTime + anchor_t).
+  const seekToTime = useCallback((t: number) => {
     const v = videoRef.current;
     if (!v) return;
-    v.currentTime = shot.time_absolute;
+    v.currentTime = t;
     void v.play().catch(() => {});
   }, []);
+
+  const seekToShot = useCallback(
+    (shot: { time_absolute: number }) => seekToTime(shot.time_absolute),
+    [seekToTime],
+  );
 
   if (error) {
     return (
@@ -521,6 +537,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           baselines={baselines}
           momentTime={momentTime}
           onCopyMoment={handleCopyMoment}
+          commentTimes={commentAnchors.map((t) => coach.beep_time + t)}
         />
       </div>
       <div className="flex flex-col gap-4 lg:max-h-[calc(100dvh-var(--shell-header-h,86px)-2rem)] lg:overflow-y-auto">
@@ -549,6 +566,16 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
             ) : null}
           </div>
         ) : null}
+        <CommentPanel
+          slug={slug}
+          stage={stage}
+          shots={shots}
+          beepTime={coach.beep_time}
+          currentTime={currentTime}
+          canComment={canComment}
+          onSeek={seekToTime}
+          onAnchorsChange={setCommentAnchors}
+        />
       </div>
       <ReclassifySheet
         key={sheetShot?.shot_number ?? "closed"}

@@ -1506,8 +1506,10 @@ export type MatchOrigin = "hosted" | "desktop" | "local";
 /** Server-derived per-match capability set (#756), computed next to the
  *  403 guard so payload and enforcement can never disagree. Gate write
  *  affordances on these, never on `origin` - origin is provenance
- *  (picker flag) and media-surface behavior (#821), not writability. */
-export type MatchCapability = "edit" | "review" | "share_manage";
+ *  (picker flag) and media-surface behavior (#821), not writability.
+ *  `comment_write` joined the table in the timestamped-comments Task 5
+ *  work, granted by the same hosted/desktop origin sets as the others. */
+export type MatchCapability = "edit" | "review" | "share_manage" | "comment_write";
 
 /** True when the capability set is KNOWN and lacks `cap`. Null or
  *  undefined means "not loaded yet" and denies nothing - pages keep

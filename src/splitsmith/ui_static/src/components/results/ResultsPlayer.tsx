@@ -58,6 +58,13 @@ interface ResultsPlayerProps {
   /** When set, renders a "Copy link at moment" button in the transport
    *  row. */
   onCopyMoment?: () => void;
+  /** Comment anchors in absolute clip seconds (the page converts from
+   *  seconds-after-beep, same as `momentTime`). Renders a scrub-bar pin
+   *  per entry - visual only, the comment thread below is the
+   *  interactive surface. Distinct shape + position from the moment
+   *  marker (above the track, not on it) so the two annotation kinds
+   *  never blend into one signal. */
+  commentTimes?: readonly number[];
 }
 
 function clamp(t: number, lo: number, hi: number): number {
@@ -83,6 +90,7 @@ export function ResultsPlayer({
   baselines,
   momentTime,
   onCopyMoment,
+  commentTimes,
 }: ResultsPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState<number | null>(null);
@@ -460,6 +468,22 @@ export function ResultsPlayer({
             style={{ left: `${pct(momentTime)}%` }}
           />
         )}
+        {/* Comment pins: sit above the track (not on it) so they never
+            merge with the moment diamond or the shot dots - a triangle
+            "flag" shape, distinct from both, in the one hue (manual
+            violet) unused elsewhere on this bar. Visual-only echo of the
+            thread below; the thread rows are the interactive surface. */}
+        {commentTimes?.map((t, i) => (
+          <span
+            key={i}
+            aria-hidden
+            className="pointer-events-none absolute bottom-full mb-1 size-2 -translate-x-1/2 bg-manual shadow-[0_0_4px_var(--color-manual-glow)]"
+            style={{
+              left: `${pct(t)}%`,
+              clipPath: "polygon(50% 100%, 0 0, 100% 0)",
+            }}
+          />
+        ))}
         {/* Shot dots, colored by gap tier (neutral when unjudged) */}
         {shots.map((shot) => (
           <span
