@@ -90,9 +90,7 @@ describe("AccountChip at phone width (#733)", () => {
     renderChip();
     await screen.findByTestId("account-chip");
     expect(screen.getByRole("link", { name: "Workers (admin)" })).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Desktop sync tokens" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Account" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
   });
 
@@ -101,9 +99,19 @@ describe("AccountChip at phone width (#733)", () => {
     renderChip();
     await screen.findByTestId("account-chip");
     expect(screen.queryByRole("link", { name: "Workers (admin)" })).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Desktop sync tokens" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Account" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+  });
+
+  it("links to the account page", async () => {
+    // Uses the same AuthProvider + MemoryRouter wrapper as the other
+    // tests here (useAuth() throws outside AuthProvider); the brief's
+    // wrapper snippet is for a file with no auth context to satisfy.
+    renderChip();
+    await screen.findByTestId("account-chip");
+    expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute(
+      "href",
+      "/account",
+    );
   });
 });

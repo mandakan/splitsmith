@@ -7,9 +7,14 @@
  * revokes the session and drops to the login surface (the deployment-mode
  * gate redirects once the auth status flips to anonymous).
  *
- * Also carries the entry point to DesktopTokensDialog (#631 Task 10) -
- * desktop token management is an account-level concern, same tier as
- * sign-out, not match-scoped like ShareDialog.
+ * Also links to /account (#867 Task 11), which owns display name and
+ * desktop token management - an account-level concern, same tier as
+ * sign-out, not match-scoped like ShareDialog. Desktop tokens used to
+ * open in a dialog straight from this chip (#631 Task 10); that dialog
+ * is now a section on the account page instead, and the chip just
+ * links there. The control count this chip carries is unchanged - one
+ * icon button was traded for one icon link - so the phone-width
+ * reasoning below still holds.
  *
  * Phone width (#733): measured at 326 -> 632 on a 390px bar, i.e. further
  * past the edge than the chip that issue was filed about. What it drops is
@@ -23,11 +28,10 @@
  */
 
 import * as React from "react";
-import { KeyRound, LogOut, Server } from "lucide-react";
+import { LogOut, Server, UserCog } from "lucide-react";
 import { Link } from "react-router-dom";
 
 import { IconButton, iconButtonVariants } from "@/components/ui/IconButton";
-import { DesktopTokensDialog } from "@/components/account/DesktopTokensDialog";
 import { useDeploymentMode } from "@/lib/features";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { useAuth } from "@/lib/auth";
@@ -37,7 +41,6 @@ export function AccountChip({ className }: { className?: string }) {
   const isMobile = useIsMobile();
   const { status, user, logout } = useAuth();
   const [busy, setBusy] = React.useState(false);
-  const [tokensOpen, setTokensOpen] = React.useState(false);
 
   // Hosted-only, and only once a real account is resolved.
   if (mode !== "hosted" || status !== "authed" || !user) return null;
@@ -83,16 +86,18 @@ export function AccountChip({ className }: { className?: string }) {
           <Server className="size-3.5" />
         </Link>
       ) : null}
-      <IconButton
-        className="shrink-0"
-        variant="subtle"
-        size="sm"
-        label="Desktop sync tokens"
-        onClick={() => setTokensOpen(true)}
-        disabled={busy}
+      <Link
+        to="/account"
+        aria-label="Account"
+        title="Account"
+        className={iconButtonVariants({
+          variant: "subtle",
+          size: "sm",
+          className: "shrink-0",
+        })}
       >
-        <KeyRound className="size-3.5" />
-      </IconButton>
+        <UserCog className="size-3.5" />
+      </Link>
       <IconButton
         className="shrink-0"
         variant="subtle"
@@ -103,9 +108,6 @@ export function AccountChip({ className }: { className?: string }) {
       >
         <LogOut className="size-3.5" />
       </IconButton>
-      {tokensOpen ? (
-        <DesktopTokensDialog onClose={() => setTokensOpen(false)} />
-      ) : null}
     </div>
   );
 }

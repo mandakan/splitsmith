@@ -29,7 +29,7 @@
  * token or the base URL changes (#719) - see put_hosted_sync_settings.
  *
  * Overlay architecture: body Portal + z-modal token + useDialogFocus
- * (modal trap) - same skeleton as DesktopTokensDialog (PR #519
+ * (modal trap) - same skeleton as ShareDialog (PR #519
  * convention).
  */
 

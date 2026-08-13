@@ -8,7 +8,7 @@
  * button (Task 9's review finding - an enabled button that would
  * always fail is worse than a disabled one); clicking the button
  * fires startSync. Mocks @/lib/api and @/lib/features the same way
- * MatchShell.test.tsx and DesktopTokensDialog.test.tsx mock api.
+ * MatchShell.test.tsx and DesktopTokensSection.test.tsx mock api.
  */
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";

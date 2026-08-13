@@ -8,7 +8,7 @@
  * touches ``HostedSyncSettings`` directly.
  *
  * Overlay architecture: body Portal + z-modal token + useDialogFocus
- * (modal trap) - same skeleton as SyncSettingsDialog / DesktopTokensDialog
+ * (modal trap) - same skeleton as SyncSettingsDialog / ShareDialog
  * (PR #519 convention).
  *
  * The primary button opens ``verification_uri_complete`` in a new tab
