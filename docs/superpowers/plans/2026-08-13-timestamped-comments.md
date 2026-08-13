@@ -19,6 +19,7 @@
 - The uniform-404 rule: every refusal on the anonymous surface returns `{"detail": "not found"}` with status 404, byte-identical to an unknown token. Only 422 (validation) and 429 (rate limit) may differ, and only for a caller who already passed the scope check.
 - `_SHARE_PATH_RE` stays GET-only and keeps its docstring claim. Writes get a separate pattern; the two are never merged.
 - Backend tests: `uv run pytest -n0 <file> -q` (serial for a single file - worker startup dominates a focused run).
+- **Async tests use the repo's `asyncio.run()` idiom, not an async-test plugin.** 57 test files write sync `def test_...` bodies that call `asyncio.run(coro)`; `tests/test_share_tokens_store.py` is the closest model, including its `_engine_with_users` helper built on `create_engine` / `sessionmaker` from `splitsmith.db`. There is no `pytest-asyncio`, and `anyio` is only a transitive dependency of starlette - reaching for its pytest plugin would take an undeclared dependency on another package's dep tree, which the no-new-dependencies rule forbids.
 - Frontend tests: `pnpm vitest run <file>` from `src/splitsmith/ui_static/`.
 - Full gates once at the end of the branch (Task 11), not per task.
 - Current alembic head is `a1c9e3b7d5f0` (`add_scope_to_share_tokens`). Task 1's migration sets `down_revision = "a1c9e3b7d5f0"`.
@@ -41,48 +42,64 @@
 Create `tests/test_comments_schema.py`:
 
 ```python
-"""Schema-level guards for match_comments (timestamped comments)."""
+"""Schema-level guards for match_comments (timestamped comments).
+
+Sync tests calling ``asyncio.run`` - the repo idiom (see
+``tests/test_share_tokens_store.py``). There is no async-test plugin.
+"""
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
+from sqlalchemy import select
 
-sa = pytest.importorskip("sqlalchemy")
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
-
-from splitsmith.db.models import Base, CommentRow, User  # noqa: E402
-
-
-@pytest.fixture
-async def session_factory():
-    engine = create_async_engine("sqlite+aiosqlite://")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield async_sessionmaker(engine, expire_on_commit=False)
-    await engine.dispose()
+from splitsmith.db import Base, User, create_engine, sessionmaker
+from splitsmith.db.models import CommentRow
 
 
-async def test_comment_row_persists_all_columns(session_factory) -> None:
-    async with session_factory() as session:
-        session.add(User(id="u1", email="owner@example.com"))
-        session.add(
-            CommentRow(
-                user_id="u1",
-                match_id="m1",
-                slug="alice",
-                stage_number=3,
-                anchor_t=4.32,
-                anchor_kind="shot",
-                anchor_shot_id="cand-7",
-                author_kind="handle",
-                author_handle="Prone Popper 47",
-                author_key_hash="deadbeef",
-                share_token_id="s1",
-                body="reload looks early here",
+def _session_factory() -> sessionmaker:
+    """Fresh in-memory engine with the schema created and one user seeded."""
+    engine = create_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = sessionmaker(engine)
+
+    async def _setup() -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_factory() as s:
+            s.add(User(id="u1", email="owner@example.com"))
+            await s.commit()
+
+    asyncio.run(_setup())
+    return session_factory
+
+
+def test_comment_row_persists_all_columns() -> None:
+    sf = _session_factory()
+
+    async def _go() -> CommentRow:
+        async with sf() as session:
+            session.add(
+                CommentRow(
+                    user_id="u1",
+                    match_id="m1",
+                    slug="alice",
+                    stage_number=3,
+                    anchor_t=4.32,
+                    anchor_kind="shot",
+                    anchor_shot_id="cand-7",
+                    author_kind="handle",
+                    author_handle="Prone Popper 47",
+                    author_key_hash="deadbeef",
+                    share_token_id="s1",
+                    body="reload looks early here",
+                )
             )
-        )
-        await session.commit()
-        row = (await session.execute(sa.select(CommentRow))).scalar_one()
+            await session.commit()
+            return (await session.execute(select(CommentRow))).scalar_one()
+
+    row = asyncio.run(_go())
 
     assert row.id  # ULID default assigned
     assert row.anchor_t == pytest.approx(4.32)
@@ -93,7 +110,7 @@ async def test_comment_row_persists_all_columns(session_factory) -> None:
     assert row.created_at is not None
 
 
-async def test_anchor_t_is_required_even_for_a_shot_anchor() -> None:
+def test_anchor_t_is_required_even_for_a_shot_anchor() -> None:
     """The shot id is a label; anchor_t is the truth. A row without it is
     meaningless once a re-detect moves the shot."""
     assert CommentRow.__table__.c.anchor_t.nullable is False
@@ -540,42 +557,47 @@ Create `tests/test_comments_store.py`:
 ```python
 """CommentStore behaviour + the multi-tenant isolation guard.
 
-``test_share_tokens_store.py`` sets the precedent: one isolation test per
-store method. A method that forgets its ``user_id`` filter is the single
-most damaging bug this table can carry, because the owner tenant is
-pinned by impersonation on every anonymous write.
+``test_share_tokens_store.py`` sets the precedent twice over: the
+``asyncio.run`` idiom (there is no async-test plugin in this repo), and
+one isolation test per store method. A method that forgets its
+``user_id`` filter is the single most damaging bug this table can carry,
+because the owner tenant is pinned by impersonation on every anonymous
+write.
 """
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
-sa = pytest.importorskip("sqlalchemy")
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
-
-from splitsmith.db.comments import CommentStore  # noqa: E402
-from splitsmith.db.models import Base, User  # noqa: E402
+from splitsmith.db import Base, User, create_engine, sessionmaker
+from splitsmith.db.comments import CommentStore
 
 
-@pytest.fixture
-async def session_factory():
-    engine = create_async_engine("sqlite+aiosqlite://")
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    async with factory() as session:
-        session.add(User(id="owner", email="owner@example.com"))
-        session.add(User(id="other", email="other@example.com"))
-        await session.commit()
-    yield factory
-    await engine.dispose()
+def _engine_with_owner_and_other() -> sessionmaker:
+    """Fresh in-memory engine seeded with two users: 'owner' and 'other'."""
+    engine = create_engine("sqlite+aiosqlite:///:memory:")
+    session_factory = sessionmaker(engine)
+
+    async def _setup() -> None:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with session_factory() as s:
+            s.add(User(id="owner", email="owner@example.com"))
+            s.add(User(id="other", email="other@example.com"))
+            await s.commit()
+
+    asyncio.run(_setup())
+    return session_factory
 
 
-def _store(factory, user_id: str = "owner") -> CommentStore:
+def _store(factory: sessionmaker, user_id: str = "owner") -> CommentStore:
     return CommentStore(factory, user_id=user_id)
 
 
-async def _seed(store: CommentStore, **over) -> str:
+def _seed(store: CommentStore, **over) -> str:
+    """Create one comment with sensible defaults; return its id."""
     kwargs = dict(
         match_id="m1",
         slug="alice",
@@ -591,130 +613,143 @@ async def _seed(store: CommentStore, **over) -> str:
         body="reload looks early",
     )
     kwargs.update(over)
-    created = await store.create(**kwargs)
-    return created.id
+    return asyncio.run(store.create(**kwargs)).id
 
 
-async def test_create_then_list_round_trips(session_factory) -> None:
-    store = _store(session_factory)
-    await _seed(store)
-    got = await store.list_for_stage("m1", "alice", 3)
+def _bodies(store: CommentStore, match_id: str = "m1", slug: str = "alice", stage: int = 3):
+    return [c.body for c in asyncio.run(store.list_for_stage(match_id, slug, stage))]
+
+
+def test_create_then_list_round_trips() -> None:
+    store = _store(_engine_with_owner_and_other())
+    _seed(store)
+    got = asyncio.run(store.list_for_stage("m1", "alice", 3))
     assert [c.body for c in got] == ["reload looks early"]
     assert got[0].anchor_t == pytest.approx(4.32)
 
 
-async def test_list_is_oldest_first(session_factory) -> None:
-    store = _store(session_factory)
-    await _seed(store, body="first")
-    await _seed(store, body="second")
-    got = await store.list_for_stage("m1", "alice", 3)
-    assert [c.body for c in got] == ["first", "second"]
+def test_list_is_oldest_first() -> None:
+    store = _store(_engine_with_owner_and_other())
+    _seed(store, body="first")
+    _seed(store, body="second")
+    assert _bodies(store) == ["first", "second"]
 
 
-async def test_list_is_scoped_to_stage_and_slug(session_factory) -> None:
-    store = _store(session_factory)
-    await _seed(store, body="alice s3")
-    await _seed(store, slug="bob", body="bob s3")
-    await _seed(store, stage_number=4, body="alice s4")
-    got = await store.list_for_stage("m1", "alice", 3)
-    assert [c.body for c in got] == ["alice s3"]
+def test_list_is_scoped_to_stage_and_slug() -> None:
+    store = _store(_engine_with_owner_and_other())
+    _seed(store, body="alice s3")
+    _seed(store, slug="bob", body="bob s3")
+    _seed(store, stage_number=4, body="alice s4")
+    assert _bodies(store) == ["alice s3"]
 
 
-async def test_list_omits_soft_deleted(session_factory) -> None:
-    store = _store(session_factory)
-    cid = await _seed(store)
-    assert await store.delete_as_owner(cid, match_id="m1") is True
-    assert await store.list_for_stage("m1", "alice", 3) == []
+def test_list_omits_soft_deleted() -> None:
+    store = _store(_engine_with_owner_and_other())
+    cid = _seed(store)
+    assert asyncio.run(store.delete_as_owner(cid, match_id="m1")) is True
+    assert _bodies(store) == []
 
 
-async def test_delete_own_requires_the_matching_author_key(session_factory) -> None:
-    store = _store(session_factory)
-    cid = await _seed(store, author_key_hash="hash-a")
-    assert await store.delete_own(cid, match_id="m1", author_key_hash="hash-b") is False
-    assert len(await store.list_for_stage("m1", "alice", 3)) == 1
-    assert await store.delete_own(cid, match_id="m1", author_key_hash="hash-a") is True
-    assert await store.list_for_stage("m1", "alice", 3) == []
+def test_delete_own_requires_the_matching_author_key() -> None:
+    store = _store(_engine_with_owner_and_other())
+    cid = _seed(store, author_key_hash="hash-a")
+    wrong = asyncio.run(store.delete_own(cid, match_id="m1", author_key_hash="hash-b"))
+    assert wrong is False
+    assert len(_bodies(store)) == 1
+    right = asyncio.run(store.delete_own(cid, match_id="m1", author_key_hash="hash-a"))
+    assert right is True
+    assert _bodies(store) == []
 
 
-async def test_bulk_delete_by_share_token(session_factory) -> None:
-    store = _store(session_factory)
-    await _seed(store, share_token_id="tok-1", body="from link 1")
-    await _seed(store, share_token_id="tok-2", body="from link 2")
-    assert await store.delete_by_share_token("m1", "tok-1") == 1
-    assert [c.body for c in await store.list_for_stage("m1", "alice", 3)] == ["from link 2"]
+def test_bulk_delete_by_share_token() -> None:
+    store = _store(_engine_with_owner_and_other())
+    _seed(store, share_token_id="tok-1", body="from link 1")
+    _seed(store, share_token_id="tok-2", body="from link 2")
+    assert asyncio.run(store.delete_by_share_token("m1", "tok-1")) == 1
+    assert _bodies(store) == ["from link 2"]
 
 
-async def test_bulk_delete_by_author_key_hash(session_factory) -> None:
-    store = _store(session_factory)
-    await _seed(store, author_key_hash="hash-a", body="nuisance")
-    await _seed(store, author_key_hash="hash-b", body="fine")
-    assert await store.delete_by_author_key_hash("m1", "hash-a") == 1
-    assert [c.body for c in await store.list_for_stage("m1", "alice", 3)] == ["fine"]
+def test_bulk_delete_by_author_key_hash() -> None:
+    store = _store(_engine_with_owner_and_other())
+    _seed(store, author_key_hash="hash-a", body="nuisance")
+    _seed(store, author_key_hash="hash-b", body="fine")
+    assert asyncio.run(store.delete_by_author_key_hash("m1", "hash-a")) == 1
+    assert _bodies(store) == ["fine"]
+
+
+def test_purge_match_hard_deletes_every_stage() -> None:
+    store = _store(_engine_with_owner_and_other())
+    _seed(store, stage_number=3)
+    _seed(store, stage_number=4, slug="bob")
+    _seed(store, match_id="m2", body="other match")
+    assert asyncio.run(store.purge_match("m1")) == 2
+    assert _bodies(store) == []
+    assert len(_bodies(store, match_id="m2")) == 1
+
+
+def test_purge_match_removes_already_soft_deleted_rows() -> None:
+    """Soft-deleted rows still hold a body. A match delete must take them
+    too, or 'delete my match' leaves text behind."""
+    store = _store(_engine_with_owner_and_other())
+    cid = _seed(store)
+    asyncio.run(store.delete_as_owner(cid, match_id="m1"))
+    assert asyncio.run(store.purge_match("m1")) == 1
+
+
+def test_count_for_stage_ignores_deleted() -> None:
+    store = _store(_engine_with_owner_and_other())
+    cid = _seed(store)
+    assert asyncio.run(store.count_for_stage("m1", "alice", 3)) == 1
+    asyncio.run(store.delete_as_owner(cid, match_id="m1"))
+    assert asyncio.run(store.count_for_stage("m1", "alice", 3)) == 0
 
 
 # --- isolation: one per method -------------------------------------------
 
-async def test_list_is_isolated_by_user(session_factory) -> None:
-    await _seed(_store(session_factory, "owner"))
-    assert await _store(session_factory, "other").list_for_stage("m1", "alice", 3) == []
+
+def test_list_is_isolated_by_user() -> None:
+    sf = _engine_with_owner_and_other()
+    _seed(_store(sf, "owner"))
+    assert asyncio.run(_store(sf, "other").list_for_stage("m1", "alice", 3)) == []
 
 
-async def test_delete_own_is_isolated_by_user(session_factory) -> None:
-    cid = await _seed(_store(session_factory, "owner"))
-    stolen = await _store(session_factory, "other").delete_own(
-        cid, match_id="m1", author_key_hash="hash-a"
+def test_delete_own_is_isolated_by_user() -> None:
+    sf = _engine_with_owner_and_other()
+    cid = _seed(_store(sf, "owner"))
+    stolen = asyncio.run(
+        _store(sf, "other").delete_own(cid, match_id="m1", author_key_hash="hash-a")
     )
     assert stolen is False
+    assert len(_bodies(_store(sf, "owner"))) == 1
 
 
-async def test_delete_as_owner_is_isolated_by_user(session_factory) -> None:
-    cid = await _seed(_store(session_factory, "owner"))
-    assert await _store(session_factory, "other").delete_as_owner(cid, match_id="m1") is False
+def test_delete_as_owner_is_isolated_by_user() -> None:
+    sf = _engine_with_owner_and_other()
+    cid = _seed(_store(sf, "owner"))
+    assert asyncio.run(_store(sf, "other").delete_as_owner(cid, match_id="m1")) is False
+    assert len(_bodies(_store(sf, "owner"))) == 1
 
 
-async def test_bulk_deletes_are_isolated_by_user(session_factory) -> None:
-    await _seed(_store(session_factory, "owner"))
-    other = _store(session_factory, "other")
-    assert await other.delete_by_share_token("m1", "tok-1") == 0
-    assert await other.delete_by_author_key_hash("m1", "hash-a") == 0
+def test_bulk_deletes_are_isolated_by_user() -> None:
+    sf = _engine_with_owner_and_other()
+    _seed(_store(sf, "owner"))
+    other = _store(sf, "other")
+    assert asyncio.run(other.delete_by_share_token("m1", "tok-1")) == 0
+    assert asyncio.run(other.delete_by_author_key_hash("m1", "hash-a")) == 0
+    assert len(_bodies(_store(sf, "owner"))) == 1
 
 
-async def test_purge_match_hard_deletes_every_stage(session_factory) -> None:
-    store = _store(session_factory)
-    await _seed(store, stage_number=3)
-    await _seed(store, stage_number=4, slug="bob")
-    await _seed(store, match_id="m2", body="other match")
-    assert await store.purge_match("m1") == 2
-    assert await store.list_for_stage("m1", "alice", 3) == []
-    assert len(await store.list_for_stage("m2", "alice", 3)) == 1
+def test_purge_match_is_isolated_by_user() -> None:
+    sf = _engine_with_owner_and_other()
+    _seed(_store(sf, "owner"))
+    assert asyncio.run(_store(sf, "other").purge_match("m1")) == 0
+    assert len(_bodies(_store(sf, "owner"))) == 1
 
 
-async def test_purge_match_removes_already_soft_deleted_rows(session_factory) -> None:
-    """Soft-deleted rows still hold a body. A match delete must take them
-    too, or 'delete my match' leaves text behind."""
-    store = _store(session_factory)
-    cid = await _seed(store)
-    await store.delete_as_owner(cid, match_id="m1")
-    assert await store.purge_match("m1") == 1
-
-
-async def test_purge_match_is_isolated_by_user(session_factory) -> None:
-    await _seed(_store(session_factory, "owner"))
-    assert await _store(session_factory, "other").purge_match("m1") == 0
-    assert len(await _store(session_factory, "owner").list_for_stage("m1", "alice", 3)) == 1
-
-
-async def test_count_for_stage_ignores_deleted(session_factory) -> None:
-    store = _store(session_factory)
-    cid = await _seed(store)
-    assert await store.count_for_stage("m1", "alice", 3) == 1
-    await store.delete_as_owner(cid, match_id="m1")
-    assert await store.count_for_stage("m1", "alice", 3) == 0
-
-
-async def test_store_refuses_an_empty_user_id(session_factory) -> None:
+def test_store_refuses_an_empty_user_id() -> None:
+    sf = _engine_with_owner_and_other()
     with pytest.raises(ValueError, match="non-empty user_id"):
-        CommentStore(session_factory, user_id="")
+        CommentStore(sf, user_id="")
 ```
 
 - [ ] **Step 2: Run it to make sure it fails**
@@ -2909,7 +2944,7 @@ def test_no_shape_is_admitted_by_both_patterns_except_the_thread() -> None:
     assert both == ["shooters/alice/stages/3/comments"]
 
 
-async def test_deleting_a_match_purges_its_comments(owner_client, seeded_comment) -> None:
+def test_deleting_a_match_purges_its_comments(owner_client, seeded_comment) -> None:
     """Nothing cascades from the matches registry row - _delete_hosted
     deletes state_docs explicitly for that reason. Comments need the same
     step, or 'delete my match' leaves other people's text behind."""
@@ -2921,7 +2956,7 @@ async def test_deleting_a_match_purges_its_comments(owner_client, seeded_comment
     assert resp.json()["comments_removed"] == 1
 
 
-async def test_match_delete_reports_comments_in_its_summary(owner_client, seeded_comment) -> None:
+def test_match_delete_reports_comments_in_its_summary(owner_client, seeded_comment) -> None:
     """The summary is the audit trail for a destructive action (CLAUDE.md:
     optimize for the audit trail). A silent purge is worse than none."""
     summary = owner_client.delete("/api/matches/<match_id>").json()
