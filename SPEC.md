@@ -310,10 +310,12 @@ historical authors.
 
 It exists because a display name is self-chosen: an account can set
 theirs to another commenter's, including a generated pseudonym. The code
-is always in the DOM and in a tooltip; it renders visibly only when two
-distinct codes in one thread normalize to the same name
-(`lib/authorAmbiguity.ts`). The owner's view can expand a code to see
-every name it has posted under, which is the signal a rename leaves.
+is always in the DOM and in a tooltip. For a reader who cannot moderate,
+it renders visibly only when two distinct codes in one thread normalize
+to the same name (`lib/authorAmbiguity.ts`); for the match owner it is
+always visible, as the label on a detail trigger they can expand to see
+every name that code has posted under, which is the signal a rename
+leaves.
 
 That aggregate is match-scoped and owner-only (`GET
 /api/match/comment-authors`, absent from `_SHARE_PATH_RE`). Aggregating

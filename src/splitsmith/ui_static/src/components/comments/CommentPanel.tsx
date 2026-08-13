@@ -58,6 +58,23 @@ interface CommentPanelProps {
 const LOAD_FAILED_FALLBACK = "Could not load comments - check the connection and retry.";
 const POST_FAILED_FALLBACK = "Could not post the comment - check the connection and retry.";
 
+/** Format an ISO timestamp as "DD Mon YYYY". Mirrors DesktopTokensSection's
+ *  formatTokenDate and ShareDialog's formatShareDate -- kept local rather
+ *  than shared since none of the three otherwise have any coupling. Guards
+ *  against an unparseable value: this runs inside render, and the ISO
+ *  string comes from the author-detail endpoint, not a value this
+ *  component controls. */
+function formatCommentDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const months = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+  ];
+  return `${day} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
 /** `Shot <n>` when the anchor's shot id still resolves against the
  *  current shot table; otherwise a plain time pin. A distinct icon
  *  accompanies the text in both cases so the anchor kind is never
@@ -91,7 +108,10 @@ export function CommentPanel({
   const [posting, setPosting] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [openAuthor, setOpenAuthor] = useState<string | null>(null);
+  // Keyed by comment id, not author_code: an author with several
+  // comments in the thread gets a trigger per comment, and only the one
+  // the reader clicked should open (#867 final review, M3).
+  const [openCommentId, setOpenCommentId] = useState<string | null>(null);
   const [authors, setAuthors] = useState<CommentAuthor[] | null>(null);
 
   // Recomputed per render off `comments` rather than memoized: the
@@ -161,8 +181,8 @@ export function CommentPanel({
   // Owner-only, and only when they actually ask: the endpoint is a
   // match-wide aggregate, so fetching it on mount would cost every
   // reader a query for a panel most of them never open.
-  async function openAuthorDetail(code: string) {
-    setOpenAuthor((current) => (current === code ? null : code));
+  async function openAuthorDetail(commentId: string) {
+    setOpenCommentId((current) => (current === commentId ? null : commentId));
     if (authors !== null) return;
     try {
       const resp = await api.listCommentAuthors();
@@ -244,8 +264,13 @@ export function CommentPanel({
                       showing it would put a code on every line of a
                       thread that is usually one or two people; never
                       showing it would leave a spoofed name reading as
-                      authoritative. */}
-                  {ambiguous.has(c.author_code) ? (
+                      authoritative. A moderator gets the code either way,
+                      as the detail trigger's own label below -- so this
+                      plain span only covers the non-moderator case, and
+                      never renders alongside the button (that would put
+                      the same code on the line twice, #867 final review
+                      M1). */}
+                  {!canModerate && ambiguous.has(c.author_code) ? (
                     <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
                       {c.author_code}
                     </span>
@@ -254,16 +279,16 @@ export function CommentPanel({
                     <button
                       type="button"
                       aria-label={`Author detail for ${c.author_handle}`}
-                      aria-expanded={openAuthor === c.author_code}
+                      aria-expanded={openCommentId === c.id}
                       aria-controls={`author-detail-${c.id}`}
-                      onClick={() => void openAuthorDetail(c.author_code)}
+                      onClick={() => void openAuthorDetail(c.id)}
                       className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted transition-colors hover:text-ink"
                     >
                       {c.author_code}
                     </button>
                   ) : null}
                 </div>
-                {openAuthor === c.author_code ? (
+                {openCommentId === c.id ? (
                   <span
                     id={`author-detail-${c.id}`}
                     className="mx-4 mt-1 block rounded border border-rule bg-surface-2 p-2 text-[0.6875rem] text-muted"
@@ -271,7 +296,7 @@ export function CommentPanel({
                     {(() => {
                       const detail = authors?.find((a) => a.author_code === c.author_code);
                       if (!detail) return "Author detail unavailable.";
-                      return `${detail.author_kind === "account" ? "Account" : "Pseudonym"} - ${detail.comment_count} comments since ${new Date(detail.first_comment_at).toISOString().slice(0, 10)} - posted as ${detail.handles.join(", ")}`;
+                      return `${detail.author_kind === "account" ? "Account" : "Pseudonym"} - ${detail.comment_count} comments since ${formatCommentDate(detail.first_comment_at)} - posted as ${detail.handles.join(", ")}`;
                     })()}
                   </span>
                 ) : null}

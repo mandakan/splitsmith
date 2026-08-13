@@ -382,6 +382,43 @@ describe("CommentPanel author codes (#867)", () => {
     expect(await screen.findByText(/unavailable/i)).toBeInTheDocument();
   });
 
+  it("renders the code exactly once for a moderator viewing an ambiguous pair", async () => {
+    // Final review M1: the span (visible-on-collision, non-moderator
+    // path) and the detail-trigger button both used to render the code
+    // for a moderator, duplicating it on the line.
+    mockList([
+      comment({ id: "c1", author_handle: "Anders Berg", author_code: "AAA111" }),
+      comment({ id: "c2", author_handle: "anders  berg", author_code: "BBB222" }),
+    ]);
+    render(<CommentPanel {...baseProps} canModerate />);
+
+    await screen.findAllByText("Anders Berg");
+    expect(screen.getAllByText("AAA111")).toHaveLength(1);
+    expect(screen.getAllByText("BBB222")).toHaveLength(1);
+  });
+
+  it("opens detail for the clicked comment's row only, even when one author posted three comments", async () => {
+    // Final review M2: gating on openAuthor === author_code opened every
+    // row for that author at once, since a normal thread has one author
+    // posting several times.
+    mockList([
+      comment({ id: "c1", author_handle: "Anders Berg", author_code: "AAA111", body: "first" }),
+      comment({ id: "a", author_handle: "Anders Berg", author_code: "AAA111", body: "second" }),
+      comment({ id: "b", author_handle: "Anders Berg", author_code: "AAA111", body: "third" }),
+    ]);
+    render(<CommentPanel {...baseProps} canModerate />);
+
+    const triggers = await screen.findAllByRole("button", { name: /author detail/i });
+    expect(triggers).toHaveLength(3);
+
+    await userEvent.click(triggers[0]);
+
+    expect(screen.getAllByText(/unavailable|comments since/i)).toHaveLength(1);
+    const expanded = triggers.filter((t) => t.getAttribute("aria-expanded") === "true");
+    expect(expanded).toHaveLength(1);
+    expect(expanded[0]).toBe(triggers[0]);
+  });
+
   it("does not nest a button inside the seek button, and clicks route correctly", async () => {
     // React warns via console.error when it rejects a <button> nested
     // inside a <button> - that warning is the proof the row restructure

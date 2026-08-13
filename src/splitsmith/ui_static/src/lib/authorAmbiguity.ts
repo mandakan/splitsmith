@@ -50,6 +50,11 @@ export function ambiguousCodes(
   const byName = new Map<string, Set<string>>();
   for (const a of authors) {
     const key = normalizeAuthorName(a.author_handle);
+    // A symbol-only name (e.g. "***") folds to "" -- every letter and
+    // digit was stripped, nothing survived. Two such names are not
+    // actually equal, they just both lost everything. Bucketing "" would
+    // report unrelated symbol-only authors as colliding with each other.
+    if (key === "") continue;
     const codes = byName.get(key) ?? new Set<string>();
     codes.add(a.author_code);
     byName.set(key, codes);

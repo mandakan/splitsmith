@@ -98,6 +98,19 @@ describe("ambiguousCodes", () => {
     expect(codes).toEqual(new Set(["AAA111", "BBB222"]));
   });
 
+  it("does not flag two different symbol-only names, which both fold to empty", () => {
+    // "★★★" and "♦♦♦" have no letters or
+    // digits, so normalizeAuthorName strips everything and both land on
+    // "". They are not the same name -- they just both lost all their
+    // content to folding -- so grouping on the empty key would report a
+    // false collision.
+    const codes = ambiguousCodes([
+      author("★★★", "AAA111"),
+      author("♦♦♦", "BBB222"),
+    ]);
+    expect(codes.size).toBe(0);
+  });
+
   it("flags only the colliding pair in a mixed thread", () => {
     const codes = ambiguousCodes([
       author("Mathias Axell", "AAA111"),
