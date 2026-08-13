@@ -1258,6 +1258,14 @@ export interface JobTimings {
 export interface Job {
   id: string;
   kind: string;
+  /** The match this job was submitted for. The jobs list is global
+   *  (cross-match), so per-match predicates - SyncCard's "is a
+   *  sync_match running for THIS match?" - must match on this id or
+   *  they collide across matches, the same way per-stage predicates
+   *  collide across shooters without shooter_slug (issue #664). Null
+   *  for jobs submitted outside a match-scoped request
+   *  (model_download). */
+  match_id: string | null;
   stage_number: number | null;
   /** The shooter this job belongs to. Stage numbers repeat across every
    *  shooter in a match, so any per-stage predicate over the jobs list

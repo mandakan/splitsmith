@@ -161,6 +161,25 @@ def test_sync_trigger_with_config_enqueues_job(tmp_path: Path) -> None:
     assert job["status"] in ("pending", "running")
 
 
+def test_sync_trigger_stamps_the_submitting_match_id(tmp_path: Path) -> None:
+    """The Job wire shape carries the submitting request's match id.
+
+    The jobs list is global (cross-match), so without this the SPA's
+    SyncCard cannot tell whose sync is running and match B's card
+    mirrors match A's in-flight push (progress line + disabled button).
+    """
+    client, match_id = _local_app_with_match(tmp_path)
+    client.put(
+        "/api/settings/hosted-sync",
+        json={"base_url": _UNREACHABLE_BASE_URL, "token": "secret-token"},
+    )
+
+    resp = client.post(f"/api/matches/{match_id}/match/sync")
+
+    assert resp.status_code == 200
+    assert resp.json()["match_id"] == match_id
+
+
 # ---------------------------------------------------------------------------
 # GET /api/match/sync/status
 # ---------------------------------------------------------------------------

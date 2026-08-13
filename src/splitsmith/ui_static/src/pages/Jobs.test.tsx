@@ -11,6 +11,7 @@ function makeJob(over: Partial<Job>): Job {
   return {
     id: "j1",
     kind: "detect_beep",
+    match_id: "m1",
     stage_number: 3,
     shooter_slug: "anna",
     video_id: "v1",

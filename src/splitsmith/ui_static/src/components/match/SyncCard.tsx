@@ -11,12 +11,17 @@
  *
  * States (text + icon, never color alone):
  *   not configured  - CTA opens SyncSettingsDialog.
- *   syncing         - a sync_match job for this install is
+ *   syncing         - a sync_match job for THIS match is
  *                       pending/running in the jobs list the shell
- *                       already polls; button disabled, progress
- *                       message shown. Takes priority over the other
- *                       states below since it reflects a push actually
- *                       in flight right now.
+ *                       already polls (matched on Job.match_id - the
+ *                       jobs list is cross-match); button disabled,
+ *                       progress message shown. Takes priority over the
+ *                       other states below since it reflects a push
+ *                       actually in flight right now.
+ *   other syncing   - a sync_match job for a DIFFERENT match is
+ *                       active: button parked (one push at a time) with
+ *                       an honest "another match is syncing" line
+ *                       instead of mirroring that match's progress.
  *   errors          - the last computed push plan can't run (e.g. a
  *                       clip lives outside the match root). Listed in
  *                       full AND the button is disabled - Task 9's
@@ -122,13 +127,32 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
     }
   }, []);
 
+  // Refetch keyed on matchId: the card is NOT remounted on match
+  // navigation (react-router reuses the instance above the :matchId
+  // param), so without this a never-synced match B kept showing match
+  // A's cached status after switching. Reset the per-match state first
+  // so B renders "Checking sync status..." instead of A's answer while
+  // the fetch is in flight.
   useEffect(() => {
     if (!local) return;
+    setStatus(null);
+    setLoadError(null);
+    setStartError(null);
+    setStartedJob(null);
     void load();
-  }, [local, load]);
+  }, [local, load, matchId]);
 
-  const jobsSyncing = jobs.some((j) => j.kind === "sync_match" && isJobActive(j));
-  const runningJob = jobs.find((j) => j.kind === "sync_match" && isJobActive(j)) ?? null;
+  // The jobs list is global (cross-match), so match on match_id too -
+  // by kind alone, match B's card mirrors match A's in-flight push
+  // (progress line + disabled "Syncing..." button). A foreign active
+  // sync still parks the button (one push at a time), but is reported
+  // as another match's sync, not this one's.
+  const isActiveSync = (j: Job) => j.kind === "sync_match" && isJobActive(j);
+  const runningJob =
+    jobs.find((j) => isActiveSync(j) && j.match_id === matchId) ?? null;
+  const jobsSyncing = runningJob != null;
+  const otherMatchSyncing =
+    !jobsSyncing && jobs.some((j) => isActiveSync(j) && j.match_id !== matchId);
 
   // startedJob has settled once the poller's jobs list carries its id
   // in a terminal (non-active) state. Until then - including while
@@ -178,7 +202,7 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
 
   const hasErrors = (status?.errors.length ?? 0) > 0;
   const notConfigured = status != null && !status.configured;
-  const buttonDisabled = starting || syncing || hasErrors;
+  const buttonDisabled = starting || syncing || hasErrors || otherMatchSyncing;
 
   return (
     <section className="mb-6 rounded-xl border border-rule-strong bg-surface p-5">
@@ -199,6 +223,7 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
               loadError={loadError}
               syncing={syncing}
               runningJob={runningJob}
+              otherMatchSyncing={otherMatchSyncing}
             />
           </div>
         </div>
@@ -292,11 +317,13 @@ function SyncStatusLine({
   loadError,
   syncing,
   runningJob,
+  otherMatchSyncing,
 }: {
   status: SyncStatusResponse | null;
   loadError: string | null;
   syncing: boolean;
   runningJob: Job | null;
+  otherMatchSyncing: boolean;
 }) {
   const lineClass = "mt-0.5 flex items-center gap-1.5 font-mono text-[0.75rem] text-muted";
 
@@ -305,6 +332,14 @@ function SyncStatusLine({
       <p className={lineClass} aria-live="polite">
         <Loader2 className="size-3.5 shrink-0 animate-spin text-led" aria-hidden="true" />
         {runningJob?.message ?? "Push in progress..."}
+      </p>
+    );
+  }
+  if (otherMatchSyncing) {
+    return (
+      <p className={lineClass} aria-live="polite">
+        <Clock className="size-3.5 shrink-0" aria-hidden="true" />
+        Another match is syncing - this one can start when it finishes
       </p>
     );
   }
