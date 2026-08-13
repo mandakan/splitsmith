@@ -564,6 +564,67 @@ class ShareTokenRow(Base):
         )
 
 
+class CommentRow(Base):
+    """One public, timestamped comment on a shooter's stage video.
+
+    **``user_id`` is the match owner, not the author.** Counterintuitive
+    and deliberate: the comment is about the owner's footage, it dies
+    with the owner's match through the CASCADE below, and an anonymous
+    author has no account for it to belong to. Tenancy therefore stays
+    exactly what it is in every other table, and the RLS policy needs no
+    special case. ``author_user_id`` is the separate, nullable column
+    that records a *signed-in* author.
+
+    **``anchor_t`` is always set, even when ``anchor_kind == "shot"``.**
+    The shot id is a label; ``anchor_t`` is the truth. A re-detect, a
+    renumber, or a recycled ``cand-<n>`` (#842) therefore degrades a
+    shot-anchored comment to a plain time pin -- it is never hidden and
+    never silently re-attaches to a different shot, which is the failure
+    that would actually mislead a reader.
+
+    **``author_key_hash`` is convenience, not a security boundary.** The
+    client mints a random opaque key once and keeps it in localStorage;
+    it exists so a commenter can delete their own comment without an
+    account. Anyone can mint one, so it must never gate anything whose
+    exposure matters.
+
+    **``share_token_id`` is the moderation primitive.** It makes "remove
+    everything that came through the link I sent to that guy" one query,
+    and it composes with revocation (#788).
+    """
+
+    __tablename__ = "match_comments"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # Paired with user_id the way state_docs pairs them, rather than a
+    # single-column FK: matches are keyed (user_id, match_id).
+    match_id: Mapped[str] = mapped_column(String, nullable=False)
+    slug: Mapped[str] = mapped_column(String, nullable=False)
+    stage_number: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    anchor_t: Mapped[float] = mapped_column(Float, nullable=False)
+    anchor_kind: Mapped[str] = mapped_column(String, nullable=False, default="time")
+    anchor_shot_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    author_kind: Mapped[str] = mapped_column(String, nullable=False, default="handle")
+    author_user_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    author_handle: Mapped[str] = mapped_column(String, nullable=False)
+    author_key_hash: Mapped[str] = mapped_column(String, nullable=False)
+    share_token_id: Mapped[str] = mapped_column(String, nullable=False)
+
+    body: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<CommentRow id={self.id!r} match_id={self.match_id!r} stage={self.stage_number}>"
+
+
 class WorkerRow(Base):
     """One compute-worker target (self-hosted box or the Railway service).
 
