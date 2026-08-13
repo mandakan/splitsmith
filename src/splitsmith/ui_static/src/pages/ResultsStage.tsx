@@ -89,11 +89,26 @@ export function ResultsStage() {
 
 function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const { shooters, capabilities } = useOutletContext<MatchShellOutletContext>();
-  // Server-derived, same fact the 403 guard enforces (#756-family gate) -
-  // never isShareView: a share token can carry comment_write, and an
-  // owner mount's capabilities can just as well lack it, so the URL
-  // shape and the write permission are not the same fact.
-  const canComment = !capabilityDenied(capabilities, "comment_write");
+  const location = useLocation();
+  // `comment_write` is one capability with two meanings, and the two
+  // affordances it drives are not the same affordance (final review,
+  // I2/I3). On a share mount it means "may post": the POST handler
+  // requires a share_token_id, which only the share middleware sets.
+  // On the owner's own mount the very same capability means "may
+  // moderate": posting there 404s, but DELETE on anyone's comment
+  // succeeds. Reading one flag for both put a dead compose box on the
+  // owner's page and left owner delete with no button at all.
+  //
+  // isShareView is legitimate here precisely because it selects which
+  // *affordance* to render, not who is allowed to do what - the server
+  // remains the only enforcement (the write allowlist, the scope gate,
+  // and the capability check). This is not the SPA re-implementing
+  // authorization; a wrong answer here shows or hides a button, it
+  // never grants anything.
+  const commentWrite = !capabilityDenied(capabilities, "comment_write");
+  const shareView = isShareView(location.pathname);
+  const canComment = commentWrite && shareView;
+  const canModerate = commentWrite && !shareView;
   const [commentAnchors, setCommentAnchors] = useState<number[]>([]);
   const href = useMatchHref();
   const navigate = useNavigate();
@@ -117,8 +132,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const [fsMode, setFsMode] = useState<FullscreenMode>("off");
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [playerBox, setPlayerBox] = useState<HTMLDivElement | null>(null);
-  const location = useLocation();
-  const canReclassify = !isShareView(location.pathname);
+  const canReclassify = !shareView;
   const { shareUrl } = useActiveShare();
   const [sheetShot, setSheetShot] = useState<CoachShot | null>(null);
   const [patchBusy, setPatchBusy] = useState(false);
@@ -573,6 +587,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           beepTime={coach.beep_time}
           currentTime={currentTime}
           canComment={canComment}
+          canModerate={canModerate}
           onSeek={seekToTime}
           onAnchorsChange={setCommentAnchors}
         />

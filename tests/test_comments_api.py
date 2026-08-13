@@ -565,3 +565,137 @@ def test_short_author_key_is_rejected(comment_token_client) -> None:
     client, token = comment_token_client
     resp = _post(client, token, key="short")
     assert resp.status_code == 422
+
+
+# --- final review fix wave ----------------------------------------------
+
+
+@pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_anchor_t_is_a_422_not_a_500(hosted_app, comment_token_client, literal) -> None:
+    """I1: measured before the fix, all three returned 500.
+
+    ``anchor_t``'s own validator raises, FastAPI echoes the offending
+    float back in the error record's ``input`` field, and Starlette
+    renders every JSONResponse with ``allow_nan=False`` - so building the
+    422 blew up. It fails during validation, before the rate limiter and
+    before the stage cap, so an anonymous caller could drive unbounded
+    500s at no cost.
+
+    Driven through a client with ``raise_server_exceptions=False``: that
+    is what a real client sees, and the default TestClient would re-raise
+    the render error instead of reporting the status.
+    """
+    _client, token = comment_token_client
+    raw = TestClient(hosted_app[0].app, raise_server_exceptions=False)
+    raw.cookies.clear()
+    resp = raw.post(
+        f"/api/share/{token}/shooters/alice/stages/3/comments",
+        content=f'{{"body":"x","anchor_t":{literal}}}'.encode(),
+        headers={AUTHOR_KEY_HEADER: KEY, "content-type": "application/json"},
+    )
+    assert resp.status_code == 422, resp.text
+    # The record keeps its shape - the offending value is just no longer
+    # a raw float. json() would raise if the body were not valid JSON.
+    detail = resp.json()["detail"]
+    assert detail[0]["loc"] == ["body", "anchor_t"]
+    assert detail[0]["input"] in {"nan", "inf", "-inf"}
+
+
+def test_a_finite_anchor_t_still_posts(comment_token_client) -> None:
+    """The I1 handler must not turn every 422 into something else, nor
+    reject a value that was always legal."""
+    client, token = comment_token_client
+    assert _post(client, token, anchor_t=-12.5).json()["anchor_t"] == pytest.approx(-12.5)
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("POST", "shooters/alice/stages/\u0663/comments"),
+        ("POST", "shooters/does-not-exist/stages/\u0663/comments"),
+        ("DELETE", "shooters/alice/stages/\u0663/comments/abc"),
+    ],
+)
+def test_a_unicode_digit_stage_is_the_uniform_404_on_the_write_surface(
+    comment_token_client, read_token_client, method, path
+) -> None:
+    """I6: U+0663 ARABIC-INDIC DIGIT THREE. Measured before the fix,
+    these returned 404 on a read scope and 422 on a comment scope - one
+    request classifying a token's scope, before the roster check, with
+    no author key, creating no row, and naming ``["path","stage_number"]``
+    in the body. ``_share_alias``'s uniform-404 seam only normalizes
+    status 404, so the 422 sailed straight through.
+
+    The allowlists matched with ``\\d``, which is every Unicode decimal
+    digit; the route's ``int`` path parameter is ASCII-only.
+    """
+    client, comment_token = comment_token_client
+    _, read_token = read_token_client
+    responses = []
+    for token in (read_token, comment_token):
+        resp = client.request(
+            method,
+            f"/api/share/{token}/{path}",
+            json={"body": "x", "anchor_t": 1.0} if method == "POST" else None,
+            headers={AUTHOR_KEY_HEADER: KEY},
+        )
+        responses.append((resp.status_code, resp.json()))
+    assert responses[0] == (404, NOT_FOUND)
+    assert responses[1] == (404, NOT_FOUND)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "shooters/alice/stages/\u0663/coach",
+        "shooters/alice/stages/\u0663/comments",
+        "match/stage/\u0663/compare",
+        "og/alice/\u0663.png",
+        "og-meta/alice/\u0663",
+    ],
+)
+def test_a_unicode_digit_stage_is_the_uniform_404_on_the_read_surface(read_token_client, path) -> None:
+    """I6, read half - pre-existing rather than introduced with comments:
+    ``_SHARE_PATH_RE`` has always used ``\\d``, so every one of these
+    422'd on a plain read token. Same fix, same reason."""
+    client, token = read_token_client
+    resp = client.get(f"/api/share/{token}/{path}")
+    assert resp.status_code == 404, resp.text
+    assert resp.json() == NOT_FOUND
+
+
+def test_an_ascii_digit_stage_still_reaches_the_route(read_token_client) -> None:
+    """The narrowing must not close the door on real stage numbers."""
+    client, token = read_token_client
+    resp = client.get(f"/api/share/{token}/shooters/alice/stages/3/comments")
+    assert resp.status_code == 200, resp.text
+
+
+def test_rotating_the_author_key_no_longer_defeats_the_rate_limit(comment_token_client) -> None:
+    """I5: measured before the fix, a fresh author key per request got
+    [201] x 8 while a fixed key got [201 x 5, 429 x 3].
+
+    The author key is a header the client mints for itself, so keying the
+    limiter on it alone bounded nothing. The share token id is the link
+    the caller was given - not attacker-chosen - so it is the bound that
+    holds. The default limit is 5 per 60 s.
+    """
+    client, token = comment_token_client
+    codes = [
+        client.post(
+            f"/api/share/{token}/shooters/alice/stages/3/comments",
+            json={"body": f"rotated {i}", "anchor_t": 1.0},
+            # A different 64-char key every time.
+            headers={AUTHOR_KEY_HEADER: f"{i:064d}"},
+        ).status_code
+        for i in range(8)
+    ]
+    assert codes == [201, 201, 201, 201, 201, 429, 429, 429]
+
+
+def test_a_fixed_author_key_is_still_limited(comment_token_client) -> None:
+    """The per-author-key bound survives the re-key: one visitor must not
+    be able to spend a whole token's budget in a burst."""
+    client, token = comment_token_client
+    codes = [_post(client, token, body=f"same {i}").status_code for i in range(8)]
+    assert codes == [201, 201, 201, 201, 201, 429, 429, 429]

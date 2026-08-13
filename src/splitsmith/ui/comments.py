@@ -200,7 +200,16 @@ def to_out(comment: Comment, *, author_key_hash: str | None, owner_view: bool) -
 
 
 class CommentRateLimiter:
-    """Sliding-window comment limiter keyed by hashed author key.
+    """Sliding-window comment limiter over one or more keys at once.
+
+    **The share token id has to be one of the keys.** The first version
+    keyed only on the hashed author key, and the author key is a header
+    the client mints for itself: rotating it per request defeated the
+    limiter completely - measured 8/8 accepted against 5/8 for a fixed
+    key (final review, I5). The share token id is the link the caller
+    holds; they cannot mint another one, so it is the bound that
+    actually holds. Keying on the author key too is still worth it, so
+    one visitor cannot spend the whole token's budget in a burst.
 
     In-process and per-replica by design. This is a spam speed bump, not
     a security control - the security properties are the scope gate and
@@ -219,18 +228,37 @@ class CommentRateLimiter:
         self._max_keys = max_keys
         self._hits: OrderedDict[str, list[float]] = OrderedDict()
 
-    def allow(self, key: str, *, now: float) -> bool:
-        stamps = [t for t in self._hits.get(key, ()) if now - t < self._window_s]
-        if len(stamps) >= self._limit:
+    def allow(self, *keys: str, now: float) -> bool:
+        """Consume one slot against every key, all or nothing.
+
+        A request that any key refuses records a hit against none of
+        them - otherwise a caller already over the token limit would go
+        on burning the budget of every author key they rotate through.
+        Namespace the keys at the call site (``token:``/``key:``) so two
+        different kinds of identifier cannot collide in the table.
+        """
+        if not keys:
+            raise ValueError("CommentRateLimiter.allow needs at least one key")
+        # dict.fromkeys: de-duplicate without losing order, so passing
+        # the same key twice does not count as two slots.
+        pruned = {
+            key: [t for t in self._hits.get(key, ()) if now - t < self._window_s]
+            for key in dict.fromkeys(keys)
+        }
+        allowed = all(len(stamps) < self._limit for stamps in pruned.values())
+        for key, stamps in pruned.items():
+            if allowed:
+                stamps.append(now)
+            elif key not in self._hits:
+                # A refused request must not seed an entry for a key
+                # never seen before - that is the rotation the max_keys
+                # bound exists to blunt, and there is nothing to record.
+                continue
             self._hits[key] = stamps
             self._hits.move_to_end(key)
-            return False
-        stamps.append(now)
-        self._hits[key] = stamps
-        self._hits.move_to_end(key)
         while len(self._hits) > self._max_keys:
             self._hits.popitem(last=False)
-        return True
+        return allowed
 
     def size(self) -> int:
         return len(self._hits)

@@ -12,10 +12,14 @@
  * re-detect moved or removed it), the row falls back to a time label
  * instead of mislabeling a different shot. See lib/commentAnchor.ts.
  *
- * The compose box only renders when `canComment` (the match's
- * `comment_write` capability, read by the caller) - the server 403s an
- * anonymous POST the token's scope doesn't grant, so the SPA must gate
- * on the same fact rather than the URL shape.
+ * The compose box renders when `canComment`; a Delete button renders on
+ * every comment when `canModerate`, and on the caller's own comments
+ * always (`c.mine`). Both flags come from the caller - see
+ * ResultsStage's `canComment`/`canModerate` pair for how one
+ * `comment_write` capability splits into the two. The server refuses a
+ * POST the token's scope doesn't grant with the same uniform **404** it
+ * returns for an unknown token, not a 403: the whole share surface is
+ * deliberately undiscoverable by probing.
  */
 import { Clock, Loader2, Target } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -34,7 +38,13 @@ interface CommentPanelProps {
   /** Seconds - the video element's current playback position in the
    *  same coordinate system, same as ResultsStage's `currentTime`. */
   currentTime: number;
+  /** Render the compose box. True only where a POST can succeed: a
+   *  share mount whose token carries `comment_write`. */
   canComment: boolean;
+  /** Render Delete on every comment, not just the caller's own. True on
+   *  the owner's own mount, where `comment_write` means "may moderate".
+   *  Optional so an existing caller keeps today's behaviour. */
+  canModerate?: boolean;
   /** Clip-absolute seconds, the same coordinate system SplitsList's
    *  `onSeek` already uses for shot rows. */
   onSeek: (t: number) => void;
@@ -69,6 +79,7 @@ export function CommentPanel({
   beepTime,
   currentTime,
   canComment,
+  canModerate = false,
   onSeek,
   onAnchorsChange,
 }: CommentPanelProps) {
@@ -122,7 +133,10 @@ export function CommentPanel({
         anchor_kind,
         anchor_shot_id,
       });
-      commitComments([created, ...(comments ?? [])]);
+      // Append, not prepend: the server returns the thread oldest-first,
+      // so prepending showed a different order than the next reload
+      // would (final review, M3).
+      commitComments([...(comments ?? []), created]);
       // A comment can post successfully even after the initial thread
       // load failed (the compose box doesn't wait on that fetch) - clear
       // the retry banner so the freshly-posted comment isn't hidden
@@ -201,7 +215,7 @@ export function CommentPanel({
                   </span>
                   <p className="mt-1 text-sm text-ink-2">{c.body}</p>
                 </button>
-                {c.mine ? (
+                {c.mine || canModerate ? (
                   <button
                     type="button"
                     onClick={() => void handleDelete(c.id)}

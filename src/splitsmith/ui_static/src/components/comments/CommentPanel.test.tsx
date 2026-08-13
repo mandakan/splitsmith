@@ -143,6 +143,55 @@ describe("CommentPanel", () => {
     expect(screen.getAllByRole("button", { name: /delete/i })).toHaveLength(1);
   });
 
+  it("renders delete on every comment when the caller may moderate", async () => {
+    // I3: the owner never posted the comments they need to moderate, so
+    // `mine` is false for all of them and there was no button at all -
+    // owner delete shipped as a curl command against a working backend.
+    vi.mocked(api.listStageComments).mockResolvedValue({
+      comments: [comment({ id: "a", mine: false }), comment({ id: "b", mine: false })],
+    });
+    renderPanel({ canComment: false, canModerate: true });
+    await screen.findAllByText("Prone Popper 47");
+    expect(screen.getAllByRole("button", { name: /delete/i })).toHaveLength(2);
+  });
+
+  it("still offers delete on your own comment when you may not moderate", async () => {
+    vi.mocked(api.listStageComments).mockResolvedValue({
+      comments: [comment({ id: "a", mine: false }), comment({ id: "b", mine: true })],
+    });
+    renderPanel({ canModerate: false });
+    await screen.findAllByText("Prone Popper 47");
+    expect(screen.getAllByRole("button", { name: /delete/i })).toHaveLength(1);
+  });
+
+  it("deletes through the moderation button", async () => {
+    vi.mocked(api.deleteStageComment).mockResolvedValue(undefined as never);
+    vi.mocked(api.listStageComments).mockResolvedValue({
+      comments: [comment({ id: "a", mine: false })],
+    });
+    renderPanel({ canComment: false, canModerate: true });
+    await userEvent.click(await screen.findByRole("button", { name: /delete/i }));
+    expect(api.deleteStageComment).toHaveBeenCalledWith("alice", 3, "a");
+    await waitFor(() => expect(screen.queryByText("reload looks early")).not.toBeInTheDocument());
+  });
+
+  it("appends a new comment, matching the server's oldest-first order", async () => {
+    // M3: prepending showed a different order than the next reload.
+    vi.mocked(api.listStageComments).mockResolvedValue({
+      comments: [comment({ id: "a", body: "first" }), comment({ id: "b", body: "second" })],
+    });
+    vi.mocked(api.createStageComment).mockResolvedValue(comment({ id: "c", body: "third", mine: true }));
+    renderPanel();
+    await screen.findByText("first");
+
+    await userEvent.type(screen.getByRole("textbox", { name: /comment/i }), "third");
+    await userEvent.click(screen.getByRole("button", { name: /post/i }));
+
+    await screen.findByText("third");
+    const bodies = screen.getAllByText(/first|second|third/).map((el) => el.textContent);
+    expect(bodies).toEqual(["first", "second", "third"]);
+  });
+
   it("seeks when a comment is activated", async () => {
     const onSeek = vi.fn();
     renderPanel({ onSeek });

@@ -65,15 +65,32 @@ def test_share_scope_capability_sets() -> None:
         # token's admitted write is not refused with a 403 among 404s.
         ("POST", "shooters/anna/stages/3/comments", COMMENT_WRITE),
         ("DELETE", "shooters/anna/stages/3/comments/01J000000000000000000000", COMMENT_WRITE),
+        # U+0663 ARABIC-INDIC DIGIT THREE. Python's ``\d`` matches it;
+        # the route's ``int`` path parameter is ASCII-only and 422s on
+        # it, which is a refusal shape distinguishable from the uniform
+        # 404 (final review, I6). ``[0-9]`` sends these to EDIT, which
+        # no share scope grants, so the share alias refuses first.
+        ("POST", "shooters/anna/stages/\u0663/comments", EDIT),
+        ("DELETE", "shooters/anna/stages/\u0663/comments/01J000000000000000000000", EDIT),
         # Method/shape mismatches on the comment routes fall through to
         # EDIT, same as every other unmapped write - not COMMENT_WRITE.
         ("DELETE", "shooters/anna/stages/3/comments", EDIT),
         ("PATCH", "shooters/anna/stages/3/comments", EDIT),
         ("POST", "shooters/anna/stages/3/comments/01J000000000000000000000", EDIT),
-        # Task 8's bulk moderation route is deliberately unmapped here -
-        # it falls through to EDIT, which no share scope grants, and it
-        # is not in the share alias's write allowlist either.
+        # Task 8's bulk moderation route. It used to fall through to
+        # EDIT, which capabilities_for_origin("desktop") does not grant,
+        # so both selectors 403'd on a mirror match - the origin most
+        # likely to have share links at all (final review, I4).
+        # Moderating comments is COMMENT_WRITE wherever it happens. The
+        # share alias's write allowlist still does not admit it, so no
+        # share token reaches it under any scope.
+        ("DELETE", "match/comments", COMMENT_WRITE),
+        # One exact path and one method: the by-id shape, a trailing
+        # slash and every other method still fall through to EDIT.
         ("DELETE", "match/comments/01J000000000000000000000", EDIT),
+        ("DELETE", "match/comments/", EDIT),
+        ("POST", "match/comments", EDIT),
+        ("PUT", "match/comments", EDIT),
         # Method mismatches fall through to EDIT - the old guard was
         # method-gated per regex and the table must stay that strict.
         ("DELETE", "shooters/anna/stages/3/videos/v1/beep", EDIT),
@@ -115,6 +132,7 @@ def test_required_capability(method: str, rest: str, expected: str | None) -> No
         ("PUT", "shooters/anna/stages/3/audit\n"),
         ("POST", "shooters/anna/stages/3/comments\n"),
         ("DELETE", "shooters/anna/stages/3/comments/01J000000000000000000000\n"),
+        ("DELETE", "match/comments\n"),
     ],
 )
 def test_review_routes_do_not_admit_a_trailing_newline(method: str, rest: str) -> None:

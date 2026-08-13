@@ -205,3 +205,23 @@ def test_a_share_request_cannot_reach_the_bulk_delete(comment_token_client) -> N
     resp = client.delete(f"/api/share/{token}/match/comments?share_token_id=x")
     assert resp.status_code == 404
     assert resp.json() == {"detail": "not found"}
+
+
+@pytest.mark.parametrize("scope", ["read", "comment"])
+def test_no_share_scope_reaches_the_bulk_delete(owner_client, scope) -> None:
+    """The second gate behind the I4 fix.
+
+    ``DELETE match/comments`` now maps to COMMENT_WRITE, which a
+    comment-scoped token *does* hold - so the capability table alone no
+    longer refuses it. What still refuses it is
+    ``server._SHARE_WRITE_ROUTES``, which does not admit the shape at
+    all: the share middleware 404s before any capability is consulted.
+    Both scopes, because a comment scope is the one that would slip
+    through if the shape were ever added to that table.
+    """
+    created = owner_client.post("/api/match/shares", json={"scope": scope}).json()
+    anon = _anon(owner_client)
+    token = _token_from_url(created["url"])
+    resp = anon.delete(f"/api/share/{token}/match/comments?share_token_id=x")
+    assert resp.status_code == 404
+    assert resp.json() == {"detail": "not found"}

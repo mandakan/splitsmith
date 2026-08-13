@@ -21,8 +21,16 @@ Capabilities:
   ``comment`` scope only) and deleting one (share surface via the
   ``comment`` scope, or an authenticated owner via ``capabilities_for_origin``
   on ``desktop``/``hosted`` origin, moderating a comment someone else
-  posted through the same DELETE route). ``local`` origin never grants
-  it - there is no share surface, so nothing to moderate.
+  posted through the same DELETE route). It also covers the owner's
+  bulk-moderation route, ``DELETE match/comments``. ``local`` origin
+  never grants it - there is no share surface, so nothing to moderate.
+
+  The capability means two different things depending on where the
+  request came from, and the SPA has to keep them apart: on a share
+  mount it means "may post", on the owner's own mount it means "may
+  moderate" (the owner cannot post - ``create_stage_comment`` requires a
+  ``share_token_id``). See ``ResultsStage.tsx``'s ``canComment`` /
+  ``canModerate`` pair.
 """
 
 from __future__ import annotations
@@ -113,13 +121,29 @@ _REVIEW_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
-# The comment routes on the anonymous share surface. Mapped explicitly
-# rather than falling through to EDIT: a comment-scoped token grants only
-# COMMENT_WRITE, and an unmapped route would refuse with a 403 among
-# 404s - a discriminator that enumerates the write allowlist.
+# The comment routes. The first two are the anonymous share surface,
+# mapped explicitly rather than falling through to EDIT: a
+# comment-scoped token grants only COMMENT_WRITE, and an unmapped route
+# would refuse with a 403 among 404s - a discriminator that enumerates
+# the write allowlist.
+#
+# The third, ``DELETE match/comments``, is the owner's bulk-moderation
+# route (Task 8). It is here for a different reason: it was falling
+# through to the EDIT default, which ``capabilities_for_origin("desktop")``
+# does not grant, so both bulk selectors 403'd on exactly the matches
+# most likely to have share links - a desktop project mirrored up for
+# sharing (final review, I4). Moderating comments is COMMENT_WRITE
+# wherever it happens. It is deliberately absent from
+# ``server._SHARE_WRITE_ROUTES``, so no share token of any scope can
+# reach it; an anonymous caller still gets the uniform 404.
+#
+# ``[0-9]`` rather than ``\d``: ``\d`` matches Unicode decimal digits the
+# route's ``int`` path parameter cannot parse, which leaked a 422 among
+# the uniform 404s (final review, I6). See ``server._SHARE_PATH_RE``.
 _COMMENT_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("POST", re.compile(r"\Ashooters/[^/]+/stages/\d+/comments\Z")),
-    ("DELETE", re.compile(r"\Ashooters/[^/]+/stages/\d+/comments/[A-Za-z0-9]+\Z")),
+    ("POST", re.compile(r"\Ashooters/[^/]+/stages/[0-9]+/comments\Z")),
+    ("DELETE", re.compile(r"\Ashooters/[^/]+/stages/[0-9]+/comments/[A-Za-z0-9]+\Z")),
+    ("DELETE", re.compile(r"\Amatch/comments\Z")),
 )
 
 

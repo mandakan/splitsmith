@@ -117,3 +117,42 @@ def test_match_delete_reports_comments_in_its_summary(
     resp = raw.post("/api/me/recent-projects/delete", json={"path": path})
     assert resp.status_code == 200, resp.text
     assert "comments_removed" in resp.json()["summary"]
+
+
+def test_bulk_moderation_works_on_a_desktop_mirror(
+    hosted_env: str, hosted_app: tuple[TestClient, object]
+) -> None:
+    """Task 5 said match/comments was deliberately left on the EDIT
+    default; Task 8 then built the route that call breaks (final review,
+    I4).
+
+    ``capabilities_for_origin("desktop")`` grants no EDIT, so both bulk
+    selectors 403'd with ``read_only_mirror`` on exactly the origin most
+    likely to have share links - a desktop project mirrored up so it can
+    be shared. Measured before the fix: mirror 403, hosted 200. The
+    per-comment DELETE already worked on a mirror; only the bulk route
+    did not.
+    """
+    from tests.mirror_helpers import alias_url, seed_mirror
+
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    seed_mirror(client, "mirror-bulk-mod", "Mirror Bulk Moderation")
+
+    by_token = client.delete(alias_url("mirror-bulk-mod", "match/comments") + "?share_token_id=nope")
+    by_key = client.delete(alias_url("mirror-bulk-mod", "match/comments") + "?author_key_hash=nope")
+
+    assert (by_token.status_code, by_token.json()) == (200, {"deleted": 0}), by_token.text
+    assert (by_key.status_code, by_key.json()) == (200, {"deleted": 0}), by_key.text
+
+
+def test_the_write_allowlist_still_refuses_the_bulk_moderation_shape() -> None:
+    """The other half of the I4 fix, as a table check rather than a
+    request: ``match/comments`` is now COMMENT_WRITE in
+    ``required_capability``, which a comment-scoped token holds. What
+    keeps it off the anonymous surface is its absence from
+    ``_SHARE_WRITE_ROUTES`` - so that absence is now load-bearing and
+    has to be pinned."""
+    assert not _share_write_admits("DELETE", "match/comments")
+    assert not _share_write_admits("POST", "match/comments")
+    assert not _SHARE_PATH_RE.fullmatch("match/comments")

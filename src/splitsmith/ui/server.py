@@ -120,7 +120,7 @@ from fastapi import (
     Response,
     UploadFile,
 )
-from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -1149,17 +1149,26 @@ _PUBLIC_API_PATHS: frozenset[str] = frozenset(
 # whitelist is the containment boundary: extend it only with read-only,
 # match-scoped routes, and never let the client supply the match id. The
 # pattern is anchored (fullmatch) and case-sensitive by design.
+#
+# ``[0-9]`` rather than ``\d`` for every stage number, here and in
+# _SHARE_WRITE_ROUTES / capabilities._COMMENT_ROUTES. Python's ``\d``
+# matches any Unicode decimal digit, but the ``int`` path parameter on
+# the route behind it is ASCII-only - so ``stages/U+0663/coach`` passed
+# this allowlist and then 422'd at the route, which is a refusal shape
+# distinguishable from the uniform 404 (final review, I6; the GET half
+# predates the comment work). ``[0-9]`` makes the allowlist admit
+# exactly what the route can parse.
 _SHARE_PATH_RE = re.compile(
     r"^(?:match/shooters"
     r"|shooters/[^/]+/project"
-    r"|shooters/[^/]+/stages/\d+/coach"
+    r"|shooters/[^/]+/stages/[0-9]+/coach"
     # The comment thread. Readable through ANY scope, including plain
     # "read" - a link already in the wild shows the conversation but
     # cannot join it. Posting is _SHARE_WRITE_ROUTES's business.
-    r"|shooters/[^/]+/stages/\d+/comments"
+    r"|shooters/[^/]+/stages/[0-9]+/comments"
     r"|shooters/[^/]+/coach/distributions"
     r"|shooters/[^/]+/videos/stream"
-    r"|match/stage/\d+/compare"
+    r"|match/stage/[0-9]+/compare"
     # Same registry as the "shooters/[^/]+/videos/stream" shape above -
     # this alternative also reaches the registered-video branch of
     # stream_shooter_video (raw sources/proxies), not just Compare's
@@ -1175,9 +1184,9 @@ _SHARE_PATH_RE = re.compile(
     # incidentally. Route registration order (compare defined above the
     # {slug} routes in share_og.py) is what makes "compare" dispatch to
     # the compare card instead of a shooter slugged "compare".
-    r"|og/[^/]+/\d+\.png"
+    r"|og/[^/]+/[0-9]+\.png"
     r"|og-meta"
-    r"|og-meta/[^/]+/\d+)$"
+    r"|og-meta/[^/]+/[0-9]+)$"
 )
 
 
@@ -1197,21 +1206,60 @@ _SHARE_PATH_RE = re.compile(
 # unmapped for POST-on-that-shape, fell through to the EDIT default, and
 # refused 403 among otherwise uniform 404s - the exact discriminator this
 # allowlist exists to deny. Pairing each shape with its one valid method
-# here mirrors ``_COMMENT_ROUTES`` one to one, so the two tables cannot
-# drift into a gap.
+# here mirrors the two anonymous entries of ``_COMMENT_ROUTES``, so the
+# two tables cannot drift into a gap. ``_COMMENT_ROUTES`` carries one
+# extra entry this table deliberately does not - ``DELETE
+# match/comments``, the owner's bulk-moderation route, which is
+# authenticated-only and must stay unreachable from a share token (final
+# review, I4). It is absent here, so an anonymous caller gets the uniform
+# 404 on it under any scope.
 #
 # ``\A``/``\Z`` rather than ``^``/``$`` for the reason _REVIEW_ROUTES
 # documents: plain ``$`` also matches just before a single trailing
 # newline, and on an allow-list that direction is the unsafe one.
+# ``[0-9]`` rather than ``\d`` for the reason _SHARE_PATH_RE documents.
 _SHARE_WRITE_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("POST", re.compile(r"\Ashooters/[^/]+/stages/\d+/comments\Z")),
-    ("DELETE", re.compile(r"\Ashooters/[^/]+/stages/\d+/comments/[A-Za-z0-9]+\Z")),
+    ("POST", re.compile(r"\Ashooters/[^/]+/stages/[0-9]+/comments\Z")),
+    ("DELETE", re.compile(r"\Ashooters/[^/]+/stages/[0-9]+/comments/[A-Za-z0-9]+\Z")),
 )
 
 
 def _share_write_admits(method: str, rest: str) -> bool:
     """Whether (method, path) is an admitted anonymous write shape."""
     return any(m == method and p.match(rest) is not None for m, p in _SHARE_WRITE_ROUTES)
+
+
+def _json_safe(value: Any) -> Any:
+    """Replace non-finite floats with their text form, recursively.
+
+    Starlette renders every JSONResponse with ``json.dumps(...,
+    allow_nan=False)``, so a ``nan``/``inf`` anywhere in a response body
+    raises ``ValueError`` *while rendering* - which surfaces to the
+    caller as a 500 with a stack trace in the log.
+
+    That was reachable anonymously (final review, I1). ``POST
+    /api/share/{token}/shooters/{slug}/stages/{n}/comments`` with
+    ``{"body":"x","anchor_t":NaN}`` fails validation, and pydantic's
+    error record echoes the offending value back in its ``input`` field;
+    FastAPI puts that record straight into the 422 body. The request
+    dies during validation, before the rate limiter and before the stage
+    cap, so an attacker could drive unbounded 500s for free.
+    ``Field(allow_inf_nan=False)`` does not help - the raw float is still
+    what ``errors()`` reports as ``input``.
+
+    Every other 422 keeps its exact shape: for any structure that is
+    already JSON-clean this is the identity function, so the SPA's
+    ``detail.code`` matching is untouched.
+    """
+    if isinstance(value, float) and not isfinite(value):
+        # repr, not None: "nan"/"inf"/"-inf" tells the caller what was
+        # rejected, and dropping the key would change the record's shape.
+        return repr(value)
+    if isinstance(value, dict):
+        return {k: _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 def _is_loopback(request: Request) -> bool:
@@ -6782,7 +6830,15 @@ def create_app(
             raise HTTPException(status_code=404, detail="not found")
         _require_comment_scope(state, slug, stage_number)
         author_key = _require_author_key(request)
-        if not _comment_limiter.allow(hash_author_key(author_key), now=time.monotonic()):
+        # Both keys, token first: the author key is a client-chosen
+        # header, so it bounds nothing on its own (final review, I5).
+        # share_token_id is not attacker-chosen - it is the link they
+        # were given - so it is the bound that holds under rotation.
+        if not _comment_limiter.allow(
+            f"token:{share_token_id}",
+            f"key:{hash_author_key(author_key)}",
+            now=time.monotonic(),
+        ):
             raise HTTPException(
                 status_code=429,
                 detail={"code": "comment_rate_limited", "message": "too many comments, slow down"},
@@ -6956,13 +7012,14 @@ def create_app(
     async def _worker_validation_gate(request: Request, exc: RequestValidationError) -> JSONResponse:
         """Return the uniform 404 for malformed /api/workers/register bodies.
 
-        Any other path gets the default FastAPI 422 so existing validation
-        behavior is unchanged.  The worker register endpoint must not leak
-        its existence or expected shape via a 422.
+        Any other path gets the 422 FastAPI would have produced, with one
+        difference: the error detail is passed through ``_json_safe``
+        first. See that helper for why an anonymous caller could
+        otherwise force a 500 out of this handler.
         """
         if request.url.path == "/api/workers/register":
             return JSONResponse(status_code=404, content={"detail": "not found"})
-        return await request_validation_exception_handler(request, exc)
+        return JSONResponse(status_code=422, content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
 
     # Optimistic-locking conflict on a hosted state_docs save -> 409 so the
     # SPA can reload + retry. Registered only when the db layer imports

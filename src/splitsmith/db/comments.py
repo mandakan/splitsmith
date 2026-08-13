@@ -79,9 +79,19 @@ class CommentStore:
                         CommentRow.stage_number == stage_number,
                         CommentRow.deleted_at.is_(None),
                     )
-                    # ULIDs sort by creation, so id alone is a stable
-                    # oldest-first order without a second column.
-                    .order_by(CommentRow.id.asc())
+                    # Oldest first. ULIDs do NOT sort by creation within
+                    # a millisecond - the library reseeds randomness
+                    # instead of incrementing, and the final review
+                    # reproduced a non-monotonic pair at trial 8 of 200
+                    # (issue #673). So created_at leads and the id is
+                    # only the tie-break: on Postgres its microsecond
+                    # resolution settles same-millisecond rows correctly,
+                    # and on SQLite (CURRENT_TIMESTAMP, one-second
+                    # resolution) it degrades to the id ordering, which
+                    # is exact across milliseconds and arbitrary within
+                    # one. Both are stable - two calls return the same
+                    # order - which is the property the thread needs.
+                    .order_by(CommentRow.created_at.asc(), CommentRow.id.asc())
                 )
             ).scalars()
             return [_to_comment(r) for r in rows]
