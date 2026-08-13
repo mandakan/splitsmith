@@ -156,3 +156,69 @@ def derive_handle(author_key: str, *, secret: bytes | None = None) -> str:
     noun = NOUNS[(value // len(ADJECTIVES)) % len(NOUNS)]
     number = (value // (len(ADJECTIVES) * len(NOUNS))) % _NUMBERS
     return f"{adjective} {noun} {number:02d}"
+
+
+# Crockford base32: the digits plus the consonant-heavy letter set that
+# omits I, L, O and U. Chosen over plain base32 so a code read aloud, or
+# copied by eye off a comment thread, cannot be confused with a
+# neighbouring one - which is the whole job of the code.
+AUTHOR_CODE_ALPHABET: Final = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+
+# 6 characters over a 32-symbol alphabet is 30 bits, ~1.07e9 codes.
+AUTHOR_CODE_LEN: Final = 6
+
+# Domain separation. The handle and the code are derived from the same
+# secret and, for a pseudonymous author, from the same key -- without a
+# prefix the two HMACs would be the same computation, and a change to
+# one derivation could silently move the other.
+_AUTHOR_CODE_DOMAIN: Final = b"author-code:"
+
+
+def derive_author_code(key: str, *, secret: bytes | None = None) -> str:
+    """Stable public identifier for a comment author.
+
+    Six Crockford-base32 characters, deterministic for a given key +
+    secret and not reversible to the key. Callers should prefer
+    :func:`author_code_for`, which decides *which* key an author's code
+    derives from; this function is the raw derivation.
+    """
+    material = secret if secret is not None else handle_secret()
+    digest = hmac.new(material, _AUTHOR_CODE_DOMAIN + key.encode("utf-8"), hashlib.sha256).digest()
+    value = int.from_bytes(digest[:8], "big")
+    out = []
+    for _ in range(AUTHOR_CODE_LEN):
+        out.append(AUTHOR_CODE_ALPHABET[value % len(AUTHOR_CODE_ALPHABET)])
+        value //= len(AUTHOR_CODE_ALPHABET)
+    return "".join(out)
+
+
+def author_code_for(
+    *,
+    author_kind: str,
+    author_user_id: str | None,
+    author_key_hash: str,
+    secret: bytes | None = None,
+) -> str:
+    """The author code for one comment's author.
+
+    An account author's code derives from their user id, so it is the
+    same code across every browser they post from. A pseudonymous
+    author's derives from the hashed browser key, which is the only
+    identity they have. **Never the raw user id itself** -- it is the
+    internal foreign key and a ULID encodes its creation time, so
+    publishing it on an anonymous surface would leak account age.
+
+    The single decision point for which key feeds the HMAC. The write
+    path and the read-time fallback in ``ui/comments.to_out`` both call
+    this, which is what makes a legacy row's computed code identical to
+    the one the write path would have stored.
+
+    ``author_user_id`` is ``ON DELETE SET NULL``, so an account author
+    whose account was deleted arrives here as ``author_kind="account"``
+    with no id. That falls back to the key hash rather than raising: the
+    comment still needs a code, and the one thing it must not do is
+    collide with another author's.
+    """
+    if author_kind == "account" and author_user_id:
+        return derive_author_code(author_user_id, secret=secret)
+    return derive_author_code(author_key_hash, secret=secret)
