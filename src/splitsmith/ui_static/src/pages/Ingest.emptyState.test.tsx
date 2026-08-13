@@ -118,6 +118,25 @@ function renderIngest() {
   );
 }
 
+/** Flush pending effects before firing a *window-level* event.
+ *
+ *  `waitFor(... toBeDisabled())` is a render-time signal, and the
+ *  read-only gate it observes also tears down `useWindowFileDrag`'s
+ *  listener -- but React runs effect cleanup in a later commit than the
+ *  render that triggered it. Asserting straight after the `waitFor` can
+ *  therefore fire into a listener that is on its way out but still
+ *  attached, and the width of that window depends on how busy the
+ *  machine is: this failed under full-suite load and passed standalone
+ *  and in CI. Awaiting an empty `act` drains the pending effects, so the
+ *  assertion is about the gate rather than about scheduling.
+ *
+ *  Only needed where the event goes to `window`. Assertions on rendered
+ *  output are already settled by the `waitFor` itself.
+ */
+async function settleEffects(): Promise<void> {
+  await act(async () => {});
+}
+
 describe("Ingest empty state", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -193,6 +212,7 @@ describe("Ingest empty state", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /browse files/i })).toBeDisabled(),
     );
+    await settleEffects();
     const file = new File(["x"], "GH010001.MP4", { type: "video/mp4" });
     act(() => {
       fireEvent.drop(window, { dataTransfer: { files: [file], types: ["Files"] } });
@@ -207,6 +227,7 @@ describe("Ingest empty state", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /browse files/i })).toBeDisabled(),
     );
+    await settleEffects();
     const file = new File(["x"], "GH010001.MP4", { type: "video/mp4" });
     act(() => {
       fireEvent.dragEnter(window, { dataTransfer: { files: [file], types: ["Files"] } });

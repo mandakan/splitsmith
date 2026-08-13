@@ -45,7 +45,11 @@ jobs:
       - name: Install Node + pnpm (for SPA build)
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # Must match ci.yml and .nvmrc. This job builds the SPA that
+          # actually ships inside the wheel, so a version only used here
+          # is a toolchain no PR ever exercises -- PR CI would stay green
+          # while the published artifact was built by something else.
+          node-version: "22"
 
       - name: Install pnpm
         # Version comes from the root package.json packageManager field.
