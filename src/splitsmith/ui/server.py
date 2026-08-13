@@ -152,7 +152,7 @@ from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
 from ..auth import AuthBackend, CompositeAuth, LoopbackAuth, User
-from ..comment_identity import MAX_AUTHOR_KEY_LEN, derive_handle, hash_author_key
+from ..comment_identity import MAX_AUTHOR_KEY_LEN, MIN_AUTHOR_KEY_LEN, derive_handle, hash_author_key
 from ..compare import mp4_grid, project_loader
 from ..compute import ComputeBackend, LocalComputeBackend
 from ..config import (
@@ -212,6 +212,7 @@ from .comments import (
     CommentCreateRequest,
     CommentListResponse,
     CommentOut,
+    CommentOwnerListResponse,
     to_out,
 )
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
@@ -1127,7 +1128,7 @@ _PUBLIC_API_PATHS: frozenset[str] = frozenset(
 
 
 # GET-only path shapes reachable through /api/share/{token}/ - the read
-# half of the anonymous surface. _SHARE_WRITE_PATH_RE below is the other
+# half of the anonymous surface. _SHARE_WRITE_ROUTES below is the other
 # half, admitted through the same middleware for POST/DELETE. Anything
 # else under the prefix, on any method, is a uniform 404. The share
 # middleware impersonates the owner's tenant for the request, so this
@@ -1140,7 +1141,7 @@ _SHARE_PATH_RE = re.compile(
     r"|shooters/[^/]+/stages/\d+/coach"
     # The comment thread. Readable through ANY scope, including plain
     # "read" - a link already in the wild shows the conversation but
-    # cannot join it. Posting is _SHARE_WRITE_PATH_RE's business.
+    # cannot join it. Posting is _SHARE_WRITE_ROUTES's business.
     r"|shooters/[^/]+/stages/\d+/comments"
     r"|shooters/[^/]+/coach/distributions"
     r"|shooters/[^/]+/videos/stream"
@@ -1166,21 +1167,37 @@ _SHARE_PATH_RE = re.compile(
 )
 
 
-# The anonymous WRITE surface - deliberately a second pattern rather than
+# The anonymous WRITE surface - deliberately a second table rather than
 # an extension of _SHARE_PATH_RE, whose docstring calls itself GET-only
-# and must stay true. Admission requires all three of: a shape here, a
-# method in _SHARE_WRITE_METHODS, and a resolved token whose scope is
-# write-capable (db.share_guard.scope_may_write). Any one missing is the
-# same opaque 404 as an unknown token, so the write surface is not
-# discoverable by probing.
+# and must stay true. Admission requires all three of: a (method, shape)
+# pair here, and a resolved token whose scope is write-capable
+# (db.share_guard.scope_may_write). Any one missing is the same opaque
+# 404 as an unknown token, so the write surface is not discoverable by
+# probing.
+#
+# Method-paired (fix round 1, F5) rather than a single pattern matched
+# against a separate method set: that earlier shape took the cross
+# product of "any shape here" x "any method in _SHARE_WRITE_METHODS", so
+# POST admitted the DELETE-by-id shape too. That POST then reached
+# ``required_capability``'s ``_COMMENT_ROUTES`` table (ui/capabilities.py)
+# unmapped for POST-on-that-shape, fell through to the EDIT default, and
+# refused 403 among otherwise uniform 404s - the exact discriminator this
+# allowlist exists to deny. Pairing each shape with its one valid method
+# here mirrors ``_COMMENT_ROUTES`` one to one, so the two tables cannot
+# drift into a gap.
 #
 # ``\A``/``\Z`` rather than ``^``/``$`` for the reason _REVIEW_ROUTES
 # documents: plain ``$`` also matches just before a single trailing
 # newline, and on an allow-list that direction is the unsafe one.
-_SHARE_WRITE_PATH_RE = re.compile(
-    r"\A(?:shooters/[^/]+/stages/\d+/comments" r"|shooters/[^/]+/stages/\d+/comments/[A-Za-z0-9]+)\Z"
+_SHARE_WRITE_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("POST", re.compile(r"\Ashooters/[^/]+/stages/\d+/comments\Z")),
+    ("DELETE", re.compile(r"\Ashooters/[^/]+/stages/\d+/comments/[A-Za-z0-9]+\Z")),
 )
-_SHARE_WRITE_METHODS = frozenset({"POST", "DELETE"})
+
+
+def _share_write_admits(method: str, rest: str) -> bool:
+    """Whether (method, path) is an admitted anonymous write shape."""
+    return any(m == method and p.match(rest) is not None for m, p in _SHARE_WRITE_ROUTES)
 
 
 def _is_loopback(request: Request) -> bool:
@@ -1216,31 +1233,75 @@ def _no_project_error() -> HTTPException:
     )
 
 
+def _valid_author_key_len(raw: str) -> bool:
+    """Whether ``raw`` is a plausible client-minted author key.
+
+    Bounded on both ends (fix round 1, F7): the client always mints 32
+    random bytes hex-encoded (64 chars), well inside ``[MIN, MAX]``. A key
+    below the floor is easy to guess or collide, which turns self-delete
+    into anyone-delete for that handle - identity, ``mine``, and
+    self-delete all key off this value's hash.
+    """
+    return MIN_AUTHOR_KEY_LEN <= len(raw) <= MAX_AUTHOR_KEY_LEN
+
+
 def _caller_author_key_hash(request: Request) -> str | None:
     """Hashed author key from the request header, or None.
 
-    Optional on reads: a caller who sends none gets ``mine=False``
-    everywhere, which is right for a first-time reader.
+    Optional on reads: a caller who sends none (or an implausible one)
+    gets ``mine=False`` everywhere, which is right for a first-time
+    reader.
     """
     raw = request.headers.get(AUTHOR_KEY_HEADER, "").strip()
-    if not raw or len(raw) > MAX_AUTHOR_KEY_LEN:
+    if not _valid_author_key_len(raw):
         return None
     return hash_author_key(raw)
 
 
 def _require_author_key(request: Request) -> str:
-    """Author key for a write. 422 rather than 404 when missing: the
-    caller already passed the scope gate, so an honest error is right."""
+    """Author key for a write. 422 rather than 404 when missing or
+    implausible: the caller already passed the scope gate, so an honest
+    error is right."""
     raw = request.headers.get(AUTHOR_KEY_HEADER, "").strip()
-    if not raw or len(raw) > MAX_AUTHOR_KEY_LEN:
+    if not _valid_author_key_len(raw):
         raise HTTPException(
             status_code=422,
             detail={
                 "code": "author_key_required",
-                "message": f"{AUTHOR_KEY_HEADER} must carry an opaque client key",
+                "message": (
+                    f"{AUTHOR_KEY_HEADER} must carry an opaque client key between "
+                    f"{MIN_AUTHOR_KEY_LEN} and {MAX_AUTHOR_KEY_LEN} characters"
+                ),
             },
         )
     return raw
+
+
+def _require_comment_scope(state: AppState, slug: str, stage_number: int) -> None:
+    """Bound the (slug, stage_number) path segments before any comment-
+    store call (fix round 1, F1/F2).
+
+    ``state.shooter_root`` is the roster-membership check every other
+    shooter-scoped route on this surface already goes through (e.g. the
+    coach route); the comment routes as first written skipped it, so a
+    comment-scoped token could ``POST`` to
+    ``shooters/does-not-exist/stages/999/comments`` and get 201.
+    ``STAGE_COMMENT_CAP`` does not catch that either - ``count_for_stage``
+    filters on slug + stage_number, the two values the caller chooses, so
+    varying either resets the cap: one admitted link buys unbounded rows
+    at slugs/stages no UI renders and no owner can find to moderate.
+
+    A stage_number large enough additionally overflows the driver's
+    integer column before any predicate is even evaluated - ``OverflowError``
+    on SQLite, ``NumericValueOutOfRange`` on Postgres, and this test suite
+    is SQLite-backed so it cannot see the Postgres class of that bug.
+    Checking against the match's own stage list closes both holes at
+    once: nothing in a real stage list is ever attacker-sized.
+    """
+    state.shooter_root(slug)
+    known_stages = {s.stage_number for s in state.match().stages}
+    if stage_number not in known_stages:
+        raise HTTPException(status_code=404, detail="not found")
 
 
 # Per-request match root resolved by the ``/api/matches/{match_id}/...``
@@ -6631,41 +6692,45 @@ def create_app(
 
     @app.get(
         "/api/shooters/{slug}/stages/{stage_number}/comments",
-        response_model=CommentListResponse,
-        # exclude_none: to_out sets author_key_hash/share_token_id to None
-        # for a non-owner_view caller rather than omitting them, so the
-        # anonymous-containment guarantee has to be enforced here at
-        # serialization time -- otherwise the key would still reach the
-        # wire as ``"author_key_hash": null``, which is a smaller leak
-        # (confirms the field's existence) but a leak.
-        response_model_exclude_none=True,
+        # No single response_model: an owner_view caller gets
+        # CommentOwnerListResponse, everyone else gets CommentListResponse.
+        # See CommentOwnerOut's docstring (fix round 1, F4) for why this is
+        # two types rather than one model plus exclude_none.
+        response_model=None,
     )
     async def list_stage_comments(
         slug: str,
         stage_number: int,
         request: Request,
-    ) -> CommentListResponse:
+    ) -> CommentListResponse | CommentOwnerListResponse:
         """The comment thread. Readable through any share scope, and by
         the owner on their own routes."""
         store = state.comments
         mid = current_match_id.get()
         if store is None or mid is None:
             raise HTTPException(status_code=404, detail="not found")
+        _require_comment_scope(state, slug, stage_number)
         caller_hash = _caller_author_key_hash(request)
         owner_view = not current_share_request.get()
         comments = await store.list_for_stage(mid, slug, stage_number)
+        if owner_view:
+            # to_out's declared return type is CommentOut (the narrower,
+            # anonymous-safe type); at runtime, owner_view=True makes it
+            # return the CommentOwnerOut subtype this field actually needs.
+            return CommentOwnerListResponse(
+                comments=[
+                    to_out(c, author_key_hash=caller_hash, owner_view=True)  # type: ignore[misc]
+                    for c in comments
+                ]
+            )
         return CommentListResponse(
-            comments=[to_out(c, author_key_hash=caller_hash, owner_view=owner_view) for c in comments]
+            comments=[to_out(c, author_key_hash=caller_hash, owner_view=False) for c in comments]
         )
 
     @app.post(
         "/api/shooters/{slug}/stages/{stage_number}/comments",
         response_model=CommentOut,
         status_code=201,
-        # Same rationale as list_stage_comments above: a POST's response is
-        # always owner_view=False, so it must not leak the two owner-only
-        # fields as explicit nulls either.
-        response_model_exclude_none=True,
     )
     async def create_stage_comment(
         slug: str,
@@ -6682,6 +6747,7 @@ def create_app(
         share_token_id = getattr(request.state, "share_token_id", None)
         if store is None or mid is None or share_token_id is None:
             raise HTTPException(status_code=404, detail="not found")
+        _require_comment_scope(state, slug, stage_number)
         author_key = _require_author_key(request)
         if await store.count_for_stage(mid, slug, stage_number) >= STAGE_COMMENT_CAP:
             raise HTTPException(
@@ -6721,11 +6787,18 @@ def create_app(
         mid = current_match_id.get()
         if store is None or mid is None:
             raise HTTPException(status_code=404, detail="not found")
+        _require_comment_scope(state, slug, stage_number)
         if current_share_request.get():
             author_key = _require_author_key(request)
-            ok = await store.delete_own(comment_id, match_id=mid, author_key_hash=hash_author_key(author_key))
+            ok = await store.delete_own(
+                comment_id,
+                match_id=mid,
+                slug=slug,
+                stage_number=stage_number,
+                author_key_hash=hash_author_key(author_key),
+            )
         else:
-            ok = await store.delete_as_owner(comment_id, match_id=mid)
+            ok = await store.delete_as_owner(comment_id, match_id=mid, slug=slug, stage_number=stage_number)
         if not ok:
             raise HTTPException(status_code=404, detail="not found")
         return Response(status_code=204)
@@ -6995,8 +7068,9 @@ def create_app(
     # returns the same opaque 404, so unknown, revoked, and expired
     # tokens - and a read-scoped token probing the write surface - are
     # all indistinguishable. GET admits through _SHARE_PATH_RE; POST and
-    # DELETE admit only through the separate _SHARE_WRITE_PATH_RE, and
-    # only when the resolved token's scope is write-capable.
+    # DELETE admit only through the separate method-paired
+    # _SHARE_WRITE_ROUTES table (via _share_write_admits), and only when
+    # the resolved token's scope is write-capable.
     @app.middleware("http")
     async def _share_alias(request, call_next):
         path = request.url.path
@@ -7016,8 +7090,8 @@ def create_app(
             if not _SHARE_PATH_RE.fullmatch(rest):
                 return not_found
             needs_write_scope = False
-        elif method in _SHARE_WRITE_METHODS:
-            if not _SHARE_WRITE_PATH_RE.fullmatch(rest):
+        elif method in ("POST", "DELETE"):
+            if not _share_write_admits(method, rest):
                 return not_found
             needs_write_scope = True
         else:

@@ -32,6 +32,15 @@ SPLITSMITH_COMMENT_HANDLE_SECRET_ENV: Final = "SPLITSMITH_COMMENT_HANDLE_SECRET"
 # bounds what reaches the HMAC.
 MAX_AUTHOR_KEY_LEN: Final = 128
 
+# Shortest client-supplied author key accepted (fix round 1, F7). The
+# client always mints 32 random bytes hex-encoded (64 chars, well above
+# this); without a floor a 1-character key posts fine even though
+# identity, ``mine``, and self-delete all key off its hash - a short key
+# is easy to guess or collide, which turns self-delete into anyone-delete
+# for that handle. Chosen well under the real 64-char key so it never
+# rejects a legitimate client, only implausibly short ones.
+MIN_AUTHOR_KEY_LEN: Final = 32
+
 ADJECTIVES: Final[tuple[str, ...]] = (
     "Steady",
     "Swift",

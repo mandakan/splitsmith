@@ -123,8 +123,8 @@ def test_review_routes_do_not_admit_a_trailing_newline(method: str, rest: str) -
     ``$`` also matches just before a single trailing ``\\n``, which on an
     allow-list widens REVIEW (or, for the comment routes added in Task 5's
     fix round, COMMENT_WRITE) over a string the table means to send to
-    EDIT. Unlike ``_SHARE_WRITE_PATH_RE`` (matched with ``fullmatch``,
-    where ``$`` and ``\\Z`` reject a trailing newline identically),
+    EDIT. Unlike ``_SHARE_PATH_RE`` (matched with ``fullmatch``, where
+    ``$`` and ``\\Z`` reject a trailing newline identically),
     ``required_capability`` matches with ``pattern.match()``, so this is
     the call site where the ``$``-vs-``\\Z`` choice actually changes the
     result. No such ``rest`` reaches the middleware today (``urlsplit()``

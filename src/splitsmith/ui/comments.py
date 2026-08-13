@@ -29,12 +29,24 @@ AUTHOR_KEY_HEADER: Final = "X-Splitsmith-Author-Key"
 BODY_MAX_CHARS: Final = 1000
 # Refuse further comments on a stage past this many. A blunt backstop
 # against one link being used to fill a table, distinct from the rate
-# limit which bounds speed rather than total.
+# limit which bounds speed rather than total. Bounding (slug, stage_number)
+# themselves is what keeps this predicate meaningful - see
+# ``_require_comment_scope`` in server.py; count_for_stage filters on the
+# same two values so an unbounded slug/stage would reset the cap for free.
 STAGE_COMMENT_CAP: Final = 500
 
 # Same bound the frontend's parseMoment enforces, and the same one
 # share_og.py clamps a moment card to.
 T_LIMIT: Final = 3600.0
+
+# C0 control characters (and DEL) are refused in a comment body (fix round
+# 1, F6). A NUL byte in particular is not just cosmetic: SQLite happily
+# stores it but Postgres's text type raises on the wire, so an anonymous
+# POST that 201s in the dev/test SQLite backend 500s in production. Tab
+# and newline are allowed - a multi-line comment is a normal thing to
+# write; every other C0 code point and DEL are not something a client
+# ever has a legitimate reason to send in prose.
+_DISALLOWED_BODY_CHARS = frozenset(chr(c) for c in range(0x20) if c not in (0x09, 0x0A)) | {"\x7f"}
 
 
 class CommentCreateRequest(BaseModel):
@@ -61,6 +73,13 @@ class CommentCreateRequest(BaseModel):
             raise ValueError("body must not be blank")
         return stripped
 
+    @field_validator("body")
+    @classmethod
+    def _body_has_no_control_chars(cls, value: str) -> str:
+        if any(ch in _DISALLOWED_BODY_CHARS for ch in value):
+            raise ValueError("body must not contain control characters")
+        return value
+
     @field_validator("anchor_t")
     @classmethod
     def _clamp_and_round(cls, value: float) -> float:
@@ -78,6 +97,10 @@ class CommentCreateRequest(BaseModel):
 
 
 class CommentOut(BaseModel):
+    """Anonymous-safe projection of a comment. No slot for
+    ``share_token_id``/``author_key_hash`` at all - see
+    :class:`CommentOwnerOut` for why that is the point (fix round 1, F4)."""
+
     id: str
     anchor_t: float
     anchor_kind: str
@@ -87,14 +110,35 @@ class CommentOut(BaseModel):
     body: str
     created_at: datetime
     mine: bool
-    # Owner view only - the two bulk-moderation actions need them. Absent
-    # (None, excluded on serialization) for anonymous callers.
-    share_token_id: str | None = None
-    author_key_hash: str | None = None
+
+
+class CommentOwnerOut(CommentOut):
+    """Owner-view projection: adds the two fields Task 8's moderation
+    routes need.
+
+    A separate *type*, not ``CommentOut`` with two optional fields left
+    ``None`` for anonymous callers. The earlier version did that plus
+    ``response_model_exclude_none=True`` to hide the ``null``s - which
+    made containment depend on a *value* (happens to be ``None`` today)
+    rather than a *type* (this field does not exist on the anonymous
+    model). The first owner-only field Task 8 adds with a non-``None``
+    default would leak silently through that scheme while
+    ``test_list_never_exposes_author_key_hash_or_share_token`` stayed
+    green. It also suppressed ``anchor_shot_id: null`` for every
+    time-anchored comment, contradicting the frontend contract that
+    declares the field required ``string | null``.
+    """
+
+    share_token_id: str
+    author_key_hash: str
 
 
 class CommentListResponse(BaseModel):
     comments: list[CommentOut]
+
+
+class CommentOwnerListResponse(BaseModel):
+    comments: list[CommentOwnerOut]
 
 
 def to_out(comment: Comment, *, author_key_hash: str | None, owner_view: bool) -> CommentOut:
@@ -102,8 +146,26 @@ def to_out(comment: Comment, *, author_key_hash: str | None, owner_view: bool) -
 
     ``author_key_hash`` is the *caller's*, used only to compute ``mine``;
     a caller who sent no key gets ``mine=False`` everywhere, which is the
-    correct answer for a first-time reader.
+    correct answer for a first-time reader. Returns a
+    :class:`CommentOwnerOut` (a ``CommentOut`` subtype) when
+    ``owner_view``, so a caller that forgets to branch on the type still
+    gets every ``CommentOut`` field.
     """
+    mine = author_key_hash is not None and comment.author_key_hash == author_key_hash
+    if owner_view:
+        return CommentOwnerOut(
+            id=comment.id,
+            anchor_t=comment.anchor_t,
+            anchor_kind=comment.anchor_kind,
+            anchor_shot_id=comment.anchor_shot_id,
+            author_kind=comment.author_kind,
+            author_handle=comment.author_handle,
+            body=comment.body,
+            created_at=comment.created_at,
+            mine=mine,
+            share_token_id=comment.share_token_id,
+            author_key_hash=comment.author_key_hash,
+        )
     return CommentOut(
         id=comment.id,
         anchor_t=comment.anchor_t,
@@ -113,7 +175,5 @@ def to_out(comment: Comment, *, author_key_hash: str | None, owner_view: bool) -
         author_handle=comment.author_handle,
         body=comment.body,
         created_at=comment.created_at,
-        mine=author_key_hash is not None and comment.author_key_hash == author_key_hash,
-        share_token_id=comment.share_token_id if owner_view else None,
-        author_key_hash=comment.author_key_hash if owner_view else None,
+        mine=mine,
     )

@@ -64,6 +64,40 @@ def _seed_state_docs(db_url: str, user_email: str, match_id: str, slug: str) -> 
     asyncio.run(_seed())
 
 
+def _add_second_shooter(db_url: str, user_email: str, match_id: str, slug: str) -> None:
+    """Register an additional slug on the match roster.
+
+    No project doc needed - ``state.shooter_root``'s roster check (which
+    ``_require_comment_scope`` calls) only consults ``match.shooters``.
+    Used by the F3 cross-slug DELETE test: the second slug must be a
+    *real* registered shooter, or the request would 404 for the F1 reason
+    (unregistered slug) rather than the F3 reason (the delete predicate
+    not pinning slug/stage_number).
+    """
+    import asyncio
+
+    from sqlalchemy import select as _select
+
+    from splitsmith import match_model
+    from splitsmith.db import ProjectStateStore, User, create_engine, sessionmaker
+
+    engine = create_engine(db_url)
+    sf = sessionmaker(engine)
+
+    async def _seed() -> None:
+        async with sf() as s:
+            row = (await s.execute(_select(User).where(User.email == user_email))).scalar_one()
+            user_id = row.id
+        store = ProjectStateStore(sf, user_id=user_id)
+        doc, version = await store.load_match(match_id)
+        assert doc is not None
+        match = match_model.Match.model_validate(doc)
+        match.shooters.append(slug)
+        await store.save_match(match_id, match.model_dump(mode="json"), expected_version=version)
+
+    asyncio.run(_seed())
+
+
 def _mint_share_token(db_url: str, user_email: str, match_id: str, *, scope: str) -> str:
     """Mint a share token directly through ``ShareTokenStore``.
 
@@ -365,3 +399,152 @@ def test_owner_can_delete_a_comment_posted_through_their_own_link(
 
     resp = owner_client.delete(f"/api/matches/{MID}/shooters/{SLUG}/stages/{STAGE}/comments/{cid}")
     assert resp.status_code == 204
+
+
+# --- fix round 1 -----------------------------------------------------------
+#
+# F1: slug/stage_number were unbounded path segments. F2: an unbounded
+# stage_number also overflows the driver's integer column. F3: DELETE's
+# predicate did not pin slug/stage_number either. F5: the write allowlist
+# admitted the wrong method on the DELETE-by-id shape. F6: no control-
+# character check on the body. F7: no floor on the author key length.
+
+
+def test_post_to_an_unregistered_slug_is_the_uniform_404(comment_token_client) -> None:
+    """F1: measured before the fix, this returned 201 - a comment-scoped
+    token could post to a slug not on this match's roster at all."""
+    client, token = comment_token_client
+    resp = client.post(
+        f"/api/share/{token}/shooters/does-not-exist/stages/3/comments",
+        json={"body": "x", "anchor_t": 1.0},
+        headers={AUTHOR_KEY_HEADER: KEY},
+    )
+    assert resp.status_code == 404
+    assert resp.json() == NOT_FOUND
+
+
+def test_post_to_an_unknown_stage_number_is_the_uniform_404(comment_token_client) -> None:
+    """F1: measured before the fix, this also returned 201 - varying
+    stage_number was the other half of the STAGE_COMMENT_CAP bypass,
+    since count_for_stage filters on exactly these two caller-chosen
+    values."""
+    client, token = comment_token_client
+    resp = client.post(
+        f"/api/share/{token}/shooters/alice/stages/999/comments",
+        json={"body": "x", "anchor_t": 1.0},
+        headers={AUTHOR_KEY_HEADER: KEY},
+    )
+    assert resp.status_code == 404
+    assert resp.json() == NOT_FOUND
+
+
+def test_huge_stage_number_does_not_500(comment_token_client) -> None:
+    """F2: a stage_number large enough to overflow the driver's integer
+    column must 404 before it ever reaches a query, not 500. Falls out of
+    the F1 fix - the match's own stage list never contains anything
+    attacker-sized, so the bound check rejects it first."""
+    client, token = comment_token_client
+    resp = client.post(
+        f"/api/share/{token}/shooters/alice/stages/99999999999999999999/comments",
+        json={"body": "x", "anchor_t": 1.0},
+        headers={AUTHOR_KEY_HEADER: KEY},
+    )
+    assert resp.status_code == 404
+    assert resp.json() == NOT_FOUND
+
+
+def test_list_and_delete_also_bound_slug_and_stage_number(comment_token_client) -> None:
+    """F1 covers all three handlers, not just POST."""
+    client, token = comment_token_client
+    listed = client.get(f"/api/share/{token}/shooters/does-not-exist/stages/3/comments")
+    assert listed.status_code == 404
+    assert listed.json() == NOT_FOUND
+
+    deleted = client.delete(
+        f"/api/share/{token}/shooters/does-not-exist/stages/3/comments/some-id",
+        headers={AUTHOR_KEY_HEADER: KEY},
+    )
+    assert deleted.status_code == 404
+    assert deleted.json() == NOT_FOUND
+
+
+def test_delete_is_scoped_to_slug_and_stage_in_the_url(hosted_env: str, comment_token_client) -> None:
+    """F3: measured before the fix, a comment posted at alice/3 deleted
+    through bob/3 (a *different*, but still real and registered, slug on
+    the same match) and returned 204 with the row gone - the delete
+    predicate keyed only on id + match_id + user_id, so the URL's slug
+    and stage_number were decorative. ``bob`` must be a genuinely
+    registered shooter here, or this would 404 for the F1 reason instead
+    of proving F3."""
+    client, token = comment_token_client
+    _add_second_shooter(hosted_env, "owner@example.com", MID, "bob")
+
+    cid = _post(client, token).json()["id"]
+
+    wrong_slug = client.delete(
+        f"/api/share/{token}/shooters/bob/stages/3/comments/{cid}",
+        headers={AUTHOR_KEY_HEADER: KEY},
+    )
+    assert wrong_slug.status_code == 404
+    assert wrong_slug.json() == NOT_FOUND
+
+    wrong_stage = client.delete(
+        f"/api/share/{token}/shooters/alice/stages/4/comments/{cid}",
+        headers={AUTHOR_KEY_HEADER: KEY},
+    )
+    assert wrong_stage.status_code == 404
+
+    # The comment must still be there - neither wrong-scoped delete
+    # touched it.
+    listed = client.get(f"/api/share/{token}/shooters/alice/stages/3/comments").json()
+    assert [c["id"] for c in listed["comments"]] == [cid]
+
+    right = client.delete(
+        f"/api/share/{token}/shooters/alice/stages/3/comments/{cid}",
+        headers={AUTHOR_KEY_HEADER: KEY},
+    )
+    assert right.status_code == 204
+
+
+def test_post_to_a_comment_id_path_is_the_uniform_404(comment_token_client) -> None:
+    """F5: _SHARE_WRITE_ROUTES pairs shape with method - a POST shaped
+    like the DELETE-by-id route must be refused at the uniform 404, not
+    fall through to an unmapped-capability 403 (the same discriminator
+    the write allowlist exists to deny)."""
+    client, token = comment_token_client
+    cid = _post(client, token).json()["id"]
+    resp = client.post(
+        f"/api/share/{token}/shooters/alice/stages/3/comments/{cid}",
+        json={"body": "x", "anchor_t": 1.0},
+        headers={AUTHOR_KEY_HEADER: KEY},
+    )
+    assert resp.status_code == 404
+    assert resp.json() == NOT_FOUND
+
+
+def test_body_with_a_nul_byte_is_rejected(comment_token_client) -> None:
+    """F6: a NUL byte stores fine on SQLite but 500s against Postgres's
+    text type on the real deploy target."""
+    client, token = comment_token_client
+    assert _post(client, token, body="reload\x00early").status_code == 422
+
+
+def test_body_with_other_control_chars_is_rejected(comment_token_client) -> None:
+    client, token = comment_token_client
+    assert _post(client, token, body="reload\x07early").status_code == 422
+
+
+def test_body_newlines_are_still_allowed(comment_token_client) -> None:
+    """The control-character check must not overreach: a multi-line
+    comment is ordinary prose, not an attack."""
+    client, token = comment_token_client
+    resp = _post(client, token, body="reload looks early\non the last stage")
+    assert resp.status_code == 201
+
+
+def test_short_author_key_is_rejected(comment_token_client) -> None:
+    """F7: identity, ``mine``, and self-delete all key off the author
+    key's hash - a key below the floor is easy to guess or collide."""
+    client, token = comment_token_client
+    resp = _post(client, token, key="short")
+    assert resp.status_code == 422

@@ -89,18 +89,59 @@ def test_list_is_scoped_to_stage_and_slug() -> None:
 def test_list_omits_soft_deleted() -> None:
     store = _store(_engine_with_owner_and_other())
     cid = _seed(store)
-    assert asyncio.run(store.delete_as_owner(cid, match_id="m1")) is True
+    assert asyncio.run(store.delete_as_owner(cid, match_id="m1", slug="alice", stage_number=3)) is True
     assert _bodies(store) == []
 
 
 def test_delete_own_requires_the_matching_author_key() -> None:
     store = _store(_engine_with_owner_and_other())
     cid = _seed(store, author_key_hash="hash-a")
-    wrong = asyncio.run(store.delete_own(cid, match_id="m1", author_key_hash="hash-b"))
+    wrong = asyncio.run(
+        store.delete_own(cid, match_id="m1", slug="alice", stage_number=3, author_key_hash="hash-b")
+    )
     assert wrong is False
     assert len(_bodies(store)) == 1
-    right = asyncio.run(store.delete_own(cid, match_id="m1", author_key_hash="hash-a"))
+    right = asyncio.run(
+        store.delete_own(cid, match_id="m1", slug="alice", stage_number=3, author_key_hash="hash-a")
+    )
     assert right is True
+    assert _bodies(store) == []
+
+
+def test_delete_own_is_scoped_to_slug_and_stage_number() -> None:
+    """F3 (fix round 1): the URL's slug/stage_number must be part of the
+    delete predicate, not decorative. A comment posted at alice/3 must not
+    delete through bob/3, alice/99, or any other (slug, stage) pairing on
+    the same match."""
+    store = _store(_engine_with_owner_and_other())
+    cid = _seed(store, slug="alice", stage_number=3, author_key_hash="hash-a")
+
+    wrong_slug = asyncio.run(
+        store.delete_own(cid, match_id="m1", slug="bob", stage_number=3, author_key_hash="hash-a")
+    )
+    assert wrong_slug is False
+    wrong_stage = asyncio.run(
+        store.delete_own(cid, match_id="m1", slug="alice", stage_number=99, author_key_hash="hash-a")
+    )
+    assert wrong_stage is False
+    assert len(_bodies(store)) == 1
+
+    right = asyncio.run(
+        store.delete_own(cid, match_id="m1", slug="alice", stage_number=3, author_key_hash="hash-a")
+    )
+    assert right is True
+    assert _bodies(store) == []
+
+
+def test_delete_as_owner_is_scoped_to_slug_and_stage_number() -> None:
+    store = _store(_engine_with_owner_and_other())
+    cid = _seed(store, slug="alice", stage_number=3)
+
+    assert asyncio.run(store.delete_as_owner(cid, match_id="m1", slug="bob", stage_number=3)) is False
+    assert asyncio.run(store.delete_as_owner(cid, match_id="m1", slug="alice", stage_number=99)) is False
+    assert len(_bodies(store)) == 1
+
+    assert asyncio.run(store.delete_as_owner(cid, match_id="m1", slug="alice", stage_number=3)) is True
     assert _bodies(store) == []
 
 
@@ -135,7 +176,7 @@ def test_purge_match_removes_already_soft_deleted_rows() -> None:
     too, or 'delete my match' leaves text behind."""
     store = _store(_engine_with_owner_and_other())
     cid = _seed(store)
-    asyncio.run(store.delete_as_owner(cid, match_id="m1"))
+    asyncio.run(store.delete_as_owner(cid, match_id="m1", slug="alice", stage_number=3))
     assert asyncio.run(store.purge_match("m1")) == 1
 
 
@@ -143,7 +184,7 @@ def test_count_for_stage_ignores_deleted() -> None:
     store = _store(_engine_with_owner_and_other())
     cid = _seed(store)
     assert asyncio.run(store.count_for_stage("m1", "alice", 3)) == 1
-    asyncio.run(store.delete_as_owner(cid, match_id="m1"))
+    asyncio.run(store.delete_as_owner(cid, match_id="m1", slug="alice", stage_number=3))
     assert asyncio.run(store.count_for_stage("m1", "alice", 3)) == 0
 
 
@@ -159,7 +200,11 @@ def test_list_is_isolated_by_user() -> None:
 def test_delete_own_is_isolated_by_user() -> None:
     sf = _engine_with_owner_and_other()
     cid = _seed(_store(sf, "owner"))
-    stolen = asyncio.run(_store(sf, "other").delete_own(cid, match_id="m1", author_key_hash="hash-a"))
+    stolen = asyncio.run(
+        _store(sf, "other").delete_own(
+            cid, match_id="m1", slug="alice", stage_number=3, author_key_hash="hash-a"
+        )
+    )
     assert stolen is False
     assert len(_bodies(_store(sf, "owner"))) == 1
 
@@ -167,7 +212,10 @@ def test_delete_own_is_isolated_by_user() -> None:
 def test_delete_as_owner_is_isolated_by_user() -> None:
     sf = _engine_with_owner_and_other()
     cid = _seed(_store(sf, "owner"))
-    assert asyncio.run(_store(sf, "other").delete_as_owner(cid, match_id="m1")) is False
+    assert (
+        asyncio.run(_store(sf, "other").delete_as_owner(cid, match_id="m1", slug="alice", stage_number=3))
+        is False
+    )
     assert len(_bodies(_store(sf, "owner"))) == 1
 
 

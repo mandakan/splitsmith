@@ -141,17 +141,42 @@ class CommentStore:
             await session.refresh(row)
             return _to_comment(row)
 
-    async def delete_own(self, comment_id: str, *, match_id: str, author_key_hash: str) -> bool:
-        return await self._soft_delete_one(comment_id, match_id=match_id, author_key_hash=author_key_hash)
+    async def delete_own(
+        self, comment_id: str, *, match_id: str, slug: str, stage_number: int, author_key_hash: str
+    ) -> bool:
+        return await self._soft_delete_one(
+            comment_id,
+            match_id=match_id,
+            slug=slug,
+            stage_number=stage_number,
+            author_key_hash=author_key_hash,
+        )
 
-    async def delete_as_owner(self, comment_id: str, *, match_id: str) -> bool:
-        return await self._soft_delete_one(comment_id, match_id=match_id, author_key_hash=None)
+    async def delete_as_owner(self, comment_id: str, *, match_id: str, slug: str, stage_number: int) -> bool:
+        return await self._soft_delete_one(
+            comment_id, match_id=match_id, slug=slug, stage_number=stage_number, author_key_hash=None
+        )
 
-    async def _soft_delete_one(self, comment_id: str, *, match_id: str, author_key_hash: str | None) -> bool:
+    async def _soft_delete_one(
+        self,
+        comment_id: str,
+        *,
+        match_id: str,
+        slug: str,
+        stage_number: int,
+        author_key_hash: str | None,
+    ) -> bool:
+        # slug + stage_number pin the delete to the thread the URL names
+        # (fix round 1, F3): without them a comment posted at alice/3
+        # deletes through any other slug/stage path on the same match,
+        # since id + match_id + user_id alone already uniquely identify
+        # the row - the two path segments were decorative.
         conditions = [
             CommentRow.user_id == self._user_id,
             CommentRow.id == comment_id,
             CommentRow.match_id == match_id,
+            CommentRow.slug == slug,
+            CommentRow.stage_number == stage_number,
             CommentRow.deleted_at.is_(None),
         ]
         if author_key_hash is not None:
