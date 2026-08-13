@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.29.0](https://github.com/mandakan/splitsmith/compare/v0.28.0...v0.29.0) (2026-08-13)
+
+
+### Features
+
+* **sync:** shots become a first-class synced entity ([#848](https://github.com/mandakan/splitsmith/issues/848)) ([8ab16a8](https://github.com/mandakan/splitsmith/commit/8ab16a8f6079aa9c4f595567453460cb79b80a7d))
+
+
+### Bug Fixes
+
+* **test:** make the mode-resolution gate test load-independent ([#859](https://github.com/mandakan/splitsmith/issues/859)) ([99d3a4d](https://github.com/mandakan/splitsmith/commit/99d3a4d241bbbefd2442e3ba628da990488c2628))
+* **ui:** a reset re-detect records the shots it wipes ([#856](https://github.com/mandakan/splitsmith/issues/856)) ([f067fba](https://github.com/mandakan/splitsmith/commit/f067fba36525327b128c4bc153525a0b1e0e1fbd)), closes [#842](https://github.com/mandakan/splitsmith/issues/842)
+* **ui:** apply PATCH-returned WorkerView instead of refetching the roster ([#579](https://github.com/mandakan/splitsmith/issues/579)) ([#862](https://github.com/mandakan/splitsmith/issues/862)) ([0fb3025](https://github.com/mandakan/splitsmith/commit/0fb302578744077d051ee8be903f06a8f4aa919b))
+* **ui:** candidate numbers are never reused within a stage ([#857](https://github.com/mandakan/splitsmith/issues/857)) ([d0113f1](https://github.com/mandakan/splitsmith/commit/d0113f1e0e9e18af18c024ebe8f532360e2338b6)), closes [#842](https://github.com/mandakan/splitsmith/issues/842)
+* **ui:** deriveMarkers no longer double-emits a candidate-matched shot ([#852](https://github.com/mandakan/splitsmith/issues/852)) ([4a09719](https://github.com/mandakan/splitsmith/commit/4a09719799a4169d71d40dfdb2b1f9f4cca5c33f)), closes [#847](https://github.com/mandakan/splitsmith/issues/847)
+* **ui:** hosted export downloads survive a reload ([#858](https://github.com/mandakan/splitsmith/issues/858)) ([86753e1](https://github.com/mandakan/splitsmith/commit/86753e11781021e794a19d0a60051b5d0ab5318a))
+* **ui:** reject non-finite floats at the audit save boundary ([#853](https://github.com/mandakan/splitsmith/issues/853)) ([e1f2be8](https://github.com/mandakan/splitsmith/commit/e1f2be807b7039959f49dbebffb2b8dfeb39113c)), closes [#843](https://github.com/mandakan/splitsmith/issues/843)
+* **ui:** repoint the coach PATCH at the by-id route ([#844](https://github.com/mandakan/splitsmith/issues/844)) ([ae4ee6a](https://github.com/mandakan/splitsmith/commit/ae4ee6ae8986b54dddb374e78a472f4ef0726606))
+* **ui:** scope SyncCard to its own match ([#861](https://github.com/mandakan/splitsmith/issues/861)) ([4f2ae12](https://github.com/mandakan/splitsmith/commit/4f2ae121fe75f68138e7b0b164d53000caaf777b))
+
+
+### Refactors
+
+* **sync:** promote the names two sync modules already share ([#854](https://github.com/mandakan/splitsmith/issues/854)) ([7aabd60](https://github.com/mandakan/splitsmith/commit/7aabd60ce737419e52a4a820a2d887cc9b600bcb)), closes [#845](https://github.com/mandakan/splitsmith/issues/845)
+
 ## [0.28.0](https://github.com/mandakan/splitsmith/compare/v0.27.0...v0.28.0) (2026-08-12)
 
 
