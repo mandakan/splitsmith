@@ -7,6 +7,7 @@
  */
 
 import type { Anomaly } from "@/lib/anomalies";
+import { authorKey } from "@/lib/authorKey";
 
 export type VideoRole = "primary" | "secondary" | "ignored";
 /** ``"aligned"`` means the in-stream beep detector failed on a secondary
@@ -2191,6 +2192,39 @@ export function notifyHostedAccountChanged(): void {
   }
 }
 
+/** Header carrying the anonymous commenter's opaque per-browser key
+ *  (see lib/authorKey.ts). The server derives the display handle from
+ *  it via HMAC - the client never sends a name. */
+const AUTHOR_KEY_HEADER = "X-Splitsmith-Author-Key";
+
+/** A timestamped comment on a stage, anchored either to a wall-clock
+ *  time in the stage video or to a specific shot. */
+export interface Comment {
+  id: string;
+  anchor_t: number;
+  anchor_kind: "time" | "shot";
+  anchor_shot_id: string | null;
+  author_kind: "handle" | "account";
+  author_handle: string;
+  body: string;
+  created_at: string;
+  mine: boolean;
+  /** Owner view only; absent for anonymous callers. */
+  share_token_id?: string | null;
+  author_key_hash?: string | null;
+}
+
+export interface CommentListResponse {
+  comments: Comment[];
+}
+
+export interface CommentCreateInput {
+  body: string;
+  anchor_t: number;
+  anchor_kind: "time" | "shot";
+  anchor_shot_id?: string | null;
+}
+
 export const api = {
   getProject: (slug: string) =>
     request<MatchProject>(`/api/shooters/${encodeURIComponent(slug)}/project`),
@@ -3368,6 +3402,34 @@ export const api = {
     request<BeepSnippetPeaks>(
       `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/videos/${encodeURIComponent(videoId)}/beep-snippet/peaks`,
     ),
+
+  /** Comments on a stage, newest-first per the server. The author-key
+   *  header is optional here - a caller sending none gets ``mine: false``
+   *  on every row, which is correct for a first-time reader. */
+  listStageComments(slug: string, stage: number): Promise<CommentListResponse> {
+    return request<CommentListResponse>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stage}/comments`,
+      { headers: { [AUTHOR_KEY_HEADER]: authorKey() } },
+    );
+  },
+
+  createStageComment(
+    slug: string,
+    stage: number,
+    input: CommentCreateInput,
+  ): Promise<Comment> {
+    return request<Comment>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stage}/comments`,
+      { method: "POST", json: input, headers: { [AUTHOR_KEY_HEADER]: authorKey() } },
+    );
+  },
+
+  deleteStageComment(slug: string, stage: number, id: string): Promise<void> {
+    return request<void>(
+      `/api/shooters/${encodeURIComponent(slug)}/stages/${stage}/comments/${encodeURIComponent(id)}`,
+      { method: "DELETE", headers: { [AUTHOR_KEY_HEADER]: authorKey() } },
+    );
+  },
 
   /** Returns the saved audit JSON for a stage, or null when none exists yet.
    *  Server returns ``200 null`` for the "no audit yet" state so this
