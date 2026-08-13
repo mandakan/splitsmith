@@ -4581,6 +4581,7 @@ class DeletionSummaryModel(BaseModel):
     recent_project_removed: bool
     match_row_removed: bool
     state_docs_removed: int
+    comments_removed: int
     storage_objects_deleted: int
     raw_uploads_deleted: list[str]
     raw_uploads_skipped_shared: list[str]

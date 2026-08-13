@@ -265,6 +265,40 @@ re-audit changes the figures, which changes the hash, which changes the URL,
 so a crawler refetches instead of an object write nobody's cached copy ever
 points at.
 
+**`comment_identity.py`** -- pure. Server-derived display names for
+anonymous commenters, so the client never supplies one. `derive_handle`
+turns the client's opaque `author_key` into a deterministic
+`adjective noun NN` handle ("Prone Popper 47") via `HMAC(secret, key)`
+indexed into a curated IPSC wordlist; the secret
+(`SPLITSMITH_COMMENT_HANDLE_SECRET`, falling back to a fixed dev value)
+is what stops an attacker grinding keys offline to collide with an
+existing handle. `hash_author_key` is the storage form of the key (plain
+SHA-256 -- the input is already high-entropy client randomness, nothing
+to brute-force). `author_handle` is denormalized onto each comment row
+at write time, so rotating the secret never renames existing comments.
+
+**`db/comments.py`** -- `CommentStore`, a per-owner store for public
+timestamped comments (#comments). Constructed with the *match owner's*
+user id, not the commenter's -- on an anonymous write that is the
+tenant `_share_alias` impersonated, and it is what keeps this store's
+shape identical to every other tenant store despite serving
+unauthenticated callers. `match_comments` carries the same
+`tenant_isolation` RLS policy as the rest of the tenant tables.
+Deletion is soft (`deleted_at`) for everything except `purge_match`,
+the one hard delete: it exists for match teardown, where a soft delete
+would leave "delete my match" quietly keeping other people's text
+about it -- wired into `ui/match_delete.py`'s `_delete_hosted` cascade,
+between the state-docs step and the registry-row step.
+
+**`ui/comments.py`** -- request/response models (`CommentCreateRequest`,
+`CommentOut`, the owner-only `CommentOwnerOut`) and `to_out`, the single
+projection point that keeps `author_key_hash` / `share_token_id` off
+the anonymous-safe response type. The comment routes themselves live in
+`ui/server.py`, reachable both by the owner (via the
+`/api/matches/{match_id}/...` alias) and anonymously (via
+`/api/share/{token}/...`, admitted only through a comment-scoped token
+-- see CLAUDE.md's share-link section for the two-allowlist design).
+
 ## Data structures
 
 ```python
