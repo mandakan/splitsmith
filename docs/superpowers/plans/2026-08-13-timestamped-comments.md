@@ -1298,11 +1298,24 @@ Then, immediately after the `_SHARE_PATH_RE` definition, add:
 # ``\A``/``\Z`` rather than ``^``/``$`` for the reason _REVIEW_ROUTES
 # documents: plain ``$`` also matches just before a single trailing
 # newline, and on an allow-list that direction is the unsafe one.
-_SHARE_WRITE_PATH_RE = re.compile(
-    r"\A(?:shooters/[^/]+/stages/\d+/comments"
-    r"|shooters/[^/]+/stages/\d+/comments/[A-Za-z0-9]+)\Z"
+Pair each shape with its method rather than taking the cross-product. A shape
+admitted under a method the capability table does not map falls through to the
+`EDIT` default and is refused **403** among 404s - the same discriminator that
+enumerates the write allowlist. `POST .../comments/{id}` is exactly that case.
+Keeping this table method-paired means it mirrors `_COMMENT_ROUTES` one-to-one,
+and the two cannot drift into a gap.
+
+```python
+_SHARE_WRITE_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("POST", re.compile(r"\Ashooters/[^/]+/stages/\d+/comments\Z")),
+    ("DELETE", re.compile(r"\Ashooters/[^/]+/stages/\d+/comments/[A-Za-z0-9]+\Z")),
 )
-_SHARE_WRITE_METHODS = frozenset({"POST", "DELETE"})
+
+
+def _share_write_admits(method: str, rest: str) -> bool:
+    """Whether (method, path) is an admitted anonymous write shape."""
+    return any(m == method and p.match(rest) is not None for m, p in _SHARE_WRITE_ROUTES)
+```
 ```
 
 - [ ] **Step 4: Admit the write in `_share_alias`**
@@ -1909,6 +1922,45 @@ def _require_author_key(request: Request) -> str:
 
 Run: `uv run pytest -n0 tests/test_comments_api.py -q`
 Expected: PASS (20 tests).
+
+- [ ] **Step 4b: Bound the attacker-controlled path segments**
+
+`slug` and `stage_number` arrive from the URL and nothing in the handlers as
+first written constrained them. Everywhere else on this surface a slug is
+bounded by the roster-membership check inside `AppState.shooter_root`; the
+comment routes bypassed it, so a comment-scoped link could `POST` to
+`shooters/does-not-exist/stages/999/comments` and get a 201.
+
+`STAGE_COMMENT_CAP` does not contain that, because `count_for_stage` filters on
+`slug` and `stage_number` - the two values the attacker chooses. Varying either
+resets the cap, so one link buys unbounded rows carrying attacker-chosen text,
+at slugs no UI renders and therefore no owner can see to moderate. A huge
+`stage_number` additionally reaches the driver as an overflow: `OverflowError`
+on SQLite, `NumericValueOutOfRange` on Postgres, surfacing as a raw 500 on an
+anonymous route.
+
+All three handlers must resolve the slug through `state.shooter_root(slug)`
+(which 404s an unknown slug) and reject a `stage_number` outside the match's
+stage list, before any store call. Note the test suite is SQLite-backed and
+cannot see the Postgres overflow, so bound the value rather than relying on a
+test to catch it.
+
+**Response models: two, not `exclude_none`.** Suppressing `None` hides
+`author_key_hash` and `share_token_id` from anonymous callers, but it makes
+containment depend on a *value* rather than a *type* - the moment an owner-only
+field has a non-`None` default it leaks with the "must never expose" test still
+green. It also drops `anchor_shot_id` from every time-anchored comment, which
+contradicts the frontend contract below that declares it required
+`string | null`. Ship `CommentOut` (anonymous) and
+`CommentOwnerOut(CommentOut)` adding the two owner fields; the GET route takes
+`response_model=None` and returns whichever fits the caller, POST declares
+`CommentOut`. Drop `response_model_exclude_none`.
+
+**Deletes pin their path segments.** `_soft_delete_one` predicates only on
+`user_id`, `id` and `match_id`, so a comment posted at `alice/3` deletes
+through `shooters/bob/stages/99/comments/{id}`. The segments are decorative
+otherwise. Add `slug` and `stage_number` to the predicate and pass them from
+the handlers.
 
 - [ ] **Step 5b: Prove the scope gate is actually covered**
 
