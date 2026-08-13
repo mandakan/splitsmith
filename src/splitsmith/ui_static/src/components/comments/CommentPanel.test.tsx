@@ -1,9 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { CommentPanel } from "./CommentPanel";
-import { api } from "@/lib/api";
+import { api, type Comment } from "@/lib/api";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -14,6 +14,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       listStageComments: vi.fn(),
       createStageComment: vi.fn(),
       deleteStageComment: vi.fn(),
+      listCommentAuthors: vi.fn(),
     },
   };
 });
@@ -65,25 +66,33 @@ const SHOTS = [
   },
 ];
 
+// Shared prop bag for tests that build their own <CommentPanel /> element
+// directly (needed for `rerender`, which `renderPanel` below doesn't
+// support). Kept in lockstep with renderPanel's defaults.
+const baseProps = {
+  slug: "alice",
+  stage: 3,
+  shots: SHOTS,
+  beepTime: 10,
+  currentTime: 14.32,
+  canComment: true,
+  onSeek: vi.fn(),
+};
+
 function renderPanel(over = {}) {
-  return render(
-    <CommentPanel
-      slug="alice"
-      stage={3}
-      shots={SHOTS}
-      beepTime={10}
-      currentTime={14.32}
-      canComment
-      onSeek={vi.fn()}
-      {...over}
-    />,
-  );
+  return render(<CommentPanel {...baseProps} {...over} />);
+}
+
+/** Stub the thread load with a fixed comment list. */
+function mockList(comments: Comment[]) {
+  vi.mocked(api.listStageComments).mockResolvedValue({ comments });
 }
 
 describe("CommentPanel", () => {
   beforeEach(() => {
     vi.mocked(api.listStageComments).mockResolvedValue({ comments: [comment()] });
     vi.mocked(api.createStageComment).mockResolvedValue(comment({ id: "c2", mine: true }));
+    vi.mocked(api.listCommentAuthors).mockResolvedValue({ authors: [] });
   });
 
   it("renders the handle and body", async () => {
@@ -231,5 +240,153 @@ describe("CommentPanel", () => {
 
     expect(await screen.findByText("nice")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("CommentPanel author codes (#867)", () => {
+  beforeEach(() => {
+    // Call counts on this mock persist across tests (nothing in
+    // testSetup.ts resets them) - several tests below assert
+    // `.not.toHaveBeenCalled()`, so a stale count from an earlier test's
+    // click would produce a false failure. Clear before each test, then
+    // set the default implementation fresh.
+    vi.mocked(api.listCommentAuthors).mockClear();
+    vi.mocked(api.listCommentAuthors).mockResolvedValue({ authors: [] });
+  });
+
+  it("puts every author code in the DOM and in a tooltip", async () => {
+    mockList([comment({ author_handle: "Anders Berg", author_code: "AAA111" })]);
+    render(<CommentPanel {...baseProps} />);
+
+    const author = await screen.findByText("Anders Berg");
+    expect(author).toHaveAttribute("data-author-code", "AAA111");
+    expect(author).toHaveAttribute("title", expect.stringContaining("AAA111"));
+  });
+
+  it("does not show a code when every name is distinct", async () => {
+    mockList([
+      comment({ id: "c1", author_handle: "Anders Berg", author_code: "AAA111" }),
+      comment({ id: "c2", author_handle: "Bertil Lund", author_code: "BBB222" }),
+    ]);
+    render(<CommentPanel {...baseProps} />);
+
+    await screen.findByText("Anders Berg");
+    expect(screen.queryByText("AAA111")).not.toBeInTheDocument();
+  });
+
+  it("shows both codes when two authors share a name", async () => {
+    mockList([
+      comment({ id: "c1", author_handle: "Anders Berg", author_code: "AAA111" }),
+      comment({ id: "c2", author_handle: "anders  berg", author_code: "BBB222" }),
+    ]);
+    render(<CommentPanel {...baseProps} />);
+
+    expect(await screen.findByText("AAA111")).toBeInTheDocument();
+    expect(await screen.findByText("BBB222")).toBeInTheDocument();
+  });
+
+  it("shows no code when one author posts twice", async () => {
+    mockList([
+      comment({ id: "c1", author_handle: "Anders Berg", author_code: "AAA111" }),
+      comment({ id: "c2", author_handle: "Anders Berg", author_code: "AAA111" }),
+    ]);
+    render(<CommentPanel {...baseProps} />);
+
+    await screen.findAllByText("Anders Berg");
+    expect(screen.queryByText("AAA111")).not.toBeInTheDocument();
+  });
+
+  it("offers author detail only to a moderator", async () => {
+    mockList([comment({ author_handle: "Anders Berg", author_code: "AAA111" })]);
+    const { rerender } = render(<CommentPanel {...baseProps} canModerate={false} />);
+    await screen.findByText("Anders Berg");
+    expect(screen.queryByRole("button", { name: /author detail/i })).not.toBeInTheDocument();
+
+    rerender(<CommentPanel {...baseProps} canModerate />);
+    expect(
+      await screen.findByRole("button", { name: /author detail/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows every name a code posted under when a moderator opens detail", async () => {
+    mockList([comment({ author_handle: "Bertil Lund", author_code: "AAA111" })]);
+    vi.mocked(api.listCommentAuthors).mockResolvedValue({
+      authors: [
+        {
+          author_code: "AAA111",
+          author_kind: "account",
+          first_comment_at: "2026-08-13T10:00:00Z",
+          comment_count: 2,
+          handles: ["Anders Berg", "Bertil Lund"],
+        },
+      ],
+    });
+    render(<CommentPanel {...baseProps} canModerate />);
+
+    fireEvent.click(await screen.findByRole("button", { name: /author detail/i }));
+
+    expect(await screen.findByText(/Anders Berg/)).toBeInTheDocument();
+    expect(await screen.findByText(/2 comments/i)).toBeInTheDocument();
+  });
+
+  it("does not fetch author detail on mount for a non-moderator", async () => {
+    mockList([comment({ author_handle: "Anders Berg", author_code: "AAA111" })]);
+    render(<CommentPanel {...baseProps} canModerate={false} />);
+    await screen.findByText("Anders Berg");
+    expect(api.listCommentAuthors).not.toHaveBeenCalled();
+  });
+
+  it("does not fetch author detail on mount even for a moderator - only on open", async () => {
+    mockList([comment({ author_handle: "Anders Berg", author_code: "AAA111" })]);
+    render(<CommentPanel {...baseProps} canModerate />);
+    await screen.findByText("Anders Berg");
+    expect(api.listCommentAuthors).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: /author detail/i }));
+    expect(api.listCommentAuthors).toHaveBeenCalledTimes(1);
+  });
+
+  it("degrades gracefully when author detail fails to load", async () => {
+    mockList([comment({ author_handle: "Anders Berg", author_code: "AAA111" })]);
+    vi.mocked(api.listCommentAuthors).mockRejectedValue(new Error("boom"));
+    render(<CommentPanel {...baseProps} canModerate />);
+
+    // The code and tooltip are unaffected by a detail-fetch failure -
+    // they come from the comment itself, not the aggregate endpoint.
+    const author = await screen.findByText("Anders Berg");
+    expect(author).toHaveAttribute("data-author-code", "AAA111");
+    expect(author).toHaveAttribute("title", expect.stringContaining("AAA111"));
+
+    await userEvent.click(screen.getByRole("button", { name: /author detail/i }));
+    expect(await screen.findByText(/unavailable/i)).toBeInTheDocument();
+  });
+
+  it("does not nest a button inside the seek button, and clicks route correctly", async () => {
+    // React warns via console.error when validateDOMNesting rejects a
+    // <button> inside a <button> - that warning is the proof the row
+    // restructure actually worked, not just that the new button exists.
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const onSeek = vi.fn();
+    mockList([comment({ author_handle: "Anders Berg", author_code: "AAA111" })]);
+    render(<CommentPanel {...baseProps} canModerate onSeek={onSeek} />);
+    await screen.findByText("Anders Berg");
+
+    const nestingWarning = errorSpy.mock.calls.some((call) =>
+      call.some(
+        (arg) =>
+          typeof arg === "string" &&
+          /validateDOMNesting|cannot appear as a descendant/i.test(arg),
+      ),
+    );
+    expect(nestingWarning).toBe(false);
+    errorSpy.mockRestore();
+
+    // The detail trigger must not also seek the player.
+    await userEvent.click(screen.getByRole("button", { name: /author detail/i }));
+    expect(onSeek).not.toHaveBeenCalled();
+
+    // The comment body still does.
+    await userEvent.click(screen.getByText("reload looks early"));
+    expect(onSeek).toHaveBeenCalledWith(14.32);
   });
 });
