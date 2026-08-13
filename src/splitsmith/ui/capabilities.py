@@ -17,6 +17,10 @@ Capabilities:
   once shots carry a stable id and the sync merge unions their
   membership by it rather than by position.
 - ``share_manage``: the match/shares management routes.
+- ``comment_write``: posting and self-deleting a timestamped comment on
+  the anonymous share surface. Granted only by the ``comment`` share
+  scope - never by ``capabilities_for_origin``, because an authenticated
+  operator editing their own match has no use for it.
 """
 
 from __future__ import annotations
@@ -26,6 +30,7 @@ import re
 EDIT = "edit"
 REVIEW = "review"
 SHARE_MANAGE = "share_manage"
+COMMENT_WRITE = "comment_write"
 
 
 def capabilities_for_origin(origin: str | None) -> frozenset[str]:
@@ -45,10 +50,11 @@ def capabilities_for_origin(origin: str | None) -> frozenset[str]:
     return frozenset({EDIT, REVIEW})
 
 
-# Share-token scopes -> capability sets. 'read' is the only scope shipped
-# (#779); a write-capable scope (e.g. 'coach') is one new entry here.
+# Share-token scopes -> capability sets. 'read' grants nothing; 'comment'
+# is the first write-capable scope (the one #779 anticipated).
 _SHARE_SCOPE_CAPABILITIES: dict[str, frozenset[str]] = {
     "read": frozenset(),
+    "comment": frozenset({COMMENT_WRITE}),
 }
 
 

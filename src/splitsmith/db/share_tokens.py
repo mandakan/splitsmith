@@ -35,6 +35,7 @@ class ShareToken:
     token: str
     created_at: datetime
     revoked_at: datetime | None
+    scope: str
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,7 @@ def _to_share_token(row: ShareTokenRow) -> ShareToken:
         token=row.token,
         created_at=row.created_at,
         revoked_at=row.revoked_at,
+        scope=row.scope,
     )
 
 
@@ -72,11 +74,18 @@ class ShareTokenStore:
         self._session_factory = session_factory
         self._user_id = user_id
 
-    async def create(self, match_id: str) -> ShareToken:
+    async def create(self, match_id: str, *, scope: str = "read") -> ShareToken:
+        """Mint a link. ``scope`` is fixed for the token's whole life -
+        there is deliberately no route that changes it, so an owner can
+        reason about a link they already sent from the moment they sent
+        it."""
+        if scope not in ("read", "comment"):
+            raise ValueError(f"unknown share scope {scope!r}")
         row = ShareTokenRow(
             user_id=self._user_id,
             match_id=match_id,
             token=secrets.token_urlsafe(32),
+            scope=scope,
         )
         async with self._session_factory() as session:
             session.add(row)

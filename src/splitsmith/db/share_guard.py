@@ -31,12 +31,18 @@ class ShareReadOnlyError(RuntimeError):
     """
 
 
-# Scopes allowed to write through share auth. Empty today - the coach
-# chunk adds entries here (and the capability table decides what they
-# may write). Any scope NOT in this set is treated as read-only, so an
-# unknown or mistyped scope fails closed instead of silently skipping
-# every defense layer.
-_WRITE_CAPABLE_SCOPES: frozenset[str] = frozenset()
+# The one write-capable scope: a link minted for commenting. Named here
+# rather than inline so the routes and the token store agree on the
+# spelling.
+COMMENT_SCOPE = "comment"
+
+# Scopes allowed to write through share auth. Any scope NOT in this set
+# is treated as read-only, so an unknown or mistyped scope fails closed
+# instead of silently skipping every defense layer. "read" - which every
+# token minted before comments shipped carries - is deliberately absent,
+# so turning this feature on cannot retroactively open a link that is
+# already in someone's inbox.
+_WRITE_CAPABLE_SCOPES: frozenset[str] = frozenset({COMMENT_SCOPE})
 
 
 def share_request_is_read_only() -> bool:
