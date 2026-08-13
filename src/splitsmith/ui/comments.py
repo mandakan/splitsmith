@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING, Final, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from ..comment_identity import author_code_for
+
 if TYPE_CHECKING:
     # Lazy at runtime (see ``server.py``'s own TYPE_CHECKING import block):
     # ``splitsmith.db`` pulls in sqlalchemy, which is only installed with
@@ -100,7 +102,13 @@ class CommentCreateRequest(BaseModel):
 class CommentOut(BaseModel):
     """Anonymous-safe projection of a comment. No slot for
     ``share_token_id``/``author_key_hash`` at all - see
-    :class:`CommentOwnerOut` for why that is the point (fix round 1, F4)."""
+    :class:`CommentOwnerOut` for why that is the point (fix round 1, F4).
+
+    ``author_code`` is on the base model, not :class:`CommentOwnerOut`:
+    visitors need it for the tooltip and for the client-side name-collision
+    check, and it exposes nothing -- it is an HMAC of an identifier, not the
+    identifier.
+    """
 
     id: str
     anchor_t: float
@@ -108,6 +116,7 @@ class CommentOut(BaseModel):
     anchor_shot_id: str | None
     author_kind: str
     author_handle: str
+    author_code: str
     body: str
     created_at: datetime
     mine: bool
@@ -172,6 +181,16 @@ def to_out(comment: Comment, *, author_key_hash: str | None, owner_view: bool) -
     the thing that must never regress; this flag alone was never enough.
     """
     mine = author_key_hash is not None and comment.author_key_hash == author_key_hash
+    # A row written before #867 has no stored code; compute the same
+    # value the write path would have. Going through author_code_for
+    # (rather than repeating the key choice here) is what guarantees a
+    # legacy comment and a new one from the same author read as one
+    # person.
+    author_code = comment.author_code or author_code_for(
+        author_kind=comment.author_kind,
+        author_user_id=comment.author_user_id,
+        author_key_hash=comment.author_key_hash,
+    )
     if owner_view:
         return CommentOwnerOut(
             id=comment.id,
@@ -180,6 +199,7 @@ def to_out(comment: Comment, *, author_key_hash: str | None, owner_view: bool) -
             anchor_shot_id=comment.anchor_shot_id,
             author_kind=comment.author_kind,
             author_handle=comment.author_handle,
+            author_code=author_code,
             body=comment.body,
             created_at=comment.created_at,
             mine=mine,
@@ -193,6 +213,7 @@ def to_out(comment: Comment, *, author_key_hash: str | None, owner_view: bool) -
         anchor_shot_id=comment.anchor_shot_id,
         author_kind=comment.author_kind,
         author_handle=comment.author_handle,
+        author_code=author_code,
         body=comment.body,
         created_at=comment.created_at,
         mine=mine,

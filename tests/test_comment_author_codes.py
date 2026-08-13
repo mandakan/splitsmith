@@ -101,3 +101,61 @@ def test_one_browser_posting_signed_in_and_signed_out_gets_two_codes() -> None:
         secret=SECRET,
     )
     assert signed_in != anonymous
+
+
+def test_to_out_emits_the_stored_code() -> None:
+    from datetime import UTC, datetime
+
+    from splitsmith.db.comments import Comment
+    from splitsmith.ui.comments import to_out
+
+    comment = Comment(
+        id="c1",
+        anchor_t=1.0,
+        anchor_kind="time",
+        anchor_shot_id=None,
+        author_kind="handle",
+        author_user_id=None,
+        author_handle="Prone Popper 47",
+        author_key_hash="deadbeef",
+        author_code="ABC123",
+        share_token_id="s1",
+        body="nice draw",
+        created_at=datetime.now(UTC),
+    )
+
+    out = to_out(comment, author_key_hash=None, owner_view=False)
+
+    assert out.author_code == "ABC123"
+
+
+def test_to_out_computes_the_code_for_a_legacy_row() -> None:
+    """Rows written before #867 have author_code NULL. The read-time
+    fallback must produce exactly the code the write path would have
+    stored, or a legacy comment and a new one from the same author would
+    read as two different people."""
+    from datetime import UTC, datetime
+
+    from splitsmith.db.comments import Comment
+    from splitsmith.ui.comments import to_out
+
+    comment = Comment(
+        id="c1",
+        anchor_t=1.0,
+        anchor_kind="time",
+        anchor_shot_id=None,
+        author_kind="handle",
+        author_user_id=None,
+        author_handle="Prone Popper 47",
+        author_key_hash="deadbeef",
+        author_code=None,
+        share_token_id="s1",
+        body="nice draw",
+        created_at=datetime.now(UTC),
+    )
+
+    out = to_out(comment, author_key_hash=None, owner_view=False)
+
+    assert out.author_code == author_code_for(
+        author_kind="handle", author_user_id=None, author_key_hash="deadbeef"
+    )

@@ -52,6 +52,7 @@ def _seed(store: CommentStore, **over) -> str:
         "author_user_id": None,
         "author_handle": "Prone Popper 47",
         "author_key_hash": "hash-a",
+        "author_code": "ABCDEF",
         "share_token_id": "tok-1",
         "body": "reload looks early",
     }

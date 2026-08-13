@@ -35,8 +35,10 @@ class Comment:
     anchor_kind: str
     anchor_shot_id: str | None
     author_kind: str
+    author_user_id: str | None
     author_handle: str
     author_key_hash: str
+    author_code: str | None
     share_token_id: str
     body: str
     created_at: datetime
@@ -49,8 +51,10 @@ def _to_comment(row: CommentRow) -> Comment:
         anchor_kind=row.anchor_kind,
         anchor_shot_id=row.anchor_shot_id,
         author_kind=row.author_kind,
+        author_user_id=row.author_user_id,
         author_handle=row.author_handle,
         author_key_hash=row.author_key_hash,
+        author_code=row.author_code,
         share_token_id=row.share_token_id,
         body=row.body,
         created_at=row.created_at,
@@ -127,6 +131,7 @@ class CommentStore:
         author_user_id: str | None,
         author_handle: str,
         author_key_hash: str,
+        author_code: str,
         share_token_id: str,
         body: str,
     ) -> Comment:
@@ -142,6 +147,7 @@ class CommentStore:
             author_user_id=author_user_id,
             author_handle=author_handle,
             author_key_hash=author_key_hash,
+            author_code=author_code,
             share_token_id=share_token_id,
             body=body,
         )

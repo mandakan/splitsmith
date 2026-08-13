@@ -152,7 +152,13 @@ from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
 from ..auth import AuthBackend, CompositeAuth, LoopbackAuth, User
-from ..comment_identity import MAX_AUTHOR_KEY_LEN, MIN_AUTHOR_KEY_LEN, derive_handle, hash_author_key
+from ..comment_identity import (
+    MAX_AUTHOR_KEY_LEN,
+    MIN_AUTHOR_KEY_LEN,
+    author_code_for,
+    derive_handle,
+    hash_author_key,
+)
 from ..compare import mp4_grid, project_loader
 from ..compute import ComputeBackend, LocalComputeBackend
 from ..config import (
@@ -6886,6 +6892,11 @@ def create_app(
             author_kind = "handle"
             author_user_id = None
             author_handle = derive_handle(author_key)
+        author_code = author_code_for(
+            author_kind=author_kind,
+            author_user_id=author_user_id,
+            author_key_hash=hash_author_key(author_key),
+        )
         created = await store.create(
             match_id=mid,
             slug=slug,
@@ -6897,6 +6908,7 @@ def create_app(
             author_user_id=author_user_id,
             author_handle=author_handle,
             author_key_hash=hash_author_key(author_key),
+            author_code=author_code,
             share_token_id=share_token_id,
             body=req.body,
         )
