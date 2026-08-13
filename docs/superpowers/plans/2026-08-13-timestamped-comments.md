@@ -1358,10 +1358,51 @@ def scope_may_write(scope: str | None) -> bool:
 
 and use `if not scope_may_write(resolved.scope): return not_found`.
 
+- [ ] **Step 4b: Map the comment routes in the capability table**
+
+Admission is not the last gate. `required_capability` (`ui/capabilities.py`)
+returns `EDIT` for any unclassified write, and a `comment`-scoped token grants
+only `COMMENT_WRITE` - so without an entry here every admitted comment write is
+refused **403** while every other refusal on this surface is an opaque 404.
+That breaks the feature *and* tells a prober exactly which write shapes the
+allowlist admits.
+
+```python
+# The comment routes on the anonymous share surface. Mapped explicitly
+# rather than falling through to EDIT: a comment-scoped token grants only
+# COMMENT_WRITE, and an unmapped route would refuse with a 403 among
+# 404s - a discriminator that enumerates the write allowlist.
+_COMMENT_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("POST", re.compile(r"\Ashooters/[^/]+/stages/\d+/comments\Z")),
+    ("DELETE", re.compile(r"\Ashooters/[^/]+/stages/\d+/comments/[A-Za-z0-9]+\Z")),
+)
+```
+
+consulted in `required_capability` after the `match/shares` check:
+
+```python
+    for allowed_method, pattern in _COMMENT_ROUTES:
+        if method == allowed_method and pattern.match(rest) is not None:
+            return COMMENT_WRITE
+```
+
+`capabilities_for_origin` also gains `COMMENT_WRITE` for the `desktop` and
+`hosted` sets - the owner moderates comments on their own match through the
+same per-stage DELETE route, and a mirror keeps that for the same reason it
+keeps `SHARE_MANAGE`. `local` does not: there is no share surface and so no
+comments.
+
+Leave `match/comments` (Task 8's bulk moderation) unmapped - it falls through
+to `EDIT`, which no share scope grants, and it is not in the write allowlist
+either. Two independent gates, deliberately.
+
 - [ ] **Step 5: Run the tests to verify they pass**
 
 Run: `uv run pytest -n0 tests/test_share_write_allowlist.py -q`
 Expected: PASS (6 tests).
+
+Also run the capability suite - `capabilities_for_origin` changed shape:
+`uv run pytest -n0 -k "capabilit" -q`
 
 - [ ] **Step 6: Run the existing share suite for regressions**
 
@@ -1868,6 +1909,21 @@ def _require_author_key(request: Request) -> str:
 
 Run: `uv run pytest -n0 tests/test_comments_api.py -q`
 Expected: PASS (20 tests).
+
+- [ ] **Step 5b: Prove the scope gate is actually covered**
+
+Task 5 added the scope gate in `_share_alias` but could not test it: with no
+route behind the path, an admitted write and a refused one both ended as 404,
+so deleting the entire gate left 154 tests green. This task is the first point
+where the gate is observable, and these tests are what cover it.
+
+Delete the whole `if needs_write_scope:` block from `_share_alias`, run
+`uv run pytest -n0 tests/test_comments_api.py -q`, and confirm
+`test_post_through_a_read_scoped_token_is_the_uniform_404` **fails**. Restore
+the block. Record the output in your report.
+
+If it still passes, the gate remains uncovered and the task is not done -
+say so rather than moving on.
 
 - [ ] **Step 6: Commit**
 
