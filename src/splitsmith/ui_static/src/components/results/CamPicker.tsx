@@ -38,7 +38,7 @@ export function CamPicker({ entries, activeIndex, onSelect, srcFor }: CamPickerP
             aria-label={`Camera ${i + 1} of ${entries.length}: ${camLabel(i)}${disabled ? " (no beep sync)" : ""}`}
             className={cn(
               "flex w-24 shrink-0 flex-col overflow-hidden rounded-md border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
-              active ? "border-led" : "border-rule-strong hover:border-rule",
+              active ? "border-2 border-led" : "border-rule-strong hover:border-rule",
               disabled && "opacity-40",
             )}
           >
@@ -59,7 +59,7 @@ export function CamPicker({ entries, activeIndex, onSelect, srcFor }: CamPickerP
             <span
               className={cn(
                 "px-1.5 py-0.5 text-left font-mono text-[0.5625rem] font-bold uppercase tracking-[0.1em]",
-                active ? "text-led" : "text-muted",
+                active ? "text-led underline underline-offset-2" : "text-muted",
               )}
             >
               {camLabel(i)}

@@ -250,6 +250,10 @@ export function Compare() {
     maxDriftRef.current = 0;
 
     const interval = window.setInterval(() => {
+      // A freshly swapped master src reports currentTime 0 until its
+      // metadata arrives - deriving the shared clock from that would drag
+      // every tile to clip start. Skip ticks until the master is readable.
+      if (masterEl.readyState < 1) return;
       const masterBeep = effectiveBeep(audioShooter) ?? 0;
       const tsb = masterEl.currentTime - masterBeep;
       setTimeSinceBeep(tsb);
