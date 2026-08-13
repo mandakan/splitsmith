@@ -156,6 +156,7 @@ function otherPersonsComment() {
     anchor_shot_id: null,
     author_kind: "handle" as const,
     author_handle: "Prone Popper 47",
+    author_code: "auth-c1",
     body: "someone else said this",
     created_at: "2026-08-13T10:00:00Z",
     mine: false,

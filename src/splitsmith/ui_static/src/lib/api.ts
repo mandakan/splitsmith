@@ -2208,6 +2208,10 @@ export interface Comment {
   anchor_shot_id: string | null;
   author_kind: "handle" | "account";
   author_handle: string;
+  /** Stable public identifier for the author -- an HMAC of their account
+   *  id or browser key, never either one. Two authors posting under the
+   *  same name are told apart by this. See lib/authorAmbiguity.ts. */
+  author_code: string;
   body: string;
   created_at: string;
   mine: boolean;
@@ -2225,6 +2229,22 @@ export interface CommentCreateInput {
   anchor_t: number;
   anchor_kind: "time" | "shot";
   anchor_shot_id?: string | null;
+}
+
+/** One author's footprint on a match. Owner-only: the route is not on
+ *  the anonymous share surface. */
+export interface CommentAuthor {
+  author_code: string;
+  author_kind: "handle" | "account";
+  first_comment_at: string;
+  comment_count: number;
+  /** Every distinct name this code posted under, oldest first. Two
+   *  entries means the author renamed themselves mid-thread. */
+  handles: string[];
+}
+
+export interface CommentAuthorListResponse {
+  authors: CommentAuthor[];
 }
 
 export const api = {
@@ -2847,6 +2867,14 @@ export const api = {
    *  when signed out. Always 200 in local mode (loopback user). */
   getMe: () => request<AuthUser>("/api/me"),
 
+  /** Hosted mode -- set or clear the account display name. 404s in local
+   *  mode. A blank name stores null server-side, never an empty string. */
+  updateMe: (displayName: string | null) =>
+    request<AuthUser>("/api/me", {
+      method: "PATCH",
+      json: { display_name: displayName },
+    }),
+
   /** Hosted mode -- start a magic-link sign-in: the server e-mails a link
    *  to ``email``. Always 200 (never reveals whether the address has an
    *  account); the account is created when the link is redeemed. */
@@ -3431,6 +3459,12 @@ export const api = {
       `/api/shooters/${encodeURIComponent(slug)}/stages/${stage}/comments/${encodeURIComponent(id)}`,
       { method: "DELETE", headers: { [AUTHOR_KEY_HEADER]: authorKey() } },
     );
+  },
+
+  /** Per-author detail across the whole match. Owner-only -- an
+   *  anonymous share caller gets a 404. */
+  listCommentAuthors(): Promise<CommentAuthorListResponse> {
+    return request<CommentAuthorListResponse>("/api/match/comment-authors");
   },
 
   /** Returns the saved audit JSON for a stage, or null when none exists yet.

@@ -26,6 +26,11 @@ function comment(over: Partial<import("@/lib/api").Comment> = {}) {
     anchor_shot_id: null,
     author_kind: "handle" as const,
     author_handle: "Prone Popper 47",
+    // Derived from the comment id so distinct comment ids never share a
+    // code by copy-paste accident -- a future name-collision test relies
+    // on fixtures keeping different authors apart even when the display
+    // handle matches.
+    author_code: `auth-${over.id ?? "c1"}`,
     body: "reload looks early",
     created_at: "2026-08-13T10:00:00Z",
     mine: false,
