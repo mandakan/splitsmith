@@ -1345,6 +1345,16 @@ current_match_capabilities: ContextVar[frozenset[str] | None] = ContextVar(
 # strip server-local fields (e.g. match_root, last_scanned_dir) from their
 # response payloads before returning them to anonymous viewers.
 current_share_request: ContextVar[bool] = ContextVar("splitsmith_current_share_request", default=False)
+# The signed-in user behind a share request, or None. Set by
+# _share_alias purely so a comment can carry an account name instead of
+# a generated handle.
+#
+# It grants NOTHING. The tenant stays the match owner's, the allowlist
+# does not widen, and the scope gate does not soften. If a future change
+# makes this value authorize anything, that is the bug - the token is
+# the authorization on this surface, and a second one would mean two
+# answers to "who may do this".
+current_share_viewer: ContextVar[object | None] = ContextVar("splitsmith_current_share_viewer", default=None)
 
 
 def _may_mint_shot_ids() -> bool:
@@ -6781,6 +6791,19 @@ def create_app(
                 status_code=429,
                 detail={"code": "comment_stage_cap", "message": "this stage has too many comments"},
             )
+        viewer = current_share_viewer.get()
+        display_name = getattr(viewer, "display_name", None) if viewer is not None else None
+        if isinstance(display_name, str) and display_name.strip():
+            author_kind = "account"
+            author_user_id = viewer.id  # type: ignore[union-attr]
+            author_handle = display_name.strip()
+        else:
+            # Includes a signed-in account that never set a display name:
+            # an email address is not a name they chose to publish, and an
+            # empty string is not a name at all.
+            author_kind = "handle"
+            author_user_id = None
+            author_handle = derive_handle(author_key)
         created = await store.create(
             match_id=mid,
             slug=slug,
@@ -6788,9 +6811,9 @@ def create_app(
             anchor_t=req.anchor_t,
             anchor_kind=req.anchor_kind,
             anchor_shot_id=req.anchor_shot_id,
-            author_kind="handle",
-            author_user_id=None,
-            author_handle=derive_handle(author_key),
+            author_kind=author_kind,
+            author_user_id=author_user_id,
+            author_handle=author_handle,
             author_key_hash=hash_author_key(author_key),
             share_token_id=share_token_id,
             body=req.body,
@@ -7176,6 +7199,18 @@ def create_app(
         # has imported the db package, so this is a free (cached) import.
         from ..db.share_guard import current_share_scope
 
+        # Best-effort only: an absent, expired or malformed session is an
+        # anonymous visitor, never an error. Wrapped because the auth
+        # backend may raise on a garbage cookie and a share page must not
+        # 500 for it.
+        viewer = None
+        if needs_write_scope:
+            try:
+                viewer = await state.auth.authenticate_request(request)
+            except Exception:  # noqa: BLE001
+                viewer = None
+        viewer_token = current_share_viewer.set(viewer)
+
         tenant_token = current_tenant.set(state.build_tenant(resolved.owner_user_id))
         share_token = current_share_request.set(True)
         scope_token = current_share_scope.set(resolved.scope)
@@ -7200,6 +7235,7 @@ def create_app(
                 return not_found
             return response
         finally:
+            current_share_viewer.reset(viewer_token)
             current_share_scope.reset(scope_token)
             current_share_request.reset(share_token)
             current_tenant.reset(tenant_token)
