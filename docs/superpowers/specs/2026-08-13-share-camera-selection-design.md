@@ -69,12 +69,12 @@ alone; labels read "Camera 2 of 3".
 
 ### Compare changes
 
-- Each shooter tile whose shooter has more than one camera gets a small
-  camera control (icon + count badge) in the tile chrome; activating it opens
-  a popover listing that shooter's cameras (text labels, active one marked).
-  Picking one swaps that tile's clip. Tiles are too small for an embedded
-  thumbnail strip, so the popover is the chosen form; it reuses the existing
-  overlay conventions (z tokens, body portal, `useDialogFocus`).
+- Each shooter tile whose shooter has more than one camera gets a native
+  `<select>` in the tile header (the shooter-switcher precedent from the
+  ResultsStage header): text labels, active camera marked by value, beepless
+  cameras disabled. Picking one swaps that tile's clip. Tiles are too small
+  for an embedded thumbnail strip, and the tile's overflow-hidden would clip
+  a custom popover - the OS picker is the accessible overlay.
 - The swapped clip stays beep-synced: Compare's sync math uses that camera's
   `beep_in_clip` instead of the primary's.
 - Data source: Compare must have the full camera list per shooter. If its
