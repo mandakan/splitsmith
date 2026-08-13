@@ -216,6 +216,8 @@ from .capabilities import (
 from .comments import (
     AUTHOR_KEY_HEADER,
     STAGE_COMMENT_CAP,
+    CommentAuthorListResponse,
+    CommentAuthorOut,
     CommentCreateRequest,
     CommentListResponse,
     CommentOut,
@@ -6946,6 +6948,37 @@ def create_app(
         if not ok:
             raise HTTPException(status_code=404, detail="not found")
         return Response(status_code=204)
+
+    @app.get("/api/match/comment-authors", response_model=CommentAuthorListResponse)
+    async def list_match_comment_authors() -> CommentAuthorListResponse:
+        """Per-author detail for the owner's moderation view.
+
+        Owner-only by construction: the shape is absent from
+        ``_SHARE_PATH_RE``, so an anonymous share caller gets the same
+        uniform 404 as any unadmitted path. No capability entry is
+        needed -- ``required_capability`` returns ``None`` for GET.
+
+        Match-scoped on purpose. Aggregating an author across matches
+        would reveal that they commented on other people's share links,
+        which is a disclosure they never opted into.
+        """
+        store = state.comments
+        mid = current_match_id.get()
+        if store is None or mid is None:
+            raise HTTPException(status_code=404, detail="not found")
+        summaries = await store.author_summaries(mid)
+        return CommentAuthorListResponse(
+            authors=[
+                CommentAuthorOut(
+                    author_code=s.author_code,
+                    author_kind=s.author_kind,
+                    first_comment_at=s.first_comment_at,
+                    comment_count=s.comment_count,
+                    handles=list(s.handles),
+                )
+                for s in summaries
+            ]
+        )
 
     @app.delete("/api/match/comments")
     async def delete_match_comments(

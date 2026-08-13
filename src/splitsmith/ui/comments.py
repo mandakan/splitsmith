@@ -151,6 +151,26 @@ class CommentOwnerListResponse(BaseModel):
     comments: list[CommentOwnerOut]
 
 
+class CommentAuthorOut(BaseModel):
+    """One author's footprint on a match. Owner-only -- the route that
+    returns this is absent from ``_SHARE_PATH_RE``, so the anonymous
+    surface cannot reach it.
+
+    ``handles`` is every distinct name the code posted under, oldest
+    first. An account that renamed itself to match another commenter
+    shows two names here under one code."""
+
+    author_code: str
+    author_kind: str
+    first_comment_at: datetime
+    comment_count: int
+    handles: list[str]
+
+
+class CommentAuthorListResponse(BaseModel):
+    authors: list[CommentAuthorOut]
+
+
 def to_out(comment: Comment, *, author_key_hash: str | None, owner_view: bool) -> CommentOut:
     """Project a stored comment for the wire.
 
