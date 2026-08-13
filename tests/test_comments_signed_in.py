@@ -8,8 +8,13 @@ another test module's fixture graph.
 The rule under test: a resolved session on a share request grants
 nothing beyond a display name. It must not touch the tenant, the write
 allowlist, or the scope gate - those are Task 6/Task 8's settled
-invariants, and the four ``test_a_session_does_not_*`` tests below exist
+invariants, and the three ``test_a_session_does_not_*`` tests below exist
 to catch a future change that lets a session start authorizing anything.
+A fourth containment test, ``test_a_scope_limited_desktop_token_cannot_
+name_a_comment``, catches the same class of bug from a different
+credential: a bearer token confined to ``/api/sync/*`` must not be able
+to pick who a comment posts as either, even though the share token still
+authorizes the write itself.
 """
 
 from __future__ import annotations
@@ -82,6 +87,26 @@ def _mint_share_token(db_url: str, user_email: str, match_id: str, *, scope: str
         store = ShareTokenStore(sf, user_id=user_id)
         created = await store.create(match_id, scope=scope)
         return created.token
+
+    return asyncio.run(_mint())
+
+
+def _mint_desktop_token(db_url: str, user_email: str, *, scope: str = "sync") -> str:
+    """Mint a desktop bearer token directly through ``DesktopTokenStore``,
+    for the fix-round-1 finding: a sync-scoped token must not be able to
+    name a comment, even on a comment-scoped share link. Requires the
+    user row to already exist (call after ``login``)."""
+    from splitsmith.db.desktop_tokens import DesktopTokenStore
+
+    async def _mint() -> str:
+        engine = create_engine(db_url)
+        sf = sessionmaker(engine)
+        async with sf() as s:
+            row = (await s.execute(_select(User).where(User.email == user_email))).scalar_one()
+            user_id = row.id
+        store = DesktopTokenStore(sf, user_id=user_id)
+        _record, raw = await store.create("test device", scope=scope)
+        return raw
 
     return asyncio.run(_mint())
 
@@ -261,3 +286,52 @@ def test_authenticate_request_raising_degrades_to_anonymous(
     resp = _post(client, token, **signed_in_headers)
     assert resp.status_code == 201
     assert resp.json()["author_kind"] == "handle"
+
+
+def test_a_scope_limited_desktop_token_cannot_name_a_comment(
+    hosted_env: str, hosted_app, comment_token_client
+) -> None:
+    """Fix round 1, Finding 1. ``state.auth`` also resolves the desktop
+    bearer backend, and a sync-scoped token is confined to /api/sync/* by
+    _auth_gate - a confinement that gate never enforces on /api/share/,
+    since it hands off before consulting a session at all. The share
+    token still authorizes the write (this is not a wider allowlist); the
+    bug this guards against is a credential that isn't even allowed onto
+    this surface getting to pick whose name lands on the comment."""
+    client, sender = hosted_app
+    _, token = comment_token_client
+    login(client, sender, "victim@example.com")
+    client.cookies.clear()
+    _set_display_name(hosted_env, "victim@example.com", "Victim Person")
+    bearer = _mint_desktop_token(hosted_env, "victim@example.com", scope="sync")
+
+    created = _post(client, token, Authorization=f"Bearer {bearer}").json()
+    assert created["author_kind"] == "handle"
+    assert created["author_handle"] != "Victim Person"
+
+
+def test_a_session_is_resolved_only_on_writes(
+    hosted_env: str, hosted_app, comment_token_client, signed_in_headers, monkeypatch
+) -> None:
+    """Fix round 1, Finding 2. The brief says the lookup must happen only
+    on writes, but nothing failed if a refactor moved it above the
+    needs_write_scope branch - which would land a session lookup on
+    every anonymous card/list fetch. Count calls to authenticate_request
+    directly: a GET must make zero, a POST exactly one."""
+    client, token = comment_token_client
+    state = client.app.state.splitsmith_state
+    original = state.auth.authenticate_request
+    calls: list[None] = []
+
+    async def _counting(request):
+        calls.append(None)
+        return await original(request)
+
+    monkeypatch.setattr(state.auth, "authenticate_request", _counting)
+
+    get_resp = client.get(f"/api/share/{token}/shooters/alice/stages/3/comments")
+    assert get_resp.status_code == 200
+    assert len(calls) == 0
+
+    _post(client, token, **signed_in_headers)
+    assert len(calls) == 1

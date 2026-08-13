@@ -1354,7 +1354,7 @@ current_share_request: ContextVar[bool] = ContextVar("splitsmith_current_share_r
 # makes this value authorize anything, that is the bug - the token is
 # the authorization on this surface, and a second one would mean two
 # answers to "who may do this".
-current_share_viewer: ContextVar[object | None] = ContextVar("splitsmith_current_share_viewer", default=None)
+current_share_viewer: ContextVar[User | None] = ContextVar("splitsmith_current_share_viewer", default=None)
 
 
 def _may_mint_shot_ids() -> bool:
@@ -6792,11 +6792,10 @@ def create_app(
                 detail={"code": "comment_stage_cap", "message": "this stage has too many comments"},
             )
         viewer = current_share_viewer.get()
-        display_name = getattr(viewer, "display_name", None) if viewer is not None else None
-        if isinstance(display_name, str) and display_name.strip():
+        if viewer is not None and isinstance(viewer.display_name, str) and viewer.display_name.strip():
             author_kind = "account"
-            author_user_id = viewer.id  # type: ignore[union-attr]
-            author_handle = display_name.strip()
+            author_user_id = viewer.id
+            author_handle = viewer.display_name.strip()
         else:
             # Includes a signed-in account that never set a display name:
             # an email address is not a name they chose to publish, and an
@@ -7208,6 +7207,16 @@ def create_app(
             try:
                 viewer = await state.auth.authenticate_request(request)
             except Exception:  # noqa: BLE001
+                viewer = None
+            # A credential confined to some other surface (#719's
+            # token_scope - a sync-scoped desktop token today, and any
+            # future scope tomorrow) must not name a comment either, for
+            # the same reason _auth_gate confines it: the share token is
+            # what authorizes the write, and a bearer token that isn't
+            # even allowed onto this surface must not get to pick who it
+            # posts as. Same spelling _auth_gate uses at "user.token_scope
+            # not in (None, "full")" - not a second one.
+            if viewer is not None and viewer.token_scope not in (None, "full"):
                 viewer = None
         viewer_token = current_share_viewer.set(viewer)
 
