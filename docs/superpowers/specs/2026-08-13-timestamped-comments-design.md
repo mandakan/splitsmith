@@ -223,8 +223,12 @@ Owner-side, ordinary authenticated routes under the existing match alias:
 
 - `GET    /api/shooters/{slug}/stages/{n}/comments`
 - `DELETE /api/shooters/{slug}/stages/{n}/comments/{id}`
-- `DELETE /api/matches/{match_id}/comments?share_token_id=...`
-- `DELETE /api/matches/{match_id}/comments?author_key_hash=...`
+- `DELETE /api/match/comments?share_token_id=...`
+- `DELETE /api/match/comments?author_key_hash=...`
+
+(The `match/...` prefix rather than a literal `matches/{match_id}/...` follows
+`/api/match/shares`: the alias middleware supplies the match id, so no route
+takes it from the client.)
 
 The caller's `author_key` travels as a request header on `GET` as well as on
 `POST` and `DELETE` - the `GET` needs it to compute `mine`. It is optional on
@@ -288,5 +292,8 @@ an unrevoked link.
 - Compare (multi-shooter grid) commenting.
 - Replies, threading, reactions, editing.
 - Notifications of any kind to the owner or to commenters.
+- Purging soft-deleted comments. A match delete hard-deletes its whole thread
+  (nothing cascades from the registry row, so that step is explicit); routine
+  retention of soft-deleted rows is a later decision.
 - Bookmarks, and the limited-account tier.
 - Re-attributing anonymous comments to an account created later.
