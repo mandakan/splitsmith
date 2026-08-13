@@ -195,6 +195,14 @@ class Job(BaseModel):
 
     id: str
     kind: str  # "detect_beep" | "trim" | etc; used for SPA copy + filtering
+    # The match this job was submitted for. The jobs list is global
+    # (cross-match), so any per-match predicate over it - the SyncCard's
+    # "is a sync_match running for THIS match?" - needs this on the wire
+    # or it collides across matches, the same way per-stage predicates
+    # collide across shooters without ``shooter_slug`` (issue #664).
+    # ``None`` for jobs submitted outside a match-scoped request
+    # (model_download).
+    match_id: str | None = None
     stage_number: int | None = None
     # The shooter this job belongs to. Stage numbers are shared across
     # every shooter in a match by definition, so any per-stage matching
@@ -595,6 +603,7 @@ class JobRegistry:
         job = Job(
             id=uuid.uuid4().hex,
             kind=kind,
+            match_id=match_ctx[0],
             stage_number=stage_number,
             shooter_slug=shooter_slug,
             video_id=video_id,

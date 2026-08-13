@@ -52,6 +52,30 @@ function makeStatus(overrides: Partial<SyncStatusResponse> = {}): SyncStatusResp
   };
 }
 
+function makeJob(overrides: Partial<Job> = {}): Job {
+  return {
+    id: "job-1",
+    kind: "sync_match",
+    match_id: "m1",
+    stage_number: null,
+    shooter_slug: null,
+    video_id: null,
+    status: "pending",
+    progress: null,
+    message: null,
+    error: null,
+    cancel_requested: false,
+    acknowledged: false,
+    result: null,
+    timings: null,
+    created_at: "2026-08-07T00:00:00Z",
+    updated_at: "2026-08-07T00:00:00Z",
+    started_at: null,
+    finished_at: null,
+    ...overrides,
+  };
+}
+
 describe("SyncCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -120,25 +144,7 @@ describe("SyncCard", () => {
     vi.mocked(api.getSyncStatus).mockResolvedValue(
       makeStatus({ stale: true, pending_media: 1, errors: [] }),
     );
-    vi.mocked(api.startSync).mockResolvedValue({
-      id: "job-1",
-      kind: "sync_match",
-      stage_number: null,
-      shooter_slug: null,
-      video_id: null,
-      status: "pending",
-      progress: null,
-      message: null,
-      error: null,
-      cancel_requested: false,
-      acknowledged: false,
-      result: null,
-      timings: null,
-      created_at: "2026-08-07T00:00:00Z",
-      updated_at: "2026-08-07T00:00:00Z",
-      started_at: null,
-      finished_at: null,
-    } satisfies Job);
+    vi.mocked(api.startSync).mockResolvedValue(makeJob());
 
     render(<SyncCard jobs={[]} matchId="m1" />);
 
@@ -160,25 +166,7 @@ describe("SyncCard", () => {
     vi.mocked(api.getSyncStatus).mockResolvedValue(
       makeStatus({ stale: true, pending_media: 1, errors: [] }),
     );
-    vi.mocked(api.startSync).mockResolvedValue({
-      id: "job-1",
-      kind: "sync_match",
-      stage_number: null,
-      shooter_slug: null,
-      video_id: null,
-      status: "pending",
-      progress: null,
-      message: null,
-      error: null,
-      cancel_requested: false,
-      acknowledged: false,
-      result: null,
-      timings: null,
-      created_at: "2026-08-07T00:00:00Z",
-      updated_at: "2026-08-07T00:00:00Z",
-      started_at: null,
-      finished_at: null,
-    } satisfies Job);
+    vi.mocked(api.startSync).mockResolvedValue(makeJob());
 
     render(<SyncCard jobs={[]} matchId="m1" />);
 
@@ -191,6 +179,67 @@ describe("SyncCard", () => {
     // shell's next poll tick.
     await waitFor(() => expect(api.startSync).toHaveBeenCalled());
     await waitFor(() => expect(button).toBeDisabled());
+  });
+
+  it("shows progress for this match's own running sync job", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue(
+      makeStatus({ stale: true, pending_media: 3 }),
+    );
+    const own = makeJob({
+      match_id: "m1",
+      status: "running",
+      message: "Uploading clip 3/9...",
+    });
+
+    render(<SyncCard jobs={[own]} matchId="m1" />);
+
+    expect(await screen.findByText(/uploading clip 3\/9/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /syncing/i })).toBeDisabled();
+  });
+
+  it("does not mirror another match's running sync as its own", async () => {
+    // Regression: the jobs list is global (cross-match). Pre-fix the
+    // card matched sync_match jobs by kind alone, so match B's card
+    // showed match A's progress message and claimed to be syncing.
+    vi.mocked(api.getSyncStatus).mockResolvedValue(
+      makeStatus({ stale: true, pending_media: 3 }),
+    );
+    const foreign = makeJob({
+      match_id: "other-match",
+      status: "running",
+      message: "Uploading clip 3/9...",
+    });
+
+    render(<SyncCard jobs={[foreign]} matchId="m1" />);
+
+    expect(
+      await screen.findByText(/another match is syncing/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/uploading clip 3\/9/i)).not.toBeInTheDocument();
+    // The button waits (one push at a time) but does not claim to be
+    // syncing this match.
+    const button = screen.getByRole("button", { name: /sync now/i });
+    expect(button).toBeDisabled();
+  });
+
+  it("refetches status when the match changes", async () => {
+    // Regression: the card is not remounted on match navigation
+    // (react-router reuses the instance), so without a matchId-keyed
+    // refetch match B kept showing match A's cached status - a
+    // never-synced match read "0 files changed since last sync".
+    vi.mocked(api.getSyncStatus).mockResolvedValue(
+      makeStatus({ stale: true, pending_media: 3 }),
+    );
+
+    const { rerender } = render(<SyncCard jobs={[]} matchId="m1" />);
+    expect(await screen.findByText(/3 files changed since last sync/i)).toBeInTheDocument();
+
+    vi.mocked(api.getSyncStatus).mockResolvedValue(
+      makeStatus({ last_synced_at: null, stale: true, pending_media: 0 }),
+    );
+    rerender(<SyncCard jobs={[]} matchId="m2" />);
+
+    expect(await screen.findByText(/never synced/i)).toBeInTheDocument();
   });
 
   it("shows the hosted-has-newer hint when remote_changes > 0", async () => {

@@ -156,6 +156,7 @@ function makeJob(overrides: Partial<Job> = {}): Job {
   return {
     id: "job-1",
     kind: "shot_detect",
+    match_id: "m1",
     stage_number: 1,
     shooter_slug: "mathias",
     video_id: null,
