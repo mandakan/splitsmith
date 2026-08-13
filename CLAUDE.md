@@ -196,6 +196,15 @@ most likely to break by "simplifying" the compose box: adding a
 display-name input to the POST body would let anyone sign a comment with
 someone else's name.
 
+A signed-in visitor comments under `users.display_name`, which the
+`/account` page writes through `PATCH /api/me` (#867). Nothing else in
+the codebase writes that column -- `splitsmith.db.profile` is the single
+owner, which is what makes "can this branch be reached?" answerable by
+grep. #866 shipped the branch with no writer and it was dead in
+production for exactly that reason. An account with a blank name still
+falls back to a generated handle; that invariant is pinned in
+`tests/test_comments_signed_in.py` and does not move.
+
 ## Things Claude Code should not do
 
 - Add new dependencies without asking. The dep list is small on purpose.
