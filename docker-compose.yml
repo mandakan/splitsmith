@@ -27,7 +27,13 @@ services:
     ports:
       # Exposed on the host so the test suite can verify the DB
       # state directly (e.g. via psql) when debugging the smoke.
-      - "5432:5432"
+      #
+      # Every published port here is overridable. The defaults are the
+      # documented manual smoke path; ``pytest -m docker`` overrides all
+      # four so a developer box that already has something on 5432 /
+      # 9001 / 5174 can still run the docker suite. See
+      # tests/test_hosted_docker_smoke.py.
+      - "${SPLITSMITH_COMPOSE_POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       # Creates the non-superuser ``splitsmith_app`` role the API/worker
@@ -49,8 +55,8 @@ services:
       MINIO_ROOT_USER: splitsmith
       MINIO_ROOT_PASSWORD: splitsmithsplitsmith
     ports:
-      - "9000:9000"  # S3 API
-      - "9001:9001"  # Web console
+      - "${SPLITSMITH_COMPOSE_MINIO_PORT:-9000}:9000"  # S3 API
+      - "${SPLITSMITH_COMPOSE_MINIO_CONSOLE_PORT:-9001}:9001"  # Web console
     volumes:
       - minio-data:/data
     healthcheck:
@@ -95,9 +101,12 @@ services:
       SPLITSMITH_MODE: hosted
       # Public origin: base of the magic-link callback + decides the
       # session cookie's Secure flag. http://localhost over the published
-      # 5174 port, so Secure is OFF (a Secure cookie wouldn't round-trip
+      # API port, so Secure is OFF (a Secure cookie wouldn't round-trip
       # over plain http) -- production sets an https URL and gets Secure.
-      SPLITSMITH_PUBLIC_URL: http://localhost:5174
+      # Must track the published port: the magic-link callback is built
+      # from this, and a link pointing at a port nothing listens on
+      # fails in a way that looks like an auth bug.
+      SPLITSMITH_PUBLIC_URL: http://localhost:${SPLITSMITH_COMPOSE_API_PORT:-5174}
       # Magic-link transport: console logs the link (no mail creds needed
       # for the dev / smoke stack). The smoke's login dance reads it back
       # via the in-process MagicLinkAuth against this same Postgres.
@@ -112,7 +121,7 @@ services:
       SPLITSMITH_S3_BUCKET: splitsmith-uploads
       SPLITSMITH_S3_REGION: us-east-1
     ports:
-      - "5174:5174"
+      - "${SPLITSMITH_COMPOSE_API_PORT:-5174}:5174"
     # Default CMD already binds 0.0.0.0:5174; override here only when
     # debugging (e.g. ``--log-level debug``).
     healthcheck:
@@ -150,7 +159,8 @@ services:
       SPLITSMITH_MODE: hosted
       # The worker has no login routes, but the hosted wiring it shares
       # with the API requires these; console sender is never exercised here.
-      SPLITSMITH_PUBLIC_URL: http://localhost:5174
+      # Tracks the API's published port for the same reason the API's does.
+      SPLITSMITH_PUBLIC_URL: http://localhost:${SPLITSMITH_COMPOSE_API_PORT:-5174}
       SPLITSMITH_EMAIL_BACKEND: console
       SPLITSMITH_S3_ENDPOINT_URL: http://minio:9000
       SPLITSMITH_S3_ACCESS_KEY_ID: splitsmith
