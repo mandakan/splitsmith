@@ -48,7 +48,7 @@ import uuid
 import httpx
 import pytest
 
-from .test_hosted_docker_smoke import API_BASE, _magic_link_login, _psql
+from .test_hosted_docker_smoke import API_BASE, POSTGRES_PORT, _magic_link_login, _psql
 
 # ``hosted_stack`` is re-exported for global fixture discovery via
 # conftest.py (same idiom as ``hosted_app`` / ``hosted_env`` - importing it
@@ -61,7 +61,14 @@ pytestmark = pytest.mark.docker
 # exact role - connecting as it here from the host exercises the same
 # non-superuser path the API/worker run under, not the ``splitsmith``
 # superuser ``test_hosted_docker_smoke.py`` seeds with.
-HOST_APP_DB_URL = "postgresql+asyncpg://splitsmith_app:splitsmith_app@localhost:5432/splitsmith"
+#
+# The port comes from the smoke module rather than being written out
+# here: the compose stack's published ports are overridable and default
+# to shifted values, so a literal 5432 would silently connect to
+# whatever else the developer's box happens to be running there instead
+# of to the test stack -- which fails as a confusing SQL error, not as a
+# connection refusal.
+HOST_APP_DB_URL = f"postgresql+asyncpg://splitsmith_app:splitsmith_app@localhost:{POSTGRES_PORT}/splitsmith"
 
 
 def _seed_two_users() -> tuple[str, str]:

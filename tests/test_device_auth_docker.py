@@ -53,7 +53,7 @@ import uuid
 
 import pytest
 
-from .test_hosted_docker_smoke import _psql
+from .test_hosted_docker_smoke import POSTGRES_PORT, _psql
 
 # ``hosted_stack`` is re-exported for global fixture discovery via
 # conftest.py (same idiom as test_sync_docker.py - importing it directly
@@ -64,7 +64,10 @@ pytestmark = pytest.mark.docker
 # The role the container's own SPLITSMITH_DATABASE_URL uses. Connecting as
 # it from the host exercises the same non-superuser path the API runs
 # under, not the ``splitsmith`` superuser ``_psql`` seeds with.
-HOST_APP_DB_URL = "postgresql+asyncpg://splitsmith_app:splitsmith_app@localhost:5432/splitsmith"
+#
+# Port from the smoke module, not a literal -- see the same constant in
+# test_sync_docker.py for why.
+HOST_APP_DB_URL = f"postgresql+asyncpg://splitsmith_app:splitsmith_app@localhost:{POSTGRES_PORT}/splitsmith"
 
 
 def test_migration_creates_device_authorizations(hosted_stack: None) -> None:
