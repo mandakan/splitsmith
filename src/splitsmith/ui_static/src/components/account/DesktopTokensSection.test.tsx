@@ -40,9 +40,22 @@ function makeToken(overrides: Partial<DesktopTokenInfo> = {}): DesktopTokenInfo 
   };
 }
 
+// jsdom does not implement the Clipboard API (`navigator.clipboard` is
+// `undefined`), so the copy button's `handleCopy` would hit its catch
+// block and silently no-op without this. Object.defineProperty rather
+// than vi.stubGlobal("navigator", ...) -- the latter would replace the
+// whole Navigator object instead of adding the one property jsdom is
+// missing.
+const writeText = vi.fn().mockResolvedValue(undefined);
+Object.defineProperty(navigator, "clipboard", {
+  value: { writeText },
+  configurable: true,
+});
+
 describe("DesktopTokensSection", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    writeText.mockClear();
   });
 
   it("renders the existing token list", async () => {
@@ -129,5 +142,56 @@ describe("DesktopTokensSection", () => {
     expect(field).toHaveValue("raw-token-value");
     expect(field.closest("[aria-live='polite']")).not.toBeNull();
     expect(screen.getByText(/you will not see this again/i)).toBeInTheDocument();
+  });
+
+  it("swaps the copy button label to Copied after a successful copy, and back to its accessible name", async () => {
+    vi.mocked(api.listDesktopTokens).mockResolvedValue({ tokens: [] });
+    vi.mocked(api.createDesktopToken).mockResolvedValue({
+      token: "dtok_raw_value_shown_once",
+      record: makeToken({ id: "tok-2", name: "garage-pc" }),
+    });
+
+    render(<DesktopTokensSection />);
+
+    fireEvent.change(await screen.findByLabelText(/name/i), {
+      target: { value: "garage-pc" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /create/i }));
+    await screen.findByDisplayValue("dtok_raw_value_shown_once");
+
+    // Not-yet-copied state: label reads "Copy", accessible name matches.
+    const copyButton = screen.getByRole("button", {
+      name: "Copy token to clipboard",
+    });
+    expect(copyButton).toHaveTextContent("Copy");
+
+    fireEvent.click(copyButton);
+
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith("dtok_raw_value_shown_once"),
+    );
+
+    // Copied state: label swaps to "Copied" and the accessible name
+    // changes with it -- the same button, re-queried by its new name.
+    const copiedButton = await screen.findByRole("button", {
+      name: "Token copied to clipboard",
+    });
+    expect(copiedButton).toHaveTextContent("Copied");
+    expect(
+      screen.queryByRole("button", { name: "Copy token to clipboard" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a role=alert error when the name is empty on create", async () => {
+    vi.mocked(api.listDesktopTokens).mockResolvedValue({ tokens: [] });
+
+    render(<DesktopTokensSection />);
+
+    await screen.findByLabelText(/name/i);
+    fireEvent.click(screen.getByRole("button", { name: /create/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Name is required.");
+    expect(api.createDesktopToken).not.toHaveBeenCalled();
   });
 });
