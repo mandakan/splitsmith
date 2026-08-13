@@ -4,7 +4,7 @@
  * as CPU; a worker behind the server version gets the "update available"
  * affordance while a current one does not.
  */
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WorkerListResponse, WorkerView } from "@/lib/api";
@@ -22,6 +22,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     api: {
       ...actual.api,
       adminListWorkers: vi.fn(),
+      adminUpdateWorker: vi.fn(),
     },
   };
 });
@@ -130,5 +131,41 @@ describe("AdminWorkers", () => {
     render(<AdminWorkers />);
     expect(await screen.findByText("unknown")).toBeInTheDocument();
     expect(screen.queryByTitle(/update available/i)).not.toBeInTheDocument();
+  });
+
+  it("applies the WorkerView returned by the enabled toggle without refetching the list", async () => {
+    // Regression for the #579 sweep: the row PATCHed then blind-refetched
+    // the whole roster, discarding the WorkerView the PATCH returned.
+    vi.mocked(api.adminListWorkers).mockResolvedValue(listResp([worker()]));
+    vi.mocked(api.adminUpdateWorker).mockResolvedValue(worker({ enabled: false }));
+
+    render(<AdminWorkers />);
+
+    const toggle = await screen.findByRole("checkbox", {
+      name: /disable home-wsl-gpu/i,
+    });
+    expect(toggle).toBeChecked();
+    fireEvent.click(toggle);
+
+    await waitFor(() => expect(toggle).not.toBeChecked());
+    expect(api.adminUpdateWorker).toHaveBeenCalledWith("w1", { enabled: false });
+    expect(api.adminListWorkers).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies the WorkerView returned by a priority edit without refetching the list", async () => {
+    vi.mocked(api.adminListWorkers).mockResolvedValue(listResp([worker()]));
+    vi.mocked(api.adminUpdateWorker).mockResolvedValue(worker({ priority: 5 }));
+
+    render(<AdminWorkers />);
+
+    const input = await screen.findByLabelText(/priority for home-wsl-gpu/i);
+    fireEvent.change(input, { target: { value: "5" } });
+    fireEvent.blur(input);
+
+    await waitFor(() =>
+      expect(api.adminUpdateWorker).toHaveBeenCalledWith("w1", { priority: 5 }),
+    );
+    await waitFor(() => expect(input).not.toBeDisabled());
+    expect(api.adminListWorkers).toHaveBeenCalledTimes(1);
   });
 });

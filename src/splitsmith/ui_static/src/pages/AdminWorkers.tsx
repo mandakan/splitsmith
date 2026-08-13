@@ -108,10 +108,15 @@ function CapabilityBadges({ info }: { info: WorkerInfo | null }) {
 interface WorkerRowProps {
   worker: WorkerView;
   serverVersion: string;
+  /** Splice the WorkerView a PATCH returned back into the roster - the
+   *  #579 sweep: no blind list refetch when the mutation already hands
+   *  back the updated resource. */
+  onUpdated: (worker: WorkerView) => void;
+  /** Full roster refetch - only for delete, which returns void. */
   onRefetch: () => void;
 }
 
-function WorkerRow({ worker, serverVersion, onRefetch }: WorkerRowProps) {
+function WorkerRow({ worker, serverVersion, onUpdated, onRefetch }: WorkerRowProps) {
   const outdated = isOutdated(worker.version, serverVersion);
   const [priorityDraft, setPriorityDraft] = useState(String(worker.priority));
   const [patching, setPatching] = useState(false);
@@ -128,8 +133,11 @@ function WorkerRow({ worker, serverVersion, onRefetch }: WorkerRowProps) {
     setPatching(true);
     setRowError(null);
     try {
-      await api.adminUpdateWorker(worker.id, { priority: n });
-      onRefetch();
+      const updated = await api.adminUpdateWorker(worker.id, { priority: n });
+      onUpdated(updated);
+      // Re-sync the draft from the response in case the server clamped
+      // the value.
+      setPriorityDraft(String(updated.priority));
     } catch (e) {
       setRowError(e instanceof ApiError ? e.detail : String(e));
     } finally {
@@ -141,8 +149,8 @@ function WorkerRow({ worker, serverVersion, onRefetch }: WorkerRowProps) {
     setPatching(true);
     setRowError(null);
     try {
-      await api.adminUpdateWorker(worker.id, { enabled: !worker.enabled });
-      onRefetch();
+      const updated = await api.adminUpdateWorker(worker.id, { enabled: !worker.enabled });
+      onUpdated(updated);
     } catch (e) {
       setRowError(e instanceof ApiError ? e.detail : String(e));
     } finally {
@@ -391,6 +399,11 @@ export function AdminWorkers() {
                 key={w.id}
                 worker={w}
                 serverVersion={serverVersion}
+                onUpdated={(next) =>
+                  setWorkers((cur) =>
+                    cur ? cur.map((x) => (x.id === next.id ? next : x)) : cur,
+                  )
+                }
                 onRefetch={() => void loadWorkers()}
               />
             ))}
