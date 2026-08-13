@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -149,5 +149,33 @@ describe("ResultsStage camera selection", () => {
     });
     await screen.findByText(/steel rush/i);
     expect(mainVideoSrcs()).toEqual(["http://localhost/cam-b.mp4"]);
+  });
+
+  it("copies a moment link anchored to the active camera's own beep, not the primary's", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    renderStage("/match/m1/results/anna/2", [makeShooter("anna", "Anna", [[2, "audited"]])], {
+      videos: TWO_CAMS,
+    });
+    await screen.findByText(/steel rush/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /camera 2 of 2/i }));
+    expect(mainVideoSrcs()).toEqual(["http://localhost/cam-b.mp4"]);
+
+    // Cam B's beep_in_clip is 12 - park the video 3s past it on cam B's
+    // own clock, so the correct t (seconds after beep, camera-independent)
+    // is a deterministic 3.00, not 15 - coach.beep_time (5) = 10.
+    const video = document.querySelector("video:not([aria-hidden])") as HTMLVideoElement;
+    video.currentTime = 15;
+
+    fireEvent.click(screen.getByRole("button", { name: /copy link at moment/i }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+
+    const url = new URL(writeText.mock.calls[0][0] as string);
+    expect(url.searchParams.get("v")).toBe("1");
+    expect(url.searchParams.get("t")).toBe("3.00");
   });
 });

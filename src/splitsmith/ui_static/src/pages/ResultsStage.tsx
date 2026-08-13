@@ -149,6 +149,10 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   // Mirrors camIndex for handleCopyMoment, which is memoized on other
   // deps - a ref avoids re-memoizing the callback on every camera switch.
   const camIndexRef = useRef(0);
+  // Mirrors activeBeep alongside camIndexRef, same reason: handleCopyMoment
+  // must encode t against the *active* camera's beep (mirroring how
+  // momentTime decodes it), not always the primary's coach.beep_time.
+  const activeBeepRef = useRef(0);
   const momentTime =
     moment != null && coach != null
       ? (coach.videos[coach.videos[activeCamIndex] ? activeCamIndex : 0]?.beep_in_clip ??
@@ -163,7 +167,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const handleCopyMoment = useCallback(async () => {
     const v = videoRef.current;
     if (!v || !coach) return;
-    const t = Math.round((v.currentTime - coach.beep_time) * 100) / 100;
+    const t = Math.round((v.currentTime - activeBeepRef.current) * 100) / 100;
     const m = { t, ...(camIndexRef.current > 0 ? { v: camIndexRef.current } : {}) };
     const link = shareUrl
       ? `${shareUrl}/results/${slug}/${stage}?${momentToSearch(m).toString()}`
@@ -471,6 +475,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const activeBeep = activeVideo?.beep_in_clip ?? coach.beep_time;
   const camDelta = activeBeep - coach.beep_time;
   camIndexRef.current = camIndex;
+  activeBeepRef.current = activeBeep;
   const navButton =
     "inline-flex size-11 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led";
 
