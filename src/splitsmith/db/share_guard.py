@@ -16,10 +16,9 @@ from __future__ import annotations
 from contextvars import ContextVar
 
 # Scope of the share token authorizing the current request, or None
-# outside a share request. "read" is the only scope shipped today; a
-# write-capable scope added later (e.g. "coach") simply stops matching
-# the read-only check below and the capability table decides what it
-# may write.
+# outside a share request. "read" grants no writes; "comment" is the one
+# write-capable scope shipped today (see _WRITE_CAPABLE_SCOPES below) -
+# the capability table decides what a write-capable scope may actually do.
 current_share_scope: ContextVar[str | None] = ContextVar("splitsmith_current_share_scope", default=None)
 
 
@@ -43,6 +42,14 @@ COMMENT_SCOPE = "comment"
 # so turning this feature on cannot retroactively open a link that is
 # already in someone's inbox.
 _WRITE_CAPABLE_SCOPES: frozenset[str] = frozenset({COMMENT_SCOPE})
+
+
+def scope_may_write(scope: str | None) -> bool:
+    """Whether a resolved token's scope may pass the write allowlist.
+
+    Fails closed: unknown, empty and None all return False.
+    """
+    return scope is not None and scope in _WRITE_CAPABLE_SCOPES
 
 
 def share_request_is_read_only() -> bool:

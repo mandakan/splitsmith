@@ -1126,6 +1126,10 @@ _SHARE_PATH_RE = re.compile(
     r"^(?:match/shooters"
     r"|shooters/[^/]+/project"
     r"|shooters/[^/]+/stages/\d+/coach"
+    # The comment thread. Readable through ANY scope, including plain
+    # "read" - a link already in the wild shows the conversation but
+    # cannot join it. Posting is _SHARE_WRITE_PATH_RE's business.
+    r"|shooters/[^/]+/stages/\d+/comments"
     r"|shooters/[^/]+/coach/distributions"
     r"|shooters/[^/]+/videos/stream"
     r"|match/stage/\d+/compare"
@@ -1148,6 +1152,23 @@ _SHARE_PATH_RE = re.compile(
     r"|og-meta"
     r"|og-meta/[^/]+/\d+)$"
 )
+
+
+# The anonymous WRITE surface - deliberately a second pattern rather than
+# an extension of _SHARE_PATH_RE, whose docstring calls itself GET-only
+# and must stay true. Admission requires all three of: a shape here, a
+# method in _SHARE_WRITE_METHODS, and a resolved token whose scope is
+# write-capable (db.share_guard.scope_may_write). Any one missing is the
+# same opaque 404 as an unknown token, so the write surface is not
+# discoverable by probing.
+#
+# ``\A``/``\Z`` rather than ``^``/``$`` for the reason _REVIEW_ROUTES
+# documents: plain ``$`` also matches just before a single trailing
+# newline, and on an allow-list that direction is the unsafe one.
+_SHARE_WRITE_PATH_RE = re.compile(
+    r"\A(?:shooters/[^/]+/stages/\d+/comments" r"|shooters/[^/]+/stages/\d+/comments/[A-Za-z0-9]+)\Z"
+)
+_SHARE_WRITE_METHODS = frozenset({"POST", "DELETE"})
 
 
 def _is_loopback(request: Request) -> bool:
@@ -6817,11 +6838,30 @@ def create_app(
             # Local mode: no share surface at all.
             return not_found
         token, sep, rest = path[len(prefix) :].partition("/")
-        if not sep or not token or request.method != "GET" or not _SHARE_PATH_RE.fullmatch(rest):
+        if not sep or not token:
+            return not_found
+        method = request.method
+        if method == "GET":
+            if not _SHARE_PATH_RE.fullmatch(rest):
+                return not_found
+            needs_write_scope = False
+        elif method in _SHARE_WRITE_METHODS:
+            if not _SHARE_WRITE_PATH_RE.fullmatch(rest):
+                return not_found
+            needs_write_scope = True
+        else:
             return not_found
         resolved = await resolver(token)
         if resolved is None:
             return not_found
+        if needs_write_scope:
+            # Lazy import for the same reason the share_guard import below
+            # is lazy: this middleware runs on every request in local mode
+            # too, where splitsmith.db may not be installed.
+            from ..db.share_guard import scope_may_write
+
+            if not scope_may_write(resolved.scope):
+                return not_found
         # Rewrite onto the match-alias prefix with the match id from the
         # token row - never from the URL - and pin the owner's tenant so
         # the downstream ownership check + stores resolve as the owner.
