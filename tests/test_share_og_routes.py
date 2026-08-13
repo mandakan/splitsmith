@@ -493,6 +493,23 @@ def test_creating_a_share_warms_the_match_card(
     miss, ``render_card`` runs, and the poison fires.
     """
     import splitsmith.share_card_render as share_card_render_mod
+    import splitsmith.ui.share_og as share_og
+
+    # The warm runs a real Chromium launch on a worker thread and
+    # ``warm_match_card_bounded`` stops *waiting* for it after
+    # ``_WARM_TIMEOUT_S`` -- it cannot cancel it. On a busy machine the
+    # launch outruns the 3 s default, share creation returns with the
+    # cache still cold, and the fetch below lands on the poisoned
+    # ``render_card``. That made this test fail under parallel load while
+    # passing standalone and in CI.
+    #
+    # The subject here is *that* creating a share warms the card, not that
+    # it does so within any particular deadline. Raising the bound removes
+    # the race without weakening the assertion; the deadline behaviour is
+    # covered separately and explicitly by
+    # ``test_share_creation_does_not_wait_out_a_slow_warm``, which pins it
+    # from the other side with a 0.1 s bound.
+    monkeypatch.setattr(share_og, "_WARM_TIMEOUT_S", 60.0)
 
     token = _setup_shared_match(hosted_env, hosted_app_with_storage)
     client, _sender = hosted_app_with_storage

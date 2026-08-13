@@ -118,14 +118,23 @@ def test_sigterm_to_main_exits_clean(tmp_path: Path) -> None:
         text=True,
     )
     try:
-        banner_line = _read_banner(proc, deadline_s=15.0)
+        # Both numbers below are hang guards, not assertions. What this
+        # test is about is the exit code and the banner's contents; the
+        # deadlines exist only so a genuinely stuck subprocess fails the
+        # run instead of wedging it forever. A healthy boot emits the
+        # banner in about a second and the shutdown returns immediately,
+        # so a generous ceiling costs a passing run nothing -- while a
+        # tight one turns "this machine is busy" into "SIGTERM handling
+        # is broken", which is what kept happening (both locally under
+        # full-suite load and on CI, where it was raised from 10s once
+        # already for exactly this reason).
+        banner_line = _read_banner(proc, deadline_s=90.0)
         proc.terminate()
-        # Allow the same grace window the runtime does
-        # (``DEFAULT_SHUTDOWN_TIMEOUT_S = 30s`` in ``embedded.py``) plus
-        # a small buffer for the test runner's process-teardown
-        # bookkeeping. The previous 10s was tighter than the runtime's
-        # own drain allowance and tripped intermittently on slow CI.
-        rc = proc.wait(timeout=35.0)
+        # Still comfortably above the runtime's own drain allowance
+        # (``DEFAULT_SHUTDOWN_TIMEOUT_S = 30s`` in ``embedded.py``), so a
+        # real failure to drain is still caught -- it just is not
+        # confused with scheduling delay.
+        rc = proc.wait(timeout=120.0)
     finally:
         if proc.poll() is None:
             proc.kill()
