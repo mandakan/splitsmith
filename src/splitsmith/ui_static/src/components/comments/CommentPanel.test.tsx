@@ -18,6 +18,20 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
+// Real author_code values are 6-char uppercase Crockford base32 (see
+// AUTHOR_CODE_ALPHABET / AUTHOR_CODE_LEN in comment_identity.py) -- no
+// I/L/O/U. One per comment id used in this file, so distinct comment ids
+// never share a code by copy-paste accident: a future name-collision test
+// relies on fixtures keeping different authors apart even when the
+// display handle matches.
+const AUTHOR_CODES: Record<string, string> = {
+  c1: "A7K2M9",
+  c2: "B3P8QR",
+  a: "C5T4VW",
+  b: "D6X1YZ",
+  c: "E9N7JH",
+};
+
 function comment(over: Partial<import("@/lib/api").Comment> = {}) {
   return {
     id: "c1",
@@ -26,11 +40,7 @@ function comment(over: Partial<import("@/lib/api").Comment> = {}) {
     anchor_shot_id: null,
     author_kind: "handle" as const,
     author_handle: "Prone Popper 47",
-    // Derived from the comment id so distinct comment ids never share a
-    // code by copy-paste accident -- a future name-collision test relies
-    // on fixtures keeping different authors apart even when the display
-    // handle matches.
-    author_code: `auth-${over.id ?? "c1"}`,
+    author_code: AUTHOR_CODES[over.id ?? "c1"],
     body: "reload looks early",
     created_at: "2026-08-13T10:00:00Z",
     mine: false,
