@@ -142,6 +142,38 @@ it("redirects to the picker in local mode", () => {
   expect(container.querySelector("input")).toBeNull();
 });
 
+it("clears the saved indicator once the field changes after a successful save", async () => {
+  vi.mocked(api.updateMe).mockResolvedValue({
+    id: "u1",
+    email: "m@thias.se",
+    display_name: "Anders Berg",
+    is_admin: false,
+  });
+  renderPage();
+
+  fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "Anders Berg" } });
+  fireEvent.click(screen.getByRole("button", { name: /save/i }));
+  await screen.findByText("Saved");
+
+  // "Saved" describes the value that was submitted -- it must stop
+  // being true the instant the field diverges from it, not linger
+  // while the user types a name that was never sent.
+  fireEvent.change(screen.getByLabelText(/display name/i), { target: { value: "Anders Bergsson" } });
+  expect(screen.queryByText("Saved")).not.toBeInTheDocument();
+});
+
+it("announces the character limit to screen readers only once it is reached, not on every keystroke", () => {
+  renderPage();
+  const input = screen.getByLabelText(/display name/i);
+
+  fireEvent.change(input, { target: { value: "short name" } });
+  expect(screen.queryByText(/character limit reached/i)).not.toBeInTheDocument();
+
+  fireEvent.change(input, { target: { value: "x".repeat(60) } });
+  const liveRegion = screen.getByText(/60 character limit reached/i);
+  expect(liveRegion).toHaveAttribute("aria-live", "polite");
+});
+
 it("does not redirect while the deployment mode is still unresolved", () => {
   // mode defaults to "local" before /api/server/features settles; if the
   // redirect fired on that default, a hosted user on a slow first load

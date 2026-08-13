@@ -100,11 +100,29 @@ export function Account() {
               type="text"
               value={name}
               maxLength={DISPLAY_NAME_MAX}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value);
+                // "Saved" describes a prior submission; it stops being
+                // true the moment the field diverges from what was sent.
+                setSaved(false);
+              }}
               disabled={saving}
               placeholder="Leave blank for a generated name"
               className="rounded border border-rule bg-bg px-3 py-1.5 text-sm disabled:opacity-50"
             />
+            {/* Announces only at the cap, not on every keystroke -- a
+                counter that narrates each character is noise a
+                screen-reader user has to tune out, which teaches them to
+                ignore the region right when it matters (a paste that got
+                cut down). Worded for "you are at the limit" rather than
+                "truncated": reaching 60 by typing and reaching it by a
+                cut-down paste look identical from here, and the former
+                is not actually a truncation. */}
+            <span aria-live="polite" className="sr-only">
+              {name.length === DISPLAY_NAME_MAX
+                ? `${DISPLAY_NAME_MAX} character limit reached. Additional characters will not be saved.`
+                : ""}
+            </span>
             <p className="text-xs text-muted">
               The name shown on comments you post on other people's shared
               stages. Leave it blank and your comments get a generated name
