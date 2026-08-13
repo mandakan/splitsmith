@@ -102,3 +102,38 @@ def test_accents_are_not_silently_normalised() -> None:
     not ``langvagen``.
     """
     assert export_naming.slugify("Långvägen", fallback="stage") == "l-ngv-gen"
+
+
+def test_match_file_base_matches_what_the_exporter_writes() -> None:
+    """The writer used to interpolate this by hand (#629).
+
+    ``ui.match_exports`` built ``f"{slugify(name, fallback='match')}-match"``
+    inline, so a reader had no function to call and would have had to
+    interpolate it a second time -- the exact drift this module exists to
+    prevent, and the one that already cost a wrong stage filename once.
+    """
+    assert export_naming.match_file_base("Bromma 2026") == "bromma-2026-match"
+    assert export_naming.match_file_base("") == "match-match"
+
+
+def test_is_match_export_excludes_a_stage_named_the_match() -> None:
+    """The collision the ``stage<N>_`` test exists for.
+
+    A stage named "The Match" slugifies to ``stage1_the-match``, and that
+    stem ends in ``-match`` -- so a suffix check alone would offer that
+    stage's FCPXML as the *match's* FCPXML. Per-stage artefacts always
+    begin ``stage<N>_``, which is what disambiguates them.
+    """
+    assert export_naming.is_match_export("bromma-2026-match.fcpxml") is True
+    assert export_naming.is_match_export("bromma-2026-match.srt") is True
+    assert export_naming.is_match_export("bromma-2026-match.json") is True
+    assert export_naming.is_match_export("match-match.mp4") is True
+
+    stage_file = f"{export_naming.stage_file_base(1, 'The Match')}.fcpxml"
+    assert stage_file == "stage1_the-match.fcpxml"
+    assert export_naming.is_match_export(stage_file) is False
+
+    assert export_naming.is_match_export("stage1_stage-1_trimmed.mp4") is False
+    assert export_naming.is_match_export("stage12_el-presidente_splits.csv") is False
+    # No extension, and a name that merely contains the word.
+    assert export_naming.is_match_export("matchless.fcpxml") is False

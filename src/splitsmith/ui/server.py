@@ -12001,6 +12001,13 @@ def create_app(
         Returns one row per stage with audit + export status (shot count,
         pending candidates, file paths, last export time, ready-to-export
         flag). Pure stat: no detection, no rewriting of audit JSON.
+
+        ``match_exports`` lists the match-level deliverables the same way
+        (#629). Before this, the only thing that knew a match FCPXML
+        existed was the export job's own ``Job.result``, so a hosted user
+        who reloaded lost the download link to a file that was in R2 the
+        whole time -- the per-stage rows survived a reload and the match
+        output did not.
         """
         project = state.shooter_project(slug)
         # Hosted: audit docs live in state_docs, not on this container's
@@ -12012,8 +12019,15 @@ def create_app(
             doc, _ = state.load_audit(slug, stg.stage_number)
             if doc is not None:
                 audit_docs[stg.stage_number] = doc
-        rows = project.export_overview(state.shooter_root(slug), audit_docs=audit_docs)
-        return JSONResponse({"stages": [r.model_dump(mode="json") for r in rows]})
+        root = state.shooter_root(slug)
+        rows = project.export_overview(root, audit_docs=audit_docs)
+        match_files = project.match_export_files(root)
+        return JSONResponse(
+            {
+                "stages": [r.model_dump(mode="json") for r in rows],
+                "match_exports": [m.model_dump(mode="json") for m in match_files],
+            }
+        )
 
     @app.get("/api/shooters/{slug}/exports/file/{filename:path}")
     def download_export_file(slug: str, filename: str) -> FileResponse:
