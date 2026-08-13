@@ -193,7 +193,9 @@ export function Compare() {
     };
   }, [bundle, stageNumber]);
 
-  const orderedShooters = bundle?.shooters ?? [];
+  // Memoized: several effects depend on this list, and a fresh [] per
+  // render would re-arm them all on every render while bundle is null.
+  const orderedShooters = useMemo(() => bundle?.shooters ?? [], [bundle]);
   const playableShooters = orderedShooters.filter(
     (s) => s.video_ref && s.beep_offset_in_clip != null,
   );
