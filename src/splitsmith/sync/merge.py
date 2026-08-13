@@ -654,16 +654,6 @@ def _merge_shot_section(
     # it. The verdict never becomes actionable by being echoed back.
     remote_event_ids = _membership_event_ids(remote_for_merge.get("audit_events"))
 
-    def _remote_knows(shot_id: str) -> bool:
-        # ``remote_shots`` is unreachable through the only caller: ``_dropped``
-        # has already returned False for anything remote still carries. Kept so
-        # this reads as the total predicate its name claims, rather than as one
-        # that silently depends on its caller's guard -- but that means it
-        # cannot be pinned by a test, and an ablation of it stays green.
-        # ``base_shots`` and ``remote_event_ids`` are each load-bearing and each
-        # pinned by exactly one test (#846).
-        return shot_id in base_shots or shot_id in remote_shots or shot_id in remote_event_ids
-
     def _dropped(shot_id: str) -> bool:
         if verdicts.get(shot_id) is not False:
             return False
@@ -671,7 +661,26 @@ def _merge_shot_section(
         # own document contradicts the delete.
         if shot_id in remote_shots:
             return False
-        return _remote_knows(shot_id)
+        # ...and remote has to have known the shot at all, or the id is one
+        # this side minted and the other has simply never seen.
+        #
+        # These two clauses were a ``_remote_knows`` helper that also tested
+        # ``shot_id in remote_shots``. That third clause was not merely
+        # untested, it was unreachable: this function is its only caller,
+        # the guard directly above returns for anything remote still
+        # carries, ``remote_shots`` is bound once and never mutated, and
+        # nothing runs between the two tests. Naming it as a "total"
+        # predicate therefore advertised a totality nothing had verified
+        # and nothing could -- so a second caller written without that
+        # guard would have inherited a wrong answer. Inlined instead, which
+        # deletes the unreachable clause and the hazard together.
+        #
+        # Both surviving clauses are load-bearing, and each is pinned by
+        # exactly one test (#846): ablate ``base_shots`` and
+        # ``test_a_delete_verdict_acts_when_base_holds_the_shot_and_remote_dropped_it``
+        # fails; ablate ``remote_event_ids`` and
+        # ``test_promote_then_delete_round_trips_to_absent`` fails.
+        return shot_id in base_shots or shot_id in remote_event_ids
 
     # unkeyable and resolved are disjoint only when a shot's keyability is the
     # same on both sides. Local holding an id aside while remote's copy of
