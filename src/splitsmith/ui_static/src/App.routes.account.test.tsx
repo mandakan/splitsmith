@@ -67,9 +67,15 @@ async function renderAt(path: string) {
 }
 
 describe("/account route", () => {
+  // #867 final review M10: same bump as App.routes.test.tsx's beforeAll.
+  // This file is the third in the class paying the same route-tree
+  // import cost in this hook; the default 10s hookTimeout is what
+  // flaked under load once three files were competing for it. The
+  // import itself is bounded work done once; raise the budget rather
+  // than change what it does.
   beforeAll(async () => {
     await import("@/App");
-  });
+  }, 30_000);
 
   it("mounts the Account page for a signed-in hosted visitor, not a redirect", async () => {
     await renderAt("/account");
