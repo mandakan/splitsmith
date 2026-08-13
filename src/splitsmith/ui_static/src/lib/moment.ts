@@ -3,10 +3,16 @@
 // This module is the single serializer/parser for its URL form - the future
 // bookmark feature stores this same object and navigates via momentToSearch.
 
+/** Camera pick: plain index on Results stage links, per-shooter map on
+ *  Compare links. Index into the coach payload's videos[] (0 = primary,
+ *  never serialized - primary is the absence of v). */
+export type MomentCam = number | Record<string, number>;
+
 export type Moment = {
   t: number;
   cam?: string;
   who?: string[];
+  v?: MomentCam;
 };
 
 const T_LIMIT = 3600;
@@ -15,6 +21,8 @@ const T_LIMIT = 3600;
 // moment's roster so an unbounded who= can't pad an arbitrarily long
 // list into the URL (and, downstream, the OG card render).
 export const WHO_MAX = 12;
+
+export const V_INDEX_LIMIT = 32;
 
 export function momentToSearch(m: Moment): URLSearchParams {
   const params = new URLSearchParams();
@@ -26,6 +34,19 @@ export function momentToSearch(m: Moment): URLSearchParams {
   params.set("t", t.toFixed(2));
   if (m.cam) params.set("cam", m.cam);
   if (m.who && m.who.length > 0) params.set("who", m.who.slice(0, WHO_MAX).join(","));
+  if (m.v != null) {
+    if (typeof m.v === "number") {
+      if (Number.isInteger(m.v) && m.v > 0 && m.v <= V_INDEX_LIMIT) {
+        params.set("v", String(m.v));
+      }
+    } else {
+      const entries = Object.entries(m.v)
+        .filter(([slug, idx]) => slug && Number.isInteger(idx) && idx > 0 && idx <= V_INDEX_LIMIT)
+        .slice(0, WHO_MAX)
+        .map(([slug, idx]) => `${slug}:${idx}`);
+      if (entries.length > 0) params.set("v", entries.join(","));
+    }
+  }
   return params;
 }
 
@@ -44,6 +65,25 @@ export function parseMoment(params: URLSearchParams): Moment | null {
       .map((s) => s.trim())
       .filter(Boolean);
     if (slugs.length > 0) moment.who = slugs;
+  }
+  const v = params.get("v");
+  if (v) {
+    if (/^\d+$/.test(v)) {
+      const idx = Number(v);
+      if (idx > 0 && idx <= V_INDEX_LIMIT) moment.v = idx;
+    } else {
+      const map: Record<string, number> = {};
+      for (const token of v.split(",").slice(0, WHO_MAX)) {
+        const sep = token.indexOf(":");
+        if (sep <= 0) continue;
+        const slug = token.slice(0, sep).trim();
+        const rawIdx = token.slice(sep + 1);
+        if (!slug || !/^\d+$/.test(rawIdx)) continue;
+        const idx = Number(rawIdx);
+        if (idx > 0 && idx <= V_INDEX_LIMIT) map[slug] = idx;
+      }
+      if (Object.keys(map).length > 0) moment.v = map;
+    }
   }
   return moment;
 }

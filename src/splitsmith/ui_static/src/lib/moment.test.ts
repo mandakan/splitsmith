@@ -66,3 +66,40 @@ describe("resolveMomentView", () => {
     });
   });
 });
+
+describe("camera pick (v=)", () => {
+  it("round-trips a results-form camera index", () => {
+    const m = { t: 1.5, v: 2 };
+    expect(momentToSearch(m).get("v")).toBe("2");
+    expect(parseMoment(momentToSearch(m))).toEqual(m);
+  });
+
+  it("round-trips a compare-form per-shooter map", () => {
+    const m = { t: 1.5, v: { alice: 1, bob: 2 } };
+    expect(momentToSearch(m).get("v")).toBe("alice:1,bob:2");
+    expect(parseMoment(momentToSearch(m))).toEqual(m);
+  });
+
+  it("never serializes index 0 (primary = absence)", () => {
+    expect(momentToSearch({ t: 1, v: 0 }).get("v")).toBeNull();
+    expect(momentToSearch({ t: 1, v: { alice: 0 } }).get("v")).toBeNull();
+  });
+
+  it("drops junk v tokens and keeps the valid ones", () => {
+    expect(parseMoment(new URLSearchParams("t=1&v=abc"))).toEqual({ t: 1 });
+    expect(parseMoment(new URLSearchParams("t=1&v=-1"))).toEqual({ t: 1 });
+    expect(parseMoment(new URLSearchParams("t=1&v=999"))).toEqual({ t: 1 });
+    expect(parseMoment(new URLSearchParams("t=1&v=alice:1,ghost:,:2,bob:999"))).toEqual({
+      t: 1,
+      v: { alice: 1 },
+    });
+  });
+
+  it("caps the record form at WHO_MAX entries", () => {
+    const v = Object.fromEntries(
+      Array.from({ length: 15 }, (_, i) => [`s${i}`, 1]),
+    );
+    const parsed = parseMoment(momentToSearch({ t: 1, v }));
+    expect(Object.keys((parsed?.v ?? {}) as Record<string, number>)).toHaveLength(WHO_MAX);
+  });
+});
