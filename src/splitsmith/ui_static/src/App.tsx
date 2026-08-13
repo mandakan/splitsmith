@@ -50,6 +50,7 @@ import { Shooters } from "@/pages/Shooters";
 import { TakeOverview } from "@/pages/TakeOverview";
 import { PromoteReview } from "@/pages/PromoteReview";
 import { AdminWorkers } from "@/pages/AdminWorkers";
+import { Account } from "@/pages/Account";
 import { Results } from "@/pages/Results";
 import { ResultsStage } from "@/pages/ResultsStage";
 import { Review } from "@/pages/Review";
@@ -222,6 +223,11 @@ export function App() {
               account menu and an empty sidebar. They nest directly
               under RootLayout now (#550). */}
           <Route path="admin/workers" element={<AdminWorkers />} />
+          {/* Account settings (#867). Under RootLayout for the same
+              reason the admin surfaces are: server-wide, not
+              project-scoped. Hosted-only - the page itself redirects to
+              /pick in local mode. */}
+          <Route path="account" element={<Account />} />
           {/* Device-flow approval screen (#719). Under RootLayout so it
               carries the account chip -- the operator needs to see which
               account they are approving for. */}
