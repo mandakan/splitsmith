@@ -177,11 +177,11 @@ async def poll_device_token(body: DeviceTokenRequest, request: Request) -> Devic
         DeviceAccountInfo(
             id=result.account.id,
             email=result.account.email,
-            # Snapshot, not a live read: a display name set later through
-            # PATCH /api/me (#867) does not reach the desktop chip until
-            # the device is linked again. A sync-scoped token cannot read
-            # /api/me, so refreshing this would need a new route - out of
-            # scope.
+            # Live read, not a cache - this is where the account's current
+            # display_name crosses from DB state onto the wire. The desktop
+            # client is what caches this response (see server.py's
+            # get_device_status, ``prefs.hosted_account = ...``); staleness
+            # is a property of that cache, not of this read.
             display_name=result.account.display_name,
         )
         if result.account is not None

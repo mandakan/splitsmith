@@ -14751,6 +14751,11 @@ def create_app(
                 prefs.hosted_account = user_config.HostedAccountRef(
                     id=str(account.get("id", "")),
                     email=str(account.get("email", "")),
+                    # Snapshot, not a live read: a display name set later
+                    # through PATCH /api/me (#867) does not reach the
+                    # desktop chip until the device is linked again. A
+                    # sync-scoped token cannot read /api/me, so refreshing
+                    # this would need a new route - out of scope.
                     display_name=account.get("display_name"),
                     device_name=str(verdict.get("device_name") or socket.gethostname()),
                     linked_at=datetime.now(UTC),
