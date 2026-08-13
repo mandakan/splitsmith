@@ -3073,6 +3073,41 @@ def test_match_delete_reports_comments_in_its_summary(owner_client, seeded_comme
 
 The implementer fills `<match_id>` from the fixture and confirms the exact delete route path and response shape against `server.py` (search for `delete_match_cascade`).
 
+- [ ] **Step 1b: A docker-marked RLS test for `match_comments`**
+
+The whole feature rests on `user_id` being the match owner and RLS keeping
+tenants apart, but the suite is SQLite-backed and SQLite has no RLS. Every
+isolation test so far proves only that `CommentStore` filters explicitly - if
+someone later adds a query that forgets the filter, nothing in the default
+suite catches it. The policy itself has never been exercised by a test.
+
+`tests/test_hosted_docker_smoke.py` already runs against the compose Postgres
+and has `_psql_run(query, *, user=...)`, where `user="splitsmith_app"` is the
+non-superuser app role the API actually connects as (a superuser bypasses RLS;
+the app role does not). `tests/test_share_readonly_docker.py` is the closest
+precedent for a focused docker-marked security test. Add
+`tests/test_comments_rls_docker.py` in that shape, marked `@pytest.mark.docker`.
+
+Seed two owners' comments through the **superuser** (which bypasses RLS, which
+is exactly why seeding uses it), then assert as `splitsmith_app`:
+
+| Set-up | Expected |
+| --- | --- |
+| `SET app.user_id='own-A'` | sees only A's rows |
+| `SET app.user_id='own-B'` | sees only B's rows |
+| no `app.user_id` set at all | zero rows - the policy fails closed |
+| A `DELETE`s B's row by id | affects nothing; B still sees it |
+| A `INSERT`s a row with `user_id` = B | `new row violates row-level security policy` |
+
+All five were verified by hand against `postgres:16-alpine` with the migration
+applied **as `splitsmith_app`** (ownership matters: `FORCE ROW LEVEL SECURITY`
+is what makes the policy bind the table owner). This step turns that one-off
+into a test.
+
+Run with `uv run pytest -m docker -n0 tests/test_comments_rls_docker.py -q`.
+Per CLAUDE.md, `-n0` is required whenever a docker run spans more than one
+docker-marked file, because the compose fixtures use fixed container names.
+
 - [ ] **Step 2: Wire the purge into the cascade**
 
 In `src/splitsmith/ui/match_delete.py`, add a step between the existing steps 6 and 7 of `_delete_hosted` - after the state docs, before the registry row, so a failure leaves the match still resolvable and the operation retryable:
