@@ -363,6 +363,16 @@ export function Compare() {
     const view = resolveMomentView(moment, slugs);
     if (view.who) setVisibleSlugs(new Set(view.who));
     if (view.cam) setAudioSlug(view.cam);
+    if (moment.v && typeof moment.v === "object") {
+      const roster = new Set(bundle.shooters.map((s) => s.slug));
+      const picks: Record<string, number> = {};
+      for (const [slug, idx] of Object.entries(moment.v)) {
+        if (roster.has(slug)) picks[slug] = idx;
+      }
+      // Validity against the camera lists is enforced lazily by camIndexFor
+      // - the lists may still be loading when the moment applies.
+      if (Object.keys(picks).length > 0) setCamIndexBySlug((prev) => ({ ...prev, ...picks }));
+    }
     scrubTo(moment.t);
     // scrubTo writes currentTime immediately, but a video element that has
     // not reached HAVE_METADATA can drop that write - re-apply once per
@@ -417,7 +427,17 @@ export function Compare() {
     const who = playableShooters
       .filter((s) => visibleSlugs.has(s.slug))
       .map((s) => s.slug);
-    const moment = { t, cam: audioSlug ?? undefined, who };
+    const v: Record<string, number> = {};
+    for (const s of playableShooters) {
+      const idx = camIndexFor(s.slug);
+      if (idx > 0) v[s.slug] = idx;
+    }
+    const moment = {
+      t,
+      cam: audioSlug ?? undefined,
+      who,
+      ...(Object.keys(v).length > 0 ? { v } : {}),
+    };
     const link = shareUrl
       ? `${shareUrl}/compare/${stageNumber}?${momentToSearch(moment).toString()}`
       : `${window.location.origin}${momentHref(location.pathname, moment)}`;
@@ -437,6 +457,7 @@ export function Compare() {
     playableShooters,
     visibleSlugs,
     audioSlug,
+    camIndexFor,
     location.pathname,
     shareUrl,
     stageNumber,

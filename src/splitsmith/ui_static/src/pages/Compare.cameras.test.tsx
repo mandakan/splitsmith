@@ -121,4 +121,23 @@ describe("Compare per-shooter camera choice", () => {
     fireEvent.change(select, { target: { value: "0" } });
     expect(annaVideo().src).toContain("/trim/");
   });
+
+  it("applies a moment link's per-shooter camera picks", async () => {
+    renderCompare("/match/m1/compare/2?t=1.00&v=anna:1");
+    await screen.findByTestId("compare-page");
+    const select = await screen.findByRole("combobox", { name: /anna - camera/i });
+    await waitFor(() => expect((select as HTMLSelectElement).value).toBe("1"));
+  });
+
+  it("copies moment links with the current camera picks", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderCompare("/match/m1/compare/2");
+    await screen.findByTestId("compare-page");
+    const select = await screen.findByRole("combobox", { name: /anna - camera/i });
+    fireEvent.change(select, { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: /copy link/i }));
+    await waitFor(() => expect(writeText).toHaveBeenCalled());
+    expect(String(writeText.mock.calls[0][0])).toContain("v=anna%3A1");
+  });
 });
