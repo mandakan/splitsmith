@@ -999,6 +999,18 @@ class AuthBeginRequest(BaseModel):
     email: str
 
 
+class ShareCreateRequest(BaseModel):
+    """Body for minting a link.
+
+    ``scope`` is fixed for the token's whole life. There is deliberately
+    no route that changes it: an owner should be able to reason about a
+    link from the moment they send it, and a toggle would mean a link
+    already in someone's inbox could gain the ability to post.
+    """
+
+    scope: Literal["read", "comment"] = "read"
+
+
 class ShareInfo(BaseModel):
     """One share link as returned by the owner-management routes.
 
@@ -1010,6 +1022,7 @@ class ShareInfo(BaseModel):
     url: str
     created_at: datetime
     revoked_at: datetime | None
+    scope: str
 
 
 class ShareListResponse(BaseModel):
@@ -6628,13 +6641,14 @@ def create_app(
                     url=f"{state.public_base_url}/share/{s.token}",
                     created_at=s.created_at,
                     revoked_at=s.revoked_at,
+                    scope=s.scope,
                 )
                 for s in shares
             ]
         )
 
     @app.post("/api/match/shares", response_model=ShareInfo, status_code=201)
-    async def _create_match_share() -> ShareInfo:
+    async def _create_match_share(req: ShareCreateRequest = ShareCreateRequest()) -> ShareInfo:
         """Create a new share token for the current match. Returns 201."""
         if not _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
@@ -6644,7 +6658,7 @@ def create_app(
         store = state.share_tokens
         if store is None:
             raise HTTPException(status_code=500, detail="share store unavailable")
-        s = await store.create(mid)
+        s = await store.create(mid, scope=req.scope)
         # Best-effort, timeout-bounded: warm the match card cache so the
         # link the owner immediately pastes previews without a cold
         # Chromium render on first fetch. All of the "never cost the
@@ -6665,6 +6679,7 @@ def create_app(
             url=f"{state.public_base_url}/share/{s.token}",
             created_at=s.created_at,
             revoked_at=s.revoked_at,
+            scope=s.scope,
         )
 
     @app.delete("/api/match/shares/{share_id}", status_code=204)
@@ -6814,6 +6829,33 @@ def create_app(
         if not ok:
             raise HTTPException(status_code=404, detail="not found")
         return Response(status_code=204)
+
+    @app.delete("/api/match/comments")
+    async def delete_match_comments(
+        share_token_id: str | None = None,
+        author_key_hash: str | None = None,
+    ) -> dict[str, int]:
+        """Bulk moderation. Exactly one selector, because the two mean
+        very different things and a call with neither would read as
+        'delete everything' - which is not an action this offers."""
+        if (share_token_id is None) == (author_key_hash is None):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "one_selector_required",
+                    "message": "pass exactly one of share_token_id or author_key_hash",
+                },
+            )
+        store = state.comments
+        mid = current_match_id.get()
+        if store is None or mid is None:
+            raise HTTPException(status_code=404, detail="not found")
+        if share_token_id is not None:
+            deleted = await store.delete_by_share_token(mid, share_token_id)
+        else:
+            assert author_key_hash is not None
+            deleted = await store.delete_by_author_key_hash(mid, author_key_hash)
+        return {"deleted": deleted}
 
     # ----------------------------------------------------------------------
     # Match sync trigger/status (desktop-to-hosted sync MVP, #631 Task 9)
