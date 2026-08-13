@@ -2080,3 +2080,82 @@ def test_unassign_stage_videos_unknown_stage_is_a_noop(tmp_path: Path) -> None:
     project.init_placeholder_stages(2)
     assert project.unassign_stage_videos(99) == 0
     assert project.unassigned_videos == []
+
+
+def test_match_export_files_hosted_reads_storage_not_the_local_dir(tmp_path) -> None:
+    """#629: the match FCPXML lives in object storage and had no reader.
+
+    ``export_overview`` already surfaced every *per-stage* artefact from
+    storage, but nothing did the same for match-level output -- so the
+    only thing that knew it existed was the export job's own
+    ``Job.result``, and a hosted user who reloaded lost the download.
+    """
+    from splitsmith.match_project import MatchProject, StageEntry
+    from splitsmith.storage import FilesystemStorage
+
+    root = tmp_path / "shooters" / "me"
+    proj = MatchProject.init(root, name="Bromma 2026")
+    proj.stages = [StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=10.0)]
+    proj.save(root)
+
+    storage = FilesystemStorage(tmp_path / "s3")
+    scope = "matches/m1/shooters/me"
+    storage.write_bytes(f"{scope}/exports/bromma-2026-match.fcpxml", b"<fcpxml/>")
+    storage.write_bytes(f"{scope}/exports/bromma-2026-match.srt", b"1\n")
+    # A per-stage artefact must not be offered as a match deliverable.
+    storage.write_bytes(f"{scope}/exports/stage1_stage-1_trimmed.mp4", b"\x00")
+    proj.bind_storage(storage, scope=scope)
+
+    rows = proj.match_export_files(root)
+
+    assert sorted(r.filename for r in rows) == [
+        "bromma-2026-match.fcpxml",
+        "bromma-2026-match.srt",
+    ]
+    assert all(r.last_export_at is not None for r in rows)
+    assert not any(proj.exports_path(root).glob("*"))
+
+
+def test_match_export_files_finds_output_written_under_an_older_project_name(tmp_path) -> None:
+    """Recognition is by shape, not by rebuilding the name from
+    ``self.name``: the artefact encodes the ``project_name`` of the run
+    that wrote it, and the user may have renamed the project since. A
+    reader that rebuilt the expected name would hide the user's own file.
+    """
+    from splitsmith.match_project import MatchProject
+    from splitsmith.storage import FilesystemStorage
+
+    root = tmp_path / "shooters" / "me"
+    proj = MatchProject.init(root, name="Renamed Since")
+    proj.save(root)
+    storage = FilesystemStorage(tmp_path / "s3")
+    scope = "matches/m1/shooters/me"
+    storage.write_bytes(f"{scope}/exports/old-name-match.fcpxml", b"<fcpxml/>")
+    proj.bind_storage(storage, scope=scope)
+
+    assert [r.filename for r in proj.match_export_files(root)] == ["old-name-match.fcpxml"]
+
+
+def test_match_export_files_local_reads_the_exports_dir(tmp_path) -> None:
+    """Desktop has no bound storage, so the same call stats the disk."""
+    from splitsmith.match_project import MatchProject
+
+    root = tmp_path / "shooters" / "me"
+    proj = MatchProject.init(root, name="Bromma 2026")
+    proj.save(root)
+    exports = proj.exports_path(root)
+    exports.mkdir(parents=True, exist_ok=True)
+    (exports / "bromma-2026-match.fcpxml").write_text("<fcpxml/>", encoding="utf-8")
+    (exports / "stage1_stage-1_splits.csv").write_text("a,b\n", encoding="utf-8")
+
+    assert [r.filename for r in proj.match_export_files(root)] == ["bromma-2026-match.fcpxml"]
+
+
+def test_match_export_files_is_empty_when_nothing_has_been_exported(tmp_path) -> None:
+    """No exports dir at all is the first-run shape, not an error."""
+    from splitsmith.match_project import MatchProject
+
+    root = tmp_path / "shooters" / "me"
+    proj = MatchProject.init(root, name="Fresh")
+    proj.save(root)
+    assert proj.match_export_files(root) == []

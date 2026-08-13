@@ -40,7 +40,7 @@ from . import video_match
 from .async_bridge import run_sync
 from .automation import AutomationOverride
 from .config import BeepCandidate, StageData, StageRounds, VideoMatchConfig
-from .export_naming import stage_file_base
+from .export_naming import is_match_export, stage_file_base
 from .storage import Storage
 from .video_match import match_videos_to_stages
 
@@ -694,6 +694,20 @@ class SecondaryExportStatus(BaseModel):
     trim_present: bool
 
 
+class MatchExportFile(BaseModel):
+    """One match-level deliverable sitting in the project's ``exports/``.
+
+    Deliberately thinner than :class:`StageExportStatus`: this answers
+    "what can the user download right now", which is a listing, not a
+    status. The richer per-run history #629 also asks for (duration,
+    selected formats, anomaly count) is not derivable from a directory
+    listing and needs a record written at export time.
+    """
+
+    filename: str
+    last_export_at: datetime | None
+
+
 class StageExportStatus(BaseModel):
     """Per-stage audit + export status for the Analysis & Export overview.
 
@@ -1207,6 +1221,61 @@ class MatchProject(BaseModel):
             out.extend(s.videos)
         return out
 
+    def _stored_exports(self) -> dict[str, datetime | None] | None:
+        """``basename -> last_modified`` for the exports prefix in object
+        storage, or ``None`` when this project has no bound storage.
+
+        ``None`` means "ask the local disk", which is what desktop does;
+        an empty dict means "storage answered, and there is nothing
+        there". Callers must keep those apart -- collapsing them makes a
+        storage hiccup look like a project with no exports on desktop,
+        where the files are sitting right there.
+        """
+        storage = self._storage
+        scope = self._storage_scope
+        if storage is None or scope is None:
+            return None
+        try:
+            listing = storage.list(f"{scope}/exports/")
+            return {obj.path.rsplit("/", 1)[-1]: obj.last_modified for obj in listing}
+        except Exception:  # noqa: BLE001 -- a storage hiccup degrades to "no exports", not a 500
+            return {}
+
+    def match_export_files(self, root: Path) -> list[MatchExportFile]:
+        """Match-level deliverables that exist right now, newest first.
+
+        The per-stage half of this is :meth:`export_overview`, whose rows
+        already carry every stage artefact and its ``last_export_at``.
+        Match-level output had no equivalent reader, so the only thing
+        that knew a match FCPXML existed was the export job's own
+        ``Job.result`` -- which is in-session state. A hosted user who
+        reloaded lost the link to a file that was sitting in R2 the whole
+        time (#629).
+
+        Recognition is by :func:`export_naming.is_match_export` rather
+        than by rebuilding the name from ``self.name``: the artefact
+        encodes the ``project_name`` of the run that wrote it, which the
+        user may have changed since.
+        """
+        stored = self._stored_exports()
+        exports_dir = self.exports_path(root)
+        if stored is not None:
+            found = [(name, mtime) for name, mtime in stored.items() if is_match_export(name)]
+        elif exports_dir.is_dir():
+            found = [
+                (p.name, datetime.fromtimestamp(p.stat().st_mtime, tz=UTC))
+                for p in exports_dir.iterdir()
+                if p.is_file() and is_match_export(p.name)
+            ]
+        else:
+            found = []
+        rows = [MatchExportFile(filename=name, last_export_at=mtime) for name, mtime in found]
+        # Newest first, but the sort key has to tolerate a None mtime: a
+        # storage backend that omits last_modified would otherwise raise
+        # here rather than degrade.
+        rows.sort(key=lambda r: (r.last_export_at is not None, r.last_export_at, r.filename), reverse=True)
+        return rows
+
     def export_overview(
         self, root: Path, *, audit_docs: dict[int, dict] | None = None
     ) -> list[StageExportStatus]:
@@ -1232,16 +1301,7 @@ class MatchProject(BaseModel):
         # Hosted: one storage list of the exports prefix -> {basename:
         # last_modified}, so file-presence checks below are in-memory
         # membership tests rather than N storage HEADs per stage.
-        storage = self._storage
-        scope = self._storage_scope
-        stored_exports: dict[str, datetime | None] | None = None
-        if storage is not None and scope is not None:
-            stored_exports = {}
-            try:
-                for obj in storage.list(f"{scope}/exports/"):
-                    stored_exports[obj.path.rsplit("/", 1)[-1]] = obj.last_modified
-            except Exception:  # noqa: BLE001 -- a storage hiccup degrades to "no exports", not a 500
-                stored_exports = {}
+        stored_exports = self._stored_exports()
 
         def _present(p: Path) -> tuple[bool, datetime | None]:
             """(exists, last_modified) for an export deliverable -- from

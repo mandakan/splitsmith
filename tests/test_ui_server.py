@@ -9130,6 +9130,37 @@ def test_download_export_file_serves_local_and_guards_traversal(tmp_path: Path) 
     assert resp.status_code == 400
 
 
+def test_export_overview_lists_match_deliverables_for_download(tmp_path: Path) -> None:
+    """#629: the overview is what survives a reload, so the match-level
+    output has to be reachable through it.
+
+    The download route already served these files -- it pulls from object
+    storage on hosted -- but nothing told the client their names outside
+    the export job's own in-session ``result``. Per-stage artefacts must
+    not leak into this list: they have their own rows.
+    """
+    from splitsmith import match_model
+
+    root = tmp_path / "match"
+    app = _match_create_app(project_root=root, project_name="x")
+    client = _MatchClient(app)
+
+    exports = match_model.Match.shooter_root(root, "me") / "exports"
+    exports.mkdir(parents=True, exist_ok=True)
+    (exports / "bromma-2026-match.fcpxml").write_bytes(b"<fcpxml/>")
+    (exports / "bromma-2026-match.srt").write_bytes(b"1\n")
+    (exports / "stage1_one_trimmed.mp4").write_bytes(b"\x00")
+
+    body = client.get("/api/shooters/me/exports/overview").json()
+    assert sorted(m["filename"] for m in body["match_exports"]) == [
+        "bromma-2026-match.fcpxml",
+        "bromma-2026-match.srt",
+    ]
+    # Every name it hands back is one the download route actually serves.
+    for m in body["match_exports"]:
+        assert client.get(f"/api/shooters/me/exports/file/{m['filename']}").status_code == 200
+
+
 # ---------------------------------------------------------------------------
 # Regression: boot_retrigger lifespan registration
 # ---------------------------------------------------------------------------

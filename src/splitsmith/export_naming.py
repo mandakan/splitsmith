@@ -33,6 +33,9 @@ import re
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
 
+#: Every per-stage artefact starts with this -- see :func:`stage_file_base`.
+_STAGE_FILE_RE = re.compile(r"^stage\d+_")
+
 
 def slugify(name: str, *, fallback: str) -> str:
     """Filesystem-friendly slug: lowercase, ``[a-z0-9]`` runs joined by ``-``.
@@ -55,3 +58,41 @@ def stage_file_base(stage_number: int, stage_name: str) -> str:
     nobody thought to try.
     """
     return f"stage{stage_number}_{slugify(stage_name, fallback='stage')}"
+
+
+def match_file_base(project_name: str) -> str:
+    """The stem of every match-level export artefact.
+
+    ``ui.match_exports`` appends the output format's extension
+    (``.fcpxml`` / ``.xml`` / ``.mp4``) and the YouTube sidecar writer
+    appends ``.srt`` / ``.json`` to the same stem. Same contract as
+    :func:`stage_file_base`: the writer and every reader call this
+    instead of interpolating, so they cannot drift.
+
+    ``fallback='match'`` and not ``'stage'`` -- see the module docstring
+    for why that distinction is a parameter rather than unified away.
+    """
+    return f"{slugify(project_name, fallback='match')}-match"
+
+
+def is_match_export(filename: str) -> bool:
+    """Whether a basename in ``exports/`` is a match-level deliverable.
+
+    Readers that only have a directory listing -- no project name --
+    need this: the name a match export was written under encodes the
+    ``project_name`` *of that run*, which the caller may since have
+    changed, so comparing against ``match_file_base(project.name)``
+    would miss the user's own files.
+
+    The ``stage<N>_`` test is load-bearing, not belt-and-braces. A stage
+    literally named "Match" slugifies into
+    ``stage1_match_trimmed.mp4`` (harmless), but a stage named "The
+    Match" produces ``stage1_the-match.fcpxml``, whose stem *does* end
+    in ``-match``. Per-stage artefacts always begin ``stage<N>_`` --
+    :func:`stage_file_base` guarantees it -- so excluding them first is
+    what keeps that stage's FCPXML from being offered as the match's.
+    """
+    if _STAGE_FILE_RE.match(filename):
+        return False
+    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+    return stem.endswith("-match")

@@ -61,6 +61,7 @@ import {
   type OverlayCodec,
   type StageExportStatus,
 } from "@/lib/api";
+import { hostedDownloads as buildHostedDownloads } from "@/lib/exportDownloads";
 import { useDeploymentMode } from "@/lib/features";
 import { cn } from "@/lib/utils";
 
@@ -342,44 +343,17 @@ function ExportInner({ slug }: { slug: string }) {
     }
   }
 
-  // Hosted mode has no "Reveal in Finder": the worker that produced the
-  // bundle ran in a separate container. Surface the finished match FCPXML
-  // plus the per-stage media it references (trims + overlays + per-cam
-  // trims) as individual download links. Filenames are basenames under the
-  // project's exports/ dir; the download endpoint pulls them from object
-  // storage. Empty until a match export finishes (``result`` set).
+  // #629: every input to this is persistent -- see ``lib/exportDownloads``
+  // for why that matters. It used to be gated on the export job's
+  // in-session ``result`` and so emptied itself on every reload.
   const hostedDownloads = useMemo(() => {
-    if (deploymentMode !== "hosted" || result === null) return [];
-    const basename = (p: string) => p.split("/").pop() ?? p;
-    const sel = new Set(orderedSelection);
-    const out: { label: string; filename: string }[] = [
-      { label: "Match FCPXML", filename: basename(result.fcpxml_path) },
-    ];
-    for (const s of stages) {
-      if (!sel.has(s.stage_number)) continue;
-      if (s.lossless_trim_present && s.trimmed_video_path) {
-        out.push({
-          label: `Stage ${s.stage_number} trim`,
-          filename: basename(s.trimmed_video_path),
-        });
-      }
-      if (s.overlay_path) {
-        out.push({
-          label: `Stage ${s.stage_number} overlay`,
-          filename: basename(s.overlay_path),
-        });
-      }
-      for (const sec of s.secondaries) {
-        if (sec.trim_present && sec.trim_path) {
-          out.push({
-            label: `Stage ${s.stage_number} ${sec.label}`,
-            filename: basename(sec.trim_path),
-          });
-        }
-      }
-    }
-    return out;
-  }, [deploymentMode, result, stages, orderedSelection]);
+    if (deploymentMode !== "hosted") return [];
+    return buildHostedDownloads({
+      matchExports: overview?.match_exports ?? [],
+      stages,
+      selection: orderedSelection,
+    });
+  }, [deploymentMode, overview, stages, orderedSelection]);
 
   // Custom preset auto-sync.
   function selectPreset(next: PaddingPreset) {

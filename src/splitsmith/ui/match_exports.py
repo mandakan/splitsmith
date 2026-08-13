@@ -21,7 +21,7 @@ from typing import Literal
 from .. import composition, fcp7xml_render, fcpxml_gen, mp4_render, youtube_sidecar
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..config import OutputConfig
-from ..export_naming import slugify
+from ..export_naming import match_file_base
 
 PipLayout = Literal["stacked", "pip-corners"]
 # Issue #197. ``"fcpxml"`` writes a Final Cut Pro 1.10 timeline (current
@@ -279,7 +279,7 @@ def export_match(
 
     exports_dir.mkdir(parents=True, exist_ok=True)
     extension = _OUTPUT_EXTENSIONS[request.output_format]
-    output_path = exports_dir / f"{slugify(request.project_name, fallback='match')}-match{extension}"
+    output_path = exports_dir / f"{match_file_base(request.project_name)}{extension}"
     # Match export goes through the composition IR (issue #194). The bridge
     # renderer lowers back to ``generate_match_fcpxml`` for the FCPXML path
     # so output stays byte-identical to the pre-IR emitter when no extra

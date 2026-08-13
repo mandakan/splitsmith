@@ -754,8 +754,20 @@ export interface StageExportStatus {
   secondaries: SecondaryExportStatus[];
 }
 
+/** One match-level deliverable in the project's ``exports/``.
+ *
+ *  Separate from {@link StageExportStatus} because it answers a listing
+ *  question ("what can I download now"), not a status one. Persistent:
+ *  it comes from the exports directory (object storage in hosted mode),
+ *  so unlike the export job's ``result`` it survives a reload. */
+export interface MatchExportFile {
+  filename: string;
+  last_export_at: string | null;
+}
+
 export interface ExportOverview {
   stages: StageExportStatus[];
+  match_exports: MatchExportFile[];
 }
 
 /** Encoder for the alpha overlay MOV.
