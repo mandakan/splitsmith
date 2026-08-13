@@ -186,6 +186,50 @@ def test_first_comment_at_is_the_earliest(comment_token_client, owner_client) ->
     assert authors[0]["first_comment_at"][:19] == first["created_at"][:19]
 
 
+def test_comment_authors_does_not_see_another_match(
+    hosted_env: str, hosted_app, comment_token_client, owner_client
+) -> None:
+    """Containment: the aggregate is scoped by match_id (and, via the
+    tenant session, by the owner's user_id), but nothing in this file
+    proved it. Same owner, a second match, comments posted only to the
+    second match -- match A's response must never count or name any of
+    them."""
+    client, sender = hosted_app
+    mid_b = "signed-in-match-2"
+    seed_match(hosted_env, "owner@example.com", mid_b)
+    _seed_state_docs(hosted_env, "owner@example.com", mid_b, SLUG)
+    token_b = _mint_share_token(hosted_env, "owner@example.com", mid_b, scope="comment")
+
+    # Post to match A (the shared fixture's match) and to match B, using
+    # distinct author keys so a leak would show up as a second author
+    # (not just a bumped count on the one from match A).
+    share_client, token_a = comment_token_client
+    _post(share_client, token_a, key="a" * 64)
+    _post(share_client, token_a, key="a" * 64)
+    share_client.post(
+        f"/api/share/{token_b}/shooters/{SLUG}/stages/{STAGE}/comments",
+        json={"body": "match B only", "anchor_t": 1.0},
+        headers={AUTHOR_KEY_HEADER: "z" * 64},
+    )
+    share_client.post(
+        f"/api/share/{token_b}/shooters/{SLUG}/stages/{STAGE}/comments",
+        json={"body": "match B only, again", "anchor_t": 1.0},
+        headers={AUTHOR_KEY_HEADER: "z" * 64},
+    )
+    share_client.post(
+        f"/api/share/{token_b}/shooters/{SLUG}/stages/{STAGE}/comments",
+        json={"body": "match B only, a third", "anchor_t": 1.0},
+        headers={AUTHOR_KEY_HEADER: "z" * 64},
+    )
+
+    authors_a = owner_client.get(f"/api/matches/{MID}/match/comment-authors").json()["authors"]
+
+    # If match_id scoping were broken, this would report two authors and
+    # a total comment_count of 5 (2 from match A + 3 from match B).
+    assert len(authors_a) == 1
+    assert authors_a[0]["comment_count"] == 2
+
+
 def test_handles_are_ordered_oldest_first(
     hosted_env: str, hosted_app, comment_token_client, owner_client
 ) -> None:

@@ -442,25 +442,6 @@ def test_worker_runs_compute_job_end_to_end(hosted_stack: None) -> None:
     pytest.fail(f"worker did not finish compute job within 60s (last status: {status!r})")
 
 
-def _s3_object_exists(key: str) -> bool:
-    """True iff ``key`` exists in the compose MinIO uploads bucket."""
-    import boto3
-    from botocore.exceptions import ClientError
-
-    client = boto3.client(
-        "s3",
-        endpoint_url="http://localhost:9000",
-        region_name="us-east-1",
-        aws_access_key_id="splitsmith",
-        aws_secret_access_key="splitsmithsplitsmith",
-    )
-    try:
-        client.head_object(Bucket="splitsmith-uploads", Key=key)
-        return True
-    except ClientError:
-        return False
-
-
 def test_worker_resolves_match_cross_process(hosted_stack: None) -> None:
     """PR-delta proof: a match created through the API is resolvable by the
     *separate* worker container, with its metadata round-tripping via MinIO.
