@@ -76,6 +76,7 @@ def test_api_me_works_when_unbound() -> None:
 # below fails if a new route lands without an entry here.
 _ME_ROUTES_REQUIRING_AUTH: list[tuple[str, str, str]] = [
     ("GET", "/api/me", "/api/me"),
+    ("PATCH", "/api/me", "/api/me"),
     ("GET", "/api/me/jobs", "/api/me/jobs"),
     ("GET", "/api/me/jobs/{job_id}", "/api/me/jobs/does-not-exist"),
     ("POST", "/api/me/jobs/acknowledge-failures", "/api/me/jobs/acknowledge-failures"),

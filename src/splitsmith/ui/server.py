@@ -164,6 +164,7 @@ from ..config import (
     IntervalClassSource,
     StageRounds,
 )
+from ..display_name import normalize_display_name
 from ..export_naming import slugify, stage_file_base
 from ..fixture_schema import (
     AgcState,
@@ -4612,6 +4613,18 @@ class BindRecentProjectRequest(BaseModel):
 class ScoreboardImportRequest(BaseModel):
     data: dict[str, Any]
     overwrite: bool = False
+
+
+class UpdateMeRequest(BaseModel):
+    """Body for PATCH /api/me (#867).
+
+    ``display_name`` is required *and* nullable: an explicit ``null``
+    clears the name, and a body that omits the field is a 422 rather
+    than being read as a clear. With one field on the model the
+    distinction would otherwise be invisible.
+    """
+
+    display_name: str | None
 
 
 class DeleteProjectRequest(BaseModel):
@@ -10091,6 +10104,39 @@ def create_app(
         time; it is never stored on the user record itself.
         """
         return user.model_copy(update={"is_admin": user.email.lower() in state.admin_emails})
+
+    @app.patch("/api/me", response_model=User)
+    async def patch_me(req: UpdateMeRequest, user: User = Depends(get_current_user)) -> User:
+        """Update the signed-in account's profile. Hosted mode only.
+
+        Local mode 404s: ``LoopbackAuth``'s sentinel user has no
+        database row, and the magic-link routes 404 there for the same
+        reason. A sync-scoped desktop token never arrives here at all --
+        ``_auth_gate`` confines it to ``/api/sync/*``.
+
+        Normalization runs before the store opens a session, so an
+        invalid name is a 422 that touches nothing. A blank name stores
+        ``None``, which is what keeps #866's fallback invariant true:
+        an account with no name publishes a generated handle, never an
+        empty string.
+        """
+        store = state.profile
+        if store is None:
+            raise HTTPException(status_code=404, detail="not found")
+        try:
+            display_name = normalize_display_name(req.display_name)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "invalid_display_name", "message": str(exc)},
+            ) from exc
+        await store.set_display_name(display_name)
+        return user.model_copy(
+            update={
+                "display_name": display_name,
+                "is_admin": user.email.lower() in state.admin_emails,
+            }
+        )
 
     @app.get("/api/me/jobs", response_model=list[Job])
     async def list_jobs(user: User = Depends(get_current_user)) -> list[Job]:
