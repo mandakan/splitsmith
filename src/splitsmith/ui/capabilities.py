@@ -17,10 +17,12 @@ Capabilities:
   once shots carry a stable id and the sync merge unions their
   membership by it rather than by position.
 - ``share_manage``: the match/shares management routes.
-- ``comment_write``: posting and self-deleting a timestamped comment on
-  the anonymous share surface. Granted only by the ``comment`` share
-  scope - never by ``capabilities_for_origin``, because an authenticated
-  operator editing their own match has no use for it.
+- ``comment_write``: posting a timestamped comment (share surface,
+  ``comment`` scope only) and deleting one (share surface via the
+  ``comment`` scope, or an authenticated owner via ``capabilities_for_origin``
+  on ``desktop``/``hosted`` origin, moderating a comment someone else
+  posted through the same DELETE route). ``local`` origin never grants
+  it - there is no share surface, so nothing to moderate.
 """
 
 from __future__ import annotations
@@ -41,10 +43,12 @@ def capabilities_for_origin(origin: str | None) -> frozenset[str]:
     if origin == "desktop":
         # A mirror desktop still owns: review actions sync back, editing
         # stays on desktop. Share management is the point of exposing
-        # the mirror hosted-side.
-        return frozenset({REVIEW, SHARE_MANAGE})
+        # the mirror hosted-side. Comment moderation (the owner's own
+        # DELETE on a comment someone else posted) is the same kind of
+        # hosted-side-only action, so it stays here too.
+        return frozenset({REVIEW, SHARE_MANAGE, COMMENT_WRITE})
     if origin == "hosted":
-        return frozenset({EDIT, REVIEW, SHARE_MANAGE})
+        return frozenset({EDIT, REVIEW, SHARE_MANAGE, COMMENT_WRITE})
     # "local" and None (legacy bare-path local traffic): one operator,
     # full control, no share surface to manage.
     return frozenset({EDIT, REVIEW})
@@ -109,6 +113,16 @@ _REVIEW_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
+# The comment routes on the anonymous share surface. Mapped explicitly
+# rather than falling through to EDIT: a comment-scoped token grants only
+# COMMENT_WRITE, and an unmapped route would refuse with a 403 among
+# 404s - a discriminator that enumerates the write allowlist.
+_COMMENT_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("POST", re.compile(r"\Ashooters/[^/]+/stages/\d+/comments\Z")),
+    ("DELETE", re.compile(r"\Ashooters/[^/]+/stages/\d+/comments/[A-Za-z0-9]+\Z")),
+)
+
+
 def required_capability(method: str, rest: str) -> str | None:
     """Capability a request needs, or None for safe methods.
 
@@ -119,6 +133,9 @@ def required_capability(method: str, rest: str) -> str | None:
         return None
     if rest == "match/shares" or rest.startswith("match/shares/"):
         return SHARE_MANAGE
+    for allowed_method, pattern in _COMMENT_ROUTES:
+        if method == allowed_method and pattern.match(rest) is not None:
+            return COMMENT_WRITE
     for allowed_method, pattern in _REVIEW_ROUTES:
         if method == allowed_method and pattern.match(rest) is not None:
             return REVIEW

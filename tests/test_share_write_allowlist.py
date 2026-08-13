@@ -56,9 +56,22 @@ def test_write_pattern_rejects_traversal_and_extra_segments() -> None:
 
 
 def test_write_pattern_is_anchored_against_a_trailing_newline() -> None:
-    """_REVIEW_ROUTES documents why \\Z beats $ on an allow-list: plain $
-    also matches before one trailing newline, and the widened form grants
-    more than intended."""
+    """Under fullmatch() - how _share_alias actually calls this pattern -
+    a trailing $ and a trailing \\Z reject a trailing newline identically,
+    so asserting only fullmatch() behavior would not prove \\Z is doing
+    anything. The risk _REVIEW_ROUTES documents is a different call
+    convention: under .match() (not .fullmatch()), a plain $ accepts one
+    trailing newline and \\Z does not. Rebuild the pattern body with each
+    anchor and compare .match() results directly, so this pins the actual
+    reason \\Z is chosen rather than a fullmatch quirk that can't fail."""
     assert _SHARE_WRITE_PATH_RE.fullmatch(f"{COMMENTS}\n") is None
+
+    body = _SHARE_WRITE_PATH_RE.pattern.removeprefix(r"\A").removesuffix(r"\Z")
+    dollar_variant = re.compile(body + "$")
+    z_variant = re.compile(body + r"\Z")
+    trailing_newline = f"{COMMENTS}\n"
+    assert dollar_variant.match(trailing_newline) is not None, "the risk this test names"
+    assert z_variant.match(trailing_newline) is None
+
     assert _SHARE_WRITE_PATH_RE.pattern.endswith(r")\Z")
     assert _SHARE_WRITE_PATH_RE.flags & re.IGNORECASE == 0

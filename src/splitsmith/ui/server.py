@@ -1116,9 +1116,11 @@ _PUBLIC_API_PATHS: frozenset[str] = frozenset(
 )
 
 
-# GET-only path shapes reachable through /api/share/{token}/ - the entire
-# anonymous surface. Anything else under the prefix is a uniform 404. The
-# share middleware impersonates the owner's tenant for the request, so this
+# GET-only path shapes reachable through /api/share/{token}/ - the read
+# half of the anonymous surface. _SHARE_WRITE_PATH_RE below is the other
+# half, admitted through the same middleware for POST/DELETE. Anything
+# else under the prefix, on any method, is a uniform 404. The share
+# middleware impersonates the owner's tenant for the request, so this
 # whitelist is the containment boundary: extend it only with read-only,
 # match-scoped routes, and never let the client supply the match id. The
 # pattern is anchored (fullmatch) and case-sensitive by design.
@@ -6753,8 +6755,12 @@ def create_app(
             # #631 Task 6). One table decides both this 403 and the
             # ``capabilities`` payload field - see capabilities.py. On a
             # share request the set comes from the token's scope instead
-            # of the origin (#779); share traffic is GET-only at the
-            # share alias, so the gate is payload-only there today.
+            # of the origin (#779). Share traffic is no longer GET-only:
+            # a comment-scoped token's admitted POST/DELETE reach this
+            # gate too, and ``_COMMENT_ROUTES`` in capabilities.py maps
+            # them to COMMENT_WRITE - unmapped, they would refuse with a
+            # 403 that enumerates the write allowlist against the share
+            # alias's uniform 404s.
             if current_share_request.get():
                 from ..db.share_guard import current_share_scope
 
@@ -6823,9 +6829,13 @@ def create_app(
     #     here is in scope for the alias's RLS-scoped ownership check.
     #
     # Security invariants: the match id comes ONLY from the resolved token
-    # row (never the URL); every non-token / non-whitelisted / non-GET /
-    # local-mode case returns the same opaque 404 so unknown, revoked, and
-    # expired tokens are indistinguishable.
+    # row (never the URL); every non-token / non-whitelisted-shape /
+    # disallowed-method / local-mode / write-capability-missing case
+    # returns the same opaque 404, so unknown, revoked, and expired
+    # tokens - and a read-scoped token probing the write surface - are
+    # all indistinguishable. GET admits through _SHARE_PATH_RE; POST and
+    # DELETE admit only through the separate _SHARE_WRITE_PATH_RE, and
+    # only when the resolved token's scope is write-capable.
     @app.middleware("http")
     async def _share_alias(request, call_next):
         path = request.url.path

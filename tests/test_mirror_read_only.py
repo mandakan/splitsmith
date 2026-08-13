@@ -1286,15 +1286,20 @@ def test_payload_capabilities_match_guard(
     hosted_app: tuple[TestClient, _CapturingSender],
 ) -> None:
     """#756: the serialized set is the same one the guard enforces - a
-    mirror advertises review+share_manage, never edit."""
+    mirror advertises review+share_manage+comment_write, never edit.
+    comment_write joined the mirror's set in Task 5's fix round: the
+    owner moderates (DELETEs) a comment through the same route a
+    comment-scoped share token posts through, capabilities_for_origin's
+    "desktop" branch grants it for the same reason it already grants
+    share_manage."""
     client, sender = hosted_app
     login(client, sender, "owner@example.com")
     seed_mirror(client, "mirror-caps", "Caps Match")
 
     shooters = client.get(alias_url("mirror-caps", "match/shooters"))
     assert shooters.status_code == 200, shooters.text
-    assert shooters.json()["capabilities"] == ["review", "share_manage"]
+    assert shooters.json()["capabilities"] == ["comment_write", "review", "share_manage"]
 
     queue = client.get(alias_url("mirror-caps", "match/beep-queue"))
     assert queue.status_code == 200, queue.text
-    assert queue.json()["capabilities"] == ["review", "share_manage"]
+    assert queue.json()["capabilities"] == ["comment_write", "review", "share_manage"]
