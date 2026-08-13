@@ -111,7 +111,7 @@ def test_list_for_match_does_not_leak_across_users() -> None:
     assert rows == []
 
 
-# - resolve_share_token(): live token -> ResolvedShare(owner_user_id, match_id)
+# - resolve_share_token(): live token -> ResolvedShare(owner_user_id, match_id, share_token_id)
 def test_resolve_live_token_returns_resolved_share() -> None:
     sf, (uid,) = _engine_with_users("a@thias.se")
     store = ShareTokenStore(sf, user_id=uid)
@@ -120,6 +120,10 @@ def test_resolve_live_token_returns_resolved_share() -> None:
     assert isinstance(result, ResolvedShare)
     assert result.owner_user_id == uid
     assert result.match_id == "match-1"
+    # #6 (timestamped comments): the resolved share must surface the
+    # token row's own id, not just the raw token - a posted comment
+    # records this to attribute itself to the link it came through.
+    assert result.share_token_id == token.id
 
 
 # - resolve_share_token(): unknown token -> None

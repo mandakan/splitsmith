@@ -43,6 +43,11 @@ class ResolvedShare:
     owner_user_id: str
     match_id: str
     scope: str
+    # The token row's own id (not the raw token string). A posted comment
+    # records this so a later moderation pass can find "every comment
+    # left through this link" without also storing the raw token
+    # (comparable to a hashed session id, not a bearer credential).
+    share_token_id: str
 
 
 def _to_share_token(row: ShareTokenRow) -> ShareToken:
@@ -143,4 +148,6 @@ async def resolve_share_token(session_factory: async_sessionmaker, token: str) -
     if row.expires_at is not None:
         if _aware(row.expires_at) < datetime.now(UTC):
             return None
-    return ResolvedShare(owner_user_id=row.user_id, match_id=row.match_id, scope=row.scope)
+    return ResolvedShare(
+        owner_user_id=row.user_id, match_id=row.match_id, scope=row.scope, share_token_id=row.id
+    )

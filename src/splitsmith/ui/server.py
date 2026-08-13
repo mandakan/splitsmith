@@ -98,6 +98,7 @@ if TYPE_CHECKING:
     # Hosted-only; imported lazily at runtime inside _apply_hosted_mode_wiring
     # so local mode stays free of the db (procrastinate/psycopg) dependency.
     from ..db import PostgresMatchStore, ProjectStateStore
+    from ..db.comments import CommentStore
     from ..db.desktop_tokens import DesktopTokenRecord, DesktopTokenStore
     from ..db.device_auth import DeviceAuthStore
     from ..db.share_tokens import ResolvedShare, ShareTokenStore
@@ -151,6 +152,7 @@ from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
 from ..auth import AuthBackend, CompositeAuth, LoopbackAuth, User
+from ..comment_identity import MAX_AUTHOR_KEY_LEN, derive_handle, hash_author_key
 from ..compare import mp4_grid, project_loader
 from ..compute import ComputeBackend, LocalComputeBackend
 from ..config import (
@@ -203,6 +205,14 @@ from .capabilities import (
     capabilities_for_origin,
     required_capability,
     share_scope_capabilities,
+)
+from .comments import (
+    AUTHOR_KEY_HEADER,
+    STAGE_COMMENT_CAP,
+    CommentCreateRequest,
+    CommentListResponse,
+    CommentOut,
+    to_out,
 )
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
 from .jobs import (
@@ -1206,6 +1216,33 @@ def _no_project_error() -> HTTPException:
     )
 
 
+def _caller_author_key_hash(request: Request) -> str | None:
+    """Hashed author key from the request header, or None.
+
+    Optional on reads: a caller who sends none gets ``mine=False``
+    everywhere, which is right for a first-time reader.
+    """
+    raw = request.headers.get(AUTHOR_KEY_HEADER, "").strip()
+    if not raw or len(raw) > MAX_AUTHOR_KEY_LEN:
+        return None
+    return hash_author_key(raw)
+
+
+def _require_author_key(request: Request) -> str:
+    """Author key for a write. 422 rather than 404 when missing: the
+    caller already passed the scope gate, so an honest error is right."""
+    raw = request.headers.get(AUTHOR_KEY_HEADER, "").strip()
+    if not raw or len(raw) > MAX_AUTHOR_KEY_LEN:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "author_key_required",
+                "message": f"{AUTHOR_KEY_HEADER} must carry an opaque client key",
+            },
+        )
+    return raw
+
+
 # Per-request match root resolved by the ``/api/matches/{match_id}/...``
 # alias middleware (#353 Phase 3 PR C). When set, ``AppState.shooter_root``
 # reads from here instead of the process singleton -- which means two
@@ -1322,6 +1359,13 @@ class TenantContext:
     # store's own user_id filter is the real isolation boundary, but the
     # tenant factory is still the established construction pattern here.
     desktop_tokens: DesktopTokenStore | None
+    # Per-user public comment-thread store (timestamped comments). None in
+    # local mode; in hosted mode built per-request with the tenant factory.
+    # Unlike share_tokens and desktop_tokens directly above, match_comments
+    # IS under the tenant_isolation RLS policy (Task 1's migration) - so
+    # here the tenant factory is load-bearing, not merely the established
+    # pattern: it is what sets the ``app.user_id`` GUC the policy keys on.
+    comments: CommentStore | None
 
 
 # Per-request / per-job tenant resolved by the hosted-mode auth gate
@@ -1587,6 +1631,13 @@ class AppState:
         # hosted-only feature. Returns None when no tenant is pinned.
         tenant = current_tenant.get()
         return tenant.desktop_tokens if tenant is not None else None
+
+    @property
+    def comments(self) -> CommentStore | None:
+        # Local mode has no per-user comment store - public comments are a
+        # hosted-only feature. Returns None when no tenant is pinned.
+        tenant = current_tenant.get()
+        return tenant.comments if tenant is not None else None
 
     def build_tenant(self, user_id: str) -> TenantContext:
         """Build the :class:`TenantContext` for ``user_id`` (hosted mode).
@@ -5764,6 +5815,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         sessionmaker,
         tenant_session_factory,
     )
+    from ..db.comments import CommentStore
     from ..db.desktop_tokens import DesktopTokenAuth, DesktopTokenStore
     from ..db.device_auth import DeviceAuthStore
     from ..db.share_tokens import ShareTokenStore
@@ -5921,6 +5973,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             storage=_tenant_s3_storage(s3_client, s3_bucket, user_id),
             share_tokens=ShareTokenStore(tenant_factory, user_id=user_id),
             desktop_tokens=DesktopTokenStore(tenant_factory, user_id=user_id),
+            comments=CommentStore(tenant_factory, user_id=user_id),
         )
 
     state._build_tenant = _build_tenant
@@ -6570,6 +6623,114 @@ def create_app(
         return Response(status_code=204)
 
     # ----------------------------------------------------------------------
+    # Timestamped comments (public share surface, #comments)
+    # Reached via the /api/matches/{match_id}/... alias prefix, same as
+    # /api/match/shares - both the owner (authenticated) and an anonymous
+    # caller (through _share_alias's rewrite) hit the same three routes.
+    # ----------------------------------------------------------------------
+
+    @app.get(
+        "/api/shooters/{slug}/stages/{stage_number}/comments",
+        response_model=CommentListResponse,
+        # exclude_none: to_out sets author_key_hash/share_token_id to None
+        # for a non-owner_view caller rather than omitting them, so the
+        # anonymous-containment guarantee has to be enforced here at
+        # serialization time -- otherwise the key would still reach the
+        # wire as ``"author_key_hash": null``, which is a smaller leak
+        # (confirms the field's existence) but a leak.
+        response_model_exclude_none=True,
+    )
+    async def list_stage_comments(
+        slug: str,
+        stage_number: int,
+        request: Request,
+    ) -> CommentListResponse:
+        """The comment thread. Readable through any share scope, and by
+        the owner on their own routes."""
+        store = state.comments
+        mid = current_match_id.get()
+        if store is None or mid is None:
+            raise HTTPException(status_code=404, detail="not found")
+        caller_hash = _caller_author_key_hash(request)
+        owner_view = not current_share_request.get()
+        comments = await store.list_for_stage(mid, slug, stage_number)
+        return CommentListResponse(
+            comments=[to_out(c, author_key_hash=caller_hash, owner_view=owner_view) for c in comments]
+        )
+
+    @app.post(
+        "/api/shooters/{slug}/stages/{stage_number}/comments",
+        response_model=CommentOut,
+        status_code=201,
+        # Same rationale as list_stage_comments above: a POST's response is
+        # always owner_view=False, so it must not leak the two owner-only
+        # fields as explicit nulls either.
+        response_model_exclude_none=True,
+    )
+    async def create_stage_comment(
+        slug: str,
+        stage_number: int,
+        req: CommentCreateRequest,
+        request: Request,
+    ) -> CommentOut:
+        """Post a comment. Reachable only through a comment-scoped share
+        link: the write allowlist plus the scope gate in ``_share_alias``
+        are what admit this, and an owner posting on their own footage is
+        deliberately not a use case v1 serves."""
+        store = state.comments
+        mid = current_match_id.get()
+        share_token_id = getattr(request.state, "share_token_id", None)
+        if store is None or mid is None or share_token_id is None:
+            raise HTTPException(status_code=404, detail="not found")
+        author_key = _require_author_key(request)
+        if await store.count_for_stage(mid, slug, stage_number) >= STAGE_COMMENT_CAP:
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "comment_stage_cap", "message": "this stage has too many comments"},
+            )
+        created = await store.create(
+            match_id=mid,
+            slug=slug,
+            stage_number=stage_number,
+            anchor_t=req.anchor_t,
+            anchor_kind=req.anchor_kind,
+            anchor_shot_id=req.anchor_shot_id,
+            author_kind="handle",
+            author_user_id=None,
+            author_handle=derive_handle(author_key),
+            author_key_hash=hash_author_key(author_key),
+            share_token_id=share_token_id,
+            body=req.body,
+        )
+        return to_out(created, author_key_hash=created.author_key_hash, owner_view=False)
+
+    @app.delete(
+        "/api/shooters/{slug}/stages/{stage_number}/comments/{comment_id}",
+        status_code=204,
+    )
+    async def delete_stage_comment(
+        slug: str,
+        stage_number: int,
+        comment_id: str,
+        request: Request,
+    ) -> Response:
+        """Delete one comment. An anonymous caller may delete only their
+        own, matched on the hashed author key; the owner may delete any.
+        Both refusals are the same 404."""
+        store = state.comments
+        mid = current_match_id.get()
+        if store is None or mid is None:
+            raise HTTPException(status_code=404, detail="not found")
+        if current_share_request.get():
+            author_key = _require_author_key(request)
+            ok = await store.delete_own(comment_id, match_id=mid, author_key_hash=hash_author_key(author_key))
+        else:
+            ok = await store.delete_as_owner(comment_id, match_id=mid)
+        if not ok:
+            raise HTTPException(status_code=404, detail="not found")
+        return Response(status_code=204)
+
+    # ----------------------------------------------------------------------
     # Match sync trigger/status (desktop-to-hosted sync MVP, #631 Task 9)
     # Local-only: raise 404 in hosted mode (same inverse guard as the
     # settings routes above). Reached via the /api/matches/{match_id}/
@@ -6900,6 +7061,7 @@ def create_app(
         # path every route in _SHARE_PATH_RE (og.png included) is actually
         # registered under.
         request.state.share_token = token
+        request.state.share_token_id = resolved.share_token_id
         try:
             response = await call_next(request)
             # Uniform-404 seam: a live token whose underlying resource no
