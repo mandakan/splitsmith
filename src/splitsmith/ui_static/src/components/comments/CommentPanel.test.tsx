@@ -155,4 +155,17 @@ describe("CommentPanel", () => {
     renderPanel();
     expect(await screen.findByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
+
+  it("clears the retry banner and shows the new comment after a post that follows a failed load", async () => {
+    vi.mocked(api.listStageComments).mockRejectedValue(new Error("boom"));
+    vi.mocked(api.createStageComment).mockResolvedValue(comment({ id: "c2", body: "nice", mine: true }));
+    renderPanel();
+    await screen.findByRole("button", { name: /retry/i });
+
+    await userEvent.type(screen.getByRole("textbox", { name: /comment/i }), "nice");
+    await userEvent.click(screen.getByRole("button", { name: /post/i }));
+
+    expect(await screen.findByText("nice")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+  });
 });

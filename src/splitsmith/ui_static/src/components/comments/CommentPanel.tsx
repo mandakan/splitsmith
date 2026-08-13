@@ -123,6 +123,11 @@ export function CommentPanel({
         anchor_shot_id,
       });
       commitComments([created, ...(comments ?? [])]);
+      // A comment can post successfully even after the initial thread
+      // load failed (the compose box doesn't wait on that fetch) - clear
+      // the retry banner so the freshly-posted comment isn't hidden
+      // behind it. The render branch checks loadError before comments.
+      setLoadError(null);
       setBody("");
     } catch (e) {
       setPostError(apiErrorText(e, POST_FAILED_FALLBACK));

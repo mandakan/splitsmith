@@ -7,6 +7,7 @@ import type {
   CoachIntervalClass,
   CoachShot,
   CoachStageResponse,
+  MatchCapability,
   ShooterListEntry,
   StageStatus,
 } from "@/lib/api";
@@ -106,7 +107,12 @@ function Shell({ ctx }: { ctx: MatchShellOutletContext }) {
   return <Outlet context={ctx} />;
 }
 
-function renderStage(path: string, shooters: ShooterListEntry[], shots: CoachShot[] = []) {
+function renderStage(
+  path: string,
+  shooters: ShooterListEntry[],
+  shots: CoachShot[] = [],
+  capabilities: MatchCapability[] | null = null,
+) {
   vi.mocked(api.getStageCoach).mockResolvedValue(makeCoach(shots));
   const ctx: MatchShellOutletContext = {
     project: null,
@@ -114,7 +120,7 @@ function renderStage(path: string, shooters: ShooterListEntry[], shots: CoachSho
     shooters,
     refresh: vi.fn(),
     origin: null,
-    capabilities: null,
+    capabilities,
   };
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -334,5 +340,22 @@ describe("ResultsStage reclassify flow", () => {
       "Could not save the change - check the connection and retry.",
     );
     expect(alert).not.toHaveTextContent("TypeError");
+  });
+});
+
+describe("ResultsStage comment gating", () => {
+  // #756-family gate: canComment must come from the capability set the
+  // outlet context carries (the same field Home/Shooters capability
+  // gating reads), never from the URL shape. These drive that field
+  // directly, mirroring Home.capabilities.test.tsx / Shooters.capabilities.test.tsx.
+  it("shows the compose control when capabilities include comment_write", async () => {
+    renderStage("/match/m1/results/anna/2", SOLO, [], ["review", "comment_write"]);
+    expect(await screen.findByRole("textbox", { name: /comment/i })).toBeInTheDocument();
+  });
+
+  it("hides the compose control when capabilities lack comment_write", async () => {
+    renderStage("/match/m1/results/anna/2", SOLO, [], ["review", "share_manage"]);
+    await screen.findByText("Anna");
+    expect(screen.queryByRole("textbox", { name: /comment/i })).not.toBeInTheDocument();
   });
 });

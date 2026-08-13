@@ -472,11 +472,15 @@ export function ResultsPlayer({
             merge with the moment diamond or the shot dots - a triangle
             "flag" shape, distinct from both, in the one hue (manual
             violet) unused elsewhere on this bar. Visual-only echo of the
-            thread below; the thread rows are the interactive surface. */}
+            thread below (the thread rows are the interactive surface),
+            but still carries an accessible label - shape and color only
+            distinguish it for sighted users, matching the moment
+            marker's role="img" + aria-label idiom immediately above. */}
         {commentTimes?.map((t, i) => (
           <span
             key={i}
-            aria-hidden
+            role="img"
+            aria-label={`Comment at ${(t - beepTime).toFixed(2)}s`}
             className="pointer-events-none absolute bottom-full mb-1 size-2 -translate-x-1/2 bg-manual shadow-[0_0_4px_var(--color-manual-glow)]"
             style={{
               left: `${pct(t)}%`,
