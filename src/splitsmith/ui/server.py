@@ -213,6 +213,7 @@ from .comments import (
     CommentListResponse,
     CommentOut,
     CommentOwnerListResponse,
+    CommentRateLimiter,
     to_out,
 )
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
@@ -6690,6 +6691,12 @@ def create_app(
     # caller (through _share_alias's rewrite) hit the same three routes.
     # ----------------------------------------------------------------------
 
+    # Constructed once per app, not per request: a per-request limiter
+    # would reset on every call and limit nothing. Each test builds a
+    # fresh app (see hosted_app in tests/hosted_helpers.py), which is
+    # what keeps rate-limit state from leaking between test cases.
+    _comment_limiter = CommentRateLimiter()
+
     @app.get(
         "/api/shooters/{slug}/stages/{stage_number}/comments",
         # No single response_model: an owner_view caller gets
@@ -6749,6 +6756,11 @@ def create_app(
             raise HTTPException(status_code=404, detail="not found")
         _require_comment_scope(state, slug, stage_number)
         author_key = _require_author_key(request)
+        if not _comment_limiter.allow(hash_author_key(author_key), now=time.monotonic()):
+            raise HTTPException(
+                status_code=429,
+                detail={"code": "comment_rate_limited", "message": "too many comments, slow down"},
+            )
         if await store.count_for_stage(mid, slug, stage_number) >= STAGE_COMMENT_CAP:
             raise HTTPException(
                 status_code=429,

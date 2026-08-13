@@ -9,6 +9,7 @@ and the response projection.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from datetime import datetime
 from typing import TYPE_CHECKING, Final, Literal
 
@@ -177,3 +178,40 @@ def to_out(comment: Comment, *, author_key_hash: str | None, owner_view: bool) -
         created_at=comment.created_at,
         mine=mine,
     )
+
+
+class CommentRateLimiter:
+    """Sliding-window comment limiter keyed by hashed author key.
+
+    In-process and per-replica by design. This is a spam speed bump, not
+    a security control - the security properties are the scope gate and
+    the allowlist. A shared counter would mean Redis, which is a new
+    dependency, and the thing it would buy (exact limits across
+    replicas) is not worth that on a personal tool's share surface.
+
+    ``max_keys`` bounds the table so an attacker rotating author keys
+    turns a spam control into a bigger table rather than a memory leak;
+    the oldest entries are evicted first.
+    """
+
+    def __init__(self, *, limit: int = 5, window_s: float = 60.0, max_keys: int = 10_000) -> None:
+        self._limit = limit
+        self._window_s = window_s
+        self._max_keys = max_keys
+        self._hits: OrderedDict[str, list[float]] = OrderedDict()
+
+    def allow(self, key: str, *, now: float) -> bool:
+        stamps = [t for t in self._hits.get(key, ()) if now - t < self._window_s]
+        if len(stamps) >= self._limit:
+            self._hits[key] = stamps
+            self._hits.move_to_end(key)
+            return False
+        stamps.append(now)
+        self._hits[key] = stamps
+        self._hits.move_to_end(key)
+        while len(self._hits) > self._max_keys:
+            self._hits.popitem(last=False)
+        return True
+
+    def size(self) -> int:
+        return len(self._hits)
