@@ -86,14 +86,15 @@ async function renderAtStrict(path: string) {
 }
 
 describe("AuthGate device-flow stash (hosted mode)", () => {
-  // Same warm-up as App.routes.test.tsx: ``@/App`` pulls in the whole
-  // route tree, and paying that transform cost inside a hook (10s
-  // hookTimeout) rather than the first ``it`` (5s testTimeout) keeps this
-  // file from flaking under xdist load, where the first test otherwise
-  // eats a cold-start tax the rest never pay.
+  // #867 final review M10: same bump as App.routes.test.tsx's beforeAll.
+  // This file is the fourth in the class paying the same route-tree
+  // import cost in this hook; the default 10s hookTimeout is what
+  // flaked under load once multiple files were competing for it. The
+  // import itself is bounded work done once; raise the budget rather
+  // than change what it does.
   beforeAll(async () => {
     await import("@/App");
-  });
+  }, 30_000);
 
   beforeEach(() => {
     sessionStorage.clear();
