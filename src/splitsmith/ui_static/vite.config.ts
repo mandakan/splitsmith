@@ -54,6 +54,19 @@ export default defineConfig({
     // ceiling, and a too-high budget only costs latency on a report
     // nobody is waiting for.
     //
+    // Re-measured after #895 dropped MobileAudit's waveform fixture from
+    // 8192 bins to 440 in twelve of its thirteen tests, since that is the
+    // test the 6573 ms came from. Three more loaded full runs, same day,
+    // 107 files / 621 tests:
+    //
+    //   worst test  5518 ms  App.routes.modegate, the in-test @/App import
+    //   MobileAudit worst  2758 ms  the one test still rendering the cap
+    //
+    // 4x that is 25s, so 30s stays: it is above the derived floor, the
+    // measurements come from one box and not from CI, and lowering a
+    // budget that is not firing buys nothing but flake risk. The worst
+    // case is now the route-tree import -- #894's subject, not a fixture.
+    //
     // Deliberately NOT scoped to the route files, which is where this
     // change started. Those six await `import("@/App")` and pull ~30
     // eagerly-imported page modules through vite's transform (~2s each,

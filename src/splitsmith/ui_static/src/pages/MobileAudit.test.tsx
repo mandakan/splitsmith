@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { DEFAULT_ROWS } from "@/components/audit/mobile/WrappedWaveform";
 import type { StageAudit } from "@/lib/api";
 import { MobileAudit } from "@/pages/MobileAudit";
 
@@ -74,6 +75,22 @@ const projectWithVideo = () => ({
   ],
 });
 
+// WrappedWaveform maps one SVG node per peak bin, so render cost is linear in
+// bins. Only the cap test needs the production PEAKS_BINS value; every other
+// test renders the same component and asserts nothing about bin geometry, so
+// it gets a small fixture (11 rows x 40 bins).
+const PEAKS_CAP = 8192;
+const PEAKS_SMALL = 440;
+
+const peaksResult = (bins: number) => ({
+  duration: 22,
+  sample_rate: 48000,
+  bins,
+  peaks: Array.from({ length: bins }, () => 0.4),
+  beep_time: 1.0,
+  trimmed: true,
+});
+
 const apiMock = vi.hoisted(() => ({
   getStageAudit: vi.fn(),
   getStagePeaks: vi.fn(),
@@ -100,22 +117,19 @@ beforeEach(() => {
   vi.clearAllMocks();
   playback.state.playhead = 0;
   apiMock.getStageAudit.mockResolvedValue(doc());
-  apiMock.getStagePeaks.mockResolvedValue({
-    duration: 22,
-    sample_rate: 48000,
-    bins: 8192,
-    peaks: Array.from({ length: 8192 }, () => 0.4),
-    beep_time: 1.0,
-    trimmed: true,
-  });
+  apiMock.getStagePeaks.mockResolvedValue(peaksResult(PEAKS_SMALL));
   apiMock.saveStageAudit.mockImplementation(async (_s: string, _n: number, p: StageAudit) => p);
 });
 
 describe("MobileAudit", () => {
   it("requests peaks at the 8192-bin cap and renders the row stack", async () => {
+    // The one test that renders a full-cap response: it both asserts the
+    // requested bin count and proves the row stack survives 8192 bins.
+    apiMock.getStagePeaks.mockResolvedValue(peaksResult(PEAKS_CAP));
     renderPage();
     await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
-    expect(apiMock.getStagePeaks).toHaveBeenCalledWith("alice", 3, 8192);
+    expect(apiMock.getStagePeaks).toHaveBeenCalledWith("alice", 3, PEAKS_CAP);
+    expect(screen.getAllByTestId("wave-row")).toHaveLength(DEFAULT_ROWS);
   });
 
   it("shows the empty state when there is no audit doc", async () => {
@@ -239,14 +253,7 @@ describe("MobileAudit", () => {
     // processed.trim is false here; peaksResult.trimmed (below) says true -
     // the peaks flag must win.
     ctx.value = { ...ctx.value, project: projectWithVideo() };
-    apiMock.getStagePeaks.mockResolvedValue({
-      duration: 22,
-      sample_rate: 48000,
-      bins: 8192,
-      peaks: Array.from({ length: 8192 }, () => 0.4),
-      beep_time: 1.0,
-      trimmed: true,
-    });
+    apiMock.getStagePeaks.mockResolvedValue({ ...peaksResult(PEAKS_SMALL), trimmed: true });
     playback.state.playhead = 2.0; // on cand-1, a kept shot -> Video button renders
     renderPage();
     await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
