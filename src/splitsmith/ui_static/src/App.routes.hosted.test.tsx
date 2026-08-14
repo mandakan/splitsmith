@@ -86,15 +86,9 @@ async function renderAtStrict(path: string) {
 }
 
 describe("AuthGate device-flow stash (hosted mode)", () => {
-  // #867 final review M10: same bump as App.routes.test.tsx's beforeAll.
-  // This file is the fourth in the class paying the same route-tree
-  // import cost in this hook; the default 10s hookTimeout is what
-  // flaked under load once multiple files were competing for it. The
-  // import itself is bounded work done once; raise the budget rather
-  // than change what it does.
   beforeAll(async () => {
     await import("@/App");
-  }, 30_000);
+  });
 
   beforeEach(() => {
     sessionStorage.clear();

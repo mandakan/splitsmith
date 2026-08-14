@@ -26,8 +26,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *  wall-clock-bound in two ways and it failed on a loaded machine every
  *  time (#851): the spinner had to be *observed* inside that 200 ms
  *  window, and the dynamic `import("@/App")` below had to finish inside
- *  vitest's 5 s per-test budget. Neither is a property of the code under
- *  test.
+ *  vitest's 5 s per-test budget (now the suite-wide budget in
+ *  vite.config.ts). Neither is a property of the code under test.
  *
  *  Holding the promise open until the test resolves it is also a
  *  stronger assertion than a delay was. "Long enough that the pre-fix
@@ -102,30 +102,21 @@ describe("AuthGate mode-resolution gate (#734)", () => {
     sessionStorage.clear();
   });
 
-  // The generous per-test budget is for the dynamic `import("@/App")`
-  // below, which pulls the whole route tree through vite's transform. On
-  // a machine with other work on it that alone can exceed vitest's 5 s
-  // default -- the actual #851 failure. Nothing here waits on a clock, so
-  // a raised ceiling costs nothing when the machine is idle.
-  it(
-    "holds the route tree on standby until /api/server/features resolves",
-    { timeout: 30_000 },
-    async () => {
-      window.history.pushState({}, "", "/pick");
-      const { App } = await import("@/App");
-      render(<App />);
+  it("holds the route tree on standby until /api/server/features resolves", async () => {
+    window.history.pushState({}, "", "/pick");
+    const { App } = await import("@/App");
+    render(<App />);
 
-      // While the mode is unresolved the tree must not mount: Pick's own
-      // data fetch is the observable proxy for "the tree mounted". The
-      // mode cannot resolve here -- nothing has released the gate -- so
-      // this is a statement about the gate, not about timing.
-      expect(await screen.findByRole("status", { name: /loading/i })).toBeInTheDocument();
-      expect(api.getRecentProjectsDetail).not.toHaveBeenCalled();
+    // While the mode is unresolved the tree must not mount: Pick's own
+    // data fetch is the observable proxy for "the tree mounted". The
+    // mode cannot resolve here -- nothing has released the gate -- so
+    // this is a statement about the gate, not about timing.
+    expect(await screen.findByRole("status", { name: /loading/i })).toBeInTheDocument();
+    expect(api.getRecentProjectsDetail).not.toHaveBeenCalled();
 
-      featuresGate.release({ lab: false, mode: "local" });
+    featuresGate.release({ lab: false, mode: "local" });
 
-      await waitFor(() => expect(api.getRecentProjectsDetail).toHaveBeenCalled());
-      expect(screen.queryByRole("status", { name: /loading/i })).not.toBeInTheDocument();
-    },
-  );
+    await waitFor(() => expect(api.getRecentProjectsDetail).toHaveBeenCalled());
+    expect(screen.queryByRole("status", { name: /loading/i })).not.toBeInTheDocument();
+  });
 });
