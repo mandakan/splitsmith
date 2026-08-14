@@ -52,12 +52,14 @@ class _FakeHosted:
         self.polls = 0
         self.revokes = 0
         self.built_against: list[str] = []
+        self.built_kwargs: list[dict] = []
         self.whoami_calls = 0
         # dict | None picks the "not set" default (empty body); anything
         # else (list, str, ...) scripts a 200 whose body is not the shape
         # SyncWhoAmIResponse declares (#877 review).
         self.whoami_payload: dict | list | str | None = None
         self.whoami_status = 200
+        self.whoami_auth: list[str | None] = []
         # Fires while the refresh is parked in the threadpool, i.e. the
         # window in which another writer can touch config.yaml (#877
         # review).
@@ -87,6 +89,14 @@ class _FakeHosted:
             return httpx.Response(self.revoke_status, json={"revoked": True})
         if path == "/api/sync/whoami":
             self.whoami_calls += 1
+            self.whoami_auth.append(request.headers.get("authorization"))
+            # The route is authenticated by the desktop token; a refresh
+            # that stopped sending it would 401 in production and degrade
+            # silently to the cached snapshot -- #877's own bug, back and
+            # invisible unless the double insists on the credential.
+            assert (
+                self.whoami_auth[-1] == "Bearer desktop-token"
+            ), f"whoami reached the hosted side with no bearer: {self.whoami_auth[-1]!r}"
             if self.whoami_hook is not None:
                 self.whoami_hook()
             if self.whoami_status != 200:
@@ -99,6 +109,7 @@ class _FakeHosted:
 def _install_fake(monkeypatch, fake: _FakeHosted) -> None:
     def _build(base_url: str, *, token: str | None = None, timeout: float = 30.0) -> HostedSyncClient:
         fake.built_against.append(base_url)
+        fake.built_kwargs.append({"token": token, "timeout": timeout})
         return HostedSyncClient(
             http=httpx.Client(
                 base_url=base_url,
@@ -610,6 +621,11 @@ def _link_account(
     written straight into config.yaml the way a hand-edited file would -
     ``GlobalPrefs.hosted_base_url`` is a bare ``str`` with no format
     validation anywhere.
+
+    The double is built with the ``token`` the route passes, as a real
+    ``_build_device_client`` does, and records every kwarg: a fixture
+    that drops them cannot see a refresh lose its credential or its
+    timeout (#877 review).
     """
     monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
     prefs = user_config.load_global_prefs()
@@ -624,13 +640,7 @@ def _link_account(
     )
     user_config.save_global_prefs(prefs)
     client = _local_app(tmp_path)
-    monkeypatch.setattr(
-        server_mod,
-        "_build_device_client",
-        lambda base_url, **kw: HostedSyncClient(
-            http=httpx.Client(base_url=base_url, transport=httpx.MockTransport(hosted.handle))
-        ),
-    )
+    _install_fake(monkeypatch, hosted)
     return client
 
 
@@ -640,6 +650,20 @@ def test_settings_picks_up_a_display_name_set_on_the_web(tmp_path: Path, monkeyp
     client = _link_account(tmp_path, monkeypatch, hosted)
 
     body = client.get("/api/settings/hosted-sync").json()
+
+    # Asserted first, and separately from the outcome: the route is
+    # authenticated, so a refresh that stopped sending the bearer would
+    # 401 in production and the broad except would degrade silently to
+    # the cached snapshot -- #877 itself, back. Left to the outcome
+    # assertion alone, the only symptom is a display_name that stayed
+    # None, which reads as a dozen other things (#877 review).
+    assert hosted.whoami_auth == ["Bearer desktop-token"]
+    # ...and it sits in front of a UI paint, so it uses the short budget
+    # rather than the 30s the device-flow calls take.
+    assert hosted.built_kwargs == [
+        {"token": "desktop-token", "timeout": server_mod.HOSTED_ACCOUNT_REFRESH_TIMEOUT_S}
+    ]
+    assert server_mod.HOSTED_ACCOUNT_REFRESH_TIMEOUT_S == 5.0
 
     assert body["account"]["display_name"] == "Mathias A"
     assert hosted.whoami_calls == 1
@@ -723,13 +747,7 @@ def test_an_unlinked_install_makes_no_upstream_call(tmp_path: Path, monkeypatch)
     hosted = _FakeHosted([])
     monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
     client = _local_app(tmp_path)
-    monkeypatch.setattr(
-        server_mod,
-        "_build_device_client",
-        lambda base_url, **kw: HostedSyncClient(
-            http=httpx.Client(base_url=base_url, transport=httpx.MockTransport(hosted.handle))
-        ),
-    )
+    _install_fake(monkeypatch, hosted)
 
     assert client.get("/api/settings/hosted-sync").json()["account"] is None
     assert hosted.whoami_calls == 0
