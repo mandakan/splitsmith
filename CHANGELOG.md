@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.31.0](https://github.com/mandakan/splitsmith/compare/v0.30.0...v0.31.0) (2026-08-14)
+
+
+### Features
+
+* pin camera streams to the measured clip kind ([#874](https://github.com/mandakan/splitsmith/issues/874)) ([0267be8](https://github.com/mandakan/splitsmith/commit/0267be8f725038324fa2b2cdba5bc0424b9ad507))
+* **ui:** mobile audit screen (mobile audit design, step 6) ([6abcd80](https://github.com/mandakan/splitsmith/commit/6abcd80b8a2cb0078f29ab7f7b1e0b1acc586a91))
+
+
+### Bug Fixes
+
+* **ui:** video kind from peaks flag, dirty-guard on back, guarded 409 reload ([54f402d](https://github.com/mandakan/splitsmith/commit/54f402d2ccbf4db2c07bd36578cccc5a5562ac9e))
+
+
+### Refactors
+
+* **ui:** camera polish follow-ups from [#868](https://github.com/mandakan/splitsmith/issues/868) review ([#871](https://github.com/mandakan/splitsmith/issues/871)) ([9c9d62d](https://github.com/mandakan/splitsmith/commit/9c9d62d9249a7d9aaa915b27393136f86bf6e54c))
+
 ## [0.30.0](https://github.com/mandakan/splitsmith/compare/v0.29.0...v0.30.0) (2026-08-14)
 
 
