@@ -27,6 +27,7 @@ import {
   ArrowDownToLine,
   ArrowLeft,
   ArrowRight,
+  ChevronDown,
   Loader2,
   Volume2,
   VolumeX,
@@ -54,6 +55,7 @@ import {
   ApiError,
   api,
   capabilityDenied,
+  type CoachVideoEntry,
   type CompareShooterRecord,
   type CompareStageResponse,
   type MatchProject,
@@ -162,7 +164,38 @@ export function Compare() {
     };
   }, [stageNumber]);
 
-  const orderedShooters = bundle?.shooters ?? [];
+  // Camera alternatives per shooter, from each shooter's coach payload
+  // (share-whitelisted; Compare's own bundle carries only the primary
+  // trim). A failed fetch just means no switcher for that shooter.
+  const [camsBySlug, setCamsBySlug] = useState<Record<string, CoachVideoEntry[]>>({});
+  const [camIndexBySlug, setCamIndexBySlug] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    if (!bundle) return;
+    let alive = true;
+    setCamsBySlug({});
+    setCamIndexBySlug({});
+    (async () => {
+      const results = await Promise.allSettled(
+        bundle.shooters.map(async (s) => {
+          const coach = await api.getStageCoach(s.slug, stageNumber);
+          if (!coach) throw new Error(`no coach data for ${s.slug}`);
+          return [s.slug, coach.videos] as const;
+        }),
+      );
+      if (!alive) return;
+      const map: Record<string, CoachVideoEntry[]> = {};
+      for (const r of results) if (r.status === "fulfilled") map[r.value[0]] = r.value[1];
+      setCamsBySlug(map);
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [bundle, stageNumber]);
+
+  // Memoized: several effects depend on this list, and a fresh [] per
+  // render would re-arm them all on every render while bundle is null.
+  const orderedShooters = useMemo(() => bundle?.shooters ?? [], [bundle]);
   const playableShooters = orderedShooters.filter(
     (s) => s.video_ref && s.beep_offset_in_clip != null,
   );
@@ -179,6 +212,32 @@ export function Compare() {
     [playableShooters],
   );
 
+  // Index into camsBySlug[slug]; 0 = the bundle's own primary trim.
+  // Invalid or unsyncable picks resolve to 0 - graceful drift, never an
+  // error (moment links may name cameras that no longer exist).
+  const camIndexFor = useCallback(
+    (slug: string): number => {
+      const idx = camIndexBySlug[slug] ?? 0;
+      return idx > 0 && camsBySlug[slug]?.[idx]?.beep_in_clip != null ? idx : 0;
+    },
+    [camIndexBySlug, camsBySlug],
+  );
+  const effectiveBeep = useCallback(
+    (s: CompareShooterRecord): number | null => {
+      const idx = camIndexFor(s.slug);
+      return idx > 0 ? camsBySlug[s.slug][idx].beep_in_clip : s.beep_offset_in_clip;
+    },
+    [camIndexFor, camsBySlug],
+  );
+  const tileSrc = useCallback(
+    (s: CompareShooterRecord): string | null => {
+      const idx = camIndexFor(s.slug);
+      if (idx > 0) return api.videoStreamUrl(s.slug, camsBySlug[s.slug][idx].path);
+      return s.video_ref ? api.shooterVideoStreamUrl(s.slug, s.video_ref) : null;
+    },
+    [camIndexFor, camsBySlug],
+  );
+
   // Sync engine: read the master's currentTime, derive time-since-beep,
   // and pull the other videos into agreement when drift > threshold.
   useEffect(() => {
@@ -191,15 +250,21 @@ export function Compare() {
     maxDriftRef.current = 0;
 
     const interval = window.setInterval(() => {
-      const masterBeep = audioShooter.beep_offset_in_clip ?? 0;
+      // A freshly swapped master src reports currentTime 0 until its
+      // metadata arrives - deriving the shared clock from that would drag
+      // every tile to clip start. Skip ticks until the master is readable.
+      if (masterEl.readyState < 1) return;
+      const masterBeep = effectiveBeep(audioShooter) ?? 0;
       const tsb = masterEl.currentTime - masterBeep;
       setTimeSinceBeep(tsb);
       // Resync slaves.
       videoRefs.current.forEach((el, slug) => {
         if (slug === audioShooter.slug) return;
         const shooter = orderedShooters.find((s) => s.slug === slug);
-        if (!shooter || shooter.beep_offset_in_clip == null) return;
-        const target = shooter.beep_offset_in_clip + tsb;
+        if (!shooter) return;
+        const beep = effectiveBeep(shooter);
+        if (beep == null) return;
+        const target = beep + tsb;
         const drift = Math.abs(el.currentTime - target);
         maxDriftRef.current = Math.max(maxDriftRef.current, drift);
         if (drift > SYNC_DRIFT_THRESHOLD_S) {
@@ -220,7 +285,7 @@ export function Compare() {
         maxDriftRef.current = 0;
       }
     };
-  }, [isPlaying, audioShooter, orderedShooters, stageNumber]);
+  }, [isPlaying, audioShooter, orderedShooters, stageNumber, effectiveBeep]);
 
   // When the master pauses naturally (end of clip), reflect into state.
   useEffect(() => {
@@ -276,12 +341,14 @@ export function Compare() {
         setTimeSinceBeep(tsb);
         videoRefs.current.forEach((el, slug) => {
           const shooter = orderedShooters.find((s) => s.slug === slug);
-          if (!shooter || shooter.beep_offset_in_clip == null) return;
-          el.currentTime = Math.max(0, shooter.beep_offset_in_clip + tsb);
+          if (!shooter) return;
+          const beep = effectiveBeep(shooter);
+          if (beep == null) return;
+          el.currentTime = Math.max(0, beep + tsb);
         });
       });
     },
-    [orderedShooters],
+    [orderedShooters, effectiveBeep],
   );
 
   // Apply a shared moment (?t=&cam=&who=) on bundle load and whenever the
@@ -302,6 +369,16 @@ export function Compare() {
     const view = resolveMomentView(moment, slugs);
     if (view.who) setVisibleSlugs(new Set(view.who));
     if (view.cam) setAudioSlug(view.cam);
+    if (moment.v && typeof moment.v === "object") {
+      const roster = new Set(bundle.shooters.map((s) => s.slug));
+      const picks: Record<string, number> = {};
+      for (const [slug, idx] of Object.entries(moment.v)) {
+        if (roster.has(slug)) picks[slug] = idx;
+      }
+      // Validity against the camera lists is enforced lazily by camIndexFor
+      // - the lists may still be loading when the moment applies.
+      if (Object.keys(picks).length > 0) setCamIndexBySlug((prev) => ({ ...prev, ...picks }));
+    }
     scrubTo(moment.t);
     // scrubTo writes currentTime immediately, but a video element that has
     // not reached HAVE_METADATA can drop that write - re-apply once per
@@ -310,8 +387,9 @@ export function Compare() {
     videoRefs.current.forEach((el, slug) => {
       if (el.readyState >= 1) return;
       const shooter = bundle.shooters.find((s) => s.slug === slug);
-      if (!shooter || shooter.beep_offset_in_clip == null) return;
-      const offset = shooter.beep_offset_in_clip;
+      if (!shooter) return;
+      const offset = effectiveBeep(shooter);
+      if (offset == null) return;
       el.addEventListener(
         "loadedmetadata",
         () => {
@@ -320,7 +398,27 @@ export function Compare() {
         { once: true },
       );
     });
-  }, [bundle, urlMoment, scrubTo]);
+  }, [bundle, urlMoment, scrubTo, effectiveBeep]);
+
+  // A tile whose src just swapped reloads at clip time 0; put it back on
+  // the shared clock once its metadata is in. The drift guard keeps this
+  // from fighting the sync engine or the user's scrubbing.
+  useEffect(() => {
+    videoRefs.current.forEach((el, slug) => {
+      const shooter = orderedShooters.find((s) => s.slug === slug);
+      if (!shooter) return;
+      const beep = effectiveBeep(shooter);
+      if (beep == null) return;
+      const target = Math.max(0, beep + timeSinceBeep);
+      if (Math.abs(el.currentTime - target) < 0.3) return;
+      const apply = () => {
+        el.currentTime = target;
+        if (isPlaying) void el.play().catch(() => {});
+      };
+      if (el.readyState >= 1) apply();
+      else el.addEventListener("loadedmetadata", apply, { once: true });
+    });
+  }, [camIndexBySlug, camsBySlug, orderedShooters, effectiveBeep, timeSinceBeep, isPlaying]);
 
   // Copies a shareable moment link: current time-since-beep, the audio
   // camera, and whichever shooters are currently visible - mirrors
@@ -335,7 +433,17 @@ export function Compare() {
     const who = playableShooters
       .filter((s) => visibleSlugs.has(s.slug))
       .map((s) => s.slug);
-    const moment = { t, cam: audioSlug ?? undefined, who };
+    const v: Record<string, number> = {};
+    for (const s of playableShooters) {
+      const idx = camIndexFor(s.slug);
+      if (idx > 0) v[s.slug] = idx;
+    }
+    const moment = {
+      t,
+      cam: audioSlug ?? undefined,
+      who,
+      ...(Object.keys(v).length > 0 ? { v } : {}),
+    };
     const link = shareUrl
       ? `${shareUrl}/compare/${stageNumber}?${momentToSearch(moment).toString()}`
       : `${window.location.origin}${momentHref(location.pathname, moment)}`;
@@ -355,6 +463,7 @@ export function Compare() {
     playableShooters,
     visibleSlugs,
     audioSlug,
+    camIndexFor,
     location.pathname,
     shareUrl,
     stageNumber,
@@ -594,6 +703,12 @@ export function Compare() {
                 <VideoTile
                   key={shooter.slug}
                   shooter={shooter}
+                  src={tileSrc(shooter)}
+                  cams={camsBySlug[shooter.slug] ?? null}
+                  camIndex={camIndexFor(shooter.slug)}
+                  onPickCam={(index) =>
+                    setCamIndexBySlug((prev) => ({ ...prev, [shooter.slug]: index }))
+                  }
                   isAudio={audioSlug === shooter.slug}
                   fit={layout === "stack" ? "aspect" : "fill"}
                   onPickAudio={() => setAudioSlug(shooter.slug)}
@@ -903,20 +1018,25 @@ function LayoutPill({
 
 function VideoTile({
   shooter,
+  src,
+  cams,
+  camIndex,
+  onPickCam,
   isAudio,
   fit,
   onPickAudio,
   onMount,
 }: {
   shooter: CompareShooterRecord;
+  src: string | null;
+  cams: CoachVideoEntry[] | null;
+  camIndex: number;
+  onPickCam: (index: number) => void;
   isAudio: boolean;
   fit: "fill" | "aspect";
   onPickAudio: () => void;
   onMount: (el: HTMLVideoElement | null) => void;
 }) {
-  const url = shooter.video_ref
-    ? api.shooterVideoStreamUrl(shooter.slug, shooter.video_ref)
-    : null;
   return (
     <div
       className={cn(
@@ -938,18 +1058,40 @@ function VideoTile({
         <span className="font-display text-[0.75rem] font-bold uppercase tracking-[0.06em] text-ink">
           {shooter.name}
         </span>
-        {isAudio && (
-          <span className="ml-auto inline-flex items-center gap-1 rounded border border-led-deep bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-ink shadow-[0_0_8px_var(--color-led-glow)]">
-            <Volume2 className="size-2.5" />
-            Audio
-          </span>
-        )}
+        <span className="ml-auto flex items-center gap-2">
+          {cams && cams.length > 1 ? (
+            <span className="relative inline-flex items-center">
+              <select
+                value={camIndex}
+                onChange={(e) => onPickCam(Number(e.target.value))}
+                aria-label={`${shooter.name} - camera`}
+                className="cursor-pointer appearance-none bg-transparent pr-4 font-mono text-[0.625rem] font-bold uppercase tracking-[0.1em] text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
+              >
+                {cams.map((c, i) => (
+                  <option key={c.path} value={i} disabled={c.beep_in_clip == null}>
+                    {i === 0 ? "Primary" : `Cam ${i + 1}`}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                aria-hidden
+                className="pointer-events-none absolute right-0 size-3 text-subtle"
+              />
+            </span>
+          ) : null}
+          {isAudio && (
+            <span className="inline-flex items-center gap-1 rounded border border-led-deep bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-ink shadow-[0_0_8px_var(--color-led-glow)]">
+              <Volume2 className="size-2.5" />
+              Audio
+            </span>
+          )}
+        </span>
       </div>
       <div className={cn("relative", fit === "fill" && "min-h-0 flex-1 bg-black")}>
-        {url ? (
+        {src ? (
           <video
             ref={onMount}
-            src={url}
+            src={src}
             preload="metadata"
             playsInline
             controls={false}

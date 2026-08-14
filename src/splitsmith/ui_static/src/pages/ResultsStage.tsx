@@ -27,6 +27,7 @@ import {
 import { CommentPanel } from "@/components/comments/CommentPanel";
 import { Snackbar, type SnackState } from "@/components/Snackbar";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
+import { CamPicker } from "@/components/results/CamPicker";
 import { ReclassifySheet } from "@/components/results/ReclassifySheet";
 import { ResultsPlayer, type FullscreenMode } from "@/components/results/ResultsPlayer";
 import { Scorecard } from "@/components/results/Scorecard";
@@ -139,7 +140,24 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const [snack, setSnack] = useState<SnackState | null>(null);
   const [searchParams] = useSearchParams();
   const moment = useMemo(() => parseMoment(searchParams), [searchParams]);
-  const momentTime = moment != null && coach != null ? coach.beep_time + moment.t : null;
+  const [activeCamIndex, setActiveCamIndex] = useState(0);
+  // Position to restore after a camera switch remounts the player.
+  const pendingSeekRef = useRef<{ t: number; play: boolean } | null>(null);
+  // One-shot: apply a moment link's ?v= once per mount (the page remounts
+  // per slug-stage via the key in ResultsStage).
+  const appliedMomentCamRef = useRef(false);
+  // Mirrors camIndex for handleCopyMoment, which is memoized on other
+  // deps - a ref avoids re-memoizing the callback on every camera switch.
+  const camIndexRef = useRef(0);
+  // Mirrors activeBeep alongside camIndexRef, same reason: handleCopyMoment
+  // must encode t against the *active* camera's beep (mirroring how
+  // momentTime decodes it), not always the primary's coach.beep_time.
+  const activeBeepRef = useRef(0);
+  const momentTime =
+    moment != null && coach != null
+      ? (coach.videos[coach.videos[activeCamIndex] ? activeCamIndex : 0]?.beep_in_clip ??
+          coach.beep_time) + moment.t
+      : null;
 
   // When the match has a live share, copy the share-scoped moment URL
   // instead of the operator one - it works for whoever the owner
@@ -149,10 +167,11 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const handleCopyMoment = useCallback(async () => {
     const v = videoRef.current;
     if (!v || !coach) return;
-    const t = Math.round((v.currentTime - coach.beep_time) * 100) / 100;
+    const t = Math.round((v.currentTime - activeBeepRef.current) * 100) / 100;
+    const m = { t, ...(camIndexRef.current > 0 ? { v: camIndexRef.current } : {}) };
     const link = shareUrl
-      ? `${shareUrl}/results/${slug}/${stage}?${momentToSearch({ t }).toString()}`
-      : `${window.location.origin}${momentHref(location.pathname, { t })}`;
+      ? `${shareUrl}/results/${slug}/${stage}?${momentToSearch(m).toString()}`
+      : `${window.location.origin}${momentHref(location.pathname, m)}`;
     try {
       await navigator.clipboard.writeText(link);
       setSnack({
@@ -296,6 +315,41 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
     };
   }, [applyCoach, slug, stage, attempt]);
 
+  // Moment links can name a non-primary camera via ?v=. Applied once per
+  // mount, not on every coach reload - a later PATCH response must not
+  // yank the operator back to the linked camera after they have switched.
+  useEffect(() => {
+    if (!coach || appliedMomentCamRef.current) return;
+    appliedMomentCamRef.current = true;
+    const v = moment?.v;
+    if (
+      typeof v === "number" &&
+      v < coach.videos.length &&
+      coach.videos[v]?.beep_in_clip != null
+    ) {
+      setActiveCamIndex(v);
+    }
+  }, [coach, moment]);
+
+  // Restores the preserved playback position after a camera switch
+  // remounts ResultsPlayer. Runs after the child's own effects (parent
+  // effects fire after child effects on mount), so it lands after
+  // ResultsPlayer's seekToWindowStart / moment seek in both the
+  // loadedmetadata-listener path and the already-buffered readyState>=1
+  // path.
+  useEffect(() => {
+    const pending = pendingSeekRef.current;
+    const el = videoRef.current;
+    if (!pending || !el) return;
+    pendingSeekRef.current = null;
+    const apply = () => {
+      el.currentTime = Math.max(0, pending.t);
+      if (pending.play) void el.play().catch(() => {});
+    };
+    if (el.readyState >= 1) apply();
+    else el.addEventListener("loadedmetadata", apply, { once: true });
+  }, [activeCamIndex]);
+
   const shooter = shooters.find((s) => s.slug === slug) ?? null;
 
   // This shooter's audited stages, ordered - prev/next skip stages that
@@ -313,10 +367,23 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const nextStage = idx >= 0 && idx < auditedStages.length - 1 ? auditedStages[idx + 1] : null;
 
   const shots = useMemo(() => coach?.shots ?? [], [coach]);
+  // Shot times arrive in the primary clip's coordinates; replaying them
+  // on another camera shifts them onto that clip's clock via the beep.
+  const camDeltaForShots = coach
+    ? (coach.videos[coach.videos[activeCamIndex] ? activeCamIndex : 0]?.beep_in_clip ??
+        coach.beep_time) - coach.beep_time
+    : 0;
+  const displayShots = useMemo(
+    () =>
+      camDeltaForShots === 0
+        ? shots
+        : shots.map((s) => ({ ...s, time_absolute: s.time_absolute + camDeltaForShots })),
+    [shots, camDeltaForShots],
+  );
   const activeShotNumber = useMemo(() => {
-    const idx = currentShotIndex(shots, currentTime);
-    return idx >= 0 ? shots[idx].shot_number : null;
-  }, [shots, currentTime]);
+    const idx = currentShotIndex(displayShots, currentTime);
+    return idx >= 0 ? displayShots[idx].shot_number : null;
+  }, [displayShots, currentTime]);
 
   const stageTime = shots.length > 0 ? shots[shots.length - 1].time_from_beep : null;
   // Split statistics count split-classed intervals only - transitions,
@@ -342,6 +409,24 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const seekToShot = useCallback(
     (shot: { time_absolute: number }) => seekToTime(shot.time_absolute),
     [seekToTime],
+  );
+
+  const handleSelectCam = useCallback(
+    (index: number) => {
+      setActiveCamIndex((prev) => {
+        if (index === prev || !coach) return prev;
+        const prevBeep = coach.videos[prev]?.beep_in_clip ?? coach.beep_time;
+        const nextBeep = coach.videos[index]?.beep_in_clip;
+        if (nextBeep == null) return prev;
+        const el = videoRef.current;
+        if (el) {
+          // Same run moment on the new camera's clock.
+          pendingSeekRef.current = { t: el.currentTime - prevBeep + nextBeep, play: !el.paused };
+        }
+        return index;
+      });
+    },
+    [coach],
   );
 
   if (error) {
@@ -382,7 +467,15 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
     );
   }
 
-  const primary = coach.videos.find((v) => v.role === "primary");
+  // Camera identity is the payload index (primary first). A stale index
+  // (coach reloaded with fewer cameras) silently falls back to entry 0;
+  // entry 0 also covers the no-primary edge instead of dead-ending.
+  const camIndex = coach.videos[activeCamIndex] ? activeCamIndex : 0;
+  const activeVideo = coach.videos[camIndex];
+  const activeBeep = activeVideo?.beep_in_clip ?? coach.beep_time;
+  const camDelta = activeBeep - coach.beep_time;
+  camIndexRef.current = camIndex;
+  activeBeepRef.current = activeBeep;
   const navButton =
     "inline-flex size-11 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led";
 
@@ -502,12 +595,12 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
     </div>
   );
 
-  if (!primary) {
+  if (!activeVideo) {
     return (
       <div className="flex flex-col gap-4 px-4 py-4 md:px-7">
         {header}
         <div className="rounded-md border border-rule-strong bg-surface-2 px-4 py-6 text-center text-sm text-muted">
-          No primary video for this stage.
+          No video for this stage.
         </div>
       </div>
     );
@@ -541,9 +634,10 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
         )}
       >
         <ResultsPlayer
-          src={api.videoStreamUrl(slug, primary.path)}
-          beepTime={coach.beep_time}
-          shots={shots}
+          key={camIndex}
+          src={api.videoStreamUrl(slug, activeVideo.path)}
+          beepTime={coach.beep_time + camDelta}
+          shots={displayShots}
           videoRef={videoRef}
           onTimeChange={setCurrentTime}
           onPlayingChange={setIsPlaying}
@@ -551,7 +645,13 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           baselines={baselines}
           momentTime={momentTime}
           onCopyMoment={handleCopyMoment}
-          commentTimes={commentAnchors.map((t) => coach.beep_time + t)}
+          commentTimes={commentAnchors.map((t) => coach.beep_time + camDelta + t)}
+        />
+        <CamPicker
+          entries={coach.videos}
+          activeIndex={camIndex}
+          onSelect={handleSelectCam}
+          srcFor={(e) => api.videoStreamUrl(slug, e.path)}
         />
       </div>
       <div className="flex flex-col gap-4 lg:max-h-[calc(100dvh-var(--shell-header-h,86px)-2rem)] lg:overflow-y-auto">
@@ -563,7 +663,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           avgSplit={avgSplit}
         />
         <SplitsList
-          shots={shots}
+          shots={displayShots}
           activeShotNumber={activeShotNumber}
           onSeek={seekToShot}
           isPlaying={isPlaying}
@@ -584,7 +684,10 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           slug={slug}
           stage={stage}
           shots={shots}
-          beepTime={coach.beep_time}
+          // The active camera's beep: anchor_t stays beep-relative (and so
+          // camera-independent) only if capture and seek both use the beep
+          // of the clip currentTime is measured in.
+          beepTime={coach.beep_time + camDelta}
           currentTime={currentTime}
           canComment={canComment}
           canModerate={canModerate}
