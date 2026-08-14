@@ -24,10 +24,12 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -148,7 +150,7 @@ class MagicLinkTokenRow(Base):
     email: Mapped[str] = mapped_column(String, nullable=False, index=True)
     # SHA-256 hex of the raw token the email link carries. Unique so a
     # redemption is an indexed point lookup; the raw token never lands here.
-    token_hash: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -186,7 +188,7 @@ class SessionRow(Base):
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
     # SHA-256 hex of the raw session secret stored in the cookie.
-    token_hash: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    token_hash: Mapped[str] = mapped_column(String, unique=True, index=True, nullable=False)
     user_id: Mapped[str] = mapped_column(
         String,
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -361,12 +363,17 @@ class StateDocRow(Base):
     ``(user_id, match_id, doc_kind, slug, stage_number)``. But NULL is
     distinct-from-NULL in a SQL unique index, so a plain
     :class:`UniqueConstraint` over those columns would happily admit two
-    ``match`` rows (both with NULL slug + stage). The real guard is a
-    Postgres ``coalesce`` expression index created in the migration
-    (``coalesce(slug,'')``, ``coalesce(stage_number,-1)``). The
-    ``UniqueConstraint`` declared here is only so SQLite's ``create_all``
-    builds *a* unique index for the test engine -- tests never create
-    duplicates, so its NULL-distinct weakness is harmless there.
+    ``match`` rows (both with NULL slug + stage). The guard is therefore
+    the ``coalesce`` expression index declared below
+    (``coalesce(slug,'')``, ``coalesce(stage_number,-1)``), matching what
+    migration ``d1f7b25c8a3e`` creates on Postgres. SQLite supports
+    expression indexes too, so ``create_all`` builds the same guard for
+    the test engine rather than a weaker NULL-distinct approximation --
+    but a SQLite database built by ``alembic upgrade head`` instead (that
+    migration's SQLite branch was not changed) still gets the plain,
+    NULL-distinct unique index. That includes a hosted deploy that
+    points ``splitsmith serve`` at a SQLite URL (see ``cli.py``'s
+    ``serve`` command, which runs migrations, not ``create_all``).
 
     **Optimistic concurrency.** ``version`` starts at 1 on insert and the
     store bumps it on every save guarded by ``WHERE version =
@@ -382,13 +389,14 @@ class StateDocRow(Base):
 
     __tablename__ = "state_docs"
     __table_args__ = (
-        UniqueConstraint(
+        Index(
+            "uq_state_docs_identity",
             "user_id",
             "match_id",
             "doc_kind",
-            "slug",
-            "stage_number",
-            name="uq_state_docs_identity",
+            text("coalesce(slug, '')"),
+            text("coalesce(stage_number, -1)"),
+            unique=True,
         ),
     )
 
@@ -594,6 +602,10 @@ class CommentRow(Base):
     """
 
     __tablename__ = "match_comments"
+    # The thread index backs the only listing query: every comment for
+    # one (owner, match, shooter, stage). Created by migration
+    # b4d8f1a90c27 alongside the per-column indexes declared below.
+    __table_args__ = (Index("ix_match_comments_thread", "user_id", "match_id", "slug", "stage_number"),)
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
     user_id: Mapped[str] = mapped_column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
@@ -612,14 +624,14 @@ class CommentRow(Base):
         String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     author_handle: Mapped[str] = mapped_column(String, nullable=False)
-    author_key_hash: Mapped[str] = mapped_column(String, nullable=False)
+    author_key_hash: Mapped[str] = mapped_column(String, nullable=False, index=True)
     # Stable public identifier for the author, denormalized at write
     # time for the same reason author_handle is: rotating the handle
     # secret must not re-identify every historical author. Nullable only
     # to carry rows written before #867 - see ui/comments.to_out, which
     # computes the same value for those through author_code_for.
     author_code: Mapped[str | None] = mapped_column(String, nullable=True)
-    share_token_id: Mapped[str] = mapped_column(String, nullable=False)
+    share_token_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
 
     body: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -755,10 +767,19 @@ class DeviceAuthorizationRow(Base):
     """
 
     __tablename__ = "device_authorizations"
+    # Uniqueness on both ``user_code`` and ``device_code_hash`` is a
+    # named table constraint, not a bare ``unique=True``: that is what
+    # migration 0c1dbb2ce678 created and what the deployed schema has.
+    # The plain ``index=True`` on ``user_code`` below is the separate
+    # (redundant but shipped) lookup index the same migration created.
+    __table_args__ = (
+        UniqueConstraint("user_code", name="uq_device_authorizations_user_code"),
+        UniqueConstraint("device_code_hash", name="uq_device_authorizations_device_code_hash"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
-    device_code_hash: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    user_code: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    device_code_hash: Mapped[str] = mapped_column(String, nullable=False)
+    user_code: Mapped[str] = mapped_column(String, nullable=False, index=True)
     device_name: Mapped[str] = mapped_column(String, nullable=False)
     scope: Mapped[str] = mapped_column(String, nullable=False, server_default="sync", default="sync")
     status: Mapped[str] = mapped_column(String, nullable=False, server_default="pending", default="pending")

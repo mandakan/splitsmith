@@ -13,6 +13,7 @@ from alembic import context
 # ``splitsmith.db.models``; alembic picks it up here.
 from splitsmith.db.migrations import connect_with_retry, engine_connect_args  # noqa: E402
 from splitsmith.db.models import Base  # noqa: E402
+from splitsmith.db.schema_diff import include_object  # noqa: E402
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -55,6 +56,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        include_object=include_object,
     )
 
     with context.begin_transaction():
@@ -62,7 +64,11 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection,
+        target_metadata=target_metadata,
+        include_object=include_object,
+    )
 
     with context.begin_transaction():
         context.run_migrations()
