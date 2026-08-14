@@ -115,6 +115,66 @@ jobs:
         # count, no collisions (every test writes under ``tmp_path``).
         run: uv run pytest -q
 
+  migrations:
+    # Nothing in CI applied a migration, so the first process that ever
+    # ran `alembic upgrade head` on a new revision was the production
+    # deploy (#876). A model/migration divergence, a migration that is
+    # fine on SQLite and not on Postgres, or two revisions claiming the
+    # same parent all shipped with entirely green CI.
+    #
+    # The default suite cannot close this: it is SQLite-backed and builds
+    # its tables with Base.metadata.create_all, so it tests the models,
+    # not the chain. The only coverage that genuinely ran the chain
+    # against Postgres was the docker suite, which addopts deselects and
+    # CI never opted into.
+    #
+    # Always-on because it is cheap by construction: no models, no
+    # ffmpeg, no Node, no dev group -- one Postgres service and the
+    # hosted extra. Seconds, not the docker suite's four minutes, and it
+    # reports a schema failure rather than a stack failure.
+    name: migrations apply + match the models
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: splitsmith
+          POSTGRES_PASSWORD: splitsmith
+          POSTGRES_DB: splitsmith_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U splitsmith"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.11
+        run: uv python install 3.11
+
+      - name: Sync hosted deps only
+        # Deliberately NOT --all-groups: this job needs sqlalchemy,
+        # alembic, asyncpg and procrastinate, and has no business
+        # installing torch. It does not need pytest either -- the check
+        # is a standalone script.
+        run: uv sync --frozen --extra hosted --no-dev
+
+      - name: Migrations apply, match the models, and reverse
+        env:
+          # alembic/env.py honours this over the ini's baked-in URL, so
+          # no CI-specific alembic ini is needed.
+          SPLITSMITH_DATABASE_URL: postgresql+asyncpg://splitsmith:splitsmith@localhost:5432/splitsmith_ci
+        run: uv run python scripts/ci/assert_migrations_match_models.py
+
   spa:
     # The SPA had no CI validation on a normal PR at all: the job above
     # runs ruff, black and pytest and nothing else, so TypeScript could
