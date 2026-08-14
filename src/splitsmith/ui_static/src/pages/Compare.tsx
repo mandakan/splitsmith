@@ -116,6 +116,22 @@ export function Compare() {
   // moment (or no moment) does not keep re-scrubbing over the user's
   // own interaction. Reset to null on stage change alongside the bundle.
   const lastAppliedMomentRef = useRef<string | null>(null);
+  // Read by the resync effect without re-arming it per 120ms sync tick -
+  // the effect must fire on camera/list changes only, but its target math
+  // still needs the current clock and play state.
+  const timeSinceBeepRef = useRef(0);
+  const isPlayingRef = useRef(false);
+  useEffect(() => {
+    timeSinceBeepRef.current = timeSinceBeep;
+  }, [timeSinceBeep]);
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+  // At most one pending metadata listener per tile (keyed by slug), so a
+  // slow-loading swap cannot stack stale-target listeners.
+  const pendingResyncRef = useRef<Map<string, { el: HTMLVideoElement; fn: () => void }>>(
+    new Map(),
+  );
 
   // Load project + compare data. Stage definitions are identical across
   // every shooter in a match, so we lift them from whichever shooter is
@@ -404,21 +420,33 @@ export function Compare() {
   // the shared clock once its metadata is in. The drift guard keeps this
   // from fighting the sync engine or the user's scrubbing.
   useEffect(() => {
+    const pending = pendingResyncRef.current;
     videoRefs.current.forEach((el, slug) => {
       const shooter = orderedShooters.find((s) => s.slug === slug);
       if (!shooter) return;
       const beep = effectiveBeep(shooter);
       if (beep == null) return;
-      const target = Math.max(0, beep + timeSinceBeep);
+      const target = Math.max(0, beep + timeSinceBeepRef.current);
       if (Math.abs(el.currentTime - target) < 0.3) return;
       const apply = () => {
-        el.currentTime = target;
-        if (isPlaying) void el.play().catch(() => {});
+        pending.delete(slug);
+        el.currentTime = Math.max(0, beep + timeSinceBeepRef.current);
+        if (isPlayingRef.current) void el.play().catch(() => {});
       };
-      if (el.readyState >= 1) apply();
-      else el.addEventListener("loadedmetadata", apply, { once: true });
+      if (el.readyState >= 1) {
+        apply();
+        return;
+      }
+      const prev = pending.get(slug);
+      if (prev) prev.el.removeEventListener("loadedmetadata", prev.fn);
+      pending.set(slug, { el, fn: apply });
+      el.addEventListener("loadedmetadata", apply, { once: true });
     });
-  }, [camIndexBySlug, camsBySlug, orderedShooters, effectiveBeep, timeSinceBeep, isPlaying]);
+    return () => {
+      pending.forEach(({ el, fn }) => el.removeEventListener("loadedmetadata", fn));
+      pending.clear();
+    };
+  }, [camIndexBySlug, camsBySlug, orderedShooters, effectiveBeep]);
 
   // Copies a shareable moment link: current time-since-beep, the audio
   // camera, and whichever shooters are currently visible - mirrors
