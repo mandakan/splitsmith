@@ -136,13 +136,19 @@ export function Lab() {
   // fallback (when the server cache is cold) submits its own job ->
   // 12-15 labels -> 12-15 eval jobs.
   const inFlightEvalRef = useRef<Promise<void> | null>(null);
-  const runEval = useCallback(async (): Promise<void> => {
+  // Optional ``slugs`` scopes the eval to a fixture subset -- the fast
+  // path the pre-eval drawer uses so labeling one fixture doesn't cost
+  // a full-corpus run. Guarded with Array.isArray because two call
+  // sites pass this directly as an onClick handler (the arg is then a
+  // MouseEvent, which must not leak into the request body).
+  const runEval = useCallback(async (slugs?: unknown): Promise<void> => {
     if (inFlightEvalRef.current) return inFlightEvalRef.current;
+    const wanted = Array.isArray(slugs) ? (slugs as string[]) : undefined;
     const p = (async () => {
       setEvalLoading(true);
       setError(null);
       try {
-        const job = await api.runLabEval({ config, persist: true });
+        const job = await api.runLabEval({ slugs: wanted, config, persist: true });
         const finished = await api.pollJob(job.id, () => {
           /* jobs rail polls /api/jobs on its own interval and renders the
              progress; we just need to await terminal status here. */
@@ -268,7 +274,7 @@ export function Lab() {
         <FixtureDetailLite
           record={catalog.find((r) => r.slug === slug) ?? null}
           onClose={() => navigate("/dev/legacy/lab", { replace: true })}
-          onRunEval={runEval}
+          onRunEvalScoped={(slugs) => void runEval(slugs)}
           evalLoading={evalLoading}
         />
       ) : null}
@@ -281,12 +287,12 @@ export function Lab() {
 function FixtureDetailLite({
   record,
   onClose,
-  onRunEval,
+  onRunEvalScoped,
   evalLoading,
 }: {
   record: LabFixtureRecord | null;
   onClose: () => void;
-  onRunEval: () => void;
+  onRunEvalScoped: (slugs: string[]) => void;
   evalLoading: boolean;
 }) {
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
@@ -338,15 +344,19 @@ function FixtureDetailLite({
           <Button variant="outline" size="sm" asChild>
             <Link
               to={reviewUrl(record.audit_path, record.source_video)}
-              title="Open in the review editor"
+              title="Edit ground-truth markers (add / move / delete shots) in the review editor"
             >
               <Pencil className="size-3.5" />
-              Re-label
+              Edit markers
             </Link>
           </Button>
-          <Button size="sm" onClick={onRunEval} disabled={evalLoading}>
+          <Button
+            size="sm"
+            onClick={() => onRunEvalScoped([record.slug])}
+            disabled={evalLoading}
+          >
             {evalLoading ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
-            Run eval
+            Eval this fixture
           </Button>
           <Button variant="ghost" size="sm" onClick={onClose}>
             Close
@@ -357,6 +367,17 @@ function FixtureDetailLite({
         {error && (
           <div className="rounded bg-destructive/10 px-3 py-2 text-xs text-destructive">{error}</div>
         )}
+        <div className="flex gap-1.5 rounded border border-[rgba(251,191,36,0.4)] bg-[color:var(--color-live-tint)] px-3 py-2 text-xs text-live">
+          <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+          <span>
+            Candidate labeling needs an eval run first -- labels (paper /
+            steel / cross_bay / echo ...) attach to detection candidates,
+            which only exist after eval. <b>Eval this fixture</b> above runs
+            it for just this fixture in seconds; the header&apos;s Run eval
+            covers the whole corpus and takes minutes. The eval cache is
+            per-server-session, so a restart brings you back here.
+          </span>
+        </div>
         {peaks ? (
           <Waveform
             peaks={peaks.peaks}
@@ -381,11 +402,6 @@ function FixtureDetailLite({
             <Loader2 className="mr-2 size-4 animate-spin" /> loading waveform...
           </div>
         )}
-        <p className="text-xs text-muted">
-          Diffs (TP/FP/FN), the per-voter breakdown, the candidate table, and label
-          shortcuts only render after Run eval -- they need the per-candidate feature
-          universe (CLAP / PANN / GBDT) which is built by eval.
-        </p>
       </CardContent>
     </Card>
   );
@@ -851,8 +867,8 @@ function FixtureRow({
             to={reviewUrl(rec.audit_path, rec.source_video)}
             onClick={(e) => e.stopPropagation()}
             className="rounded p-1 text-muted hover:bg-surface-3 hover:text-ink"
-            title="Re-label this fixture in the review editor"
-            aria-label={`Re-label ${rec.slug}`}
+            title="Edit ground-truth markers in the review editor (candidate labeling lives in the row's detail drawer, after an eval)"
+            aria-label={`Edit markers for ${rec.slug}`}
           >
             <Pencil className="size-3.5" />
           </Link>
@@ -1094,10 +1110,10 @@ function FixtureDetail({
           <Button variant="outline" size="sm" asChild>
             <Link
               to={reviewUrl(fixture.audit_path, fixture.source_video)}
-              title="Open this fixture in the review editor (re-label shots, edit beep, save in place)"
+              title="Edit ground-truth markers (add / move / delete shots, edit beep) in the review editor"
             >
               <Pencil className="size-3.5" />
-              Re-label
+              Edit markers
             </Link>
           </Button>
           <Button variant="ghost" size="sm" onClick={onClose}>
