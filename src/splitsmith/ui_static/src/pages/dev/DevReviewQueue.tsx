@@ -3,7 +3,7 @@
  *
  * Three-column layout: dev sidebar (rendered by DeveloperShell), a
  * persistent queue list, and a focused detail panel. The detail panel
- * routes the user into /dev/legacy/review to do the actual edit -- the
+ * routes the user into /review to do the actual edit -- the
  * fixture-edit primitive lives there and we don't fork it during the
  * redesign. The queue list itself is fully redesigned per polished/10.
  */

@@ -1,16 +1,14 @@
 /**
  * Shared eval-run data hook for the Lab surfaces. Lifted verbatim (in
- * behavior) from the ``Lab`` component in ``src/pages/Lab.tsx``: the
- * single-flight ``runEval`` (with its ``Array.isArray`` slug guard, so
- * onClick call sites can pass the callback directly without a MouseEvent
- * leaking into the request body), the mount hydration that adopts the
- * server's cached last-run + its config, and the 120 ms debounced
- * rescore that keeps slider tweaks feeling live.
+ * behavior) from the legacy ``Lab`` page component (deleted -- #331
+ * final task): the single-flight ``runEval`` (with its ``Array.isArray``
+ * slug guard, so onClick call sites can pass the callback directly
+ * without a MouseEvent leaking into the request body), the mount
+ * hydration that adopts the server's cached last-run + its config, and
+ * the 120 ms debounced rescore that keeps slider tweaks feeling live.
  *
- * ``Lab.tsx`` keeps its own inline copy of this logic -- it is slated
- * for deletion once the redesigned pages replace it, so it intentionally
- * does not consume this hook. New Lab surfaces (fixture detail page,
- * Validate page) should use this instead of duplicating the logic again.
+ * Dev-mode Lab surfaces (fixture detail page, Validate page) use this
+ * hook instead of duplicating the logic.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 

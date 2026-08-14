@@ -1,12 +1,16 @@
 /**
  * Batch-promote every eligible stage of a match's shooters as primary
- * fixtures. Moved out of legacy ``Lab.tsx`` (#886 follow-up) so the
- * Corpus page can host it as a full-width expandable section instead of
- * a 640px popover; Lab.tsx still renders this component (``variant``
- * defaults to the legacy popover) so its behavior -- and the tests
- * pinning it -- stay identical until the legacy page is deleted.
+ * fixtures. Moved out of the legacy Lab page (#886 follow-up) so the
+ * Corpus page could host it as a full-width expandable section instead
+ * of a 640px popover. ``DevCorpus`` is the only consumer now (passes
+ * ``variant="section"``) -- the legacy page rendered this component
+ * with the default ``variant="popover"``, but that page is deleted
+ * (#331 final task), so the popover variant is currently unexercised in
+ * production. Left in place rather than removed: it's a one-line prop,
+ * not dead weight, and a future full-width-constrained surface may want
+ * it again.
  *
- * The Lab/Corpus surfaces live on /dev/* URLs, outside the
+ * The Corpus surfaces live on /dev/* URLs, outside the
  * ``/match/:matchId/`` URL scoping that match-mode surfaces ride on --
  * and since #353 Tier 1 there is no process-level bind for the bare
  * paths to fall back on. The panel therefore picks its own match:

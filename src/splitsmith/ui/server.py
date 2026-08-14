@@ -15013,11 +15013,11 @@ def create_app(
 
         Fields:
 
-        - ``lab`` -- the developer-facing Algorithm Lab page; off by
-          default, opt-in via ``splitsmith ui --lab``. The SPA hides
-          the Lab nav entry when this is False so end users don't trip
-          into a multi-second model-loading workflow they didn't ask
-          for.
+        - ``lab`` -- the developer-facing dev-mode Lab surfaces (corpus,
+          fixture detail, validate, retrain); off by default, opt-in
+          via ``splitsmith ui --lab``. The SPA hides the Lab nav entry
+          when this is False so end users don't trip into a
+          multi-second model-loading workflow they didn't ask for.
         - ``mode`` -- ``"local"`` (default ``splitsmith ui``) or
           ``"hosted"`` (``splitsmith serve`` + ``SPLITSMITH_MODE=hosted``).
           The SPA branches on this to suppress filesystem-picker UX
