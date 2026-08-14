@@ -51,6 +51,7 @@ import { LabelProgress } from "@/components/lab/LabelProgress";
 import { REASON_SHORTCUTS, SUBCLASS_SHORTCUTS } from "@/components/lab/labels";
 import { Pin } from "@/components/lab/Pin";
 import { StepThroughPanel } from "@/components/lab/StepThroughPanel";
+import { DEFAULT_CONFIG } from "@/components/lab/useLabRun";
 import { VoterRecallTable } from "@/components/lab/VoterRecallTable";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -76,16 +77,6 @@ import {
 } from "@/lib/api";
 import { exportSlugify } from "@/lib/slugify";
 import { cn } from "@/lib/utils";
-
-const DEFAULT_CONFIG: LabEvalConfig = {
-  consensus: 2,
-  apriori_boost: 1.0,
-  tolerance_ms: 75.0,
-  use_expected_rounds: true,
-  voter_a_floor_override: null,
-  voter_b_threshold_override: null,
-  voter_c_threshold_override: null,
-};
 
 /** Build the /review URL for a fixture, threading the source video
  *  through when available so the review page boots with the video
