@@ -38,7 +38,7 @@ So a `hookTimeout` alone covers five of six and leaves modegate exactly where it
 
 30s is an observation from a loaded box, not a measurement. Nobody has looked at where the time goes or at what the hook actually costs at its worst. Setting the number without measuring would move the folklore into a config file rather than retire it.
 
-Baseline already taken on this box, 2026-08-14, idle:
+Baseline taken on this box, 2026-08-14, idle:
 
 | what | wall | note |
 |---|---|---|
@@ -49,6 +49,42 @@ Baseline already taken on this box, 2026-08-14, idle:
 The route files' own tests run 30-600ms each. The cost is the import: `App.tsx` eagerly imports about 30 page modules with no lazy boundary anywhere.
 
 What is missing is the hook's own elapsed time at its worst, under a fully loaded run. That is what this task gets.
+
+## Scope change, 2026-08-14 (after #876 and #877 merged)
+
+Re-measuring on a fresh branch cut from `main` invalidated two of this
+plan's assumptions. Both change the fix.
+
+**The suite is bigger.** 104 files / 604 tests, not 88 / 517 -- Lab work
+(#890, #891) and the mobile audit UI landed in between. Every count in
+Task 2 and Task 3 must be re-derived, not copied from this document.
+
+**The problem is no longer confined to the route glob.**
+`src/pages/MobileAudit.test.tsx` fails 2 tests under full-suite load and
+passes 13/13 in isolation, reproducibly (3 of 3 runs), with
+`Test timed out in 5000ms` -- vitest's default `testTimeout`. It is not a
+route file, so the `App.routes.*` project this plan proposed would not
+have covered it, and the next victim would be rediscovered the same way.
+That progression is precisely what #878's issue body complains about.
+
+**So the design changes:** raise the *global* `testTimeout` and
+`hookTimeout` to a measured value, and keep the larger route-tree budget
+scoped to the six files via `projects`. This overrides the original
+"deliberately NOT global" reasoning below. That reasoning was not wrong
+-- a genuine hang elsewhere now takes the global budget to report
+instead of 5s -- but a suite that fails spuriously is the worse of the
+two, and the global number is derived from measurement rather than
+picked.
+
+**Verification is CI-green, not local-green.** The `MobileAudit`
+failure reproduces only on this box; `main`'s `spa` job is green.
+Per the human partner's direction, local-only failures are not chased as
+separate defects and do not gate this work. The global raise is still
+justified on CI's own evidence: #878's issue body records three files
+timing out in CI, and `App.routes.modegate.test.tsx`'s comment notes
+CI's budget was raised once already for exactly this. MobileAudit is
+expected to stop failing locally as a side effect; that is a bonus, not
+the acceptance criterion, and no MobileAudit-specific work is in scope.
 
 **Files:**
 - Temporarily modify (all reverted by the end of this task): the six `src/App.routes.*.test.tsx` files
@@ -90,15 +126,23 @@ Expected: values in the low seconds on an idle box. On a loaded box the same com
 
 - [ ] **Step 3: Derive the budget**
 
-Apply this rule, so the number has a stated origin:
+Two numbers now, not one, per the scope change above.
+
+**The route budget**, from the worst observed *hook* time:
 
 ```
-ROUTE_TREE_BUDGET_MS = max(15_000, roundUpTo5s(4 * worst_observed_ms))
+ROUTE_TREE_BUDGET_MS = max(15_000, roundUpTo5s(4 * worst_hook_ms))
 ```
 
-Four times the worst observation, rounded up to the next 5s, floored at 15s. The multiple is generous on purpose: the failure this guards against is machine load, which is unbounded, and the cost of a too-high ceiling is only that a genuine hang in these six files takes longer to report.
+**The global budget**, from the worst observed *ordinary test* time across the rest of the suite -- measure it the same way, and include `src/pages/MobileAudit.test.tsx`, which is the file currently blowing the 5s default:
 
-If the rule lands on 30s, the budget stays 30s -- and is now a derived number rather than a remembered one. Write down both the worst observation and the resulting budget; both go in the config comment.
+```
+GLOBAL_BUDGET_MS = max(15_000, roundUpTo5s(4 * worst_ordinary_test_ms))
+```
+
+Four times the worst observation in both cases, rounded up to the next 5s, floored at 15s. The multiple is generous on purpose: the failure this guards against is machine load, which is unbounded, and the cost of a too-high ceiling is only that a genuine hang takes longer to report.
+
+If a rule lands on 30s, that budget stays 30s -- and is now derived rather than remembered. Write down both worst observations and both resulting budgets; all four numbers go in the config comment.
 
 - [ ] **Step 4: Revert the instrumentation**
 
@@ -141,27 +185,38 @@ Replace the `test` block in `vitest.config.ts` with:
     // nothing stopped file seven from starting at the default and being
     // discovered the same way.
     //
-    // The route files are genuinely different from the other 82: each
-    // awaits `import("@/App")`, which pulls the whole route tree --
-    // about 30 eagerly-imported page modules -- through vite's
-    // transform. Measured 2026-08-14: ~2s of transform per file on an
-    // idle box, and 11.4s cumulative across the six, because they each
-    // pay for the same tree. Under the full 88-file suite that competes
-    // with everything else and is what blew the default.
+    // The route files are genuinely different from the rest: each awaits
+    // `import("@/App")`, which pulls the whole route tree -- about 30
+    // eagerly-imported page modules -- through vite's transform.
+    // Measured 2026-08-14: ~2s of transform per file on an idle box, and
+    // 11.4s cumulative across the six, because they each pay for the
+    // same tree. Under the full suite that competes with everything else
+    // and is what blew the default.
+    //
+    // The GLOBAL budget is raised too, which the first draft of this
+    // change deliberately did not do. The reason it changed: the same
+    // failure turned up in `src/pages/MobileAudit.test.tsx`, which is
+    // not a route file -- 2 tests failing `Test timed out in 5000ms`
+    // under load, passing 13/13 alone, on 3 of 3 runs. Scoping the fix
+    // to `App.routes.*` would have left it broken and let the next
+    // non-route victim be rediscovered the same way, which is the exact
+    // progression #878 exists to stop. A genuine hang now takes the
+    // global budget to report rather than 5s; a suite that fails
+    // spuriously is the worse of the two.
     //
     // Worst observed hook time under a loaded full-suite run:
-    // <WORST_MS>ms. Budget is 4x that, rounded up to 5s -- generous
-    // because the thing it absorbs is machine load, which has no
-    // ceiling, and a too-high budget only costs latency on a report
-    // nobody is waiting for.
-    //
-    // Deliberately NOT global: a genuine hang in the other 82 files
-    // should still report at vitest's defaults rather than sitting for
-    // half a minute.
+    // <WORST_HOOK_MS>ms -> route budget <ROUTE_BUDGET>ms.
+    // Worst observed ordinary test: <WORST_TEST_MS>ms -> global budget
+    // <GLOBAL_BUDGET>ms. Both are 4x the observation, rounded up to 5s,
+    // floored at 15s -- generous because the thing they absorb is
+    // machine load, which has no ceiling, and a too-high budget only
+    // costs latency on a report nobody is waiting for.
     //
     // Both timeouts, not just hookTimeout: five of the six do the import
     // in `beforeAll`, but modegate does it inside its single `it` and
     // needs testTimeout. They are different defaults too (5s vs 10s).
+    hookTimeout: GLOBAL_BUDGET_MS,
+    testTimeout: GLOBAL_BUDGET_MS,
     projects: [
       {
         extends: true,
@@ -184,23 +239,29 @@ Replace the `test` block in `vitest.config.ts` with:
   },
 ```
 
-Define the constant above `export default defineConfig({`:
+Define both constants above `export default defineConfig({`:
 
 ```ts
-// The route suite's import budget. See the comment on `test.projects`
-// for how this number was derived; it is a measurement times four, not
-// a remembered value.
+// Both budgets are measurements times four, not remembered values. See
+// the comment on `test.projects` for how each was derived.
+const GLOBAL_BUDGET_MS = 15_000;
 const ROUTE_TREE_BUDGET_MS = 30_000;
 ```
 
-Substitute Task 1's actual numbers for `ROUTE_TREE_BUDGET_MS` and `<WORST_MS>`.
+Substitute Task 1's actual numbers for both constants and for the four `<...>` placeholders in the comment.
+
+**Confirm the projects genuinely inherit the root-level budgets.** `extends: true` should carry `hookTimeout`/`testTimeout` down to the `unit` project, but verify it rather than assuming -- if it does not, set them explicitly on `unit` too. Task 3 Step 4 is the check that proves it either way.
 
 - [ ] **Step 2: Verify the split collects everything**
 
+First record the pre-change totals on this branch (`pnpm vitest run`), because the counts in this document are stale -- the suite grew after #876 and #877 merged. As of the scope-change re-measure it was **104 files / 604 tests**, with 2 of those failing under load in `MobileAudit.test.tsx`.
+
 Run: `pnpm test`
-Expected: **88 test files, 517 tests, all passing** -- the same totals as before the change. Each file must appear under exactly one project.
+Expected: **the same file and test totals you recorded**, with each file appearing under exactly one project.
 
 A lower file count means the two `include` globs do not cover what the old default did; a higher one means a file is being collected twice. Either way, fix the globs before continuing -- a config that silently stops running tests is strictly worse than six duplicated timeouts.
+
+The two `MobileAudit` failures are expected to stop reproducing once the global budget is raised. That is a side effect, not the acceptance criterion (see the scope change: verification is CI-green, and local-only failures are not chased). Note whether they cleared; do not do MobileAudit-specific work either way.
 
 - [ ] **Step 3: Verify filtering still works**
 
@@ -304,6 +365,12 @@ Still at `ROUTE_TREE_BUDGET_MS = 1`:
 Run: `pnpm vitest run src/lib`
 Expected: passing. The 1ms budget must not reach the `unit` project -- that is what `exclude` is for, and this is the assertion that it works.
 
+Then the mirror check, which the scope change makes necessary: temporarily set `GLOBAL_BUDGET_MS = 1` (restoring `ROUTE_TREE_BUDGET_MS` first) and run `pnpm vitest run src/lib` again.
+
+Expected: FAIL with a 1ms timeout. That is what proves the `unit` project genuinely inherits the root-level budget through `extends: true` rather than silently falling back to vitest's defaults -- which would leave `MobileAudit` exactly as broken as before while the config claimed otherwise. If it passes, `extends: true` is not carrying the timeouts and they must be set explicitly on the `unit` project.
+
+Restore both constants afterwards.
+
 - [ ] **Step 5: Restore the budget and delete the probe**
 
 ```bash
@@ -360,7 +427,9 @@ So the next person reading #878's "reduce the cost" suggestion finds where that 
 ## Done when
 
 - No `src/App.routes.*.test.tsx` file names a timeout.
-- `pnpm test` still collects 88 files / 517 tests.
-- A new route test file has been observed inheriting the budget, and a non-route file has been observed not inheriting it.
-- The budget in the config is a stated multiple of a recorded measurement, and the comment says which.
+- `pnpm test` still collects the same file and test totals recorded at the start of Task 2 (104 / 604 at the time of writing -- re-derive, do not copy).
+- A new route test file has been observed inheriting the route budget.
+- A non-route file has been observed **not** inheriting the route budget, and **yes** inheriting the global one. Both halves matter: the second is what proves the fix reaches files like `MobileAudit.test.tsx`.
+- Both budgets in the config are stated multiples of recorded measurements, and the comment says which.
 - The lazy-import follow-up is filed with the measurement attached.
+- The `spa` job is green in CI. That is the acceptance criterion; local-only failures are noted, not chased.
