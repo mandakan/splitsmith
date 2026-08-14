@@ -179,6 +179,15 @@ describe("StepThroughPanel preserveSelection", () => {
     expect(screen.getByTestId("snippet")).toHaveAttribute("data-cn", "2");
   });
 
+  it("shows -- (not 0) as queue position for an off-list selection", () => {
+    // Candidate #2 is unanimous, so the default borderline filter
+    // excludes it; the panel follows the selection but it has no
+    // position in the queue -- "0 / 1" would claim it does.
+    renderPanel({ selectedCn: 2, preserveSelection: true });
+    expect(screen.getByText(/-- \/ 1/)).toBeInTheDocument();
+    expect(screen.getByText(/selection is outside this filter/)).toBeInTheDocument();
+  });
+
   it("still falls back when the selected candidate leaves the fixture", () => {
     const onSelect = vi.fn();
     render(
