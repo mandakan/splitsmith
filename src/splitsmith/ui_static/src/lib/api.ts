@@ -1470,6 +1470,11 @@ export interface RecentProject {
   name: string;
   last_opened_at: string;
   kind?: "match" | "legacy" | null;
+  /** Stable match identifier (#353 Phase 3). Populated for
+   *  ``kind="match"`` entries; what dev-mode surfaces plug into the
+   *  ``/api/matches/{id}/...`` alias to address a match without a
+   *  process-level bind. */
+  match_id?: string | null;
 }
 
 /** What a project delete actually removed (mirrors the server's
@@ -1533,6 +1538,11 @@ export interface RecentProjectDetail {
   name: string;
   last_opened_at: string;
   kind: "match" | "legacy" | "missing" | "unknown";
+  /** Stable match identifier (#353 Phase 3). Populated for
+   *  ``kind="match"``; ``null`` otherwise. What dev-mode surfaces plug
+   *  into the ``/api/matches/{id}/...`` alias to address the match
+   *  without a process-level bind. */
+  match_id: string | null;
   shooter_count: number;
   stage_count: number;
   stages_audited: number;
@@ -3126,6 +3136,36 @@ export const api = {
   listMatchShooters: () =>
     request<ShooterListResponse>("/api/match/shooters"),
 
+  /* Explicitly match-addressed variants for surfaces outside the
+   * ``/match/:matchId/`` URL space (the dev-mode Lab). ``scopeRequestPath``
+   * only rewrites bare ``/api/match/`` + ``/api/shooters/`` paths when the
+   * browser URL carries a match prefix, and since #353 Tier 1 the server
+   * has no process-level bind fallback -- so a dev-mode caller must name
+   * the match in the request path itself. */
+  listMatchShootersIn: (matchId: string) =>
+    request<ShooterListResponse>(
+      `/api/matches/${encodeURIComponent(matchId)}/match/shooters`,
+    ),
+
+  getProjectIn: (matchId: string, slug: string) =>
+    request<MatchProject>(
+      `/api/matches/${encodeURIComponent(matchId)}/shooters/${encodeURIComponent(slug)}/project`,
+    ),
+
+  getExportOverviewIn: (matchId: string, slug: string) =>
+    request<ExportOverview>(
+      `/api/matches/${encodeURIComponent(matchId)}/shooters/${encodeURIComponent(slug)}/exports/overview`,
+    ),
+
+  promoteFixtureIn: (
+    matchId: string,
+    payload: { stage_number: number; slug: string; overwrite?: boolean },
+  ) =>
+    request<LabFixtureRecord>(
+      `/api/matches/${encodeURIComponent(matchId)}/lab/promote`,
+      { method: "POST", json: payload },
+    ),
+
   /** Queue trim-cache rebuild jobs for every missing-but-rebuildable stage
    *  in the named shooter's project. Works against the shooter's project
    *  root directly, so it does not change which shooter the server is
@@ -3781,9 +3821,6 @@ export const api = {
 
   rescoreLabUniverse: (config: Partial<LabEvalConfig>) =>
     request<LabEvalRun>("/api/lab/rescore", { method: "POST", json: { config } }),
-
-  promoteFixture: (payload: { stage_number: number; slug: string; overwrite?: boolean }) =>
-    request<LabFixtureRecord>("/api/lab/promote", { method: "POST", json: payload }),
 
   saveLabConfig: (payload: { name: string; note?: string; overwrite?: boolean }) =>
     request<{ path: string }>("/api/lab/save-config", { method: "POST", json: payload }),
