@@ -33,11 +33,13 @@ export function useAuditPlayback(
   const elRef = useRef<HTMLAudioElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const loopRef = useRef<LoopRegion | null>(null);
+  const speedRef = useRef<PlaybackSpeed>(1);
   const [playhead, setPlayhead] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeedState] = useState<PlaybackSpeed>(1);
   const [loop, setLoop] = useState<LoopRegion | null>(null);
   loopRef.current = loop;
+  speedRef.current = speed;
 
   useEffect(() => {
     if (src == null) return undefined;
@@ -46,7 +48,14 @@ export function useAuditPlayback(
     // no-op there rather than an error.
     el.preservesPitch = true;
     (el as unknown as { webkitPreservesPitch?: boolean }).webkitPreservesPitch = true;
+    // Apply the current playback speed to the new element; speed is a session
+    // preference and carries across src changes.
+    el.playbackRate = speedRef.current;
     elRef.current = el;
+    // Reset playhead, playing, and loop; speed is preserved as operator session state.
+    setPlayhead(0);
+    setPlaying(false);
+    setLoop(null);
     return () => {
       el.pause();
       elRef.current = null;
@@ -65,7 +74,12 @@ export function useAuditPlayback(
       el.currentTime = region.start;
     }
     setPlayhead(el.currentTime);
-    if (!el.paused) rafRef.current = requestAnimationFrame(tick);
+    if (el.paused) {
+      // Audio reached the end naturally; update playing state.
+      setPlaying(false);
+    } else {
+      rafRef.current = requestAnimationFrame(tick);
+    }
   }, []);
 
   const playFrom = useCallback(
@@ -74,8 +88,11 @@ export function useAuditPlayback(
       if (el == null) return;
       el.currentTime = Math.max(0, t);
       setPlayhead(el.currentTime);
-      void el.play();
+      // Catch play() rejection on rapid pause; AbortError is normal for tap-play/grab-stop.
+      el.play().catch(() => {});
       setPlaying(true);
+      // Cancel any existing rAF chain before starting a new one.
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       rafRef.current = requestAnimationFrame(tick);
     },
     [tick],

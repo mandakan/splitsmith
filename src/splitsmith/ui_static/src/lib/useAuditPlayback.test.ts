@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LOOP_S, useAuditPlayback } from "@/lib/useAuditPlayback";
 
@@ -35,6 +35,10 @@ function setup() {
 }
 
 describe("useAuditPlayback", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
   it("creates the element with preservesPitch on", () => {
     const { el } = setup();
     expect(el().preservesPitch).toBe(true);
@@ -77,5 +81,62 @@ describe("useAuditPlayback", () => {
     const before = hook.result.current.loop;
     act(() => hook.result.current.seek(5.3));
     expect(hook.result.current.loop).toEqual(before);
+  });
+
+  it("sets playing to false when audio reaches the end naturally", () => {
+    const { hook, el } = setup();
+    const audio = el();
+    // Mock play to set paused back to true immediately (simulating end-of-clip)
+    audio.play = vi.fn(async () => {
+      audio.paused = true;
+    });
+    act(() => hook.result.current.playFrom(0));
+    expect(hook.result.current.playing).toBe(true);
+    // Advance timers to let tick run and observe paused=true
+    act(() => {
+      vi.runAllTimers();
+    });
+    expect(hook.result.current.playing).toBe(false);
+  });
+
+  it("resets playhead, playing and loop when src changes", () => {
+    const created: FakeAudio[] = [];
+    const hook = renderHook(
+      ({ src }) => useAuditPlayback(src, (s) => {
+        const a = new FakeAudio(s);
+        created.push(a);
+        return a as unknown as HTMLAudioElement;
+      }),
+      { initialProps: { src: "/audio1.wav" } },
+    );
+    // Set up state on first audio
+    act(() => hook.result.current.playFrom(2.5));
+    act(() => hook.result.current.toggleLoop(5.0));
+    act(() => hook.result.current.setSpeed(0.5));
+    expect(hook.result.current.playhead).toBeCloseTo(2.5);
+    expect(hook.result.current.loop).not.toBeNull();
+    expect(hook.result.current.speed).toBe(0.5);
+    // Change src
+    act(() => hook.rerender({ src: "/audio2.wav" }));
+    // Playhead, playing, and loop should reset
+    expect(hook.result.current.playhead).toBeCloseTo(0);
+    expect(hook.result.current.playing).toBe(false);
+    expect(hook.result.current.loop).toBeNull();
+    // Speed should be preserved, and applied to the new element
+    expect(hook.result.current.speed).toBe(0.5);
+    expect(created[1].playbackRate).toBe(0.5);
+  });
+
+  it("handles play() rejection from rapid pause after play", () => {
+    const { hook, el } = setup();
+    const audio = el();
+    // Mock play to reject (simulating AbortError on quick pause)
+    audio.play = vi.fn(async () => {
+      throw new Error("AbortError");
+    });
+    // This should not throw or cause unhandled rejection
+    expect(() => {
+      act(() => hook.result.current.playFrom(1.0));
+    }).not.toThrow();
   });
 });
