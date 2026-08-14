@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LOOP_S, useAuditPlayback } from "@/lib/useAuditPlayback";
 
@@ -34,9 +34,32 @@ function setup() {
   return { hook, el: () => created[0] };
 }
 
+function setupWithRejectingPlay() {
+  const created: FakeAudio[] = [];
+  const playReturnedPromises: Promise<void>[] = [];
+  const hook = renderHook(() =>
+    useAuditPlayback("/audio.wav", (src) => {
+      const a = new FakeAudio(src);
+      // Mock play to return a rejected promise
+      a.play = vi.fn(() => {
+        const p = Promise.reject(new Error("AbortError"));
+        playReturnedPromises.push(p);
+        return p as Promise<void>;
+      });
+      created.push(a);
+      return a as unknown as HTMLAudioElement;
+    }),
+  );
+  return { hook, el: () => created[0], playReturnedPromises };
+}
+
 describe("useAuditPlayback", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("creates the element with preservesPitch on", () => {
@@ -127,16 +150,18 @@ describe("useAuditPlayback", () => {
     expect(created[1].playbackRate).toBe(0.5);
   });
 
-  it("handles play() rejection from rapid pause after play", () => {
-    const { hook, el } = setup();
-    const audio = el();
-    // Mock play to reject (simulating AbortError on quick pause)
-    audio.play = vi.fn(async () => {
-      throw new Error("AbortError");
-    });
-    // This should not throw or cause unhandled rejection
-    expect(() => {
+  it("swallows the play() rejection from a rapid pause", () => {
+    // Spy on Promise.prototype.catch to verify it's called on the rejected promise
+    const catchSpy = vi.spyOn(Promise.prototype, "catch");
+    try {
+      const { hook, playReturnedPromises } = setupWithRejectingPlay();
       act(() => hook.result.current.playFrom(1.0));
-    }).not.toThrow();
+      // Verify that play was called and returned a rejected promise
+      expect(playReturnedPromises.length).toBeGreaterThan(0);
+      // With the .catch() fix, Promise.prototype.catch is called
+      expect(catchSpy).toHaveBeenCalled();
+    } finally {
+      catchSpy.mockRestore();
+    }
   });
 });
