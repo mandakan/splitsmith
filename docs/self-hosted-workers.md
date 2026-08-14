@@ -229,12 +229,28 @@ must swap it back:
 VENV=~/.venv-splitsmith-agent
 uv venv "$VENV" --python 3.11
 uv pip install --python "$VENV" "splitsmith[hosted]"
-# swap CPU onnxruntime -> GPU (pins mirror scripts/setup-agent-gpu.sh)
-uv pip uninstall --python "$VENV" onnxruntime
-uv pip install --python "$VENV" onnxruntime-gpu==1.22.0 \
+# swap CPU onnxruntime -> GPU (pins mirror scripts/setup-agent-gpu.sh).
+# Uninstall BOTH and reinstall fresh -- see the gotcha below.
+uv pip uninstall --python "$VENV" onnxruntime onnxruntime-gpu
+uv pip install --python "$VENV" --reinstall-package onnxruntime-gpu \
+  onnxruntime-gpu==1.22.0 \
   nvidia-cudnn-cu12 nvidia-cublas-cu12 nvidia-cuda-runtime-cu12 \
   nvidia-curand-cu12 nvidia-cufft-cu12
 ```
+
+**The swap must reinstall, not just re-name (upgrade gotcha).** `onnxruntime`
+and `onnxruntime-gpu` share the same on-disk `onnxruntime/` directory. A base
+`uv pip install -U "splitsmith[hosted]"` upgrade pulls the CPU `onnxruntime`
+*over* the GPU files. Uninstalling then installing onnxruntime-gpu *by name* is a
+no-op when its dist-info survives -- uv reports "already satisfied" and skips it,
+leaving a gutted namespace package: `import onnxruntime` gives `__file__=None`
+and no `CUDAExecutionProvider`, so ensemble detect silently falls back to CPU.
+That is why the swap uninstalls **both** distributions, deletes the leftover
+`onnxruntime/` dir, and forces `--reinstall-package onnxruntime-gpu`. Any
+auto-updater that upgrades the base package **must** re-run this exact swap after
+every upgrade, and should verify `CUDAExecutionProvider` is present afterward
+(`onnxruntime.preload_dlls(); onnxruntime.get_available_providers()`) rather than
+trust the install.
 
 Point the systemd unit's `ExecStart` at the venv binary directly (no
 `run-agent-gpu.sh` needed):
