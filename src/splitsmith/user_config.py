@@ -111,10 +111,14 @@ class HostedAccountRef(BaseModel):
 
     Seeded from the device-flow poll and refreshed from
     ``GET /api/sync/whoami`` whenever the SPA reads
-    ``GET /api/settings/hosted-sync`` and the cached copy is older than
-    ``HOSTED_ACCOUNT_REFRESH_TTL_S`` (#877). The refresh goes through the
-    sync surface rather than ``/api/me``, which the sync-scoped token
-    this install holds cannot reach by design.
+    ``GET /api/settings/hosted-sync`` and this desktop process has not
+    *attempted* a refresh for ``HOSTED_ACCOUNT_REFRESH_TTL_S`` (#877).
+    The timer is on the attempt, not on the age of the stored copy: a
+    failed attempt consumes the window too, so a stale copy waits out
+    the full TTL before the next try. It lives in memory, so a restart
+    refreshes. The refresh goes through the sync surface rather than
+    ``/api/me``, which the sync-scoped token this install holds cannot
+    reach by design.
 
     A hosted-side name or email change therefore propagates within one
     TTL window while the app is running, and the stored copy is what the

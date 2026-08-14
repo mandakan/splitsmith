@@ -348,8 +348,16 @@ def _validate_media_key(key: str, match_id: str) -> None:
 async def whoami(user: Any = Depends(_current_user)) -> SyncWhoAmIResponse:
     """The account this credential belongs to, as the desktop chip renders it.
 
-    Read-only and free of side effects: the desktop calls it on a chip
-    mount, so it must stay cheap enough to sit in front of a UI paint.
+    Read-only with respect to account state, and cheap enough to sit in
+    front of a UI paint -- the desktop calls it behind a chip mount.
+
+    Not free of side effects, though: like every desktop-token call it
+    goes through ``DesktopTokenAuth``, which stamps ``last_used_at`` on
+    the token row. Since #877 the desktop refreshes at most once per
+    ``HOSTED_ACCOUNT_REFRESH_TTL_S`` for an app that is merely *open*,
+    so that column now means "last contacted" rather than "last
+    synced". It is what the account page shows as "Last used" before an
+    operator revokes a device; nothing expires off it.
     """
     _hosted_gate()
     return SyncWhoAmIResponse(

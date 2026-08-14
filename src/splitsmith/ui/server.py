@@ -5938,11 +5938,15 @@ def _hosted_mode_active() -> bool:
     return os.environ.get(SPLITSMITH_MODE_ENV, "").strip().lower() == "hosted"
 
 
-#: How long the cached hosted-account snapshot is trusted before the next
-#: ``GET /api/settings/hosted-sync`` refreshes it upstream (#877). The
-#: chip calls that route on every mount, and GlobalBar plus the mobile
-#: drawer each render one, so an untimed refresh would be a steady
-#: trickle of upstream calls for a label.
+#: How long this process waits between upstream refresh *attempts* for
+#: the cached hosted-account snapshot (#877). The timer is on the last
+#: attempt, not on the age of the stored copy, and a failed attempt
+#: consumes the window too -- so a stale copy is not retried for another
+#: full TTL. It is held in ``AppState``, i.e. in memory, so a restart
+#: refreshes. The chip calls ``GET /api/settings/hosted-sync`` on every
+#: mount, and GlobalBar plus the mobile drawer each render one, so an
+#: untimed refresh would be a steady trickle of upstream calls for a
+#: label.
 HOSTED_ACCOUNT_REFRESH_TTL_S = 300.0
 
 #: Connect/read budget for that refresh. Much shorter than the 30s the
@@ -14643,15 +14647,14 @@ def create_app(
             return prefs
         state.hosted_account_refreshed_at = now
 
-        # Local import: same lazy idiom sync_api.py itself uses to stay
-        # import-safe on a local-slim install (see the comment at its
-        # router registration, above) -- SyncWhoAmIResponse is a bare
-        # BaseModel with no hosted-only deps behind it, but the import
-        # stays scoped to the one call site that needs it.
-        from .sync_api import SyncWhoAmIResponse
-
         client: HostedSyncClient | None = None
         try:
+            # Local import: same lazy idiom sync_api.py itself uses to
+            # stay import-safe on a local-slim install (see the comment
+            # at its router registration, above). Inside the guard, so
+            # the "best-effort in the strong sense" claim covers it too.
+            from .sync_api import SyncWhoAmIResponse
+
             client = _build_device_client(
                 prefs.hosted_base_url,
                 token=prefs.hosted_token,
@@ -14678,6 +14681,12 @@ def create_app(
             # missed the last two, turning either into an unhandled 500
             # on a route whose whole job is to report a cached value
             # (#877 review).
+            #
+            # Logged because the visible symptom of a NameError or an
+            # AttributeError in here is identical to a hosted outage --
+            # "the chip still shows my email address", i.e. the bug this
+            # code exists to fix -- and nothing else would record it.
+            logger.debug("hosted account refresh failed", exc_info=True)
             return prefs
         finally:
             if client is not None:
