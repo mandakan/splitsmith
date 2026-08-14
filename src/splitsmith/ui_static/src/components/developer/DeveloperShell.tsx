@@ -333,12 +333,10 @@ function SubLink({
   to,
   icon,
   children,
-  legacy,
 }: {
   to: To;
   icon: React.ReactNode;
   children: React.ReactNode;
-  legacy?: boolean;
 }) {
   return (
     <NavLink
@@ -352,11 +350,6 @@ function SubLink({
     >
       <span className="inline-flex shrink-0 text-muted">{icon}</span>
       <span className="flex-1">{children}</span>
-      {legacy && (
-        <span className="inline-flex items-center rounded border border-[rgba(251,191,36,0.4)] bg-[color:var(--color-live-tint)] px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.1em] text-live">
-          Legacy
-        </span>
-      )}
     </NavLink>
   );
 }
