@@ -14620,6 +14620,18 @@ def create_app(
 
         The TTL is consumed before the call, not after, so a dead host
         costs one timeout per window rather than one per chip mount.
+
+        This is a WRITER, on the one route the SPA fires by itself, and
+        the ``await`` in the middle of it is long (up to
+        ``HOSTED_ACCOUNT_REFRESH_TIMEOUT_S``). The other writers -- the
+        settings PUT, the device-flow approval and the sign-out DELETE
+        -- can all land inside that window. So the object handed in is
+        used only to decide *what to ask*; the write re-reads from disk
+        immediately before saving, with no ``await`` in between, and
+        merges the two account fields alone. Saving the object we
+        loaded before the call would persist ``hosted_token`` too, and
+        a sign-out in the window would come back from the dead: a
+        revoked bearer and a live-looking chip (#877 review).
         """
         ref = prefs.hosted_account
         if ref is None or not prefs.hosted_base_url or not prefs.hosted_token:
@@ -14674,11 +14686,22 @@ def create_app(
         if payload.email == ref.email and payload.display_name == ref.display_name:
             return prefs
 
-        prefs.hosted_account = ref.model_copy(
+        # Re-read, then write, with no await in between: see the
+        # docstring. ``fresh`` is also what we return, so the response
+        # reports what is actually on disk rather than the snapshot this
+        # request started from.
+        fresh = user_config.load_global_prefs()
+        cur = fresh.hosted_account
+        if cur is None or cur.id != ref.id:
+            # Unlinked, or re-linked to another account, while we were
+            # away. The answer in hand describes a link that no longer
+            # exists; discard it rather than stamp it onto the new one.
+            return fresh
+        fresh.hosted_account = cur.model_copy(
             update={"email": payload.email, "display_name": payload.display_name}
         )
-        user_config.save_global_prefs(prefs)
-        return prefs
+        user_config.save_global_prefs(fresh)
+        return fresh
 
     @app.get("/api/settings/hosted-sync", response_model=HostedSyncSettings)
     async def get_hosted_sync_settings() -> HostedSyncSettings:

@@ -15,6 +15,7 @@ What matters here and is easy to get wrong:
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -57,6 +58,10 @@ class _FakeHosted:
         # SyncWhoAmIResponse declares (#877 review).
         self.whoami_payload: dict | list | str | None = None
         self.whoami_status = 200
+        # Fires while the refresh is parked in the threadpool, i.e. the
+        # window in which another writer can touch config.yaml (#877
+        # review).
+        self.whoami_hook: Callable[[], None] | None = None
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -82,6 +87,8 @@ class _FakeHosted:
             return httpx.Response(self.revoke_status, json={"revoked": True})
         if path == "/api/sync/whoami":
             self.whoami_calls += 1
+            if self.whoami_hook is not None:
+                self.whoami_hook()
             if self.whoami_status != 200:
                 return httpx.Response(self.whoami_status, json={"detail": "nope"})
             body = self.whoami_payload if self.whoami_payload is not None else {}
@@ -726,6 +733,79 @@ def test_an_unlinked_install_makes_no_upstream_call(tmp_path: Path, monkeypatch)
 
     assert client.get("/api/settings/hosted-sync").json()["account"] is None
     assert hosted.whoami_calls == 0
+
+
+def test_a_signout_underneath_an_in_flight_refresh_is_not_reverted(tmp_path: Path, monkeypatch) -> None:
+    """The refresh is a WRITER on the one route the SPA fires by itself.
+
+    It loads prefs, awaits whoami (up to 5s), then saves. If it saves
+    the object it loaded before the await, it persists the whole
+    ``GlobalPrefs`` - including ``hosted_token`` - and a sign-out that
+    landed in that window is undone: a revoked bearer and a cleared
+    account link are both back in config.yaml, and the chip renders the
+    account again on the next mount. That is #738 in reverse (#877
+    review).
+    """
+    hosted = _FakeHosted([])
+    hosted.whoami_payload = {"id": "u1", "email": "owner@example.com", "display_name": "Mathias A"}
+    client = _link_account(tmp_path, monkeypatch, hosted)
+    seen: dict = {}
+
+    def _sign_out_now() -> None:
+        # The refresh is parked in the threadpool right here; the
+        # operator clicks sign out.
+        seen["unlink"] = client.delete(SESSION).json()
+        seen["disk_after_unlink"] = user_config.load_global_prefs()
+
+    hosted.whoami_hook = _sign_out_now
+
+    body = client.get("/api/settings/hosted-sync").json()
+    disk = user_config.load_global_prefs()
+
+    # The sign-out itself did its job...
+    assert seen["unlink"] == {"cleared": True, "hosted_revoked": True}
+    assert seen["disk_after_unlink"].hosted_token is None
+    assert seen["disk_after_unlink"].hosted_account is None
+    # ...and the refresh that finished afterwards left it alone.
+    assert disk.hosted_token is None, "SIGN-OUT REVERTED: revoked token is back on disk"
+    assert disk.hosted_account is None, "SIGN-OUT REVERTED: account is back on disk"
+    # The response agrees with disk rather than reporting the stale
+    # snapshot the request started from.
+    assert body["account"] is None
+    assert body["token_set"] is False
+
+
+def test_a_relink_to_another_account_underneath_a_refresh_wins(tmp_path: Path, monkeypatch) -> None:
+    """The stale response must not be merged onto a different account.
+
+    Same window as above, but config.yaml now holds a *different*
+    hosted account. The in-flight answer describes the old one, so it
+    is discarded outright rather than stamped onto the new link.
+    """
+    hosted = _FakeHosted([])
+    hosted.whoami_payload = {"id": "u1", "email": "owner@example.com", "display_name": "Mathias A"}
+    client = _link_account(tmp_path, monkeypatch, hosted)
+
+    def _relink_now() -> None:
+        prefs = user_config.load_global_prefs()
+        prefs.hosted_account = user_config.HostedAccountRef(
+            id="u2",
+            email="other@example.com",
+            display_name="Someone Else",
+            device_name="thinkpad",
+            linked_at=datetime.now(UTC),
+        )
+        user_config.save_global_prefs(prefs)
+
+    hosted.whoami_hook = _relink_now
+
+    body = client.get("/api/settings/hosted-sync").json()
+
+    assert body["account"]["email"] == "other@example.com"
+    assert body["account"]["display_name"] == "Someone Else"
+    disk = user_config.load_global_prefs()
+    assert disk.hosted_account.id == "u2"
+    assert disk.hosted_account.email == "other@example.com"
 
 
 def test_a_malformed_base_url_returns_the_cached_account(tmp_path: Path, monkeypatch) -> None:
