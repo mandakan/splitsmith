@@ -194,6 +194,17 @@ export function Lab() {
     return run.universe.fixtures.find((f) => f.slug === slug) ?? null;
   }, [run, slug]);
 
+  // The detail drawer renders below the fixture table, which at corpus
+  // size is thousands of pixels tall -- without an explicit scroll a
+  // row click looks like a no-op. Scroll when the selected slug
+  // changes; not when the drawer merely swaps Lite -> full after an
+  // eval, since the operator is already looking at it then.
+  const detailRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!slug) return;
+    detailRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }, [slug]);
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -261,22 +272,26 @@ export function Lab() {
         }
       />
 
-      {focused ? (
-        <FixtureDetail
-          fixture={focused}
-          onClose={() => navigate("/dev/legacy/lab", { replace: true })}
-          onLabelChanged={(updated) => {
-            if (updated) setRun(updated);
-            else runEval();
-          }}
-        />
-      ) : slug ? (
-        <FixtureDetailLite
-          record={catalog.find((r) => r.slug === slug) ?? null}
-          onClose={() => navigate("/dev/legacy/lab", { replace: true })}
-          onRunEvalScoped={(slugs) => void runEval(slugs)}
-          evalLoading={evalLoading}
-        />
+      {slug ? (
+        <div ref={detailRef} className="scroll-mt-24">
+          {focused ? (
+            <FixtureDetail
+              fixture={focused}
+              onClose={() => navigate("/dev/legacy/lab", { replace: true })}
+              onLabelChanged={(updated) => {
+                if (updated) setRun(updated);
+                else runEval();
+              }}
+            />
+          ) : (
+            <FixtureDetailLite
+              record={catalog.find((r) => r.slug === slug) ?? null}
+              onClose={() => navigate("/dev/legacy/lab", { replace: true })}
+              onRunEvalScoped={(slugs) => void runEval(slugs)}
+              evalLoading={evalLoading}
+            />
+          )}
+        </div>
       ) : null}
 
       <SweepsCard />
