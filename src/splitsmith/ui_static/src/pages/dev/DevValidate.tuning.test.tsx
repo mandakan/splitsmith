@@ -150,4 +150,33 @@ describe("DevValidate tuning panel", () => {
     );
     expect(screen.getByText("0.987")).toBeInTheDocument();
   });
+
+  it("has exactly one consensus control, ranged 1-3, with a live bar readout", async () => {
+    // #899: the run-config bar and TuningPanel both wrote
+    // config.consensus with mismatched displayed ranges ("of 3" vs
+    // "of 4" -- the ensemble runs three voters). The tuning panel owns
+    // the only control now; the bar cell is a read-only readout of the
+    // same field.
+    vi.mocked(api.getLastLabRun).mockRejectedValue(new Error("no run"));
+
+    renderValidate();
+    await screen.findByTestId("consensus-readout");
+
+    const sliders = screen
+      .getAllByRole("slider")
+      .filter((s) => /consensus/i.test(s.getAttribute("aria-label") ?? "") ||
+        /consensus/i.test(s.closest("label")?.textContent ?? ""));
+    expect(sliders).toHaveLength(1);
+    expect(sliders[0]).toHaveAttribute("max", "3");
+    expect(sliders[0]).toHaveAttribute("min", "1");
+
+    const readout = screen.getByTestId("consensus-readout");
+    expect(readout).toHaveTextContent("2");
+    expect(readout).toHaveTextContent("of 3");
+    expect(readout.querySelector("input")).toBeNull();
+
+    // The readout tracks the tuning panel's slider -- same field.
+    fireEvent.change(sliders[0], { target: { value: "3" } });
+    expect(screen.getByTestId("consensus-readout")).toHaveTextContent("3");
+  });
 });
