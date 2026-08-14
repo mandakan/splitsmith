@@ -35,6 +35,7 @@ import {
 } from "@/lib/api";
 import { buildAuditJson, deriveMarkers } from "@/lib/audit-doc";
 import { resolveTarget } from "@/lib/audit-target";
+import { useDialogFocus } from "@/lib/dialogFocus";
 import { useMatchHref } from "@/lib/matchHref";
 import { snapToPeak, type SnapPeaks } from "@/lib/peak-snap";
 import { createScrubber, type Scrubber } from "@/lib/scrub-audio";
@@ -72,6 +73,12 @@ export function MobileAudit() {
 
   // undefined = not loaded yet; null = confirmed no audit doc for this stage.
   const [audit, setAudit] = useState<StageAudit | null | undefined>(undefined);
+  // Set only when the getStageAudit request itself failed (network error,
+  // 5xx, ...) - distinct from the server's honest "no audit yet" 200-null
+  // response. Conflating the two told the operator to re-run detection on
+  // a stage that was actually already audited (#757 follow-up).
+  const [auditError, setAuditError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const [markers, setMarkers] = useState<AuditMarker[]>([]);
   const [peaksResult, setPeaksResult] = useState<PeaksResult | null>(null);
   const [peaksError, setPeaksError] = useState<PeaksError | null>(null);
@@ -88,6 +95,7 @@ export function MobileAudit() {
   const sessionEvents = useRef<AuditEvent[]>([]);
   const scrubberRef = useRef<Scrubber | null>(null);
   const videoElRef = useRef<HTMLVideoElement | null>(null);
+  const videoPanelRef = useRef<HTMLDivElement | null>(null);
 
   const audioSrc = stageNumber != null ? api.stageAudioUrl(slug, stageNumber) : null;
   const playback = useAuditPlayback(audioSrc);
@@ -105,6 +113,7 @@ export function MobileAudit() {
     if (!slug || stageNumber == null) return undefined;
     let alive = true;
     setAudit(undefined);
+    setAuditError(null);
     setMarkers([]);
     setPeaksResult(null);
     setPeaksError(null);
@@ -116,10 +125,10 @@ export function MobileAudit() {
         setAudit(doc);
         setMarkers(deriveMarkers(doc));
       })
-      .catch(() => {
+      .catch((err) => {
         if (!alive) return;
-        setAudit(null);
-        setMarkers([]);
+        setAudit(undefined);
+        setAuditError(saveErrorMessage(err));
       });
 
     api
@@ -136,7 +145,7 @@ export function MobileAudit() {
     return () => {
       alive = false;
     };
-  }, [slug, stageNumber]);
+  }, [slug, stageNumber, reloadToken]);
 
   // Scrubber lifecycle: create once the audio src is known, dispose on
   // unmount / src change. Every failure path degrades to silent
@@ -219,7 +228,7 @@ export function MobileAudit() {
 
   const handleNudge = useCallback(
     (deltaMs: -10 | 10) => {
-      if (target.kind !== "shot" || readOnly) return;
+      if (target.kind !== "shot" || readOnly || saving) return;
       const m = target.marker;
       const fromTime = m.time;
       const toTime = fromTime + deltaMs / 1000;
@@ -228,11 +237,11 @@ export function MobileAudit() {
       setHeldId(m.id);
       setNudgeMs((n) => n + deltaMs);
     },
-    [target, readOnly, recordEvent],
+    [target, readOnly, saving, recordEvent],
   );
 
   const handleDeleteShot = useCallback(() => {
-    if (target.kind !== "shot" || readOnly) return;
+    if (target.kind !== "shot" || readOnly || saving) return;
     const m = target.marker;
     if (m.kind === "manual") {
       setConfirmDeleteMarker(m);
@@ -240,25 +249,26 @@ export function MobileAudit() {
     }
     recordEvent("marker_rejected", { id: m.id, time: m.time, candidate_number: m.candidateNumber });
     setMarkers((prev) => prev.map((x) => (x.id === m.id ? { ...x, kind: "rejected" } : x)));
-  }, [target, readOnly, recordEvent]);
+  }, [target, readOnly, saving, recordEvent]);
 
   const confirmDeleteManual = useCallback(() => {
+    if (saving) return;
     const m = confirmDeleteMarker;
     if (!m) return;
     recordEvent("marker_deleted", { id: m.id, time: m.time, kind: "manual" });
     setMarkers((prev) => prev.filter((x) => x.id !== m.id));
     setConfirmDeleteMarker(null);
-  }, [confirmDeleteMarker, recordEvent]);
+  }, [confirmDeleteMarker, saving, recordEvent]);
 
   const handlePromote = useCallback(() => {
-    if (target.kind !== "candidate" || readOnly) return;
+    if (target.kind !== "candidate" || readOnly || saving) return;
     const m = target.marker;
     recordEvent("marker_kept", { id: m.id, time: m.time, candidate_number: m.candidateNumber });
     setMarkers((prev) => prev.map((x) => (x.id === m.id ? { ...x, kind: "detected" } : x)));
-  }, [target, readOnly, recordEvent]);
+  }, [target, readOnly, saving, recordEvent]);
 
   const handleAddShot = useCallback(() => {
-    if (target.kind !== "none" || readOnly) return;
+    if (target.kind !== "none" || readOnly || saving) return;
     const snapped = snapPeaks ? snapToPeak(playback.playhead, snapPeaks) : null;
     const t = snapped ?? playback.playhead;
     const id = `manual-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -276,7 +286,7 @@ export function MobileAudit() {
         note: "",
       },
     ]);
-  }, [target, readOnly, snapPeaks, playback.playhead, recordEvent]);
+  }, [target, readOnly, saving, snapPeaks, playback.playhead, recordEvent]);
 
   const handleLoopToggle = useCallback(() => {
     const anchor = target.kind === "shot" ? target.marker.time : playback.playhead;
@@ -299,6 +309,13 @@ export function MobileAudit() {
   const handleShowVideo = useCallback(() => {
     if (videoUrl) setVideoOpen(true);
   }, [videoUrl]);
+
+  const closeVideo = useCallback(() => setVideoOpen(false), []);
+
+  // Same overlay-architecture contract as MobileConfirmSheet: Escape
+  // closes, Tab is trapped inside, focus moves in on open and restores
+  // to the trigger on close.
+  useDialogFocus(videoOpen, videoPanelRef, closeVideo);
 
   const handleVideoLoadedMetadata = useCallback(() => {
     const el = videoElRef.current;
@@ -418,22 +435,29 @@ export function MobileAudit() {
             )}
           </header>
 
-          {audit === undefined && (
+          {auditError != null ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+              <p className="text-sm text-muted">Could not load the audit - retry ({auditError})</p>
+              <button
+                type="button"
+                onClick={() => setReloadToken((n) => n + 1)}
+                className="min-h-11 rounded-md border border-rule px-4 py-2 text-sm text-ink"
+              >
+                Retry
+              </button>
+            </div>
+          ) : audit === undefined ? (
             <div className="flex flex-1 items-center justify-center text-sm text-muted">
               Loading...
             </div>
-          )}
-
-          {audit === null && (
+          ) : audit === null ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
               <p className="text-sm text-muted">Nothing to audit yet - run shot detection first</p>
               <Link to={href("jobs")} className="min-h-11 rounded-md border border-rule px-4 py-2 text-sm text-ink">
                 Go to jobs
               </Link>
             </div>
-          )}
-
-          {audit != null && (
+          ) : (
             <>
               {peaksResult ? (
                 <WrappedWaveform
@@ -491,7 +515,7 @@ export function MobileAudit() {
                 shotOrdinal={shotOrdinal}
                 splitS={splitS}
                 nudgeMs={nudgeMs}
-                readOnly={readOnly}
+                readOnly={readOnly || saving}
                 hasVideo={videoUrl != null}
                 onNudge={handleNudge}
                 onDeleteShot={handleDeleteShot}
@@ -505,16 +529,18 @@ export function MobileAudit() {
 
         {videoOpen && videoUrl && (
           <div
+            ref={videoPanelRef}
             role="dialog"
             aria-modal="true"
             aria-label="Shot video"
-            className="fixed inset-0 z-modal flex flex-col bg-black"
+            tabIndex={-1}
+            className="fixed inset-0 z-modal flex flex-col bg-black outline-none"
           >
             <div className="flex justify-end p-2">
               <button
                 type="button"
                 aria-label="Close"
-                onClick={() => setVideoOpen(false)}
+                onClick={closeVideo}
                 className="flex min-h-11 min-w-11 items-center justify-center text-ink"
               >
                 <X className="size-5" aria-hidden />
@@ -540,6 +566,7 @@ export function MobileAudit() {
               : ""
           }
           confirmLabel="Delete"
+          confirmDisabled={saving}
           onConfirm={confirmDeleteManual}
           onCancel={() => setConfirmDeleteMarker(null)}
         />

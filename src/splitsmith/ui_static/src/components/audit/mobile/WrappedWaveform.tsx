@@ -61,7 +61,7 @@ export function WrappedWaveform({
     return (row + fx) * rowDur;
   };
 
-  const down = (row: number) => (e: ReactPointerEvent<HTMLDivElement>) => {
+  const down = (e: ReactPointerEvent<HTMLDivElement>) => {
     // Ignore new pointers if a gesture is already in progress with a different ID
     if (gesture.current != null && gesture.current.pointerId !== e.pointerId) return;
     gesture.current = { pointerId: e.pointerId, startX: e.clientX, grabbed: false };
@@ -111,7 +111,7 @@ export function WrappedWaveform({
             <div
               data-testid="wave-row"
               className="relative min-w-0 flex-1 touch-none"
-              onPointerDown={down(r)}
+              onPointerDown={down}
               onPointerMove={move(r)}
               onPointerUp={up(r)}
               onPointerCancel={cancel}

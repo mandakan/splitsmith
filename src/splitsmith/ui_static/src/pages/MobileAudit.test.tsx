@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -57,6 +57,21 @@ const doc = (): StageAudit => ({
     ],
   },
   audit_events: [],
+});
+
+const projectWithVideo = () => ({
+  stages: [
+    {
+      stage_number: 3,
+      videos: [
+        {
+          role: "primary",
+          path: "raw/stage3.mp4",
+          processed: { beep: true, shot_detect: false, trim: false },
+        },
+      ],
+    },
+  ],
 });
 
 const apiMock = vi.hoisted(() => ({
@@ -172,5 +187,51 @@ describe("MobileAudit", () => {
     await waitFor(() =>
       expect(screen.getByText(/waiting for the desktop to sync/i)).toBeInTheDocument(),
     );
+  });
+
+  it("an audit fetch failure shows an honest load-error, not the empty-state copy", async () => {
+    const { ApiError } = await import("@/lib/api");
+    apiMock.getStageAudit.mockRejectedValue(new ApiError(500, "server exploded"));
+    renderPage();
+    await waitFor(() =>
+      expect(screen.getByText(/could not load the audit/i)).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/nothing to audit yet/i)).toBeNull();
+  });
+
+  it("Escape closes the video overlay with focus trap wiring", async () => {
+    ctx.value = { ...ctx.value, project: projectWithVideo() };
+    playback.state.playhead = 2.0; // on cand-1, a kept shot -> Video button renders
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Video" }));
+    expect(screen.getByRole("dialog", { name: "Shot video" })).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Shot video" })).toBeNull(),
+    );
+    ctx.value = { ...ctx.value, project: null };
+  });
+
+  it("action buttons disable while a save is in flight", async () => {
+    let resolveSave: (v: StageAudit) => void = () => {};
+    apiMock.saveStageAudit.mockImplementation(
+      () =>
+        new Promise<StageAudit>((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+    playback.state.playhead = 2.0; // on cand-1, a kept shot
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "+10 ms" })); // dirty, so Save enables
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "+10 ms" })).toBeDisabled());
+    expect(screen.getByRole("button", { name: "-10 ms" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled();
+    await act(async () => {
+      resolveSave(doc());
+      await Promise.resolve();
+    });
   });
 });
