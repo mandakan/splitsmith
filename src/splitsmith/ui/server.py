@@ -14964,6 +14964,16 @@ def create_app(
                     config=cfg,
                     progress=progress,
                 )
+                cached = _lab_universe_cache.get("last_run")
+                if wanted_slugs is not None and cached is not None and cached.config_hash == run.config_hash:
+                    # Scoped re-eval of a subset: fold it into the cached run so a
+                    # full Validate universe survives per-fixture labeling evals.
+                    fresh = {f.slug for f in run.universe.fixtures}
+                    keep = [f for f in cached.universe.fixtures if f.slug not in fresh]
+                    merged = cached.universe.model_copy(
+                        update={"fixtures": keep + list(run.universe.fixtures)}
+                    )
+                    run = lab_module.rescore_universe(merged, cfg)
                 if persist:
                     try:
                         lab_module.save_run(run)
