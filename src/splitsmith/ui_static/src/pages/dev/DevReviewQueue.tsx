@@ -3,9 +3,11 @@
  *
  * Three-column layout: dev sidebar (rendered by DeveloperShell), a
  * persistent queue list, and a focused detail panel. The detail panel
- * routes the user into /review to do the actual edit -- the
- * fixture-edit primitive lives there and we don't fork it during the
- * redesign. The queue list itself is fully redesigned per polished/10.
+ * routes the user out for the actual work: /review for marker edits
+ * (the fixture-edit primitive lives there and we don't fork it) and
+ * /dev/corpus/:slug for candidate labeling (#902 -- the redesign
+ * spec's routes table promises both). The queue list itself is fully
+ * redesigned per polished/10.
  */
 
 import {
@@ -15,9 +17,10 @@ import {
   Inbox,
   Keyboard,
   ListChecks,
+  Tags,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
 import { api, type DevReviewQueueItem, type DevReviewQueueResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -267,6 +270,11 @@ function QueueItem({
 }
 
 function DetailPane({ item, loading }: { item: DevReviewQueueItem | null; loading: boolean }) {
+  // Dev-mode match context, threaded the same way DeveloperShell's
+  // stepper and the corpus row links do (#884).
+  const [searchParams] = useSearchParams();
+  const matchContext = searchParams.get("match");
+
   if (loading) {
     return (
       <main className="flex h-full items-center justify-center text-[0.875rem] text-muted">
@@ -290,6 +298,15 @@ function DetailPane({ item, loading }: { item: DevReviewQueueItem | null; loadin
   }
 
   const reviewUrl = `/review?fixture=${encodeURIComponent(item.audit_path)}`;
+  // Labeling happens on the fixture detail page (candidates only exist
+  // there); marker edits stay in /review. The redesign spec's routes
+  // table promises both links from a queue item (#902).
+  const labelUrl = {
+    pathname: `/dev/corpus/${item.slug}`,
+    ...(matchContext
+      ? { search: `?match=${encodeURIComponent(matchContext)}` }
+      : {}),
+  };
 
   return (
     <main className="flex h-full flex-col overflow-y-auto">
@@ -361,6 +378,14 @@ function DetailPane({ item, loading }: { item: DevReviewQueueItem | null; loadin
             O
           </kbd>
         </a>
+        <Link
+          to={labelUrl}
+          title="Label this fixture's detection candidates on the fixture detail page"
+          className="inline-flex items-center gap-2 rounded-md border border-[rgba(6,182,212,0.4)] bg-[color:var(--color-beep-tint)] px-3 py-2 font-mono text-[0.75rem] font-bold uppercase tracking-[0.08em] text-beep transition-colors hover:bg-[rgba(6,182,212,0.2)]"
+        >
+          <Tags className="size-3.5" />
+          Label
+        </Link>
         <button
           type="button"
           className="inline-flex items-center gap-2 rounded-md border border-rule bg-surface px-3 py-2 font-mono text-[0.75rem] font-bold uppercase tracking-[0.08em] text-ink-2 transition-colors hover:bg-surface-2"
