@@ -1,7 +1,8 @@
 /**
- * useLabRun -- the shared eval-run data hook lifted out of Lab.tsx so
- * the redesigned fixture-detail page and the Validate page can drive
- * eval runs the same way the legacy Lab page does. Pins the three
+ * useLabRun -- the shared eval-run data hook lifted out of the legacy
+ * Lab page (since deleted -- #331 final task) so the redesigned
+ * fixture-detail page and the Validate page can drive eval runs the
+ * same way the legacy Lab page did. Pins the three
  * behaviors that must survive the lift verbatim: mount hydration from
  * the server's last-run cache (config included), the single-flight
  * scoped runEval, and the 120ms debounced rescore that only fires on a

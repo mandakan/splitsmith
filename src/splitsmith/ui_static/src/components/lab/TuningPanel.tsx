@@ -1,11 +1,12 @@
 /**
- * Tuning + save-as-YAML panel, lifted out of legacy ``Lab.tsx`` (#886
+ * Tuning + save-as-YAML panel, lifted out of the legacy Lab page (#886
  * follow-up) as ``TuningCard`` + ``SaveYamlButton`` combined into one
  * component for the redesigned Validate page. Unlike the promote
- * panels, legacy Lab.tsx keeps its own inline copy of this logic (the
+ * panels, the legacy page kept its own inline copy of this logic (the
  * same pattern ``useLabRun`` already established -- see that file's
- * header comment) since it is slated for deletion in PR 5; this
- * component is for the new Lab surfaces only.
+ * header comment) rather than consuming this component -- that page is
+ * now deleted (#331 final task), so this component is the only copy
+ * left.
  *
  * Sliders rescore the cached universe live via the caller's debounced
  * ``onChange`` (typically backed by ``useLabRun``); ``rescoreLoading``
