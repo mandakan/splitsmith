@@ -40,10 +40,18 @@ echo "==> Installing splitsmith + hosted deps (this is the agent's runtime)"
 uv pip install --python "$VENV_DIR" -e ".[hosted]"
 
 echo "==> Swapping CPU onnxruntime -> onnxruntime-gpu $ORT_GPU_VERSION + CUDA 12 wheels"
-# onnxruntime and onnxruntime-gpu share the 'onnxruntime' import name and cannot
-# coexist, so uninstall the CPU wheel first.
-uv pip uninstall --python "$VENV_DIR" onnxruntime >/dev/null 2>&1 || true
-uv pip install --python "$VENV_DIR" \
+# onnxruntime and onnxruntime-gpu share the 'onnxruntime' import name (and the
+# same on-disk dir) and cannot coexist. A base (re)install lays the CPU wheel
+# down over the GPU files; uninstalling then installing by-name is a no-op when
+# the GPU dist-info survives, leaving a gutted namespace package (no
+# __init__.py, `import onnxruntime` -> __file__=None, no CUDA). Re-running this
+# script or upgrading the base package hits exactly that. So remove BOTH dists
+# and any leftover dir, then reinstall the GPU wheel fresh (--reinstall-package)
+# so the module is whole every time.
+uv pip uninstall --python "$VENV_DIR" onnxruntime onnxruntime-gpu >/dev/null 2>&1 || true
+_sp="$("$VENV_DIR/bin/python" -c 'import site; print(site.getsitepackages()[0])' 2>/dev/null)"
+[ -n "$_sp" ] && rm -rf "$_sp/onnxruntime"
+uv pip install --python "$VENV_DIR" --reinstall-package onnxruntime-gpu \
     "onnxruntime-gpu==${ORT_GPU_VERSION}" \
     nvidia-cudnn-cu12 \
     nvidia-cublas-cu12 \
