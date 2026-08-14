@@ -19,7 +19,7 @@
 import { Check, FlaskConical, Layers, Zap } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate, type To } from "react-router-dom";
 
 import { JobsSurface } from "@/components/Jobs";
 import {
@@ -51,9 +51,16 @@ const STEPS: StepDef[] = [
 ];
 
 export function DeveloperShell() {
-  const { pathname } = useLocation();
+  const { pathname, search } = useLocation();
   const navigate = useNavigate();
   const { mode, setMode } = useMode();
+
+  // Dev mode's match context (#884). MatchShell's dev flip and the
+  // dev-mode picker pin the chosen match as ?match=; the shell keeps it
+  // across its own nav links so the Lab (the one match-consuming dev
+  // surface) still sees it after the operator wanders through the
+  // stepper. Absent param -> bare links, exactly as before.
+  const matchContext = new URLSearchParams(search).get("match");
 
   // First-paint sync: if a /dev/* URL is loaded fresh, force the global
   // mode to "developer" so the cyan accent tokens fire. We only do this
@@ -69,8 +76,17 @@ export function DeveloperShell() {
     // Replace, not push: same reasoning as the match shell -- mode
     // flips shouldn't leave a back-button breadcrumb to the dev URL
     // because the mode state itself won't restore on back.
-    if (mode === "match") navigate("/", { replace: true });
-  }, [mode, setMode, didInitMode, navigate]);
+    //
+    // With a pinned match, flip back to that match's home instead of
+    // the root/picker -- the operator already chose it; making them
+    // choose it again on every round trip is the confusion this param
+    // exists to fix.
+    if (mode === "match") {
+      navigate(matchContext ? `/match/${encodeURIComponent(matchContext)}/` : "/", {
+        replace: true,
+      });
+    }
+  }, [mode, setMode, didInitMode, navigate, matchContext]);
 
   const [model, setModel] = useState<DeveloperModelInfo | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -193,6 +209,14 @@ function DeveloperSidebar({
   // JobsSurface no longer self-hosts its poller (#663); this sidebar
   // is the jobs owner for the developer shell.
   const jobsState = useJobs();
+  // Keep the dev-mode match context (?match=) on every sidebar link --
+  // see the shell's matchContext comment.
+  const { search } = useLocation();
+  const matchContext = new URLSearchParams(search).get("match");
+  const withMatch = (to: string) =>
+    matchContext
+      ? { pathname: to, search: `?match=${encodeURIComponent(matchContext)}` }
+      : to;
   return (
     <aside className="sticky top-[var(--shell-header-h,86px)] flex h-[calc(100dvh-var(--shell-header-h,86px))] w-[248px] shrink-0 flex-col overflow-y-auto border-r border-rule bg-surface px-3 py-4">
       <div className="relative mb-3.5 border-b border-rule px-3 pb-4">
@@ -227,7 +251,7 @@ function DeveloperSidebar({
           return (
             <div key={step.to} className="relative">
               <NavLink
-                to={step.to}
+                to={withMatch(step.to)}
                 className={cn(
                   "grid min-h-10 grid-cols-[28px_1fr_auto] items-center gap-2.5 rounded-md px-2.5 py-2 text-[0.8125rem] font-medium transition-colors",
                   active
@@ -283,7 +307,11 @@ function DeveloperSidebar({
         Tools
       </div>
       <div className="flex flex-col gap-px">
-        <SubLink to="/dev/legacy/lab" icon={<FlaskConical className="size-[15px]" />} legacy>
+        <SubLink
+          to={withMatch("/dev/legacy/lab")}
+          icon={<FlaskConical className="size-[15px]" />}
+          legacy
+        >
           Lab playground
         </SubLink>
         <SubLink to="/_design" icon={<Layers className="size-[15px]" />}>
@@ -314,7 +342,7 @@ function SubLink({
   children,
   legacy,
 }: {
-  to: string;
+  to: To;
   icon: React.ReactNode;
   children: React.ReactNode;
   legacy?: boolean;

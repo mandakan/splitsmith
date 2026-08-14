@@ -45,6 +45,7 @@ import {
   type ServerHealth,
 } from "@/lib/api";
 import { useDeploymentMode } from "@/lib/features";
+import { useMode } from "@/lib/mode";
 import { cn } from "@/lib/utils";
 
 type StatusFilter = "all" | "awaiting_footage" | "in_progress" | "exported" | "archived";
@@ -63,6 +64,7 @@ export function Pick() {
   const navigate = useNavigate();
   const confirm = useConfirm();
   const { mode } = useDeploymentMode();
+  const { mode: appMode } = useMode();
   const [recents, setRecents] = useState<RecentProjectDetail[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
@@ -191,12 +193,25 @@ export function Pick() {
     }
   }, [filtered.length, selectedIdx]);
 
+  /** Where a successful bind should land. In Developer mode the picker
+   *  is a detour from dev work (reached via the Splitsmith breadcrumb
+   *  or an unbound ``--lab`` boot), so return to the Lab with the
+   *  chosen match pinned as ``?match=`` instead of dropping the
+   *  operator into match mode. Legacy projects have no match_id the
+   *  Lab could use, so they keep the match-home destination. */
+  function postBindTarget(health: ServerHealth): string {
+    if (appMode === "developer" && health.match_id) {
+      return `/dev/legacy/lab?match=${encodeURIComponent(health.match_id)}`;
+    }
+    return matchHome(health);
+  }
+
   async function open(target: RecentProjectDetail) {
     setOpening(target.path);
     setError(null);
     try {
       const health = await api.bindProject(target.path, target.name);
-      navigate(matchHome(health), { replace: true });
+      navigate(postBindTarget(health), { replace: true });
     } catch (e: unknown) {
       setOpening(null);
       setError(e instanceof ApiError ? e.detail : String(e));
@@ -262,7 +277,7 @@ export function Pick() {
     setError(null);
     try {
       const health = await api.bindProject(trimmed);
-      navigate(matchHome(health), { replace: true });
+      navigate(postBindTarget(health), { replace: true });
     } catch (e: unknown) {
       setOpening(null);
       setError(e instanceof ApiError ? e.detail : String(e));
