@@ -234,4 +234,56 @@ describe("MobileAudit", () => {
       await Promise.resolve();
     });
   });
+
+  it("video kind follows peaksResult.trimmed, not the project payload's processed.trim", async () => {
+    // processed.trim is false here; peaksResult.trimmed (below) says true -
+    // the peaks flag must win.
+    ctx.value = { ...ctx.value, project: projectWithVideo() };
+    apiMock.getStagePeaks.mockResolvedValue({
+      duration: 22,
+      sample_rate: 48000,
+      bins: 8192,
+      peaks: Array.from({ length: 8192 }, () => 0.4),
+      beep_time: 1.0,
+      trimmed: true,
+    });
+    playback.state.playhead = 2.0; // on cand-1, a kept shot -> Video button renders
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Video" }));
+    expect(apiMock.videoStreamUrl).toHaveBeenCalledWith("alice", "raw/stage3.mp4", "trim");
+    ctx.value = { ...ctx.value, project: null };
+  });
+
+  it("Back with dirty edits opens a discard-confirm sheet instead of navigating", async () => {
+    playback.state.playhead = 2.0; // on cand-1
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "+10 ms" })); // dirty
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByText(/discard unsaved edits/i)).toBeInTheDocument();
+    // Did not navigate away - the takeover is still mounted.
+    expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(screen.queryByTestId("wrapped-waveform")).toBeNull());
+  });
+
+  it("a 409 followed by a failed reload shows an error and preserves dirty edits", async () => {
+    const { ApiError } = await import("@/lib/api");
+    playback.state.playhead = 3.1;
+    apiMock.saveStageAudit.mockRejectedValue(new ApiError(409, "version_conflict"));
+    apiMock.getStageAudit
+      .mockResolvedValueOnce(doc()) // initial load
+      .mockRejectedValueOnce(new ApiError(500, "reload boom")); // the 409 refetch
+    renderPage();
+    await waitFor(() => expect(screen.getByTestId("wrapped-waveform")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Promote candidate" }));
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
+    await waitFor(() => expect(screen.getByText(/reload failed/i)).toBeInTheDocument());
+    // Dirty edits survive: the Save button still shows the dirty indicator
+    // and is enabled again (not stuck disabled from the finished attempt).
+    const saveButton = screen.getByRole("button", { name: /save/i });
+    expect(saveButton).not.toBeDisabled();
+    expect(saveButton).toHaveTextContent("Save *");
+  });
 });

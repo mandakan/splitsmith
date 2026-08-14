@@ -91,6 +91,7 @@ export function MobileAudit() {
   const [zoom, setZoom] = useState<ZoomFactor>(3);
   const [videoOpen, setVideoOpen] = useState(false);
   const [confirmDeleteMarker, setConfirmDeleteMarker] = useState<AuditMarker | null>(null);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   const sessionEvents = useRef<AuditEvent[]>([]);
   const scrubberRef = useRef<Scrubber | null>(null);
@@ -302,9 +303,20 @@ export function MobileAudit() {
   }, [outletCtx?.project, stageNumber]);
 
   const videoUrl = useMemo(() => {
-    if (!primaryVideo) return null;
-    return api.videoStreamUrl(slug, primaryVideo.path, primaryVideo.processed.trim ? "trim" : "auto");
-  }, [primaryVideo, slug]);
+    // Keyed off peaksResult.trimmed, not primaryVideo.processed.trim: the
+    // audit timeline's marker times live in whatever file the server
+    // actually served for peaks, and that flag is the only source of
+    // truth for it (mirrors lib/camPlayback.ts's planServedClip, which
+    // keys the primary's served-clip kind off the same peaks flag - "peaks
+    // already reflect whichever file the server picked"). If the two
+    // diverge, keying off the project payload's `processed.trim` instead
+    // would silently serve the wrong file while `marker.time - 1.5` is
+    // still trimmed-clip-local. Also gates the Video button on peaks
+    // being loaded at all, since there is no defensible kind to seek into
+    // before that - the seek-into-nothing case.
+    if (!primaryVideo || !peaksResult) return null;
+    return api.videoStreamUrl(slug, primaryVideo.path, peaksResult.trimmed ? "trim" : "auto");
+  }, [primaryVideo, peaksResult, slug]);
 
   const handleShowVideo = useCallback(() => {
     if (videoUrl) setVideoOpen(true);
@@ -356,15 +368,25 @@ export function MobileAudit() {
       setSnack({ message: "Saved", tone: "status" });
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
-        const fresh = await api.getStageAudit(slug, stageNumber);
-        setAudit(fresh);
-        setMarkers(deriveMarkers(fresh));
-        sessionEvents.current = [];
-        setDirty(false);
-        setSnack({
-          message: "This stage changed elsewhere - reloaded, local edits were discarded",
-          tone: "error",
-        });
+        try {
+          const fresh = await api.getStageAudit(slug, stageNumber);
+          setAudit(fresh);
+          setMarkers(deriveMarkers(fresh));
+          sessionEvents.current = [];
+          setDirty(false);
+          setSnack({
+            message: "This stage changed elsewhere - reloaded, local edits were discarded",
+            tone: "error",
+          });
+        } catch (reloadErr) {
+          // The reload itself failed - do not clear sessionEvents/dirty,
+          // there is nothing fresh to have replaced them with, and the
+          // operator's edits are the only copy of this work.
+          setSnack({
+            message: `Save conflicted and the reload failed - check your connection and retry (${saveErrorMessage(reloadErr)})`,
+            tone: "error",
+          });
+        }
       } else if (err instanceof ApiError && err.status === 403) {
         setSnack({
           message: "Save refused - this mirror's audit gate should be open. This is a bug.",
@@ -377,6 +399,25 @@ export function MobileAudit() {
       setSaving(false);
     }
   }, [audit, stageNumber, readOnly, saving, markers, peaksResult, slug, outletCtx]);
+
+  // ---- Back navigation -------------------------------------------------------
+
+  const backHref = `/match/${matchId}/results/${slug}/${stageNumber}`;
+
+  // Desktop auto-saves on navigation; mobile has no such safety net, so a
+  // dirty stage must not lose edits to one mis-tap of the back button.
+  const handleBack = useCallback(() => {
+    if (dirty) {
+      setConfirmDiscard(true);
+      return;
+    }
+    navigate(backHref);
+  }, [dirty, navigate, backHref]);
+
+  const confirmDiscardAndBack = useCallback(() => {
+    setConfirmDiscard(false);
+    navigate(backHref);
+  }, [navigate, backHref]);
 
   // ---- No-stage-param: plain stage list, no takeover ------------------------
 
@@ -415,7 +456,7 @@ export function MobileAudit() {
             <button
               type="button"
               aria-label="Back"
-              onClick={() => navigate(`/match/${matchId}/results/${slug}/${stageNumber}`)}
+              onClick={handleBack}
               className="flex min-h-11 min-w-11 items-center justify-center"
             >
               <ArrowLeft className="size-5" aria-hidden />
@@ -569,6 +610,17 @@ export function MobileAudit() {
           confirmDisabled={saving}
           onConfirm={confirmDeleteManual}
           onCancel={() => setConfirmDeleteMarker(null)}
+        />
+
+        <MobileConfirmSheet
+          open={confirmDiscard}
+          title="Discard unsaved edits?"
+          body={`Stage ${stageNumber} has ${sessionEvents.current.length} unsaved edit${
+            sessionEvents.current.length === 1 ? "" : "s"
+          }. Going back without saving discards them.`}
+          confirmLabel="Discard"
+          onConfirm={confirmDiscardAndBack}
+          onCancel={() => setConfirmDiscard(false)}
         />
       </Portal>
       <Snackbar snack={snack} onDismiss={() => setSnack(null)} />
