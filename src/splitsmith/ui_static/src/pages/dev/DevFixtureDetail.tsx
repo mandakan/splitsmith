@@ -47,6 +47,11 @@ import { LabelBreakdown } from "@/components/lab/LabelBreakdown";
 import { Pin } from "@/components/lab/Pin";
 import { StepThroughPanel } from "@/components/lab/StepThroughPanel";
 import { VoterRecallTable } from "@/components/lab/VoterRecallTable";
+import {
+  filterFixtures,
+  isFilterKey,
+  type FilterKey,
+} from "@/components/lab/corpusFilter";
 import { disposeLabAudio } from "@/components/lab/labAudio";
 import { LAB_PALETTE, fmtPct } from "@/components/lab/labPalette";
 import { REASON_SHORTCUTS, SUBCLASS_SHORTCUTS } from "@/components/lab/labels";
@@ -83,15 +88,25 @@ export function DevFixtureDetail() {
   const confirm = useConfirm();
   const [searchParams] = useSearchParams();
   const matchContext = searchParams.get("match");
+  // The corpus list threads its active search/filter onto the row link
+  // (#898), so prev/next here walk the subset the operator saw -- and
+  // the back link restores the list to that same state.
+  const listQuery = searchParams.get("q") ?? "";
+  const listFilterRaw = searchParams.get("filter");
+  const listFilter: FilterKey = isFilterKey(listFilterRaw) ? listFilterRaw : "all";
 
-  // Keep the dev-mode match context on our own links -- same contract as
-  // DeveloperShell's stepper (#884).
-  const withMatch = useCallback(
-    (to: string) =>
-      matchContext
-        ? { pathname: to, search: `?match=${encodeURIComponent(matchContext)}` }
-        : { pathname: to },
-    [matchContext],
+  // Keep the dev-mode match context (same contract as DeveloperShell's
+  // stepper, #884) plus the list's search/filter on our own links.
+  const withContext = useCallback(
+    (to: string) => {
+      const params = new URLSearchParams();
+      if (matchContext) params.set("match", matchContext);
+      if (listQuery) params.set("q", listQuery);
+      if (listFilter !== "all") params.set("filter", listFilter);
+      const s = params.toString();
+      return s ? { pathname: to, search: `?${s}` } : { pathname: to };
+    },
+    [matchContext, listQuery, listFilter],
   );
 
   // autoRescore off: this page has no tuning sliders, so the debounced
@@ -102,6 +117,7 @@ export function DevFixtureDetail() {
 
   const [catalog, setCatalog] = useState<LabFixtureRecord[] | null>(null);
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
+  const [peaksError, setPeaksError] = useState<string | null>(null);
   const [audit, setAudit] = useState<StageAudit | null>(null);
   const [time, setTime] = useState(0);
   const [savingLabel, setSavingLabel] = useState<number | null>(null);
@@ -135,15 +151,22 @@ export function DevFixtureDetail() {
     [run, slug],
   );
 
-  // Corpus order for prev/next is the catalog's own order, so walking
-  // here matches the order the /dev/corpus table shows.
+  // Prev/next walk the operator's visible subset (catalog order under
+  // the q/filter params the corpus row link carried). A slug the subset
+  // doesn't cover -- stale bookmark, hand-edited URL -- falls back to
+  // the whole catalog rather than stranding navigation.
+  const walkList = useMemo(() => {
+    if (!catalog) return null;
+    const visible = filterFixtures(catalog, listQuery, listFilter);
+    return visible.some((r) => r.slug === slug) ? visible : catalog;
+  }, [catalog, listQuery, listFilter, slug]);
   const index = useMemo(
-    () => catalog?.findIndex((r) => r.slug === slug) ?? -1,
-    [catalog, slug],
+    () => walkList?.findIndex((r) => r.slug === slug) ?? -1,
+    [walkList, slug],
   );
-  const prev = index > 0 ? (catalog?.[index - 1] ?? null) : null;
+  const prev = index > 0 ? (walkList?.[index - 1] ?? null) : null;
   const next =
-    index >= 0 && catalog && index < catalog.length - 1 ? catalog[index + 1] : null;
+    index >= 0 && walkList && index < walkList.length - 1 ? walkList[index + 1] : null;
 
   // Self-heal a cold cache: scope the eval to this one fixture. Guarded
   // per-slug so a run that still doesn't cover it (failed eval, deleted
@@ -164,6 +187,7 @@ export function DevFixtureDetail() {
     if (!auditPath) return;
     let alive = true;
     setPeaks(null);
+    setPeaksError(null);
     setAudit(null);
     Promise.all([api.getFixturePeaks(auditPath), api.getFixtureAudit(auditPath)])
       .then(([p, a]) => {
@@ -171,8 +195,11 @@ export function DevFixtureDetail() {
         setPeaks(p);
         setAudit(a);
       })
-      .catch(() => {
-        /* waveform is decoration here; the candidate table is the tool. */
+      .catch((err) => {
+        // The waveform is decoration here (the candidate table is the
+        // tool), but a swallowed failure left a permanent "loading"
+        // spinner (#898) -- say what happened instead.
+        if (alive) setPeaksError(String(err));
       });
     return () => {
       alive = false;
@@ -314,11 +341,11 @@ export function DevFixtureDetail() {
     if (!ok.confirmed) return;
     try {
       await api.deleteFixture(record.slug);
-      navigate(withMatch("/dev/corpus"), { replace: true });
+      navigate(withContext("/dev/corpus"), { replace: true });
     } catch (err) {
       window.alert(`Delete failed: ${err}`);
     }
-  }, [record, confirm, navigate, withMatch]);
+  }, [record, confirm, navigate, withContext]);
 
   // Ground truth the consensus missed. When no run covers the fixture
   // yet, the audit's own shot list stands in so the waveform is still
@@ -340,7 +367,7 @@ export function DevFixtureDetail() {
   if (catalog !== null && !record && !focused) {
     return (
       <div className="mx-auto min-w-0 max-w-[1500px] px-7 py-5">
-        <BackLink to={withMatch("/dev/corpus")} />
+        <BackLink to={withContext("/dev/corpus")} />
         <div className="mt-6 rounded-md border border-rule bg-surface px-5 py-10 text-center">
           <div className="font-mono text-[0.8125rem] font-bold text-ink">{slug}</div>
           <p className="mt-2 text-[0.875rem] text-muted">
@@ -356,7 +383,7 @@ export function DevFixtureDetail() {
       <header>
         <div className="mb-3 flex items-center justify-between gap-6">
           <div className="flex items-center gap-4">
-            <BackLink to={withMatch("/dev/corpus")} />
+            <BackLink to={withContext("/dev/corpus")} />
             <span className="text-whisper">/</span>
             <div className="flex items-center gap-2.5 font-mono text-[0.6875rem] font-bold uppercase tracking-[0.18em] text-beep">
               <span aria-hidden className="h-px w-6 bg-beep" />
@@ -365,17 +392,17 @@ export function DevFixtureDetail() {
           </div>
           <nav className="flex items-center gap-1.5">
             <StepLink
-              to={prev ? withMatch(`/dev/corpus/${prev.slug}`) : null}
+              to={prev ? withContext(`/dev/corpus/${prev.slug}`) : null}
               label="Previous fixture"
               side="prev"
             />
             <span className="min-w-[74px] text-center font-mono text-[0.6875rem] tabular-nums text-muted">
-              {index >= 0 && catalog
-                ? `${String(index + 1).padStart(2, "0")} / ${String(catalog.length).padStart(2, "0")}`
+              {index >= 0 && walkList
+                ? `${String(index + 1).padStart(2, "0")} / ${String(walkList.length).padStart(2, "0")}`
                 : "-- / --"}
             </span>
             <StepLink
-              to={next ? withMatch(`/dev/corpus/${next.slug}`) : null}
+              to={next ? withContext(`/dev/corpus/${next.slug}`) : null}
               label="Next fixture"
               side="next"
             />
@@ -527,6 +554,15 @@ export function DevFixtureDetail() {
                 />
               ))}
             </Waveform>
+          ) : peaksError ? (
+            <div className="flex h-[150px] flex-col items-center justify-center gap-1.5 rounded border border-rule/60 bg-bg-glow px-6 text-center font-mono text-[0.6875rem] text-muted">
+              <span className="inline-flex items-center gap-1.5 uppercase tracking-[0.08em]">
+                <AlertCircle className="size-3.5" /> waveform unavailable
+              </span>
+              <span className="max-w-full truncate text-[0.625rem] text-subtle">
+                {peaksError}
+              </span>
+            </div>
           ) : (
             <div className="flex h-[150px] items-center justify-center rounded border border-rule/60 bg-bg-glow font-mono text-[0.6875rem] uppercase tracking-[0.08em] text-muted">
               <Loader2 className="mr-2 size-3.5 animate-spin" /> loading waveform
@@ -567,7 +603,7 @@ export function DevFixtureDetail() {
               buttons) is taller than a laptop viewport at this width,
               and a clipped sticky column would hide the label buttons. */}
           <aside className="sticky top-[var(--shell-header-h,86px)] max-h-[calc(100dvh-var(--shell-header-h,86px)-1.5rem)] space-y-3 self-start overflow-y-auto pr-0.5">
-            <section className="overflow-hidden rounded-md border border-[rgba(6,182,212,0.3)] bg-surface">
+            <section className="overflow-hidden rounded-md border border-[rgba(6,182,212,0.4)] bg-surface">
               <div className="flex items-center justify-between border-b border-rule px-4 py-2.5">
                 <h2 className="font-display text-[0.9375rem] font-bold uppercase tracking-tight text-ink">
                   Label

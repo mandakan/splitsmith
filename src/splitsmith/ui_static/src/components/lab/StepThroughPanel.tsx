@@ -183,8 +183,11 @@ export function StepThroughPanel({
     onSelect(ordered[idxInList + 1].candidate_number);
   }, [idxInList, ordered, onSelect]);
 
+  // No frame of its own: the hosting card carries the accent border
+  // (nesting a green frame inside the detail page's cyan card was the
+  // #898 clash). Green stays for selection semantics in the queue below.
   return (
-    <div className="rounded border border-led/40 bg-led/5 p-3">
+    <div>
       <div className="mb-3 flex flex-wrap items-end gap-3 text-[11px]">
         <label className="flex flex-col gap-1">
           <span className="font-medium text-muted">Filter</span>
@@ -282,7 +285,9 @@ export function StepThroughPanel({
           />
         </label>
         <span className="ml-auto text-muted">
-          {idxInList + 1} / {ordered.length}
+          {/* "--" rather than "0": the selection has no queue position
+              when it sits outside the panel filter. */}
+          {idxInList >= 0 ? idxInList + 1 : "--"} / {ordered.length}
           {ordered.length === 0 && " (no candidates match filter)"}
           {/* Only reachable under preserveSelection: the operator picked
               a row that this filter excludes. */}
