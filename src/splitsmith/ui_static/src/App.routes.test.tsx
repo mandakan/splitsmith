@@ -79,17 +79,9 @@ describe("route tree", () => {
   // happens to run first eats a cold-start tax the other two never pay
   // (their own ``renderAt`` calls hit the now-warm module cache), and
   // under enough parallel load that tax alone exceeds 5s (#550 review).
-  // #867 final review M10: the default 10s hookTimeout above was fine
-  // solo (~5.6s) but this class now has three files paying this same
-  // transform cost (App.routes.pickup.test.tsx and the new
-  // App.routes.account.test.tsx both warm up the same way), and under a
-  // loaded box running them together the combined pressure pushed this
-  // one past 10s. The work itself is bounded and legitimate -- one
-  // import of the whole route tree, done once -- so the fix is budget,
-  // not a different approach.
   beforeAll(async () => {
     await import("@/App");
-  }, 30_000);
+  });
 
   it("renders global chrome on the picker", async () => {
     await renderAt("/pick");
