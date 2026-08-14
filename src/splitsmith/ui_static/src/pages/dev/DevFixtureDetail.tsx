@@ -61,16 +61,6 @@ import {
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-/**
- * The cached-run hydration (``GET /api/lab/last-run``) and the catalog
- * fetch race each other on mount. If the catalog wins we would briefly
- * see "no run covers this fixture" and fire an eval the cache was about
- * to make unnecessary. Waiting a beat before committing to the scoped
- * eval collapses that race -- when the run lands the effect re-runs and
- * cancels the pending timer.
- */
-const AUTO_EVAL_GRACE_MS = 250;
-
 /** Build the /review URL for a fixture, threading the source video
  *  through when available so the review page boots with the video bound. */
 function reviewUrl(auditPath: string, sourceVideo: string | null | undefined): string {
@@ -106,7 +96,9 @@ export function DevFixtureDetail() {
 
   // autoRescore off: this page has no tuning sliders, so the debounced
   // rescore would only ever fire on the hydrated config -- wasted work.
-  const { run, setRun, runEval, evalLoading, error } = useLabRun({ autoRescore: false });
+  const { run, setRun, runEval, evalLoading, error, hydrated } = useLabRun({
+    autoRescore: false,
+  });
 
   const [catalog, setCatalog] = useState<LabFixtureRecord[] | null>(null);
   const [peaks, setPeaks] = useState<PeaksResult | null>(null);
@@ -155,17 +147,17 @@ export function DevFixtureDetail() {
 
   // Self-heal a cold cache: scope the eval to this one fixture. Guarded
   // per-slug so a run that still doesn't cover it (failed eval, deleted
-  // audio) can't spin.
+  // audio) can't spin. Gated on ``hydrated`` so a slow last-run fetch
+  // can't let the eval fire under the stale DEFAULT_CONFIG -- a scoped
+  // eval whose config hash differs from the cached run's would replace
+  // a tuned universe instead of merging into it (#900).
   const attemptedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!slug || !record || focused || evalLoading) return;
+    if (!hydrated || !slug || !record || focused || evalLoading) return;
     if (attemptedRef.current === slug) return;
-    const id = window.setTimeout(() => {
-      attemptedRef.current = slug;
-      void runEval([slug]);
-    }, AUTO_EVAL_GRACE_MS);
-    return () => window.clearTimeout(id);
-  }, [slug, record, focused, evalLoading, runEval]);
+    attemptedRef.current = slug;
+    void runEval([slug]);
+  }, [hydrated, slug, record, focused, evalLoading, runEval]);
 
   const auditPath = record?.audit_path ?? focused?.audit_path ?? null;
   useEffect(() => {
