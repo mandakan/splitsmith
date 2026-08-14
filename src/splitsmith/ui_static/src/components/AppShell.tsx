@@ -4,22 +4,20 @@ import {
   PanelLeftOpen,
   Palette,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { createPortal } from "react-dom";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 
 import { JobsSurface } from "@/components/Jobs";
 import { useShellContextSlot } from "@/components/layout/shellChromeContext";
 import { useJobs } from "@/lib/jobs";
-import { useMode } from "@/lib/mode";
+import { useDevFlipRedirect } from "@/lib/useDevFlipRedirect";
 import { cn } from "@/lib/utils";
 
 const SIDEBAR_COLLAPSE_KEY = "splitsmith.appshell.sidebarCollapsed";
 
 export function AppShell() {
   const { pathname } = useLocation();
-  const navigate = useNavigate();
-  const { mode } = useMode();
   // JobsSurface no longer self-hosts its poller (#663); each shell
   // owns one jobs state and hands it down.
   const jobsState = useJobs();
@@ -33,14 +31,10 @@ export function AppShell() {
   // AppShell hosts the fixture editor + design system. Either one is
   // mode-agnostic, but flipping to Developer should take the user to
   // the dev workspace rather than leaving them on a hidden-sidebar page
-  // with no dev nav.
-  useEffect(() => {
-    // Mode toggle uses replace, not push. Otherwise hitting browser
-    // back after a mode flip would "undo" the flip via a route change
-    // while the mode state stays put -- so the new shell mounts, sees
-    // the wrong mode, and forces it back. Replace keeps history clean.
-    if (mode === "developer") navigate("/dev/corpus", { replace: true });
-  }, [mode, navigate]);
+  // with no dev nav. Flip-only: the dev review queue and the Lab link
+  // INTO /review and /promote-review, so mounting them while developer
+  // mode is persisted must not bounce straight back to /dev/corpus.
+  useDevFlipRedirect();
   // /review is fixture-only: no project context, the project tabs would
   // 404 against the throwaway tmp project ``splitsmith review`` boots.
   // Hide the sidebar entirely so the screen reads as a single-purpose

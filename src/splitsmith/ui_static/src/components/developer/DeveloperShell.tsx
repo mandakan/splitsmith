@@ -16,18 +16,7 @@
  * means hosted /dev/* gains a sign-out path it never had before.
  */
 
-import {
-  Bell,
-  Check,
-  Clock,
-  Database,
-  FlaskConical,
-  HelpCircle,
-  Inbox,
-  Layers,
-  Settings,
-  Zap,
-} from "lucide-react";
+import { Check, FlaskConical, Layers, Zap } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -38,7 +27,6 @@ import {
   useShellContextSlot,
 } from "@/components/layout/shellChromeContext";
 import { useJobs } from "@/lib/jobs";
-import { IconButton } from "@/components/ui";
 import { api, type DeveloperModelInfo } from "@/lib/api";
 import { useMode } from "@/lib/mode";
 import { cn } from "@/lib/utils";
@@ -143,15 +131,6 @@ export function DeveloperShell() {
       </div>
       <ModelChip model={model} />
       <div className="flex-1" />
-      <IconButton variant="subtle" size="md" label="Help">
-        <HelpCircle className="size-[18px]" />
-      </IconButton>
-      <IconButton variant="subtle" size="md" label="Notifications">
-        <Bell className="size-[18px]" />
-      </IconButton>
-      <IconButton variant="subtle" size="md" label="Settings">
-        <Settings className="size-[18px]" />
-      </IconButton>
     </div>
   );
 
@@ -306,15 +285,6 @@ function DeveloperSidebar({
       <div className="flex flex-col gap-px">
         <SubLink to="/dev/legacy/lab" icon={<FlaskConical className="size-[15px]" />} legacy>
           Lab playground
-        </SubLink>
-        <SubLink to="/dev/legacy/review" icon={<Inbox className="size-[15px]" />} legacy>
-          Fixture review
-        </SubLink>
-        <SubLink to="/dev/history" icon={<Clock className="size-[15px]" />}>
-          Build history
-        </SubLink>
-        <SubLink to="/dev/datasets" icon={<Database className="size-[15px]" />}>
-          Datasets
         </SubLink>
         <SubLink to="/_design" icon={<Layers className="size-[15px]" />}>
           Design system

@@ -18,8 +18,8 @@
  * with nothing to portal into and never wake it up.
  */
 
-import { useEffect, useMemo, useState } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useMemo, useState } from "react";
+import { Outlet, useLocation } from "react-router-dom";
 
 import { GlobalBar } from "@/components/layout/GlobalBar";
 import {
@@ -28,8 +28,8 @@ import {
   type ShellChromeValue,
 } from "@/components/layout/shellChromeContext";
 import { useShellHeaderHeight } from "@/lib/shellChrome";
+import { useDevFlipRedirect } from "@/lib/useDevFlipRedirect";
 import { useIsMobile } from "@/lib/useIsMobile";
-import { useMode } from "@/lib/mode";
 import { cn } from "@/lib/utils";
 
 const HAIRLINE: Record<ShellAccent, string> = {
@@ -52,26 +52,24 @@ const HAIRLINE: Record<ShellAccent, string> = {
  *  surface on first mount and navigate back to "/" or /dev/corpus on every
  *  subsequent flip; AppShell does neither of those and only ever navigates
  *  away on a flip to Developer), so rather than hoist one shared effect and
- *  risk changing any of their behaviour, this mirrors AppShell's narrower
- *  effect -- react only to a flip to Developer, replace not push -- and
- *  applies it only to the routes that had nothing at all. */
+ *  risk changing any of their behaviour, this shares only AppShell's
+ *  narrower behaviour -- react only to a flip to Developer, replace not
+ *  push (via useDevFlipRedirect) -- and applies it only to the routes
+ *  that had nothing at all. */
 const SHELLESS_MODE_ROUTES = ["/pick", "/pick/new", "/pick/merge", "/admin/workers"];
 
 export function RootLayout() {
   const isMobile = useIsMobile();
   const location = useLocation();
-  const navigate = useNavigate();
-  const { mode } = useMode();
   const [contextSlot, setContextSlot] = useState<HTMLElement | null>(null);
   const [accent, setAccent] = useState<ShellAccent>("led");
   const [ownsMobileAccount, setOwnsMobileAccount] = useState(false);
   const { headerRef, headerStyle } = useShellHeaderHeight();
 
-  useEffect(() => {
-    if (mode !== "developer") return;
-    if (!SHELLESS_MODE_ROUTES.includes(location.pathname)) return;
-    navigate("/dev/corpus", { replace: true });
-  }, [mode, location.pathname, navigate]);
+  // Flip-only on purpose: a persisted developer mode must not bounce a
+  // freshly-loaded /pick, or an unbound ``--lab`` launch can never reach
+  // the match picker (dev mode has no picker of its own).
+  useDevFlipRedirect(SHELLESS_MODE_ROUTES.includes(location.pathname));
 
   // setAccent/setOwnsMobileAccount are useState setters, so React keeps
   // them referentially stable (exhaustive-deps exempts them below for the

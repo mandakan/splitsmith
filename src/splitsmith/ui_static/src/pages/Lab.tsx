@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   AlertCircle,
   Beaker,
@@ -61,6 +61,7 @@ import {
   type LabEvalRun,
   type LabFixtureRecord,
   type MatchProject,
+  type RecentProject,
   type PeaksResult,
   type StageAudit,
   type StageExportStatus,
@@ -1664,6 +1665,42 @@ function PromoteAllStagesButton({
   const [overwrite, setOverwrite] = useState(false);
   const [running, setRunning] = useState(false);
 
+  // The Lab lives on /dev/* URLs, so the ``/match/:matchId/`` URL scoping
+  // that match-mode surfaces ride on never applies here -- and since #353
+  // Tier 1 there is no process-level bind for the bare paths to fall back
+  // on. The panel therefore picks its own match: recent projects feed a
+  // selector, the choice is pinned in ``?match=`` (so a reload or a
+  // shared URL lands on the same match), and every call below addresses
+  // that id through the ``/api/matches/{id}/...`` alias explicitly.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [matches, setMatches] = useState<RecentProject[] | null>(null);
+  const [matchesError, setMatchesError] = useState<string | null>(null);
+  const urlMatchId = searchParams.get("match");
+  const matchId = useMemo(() => {
+    if (matches === null) return null;
+    if (urlMatchId && matches.some((m) => m.match_id === urlMatchId)) {
+      return urlMatchId;
+    }
+    return matches[0]?.match_id ?? null;
+  }, [matches, urlMatchId]);
+
+  useEffect(() => {
+    if (!open || matches !== null) return;
+    let alive = true;
+    api
+      .getRecentProjects()
+      .then((all) => {
+        if (!alive) return;
+        setMatches(all.filter((p) => p.kind === "match" && p.match_id));
+      })
+      .catch((err) => {
+        if (alive) setMatchesError(String(err));
+      });
+    return () => {
+      alive = false;
+    };
+  }, [open, matches]);
+
   // Re-derive rows when the catalog changes (so "exists" badges update after
   // a successful batch run without re-fetching the project).
   useEffect(() => {
@@ -1674,40 +1711,62 @@ function PromoteAllStagesButton({
     });
   }, [catalog, project]);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      // Lab is process-scoped (legacy dev tool). Pull stage definitions
-      // off whichever shooter is alphabetically first; in match mode they
-      // share the same stage list, and in single-shooter mode there's
-      // only one shooter to pick.
-      const shooters = await api.listMatchShooters();
-      const first = shooters.shooters[0]?.slug;
-      if (!first) {
-        setRows([]);
-        return;
+  const load = useCallback(
+    async (mid: string) => {
+      setLoading(true);
+      setLoadError(null);
+      setProject(null);
+      setRows([]);
+      try {
+        // Pull stage definitions off whichever shooter is alphabetically
+        // first; every shooter in a match shares the same stage list, and
+        // in single-shooter mode there's only one shooter to pick.
+        const shooters = await api.listMatchShootersIn(mid);
+        const first = shooters.shooters[0]?.slug;
+        if (!first) {
+          return;
+        }
+        const [proj, ov] = await Promise.all([
+          api.getProjectIn(mid, first),
+          api.getExportOverviewIn(mid, first),
+        ]);
+        setProject(proj);
+        setRows(buildBatchRows(proj, ov.stages, catalog));
+      } catch (err) {
+        setLoadError(String(err));
+      } finally {
+        setLoading(false);
       }
-      const [proj, ov] = await Promise.all([
-        api.getProject(first),
-        api.getExportOverview(first),
-      ]);
-      setProject(proj);
-      setRows(buildBatchRows(proj, ov.stages, catalog));
-    } catch (err) {
-      setLoadError(String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, [catalog]);
+    },
+    [catalog],
+  );
+
+  // (Re)load whenever the panel is open on a resolved match -- covers
+  // first open, a selector change, and the ?match= default resolving
+  // once the recents list arrives.
+  useEffect(() => {
+    if (!open || matchId === null) return;
+    void load(matchId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, matchId]);
 
   const toggleOpen = useCallback(() => {
-    setOpen((v) => {
-      const next = !v;
-      if (next) void load();
-      return next;
-    });
-  }, [load]);
+    setOpen((v) => !v);
+  }, []);
+
+  const selectMatch = useCallback(
+    (mid: string) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("match", mid);
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
 
   const toggleRow = useCallback((stageNumber: number) => {
     setRows((prev) =>
@@ -1726,6 +1785,7 @@ function PromoteAllStagesButton({
   }, []);
 
   const submit = useCallback(async () => {
+    if (matchId === null) return;
     setRunning(true);
     const queue = rows.filter((r) => r.selected && r.blockers.length === 0);
     setRows((prev) =>
@@ -1737,7 +1797,7 @@ function PromoteAllStagesButton({
     );
     for (const row of queue) {
       try {
-        const rec = await api.promoteFixture({
+        const rec = await api.promoteFixtureIn(matchId, {
           stage_number: row.stageNumber,
           slug: row.slug,
           overwrite,
@@ -1767,7 +1827,7 @@ function PromoteAllStagesButton({
       // confirms the server accepted each promote.
     }
     setRunning(false);
-  }, [rows, overwrite, onCatalogChanged]);
+  }, [rows, overwrite, onCatalogChanged, matchId]);
 
   const eligibleCount = rows.filter((r) => r.blockers.length === 0).length;
   const selectedCount = rows.filter(
@@ -1798,7 +1858,36 @@ function PromoteAllStagesButton({
             stage that has an audit JSON, a primary beep, and a camera mount.
             Same write path as the single-stage button on the Audit page.
           </p>
-          {loading && (
+          {matchesError && (
+            <div className="flex gap-1.5 rounded bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive">
+              <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
+              {matchesError}
+            </div>
+          )}
+          {matches !== null && matches.length === 0 && (
+            <div className="rounded bg-muted px-2 py-1.5 text-[11px] text-muted">
+              No matches in the recent-projects list. Open one in Match mode
+              first so it lands there.
+            </div>
+          )}
+          {matches !== null && matches.length > 0 && (
+            <label className="mb-3 flex items-center gap-2 text-[11px] text-muted">
+              Match
+              <select
+                value={matchId ?? ""}
+                onChange={(e) => selectMatch(e.target.value)}
+                disabled={running}
+                className="min-w-0 flex-1 rounded border border-rule bg-bg px-2 py-1 text-xs text-ink"
+              >
+                {matches.map((m) => (
+                  <option key={m.match_id ?? m.path} value={m.match_id ?? ""}>
+                    {m.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {(loading || (matches === null && !matchesError)) && (
             <div className="flex items-center gap-2 py-6 text-xs text-muted">
               <Loader2 className="size-3.5 animate-spin" />
               Loading project + export overview...
