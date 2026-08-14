@@ -16,7 +16,7 @@
  * means hosted /dev/* gains a sign-out path it never had before.
  */
 
-import { Check, FlaskConical, Layers, Zap } from "lucide-react";
+import { Check, Layers, Zap } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { NavLink, Outlet, useLocation, useNavigate, type To } from "react-router-dom";
@@ -307,13 +307,6 @@ function DeveloperSidebar({
         Tools
       </div>
       <div className="flex flex-col gap-px">
-        <SubLink
-          to={withMatch("/dev/legacy/lab")}
-          icon={<FlaskConical className="size-[15px]" />}
-          legacy
-        >
-          Lab playground
-        </SubLink>
         <SubLink to="/_design" icon={<Layers className="size-[15px]" />}>
           Design system
         </SubLink>

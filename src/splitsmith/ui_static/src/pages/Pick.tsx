@@ -195,13 +195,13 @@ export function Pick() {
 
   /** Where a successful bind should land. In Developer mode the picker
    *  is a detour from dev work (reached via the Splitsmith breadcrumb
-   *  or an unbound ``--lab`` boot), so return to the Lab with the
+   *  or an unbound ``--lab`` boot), so return to the dev corpus with the
    *  chosen match pinned as ``?match=`` instead of dropping the
    *  operator into match mode. Legacy projects have no match_id the
-   *  Lab could use, so they keep the match-home destination. */
+   *  corpus page could use, so they keep the match-home destination. */
   function postBindTarget(health: ServerHealth): string {
     if (appMode === "developer" && health.match_id) {
-      return `/dev/legacy/lab?match=${encodeURIComponent(health.match_id)}`;
+      return `/dev/corpus?match=${encodeURIComponent(health.match_id)}`;
     }
     return matchHome(health);
   }

@@ -45,7 +45,6 @@ import { MatchExport } from "@/pages/MatchExport";
 import { Home } from "@/pages/Home";
 import { Ingest } from "@/pages/Ingest";
 import { Jobs } from "@/pages/Jobs";
-import { Lab } from "@/pages/Lab";
 import { MergeMatches } from "@/pages/MergeMatches";
 import { Pick } from "@/pages/Pick";
 import { Shooters } from "@/pages/Shooters";
@@ -58,9 +57,28 @@ import { ResultsStage } from "@/pages/ResultsStage";
 import { Review } from "@/pages/Review";
 import { Triage } from "@/pages/Triage";
 
-function RedirectLabSlug() {
+/* The legacy Lab page is deleted (#331 final task). Every legacy Lab URL
+ * family redirects to the dev-mode corpus / fixture-detail pages that
+ * replaced it, carrying location.search along (a pinned ``?match=`` must
+ * survive the bounce -- see Pick.tsx's postBindTarget and
+ * DeveloperShell's matchContext, both of which pin the chosen match as
+ * a query param). Navigate's ``to`` prop takes the full location object
+ * for this reason; a bare path string would drop the search. */
+function RedirectLegacyLab() {
+  const { search } = useLocation();
+  return <Navigate to={{ pathname: "/dev/corpus", search }} replace />;
+}
+
+function RedirectLegacyLabSlug() {
   const { slug } = useParams<{ slug: string }>();
-  return <Navigate to={`/dev/legacy/lab/${slug ?? ""}`} replace />;
+  const { search } = useLocation();
+  return <Navigate to={{ pathname: `/dev/corpus/${slug ?? ""}`, search }} replace />;
+}
+
+/* The pre-dev-mode ``/lab(/:slug)`` bookmarks land on the same targets
+ * as the ``/dev/legacy/lab(/:slug)`` family above. */
+function RedirectLabSlug() {
+  return <RedirectLegacyLabSlug />;
 }
 
 /* Beep review is the one match-scoped screen with a real mobile surface
@@ -315,9 +333,9 @@ export function App() {
               <Route path="jobs" element={<Jobs />} />
             </Route>
           </Route>
-          {/* Developer mode (#331). All four workflow steps + the
-              retired Lab + fixture-editor surfaces sit under the
-              cyan-accented DeveloperShell. */}
+          {/* Developer mode (#331). All four workflow steps sit under the
+              cyan-accented DeveloperShell, plus the legacy Lab
+              redirects below (the Lab page itself is deleted). */}
           <Route element={<DeveloperShell />}>
             <Route path="dev" element={<Navigate to="/dev/corpus" replace />} />
             <Route path="dev/corpus" element={<DesktopGate screen="Developer tools" links={false}><DevCorpus /></DesktopGate>} />
@@ -325,8 +343,10 @@ export function App() {
             <Route path="dev/review" element={<DesktopGate screen="Developer tools" links={false}><DevReviewQueue /></DesktopGate>} />
             <Route path="dev/validate" element={<DesktopGate screen="Developer tools" links={false}><DevValidate /></DesktopGate>} />
             <Route path="dev/retrain" element={<DesktopGate screen="Developer tools" links={false}><DevRetrain /></DesktopGate>} />
-            <Route path="dev/legacy/lab" element={<DesktopGate screen="Developer tools" links={false}><Lab /></DesktopGate>} />
-            <Route path="dev/legacy/lab/:slug" element={<DesktopGate screen="Developer tools" links={false}><Lab /></DesktopGate>} />
+            {/* Legacy Lab redirects (#331 final task) so old dev-mode
+                bookmarks/links don't 404. */}
+            <Route path="dev/legacy/lab" element={<RedirectLegacyLab />} />
+            <Route path="dev/legacy/lab/:slug" element={<RedirectLegacyLabSlug />} />
           </Route>
           {/* Fixture editor + design system stay AppShell-mounted: the
               editor is a single-purpose tool that the dev review queue
@@ -337,7 +357,7 @@ export function App() {
             <Route path="promote-review" element={<DesktopGate screen="Promote review" links={false}><PromoteReview /></DesktopGate>} />
             <Route path="_design" element={<DesktopGate screen="Design system" links={false}><Design /></DesktopGate>} />
             {/* Legacy redirects so old bookmarks don't 404. */}
-            <Route path="lab" element={<Navigate to="/dev/legacy/lab" replace />} />
+            <Route path="lab" element={<RedirectLegacyLab />} />
             <Route path="lab/:slug" element={<RedirectLabSlug />} />
           </Route>
           </Route>

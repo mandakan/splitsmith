@@ -83,9 +83,6 @@ describe("DeveloperShell match context", () => {
       "href",
       "/dev/review?match=m1",
     );
-    expect(
-      screen.getByRole("link", { name: /lab playground/i }),
-    ).toHaveAttribute("href", "/dev/legacy/lab?match=m1");
   });
 
   it("leaves links bare without a match context", async () => {

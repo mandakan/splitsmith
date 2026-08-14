@@ -96,7 +96,7 @@ function renderPick() {
             <Routes>
               <Route path="pick" element={<Pick />} />
               <Route
-                path="dev/legacy/lab"
+                path="dev/corpus"
                 element={<LocationProbe id="lab-probe" />}
               />
               <Route
@@ -121,7 +121,7 @@ describe("Pick in developer mode", () => {
     await userEvent.click(rows[0]);
     await waitFor(() =>
       expect(screen.getByTestId("lab-probe")).toHaveTextContent(
-        "/dev/legacy/lab?match=m-hfo",
+        "/dev/corpus?match=m-hfo",
       ),
     );
     expect(api.bindProject).toHaveBeenCalledWith("/m/hfo", "HFO Masters 2026");

@@ -164,6 +164,37 @@ describe("route tree", () => {
     expect(window.location.pathname).not.toBe("/desktop/approve");
   });
 
+  /**
+   * The legacy Lab page is deleted (#331 final task): every legacy Lab
+   * URL family -- the pre-dev-mode ``/lab(/:slug)`` bookmarks and the
+   * dev-mode ``/dev/legacy/lab(/:slug)`` links -- must redirect to the
+   * corpus/detail pages that replaced it, carrying the query string
+   * (``?match=``) along so a pinned match survives the bounce.
+   */
+  it("redirects /dev/legacy/lab/:slug to /dev/corpus/:slug, keeping the query string", async () => {
+    await renderAt("/dev/legacy/lab/some-slug?match=m1");
+    await waitFor(() => expect(window.location.pathname).toBe("/dev/corpus/some-slug"));
+    expect(window.location.search).toBe("?match=m1");
+  });
+
+  it("redirects /dev/legacy/lab to /dev/corpus, keeping the query string", async () => {
+    await renderAt("/dev/legacy/lab?match=m1");
+    await waitFor(() => expect(window.location.pathname).toBe("/dev/corpus"));
+    expect(window.location.search).toBe("?match=m1");
+  });
+
+  it("redirects the old /lab/:slug bookmark to /dev/corpus/:slug, keeping the query string", async () => {
+    await renderAt("/lab/some-slug?match=m1");
+    await waitFor(() => expect(window.location.pathname).toBe("/dev/corpus/some-slug"));
+    expect(window.location.search).toBe("?match=m1");
+  });
+
+  it("redirects the old /lab bookmark to /dev/corpus, keeping the query string", async () => {
+    await renderAt("/lab?match=m1");
+    await waitFor(() => expect(window.location.pathname).toBe("/dev/corpus"));
+    expect(window.location.search).toBe("?match=m1");
+  });
+
   it("does not render global chrome on the login surface", async () => {
     // Login itself redirects to "/" once useAuth's status is "authed"
     // (see src/pages/Login.tsx), and the module-level getMe mock above

@@ -414,9 +414,9 @@ def ui(
         False,
         "--lab",
         help=(
-            "Expose the Algorithm Lab page (fixture eval + labeling). "
-            "Hidden by default since it's a developer tool that loads "
-            "heavy CLAP/PANN models on first use."
+            "Expose the developer Lab surfaces (/dev/*: corpus, review "
+            "queue, validate, retrain). Hidden by default since it's a "
+            "developer tool that loads heavy CLAP/PANN models on first use."
         ),
     ),
     skip_system_check: bool = typer.Option(
@@ -481,7 +481,7 @@ def ui(
     else:
         console.print("  project: [dim]none -- showing picker[/]")
     if lab:
-        console.print("  [cyan]Algorithm Lab[/] enabled")
+        console.print("  [cyan]Developer Lab[/] enabled")
 
     if not no_browser:
         import webbrowser
