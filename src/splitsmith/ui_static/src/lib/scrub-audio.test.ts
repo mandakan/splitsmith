@@ -77,4 +77,46 @@ describe("createScrubber", () => {
     scrubber?.dispose();
     expect(ctx.close).toHaveBeenCalled();
   });
+
+  it("grainAt survives after dispose and does not throw", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, arrayBuffer: async () => new ArrayBuffer(4) })),
+    );
+    let isClosed = false;
+    const gainNode = {
+      gain: {
+        setValueAtTime: vi.fn(),
+        linearRampToValueAtTime: vi.fn(),
+      },
+      connect: vi.fn(() => ({ connect: vi.fn() })),
+    };
+    const source = {
+      buffer: null as unknown,
+      connect: vi.fn(() => gainNode),
+      start: vi.fn(),
+    };
+    const ctx = {
+      currentTime: 0,
+      destination: {},
+      createBufferSource: vi.fn(() => {
+        if (isClosed) throw new Error("InvalidStateError");
+        return source;
+      }),
+      createGain: vi.fn(() => {
+        if (isClosed) throw new Error("InvalidStateError");
+        return gainNode;
+      }),
+      decodeAudioData: vi.fn(async () => ({ duration: 10 })),
+      close: vi.fn(async () => {
+        isClosed = true;
+      }),
+    };
+    const scrubber = await createScrubber("/audio", () => ctx as unknown as AudioContext);
+    scrubber?.dispose();
+    ctx.currentTime = 1;
+    // This must not throw - a stale pointer-move handler firing after cleanup
+    // should safely degrade to a silently dropped grain, not crash the audit.
+    expect(() => scrubber?.grainAt(2.5)).not.toThrow();
+  });
 });

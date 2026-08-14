@@ -33,19 +33,25 @@ export async function createScrubber(
       const now = ctx.currentTime;
       if (now - lastAt < GRAIN_GAP_S) return;
       lastAt = now;
-      const offset = Math.max(0, Math.min(time, buffer.duration - GRAIN_S));
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      const gain = ctx.createGain();
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(1, now + RAMP_S);
-      gain.gain.setValueAtTime(1, now + GRAIN_S - RAMP_S);
-      gain.gain.linearRampToValueAtTime(0, now + GRAIN_S);
-      source.connect(gain).connect(ctx.destination);
-      source.start(now, offset, GRAIN_S);
+      try {
+        const offset = Math.max(0, Math.min(time, buffer.duration - GRAIN_S));
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(1, now + RAMP_S);
+        gain.gain.setValueAtTime(1, now + GRAIN_S - RAMP_S);
+        gain.gain.linearRampToValueAtTime(0, now + GRAIN_S);
+        source.connect(gain).connect(ctx.destination);
+        source.start(now, offset, GRAIN_S);
+      } catch {
+        // Silently swallow exceptions from AudioContext operations after dispose.
+        // A dropped grain is the intended degraded behavior - scrubbing must never
+        // block the audit pass, even if a stale pointer-move handler fires after cleanup.
+      }
     },
     dispose() {
-      void ctx.close();
+      void ctx.close().catch(() => {});
     },
   };
 }
