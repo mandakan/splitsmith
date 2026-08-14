@@ -12,6 +12,10 @@ export interface ActionAreaProps {
   splitS: number | null;
   nudgeMs: number;
   readOnly: boolean;
+  /** Whether the stage has a primary video to show. Defaults to true so
+   *  existing callers keep the button; the mobile audit page passes
+   *  false when the project payload names no video for this stage. */
+  hasVideo?: boolean;
   onNudge(deltaMs: -10 | 10): void;
   onDeleteShot(): void;
   onShowVideo(): void;
@@ -39,7 +43,7 @@ function readout(props: ActionAreaProps): string {
 const btn = "min-h-11 rounded-md border border-rule px-3 font-mono text-sm disabled:opacity-50";
 
 export function ActionArea(props: ActionAreaProps) {
-  const { target, readOnly, onNudge, onDeleteShot, onShowVideo, onPromote, onAddShot } = props;
+  const { target, readOnly, hasVideo = true, onNudge, onDeleteShot, onShowVideo, onPromote, onAddShot } = props;
   return (
     <div className="flex flex-col gap-1 px-2 pb-2">
       <div aria-live="polite" className="truncate font-mono text-sm">
@@ -57,9 +61,11 @@ export function ActionArea(props: ActionAreaProps) {
             <button type="button" className={btn} disabled={readOnly} onClick={onDeleteShot}>
               Delete
             </button>
-            <button type="button" className={`${btn} ml-auto`} onClick={onShowVideo}>
-              Video
-            </button>
+            {hasVideo && (
+              <button type="button" className={`${btn} ml-auto`} onClick={onShowVideo}>
+                Video
+              </button>
+            )}
           </>
         )}
         {target.kind === "candidate" && (
