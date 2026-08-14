@@ -152,10 +152,14 @@ def test_email_unique_constraint_rejects_duplicates() -> None:
 
 def test_migration_creates_users_table_on_clean_sqlite(tmp_path) -> None:
     """The Alembic migration we generated should apply cleanly to
-    an empty database. This is the gate that proves the migration
-    isn't drifting from the model definitions -- if someone adds
-    a column to ``User`` without ``alembic revision --autogenerate``,
-    this test fails.
+    an empty database, and the resulting schema should accept a
+    ``User`` insert. That's the only drift this test can catch, and
+    only by accident: it fails if a ``User`` column is missing or
+    renamed in a way that breaks the ORM insert, and says nothing
+    about any other table, index, constraint, or anything
+    Postgres-specific. The actual gate that compares the full
+    migration chain against ``Base.metadata`` is
+    ``scripts/ci/assert_migrations_match_models.py`` (#876).
 
     Runs against a file-backed SQLite so Alembic's process can
     open its own connection (in-memory dbs don't share across

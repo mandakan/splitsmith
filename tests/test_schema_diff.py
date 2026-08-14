@@ -31,15 +31,20 @@ def test_our_own_tables_are_compared() -> None:
 
 def test_an_index_on_an_ignored_table_is_ignored_with_it() -> None:
     # Indexes and constraints arrive with their own name, which does not
-    # carry the prefix -- the table they hang off does. Without the
-    # parent lookup, every procrastinate index reads as a diff.
+    # carry the prefix -- the table they hang off does. This pins the
+    # parent-lookup clause as defensive rather than as a regression
+    # guard: on the current schema Alembic never calls include_object
+    # for an index/constraint whose parent table it hasn't already
+    # rejected at the table level (ablating the clause and re-running
+    # compare_metadata against the live schema still yields 0 diffs).
+    # Kept in case Alembic's traversal order ever changes.
     index = SimpleNamespace(table=SimpleNamespace(name="procrastinate_jobs"))
     assert include_object(index, "idx_procrastinate_jobs_queue", "index", True, None) is False
 
 
 def test_an_index_on_our_own_table_is_compared() -> None:
     index = SimpleNamespace(table=SimpleNamespace(name="match_comments"))
-    assert include_object(index, "ix_match_comments_match_id", "index", True, None) is True
+    assert include_object(index, "ix_match_comments_thread", "index", True, None) is True
 
 
 def test_an_unnamed_object_is_compared() -> None:

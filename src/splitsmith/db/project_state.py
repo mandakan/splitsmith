@@ -358,11 +358,15 @@ class ProjectStateStore:
             try:
                 await session.commit()
             except IntegrityError as exc:
-                # A concurrent writer inserted the same identity first
-                # (the coalesce expression unique index on PG, or the
-                # plain unique index on SQLite, rejected our row). The
-                # caller thought this was a creation (expected_version 0)
-                # but the doc already exists -> a genuine conflict.
+                # A concurrent writer inserted the same identity first --
+                # the coalesce expression unique index on PG, or on a
+                # SQLite database built by ``Base.metadata.create_all``
+                # (the unit-test engine); a SQLite database built by
+                # ``alembic upgrade head`` instead has the plain unique
+                # index that migration's SQLite branch still creates.
+                # Either way our row was rejected. The caller thought
+                # this was a creation (expected_version 0) but the doc
+                # already exists -> a genuine conflict.
                 await session.rollback()
                 raise StateConflictError(
                     f"insert conflict for {doc_kind} doc "

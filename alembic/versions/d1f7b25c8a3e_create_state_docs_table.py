@@ -14,10 +14,17 @@ and SQL treats NULL as distinct-from-NULL in a unique index, so two
 ``match`` rows (both NULL slug + stage) would coexist. On Postgres we use
 an expression unique index over ``coalesce(slug,'')`` and
 ``coalesce(stage_number,-1)`` so the NULLs collapse to real values and
-the constraint bites. SQLite (the unit-test engine, and the clean-DB
-migration smoke test) has no expression-index-as-constraint story we need
-here and never sees concurrent writers, so it gets a plain unique index --
-its NULL-distinct weakness is harmless in tests.
+the constraint bites. This migration's own SQLite branch (below) still
+creates a plain unique index, unchanged since this revision was written.
+``Base.metadata.create_all`` no longer takes that branch, though: the
+unit-test engine now builds the same coalesce expression index as
+Postgres (see :class:`splitsmith.db.models.StateDocRow`). So only a
+SQLite database built by ``alembic upgrade head`` -- the migration smoke
+test in ``tests/test_db_foundation.py``, and a hosted deploy pointed at
+a SQLite URL (``splitsmith serve`` runs migrations, not ``create_all``)
+-- gets this weaker index. Its NULL-distinct weakness is harmless in the
+smoke test (one row, no concurrency) but is a real gap for that hosted
+configuration.
 
 The ``doc`` column starts as generic JSON (so ``create_table`` works on
 both engines) and is ALTERed to JSONB on Postgres. RLS enablement is

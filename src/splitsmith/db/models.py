@@ -368,7 +368,12 @@ class StateDocRow(Base):
     (``coalesce(slug,'')``, ``coalesce(stage_number,-1)``), matching what
     migration ``d1f7b25c8a3e`` creates on Postgres. SQLite supports
     expression indexes too, so ``create_all`` builds the same guard for
-    the test engine rather than a weaker NULL-distinct approximation.
+    the test engine rather than a weaker NULL-distinct approximation --
+    but a SQLite database built by ``alembic upgrade head`` instead (that
+    migration's SQLite branch was not changed) still gets the plain,
+    NULL-distinct unique index. That includes a hosted deploy that
+    points ``splitsmith serve`` at a SQLite URL (see ``cli.py``'s
+    ``serve`` command, which runs migrations, not ``create_all``).
 
     **Optimistic concurrency.** ``version`` starts at 1 on insert and the
     store bumps it on every save guarded by ``WHERE version =

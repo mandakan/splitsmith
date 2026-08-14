@@ -54,9 +54,16 @@ def include_object(
     """
     if _is_ignored(name):
         return False
-    # Indexes, constraints and columns carry their own name; the prefix
-    # lives on the table they belong to. Without this, every
-    # procrastinate index reads as a diff.
+    # Defensive, not currently load-bearing: indexes and constraints
+    # carry their own name, not the table's prefix, so in principle one
+    # could reach this function unfiltered. Measured against this
+    # schema, Alembic's ``include_object`` is only ever called with
+    # ``type_`` in {"table", "column"} -- it rejects a procrastinate
+    # table before offering any of its indexes or constraints, so this
+    # branch has no observable effect today (ablating it still yields 0
+    # diffs). Kept as cheap insurance if Alembic's traversal order ever
+    # changes; see
+    # ``test_an_index_on_an_ignored_table_is_ignored_with_it``.
     parent = getattr(obj, "table", None)
     if _is_ignored(getattr(parent, "name", None)):
         return False

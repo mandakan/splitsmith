@@ -18,6 +18,12 @@ Four assertions, cheapest first, each naming what broke:
 3. an empty diff      -- the models and the chain having drifted apart
 4. ``downgrade base`` -- an unreversible revision
 
+All four assertions run against an *empty* database, so this gate does
+not catch a migration that only breaks on populated tables -- e.g. a
+``NOT NULL`` column added with no server default, or a ``downgrade()``
+that only fails once rows exist. Those failure classes still reach
+production undetected.
+
 Run against a scratch database, never one with data: assertion 4 drops
 every table.
 
