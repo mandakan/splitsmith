@@ -334,3 +334,41 @@ def test_promote_overrides_audit_json_provenance_with_request(tmp_path: Path) ->
     assert written["source_video"] == "/new/correct/path.mov"
     assert written["fixture_window_in_source"] == [0.5, 13.5]
     assert written["camera"]["mount"] == "hand"
+
+
+def test_lab_promote_endpoint_separates_shooter_slug_from_fixture_slug(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The SPA's batch-promote panel names fixtures with the
+    ``stage-shots-...`` convention but resolves the project through the
+    shooter's registry slug -- two different strings. Post Tier 1 the
+    shooter lookup is strict, so the payload must carry them separately:
+    ``shooter_slug`` resolves the project, ``slug`` names the fixture.
+    Regression: the panel used to send only the fixture slug, and the
+    endpoint 404ed with "shooter '<fixture-slug>' is not registered"."""
+    root = tmp_path / "match"
+    _setup_promote_endpoint_project(root, camera_mount="hand")
+    fixtures_root = tmp_path / "fixtures-out"
+    fixtures_root.mkdir()
+    monkeypatch.setattr(lab_core, "DEFAULT_FIXTURES_ROOT", fixtures_root)
+
+    from tests.conftest import bound_match_id
+
+    app = create_app(project_root=root, project_name="ignored", lab_enabled=True)
+    client = TestClient(app)
+    match_id = bound_match_id(app)
+
+    resp = client.post(
+        f"/api/matches/{match_id}/lab/promote",
+        json={
+            "stage_number": 1,
+            "slug": "stage-shots-promote-test-match-stage1",
+            "shooter_slug": "me",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    audit_path = Path(resp.json()["audit_path"])
+    # Fixture is named by ``slug`` (plus the derived shooter token),
+    # never by the shooter's registry slug.
+    assert audit_path.name.startswith("stage-shots-promote-test-match-stage1")
+    assert "me" != audit_path.stem

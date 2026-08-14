@@ -1661,6 +1661,10 @@ function PromoteAllStagesButton({
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [project, setProject] = useState<MatchProject | null>(null);
+  // Registry slug of the shooter the loaded project belongs to. The
+  // promote POST needs it alongside each row's fixture slug -- the two
+  // are different strings since the match/shooter split.
+  const [shooterSlug, setShooterSlug] = useState<string | null>(null);
   const [rows, setRows] = useState<BatchRow[]>([]);
   const [overwrite, setOverwrite] = useState(false);
   const [running, setRunning] = useState(false);
@@ -1716,6 +1720,7 @@ function PromoteAllStagesButton({
       setLoading(true);
       setLoadError(null);
       setProject(null);
+      setShooterSlug(null);
       setRows([]);
       try {
         // Pull stage definitions off whichever shooter is alphabetically
@@ -1726,6 +1731,7 @@ function PromoteAllStagesButton({
         if (!first) {
           return;
         }
+        setShooterSlug(first);
         const [proj, ov] = await Promise.all([
           api.getProjectIn(mid, first),
           api.getExportOverviewIn(mid, first),
@@ -1785,7 +1791,7 @@ function PromoteAllStagesButton({
   }, []);
 
   const submit = useCallback(async () => {
-    if (matchId === null) return;
+    if (matchId === null || shooterSlug === null) return;
     setRunning(true);
     const queue = rows.filter((r) => r.selected && r.blockers.length === 0);
     setRows((prev) =>
@@ -1800,6 +1806,7 @@ function PromoteAllStagesButton({
         const rec = await api.promoteFixtureIn(matchId, {
           stage_number: row.stageNumber,
           slug: row.slug,
+          shooter_slug: shooterSlug,
           overwrite,
         });
         setRows((prev) =>
@@ -1827,7 +1834,7 @@ function PromoteAllStagesButton({
       // confirms the server accepted each promote.
     }
     setRunning(false);
-  }, [rows, overwrite, onCatalogChanged, matchId]);
+  }, [rows, overwrite, onCatalogChanged, matchId, shooterSlug]);
 
   const eligibleCount = rows.filter((r) => r.blockers.length === 0).length;
   const selectedCount = rows.filter(

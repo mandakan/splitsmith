@@ -54,6 +54,7 @@ describe("match-scoped Lab API calls", () => {
     await api.promoteFixtureIn("m-1", {
       stage_number: 3,
       slug: "stage-shots-x",
+      shooter_slug: "s_abc",
       overwrite: true,
     });
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -62,6 +63,7 @@ describe("match-scoped Lab API calls", () => {
     expect(JSON.parse(String(init.body))).toEqual({
       stage_number: 3,
       slug: "stage-shots-x",
+      shooter_slug: "s_abc",
       overwrite: true,
     });
   });
