@@ -142,18 +142,21 @@ export function DevValidate() {
               <ChevronDown className="size-3.5 text-muted" />
             </div>
           </ConfigCell>
+          {/* Read-only: the Tuning panel below owns the consensus knob
+              (with the rest of the ensemble parameters). Two controls
+              writing config.consensus disagreed on the voter count and
+              could show different ranges for the same value (#899). */}
           <ConfigCell label="Consensus">
-            <input
-              type="range"
-              min={1}
-              max={3}
-              step={1}
-              value={config.consensus}
-              onChange={(e) => setConfig({ consensus: Number(e.target.value) })}
-              className="h-1 w-full accent-beep"
-            />
-            <div className="mt-1 font-mono text-[0.6875rem] tabular-nums text-beep">
-              {config.consensus} of 3
+            <div
+              data-testid="consensus-readout"
+              className="flex items-center gap-2 rounded-md border border-rule bg-surface-2 px-3 py-2 font-mono text-[0.75rem] tabular-nums text-ink"
+            >
+              <span className="font-bold text-beep">{config.consensus}</span>
+              <span className="text-muted">of 3</span>
+              <span className="flex-1" />
+              <span className="text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
+                tune below
+              </span>
             </div>
           </ConfigCell>
           <ConfigCell label="Apriori boost">
