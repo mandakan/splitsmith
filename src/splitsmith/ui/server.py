@@ -15006,14 +15006,25 @@ def create_app(
                     status_code=400,
                     detail="payload must include integer 'stage_number' and string 'slug'",
                 )
-            project = state.shooter_project(slug)
+            # ``slug`` names the fixture (the SPA sends the
+            # ``stage-shots-...`` convention); ``shooter_slug`` resolves
+            # the project. They were one field when a "project" and a
+            # "shooter" were the same thing -- post Tier 1 the shooter
+            # lookup is strict, so a fixture slug in the lookup position
+            # 404s. The fallback keeps old single-slug clients (where
+            # both strings coincide) working.
+            shooter_slug = payload.get("shooter_slug")
+            if shooter_slug is not None and not isinstance(shooter_slug, str):
+                raise HTTPException(status_code=400, detail="'shooter_slug' must be a string")
+            shooter_slug = shooter_slug or slug
+            project = state.shooter_project(shooter_slug)
             try:
                 stg = project.stage(stage_n)
             except KeyError as exc:
                 raise HTTPException(status_code=404, detail=str(exc)) from exc
-            audit_json = state.materialize_audit(slug, stage_n)
+            audit_json = state.materialize_audit(shooter_slug, stage_n)
             try:
-                audit_audio = _resolve_audit_audio(slug, project, stage_n)
+                audit_audio = _resolve_audit_audio(shooter_slug, project, stage_n)
             except HTTPException:
                 raise
             audit_wav = audit_audio.audio_path
@@ -15084,7 +15095,9 @@ def create_app(
                     status_code=409,
                     detail=(f"stage {stage_n} has no time_seconds; cannot " "compute the trim window."),
                 )
-            source_video_path = project.resolve_video_path(state.shooter_root(slug), primary.path)
+            source_video_path = project.resolve_video_path(
+                state.shooter_root(shooter_slug), primary.path
+            )
             trim_start = max(0.0, float(primary.beep_time) - float(project.trim_pre_buffer_seconds))
             trim_end = (
                 float(primary.beep_time) + float(stage_time_seconds) + float(project.trim_post_buffer_seconds)

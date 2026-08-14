@@ -3159,7 +3159,15 @@ export const api = {
 
   promoteFixtureIn: (
     matchId: string,
-    payload: { stage_number: number; slug: string; overwrite?: boolean },
+    payload: {
+      stage_number: number;
+      /** Fixture slug -- names the promoted files (``stage-shots-...``). */
+      slug: string;
+      /** Registry slug of the shooter whose project the stage lives in.
+       *  Distinct from ``slug`` since the match/shooter split. */
+      shooter_slug: string;
+      overwrite?: boolean;
+    },
   ) =>
     request<LabFixtureRecord>(
       `/api/matches/${encodeURIComponent(matchId)}/lab/promote`,
