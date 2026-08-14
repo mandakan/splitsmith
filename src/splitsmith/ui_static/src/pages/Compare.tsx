@@ -248,7 +248,10 @@ export function Compare() {
   const tileSrc = useCallback(
     (s: CompareShooterRecord): string | null => {
       const idx = camIndexFor(s.slug);
-      if (idx > 0) return api.videoStreamUrl(s.slug, camsBySlug[s.slug][idx].path);
+      if (idx > 0) {
+        const cam = camsBySlug[s.slug][idx];
+        return api.videoStreamUrl(s.slug, cam.path, cam.kind);
+      }
       return s.video_ref ? api.shooterVideoStreamUrl(s.slug, s.video_ref) : null;
     },
     [camIndexFor, camsBySlug],

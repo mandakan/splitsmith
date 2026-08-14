@@ -1148,7 +1148,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   const activeShot =
     coach.shots.find((s) => s.shot_number === activeShotNumber) ?? null;
   const primary = coach.videos.find((v) => v.role === "primary");
-  const streamUrl = primary ? api.videoStreamUrl(slug, primary.path) : null;
+  const streamUrl = primary ? api.videoStreamUrl(slug, primary.path, primary.kind) : null;
   const maxAbs =
     coach.shots.length > 0
       ? Math.max(...coach.shots.map((s) => s.time_absolute))

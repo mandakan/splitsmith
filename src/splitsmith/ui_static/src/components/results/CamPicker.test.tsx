@@ -5,7 +5,7 @@ import type { CoachVideoEntry } from "@/lib/api";
 import { CamPicker } from "@/components/results/CamPicker";
 
 function entry(path: string, role: "primary" | "secondary", beep: number | null): CoachVideoEntry {
-  return { path, role, beep_in_clip: beep };
+  return { path, role, beep_in_clip: beep, kind: "source" };
 }
 
 const srcFor = (e: CoachVideoEntry) => `http://localhost/${e.path}`;

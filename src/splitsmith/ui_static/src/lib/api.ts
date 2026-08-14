@@ -1131,6 +1131,11 @@ export interface CoachVideoEntry {
    *  exists, the source otherwise. ``null`` for cameras without a beep
    *  yet; those are unsyncable and the SPA leaves them disabled. */
   beep_in_clip: number | null;
+  /** Which clip ``beep_in_clip`` was measured against - pin it as the
+   *  stream kind so a trim job completing mid-session cannot shift the
+   *  served bytes under a stale anchor (same hazard the audit screen
+   *  avoids with explicit trim/proxy kinds). */
+  kind: "trim" | "source";
 }
 
 export interface CoachStageResponse {

@@ -21,7 +21,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getStageCoach: vi.fn(),
       getMatchCoachDistributions: vi.fn().mockResolvedValue(null),
       patchStageShotCoach: vi.fn(),
-      videoStreamUrl: () => "http://localhost/video.mp4",
+      videoStreamUrl: (_slug: string, path: string, kind = "auto") => `http://localhost/${kind}/${path}`,
     },
   };
 });
@@ -70,7 +70,7 @@ function makeCoach(shots: CoachShot[], version = 4): CoachStageResponse {
     stage_name: "Stage One",
     beep_time: 5,
     version,
-    videos: [{ path: "trimmed/stage1.mp4", role: "primary", beep_in_clip: 5 }],
+    videos: [{ path: "trimmed/stage1.mp4", role: "primary", beep_in_clip: 5, kind: "trim" }],
     shots,
   };
 }
@@ -129,5 +129,17 @@ describe("Coach stage shot patch", () => {
       expect(api.patchStageShotCoach).toHaveBeenCalledTimes(2);
     });
     expect(vi.mocked(api.patchStageShotCoach).mock.calls[1][4]).toBe(5);
+  });
+});
+
+describe("Coach stage stream URL", () => {
+  it("pins the video player stream to the measured clip kind", async () => {
+    const shot = makeShot(1, "cand-7");
+    const { container } = renderCoachStage([shot]);
+
+    await waitFor(() => {
+      const videoElement = container.querySelector("video");
+      expect(videoElement?.src).toContain("/trim/");
+    });
   });
 });

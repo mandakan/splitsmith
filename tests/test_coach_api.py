@@ -307,7 +307,32 @@ def test_get_coach_stays_source_anchored_when_legacy_trim_ambiguous(tmp_path: Pa
     body = resp.json()
     assert body["beep_time"] == pytest.approx(8.0)
     assert body["videos"][0]["beep_in_clip"] == pytest.approx(8.0)
+    # A refused trim must label source too - a trim file exists on disk
+    # here, so "file exists => trim" would pass the other kind tests but
+    # mislabel this one and pin the SPA to a clip stream_video refuses.
+    assert body["videos"][0]["kind"] == "source"
     assert body["shots"][0]["time_absolute"] == pytest.approx(8.0 + 1.5)
+
+
+def test_get_coach_entry_kind_source_without_trim(tmp_path: Path) -> None:
+    """No trim on disk: the entry pins kind=source, matching the bytes
+    stream_video would serve for kind=auto."""
+    client, _audit, base = _bootstrap(tmp_path)
+    resp = client.get(f"{base}/shooters/me/stages/1/coach")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["videos"][0]["kind"] == "source"
+
+
+def test_get_coach_entry_kind_trim_with_trim_on_disk(tmp_path: Path) -> None:
+    """Trim + params sidecar on disk: kind=trim rides with the trim-based
+    beep_in_clip, so the SPA can pin the exact clip the anchor was
+    measured against."""
+    client, base = _bootstrap_legacy_trim(tmp_path, stage_numbers=(1,))
+    resp = client.get(f"{base}/shooters/me/stages/1/coach")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["videos"][0]["kind"] == "trim"
+    assert body["videos"][0]["beep_in_clip"] == pytest.approx(3.0)
 
 
 def test_get_stage_distributions(tmp_path: Path) -> None:

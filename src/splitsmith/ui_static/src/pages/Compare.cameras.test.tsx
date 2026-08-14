@@ -50,8 +50,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getStageCoach: vi.fn(),
       shooterVideoStreamUrl: (_slug: string, ref: string) =>
         `http://localhost/trim/${ref}`,
-      videoStreamUrl: (_slug: string, path: string) =>
-        `http://localhost/coach/${path}`,
+      videoStreamUrl: (_slug: string, path: string, kind = "auto") =>
+        `http://localhost/coach/${kind}/${path}`,
     },
   };
 });
@@ -90,10 +90,22 @@ describe("Compare per-shooter camera choice", () => {
         slug,
         slug === "anna"
           ? [
-              { path: "anna-primary.mp4", role: "primary", beep_in_clip: 5 },
-              { path: "anna-b.mp4", role: "secondary", beep_in_clip: 9 },
+              {
+                path: "anna-primary.mp4",
+                role: "primary",
+                beep_in_clip: 5,
+                kind: "trim" as const,
+              },
+              { path: "anna-b.mp4", role: "secondary", beep_in_clip: 9, kind: "trim" as const },
             ]
-          : [{ path: "bob-primary.mp4", role: "primary", beep_in_clip: 4 }],
+          : [
+              {
+                path: "bob-primary.mp4",
+                role: "primary",
+                beep_in_clip: 4,
+                kind: "trim" as const,
+              },
+            ],
       ),
     );
   });
@@ -117,7 +129,7 @@ describe("Compare per-shooter camera choice", () => {
       ) as HTMLVideoElement;
     expect(annaVideo().src).toContain("/trim/");
     fireEvent.change(select, { target: { value: "1" } });
-    expect(annaVideo().src).toBe("http://localhost/coach/anna-b.mp4");
+    expect(annaVideo().src).toBe("http://localhost/coach/trim/anna-b.mp4");
     fireEvent.change(select, { target: { value: "0" } });
     expect(annaVideo().src).toContain("/trim/");
   });

@@ -11458,12 +11458,12 @@ def create_app(
     # coach fields.
     # ----------------------------------------------------------------------
 
-    def _video_beep_in_clip(
+    def _video_clip_anchor(
         slug: str,
         project: MatchProject,
         stage_number: int,
         video: StageVideo,
-    ) -> float | None:
+    ) -> tuple[float | None, str]:
         """Where the beep falls inside the clip the SPA will receive
         from ``/api/videos/stream`` for ``video``.
 
@@ -11482,17 +11482,20 @@ def create_app(
         pre_buffer from the resolved trim's params sidecar - otherwise
         the anchor stays source-based while the served clip is
         trim-based and every marker lands offset by beep - pre_buffer.
+
+        Returns (anchor, kind) where kind names the clip measured: "trim"
+        or "source".
         """
-        if video.beep_time is None:
-            return None
         resolved = audio_helpers.resolve_trim_for_read(
             state.shooter_root(slug), stage_number, video, project=project
         )
         if resolved is not None:
+            if video.beep_time is None:
+                return (None, "trim")
             pre_buffer = audio_helpers.trim_pre_buffer_seconds_for(
                 resolved, default=project.trim_pre_buffer_seconds
             )
-            return min(video.beep_time, pre_buffer)
+            return (min(video.beep_time, pre_buffer), "trim")
         # Hosted: the trim may exist only in the storage cache (worker-
         # cut, not yet mirrored); stream_video pulls it on demand, so the
         # anchor must agree. New-keyed only by design: a storage-only
@@ -11503,8 +11506,18 @@ def create_app(
             state.shooter_root(slug), stage_number, video, project=project
         )
         if audio_helpers.trim_available(project, trimmed):
-            return min(video.beep_time, project.trim_pre_buffer_seconds)
-        return video.beep_time
+            if video.beep_time is None:
+                return (None, "trim")
+            return (min(video.beep_time, project.trim_pre_buffer_seconds), "trim")
+        return (video.beep_time, "source")
+
+    def _video_beep_in_clip(
+        slug: str,
+        project: MatchProject,
+        stage_number: int,
+        video: StageVideo,
+    ) -> float | None:
+        return _video_clip_anchor(slug, project, stage_number, video)[0]
 
     def _coach_video_entries(slug: str, project: MatchProject, stg: Any) -> list[dict[str, Any]]:
         """Per-video metadata the SPA needs to seek every synced camera.
@@ -11522,11 +11535,13 @@ def create_app(
         ordered_videos = ([primary] if primary is not None else []) + secondaries
         out: list[dict[str, Any]] = []
         for v in ordered_videos:
+            anchor, kind = _video_clip_anchor(slug, project, stg.stage_number, v)
             out.append(
                 {
                     "path": str(v.path),
                     "role": v.role,
-                    "beep_in_clip": _video_beep_in_clip(slug, project, stg.stage_number, v),
+                    "beep_in_clip": anchor,
+                    "kind": kind,
                 }
             )
         return out
