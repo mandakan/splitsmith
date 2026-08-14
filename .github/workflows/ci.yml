@@ -173,7 +173,14 @@ jobs:
           # alembic/env.py honours this over the ini's baked-in URL, so
           # no CI-specific alembic ini is needed.
           SPLITSMITH_DATABASE_URL: postgresql+asyncpg://splitsmith:splitsmith@localhost:5432/splitsmith_ci
-        run: uv run python scripts/ci/assert_migrations_match_models.py
+        # --no-dev appears again here, not just on the sync step above:
+        # a bare `uv run` performs its own implicit sync against the
+        # project's *default* groups, which silently reinstalls the dev
+        # group (torch, transformers, the nvidia-* CUDA wheels) and
+        # undoes the exclusion the sync step just paid for. Deleting
+        # this flag as "redundant" restores the 200MB download the
+        # comment above the job claims doesn't happen.
+        run: uv run --no-dev python scripts/ci/assert_migrations_match_models.py
 
   spa:
     # The SPA had no CI validation on a normal PR at all: the job above
