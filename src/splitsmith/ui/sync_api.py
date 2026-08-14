@@ -85,6 +85,24 @@ class SyncMatchCreateResponse(BaseModel):
     origin: str
 
 
+class SyncWhoAmIResponse(BaseModel):
+    """Body for ``GET /api/sync/whoami`` (#877).
+
+    Identity only, never a credential -- the same rule
+    ``HostedSyncSettings`` states for the desktop's own settings body.
+
+    Exists because the desktop caches ``email`` / ``display_name`` into
+    ``config.yaml`` at device-link time and had no way to refresh them:
+    its token is sync-scoped, and ``_auth_gate`` gives that scope a 403
+    on ``/api/me`` deliberately (#719). Widening the scope for a label
+    would have undone that containment; this route is the narrow half.
+    """
+
+    id: str
+    email: str
+    display_name: str | None = None
+
+
 class SyncDocVersionResponse(BaseModel):
     """Response shared by all three doc-upsert routes."""
 
@@ -324,6 +342,21 @@ def _validate_media_key(key: str, match_id: str) -> None:
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+
+@router.get("/whoami", response_model=SyncWhoAmIResponse)
+async def whoami(user: Any = Depends(_current_user)) -> SyncWhoAmIResponse:
+    """The account this credential belongs to, as the desktop chip renders it.
+
+    Read-only and free of side effects: the desktop calls it on a chip
+    mount, so it must stay cheap enough to sit in front of a UI paint.
+    """
+    _hosted_gate()
+    return SyncWhoAmIResponse(
+        id=str(user.id),
+        email=str(user.email),
+        display_name=user.display_name,
+    )
 
 
 @router.post("/matches", response_model=SyncMatchCreateResponse)

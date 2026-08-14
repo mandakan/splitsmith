@@ -170,3 +170,24 @@ def test_unrecognized_scope_is_denied_not_allowed(
     resp = client.get("/api/me", headers=_auth(token))
     assert resp.status_code == 403, resp.text
     assert resp.json()["detail"] == "token scope"
+
+
+def test_sync_token_reads_whoami_but_still_not_me(
+    hosted_app: tuple[TestClient, _CapturingSender], hosted_env: str
+) -> None:
+    """#877's route and the #719 boundary it must not breach, in one test.
+
+    The desktop needs to refresh the account label it caches at link
+    time, and cannot read /api/me to do it. The fix was a route on the
+    surface the sync scope already reaches -- NOT a wider scope. If a
+    future change makes the second assertion pass, the containment #719
+    established is gone and the first assertion is no longer evidence of
+    anything.
+    """
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    token = _seed_token(hosted_env, "owner@example.com", scope="sync")
+    client.cookies.clear()
+
+    assert client.get("/api/sync/whoami", headers=_auth(token)).status_code == 200
+    assert client.get("/api/me", headers=_auth(token)).status_code == 403

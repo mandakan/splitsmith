@@ -115,6 +115,17 @@ class HostedSyncClient:
         resp = self._http.delete("/api/device/session")
         self._raise_for_status(resp)
 
+    def whoami(self) -> dict:
+        """The linked account's identity (#877). Needs the bearer.
+
+        Used by the desktop to refresh the account snapshot it cached at
+        link time. ``/api/me`` is unreachable with this client's
+        sync-scoped token, which is why this route exists.
+        """
+        resp = self._http.get("/api/sync/whoami")
+        self._raise_for_status(resp)
+        return resp.json()
+
     def put_doc(self, match_id: str, item: DocItem, *, expected_version: int) -> int:
         """Upsert one doc at ``expected_version`` (0 = create), returning
         the version the hosted side assigned. Raises
