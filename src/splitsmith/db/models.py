@@ -767,15 +767,18 @@ class DeviceAuthorizationRow(Base):
     """
 
     __tablename__ = "device_authorizations"
-    # Uniqueness on ``user_code`` is a named table constraint, not a
-    # unique index: that is what migration 0c1dbb2ce678 created and what
-    # the deployed schema has. The plain ``index=True`` below is the
-    # separate (redundant but shipped) lookup index the same migration
-    # created.
-    __table_args__ = (UniqueConstraint("user_code", name="uq_device_authorizations_user_code"),)
+    # Uniqueness on both ``user_code`` and ``device_code_hash`` is a
+    # named table constraint, not a bare ``unique=True``: that is what
+    # migration 0c1dbb2ce678 created and what the deployed schema has.
+    # The plain ``index=True`` on ``user_code`` below is the separate
+    # (redundant but shipped) lookup index the same migration created.
+    __table_args__ = (
+        UniqueConstraint("user_code", name="uq_device_authorizations_user_code"),
+        UniqueConstraint("device_code_hash", name="uq_device_authorizations_device_code_hash"),
+    )
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
-    device_code_hash: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    device_code_hash: Mapped[str] = mapped_column(String, nullable=False)
     user_code: Mapped[str] = mapped_column(String, nullable=False, index=True)
     device_name: Mapped[str] = mapped_column(String, nullable=False)
     scope: Mapped[str] = mapped_column(String, nullable=False, server_default="sync", default="sync")
