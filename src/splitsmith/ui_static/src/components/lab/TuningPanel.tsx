@@ -53,11 +53,16 @@ export function TuningPanel({
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* "of 3": the shipped ensemble runs three voters (A+B+C --
+            voter D was folded into C as a feature). The backend field
+            allows up to 4 only because the apriori boost can add one
+            to vote_total; as an operator control that reads as a
+            phantom fourth voter, so the slider stops at 3 (#899). */}
         <Slider
-          label={`Consensus K (${config.consensus} of 4)`}
+          label={`Consensus K (${config.consensus} of 3)`}
           value={config.consensus}
           min={1}
-          max={4}
+          max={3}
           step={1}
           onChange={(v) => onChange({ consensus: v })}
         />
