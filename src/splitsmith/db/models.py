@@ -123,6 +123,10 @@ class User(Base):
     # JSONB's indexing wins don't apply.
     scoreboard_identity: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # TEMPORARY: proves the #876 gate goes red on a stale model. Reverted
+    # in the next commit.
+    ci_drill_column: Mapped[str | None] = mapped_column(String, nullable=True)
+
     def __repr__(self) -> str:
         return f"<User id={self.id!r} email={self.email!r}>"
 
