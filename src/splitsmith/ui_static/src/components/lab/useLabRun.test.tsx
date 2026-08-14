@@ -126,6 +126,79 @@ describe("useLabRun", () => {
     expect(result.current.run).toEqual(RESCORED);
   });
 
+  it("reports hydrated once the last-run fetch settles, on both outcomes", async () => {
+    // Resolve path: hold the promise open so the pre-hydration state is
+    // observable, not just a race the test usually wins.
+    let resolveHydration!: (r: LabEvalRun) => void;
+    vi.mocked(api.getLastLabRun).mockReturnValue(
+      new Promise((res) => {
+        resolveHydration = res;
+      }),
+    );
+    const first = renderHook(() => useLabRun());
+    expect(first.result.current.hydrated).toBe(false);
+    await act(async () => {
+      resolveHydration(makeRun());
+    });
+    expect(first.result.current.hydrated).toBe(true);
+    first.unmount();
+
+    // Reject path (no run cached yet) settles hydration just the same --
+    // a caller gating work on ``hydrated`` must not hang forever on a
+    // cold cache.
+    vi.mocked(api.getLastLabRun).mockRejectedValue(new Error("no run"));
+    const second = renderHook(() => useLabRun());
+    await waitFor(() => expect(second.result.current.hydrated).toBe(true));
+    expect(second.result.current.run).toBeNull();
+  });
+
+  it("does not rescore on the config change caused by hydration itself", async () => {
+    // The hydrated run's config differs from DEFAULT_CONFIG, so adopting
+    // it *is* a config change and the debounce effect runs -- it must
+    // recognize the change as the hydration echo, not an operator edit.
+    const RUN = makeRun({ config: { ...DEFAULT_CONFIG, consensus: 3 } });
+    vi.mocked(api.getLastLabRun).mockResolvedValue(RUN);
+
+    const { result } = renderHook(() => useLabRun());
+    await waitFor(() => expect(result.current.run).toEqual(RUN));
+
+    vi.useFakeTimers();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+
+    expect(api.rescoreLabUniverse).not.toHaveBeenCalled();
+  });
+
+  it("rescores an edit made right after hydration, with the merged config", async () => {
+    // Guards against over-suppression: the hydration guard must key on
+    // the hydrated config *value*, not on "swallow the next change" --
+    // an edit arriving in the same commit as the hydration adopt would
+    // otherwise be eaten (the race noted on #900).
+    const RUN = makeRun({ config: { ...DEFAULT_CONFIG, consensus: 3 } });
+    vi.mocked(api.getLastLabRun).mockResolvedValue(RUN);
+    const RESCORED = makeRun({ config_hash: "rescored" });
+    vi.mocked(api.rescoreLabUniverse).mockResolvedValue(RESCORED);
+
+    const { result } = renderHook(() => useLabRun());
+    await waitFor(() => expect(result.current.run).toEqual(RUN));
+
+    vi.useFakeTimers();
+    act(() => {
+      result.current.setConfig({ tolerance_ms: 50 });
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+
+    expect(api.rescoreLabUniverse).toHaveBeenCalledTimes(1);
+    expect(api.rescoreLabUniverse).toHaveBeenCalledWith({
+      ...DEFAULT_CONFIG,
+      consensus: 3,
+      tolerance_ms: 50,
+    });
+  });
+
   it("does not auto-rescore when autoRescore is false", async () => {
     vi.mocked(api.getLastLabRun).mockRejectedValue(new Error("no run"));
 

@@ -34,6 +34,12 @@ export interface UseLabRunResult {
   evalLoading: boolean;
   rescoreLoading: boolean;
   error: string | null;
+  /** True once the mount hydration (``GET /api/lab/last-run``) has
+   *  settled -- resolved or 404 alike. Until then ``run`` and ``config``
+   *  may still be the defaults a cached run is about to replace, so work
+   *  that submits the current config (e.g. the detail page's auto
+   *  scoped eval) must wait for this. */
+  hydrated: boolean;
 }
 
 export function useLabRun(opts?: { autoRescore?: boolean }): UseLabRunResult {
@@ -44,25 +50,34 @@ export function useLabRun(opts?: { autoRescore?: boolean }): UseLabRunResult {
   const [evalLoading, setEvalLoading] = useState(false);
   const [rescoreLoading, setRescoreLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hydrated, setHydrated] = useState(false);
 
-  // Set right before the mount-hydration effect adopts the server's
-  // config, so the debounce effect below can tell "config changed
-  // because we just hydrated" apart from "config changed because the
-  // caller tuned a slider" -- only the latter should fire a rescore.
-  const hydratingConfigRef = useRef(false);
+  // Holds the hydrated run's config object until the debounce effect
+  // below has seen it, so that effect can tell "config changed because
+  // we just hydrated" apart from "config changed because the caller
+  // tuned a slider" -- only the latter should fire a rescore. Keyed on
+  // the config *value* rather than a consumed-on-next-run boolean: an
+  // edit landing in the same commit as the hydration adopt produces a
+  // config that is not the hydrated object, so it still rescores
+  // instead of being swallowed by a one-shot flag.
+  const hydratedConfigRef = useRef<LabEvalConfig | null>(null);
 
   useEffect(() => {
     // Hydrate from the server's most-recent run cache so navigating
-    // away and back doesn't wipe the eval state.
+    // away and back doesn't wipe the eval state. setHydrated stays in
+    // the same callbacks as setRun so both land in one commit -- no
+    // render may observe hydrated=true without the run.
     api
       .getLastLabRun()
       .then((r) => {
-        hydratingConfigRef.current = true;
+        hydratedConfigRef.current = r.config;
         setRun(r);
         setConfigState(r.config);
+        setHydrated(true);
       })
       .catch(() => {
         // 404 = no eval has run yet; that's the normal first-load case.
+        setHydrated(true);
       });
   }, []);
 
@@ -116,9 +131,10 @@ export function useLabRun(opts?: { autoRescore?: boolean }): UseLabRunResult {
       mountedRef.current = true;
       return;
     }
-    if (hydratingConfigRef.current) {
-      hydratingConfigRef.current = false;
-      return;
+    if (hydratedConfigRef.current !== null) {
+      const isHydrationEcho = hydratedConfigRef.current === config;
+      hydratedConfigRef.current = null;
+      if (isHydrationEcho) return;
     }
     if (!autoRescore) return;
     if (!run) return;
@@ -155,5 +171,6 @@ export function useLabRun(opts?: { autoRescore?: boolean }): UseLabRunResult {
     evalLoading,
     rescoreLoading,
     error,
+    hydrated,
   };
 }

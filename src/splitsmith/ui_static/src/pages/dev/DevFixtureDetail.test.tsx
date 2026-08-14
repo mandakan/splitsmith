@@ -213,6 +213,22 @@ describe("DevFixtureDetail", () => {
     );
   });
 
+  it("holds the scoped eval until last-run hydration settles", async () => {
+    // A slow /api/lab/last-run must not let the auto-eval fire with the
+    // stale DEFAULT_CONFIG -- a scoped eval under a config hash that
+    // differs from the cached run's REPLACES the tuned universe. The
+    // eval is gated on the hook's hydrated flag, not a grace timer, so
+    // however slow the fetch is, no eval fires before it settles.
+    vi.mocked(api.listLabFixtures).mockResolvedValue([record(SLUG)]);
+    vi.mocked(api.getLastLabRun).mockReturnValue(new Promise(() => {}));
+
+    renderDetail(SLUG);
+
+    await screen.findByRole("heading", { name: SLUG });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(api.runLabEval).not.toHaveBeenCalled();
+  });
+
   it("renders the labeling working area once the run contains the fixture", async () => {
     vi.mocked(api.listLabFixtures).mockResolvedValue([record(SLUG)]);
     vi.mocked(api.getLastLabRun).mockResolvedValue(runWith(SLUG));
@@ -226,9 +242,9 @@ describe("DevFixtureDetail", () => {
       screen.getByRole("option", { name: /borderline/i }),
     ).toBeInTheDocument();
 
-    // The auto-eval is deliberately delayed past the hydration race, so
-    // wait out that window before asserting it never fired.
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    // Covered fixture: the hydrated run satisfies the page, so the
+    // auto-eval must never fire (a job per navigation otherwise).
+    await new Promise((resolve) => setTimeout(resolve, 100));
     expect(api.runLabEval).not.toHaveBeenCalled();
   });
 
