@@ -51,7 +51,7 @@ export function WrappedWaveform({
   onScrub,
   onGrabEnd,
 }: WrappedWaveformProps) {
-  const gesture = useRef<{ pointerId: number; startX: number; row: number; grabbed: boolean } | null>(null);
+  const gesture = useRef<{ pointerId: number; startX: number; grabbed: boolean } | null>(null);
   const rowDur = duration > 0 ? duration / rows : 0;
   const binsPerRow = Math.ceil(peaks.length / rows);
 
@@ -62,7 +62,9 @@ export function WrappedWaveform({
   };
 
   const down = (row: number) => (e: ReactPointerEvent<HTMLDivElement>) => {
-    gesture.current = { pointerId: e.pointerId, startX: e.clientX, row, grabbed: false };
+    // Ignore new pointers if a gesture is already in progress with a different ID
+    if (gesture.current != null && gesture.current.pointerId !== e.pointerId) return;
+    gesture.current = { pointerId: e.pointerId, startX: e.clientX, grabbed: false };
     if (e.currentTarget.setPointerCapture) e.currentTarget.setPointerCapture(e.pointerId);
   };
   const move = (row: number) => (e: ReactPointerEvent<HTMLDivElement>) => {
@@ -82,6 +84,12 @@ export function WrappedWaveform({
     if (g.grabbed) onGrabEnd();
     else onTap(timeAt(row, e.currentTarget, e.clientX));
   };
+  const cancel = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const g = gesture.current;
+    if (g == null || g.pointerId !== e.pointerId) return;
+    gesture.current = null;
+    if (g.grabbed) onGrabEnd();
+  };
 
   if (duration <= 0 || peaks.length === 0) return <div className="flex-1" />;
   const playRow = Math.min(rows - 1, Math.floor(playhead / rowDur));
@@ -96,19 +104,18 @@ export function WrappedWaveform({
           loop != null && loop.start < rowStart + rowDur && loop.end > rowStart ? loop : null;
         const toX = (t: number) => ((t - rowStart) / rowDur) * 1000;
         return (
-          <div
-            key={r}
-            data-testid="wave-row"
-            className="flex min-h-0 flex-1 items-stretch gap-1 touch-none"
-            onPointerDown={down(r)}
-            onPointerMove={move(r)}
-            onPointerUp={up(r)}
-            onPointerCancel={up(r)}
-          >
-            <span className="w-8 shrink-0 self-center text-right font-mono text-[10px] text-[var(--color-text-dim,inherit)] opacity-60">
+          <div key={r} className="flex min-h-0 flex-1 items-stretch gap-1">
+            <span className="w-8 shrink-0 self-center text-right font-mono text-[10px] text-muted">
               {formatRowStart(rowStart)}
             </span>
-            <div className="relative min-w-0 flex-1">
+            <div
+              data-testid="wave-row"
+              className="relative min-w-0 flex-1 touch-none"
+              onPointerDown={down(r)}
+              onPointerMove={move(r)}
+              onPointerUp={up(r)}
+              onPointerCancel={cancel}
+            >
               <svg viewBox="0 0 1000 100" preserveAspectRatio="none" className="h-full w-full" aria-hidden>
                 {loopIn != null && (
                   <rect

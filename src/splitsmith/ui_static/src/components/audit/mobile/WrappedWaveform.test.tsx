@@ -83,4 +83,64 @@ describe("WrappedWaveform", () => {
     expect(props.onGrabEnd).toHaveBeenCalledTimes(1);
     expect(props.onTap).not.toHaveBeenCalled();
   });
+
+  it("gutter label presses are ignored", () => {
+    const props = renderRows();
+    // Get the outer row container which has the label as a child
+    const rowContainer = document.querySelector('[data-testid="wave-row"]')?.parentElement;
+    if (!rowContainer) throw new Error("Row container not found");
+    const label = rowContainer.querySelector("span");
+    if (!label) throw new Error("Label not found");
+    label.getBoundingClientRect = () =>
+      ({ left: 0, width: 50, top: 0, height: 40 }) as DOMRect;
+    fireEvent.pointerDown(label, { clientX: 25, clientY: 10, pointerId: 1 });
+    fireEvent.pointerUp(label, { clientX: 26, clientY: 10, pointerId: 1 });
+    expect(props.onTap).not.toHaveBeenCalled();
+    expect(props.onGrabStart).not.toHaveBeenCalled();
+  });
+
+  it("pointerCancel on a non-grabbed gesture fires no onTap", () => {
+    const props = renderRows();
+    const row = screen.getAllByTestId("wave-row")[0];
+    row.getBoundingClientRect = () =>
+      ({ left: 0, width: 100, top: 0, height: 40 }) as DOMRect;
+    fireEvent.pointerDown(row, { clientX: 50, clientY: 10, pointerId: 1 });
+    fireEvent.pointerCancel(row, { clientX: 51, clientY: 10, pointerId: 1 });
+    expect(props.onTap).not.toHaveBeenCalled();
+    expect(props.onGrabStart).not.toHaveBeenCalled();
+    expect(props.onGrabEnd).not.toHaveBeenCalled();
+  });
+
+  it("pointerCancel on a grabbed gesture fires onGrabEnd but not onTap", () => {
+    const props = renderRows();
+    const row = screen.getAllByTestId("wave-row")[0];
+    row.getBoundingClientRect = () =>
+      ({ left: 0, width: 100, top: 0, height: 40 }) as DOMRect;
+    fireEvent.pointerDown(row, { clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(row, { clientX: 30, clientY: 10, pointerId: 1 });
+    fireEvent.pointerCancel(row, { clientX: 30, clientY: 10, pointerId: 1 });
+    expect(props.onGrabEnd).toHaveBeenCalledTimes(1);
+    expect(props.onTap).not.toHaveBeenCalled();
+  });
+
+  it("second concurrent pointer is ignored", () => {
+    const props = renderRows();
+    const row = screen.getAllByTestId("wave-row")[0];
+    row.getBoundingClientRect = () =>
+      ({ left: 0, width: 100, top: 0, height: 40 }) as DOMRect;
+    // Start first pointer grab
+    fireEvent.pointerDown(row, { clientX: 10, clientY: 10, pointerId: 1 });
+    fireEvent.pointerMove(row, { clientX: 30, clientY: 10, pointerId: 1 });
+    expect(props.onGrabStart).toHaveBeenCalledTimes(1);
+    // Try to start second pointer mid-grab
+    fireEvent.pointerDown(row, { clientX: 50, clientY: 10, pointerId: 2 });
+    fireEvent.pointerMove(row, { clientX: 70, clientY: 10, pointerId: 2 });
+    // onGrabStart should still be 1 (second pointer ignored)
+    expect(props.onGrabStart).toHaveBeenCalledTimes(1);
+    // Release first pointer
+    fireEvent.pointerUp(row, { clientX: 30, clientY: 10, pointerId: 1 });
+    expect(props.onGrabEnd).toHaveBeenCalledTimes(1);
+    // onTap/onScrub from second pointer should not fire
+    expect(props.onTap).not.toHaveBeenCalled();
+  });
 });
