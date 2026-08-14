@@ -74,11 +74,12 @@ describe("route tree", () => {
   // transform cost for that entire graph (measured standalone: ~2.3s on
   // this host, and it competes with every other test file's own
   // transform work for the same shared pipeline). Paying that cost here,
-  // in a hook with vitest's default 10s hookTimeout, keeps it off the
-  // first ``it``'s 5s testTimeout budget -- otherwise whichever test
-  // happens to run first eats a cold-start tax the other two never pay
-  // (their own ``renderAt`` calls hit the now-warm module cache), and
-  // under enough parallel load that tax alone exceeds 5s (#550 review).
+  // in a hook, keeps it off the first ``it`` -- the timeout budget is
+  // the suite-wide ``TEST_BUDGET_MS`` in vite.config.ts now, not a
+  // hook/test split -- otherwise whichever test happens to run first
+  // eats a cold-start tax the other two never pay (their own
+  // ``renderAt`` calls hit the now-warm module cache), and under enough
+  // parallel load that tax alone exceeds 5s (#550 review).
   beforeAll(async () => {
     await import("@/App");
   });

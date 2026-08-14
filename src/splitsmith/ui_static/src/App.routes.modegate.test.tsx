@@ -26,8 +26,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  *  wall-clock-bound in two ways and it failed on a loaded machine every
  *  time (#851): the spinner had to be *observed* inside that 200 ms
  *  window, and the dynamic `import("@/App")` below had to finish inside
- *  vitest's 5 s per-test budget. Neither is a property of the code under
- *  test.
+ *  vitest's 5 s per-test budget (now the suite-wide budget in
+ *  vite.config.ts). Neither is a property of the code under test.
  *
  *  Holding the promise open until the test resolves it is also a
  *  stronger assertion than a delay was. "Long enough that the pre-fix

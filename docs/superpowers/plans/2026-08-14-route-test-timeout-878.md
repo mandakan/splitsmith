@@ -4,7 +4,7 @@
 
 **Goal:** Give the route-suite's import budget one home, so file seven inherits it instead of starting at the default and being discovered red under load by whoever trips it.
 
-**Architecture:** `vitest.config.ts` gains one `TEST_BUDGET_MS` constant driving suite-wide `hookTimeout` and `testTimeout`. The six inline budgets come out. The number is measured first, not inherited from folklore -- and the measurement is what collapsed this from a two-project split to a single constant (see "Second scope change" below).
+**Architecture:** `vite.config.ts` gains one `TEST_BUDGET_MS` constant driving suite-wide `hookTimeout` and `testTimeout`. The six inline budgets come out. The number is measured first, not inherited from folklore -- and the measurement is what collapsed this from a two-project split to a single constant (see "Second scope change" below).
 
 **Tech Stack:** vitest 4.1, vite 6, jsdom, React Testing Library, pnpm.
 
@@ -188,7 +188,7 @@ Expected: clean. Nothing from this task is committed -- it produced two numbers,
 ### Task 2: One home for the budget
 
 **Files:**
-- Modify: `src/splitsmith/ui_static/vitest.config.ts` (the `test` block, currently `environment` + `setupFiles`)
+- Modify: `src/splitsmith/ui_static/vite.config.ts` (the `test` block, currently `environment` + `setupFiles`)
 - Modify: `src/App.routes.test.tsx:90-92`, `.account:70-78`, `.share:85-93`, `.pickup:82-90`, `.hosted:89-97` (remove the inline budget and its comment)
 - Modify: `src/App.routes.modegate.test.tsx:105-113` (remove the per-test budget and its comment)
 
@@ -197,7 +197,7 @@ Expected: clean. Nothing from this task is committed -- it produced two numbers,
 
 - [ ] **Step 1: Rewrite the config's `test` block**
 
-One constant, one pair of timeouts, no projects. Replace the `test` block in `vitest.config.ts` with:
+One constant, one pair of timeouts, no projects. Replace the `test` block in `vite.config.ts` with:
 
 ```ts
   test: {
@@ -295,12 +295,12 @@ pnpm typecheck
 pnpm lint
 ```
 
-Expected: clean. `vitest.config.ts` is typechecked, so a malformed `test` block surfaces here.
+Expected: clean. `vite.config.ts` is typechecked, so a malformed `test` block surfaces here.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add vitest.config.ts src/App.routes.test.tsx src/App.routes.account.test.tsx \
+git add vite.config.ts src/App.routes.test.tsx src/App.routes.account.test.tsx \
   src/App.routes.share.test.tsx src/App.routes.pickup.test.tsx \
   src/App.routes.hosted.test.tsx src/App.routes.modegate.test.tsx
 git commit -m "test(ui): one home for the route suite's import budget"
@@ -316,7 +316,7 @@ With the projects split gone, the check is simpler than the original plan's: the
 
 **Files:**
 - Create then delete: `src/inherit.probe.test.ts` (a probe, not a committed test)
-- Temporarily modify then revert: `vitest.config.ts`
+- Temporarily modify then revert: `vite.config.ts`
 
 **Interfaces:**
 - Consumes: Task 2's config.
@@ -347,7 +347,7 @@ Expected: 1 file, 1 test, passing, taking just over 6s.
 
 - [ ] **Step 3: Shrink the budget and watch it fail**
 
-In `vitest.config.ts`, temporarily set `const TEST_BUDGET_MS = 1;`.
+In `vite.config.ts`, temporarily set `const TEST_BUDGET_MS = 1;`.
 
 Run: `pnpm vitest run src/inherit.probe`
 Expected: FAIL with `Test timed out in 1ms`.
@@ -366,7 +366,7 @@ This is what confirms the six route files now take their budget from the config 
 - [ ] **Step 5: Restore the budget and delete the probe**
 
 ```bash
-git checkout -- vitest.config.ts
+git checkout -- vite.config.ts
 rm src/inherit.probe.test.ts
 pnpm test
 ```
@@ -418,8 +418,8 @@ So the next person reading #878's "reduce the cost" suggestion finds where that 
 
 ## Done when
 
-- No `src/App.routes.*.test.tsx` file names a timeout, and neither does any other test file.
-- `vitest.config.ts` carries exactly one budget constant, and its comment states the two measurements it came from.
+- No `src/App.routes.*.test.tsx` file names a vitest hook/test timeout, and neither does any other test file -- this does not cover RTL's own `waitFor({ timeout })` calls, which stay: `App.routes.pickup.test.tsx:94`'s `{ timeout: FEATURES_DELAY_MS - 50 }` asserts a redirect lands before a real 300 ms `setTimeout`, a wall-clock assertion the global budget structurally cannot replace.
+- `vite.config.ts` carries exactly one budget constant, and its comment states the two measurements it came from.
 - `pnpm test` collects the same file and test totals recorded at the start of Task 2 (104 / 604 at the time of writing -- re-derive, do not copy).
 - A **non-route** probe file that names no timeout has been observed passing a 6s test, and failing when the constant is set to 1ms. That pair is what proves the budget is global and is genuinely the timeout.
 - The six route files have been observed failing at a 1ms budget, proving they now take it from the config rather than from a surviving inline value.

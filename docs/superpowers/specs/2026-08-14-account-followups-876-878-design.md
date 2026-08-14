@@ -272,6 +272,11 @@ measurement says 30s is right, it stays 30s and stops being folklore.
 
 ## Approach
 
+**Superseded, 2026-08-14:** measurement showed the worst ordinary test
+(6,573 ms) beats the worst route hook (4,428 ms), so the projects split
+below was dropped for one `TEST_BUDGET_MS` in `vite.config.ts`. See the
+plan's "Second scope change" section.
+
 `vitest.config.ts` grows `test.projects`:
 
 - a `routes` project globbing `src/App.routes.*.test.tsx`, carrying the
