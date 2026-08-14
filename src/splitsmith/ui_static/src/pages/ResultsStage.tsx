@@ -88,6 +88,18 @@ export function ResultsStage() {
   );
 }
 
+// Camera identity is the payload index (primary first); a stale index
+// (coach reloaded with fewer cameras) resolves to 0 rather than erroring.
+function resolveCamIndex(coach: CoachStageResponse, raw: number): number {
+  return coach.videos[raw] ? raw : 0;
+}
+
+// The beep anchor of the clip the SPA plays for this camera; falls back
+// to the primary anchor when the entry is missing or beepless.
+function camBeep(coach: CoachStageResponse, index: number): number {
+  return coach.videos[index]?.beep_in_clip ?? coach.beep_time;
+}
+
 function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const { shooters, capabilities } = useOutletContext<MatchShellOutletContext>();
   const location = useLocation();
@@ -155,8 +167,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const activeBeepRef = useRef(0);
   const momentTime =
     moment != null && coach != null
-      ? (coach.videos[coach.videos[activeCamIndex] ? activeCamIndex : 0]?.beep_in_clip ??
-          coach.beep_time) + moment.t
+      ? camBeep(coach, resolveCamIndex(coach, activeCamIndex)) + moment.t
       : null;
 
   // When the match has a live share, copy the share-scoped moment URL
@@ -370,8 +381,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   // Shot times arrive in the primary clip's coordinates; replaying them
   // on another camera shifts them onto that clip's clock via the beep.
   const camDeltaForShots = coach
-    ? (coach.videos[coach.videos[activeCamIndex] ? activeCamIndex : 0]?.beep_in_clip ??
-        coach.beep_time) - coach.beep_time
+    ? camBeep(coach, resolveCamIndex(coach, activeCamIndex)) - coach.beep_time
     : 0;
   const displayShots = useMemo(
     () =>
@@ -415,7 +425,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
     (index: number) => {
       setActiveCamIndex((prev) => {
         if (index === prev || !coach) return prev;
-        const prevBeep = coach.videos[prev]?.beep_in_clip ?? coach.beep_time;
+        const prevBeep = camBeep(coach, resolveCamIndex(coach, prev));
         const nextBeep = coach.videos[index]?.beep_in_clip;
         if (nextBeep == null) return prev;
         const el = videoRef.current;
@@ -467,12 +477,9 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
     );
   }
 
-  // Camera identity is the payload index (primary first). A stale index
-  // (coach reloaded with fewer cameras) silently falls back to entry 0;
-  // entry 0 also covers the no-primary edge instead of dead-ending.
-  const camIndex = coach.videos[activeCamIndex] ? activeCamIndex : 0;
+  const camIndex = resolveCamIndex(coach, activeCamIndex);
   const activeVideo = coach.videos[camIndex];
-  const activeBeep = activeVideo?.beep_in_clip ?? coach.beep_time;
+  const activeBeep = camBeep(coach, camIndex);
   const camDelta = activeBeep - coach.beep_time;
   camIndexRef.current = camIndex;
   activeBeepRef.current = activeBeep;
