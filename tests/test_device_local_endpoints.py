@@ -48,6 +48,15 @@ class _FakeHosted:
     def __init__(self, verdicts: list[dict], *, revoke_status: int = 200) -> None:
         self.verdicts = verdicts
         self.revoke_status = revoke_status
+        # The bearer whoami is expected to see. Defaults to the token the
+        # ``_link_account`` fixture writes; the two device-flow tests that
+        # link with a *different* token (the one the approval verdict
+        # itself scripts) override this before the call that reaches
+        # whoami with it (#877 review wave 2) -- a hard-coded constant
+        # here rejected a legitimate token and the resulting
+        # AssertionError was silently swallowed by the refresh's own
+        # broad except, leaving the refresh path unexercised.
+        self.expected_bearer = "desktop-token"
         self.authorizes = 0
         self.polls = 0
         self.revokes = 0
@@ -94,9 +103,10 @@ class _FakeHosted:
             # that stopped sending it would 401 in production and degrade
             # silently to the cached snapshot -- #877's own bug, back and
             # invisible unless the double insists on the credential.
+            expected = f"Bearer {self.expected_bearer}"
             assert (
-                self.whoami_auth[-1] == "Bearer desktop-token"
-            ), f"whoami reached the hosted side with no bearer: {self.whoami_auth[-1]!r}"
+                self.whoami_auth[-1] == expected
+            ), f"whoami reached the hosted side with the wrong bearer: {self.whoami_auth[-1]!r}"
             if self.whoami_hook is not None:
                 self.whoami_hook()
             if self.whoami_status != 200:
@@ -161,7 +171,8 @@ def test_approval_writes_token_and_account_without_echoing_the_token(tmp_path: P
     monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
     client = _local_app(tmp_path)
     client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
-    _install_fake(monkeypatch, _FakeHosted([dict(_APPROVED)]))
+    fake = _FakeHosted([dict(_APPROVED)])
+    _install_fake(monkeypatch, fake)
 
     client.post(START)
     status = client.get(STATUS)
@@ -176,6 +187,15 @@ def test_approval_writes_token_and_account_without_echoing_the_token(tmp_path: P
     assert prefs.hosted_account.email == "shooter@example.com"
     assert prefs.hosted_account.device_name == "gaspode"
 
+    # The GET below refreshes the cached snapshot, which builds its
+    # hosted client with the token approval just linked -- not
+    # "desktop-token" (#877 review wave 2). A matching whoami payload
+    # keeps the refresh a clean no-op (the account is unchanged) rather
+    # than tripping the response-shape ValidationError the double's
+    # empty default body would otherwise cause -- that would also be
+    # silently swallowed, and this test is not the one about that path.
+    fake.expected_bearer = "sync-token-value"
+    fake.whoami_payload = {"id": "u1", "email": "shooter@example.com", "display_name": None}
     settings = client.get("/api/settings/hosted-sync")
     assert settings.json()["token_set"] is True
     assert settings.json()["account"]["email"] == "shooter@example.com"
@@ -364,9 +384,19 @@ def test_saving_a_pasted_token_clears_the_linked_account(tmp_path: Path, monkeyp
     monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
     client = _local_app(tmp_path)
     client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
-    _install_fake(monkeypatch, _FakeHosted([dict(_APPROVED)]))
+    fake = _FakeHosted([dict(_APPROVED)])
+    _install_fake(monkeypatch, fake)
     client.post(START)
     assert client.get(STATUS).json()["status"] == "approved"
+    # The GET below refreshes the cached snapshot, which builds its
+    # hosted client with the token approval just linked -- not
+    # "desktop-token" (#877 review wave 2). A matching whoami payload
+    # keeps the refresh a clean no-op (the account is unchanged) rather
+    # than tripping the response-shape ValidationError the double's
+    # empty default body would otherwise cause -- that would also be
+    # silently swallowed, and this test is not the one about that path.
+    fake.expected_bearer = "sync-token-value"
+    fake.whoami_payload = {"id": "u1", "email": "shooter@example.com", "display_name": None}
     assert client.get("/api/settings/hosted-sync").json()["account"] is not None
 
     resp = client.put(
