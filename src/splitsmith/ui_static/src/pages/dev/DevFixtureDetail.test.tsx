@@ -19,7 +19,8 @@
  * jsdom has no AudioContext, so the audio-touching lab components are
  * mocked (SnippetPlayer decodes; ZoomedWaveform renders its buffer).
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -29,7 +30,13 @@ import { DevFixtureDetail } from "@/pages/dev/DevFixtureDetail";
 
 vi.mock("@/components/Waveform", () => ({ Waveform: () => null }));
 vi.mock("@/components/lab/ZoomedWaveform", () => ({ ZoomedWaveform: () => null }));
-vi.mock("@/components/lab/SnippetPlayer", () => ({ SnippetPlayer: () => null }));
+// Stubbed for jsdom (no AudioContext), but the stub keeps the one prop
+// that decides whether the page makes noise.
+vi.mock("@/components/lab/SnippetPlayer", () => ({
+  SnippetPlayer: ({ playing }: { playing: boolean }) => (
+    <div data-testid="snippet" data-playing={String(playing)} />
+  ),
+}));
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -54,6 +61,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       runLabEval: vi.fn().mockResolvedValue({ id: "job-1", status: "running" }),
       pollJob: vi.fn().mockResolvedValue({ id: "job-1", status: "succeeded" }),
       deleteFixture: vi.fn().mockResolvedValue(undefined),
+      applyLabLabels: vi.fn(),
     },
   };
 });
@@ -108,7 +116,15 @@ function candidate(n: number, over: Record<string, unknown> = {}) {
   };
 }
 
-function runWith(slug: string): LabEvalRun {
+/** #1 sits in the step-through panel's default "borderline" filter
+ *  (1-3 votes); #2 is unanimous, so the panel filters it out. Selecting
+ *  #2 in the candidate table models the selection source the panel does
+ *  not own. */
+function twoCandidates() {
+  return [candidate(1), candidate(2, { vote_total: 4, vote_c: 1, ensemble_score: 4 })];
+}
+
+function runWith(slug: string, candidates = twoCandidates()): LabEvalRun {
   const metrics = {
     n_truth: 2,
     n_kept: 2,
@@ -155,7 +171,7 @@ function runWith(slug: string): LabEvalRun {
           audio_path: `/fixtures/${slug}.wav`,
           source_video: null,
           expected_rounds: 12,
-          candidates: [candidate(1), candidate(2)],
+          candidates,
           truth_times: [3.25, 3.5],
           metrics,
           audit_mtime: 1,
@@ -214,6 +230,68 @@ describe("DevFixtureDetail", () => {
     // wait out that window before asserting it never fired.
     await new Promise((resolve) => setTimeout(resolve, 400));
     expect(api.runLabEval).not.toHaveBeenCalled();
+  });
+
+  it("does not start audio playback on arrival", async () => {
+    // The labeling panel is on screen from the first paint, and getting
+    // here is a user gesture (a corpus row click), so the AudioContext
+    // is resumable -- an auto-playing looped gunshot snippet would greet
+    // whoever opened the fixture. Legacy gated this behind an explicit
+    // "Step through" toggle; this page has no such gate, so playback has
+    // to start paused.
+    vi.mocked(api.listLabFixtures).mockResolvedValue([record(SLUG)]);
+    vi.mocked(api.getLastLabRun).mockResolvedValue(runWith(SLUG));
+
+    renderDetail(SLUG);
+
+    expect(await screen.findByTestId("snippet")).toHaveAttribute(
+      "data-playing",
+      "false",
+    );
+  });
+
+  it("keeps the operator's selection across a label save", async () => {
+    // A save returns a run with fresh candidate objects, which rebuilds
+    // the step-through panel's filtered list. Candidate #2 is outside
+    // that list (unanimous, so the default borderline filter drops it),
+    // which is exactly the case where the panel used to yank the
+    // selection back to the head of its own list mid-labeling.
+    vi.mocked(api.listLabFixtures).mockResolvedValue([record(SLUG)]);
+    vi.mocked(api.getLastLabRun).mockResolvedValue(runWith(SLUG));
+    vi.mocked(api.applyLabLabels).mockResolvedValue({
+      path: `/fixtures/${SLUG}.json`,
+      counts: { paper: 1 },
+      run: runWith(SLUG, [
+        candidate(1),
+        candidate(2, {
+          vote_total: 4,
+          vote_c: 1,
+          ensemble_score: 4,
+          subclass: "paper",
+        }),
+      ]),
+    });
+
+    renderDetail(SLUG);
+    await screen.findByText(/candidates \(2\)/i);
+
+    const row = document.querySelector('[data-cn="2"]') as HTMLElement;
+    await userEvent.click(row);
+    expect(screen.getByText(/row #2 selected/i)).toBeInTheDocument();
+
+    // "p" -> subclass paper on the selected truth-positive candidate.
+    await userEvent.keyboard("p");
+    await waitFor(() => expect(api.applyLabLabels).toHaveBeenCalled());
+    // The relabeled run has landed once the row's dropdown shows it.
+    await waitFor(() =>
+      expect(
+        within(document.querySelector('[data-cn="2"]') as HTMLElement).getByRole(
+          "combobox",
+        ),
+      ).toHaveValue("paper"),
+    );
+
+    expect(screen.getByText(/row #2 selected/i)).toBeInTheDocument();
   });
 
   it("walks the corpus with prev/next preserving ?match=", async () => {
