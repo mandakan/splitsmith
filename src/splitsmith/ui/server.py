@@ -97,7 +97,7 @@ from typing import TYPE_CHECKING, Any, BinaryIO, Literal
 if TYPE_CHECKING:
     # Hosted-only; imported lazily at runtime inside _apply_hosted_mode_wiring
     # so local mode stays free of the db (procrastinate/psycopg) dependency.
-    from ..db import PostgresMatchStore, ProjectStateStore
+    from ..db import PostgresMatchStore, PostgresProfileStore, ProjectStateStore
     from ..db.comments import CommentStore
     from ..db.desktop_tokens import DesktopTokenRecord, DesktopTokenStore
     from ..db.device_auth import DeviceAuthStore
@@ -152,7 +152,13 @@ from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
 from ..auth import AuthBackend, CompositeAuth, LoopbackAuth, User
-from ..comment_identity import MAX_AUTHOR_KEY_LEN, MIN_AUTHOR_KEY_LEN, derive_handle, hash_author_key
+from ..comment_identity import (
+    MAX_AUTHOR_KEY_LEN,
+    MIN_AUTHOR_KEY_LEN,
+    author_code_for,
+    derive_handle,
+    hash_author_key,
+)
 from ..compare import mp4_grid, project_loader
 from ..compute import ComputeBackend, LocalComputeBackend
 from ..config import (
@@ -164,6 +170,7 @@ from ..config import (
     IntervalClassSource,
     StageRounds,
 )
+from ..display_name import normalize_display_name
 from ..export_naming import slugify, stage_file_base
 from ..fixture_schema import (
     AgcState,
@@ -209,6 +216,8 @@ from .capabilities import (
 from .comments import (
     AUTHOR_KEY_HEADER,
     STAGE_COMMENT_CAP,
+    CommentAuthorListResponse,
+    CommentAuthorOut,
     CommentCreateRequest,
     CommentListResponse,
     CommentOut,
@@ -1499,6 +1508,10 @@ class TenantContext:
     # here the tenant factory is load-bearing, not merely the established
     # pattern: it is what sets the ``app.user_id`` GUC the policy keys on.
     comments: CommentStore | None
+    # Per-user account-profile writer (#867). None in local mode: the
+    # loopback sentinel has no user row, and the PATCH route that uses
+    # this 404s there.
+    profile: PostgresProfileStore | None = None
 
 
 # Per-request / per-job tenant resolved by the hosted-mode auth gate
@@ -1771,6 +1784,13 @@ class AppState:
         # hosted-only feature. Returns None when no tenant is pinned.
         tenant = current_tenant.get()
         return tenant.comments if tenant is not None else None
+
+    @property
+    def profile(self) -> PostgresProfileStore | None:
+        # Local mode has no per-user profile store - display names are a
+        # hosted-account concept. Returns None when no tenant is pinned.
+        tenant = current_tenant.get()
+        return tenant.profile if tenant is not None else None
 
     def build_tenant(self, user_id: str) -> TenantContext:
         """Build the :class:`TenantContext` for ``user_id`` (hosted mode).
@@ -4603,6 +4623,18 @@ class ScoreboardImportRequest(BaseModel):
     overwrite: bool = False
 
 
+class UpdateMeRequest(BaseModel):
+    """Body for PATCH /api/me (#867).
+
+    ``display_name`` is required *and* nullable: an explicit ``null``
+    clears the name, and a body that omits the field is a 422 rather
+    than being read as a clear. With one field on the model the
+    distinction would otherwise be invisible.
+    """
+
+    display_name: str | None
+
+
 class DeleteProjectRequest(BaseModel):
     """Body for POST /api/me/recent-projects/delete.
 
@@ -5940,6 +5972,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         MagicLinkAuth,
         PostgresJobBackend,
         PostgresMatchStore,
+        PostgresProfileStore,
         PostgresRecentProjectsStore,
         PostgresScoreboardIdentityStore,
         ProjectStateStore,
@@ -6108,6 +6141,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             share_tokens=ShareTokenStore(tenant_factory, user_id=user_id),
             desktop_tokens=DesktopTokenStore(tenant_factory, user_id=user_id),
             comments=CommentStore(tenant_factory, user_id=user_id),
+            profile=PostgresProfileStore(tenant_factory, user_id=user_id),
         )
 
     state._build_tenant = _build_tenant
@@ -6860,6 +6894,11 @@ def create_app(
             author_kind = "handle"
             author_user_id = None
             author_handle = derive_handle(author_key)
+        author_code = author_code_for(
+            author_kind=author_kind,
+            author_user_id=author_user_id,
+            author_key_hash=hash_author_key(author_key),
+        )
         created = await store.create(
             match_id=mid,
             slug=slug,
@@ -6871,6 +6910,7 @@ def create_app(
             author_user_id=author_user_id,
             author_handle=author_handle,
             author_key_hash=hash_author_key(author_key),
+            author_code=author_code,
             share_token_id=share_token_id,
             body=req.body,
         )
@@ -6908,6 +6948,37 @@ def create_app(
         if not ok:
             raise HTTPException(status_code=404, detail="not found")
         return Response(status_code=204)
+
+    @app.get("/api/match/comment-authors", response_model=CommentAuthorListResponse)
+    async def list_match_comment_authors() -> CommentAuthorListResponse:
+        """Per-author detail for the owner's moderation view.
+
+        Owner-only by construction: the shape is absent from
+        ``_SHARE_PATH_RE``, so an anonymous share caller gets the same
+        uniform 404 as any unadmitted path. No capability entry is
+        needed -- ``required_capability`` returns ``None`` for GET.
+
+        Match-scoped on purpose. Aggregating an author across matches
+        would reveal that they commented on other people's share links,
+        which is a disclosure they never opted into.
+        """
+        store = state.comments
+        mid = current_match_id.get()
+        if store is None or mid is None:
+            raise HTTPException(status_code=404, detail="not found")
+        summaries = await store.author_summaries(mid)
+        return CommentAuthorListResponse(
+            authors=[
+                CommentAuthorOut(
+                    author_code=s.author_code,
+                    author_kind=s.author_kind,
+                    first_comment_at=s.first_comment_at,
+                    comment_count=s.comment_count,
+                    handles=list(s.handles),
+                )
+                for s in summaries
+            ]
+        )
 
     @app.delete("/api/match/comments")
     async def delete_match_comments(
@@ -10078,6 +10149,39 @@ def create_app(
         time; it is never stored on the user record itself.
         """
         return user.model_copy(update={"is_admin": user.email.lower() in state.admin_emails})
+
+    @app.patch("/api/me", response_model=User)
+    async def patch_me(req: UpdateMeRequest, user: User = Depends(get_current_user)) -> User:
+        """Update the signed-in account's profile. Hosted mode only.
+
+        Local mode 404s: ``LoopbackAuth``'s sentinel user has no
+        database row, and the magic-link routes 404 there for the same
+        reason. A sync-scoped desktop token never arrives here at all --
+        ``_auth_gate`` confines it to ``/api/sync/*``.
+
+        Normalization runs before the store opens a session, so an
+        invalid name is a 422 that touches nothing. A blank name stores
+        ``None``, which is what keeps #866's fallback invariant true:
+        an account with no name publishes a generated handle, never an
+        empty string.
+        """
+        store = state.profile
+        if store is None:
+            raise HTTPException(status_code=404, detail="not found")
+        try:
+            display_name = normalize_display_name(req.display_name)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "invalid_display_name", "message": str(exc)},
+            ) from exc
+        await store.set_display_name(display_name)
+        return user.model_copy(
+            update={
+                "display_name": display_name,
+                "is_admin": user.email.lower() in state.admin_emails,
+            }
+        )
 
     @app.get("/api/me/jobs", response_model=list[Job])
     async def list_jobs(user: User = Depends(get_current_user)) -> list[Job]:
@@ -14647,6 +14751,11 @@ def create_app(
                 prefs.hosted_account = user_config.HostedAccountRef(
                     id=str(account.get("id", "")),
                     email=str(account.get("email", "")),
+                    # Snapshot, not a live read: a display name set later
+                    # through PATCH /api/me (#867) does not reach the
+                    # desktop chip until the device is linked again. A
+                    # sync-scoped token cannot read /api/me, so refreshing
+                    # this would need a new route - out of scope.
                     display_name=account.get("display_name"),
                     device_name=str(verdict.get("device_name") or socket.gethostname()),
                     linked_at=datetime.now(UTC),

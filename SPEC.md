@@ -299,6 +299,29 @@ the anonymous-safe response type. The comment routes themselves live in
 `/api/share/{token}/...`, admitted only through a comment-scoped token
 -- see CLAUDE.md's share-link section for the two-allowlist design).
 
+### Author codes
+
+Every comment carries an `author_code`: six Crockford-base32 characters
+derived by HMAC from the author's account id (signed-in) or hashed
+browser key (pseudonymous), never from the raw identifier. It is
+denormalized onto the row at write time for the same reason
+`author_handle` is -- rotating the handle secret must not re-identify
+historical authors.
+
+It exists because a display name is self-chosen: an account can set
+theirs to another commenter's, including a generated pseudonym. The code
+is always in the DOM and in a tooltip. For a reader who cannot moderate,
+it renders visibly only when two distinct codes in one thread normalize
+to the same name (`lib/authorAmbiguity.ts`); for the match owner it is
+always visible, as the label on a detail trigger they can expand to see
+every name that code has posted under, which is the signal a rename
+leaves.
+
+That aggregate is match-scoped and owner-only (`GET
+/api/match/comment-authors`, absent from `_SHARE_PATH_RE`). Aggregating
+an author across matches would reveal that they commented on other
+people's share links.
+
 ## Data structures
 
 ```python
@@ -587,6 +610,24 @@ Derived caches are resolved per shooter, at `<match_root>/shooters/<slug>/{audio
 Non-reuse is what lets this ship without an artifact-migration engine: every per-stage artifact is keyed on `stage_number` (`audit/stage<N>.json`, `stage<N>_cam_*.wav`, `stage<N>_cam_*_trimmed.mp4`), so never renumbering a live stage is what keeps the audit progress on stages the user didn't touch intact. It also means a worker write that lands after a removed stage's artifacts are purged is inert rather than a correctness bug -- the number can never be read back as belonging to a live stage -- which is why this feature ships with no job cancellation (see #645).
 
 Removing a stage releases its videos to `unassigned_videos` on every shooter (uploaded footage is never deleted -- in a hosted deployment it may be the user's only copy) and deletes that stage's audit doc plus derived caches.
+
+## Accounts
+
+### Account display name
+
+`users.display_name` is set through `PATCH /api/me` from the `/account`
+page, and is the name published on comments the account posts on other
+people's shared stages. It is optional: an account with no name comments
+under a server-derived pseudonym instead, and splitsmith never publishes
+an account's email address.
+
+Validation lives in `splitsmith.display_name.normalize_display_name`
+(NFC, whitespace-collapsed, no control characters, 60 characters). A
+blank name normalizes to `NULL`, never `""` -- the comment attribution
+branch falls back on a blank name, and an empty string would publish an
+empty author. Tab is deliberately exempt from the control-character
+refusal and collapses as whitespace instead of being rejected -- it is
+the only control character a person plausibly types into a text field.
 
 ## Hosted deployment: self-hosted workers
 

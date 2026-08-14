@@ -699,3 +699,37 @@ def test_a_fixed_author_key_is_still_limited(comment_token_client) -> None:
     client, token = comment_token_client
     codes = [_post(client, token, body=f"same {i}").status_code for i in range(8)]
     assert codes == [201, 201, 201, 201, 201, 429, 429, 429]
+
+
+def test_a_posted_comment_carries_an_author_code(comment_token_client) -> None:
+    client, token = comment_token_client
+    created = _post(client, token).json()
+    assert len(created["author_code"]) == 6
+
+
+def test_two_browsers_get_two_codes(comment_token_client) -> None:
+    client, token = comment_token_client
+    first = _post(client, token, key="a" * 64).json()
+    second = _post(client, token, key="b" * 64).json()
+    assert first["author_code"] != second["author_code"]
+
+
+def test_the_same_browser_keeps_one_code(comment_token_client) -> None:
+    client, token = comment_token_client
+    first = _post(client, token, key="a" * 64).json()
+    second = _post(client, token, key="a" * 64).json()
+    assert first["author_code"] == second["author_code"]
+
+
+def test_author_code_survives_a_handle_secret_rotation(comment_token_client, monkeypatch) -> None:
+    """The code is denormalized at write time for the same reason
+    author_handle is: rotating the secret must not re-identify history."""
+    from splitsmith.comment_identity import SPLITSMITH_COMMENT_HANDLE_SECRET_ENV
+
+    client, token = comment_token_client
+    created = _post(client, token).json()
+
+    monkeypatch.setenv(SPLITSMITH_COMMENT_HANDLE_SECRET_ENV, "a-rotated-secret")
+    listed = client.get(f"/api/share/{token}/shooters/alice/stages/3/comments").json()
+
+    assert listed["comments"][0]["author_code"] == created["author_code"]

@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from ..comment_identity import author_code_for
 from .models import CommentRow
 
 
@@ -35,11 +36,25 @@ class Comment:
     anchor_kind: str
     anchor_shot_id: str | None
     author_kind: str
+    author_user_id: str | None
     author_handle: str
     author_key_hash: str
+    author_code: str | None
     share_token_id: str
     body: str
     created_at: datetime
+
+
+@dataclass(frozen=True)
+class CommentAuthorSummary:
+    """One author's footprint on a match, as the owner's moderation view
+    reports it."""
+
+    author_code: str
+    author_kind: str
+    first_comment_at: datetime
+    comment_count: int
+    handles: tuple[str, ...]
 
 
 def _to_comment(row: CommentRow) -> Comment:
@@ -49,8 +64,10 @@ def _to_comment(row: CommentRow) -> Comment:
         anchor_kind=row.anchor_kind,
         anchor_shot_id=row.anchor_shot_id,
         author_kind=row.author_kind,
+        author_user_id=row.author_user_id,
         author_handle=row.author_handle,
         author_key_hash=row.author_key_hash,
+        author_code=row.author_code,
         share_token_id=row.share_token_id,
         body=row.body,
         created_at=row.created_at,
@@ -127,6 +144,7 @@ class CommentStore:
         author_user_id: str | None,
         author_handle: str,
         author_key_hash: str,
+        author_code: str,
         share_token_id: str,
         body: str,
     ) -> Comment:
@@ -142,6 +160,7 @@ class CommentStore:
             author_user_id=author_user_id,
             author_handle=author_handle,
             author_key_hash=author_key_hash,
+            author_code=author_code,
             share_token_id=share_token_id,
             body=body,
         )
@@ -237,3 +256,57 @@ class CommentStore:
             )
             await session.commit()
             return int(result.rowcount)
+
+    async def author_summaries(self, match_id: str) -> list[CommentAuthorSummary]:
+        """Per-author aggregates across one match, newest activity last.
+
+        Aggregated in Python rather than by a GROUP BY on
+        ``author_code``: rows written before #867 have the column NULL,
+        so grouping in SQL would split one author into a legacy bucket
+        and a current one. Deriving every row's code through
+        ``author_code_for`` -- the same function the write path uses --
+        makes the two indistinguishable, which is the point.
+
+        The row count this loads is bounded by the per-stage comment cap
+        times the number of stages on a match. A match that outgrows
+        that wants a GROUP BY plus a one-off backfill of author_code,
+        not a paginated version of this.
+        """
+        async with self._session_factory() as session:
+            rows = list(
+                (
+                    await session.execute(
+                        select(CommentRow)
+                        .where(
+                            CommentRow.user_id == self._user_id,
+                            CommentRow.match_id == match_id,
+                            CommentRow.deleted_at.is_(None),
+                        )
+                        .order_by(CommentRow.created_at.asc(), CommentRow.id.asc())
+                    )
+                ).scalars()
+            )
+        grouped: dict[str, list[CommentRow]] = {}
+        for row in rows:
+            code = row.author_code or author_code_for(
+                author_kind=row.author_kind,
+                author_user_id=row.author_user_id,
+                author_key_hash=row.author_key_hash,
+            )
+            grouped.setdefault(code, []).append(row)
+        summaries = []
+        for code, group in grouped.items():
+            # dict.fromkeys, not a set: the owner reads this list, and
+            # the order names were used in is information a set discards.
+            handles = tuple(dict.fromkeys(r.author_handle for r in group))
+            summaries.append(
+                CommentAuthorSummary(
+                    author_code=code,
+                    author_kind=group[0].author_kind,
+                    first_comment_at=group[0].created_at,
+                    comment_count=len(group),
+                    handles=handles,
+                )
+            )
+        summaries.sort(key=lambda s: s.first_comment_at)
+        return summaries

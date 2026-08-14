@@ -20,6 +20,7 @@ than hanging on a half-started compose project.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import time
@@ -33,8 +34,51 @@ pytestmark = pytest.mark.docker
 
 
 COMPOSE_FILE = Path(__file__).resolve().parent.parent / "docker-compose.yml"
-API_BASE = "http://localhost:5174"
+
+# Its OWN compose project, never the bare "splitsmith" the compose file
+# would derive from the directory name. A developer box can legitimately
+# be running a *different* stack under that project name -- a
+# self-hosted agent deployment out of another checkout, say -- and this
+# fixture's teardown is ``down -v``, which destroys the project's named
+# volumes. Sharing the project name would let a test run delete a live
+# deployment's database. The name also keeps the containers this suite
+# creates trivially identifiable when a run is interrupted.
+COMPOSE_PROJECT = os.environ.get("SPLITSMITH_COMPOSE_PROJECT", "splitsmith-test")
+
+# Published host ports. The compose file defaults these to the
+# documented manual smoke values (5432 / 9000 / 9001 / 5174) so a bare
+# ``docker compose up`` is unchanged; the test suite shifts all four,
+# because those defaults collide with things developer boxes commonly
+# already run -- a local Postgres, MinIO's console, a Vite dev server.
+# A collision surfaces as an opaque "port is already allocated" failure
+# from compose, not as a test failure, so the shift is the difference
+# between the docker suite being runnable locally and being CI-only.
+COMPOSE_PORTS = {
+    "SPLITSMITH_COMPOSE_POSTGRES_PORT": os.environ.get("SPLITSMITH_COMPOSE_POSTGRES_PORT", "5433"),
+    "SPLITSMITH_COMPOSE_MINIO_PORT": os.environ.get("SPLITSMITH_COMPOSE_MINIO_PORT", "9010"),
+    "SPLITSMITH_COMPOSE_MINIO_CONSOLE_PORT": os.environ.get("SPLITSMITH_COMPOSE_MINIO_CONSOLE_PORT", "9011"),
+    "SPLITSMITH_COMPOSE_API_PORT": os.environ.get("SPLITSMITH_COMPOSE_API_PORT", "5175"),
+}
+
+API_PORT = COMPOSE_PORTS["SPLITSMITH_COMPOSE_API_PORT"]
+POSTGRES_PORT = COMPOSE_PORTS["SPLITSMITH_COMPOSE_POSTGRES_PORT"]
+
+API_BASE = f"http://localhost:{API_PORT}"
 HEALTH_TIMEOUT_S = 90.0
+
+
+def _compose(*args: str) -> list[str]:
+    """``docker compose`` argv pinned to this suite's project + file.
+
+    Every invocation in this module goes through here so no call can
+    accidentally address the ambient project.
+    """
+    return ["docker", "compose", "-p", COMPOSE_PROJECT, "-f", str(COMPOSE_FILE), *args]
+
+
+def _compose_env() -> dict[str, str]:
+    """Process env plus the published-port overrides compose interpolates."""
+    return {**os.environ, **COMPOSE_PORTS}
 
 
 def _docker_compose_available() -> bool:
@@ -73,9 +117,10 @@ def hosted_stack() -> Iterator[None]:
     # foreground. ``--build`` ensures the splitsmith image picks up
     # any source changes since the last run.
     up = subprocess.run(
-        ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d", "--build"],
+        _compose("up", "-d", "--build"),
         capture_output=True,
         text=True,
+        env=_compose_env(),
     )
     if up.returncode != 0:
         pytest.fail(f"docker compose up failed:\n{up.stderr}")
@@ -88,10 +133,11 @@ def hosted_stack() -> Iterator[None]:
         # from a clean Postgres -- otherwise the recent-projects
         # asserts below would see leftover state from the prior run.
         subprocess.run(
-            ["docker", "compose", "-f", str(COMPOSE_FILE), "down", "-v"],
+            _compose("down", "-v"),
             capture_output=True,
             text=True,
             check=False,
+            env=_compose_env(),
         )
 
 
@@ -133,9 +179,10 @@ def test_recent_projects_round_trip_hits_postgres(hosted_stack: None) -> None:
     # Restart the API container and verify the empty-but-responsive
     # state survives the bounce.
     restart = subprocess.run(
-        ["docker", "compose", "-f", str(COMPOSE_FILE), "restart", "splitsmith"],
+        _compose("restart", "splitsmith"),
         capture_output=True,
         text=True,
+        env=_compose_env(),
     )
     assert restart.returncode == 0, restart.stderr
     _wait_until_healthy()
@@ -144,7 +191,7 @@ def test_recent_projects_round_trip_hits_postgres(hosted_stack: None) -> None:
     assert listed == {"projects": []}
 
 
-HOST_DB_URL = "postgresql+asyncpg://splitsmith:splitsmith@localhost:5432/splitsmith"
+HOST_DB_URL = f"postgresql+asyncpg://splitsmith:splitsmith@localhost:{POSTGRES_PORT}/splitsmith"
 
 
 def _magic_link_login(email: str) -> tuple[str, str]:
@@ -236,11 +283,7 @@ def _psql_run(query: str, *, user: str = "splitsmith") -> subprocess.CompletedPr
     role) to exercise the RLS policies the app actually runs under.
     """
     return subprocess.run(
-        [
-            "docker",
-            "compose",
-            "-f",
-            str(COMPOSE_FILE),
+        _compose(
             "exec",
             "-T",
             "postgres",
@@ -255,9 +298,10 @@ def _psql_run(query: str, *, user: str = "splitsmith") -> subprocess.CompletedPr
             "-qAt",
             "-c",
             query,
-        ],
+        ),
         capture_output=True,
         text=True,
+        env=_compose_env(),
     )
 
 
@@ -306,14 +350,14 @@ def test_worker_drains_ping_task(hosted_stack: None) -> None:
     This is the one test that exercises the actual cross-process
     dispatch -- the unit tests only inspect the App. The host defers
     through the same ``build_app`` path the API uses (Postgres exposed
-    on localhost:5432 by compose); the worker container, draining all
+    on the published Postgres port by compose); the worker container, draining all
     queues, executes it and writes ``succeeded`` to ``procrastinate_jobs``.
     """
     import asyncio
 
     from splitsmith.queue import build_app
 
-    host_url = "postgresql+asyncpg://splitsmith:splitsmith@localhost:5432/splitsmith"
+    host_url = HOST_DB_URL
 
     async def _defer() -> None:
         app = build_app(host_url)
@@ -398,25 +442,6 @@ def test_worker_runs_compute_job_end_to_end(hosted_stack: None) -> None:
     pytest.fail(f"worker did not finish compute job within 60s (last status: {status!r})")
 
 
-def _s3_object_exists(key: str) -> bool:
-    """True iff ``key`` exists in the compose MinIO uploads bucket."""
-    import boto3
-    from botocore.exceptions import ClientError
-
-    client = boto3.client(
-        "s3",
-        endpoint_url="http://localhost:9000",
-        region_name="us-east-1",
-        aws_access_key_id="splitsmith",
-        aws_secret_access_key="splitsmithsplitsmith",
-    )
-    try:
-        client.head_object(Bucket="splitsmith-uploads", Key=key)
-        return True
-    except ClientError:
-        return False
-
-
 def test_worker_resolves_match_cross_process(hosted_stack: None) -> None:
     """PR-delta proof: a match created through the API is resolvable by the
     *separate* worker container, with its metadata round-tripping via MinIO.
@@ -480,7 +505,7 @@ def test_worker_resolves_match_cross_process(hosted_stack: None) -> None:
     #    backend's submit (PENDING row + defer) for a detect_beep job with no
     #    real video; assert it gets past resolution (no "cannot resolve
     #    match" failure).
-    host_url = "postgresql+asyncpg://splitsmith:splitsmith@localhost:5432/splitsmith"
+    host_url = HOST_DB_URL
     job_id = uuid.uuid4().hex
     _psql(
         "INSERT INTO compute_jobs (id, user_id, kind, status, stage_number, video_id, "

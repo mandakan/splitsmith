@@ -156,6 +156,9 @@ function otherPersonsComment() {
     anchor_shot_id: null,
     author_kind: "handle" as const,
     author_handle: "Prone Popper 47",
+    // 6-char uppercase Crockford base32, matching AUTHOR_CODE_ALPHABET /
+    // AUTHOR_CODE_LEN in comment_identity.py -- no I/L/O/U.
+    author_code: "A7K2M9",
     body: "someone else said this",
     created_at: "2026-08-13T10:00:00Z",
     mine: false,

@@ -613,6 +613,12 @@ class CommentRow(Base):
     )
     author_handle: Mapped[str] = mapped_column(String, nullable=False)
     author_key_hash: Mapped[str] = mapped_column(String, nullable=False)
+    # Stable public identifier for the author, denormalized at write
+    # time for the same reason author_handle is: rotating the handle
+    # secret must not re-identify every historical author. Nullable only
+    # to carry rows written before #867 - see ui/comments.to_out, which
+    # computes the same value for those through author_code_for.
+    author_code: Mapped[str | None] = mapped_column(String, nullable=True)
     share_token_id: Mapped[str] = mapped_column(String, nullable=False)
 
     body: Mapped[str] = mapped_column(String, nullable=False)

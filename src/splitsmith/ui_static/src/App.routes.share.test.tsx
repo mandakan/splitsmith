@@ -82,12 +82,15 @@ async function renderAt(path: string) {
 }
 
 describe("share compare route (#700)", () => {
-  // Same warm-up rationale as App.routes.test.tsx: pay the whole route
-  // tree's transform cost in beforeAll's 10s hookTimeout, not the first
-  // test's 5s testTimeout.
+  // #867 final review M10: same bump as App.routes.test.tsx's beforeAll.
+  // This file is the fifth in the class paying the same route-tree
+  // import cost in this hook; the default 10s hookTimeout is what
+  // flaked under load once multiple files were competing for it. The
+  // import itself is bounded work done once; raise the budget rather
+  // than change what it does.
   beforeAll(async () => {
     await import("@/App");
-  });
+  }, 30_000);
 
   beforeEach(() => {
     mobile.value = false;

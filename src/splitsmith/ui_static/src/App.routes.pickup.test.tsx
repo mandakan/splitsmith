@@ -79,9 +79,15 @@ window.matchMedia =
 const STASH_KEY = "splitsmith.deviceApproveCode";
 
 describe("AuthGate device-flow pickup vs. the features fetch", () => {
+  // #867 final review M10: same bump as App.routes.test.tsx's beforeAll
+  // -- this file pays the same route-tree import cost, and the default
+  // 10s hookTimeout flaked under load once a third file (this class now
+  // has App.routes.test.tsx, this one, and App.routes.account.test.tsx)
+  // started competing for it. The import itself is bounded work done
+  // once; raise the budget rather than change what it does.
   beforeAll(async () => {
     await import("@/App");
-  });
+  }, 30_000);
 
   it("picks the stash up when /api/me resolves before /api/server/features", async () => {
     sessionStorage.setItem(STASH_KEY, "ABCD-2345");

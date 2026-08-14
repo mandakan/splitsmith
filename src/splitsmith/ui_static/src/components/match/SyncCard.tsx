@@ -79,7 +79,7 @@ export interface SyncCardProps {
 
 /** Compact "Xh ago" relative time, local to this card - mirrors
  *  AdminWorkers.tsx's ``relativeTime``. No shared helper exists yet
- *  (grepped before writing this); kept local like DesktopTokensDialog's
+ *  (grepped before writing this); kept local like DesktopTokensSection's
  *  ``formatTokenDate`` rather than inventing a shared one for a single
  *  caller. */
 function relativeTime(iso: string): string {
