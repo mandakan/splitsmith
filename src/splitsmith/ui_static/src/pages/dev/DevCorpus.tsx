@@ -12,6 +12,8 @@ import { ArrowRight, Inbox, Search, Slash } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useOutletContext } from "react-router-dom";
 
+import { PromoteFromAnchorPanel } from "@/components/lab/PromoteFromAnchorPanel";
+import { PromoteStagesPanel } from "@/components/lab/PromoteStagesPanel";
 import { api, type DevReviewQueueItem, type LabFixtureRecord } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -103,6 +105,21 @@ export function DevCorpus() {
           <b className="font-bold text-done">{model ? model.recall.toFixed(2) : "--"}</b>
         </div>
       </header>
+
+      {/* Promote entry points -- full-width expandable sections, not
+          popovers, since this page has the room and the corpus table
+          below is the thing they populate. */}
+      <div className="mb-6 flex flex-wrap items-start gap-2.5">
+        <span className="mr-1 flex h-8 items-center font-mono text-[0.625rem] font-bold uppercase tracking-[0.18em] text-muted">
+          Promote
+        </span>
+        <PromoteStagesPanel
+          catalog={fixtures}
+          onCatalogChanged={setFixtures}
+          variant="section"
+        />
+        <PromoteFromAnchorPanel fixtures={fixtures} variant="section" />
+      </div>
 
       {/* Workflow status banner */}
       <WorkflowBanner pendingReview={pendingCount} corpusSize={fixtures.length} model={model} />

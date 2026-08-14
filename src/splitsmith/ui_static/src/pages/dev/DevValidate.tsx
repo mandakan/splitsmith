@@ -17,7 +17,10 @@ import { ChevronDown, Play, Save, Undo2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 
-import { api, type LabEvalRun, type LabEvalFixture, type Job } from "@/lib/api";
+import { SweepsCard } from "@/components/SweepsCard";
+import { TuningPanel } from "@/components/lab/TuningPanel";
+import { useLabRun } from "@/components/lab/useLabRun";
+import { api, type LabEvalRun, type LabEvalFixture } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 import type { DeveloperShellOutletContext } from "@/components/developer/DeveloperShell";
@@ -33,23 +36,30 @@ const SPLITS: { key: SplitStrategy; label: string }[] = [
 export function DevValidate() {
   const { model, refresh } = useOutletContext<DeveloperShellOutletContext>();
   const [split, setSplit] = useState<SplitStrategy>("per-shooter");
-  const [consensus, setConsensus] = useState(2);
-  const [useApriori, setUseApriori] = useState(true);
-  const [lastRun, setLastRun] = useState<LabEvalRun | null>(null);
-  const [runJob, setRunJob] = useState<Job | null>(null);
-  const [running, setRunning] = useState(false);
+  const {
+    run: lastRun,
+    config,
+    setConfig,
+    resetConfig,
+    runEval,
+    evalLoading: running,
+    rescoreLoading,
+    error: hookError,
+  } = useLabRun({ autoRescore: true });
   const [error, setError] = useState<string | null>(null);
   const [labMissing, setLabMissing] = useState(false);
+  const useApriori = config.apriori_boost > 0;
 
+  // The hook's own mount hydration covers the happy "adopt the cached
+  // run" path; this probe exists only to tell "no run yet" (404, fine)
+  // apart from "the /api/lab/* surface itself is missing" (any other
+  // failure -- e.g. --lab not enabled), which the hook's hydrate effect
+  // deliberately treats identically (it just swallows every error).
   useEffect(() => {
     let alive = true;
     api
       .getLastLabRun()
-      .then((r) => {
-        if (alive) setLastRun(r);
-      })
       .catch((e: unknown) => {
-        // 404 just means no run yet -- not an error.
         if (e && typeof e === "object" && "status" in e && (e as { status: number }).status === 404) {
           return;
         }
@@ -60,53 +70,22 @@ export function DevValidate() {
     };
   }, []);
 
-  async function runValidation() {
-    setRunning(true);
-    setError(null);
-    try {
-      const job = await api.runLabEval({
-        config: {
-          consensus,
-          apriori_boost: useApriori ? 1.0 : 0.0,
-          tolerance_ms: 75,
-        },
-        persist: true,
-      });
-      setRunJob(job);
-      // Poll for completion.
-      const interval = setInterval(async () => {
-        try {
-          const j = await api.getJob(job.id);
-          setRunJob(j);
-          if (j.status === "succeeded" || j.status === "failed") {
-            clearInterval(interval);
-            setRunning(false);
-            if (j.status === "succeeded") {
-              const r = await api.getLastLabRun();
-              setLastRun(r);
-              refresh();
-            } else {
-              setError(j.error ?? "Validation failed");
-            }
-          }
-        } catch (e) {
-          clearInterval(interval);
-          setRunning(false);
-          setError(String(e));
-        }
-      }, 1000);
-    } catch (e) {
-      setRunning(false);
-      const msg = String(e);
-      if (msg.includes("404") || msg.includes("lab")) {
-        setLabMissing(true);
-        setError(
-          "Validation runs require --lab to be enabled. Launch the server with `splitsmith ui --lab` to enable evaluations.",
-        );
-      } else {
-        setError(msg);
-      }
+  useEffect(() => {
+    if (!hookError) return;
+    if (hookError.includes("404") || hookError.includes("lab")) {
+      setLabMissing(true);
+      setError(
+        "Validation runs require --lab to be enabled. Launch the server with `splitsmith ui --lab` to enable evaluations.",
+      );
+    } else {
+      setError(hookError);
     }
+  }, [hookError]);
+
+  async function runValidation() {
+    setError(null);
+    await runEval();
+    refresh();
   }
 
   return (
@@ -169,18 +148,18 @@ export function DevValidate() {
               min={1}
               max={3}
               step={1}
-              value={consensus}
-              onChange={(e) => setConsensus(Number(e.target.value))}
+              value={config.consensus}
+              onChange={(e) => setConfig({ consensus: Number(e.target.value) })}
               className="h-1 w-full accent-beep"
             />
             <div className="mt-1 font-mono text-[0.6875rem] tabular-nums text-beep">
-              {consensus} of 3
+              {config.consensus} of 3
             </div>
           </ConfigCell>
           <ConfigCell label="Apriori boost">
             <button
               type="button"
-              onClick={() => setUseApriori((v) => !v)}
+              onClick={() => setConfig({ apriori_boost: useApriori ? 0 : 1.0 })}
               className={cn(
                 "relative inline-flex h-6 w-10 items-center rounded-full border transition-colors",
                 useApriori
@@ -217,10 +196,10 @@ export function DevValidate() {
             &middot; consensus {lastRun?.config.consensus ?? "--"} &middot; apriori{" "}
             {lastRun?.config.apriori_boost ?? "--"}
           </span>
-          {runJob && (
+          {(running || rescoreLoading) && (
             <span className="flex items-center gap-2">
               <span className="size-1.5 rounded-full bg-live shadow-[0_0_6px_var(--color-live-glow)]" />
-              {runJob.message ?? runJob.status}
+              {running ? "running eval..." : "rescoring..."}
             </span>
           )}
         </div>
@@ -234,6 +213,18 @@ export function DevValidate() {
 
       {/* Metrics grid */}
       <MetricsGrid run={lastRun} target={model?.recall ?? 0.95} />
+
+      {/* Tuning + sweeps, side by side */}
+      <div className="mb-6 grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <TuningPanel
+          config={config}
+          onChange={setConfig}
+          onReset={resetConfig}
+          run={lastRun}
+          rescoreLoading={rescoreLoading}
+        />
+        <SweepsCard />
+      </div>
 
       {/* Per-shooter holdout */}
       <ShooterHoldoutCard run={lastRun} split={split} />
