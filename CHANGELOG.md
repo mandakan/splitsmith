@@ -1,5 +1,46 @@
 # Changelog
 
+## [0.32.0](https://github.com/mandakan/splitsmith/compare/v0.31.0...v0.32.0) (2026-08-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **dev:** delete the legacy Lab page ([#897](https://github.com/mandakan/splitsmith/issues/897))
+
+### Features
+
+* **desktop:** refresh the linked account's display name ([#877](https://github.com/mandakan/splitsmith/issues/877)) ([bbc3f78](https://github.com/mandakan/splitsmith/commit/bbc3f781c788f06ade097fb31d14d9e1521bbe04))
+* **dev:** delete the legacy Lab page ([#897](https://github.com/mandakan/splitsmith/issues/897)) ([cb5705c](https://github.com/mandakan/splitsmith/commit/cb5705cbf80ec8d727d972fb70e897fcdbdd9f97))
+* **dev:** full-page fixture detail with labeling at /dev/corpus/:slug ([#893](https://github.com/mandakan/splitsmith/issues/893)) ([cbaae33](https://github.com/mandakan/splitsmith/commit/cbaae33b41c85b4fa1fe8168b14aee2344a5f094))
+* **dev:** promotion on Corpus, tuning + sweeps on Validate ([#896](https://github.com/mandakan/splitsmith/issues/896)) ([9d6d591](https://github.com/mandakan/splitsmith/commit/9d6d5914bedae905555287c5d471d6cf78ac0c90))
+* **dev:** review queue items deep-link to the fixture detail page for labeling ([#912](https://github.com/mandakan/splitsmith/issues/912)) ([bb8506d](https://github.com/mandakan/splitsmith/commit/bb8506d12ce0aa6ddeaa73bbbfe92cb3083f4914))
+* **lab:** scoped eval merges into a same-config cached run ([#891](https://github.com/mandakan/splitsmith/issues/891)) ([1af97f8](https://github.com/mandakan/splitsmith/commit/1af97f8edae286902f15db16a5f88a2f8193ef46))
+* **lab:** shooter selector in the batch-promote panel, all selected by default ([#886](https://github.com/mandakan/splitsmith/issues/886)) ([fac2759](https://github.com/mandakan/splitsmith/commit/fac2759cbf32c4f41a4b55aec1a614a2ac2fe466))
+
+
+### Bug Fixes
+
+* **agent-gpu:** force clean onnxruntime-gpu reinstall in the swap ([#880](https://github.com/mandakan/splitsmith/issues/880)) ([3bb889b](https://github.com/mandakan/splitsmith/commit/3bb889b68b63d5e91c7f773a60b4fb57060ca25a))
+* **dev:** fixture-detail polish -- fetch-error state, filtered prev/next, accent nits ([#909](https://github.com/mandakan/splitsmith/issues/909)) ([39653e9](https://github.com/mandakan/splitsmith/commit/39653e9df68ee54e8fa79851f6304e362c8f1f01))
+* **dev:** gate the fixture-detail auto-eval on hydration, not a 250ms timer ([#903](https://github.com/mandakan/splitsmith/issues/903)) ([d410028](https://github.com/mandakan/splitsmith/commit/d410028427e6054bd2f7754f06d6bfd62b056cf6))
+* **dev:** one consensus control on Validate, ranged to the real 3-voter ensemble ([#910](https://github.com/mandakan/splitsmith/issues/910)) ([8012140](https://github.com/mandakan/splitsmith/commit/8012140b1bdbd5d6decd40e76fbeff8e254e1c6e))
+* **lab:** explain the pre-eval state and offer a per-fixture eval ([#887](https://github.com/mandakan/splitsmith/issues/887)) ([5c64d18](https://github.com/mandakan/splitsmith/commit/5c64d187b439882bf7003b9f465b1aef7ad06fa9))
+* **lab:** scroll the fixture detail drawer into view on row click ([#888](https://github.com/mandakan/splitsmith/issues/888)) ([2237ac5](https://github.com/mandakan/splitsmith/commit/2237ac581ec3959263fb5f97c55f81f6bb03b0f9))
+* **lab:** separate the shooter slug from the fixture slug in promote ([#885](https://github.com/mandakan/splitsmith/issues/885)) ([6dec3e0](https://github.com/mandakan/splitsmith/commit/6dec3e07d9d362d926457ae6e87d804ae20f68ca))
+* **ui:** give the dev-mode Lab an explicit match context ([#883](https://github.com/mandakan/splitsmith/issues/883)) ([b1be1c5](https://github.com/mandakan/splitsmith/commit/b1be1c5321e627dce09b1f03568d8e9a344126d7))
+* **ui:** thread the chosen match through mode flips and dev-mode picks ([#884](https://github.com/mandakan/splitsmith/issues/884)) ([3d6d9d5](https://github.com/mandakan/splitsmith/commit/3d6d9d5f67eb276b79b8170389ce838086575ea5))
+
+
+### Refactors
+
+* **dev:** drop the legacy compat shims from the shared lab components ([#911](https://github.com/mandakan/splitsmith/issues/911)) ([9e23cfd](https://github.com/mandakan/splitsmith/commit/9e23cfd755376a9d01b94ea8e1713ca64b0a7d31))
+* **lab:** extract lab primitives to components/lab ([#890](https://github.com/mandakan/splitsmith/issues/890)) ([81b5dd6](https://github.com/mandakan/splitsmith/commit/81b5dd6fce623b11f03741d7a5c9b7e4f2c8a90e))
+
+
+### Build / CI
+
+* no workflow applies a migration -- gate it ([#876](https://github.com/mandakan/splitsmith/issues/876)) ([89dd37b](https://github.com/mandakan/splitsmith/commit/89dd37bb7d0132201fa2ab70b3d2fdc39cdcc5fc))
+
 ## [0.31.0](https://github.com/mandakan/splitsmith/compare/v0.30.0...v0.31.0) (2026-08-14)
 
 
