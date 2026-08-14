@@ -36,6 +36,7 @@ import { CreateMatch } from "@/pages/CreateMatch";
 import { Design } from "@/pages/Design";
 import { DesktopApprove } from "@/pages/DesktopApprove";
 import { DevCorpus } from "@/pages/dev/DevCorpus";
+import { DevFixtureDetail } from "@/pages/dev/DevFixtureDetail";
 import { DevRetrain } from "@/pages/dev/DevRetrain";
 import { DevReviewQueue } from "@/pages/dev/DevReviewQueue";
 import { DevValidate } from "@/pages/dev/DevValidate";
@@ -320,6 +321,7 @@ export function App() {
           <Route element={<DeveloperShell />}>
             <Route path="dev" element={<Navigate to="/dev/corpus" replace />} />
             <Route path="dev/corpus" element={<DesktopGate screen="Developer tools" links={false}><DevCorpus /></DesktopGate>} />
+            <Route path="dev/corpus/:slug" element={<DesktopGate screen="Developer tools" links={false}><DevFixtureDetail /></DesktopGate>} />
             <Route path="dev/review" element={<DesktopGate screen="Developer tools" links={false}><DevReviewQueue /></DesktopGate>} />
             <Route path="dev/validate" element={<DesktopGate screen="Developer tools" links={false}><DevValidate /></DesktopGate>} />
             <Route path="dev/retrain" element={<DesktopGate screen="Developer tools" links={false}><DevRetrain /></DesktopGate>} />

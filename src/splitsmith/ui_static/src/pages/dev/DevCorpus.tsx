@@ -10,7 +10,7 @@
 
 import { ArrowRight, Inbox, Search, Slash } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { useNavigate, useOutletContext } from "react-router-dom";
+import { useLocation, useNavigate, useOutletContext } from "react-router-dom";
 
 import { api, type DevReviewQueueItem, type LabFixtureRecord } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -29,6 +29,9 @@ type FilterKey = (typeof FILTER_DEFS)[number]["key"];
 export function DevCorpus() {
   const { model } = useOutletContext<DeveloperShellOutletContext>();
   const navigate = useNavigate();
+  // Carry the dev-mode match context (?match=) into the fixture detail
+  // page, the same way DeveloperShell carries it across the stepper.
+  const { search } = useLocation();
 
   const [fixtures, setFixtures] = useState<LabFixtureRecord[]>([]);
   const [queue, setQueue] = useState<DevReviewQueueItem[]>([]);
@@ -69,6 +72,11 @@ export function DevCorpus() {
   }, [fixtures, query, filter]);
 
   const pendingCount = queue.length;
+
+  const matchContext = new URLSearchParams(search).get("match");
+  const detailSearch = matchContext
+    ? `?match=${encodeURIComponent(matchContext)}`
+    : "";
 
   return (
     <div className="min-w-0 px-7 py-7">
@@ -177,7 +185,7 @@ export function DevCorpus() {
               <FixtureRow
                 key={fx.slug}
                 fx={fx}
-                onOpen={() => navigate(`/dev/legacy/lab/${fx.slug}`)}
+                onOpen={() => navigate(`/dev/corpus/${fx.slug}${detailSearch}`)}
               />
             ))}
           </ul>

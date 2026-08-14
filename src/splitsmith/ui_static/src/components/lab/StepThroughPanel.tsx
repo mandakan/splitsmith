@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { LAB_REASONS, LAB_SUBCLASSES, type LabEvalFixture } from "@/lib/api";
@@ -27,6 +27,8 @@ export function StepThroughPanel({
   registerAdvancer,
   savingLabel,
   onLabel,
+  autoPlay = true,
+  preserveSelection = false,
 }: {
   fixture: LabEvalFixture;
   selectedCn: number | null;
@@ -37,18 +39,41 @@ export function StepThroughPanel({
     cn: number,
     patch: { reason?: string | null; subclass?: string | null },
   ) => void;
+  /** Start playing as soon as a candidate is selected. True (legacy) is
+   *  right when the panel is behind an explicit "Step through" toggle:
+   *  the operator asked for audio. False is right when the panel is
+   *  always on screen -- arriving on a page must not loop a gunshot at
+   *  someone. Once the operator starts playback (play button or space)
+   *  the panel arms itself and later candidate changes auto-play either
+   *  way, which is what makes stepping feel continuous. */
+  autoPlay?: boolean;
+  /** Treat a selection that isn't in this panel's filtered list as
+   *  intentional (it came from a candidate table or J/K over the full
+   *  universe) and leave it alone, falling back to the head of the list
+   *  only when the candidate is gone from the fixture entirely. False
+   *  (legacy) re-snaps to the head of the list whenever the filtered
+   *  list is rebuilt -- including on every label save, which silently
+   *  moves the operator off the row they were labeling. */
+  preserveSelection?: boolean;
 }) {
   const [filter, setFilter] = useState<StepFilter>("borderline");
   const [classFilter, setClassFilter] = useState<string>("");
   const [sort, setSort] = useState<StepSort>("ensemble_score_desc");
   const [preMs, setPreMs] = useState(100);
   const [postMs, setPostMs] = useState(300);
-  const [playing, setPlaying] = useState(true);
+  const [playing, setPlaying] = useState(autoPlay);
 
-  const togglePlay = useCallback(() => setPlaying((p) => !p), []);
+  // Armed once the operator has asked for audio at least once. Starts
+  // armed under the legacy autoPlay default, so nothing changes there.
+  const armedRef = useRef(autoPlay);
+  const togglePlay = useCallback(() => {
+    armedRef.current = true;
+    setPlaying((p) => !p);
+  }, []);
 
   // Auto-play whenever the candidate changes (resumes if user paused).
   useEffect(() => {
+    if (!armedRef.current) return;
     setPlaying(true);
   }, [selectedCn]);
 
@@ -64,11 +89,11 @@ export function StepThroughPanel({
       if (isTyping(e.target)) return;
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       e.preventDefault();
-      setPlaying((p) => !p);
+      togglePlay();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [togglePlay]);
 
   const ordered = useMemo(() => {
     let list = [...fixture.candidates];
@@ -120,19 +145,32 @@ export function StepThroughPanel({
     return () => registerAdvancer(null);
   }, [ordered, registerAdvancer]);
 
-  // Default selection: first item in the active list.
+  // Default selection: first item in the active list. ``ordered`` is
+  // rebuilt on every label save (the run comes back with fresh candidate
+  // objects), so what counts as "the selection is gone" decides whether
+  // labeling costs the operator their place -- see preserveSelection.
   useEffect(() => {
     if (ordered.length === 0) return;
-    if (selectedCn == null || !ordered.some((c) => c.candidate_number === selectedCn)) {
+    if (selectedCn == null) {
       onSelect(ordered[0].candidate_number);
+      return;
     }
+    const alive = preserveSelection
+      ? fixture.candidates.some((c) => c.candidate_number === selectedCn)
+      : ordered.some((c) => c.candidate_number === selectedCn);
+    if (!alive) onSelect(ordered[0].candidate_number);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ordered]);
 
-  const current = useMemo(
-    () => ordered.find((c) => c.candidate_number === selectedCn) ?? null,
-    [ordered, selectedCn],
-  );
+  // Under preserveSelection the panel follows a selection made outside
+  // its own filter rather than showing "nothing selected" -- otherwise
+  // clicking a non-borderline row in a side-by-side candidate table
+  // would blank the player and the label buttons.
+  const current = useMemo(() => {
+    const inList = ordered.find((c) => c.candidate_number === selectedCn) ?? null;
+    if (inList || !preserveSelection) return inList;
+    return fixture.candidates.find((c) => c.candidate_number === selectedCn) ?? null;
+  }, [ordered, selectedCn, preserveSelection, fixture.candidates]);
 
   const idxInList = current
     ? ordered.findIndex((c) => c.candidate_number === current.candidate_number)
@@ -246,6 +284,9 @@ export function StepThroughPanel({
         <span className="ml-auto text-muted">
           {idxInList + 1} / {ordered.length}
           {ordered.length === 0 && " (no candidates match filter)"}
+          {/* Only reachable under preserveSelection: the operator picked
+              a row that this filter excludes. */}
+          {idxInList < 0 && current && " (selection is outside this filter)"}
         </span>
       </div>
 
