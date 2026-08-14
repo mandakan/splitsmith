@@ -14631,29 +14631,52 @@ def create_app(
             return prefs
         state.hosted_account_refreshed_at = now
 
-        client = _build_device_client(
-            prefs.hosted_base_url,
-            token=prefs.hosted_token,
-            timeout=HOSTED_ACCOUNT_REFRESH_TIMEOUT_S,
-        )
+        # Local import: same lazy idiom sync_api.py itself uses to stay
+        # import-safe on a local-slim install (see the comment at its
+        # router registration, above) -- SyncWhoAmIResponse is a bare
+        # BaseModel with no hosted-only deps behind it, but the import
+        # stays scoped to the one call site that needs it.
+        from .sync_api import SyncWhoAmIResponse
+
+        client: HostedSyncClient | None = None
         try:
-            payload = await run_in_threadpool(client.whoami)
-        except (SyncClientError, httpx.HTTPError, ValueError):
-            # Includes 401. A revoked token is NOT grounds to unlink
-            # here: an upstream outage would then sign every install
-            # out. Revocation surfaces on the next sync, where the
-            # operator is already watching an outcome.
+            client = _build_device_client(
+                prefs.hosted_base_url,
+                token=prefs.hosted_token,
+                timeout=HOSTED_ACCOUNT_REFRESH_TIMEOUT_S,
+            )
+            raw = await run_in_threadpool(client.whoami)
+            payload = SyncWhoAmIResponse.model_validate(raw)
+        except Exception:
+            # Deliberately broad, per the docstring's "best-effort in the
+            # strong sense": this route's entire job is to report the
+            # cached snapshot, so degrading to it beats a 500 for ANY
+            # failure here, not just the ones a narrower tuple happens to
+            # name. Concretely this has to catch, at minimum:
+            #   - SyncClientError / httpx.HTTPError -- non-2xx, including
+            #     401 (a revoked token is not grounds to unlink here: an
+            #     upstream outage would then sign every install out;
+            #     revocation surfaces on the next sync instead)
+            #   - httpx.InvalidURL -- a malformed hosted_base_url; it is
+            #     NOT an httpx.HTTPError subclass, and hosted_base_url is
+            #     an unvalidated str a hand-edited config.yaml can corrupt
+            #   - pydantic.ValidationError -- a 200 whose body isn't the
+            #     shape SyncWhoAmIResponse declares (not even a dict)
+            # A previous narrower tuple here caught the first bullet but
+            # missed the last two, turning either into an unhandled 500
+            # on a route whose whole job is to report a cached value
+            # (#877 review).
             return prefs
         finally:
-            client.close()
+            if client is not None:
+                client.close()
 
-        email = str(payload.get("email") or ref.email)
-        raw_name = payload.get("display_name")
-        display_name = str(raw_name) if raw_name is not None else None
-        if email == ref.email and display_name == ref.display_name:
+        if payload.email == ref.email and payload.display_name == ref.display_name:
             return prefs
 
-        prefs.hosted_account = ref.model_copy(update={"email": email, "display_name": display_name})
+        prefs.hosted_account = ref.model_copy(
+            update={"email": payload.email, "display_name": payload.display_name}
+        )
         user_config.save_global_prefs(prefs)
         return prefs
 

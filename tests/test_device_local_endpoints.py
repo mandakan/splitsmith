@@ -52,7 +52,10 @@ class _FakeHosted:
         self.revokes = 0
         self.built_against: list[str] = []
         self.whoami_calls = 0
-        self.whoami_payload: dict | None = None
+        # dict | None picks the "not set" default (empty body); anything
+        # else (list, str, ...) scripts a 200 whose body is not the shape
+        # SyncWhoAmIResponse declares (#877 review).
+        self.whoami_payload: dict | list | str | None = None
         self.whoami_status = 200
 
     def handle(self, request: httpx.Request) -> httpx.Response:
@@ -81,7 +84,8 @@ class _FakeHosted:
             self.whoami_calls += 1
             if self.whoami_status != 200:
                 return httpx.Response(self.whoami_status, json={"detail": "nope"})
-            return httpx.Response(200, json=self.whoami_payload or {})
+            body = self.whoami_payload if self.whoami_payload is not None else {}
+            return httpx.Response(200, json=body)
         raise AssertionError(f"unexpected hosted call: {path}")
 
 
@@ -586,16 +590,23 @@ def test_device_routes_404_in_hosted_mode(
 # The cached account snapshot refreshes itself (#877)
 
 
-def _link_account(tmp_path: Path, monkeypatch, hosted: _FakeHosted) -> TestClient:
+def _link_account(
+    tmp_path: Path, monkeypatch, hosted: _FakeHosted, *, base_url: str = "https://hosted.example"
+) -> TestClient:
     """A local app with config.yaml already holding a linked account.
 
     Written directly rather than driven through the device flow: this
     file already covers the flow, and these tests are about what happens
     to the snapshot afterwards.
+
+    ``base_url`` is overridable so a malformed one (#877 review) can be
+    written straight into config.yaml the way a hand-edited file would -
+    ``GlobalPrefs.hosted_base_url`` is a bare ``str`` with no format
+    validation anywhere.
     """
     monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
     prefs = user_config.load_global_prefs()
-    prefs.hosted_base_url = "https://hosted.example"
+    prefs.hosted_base_url = base_url
     prefs.hosted_token = "desktop-token"
     prefs.hosted_account = user_config.HostedAccountRef(
         id="u1",
@@ -715,3 +726,35 @@ def test_an_unlinked_install_makes_no_upstream_call(tmp_path: Path, monkeypatch)
 
     assert client.get("/api/settings/hosted-sync").json()["account"] is None
     assert hosted.whoami_calls == 0
+
+
+def test_a_malformed_base_url_returns_the_cached_account(tmp_path: Path, monkeypatch) -> None:
+    # httpx.InvalidURL is NOT an httpx.HTTPError subclass, and
+    # hosted_base_url is a bare str with no format validation anywhere -
+    # a hand-edited config.yaml reaches this. Must degrade to the cached
+    # snapshot, not 500 a route whose whole job is to report it (#877
+    # review).
+    hosted = _FakeHosted([])
+    client = _link_account(tmp_path, monkeypatch, hosted, base_url="http://[::1")
+
+    resp = client.get("/api/settings/hosted-sync")
+
+    assert resp.status_code == 200
+    assert resp.json()["account"]["email"] == "owner@example.com"
+    # The URL never resolves to a request, so the fake never sees a call.
+    assert hosted.whoami_calls == 0
+
+
+def test_a_non_dict_whoami_body_returns_the_cached_account(tmp_path: Path, monkeypatch) -> None:
+    # A 200 whose JSON body isn't the SyncWhoAmIResponse shape (a bare
+    # list here) must degrade to the cached snapshot rather than raise
+    # out of unvalidated dict access (#877 review).
+    hosted = _FakeHosted([])
+    hosted.whoami_payload = []
+    client = _link_account(tmp_path, monkeypatch, hosted)
+
+    resp = client.get("/api/settings/hosted-sync")
+
+    assert resp.status_code == 200
+    assert resp.json()["account"]["email"] == "owner@example.com"
+    assert hosted.whoami_calls == 1
