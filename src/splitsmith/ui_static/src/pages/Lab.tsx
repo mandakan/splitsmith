@@ -1599,6 +1599,9 @@ function SaveYamlButton({ run }: { run: LabEvalRun | null }) {
 // ---------------------------------------------------------------------------
 
 interface BatchRow {
+  /** Registry slug of the shooter this row's run belongs to. */
+  shooterSlug: string;
+  shooterName: string;
   stageNumber: number;
   stageName: string;
   slug: string;
@@ -1609,24 +1612,38 @@ interface BatchRow {
   message: string | null;
 }
 
+/** One shooter's loaded project + export overview, cached so toggling
+ *  the shooter checkboxes rebuilds rows without re-fetching. */
+interface ShooterBatch {
+  slug: string;
+  name: string;
+  project: MatchProject;
+  overview: StageExportStatus[];
+}
+
 function buildBatchRows(
-  project: MatchProject,
-  overview: StageExportStatus[],
+  shooter: ShooterBatch,
   catalog: LabFixtureRecord[],
 ): BatchRow[] {
+  const { project } = shooter;
   const existing = new Set(catalog.map((f) => f.slug));
   const token = project.shooter_token;
   // Must agree with the backend reader (`/api/lab/promote-from-anchor`
   // composes the same slug via export_naming.slugify with this fallback),
   // or the secondary promote 409s on a fixture the primary just wrote.
   const projectSlug = exportSlugify(project.name, "stage");
-  const overviewByStage = new Map(overview.map((s) => [s.stage_number, s]));
+  const overviewByStage = new Map(shooter.overview.map((s) => [s.stage_number, s]));
   const rows: BatchRow[] = [];
   for (const stage of project.stages) {
     if (stage.placeholder || stage.skipped) continue;
     const ov = overviewByStage.get(stage.stage_number);
     const primary = stage.videos[0] ?? null;
     const blockers: string[] = [];
+    // Per-shooter, not panel-wide: in a multi-shooter match one
+    // unpinned shooter must not block promoting everyone else's runs.
+    if (project.selected_shooter_id == null) {
+      blockers.push("no SSI shooter pinned (Ingest page)");
+    }
     if (!ov || !ov.audit_path) blockers.push("no audit JSON (run shot-detect)");
     if (!primary) blockers.push("no primary video");
     else {
@@ -1637,6 +1654,8 @@ function buildBatchRows(
       ? `stage-shots-${projectSlug}-stage${stage.stage_number}-${token}`
       : `stage-shots-${projectSlug}-stage${stage.stage_number}`;
     rows.push({
+      shooterSlug: shooter.slug,
+      shooterName: shooter.name,
       stageNumber: stage.stage_number,
       stageName: stage.stage_name,
       slug,
@@ -1660,11 +1679,12 @@ function PromoteAllStagesButton({
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [project, setProject] = useState<MatchProject | null>(null);
-  // Registry slug of the shooter the loaded project belongs to. The
-  // promote POST needs it alongside each row's fixture slug -- the two
-  // are different strings since the match/shooter split.
-  const [shooterSlug, setShooterSlug] = useState<string | null>(null);
+  // Every shooter's project + overview, loaded up front so the shooter
+  // checkboxes toggle instantly. Rows are derived per selected shooter.
+  const [shooterData, setShooterData] = useState<ShooterBatch[]>([]);
+  const [selectedShooters, setSelectedShooters] = useState<Set<string>>(
+    new Set(),
+  );
   const [rows, setRows] = useState<BatchRow[]>([]);
   const [overwrite, setOverwrite] = useState(false);
   const [running, setRunning] = useState(false);
@@ -1706,38 +1726,44 @@ function PromoteAllStagesButton({
   }, [open, matches]);
 
   // Re-derive rows when the catalog changes (so "exists" badges update after
-  // a successful batch run without re-fetching the project).
+  // a successful batch run without re-fetching the projects).
   useEffect(() => {
-    if (!project) return;
+    if (shooterData.length === 0) return;
     setRows((prev) => {
       const existing = new Set(catalog.map((f) => f.slug));
       return prev.map((r) => ({ ...r, exists: existing.has(r.slug) }));
     });
-  }, [catalog, project]);
+  }, [catalog, shooterData]);
 
   const load = useCallback(
     async (mid: string) => {
       setLoading(true);
       setLoadError(null);
-      setProject(null);
-      setShooterSlug(null);
+      setShooterData([]);
+      setSelectedShooters(new Set());
       setRows([]);
       try {
-        // Pull stage definitions off whichever shooter is alphabetically
-        // first; every shooter in a match shares the same stage list, and
-        // in single-shooter mode there's only one shooter to pick.
+        // Every shooter runs the same stage list, but the audits, beeps
+        // and videos are per shooter -- so load each shooter's project
+        // and offer rows for all of them (all selected by default).
         const shooters = await api.listMatchShootersIn(mid);
-        const first = shooters.shooters[0]?.slug;
-        if (!first) {
-          return;
-        }
-        setShooterSlug(first);
-        const [proj, ov] = await Promise.all([
-          api.getProjectIn(mid, first),
-          api.getExportOverviewIn(mid, first),
-        ]);
-        setProject(proj);
-        setRows(buildBatchRows(proj, ov.stages, catalog));
+        const data = await Promise.all(
+          shooters.shooters.map(async (s) => {
+            const [proj, ov] = await Promise.all([
+              api.getProjectIn(mid, s.slug),
+              api.getExportOverviewIn(mid, s.slug),
+            ]);
+            return {
+              slug: s.slug,
+              name: s.name,
+              project: proj,
+              overview: ov.stages,
+            } satisfies ShooterBatch;
+          }),
+        );
+        setShooterData(data);
+        setSelectedShooters(new Set(data.map((d) => d.slug)));
+        setRows(data.flatMap((d) => buildBatchRows(d, catalog)));
       } catch (err) {
         setLoadError(String(err));
       } finally {
@@ -1745,6 +1771,26 @@ function PromoteAllStagesButton({
       }
     },
     [catalog],
+  );
+
+  // Toggling a shooter rebuilds the row set from the cached per-shooter
+  // data. Per-row manual (de)selections reset on toggle -- acceptable
+  // for a batch tool, and it keeps one source of truth for row state.
+  const toggleShooter = useCallback(
+    (slug: string) => {
+      setSelectedShooters((prev) => {
+        const next = new Set(prev);
+        if (next.has(slug)) next.delete(slug);
+        else next.add(slug);
+        setRows(
+          shooterData
+            .filter((d) => next.has(d.slug))
+            .flatMap((d) => buildBatchRows(d, catalog)),
+        );
+        return next;
+      });
+    },
+    [shooterData, catalog],
   );
 
   // (Re)load whenever the panel is open on a resolved match -- covers
@@ -1774,10 +1820,12 @@ function PromoteAllStagesButton({
     [setSearchParams],
   );
 
-  const toggleRow = useCallback((stageNumber: number) => {
+  const toggleRow = useCallback((shooterSlug: string, stageNumber: number) => {
     setRows((prev) =>
       prev.map((r) =>
-        r.stageNumber === stageNumber && r.blockers.length === 0
+        r.shooterSlug === shooterSlug &&
+        r.stageNumber === stageNumber &&
+        r.blockers.length === 0
           ? { ...r, selected: !r.selected }
           : r,
       ),
@@ -1791,12 +1839,14 @@ function PromoteAllStagesButton({
   }, []);
 
   const submit = useCallback(async () => {
-    if (matchId === null || shooterSlug === null) return;
+    if (matchId === null) return;
     setRunning(true);
     const queue = rows.filter((r) => r.selected && r.blockers.length === 0);
+    const sameRow = (a: BatchRow, b: BatchRow) =>
+      a.shooterSlug === b.shooterSlug && a.stageNumber === b.stageNumber;
     setRows((prev) =>
       prev.map((r) =>
-        queue.find((q) => q.stageNumber === r.stageNumber)
+        queue.find((q) => sameRow(q, r))
           ? { ...r, status: "running", message: null }
           : r,
       ),
@@ -1806,22 +1856,18 @@ function PromoteAllStagesButton({
         const rec = await api.promoteFixtureIn(matchId, {
           stage_number: row.stageNumber,
           slug: row.slug,
-          shooter_slug: shooterSlug,
+          shooter_slug: row.shooterSlug,
           overwrite,
         });
         setRows((prev) =>
           prev.map((r) =>
-            r.stageNumber === row.stageNumber
-              ? { ...r, status: "ok", message: rec.audit_path }
-              : r,
+            sameRow(r, row) ? { ...r, status: "ok", message: rec.audit_path } : r,
           ),
         );
       } catch (err) {
         setRows((prev) =>
           prev.map((r) =>
-            r.stageNumber === row.stageNumber
-              ? { ...r, status: "error", message: String(err) }
-              : r,
+            sameRow(r, row) ? { ...r, status: "error", message: String(err) } : r,
           ),
         );
       }
@@ -1834,13 +1880,12 @@ function PromoteAllStagesButton({
       // confirms the server accepted each promote.
     }
     setRunning(false);
-  }, [rows, overwrite, onCatalogChanged, matchId, shooterSlug]);
+  }, [rows, overwrite, onCatalogChanged, matchId]);
 
   const eligibleCount = rows.filter((r) => r.blockers.length === 0).length;
   const selectedCount = rows.filter(
     (r) => r.selected && r.blockers.length === 0,
   ).length;
-  const shooterPinned = project?.selected_shooter_id != null;
   const allEligibleSelected = eligibleCount > 0 && selectedCount === eligibleCount;
 
   return (
@@ -1906,20 +1951,31 @@ function PromoteAllStagesButton({
               {loadError}
             </div>
           )}
-          {!loading && !loadError && project && !shooterPinned && (
-            <div className="flex gap-1.5 rounded bg-destructive/10 px-2 py-1.5 text-[11px] text-destructive">
-              <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
-              This project has no SSI shooter pinned. Pin one via the Ingest
-              page before promoting -- the server refuses to land fixtures
-              with an unknown shooter.
+          {!loading && !loadError && shooterData.length > 0 && (
+            <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted">
+              <span>Shooters</span>
+              {shooterData.map((s) => (
+                <label
+                  key={s.slug}
+                  className="flex items-center gap-1.5 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedShooters.has(s.slug)}
+                    onChange={() => toggleShooter(s.slug)}
+                    disabled={running}
+                  />
+                  {s.name}
+                </label>
+              ))}
             </div>
           )}
-          {!loading && !loadError && project && shooterPinned && rows.length === 0 && (
+          {!loading && !loadError && shooterData.length > 0 && rows.length === 0 && (
             <div className="rounded bg-muted px-2 py-1.5 text-[11px] text-muted">
-              No non-placeholder stages in this project.
+              No non-placeholder stages for the selected shooters.
             </div>
           )}
-          {!loading && !loadError && project && shooterPinned && rows.length > 0 && (
+          {!loading && !loadError && rows.length > 0 && (
             <>
               <div className="mb-2 flex items-center justify-between text-[11px] text-muted">
                 <label className="flex items-center gap-1.5 cursor-pointer">
@@ -1947,6 +2003,7 @@ function PromoteAllStagesButton({
                     <tr>
                       <th className="px-2 py-1.5 w-6"></th>
                       <th className="px-2 py-1.5 w-10">#</th>
+                      <th className="px-2 py-1.5 w-28">Shooter</th>
                       <th className="px-2 py-1.5">Stage / slug</th>
                       <th className="px-2 py-1.5 w-32">Status</th>
                     </tr>
@@ -1958,7 +2015,7 @@ function PromoteAllStagesButton({
                       const blocked = !eligible;
                       return (
                         <tr
-                          key={row.stageNumber}
+                          key={`${row.shooterSlug}-${row.stageNumber}`}
                           className={cn(
                             "border-t border-rule align-top",
                             blocked && "opacity-60",
@@ -1969,11 +2026,16 @@ function PromoteAllStagesButton({
                               type="checkbox"
                               checked={row.selected && eligible}
                               disabled={!eligible || running}
-                              onChange={() => toggleRow(row.stageNumber)}
+                              onChange={() =>
+                                toggleRow(row.shooterSlug, row.stageNumber)
+                              }
                             />
                           </td>
                           <td className="px-2 py-1.5 font-mono">
                             {row.stageNumber}
+                          </td>
+                          <td className="px-2 py-1.5 truncate max-w-28">
+                            {row.shooterName}
                           </td>
                           <td className="px-2 py-1.5">
                             <div className="font-medium">{row.stageName}</div>
@@ -2067,7 +2129,7 @@ function PromoteAllStagesButton({
             <Button
               size="sm"
               onClick={submit}
-              disabled={running || selectedCount === 0 || !shooterPinned}
+              disabled={running || selectedCount === 0}
             >
               {running ? (
                 <Loader2 className="size-3.5 animate-spin mr-1" />

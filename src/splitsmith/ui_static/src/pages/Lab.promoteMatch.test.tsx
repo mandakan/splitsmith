@@ -51,29 +51,34 @@ vi.mock("@/lib/api", async (importOriginal) => {
       listMatchShootersIn: vi.fn().mockResolvedValue({
         match_root: "/m/hfo",
         match_name: "HFO Masters 2026",
-        shooters: [{ slug: "s_1", name: "Anna" }],
-      }),
-      getProjectIn: vi.fn().mockResolvedValue({
-        name: "HFO Masters 2026",
-        stages: [
-          {
-            stage_number: 1,
-            stage_name: "B50",
-            placeholder: false,
-            skipped: false,
-            videos: [
-              {
-                path: "raw/v.mp4",
-                role: "primary",
-                beep_time: 1.5,
-                camera_mount: "head",
-              },
-            ],
-          },
+        shooters: [
+          { slug: "s_1", name: "Anna" },
+          { slug: "s_2", name: "Bertil" },
         ],
-        shooter_token: "s1tok",
-        selected_shooter_id: 123,
       }),
+      getProjectIn: vi.fn().mockImplementation((_mid: string, slug: string) =>
+        Promise.resolve({
+          name: "HFO Masters 2026",
+          stages: [
+            {
+              stage_number: 1,
+              stage_name: "B50",
+              placeholder: false,
+              skipped: false,
+              videos: [
+                {
+                  path: "raw/v.mp4",
+                  role: "primary",
+                  beep_time: 1.5,
+                  camera_mount: "head",
+                },
+              ],
+            },
+          ],
+          shooter_token: slug === "s_1" ? "s1tok" : "s2tok",
+          selected_shooter_id: slug === "s_1" ? 123 : 456,
+        }),
+      ),
       getExportOverviewIn: vi.fn().mockResolvedValue({
         stages: [{ stage_number: 1, audit_path: "/m/hfo/audit/stage1.json" }],
       }),
@@ -138,7 +143,7 @@ describe("Lab batch-promote match selector", () => {
     expect(api.listMatchShootersIn).not.toHaveBeenCalledWith("m-hfo");
   });
 
-  it("promotes with the shooter slug separate from the fixture slug", async () => {
+  it("promotes every shooter's run per stage, each with its own slugs", async () => {
     renderLab();
     await openPanel();
     const promoteBtn = await screen.findByRole("button", {
@@ -153,6 +158,32 @@ describe("Lab batch-promote match selector", () => {
         overwrite: false,
       }),
     );
+    expect(api.promoteFixtureIn).toHaveBeenCalledWith("m-hfo", {
+      stage_number: 1,
+      slug: "stage-shots-hfo-masters-2026-stage1-s2tok",
+      shooter_slug: "s_2",
+      overwrite: false,
+    });
+    expect(api.promoteFixtureIn).toHaveBeenCalledTimes(2);
+  });
+
+  it("lists shooters all-selected and unchecking one excludes their rows", async () => {
+    renderLab();
+    await openPanel();
+    const bertil = await screen.findByRole("checkbox", { name: "Bertil" });
+    expect(bertil).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Anna" })).toBeChecked();
+    await userEvent.click(bertil);
+    await userEvent.click(
+      screen.getByRole("button", { name: /promote selected/i }),
+    );
+    await waitFor(() =>
+      expect(api.promoteFixtureIn).toHaveBeenCalledWith(
+        "m-hfo",
+        expect.objectContaining({ shooter_slug: "s_1" }),
+      ),
+    );
+    expect(api.promoteFixtureIn).toHaveBeenCalledTimes(1);
   });
 
   it("reloads through the newly selected match", async () => {
