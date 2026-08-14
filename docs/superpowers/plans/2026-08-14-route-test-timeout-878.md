@@ -4,7 +4,7 @@
 
 **Goal:** Give the route-suite's import budget one home, so file seven inherits it instead of starting at the default and being discovered red under load by whoever trips it.
 
-**Architecture:** `vitest.config.ts` grows two `test.projects` entries -- a `routes` project globbing `src/App.routes.*.test.tsx` that carries the budget, and a default project for the other 82 files at vitest's defaults. The six inline budgets come out. The number is measured first, not inherited from folklore.
+**Architecture:** `vitest.config.ts` gains one `TEST_BUDGET_MS` constant driving suite-wide `hookTimeout` and `testTimeout`. The six inline budgets come out. The number is measured first, not inherited from folklore -- and the measurement is what collapsed this from a two-project split to a single constant (see "Second scope change" below).
 
 **Tech Stack:** vitest 4.1, vite 6, jsdom, React Testing Library, pnpm.
 
@@ -76,6 +76,34 @@ instead of 5s -- but a suite that fails spuriously is the worse of the
 two, and the global number is derived from measurement rather than
 picked.
 
+## Second scope change, 2026-08-14: the measurement killed the projects split
+
+Task 1 ran and inverted the premise the whole design rested on:
+
+| | worst observed, 3 loaded full runs | derived budget |
+|---|---|---|
+| route-tree hook (`App.routes.pickup`) | **4,428 ms** | 20,000 ms |
+| ordinary test (`MobileAudit`, 409-on-save) | **6,573 ms** | 30,000 ms |
+
+**The route files are not the expensive ones.** The worst ordinary test
+is ~50% slower than the worst route hook. A `routes` project carrying a
+"bigger" budget would therefore *lower* those six files from the global
+30s to 20s -- the exact opposite of what it exists for.
+
+So the projects split goes. **One global budget, 30,000 ms, and nothing
+else.** That is simpler, it covers every file including the ones nobody
+has thought about yet, and it means file seven inherits it by existing
+rather than by matching a glob.
+
+What this retires, and it is the more interesting half: "the route files
+are special because they import the whole route tree" was itself
+folklore. The tree costs ~2s of transform per file, which is real, but
+it never was the suite's worst case. Nobody had measured either number.
+
+Everything below that describes `test.projects`, a `routes` project, a
+`unit` project, or two constants is superseded: there is one constant,
+`TEST_BUDGET_MS`, set at the root of the `test` block.
+
 **Verification is CI-green, not local-green.** The `MobileAudit`
 failure reproduces only on this box; `main`'s `spa` job is green.
 Per the human partner's direction, local-only failures are not chased as
@@ -90,7 +118,7 @@ the acceptance criterion, and no MobileAudit-specific work is in scope.
 - Temporarily modify (all reverted by the end of this task): the six `src/App.routes.*.test.tsx` files
 
 **Interfaces:**
-- Produces: `ROUTE_TREE_BUDGET_MS`, one integer, which Task 2 writes into the config. Also produces the worst observed hook time, which goes in the config comment as the number the budget is derived from.
+- Produces: two measurements and the budgets derived from them. Task 2 consumes only the global one (see the second scope change).
 
 - [ ] **Step 1: Instrument the import**
 
@@ -165,11 +193,11 @@ Expected: clean. Nothing from this task is committed -- it produced two numbers,
 - Modify: `src/App.routes.modegate.test.tsx:105-113` (remove the per-test budget and its comment)
 
 **Interfaces:**
-- Consumes: `ROUTE_TREE_BUDGET_MS` and the worst observation from Task 1.
+- Consumes: Task 1's measurements. Per the second scope change, only ONE budget is written: `TEST_BUDGET_MS = 30_000`, the global one. The 20,000 ms route figure Task 1 also derived is deliberately NOT used -- it is lower than the global budget, so scoping it would reduce those files' allowance.
 
 - [ ] **Step 1: Rewrite the config's `test` block**
 
-Replace the `test` block in `vitest.config.ts` with:
+One constant, one pair of timeouts, no projects. Replace the `test` block in `vitest.config.ts` with:
 
 ```ts
   test: {
@@ -179,89 +207,56 @@ Replace the `test` block in `vitest.config.ts` with:
     // than splitting test files across a node/jsdom pool.
     environment: "jsdom",
     setupFiles: ["./src/testSetup.ts"],
-    // Two projects so the route suite's import budget has ONE home
-    // (#878). Six files had grown their own copy of a 30s timeout, each
-    // added by whoever next hit "Hook timed out" on a loaded box, and
-    // nothing stopped file seven from starting at the default and being
-    // discovered the same way.
+    // One budget for the whole suite (#878). Six files had grown their
+    // own copy of a 30s timeout, each added by whoever next hit a red
+    // run on a loaded box, and nothing stopped file seven from starting
+    // at the default and being discovered the same way.
     //
-    // The route files are genuinely different from the rest: each awaits
-    // `import("@/App")`, which pulls the whole route tree -- about 30
-    // eagerly-imported page modules -- through vite's transform.
-    // Measured 2026-08-14: ~2s of transform per file on an idle box, and
-    // 11.4s cumulative across the six, because they each pay for the
-    // same tree. Under the full suite that competes with everything else
-    // and is what blew the default.
+    // The number is measured, not remembered. Worst observations across
+    // three loaded full-suite runs, 2026-08-14:
     //
-    // The GLOBAL budget is raised too, which the first draft of this
-    // change deliberately did not do. The reason it changed: the same
-    // failure turned up in `src/pages/MobileAudit.test.tsx`, which is
-    // not a route file -- 2 tests failing `Test timed out in 5000ms`
-    // under load, passing 13/13 alone, on 3 of 3 runs. Scoping the fix
-    // to `App.routes.*` would have left it broken and let the next
-    // non-route victim be rediscovered the same way, which is the exact
-    // progression #878 exists to stop. A genuine hang now takes the
-    // global budget to report rather than 5s; a suite that fails
-    // spuriously is the worse of the two.
+    //   ordinary test  6573 ms  MobileAudit.test.tsx, 409-on-save
+    //   route-tree hook 4428 ms  App.routes.pickup.test.tsx
     //
-    // Worst observed hook time under a loaded full-suite run:
-    // <WORST_HOOK_MS>ms -> route budget <ROUTE_BUDGET>ms.
-    // Worst observed ordinary test: <WORST_TEST_MS>ms -> global budget
-    // <GLOBAL_BUDGET>ms. Both are 4x the observation, rounded up to 5s,
-    // floored at 15s -- generous because the thing they absorb is
-    // machine load, which has no ceiling, and a too-high budget only
-    // costs latency on a report nobody is waiting for.
+    // Budget is 4x the worst, rounded up to 5s: 30s. The multiple is
+    // generous because what it absorbs is machine load, which has no
+    // ceiling, and a too-high budget only costs latency on a report
+    // nobody is waiting for.
     //
-    // Both timeouts, not just hookTimeout: five of the six do the import
-    // in `beforeAll`, but modegate does it inside its single `it` and
-    // needs testTimeout. They are different defaults too (5s vs 10s).
-    hookTimeout: GLOBAL_BUDGET_MS,
-    testTimeout: GLOBAL_BUDGET_MS,
-    projects: [
-      {
-        extends: true,
-        test: {
-          name: "unit",
-          include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
-          exclude: ["src/App.routes.*.test.tsx"],
-        },
-      },
-      {
-        extends: true,
-        test: {
-          name: "routes",
-          include: ["src/App.routes.*.test.tsx"],
-          hookTimeout: ROUTE_TREE_BUDGET_MS,
-          testTimeout: ROUTE_TREE_BUDGET_MS,
-        },
-      },
-    ],
+    // Deliberately NOT scoped to the route files, which is where this
+    // change started. Those six await `import("@/App")` and pull ~30
+    // eagerly-imported page modules through vite's transform (~2s each,
+    // 11.4s cumulative), so they looked like the expensive ones -- but
+    // measuring said the worst ordinary test is ~50% slower than the
+    // worst route hook. A per-glob project would have *lowered* their
+    // budget while leaving MobileAudit.test.tsx failing at the 5s
+    // default. "The route files are special" was folklore too.
+    //
+    // Both timeouts, not just hookTimeout: five of the six route files
+    // import in `beforeAll`, modegate imports inside its single `it`,
+    // and MobileAudit's failures are plain tests. The defaults differ
+    // (testTimeout 5s, hookTimeout 10s), so both need saying.
+    hookTimeout: TEST_BUDGET_MS,
+    testTimeout: TEST_BUDGET_MS,
   },
 ```
 
-Define both constants above `export default defineConfig({`:
+Define the constant above `export default defineConfig({`:
 
 ```ts
-// Both budgets are measurements times four, not remembered values. See
-// the comment on `test.projects` for how each was derived.
-const GLOBAL_BUDGET_MS = 15_000;
-const ROUTE_TREE_BUDGET_MS = 30_000;
+// Suite-wide timeout budget: 4x the worst test observed under load.
+// See the comment on `test` for the measurements it comes from.
+const TEST_BUDGET_MS = 30_000;
 ```
 
-Substitute Task 1's actual numbers for both constants and for the four `<...>` placeholders in the comment.
+- [ ] **Step 2: Verify nothing stopped being collected**
 
-**Confirm the projects genuinely inherit the root-level budgets.** `extends: true` should carry `hookTimeout`/`testTimeout` down to the `unit` project, but verify it rather than assuming -- if it does not, set them explicitly on `unit` too. Task 3 Step 4 is the check that proves it either way.
-
-- [ ] **Step 2: Verify the split collects everything**
-
-First record the pre-change totals on this branch (`pnpm vitest run`), because the counts in this document are stale -- the suite grew after #876 and #877 merged. As of the scope-change re-measure it was **104 files / 604 tests**, with 2 of those failing under load in `MobileAudit.test.tsx`.
+Record the pre-change totals on this branch first (`pnpm vitest run`) -- the counts elsewhere in this document are stale. At the time of writing: **104 files / 604 tests**, with 2 failing under load in `MobileAudit.test.tsx`.
 
 Run: `pnpm test`
-Expected: **the same file and test totals you recorded**, with each file appearing under exactly one project.
+Expected: the same file and test totals you recorded, **and the two `MobileAudit` failures gone** -- they were failing at the 5s default, and 30s is six times that. If they still fail, the budget is not reaching ordinary tests and Step 1 is wrong; investigate before continuing rather than moving on.
 
-A lower file count means the two `include` globs do not cover what the old default did; a higher one means a file is being collected twice. Either way, fix the globs before continuing -- a config that silently stops running tests is strictly worse than six duplicated timeouts.
-
-The two `MobileAudit` failures are expected to stop reproducing once the global budget is raised. That is a side effect, not the acceptance criterion (see the scope change: verification is CI-green, and local-only failures are not chased). Note whether they cleared; do not do MobileAudit-specific work either way.
+A changed file count means something stopped being collected. That is strictly worse than six duplicated timeouts -- fix it before continuing.
 
 - [ ] **Step 3: Verify filtering still works**
 
@@ -300,7 +295,7 @@ pnpm typecheck
 pnpm lint
 ```
 
-Expected: clean. `vitest.config.ts` is typechecked, so a wrong `projects` shape surfaces here.
+Expected: clean. `vitest.config.ts` is typechecked, so a malformed `test` block surfaces here.
 
 - [ ] **Step 7: Commit**
 
@@ -315,10 +310,12 @@ git commit -m "test(ui): one home for the route suite's import budget"
 
 ### Task 3: Prove file seven inherits it
 
-The six still passing is not evidence -- they passed before. The regression this closes is that a *new* route test file starts at the default and gets discovered red by whoever trips it. That is the only claim worth testing, and it needs a file that has never named a timeout.
+The six still passing is not evidence -- they passed before. The regression this closes is that a *new* test file starts at vitest's default and gets discovered red by whoever trips it. That is the only claim worth testing, and it needs a file that has never named a timeout.
+
+With the projects split gone, the check is simpler than the original plan's: there is one budget, so one probe proves it, and it should be a **non-route** file -- that is the case the original design would have missed.
 
 **Files:**
-- Create then delete: `src/App.routes.inherit.test.tsx` (a probe, not a committed test)
+- Create then delete: `src/inherit.probe.test.ts` (a probe, not a committed test)
 - Temporarily modify then revert: `vitest.config.ts`
 
 **Interfaces:**
@@ -326,66 +323,61 @@ The six still passing is not evidence -- they passed before. The regression this
 
 - [ ] **Step 1: Write the probe file**
 
-Create `src/splitsmith/ui_static/src/App.routes.inherit.test.tsx`:
+Deliberately not named `App.routes.*` -- a non-route file is what proves the budget is genuinely global. Create `src/splitsmith/ui_static/src/inherit.probe.test.ts`:
 
-```tsx
-import { beforeAll, describe, expect, it } from "vitest";
+```ts
+import { describe, expect, it } from "vitest";
 
 describe("budget inheritance probe", () => {
-  beforeAll(async () => {
-    await import("@/App");
-  });
-
-  it("imported the route tree without naming a timeout", () => {
+  it("runs under the suite-wide budget without naming a timeout", async () => {
+    await new Promise((r) => setTimeout(r, 6_000));
     expect(true).toBe(true);
   });
 });
 ```
 
+The 6s sleep is above vitest's 5s default and below the 30s budget, so this file passes only if the config's budget is reaching it.
+
 - [ ] **Step 2: Confirm it passes**
 
-Run: `pnpm vitest run src/App.routes.inherit`
-Expected: 1 file, 1 test, passing.
+Run: `pnpm vitest run src/inherit.probe`
+Expected: 1 file, 1 test, passing, taking just over 6s.
 
-This alone proves nothing -- it would also pass at the 10s default on an idle box. Step 3 is the actual test.
+**This is the load-bearing assertion**, not a formality: against vitest's untouched 5s default this same file fails with `Test timed out in 5000ms`. It passing is the proof the budget applies to a file that names nothing and is not a route test.
 
-- [ ] **Step 3: Shrink the budget and watch the probe fail**
+- [ ] **Step 3: Shrink the budget and watch it fail**
 
-In `vitest.config.ts`, temporarily set `const ROUTE_TREE_BUDGET_MS = 1;`.
+In `vitest.config.ts`, temporarily set `const TEST_BUDGET_MS = 1;`.
 
-Run: `pnpm vitest run src/App.routes.inherit`
-Expected: FAIL with `Hook timed out in 1ms`.
+Run: `pnpm vitest run src/inherit.probe`
+Expected: FAIL with `Test timed out in 1ms`.
 
-That failure is the evidence: a file that names no timeout was governed by the config's budget. If it passes, the `routes` project's `include` glob is not matching the new file and the whole change is decorative.
+Two assertions in one: the config reaches the file, and it reaches it *as the timeout* rather than by coincidence.
 
-- [ ] **Step 4: Confirm the other project is unaffected**
+- [ ] **Step 4: Confirm the route files are governed by the same constant**
 
-Still at `ROUTE_TREE_BUDGET_MS = 1`:
+Still at `TEST_BUDGET_MS = 1`:
 
-Run: `pnpm vitest run src/lib`
-Expected: passing. The 1ms budget must not reach the `unit` project -- that is what `exclude` is for, and this is the assertion that it works.
+Run: `pnpm vitest run src/App.routes`
+Expected: FAIL -- hooks timing out in 1ms.
 
-Then the mirror check, which the scope change makes necessary: temporarily set `GLOBAL_BUDGET_MS = 1` (restoring `ROUTE_TREE_BUDGET_MS` first) and run `pnpm vitest run src/lib` again.
-
-Expected: FAIL with a 1ms timeout. That is what proves the `unit` project genuinely inherits the root-level budget through `extends: true` rather than silently falling back to vitest's defaults -- which would leave `MobileAudit` exactly as broken as before while the config claimed otherwise. If it passes, `extends: true` is not carrying the timeouts and they must be set explicitly on the `unit` project.
-
-Restore both constants afterwards.
+This is what confirms the six route files now take their budget from the config rather than from the inline values Task 2 deleted. If they pass here, an inline timeout survived somewhere.
 
 - [ ] **Step 5: Restore the budget and delete the probe**
 
 ```bash
 git checkout -- vitest.config.ts
-rm src/App.routes.inherit.test.tsx
+rm src/inherit.probe.test.ts
 pnpm test
 ```
 
-Expected: 88 files, 517 tests, passing. `git status --short` shows nothing beyond Task 2's committed work.
+Expected: the totals recorded in Task 2 Step 2, all passing. `git status --short` shows nothing beyond Task 2's committed work.
 
-The probe is not kept: a permanent file whose only job is to import the route tree would add a seventh ~2s transform to every run to assert something the config already states.
+The probe is not kept: a permanent test whose only job is to sleep for 6 seconds would add 6 seconds to every run to assert something the config already states.
 
 - [ ] **Step 6: Record the drill in the PR body**
 
-Paste the `Hook timed out in 1ms` output from Step 3 and the passing `src/lib` run from Step 4. Without them this PR reads as "deleted six timeouts and added a config option", and a reviewer has no way to tell whether the config reaches new files.
+Paste the `Test timed out in 1ms` output from Step 3, the route-file failure from Step 4, and the passing 6s probe from Step 2. Without them this PR reads as "deleted six timeouts and added a config option", and a reviewer has no way to tell whether the config reaches anything.
 
 - [ ] **Step 7: Open the PR**
 
@@ -395,7 +387,7 @@ gh pr create --fill --title "test(ui): the route-suite beforeAll timeout workaro
 gh run watch
 ```
 
-Expected: the `spa` job green -- `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` all pass.
+Expected: the `spa` job green -- `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build` all pass. That job is the acceptance criterion.
 
 ---
 
@@ -426,10 +418,10 @@ So the next person reading #878's "reduce the cost" suggestion finds where that 
 
 ## Done when
 
-- No `src/App.routes.*.test.tsx` file names a timeout.
-- `pnpm test` still collects the same file and test totals recorded at the start of Task 2 (104 / 604 at the time of writing -- re-derive, do not copy).
-- A new route test file has been observed inheriting the route budget.
-- A non-route file has been observed **not** inheriting the route budget, and **yes** inheriting the global one. Both halves matter: the second is what proves the fix reaches files like `MobileAudit.test.tsx`.
-- Both budgets in the config are stated multiples of recorded measurements, and the comment says which.
-- The lazy-import follow-up is filed with the measurement attached.
+- No `src/App.routes.*.test.tsx` file names a timeout, and neither does any other test file.
+- `vitest.config.ts` carries exactly one budget constant, and its comment states the two measurements it came from.
+- `pnpm test` collects the same file and test totals recorded at the start of Task 2 (104 / 604 at the time of writing -- re-derive, do not copy).
+- A **non-route** probe file that names no timeout has been observed passing a 6s test, and failing when the constant is set to 1ms. That pair is what proves the budget is global and is genuinely the timeout.
+- The six route files have been observed failing at a 1ms budget, proving they now take it from the config rather than from a surviving inline value.
 - The `spa` job is green in CI. That is the acceptance criterion; local-only failures are noted, not chased.
+- The lazy-import follow-up is filed with the measurement attached.
