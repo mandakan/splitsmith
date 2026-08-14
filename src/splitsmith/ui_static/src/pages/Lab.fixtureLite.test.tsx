@@ -83,6 +83,20 @@ function renderLabAt(slug: string) {
   );
 }
 
+describe("fixture drawer visibility", () => {
+  it("scrolls the drawer into view when a fixture is selected", async () => {
+    // The drawer renders below the fixture table, which at corpus size
+    // is thousands of pixels tall -- without an explicit scroll the
+    // row click looks like a no-op. jsdom has no scrollIntoView, so
+    // install a spy to observe the call.
+    const spy = vi.fn();
+    Element.prototype.scrollIntoView = spy;
+    renderLabAt(SLUG);
+    await screen.findByText(/labeling needs an eval run/i);
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+  });
+});
+
 describe("pre-eval fixture drawer", () => {
   it("tells the operator labeling needs an eval run first", async () => {
     renderLabAt(SLUG);
