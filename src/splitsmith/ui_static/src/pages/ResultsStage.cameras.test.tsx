@@ -23,7 +23,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getProject: vi.fn().mockRejectedValue(new Error("no project")),
       getMatchCoachDistributions: vi.fn().mockRejectedValue(new Error("no dist")),
       patchStageShotCoach: vi.fn(),
-      videoStreamUrl: (_slug: string, path: string) => `http://localhost/${path}`,
+      videoStreamUrl: (_slug: string, path: string, kind = "auto") =>
+        `http://localhost/${kind}/${path}`,
     },
   };
 });
@@ -103,8 +104,8 @@ function renderStage(
 }
 
 const TWO_CAMS: CoachVideoEntry[] = [
-  { path: "cam-primary.mp4", role: "primary", beep_in_clip: 5 },
-  { path: "cam-b.mp4", role: "secondary", beep_in_clip: 12 },
+  { path: "cam-primary.mp4", role: "primary", beep_in_clip: 5, kind: "trim" as const },
+  { path: "cam-b.mp4", role: "secondary", beep_in_clip: 12, kind: "trim" as const },
 ];
 
 function mainVideoSrcs(): string[] {
@@ -128,9 +129,9 @@ describe("ResultsStage camera selection", () => {
       videos: TWO_CAMS,
     });
     await screen.findByText(/steel rush/i);
-    expect(mainVideoSrcs()).toEqual(["http://localhost/cam-primary.mp4"]);
+    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-primary.mp4"]);
     fireEvent.click(screen.getByRole("button", { name: /camera 2 of 2/i }));
-    expect(mainVideoSrcs()).toEqual(["http://localhost/cam-b.mp4"]);
+    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4"]);
   });
 
   it("opens on the camera a moment link names via ?v=", async () => {
@@ -140,15 +141,17 @@ describe("ResultsStage camera selection", () => {
       { videos: TWO_CAMS },
     );
     await screen.findByText(/steel rush/i);
-    expect(mainVideoSrcs()).toEqual(["http://localhost/cam-b.mp4"]);
+    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4"]);
   });
 
   it("falls back to the first camera when no primary exists", async () => {
     renderStage("/match/m1/results/anna/2", [makeShooter("anna", "Anna", [[2, "audited"]])], {
-      videos: [{ path: "cam-b.mp4", role: "secondary", beep_in_clip: 12 }],
+      videos: [
+        { path: "cam-b.mp4", role: "secondary", beep_in_clip: 12, kind: "source" as const },
+      ],
     });
     await screen.findByText(/steel rush/i);
-    expect(mainVideoSrcs()).toEqual(["http://localhost/cam-b.mp4"]);
+    expect(mainVideoSrcs()).toEqual(["http://localhost/source/cam-b.mp4"]);
   });
 
   it("copies a moment link anchored to the active camera's own beep, not the primary's", async () => {
@@ -163,7 +166,7 @@ describe("ResultsStage camera selection", () => {
     await screen.findByText(/steel rush/i);
 
     fireEvent.click(screen.getByRole("button", { name: /camera 2 of 2/i }));
-    expect(mainVideoSrcs()).toEqual(["http://localhost/cam-b.mp4"]);
+    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4"]);
 
     // Cam B's beep_in_clip is 12 - park the video 3s past it on cam B's
     // own clock, so the correct t (seconds after beep, camera-independent)
@@ -186,7 +189,7 @@ describe("ResultsStage camera selection", () => {
       { videos: TWO_CAMS },
     );
     await screen.findByText(/steel rush/i);
-    expect(mainVideoSrcs()).toEqual(["http://localhost/cam-b.mp4"]);
+    expect(mainVideoSrcs()).toEqual(["http://localhost/trim/cam-b.mp4"]);
     expect(screen.getByRole("group", { name: /cameras/i })).toBeInTheDocument();
   });
 });

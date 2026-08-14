@@ -70,7 +70,7 @@ function makeCoach(shots: CoachShot[], version = 4): CoachStageResponse {
     stage_name: "Stage One",
     beep_time: 5,
     version,
-    videos: [{ path: "trimmed/stage1.mp4", role: "primary", beep_in_clip: 5 }],
+    videos: [{ path: "trimmed/stage1.mp4", role: "primary", beep_in_clip: 5, kind: "trim" }],
     shots,
   };
 }
