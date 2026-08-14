@@ -323,4 +323,48 @@ describe("DevFixtureDetail", () => {
       screen.getByRole("link", { name: /previous fixture/i }),
     ).toHaveAttribute("href", "/dev/corpus/fixture-alpha?match=m-1");
   });
+
+  it("walks the filtered subset when the corpus link carried ?q=", async () => {
+    // The operator searched "alpha" on /dev/corpus and opened a row.
+    // Prev/next must walk that subset -- skipping fixture-bravo -- and
+    // keep the q param so the walk stays stable and the back link
+    // restores the list state. The counter counts the subset too.
+    const slugs = ["alpha-one", "fixture-bravo", "alpha-three"];
+    vi.mocked(api.listLabFixtures).mockResolvedValue(slugs.map(record));
+    vi.mocked(api.getLastLabRun).mockResolvedValue(runWith("alpha-three"));
+
+    renderDetail("alpha-three", "?match=m-1&q=alpha");
+
+    const prev = await screen.findByRole("link", { name: /previous fixture/i });
+    expect(prev).toHaveAttribute("href", "/dev/corpus/alpha-one?match=m-1&q=alpha");
+    expect(screen.getByText("02 / 02")).toBeInTheDocument();
+    // Last of the subset: no next, even though the full catalog goes on.
+    expect(screen.queryByRole("link", { name: /next fixture/i })).toBeNull();
+  });
+
+  it("falls back to the whole catalog when the slug is outside the filter", async () => {
+    // Stale bookmark: ?q= matches nothing about this fixture. Navigation
+    // must not strand -- it walks the full catalog order instead.
+    const slugs = ["alpha-one", "fixture-bravo", "alpha-three"];
+    vi.mocked(api.listLabFixtures).mockResolvedValue(slugs.map(record));
+    vi.mocked(api.getLastLabRun).mockResolvedValue(runWith("fixture-bravo"));
+
+    renderDetail("fixture-bravo", "?q=alpha");
+
+    const next = await screen.findByRole("link", { name: /next fixture/i });
+    expect(next).toHaveAttribute("href", "/dev/corpus/alpha-three?q=alpha");
+    expect(screen.getByText("02 / 03")).toBeInTheDocument();
+  });
+
+  it("shows an error state when the waveform fetch fails, not a spinner", async () => {
+    vi.mocked(api.listLabFixtures).mockResolvedValue([record(SLUG)]);
+    vi.mocked(api.getLastLabRun).mockResolvedValue(runWith(SLUG));
+    vi.mocked(api.getFixturePeaks).mockRejectedValue(new Error("peaks build failed"));
+
+    renderDetail(SLUG);
+
+    expect(await screen.findByText(/waveform unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/peaks build failed/)).toBeInTheDocument();
+    expect(screen.queryByText(/loading waveform/i)).toBeNull();
+  });
 });

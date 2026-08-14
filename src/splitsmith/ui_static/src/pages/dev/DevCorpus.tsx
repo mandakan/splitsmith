@@ -14,19 +14,15 @@ import { useLocation, useNavigate, useOutletContext } from "react-router-dom";
 
 import { PromoteFromAnchorPanel } from "@/components/lab/PromoteFromAnchorPanel";
 import { PromoteStagesPanel } from "@/components/lab/PromoteStagesPanel";
+import {
+  FILTER_DEFS,
+  filterFixtures,
+  type FilterKey,
+} from "@/components/lab/corpusFilter";
 import { api, type DevReviewQueueItem, type LabFixtureRecord } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 import type { DeveloperShellOutletContext } from "@/components/developer/DeveloperShell";
-
-const FILTER_DEFS = [
-  { key: "all", label: "all" },
-  { key: "pending", label: "needs review" },
-  { key: "promoted", label: "promoted" },
-  { key: "audio-missing", label: "no audio" },
-] as const;
-
-type FilterKey = (typeof FILTER_DEFS)[number]["key"];
 
 export function DevCorpus() {
   const { model } = useOutletContext<DeveloperShellOutletContext>();
@@ -58,27 +54,25 @@ export function DevCorpus() {
     };
   }, []);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return fixtures.filter((fx) => {
-      if (filter === "pending" && !fx.anchor_slug) return false;
-      if (filter === "promoted" && !fx.anchor_slug) return false;
-      if (filter === "audio-missing" && fx.has_audio) return false;
-      if (!q) return true;
-      return (
-        fx.slug.toLowerCase().includes(q) ||
-        (fx.source ?? "").toLowerCase().includes(q) ||
-        (fx.event_id ?? "").toLowerCase().includes(q)
-      );
-    });
-  }, [fixtures, query, filter]);
+  const filtered = useMemo(
+    () => filterFixtures(fixtures, query, filter),
+    [fixtures, query, filter],
+  );
 
   const pendingCount = queue.length;
 
   const matchContext = new URLSearchParams(search).get("match");
-  const detailSearch = matchContext
-    ? `?match=${encodeURIComponent(matchContext)}`
-    : "";
+  // Row links carry the active search/filter alongside the match
+  // context, so the detail page's prev/next walk the subset the
+  // operator is looking at, not the whole corpus (#898).
+  const detailSearch = useMemo(() => {
+    const params = new URLSearchParams();
+    if (matchContext) params.set("match", matchContext);
+    if (query.trim()) params.set("q", query.trim());
+    if (filter !== "all") params.set("filter", filter);
+    const s = params.toString();
+    return s ? `?${s}` : "";
+  }, [matchContext, query, filter]);
 
   return (
     <div className="min-w-0 px-7 py-7">
