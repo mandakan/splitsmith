@@ -100,19 +100,15 @@ export function DevCorpus() {
         </div>
       </header>
 
-      {/* Promote entry points -- full-width expandable sections, not
-          popovers, since this page has the room and the corpus table
-          below is the thing they populate. */}
+      {/* Promote entry points -- full-width expandable sections: this
+          page has the room and the corpus table below is the thing
+          they populate. */}
       <div className="mb-6 flex flex-wrap items-start gap-2.5">
         <span className="mr-1 flex h-8 items-center font-mono text-[0.625rem] font-bold uppercase tracking-[0.18em] text-muted">
           Promote
         </span>
-        <PromoteStagesPanel
-          catalog={fixtures}
-          onCatalogChanged={setFixtures}
-          variant="section"
-        />
-        <PromoteFromAnchorPanel fixtures={fixtures} variant="section" />
+        <PromoteStagesPanel catalog={fixtures} onCatalogChanged={setFixtures} />
+        <PromoteFromAnchorPanel fixtures={fixtures} />
       </div>
 
       {/* Workflow status banner */}
