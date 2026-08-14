@@ -27,6 +27,7 @@ import { peekApproveCode, stashApproveCode, takeApproveCode } from "@/lib/device
 import { ShooterScopedRoute } from "@/components/ShooterScopedRoute";
 import { Login } from "@/pages/Login";
 import { Audit } from "@/pages/Audit";
+import { MobileAudit } from "@/pages/MobileAudit";
 import { BeepReview } from "@/pages/BeepReview";
 import { MobileBeepReview } from "@/pages/MobileBeepReview";
 import { Coach } from "@/pages/Coach";
@@ -67,6 +68,21 @@ function RedirectLabSlug() {
 function BeepReviewRoute() {
   const isMobile = useIsMobile();
   return isMobile ? <MobileBeepReview /> : <BeepReview />;
+}
+
+/* Audit joins beep review as a match-scoped screen with a real mobile
+ * surface (mobile audit design, 2026-08-12). Below 768 px this renders
+ * the wrapped-row MobileAudit; the desktop screen stays behind
+ * DesktopGate untouched. */
+export function AuditRoute() {
+  const isMobile = useIsMobile();
+  return isMobile ? (
+    <MobileAudit />
+  ) : (
+    <DesktopGate screen="Audit">
+      <Audit />
+    </DesktopGate>
+  );
 }
 
 function Standby() {
@@ -240,11 +256,11 @@ export function App() {
               <Route index element={<Home />} />
               <Route
                 path="audit/:slug"
-                element={<ShooterScopedRoute element={<DesktopGate screen="Audit"><Audit /></DesktopGate>} />}
+                element={<ShooterScopedRoute element={<AuditRoute />} />}
               />
               <Route
                 path="audit/:slug/:stage"
-                element={<ShooterScopedRoute element={<DesktopGate screen="Audit"><Audit /></DesktopGate>} />}
+                element={<ShooterScopedRoute element={<AuditRoute />} />}
               />
               <Route path="audit" element={<DefaultShooterRedirect base="audit" />} />
               <Route path="compare/:stage" element={<DesktopGate screen="Compare"><Compare /></DesktopGate>} />
