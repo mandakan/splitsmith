@@ -1662,6 +1662,12 @@ class AppState:
     # poller, and restarting the local server mid-flow just means
     # starting over inside a 10-minute window.
     device_flow: dict[str, object] | None = None
+    # Monotonic timestamp of the last upstream account refresh (#877), or
+    # None when none has run in this process. Held here rather than in
+    # config.yaml because it is per-process liveness, not user
+    # preference: a restart should refresh, and two installs sharing a
+    # home directory should not share a cooldown.
+    hosted_account_refreshed_at: float | None = None
     # Guards every read-modify-write of ``device_flow`` (#719). The three
     # local device routes each ``await`` a threadpool HTTP call in the
     # middle of reading/mutating ``device_flow``; without a lock, two
@@ -4843,8 +4849,10 @@ class ScoreboardIdentityRequest(BaseModel):
 class HostedAccountInfo(BaseModel):
     """The linked hosted account, as the SPA renders it (#719).
 
-    Cached in ``config.yaml`` from the device-flow poll, never fetched
-    live - a sync-scoped token cannot read ``/api/me``.
+    Cached in ``config.yaml`` from the device-flow poll, then refreshed
+    best-effort from ``GET /api/sync/whoami`` on read (#877) -- a
+    sync-scoped token still cannot reach ``/api/me``, which is why the
+    refresh has its own route on the sync surface.
     """
 
     id: str
@@ -5930,15 +5938,38 @@ def _hosted_mode_active() -> bool:
     return os.environ.get(SPLITSMITH_MODE_ENV, "").strip().lower() == "hosted"
 
 
-def _build_device_client(base_url: str, *, token: str | None = None) -> HostedSyncClient:
+#: How long this process waits between upstream refresh *attempts* for
+#: the cached hosted-account snapshot (#877). The timer is on the last
+#: attempt, not on the age of the stored copy, and a failed attempt
+#: consumes the window too -- so a stale copy is not retried for another
+#: full TTL. It is held in ``AppState``, i.e. in memory, so a restart
+#: refreshes. The chip calls ``GET /api/settings/hosted-sync`` on every
+#: mount, and GlobalBar plus the mobile drawer each render one, so an
+#: untimed refresh would be a steady trickle of upstream calls for a
+#: label.
+HOSTED_ACCOUNT_REFRESH_TTL_S = 300.0
+
+#: Connect/read budget for that refresh. Much shorter than the 30s the
+#: device-flow calls use: this one sits in front of a UI paint, and its
+#: failure mode is "keep showing the cached name", which costs nothing.
+HOSTED_ACCOUNT_REFRESH_TIMEOUT_S = 5.0
+
+
+def _build_device_client(
+    base_url: str, *, token: str | None = None, timeout: float = 30.0
+) -> HostedSyncClient:
     """Build a ``HostedSyncClient`` for the device-flow calls (#719).
 
     ``token=None`` gives the unauthenticated client the two public device
     routes need - there is no bearer to send before the flow completes.
     The one seam tests monkeypatch to script a hosted side.
+
+    ``timeout`` defaults to the device flow's 30s. The account refresh
+    (#877) passes something much shorter: it runs in front of a UI paint
+    and can afford to give up.
     """
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    return HostedSyncClient(http=httpx.Client(base_url=base_url, headers=headers, timeout=30.0))
+    return HostedSyncClient(http=httpx.Client(base_url=base_url, headers=headers, timeout=timeout))
 
 
 def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
@@ -14577,11 +14608,116 @@ def create_app(
             linked_at=ref.linked_at,
         )
 
+    async def _refresh_hosted_account(prefs: user_config.GlobalPrefs) -> user_config.GlobalPrefs:
+        """Best-effort upstream refresh of the cached account snapshot (#877).
+
+        The snapshot is written once, at device-link time, when
+        ``display_name`` is typically still NULL. Without this the chip
+        renders the operator's email address forever -- the one thing
+        the design says it will never publish -- and the only repair is
+        to unlink and re-link.
+
+        Best-effort in the strong sense: every failure path returns the
+        cached value with no error surfaced. The chip reads a missing
+        account as "not signed in" (#738), so a network blip must not be
+        able to produce that.
+
+        The TTL is consumed before the call, not after, so a dead host
+        costs one timeout per window rather than one per chip mount.
+
+        This is a WRITER, on the one route the SPA fires by itself, and
+        the ``await`` in the middle of it is long (up to
+        ``HOSTED_ACCOUNT_REFRESH_TIMEOUT_S``). The other writers -- the
+        settings PUT, the device-flow approval and the sign-out DELETE
+        -- can all land inside that window. So the object handed in is
+        used only to decide *what to ask*; the write re-reads from disk
+        immediately before saving, with no ``await`` in between, and
+        merges the two account fields alone. Saving the object we
+        loaded before the call would persist ``hosted_token`` too, and
+        a sign-out in the window would come back from the dead: a
+        revoked bearer and a live-looking chip (#877 review).
+        """
+        ref = prefs.hosted_account
+        if ref is None or not prefs.hosted_base_url or not prefs.hosted_token:
+            return prefs
+
+        now = time.monotonic()
+        last = state.hosted_account_refreshed_at
+        if last is not None and now - last < HOSTED_ACCOUNT_REFRESH_TTL_S:
+            return prefs
+        state.hosted_account_refreshed_at = now
+
+        client: HostedSyncClient | None = None
+        try:
+            # Local import: same lazy idiom sync_api.py itself uses to
+            # stay import-safe on a local-slim install (see the comment
+            # at its router registration, above). Inside the guard, so
+            # the "best-effort in the strong sense" claim covers it too.
+            from .sync_api import SyncWhoAmIResponse
+
+            client = _build_device_client(
+                prefs.hosted_base_url,
+                token=prefs.hosted_token,
+                timeout=HOSTED_ACCOUNT_REFRESH_TIMEOUT_S,
+            )
+            raw = await run_in_threadpool(client.whoami)
+            payload = SyncWhoAmIResponse.model_validate(raw)
+        except Exception:
+            # Deliberately broad, per the docstring's "best-effort in the
+            # strong sense": this route's entire job is to report the
+            # cached snapshot, so degrading to it beats a 500 for ANY
+            # failure here, not just the ones a narrower tuple happens to
+            # name. Concretely this has to catch, at minimum:
+            #   - SyncClientError / httpx.HTTPError -- non-2xx, including
+            #     401 (a revoked token is not grounds to unlink here: an
+            #     upstream outage would then sign every install out;
+            #     revocation surfaces on the next sync instead)
+            #   - httpx.InvalidURL -- a malformed hosted_base_url; it is
+            #     NOT an httpx.HTTPError subclass, and hosted_base_url is
+            #     an unvalidated str a hand-edited config.yaml can corrupt
+            #   - pydantic.ValidationError -- a 200 whose body isn't the
+            #     shape SyncWhoAmIResponse declares (not even a dict)
+            # A previous narrower tuple here caught the first bullet but
+            # missed the last two, turning either into an unhandled 500
+            # on a route whose whole job is to report a cached value
+            # (#877 review).
+            #
+            # Logged because the visible symptom of a NameError or an
+            # AttributeError in here is identical to a hosted outage --
+            # "the chip still shows my email address", i.e. the bug this
+            # code exists to fix -- and nothing else would record it.
+            logger.debug("hosted account refresh failed", exc_info=True)
+            return prefs
+        finally:
+            if client is not None:
+                client.close()
+
+        if payload.email == ref.email and payload.display_name == ref.display_name:
+            return prefs
+
+        # Re-read, then write, with no await in between: see the
+        # docstring. ``fresh`` is also what we return, so the response
+        # reports what is actually on disk rather than the snapshot this
+        # request started from.
+        fresh = user_config.load_global_prefs()
+        cur = fresh.hosted_account
+        if cur is None or cur.id != ref.id:
+            # Unlinked, or re-linked to another account, while we were
+            # away. The answer in hand describes a link that no longer
+            # exists; discard it rather than stamp it onto the new one.
+            return fresh
+        fresh.hosted_account = cur.model_copy(
+            update={"email": payload.email, "display_name": payload.display_name}
+        )
+        user_config.save_global_prefs(fresh)
+        return fresh
+
     @app.get("/api/settings/hosted-sync", response_model=HostedSyncSettings)
     async def get_hosted_sync_settings() -> HostedSyncSettings:
         if _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
         prefs = user_config.load_global_prefs()
+        prefs = await _refresh_hosted_account(prefs)
         return HostedSyncSettings(
             base_url=prefs.hosted_base_url,
             token_set=bool(prefs.hosted_token),
@@ -14766,11 +14902,11 @@ def create_app(
                 prefs.hosted_account = user_config.HostedAccountRef(
                     id=str(account.get("id", "")),
                     email=str(account.get("email", "")),
-                    # Snapshot, not a live read: a display name set later
-                    # through PATCH /api/me (#867) does not reach the
-                    # desktop chip until the device is linked again. A
-                    # sync-scoped token cannot read /api/me, so refreshing
-                    # this would need a new route - out of scope.
+                    # The initial snapshot. display_name is typically
+                    # NULL at this moment -- an account sets its name on
+                    # the web afterwards -- so this is a starting point,
+                    # not the last word. GET /api/settings/hosted-sync
+                    # refreshes it from /api/sync/whoami (#877).
                     display_name=account.get("display_name"),
                     device_name=str(verdict.get("device_name") or socket.gethostname()),
                     linked_at=datetime.now(UTC),

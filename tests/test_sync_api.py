@@ -347,3 +347,67 @@ def test_put_doc_version_conflict_409(hosted_app: tuple[TestClient, _CapturingSe
     )
     assert resp.status_code == 409, resp.text
     assert resp.json()["detail"]["code"] == "version_conflict"
+
+
+# whoami (#877): the desktop's only way to refresh its cached account
+
+
+def test_whoami_returns_identity_under_a_bearer(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    client.patch("/api/me", json={"display_name": "Mathias A"})
+    headers = _bearer_for(client)
+
+    resp = client.get("/api/sync/whoami", headers=headers)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["email"] == "owner@example.com"
+    assert body["display_name"] == "Mathias A"
+    assert body["id"]
+
+
+def test_whoami_carries_no_credential(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    # Identity only. The desktop caches this body into config.yaml; a
+    # token or session id leaking into it would be a credential written
+    # to a plaintext file the SPA can read back.
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    headers = _bearer_for(client)
+
+    body = client.get("/api/sync/whoami", headers=headers).json()
+
+    assert set(body) == {"id", "email", "display_name"}
+
+
+def test_whoami_null_display_name_for_an_unnamed_account(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    client, sender = hosted_app
+    login(client, sender, "unnamed@example.com")
+    headers = _bearer_for(client)
+
+    assert client.get("/api/sync/whoami", headers=headers).json()["display_name"] is None
+
+
+def test_whoami_reachable_under_a_session_cookie(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    # Not bearer-only: the route is ordinary hosted surface, and a
+    # cookie-scoped caller is unrestricted.
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+
+    assert client.get("/api/sync/whoami").status_code == 200
+
+
+def test_whoami_404s_in_local_mode() -> None:
+    from splitsmith.ui.server import create_app
+
+    app = create_app()
+    with TestClient(app) as client:
+        assert client.get("/api/sync/whoami").status_code == 404

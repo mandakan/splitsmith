@@ -85,6 +85,24 @@ class SyncMatchCreateResponse(BaseModel):
     origin: str
 
 
+class SyncWhoAmIResponse(BaseModel):
+    """Body for ``GET /api/sync/whoami`` (#877).
+
+    Identity only, never a credential -- the same rule
+    ``HostedSyncSettings`` states for the desktop's own settings body.
+
+    Exists because the desktop caches ``email`` / ``display_name`` into
+    ``config.yaml`` at device-link time and had no way to refresh them:
+    its token is sync-scoped, and ``_auth_gate`` gives that scope a 403
+    on ``/api/me`` deliberately (#719). Widening the scope for a label
+    would have undone that containment; this route is the narrow half.
+    """
+
+    id: str
+    email: str
+    display_name: str | None = None
+
+
 class SyncDocVersionResponse(BaseModel):
     """Response shared by all three doc-upsert routes."""
 
@@ -324,6 +342,29 @@ def _validate_media_key(key: str, match_id: str) -> None:
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
+
+@router.get("/whoami", response_model=SyncWhoAmIResponse)
+async def whoami(user: Any = Depends(_current_user)) -> SyncWhoAmIResponse:
+    """The account this credential belongs to, as the desktop chip renders it.
+
+    Read-only with respect to account state, and cheap enough to sit in
+    front of a UI paint -- the desktop calls it behind a chip mount.
+
+    Not free of side effects, though: like every desktop-token call it
+    goes through ``DesktopTokenAuth``, which stamps ``last_used_at`` on
+    the token row. Since #877 the desktop refreshes at most once per
+    ``HOSTED_ACCOUNT_REFRESH_TTL_S`` for an app that is merely *open*,
+    so that column now means "last contacted" rather than "last
+    synced". It is what the account page shows as "Last used" before an
+    operator revokes a device; nothing expires off it.
+    """
+    _hosted_gate()
+    return SyncWhoAmIResponse(
+        id=str(user.id),
+        email=str(user.email),
+        display_name=user.display_name,
+    )
 
 
 @router.post("/matches", response_model=SyncMatchCreateResponse)

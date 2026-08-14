@@ -15,6 +15,8 @@ What matters here and is easy to get wrong:
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -46,10 +48,31 @@ class _FakeHosted:
     def __init__(self, verdicts: list[dict], *, revoke_status: int = 200) -> None:
         self.verdicts = verdicts
         self.revoke_status = revoke_status
+        # The bearer whoami is expected to see. Defaults to the token the
+        # ``_link_account`` fixture writes; the two device-flow tests that
+        # link with a *different* token (the one the approval verdict
+        # itself scripts) override this before the call that reaches
+        # whoami with it (#877 review wave 2) -- a hard-coded constant
+        # here rejected a legitimate token and the resulting
+        # AssertionError was silently swallowed by the refresh's own
+        # broad except, leaving the refresh path unexercised.
+        self.expected_bearer = "desktop-token"
         self.authorizes = 0
         self.polls = 0
         self.revokes = 0
         self.built_against: list[str] = []
+        self.built_kwargs: list[dict] = []
+        self.whoami_calls = 0
+        # dict | None picks the "not set" default (empty body); anything
+        # else (list, str, ...) scripts a 200 whose body is not the shape
+        # SyncWhoAmIResponse declares (#877 review).
+        self.whoami_payload: dict | list | str | None = None
+        self.whoami_status = 200
+        self.whoami_auth: list[str | None] = []
+        # Fires while the refresh is parked in the threadpool, i.e. the
+        # window in which another writer can touch config.yaml (#877
+        # review).
+        self.whoami_hook: Callable[[], None] | None = None
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -73,12 +96,30 @@ class _FakeHosted:
         if path == "/api/device/session":
             self.revokes += 1
             return httpx.Response(self.revoke_status, json={"revoked": True})
+        if path == "/api/sync/whoami":
+            self.whoami_calls += 1
+            self.whoami_auth.append(request.headers.get("authorization"))
+            # The route is authenticated by the desktop token; a refresh
+            # that stopped sending it would 401 in production and degrade
+            # silently to the cached snapshot -- #877's own bug, back and
+            # invisible unless the double insists on the credential.
+            expected = f"Bearer {self.expected_bearer}"
+            assert (
+                self.whoami_auth[-1] == expected
+            ), f"whoami reached the hosted side with the wrong bearer: {self.whoami_auth[-1]!r}"
+            if self.whoami_hook is not None:
+                self.whoami_hook()
+            if self.whoami_status != 200:
+                return httpx.Response(self.whoami_status, json={"detail": "nope"})
+            body = self.whoami_payload if self.whoami_payload is not None else {}
+            return httpx.Response(200, json=body)
         raise AssertionError(f"unexpected hosted call: {path}")
 
 
 def _install_fake(monkeypatch, fake: _FakeHosted) -> None:
-    def _build(base_url: str, *, token: str | None = None) -> HostedSyncClient:
+    def _build(base_url: str, *, token: str | None = None, timeout: float = 30.0) -> HostedSyncClient:
         fake.built_against.append(base_url)
+        fake.built_kwargs.append({"token": token, "timeout": timeout})
         return HostedSyncClient(
             http=httpx.Client(
                 base_url=base_url,
@@ -130,7 +171,8 @@ def test_approval_writes_token_and_account_without_echoing_the_token(tmp_path: P
     monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
     client = _local_app(tmp_path)
     client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
-    _install_fake(monkeypatch, _FakeHosted([dict(_APPROVED)]))
+    fake = _FakeHosted([dict(_APPROVED)])
+    _install_fake(monkeypatch, fake)
 
     client.post(START)
     status = client.get(STATUS)
@@ -145,6 +187,15 @@ def test_approval_writes_token_and_account_without_echoing_the_token(tmp_path: P
     assert prefs.hosted_account.email == "shooter@example.com"
     assert prefs.hosted_account.device_name == "gaspode"
 
+    # The GET below refreshes the cached snapshot, which builds its
+    # hosted client with the token approval just linked -- not
+    # "desktop-token" (#877 review wave 2). A matching whoami payload
+    # keeps the refresh a clean no-op (the account is unchanged) rather
+    # than tripping the response-shape ValidationError the double's
+    # empty default body would otherwise cause -- that would also be
+    # silently swallowed, and this test is not the one about that path.
+    fake.expected_bearer = "sync-token-value"
+    fake.whoami_payload = {"id": "u1", "email": "shooter@example.com", "display_name": None}
     settings = client.get("/api/settings/hosted-sync")
     assert settings.json()["token_set"] is True
     assert settings.json()["account"]["email"] == "shooter@example.com"
@@ -333,9 +384,19 @@ def test_saving_a_pasted_token_clears_the_linked_account(tmp_path: Path, monkeyp
     monkeypatch.setenv(user_config.ENV_HOME, str(tmp_path / "cfg"))
     client = _local_app(tmp_path)
     client.put("/api/settings/hosted-sync", json={"base_url": "https://hosted.example"})
-    _install_fake(monkeypatch, _FakeHosted([dict(_APPROVED)]))
+    fake = _FakeHosted([dict(_APPROVED)])
+    _install_fake(monkeypatch, fake)
     client.post(START)
     assert client.get(STATUS).json()["status"] == "approved"
+    # The GET below refreshes the cached snapshot, which builds its
+    # hosted client with the token approval just linked -- not
+    # "desktop-token" (#877 review wave 2). A matching whoami payload
+    # keeps the refresh a clean no-op (the account is unchanged) rather
+    # than tripping the response-shape ValidationError the double's
+    # empty default body would otherwise cause -- that would also be
+    # silently swallowed, and this test is not the one about that path.
+    fake.expected_bearer = "sync-token-value"
+    fake.whoami_payload = {"id": "u1", "email": "shooter@example.com", "display_name": None}
     assert client.get("/api/settings/hosted-sync").json()["account"] is not None
 
     resp = client.put(
@@ -572,3 +633,256 @@ def test_device_routes_404_in_hosted_mode(
     assert client.post(START).status_code == 404
     assert client.get(STATUS).status_code == 404
     assert client.delete(SESSION).status_code == 404
+
+
+# The cached account snapshot refreshes itself (#877)
+
+
+def _link_account(
+    tmp_path: Path, monkeypatch, hosted: _FakeHosted, *, base_url: str = "https://hosted.example"
+) -> TestClient:
+    """A local app with config.yaml already holding a linked account.
+
+    Written directly rather than driven through the device flow: this
+    file already covers the flow, and these tests are about what happens
+    to the snapshot afterwards.
+
+    ``base_url`` is overridable so a malformed one (#877 review) can be
+    written straight into config.yaml the way a hand-edited file would -
+    ``GlobalPrefs.hosted_base_url`` is a bare ``str`` with no format
+    validation anywhere.
+
+    The double is built with the ``token`` the route passes, as a real
+    ``_build_device_client`` does, and records every kwarg: a fixture
+    that drops them cannot see a refresh lose its credential or its
+    timeout (#877 review).
+    """
+    monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
+    prefs = user_config.load_global_prefs()
+    prefs.hosted_base_url = base_url
+    prefs.hosted_token = "desktop-token"
+    prefs.hosted_account = user_config.HostedAccountRef(
+        id="u1",
+        email="owner@example.com",
+        display_name=None,
+        device_name="mac studio",
+        linked_at=datetime.now(UTC),
+    )
+    user_config.save_global_prefs(prefs)
+    client = _local_app(tmp_path)
+    _install_fake(monkeypatch, hosted)
+    return client
+
+
+def test_settings_picks_up_a_display_name_set_on_the_web(tmp_path: Path, monkeypatch) -> None:
+    hosted = _FakeHosted([])
+    hosted.whoami_payload = {"id": "u1", "email": "owner@example.com", "display_name": "Mathias A"}
+    client = _link_account(tmp_path, monkeypatch, hosted)
+
+    body = client.get("/api/settings/hosted-sync").json()
+
+    # Asserted first, and separately from the outcome: the route is
+    # authenticated, so a refresh that stopped sending the bearer would
+    # 401 in production and the broad except would degrade silently to
+    # the cached snapshot -- #877 itself, back. Left to the outcome
+    # assertion alone, the only symptom is a display_name that stayed
+    # None, which reads as a dozen other things (#877 review).
+    assert hosted.whoami_auth == ["Bearer desktop-token"]
+    # ...and it sits in front of a UI paint, so it uses the short budget
+    # rather than the 30s the device-flow calls take.
+    assert hosted.built_kwargs == [
+        {"token": "desktop-token", "timeout": server_mod.HOSTED_ACCOUNT_REFRESH_TIMEOUT_S}
+    ]
+    assert server_mod.HOSTED_ACCOUNT_REFRESH_TIMEOUT_S == 5.0
+
+    assert body["account"]["display_name"] == "Mathias A"
+    assert hosted.whoami_calls == 1
+    # and it survives a restart, i.e. it reached config.yaml
+    assert user_config.load_global_prefs().hosted_account.display_name == "Mathias A"
+
+
+def test_settings_picks_up_an_email_change_too(tmp_path: Path, monkeypatch) -> None:
+    hosted = _FakeHosted([])
+    hosted.whoami_payload = {"id": "u1", "email": "new@example.com", "display_name": None}
+    client = _link_account(tmp_path, monkeypatch, hosted)
+
+    assert client.get("/api/settings/hosted-sync").json()["account"]["email"] == "new@example.com"
+
+
+def test_an_upstream_failure_returns_the_cached_account(tmp_path: Path, monkeypatch) -> None:
+    # #738: a transient failure must not make a linked operator look
+    # unlinked. The chip reads a missing account as "sign in".
+    hosted = _FakeHosted([])
+    hosted.whoami_status = 503
+    client = _link_account(tmp_path, monkeypatch, hosted)
+
+    resp = client.get("/api/settings/hosted-sync")
+
+    assert resp.status_code == 200
+    assert resp.json()["account"]["email"] == "owner@example.com"
+
+
+def test_a_401_does_not_unlink_the_device(tmp_path: Path, monkeypatch) -> None:
+    # Deliberate: auto-unlinking on an upstream status code would mean a
+    # hosted outage signs every desktop install out. Revocation still
+    # surfaces on the next sync.
+    hosted = _FakeHosted([])
+    hosted.whoami_status = 401
+    client = _link_account(tmp_path, monkeypatch, hosted)
+
+    assert client.get("/api/settings/hosted-sync").json()["account"] is not None
+    assert user_config.load_global_prefs().hosted_token == "desktop-token"
+
+
+def test_a_second_call_inside_the_ttl_does_not_hit_upstream(tmp_path: Path, monkeypatch) -> None:
+    # GlobalBar and the mobile drawer each render a chip with independent
+    # state, and both refetch on route changes. Without the TTL a desktop
+    # session issues a steady trickle of upstream calls for a label.
+    hosted = _FakeHosted([])
+    hosted.whoami_payload = {"id": "u1", "email": "owner@example.com", "display_name": "Mathias A"}
+    client = _link_account(tmp_path, monkeypatch, hosted)
+
+    client.get("/api/settings/hosted-sync")
+    client.get("/api/settings/hosted-sync")
+
+    assert hosted.whoami_calls == 1
+
+
+def test_a_failed_refresh_also_consumes_the_ttl(tmp_path: Path, monkeypatch) -> None:
+    # Otherwise every chip mount retries against a dead host and blocks
+    # for the timeout each time.
+    hosted = _FakeHosted([])
+    hosted.whoami_status = 503
+    client = _link_account(tmp_path, monkeypatch, hosted)
+
+    client.get("/api/settings/hosted-sync")
+    client.get("/api/settings/hosted-sync")
+
+    assert hosted.whoami_calls == 1
+
+
+def test_an_unchanged_response_does_not_rewrite_config(tmp_path: Path, monkeypatch) -> None:
+    hosted = _FakeHosted([])
+    hosted.whoami_payload = {"id": "u1", "email": "owner@example.com", "display_name": None}
+    client = _link_account(tmp_path, monkeypatch, hosted)
+    config_path = user_config.user_config_dir() / user_config.CONFIG_FILENAME
+    before = config_path.stat().st_mtime_ns
+
+    client.get("/api/settings/hosted-sync")
+
+    assert config_path.stat().st_mtime_ns == before
+
+
+def test_an_unlinked_install_makes_no_upstream_call(tmp_path: Path, monkeypatch) -> None:
+    hosted = _FakeHosted([])
+    monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
+    client = _local_app(tmp_path)
+    _install_fake(monkeypatch, hosted)
+
+    assert client.get("/api/settings/hosted-sync").json()["account"] is None
+    assert hosted.whoami_calls == 0
+
+
+def test_a_signout_underneath_an_in_flight_refresh_is_not_reverted(tmp_path: Path, monkeypatch) -> None:
+    """The refresh is a WRITER on the one route the SPA fires by itself.
+
+    It loads prefs, awaits whoami (up to 5s), then saves. If it saves
+    the object it loaded before the await, it persists the whole
+    ``GlobalPrefs`` - including ``hosted_token`` - and a sign-out that
+    landed in that window is undone: a revoked bearer and a cleared
+    account link are both back in config.yaml, and the chip renders the
+    account again on the next mount. That is #738 in reverse (#877
+    review).
+    """
+    hosted = _FakeHosted([])
+    hosted.whoami_payload = {"id": "u1", "email": "owner@example.com", "display_name": "Mathias A"}
+    client = _link_account(tmp_path, monkeypatch, hosted)
+    seen: dict = {}
+
+    def _sign_out_now() -> None:
+        # The refresh is parked in the threadpool right here; the
+        # operator clicks sign out.
+        seen["unlink"] = client.delete(SESSION).json()
+        seen["disk_after_unlink"] = user_config.load_global_prefs()
+
+    hosted.whoami_hook = _sign_out_now
+
+    body = client.get("/api/settings/hosted-sync").json()
+    disk = user_config.load_global_prefs()
+
+    # The sign-out itself did its job...
+    assert seen["unlink"] == {"cleared": True, "hosted_revoked": True}
+    assert seen["disk_after_unlink"].hosted_token is None
+    assert seen["disk_after_unlink"].hosted_account is None
+    # ...and the refresh that finished afterwards left it alone.
+    assert disk.hosted_token is None, "SIGN-OUT REVERTED: revoked token is back on disk"
+    assert disk.hosted_account is None, "SIGN-OUT REVERTED: account is back on disk"
+    # The response agrees with disk rather than reporting the stale
+    # snapshot the request started from.
+    assert body["account"] is None
+    assert body["token_set"] is False
+
+
+def test_a_relink_to_another_account_underneath_a_refresh_wins(tmp_path: Path, monkeypatch) -> None:
+    """The stale response must not be merged onto a different account.
+
+    Same window as above, but config.yaml now holds a *different*
+    hosted account. The in-flight answer describes the old one, so it
+    is discarded outright rather than stamped onto the new link.
+    """
+    hosted = _FakeHosted([])
+    hosted.whoami_payload = {"id": "u1", "email": "owner@example.com", "display_name": "Mathias A"}
+    client = _link_account(tmp_path, monkeypatch, hosted)
+
+    def _relink_now() -> None:
+        prefs = user_config.load_global_prefs()
+        prefs.hosted_account = user_config.HostedAccountRef(
+            id="u2",
+            email="other@example.com",
+            display_name="Someone Else",
+            device_name="thinkpad",
+            linked_at=datetime.now(UTC),
+        )
+        user_config.save_global_prefs(prefs)
+
+    hosted.whoami_hook = _relink_now
+
+    body = client.get("/api/settings/hosted-sync").json()
+
+    assert body["account"]["email"] == "other@example.com"
+    assert body["account"]["display_name"] == "Someone Else"
+    disk = user_config.load_global_prefs()
+    assert disk.hosted_account.id == "u2"
+    assert disk.hosted_account.email == "other@example.com"
+
+
+def test_a_malformed_base_url_returns_the_cached_account(tmp_path: Path, monkeypatch) -> None:
+    # httpx.InvalidURL is NOT an httpx.HTTPError subclass, and
+    # hosted_base_url is a bare str with no format validation anywhere -
+    # a hand-edited config.yaml reaches this. Must degrade to the cached
+    # snapshot, not 500 a route whose whole job is to report it (#877
+    # review).
+    hosted = _FakeHosted([])
+    client = _link_account(tmp_path, monkeypatch, hosted, base_url="http://[::1")
+
+    resp = client.get("/api/settings/hosted-sync")
+
+    assert resp.status_code == 200
+    assert resp.json()["account"]["email"] == "owner@example.com"
+    # The URL never resolves to a request, so the fake never sees a call.
+    assert hosted.whoami_calls == 0
+
+
+def test_a_non_dict_whoami_body_returns_the_cached_account(tmp_path: Path, monkeypatch) -> None:
+    # A 200 whose JSON body isn't the SyncWhoAmIResponse shape (a bare
+    # list here) must degrade to the cached snapshot rather than raise
+    # out of unvalidated dict access (#877 review).
+    hosted = _FakeHosted([])
+    hosted.whoami_payload = []
+    client = _link_account(tmp_path, monkeypatch, hosted)
+
+    resp = client.get("/api/settings/hosted-sync")
+
+    assert resp.status_code == 200
+    assert resp.json()["account"]["email"] == "owner@example.com"
+    assert hosted.whoami_calls == 1
