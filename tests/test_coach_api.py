@@ -307,6 +307,10 @@ def test_get_coach_stays_source_anchored_when_legacy_trim_ambiguous(tmp_path: Pa
     body = resp.json()
     assert body["beep_time"] == pytest.approx(8.0)
     assert body["videos"][0]["beep_in_clip"] == pytest.approx(8.0)
+    # A refused trim must label source too - a trim file exists on disk
+    # here, so "file exists => trim" would pass the other kind tests but
+    # mislabel this one and pin the SPA to a clip stream_video refuses.
+    assert body["videos"][0]["kind"] == "source"
     assert body["shots"][0]["time_absolute"] == pytest.approx(8.0 + 1.5)
 
 
