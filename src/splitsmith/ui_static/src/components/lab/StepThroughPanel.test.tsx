@@ -1,19 +1,20 @@
 /**
- * StepThroughPanel's two opt-in props, and the legacy defaults they
- * must not disturb.
+ * StepThroughPanel's audio-arming and selection semantics (the
+ * ``autoPlay`` / ``preserveSelection`` compat props for the deleted
+ * legacy Lab page are gone -- #901 -- so these are now the panel's only
+ * behavior, not an opt-in):
  *
- * ``autoPlay`` -- the panel loops a gunshot snippet as soon as a
- * candidate is selected. That is correct behind legacy Lab.tsx's
- * explicit "Step through" toggle (the operator asked for audio) and
- * wrong when the panel is permanently on screen, as it is on
- * /dev/corpus/:slug: opening a fixture is a user gesture, so the
- * AudioContext resumes and the page starts making noise on arrival.
+ * Playback starts silent -- the panel is permanently on screen on
+ * /dev/corpus/:slug, opening a fixture is a user gesture, so the
+ * AudioContext resumes and an auto-playing loop would greet whoever
+ * arrived. Once the operator starts playback the panel arms itself and
+ * candidate changes auto-play; navigating to another fixture disarms
+ * it again (a new fixture is a new labeling session).
  *
- * ``preserveSelection`` -- the panel re-snaps the selection to the head
- * of its own filtered list whenever that list is rebuilt, and a label
- * save rebuilds it (the run comes back with fresh candidate objects).
- * With a candidate table beside the panel feeding it selections, that
- * means every save moves the operator off the row they just labeled.
+ * Selections from outside the panel's filter (the side-by-side
+ * candidate table) are followed, and survive the list rebuild a label
+ * save causes -- the panel falls back to the head of its list only
+ * when the candidate is gone from the fixture entirely.
  *
  * jsdom has no AudioContext, so SnippetPlayer is stubbed -- but the stub
  * still surfaces the ``playing`` prop, which is exactly what decides
@@ -69,11 +70,14 @@ function candidate(n: number, voteTotal: number): LabEvalFixture["candidates"][n
 /** #1 is "borderline" (1-3 votes) so the panel's default filter keeps
  *  it; #2 is unanimous, so the default filter excludes it. Selecting #2
  *  therefore models "the operator picked a row this panel filters out". */
-function fixtureWith(candidates = [candidate(1, 2), candidate(2, 4)]): LabEvalFixture {
+function fixtureWith(
+  candidates = [candidate(1, 2), candidate(2, 4)],
+  slug = "fixture-alpha",
+): LabEvalFixture {
   return {
-    slug: "fixture-alpha",
-    audit_path: "/fixtures/fixture-alpha.json",
-    audio_path: "/fixtures/fixture-alpha.wav",
+    slug,
+    audit_path: `/fixtures/${slug}.json`,
+    audio_path: `/fixtures/${slug}.wav`,
     source_video: null,
     expected_rounds: 12,
     candidates,
@@ -112,19 +116,14 @@ function renderPanel(props: Partial<React.ComponentProps<typeof StepThroughPanel
   return { ...view, onSelect };
 }
 
-describe("StepThroughPanel autoPlay", () => {
-  it("plays on selection by default -- legacy Lab.tsx semantics", () => {
+describe("StepThroughPanel audio arming", () => {
+  it("starts silent", () => {
     renderPanel();
-    expect(screen.getByTestId("snippet")).toHaveAttribute("data-playing", "true");
-  });
-
-  it("starts silent when autoPlay is false", () => {
-    renderPanel({ autoPlay: false });
     expect(screen.getByTestId("snippet")).toHaveAttribute("data-playing", "false");
   });
 
-  it("plays once the operator asks for it, then stays armed", async () => {
-    const { rerender, onSelect } = renderPanel({ autoPlay: false });
+  it("plays once the operator asks for it, then stays armed across candidates", async () => {
+    const { rerender, onSelect } = renderPanel();
     await userEvent.keyboard(" ");
     expect(screen.getByTestId("snippet")).toHaveAttribute("data-playing", "true");
 
@@ -138,20 +137,52 @@ describe("StepThroughPanel autoPlay", () => {
         registerAdvancer={vi.fn()}
         savingLabel={null}
         onLabel={vi.fn()}
-        autoPlay={false}
-        preserveSelection
+      />,
+    );
+    expect(screen.getByTestId("snippet")).toHaveAttribute("data-playing", "true");
+  });
+
+  it("disarms when the fixture changes -- prev/next must not arrive with sound", async () => {
+    const { rerender, onSelect } = renderPanel();
+    await userEvent.keyboard(" ");
+    expect(screen.getByTestId("snippet")).toHaveAttribute("data-playing", "true");
+
+    // The panel stays mounted across prev/next navigation; a new slug
+    // is a new labeling session and starts silent again.
+    rerender(
+      <StepThroughPanel
+        fixture={fixtureWith(undefined, "fixture-bravo")}
+        selectedCn={1}
+        onSelect={onSelect}
+        registerAdvancer={vi.fn()}
+        savingLabel={null}
+        onLabel={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("snippet")).toHaveAttribute("data-playing", "false");
+  });
+
+  it("stays armed across a label save of the same fixture", async () => {
+    const { rerender, onSelect } = renderPanel();
+    await userEvent.keyboard(" ");
+
+    // A save hands back fresh candidate objects under the same slug --
+    // that is mid-session, not a navigation, so playback continues.
+    rerender(
+      <StepThroughPanel
+        fixture={fixtureWith([candidate(1, 2), { ...candidate(2, 4), subclass: "paper" }])}
+        selectedCn={1}
+        onSelect={onSelect}
+        registerAdvancer={vi.fn()}
+        savingLabel={null}
+        onLabel={vi.fn()}
       />,
     );
     expect(screen.getByTestId("snippet")).toHaveAttribute("data-playing", "true");
   });
 });
 
-describe("StepThroughPanel preserveSelection", () => {
-  it("re-snaps to the head of its own list by default -- legacy semantics", () => {
-    const { onSelect } = renderPanel({ selectedCn: 2 });
-    expect(onSelect).toHaveBeenCalledWith(1);
-  });
-
+describe("StepThroughPanel selection", () => {
   it("keeps a selection the filter excludes, across list rebuilds", () => {
     const onSelect = vi.fn();
     const props = {
@@ -160,7 +191,6 @@ describe("StepThroughPanel preserveSelection", () => {
       registerAdvancer: vi.fn(),
       savingLabel: null,
       onLabel: vi.fn(),
-      preserveSelection: true,
     };
     const { rerender } = render(<StepThroughPanel fixture={fixtureWith()} {...props} />);
     expect(onSelect).not.toHaveBeenCalled();
@@ -183,7 +213,7 @@ describe("StepThroughPanel preserveSelection", () => {
     // Candidate #2 is unanimous, so the default borderline filter
     // excludes it; the panel follows the selection but it has no
     // position in the queue -- "0 / 1" would claim it does.
-    renderPanel({ selectedCn: 2, preserveSelection: true });
+    renderPanel({ selectedCn: 2 });
     expect(screen.getByText(/-- \/ 1/)).toBeInTheDocument();
     expect(screen.getByText(/selection is outside this filter/)).toBeInTheDocument();
   });
@@ -198,7 +228,6 @@ describe("StepThroughPanel preserveSelection", () => {
         registerAdvancer={vi.fn()}
         savingLabel={null}
         onLabel={vi.fn()}
-        preserveSelection
       />,
     );
     expect(onSelect).toHaveBeenCalledWith(1);

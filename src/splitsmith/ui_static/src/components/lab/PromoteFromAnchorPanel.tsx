@@ -1,7 +1,10 @@
 /**
  * Promote-from-anchor trigger (issue #125). Moved out of legacy
- * ``Lab.tsx`` (#886 follow-up) alongside {@link PromoteStagesPanel} --
- * see that file's header for the popover-vs-section ``variant`` split.
+ * ``Lab.tsx`` (#886 follow-up) alongside {@link PromoteStagesPanel}.
+ * Renders as a full-width section under its trigger button (the
+ * legacy page's absolutely-positioned popover variant died with that
+ * page, #901); the wrapper is ``display: contents`` so the button and
+ * the expanded panel become independent items of the caller's row.
  */
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -10,15 +13,7 @@ import { AlertCircle, Link2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api, type Job, type LabFixtureRecord } from "@/lib/api";
 
-export function PromoteFromAnchorPanel({
-  fixtures,
-  variant = "popover",
-}: {
-  fixtures: LabFixtureRecord[];
-  /** ``popover``: legacy Lab.tsx's absolutely-positioned 384px dropdown.
-   *  ``section``: layout-neutral full-width block for the Corpus page. */
-  variant?: "popover" | "section";
-}) {
+export function PromoteFromAnchorPanel({ fixtures }: { fixtures: LabFixtureRecord[] }) {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [anchorSlug, setAnchorSlug] = useState("");
@@ -113,10 +108,8 @@ export function PromoteFromAnchorPanel({
 
   const fieldCls = "w-full rounded border border-rule bg-bg px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-led";
 
-  const isSection = variant === "section";
-
   return (
-    <div className={isSection ? "contents" : "relative"}>
+    <div className="contents">
       <Button
         variant="outline"
         size="sm"
@@ -129,21 +122,11 @@ export function PromoteFromAnchorPanel({
       </Button>
       {open && (
         <div
-          className={
-            isSection
-              ? "mt-3 w-full rounded-md border border-rule bg-surface p-5"
-              : "absolute right-0 top-full z-20 mt-1 w-96 rounded-md border border-rule bg-surface-2 p-4 shadow-md"
-          }
-          style={isSection ? { boxShadow: "inset 0 1px 0 rgba(6,182,212,0.1)" } : undefined}
+          className="mt-3 w-full rounded-md border border-rule bg-surface p-5"
+          style={{ boxShadow: "inset 0 1px 0 rgba(6,182,212,0.1)" }}
         >
-          <div
-            className={
-              isSection
-                ? "mb-3 flex items-center gap-2.5 font-mono text-[0.6875rem] font-bold uppercase tracking-[0.18em] text-beep"
-                : "text-xs font-semibold uppercase tracking-wide text-muted mb-3"
-            }
-          >
-            {isSection && <span aria-hidden className="h-px w-6 bg-beep" />}
+          <div className="mb-3 flex items-center gap-2.5 font-mono text-[0.6875rem] font-bold uppercase tracking-[0.18em] text-beep">
+            <span aria-hidden className="h-px w-6 bg-beep" />
             Promote from anchor
           </div>
           <div className="flex flex-col gap-2.5">

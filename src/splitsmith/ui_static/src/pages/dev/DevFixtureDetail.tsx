@@ -613,17 +613,6 @@ export function DevFixtureDetail() {
                 </span>
               </div>
               <div className="p-3">
-                {/* autoPlay off: legacy hid this panel behind a "Step
-                    through" toggle, so starting audio was something the
-                    operator had asked for. Here it is on screen the
-                    moment a corpus row is clicked -- and that click is a
-                    user gesture, so the AudioContext would resume and
-                    loop a gunshot at whoever just opened the page. The
-                    play button and space still start it.
-                    preserveSelection on: the candidate table beside it
-                    is a real selection source, and a label save rebuilds
-                    the panel's list, so without this every save would
-                    snap the operator off the row they just labeled. */}
                 <StepThroughPanel
                   fixture={focused}
                   selectedCn={selectedCn}
@@ -631,8 +620,6 @@ export function DevFixtureDetail() {
                   registerAdvancer={setAdvancer}
                   savingLabel={savingLabel}
                   onLabel={handleLabel}
-                  autoPlay={false}
-                  preserveSelection
                 />
               </div>
             </section>

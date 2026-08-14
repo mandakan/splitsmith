@@ -20,6 +20,26 @@ type StepSort =
   | "confidence_asc"
   | "chronological";
 
+/**
+ * The always-on-screen labeling panel for /dev/corpus/:slug (its only
+ * consumer since the legacy Lab page died -- the ``autoPlay`` /
+ * ``preserveSelection`` compat props went with it, #901).
+ *
+ * Playback starts silent: opening a fixture is a user gesture, so the
+ * AudioContext is resumable and auto-play would loop a gunshot at
+ * whoever arrived. Once the operator starts playback (play button or
+ * space) the panel arms itself and later candidate changes auto-play,
+ * which is what makes stepping feel continuous; navigating to another
+ * fixture disarms it again -- a new fixture is a new labeling session
+ * and must not open with sound.
+ *
+ * Selections made outside the panel's own filter (the candidate table
+ * beside it, J/K over the full universe) are treated as intentional
+ * and followed rather than re-snapped to the head of the list -- a
+ * label save rebuilds the list, and re-snapping would move the
+ * operator off the row they just labeled. The panel falls back to the
+ * head only when the candidate is gone from the fixture entirely.
+ */
 export function StepThroughPanel({
   fixture,
   selectedCn,
@@ -27,8 +47,6 @@ export function StepThroughPanel({
   registerAdvancer,
   savingLabel,
   onLabel,
-  autoPlay = true,
-  preserveSelection = false,
 }: {
   fixture: LabEvalFixture;
   selectedCn: number | null;
@@ -39,37 +57,30 @@ export function StepThroughPanel({
     cn: number,
     patch: { reason?: string | null; subclass?: string | null },
   ) => void;
-  /** Start playing as soon as a candidate is selected. True (legacy) is
-   *  right when the panel is behind an explicit "Step through" toggle:
-   *  the operator asked for audio. False is right when the panel is
-   *  always on screen -- arriving on a page must not loop a gunshot at
-   *  someone. Once the operator starts playback (play button or space)
-   *  the panel arms itself and later candidate changes auto-play either
-   *  way, which is what makes stepping feel continuous. */
-  autoPlay?: boolean;
-  /** Treat a selection that isn't in this panel's filtered list as
-   *  intentional (it came from a candidate table or J/K over the full
-   *  universe) and leave it alone, falling back to the head of the list
-   *  only when the candidate is gone from the fixture entirely. False
-   *  (legacy) re-snaps to the head of the list whenever the filtered
-   *  list is rebuilt -- including on every label save, which silently
-   *  moves the operator off the row they were labeling. */
-  preserveSelection?: boolean;
 }) {
   const [filter, setFilter] = useState<StepFilter>("borderline");
   const [classFilter, setClassFilter] = useState<string>("");
   const [sort, setSort] = useState<StepSort>("ensemble_score_desc");
   const [preMs, setPreMs] = useState(100);
   const [postMs, setPostMs] = useState(300);
-  const [playing, setPlaying] = useState(autoPlay);
+  const [playing, setPlaying] = useState(false);
 
-  // Armed once the operator has asked for audio at least once. Starts
-  // armed under the legacy autoPlay default, so nothing changes there.
-  const armedRef = useRef(autoPlay);
+  // Armed once the operator has asked for audio at least once.
+  const armedRef = useRef(false);
   const togglePlay = useCallback(() => {
     armedRef.current = true;
     setPlaying((p) => !p);
   }, []);
+
+  // Disarm on fixture change (keyed on slug -- label saves hand back
+  // fresh fixture objects for the same slug and must not disarm): the
+  // panel stays mounted across prev/next, and a fixture the operator
+  // just navigated to must not start playing until asked.
+  const slug = fixture.slug;
+  useEffect(() => {
+    armedRef.current = false;
+    setPlaying(false);
+  }, [slug]);
 
   // Auto-play whenever the candidate changes (resumes if user paused).
   useEffect(() => {
@@ -147,30 +158,29 @@ export function StepThroughPanel({
 
   // Default selection: first item in the active list. ``ordered`` is
   // rebuilt on every label save (the run comes back with fresh candidate
-  // objects), so what counts as "the selection is gone" decides whether
-  // labeling costs the operator their place -- see preserveSelection.
+  // objects), so "the selection is gone" means gone from the *fixture*,
+  // not merely from this panel's filter -- an off-list selection is an
+  // intentional pick from the candidate table beside the panel.
   useEffect(() => {
     if (ordered.length === 0) return;
     if (selectedCn == null) {
       onSelect(ordered[0].candidate_number);
       return;
     }
-    const alive = preserveSelection
-      ? fixture.candidates.some((c) => c.candidate_number === selectedCn)
-      : ordered.some((c) => c.candidate_number === selectedCn);
+    const alive = fixture.candidates.some((c) => c.candidate_number === selectedCn);
     if (!alive) onSelect(ordered[0].candidate_number);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ordered]);
 
-  // Under preserveSelection the panel follows a selection made outside
-  // its own filter rather than showing "nothing selected" -- otherwise
-  // clicking a non-borderline row in a side-by-side candidate table
-  // would blank the player and the label buttons.
+  // Follow a selection made outside the panel's own filter rather than
+  // showing "nothing selected" -- otherwise clicking a non-borderline
+  // row in the side-by-side candidate table would blank the player and
+  // the label buttons.
   const current = useMemo(() => {
     const inList = ordered.find((c) => c.candidate_number === selectedCn) ?? null;
-    if (inList || !preserveSelection) return inList;
+    if (inList) return inList;
     return fixture.candidates.find((c) => c.candidate_number === selectedCn) ?? null;
-  }, [ordered, selectedCn, preserveSelection, fixture.candidates]);
+  }, [ordered, selectedCn, fixture.candidates]);
 
   const idxInList = current
     ? ordered.findIndex((c) => c.candidate_number === current.candidate_number)
@@ -289,8 +299,7 @@ export function StepThroughPanel({
               when it sits outside the panel filter. */}
           {idxInList >= 0 ? idxInList + 1 : "--"} / {ordered.length}
           {ordered.length === 0 && " (no candidates match filter)"}
-          {/* Only reachable under preserveSelection: the operator picked
-              a row that this filter excludes. */}
+          {/* The operator picked a row that this filter excludes. */}
           {idxInList < 0 && current && " (selection is outside this filter)"}
         </span>
       </div>

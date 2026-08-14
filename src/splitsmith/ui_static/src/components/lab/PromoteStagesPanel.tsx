@@ -2,13 +2,10 @@
  * Batch-promote every eligible stage of a match's shooters as primary
  * fixtures. Moved out of the legacy Lab page (#886 follow-up) so the
  * Corpus page could host it as a full-width expandable section instead
- * of a 640px popover. ``DevCorpus`` is the only consumer now (passes
- * ``variant="section"``) -- the legacy page rendered this component
- * with the default ``variant="popover"``, but that page is deleted
- * (#331 final task), so the popover variant is currently unexercised in
- * production. Left in place rather than removed: it's a one-line prop,
- * not dead weight, and a future full-width-constrained surface may want
- * it again.
+ * of a 640px popover; that page is deleted (#331 final task) and the
+ * popover ``variant`` went with it (#901). The wrapper renders as
+ * ``display: contents`` so the trigger button and the expanded panel
+ * become independent items of whatever row the caller lays them out in.
  *
  * The Corpus surfaces live on /dev/* URLs, outside the
  * ``/match/:matchId/`` URL scoping that match-mode surfaces ride on --
@@ -114,16 +111,9 @@ function buildBatchRows(
 export function PromoteStagesPanel({
   catalog,
   onCatalogChanged,
-  variant = "popover",
 }: {
   catalog: LabFixtureRecord[];
   onCatalogChanged: (next: LabFixtureRecord[]) => void;
-  /** ``popover``: legacy Lab.tsx's absolutely-positioned 640px dropdown.
-   *  ``section``: layout-neutral full-width block for the Corpus page --
-   *  the wrapper renders as `display:contents` so the trigger button and
-   *  the (optional) expanded panel become independent flex items of
-   *  whatever row the caller lays them out in. */
-  variant?: "popover" | "section";
 }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -330,10 +320,8 @@ export function PromoteStagesPanel({
   ).length;
   const allEligibleSelected = eligibleCount > 0 && selectedCount === eligibleCount;
 
-  const isSection = variant === "section";
-
   return (
-    <div className={isSection ? "contents" : "relative"}>
+    <div className="contents">
       <Button
         variant="outline"
         size="sm"
@@ -346,21 +334,11 @@ export function PromoteStagesPanel({
       </Button>
       {open && (
         <div
-          className={
-            isSection
-              ? "mt-3 w-full rounded-md border border-rule bg-surface p-5"
-              : "absolute right-0 top-full z-20 mt-1 w-[640px] rounded-md border border-rule bg-surface-2 p-4 shadow-md"
-          }
-          style={isSection ? { boxShadow: "inset 0 1px 0 rgba(6,182,212,0.1)" } : undefined}
+          className="mt-3 w-full rounded-md border border-rule bg-surface p-5"
+          style={{ boxShadow: "inset 0 1px 0 rgba(6,182,212,0.1)" }}
         >
-          <div
-            className={
-              isSection
-                ? "mb-3 flex items-center gap-2.5 font-mono text-[0.6875rem] font-bold uppercase tracking-[0.18em] text-beep"
-                : "text-xs font-semibold uppercase tracking-wide text-muted mb-2"
-            }
-          >
-            {isSection && <span aria-hidden className="h-px w-6 bg-beep" />}
+          <div className="mb-3 flex items-center gap-2.5 font-mono text-[0.6875rem] font-bold uppercase tracking-[0.18em] text-beep">
+            <span aria-hidden className="h-px w-6 bg-beep" />
             Promote all stages
           </div>
           <p className="text-[11px] text-muted mb-3">
