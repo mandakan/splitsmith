@@ -179,9 +179,12 @@ async def poll_device_token(body: DeviceTokenRequest, request: Request) -> Devic
             email=result.account.email,
             # Live read, not a cache - this is where the account's current
             # display_name crosses from DB state onto the wire. The desktop
-            # client is what caches this response (see server.py's
-            # get_device_status, ``prefs.hosted_account = ...``); staleness
-            # is a property of that cache, not of this read.
+            # client caches this response (see server.py's
+            # get_device_status, ``prefs.hosted_account = ...``), and since
+            # #877 that cache refreshes itself from /api/sync/whoami rather
+            # than holding whatever this poll happened to return. Which
+            # matters here: at this moment display_name is usually still
+            # NULL, because an account sets its name after linking.
             display_name=result.account.display_name,
         )
         if result.account is not None

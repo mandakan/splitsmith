@@ -109,11 +109,16 @@ class ScoreboardIdentity(BaseModel):
 class HostedAccountRef(BaseModel):
     """The hosted account this desktop install is linked to (#719).
 
-    Cached from the device-flow poll response rather than read live: the
-    sync-scoped token the flow mints cannot reach ``/api/me``, and
-    widening the scope for a cosmetic field is the wrong trade. A hosted-
-    side email change therefore will not propagate until the install
-    re-links, which is accepted.
+    Seeded from the device-flow poll and refreshed from
+    ``GET /api/sync/whoami`` whenever the SPA reads
+    ``GET /api/settings/hosted-sync`` and the cached copy is older than
+    ``HOSTED_ACCOUNT_REFRESH_TTL_S`` (#877). The refresh goes through the
+    sync surface rather than ``/api/me``, which the sync-scoped token
+    this install holds cannot reach by design.
+
+    A hosted-side name or email change therefore propagates within one
+    TTL window while the app is running, and the stored copy is what the
+    chip renders when the host is unreachable.
     """
 
     id: str

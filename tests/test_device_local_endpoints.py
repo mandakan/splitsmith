@@ -15,6 +15,7 @@ What matters here and is easy to get wrong:
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import httpx
@@ -50,6 +51,9 @@ class _FakeHosted:
         self.polls = 0
         self.revokes = 0
         self.built_against: list[str] = []
+        self.whoami_calls = 0
+        self.whoami_payload: dict | None = None
+        self.whoami_status = 200
 
     def handle(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path
@@ -73,11 +77,16 @@ class _FakeHosted:
         if path == "/api/device/session":
             self.revokes += 1
             return httpx.Response(self.revoke_status, json={"revoked": True})
+        if path == "/api/sync/whoami":
+            self.whoami_calls += 1
+            if self.whoami_status != 200:
+                return httpx.Response(self.whoami_status, json={"detail": "nope"})
+            return httpx.Response(200, json=self.whoami_payload or {})
         raise AssertionError(f"unexpected hosted call: {path}")
 
 
 def _install_fake(monkeypatch, fake: _FakeHosted) -> None:
-    def _build(base_url: str, *, token: str | None = None) -> HostedSyncClient:
+    def _build(base_url: str, *, token: str | None = None, timeout: float = 30.0) -> HostedSyncClient:
         fake.built_against.append(base_url)
         return HostedSyncClient(
             http=httpx.Client(
@@ -572,3 +581,137 @@ def test_device_routes_404_in_hosted_mode(
     assert client.post(START).status_code == 404
     assert client.get(STATUS).status_code == 404
     assert client.delete(SESSION).status_code == 404
+
+
+# The cached account snapshot refreshes itself (#877)
+
+
+def _link_account(tmp_path: Path, monkeypatch, hosted: _FakeHosted) -> TestClient:
+    """A local app with config.yaml already holding a linked account.
+
+    Written directly rather than driven through the device flow: this
+    file already covers the flow, and these tests are about what happens
+    to the snapshot afterwards.
+    """
+    monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
+    prefs = user_config.load_global_prefs()
+    prefs.hosted_base_url = "https://hosted.example"
+    prefs.hosted_token = "desktop-token"
+    prefs.hosted_account = user_config.HostedAccountRef(
+        id="u1",
+        email="owner@example.com",
+        display_name=None,
+        device_name="mac studio",
+        linked_at=datetime.now(UTC),
+    )
+    user_config.save_global_prefs(prefs)
+    client = _local_app(tmp_path)
+    monkeypatch.setattr(
+        server_mod,
+        "_build_device_client",
+        lambda base_url, **kw: HostedSyncClient(
+            http=httpx.Client(base_url=base_url, transport=httpx.MockTransport(hosted.handle))
+        ),
+    )
+    return client
+
+
+def test_settings_picks_up_a_display_name_set_on_the_web(tmp_path: Path, monkeypatch) -> None:
+    hosted = _FakeHosted([])
+    hosted.whoami_payload = {"id": "u1", "email": "owner@example.com", "display_name": "Mathias A"}
+    client = _link_account(tmp_path, monkeypatch, hosted)
+
+    body = client.get("/api/settings/hosted-sync").json()
+
+    assert body["account"]["display_name"] == "Mathias A"
+    assert hosted.whoami_calls == 1
+    # and it survives a restart, i.e. it reached config.yaml
+    assert user_config.load_global_prefs().hosted_account.display_name == "Mathias A"
+
+
+def test_settings_picks_up_an_email_change_too(tmp_path: Path, monkeypatch) -> None:
+    hosted = _FakeHosted([])
+    hosted.whoami_payload = {"id": "u1", "email": "new@example.com", "display_name": None}
+    client = _link_account(tmp_path, monkeypatch, hosted)
+
+    assert client.get("/api/settings/hosted-sync").json()["account"]["email"] == "new@example.com"
+
+
+def test_an_upstream_failure_returns_the_cached_account(tmp_path: Path, monkeypatch) -> None:
+    # #738: a transient failure must not make a linked operator look
+    # unlinked. The chip reads a missing account as "sign in".
+    hosted = _FakeHosted([])
+    hosted.whoami_status = 503
+    client = _link_account(tmp_path, monkeypatch, hosted)
+
+    resp = client.get("/api/settings/hosted-sync")
+
+    assert resp.status_code == 200
+    assert resp.json()["account"]["email"] == "owner@example.com"
+
+
+def test_a_401_does_not_unlink_the_device(tmp_path: Path, monkeypatch) -> None:
+    # Deliberate: auto-unlinking on an upstream status code would mean a
+    # hosted outage signs every desktop install out. Revocation still
+    # surfaces on the next sync.
+    hosted = _FakeHosted([])
+    hosted.whoami_status = 401
+    client = _link_account(tmp_path, monkeypatch, hosted)
+
+    assert client.get("/api/settings/hosted-sync").json()["account"] is not None
+    assert user_config.load_global_prefs().hosted_token == "desktop-token"
+
+
+def test_a_second_call_inside_the_ttl_does_not_hit_upstream(tmp_path: Path, monkeypatch) -> None:
+    # GlobalBar and the mobile drawer each render a chip with independent
+    # state, and both refetch on route changes. Without the TTL a desktop
+    # session issues a steady trickle of upstream calls for a label.
+    hosted = _FakeHosted([])
+    hosted.whoami_payload = {"id": "u1", "email": "owner@example.com", "display_name": "Mathias A"}
+    client = _link_account(tmp_path, monkeypatch, hosted)
+
+    client.get("/api/settings/hosted-sync")
+    client.get("/api/settings/hosted-sync")
+
+    assert hosted.whoami_calls == 1
+
+
+def test_a_failed_refresh_also_consumes_the_ttl(tmp_path: Path, monkeypatch) -> None:
+    # Otherwise every chip mount retries against a dead host and blocks
+    # for the timeout each time.
+    hosted = _FakeHosted([])
+    hosted.whoami_status = 503
+    client = _link_account(tmp_path, monkeypatch, hosted)
+
+    client.get("/api/settings/hosted-sync")
+    client.get("/api/settings/hosted-sync")
+
+    assert hosted.whoami_calls == 1
+
+
+def test_an_unchanged_response_does_not_rewrite_config(tmp_path: Path, monkeypatch) -> None:
+    hosted = _FakeHosted([])
+    hosted.whoami_payload = {"id": "u1", "email": "owner@example.com", "display_name": None}
+    client = _link_account(tmp_path, monkeypatch, hosted)
+    config_path = user_config.user_config_dir() / user_config.CONFIG_FILENAME
+    before = config_path.stat().st_mtime_ns
+
+    client.get("/api/settings/hosted-sync")
+
+    assert config_path.stat().st_mtime_ns == before
+
+
+def test_an_unlinked_install_makes_no_upstream_call(tmp_path: Path, monkeypatch) -> None:
+    hosted = _FakeHosted([])
+    monkeypatch.setenv("SPLITSMITH_HOME", str(tmp_path / "home"))
+    client = _local_app(tmp_path)
+    monkeypatch.setattr(
+        server_mod,
+        "_build_device_client",
+        lambda base_url, **kw: HostedSyncClient(
+            http=httpx.Client(base_url=base_url, transport=httpx.MockTransport(hosted.handle))
+        ),
+    )
+
+    assert client.get("/api/settings/hosted-sync").json()["account"] is None
+    assert hosted.whoami_calls == 0
