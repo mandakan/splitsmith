@@ -243,8 +243,22 @@ export function MatchShell() {
     // effect of clicking the toggle, not a forward navigation -- back
     // should return to whatever was before the user opened the match,
     // not bounce between modes.
-    if (mode === "developer") navigate("/dev/corpus", { replace: true });
-  }, [mode, setMode, didInitMode, navigate]);
+    //
+    // Carry the URL match along as ?match= so dev mode works on the
+    // match the operator actually chose. DeveloperShell keeps the param
+    // across its nav and the Lab's promote panel reads it -- without
+    // this, dev mode falls back to inferring a match from recents
+    // order, which can silently disagree with the one on screen.
+    if (mode === "developer") {
+      navigate(
+        {
+          pathname: "/dev/corpus",
+          search: urlMatchId ? `?match=${encodeURIComponent(urlMatchId)}` : "",
+        },
+        { replace: true },
+      );
+    }
+  }, [mode, setMode, didInitMode, navigate, urlMatchId]);
 
   const [health, setHealth] = useState<ServerHealth | null>(null);
   const [project, setProject] = useState<MatchProject | null>(null);
