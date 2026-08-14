@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.30.0](https://github.com/mandakan/splitsmith/compare/v0.29.0...v0.30.0) (2026-08-14)
+
+
+### Features
+
+* **account:** a display name accounts can set, and codes that tell commenters apart ([#869](https://github.com/mandakan/splitsmith/issues/869)) ([4651b01](https://github.com/mandakan/splitsmith/commit/4651b01c067396c24f842a60ab15094f5f0e1560))
+* **share:** timestamped comments on shared stage video ([#866](https://github.com/mandakan/splitsmith/issues/866)) ([1a11a22](https://github.com/mandakan/splitsmith/commit/1a11a22bf574b9791ddaea872176949591462b54))
+* **ui:** camera selection on shared and owner match views ([#868](https://github.com/mandakan/splitsmith/issues/868)) ([78c915b](https://github.com/mandakan/splitsmith/commit/78c915b8f10c3a40cb1f21dad6ff628591b39944))
+
+
+### Build / CI
+
+* verify Railway deploys via deployment status, not the log stream ([#864](https://github.com/mandakan/splitsmith/issues/864)) ([86ef884](https://github.com/mandakan/splitsmith/commit/86ef8845256b3b5a2e2acddd328f1902d3d469e4)), closes [#863](https://github.com/mandakan/splitsmith/issues/863)
+
 ## [0.29.0](https://github.com/mandakan/splitsmith/compare/v0.28.0...v0.29.0) (2026-08-13)
 
 
