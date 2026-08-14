@@ -178,4 +178,15 @@ describe("ResultsStage camera selection", () => {
     expect(url.searchParams.get("v")).toBe("1");
     expect(url.searchParams.get("t")).toBe("3.00");
   });
+
+  it("share mount: a ?v= moment link opens on the named camera", async () => {
+    renderStage(
+      "/share/tok123/results/anna/2?t=1.00&v=1",
+      [makeShooter("anna", "Anna", [[2, "audited"]])],
+      { videos: TWO_CAMS },
+    );
+    await screen.findByText(/steel rush/i);
+    expect(mainVideoSrcs()).toEqual(["http://localhost/cam-b.mp4"]);
+    expect(screen.getByRole("group", { name: /cameras/i })).toBeInTheDocument();
+  });
 });
