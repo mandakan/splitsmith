@@ -15095,9 +15095,7 @@ def create_app(
                     status_code=409,
                     detail=(f"stage {stage_n} has no time_seconds; cannot " "compute the trim window."),
                 )
-            source_video_path = project.resolve_video_path(
-                state.shooter_root(shooter_slug), primary.path
-            )
+            source_video_path = project.resolve_video_path(state.shooter_root(shooter_slug), primary.path)
             trim_start = max(0.0, float(primary.beep_time) - float(project.trim_pre_buffer_seconds))
             trim_end = (
                 float(primary.beep_time) + float(stage_time_seconds) + float(project.trim_post_buffer_seconds)
