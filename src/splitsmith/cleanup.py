@@ -32,10 +32,11 @@ the user's audit work). It is excluded from the convenience ``--all`` /
 from __future__ import annotations
 
 import json
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import NamedTuple
 
 from pydantic import BaseModel, Field
 
@@ -114,6 +115,62 @@ class CleanupResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class _Source(NamedTuple):
+    """One (directory, patterns) pair a category sweeps.
+
+    ``local`` resolves the on-disk directory through ``MatchProject`` so
+    path overrides (``audio_dir`` and friends) keep working.
+    ``storage_subdir`` is the segment under ``<scope>/`` holding the same
+    files in hosted mode, or ``None`` when nothing pushes them -- thumbs,
+    probes and the scoreboard cache are local-only, and audit docs live
+    in ``state_docs`` rather than object storage.
+
+    One table, two readers (:func:`_iter_paths` on disk,
+    :func:`_iter_storage_items` in storage). Keeping the globs in two
+    places is how "what counts as an overlay" drifts -- the same failure
+    ``export_naming`` exists to prevent, one layer up.
+    """
+
+    local: Callable[[MatchProject, Path], Path]
+    patterns: tuple[str, ...]
+    storage_subdir: str | None
+
+
+_CATEGORY_SOURCES: dict[CleanupCategory, tuple[_Source, ...]] = {
+    CleanupCategory.CACHES: (
+        _Source(lambda p, r: p.thumbs_path(r), ("*",), None),
+        _Source(lambda p, r: p.probes_path(r), ("*.json",), None),
+        _Source(lambda p, r: r / "scoreboard" / "cache", ("**/*",), None),
+        # Peaks sit next to the audio on disk and under <scope>/audio/ in
+        # storage, but they are caches: tiny and re-derived from the WAV.
+        _Source(lambda p, r: p.audio_path(r), ("*.peaks-*.json",), "audio"),
+    ),
+    CleanupCategory.EXPORTS_LIGHT: (
+        _Source(lambda p, r: p.exports_path(r), ("*.fcpxml", "*.csv", "*_report.txt"), "exports"),
+    ),
+    CleanupCategory.EXPORTS_OVERLAYS: (
+        _Source(lambda p, r: p.exports_path(r), ("*_overlay.mov",), "exports"),
+    ),
+    CleanupCategory.EXPORTS_TRIMS: (
+        # Captures both ``stage<N>_<slug>_trimmed.mp4`` (primary) and
+        # ``stage<N>_<slug>_cam_<id>_trimmed.mp4`` (per-camera trims).
+        _Source(lambda p, r: p.exports_path(r), ("*_trimmed.mp4",), "exports"),
+    ),
+    CleanupCategory.AUDIT_TRIMS: (_Source(lambda p, r: p.trimmed_path(r), ("*.mp4",), "trimmed"),),
+    CleanupCategory.AUDIO: (
+        # Peaks JSONs deliberately live in the CACHES bucket; this bucket
+        # only carries the heavyweight extracted WAVs.
+        _Source(lambda p, r: p.audio_path(r), ("*.wav",), "audio"),
+    ),
+    CleanupCategory.AUDIT_DATA: (
+        # storage_subdir is None on purpose: hosted audit docs live in the
+        # ``state_docs`` table, not object storage. Deleting them is a
+        # database operation and is out of scope here.
+        _Source(lambda p, r: p.audit_path(r), ("stage*.json", "stage*.json.bak"), None),
+    ),
+}
+
+
 def _iter_paths(
     project: MatchProject,
     root: Path,
@@ -131,50 +188,10 @@ def _iter_paths(
     symlink (e.g. someone pointing audio_dir at a shared drive with a
     softlink convention) can never resolve into the original source.
     """
-    if category is CleanupCategory.CACHES:
-        # Thumbnails (jpg + small preview MP4s), ffprobe JSONs, scoreboard
-        # API cache, waveform peaks JSON sitting next to the audio cache.
-        for p in _glob(project.thumbs_path(root), "*"):
-            yield p
-        for p in _glob(project.probes_path(root), "*.json"):
-            yield p
-        for p in _glob(root / "scoreboard" / "cache", "**/*"):
-            yield p
-        for p in _glob(project.audio_path(root), "*.peaks-*.json"):
-            yield p
-
-    elif category is CleanupCategory.EXPORTS_LIGHT:
-        exp = project.exports_path(root)
-        for pat in ("*.fcpxml", "*.csv", "*_report.txt"):
-            for p in _glob(exp, pat):
-                yield p
-
-    elif category is CleanupCategory.EXPORTS_OVERLAYS:
-        for p in _glob(project.exports_path(root), "*_overlay.mov"):
-            yield p
-
-    elif category is CleanupCategory.EXPORTS_TRIMS:
-        # Captures both ``stage<N>_<slug>_trimmed.mp4`` (primary) and
-        # ``stage<N>_<slug>_cam_<id>_trimmed.mp4`` (per-camera trims).
-        for p in _glob(project.exports_path(root), "*_trimmed.mp4"):
-            yield p
-
-    elif category is CleanupCategory.AUDIT_TRIMS:
-        for p in _glob(project.trimmed_path(root), "*.mp4"):
-            yield p
-
-    elif category is CleanupCategory.AUDIO:
-        # Peaks JSONs deliberately live in the CACHES bucket (they're
-        # tiny and re-derivable from the audio); the AUDIO bucket only
-        # carries the heavyweight extracted WAVs.
-        for p in _glob(project.audio_path(root), "*.wav"):
-            yield p
-
-    elif category is CleanupCategory.AUDIT_DATA:
-        audit = project.audit_path(root)
-        for pat in ("stage*.json", "stage*.json.bak"):
-            for p in _glob(audit, pat):
-                yield p
+    for source in _CATEGORY_SOURCES[category]:
+        directory = source.local(project, root)
+        for pattern in source.patterns:
+            yield from _glob(directory, pattern)
 
 
 def _glob(directory: Path, pattern: str) -> Iterable[Path]:
