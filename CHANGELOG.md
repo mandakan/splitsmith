@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.32.2](https://github.com/mandakan/splitsmith/compare/v0.32.1...v0.32.2) (2026-08-15)
+
+
+### Performance
+
+* **docker:** ship ffmpeg's shared build, not two copies of every codec ([#916](https://github.com/mandakan/splitsmith/issues/916)) ([48604b9](https://github.com/mandakan/splitsmith/commit/48604b937aac68ce1151a83894d81d8fb9f2fc64))
+* **docker:** stop baking the 450 MB model cache into the image ([#918](https://github.com/mandakan/splitsmith/issues/918)) ([0607649](https://github.com/mandakan/splitsmith/commit/060764982fc46fe4bf4934b83bb63d412664b458))
+
 ## [0.32.1](https://github.com/mandakan/splitsmith/compare/v0.32.0...v0.32.1) (2026-08-15)
 
 
