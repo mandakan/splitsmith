@@ -564,3 +564,87 @@ def test_plan_serialises_the_fields_the_spa_reads(tmp_path: Path) -> None:
     assert item["storage_key"] == f"{SCOPE}/exports/stage1_a_trimmed.mp4"
     assert item["reconstructable"] is False  # no stage registered -> no source
     assert isinstance(item["path"], str)  # Path must serialise for the SPA
+
+
+class _CountingStorage(FilesystemStorage):
+    """Wraps ``FilesystemStorage`` to count ``exists``/``list`` calls.
+
+    The I3 whole-branch finding is about call *volume*, not correctness --
+    every existing hosted test already exercises correct results through
+    plain ``FilesystemStorage``. This subclass exists only to make the
+    call count an assertable fact instead of a claim.
+    """
+
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        self.exists_calls = 0
+        self.list_calls = 0
+
+    def exists(self, path: str) -> bool:
+        self.exists_calls += 1
+        return super().exists(path)
+
+    def list(self, prefix: str):  # type: ignore[override]
+        self.list_calls += 1
+        return super().list(prefix)
+
+
+def test_plan_memoises_source_present_across_items(tmp_path: Path) -> None:
+    """I3 whole-branch finding: nothing memoised ``source_present``, and the
+    ``AUDIO`` row rebuilt the full video list and re-checked every source
+    for each wav, all over again, per wav. Measured on this exact shape --
+    20 stages x 2 cameras (40 registered videos), all three storage-backed
+    categories that call ``source_present`` requested together -- pre-fix
+    code made 1680 ``storage.exists()`` calls against one ``list()``; this
+    pins the fixed count, not an estimate: at most one HEAD per distinct
+    video path used across the whole plan (40 here), regardless of how
+    many items derive from it.
+    """
+    from splitsmith.export_naming import stage_file_base
+    from splitsmith.match_project import StageEntry, StageVideo
+
+    root = tmp_path / "p"
+    project = MatchProject.init(root, name="probe")
+    backing = tmp_path / "tenant"
+    backing.mkdir(exist_ok=True)
+    storage = _CountingStorage(backing)
+    project.bind_storage(storage, scope=SCOPE)
+
+    n_stages = 20
+    for s in range(1, n_stages + 1):
+        primary = StageVideo(path=Path(f"raw/stage{s}_primary.mp4"), role="primary", stage_number=s)
+        secondary = StageVideo(path=Path(f"raw/stage{s}_secondary.mp4"), role="secondary", stage_number=s)
+        project.stages.append(
+            StageEntry(
+                stage_number=s,
+                stage_name=f"stage-{s}",
+                time_seconds=10.0,
+                videos=[primary, secondary],
+            )
+        )
+    project.save(root)
+
+    for stage in project.stages:
+        _put(backing, f"raw/stage{stage.stage_number}_primary.mp4")
+        _put(backing, f"raw/stage{stage.stage_number}_secondary.mp4")
+        primary = stage.primary()
+        secondary = next(v for v in stage.videos if v.role == "secondary")
+        base = stage_file_base(stage.stage_number, stage.stage_name)
+        _put(backing, f"{SCOPE}/exports/{base}_trimmed.mp4")
+        _put(backing, f"{SCOPE}/exports/{base}_cam_{secondary.video_id}_trimmed.mp4")
+        _put(backing, f"{SCOPE}/trimmed/stage{stage.stage_number}_cam_{primary.video_id}_trimmed.mp4")
+        _put(backing, f"{SCOPE}/trimmed/stage{stage.stage_number}_cam_{secondary.video_id}_trimmed.mp4")
+        _put(backing, f"{SCOPE}/audio/stage{stage.stage_number}_cam_{primary.video_id}.wav")
+        _put(backing, f"{SCOPE}/audio/stage{stage.stage_number}_cam_{secondary.video_id}.wav")
+
+    plan = plan_cleanup(
+        project,
+        root,
+        {CleanupCategory.EXPORTS_TRIMS, CleanupCategory.AUDIT_TRIMS, CleanupCategory.AUDIO},
+    )
+
+    assert len(plan.items) == 120  # 6 artefacts x 20 stages
+    assert storage.list_calls == 1  # one scope listing regardless of category count
+    # 40 distinct registered video paths; every item that needs an answer
+    # about one of them reuses the memoised result. Pre-fix this was 1680.
+    assert storage.exists_calls == 40

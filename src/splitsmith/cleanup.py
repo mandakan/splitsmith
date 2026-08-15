@@ -263,7 +263,7 @@ def _iter_storage_items(
     root: Path,
     category: CleanupCategory,
     listing: dict[str, int],
-    audited: set[int],
+    ctx: _PlanContext,
 ) -> Iterable[CleanupItem]:
     """Yield storage-backed items for ``category`` out of a scope listing.
 
@@ -294,7 +294,7 @@ def _iter_storage_items(
                 size_bytes=size,
                 category=category,
                 storage_key=key,
-                reconstructable=_reconstructable(project, root, category, name, audited),
+                reconstructable=_reconstructable(ctx, category, name),
             )
 
 
@@ -335,12 +335,47 @@ def _audited_stages(project: MatchProject, root: Path, audit_stages: set[int] | 
     return {s.stage_number for s in project.stages if (audit_dir / f"stage{s.stage_number}.json").exists()}
 
 
+class _PlanContext:
+    """Shared, memoised state for one :func:`plan_cleanup` call.
+
+    Two things are expensive enough to be worth sharing across every item
+    in a plan rather than recomputed per item (the I3 whole-branch
+    finding: 20 stages x 2 cameras produced 1680 ``storage.exists()``
+    calls against one ``list()``):
+
+    - :meth:`source_present` memoises ``MatchProject.source_present`` per
+      distinct video path, so N artefacts deriving from the same source
+      (a primary's trim, overlay and audit trim, say) HEAD it once.
+    - :meth:`audio_all_sources_present` computes the ``AUDIO`` row's
+      whole-project "every registered source survives" answer once,
+      instead of rebuilding the video list and re-checking every source
+      for every wav in the category.
+    """
+
+    def __init__(self, project: MatchProject, root: Path, audited: set[int]) -> None:
+        self.project = project
+        self.root = root
+        self.audited = audited
+        self._source_cache: dict[str, bool] = {}
+        self._audio_all_present: bool | None = None
+
+    def source_present(self, video_path: Path) -> bool:
+        key = str(video_path)
+        if key not in self._source_cache:
+            self._source_cache[key] = self.project.source_present(self.root, video_path, durable=True)
+        return self._source_cache[key]
+
+    def audio_all_sources_present(self) -> bool:
+        if self._audio_all_present is None:
+            videos = [v for s in self.project.stages for v in s.videos]
+            self._audio_all_present = bool(videos) and all(self.source_present(v.path) for v in videos)
+        return self._audio_all_present
+
+
 def _reconstructable(
-    project: MatchProject,
-    root: Path,
+    ctx: _PlanContext,
     category: CleanupCategory,
     filename: str,
-    audited: set[int],
 ) -> bool:
     """Whether ``filename``'s own input still exists -- see the table in
     the design doc. Conservative: an unanswerable question is False."""
@@ -354,8 +389,8 @@ def _reconstructable(
     if category is CleanupCategory.EXPORTS_LIGHT:
         if stage_number is None:
             # Match-level deliverable: rebuildable if any audit doc survives.
-            return bool(audited)
-        return stage_number in audited
+            return bool(ctx.audited)
+        return stage_number in ctx.audited
 
     # AUDIO: audio caches are stage-prefixed (``stage<N>_cam_<video_id>.wav``,
     # legacy ``stage<N>_primary.wav`` / ``stage<N>_audit.wav``), so
@@ -367,8 +402,7 @@ def _reconstructable(
     # whole-project answer instead: this only ever moves an item *into*
     # "needs explicit opt-in", never out of it.
     if category is CleanupCategory.AUDIO:
-        videos = [v for s in project.stages for v in s.videos]
-        return bool(videos) and all(project.source_present(root, v.path, durable=True) for v in videos)
+        return ctx.audio_all_sources_present()
 
     # EXPORTS_TRIMS / EXPORTS_OVERLAYS / AUDIT_TRIMS: keyed on the specific
     # source *this* artefact derives from, not blindly on the stage's
@@ -381,7 +415,7 @@ def _reconstructable(
     # Only a filename with no ``_cam_`` segment is the primary's own.
     if stage_number is None:
         return False
-    stage = next((s for s in project.stages if s.stage_number == stage_number), None)
+    stage = next((s for s in ctx.project.stages if s.stage_number == stage_number), None)
     if stage is None:
         return False
     cam_id = video_id_from_filename(filename)
@@ -391,11 +425,11 @@ def _reconstructable(
             # Fail closed: a cam id we cannot resolve to a registered video
             # cannot be proven reconstructable.
             return False
-        return project.source_present(root, video.path, durable=True)
+        return ctx.source_present(video.path)
     primary = stage.primary()
     if primary is None:
         return False
-    return project.source_present(root, primary.path, durable=True)
+    return ctx.source_present(primary.path)
 
 
 # ---------------------------------------------------------------------------
@@ -432,6 +466,7 @@ def plan_cleanup(
 
     listing = _storage_listing(project)
     audited = _audited_stages(project, root, audit_stages)
+    ctx = _PlanContext(project, root, audited)
 
     for category in requested:
         for path in _iter_paths(project, root, category):
@@ -448,14 +483,14 @@ def plan_cleanup(
                     path=path,
                     size_bytes=size,
                     category=category,
-                    reconstructable=_reconstructable(project, root, category, path.name, audited),
+                    reconstructable=_reconstructable(ctx, category, path.name),
                 )
             )
             t = totals[category]
             t.file_count += 1
             t.bytes += size
         if listing:
-            for item in _iter_storage_items(project, root, category, listing, audited):
+            for item in _iter_storage_items(project, root, category, listing, ctx):
                 items.append(item)
                 t = totals[category]
                 t.file_count += 1
