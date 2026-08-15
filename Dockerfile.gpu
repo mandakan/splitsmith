@@ -97,22 +97,25 @@ ENV UV_PYTHON_DOWNLOADS=never \
 # checksum rather than a personal host's rolling URL.
 ARG TARGETARCH
 ARG FFMPEG_BUILD=autobuild-2026-08-14-13-16
-ARG FFMPEG_REV=N-126134-gc48230eb86
 RUN set -eux; \
     case "${TARGETARCH:-amd64}" in \
-        amd64) ff_arch=linux64; \
-               ff_sha=9e49d517f47031140e45fae1813325482b1fd0a886a15d9977ac75cfec1cab05 ;; \
-        arm64) ff_arch=linuxarm64; \
-               ff_sha=a167ee7e9e40dd8d80462eebe5b1b034185aed6526c9bcce5699c35570eefdb4 ;; \
+        amd64) ff_file=ffmpeg-N-126134-gc48230eb86-linux64-gpl-shared.tar.xz; \
+               ff_sha=b3bb57f31b7e5ad4a80f9557f5a81b0ef455c86e53c3219299754fb1bb9267ed ;; \
+        arm64) ff_file=ffmpeg-N-126133-gead4378652-linuxarm64-gpl-shared.tar.xz; \
+               ff_sha=ed55c70d198d0ad70e40bc2c98b6b2a45b3c4f6c477d37f4f80c22a55193288c ;; \
         *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
-        "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BUILD}/ffmpeg-${FFMPEG_REV}-${ff_arch}-gpl.tar.xz" \
+        "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BUILD}/${ff_file}" \
         -o /tmp/ffmpeg.tar.xz; \
     echo "${ff_sha}  /tmp/ffmpeg.tar.xz" | sha256sum -c -; \
     mkdir -p /tmp/ffmpeg; \
     tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1; \
     install -m0755 /tmp/ffmpeg/bin/ffmpeg /tmp/ffmpeg/bin/ffprobe /usr/local/bin/; \
+    mkdir -p /usr/local/lib/ffmpeg; \
+    cp -a /tmp/ffmpeg/lib/*.so* /usr/local/lib/ffmpeg/; \
+    echo /usr/local/lib/ffmpeg > /etc/ld.so.conf.d/zz-ffmpeg.conf; \
+    ldconfig; \
     rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz; \
     /usr/local/bin/ffmpeg -version | head -1
 
@@ -184,8 +187,13 @@ RUN set -eux; \
     apt-get install -y --no-install-recommends python3.11 python3.11-venv; \
     rm -rf /var/lib/apt/lists/*
 
-# Static ffmpeg + ffprobe from the builder.
+# ffmpeg + ffprobe from the builder, with the libav* set they link against and
+# the ld.so.conf.d entry pointing the loader at it. ``ldconfig`` is required --
+# the cache is per-image, and without it both binaries fail at exec.
 COPY --from=builder /usr/local/bin/ffmpeg /usr/local/bin/ffprobe /usr/local/bin/
+COPY --from=builder /usr/local/lib/ffmpeg /usr/local/lib/ffmpeg
+COPY --from=builder /etc/ld.so.conf.d/zz-ffmpeg.conf /etc/ld.so.conf.d/zz-ffmpeg.conf
+RUN ldconfig && ffmpeg -version | head -1 && ffprobe -version | head -1
 
 # Non-root user with a writable home for the baked model cache + runtime writes.
 RUN groupadd --system splitsmith \

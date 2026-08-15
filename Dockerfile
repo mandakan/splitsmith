@@ -85,11 +85,15 @@ ENV UV_PYTHON_DOWNLOADS=never \
 # package, which drags ~300 MB of codec/dev libraries into the runtime image.
 # These binaries link only glibc + libgcc_s (both already in the base image)
 # and carry every codec we use compiled in: drawtext, libx264, prores, aac,
-# and h264_nvenc for Dockerfile.gpu. They are ~280 MB for the pair -- larger
-# than the ~150 MB John Van Sickle builds they replaced, because each binary
-# carries its own copy of every codec library. BtbN also publish a `-shared`
-# variant (~190 MB for binaries + a shared lib dir) if that ever matters
-# enough to be worth an LD_LIBRARY_PATH and a second COPY into runtime.
+# and h264_nvenc for Dockerfile.gpu.
+#
+# The `-shared` variant, not the static one: static duplicates every codec
+# library into BOTH binaries (281 MB for the pair), while shared is 0.7 MB of
+# binaries against one 171 MB set of libav*.so -- ~110 MB off the image. The
+# libs go in their own directory with an ld.so.conf.d entry rather than an
+# LD_LIBRARY_PATH, so nothing has to be exported into every subprocess the
+# app spawns. BtbN's shared binaries carry a malformed RPATH (`-Wl:../lib`),
+# which is why the loader has to be told where the libs are at all.
 #
 # Previously John Van Sickle's static builds, off an unversioned personal
 # host. That URL failed the v0.32.0 release twice: it answered the runner
@@ -101,34 +105,40 @@ ENV UV_PYTHON_DOWNLOADS=never \
 # BEFORE extraction, so a wrong body fails as a checksum mismatch naming the
 # file rather than as a confusing tar error.
 #
-# Pinned to one immutable autobuild tag. To bump, pick a tag from
-# https://github.com/BtbN/FFmpeg-Builds/releases and take both digests from
+# Pinned to one immutable autobuild tag. The two arches carry DIFFERENT build
+# revisions within a tag (arm64 lags amd64 by an hour or so), which is why the
+# filename is spelled out per arch instead of composed from one revision. To
+# bump, pick a tag from https://github.com/BtbN/FFmpeg-Builds/releases and take
+# both names and digests from
 #   gh api repos/BtbN/FFmpeg-Builds/releases/tags/<tag> \
-#     --jq '.assets[] | select(.name|test("linux(64|arm64)-gpl\\.tar\\.xz")) | "\(.name) \(.digest)"'
+#     --jq '.assets[] | select(.name|test("linux(64|arm64)-gpl-shared\\.tar\\.xz")) | "\(.name) \(.digest)"'
 # Keep Dockerfile.gpu's copy of this block in step.
 #
 # ``TARGETARCH`` is provided automatically by buildx (amd64 / arm64).
 ARG TARGETARCH
 ARG FFMPEG_BUILD=autobuild-2026-08-14-13-16
-ARG FFMPEG_REV=N-126134-gc48230eb86
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl xz-utils; \
     rm -rf /var/lib/apt/lists/*; \
     case "${TARGETARCH:-amd64}" in \
-        amd64) ff_arch=linux64; \
-               ff_sha=9e49d517f47031140e45fae1813325482b1fd0a886a15d9977ac75cfec1cab05 ;; \
-        arm64) ff_arch=linuxarm64; \
-               ff_sha=a167ee7e9e40dd8d80462eebe5b1b034185aed6526c9bcce5699c35570eefdb4 ;; \
+        amd64) ff_file=ffmpeg-N-126134-gc48230eb86-linux64-gpl-shared.tar.xz; \
+               ff_sha=b3bb57f31b7e5ad4a80f9557f5a81b0ef455c86e53c3219299754fb1bb9267ed ;; \
+        arm64) ff_file=ffmpeg-N-126133-gead4378652-linuxarm64-gpl-shared.tar.xz; \
+               ff_sha=ed55c70d198d0ad70e40bc2c98b6b2a45b3c4f6c477d37f4f80c22a55193288c ;; \
         *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
-        "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BUILD}/ffmpeg-${FFMPEG_REV}-${ff_arch}-gpl.tar.xz" \
+        "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BUILD}/${ff_file}" \
         -o /tmp/ffmpeg.tar.xz; \
     echo "${ff_sha}  /tmp/ffmpeg.tar.xz" | sha256sum -c -; \
     mkdir -p /tmp/ffmpeg; \
     tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1; \
     install -m0755 /tmp/ffmpeg/bin/ffmpeg /tmp/ffmpeg/bin/ffprobe /usr/local/bin/; \
+    mkdir -p /usr/local/lib/ffmpeg; \
+    cp -a /tmp/ffmpeg/lib/*.so* /usr/local/lib/ffmpeg/; \
+    echo /usr/local/lib/ffmpeg > /etc/ld.so.conf.d/zz-ffmpeg.conf; \
+    ldconfig; \
     rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz; \
     /usr/local/bin/ffmpeg -version | head -1; \
     /usr/local/bin/ffprobe -version | head -1
@@ -190,10 +200,14 @@ RUN apt-get update \
         curl \
  && rm -rf /var/lib/apt/lists/*
 
-# ffmpeg + ffprobe from the builder. Every codec is compiled in; the only
-# shared libraries they need are glibc and libgcc_s, which this base image
-# already has -- so two files is the whole install, no apt, no lib copy.
+# ffmpeg + ffprobe from the builder: the two binaries, the libav* set they
+# link against, and the ld.so.conf.d entry that points the loader at it.
+# ``ldconfig`` here is not optional -- the cache is per-image, so without it
+# both binaries fail at exec with a missing libavcodec.
 COPY --from=builder /usr/local/bin/ffmpeg /usr/local/bin/ffprobe /usr/local/bin/
+COPY --from=builder /usr/local/lib/ffmpeg /usr/local/lib/ffmpeg
+COPY --from=builder /etc/ld.so.conf.d/zz-ffmpeg.conf /etc/ld.so.conf.d/zz-ffmpeg.conf
+RUN ldconfig && ffmpeg -version | head -1 && ffprobe -version | head -1
 
 # Non-root user; --create-home so the baked model cache + any runtime
 # writes (logs) land in a writable home.
