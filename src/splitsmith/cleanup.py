@@ -32,6 +32,7 @@ the user's audit work). It is excluded from the convenience ``--all`` /
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -43,6 +44,8 @@ from pydantic import BaseModel, Field
 
 from .export_naming import stage_number_from_filename, video_id_from_filename
 from .match_project import MatchProject
+
+logger = logging.getLogger(__name__)
 
 # Filename for the per-project cleanup audit trail. JSONL so multiple
 # cleanups append cleanly. Hidden so it doesn't clutter Finder.
@@ -236,6 +239,23 @@ def _glob(directory: Path, pattern: str) -> Iterable[Path]:
         yield p
 
 
+class _StorageListingFailed(dict):
+    """Sentinel returned by :func:`_storage_listing` when ``storage.list()``
+    raised.
+
+    A plain ``dict`` subclass on purpose: it stays falsy, so the existing
+    ``if listing:`` gate in :func:`plan_cleanup` behaves exactly as it does
+    for a genuine empty scope (skip iterating storage items -- there is
+    nothing this pass can honestly offer from storage either way). But it
+    is a distinct *type*, so a caller that cares -- today just the log
+    line below, potentially a future one -- can always tell "storage
+    answered and there is nothing there" apart from "we never actually
+    asked". Collapsing the two into one ``{}`` is exactly the M1
+    whole-branch finding: a caller reading the plan has no way to know the
+    local-mirror-only items it lists are not a complete cleanup.
+    """
+
+
 def _storage_listing(project: MatchProject) -> dict[str, int] | None:
     """``key -> size`` for everything under this project's scope.
 
@@ -247,6 +267,28 @@ def _storage_listing(project: MatchProject) -> dict[str, int] | None:
 
     One ``list`` for the whole scope rather than one per category: a
     seven-category plan would otherwise be seven round trips.
+
+    A ``storage.list()`` failure (network blip, throttling, a permission
+    error) degrades to :class:`_StorageListingFailed` rather than
+    propagating, logged as a warning so an operator can tell a quiet outage
+    apart from a project that genuinely has nothing in storage. The plan
+    that comes back in that case still walks the container's local
+    mirrors -- refusing to plan *anything* over a storage hiccup would
+    block cleanup of files that have nothing to do with the outage -- but
+    it can only ever *under-report* what is reclaimable, never claim an
+    object was durably freed when it was not: ``apply_cleanup`` only
+    deletes a storage object for an item that actually carries a
+    ``storage_key``, and this function is the only source of those.
+
+    This is the opposite failure policy from
+    ``MatchProject.source_present(durable=True)``, which re-raises
+    anything but a 404 (see ``S3Storage.exists``) instead of degrading.
+    That is deliberate, not an inconsistency: a wrong ``source_present``
+    answer flips ``reconstructable``, which gates whether deleting a file
+    destroys data, so it must fail loud. This function only decides what
+    shows up as a *candidate* to delete, so a quiet degrade cannot itself
+    cause data loss -- it can only leave storage bytes unreclaimed, which
+    is the safe direction to fail in.
     """
     storage = project._storage
     scope = project._storage_scope
@@ -255,7 +297,12 @@ def _storage_listing(project: MatchProject) -> dict[str, int] | None:
     try:
         return {obj.path: obj.size for obj in storage.list(f"{scope}/")}
     except Exception:  # noqa: BLE001 -- a hiccup degrades to "nothing found", not a 500
-        return {}
+        logger.warning(
+            "cleanup: storage.list(%r) failed; planning against local mirrors only",
+            f"{scope}/",
+            exc_info=True,
+        )
+        return _StorageListingFailed()
 
 
 def _iter_storage_items(
