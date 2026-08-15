@@ -133,11 +133,17 @@ exists*, not "the source video exists":
 | --- | --- |
 | `CACHES` | always -- thumbs, probes, peaks are re-derived on demand |
 | `EXPORTS_LIGHT` | the stage's **audit doc** is present |
-| `EXPORTS_TRIMS` | the stage primary's **source** is durably present |
+| `EXPORTS_TRIMS` | per-camera artefacts (``_cam_<id>_`` segment) key on that video's source; primary artefacts key on `stage.primary()`'s source -- all resolved via ``StageEntry.find_video_by_id``; unresolvable ids fail closed (not reconstructable) |
 | `EXPORTS_OVERLAYS` | same as trims |
 | `AUDIT_TRIMS` | same as trims |
-| `AUDIO` | same as trims |
+| `AUDIO` | the **union** of all registered videos' sources; reconstructable only if every video that could contribute survives |
 | `AUDIT_DATA` | never -- and it stays gated as it is today |
+
+Keying `EXPORTS_TRIMS`, `EXPORTS_OVERLAYS` and `AUDIT_TRIMS` on the primary's
+source was a real defect (fixed in commit c81c2e3): a secondary camera's
+irreplaceable trim was silently reported reconstructable whenever the primary's
+source survived, and would be deleted without a consent step. The per-camera
+keying above is load-bearing.
 
 `EXPORTS_LIGHT` keying on the audit doc rather than the source is the
 non-obvious row, and getting it wrong regresses desktop. A CSV or FCPXML

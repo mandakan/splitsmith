@@ -121,7 +121,7 @@ def test_hosted_audit_data_plans_nothing(tmp_path: Path) -> None:
     assert plan.items == []
 
 
-def test_local_and_storage_items_both_appear(tmp_path: Path) -> None:
+def test_a_local_mirror_is_deduplicated_against_its_storage_object(tmp_path: Path) -> None:
     """A hosted container can hold a mirrored copy of a storage object --
     right after an export job, this is the normal state, not a corner
     case. The two used to become separate ``CleanupItem``s at the same
