@@ -29,6 +29,7 @@ import {
   FileBarChart,
   FileText,
   Film,
+  HardDrive,
   Scissors,
 } from "lucide-react";
 import {
@@ -42,6 +43,7 @@ import {
 
 import { Navigate, useOutletContext, useParams } from "react-router-dom";
 
+import { CleanupDialog } from "@/components/CleanupDialog";
 import {
   LedCtaButton,
   Section,
@@ -151,6 +153,7 @@ function ExportInner({ slug }: { slug: string }) {
   // so it reports "N queued" here and hands progress to the jobs rail.
   const [queueing, setQueueing] = useState<boolean>(false);
   const [queuedNote, setQueuedNote] = useState<string | null>(null);
+  const [cleanupOpen, setCleanupOpen] = useState<boolean>(false);
 
   const reload = useCallback(async () => {
     try {
@@ -979,6 +982,24 @@ function ExportInner({ slug }: { slug: string }) {
                 )}
               </div>
             </div>
+            {/* #629/#772 storage-aware cleanup: this is the deliverables
+                list ("Will write:" above, downloads in ResultPanel below)
+                where the intent "I have too many of these" forms, so it's
+                where the reclaim-space entry point lives. It's an
+                imperfect fit -- cleanup also spans caches, audio and
+                audit-trims, which aren't export concepts -- Home would be
+                the alternative if this needs to move. CleanupDialog is
+                self-contained (just slug/open/onClose), so relocating it
+                is a small, mechanical change. */}
+            <div className="border-t border-rule px-5 py-3">
+              <button
+                type="button"
+                onClick={() => setCleanupOpen(true)}
+                className="inline-flex items-center gap-1.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted hover:text-ink"
+              >
+                <HardDrive className="size-3.5" /> Reclaim space
+              </button>
+            </div>
             <div className="border-t border-rule px-5 py-4">
               <LedCtaButton
                 busy={busy}
@@ -1018,6 +1039,12 @@ function ExportInner({ slug }: { slug: string }) {
           </div>
         </aside>
       </div>
+
+      <CleanupDialog
+        slug={slug}
+        open={cleanupOpen}
+        onClose={() => setCleanupOpen(false)}
+      />
     </div>
   );
 }
