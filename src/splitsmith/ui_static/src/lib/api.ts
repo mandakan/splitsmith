@@ -990,6 +990,12 @@ export interface CleanupItem {
   path: string;
   size_bytes: number;
   category: CleanupCategory;
+  /** Set when the durable bytes live in object storage (hosted). */
+  storage_key: string | null;
+  /** False when this artefact's own input is already gone, so deleting
+   *  it costs data rather than recompute time. Such items are kept out
+   *  of "select all" and need an explicit opt-in. */
+  reconstructable: boolean;
 }
 
 export interface CleanupTotals {
@@ -1335,6 +1341,26 @@ export function asSourceUnreachable(err: unknown): SourceUnreachableDetail | nul
   const code = (body as { code?: unknown }).code;
   if (code !== "source_unreachable") return null;
   return body as SourceUnreachableDetail;
+}
+
+/** The 409 body ``cleanup_apply`` returns while a job is in flight. */
+export interface JobsActiveDetail {
+  code: "jobs_active";
+  message: string;
+  job_id: string;
+  kind: string;
+}
+
+/** Pull a jobs-active refusal out of an ApiError, or null if the body
+ *  doesn't match. The cleanup dialog names the blocking job rather than
+ *  showing a generic failure -- "trim is still running" is actionable and
+ *  "cleanup failed" is not. */
+export function asJobsActiveError(err: unknown): JobsActiveDetail | null {
+  if (!(err instanceof ApiError) || err.status !== 409) return null;
+  const body = err.body;
+  if (!body || typeof body !== "object") return null;
+  if ((body as { code?: unknown }).code !== "jobs_active") return null;
+  return body as JobsActiveDetail;
 }
 
 /** True when ``err`` is the structured 409 the server raises whenever a
