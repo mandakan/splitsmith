@@ -12497,7 +12497,7 @@ def create_app(
         audit_docs = state.load_audit_docs(slug)
         audit_stages = None if audit_docs is None else set(audit_docs)
         plan = cleanup_module.plan_cleanup(project, root, cats, audit_stages=audit_stages)
-        result = cleanup_module.apply_cleanup(plan, root=root)
+        result = cleanup_module.apply_cleanup(plan, root=root, project=project)
         return JSONResponse(
             {
                 "plan": plan.model_dump(mode="json"),

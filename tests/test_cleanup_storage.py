@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from splitsmith.cleanup import CleanupCategory, plan_cleanup
+from splitsmith.cleanup import CleanupCategory, apply_cleanup, plan_cleanup
 from splitsmith.match_project import MatchProject
 from splitsmith.storage import FilesystemStorage
 
@@ -322,3 +322,78 @@ def test_audio_requires_every_registered_source_not_just_the_named_stage(tmp_pat
     plan = plan_cleanup(project, root, {CleanupCategory.AUDIO})
 
     assert [i.reconstructable for i in plan.items] == [False]
+
+
+def test_apply_deletes_the_storage_object_and_the_local_mirror(tmp_path: Path) -> None:
+    project, root, backing = _project(tmp_path)
+    _put(backing, f"{SCOPE}/exports/stage1_a_trimmed.mp4", b"0123456789")
+    local = root / "exports" / "stage1_a_trimmed.mp4"
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_bytes(b"01234")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_TRIMS})
+    result = apply_cleanup(plan, root=root, project=project)
+
+    assert not (backing / SCOPE / "exports" / "stage1_a_trimmed.mp4").exists()
+    assert not local.exists()
+    assert result.failed == []
+
+
+def test_apply_deletes_no_key_outside_the_plan(tmp_path: Path) -> None:
+    project, root, backing = _project(tmp_path)
+    _put(backing, f"{SCOPE}/exports/stage1_a_trimmed.mp4")
+    _put(backing, f"{SCOPE}/exports/stage1_a.fcpxml")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_TRIMS})
+    apply_cleanup(plan, root=root, project=project)
+
+    assert (backing / SCOPE / "exports" / "stage1_a.fcpxml").exists()
+
+
+def test_apply_writes_the_log_to_storage_on_hosted(tmp_path: Path) -> None:
+    project, root, backing = _project(tmp_path)
+    _put(backing, f"{SCOPE}/exports/stage1_a_trimmed.mp4", b"0123456789")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_TRIMS})
+    apply_cleanup(plan, root=root, project=project)
+
+    log = (backing / SCOPE / ".cleanup.log").read_text(encoding="utf-8")
+    assert log.count("\n") == 1
+    assert "bytes_freed" in log
+
+
+def test_apply_appends_rather_than_overwrites_the_storage_log(tmp_path: Path) -> None:
+    project, root, backing = _project(tmp_path)
+    for name in ("stage1_a_trimmed.mp4", "stage2_b_trimmed.mp4"):
+        _put(backing, f"{SCOPE}/exports/{name}")
+        plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_TRIMS})
+        apply_cleanup(plan, root=root, project=project)
+
+    log = (backing / SCOPE / ".cleanup.log").read_text(encoding="utf-8")
+    assert log.count("\n") == 2
+
+
+def test_apply_does_not_count_a_failed_storage_delete_as_freed(tmp_path: Path) -> None:
+    """``bytes_freed`` must be honest: a storage delete that raises must not
+    add its bytes to the tally, and the item must not be recorded deleted --
+    even though the local mirror (if any) could still be removed. This is
+    the sharp version of the "no double counting" rule: it is not enough for
+    a passing item to count once, a *failing* item must count zero times.
+    """
+    project, root, backing = _project(tmp_path)
+    _put(backing, f"{SCOPE}/exports/stage1_a_trimmed.mp4", b"0123456789")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_TRIMS})
+
+    def boom(key: str) -> None:
+        raise OSError("simulated storage outage")
+
+    project._storage.delete = boom  # type: ignore[method-assign]
+
+    result = apply_cleanup(plan, root=root, project=project)
+
+    assert result.bytes_freed == 0
+    assert result.deleted == []
+    assert len(result.failed) == 1
+    # The object is still there -- nothing was actually freed.
+    assert (backing / SCOPE / "exports" / "stage1_a_trimmed.mp4").exists()

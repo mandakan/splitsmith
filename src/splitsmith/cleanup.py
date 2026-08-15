@@ -457,6 +457,7 @@ def apply_cleanup(
     plan: CleanupPlan,
     *,
     root: Path | None = None,
+    project: MatchProject | None = None,
 ) -> CleanupResult:
     """Delete every file in ``plan``; never raises on individual failures.
 
@@ -466,16 +467,43 @@ def apply_cleanup(
     silently succeeds. Bytes are tallied from the planned size, not
     re-stat'd post-delete.
 
+    ``project`` supplies the bound storage. An item carrying a
+    ``storage_key`` has its object deleted first -- that is the durable
+    byte -- and then any local mirror is unlinked so the running container
+    stops serving a copy it already pulled. The mirror is a cache and is
+    not counted again in ``bytes_freed``.
+
     When ``root`` is given, appends one JSONL line to
     ``<root>/.cleanup.log`` summarising the run. Missing log directory
     is created. Logging is best-effort: a write failure does not
-    invalidate an otherwise-successful cleanup.
+    invalidate an otherwise-successful cleanup. On hosted (``project``
+    bound to storage), the log is written to storage instead -- see
+    :func:`_append_storage_log`.
     """
     deleted: list[Path] = []
     failed: list[tuple[Path, str]] = []
     bytes_freed = 0
 
+    storage = project._storage if project is not None else None
+
     for item in plan.items:
+        if item.storage_key is not None:
+            if storage is None:
+                failed.append((item.path, "no storage bound"))
+                continue
+            try:
+                storage.delete(item.storage_key)
+            except Exception as exc:  # noqa: BLE001 -- per-item, never fatal
+                failed.append((item.path, str(exc)))
+                continue
+            # Drop the container's mirrored copy too; it is a cache.
+            try:
+                item.path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            deleted.append(item.path)
+            bytes_freed += item.size_bytes
+            continue
         try:
             item.path.unlink(missing_ok=True)
         except OSError as exc:
@@ -486,7 +514,12 @@ def apply_cleanup(
 
     result = CleanupResult(deleted=deleted, failed=failed, bytes_freed=bytes_freed)
 
-    if root is not None:
+    if project is not None and project._storage is not None and project._storage_scope is not None:
+        try:
+            _append_storage_log(project, plan, result)
+        except Exception:  # noqa: BLE001 -- best effort, as the disk log is
+            pass
+    elif root is not None:
         try:
             _append_log(root, plan, result)
         except OSError:
@@ -512,3 +545,34 @@ def _append_log(root: Path, plan: CleanupPlan, result: CleanupResult) -> None:
     }
     with log_path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(record) + "\n")
+
+
+def _append_storage_log(project: MatchProject, plan: CleanupPlan, result: CleanupResult) -> None:
+    """Append one JSONL line to ``<scope>/.cleanup.log`` in storage.
+
+    Read-modify-write, because object storage has no append. Two
+    concurrent cleanups can therefore lose a line. Accepted: this is the
+    audit trail of a manual, single-user action that the API already
+    refuses while any job is active, and the alternative on offer today is
+    losing the whole file on every redeploy, since ``<root>`` is an
+    ephemeral container disk. A durable answer means a new tenant table
+    for one JSONL line, which would also pull in #632's ``match_id``
+    constraint for no benefit.
+    """
+    storage = project._storage
+    scope = project._storage_scope
+    if storage is None or scope is None:
+        return
+    key = f"{scope}/{CLEANUP_LOG_FILENAME}"
+    record = {
+        "ts": datetime.now(UTC).isoformat(),
+        "categories": sorted({item.category.value for item in plan.items}),
+        "deleted_count": len(result.deleted),
+        "failed_count": len(result.failed),
+        "bytes_freed": result.bytes_freed,
+    }
+    try:
+        existing = storage.read_bytes(key)
+    except Exception:  # noqa: BLE001 -- absent log is the common case
+        existing = b""
+    storage.write_bytes(key, existing + (json.dumps(record) + "\n").encode("utf-8"))
