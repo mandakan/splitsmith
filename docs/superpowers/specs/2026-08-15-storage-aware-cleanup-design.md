@@ -192,6 +192,33 @@ analogue refuses any key that is not under `<scope>/`, and any key under
 `<scope>/raw/`. Fails closed: a key that cannot be classified is not
 deleted.
 
+Verified while planning, and worth stating because it inverts which half
+of that guard is load-bearing: **raw sources are not under the scope at
+all.** They are keyed `raw/<name>` at the storage root
+(`server.py:7904`), and `bind_storage`'s docstring is explicit that
+`scope` prefixes derived-artefact caches only, while the raw resolver
+keys off the user-prefix-relative `StageVideo.path`. So a single
+`storage.list(f"{scope}/")` structurally cannot reach a raw source -- the
+scope confinement is the real protection and the `raw/` refusal is
+defence-in-depth against a future scope-layout change.
+
+The same fact has a sharp edge for tests: seeding a source at
+`<scope>/raw/clip.mp4` puts it where `source_present` will never look.
+
+### Audit-doc presence has to come from the caller
+
+The `EXPORTS_LIGHT` row keys on the stage's audit doc. On hosted those
+live in the `state_docs` table, not on the container's disk, so a planner
+that stats `audit_path` finds an empty directory and marks every CSV and
+FCPXML unrebuildable -- pushing the cheapest category out of "select all"
+on precisely the deployment this change exists for.
+
+`plan_cleanup` therefore takes `audit_stages: set[int] | None`, supplied
+by the route from `state.load_audit`. This is not a new pattern:
+`MatchProject.export_overview` already takes `audit_docs` for the same
+reason and from the same accessor. `None` means "read the disk", which is
+desktop; an empty set means the caller looked and found none.
+
 The existing 409-while-jobs-active block on `cleanup_apply` is unchanged and
 still correct -- a mid-flight ffmpeg write racing a delete is the same
 hazard whether the target is a disk or a bucket.
