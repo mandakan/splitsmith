@@ -221,6 +221,38 @@ describe("CleanupDialog", () => {
     expect(posted()).toBe(false);
   });
 
+  it("surfaces a partial apply failure instead of closing silently", async () => {
+    // I4 whole-branch finding: `apply_cleanup` never raises on individual
+    // delete failures by design, so a caller that only checks for a
+    // thrown exception cannot tell a partial failure from full success.
+    const onClose = vi.fn();
+    mockFetch(
+      ok({
+        plan: PLAN,
+        result: {
+          deleted: ["exports/stage1_a_trimmed.mp4"],
+          failed: [["exports/stage2_b_trimmed.mp4", "storage delete failed"]],
+          bytes_freed: 1_048_576,
+        },
+      }),
+    );
+    render(<CleanupDialog slug="me" open onClose={onClose} />);
+    await userEvent.click(screen.getByRole("button", { name: /select all/i }));
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: "stage2_b_trimmed.mp4" }),
+    );
+    await userEvent.click(await screen.findByRole("button", { name: /^reclaim$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /confirm/i }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/1 file could not be removed/i)).toBeInTheDocument(),
+    );
+    expect(screen.getByText(/Freed 1\.0 MB/)).toBeInTheDocument();
+    // The whole point: a partial failure must not close the dialog like a
+    // silent success would.
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("disables confirm once every category is unchecked, even mid-confirm", async () => {
     // M6: unchecking every category at the confirm step used to leave
     // Confirm looking live while `apply()`'s own guard silently no-opped.

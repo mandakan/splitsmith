@@ -89,6 +89,15 @@ export function CleanupDialog({
   const [applying, setApplying] = useState(false);
   const [blocked, setBlocked] = useState<JobsActiveDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Result of the last ``applyCleanup`` call. ``apply_cleanup`` never
+   *  raises on individual delete failures by design -- it returns
+   *  ``failed`` and ``bytes_freed``, and the route passes both through --
+   *  so this is the only way a partial failure becomes visible instead of
+   *  looking exactly like full success. */
+  const [outcome, setOutcome] = useState<{
+    bytesFreed: number;
+    failedCount: number;
+  } | null>(null);
   /** Per-item explicit consent, keyed by ``storage_key ?? path``. Consent
    *  only gates the Confirm button -- see the module doc comment for why
    *  it cannot scope the request itself. */
@@ -131,16 +140,17 @@ export function CleanupDialog({
     };
   }, [slug, selected, open]);
 
-  // A fresh dialog must not open onto a previous run's plan or consent --
-  // a stale "cannot be rebuilt" state (or lack of one) would let a
-  // leftover tick silently authorise files the user hasn't seen yet in
-  // this session.
+  // A fresh dialog must not open onto a previous run's plan, consent or
+  // outcome -- a stale "cannot be rebuilt" state (or lack of one) would
+  // let a leftover tick silently authorise files the user hasn't seen yet
+  // in this session.
   useEffect(() => {
     if (open) return;
     setPlan(null);
     setSelected([]);
     setOptedIn(new Set());
     setConfirming(false);
+    setOutcome(null);
   }, [open]);
 
   /** Items the current plan cannot rebuild. Shown, never hidden -- see the
@@ -199,11 +209,21 @@ export function CleanupDialog({
     if (selected.length === 0 || !allUnrebuildableOptedIn) return;
     setError(null);
     setBlocked(null);
+    setOutcome(null);
     setApplying(true);
     try {
-      await api.applyCleanup(slug, selected);
-      setConfirming(false);
-      onClose();
+      const { result } = await api.applyCleanup(slug, selected);
+      const failedCount = result.failed.length;
+      setOutcome({ bytesFreed: result.bytes_freed, failedCount });
+      // A clean run closes the dialog as before. A partial failure must
+      // stay visible -- closing silently on it is exactly how every
+      // storage delete failing used to look identical to full success
+      // (I4 whole-branch finding). The user dismisses via Cancel once
+      // they've seen the outcome.
+      if (failedCount === 0) {
+        setConfirming(false);
+        onClose();
+      }
     } catch (e) {
       const jobsActive = asJobsActiveError(e);
       if (jobsActive) {
@@ -360,6 +380,22 @@ export function CleanupDialog({
               >
                 <AlertTriangle className="size-4 shrink-0" />
                 <span>{error}</span>
+              </p>
+            ) : null}
+            {outcome && outcome.failedCount > 0 ? (
+              <p
+                role="alert"
+                className="flex items-start gap-2 rounded-md border border-status-warning/40 bg-status-warning/10 p-2 text-xs text-status-warning"
+              >
+                <AlertTriangle className="size-4 shrink-0" />
+                <span>
+                  Freed {formatBytes(outcome.bytesFreed)}, but {outcome.failedCount}{" "}
+                  file{outcome.failedCount === 1 ? "" : "s"} could not be removed.
+                </span>
+              </p>
+            ) : outcome ? (
+              <p role="status" className="rounded-md border border-rule p-2 text-xs text-muted">
+                Freed {formatBytes(outcome.bytesFreed)}.
               </p>
             ) : null}
           </CardContent>
