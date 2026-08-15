@@ -156,4 +156,104 @@ describe("CleanupDialog", () => {
 
     await waitFor(() => expect(posted()).toBe(true));
   });
+
+  it("clears a stale plan when a category toggle's fetch fails, so a stray confirm can't post", async () => {
+    // I1 whole-branch finding: `plan` was never invalidated when
+    // `selected` changed, and a failed re-fetch's `.catch()` left the
+    // previous plan in state. Tick "caches" (a small, all-reconstructable
+    // plan arrives); tick "exports-trims" while that GET fails. The stale
+    // "Total: 10 B" must not linger, and Confirm -- reachable because
+    // `selected` is non-empty -- must not be able to post against it.
+    const smallPlan = {
+      items: [],
+      totals_by_category: { caches: { file_count: 1, bytes: 10 } },
+      total_bytes: 10,
+      total_file_count: 1,
+    };
+    const emptyPlan = {
+      items: [],
+      totals_by_category: {},
+      total_bytes: 0,
+      total_file_count: 0,
+    };
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((url, init) => {
+        const method = (init as RequestInit | undefined)?.method ?? "GET";
+        if (method === "POST") {
+          return Promise.resolve(
+            ok({ plan: smallPlan, result: { deleted: [], failed: [], bytes_freed: 0 } }),
+          );
+        }
+        const href = String(url);
+        if (href.includes("categories=caches%2Cexports-trims")) {
+          return Promise.reject(new Error("network down"));
+        }
+        if (href.includes("categories=caches")) {
+          return Promise.resolve(ok(smallPlan));
+        }
+        return Promise.resolve(ok(emptyPlan));
+      });
+    const posted = () =>
+      fetchMock.mock.calls.some(
+        ([, init]) => (init as RequestInit | undefined)?.method === "POST",
+      );
+
+    render(<CleanupDialog slug="me" open onClose={() => {}} />);
+
+    await userEvent.click(
+      screen.getByRole("checkbox", { name: /thumbnails, probes/i }),
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/Total: 10 B/)).toBeInTheDocument(),
+    );
+
+    await userEvent.click(
+      screen.getByRole("checkbox", { name: /lossless export trims/i }),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText(/Total: 10 B/)).not.toBeInTheDocument(),
+    );
+
+    await userEvent.click(await screen.findByRole("button", { name: /^reclaim$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /confirm/i }));
+
+    expect(posted()).toBe(false);
+  });
+
+  it("disables confirm once every category is unchecked, even mid-confirm", async () => {
+    // M6: unchecking every category at the confirm step used to leave
+    // Confirm looking live while `apply()`'s own guard silently no-opped.
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+      const method = (init as RequestInit | undefined)?.method ?? "GET";
+      return Promise.resolve(
+        method === "POST"
+          ? ok({ plan: PLAN, result: { deleted: [], failed: [], bytes_freed: 0 } })
+          : ok(PLAN),
+      );
+    });
+    const posted = () =>
+      fetchMock.mock.calls.some(
+        ([, init]) => (init as RequestInit | undefined)?.method === "POST",
+      );
+
+    render(<CleanupDialog slug="me" open onClose={() => {}} />);
+    const cachesCheckbox = screen.getByRole("checkbox", {
+      name: /thumbnails, probes/i,
+    });
+    await userEvent.click(cachesCheckbox);
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: "stage2_b_trimmed.mp4" }),
+    );
+    await userEvent.click(await screen.findByRole("button", { name: /^reclaim$/i }));
+
+    const confirmButton = screen.getByRole("button", { name: /confirm/i });
+    await waitFor(() => expect(confirmButton).toBeEnabled());
+
+    await userEvent.click(cachesCheckbox); // unchecks the only selected category
+    await waitFor(() => expect(confirmButton).toBeDisabled());
+
+    await userEvent.click(confirmButton);
+    expect(posted()).toBe(false);
+  });
 });

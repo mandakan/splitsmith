@@ -101,9 +101,17 @@ export function CleanupDialog({
   // selections rather than a 400, specifically so this can fetch on every
   // toggle. That contract was written for a caller that never arrived
   // until now.
+  //
+  // ``setPlan(null)`` up front (and again in `.catch`) is load-bearing, not
+  // tidiness: without it, a category toggle whose GET fails leaves the
+  // *previous* selection's plan sitting in state while `selected` has
+  // already moved on. `allUnrebuildableOptedIn` and the totals the user
+  // reads would then describe a different set of categories than the one
+  // Confirm is about to POST -- the I1 whole-branch finding.
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
+    setPlan(null);
     const t = setTimeout(() => {
       api
         .getCleanupPlan(slug, selected)
@@ -111,7 +119,10 @@ export function CleanupDialog({
           if (!cancelled) setPlan(p);
         })
         .catch(() => {
-          if (!cancelled) setError("Could not read the cleanup plan.");
+          if (!cancelled) {
+            setPlan(null);
+            setError("Could not read the cleanup plan.");
+          }
         });
     }, 200);
     return () => {
@@ -119,6 +130,18 @@ export function CleanupDialog({
       clearTimeout(t);
     };
   }, [slug, selected, open]);
+
+  // A fresh dialog must not open onto a previous run's plan or consent --
+  // a stale "cannot be rebuilt" state (or lack of one) would let a
+  // leftover tick silently authorise files the user hasn't seen yet in
+  // this session.
+  useEffect(() => {
+    if (open) return;
+    setPlan(null);
+    setSelected([]);
+    setOptedIn(new Set());
+    setConfirming(false);
+  }, [open]);
 
   /** Items the current plan cannot rebuild. Shown, never hidden -- see the
    *  module doc comment. */
@@ -348,7 +371,7 @@ export function CleanupDialog({
               <Button
                 type="button"
                 onClick={apply}
-                disabled={applying || !allUnrebuildableOptedIn}
+                disabled={applying || selected.length === 0 || !allUnrebuildableOptedIn}
               >
                 Confirm
               </Button>
