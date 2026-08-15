@@ -236,3 +236,89 @@ def test_exports_light_flips_when_the_audit_doc_is_gone(tmp_path: Path) -> None:
     plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_LIGHT})
 
     assert [i.reconstructable for i in plan.items] == [False]
+
+
+def test_an_audit_trim_is_reconstructable_while_its_source_survives(tmp_path: Path) -> None:
+    project, root, backing = _project(tmp_path)
+    _stage_with_primary(project, root, "raw/clip.mp4")
+    _put(backing, "raw/clip.mp4", b"source")
+    _put(backing, f"{SCOPE}/trimmed/stage1_alpha.mp4")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.AUDIT_TRIMS})
+
+    assert [i.reconstructable for i in plan.items] == [True]
+
+
+def test_an_audit_trim_is_not_reconstructable_once_the_source_is_gone(tmp_path: Path) -> None:
+    project, root, backing = _project(tmp_path)
+    _stage_with_primary(project, root, "raw/clip.mp4")
+    (root / "raw").mkdir(parents=True, exist_ok=True)
+    (root / "raw" / "clip.mp4").write_bytes(b"cached")
+    _put(backing, f"{SCOPE}/trimmed/stage1_alpha.mp4")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.AUDIT_TRIMS})
+
+    assert [i.reconstructable for i in plan.items] == [False]
+
+
+def test_an_overlay_is_reconstructable_while_its_source_survives(tmp_path: Path) -> None:
+    project, root, backing = _project(tmp_path)
+    _stage_with_primary(project, root, "raw/clip.mp4")
+    _put(backing, "raw/clip.mp4", b"source")
+    _put(backing, f"{SCOPE}/exports/stage1_alpha_overlay.mov")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_OVERLAYS})
+
+    assert [i.reconstructable for i in plan.items] == [True]
+
+
+def test_an_overlay_is_not_reconstructable_once_the_source_is_gone(tmp_path: Path) -> None:
+    project, root, backing = _project(tmp_path)
+    _stage_with_primary(project, root, "raw/clip.mp4")
+    (root / "raw").mkdir(parents=True, exist_ok=True)
+    (root / "raw" / "clip.mp4").write_bytes(b"cached")
+    _put(backing, f"{SCOPE}/exports/stage1_alpha_overlay.mov")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_OVERLAYS})
+
+    assert [i.reconstructable for i in plan.items] == [False]
+
+
+def test_audio_is_reconstructable_when_every_registered_source_survives(tmp_path: Path) -> None:
+    project, root, backing = _project(tmp_path)
+    _stage_with_primary(project, root, "raw/clip.mp4")
+    _put(backing, "raw/clip.mp4", b"source")
+    _put(backing, f"{SCOPE}/audio/stage1_cam_v1.wav")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.AUDIO})
+
+    assert [i.reconstructable for i in plan.items] == [True]
+
+
+def test_audio_requires_every_registered_source_not_just_the_named_stage(tmp_path: Path) -> None:
+    """AUDIO wavs are stage-prefixed, but a wav can derive from any
+    registered video. Keying ``reconstructable`` on just the wav's own
+    stage (stage 1, whose source is present) would wrongly say True while
+    stage 2's source is gone -- this is the case that distinguishes the
+    fixed whole-project rule from the broken per-stage-primary one.
+    """
+    from splitsmith.match_project import StageEntry, StageVideo
+
+    project, root, backing = _project(tmp_path)
+    _stage_with_primary(project, root, "raw/clip1.mp4")  # stage 1, source present
+    project.stages.append(
+        StageEntry(
+            stage_number=2,
+            stage_name="bravo",
+            time_seconds=9.0,
+            videos=[StageVideo(path=Path("raw/clip2.mp4"), role="primary")],
+        )
+    )
+    project.save(root)
+    _put(backing, "raw/clip1.mp4", b"source")
+    # stage 2's source (clip2.mp4) is never written to storage.
+    _put(backing, f"{SCOPE}/audio/stage1_cam_v1.wav")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.AUDIO})
+
+    assert [i.reconstructable for i in plan.items] == [False]

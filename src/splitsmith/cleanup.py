@@ -357,12 +357,23 @@ def _reconstructable(
             return bool(audited)
         return stage_number in audited
 
-    # EXPORTS_TRIMS / EXPORTS_OVERLAYS / AUDIT_TRIMS / AUDIO: source-derived.
-    if stage_number is None:
-        # AUDIO wavs are named after the video, not the stage: fall back to
-        # "every registered source is durably present".
+    # AUDIO: audio caches are stage-prefixed (``stage<N>_cam_<video_id>.wav``,
+    # legacy ``stage<N>_primary.wav`` / ``stage<N>_audit.wav``), so
+    # ``stage_number`` almost always parses -- but a wav can derive from any
+    # registered video on that stage, including secondaries and legacy names
+    # that carry no video id, and a filename alone cannot say which one wrote
+    # it. Keying on just that stage's primary would call a wav reconstructable
+    # while the video it actually came from is gone. Take the conservative
+    # whole-project answer instead: this only ever moves an item *into*
+    # "needs explicit opt-in", never out of it.
+    if category is CleanupCategory.AUDIO:
         videos = [v for s in project.stages for v in s.videos]
         return bool(videos) and all(project.source_present(root, v.path, durable=True) for v in videos)
+
+    # EXPORTS_TRIMS / EXPORTS_OVERLAYS / AUDIT_TRIMS: keyed on that stage's
+    # primary source.
+    if stage_number is None:
+        return False
     stage = next((s for s in project.stages if s.stage_number == stage_number), None)
     primary = stage.primary() if stage is not None else None
     if primary is None:
