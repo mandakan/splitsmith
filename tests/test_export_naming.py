@@ -22,6 +22,7 @@ import pytest
 from splitsmith import cli, export_naming
 from splitsmith import match_project as project
 from splitsmith.compare import project_loader
+from splitsmith.export_naming import stage_number_from_filename
 from splitsmith.match_project import MatchProject
 from splitsmith.mcp import export_tools
 from splitsmith.ui import exports as exports_mod
@@ -137,3 +138,16 @@ def test_is_match_export_excludes_a_stage_named_the_match() -> None:
     assert export_naming.is_match_export("stage12_el-presidente_splits.csv") is False
     # No extension, and a name that merely contains the word.
     assert export_naming.is_match_export("matchless.fcpxml") is False
+
+
+def test_stage_number_from_filename_reads_the_stage_prefix() -> None:
+    assert stage_number_from_filename("stage3_the-classifier_trimmed.mp4") == 3
+    assert stage_number_from_filename("stage12_x_cam_abc_trimmed.mp4") == 12
+
+
+def test_stage_number_from_filename_is_none_for_match_level_and_junk() -> None:
+    # Match-level deliverables carry no stage number.
+    assert stage_number_from_filename("bromma-2026-match.fcpxml") is None
+    assert stage_number_from_filename("notes.txt") is None
+    # "stage" without digits is not a stage prefix.
+    assert stage_number_from_filename("stage_notes.txt") is None

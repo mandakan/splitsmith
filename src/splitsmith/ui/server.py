@@ -12462,7 +12462,10 @@ def create_app(
                 # Skip unknown categories silently; the SPA only sends
                 # known ones, and a stale tab shouldn't crash here.
                 continue
-        plan = cleanup_module.plan_cleanup(project, state.shooter_root(slug), cats)
+        root = state.shooter_root(slug)
+        audit_docs = state.load_audit_docs(slug)
+        audit_stages = None if audit_docs is None else set(audit_docs)
+        plan = cleanup_module.plan_cleanup(project, root, cats, audit_stages=audit_stages)
         return JSONResponse(plan.model_dump(mode="json"))
 
     @app.post("/api/shooters/{slug}/project/cleanup")
@@ -12491,8 +12494,10 @@ def create_app(
         root = state.shooter_root(slug)
         project = state.shooter_project(slug)
         cats = set(req.categories)
-        plan = cleanup_module.plan_cleanup(project, root, cats)
-        result = cleanup_module.apply_cleanup(plan, root=root)
+        audit_docs = state.load_audit_docs(slug)
+        audit_stages = None if audit_docs is None else set(audit_docs)
+        plan = cleanup_module.plan_cleanup(project, root, cats, audit_stages=audit_stages)
+        result = cleanup_module.apply_cleanup(plan, root=root, project=project)
         return JSONResponse(
             {
                 "plan": plan.model_dump(mode="json"),

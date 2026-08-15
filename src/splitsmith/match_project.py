@@ -2012,7 +2012,7 @@ class MatchProject(BaseModel):
                     pass
         return local
 
-    def source_present(self, root: Path, video_path: Path) -> bool:
+    def source_present(self, root: Path, video_path: Path, *, durable: bool = False) -> bool:
         """Is this video's source available, *without* fetching it?
 
         The read-only counterpart to :meth:`resolve_video_path`, for callers
@@ -2024,13 +2024,21 @@ class MatchProject(BaseModel):
 
         Deliberately does not mirror, so it cannot be used as a way to warm
         the cache; call ``resolve_video_path`` when you need the bytes.
+
+        ``durable=True`` skips the local-disk check whenever a storage is
+        bound. In hosted mode ``root / video_path`` is the ephemeral source
+        cache, so a hit there says "present until the next redeploy", which
+        is the wrong answer for a caller deciding whether some *derived*
+        artefact can be rebuilt later. On desktop no storage is bound and
+        the local file is itself the durable copy, so the flag changes
+        nothing. Only the cleanup planner passes it.
         """
         if video_path.is_absolute():
             return video_path.exists()
-        if (root / video_path).exists():
-            return True
         if self._storage is None:
-            return False
+            return (root / video_path).exists()
+        if not durable and (root / video_path).exists():
+            return True
         return self._storage.exists(str(video_path))
 
     @staticmethod
