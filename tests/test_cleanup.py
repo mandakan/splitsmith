@@ -231,3 +231,46 @@ def test_empty_categories_returns_empty_plan(tmp_path: Path) -> None:
     assert plan.total_file_count == 0
     assert plan.totals_by_category == {}
     assert isinstance(plan, CleanupPlan)
+
+
+def test_plan_audit_trims_picks_up_trimmed_mp4(tmp_path: Path) -> None:
+    project, root = _project(tmp_path)
+    trimmed = project.trimmed_path(root)
+    _write(trimmed / "stage1_primary.mp4", b"\x00" * 512)
+
+    plan = plan_cleanup(project, root, {CleanupCategory.AUDIT_TRIMS})
+    assert plan.total_file_count == 1
+    assert plan.items[0].path.name == "stage1_primary.mp4"
+    assert plan.items[0].category == CleanupCategory.AUDIT_TRIMS
+
+
+def test_plan_caches_picks_up_thumbs(tmp_path: Path) -> None:
+    project, root = _project(tmp_path)
+    thumbs = project.thumbs_path(root)
+    _write(thumbs / "stage1_primary.jpg", b"\xff\xd8")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.CACHES})
+    assert plan.total_file_count == 1
+    assert plan.items[0].path.name == "stage1_primary.jpg"
+    assert plan.items[0].category == CleanupCategory.CACHES
+
+
+def test_plan_caches_picks_up_probes(tmp_path: Path) -> None:
+    project, root = _project(tmp_path)
+    probes = project.probes_path(root)
+    _write(probes / "stage1_primary.json", b"{}")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.CACHES})
+    assert plan.total_file_count == 1
+    assert plan.items[0].path.name == "stage1_primary.json"
+    assert plan.items[0].category == CleanupCategory.CACHES
+
+
+def test_plan_caches_picks_up_scoreboard_cache(tmp_path: Path) -> None:
+    project, root = _project(tmp_path)
+    _write(root / "scoreboard" / "cache" / "match" / "123.json", b"{}")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.CACHES})
+    assert plan.total_file_count == 1
+    assert plan.items[0].path.name == "123.json"
+    assert plan.items[0].category == CleanupCategory.CACHES

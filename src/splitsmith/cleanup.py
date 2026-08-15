@@ -35,6 +35,7 @@ import json
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from enum import StrEnum
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import NamedTuple
 
@@ -74,11 +75,18 @@ SAFE_CATEGORIES: frozenset[CleanupCategory] = frozenset(
 
 
 class CleanupItem(BaseModel):
-    """One file the plan would unlink."""
+    """One file the plan would unlink.
+
+    ``path`` is always the local-equivalent path -- for a storage object
+    it is where the file would sit on disk, so the CLI's table and the
+    SPA's list render identically either way. ``storage_key`` set means
+    the durable bytes are the object, and ``path`` may not exist at all.
+    """
 
     path: Path
     size_bytes: int
     category: CleanupCategory
+    storage_key: str | None = None
 
 
 class CleanupTotals(BaseModel):
@@ -218,6 +226,66 @@ def _glob(directory: Path, pattern: str) -> Iterable[Path]:
         yield p
 
 
+def _storage_listing(project: MatchProject) -> dict[str, int] | None:
+    """``key -> size`` for everything under this project's scope.
+
+    ``None`` means no bound storage -- ask the disk, which is what desktop
+    does. An empty dict means storage answered and the scope is empty.
+    Callers must keep those apart, exactly as ``_stored_exports`` does:
+    collapsing them makes a storage hiccup look like a project with no
+    files, and this module deletes things.
+
+    One ``list`` for the whole scope rather than one per category: a
+    seven-category plan would otherwise be seven round trips.
+    """
+    storage = project._storage
+    scope = project._storage_scope
+    if storage is None or scope is None:
+        return None
+    try:
+        return {obj.path: obj.size for obj in storage.list(f"{scope}/")}
+    except Exception:  # noqa: BLE001 -- a hiccup degrades to "nothing found", not a 500
+        return {}
+
+
+def _iter_storage_items(
+    project: MatchProject,
+    root: Path,
+    category: CleanupCategory,
+    listing: dict[str, int],
+) -> Iterable[CleanupItem]:
+    """Yield storage-backed items for ``category`` out of a scope listing.
+
+    Refuses anything not under ``<scope>/<subdir>/`` and anything under
+    ``<scope>/raw/`` -- the storage analogue of :func:`_safe_under_raw`.
+    Fails closed: a key that does not classify is not deleted.
+    """
+    scope = project._storage_scope
+    if scope is None:
+        return
+    raw_prefix = f"{scope}/raw/"
+    for source in _CATEGORY_SOURCES[category]:
+        if source.storage_subdir is None:
+            continue
+        prefix = f"{scope}/{source.storage_subdir}/"
+        local_dir = source.local(project, root)
+        for key, size in listing.items():
+            if not key.startswith(prefix) or key.startswith(raw_prefix):
+                continue
+            name = key[len(prefix) :]
+            if "/" in name:
+                # Nested keys are not artefacts this module wrote.
+                continue
+            if not any(fnmatch(name, pat) for pat in source.patterns):
+                continue
+            yield CleanupItem(
+                path=local_dir / name,
+                size_bytes=size,
+                category=category,
+                storage_key=key,
+            )
+
+
 def _safe_under_raw(project: MatchProject, root: Path, candidate: Path) -> bool:
     """Defence-in-depth: refuse any item that resolves under ``raw/``.
 
@@ -259,6 +327,8 @@ def plan_cleanup(
     items: list[CleanupItem] = []
     totals: dict[CleanupCategory, CleanupTotals] = {c: CleanupTotals() for c in requested}
 
+    listing = _storage_listing(project)
+
     for category in requested:
         for path in _iter_paths(project, root, category):
             if not _safe_under_raw(project, root, path):
@@ -273,8 +343,14 @@ def plan_cleanup(
             t = totals[category]
             t.file_count += 1
             t.bytes += size
+        if listing:
+            for item in _iter_storage_items(project, root, category, listing):
+                items.append(item)
+                t = totals[category]
+                t.file_count += 1
+                t.bytes += item.size_bytes
 
-    items.sort(key=lambda it: (it.category.value, str(it.path)))
+    items.sort(key=lambda it: (it.category.value, str(it.path), it.storage_key or ""))
     return CleanupPlan(
         items=items,
         totals_by_category=totals,
