@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -96,5 +96,28 @@ describe("Export page cleanup entry point", () => {
     expect(
       await screen.findByRole("dialog", { name: /reclaim space/i }),
     ).toBeInTheDocument();
+  });
+
+  it("reloads the export overview after the cleanup dialog closes", async () => {
+    // I5 whole-branch finding: closing the dialog only cleared the open
+    // flag. A cleanup can delete the very exports/trims this page shows
+    // download links and presence badges for, so without a reload the
+    // page keeps offering downloads that now 404.
+    renderExportPage();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: /reclaim space/i }),
+    );
+    await screen.findByRole("dialog", { name: /reclaim space/i });
+
+    const callsBefore = vi.mocked(api.getExportOverview).mock.calls.length;
+
+    await userEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+
+    await waitFor(() =>
+      expect(vi.mocked(api.getExportOverview).mock.calls.length).toBeGreaterThan(
+        callsBefore,
+      ),
+    );
   });
 });

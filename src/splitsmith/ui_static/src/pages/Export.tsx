@@ -1043,7 +1043,14 @@ function ExportInner({ slug }: { slug: string }) {
       <CleanupDialog
         slug={slug}
         open={cleanupOpen}
-        onClose={() => setCleanupOpen(false)}
+        onClose={() => {
+          setCleanupOpen(false);
+          // A cleanup can delete exports/trims this page is currently
+          // showing download links and presence badges for; without a
+          // reload the page keeps offering downloads that now 404 (I5
+          // whole-branch finding).
+          void reload();
+        }}
       />
     </div>
   );
