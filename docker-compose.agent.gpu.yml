@@ -48,6 +48,10 @@ services:
               capabilities: [gpu]
     volumes:
       - splitsmith-agent:/data
+      # See docker-compose.agent.yml: the image ships without the ~450 MB model
+      # cache, so this volume is what keeps the first-detection fetch to once.
+      - splitsmith-models:/home/splitsmith/.splitsmith/models
 
 volumes:
   splitsmith-agent:
+  splitsmith-models:

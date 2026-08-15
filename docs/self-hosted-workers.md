@@ -68,6 +68,7 @@ docker run -d \
   --restart unless-stopped \
   --name splitsmith-agent \
   -v splitsmith-agent:/data \
+  -v splitsmith-models:/home/splitsmith/.splitsmith/models \
   <IMAGE> agent \
   --server-url https://my.splitsmith.app \
   --token <REGISTRATION_TOKEN>
@@ -76,6 +77,20 @@ docker run -d \
 The `-v splitsmith-agent:/data` flag mounts a named volume at the agent's state dir.
 On first start, the agent exchanges the registration token for credentials and writes
 `/data/agent.json`. That file persists across container restarts.
+
+The second volume holds the detection models. The image ships without them -- they
+are ~450 MB, and the first detection downloads them from `models.splitsmith.app`
+into that directory, hash-verified. With the volume, that happens once and survives
+container recreates; without it, every recreated container downloads them again.
+To pre-warm rather than pay it on the first job:
+
+```bash
+docker run --rm -v splitsmith-models:/home/splitsmith/.splitsmith/models \
+  <IMAGE> fetch-models
+```
+
+A box with no outbound internet needs an image built with the models baked in:
+`docker build --build-arg BAKE_MODELS=1 .`
 
 The container runs as a non-root user. `/data` is pre-created with that user's
 ownership, so a named volume (as above) is writable out of the box. If you bind-mount

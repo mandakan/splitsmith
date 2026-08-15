@@ -163,9 +163,11 @@ RUN find /app/.venv -type d -name '__pycache__' -prune -exec rm -rf {} + ; \
     find /app/.venv -type d -name 'tests' -prune -exec rm -rf {} + ; \
     find /app/.venv -type d -name 'test' -prune -exec rm -rf {} +
 
-# Bake the slim ONNX model artifacts into a staging dir copied to runtime.
+# The slim ONNX model artifacts, staged in a dir copied to runtime. Default
+# OFF to match ./Dockerfile -- ~450 MB the runtime fetches on first detection.
+# ``--build-arg BAKE_MODELS=1`` bakes them for offline builds; see ./Dockerfile.
 ENV SPLITSMITH_CONFIG_DIR=/opt/splitsmith
-ARG BAKE_MODELS=1
+ARG BAKE_MODELS=0
 RUN if [ "$BAKE_MODELS" = "1" ]; then \
         /app/.venv/bin/splitsmith fetch-models; \
     else \

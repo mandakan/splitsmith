@@ -427,9 +427,15 @@ def test_worker_runs_compute_job_end_to_end(hosted_stack: None) -> None:
     asyncio.run(_enqueue())
 
     # The worker pops from ``user-<id>`` (it drains all queues), runs the
-    # body, and finalises the row. Baked-in slim models make the body a
-    # near-instant no-op, but allow margin over the worker poll interval.
-    deadline = time.time() + 60.0
+    # body, and finalises the row.
+    #
+    # This budget used to be 60s because the image baked the models in and a
+    # ``model_download`` job was a near-instant no-op. The image now ships
+    # without them, so this job does what its name says: ~450 MB from
+    # models.splitsmith.app into a container with an empty cache, every time
+    # the compose stack is recreated. That is a better test of the kind and a
+    # far slower one -- 60s only passes on a fast connection.
+    deadline = time.time() + 420.0
     status = ""
     while time.time() < deadline:
         status = _psql(f"SELECT status FROM compute_jobs WHERE id = '{job_id}'")

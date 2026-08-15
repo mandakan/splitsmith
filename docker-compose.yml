@@ -122,6 +122,11 @@ services:
       SPLITSMITH_S3_REGION: us-east-1
     ports:
       - "${SPLITSMITH_COMPOSE_API_PORT:-5174}:5174"
+    volumes:
+      # The image ships without the ~450 MB CLAP + PANN cache and fetches it on
+      # the first detection. Sharing one volume across the API and the worker
+      # means the stack downloads it once, and keeps it across recreates.
+      - splitsmith-models:/home/splitsmith/.splitsmith/models
     # Default CMD already binds 0.0.0.0:5174; override here only when
     # debugging (e.g. ``--log-level debug``).
     healthcheck:
@@ -167,7 +172,11 @@ services:
       SPLITSMITH_S3_SECRET_ACCESS_KEY: splitsmithsplitsmith
       SPLITSMITH_S3_BUCKET: splitsmith-uploads
       SPLITSMITH_S3_REGION: us-east-1
+    volumes:
+      # Same model cache the API mounts -- detection runs here too.
+      - splitsmith-models:/home/splitsmith/.splitsmith/models
 
 volumes:
   postgres-data:
   minio-data:
+  splitsmith-models:

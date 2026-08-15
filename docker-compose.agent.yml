@@ -41,6 +41,13 @@ services:
       # Persists agent.json (registration) AND the source cache at /data/projects.
       # Point this at a disk with room for SPLITSMITH_SOURCE_CACHE_MAX_GB.
       - splitsmith-agent:/data
+      # The ~450 MB CLAP + PANN cache. The published image ships without the
+      # models and fetches them on the first detection; a volume here is what
+      # makes that "once" instead of "every time the container is recreated".
+      # Docker seeds a fresh named volume from the image's own directory, so an
+      # image built with --build-arg BAKE_MODELS=1 still works unchanged.
+      - splitsmith-models:/home/splitsmith/.splitsmith/models
 
 volumes:
   splitsmith-agent:
+  splitsmith-models:
