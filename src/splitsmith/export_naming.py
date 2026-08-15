@@ -96,3 +96,21 @@ def is_match_export(filename: str) -> bool:
         return False
     stem = filename.rsplit(".", 1)[0] if "." in filename else filename
     return stem.endswith("-match")
+
+
+def stage_number_from_filename(filename: str) -> int | None:
+    """The stage number a per-stage artefact belongs to, or ``None``.
+
+    The inverse of :func:`stage_file_base`'s prefix, for readers that hold
+    a basename and need to ask a question about its stage -- e.g. "is that
+    stage's source still around?". Match-level deliverables and anything
+    not written by this module answer ``None``.
+
+    Lives here rather than in the caller for the reason the module
+    docstring gives: every reader that takes a name apart has to agree
+    with the one writer that put it together.
+    """
+    m = _STAGE_FILE_RE.match(filename)
+    if m is None:
+        return None
+    return int(m.group(0)[len("stage") : -1])
