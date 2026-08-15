@@ -466,3 +466,23 @@ def test_append_storage_log_does_not_clobber_the_log_on_a_transient_read_error(t
     # The append was skipped entirely -- no second line got appended either,
     # since we never learned what was already there.
     assert log.count("\n") == 1
+
+
+def test_plan_serialises_the_fields_the_spa_reads(tmp_path: Path) -> None:
+    """``storage_key`` and ``reconstructable`` must survive model_dump.
+
+    Both cleanup routes are pass-throughs of ``plan.model_dump(mode="json")``
+    (``server.py:12466``), so this is the whole wire contract. A field the
+    SPA's CleanupDialog reads that never reaches JSON would be a silent
+    ``undefined`` in the browser and a green Python suite.
+    """
+    project, root, backing = _project(tmp_path)
+    _put(backing, f"{SCOPE}/exports/stage1_a_trimmed.mp4", b"0123456789")
+
+    payload = plan_cleanup(project, root, {CleanupCategory.EXPORTS_TRIMS}).model_dump(mode="json")
+
+    assert payload["items"], "expected one planned item"
+    item = payload["items"][0]
+    assert item["storage_key"] == f"{SCOPE}/exports/stage1_a_trimmed.mp4"
+    assert item["reconstructable"] is False  # no stage registered -> no source
+    assert isinstance(item["path"], str)  # Path must serialise for the SPA
