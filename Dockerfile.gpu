@@ -88,22 +88,31 @@ ENV UV_PYTHON_DOWNLOADS=never \
     UV_LINK_MODE=copy \
     UV_PYTHON=/usr/bin/python3.11
 
-# Static ffmpeg + ffprobe (John Van Sickle) -- the SAME binaries the base image
-# uses. They advertise h264_nvenc and dlopen libnvidia-encode at encode time,
-# which the NVIDIA Container Toolkit injects from the host driver at runtime, so
-# NVENC works in-container without ffmpeg carrying any GPU libs itself.
+# ffmpeg + ffprobe (BtbN/FFmpeg-Builds) -- the SAME binaries the base image
+# uses; keep this block and ./Dockerfile's in step, including the pinned tag
+# and digests. They advertise h264_nvenc and dlopen libnvidia-encode at encode
+# time, which the NVIDIA Container Toolkit injects from the host driver at
+# runtime, so NVENC works in-container without ffmpeg carrying any GPU libs
+# itself. See ./Dockerfile for why this is a GitHub release asset with a
+# checksum rather than a personal host's rolling URL.
 ARG TARGETARCH
+ARG FFMPEG_BUILD=autobuild-2026-08-14-13-16
+ARG FFMPEG_REV=N-126134-gc48230eb86
 RUN set -eux; \
     case "${TARGETARCH:-amd64}" in \
-        amd64) ff_arch=amd64 ;; \
-        arm64) ff_arch=arm64 ;; \
+        amd64) ff_arch=linux64; \
+               ff_sha=9e49d517f47031140e45fae1813325482b1fd0a886a15d9977ac75cfec1cab05 ;; \
+        arm64) ff_arch=linuxarm64; \
+               ff_sha=a167ee7e9e40dd8d80462eebe5b1b034185aed6526c9bcce5699c35570eefdb4 ;; \
         *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${ff_arch}-static.tar.xz" \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
+        "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BUILD}/ffmpeg-${FFMPEG_REV}-${ff_arch}-gpl.tar.xz" \
         -o /tmp/ffmpeg.tar.xz; \
+    echo "${ff_sha}  /tmp/ffmpeg.tar.xz" | sha256sum -c -; \
     mkdir -p /tmp/ffmpeg; \
     tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1; \
-    install -m0755 /tmp/ffmpeg/ffmpeg /tmp/ffmpeg/ffprobe /usr/local/bin/; \
+    install -m0755 /tmp/ffmpeg/bin/ffmpeg /tmp/ffmpeg/bin/ffprobe /usr/local/bin/; \
     rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz; \
     /usr/local/bin/ffmpeg -version | head -1
 
