@@ -517,7 +517,9 @@ def apply_cleanup(
     if project is not None and project._storage is not None and project._storage_scope is not None:
         try:
             _append_storage_log(project, plan, result)
-        except Exception:  # noqa: BLE001 -- best effort, as the disk log is
+        except Exception:  # noqa: BLE001 -- best effort, as the disk log is not load-bearing for
+            # the cleanup result itself; a write failure here must never turn an
+            # otherwise-successful cleanup into an error.
             pass
     elif root is not None:
         try:
@@ -558,6 +560,16 @@ def _append_storage_log(project: MatchProject, plan: CleanupPlan, result: Cleanu
     ephemeral container disk. A durable answer means a new tenant table
     for one JSONL line, which would also pull in #632's ``match_id``
     constraint for no benefit.
+
+    The read is only allowed to fail one way: a missing key, which is the
+    genuine first-write case and reads as ``FileNotFoundError`` on both
+    backends (``FilesystemStorage`` and ``S3Storage`` both normalise a
+    missing object to that exception; see ``storage.py``). Any other
+    exception -- permission denied, throttling, a network blip -- means we
+    do not actually know what is in the object, so we must not write:
+    treating that as "no log yet" would silently overwrite the entire
+    accumulated audit trail with a single record. Skip the append and
+    return; the caller already treats this whole call as best-effort.
     """
     storage = project._storage
     scope = project._storage_scope
@@ -573,6 +585,6 @@ def _append_storage_log(project: MatchProject, plan: CleanupPlan, result: Cleanu
     }
     try:
         existing = storage.read_bytes(key)
-    except Exception:  # noqa: BLE001 -- absent log is the common case
+    except FileNotFoundError:
         existing = b""
     storage.write_bytes(key, existing + (json.dumps(record) + "\n").encode("utf-8"))

@@ -397,3 +397,72 @@ def test_apply_does_not_count_a_failed_storage_delete_as_freed(tmp_path: Path) -
     assert len(result.failed) == 1
     # The object is still there -- nothing was actually freed.
     assert (backing / SCOPE / "exports" / "stage1_a_trimmed.mp4").exists()
+
+
+def test_apply_reports_failed_not_freed_when_no_storage_is_bound(tmp_path: Path) -> None:
+    """The exact silent-success failure this task exists to prevent: a
+    storage-backed item reaches ``apply_cleanup`` with no storage bound
+    (e.g. a caller that forgets to pass ``project``, or a project whose
+    storage was never bound). The old code unlinked ``item.path`` -- which
+    usually doesn't exist for a storage-backed item -- via
+    ``missing_ok=True``, silently no-opped, and still recorded the item as
+    deleted with its bytes freed. It must instead land in ``failed`` and
+    contribute nothing to ``deleted`` or ``bytes_freed``.
+    """
+    project, root, backing = _project(tmp_path)
+    _put(backing, f"{SCOPE}/exports/stage1_a_trimmed.mp4", b"0123456789")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_TRIMS})
+
+    # No project at all.
+    result = apply_cleanup(plan, root=root)
+
+    assert result.bytes_freed == 0
+    assert result.deleted == []
+    assert len(result.failed) == 1
+    assert result.failed[0][0] == plan.items[0].path
+    # The object was never touched.
+    assert (backing / SCOPE / "exports" / "stage1_a_trimmed.mp4").exists()
+
+    # A project whose storage is unbound behaves the same way.
+    project.bind_storage(None)
+    result2 = apply_cleanup(plan, root=root, project=project)
+
+    assert result2.bytes_freed == 0
+    assert result2.deleted == []
+    assert len(result2.failed) == 1
+    assert (backing / SCOPE / "exports" / "stage1_a_trimmed.mp4").exists()
+
+
+def test_append_storage_log_does_not_clobber_the_log_on_a_transient_read_error(tmp_path: Path) -> None:
+    """A bare ``except Exception`` around the read used to treat *any*
+    read failure -- permission denied, throttling, a network blip -- the
+    same as "no log yet", so ``apply_cleanup`` would overwrite the whole
+    accumulated audit trail with a single new record. Only a genuine
+    missing key (``FileNotFoundError``) may be treated that way; any other
+    exception must skip the append entirely and leave the existing log
+    untouched.
+    """
+    project, root, backing = _project(tmp_path)
+    _put(backing, f"{SCOPE}/exports/stage1_a_trimmed.mp4", b"0123456789")
+    log_key = f"{SCOPE}/.cleanup.log"
+    _put(backing, log_key, b'{"ts": "pre-existing", "deleted_count": 1}\n')
+
+    plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_TRIMS})
+
+    real_read_bytes = project._storage.read_bytes
+
+    def flaky_read(path: str) -> bytes:
+        if path == log_key:
+            raise PermissionError("simulated transient read failure")
+        return real_read_bytes(path)
+
+    project._storage.read_bytes = flaky_read  # type: ignore[method-assign]
+
+    apply_cleanup(plan, root=root, project=project)
+
+    log = (backing / log_key).read_text(encoding="utf-8")
+    assert "pre-existing" in log
+    # The append was skipped entirely -- no second line got appended either,
+    # since we never learned what was already there.
+    assert log.count("\n") == 1
