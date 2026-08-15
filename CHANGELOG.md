@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.1](https://github.com/mandakan/splitsmith/compare/v0.32.0...v0.32.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* **docker:** pull ffmpeg from a pinned GitHub release, checksum it before extracting ([#914](https://github.com/mandakan/splitsmith/issues/914)) ([e1611b3](https://github.com/mandakan/splitsmith/commit/e1611b35da0511738cf511e51d215a8cc8ac1d62))
+
 ## [0.32.0](https://github.com/mandakan/splitsmith/compare/v0.31.0...v0.32.0) (2026-08-14)
 
 
