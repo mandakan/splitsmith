@@ -43,8 +43,14 @@
 #   procrastinate). The dev group (torch / transformers / panns / mypy /
 #   ruff / moto) stays out.
 # - ffmpeg + ffprobe for trim / probe.
-# - Baked CLAP + PANN + text-embedding artifacts (~450 MB) so neither the
-#   API nor a worker downloads models at runtime (doc 04).
+# - NO model artifacts by default. CLAP + PANN are ~450 MB -- a fifth of
+#   the image -- and the first detection fetches them from
+#   models.splitsmith.app into ``<SPLITSMITH_CONFIG_DIR>/models``. Build
+#   with ``--build-arg BAKE_MODELS=1`` to bake them in instead, which is
+#   what an offline or network-restricted deployment wants. This reverses
+#   doc 04's "never download at runtime": the download path exists, is
+#   hash-verified, and fails as a structured 503 (doc 03), so paying it
+#   once per cache beat carrying it in every pull.
 
 ARG PYTHON_IMAGE=python:3.11-slim-bookworm
 ARG NODE_IMAGE=node:22-bookworm-slim
@@ -173,12 +179,17 @@ RUN find /app/.venv -type d -name '__pycache__' -prune -exec rm -rf {} + ; \
     rm -rf "${SP}/sklearn/datasets/data" "${SP}/sklearn/datasets/descr" \
            "${SP}/sklearn/datasets/images"
 
-# Bake the slim ONNX model artifacts into a staging dir we copy into the
-# runtime stage. ``SPLITSMITH_CONFIG_DIR`` drives the cache location
-# (<config_dir>/models). Gated behind BAKE_MODELS so offline / network-
-# restricted builds opt out with ``--build-arg BAKE_MODELS=0``.
+# The slim ONNX model artifacts, staged in a dir the runtime stage copies.
+# ``SPLITSMITH_CONFIG_DIR`` drives the cache location (<config_dir>/models).
+#
+# Default OFF: the artifacts are ~450 MB against a ~2 GB image, and the
+# runtime already knows how to fetch and hash-verify them on first detection.
+# ``--build-arg BAKE_MODELS=1`` puts them back, which is what an offline or
+# air-gapped build wants -- and what a deployment wants if it cannot keep
+# <config_dir>/models on a volume, since without one the fetch repeats on
+# every container recreate rather than once.
 ENV SPLITSMITH_CONFIG_DIR=/opt/splitsmith
-ARG BAKE_MODELS=1
+ARG BAKE_MODELS=0
 RUN if [ "$BAKE_MODELS" = "1" ]; then \
         /app/.venv/bin/splitsmith fetch-models; \
     else \
