@@ -41,7 +41,7 @@ from typing import NamedTuple
 
 from pydantic import BaseModel, Field
 
-from .export_naming import stage_number_from_filename
+from .export_naming import stage_number_from_filename, video_id_from_filename
 from .match_project import MatchProject
 
 # Filename for the per-project cleanup audit trail. JSONL so multiple
@@ -370,12 +370,29 @@ def _reconstructable(
         videos = [v for s in project.stages for v in s.videos]
         return bool(videos) and all(project.source_present(root, v.path, durable=True) for v in videos)
 
-    # EXPORTS_TRIMS / EXPORTS_OVERLAYS / AUDIT_TRIMS: keyed on that stage's
-    # primary source.
+    # EXPORTS_TRIMS / EXPORTS_OVERLAYS / AUDIT_TRIMS: keyed on the specific
+    # source *this* artefact derives from, not blindly on the stage's
+    # primary (C1 whole-branch finding). Every per-camera artefact --
+    # ``stage<N>_<slug>_cam_<video_id>_trimmed.mp4`` (export trim),
+    # ``stage<N>_cam_<video_id>_trimmed.mp4`` (audit trim), and any future
+    # per-camera overlay -- embeds its ``video_id`` in the name and must be
+    # checked against that camera's own source: a secondary's trim survives
+    # (or is lost) independently of whether the primary's source does.
+    # Only a filename with no ``_cam_`` segment is the primary's own.
     if stage_number is None:
         return False
     stage = next((s for s in project.stages if s.stage_number == stage_number), None)
-    primary = stage.primary() if stage is not None else None
+    if stage is None:
+        return False
+    cam_id = video_id_from_filename(filename)
+    if cam_id is not None:
+        video = stage.find_video_by_id(cam_id)
+        if video is None:
+            # Fail closed: a cam id we cannot resolve to a registered video
+            # cannot be proven reconstructable.
+            return False
+        return project.source_present(root, video.path, durable=True)
+    primary = stage.primary()
     if primary is None:
         return False
     return project.source_present(root, primary.path, durable=True)

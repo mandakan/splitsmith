@@ -36,6 +36,14 @@ _SLUG_RE = re.compile(r"[^a-z0-9]+")
 #: Every per-stage artefact starts with this -- see :func:`stage_file_base`.
 _STAGE_FILE_RE = re.compile(r"^stage\d+_")
 
+#: The per-camera id segment embedded in a per-camera artefact's basename --
+#: ``stage<N>_<slug>_cam_<video_id>_trimmed.mp4`` (export trim) and
+#: ``stage<N>_cam_<video_id>_trimmed.mp4`` (audit trim) are both written
+#: with this shape. ``video_id`` (``StageVideo.video_id``) is a
+#: fixed-length hex digest and therefore never contains an underscore, so
+#: the segment is unambiguous between the two ``_`` delimiters.
+_CAM_ID_RE = re.compile(r"_cam_([0-9a-f]+)_")
+
 
 def slugify(name: str, *, fallback: str) -> str:
     """Filesystem-friendly slug: lowercase, ``[a-z0-9]`` runs joined by ``-``.
@@ -114,3 +122,23 @@ def stage_number_from_filename(filename: str) -> int | None:
     if m is None:
         return None
     return int(m.group(0)[len("stage") : -1])
+
+
+def video_id_from_filename(filename: str) -> str | None:
+    """The per-camera ``video_id`` embedded in an artefact basename, or
+    ``None`` when the artefact is the stage primary's (no ``_cam_`` segment).
+
+    The inverse of the ``_cam_<video_id>_`` segment every per-camera trim
+    and audit trim is written with -- see ``StageVideo.video_id`` and
+    ``StageEntry.find_video_by_id``, which this is meant to be paired with:
+    a caller resolves the id back to the specific :class:`StageVideo` that
+    produced the artefact, rather than assuming it was the stage's primary.
+
+    Lives here for the reason the module docstring gives: every reader that
+    takes a name apart has to agree with the one writer that put it
+    together.
+    """
+    m = _CAM_ID_RE.search(filename)
+    if m is None:
+        return None
+    return m.group(1)

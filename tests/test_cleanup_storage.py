@@ -284,6 +284,84 @@ def test_an_overlay_is_not_reconstructable_once_the_source_is_gone(tmp_path: Pat
     assert [i.reconstructable for i in plan.items] == [False]
 
 
+def test_a_secondarys_trim_is_keyed_on_its_own_source_not_the_primarys(tmp_path: Path) -> None:
+    """C1 whole-branch finding: a secondary's export trim and audit trim
+    are per-camera artefacts (``..._cam_<video_id>_trimmed.mp4``), but
+    ``_reconstructable`` used to resolve every ``EXPORTS_TRIMS`` /
+    ``AUDIT_TRIMS`` item through ``stage.primary()`` regardless. So a
+    secondary's trim was judged reconstructable whenever the *primary's*
+    source survived, even with the secondary's own source gone -- putting
+    an item that cannot be rebuilt inside "select all" with no consent
+    tick. Confirming a plan like that destroys the secondary's trims with
+    nothing checked.
+
+    The primary's source is present; the secondary's is not. The
+    primary's trim must stay reconstructable, and the secondary's export
+    trim and audit trim must both flip to False.
+    """
+    from splitsmith.match_project import StageEntry, StageVideo
+
+    project, root, backing = _project(tmp_path)
+    primary = StageVideo(path=Path("raw/primary.mp4"), role="primary", stage_number=1)
+    secondary = StageVideo(path=Path("raw/secondary.mp4"), role="secondary", stage_number=1)
+    project.stages.append(
+        StageEntry(
+            stage_number=1,
+            stage_name="alpha",
+            time_seconds=12.5,
+            videos=[primary, secondary],
+        )
+    )
+    project.save(root)
+
+    _put(backing, "raw/primary.mp4", b"source")
+    # secondary's own source is never written -- it is the one that's gone.
+
+    base = "stage1_alpha"
+    _put(backing, f"{SCOPE}/exports/{base}_trimmed.mp4")
+    _put(backing, f"{SCOPE}/exports/{base}_cam_{secondary.video_id}_trimmed.mp4")
+    _put(backing, f"{SCOPE}/trimmed/stage1_cam_{primary.video_id}_trimmed.mp4")
+    _put(backing, f"{SCOPE}/trimmed/stage1_cam_{secondary.video_id}_trimmed.mp4")
+
+    trims = plan_cleanup(project, root, {CleanupCategory.EXPORTS_TRIMS})
+    audit_trims = plan_cleanup(project, root, {CleanupCategory.AUDIT_TRIMS})
+
+    trims_by_name = {i.path.name: i.reconstructable for i in trims.items}
+    assert trims_by_name[f"{base}_trimmed.mp4"] is True
+    assert trims_by_name[f"{base}_cam_{secondary.video_id}_trimmed.mp4"] is False
+
+    audit_trims_by_name = {i.path.name: i.reconstructable for i in audit_trims.items}
+    assert audit_trims_by_name[f"stage1_cam_{primary.video_id}_trimmed.mp4"] is True
+    assert audit_trims_by_name[f"stage1_cam_{secondary.video_id}_trimmed.mp4"] is False
+
+
+def test_a_cam_id_that_does_not_resolve_to_a_registered_video_fails_closed(tmp_path: Path) -> None:
+    """A ``_cam_<id>_`` segment that cannot be resolved to a video on the
+    stage (stale artefact from a removed camera, corrupted name, etc.)
+    must not be silently treated as reconstructable -- there is no source
+    to check, so the honest answer is "cannot prove it", not "assume yes".
+    """
+    from splitsmith.match_project import StageEntry, StageVideo
+
+    project, root, backing = _project(tmp_path)
+    primary = StageVideo(path=Path("raw/primary.mp4"), role="primary", stage_number=1)
+    project.stages.append(
+        StageEntry(
+            stage_number=1,
+            stage_name="alpha",
+            time_seconds=12.5,
+            videos=[primary],
+        )
+    )
+    project.save(root)
+    _put(backing, "raw/primary.mp4", b"source")
+    _put(backing, f"{SCOPE}/exports/stage1_alpha_cam_deadbeef0000_trimmed.mp4")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_TRIMS})
+
+    assert [i.reconstructable for i in plan.items] == [False]
+
+
 def test_audio_is_reconstructable_when_every_registered_source_survives(tmp_path: Path) -> None:
     project, root, backing = _project(tmp_path)
     _stage_with_primary(project, root, "raw/clip.mp4")
