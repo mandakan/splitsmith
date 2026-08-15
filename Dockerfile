@@ -81,28 +81,54 @@ COPY --from=ghcr.io/astral-sh/uv:0.5 /uv /uvx /usr/local/bin/
 ENV UV_PYTHON_DOWNLOADS=never \
     UV_LINK_MODE=copy
 
-# Static ffmpeg + ffprobe (John Van Sickle release builds -- fully
-# statically linked, no runtime shared libs). Replaces the Debian
-# ``ffmpeg`` package, which drags ~300 MB of codec/dev libraries into
-# the runtime image; the static binaries are ~80 MB and self-contained.
+# ffmpeg + ffprobe from BtbN/FFmpeg-Builds, replacing the Debian ``ffmpeg``
+# package, which drags ~300 MB of codec/dev libraries into the runtime image.
+# These binaries link only glibc + libgcc_s (both already in the base image)
+# and carry every codec we use compiled in: drawtext, libx264, prores, aac,
+# and h264_nvenc for Dockerfile.gpu. They are ~280 MB for the pair -- larger
+# than the ~150 MB John Van Sickle builds they replaced, because each binary
+# carries its own copy of every codec library. BtbN also publish a `-shared`
+# variant (~190 MB for binaries + a shared lib dir) if that ever matters
+# enough to be worth an LD_LIBRARY_PATH and a second COPY into runtime.
+#
+# Previously John Van Sickle's static builds, off an unversioned personal
+# host. That URL failed the v0.32.0 release twice: it answered the runner
+# HTTP 200 with a body that was not an xz archive, so ``curl -f`` passed it
+# through and tar died on garbage. The single-arch GPU job pulling the same
+# URL succeeded both times, which points at the two concurrent arch legs of
+# this job being served an error page. Two things fix that class of failure:
+# the source is now a GitHub release asset, and the sha256 below is checked
+# BEFORE extraction, so a wrong body fails as a checksum mismatch naming the
+# file rather than as a confusing tar error.
+#
+# Pinned to one immutable autobuild tag. To bump, pick a tag from
+# https://github.com/BtbN/FFmpeg-Builds/releases and take both digests from
+#   gh api repos/BtbN/FFmpeg-Builds/releases/tags/<tag> \
+#     --jq '.assets[] | select(.name|test("linux(64|arm64)-gpl\\.tar\\.xz")) | "\(.name) \(.digest)"'
+# Keep Dockerfile.gpu's copy of this block in step.
+#
 # ``TARGETARCH`` is provided automatically by buildx (amd64 / arm64).
-# The release URL tracks the latest stable ffmpeg; it isn't strictly
-# version-pinned, which is acceptable for a CLI we only shell out to.
 ARG TARGETARCH
+ARG FFMPEG_BUILD=autobuild-2026-08-14-13-16
+ARG FFMPEG_REV=N-126134-gc48230eb86
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl xz-utils; \
     rm -rf /var/lib/apt/lists/*; \
     case "${TARGETARCH:-amd64}" in \
-        amd64) ff_arch=amd64 ;; \
-        arm64) ff_arch=arm64 ;; \
+        amd64) ff_arch=linux64; \
+               ff_sha=9e49d517f47031140e45fae1813325482b1fd0a886a15d9977ac75cfec1cab05 ;; \
+        arm64) ff_arch=linuxarm64; \
+               ff_sha=a167ee7e9e40dd8d80462eebe5b1b034185aed6526c9bcce5699c35570eefdb4 ;; \
         *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-${ff_arch}-static.tar.xz" \
+    curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
+        "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BUILD}/ffmpeg-${FFMPEG_REV}-${ff_arch}-gpl.tar.xz" \
         -o /tmp/ffmpeg.tar.xz; \
+    echo "${ff_sha}  /tmp/ffmpeg.tar.xz" | sha256sum -c -; \
     mkdir -p /tmp/ffmpeg; \
     tar -xJf /tmp/ffmpeg.tar.xz -C /tmp/ffmpeg --strip-components=1; \
-    install -m0755 /tmp/ffmpeg/ffmpeg /tmp/ffmpeg/ffprobe /usr/local/bin/; \
+    install -m0755 /tmp/ffmpeg/bin/ffmpeg /tmp/ffmpeg/bin/ffprobe /usr/local/bin/; \
     rm -rf /tmp/ffmpeg /tmp/ffmpeg.tar.xz; \
     /usr/local/bin/ffmpeg -version | head -1; \
     /usr/local/bin/ffprobe -version | head -1
@@ -156,15 +182,17 @@ RUN if [ "$BAKE_MODELS" = "1" ]; then \
 FROM ${PYTHON_IMAGE} AS runtime
 
 # Runtime system deps only: ca-certificates for outbound TLS, curl for
-# the compose healthcheck. ffmpeg/ffprobe come as static binaries from
-# the builder (below) -- no apt ffmpeg package, no codec libs.
+# the compose healthcheck. ffmpeg/ffprobe come from the builder (below)
+# -- no apt ffmpeg package, no codec libs.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
  && rm -rf /var/lib/apt/lists/*
 
-# Static ffmpeg + ffprobe from the builder (self-contained, no lib deps).
+# ffmpeg + ffprobe from the builder. Every codec is compiled in; the only
+# shared libraries they need are glibc and libgcc_s, which this base image
+# already has -- so two files is the whole install, no apt, no lib copy.
 COPY --from=builder /usr/local/bin/ffmpeg /usr/local/bin/ffprobe /usr/local/bin/
 
 # Non-root user; --create-home so the baked model cache + any runtime
