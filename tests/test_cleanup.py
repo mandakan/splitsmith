@@ -274,3 +274,18 @@ def test_plan_caches_picks_up_scoreboard_cache(tmp_path: Path) -> None:
     assert plan.total_file_count == 1
     assert plan.items[0].path.name == "123.json"
     assert plan.items[0].category == CleanupCategory.CACHES
+
+
+def test_desktop_items_are_reconstructable_by_default(tmp_path: Path) -> None:
+    """Desktop, sources and audit present: nothing is flagged.
+
+    Pins the ordinary case, where the flag must not change what "select
+    all" offers today.
+    """
+    project, root = _project(tmp_path)
+    thumbs = project.thumbs_path(root)
+    _write(thumbs / "stage1_primary.jpg", b"\xff\xd8")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.CACHES})
+    assert plan.total_file_count == 1
+    assert all(i.reconstructable for i in plan.items)

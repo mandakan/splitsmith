@@ -41,6 +41,7 @@ from typing import NamedTuple
 
 from pydantic import BaseModel, Field
 
+from .export_naming import stage_number_from_filename
 from .match_project import MatchProject
 
 # Filename for the per-project cleanup audit trail. JSONL so multiple
@@ -81,12 +82,21 @@ class CleanupItem(BaseModel):
     it is where the file would sit on disk, so the CLI's table and the
     SPA's list render identically either way. ``storage_key`` set means
     the durable bytes are the object, and ``path`` may not exist at all.
+
+    ``reconstructable`` is False when this artefact's own input is already
+    gone, so deleting it costs data rather than recompute time. Such items
+    are excluded from "select all" and need an explicit opt-in -- the same
+    treatment ``AUDIT_DATA`` already gets from ``SAFE_CATEGORIES``, for the
+    same reason. They are still *shown*: silently omitting a 4 GB trim from
+    a plan that promises to list what can be reclaimed makes the plan a
+    liar, and the user has no way to learn why it vanished.
     """
 
     path: Path
     size_bytes: int
     category: CleanupCategory
     storage_key: str | None = None
+    reconstructable: bool = True
 
 
 class CleanupTotals(BaseModel):
@@ -101,7 +111,7 @@ class CleanupPlan(BaseModel):
 
     The plan is sortable and JSON-serialisable; the SPA renders totals
     and the CLI prints them via Rich. ``items`` is sorted by (category,
-    path) so the CLI plan output and the SPA preview agree.
+    path, storage_key) so the CLI plan output and the SPA preview agree.
     """
 
     items: list[CleanupItem] = Field(default_factory=list)
@@ -253,6 +263,7 @@ def _iter_storage_items(
     root: Path,
     category: CleanupCategory,
     listing: dict[str, int],
+    audited: set[int],
 ) -> Iterable[CleanupItem]:
     """Yield storage-backed items for ``category`` out of a scope listing.
 
@@ -283,6 +294,7 @@ def _iter_storage_items(
                 size_bytes=size,
                 category=category,
                 storage_key=key,
+                reconstructable=_reconstructable(project, root, category, name, audited),
             )
 
 
@@ -304,6 +316,60 @@ def _safe_under_raw(project: MatchProject, root: Path, candidate: Path) -> bool:
     return False
 
 
+def _audited_stages(project: MatchProject, root: Path, audit_stages: set[int] | None) -> set[int]:
+    """Stage numbers with a surviving audit doc.
+
+    ``audit_stages`` is supplied by the caller in hosted mode, exactly as
+    ``export_overview`` takes ``audit_docs``: hosted audit docs live in the
+    ``state_docs`` table, not on this container's disk, so reading
+    ``audit_path`` there finds an empty directory and would report every
+    export deliverable as unrebuildable. ``None`` means "no caller
+    knowledge, read the disk", which is desktop.
+
+    Same None-vs-empty discipline as ``_stored_exports``: an empty *set*
+    means the caller looked and found none.
+    """
+    if audit_stages is not None:
+        return audit_stages
+    audit_dir = project.audit_path(root)
+    return {s.stage_number for s in project.stages if (audit_dir / f"stage{s.stage_number}.json").exists()}
+
+
+def _reconstructable(
+    project: MatchProject,
+    root: Path,
+    category: CleanupCategory,
+    filename: str,
+    audited: set[int],
+) -> bool:
+    """Whether ``filename``'s own input still exists -- see the table in
+    the design doc. Conservative: an unanswerable question is False."""
+    if category is CleanupCategory.CACHES:
+        return True
+    if category is CleanupCategory.AUDIT_DATA:
+        return False
+
+    stage_number = stage_number_from_filename(filename)
+
+    if category is CleanupCategory.EXPORTS_LIGHT:
+        if stage_number is None:
+            # Match-level deliverable: rebuildable if any audit doc survives.
+            return bool(audited)
+        return stage_number in audited
+
+    # EXPORTS_TRIMS / EXPORTS_OVERLAYS / AUDIT_TRIMS / AUDIO: source-derived.
+    if stage_number is None:
+        # AUDIO wavs are named after the video, not the stage: fall back to
+        # "every registered source is durably present".
+        videos = [v for s in project.stages for v in s.videos]
+        return bool(videos) and all(project.source_present(root, v.path, durable=True) for v in videos)
+    stage = next((s for s in project.stages if s.stage_number == stage_number), None)
+    primary = stage.primary() if stage is not None else None
+    if primary is None:
+        return False
+    return project.source_present(root, primary.path, durable=True)
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -313,6 +379,8 @@ def plan_cleanup(
     project: MatchProject,
     root: Path,
     categories: Iterable[CleanupCategory],
+    *,
+    audit_stages: set[int] | None = None,
 ) -> CleanupPlan:
     """Build a :class:`CleanupPlan` for the given categories.
 
@@ -321,6 +389,13 @@ def plan_cleanup(
     directory is missing contribute zero items but still appear in
     ``totals_by_category`` (with zeros) so the SPA can show the row
     without re-checking.
+
+    ``audit_stages`` names the stages that still have an audit doc.
+    Hosted callers must pass it -- their audit docs live in ``state_docs``
+    rather than on this container's disk, so leaving it ``None`` there
+    would mark every CSV and FCPXML unrebuildable. Mirrors
+    ``MatchProject.export_overview``'s ``audit_docs`` parameter, which
+    exists for the same reason.
     """
     requested: set[CleanupCategory] = set(categories)
 
@@ -328,6 +403,7 @@ def plan_cleanup(
     totals: dict[CleanupCategory, CleanupTotals] = {c: CleanupTotals() for c in requested}
 
     listing = _storage_listing(project)
+    audited = _audited_stages(project, root, audit_stages)
 
     for category in requested:
         for path in _iter_paths(project, root, category):
@@ -339,12 +415,19 @@ def plan_cleanup(
                 size = path.lstat().st_size
             except OSError:
                 continue
-            items.append(CleanupItem(path=path, size_bytes=size, category=category))
+            items.append(
+                CleanupItem(
+                    path=path,
+                    size_bytes=size,
+                    category=category,
+                    reconstructable=_reconstructable(project, root, category, path.name, audited),
+                )
+            )
             t = totals[category]
             t.file_count += 1
             t.bytes += size
         if listing:
-            for item in _iter_storage_items(project, root, category, listing):
+            for item in _iter_storage_items(project, root, category, listing, audited):
                 items.append(item)
                 t = totals[category]
                 t.file_count += 1

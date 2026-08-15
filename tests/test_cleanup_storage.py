@@ -138,3 +138,101 @@ def test_local_and_storage_items_both_appear(tmp_path: Path) -> None:
 
     keys = sorted((i.storage_key or "<local>") for i in plan.items)
     assert keys == ["<local>", f"{SCOPE}/exports/stage1_a_trimmed.mp4"]
+
+
+def _stage_with_primary(project: MatchProject, root: Path, rel: str) -> None:
+    """Give the project one stage whose primary points at ``rel``.
+
+    ``StageEntry`` / ``StageVideo`` live in ``splitsmith.match_project``,
+    not ``match_model``. ``time_seconds`` is required. ``StageVideo`` has
+    no ``video_id`` field -- ``role="primary"`` is what ``primary()``
+    looks for.
+    """
+    from splitsmith.match_project import StageEntry, StageVideo
+
+    project.stages.append(
+        StageEntry(
+            stage_number=1,
+            stage_name="alpha",
+            time_seconds=12.5,
+            videos=[StageVideo(path=Path(rel), role="primary")],
+        )
+    )
+    project.save(root)
+
+
+def test_a_trim_is_reconstructable_while_its_source_survives(tmp_path: Path) -> None:
+    project, root, backing = _project(tmp_path)
+    _stage_with_primary(project, root, "raw/clip.mp4")
+    # NOT scope-prefixed: ``source_present`` calls
+    # ``storage.exists(str(video_path))`` with the user-prefix-relative
+    # path. Scope prefixes derived caches (exports/, trimmed/, audio/),
+    # never raw sources -- see ``bind_storage``'s docstring.
+    _put(backing, "raw/clip.mp4", b"source")
+    _put(backing, f"{SCOPE}/exports/stage1_alpha_trimmed.mp4")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_TRIMS})
+
+    assert [i.reconstructable for i in plan.items] == [True]
+
+
+def test_a_trim_is_not_reconstructable_once_the_source_is_gone(tmp_path: Path) -> None:
+    project, root, backing = _project(tmp_path)
+    _stage_with_primary(project, root, "raw/clip.mp4")
+    # Source absent from storage; present only in the ephemeral local cache.
+    (root / "raw").mkdir(parents=True, exist_ok=True)
+    (root / "raw" / "clip.mp4").write_bytes(b"cached")
+    _put(backing, f"{SCOPE}/exports/stage1_alpha_trimmed.mp4")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_TRIMS})
+
+    assert [i.reconstructable for i in plan.items] == [False]
+
+
+def test_exports_light_uses_the_callers_audit_stages_on_hosted(tmp_path: Path) -> None:
+    """Hosted audit docs are in ``state_docs``, not on this disk.
+
+    Without the ``audit_stages`` hand-off the planner reads an empty
+    container directory and calls every CSV and FCPXML unrebuildable,
+    which would push the cheapest category out of "select all" on exactly
+    the deployment this change exists for.
+    """
+    project, root, backing = _project(tmp_path)
+    _stage_with_primary(project, root, "raw/clip.mp4")
+    _put(backing, f"{SCOPE}/exports/stage1_alpha.fcpxml")
+    # Nothing on local disk; the caller knows stage 1 has an audit doc.
+
+    plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_LIGHT}, audit_stages={1})
+
+    assert [i.reconstructable for i in plan.items] == [True]
+
+
+def test_exports_light_keys_on_the_audit_doc_not_the_source(tmp_path: Path) -> None:
+    """The row that regresses desktop select-all if keyed on the source.
+
+    A CSV/FCPXML is re-derived from the audit doc, which is durable and
+    only removable through the separately-gated AUDIT_DATA category. If
+    this were keyed on the source video, EXPORTS_LIGHT would drop out of
+    "select all" the moment a source went missing -- for the cheapest,
+    most re-derivable category in the table.
+    """
+    project, root, backing = _project(tmp_path)
+    _stage_with_primary(project, root, "raw/clip.mp4")
+    # No source anywhere; audit doc present.
+    (root / "audit").mkdir(parents=True, exist_ok=True)
+    (root / "audit" / "stage1.json").write_text("{}", encoding="utf-8")
+    _put(backing, f"{SCOPE}/exports/stage1_alpha.fcpxml")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_LIGHT})
+
+    assert [i.reconstructable for i in plan.items] == [True]
+
+
+def test_exports_light_flips_when_the_audit_doc_is_gone(tmp_path: Path) -> None:
+    project, root, backing = _project(tmp_path)
+    _stage_with_primary(project, root, "raw/clip.mp4")
+    _put(backing, f"{SCOPE}/exports/stage1_alpha.fcpxml")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_LIGHT})
+
+    assert [i.reconstructable for i in plan.items] == [False]
