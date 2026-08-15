@@ -122,11 +122,20 @@ def test_hosted_audit_data_plans_nothing(tmp_path: Path) -> None:
 
 
 def test_local_and_storage_items_both_appear(tmp_path: Path) -> None:
-    """A hosted container can hold a mirrored copy of a storage object.
+    """A hosted container can hold a mirrored copy of a storage object --
+    right after an export job, this is the normal state, not a corner
+    case. The two used to become separate ``CleanupItem``s at the same
+    ``path``, doubling ``total_bytes`` / ``bytes_freed`` and every
+    per-category total the dialog renders against a user's delete
+    decision (I2 whole-branch finding).
 
-    Both are reported, and they are not deduplicated into one item -- the
-    storage object is the durable byte and the local file is a cache, and
-    apply has to remove each.
+    ``apply_cleanup``'s storage branch already unlinks the local mirror as
+    a side effect of deleting the storage object (see
+    ``test_apply_deletes_the_storage_object_and_the_local_mirror``), so
+    "apply has to remove each" -- this test's own rationale before the
+    fix -- was factually wrong: a single storage-backed item is enough to
+    remove both copies. Keep only the storage item, since it is the
+    durable byte.
     """
     project, root, backing = _project(tmp_path)
     _put(backing, f"{SCOPE}/exports/stage1_a_trimmed.mp4", b"0123456789")
@@ -136,8 +145,12 @@ def test_local_and_storage_items_both_appear(tmp_path: Path) -> None:
 
     plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_TRIMS})
 
-    keys = sorted((i.storage_key or "<local>") for i in plan.items)
-    assert keys == ["<local>", f"{SCOPE}/exports/stage1_a_trimmed.mp4"]
+    assert len(plan.items) == 1
+    item = plan.items[0]
+    assert item.storage_key == f"{SCOPE}/exports/stage1_a_trimmed.mp4"
+    assert item.size_bytes == 10  # the storage object's size, not the 5-byte local mirror
+    assert plan.total_bytes == 10
+    assert plan.total_file_count == 1
 
 
 def _stage_with_primary(project: MatchProject, root: Path, rel: str) -> None:

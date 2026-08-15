@@ -469,6 +469,16 @@ def plan_cleanup(
     ctx = _PlanContext(project, root, audited)
 
     for category in requested:
+        # Keyed by path so a storage item can supersede a local mirror at
+        # the same path (I2 whole-branch finding): right after an export
+        # job, hosted commonly has both a durable object and the
+        # container's local copy of it, and counting both doubled every
+        # byte total the plan reports. The storage object is the durable
+        # byte; ``apply_cleanup``'s storage branch already unlinks the
+        # local mirror as a side effect of deleting it, so keeping a
+        # separate local ``CleanupItem`` for the same path was never
+        # buying an extra deletion, only an extra count.
+        by_path: dict[Path, CleanupItem] = {}
         for path in _iter_paths(project, root, category):
             if not _safe_under_raw(project, root, path):
                 # Should never happen with the current globs; guard kept
@@ -478,23 +488,20 @@ def plan_cleanup(
                 size = path.lstat().st_size
             except OSError:
                 continue
-            items.append(
-                CleanupItem(
-                    path=path,
-                    size_bytes=size,
-                    category=category,
-                    reconstructable=_reconstructable(ctx, category, path.name),
-                )
+            by_path[path] = CleanupItem(
+                path=path,
+                size_bytes=size,
+                category=category,
+                reconstructable=_reconstructable(ctx, category, path.name),
             )
-            t = totals[category]
-            t.file_count += 1
-            t.bytes += size
         if listing:
             for item in _iter_storage_items(project, root, category, listing, ctx):
-                items.append(item)
-                t = totals[category]
-                t.file_count += 1
-                t.bytes += item.size_bytes
+                by_path[item.path] = item
+        for item in by_path.values():
+            items.append(item)
+            t = totals[category]
+            t.file_count += 1
+            t.bytes += item.size_bytes
 
     items.sort(key=lambda it: (it.category.value, str(it.path), it.storage_key or ""))
     return CleanupPlan(
