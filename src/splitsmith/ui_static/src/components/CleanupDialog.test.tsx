@@ -107,11 +107,53 @@ describe("CleanupDialog", () => {
     );
     render(<CleanupDialog slug="me" open onClose={() => {}} />);
     await userEvent.click(screen.getByRole("button", { name: /select all/i }));
+    // Confirm is gated on every unrebuildable item being individually
+    // opted into (the Task 8 review fix); tick it so this test can reach
+    // apply() and exercise the 409 handling it's actually about.
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: "stage2_b_trimmed.mp4" }),
+    );
     await userEvent.click(await screen.findByRole("button", { name: /^reclaim$/i }));
     await userEvent.click(screen.getByRole("button", { name: /confirm/i }));
 
     const alert = await screen.findByRole("alert");
     expect(alert).toHaveTextContent(/trim/);
     expect(alert).not.toHaveTextContent(/cleanup failed/i);
+  });
+
+  it("blocks apply until every unrebuildable item is individually checked", async () => {
+    const applyResponse = ok({
+      plan: PLAN,
+      result: { deleted: [], failed: [], bytes_freed: 0 },
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+      const method = (init as RequestInit | undefined)?.method ?? "GET";
+      return Promise.resolve(method === "POST" ? applyResponse : ok(PLAN));
+    });
+    const posted = () =>
+      fetchMock.mock.calls.some(
+        ([, init]) => (init as RequestInit | undefined)?.method === "POST",
+      );
+
+    render(<CleanupDialog slug="me" open onClose={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: /select all/i }));
+    await userEvent.click(await screen.findByRole("button", { name: /^reclaim$/i }));
+
+    // Wait for the plan (and the unrebuildable item's own checkbox) to be
+    // visible before attempting confirm, so this exercises the opt-in gate
+    // itself rather than a plan-not-loaded-yet race.
+    await screen.findByRole("checkbox", { name: "stage2_b_trimmed.mp4" });
+
+    await userEvent.click(screen.getByRole("button", { name: /confirm/i }));
+
+    // The unrebuildable item was never individually ticked -- the request
+    // must never fire, even though a whole category ("select all") covers
+    // it and the confirm step was reached.
+    expect(posted()).toBe(false);
+
+    await userEvent.click(screen.getByRole("checkbox", { name: "stage2_b_trimmed.mp4" }));
+    await userEvent.click(screen.getByRole("button", { name: /confirm/i }));
+
+    await waitFor(() => expect(posted()).toBe(true));
   });
 });
