@@ -11,14 +11,24 @@
  * re-plans server-side from the categories it is sent, so the client
  * never sends paths, only categories, and the per-item checkboxes in the
  * "cannot be rebuilt" section cannot scope the request to individual
- * files. What they CAN do, and what they are wired to do, is gate the
- * Confirm button: an unrebuildable item's whole category is refused --
- * both in the UI (Confirm stays disabled) and again inside ``apply``
- * itself, so a stray Enter-key submit can't bypass the disabled state --
- * until every unrebuildable item currently in the plan has been
- * individually ticked. Opted-in state is pruned whenever the plan
- * refetches (category toggle), so a tick can never authorise a file the
- * user can no longer see.
+ * files. What they do instead is gate the Confirm button -- an
+ * unrebuildable item's whole category is refused, both in the UI
+ * (Confirm stays disabled) and again inside ``apply`` itself, so a stray
+ * Enter-key submit can't bypass the disabled state, until every
+ * unrebuildable item currently in the plan has been individually ticked
+ * -- and then travel with the request as the single
+ * ``include_unrebuildable`` flag (#926). Without that flag the server
+ * holds those items back, which is what makes the consent real rather
+ * than cosmetic: before it, ticking the boxes and bypassing the button
+ * reached the same delete.
+ *
+ * The flag is sent only when the user actually ticked something. On a
+ * plan with nothing unrebuildable, ``allUnrebuildableOptedIn`` is
+ * vacuously true, and sending the flag on the strength of that would
+ * pre-authorise whatever the server's own re-plan turns up between the
+ * fetch and the POST -- a file the user was never shown. Opted-in state
+ * is also pruned whenever the plan refetches (category toggle), so a
+ * tick can never authorise a file the user can no longer see.
  *
  * Unreconstructable items are shown, never hidden -- silently omitting a
  * multi-gigabyte trim from a list that promises what can be reclaimed
@@ -98,9 +108,10 @@ export function CleanupDialog({
     bytesFreed: number;
     failedCount: number;
   } | null>(null);
-  /** Per-item explicit consent, keyed by ``storage_key ?? path``. Consent
-   *  only gates the Confirm button -- see the module doc comment for why
-   *  it cannot scope the request itself. */
+  /** Per-item explicit consent, keyed by ``storage_key ?? path``. It
+   *  gates the Confirm button and collapses into the request's single
+   *  ``include_unrebuildable`` flag -- see the module doc comment for why
+   *  it cannot scope the request to individual files. */
   const [optedIn, setOptedIn] = useState<Set<string>>(new Set());
   const panelRef = useRef<HTMLDivElement | null>(null);
 
@@ -212,7 +223,15 @@ export function CleanupDialog({
     setOutcome(null);
     setApplying(true);
     try {
-      const { result } = await api.applyCleanup(slug, selected);
+      // `unrebuildable.length > 0` is not redundant with the guard above:
+      // it is the difference between "the user ticked every irreplaceable
+      // file we showed them" and "we showed them none". Only the first is
+      // consent -- see the module doc comment.
+      const { result } = await api.applyCleanup(
+        slug,
+        selected,
+        unrebuildable.length > 0 && allUnrebuildableOptedIn,
+      );
       const failedCount = result.failed.length;
       setOutcome({ bytesFreed: result.bytes_freed, failedCount });
       // Neither branch closes the dialog. A partial failure must stay
@@ -234,7 +253,7 @@ export function CleanupDialog({
     } finally {
       setApplying(false);
     }
-  }, [slug, selected, allUnrebuildableOptedIn, onClose]);
+  }, [slug, selected, allUnrebuildableOptedIn, unrebuildable, onClose]);
 
   if (!open) return null;
 

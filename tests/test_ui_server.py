@@ -8304,8 +8304,32 @@ def test_match_export_endpoint_job_fails_when_trim_unrecoverable(
 
 
 def _seed_cleanup_project(tmp_path: Path) -> tuple[_MatchClient, Path]:
+    """A project whose seeded artefacts are genuinely rebuildable.
+
+    Stage 1 is registered with its source blob present on disk, and
+    ``audit/stage1.json`` exists. Without the stage entry nothing here is
+    reconstructable -- ``_audited_stages`` iterates ``project.stages`` on
+    desktop, and every per-camera artefact resolves through the stage --
+    so a plain scaffold makes every category unrebuildable and the
+    seed cannot tell the two cases apart (#926).
+    """
     root, _shooter_root = _scaffold_match(tmp_path, name="Cleanup", subdir="match")
     project = MatchProject.load(_shooter_root)
+    # Real bytes: ``reconstructable`` asks whether the artefact's own
+    # input still exists, so a StageVideo pointing at nothing would flag
+    # every per-camera artefact unrebuildable.
+    source = _shooter_root / "raw" / "stage1.mov"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"video")
+    project.stages = [
+        StageEntry(
+            stage_number=1,
+            stage_name="One",
+            time_seconds=10.0,
+            videos=[StageVideo(path=Path("raw/stage1.mov"), role="primary", beep_time=5.0)],
+        )
+    ]
+    project.save(_shooter_root)
 
     audio = project.audio_path(_shooter_root)
     audio.mkdir(parents=True, exist_ok=True)
@@ -8373,11 +8397,85 @@ def test_cleanup_apply_deletes_and_returns_result(tmp_path: Path) -> None:
 
 
 def test_cleanup_apply_audit_data_destructive(tmp_path: Path) -> None:
+    """Selecting the category IS the opt-in for audit data, so the
+    item-level gate must not re-gate it.
+
+    Every audit doc is unreconstructable by definition -- that is why the
+    category sits outside ``SAFE_CATEGORIES``. If ``cleanup_apply``
+    re-derived the item gate as "drop everything unreconstructable"
+    instead of reusing ``needs_item_opt_in``, this POST would select the
+    category and then silently empty it, and the checkbox would do
+    nothing. That trap already cost one round on #924; this is the pin
+    for the API surface (#926).
+    """
     client, root = _seed_cleanup_project(tmp_path)
     shooter_root = root / "shooters" / "me"
     resp = client.post("/api/shooters/me/project/cleanup", json={"categories": ["audit-data"]})
     assert resp.status_code == 200
     assert not (shooter_root / "audit" / "stage1.json").exists()
+
+
+def _seed_unrebuildable_export(root: Path) -> tuple[Path, Path]:
+    """Add one rebuildable and one unrebuildable ``exports-light`` file.
+
+    ``EXPORTS_LIGHT`` keys on the stage's *audit doc*: the seed writes
+    ``audit/stage1.json`` and nothing for stage 9, so the stage-1 CSV is
+    re-derivable and the stage-9 one is not. Returns (rebuildable,
+    unrebuildable).
+    """
+    exports = root / "shooters" / "me" / "exports"
+    exports.mkdir(parents=True, exist_ok=True)
+    rebuildable = exports / "stage1_one.csv"
+    rebuildable.write_bytes(b"\x00" * 32)
+    unrebuildable = exports / "stage9_nine.csv"
+    unrebuildable.write_bytes(b"\x00" * 64)
+    return rebuildable, unrebuildable
+
+
+def test_cleanup_apply_holds_back_unrebuildable_files_by_default(tmp_path: Path) -> None:
+    """A direct POST that says nothing must not destroy data (#926).
+
+    The SPA's per-item ticks gate its Confirm button, and the CLI has
+    ``--include-unrebuildable``; the endpoint they both sit on used to
+    enforce neither, so anything POSTing a category list -- a script, a
+    replayed request, the dialog with its gate bypassed -- deleted
+    irreplaceable files with no consent step anywhere in the path.
+
+    Asserted against the filesystem, not the response body: the plan in
+    the response lists the held-back item either way, by design.
+    """
+    client, root = _seed_cleanup_project(tmp_path)
+    rebuildable, unrebuildable = _seed_unrebuildable_export(root)
+
+    resp = client.post(
+        "/api/shooters/me/project/cleanup",
+        json={"categories": ["exports-light"]},
+    )
+
+    assert resp.status_code == 200
+    assert unrebuildable.exists(), "an unrebuildable file was deleted without an opt-in"
+    assert not rebuildable.exists(), "the gate swallowed a rebuildable neighbour too"
+    body = resp.json()
+    assert body["result"]["bytes_freed"] == 32
+    # The plan still names the file it declined to delete -- omitting it
+    # from a list that promises what can be reclaimed makes it a liar.
+    assert any(i["path"].endswith("stage9_nine.csv") for i in body["plan"]["items"])
+
+
+def test_cleanup_apply_include_unrebuildable_deletes_it(tmp_path: Path) -> None:
+    """The same POST with the opt-in set goes through (#926)."""
+    client, root = _seed_cleanup_project(tmp_path)
+    rebuildable, unrebuildable = _seed_unrebuildable_export(root)
+
+    resp = client.post(
+        "/api/shooters/me/project/cleanup",
+        json={"categories": ["exports-light"], "include_unrebuildable": True},
+    )
+
+    assert resp.status_code == 200
+    assert not unrebuildable.exists()
+    assert not rebuildable.exists()
+    assert resp.json()["result"]["bytes_freed"] == 32 + 64
 
 
 def test_cleanup_apply_refuses_while_jobs_active(tmp_path: Path) -> None:
