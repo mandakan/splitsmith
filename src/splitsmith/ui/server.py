@@ -136,6 +136,7 @@ from .. import (
     beep_windows,
     camera_select,
     cross_align,
+    export_runs,
     match_model,
     report,
     user_config,
@@ -521,6 +522,18 @@ def _state_conflict_excs() -> tuple[type[BaseException], ...]:
 # thundering herd. Exhausting it re-raises -> the job fails loudly.
 _AUDIT_SAVE_MAX_ATTEMPTS = 4
 
+# Filename of the desktop export-run log, in the shooter root. NOT in
+# exports/: everything in that directory is listed by
+# ``MatchProject._stored_exports`` and offered to the user as a
+# deliverable, and the history is not a deliverable.
+EXPORT_RUNS_FILE = "export_runs.json"
+
+# How many times ``_record_export_run`` re-loads + re-appends when a
+# concurrent export job wins the version race. Batch export runs several
+# stages at once against one document, so contention is the normal case,
+# not the exotic one.
+_EXPORT_RUN_SAVE_MAX_ATTEMPTS = 4
+
 # Chunk size the multipart-upload client splits a file into. 16 MiB is
 # comfortably above S3/R2's 5 MiB non-final-part minimum and keeps the part
 # count modest (a 2 GB file = 128 parts), so per-part presign round-trips
@@ -599,6 +612,38 @@ def _save_audit_with_remerge(
             reloaded, version = state.load_audit(slug, stage_number)
             doc = reloaded if reloaded is not None else default()
     raise AssertionError("unreachable: loop returns or raises")  # pragma: no cover
+
+
+def _record_export_run(state: AppState, slug: str, run: export_runs.ExportRun) -> None:
+    """Append one run to the shooter's export history. Never raises.
+
+    Re-loads and re-appends on an optimistic-lock conflict rather than
+    retrying the same write: a conflict means a concurrent export job's
+    run landed first, and re-appending onto the winner's doc keeps both.
+    Blind overwrite would silently drop a run.
+
+    Every other failure -- store unavailable, disk full, retries exhausted
+    -- logs at WARNING and returns. The deliverables are the product and
+    they are already written by the time this is called; failing the job
+    over bookkeeping would report a successful export as broken.
+    """
+    conflict_excs = _state_conflict_excs()
+    for _attempt in range(_EXPORT_RUN_SAVE_MAX_ATTEMPTS):
+        try:
+            doc, version = state.load_export_runs(slug)
+            state.save_export_runs(slug, export_runs.append_run(doc, run), version=version)
+            return
+        except conflict_excs:
+            continue
+        except Exception as exc:  # noqa: BLE001 -- see docstring
+            logger.warning("export run record: not written for %s: %s", slug, exc)
+            return
+    logger.warning(
+        "export run record: lost %d version races for %s; run %s not recorded",
+        _EXPORT_RUN_SAVE_MAX_ATTEMPTS,
+        slug,
+        run.run_id,
+    )
 
 
 STATIC_DIR = Path(__file__).parent.parent / "ui_static" / "dist"
@@ -2002,6 +2047,50 @@ class AppState:
                         detail=f"audit delete failed: {exc}",
                     ) from exc
         return removed
+
+    def load_export_runs(self, slug: str) -> tuple[dict | None, int]:
+        """The shooter's export history doc + version (#629).
+
+        Hosted: ``state_docs``. Local: ``<shooter_root>/export_runs.json``
+        (version always 0 -- no locking on files). Unlike
+        :meth:`load_audit`, an unreadable document degrades to "no
+        history" rather than a 500: this is bookkeeping, and it must not
+        be able to break a page that would otherwise render.
+        """
+        mid = current_match_id.get()
+        store = self.project_state
+        if store is not None and mid is not None:
+            return run_sync(store.load_export_runs(mid, slug))
+        path = self.shooter_root(slug) / EXPORT_RUNS_FILE
+        if not path.exists():
+            return None, 0
+        try:
+            return json.loads(path.read_text(encoding="utf-8")), 0
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("export run record: unreadable at %s: %s", path, exc)
+            return None, 0
+
+    def save_export_runs(self, slug: str, doc: dict, *, version: int) -> int:
+        """Persist the export history doc; return the new version.
+
+        Hosted: ``state_docs`` under optimistic locking, same contract as
+        :meth:`save_audit`. Local: atomic ``.tmp`` -> rename (returns 0).
+        """
+        mid = current_match_id.get()
+        store = self.project_state
+        if store is not None and mid is not None:
+            return run_sync(store.save_export_runs(mid, slug, doc, expected_version=version))
+        path = self.shooter_root(slug) / EXPORT_RUNS_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        try:
+            tmp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+            tmp.replace(path)
+        except OSError:
+            if tmp.exists():
+                tmp.unlink()
+            raise
+        return 0
 
     def materialize_audit(self, slug: str, stage_number: int) -> Path:
         """Ensure the stage's audit doc is present at its on-disk path and
