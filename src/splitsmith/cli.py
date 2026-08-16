@@ -1570,10 +1570,28 @@ def _print_cleanup_plan(
         size_mb = totals.bytes / (1024 * 1024)
         row = [_CATEGORY_LABELS[cat], str(totals.file_count), f"{size_mb:.1f} MB"]
         if stuck:
-            n = stuck_by_category.get(cat, 0)
-            row.append(f"[yellow]{n}[/]" if n else "-")
+            row.append(_unrebuildable_cell(cat, totals, stuck_by_category.get(cat, 0)))
         table.add_row(*row)
     console.print(table)
+
+
+def _unrebuildable_cell(
+    cat: cleanup_mod.CleanupCategory,
+    totals: cleanup_mod.CleanupTotals,
+    count: int,
+) -> str:
+    """The "Cannot rebuild" cell for one category row.
+
+    A category outside ``SAFE_CATEGORIES`` is unreconstructable by
+    definition, and ``unreconstructable_items`` deliberately does not
+    count it -- it carries its own opt-in flag, so double-gating would
+    make that flag do nothing. But leaving the cell at "-" would then say
+    audit data *can* be rebuilt, which is the opposite of true and sits
+    in the one column a user scans for exactly that answer.
+    """
+    if cat not in cleanup_mod.SAFE_CATEGORIES:
+        return "[yellow]all[/]" if totals.file_count else "-"
+    return f"[yellow]{count}[/]" if count else "-"
 
 
 def _print_unrebuildable(plan: cleanup_mod.CleanupPlan, *, included: bool) -> None:

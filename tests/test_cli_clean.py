@@ -164,6 +164,22 @@ def test_clean_dry_run_names_the_unrebuildable_file(tmp_path: Path) -> None:
     assert "cannot be rebuilt" in result.stdout.lower()
 
 
+def test_clean_does_not_claim_audit_data_can_be_rebuilt(tmp_path: Path) -> None:
+    """Audit data is exempt from the item-level gate -- ``--include-audit``
+    is its opt-in -- but the "Cannot rebuild" column is the one place a
+    user looks for that answer, and a "-" there says the opposite of true.
+    """
+    root = _seed_project(tmp_path)
+    _add_unrebuildable_trim(root)  # makes the column appear at all
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["clean", str(root), "--all", "--include-audit"])
+
+    assert result.exit_code == 0, result.stdout
+    audit_row = next(line for line in result.stdout.splitlines() if "Audit JSON" in line)
+    assert "all" in audit_row, audit_row
+
+
 def test_clean_include_unrebuildable_deletes_it(tmp_path: Path) -> None:
     root = _seed_project(tmp_path)
     trim, _ = _add_unrebuildable_trim(root)
