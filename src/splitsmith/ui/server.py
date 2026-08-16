@@ -4013,6 +4013,43 @@ def register_job_bodies(state: AppState) -> None:
             export_storage.push_export_file(proj, result.fcpxml_path.with_suffix(".srt"))
             export_storage.push_export_file(proj, result.fcpxml_path.with_suffix(".json"))
 
+        # Durable record of this run (#629). One run per invocation across
+        # every selected stage -- that grouping is precisely what a
+        # directory listing cannot reconstruct.
+        match_artifacts = [
+            export_runs.ExportArtifact(
+                filename=result.fcpxml_path.name,
+                kind="match_video" if result.fcpxml_path.suffix.lower() == ".mp4" else "fcpxml",
+            )
+        ]
+        match_artifacts.extend(
+            export_runs.ExportArtifact(filename=p.name, kind="sidecar")
+            for p in (
+                result.fcpxml_path.with_suffix(".srt"),
+                result.fcpxml_path.with_suffix(".json"),
+            )
+            if p.exists()
+        )
+        _record_export_run(
+            state,
+            slug,
+            export_runs.ExportRun(
+                run_id=export_runs.new_run_id(),
+                kind="match",
+                finished_at=datetime.now(UTC),
+                # Wall clock. ``result.duration_seconds`` is the stitched
+                # timeline's length, which is a different number entirely.
+                duration_seconds=handle.timer.build()["total_ms"] / 1000.0,
+                stage_numbers=list(req.stage_numbers),
+                formats=export_runs.match_run_formats(
+                    output_format=req.output_format,
+                    youtube_sidecar=req.youtube_sidecar,
+                ),
+                anomaly_count=len(result.anomalies),
+                artifacts=match_artifacts,
+            ),
+        )
+
         handle.set_result(
             {
                 "fcpxml_path": str(result.fcpxml_path),

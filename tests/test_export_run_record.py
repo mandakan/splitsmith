@@ -12,6 +12,8 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
+
 from splitsmith import export_runs
 from splitsmith.ui import server as server_mod
 
@@ -340,3 +342,48 @@ def test_a_stage_export_records_requested_formats_separately_from_produced_artif
     assert "csv" in run["formats"]
     assert "csv" not in [a["kind"] for a in run["artifacts"]]
     assert [a["kind"] for a in run["artifacts"]] == ["trim"]
+
+
+def test_a_match_export_records_one_run_spanning_its_stages(tmp_path: Path, monkeypatch) -> None:
+    """Run *grouping* is the point: one match export over two stages is one
+    history line, not two."""
+    from .test_ui_server import _stub_match_export_probe, _wait_for_job
+
+    client, project_root = _seed_match_export_project(tmp_path)
+    _stub_match_export_probe(monkeypatch)
+
+    resp = client.post(
+        "/api/shooters/me/export/match",
+        json={
+            "stage_numbers": [1, 2],
+            "head_pad_seconds": 0.5,
+            "tail_pad_seconds": 1.0,
+            "include_secondaries": True,
+            # Trims are pre-staged and no overlay is asked for, so the
+            # worker stays on the "skip the per-stage exporter" branch and
+            # never shells out to ffmpeg.
+            "include_overlay": False,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+
+    doc = json.loads((project_root / "shooters" / "me" / "export_runs.json").read_text(encoding="utf-8"))
+    assert len(doc["runs"]) == 1
+    run = doc["runs"][0]
+    assert run["kind"] == "match"
+    assert run["stage_numbers"] == [1, 2]
+    assert run["formats"] == ["fcpxml"]
+    assert [a["kind"] for a in run["artifacts"]] == ["fcpxml"]
+    assert run["artifacts"][0]["filename"].endswith("-match.fcpxml")
+
+    # The wall-clock trap, pinned rather than described:
+    # ``MatchExportResult.duration_seconds`` is the *stitched timeline's*
+    # length, which this fixture makes 4.0s (2 stages x 2.0s effective).
+    # The run's duration is how long the job took, which for a fully
+    # mocked export is a fraction of a second. Asserting both is what
+    # makes the second assertion discriminating -- wire the wrong field in
+    # and it reads 4.0.
+    assert final["result"]["duration_seconds"] == pytest.approx(4.0, abs=0.1)
+    assert run["duration_seconds"] < 2.0
