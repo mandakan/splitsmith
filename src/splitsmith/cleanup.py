@@ -469,6 +469,13 @@ def _reconstructable(
     if cam_id is not None:
         video = stage.find_video_by_id(cam_id)
         if video is None:
+            # Artefacts written before the take spec embed the path-only
+            # ``legacy_video_id``, so the current-scheme lookup misses on
+            # every one of them. Their source is present; only the id
+            # scheme changed, and reporting them unrebuildable both hides
+            # them from "select all" and states something untrue (#922).
+            video = next((v for v in stage.videos if v.legacy_video_id == cam_id), None)
+        if video is None:
             # Fail closed: a cam id we cannot resolve to a registered video
             # cannot be proven reconstructable.
             return False

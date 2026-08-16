@@ -133,7 +133,7 @@ exists*, not "the source video exists":
 | --- | --- |
 | `CACHES` | always -- thumbs, probes, peaks are re-derived on demand |
 | `EXPORTS_LIGHT` | the stage's **audit doc** is present |
-| `EXPORTS_TRIMS` | per-camera artefacts (``_cam_<id>_`` segment) key on that video's source; primary artefacts key on `stage.primary()`'s source -- all resolved via ``StageEntry.find_video_by_id``; unresolvable ids fail closed (not reconstructable) |
+| `EXPORTS_TRIMS` | per-camera artefacts (``_cam_<id>_`` segment) key on that video's source; primary artefacts key on `stage.primary()`'s source -- resolved via ``StageEntry.find_video_by_id``, then against ``StageVideo.legacy_video_id`` for pre-take-spec names; an id matching neither fails closed (not reconstructable) |
 | `EXPORTS_OVERLAYS` | same as trims |
 | `AUDIT_TRIMS` | same as trims |
 | `AUDIO` | the **union** of all registered videos' sources; reconstructable only if every video that could contribute survives |
@@ -144,6 +144,16 @@ source was a real defect (fixed in commit c81c2e3): a secondary camera's
 irreplaceable trim was silently reported reconstructable whenever the primary's
 source survived, and would be deleted without a consent step. The per-camera
 keying above is load-bearing.
+
+Fail-closed is the right direction for an id that resolves to nothing, but it
+was originally applied to a case that is not unresolvable at all. Artefacts
+written before the take spec (2026-07-03) embed `legacy_video_id`, the
+path-only hash, so the current-scheme lookup misses on every one of them and a
+pre-take-spec project had *all* its per-camera trims labelled as having a
+source that is "already gone". The source is present; only the id scheme
+changed. The legacy comparison (#922) resolves the id and then still asks the
+source question -- it moves nothing past the safety check, it only stops the
+plan making a false statement.
 
 `EXPORTS_LIGHT` keying on the audit doc rather than the source is the
 non-obvious row, and getting it wrong regresses desktop. A CSV or FCPXML

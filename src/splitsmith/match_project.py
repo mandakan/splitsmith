@@ -405,6 +405,21 @@ class StageVideo(BaseModel):
             seed = f"{seed}#{self.stage_number}"
         return hashlib.blake2s(seed.encode("utf-8"), digest_size=6).hexdigest()
 
+    @property
+    def legacy_video_id(self) -> str:
+        """Pre-take-spec ``video_id``: the path-only hash.
+
+        The take spec (2026-07-03) added the ``#<stage_number>`` suffix
+        above, which orphaned every derived artefact already written
+        under the old id. Read paths that have to recognise those files
+        -- the cache fallbacks in ``ui.audio``, ``cleanup`` deciding
+        whether an artefact's source survives -- compare against this.
+        Deliberately *not* a ``computed_field``: it is a lookup key for
+        legacy names, not part of the serialised project. Remove
+        together with the fallbacks once a cache migration tool exists.
+        """
+        return hashlib.blake2s(str(self.path).encode("utf-8"), digest_size=6).hexdigest()
+
 
 class StageStatus(StrEnum):
     """Per-stage lifecycle state, derived from project + audit-file state.
