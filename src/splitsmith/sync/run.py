@@ -280,7 +280,7 @@ def _apply_pull(
                     merged_project = MatchProject.model_validate(result.doc)
                     merged_project.save(shooter_root)
                     merged_count += 1
-        else:  # audit
+        else:  # audit -- the only remaining kind; plan_pull filters on PULLABLE_DOC_KINDS
             shooter_root = shooter_roots.get(rd.slug)
             audit_path = (
                 None if shooter_root is None else shooter_root / "audit" / f"stage{rd.stage_number}.json"

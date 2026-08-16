@@ -59,6 +59,34 @@ def test_plan_pull_empty_manifest():
     assert plan_pull([], SyncState()) == []
 
 
+def test_plan_pull_ignores_doc_kinds_this_client_cannot_merge() -> None:
+    """A hosted-only doc kind must be inert to an old desktop client.
+
+    ``SyncClient._doc_path`` maps any unknown kind onto the audit URL
+    shape, so pulling one would GET ``docs/audit/<slug>/None`` and fail
+    the whole sync. Allowlist, not denylist: the next kind added should
+    be ignored by default rather than sync-breaking.
+    """
+    manifest = [
+        {
+            "doc_kind": "audit",
+            "slug": "me",
+            "stage_number": 1,
+            "version": 3,
+            "updated_at": "2026-08-16T10:00:00+00:00",
+        },
+        {
+            "doc_kind": "export_runs",
+            "slug": "me",
+            "stage_number": None,
+            "version": 7,
+            "updated_at": "2026-08-16T10:00:00+00:00",
+        },
+    ]
+    changed = plan_pull(manifest, SyncState())
+    assert [rd.kind for rd in changed] == ["audit"]
+
+
 # ---------------------------------------------------------------------------
 # run_sync orchestration
 # ---------------------------------------------------------------------------
