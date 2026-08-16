@@ -125,6 +125,22 @@ opt-in. That is not a new mechanism: it is exactly the shipped precedent for
 `AUDIT_DATA`, which `SAFE_CATEGORIES` already excludes for the same reason
 (deleting it destroys user work rather than costing recompute time).
 
+Each surface enforces that opt-in with the affordance it has. The dialog
+ticks items individually. The CLI has no room for per-item ticks, so one
+`--include-unrebuildable` covers the set (#924); `cleanup.without_unreconstructable`
+is what it applies, and the plan output still names every held-back file, as
+plain lines rather than table cells -- Rich ellipsizes a cell to fit, and a
+truncated filename in a data-loss warning is the #617 failure.
+
+`needs_item_opt_in` exempts categories outside `SAFE_CATEGORIES`, which today
+means `AUDIT_DATA`. Those are unreconstructable *by definition* -- that is why
+they sit outside the set -- so counting them at the item level would mean
+`--include-audit` selects the category and the item gate silently empties it
+again, leaving a documented flag doing nothing. The item gate protects the
+categories that ride along with "select all"; the category gate protects the
+rest. The dialog is stricter here and that is fine: stricter on a data-loss
+prompt costs a click, a flag that quietly stops working costs trust.
+
 Every item carries the flag; what differs per category is the input it is
 computed against. "Reconstructable" means *this artefact's own input still
 exists*, not "the source video exists":

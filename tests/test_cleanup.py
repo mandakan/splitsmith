@@ -14,6 +14,8 @@ from splitsmith.cleanup import (
     CleanupPlan,
     apply_cleanup,
     plan_cleanup,
+    unreconstructable_items,
+    without_unreconstructable,
 )
 from splitsmith.match_project import MatchProject
 
@@ -289,3 +291,44 @@ def test_desktop_items_are_reconstructable_by_default(tmp_path: Path) -> None:
     plan = plan_cleanup(project, root, {CleanupCategory.CACHES})
     assert plan.total_file_count == 1
     assert all(i.reconstructable for i in plan.items)
+
+
+def test_the_item_gate_leaves_audit_data_to_its_own_opt_in(tmp_path: Path) -> None:
+    """``AUDIT_DATA`` is unreconstructable by definition -- that is why it
+    sits outside ``SAFE_CATEGORIES``. Counting it in the item-level gate
+    would mean ``--include-audit`` selected the category and then the
+    item gate silently removed every file again, so the flag would do
+    nothing. Caught by ``test_clean_include_audit_yes_wipes_audit_too``
+    only because that test existed; pinned directly here.
+    """
+    project, root = _project(tmp_path)
+    audit = project.audit_path(root)
+    _write(audit / "stage1.json", b"{}")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.AUDIT_DATA})
+
+    assert [i.reconstructable for i in plan.items] == [False]
+    assert unreconstructable_items(plan) == []
+    assert [i.path for i in without_unreconstructable(plan).items] == [i.path for i in plan.items]
+
+
+def test_dropping_unreconstructable_items_zeroes_the_row_rather_than_removing_it(
+    tmp_path: Path,
+) -> None:
+    """ "You asked about this and it came to nothing" and "you never asked"
+    are different answers, and the SPA renders the row either way.
+    """
+    project, root = _project(tmp_path)
+    # No stage is registered, so a stage-numbered trim cannot resolve a
+    # source and fails closed -- the whole category drops out.
+    _write(project.exports_path(root) / "stage1_a_trimmed.mp4", b"\x00" * 64)
+
+    plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_TRIMS})
+    assert plan.total_file_count == 1
+
+    trimmed = without_unreconstructable(plan)
+
+    assert trimmed.items == []
+    assert trimmed.total_bytes == 0
+    assert CleanupCategory.EXPORTS_TRIMS in trimmed.totals_by_category
+    assert trimmed.totals_by_category[CleanupCategory.EXPORTS_TRIMS].file_count == 0

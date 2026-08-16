@@ -7,12 +7,26 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from splitsmith.cli import app
-from splitsmith.match_project import MatchProject
+from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 
 
 def _seed_project(tmp_path: Path) -> Path:
     root = tmp_path / "match"
     project = MatchProject.init(root, name="CLI Match")
+
+    # A registered stage whose primary source is on disk. Without it every
+    # artefact below resolves as unreconstructable (no stage to key on),
+    # and the assertions about ordinary categories would be testing the
+    # held-back path by accident rather than the deletion they name.
+    project.stages.append(
+        StageEntry(
+            stage_number=1,
+            stage_name="one",
+            time_seconds=12.5,
+            videos=[StageVideo(path=Path("raw/source.mp4"), role="primary", stage_number=1)],
+        )
+    )
+    project.save(root)
 
     audio = project.audio_path(root)
     audio.mkdir(parents=True, exist_ok=True)
@@ -94,6 +108,71 @@ def test_clean_not_a_project_errors(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["clean", str(tmp_path / "nope"), "--caches"])
     assert result.exit_code != 0
+
+
+def _add_unrebuildable_trim(root: Path) -> tuple[Path, str]:
+    """Register a second camera whose source is gone and give it a trim.
+
+    Its ``_cam_<id>_`` segment resolves to a registered video, so this is
+    not the fail-closed "unknown id" path -- the source really is missing,
+    which is the only thing that makes the trim irreplaceable.
+    """
+    project = MatchProject.load(root)
+    secondary = StageVideo(path=Path("raw/gone.mp4"), role="secondary", stage_number=1)
+    project.stages[0].videos.append(secondary)
+    project.save(root)
+
+    trim = project.exports_path(root) / f"stage1_one_cam_{secondary.video_id}_trimmed.mp4"
+    trim.write_bytes(b"\x00" * 65536)
+    return trim, trim.name
+
+
+def test_clean_all_yes_holds_back_a_trim_whose_source_is_gone(tmp_path: Path) -> None:
+    """#924: ``reconstructable`` was computed and then never consulted, so
+    ``--all --yes`` deleted an irreplaceable file without a word. The SPA
+    excludes such items from "select all" and gates them behind an
+    explicit opt-in; the two surfaces must not disagree about a data-loss
+    decision.
+    """
+    root = _seed_project(tmp_path)
+    trim, name = _add_unrebuildable_trim(root)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["clean", str(root), "--all", "--yes"])
+
+    assert result.exit_code == 0, result.stdout
+    assert trim.exists(), "an unrebuildable trim must survive a convenience --all"
+    # Rebuildable neighbours in the same category still go.
+    assert not (root / "exports" / "stage1_one_trimmed.mp4").exists()
+    # And the user is told, by name, what was held back and why.
+    assert name in result.stdout
+    assert "--include-unrebuildable" in result.stdout
+
+
+def test_clean_dry_run_names_the_unrebuildable_file(tmp_path: Path) -> None:
+    root = _seed_project(tmp_path)
+    _, name = _add_unrebuildable_trim(root)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["clean", str(root), "--all"])
+
+    assert result.exit_code == 0, result.stdout
+    # Read the rendered output, not the model: a Rich table cell would
+    # ellipsize a filename this long and the assertion would still pass
+    # while the user saw nothing (#617).
+    assert name in result.stdout
+    assert "cannot be rebuilt" in result.stdout.lower()
+
+
+def test_clean_include_unrebuildable_deletes_it(tmp_path: Path) -> None:
+    root = _seed_project(tmp_path)
+    trim, _ = _add_unrebuildable_trim(root)
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["clean", str(root), "--all", "--include-unrebuildable", "--yes"])
+
+    assert result.exit_code == 0, result.stdout
+    assert not trim.exists()
 
 
 def test_clean_specific_category_only(tmp_path: Path) -> None:
