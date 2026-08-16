@@ -29,6 +29,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
+from .. import export_runs
 from ..match_project import trim_blocker
 from . import export_storage
 from .http_errors import ensure_source_reachable
@@ -178,6 +179,25 @@ def export_overview(slug: str, request: Request) -> JSONResponse:
             "match_exports": [m.model_dump(mode="json") for m in match_files],
         }
     )
+
+
+@router.get("/api/shooters/{slug}/exports/runs")
+def list_export_runs(slug: str, request: Request) -> JSONResponse:
+    """The shooter's export history, newest first (#629).
+
+    Deliberately separate from ``exports/overview``: the overview answers
+    "what can I download now" and this answers "what happened". Run
+    grouping, duration, selected formats and anomaly count are the four
+    facts a directory listing cannot reconstruct, which is the whole
+    reason a record is written at export time.
+
+    A malformed or unreadable log reads as an empty history rather than a
+    500 -- ``export_runs.load_log`` drops what it cannot parse.
+    """
+    state = request.app.state.splitsmith_state
+    doc, _version = state.load_export_runs(slug)
+    log = export_runs.load_log(doc)
+    return JSONResponse({"runs": [r.model_dump(mode="json") for r in log.runs]})
 
 
 @router.get("/api/shooters/{slug}/exports/file/{filename:path}")

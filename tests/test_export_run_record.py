@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from splitsmith import export_runs
+from splitsmith import export_runs, trim
 from splitsmith.ui import server as server_mod
 
 from .test_ui_server import _seed_match_export_project
@@ -49,6 +49,39 @@ def _match_context(project_root: Path, match_id: str | None = None):
     finally:
         server_mod.current_match_root.reset(tok_root)
         server_mod.current_match_id.reset(tok_id)
+
+
+def _fake_trim_video(source, output_path, **kwargs):  # type: ignore[no-untyped-def]
+    """Stand in for ``trim.trim_video``: no ffmpeg, just a placeholder file.
+
+    Shared by every test that needs a trim to "succeed" without caring what
+    bytes land on disk -- the CSV/FCPXML/report writers this file exercises
+    never inspect the trim's contents, only its existence and timing.
+    """
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(output_path).write_bytes(b"TRIMMED")
+    return trim.TrimResult(output_path=Path(output_path), start_time=0.0, end_time=10.0)
+
+
+def _export_stage_trim_only(client, stage_number: int):
+    """Submit a trim-only export and wait for it. The trim writer must
+    already be monkeypatched by the caller."""
+    from .test_ui_server import _wait_for_job
+
+    resp = client.post(
+        f"/api/shooters/me/stages/{stage_number}/export",
+        json={
+            "write_trim": True,
+            "write_csv": False,
+            "write_fcpxml": False,
+            "write_report": False,
+            "write_overlay": False,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+    return final
 
 
 def test_local_mode_appends_to_a_file_in_the_shooter_root(tmp_path: Path) -> None:
@@ -199,32 +232,11 @@ def test_conflict_retry_reloads_and_reappends_onto_the_winner(tmp_path: Path, mo
 
 
 def test_a_stage_export_records_a_run(tmp_path: Path, monkeypatch) -> None:
-    from splitsmith import trim
-
-    from .test_ui_server import _wait_for_job
-
     client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
 
-    def fake_trim_video(source, output_path, **kwargs):  # type: ignore[no-untyped-def]
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(output_path).write_bytes(b"TRIMMED")
-        return trim.TrimResult(output_path=Path(output_path), start_time=0.0, end_time=10.0)
-
-    monkeypatch.setattr(trim, "trim_video", fake_trim_video)
+    monkeypatch.setattr(trim, "trim_video", _fake_trim_video)
     assert client.post("/api/shooters/me/stages/1/time", json={"time_seconds": 10.0}).status_code == 200
-
-    resp = client.post(
-        "/api/shooters/me/stages/1/export",
-        json={
-            "write_trim": True,
-            "write_csv": False,
-            "write_fcpxml": False,
-            "write_report": False,
-            "write_overlay": False,
-        },
-    )
-    assert resp.status_code == 200, resp.text
-    assert _wait_for_job(client, resp.json()["id"])["status"] == "succeeded"
+    _export_stage_trim_only(client, 1)
 
     doc = json.loads((project_root / "shooters" / "me" / "export_runs.json").read_text(encoding="utf-8"))
     assert len(doc["runs"]) == 1
@@ -247,8 +259,6 @@ def test_a_stage_export_records_a_run(tmp_path: Path, monkeypatch) -> None:
 def test_a_failed_stage_export_records_nothing(tmp_path: Path, monkeypatch) -> None:
     """The record describes a completed run. A job that raises (here: the
     trim writer produces no clip at all) must leave no history line."""
-    from splitsmith import trim
-
     from .test_ui_server import _wait_for_job
 
     client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
@@ -294,8 +304,6 @@ def test_a_stage_export_records_requested_formats_separately_from_produced_artif
     from ``test_a_stage_export_records_a_run`` alone (there both fields
     happen to agree).
     """
-    from splitsmith import trim
-
     from .test_ui_server import _wait_for_job
 
     client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
@@ -311,12 +319,7 @@ def test_a_stage_export_records_requested_formats_separately_from_produced_artif
     audit_doc["shots"] = []
     audit_path.write_text(json.dumps(audit_doc), encoding="utf-8")
 
-    def fake_trim_video(source, output_path, **kwargs):  # type: ignore[no-untyped-def]
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(output_path).write_bytes(b"TRIMMED")
-        return trim.TrimResult(output_path=Path(output_path), start_time=0.0, end_time=10.0)
-
-    monkeypatch.setattr(trim, "trim_video", fake_trim_video)
+    monkeypatch.setattr(trim, "trim_video", _fake_trim_video)
     assert client.post("/api/shooters/me/stages/1/time", json={"time_seconds": 10.0}).status_code == 200
 
     resp = client.post(
@@ -493,3 +496,40 @@ def test_a_match_export_to_mp4_records_a_match_video_artifact(tmp_path: Path, mo
     assert run["formats"] == ["mp4"]
     assert [a["kind"] for a in run["artifacts"]] == ["match_video"]
     assert run["artifacts"][0]["filename"].endswith("-match.mp4")
+
+
+def test_export_runs_endpoint_serves_the_history_newest_first(tmp_path: Path, monkeypatch) -> None:
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=2)
+
+    monkeypatch.setattr(trim, "trim_video", _fake_trim_video)
+    for n in (1, 2):
+        assert (
+            client.post(f"/api/shooters/me/stages/{n}/time", json={"time_seconds": 10.0}).status_code == 200
+        )
+        _export_stage_trim_only(client, n)
+
+    resp = client.get("/api/shooters/me/exports/runs")
+    assert resp.status_code == 200, resp.text
+    runs = resp.json()["runs"]
+    assert len(runs) == 2
+    # Newest first is the stored order; the client must never have to sort.
+    assert runs[0]["stage_numbers"] == [2]
+    assert runs[1]["stage_numbers"] == [1]
+    assert runs[0]["artifacts"][0]["filename"].endswith("_trimmed.mp4")
+
+
+def test_export_runs_endpoint_is_empty_before_any_export(tmp_path: Path) -> None:
+    client, _ = _seed_match_export_project(tmp_path, stage_count=1)
+    resp = client.get("/api/shooters/me/exports/runs")
+    assert resp.status_code == 200
+    assert resp.json() == {"runs": []}
+
+
+def test_export_runs_endpoint_survives_a_corrupt_log(tmp_path: Path) -> None:
+    """Bookkeeping must not 500 a page. A truncated document reads as an
+    empty history, not an error."""
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    (project_root / "shooters" / "me" / "export_runs.json").write_text("{not json", encoding="utf-8")
+    resp = client.get("/api/shooters/me/exports/runs")
+    assert resp.status_code == 200
+    assert resp.json() == {"runs": []}
