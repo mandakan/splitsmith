@@ -5491,9 +5491,18 @@ class CleanupRequest(BaseModel):
     The server re-plans server-side from this list rather than trusting a
     client-supplied path list -- a malicious or buggy client cannot ask
     us to delete arbitrary files outside the project's known buckets.
+
+    ``include_unrebuildable`` is the API's half of the item-level consent
+    the SPA dialog and ``splitsmith clean --include-unrebuildable``
+    already enforce (#926). It defaults to False so the safe direction is
+    what a caller gets by saying nothing: every client that predates the
+    field keeps working and none of them can destroy data by omission.
+    It cannot be a path list for the reason above -- the server re-plans,
+    so this is a yes/no about a class of item, not a selection.
     """
 
     categories: list[cleanup_module.CleanupCategory]
+    include_unrebuildable: bool = False
 
 
 class RemoveVideoRequest(BaseModel):
@@ -12476,6 +12485,15 @@ def create_app(
         paths. Any active job is treated as a hard block (409) -- mid-
         flight ffmpeg writes into ``trimmed/`` or audit JSON saves into
         ``audit/`` would race with the deletes and corrupt state.
+
+        Items whose own input is already gone are held back unless the
+        request opts in (#926), matching the CLI's
+        ``--include-unrebuildable`` and the dialog's per-item ticks. The
+        *response* still carries the full plan, not the applied subset:
+        the plan's contract is "here is everything in these categories",
+        and filtering it would leave a caller unable to tell a file that
+        was skipped from one that never existed. ``result`` is the record
+        of what was actually deleted.
         """
         active = await _any_active_job(state)
         if active is not None:
@@ -12497,7 +12515,14 @@ def create_app(
         audit_docs = state.load_audit_docs(slug)
         audit_stages = None if audit_docs is None else set(audit_docs)
         plan = cleanup_module.plan_cleanup(project, root, cats, audit_stages=audit_stages)
-        result = cleanup_module.apply_cleanup(plan, root=root, project=project)
+        # ``without_unreconstructable`` -- not a local "drop everything
+        # unreconstructable" -- because it goes through
+        # ``needs_item_opt_in``, which exempts AUDIT_DATA. Audit docs are
+        # unreconstructable by definition, so re-deriving the condition
+        # here would let the audit-data checkbox select the category and
+        # this gate silently empty it.
+        applied = plan if req.include_unrebuildable else cleanup_module.without_unreconstructable(plan)
+        result = cleanup_module.apply_cleanup(applied, root=root, project=project)
         return JSONResponse(
             {
                 "plan": plan.model_dump(mode="json"),

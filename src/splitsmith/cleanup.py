@@ -598,13 +598,17 @@ def without_unreconstructable(plan: CleanupPlan) -> CleanupPlan:
     this and it came to nothing" and "you never asked" are different
     answers, and the SPA renders the row either way.
 
-    The SPA does not call this -- ``cleanup_apply`` re-plans server-side
-    and the API takes categories, never paths, so per-item consent there
-    can only gate the button. The CLI holds the planned items directly and
-    is the one surface that can act on the distinction. The dialog's own
-    per-item list is therefore slightly stricter: it ticks audit docs
-    individually too. Stricter on a data-loss prompt is fine; the flag
-    that quietly stops working is not.
+    Three surfaces reach this. The CLI holds the planned items directly
+    and applies it unless ``--include-unrebuildable``. ``cleanup_apply``
+    applies it unless the request sets ``include_unrebuildable`` (#926):
+    the API still takes categories and never paths, so the SPA's per-item
+    ticks cannot scope the request to individual files -- they collapse
+    into that one flag, which is nonetheless what makes them real rather
+    than a disabled button anyone can route around.
+
+    The dialog's own per-item list is slightly stricter than this
+    function: it ticks audit docs individually too. Stricter on a
+    data-loss prompt is fine; the flag that quietly stops working is not.
     """
     kept = [i for i in plan.items if not needs_item_opt_in(i)]
     totals = {cat: CleanupTotals() for cat in plan.totals_by_category}

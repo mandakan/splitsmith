@@ -2341,12 +2341,20 @@ export const api = {
     );
   },
 
-  applyCleanup: (slug: string, categories: CleanupCategory[]) =>
+  /** ``includeUnrebuildable`` carries the dialog's per-item consent to the
+   *  server, which otherwise holds back every item whose own input is
+   *  already gone (#926). It defaults to false so the safe direction is
+   *  what a caller gets by saying nothing. */
+  applyCleanup: (
+    slug: string,
+    categories: CleanupCategory[],
+    includeUnrebuildable = false,
+  ) =>
     request<CleanupApplyResponse>(
       `/api/shooters/${encodeURIComponent(slug)}/project/cleanup`,
       {
         method: "POST",
-        json: { categories },
+        json: { categories, include_unrebuildable: includeUnrebuildable },
       },
     ),
 

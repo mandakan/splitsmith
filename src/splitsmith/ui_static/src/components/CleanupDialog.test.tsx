@@ -176,6 +176,81 @@ describe("CleanupDialog", () => {
     await waitFor(() => expect(posted()).toBe(true));
   });
 
+  it("carries the per-item consent to the server as include_unrebuildable", async () => {
+    // Before #926 the ticks gated the Confirm button and nothing else:
+    // the POST body was `{ categories }`, and the server deleted every
+    // unrebuildable item in those categories whether or not anyone had
+    // consented. Ticking the boxes has to change the request, or the
+    // consent is decoration on a control that can be routed around.
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+      const method = (init as RequestInit | undefined)?.method ?? "GET";
+      return Promise.resolve(
+        method === "POST"
+          ? ok({ plan: PLAN, result: { deleted: [], failed: [], bytes_freed: 0 } })
+          : ok(PLAN),
+      );
+    });
+    const postBody = () => {
+      const call = fetchMock.mock.calls.find(
+        ([, init]) => (init as RequestInit | undefined)?.method === "POST",
+      );
+      return JSON.parse(String((call?.[1] as RequestInit).body));
+    };
+
+    render(<CleanupDialog slug="me" open onClose={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: /select all/i }));
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: "stage2_b_trimmed.mp4" }),
+    );
+    await userEvent.click(await screen.findByRole("button", { name: /^reclaim$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /confirm/i }));
+
+    await waitFor(() => expect(postBody().include_unrebuildable).toBe(true));
+  });
+
+  it("withholds the flag when the plan showed nothing unrebuildable", async () => {
+    // `allUnrebuildableOptedIn` is vacuously true on a plan with nothing
+    // to tick. Sending the flag on that basis would pre-authorise
+    // whatever the server's own re-plan finds between the GET and the
+    // POST -- a file this user was never shown and never consented to.
+    const CLEAN_PLAN = {
+      ...PLAN,
+      items: [{ ...PLAN.items[0] }],
+      totals_by_category: { "exports-trims": { file_count: 1, bytes: 1_048_576 } },
+      total_bytes: 1_048_576,
+      total_file_count: 1,
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((_url, init) => {
+      const method = (init as RequestInit | undefined)?.method ?? "GET";
+      return Promise.resolve(
+        method === "POST"
+          ? ok({ plan: CLEAN_PLAN, result: { deleted: [], failed: [], bytes_freed: 0 } })
+          : ok(CLEAN_PLAN),
+      );
+    });
+
+    render(<CleanupDialog slug="me" open onClose={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: /select all/i }));
+    // No "cannot be rebuilt" section at all on this plan.
+    await waitFor(() => expect(screen.getByText(/Total: 1\.0 MB/)).toBeInTheDocument());
+    expect(
+      screen.queryByRole("region", { name: /cannot be rebuilt/i }),
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /^reclaim$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /confirm/i }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        ([, init]) => (init as RequestInit | undefined)?.method === "POST",
+      );
+      expect(call).toBeDefined();
+      expect(JSON.parse(String((call![1] as RequestInit).body)).include_unrebuildable).toBe(
+        false,
+      );
+    });
+  });
+
   it("clears a stale plan when a category toggle's fetch fails, so a stray confirm can't post", async () => {
     // I1 whole-branch finding: `plan` was never invalidated when
     // `selected` changed, and a failed re-fetch's `.catch()` left the

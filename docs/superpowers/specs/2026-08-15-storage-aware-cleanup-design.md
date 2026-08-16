@@ -132,6 +132,24 @@ is what it applies, and the plan output still names every held-back file, as
 plain lines rather than table cells -- Rich ellipsizes a cell to fit, and a
 truncated filename in a data-loss warning is the #617 failure.
 
+`cleanup_apply` enforces it too, via `include_unrebuildable: bool = False`
+on `CleanupRequest` (#926). It shipped without one, which made the dialog's
+ticks cosmetic: they gated a button, and anything POSTing the category list
+around it -- a script, a replayed request, a future client -- deleted
+irreplaceable files with no consent step anywhere in the path. The API
+still takes categories and never paths (the server re-plans, so a client
+cannot name arbitrary files to delete), so per-item consent necessarily
+collapses into this one flag. It defaults to False so the safe direction is
+what a caller gets by saying nothing. The *response* keeps carrying the
+full plan rather than the applied subset -- the plan's contract is "here is
+everything in these categories", and `result` is the record of what was
+actually deleted.
+
+The dialog sends the flag only when it actually showed the user something
+to tick. On a plan with nothing unreconstructable its "everything is ticked"
+predicate is vacuously true, and sending on that basis would pre-authorise
+whatever the server's re-plan turns up between the GET and the POST.
+
 `needs_item_opt_in` exempts categories outside `SAFE_CATEGORIES`, which today
 means `AUDIT_DATA`. Those are unreconstructable *by definition* -- that is why
 they sit outside the set -- so counting them at the item level would mean
