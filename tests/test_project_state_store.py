@@ -161,6 +161,42 @@ def test_audit_roundtrip_and_distinct_stages() -> None:
     assert asyncio.run(store.load_audit("brm-abc", "alice", 2)) == ({"shots": [2]}, 1)
 
 
+# -- export-run log doc (slug set, stage NULL) --------------------------
+
+
+def test_export_runs_roundtrip_and_version_bump() -> None:
+    sf, (uid,) = _engine_with_users("m@thias.se")
+    store = ProjectStateStore(sf, user_id=uid)
+
+    assert asyncio.run(store.load_export_runs("m1", "me")) == (None, 0)
+    v1 = asyncio.run(
+        store.save_export_runs("m1", "me", {"schema_version": 1, "runs": []}, expected_version=0)
+    )
+    assert v1 == 1
+    v2 = asyncio.run(
+        store.save_export_runs(
+            "m1", "me", {"schema_version": 1, "runs": [{"run_id": "x"}]}, expected_version=1
+        )
+    )
+    assert v2 == 2
+    doc, version = asyncio.run(store.load_export_runs("m1", "me"))
+    assert version == 2
+    assert doc["runs"] == [{"run_id": "x"}]
+
+
+def test_export_runs_does_not_collide_with_the_project_doc() -> None:
+    """Both are (match_id, slug, stage NULL); only ``doc_kind`` separates
+    them. A wrong kind constant would make one INSERT clobber the other's
+    identity and raise a conflict here."""
+    sf, (uid,) = _engine_with_users("m@thias.se")
+    store = ProjectStateStore(sf, user_id=uid)
+
+    asyncio.run(store.save_project("m1", "me", {"name": "p"}, expected_version=0))
+    asyncio.run(store.save_export_runs("m1", "me", {"schema_version": 1, "runs": []}, expected_version=0))
+    proj, _ = asyncio.run(store.load_project("m1", "me"))
+    assert proj == {"name": "p"}
+
+
 # -- multi-tenant isolation, per kind ----------------------------------
 
 
@@ -195,6 +231,16 @@ def test_tenant_isolation_audit() -> None:
 
     assert asyncio.run(a.load_audit("shared", "x", 1)) == ({"who": "alice"}, 1)
     assert asyncio.run(b.load_audit("shared", "x", 1)) == ({"who": "bob"}, 1)
+
+
+def test_tenant_isolation_export_runs() -> None:
+    sf, (alice, bob) = _engine_with_users("alice@thias.se", "bob@thias.se")
+    a, b = ProjectStateStore(sf, user_id=alice), ProjectStateStore(sf, user_id=bob)
+
+    asyncio.run(a.save_export_runs("shared", "x", {"schema_version": 1, "runs": []}, expected_version=0))
+
+    assert asyncio.run(a.load_export_runs("shared", "x")) == ({"schema_version": 1, "runs": []}, 1)
+    assert asyncio.run(b.load_export_runs("shared", "x")) == (None, 0)
 
 
 def test_load_does_not_leak_across_users() -> None:
@@ -348,6 +394,18 @@ def test_delete_shooter_tenant_isolation() -> None:
         1,
     )
     assert asyncio.run(b.load_audit("shared", "ada", 1)) == ({"shots": []}, 1)
+
+
+def test_delete_shooter_sweeps_the_export_run_log() -> None:
+    """The export-run log carries both ``match_id`` and ``slug``, same as
+    the project/audit docs :meth:`delete_shooter` already targets -- so it
+    needs no change to the delete statement, only proof that it's swept."""
+    sf, (uid,) = _engine_with_users("m@thias.se")
+    store = ProjectStateStore(sf, user_id=uid)
+    asyncio.run(store.save_export_runs("m1", "me", {"schema_version": 1, "runs": []}, expected_version=0))
+
+    assert asyncio.run(store.delete_shooter("m1", "me")) >= 1
+    assert asyncio.run(store.load_export_runs("m1", "me")) == (None, 0)
 
 
 # -- doc manifest (sync pull) -------------------------------------------
