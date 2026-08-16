@@ -236,8 +236,10 @@ def test_a_stage_export_records_a_run(tmp_path: Path, monkeypatch) -> None:
     assert run["artifacts"][0]["filename"].endswith("_trimmed.mp4")
     assert "/" not in run["artifacts"][0]["filename"]
     # Wall clock, not a timeline length -- and a real measurement, so it is
-    # positive and small for a mocked trim.
-    assert 0.0 < run["duration_seconds"] < 60.0
+    # positive and small for a mocked trim. 5s comfortably bounds a job
+    # that does no real ffmpeg work, while still excluding a wrongly-wired
+    # ``TrimResult.end_time - start_time`` (10.0, per the mock above).
+    assert 0.0 < run["duration_seconds"] < 5.0
 
 
 def test_a_failed_stage_export_records_nothing(tmp_path: Path, monkeypatch) -> None:
@@ -275,3 +277,66 @@ def test_a_failed_stage_export_records_nothing(tmp_path: Path, monkeypatch) -> N
     )
     assert _wait_for_job(client, resp.json()["id"])["status"] == "failed"
     assert not (project_root / "shooters" / "me" / "export_runs.json").exists()
+
+
+def test_a_stage_export_records_requested_formats_separately_from_produced_artifacts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """``formats`` is what was asked for; ``artifacts`` is what was written.
+
+    Request a trim (which succeeds) alongside a CSV (which the exporter
+    skips because the audit has no shots), so the two fields provably
+    diverge -- an implementation that derived ``formats`` from the
+    produced artifact kinds instead of the request flags would collapse
+    them to the same list, and this test would not tell the difference
+    from ``test_a_stage_export_records_a_run`` alone (there both fields
+    happen to agree).
+    """
+    from splitsmith import trim
+
+    from .test_ui_server import _wait_for_job
+
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    shooter_root = project_root / "shooters" / "me"
+
+    # ``_seed_match_export_project`` ships the audit doc with one shot;
+    # overwrite with an empty ``shots[]`` so ``export_stage`` skips the CSV
+    # ("csv not written: no shots audited") while the trim still succeeds
+    # via the mock below.
+    audit_path = shooter_root / "audit" / "stage1.json"
+    audit_doc = json.loads(audit_path.read_text(encoding="utf-8"))
+    assert audit_doc["shots"], "fixture no longer seeds a shot -- update this test's premise"
+    audit_doc["shots"] = []
+    audit_path.write_text(json.dumps(audit_doc), encoding="utf-8")
+
+    def fake_trim_video(source, output_path, **kwargs):  # type: ignore[no-untyped-def]
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"TRIMMED")
+        return trim.TrimResult(output_path=Path(output_path), start_time=0.0, end_time=10.0)
+
+    monkeypatch.setattr(trim, "trim_video", fake_trim_video)
+    assert client.post("/api/shooters/me/stages/1/time", json={"time_seconds": 10.0}).status_code == 200
+
+    resp = client.post(
+        "/api/shooters/me/stages/1/export",
+        json={
+            "write_trim": True,
+            "write_csv": True,
+            "write_fcpxml": False,
+            "write_report": False,
+            "write_overlay": False,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert _wait_for_job(client, resp.json()["id"])["status"] == "succeeded"
+
+    doc = json.loads((shooter_root / "export_runs.json").read_text(encoding="utf-8"))
+    run = doc["runs"][0]
+    # Both were requested...
+    assert run["formats"] == ["trim", "csv"]
+    # ...but the csv never produced a file. Both assertions in one test:
+    # a ``formats`` derived from ``artifacts`` would pass the first and
+    # fail the second, or vice versa, only if the two fields differ here.
+    assert "csv" in run["formats"]
+    assert "csv" not in [a["kind"] for a in run["artifacts"]]
+    assert [a["kind"] for a in run["artifacts"]] == ["trim"]
