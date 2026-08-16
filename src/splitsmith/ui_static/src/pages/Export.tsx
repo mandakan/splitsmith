@@ -542,6 +542,11 @@ function ExportInner({ slug }: { slug: string }) {
       const final = await api.pollJob(submitted.id, setJob);
       if (final.status === "succeeded" && final.result) {
         setResult(final.result as unknown as MatchExportResult);
+        // Same refresh the per-stage and trims-only paths already do. The
+        // job's own result drives the panel below, but the overview's
+        // match-export rows and the export history both come from the
+        // server and would otherwise stay as they were before the run.
+        void reload();
       } else if (final.status === "failed") {
         setError(final.error ?? "Export failed");
       }
