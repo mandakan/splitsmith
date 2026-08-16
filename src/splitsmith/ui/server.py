@@ -3733,6 +3733,50 @@ def register_job_bodies(state: AppState) -> None:
         def _name(p: Path | None) -> str | None:
             return p.name if p is not None else None
 
+        # Durable record of this run (#629). Everything above is already
+        # written and pushed, so a failure here must not fail the job --
+        # ``_record_export_run`` swallows and logs. Placed after the
+        # "nothing was written" raise so a failed run leaves no history.
+        run_artifacts: list[export_runs.ExportArtifact] = []
+        for produced, artifact_kind in (
+            (result.trimmed_video_path, "trim"),
+            (result.csv_path, "csv"),
+            (result.fcpxml_path, "fcpxml"),
+            (result.report_path, "report"),
+            (result.overlay_path, "overlay"),
+        ):
+            if produced is not None:
+                run_artifacts.append(export_runs.ExportArtifact(filename=produced.name, kind=artifact_kind))
+        # ``.values()``, not the mapping: iterating ``secondary_trimmed_paths``
+        # yields video-id strings, which is the exact bug
+        # ``test_export_result_reports_secondary_trim_filenames`` pins.
+        run_artifacts.extend(
+            export_runs.ExportArtifact(filename=p.name, kind="secondary_trim")
+            for p in result.secondary_trimmed_paths.values()
+        )
+        _record_export_run(
+            state,
+            slug,
+            export_runs.ExportRun(
+                run_id=export_runs.new_run_id(),
+                kind="stage",
+                finished_at=datetime.now(UTC),
+                # Wall clock for the job body. NOT any duration a result
+                # object carries -- see export_runs.ExportRun's docstring.
+                duration_seconds=handle.timer.build()["total_ms"] / 1000.0,
+                stage_numbers=[stage_number],
+                formats=export_runs.stage_run_formats(
+                    trim=req.write_trim,
+                    csv=req.write_csv,
+                    fcpxml=req.write_fcpxml,
+                    report=req.write_report,
+                    overlay=req.write_overlay,
+                ),
+                anomaly_count=len(reported),
+                artifacts=run_artifacts,
+            ),
+        )
+
         handle.set_result(
             {
                 "stage_number": stage_number,

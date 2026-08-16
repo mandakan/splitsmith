@@ -194,3 +194,84 @@ def test_conflict_retry_reloads_and_reappends_onto_the_winner(tmp_path: Path, mo
     # Newest-first, and both runs survive: the retry re-loaded the winner's
     # doc and appended onto it rather than overwriting it.
     assert [r["run_id"] for r in doc["runs"]] == ["d" * 32, "e" * 32]
+
+
+def test_a_stage_export_records_a_run(tmp_path: Path, monkeypatch) -> None:
+    from splitsmith import trim
+
+    from .test_ui_server import _wait_for_job
+
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+
+    def fake_trim_video(source, output_path, **kwargs):  # type: ignore[no-untyped-def]
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(output_path).write_bytes(b"TRIMMED")
+        return trim.TrimResult(output_path=Path(output_path), start_time=0.0, end_time=10.0)
+
+    monkeypatch.setattr(trim, "trim_video", fake_trim_video)
+    assert client.post("/api/shooters/me/stages/1/time", json={"time_seconds": 10.0}).status_code == 200
+
+    resp = client.post(
+        "/api/shooters/me/stages/1/export",
+        json={
+            "write_trim": True,
+            "write_csv": False,
+            "write_fcpxml": False,
+            "write_report": False,
+            "write_overlay": False,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert _wait_for_job(client, resp.json()["id"])["status"] == "succeeded"
+
+    doc = json.loads((project_root / "shooters" / "me" / "export_runs.json").read_text(encoding="utf-8"))
+    assert len(doc["runs"]) == 1
+    run = doc["runs"][0]
+    assert run["kind"] == "stage"
+    assert run["stage_numbers"] == [1]
+    # Requested formats, not produced files: the run asked for a trim only.
+    assert run["formats"] == ["trim"]
+    assert run["anomaly_count"] == 0
+    assert [a["kind"] for a in run["artifacts"]] == ["trim"]
+    assert run["artifacts"][0]["filename"].endswith("_trimmed.mp4")
+    assert "/" not in run["artifacts"][0]["filename"]
+    # Wall clock, not a timeline length -- and a real measurement, so it is
+    # positive and small for a mocked trim.
+    assert 0.0 < run["duration_seconds"] < 60.0
+
+
+def test_a_failed_stage_export_records_nothing(tmp_path: Path, monkeypatch) -> None:
+    """The record describes a completed run. A job that raises (here: the
+    trim writer produces no clip at all) must leave no history line."""
+    from splitsmith import trim
+
+    from .test_ui_server import _wait_for_job
+
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+
+    # ``_seed_match_export_project`` pre-populates a stale ``_trimmed.mp4``
+    # so match-export tests have something to build an FCPXML from. Remove
+    # it here: this test's premise is that the trim writer produces no clip
+    # at all, and the exporter's stale-artefact fallback would otherwise
+    # paper over the failure and let the job succeed.
+    for stale in (project_root / "shooters" / "me" / "exports").iterdir():
+        stale.unlink()
+
+    def failing_trim(source, output_path, **kwargs):  # type: ignore[no-untyped-def]
+        raise trim.FFmpegError("ffmpeg exploded")
+
+    monkeypatch.setattr(trim, "trim_video", failing_trim)
+    assert client.post("/api/shooters/me/stages/1/time", json={"time_seconds": 10.0}).status_code == 200
+
+    resp = client.post(
+        "/api/shooters/me/stages/1/export",
+        json={
+            "write_trim": True,
+            "write_csv": False,
+            "write_fcpxml": False,
+            "write_report": False,
+            "write_overlay": False,
+        },
+    )
+    assert _wait_for_job(client, resp.json()["id"])["status"] == "failed"
+    assert not (project_root / "shooters" / "me" / "export_runs.json").exists()
