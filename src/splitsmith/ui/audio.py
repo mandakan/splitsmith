@@ -83,15 +83,12 @@ def video_audio_path(
 def legacy_video_id(video: StageVideo) -> str:
     """Pre-take-spec ``video_id``: hash of the source path only.
 
-    The take spec (2026-07-03) changed ``StageVideo.video_id`` to hash
-    "<path>#<stage_number>" for stage-assigned videos, which orphaned
-    every derived-artifact cache (audio WAVs, audit trims) written under
-    the old path-only id. This mirrors the exact legacy hashing
-    (``project.py``'s ``video_id``, minus the stage suffix) so read
-    paths can fall back to those files. Remove together with the
-    fallbacks once a cache migration tool exists.
+    Thin alias for :attr:`StageVideo.legacy_video_id`, kept because the
+    cache fallbacks below and their tests read as functions. The hash
+    itself lives on the model so ``cleanup`` can ask the same question
+    without a core module importing this UI one.
     """
-    return hashlib.blake2s(str(video.path).encode("utf-8"), digest_size=6).hexdigest()
+    return video.legacy_video_id
 
 
 def _legacy_cache_fallback(

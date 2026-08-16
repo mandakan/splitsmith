@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CleanupDialog } from "@/components/CleanupDialog";
@@ -51,6 +52,24 @@ function mockFetch(applyResponse: Response) {
     const method = (init as RequestInit | undefined)?.method ?? "GET";
     return Promise.resolve(method === "POST" ? applyResponse : ok(PLAN));
   });
+}
+
+/** A caller that owns `open`, mirroring `Export.tsx`. Needed for the
+ *  clean-run assertions: with a literal `open` prop the component's
+ *  `if (!open) return null` can never fire, so a test would report a
+ *  message the user never saw. */
+function Caller({ onClosed }: { onClosed: () => void }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <CleanupDialog
+      slug="me"
+      open={open}
+      onClose={() => {
+        setOpen(false);
+        onClosed();
+      }}
+    />
+  );
 }
 
 afterEach(() => {
@@ -251,6 +270,77 @@ describe("CleanupDialog", () => {
     // The whole point: a partial failure must not close the dialog like a
     // silent success would.
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("renders the freed figure on a clean run instead of closing silently", async () => {
+    // #923, the #617 shape: the success branch used to call `onClose()` and
+    // `setOutcome()` in the same tick, React batched them into one render
+    // with `open === false`, and `if (!open) return null` ate the message.
+    // "Freed 3.0 MB" was in state and never on screen. This asserts the
+    // rendered output, not the state -- asserting state would reproduce
+    // the original defect.
+    const closed = vi.fn();
+    mockFetch(
+      ok({
+        plan: PLAN,
+        result: {
+          deleted: ["exports/stage1_a_trimmed.mp4", "exports/stage2_b_trimmed.mp4"],
+          failed: [],
+          bytes_freed: 3_145_728,
+        },
+      }),
+    );
+    // Rendered through a caller that owns `open`, the way Export.tsx does.
+    // Passing a literal `open` would make this test pass against the very
+    // defect it exists to cover: `!open` never flips, so the outcome paints
+    // in a harness where a real user saw the dialog vanish.
+    render(<Caller onClosed={closed} />);
+    await userEvent.click(screen.getByRole("button", { name: /select all/i }));
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: "stage2_b_trimmed.mp4" }),
+    );
+    await userEvent.click(await screen.findByRole("button", { name: /^reclaim$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /confirm/i }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent(/Freed 3\.0 MB/),
+    );
+    // The dialog holds itself open on the figure; the user dismisses it,
+    // and only that dismissal triggers the caller's reload.
+    expect(closed).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole("button", { name: /^done$/i }));
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it("stops offering a stale plan once a clean run has consumed it", async () => {
+    // The files named in the plan are gone. Leaving the picker and its
+    // per-category byte totals on screen under "Freed 3.0 MB" would state
+    // something false and let the user re-Confirm a plan describing
+    // deleted files.
+    mockFetch(
+      ok({
+        plan: PLAN,
+        result: {
+          deleted: ["exports/stage1_a_trimmed.mp4", "exports/stage2_b_trimmed.mp4"],
+          failed: [],
+          bytes_freed: 3_145_728,
+        },
+      }),
+    );
+    render(<CleanupDialog slug="me" open onClose={() => {}} />);
+    await userEvent.click(screen.getByRole("button", { name: /select all/i }));
+    await userEvent.click(
+      await screen.findByRole("checkbox", { name: "stage2_b_trimmed.mp4" }),
+    );
+    await userEvent.click(await screen.findByRole("button", { name: /^reclaim$/i }));
+    await userEvent.click(screen.getByRole("button", { name: /confirm/i }));
+
+    await waitFor(() => expect(screen.getByRole("status")).toBeInTheDocument());
+    expect(screen.queryByRole("button", { name: /confirm/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^reclaim$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 
   it("disables confirm once every category is unchecked, even mid-confirm", async () => {

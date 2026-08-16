@@ -469,6 +469,13 @@ def _reconstructable(
     if cam_id is not None:
         video = stage.find_video_by_id(cam_id)
         if video is None:
+            # Artefacts written before the take spec embed the path-only
+            # ``legacy_video_id``, so the current-scheme lookup misses on
+            # every one of them. Their source is present; only the id
+            # scheme changed, and reporting them unrebuildable both hides
+            # them from "select all" and states something untrue (#922).
+            video = next((v for v in stage.videos if v.legacy_video_id == cam_id), None)
+        if video is None:
             # Fail closed: a cam id we cannot resolve to a registered video
             # cannot be proven reconstructable.
             return False
@@ -553,6 +560,60 @@ def plan_cleanup(
     items.sort(key=lambda it: (it.category.value, str(it.path), it.storage_key or ""))
     return CleanupPlan(
         items=items,
+        totals_by_category=totals,
+        total_bytes=sum(t.bytes for t in totals.values()),
+        total_file_count=sum(t.file_count for t in totals.values()),
+    )
+
+
+def needs_item_opt_in(item: CleanupItem) -> bool:
+    """Is this item irreplaceable *and* not already behind its own gate?
+
+    ``AUDIT_DATA`` is unreconstructable by definition -- that is the whole
+    reason it sits outside ``SAFE_CATEGORIES``. Counting its items here
+    too would re-gate a category the caller has already opted into
+    explicitly (``--include-audit`` / the audit-data checkbox), which
+    reads as the flag silently doing nothing. The item-level gate exists
+    to protect the categories that ride along with "select all"; those
+    are exactly ``SAFE_CATEGORIES``.
+    """
+    return not item.reconstructable and item.category in SAFE_CATEGORIES
+
+
+def unreconstructable_items(plan: CleanupPlan) -> list[CleanupItem]:
+    """Items a caller must name before deleting. Plan order is preserved."""
+    return [i for i in plan.items if needs_item_opt_in(i)]
+
+
+def without_unreconstructable(plan: CleanupPlan) -> CleanupPlan:
+    """``plan`` minus every item :func:`needs_item_opt_in` flags.
+
+    The plan itself always lists them -- omitting a 4 GB trim from a list
+    that promises what can be reclaimed makes the list a liar. This is
+    what a caller applies once the user has *not* opted in, and it is the
+    item-level analogue of ``SAFE_CATEGORIES`` excluding ``AUDIT_DATA``.
+
+    Categories keep a row in ``totals_by_category`` even when every one of
+    their items was dropped, zeroed rather than missing: "you asked about
+    this and it came to nothing" and "you never asked" are different
+    answers, and the SPA renders the row either way.
+
+    The SPA does not call this -- ``cleanup_apply`` re-plans server-side
+    and the API takes categories, never paths, so per-item consent there
+    can only gate the button. The CLI holds the planned items directly and
+    is the one surface that can act on the distinction. The dialog's own
+    per-item list is therefore slightly stricter: it ticks audit docs
+    individually too. Stricter on a data-loss prompt is fine; the flag
+    that quietly stops working is not.
+    """
+    kept = [i for i in plan.items if not needs_item_opt_in(i)]
+    totals = {cat: CleanupTotals() for cat in plan.totals_by_category}
+    for item in kept:
+        t = totals.setdefault(item.category, CleanupTotals())
+        t.file_count += 1
+        t.bytes += item.size_bytes
+    return CleanupPlan(
+        items=kept,
         totals_by_category=totals,
         total_bytes=sum(t.bytes for t in totals.values()),
         total_file_count=sum(t.file_count for t in totals.values()),

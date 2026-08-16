@@ -17,6 +17,7 @@ from pathlib import Path
 from splitsmith.cleanup import CleanupCategory, apply_cleanup, plan_cleanup
 from splitsmith.match_project import MatchProject
 from splitsmith.storage import FilesystemStorage
+from splitsmith.ui.audio import legacy_video_id
 
 SCOPE = "matches/m1/shooters/me"
 
@@ -346,6 +347,51 @@ def test_a_secondarys_trim_is_keyed_on_its_own_source_not_the_primarys(tmp_path:
     audit_trims_by_name = {i.path.name: i.reconstructable for i in audit_trims.items}
     assert audit_trims_by_name[f"stage1_cam_{primary.video_id}_trimmed.mp4"] is True
     assert audit_trims_by_name[f"stage1_cam_{secondary.video_id}_trimmed.mp4"] is False
+
+
+def test_a_legacy_cam_id_resolves_to_its_video_instead_of_failing_closed(tmp_path: Path) -> None:
+    """Artefacts written before the take spec carry ``legacy_video_id``
+    (a path-only hash) in their ``_cam_<id>_`` segment, so the
+    current-scheme lookup misses and every one of them was reported
+    unreconstructable -- dropped from "select all" and labelled as having
+    a source that is "already gone". The source is present; only the id
+    scheme changed (#922).
+    """
+    from splitsmith.match_project import StageEntry, StageVideo
+
+    project, root, backing = _project(tmp_path)
+    primary = StageVideo(path=Path("raw/primary.mp4"), role="primary", stage_number=1)
+    project.stages.append(StageEntry(stage_number=1, stage_name="alpha", time_seconds=12.5, videos=[primary]))
+    project.save(root)
+    _put(backing, "raw/primary.mp4", b"source")
+
+    legacy_id = legacy_video_id(primary)
+    assert legacy_id != primary.video_id, "take spec must actually have changed the id"
+    _put(backing, f"{SCOPE}/exports/stage1_alpha_cam_{legacy_id}_trimmed.mp4")
+    _put(backing, f"{SCOPE}/trimmed/stage1_cam_{legacy_id}_trimmed.mp4")
+
+    trims = plan_cleanup(project, root, {CleanupCategory.EXPORTS_TRIMS})
+    audit_trims = plan_cleanup(project, root, {CleanupCategory.AUDIT_TRIMS})
+
+    assert [i.reconstructable for i in trims.items] == [True]
+    assert [i.reconstructable for i in audit_trims.items] == [True]
+
+
+def test_a_legacy_cam_id_still_fails_closed_when_its_source_is_gone(tmp_path: Path) -> None:
+    """The legacy fallback resolves the *id*; it must not short-circuit
+    the source check the resolution exists to perform.
+    """
+    from splitsmith.match_project import StageEntry, StageVideo
+
+    project, root, backing = _project(tmp_path)
+    primary = StageVideo(path=Path("raw/primary.mp4"), role="primary", stage_number=1)
+    project.stages.append(StageEntry(stage_number=1, stage_name="alpha", time_seconds=12.5, videos=[primary]))
+    project.save(root)
+    _put(backing, f"{SCOPE}/exports/stage1_alpha_cam_{legacy_video_id(primary)}_trimmed.mp4")
+
+    plan = plan_cleanup(project, root, {CleanupCategory.EXPORTS_TRIMS})
+
+    assert [i.reconstructable for i in plan.items] == [False]
 
 
 def test_a_cam_id_that_does_not_resolve_to_a_registered_video_fails_closed(tmp_path: Path) -> None:

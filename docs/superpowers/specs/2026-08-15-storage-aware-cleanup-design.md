@@ -125,6 +125,22 @@ opt-in. That is not a new mechanism: it is exactly the shipped precedent for
 `AUDIT_DATA`, which `SAFE_CATEGORIES` already excludes for the same reason
 (deleting it destroys user work rather than costing recompute time).
 
+Each surface enforces that opt-in with the affordance it has. The dialog
+ticks items individually. The CLI has no room for per-item ticks, so one
+`--include-unrebuildable` covers the set (#924); `cleanup.without_unreconstructable`
+is what it applies, and the plan output still names every held-back file, as
+plain lines rather than table cells -- Rich ellipsizes a cell to fit, and a
+truncated filename in a data-loss warning is the #617 failure.
+
+`needs_item_opt_in` exempts categories outside `SAFE_CATEGORIES`, which today
+means `AUDIT_DATA`. Those are unreconstructable *by definition* -- that is why
+they sit outside the set -- so counting them at the item level would mean
+`--include-audit` selects the category and the item gate silently empties it
+again, leaving a documented flag doing nothing. The item gate protects the
+categories that ride along with "select all"; the category gate protects the
+rest. The dialog is stricter here and that is fine: stricter on a data-loss
+prompt costs a click, a flag that quietly stops working costs trust.
+
 Every item carries the flag; what differs per category is the input it is
 computed against. "Reconstructable" means *this artefact's own input still
 exists*, not "the source video exists":
@@ -133,7 +149,7 @@ exists*, not "the source video exists":
 | --- | --- |
 | `CACHES` | always -- thumbs, probes, peaks are re-derived on demand |
 | `EXPORTS_LIGHT` | the stage's **audit doc** is present |
-| `EXPORTS_TRIMS` | per-camera artefacts (``_cam_<id>_`` segment) key on that video's source; primary artefacts key on `stage.primary()`'s source -- all resolved via ``StageEntry.find_video_by_id``; unresolvable ids fail closed (not reconstructable) |
+| `EXPORTS_TRIMS` | per-camera artefacts (``_cam_<id>_`` segment) key on that video's source; primary artefacts key on `stage.primary()`'s source -- resolved via ``StageEntry.find_video_by_id``, then against ``StageVideo.legacy_video_id`` for pre-take-spec names; an id matching neither fails closed (not reconstructable) |
 | `EXPORTS_OVERLAYS` | same as trims |
 | `AUDIT_TRIMS` | same as trims |
 | `AUDIO` | the **union** of all registered videos' sources; reconstructable only if every video that could contribute survives |
@@ -144,6 +160,16 @@ source was a real defect (fixed in commit c81c2e3): a secondary camera's
 irreplaceable trim was silently reported reconstructable whenever the primary's
 source survived, and would be deleted without a consent step. The per-camera
 keying above is load-bearing.
+
+Fail-closed is the right direction for an id that resolves to nothing, but it
+was originally applied to a case that is not unresolvable at all. Artefacts
+written before the take spec (2026-07-03) embed `legacy_video_id`, the
+path-only hash, so the current-scheme lookup misses on every one of them and a
+pre-take-spec project had *all* its per-camera trims labelled as having a
+source that is "already gone". The source is present; only the id scheme
+changed. The legacy comparison (#922) resolves the id and then still asks the
+source question -- it moves nothing past the safety check, it only stops the
+plan making a false statement.
 
 `EXPORTS_LIGHT` keying on the audit doc rather than the source is the
 non-obvious row, and getting it wrong regresses desktop. A CSV or FCPXML

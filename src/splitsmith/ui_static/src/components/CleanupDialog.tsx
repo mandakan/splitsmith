@@ -215,15 +215,15 @@ export function CleanupDialog({
       const { result } = await api.applyCleanup(slug, selected);
       const failedCount = result.failed.length;
       setOutcome({ bytesFreed: result.bytes_freed, failedCount });
-      // A clean run closes the dialog as before. A partial failure must
-      // stay visible -- closing silently on it is exactly how every
-      // storage delete failing used to look identical to full success
-      // (I4 whole-branch finding). The user dismisses via Cancel once
-      // they've seen the outcome.
-      if (failedCount === 0) {
-        setConfirming(false);
-        onClose();
-      }
+      // Neither branch closes the dialog. A partial failure must stay
+      // visible -- closing silently on it is exactly how every storage
+      // delete failing used to look identical to full success (I4
+      // whole-branch finding). And a clean run used to call `onClose()`
+      // here, in the same tick as `setOutcome`: React batched the two into
+      // one render with `open === false`, `if (!open) return null` fired,
+      // and "Freed 4.2 GB" was unreachable (#923, the #617 shape). The
+      // user dismisses either outcome themselves.
+      if (failedCount === 0) setConfirming(false);
     } catch (e) {
       const jobsActive = asJobsActiveError(e);
       if (jobsActive) {
@@ -237,6 +237,12 @@ export function CleanupDialog({
   }, [slug, selected, allUnrebuildableOptedIn, onClose]);
 
   if (!open) return null;
+
+  // A clean run consumed the plan: every file it names is gone. Keeping
+  // the picker and its per-category byte totals on screen under "Freed
+  // 4.2 GB" would state something false and let the user re-Confirm a
+  // plan describing deleted files. Show the result, and only the result.
+  const done = outcome !== null && outcome.failedCount === 0;
 
   return (
     <Portal>
@@ -258,108 +264,126 @@ export function CleanupDialog({
               Reclaim space
             </CardTitle>
             <CardDescription>
-              Delete regenerable local files and their object-storage copies.
-              Nothing here is required for splitsmith to keep working -- it
-              can all be rebuilt from source, except where noted below.
+              {done ? (
+                // Says something the figure below does not. Repeating
+                // "everything you selected is gone" would fill the panel
+                // without answering the question a user actually has after
+                // a bulk delete.
+                <>
+                  Your sources, project file and audit data were not touched.
+                </>
+              ) : (
+                <>
+                  Delete regenerable local files and their object-storage
+                  copies. Nothing here is required for splitsmith to keep
+                  working -- it can all be rebuilt from source, except where
+                  noted below.
+                </>
+              )}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 overflow-y-auto text-sm">
-            <div className="flex items-center justify-between gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setSelected(SAFE)}
-                disabled={applying}
-              >
-                Select all
-              </Button>
-              {plan ? (
-                <span className="text-xs font-medium text-muted">
-                  Total: {formatBytes(plan.total_bytes)}
-                </span>
-              ) : null}
-            </div>
-
-            <ul className="space-y-1">
-              {ALL.map((c) => {
-                const t = plan?.totals_by_category?.[c];
-                return (
-                  <li
-                    key={c}
-                    className="flex items-center justify-between gap-2 rounded-md border border-rule p-2"
-                  >
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="size-4 accent-led disabled:cursor-not-allowed"
-                        checked={selected.includes(c)}
-                        onChange={() => toggle(c)}
-                        aria-label={LABELS[c]}
-                        disabled={applying}
-                      />
-                      <span>{LABELS[c]}</span>
-                    </label>
-                    {t ? (
-                      <span className="whitespace-nowrap text-xs text-muted">
-                        {t.file_count} file{t.file_count === 1 ? "" : "s"},{" "}
-                        {formatBytes(t.bytes)}
-                      </span>
-                    ) : null}
-                  </li>
-                );
-              })}
-            </ul>
-
-            {unrebuildable.length > 0 ? (
-              <section
-                aria-label="cannot be rebuilt"
-                className="space-y-2 rounded-md border border-status-warning/40 bg-status-warning/10 p-2"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <p className="flex items-start gap-2 text-xs text-status-warning">
-                    <AlertTriangle className="size-4 shrink-0" />
-                    <span>
-                      {unrebuildable.length} of these cannot be rebuilt -- their
-                      source or audit data is already gone. Deleting them loses
-                      the file for good. Confirm stays disabled until each one
-                      below is individually checked.
-                    </span>
-                  </p>
+            {done ? null : (
+              <>
+                <div className="flex items-center justify-between gap-2">
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={checkAllUnrebuildable}
-                    disabled={applying || allUnrebuildableOptedIn}
+                    onClick={() => setSelected(SAFE)}
+                    disabled={applying}
                   >
-                    Check all
+                    Select all
                   </Button>
+                  {plan ? (
+                    <span className="text-xs font-medium text-muted">
+                      Total: {formatBytes(plan.total_bytes)}
+                    </span>
+                  ) : null}
                 </div>
+
                 <ul className="space-y-1">
-                  {unrebuildable.map((i) => {
-                    const key = i.storage_key ?? i.path;
+                  {ALL.map((c) => {
+                    const t = plan?.totals_by_category?.[c];
                     return (
-                      <li key={key}>
-                        <label className="flex items-center gap-2 text-xs">
+                      <li
+                        key={c}
+                        className="flex items-center justify-between gap-2 rounded-md border border-rule p-2"
+                      >
+                        <label className="flex items-center gap-2">
                           <input
                             type="checkbox"
                             className="size-4 accent-led disabled:cursor-not-allowed"
-                            checked={optedIn.has(key)}
-                            onChange={() => toggleOptIn(key)}
-                            aria-label={i.path.split("/").pop() ?? i.path}
+                            checked={selected.includes(c)}
+                            onChange={() => toggle(c)}
+                            aria-label={LABELS[c]}
                             disabled={applying}
                           />
-                          <span>
-                            {i.path.split("/").pop()} ({formatBytes(i.size_bytes)})
-                          </span>
+                          <span>{LABELS[c]}</span>
                         </label>
+                        {t ? (
+                          <span className="whitespace-nowrap text-xs text-muted">
+                            {t.file_count} file{t.file_count === 1 ? "" : "s"},{" "}
+                            {formatBytes(t.bytes)}
+                          </span>
+                        ) : null}
                       </li>
                     );
                   })}
                 </ul>
-              </section>
-            ) : null}
+
+                {unrebuildable.length > 0 ? (
+                  <section
+                    aria-label="cannot be rebuilt"
+                    className="space-y-2 rounded-md border border-status-warning/40 bg-status-warning/10 p-2"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <p className="flex items-start gap-2 text-xs text-status-warning">
+                        <AlertTriangle className="size-4 shrink-0" />
+                        <span>
+                          {unrebuildable.length} of these cannot be rebuilt --
+                          their source or audit data is already gone. Deleting
+                          them loses the file for good. Confirm stays disabled
+                          until each one below is individually checked.
+                        </span>
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={checkAllUnrebuildable}
+                        disabled={applying || allUnrebuildableOptedIn}
+                      >
+                        Check all
+                      </Button>
+                    </div>
+                    <ul className="space-y-1">
+                      {unrebuildable.map((i) => {
+                        const key = i.storage_key ?? i.path;
+                        return (
+                          <li key={key}>
+                            <label className="flex items-center gap-2 text-xs">
+                              <input
+                                type="checkbox"
+                                className="size-4 accent-led disabled:cursor-not-allowed"
+                                checked={optedIn.has(key)}
+                                onChange={() => toggleOptIn(key)}
+                                aria-label={i.path.split("/").pop() ?? i.path}
+                                disabled={applying}
+                              />
+                              <span>
+                                {i.path.split("/").pop()} (
+                                {formatBytes(i.size_bytes)})
+                              </span>
+                            </label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                ) : null}
+              </>
+            )}
 
             {blocked ? (
               <p
@@ -400,25 +424,37 @@ export function CleanupDialog({
             ) : null}
           </CardContent>
           <div className="flex items-center justify-end gap-2 border-t border-rule p-4">
-            <Button type="button" variant="ghost" onClick={onClose} disabled={applying}>
-              Cancel
-            </Button>
-            {confirming ? (
-              <Button
-                type="button"
-                onClick={apply}
-                disabled={applying || selected.length === 0 || !allUnrebuildableOptedIn}
-              >
-                Confirm
+            {done ? (
+              // One button, because there is nothing left to cancel and
+              // nothing left to reclaim. Dismissing is what reloads the
+              // caller's page (Export.tsx's `onClose`), so the download
+              // links for the files just deleted go with it.
+              <Button type="button" onClick={onClose}>
+                Done
               </Button>
             ) : (
-              <Button
-                type="button"
-                disabled={selected.length === 0}
-                onClick={() => setConfirming(true)}
-              >
-                Reclaim
-              </Button>
+              <>
+                <Button type="button" variant="ghost" onClick={onClose} disabled={applying}>
+                  Cancel
+                </Button>
+                {confirming ? (
+                  <Button
+                    type="button"
+                    onClick={apply}
+                    disabled={applying || selected.length === 0 || !allUnrebuildableOptedIn}
+                  >
+                    Confirm
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    disabled={selected.length === 0}
+                    onClick={() => setConfirming(true)}
+                  >
+                    Reclaim
+                  </Button>
+                )}
+              </>
             )}
           </div>
         </Card>

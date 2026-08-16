@@ -1023,6 +1023,14 @@ def clean(
             "loses your shot-audit work for the project."
         ),
     ),
+    include_unrebuildable: bool = typer.Option(
+        False,
+        "--include-unrebuildable",
+        help=(
+            "Also delete files whose own source or audit doc is already gone. "
+            "DESTRUCTIVE: these cannot be rebuilt, so deleting them loses them."
+        ),
+    ),
     all_: bool = typer.Option(
         False,
         "--all",
@@ -1036,6 +1044,11 @@ def clean(
     ``--yes`` to apply. The original source video files (and the
     symlinks under ``raw/``) are never touched. ``project.json`` is
     never touched.
+
+    Files whose own input is already gone are listed but held back --
+    they cost data rather than recompute time -- until
+    ``--include-unrebuildable`` says otherwise. A CLI has no room for the
+    per-item ticks the web dialog uses, so one flag covers the set.
     """
     if not project.exists() or not (project / "project.json").exists():
         raise typer.BadParameter(f"not a match project: {project}")
@@ -1066,6 +1079,9 @@ def clean(
 
     plan = cleanup_mod.plan_cleanup(proj, project, selected)
     _print_cleanup_plan(plan, selected)
+    _print_unrebuildable(plan, included=include_unrebuildable)
+    if not include_unrebuildable:
+        plan = cleanup_mod.without_unreconstructable(plan)
 
     if not yes:
         console.print("\n[dim]Dry run.[/] Re-run with [bold]--yes[/] to delete.")
@@ -1532,10 +1548,19 @@ def _print_cleanup_plan(
     plan: cleanup_mod.CleanupPlan,
     selected: set[cleanup_mod.CleanupCategory],
 ) -> None:
+    stuck = cleanup_mod.unreconstructable_items(plan)
+    stuck_by_category: dict[cleanup_mod.CleanupCategory, int] = {}
+    for item in stuck:
+        stuck_by_category[item.category] = stuck_by_category.get(item.category, 0) + 1
+
     table = Table(title=f"{plan.total_file_count} files / {plan.total_bytes / (1024*1024):.1f} MB")
     table.add_column("Category")
     table.add_column("Files", justify="right")
     table.add_column("Size", justify="right")
+    # Only when there is something to say: a column of zeros on every
+    # ordinary run is noise, and noise is what gets skimmed past.
+    if stuck:
+        table.add_column("Cannot rebuild", justify="right")
     for cat in cleanup_mod.CleanupCategory:
         if cat not in selected:
             continue
@@ -1543,8 +1568,58 @@ def _print_cleanup_plan(
         if totals is None:
             continue
         size_mb = totals.bytes / (1024 * 1024)
-        table.add_row(_CATEGORY_LABELS[cat], str(totals.file_count), f"{size_mb:.1f} MB")
+        row = [_CATEGORY_LABELS[cat], str(totals.file_count), f"{size_mb:.1f} MB"]
+        if stuck:
+            row.append(_unrebuildable_cell(cat, totals, stuck_by_category.get(cat, 0)))
+        table.add_row(*row)
     console.print(table)
+
+
+def _unrebuildable_cell(
+    cat: cleanup_mod.CleanupCategory,
+    totals: cleanup_mod.CleanupTotals,
+    count: int,
+) -> str:
+    """The "Cannot rebuild" cell for one category row.
+
+    A category outside ``SAFE_CATEGORIES`` is unreconstructable by
+    definition, and ``unreconstructable_items`` deliberately does not
+    count it -- it carries its own opt-in flag, so double-gating would
+    make that flag do nothing. But leaving the cell at "-" would then say
+    audit data *can* be rebuilt, which is the opposite of true and sits
+    in the one column a user scans for exactly that answer.
+    """
+    if cat not in cleanup_mod.SAFE_CATEGORIES:
+        return "[yellow]all[/]" if totals.file_count else "-"
+    return f"[yellow]{count}[/]" if count else "-"
+
+
+def _print_unrebuildable(plan: cleanup_mod.CleanupPlan, *, included: bool) -> None:
+    """Name every file the plan cannot rebuild, and say what happens to it.
+
+    Printed as plain lines rather than table rows on purpose: Rich
+    ellipsizes a cell to fit the terminal, and a truncated filename in a
+    data-loss warning is the #617 failure -- the message reaches the
+    surface and the renderer eats the part that mattered.
+    """
+    stuck = cleanup_mod.unreconstructable_items(plan)
+    if not stuck:
+        return
+    stuck_bytes = sum(i.size_bytes for i in stuck)
+    console.print(
+        f"\n[yellow]{len(stuck)} file(s), {stuck_bytes / (1024 * 1024):.1f} MB, "
+        "cannot be rebuilt[/] -- their own source or audit doc is already gone:"
+    )
+    for item in stuck[:20]:
+        console.print(f"  [yellow]- {item.path.name}[/] ({item.size_bytes / (1024*1024):.1f} MB)")
+    if len(stuck) > 20:
+        console.print(f"  [dim]... and {len(stuck) - 20} more[/]")
+    if included:
+        console.print(
+            "[yellow]--include-unrebuildable given: these will be deleted and are gone for good.[/]"
+        )
+    else:
+        console.print("[dim]Held back. Pass [bold]--include-unrebuildable[/bold] to delete them too.[/]")
 
 
 def _print_files_summary(files: ReportFiles) -> None:
