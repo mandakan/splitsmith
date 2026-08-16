@@ -66,11 +66,13 @@ class StateConflictError(Exception):
     """
 
 
-# The three polymorphic doc kinds. ``slug`` is NULL for ``match``;
-# ``stage_number`` is non-NULL only for ``audit``.
+# The doc kinds. ``slug`` is NULL for ``match``; ``stage_number`` is
+# non-NULL only for ``audit``. ``export_runs`` is per-shooter like
+# ``project`` and is separated from it by ``doc_kind`` alone.
 _KIND_MATCH = "match"
 _KIND_PROJECT = "project"
 _KIND_AUDIT = "audit"
+_KIND_EXPORT_RUNS = "export_runs"
 
 
 class ProjectStateStore:
@@ -153,6 +155,26 @@ class ProjectStateStore:
             expected_version=expected_version,
             slug=slug,
             stage_number=stage_number,
+        )
+
+    # -- per-shooter export-run log (slug set, stage NULL) -------------
+
+    async def load_export_runs(self, match_id: str, slug: str) -> tuple[dict | None, int]:
+        """The shooter's export history doc + version (#629).
+
+        Opaque here: the store never parses it. Shape and the
+        skip-a-bad-entry rule live in :mod:`splitsmith.export_runs`.
+        """
+        return await self._load(match_id, _KIND_EXPORT_RUNS, slug=slug, stage_number=None)
+
+    async def save_export_runs(self, match_id: str, slug: str, doc: dict, *, expected_version: int) -> int:
+        return await self._save(
+            match_id,
+            _KIND_EXPORT_RUNS,
+            doc,
+            expected_version=expected_version,
+            slug=slug,
+            stage_number=None,
         )
 
     # -- cascade cleanup ----------------------------------------------

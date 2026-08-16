@@ -298,6 +298,58 @@ def test_doc_manifest_lists_versions(hosted_app: tuple[TestClient, _CapturingSen
     assert "updated_at" in by_key[("match", None, None)]
 
 
+def test_doc_manifest_omits_kinds_a_desktop_client_cannot_pull(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """An ``export_runs`` row must not appear in the pull manifest.
+
+    ``sync.pull.plan_pull`` filters on ``PULLABLE_DOC_KINDS`` too, but
+    that only protects clients that have been upgraded, and there is no
+    version negotiation on this surface. An older desktop turns a kind it
+    does not know into ``RemoteDoc(kind="export_runs", stage_number=None)``,
+    ``SyncClient._doc_path`` falls through to ``docs/audit/{slug}/None``,
+    and ``sync/run.py``'s comprehension raises ``SyncClientError`` --
+    aborting the *entire* pull for the match, not just that doc. So the
+    server never offers it.
+    """
+    import asyncio
+
+    from sqlalchemy import select as _select
+
+    from splitsmith.db import ProjectStateStore, create_engine, sessionmaker
+    from splitsmith.db.models import User
+
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    assert client.post(CREATE_URL, json={"match_id": "m1", "name": "Match 1"}).status_code == 200
+
+    project_doc = MatchProject(name="Anna").model_dump(mode="json")
+    assert _put_doc(client, "m1", "project/anna", body=project_doc, expected_version=0).status_code == 200
+
+    # No PUT route accepts this kind (it is written by the export job
+    # bodies, hosted-side), so seed the row through the store directly.
+    engine = create_engine(_db_url_for(client))
+    sf = sessionmaker(engine)
+
+    async def _seed_export_runs() -> None:
+        async with sf() as s:
+            user_id = (
+                (await s.execute(_select(User).where(User.email == "owner@example.com"))).scalar_one().id
+            )
+        store = ProjectStateStore(sf, user_id=user_id)
+        await store.save_export_runs("m1", "anna", {"schema_version": 1, "runs": []}, expected_version=0)
+
+    asyncio.run(_seed_export_runs())
+
+    resp = client.get("/api/sync/matches/m1/docs")
+    assert resp.status_code == 200, resp.text
+    kinds = [d["doc_kind"] for d in resp.json()["docs"]]
+    assert "export_runs" not in kinds
+    # ...and the kinds a client *can* merge still come through, so this is
+    # a filter and not an empty manifest.
+    assert "project" in kinds
+
+
 def test_get_doc_roundtrip_and_404(hosted_app: tuple[TestClient, _CapturingSender]) -> None:
     client, sender = hosted_app
     login(client, sender, "owner@example.com")

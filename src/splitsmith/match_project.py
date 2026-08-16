@@ -1256,6 +1256,29 @@ class MatchProject(BaseModel):
         except Exception:  # noqa: BLE001 -- a storage hiccup degrades to "no exports", not a 500
             return {}
 
+    def existing_export_names(self, root: Path) -> set[str]:
+        """Basenames present in the shooter's ``exports/`` right now.
+
+        The same presence source :meth:`export_overview` and
+        :meth:`match_export_files` use -- object storage when this project
+        has one bound, the local dir otherwise -- exposed as a plain set
+        for a caller that holds filenames and needs to know which of them
+        still have bytes behind them.
+
+        That caller is the export history (#629): a run's record is a
+        record of what *happened* and never changes, but the user's own
+        cleanup can delete the files it names. Deriving availability here
+        rather than storing it on the record is what keeps those two
+        ideas apart.
+        """
+        stored = self._stored_exports()
+        if stored is not None:
+            return set(stored)
+        exports_dir = self.exports_path(root)
+        if not exports_dir.is_dir():
+            return set()
+        return {p.name for p in exports_dir.iterdir() if p.is_file()}
+
     def match_export_files(self, root: Path) -> list[MatchExportFile]:
         """Match-level deliverables that exist right now, newest first.
 

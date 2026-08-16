@@ -10,6 +10,14 @@ from datetime import datetime
 from .plan import doc_identity_key
 from .state import SyncState
 
+#: Doc kinds this client knows how to merge locally. ``list_doc_meta``
+#: returns every kind in the match, including hosted-only ones like
+#: ``export_runs`` (#629) -- and ``SyncClient._doc_path`` maps anything
+#: it does not recognise onto the audit URL shape, so pulling an unknown
+#: kind fails the whole sync rather than that one doc. An allowlist keeps
+#: the next kind added inert by default.
+PULLABLE_DOC_KINDS = frozenset({"match", "project", "audit"})
+
 
 @dataclass(frozen=True)
 class RemoteDoc:
@@ -37,6 +45,8 @@ def plan_pull(manifest: list[dict], sync_state: SyncState) -> list[RemoteDoc]:
     """
     changed: list[RemoteDoc] = []
     for entry in manifest:
+        if entry["doc_kind"] not in PULLABLE_DOC_KINDS:
+            continue
         rd = RemoteDoc(
             kind=entry["doc_kind"],
             slug=entry.get("slug"),

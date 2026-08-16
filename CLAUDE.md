@@ -205,6 +205,41 @@ production for exactly that reason. An account with a blank name still
 falls back to a generated handle; that invariant is pinned in
 ``tests/test_comments_signed_in.py`` and does not move.
 
+## State doc kinds and the sync allowlist
+
+Adding a ``doc_kind`` to ``state_docs`` is not a local change. The sync
+pull manifest comes from ``ProjectStateStore.list_doc_meta``, which is
+deliberately kind-agnostic and therefore returns the new kind
+immediately; ``SyncClient._doc_path`` then maps anything it does not
+recognise onto the audit URL shape, so an unhandled kind fails the
+**entire** sync for that match, not the one document.
+``sync.pull.PULLABLE_DOC_KINDS`` is an allowlist for exactly that reason
+-- it keeps the next kind inert by default rather than catastrophic.
+Widen it only together with a merge rule in ``sync.run._apply_pull``.
+
+The allowlist is applied in **two** places and they move together:
+``sync.pull.plan_pull`` (the client) and ``sync_api.get_doc_manifest``
+(the server). Neither is redundant. There is no client-version
+negotiation on the sync surface, so the client-side filter protects only
+clients that have already been upgraded -- a desktop install in the
+field still aborts its whole pull the first time a hosted export writes
+an ``export_runs`` row, unless the server declines to offer it. The
+server-side filter is the one that protects installs nobody controls;
+the client-side one is what protects a new client talking to an older
+server. Both are pinned:
+``tests/test_sync_api.py::test_doc_manifest_omits_kinds_a_desktop_client_cannot_pull``
+and the ``plan_pull`` cases in ``tests/test_sync_pull.py``.
+The cascade queries are the other half: ``delete_match`` filters on
+``match_id`` alone and ``delete_shooter`` on ``(match_id, slug)``, so
+both sweep a new per-shooter kind without edits -- ``list_project_docs``
+and ``list_audit_docs`` are the kind-*specific* ones and must not be
+"generalised" into the cascade's job.
+
+Two ``duration_seconds`` fields mean different things and are one
+mis-wire apart: ``export_runs.ExportRun.duration_seconds`` is wall clock
+for the job body, ``match_exports.MatchExportResult.duration_seconds`` is
+the length of the stitched timeline. Never assign one from the other.
+
 ## Things Claude Code should not do
 
 - Add new dependencies without asking. The dep list is small on purpose.

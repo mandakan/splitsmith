@@ -127,8 +127,16 @@ def test_is_match_export_excludes_a_stage_named_the_match() -> None:
     """
     assert export_naming.is_match_export("bromma-2026-match.fcpxml") is True
     assert export_naming.is_match_export("bromma-2026-match.srt") is True
-    assert export_naming.is_match_export("bromma-2026-match.json") is True
     assert export_naming.is_match_export("match-match.mp4") is True
+    # The YouTube metadata sidecar. ``ui.match_exports`` writes it as
+    # ``<stem>-youtube.json``, never ``<stem>.json`` -- this line used to
+    # assert the latter, a name the renderer has never produced, so the
+    # real file was invisible to every directory-listing reader.
+    assert export_naming.is_match_export("bromma-2026-match-youtube.json") is True
+    # ...and the strip is a *suffix* strip on the stem, not a substring
+    # test: a stage's own sidecar still stays out.
+    assert export_naming.is_match_export("stage1_the-match-youtube.json") is False
+    assert export_naming.is_match_export("bromma-2026-youtube.json") is False
 
     stage_file = f"{export_naming.stage_file_base(1, 'The Match')}.fcpxml"
     assert stage_file == "stage1_the-match.fcpxml"

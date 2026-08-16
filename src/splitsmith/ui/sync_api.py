@@ -39,6 +39,7 @@ from pydantic import BaseModel, ValidationError
 from .. import match_model
 from ..match_project import MatchProject
 from ..storage import Storage
+from ..sync.pull import PULLABLE_DOC_KINDS
 
 if TYPE_CHECKING:
     from ..db.matches import PostgresMatchStore
@@ -401,11 +402,23 @@ async def get_doc_manifest(
     request: Request,
     user: Any = Depends(_current_user),
 ) -> SyncDocManifestResponse:
-    """Identity + version of every state doc in this mirror.
+    """Identity + version of every *pullable* state doc in this mirror.
 
     The pull side of the bidirectional sync: desktop diffs these
     versions against the ones recorded at its last sync and GETs only
     the docs that moved. Doc bodies never ride in the manifest.
+
+    ``list_doc_meta`` returns every kind, including ones no desktop
+    client can merge -- ``export_runs`` (#629) is hosted-or-local
+    bookkeeping and is never pulled. The manifest is filtered to
+    ``PULLABLE_DOC_KINDS`` here, server-side, because there is no client
+    version negotiation on this surface: an older desktop's ``plan_pull``
+    has no allowlist of its own, so it would turn an ``export_runs``
+    entry into ``GET .../docs/audit/{slug}/None``, fail path validation,
+    and abort the *whole* pull for that match. ``plan_pull`` filters on
+    the same set, and both must move together: this side protects the
+    clients already in the field, that side protects a client talking to
+    an older server.
     """
     _hosted_gate()
     await _resolve_mirror(request, match_id)
@@ -421,6 +434,7 @@ async def get_doc_manifest(
                 updated_at=m.updated_at,
             )
             for m in meta
+            if m.doc_kind in PULLABLE_DOC_KINDS
         ]
     )
 

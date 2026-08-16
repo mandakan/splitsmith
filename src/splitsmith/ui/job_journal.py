@@ -79,13 +79,15 @@ def rehydrate_args(kind: str, args: dict[str, Any]) -> dict[str, Any]:
     :func:`to_wire_args`.
 
     Only ``export`` / ``match_export`` carry a ``req``; every other kind
-    passes through. The request models import lazily so this module (and
-    the hosted queue module that delegates here) stays importable without
-    a server import at load time.
+    passes through. The request models moved to ``exports_api`` under
+    #919's lift-as-you-go rule, and the import stays lazy under the same
+    cycle rule that governs that module: ``server`` imports the models
+    back from it, so nothing on the export-router side may be pulled in
+    eagerly from a module ``server`` itself imports -- this one included.
     """
     if kind not in ("export", "match_export") or "req" not in args:
         return args
-    from .server import ExportStageRequest, MatchExportRequest
+    from .exports_api import ExportStageRequest, MatchExportRequest
 
     model = ExportStageRequest if kind == "export" else MatchExportRequest
     out = dict(args)

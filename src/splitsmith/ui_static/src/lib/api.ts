@@ -771,6 +771,41 @@ export interface ExportOverview {
   match_exports: MatchExportFile[];
 }
 
+/** One artefact a recorded export run produced. ``filename`` is a
+ *  basename under the shooter's ``exports/`` dir -- the same key
+ *  {@link api.exportFileUrl} takes. */
+export interface ExportArtifact {
+  filename: string;
+  kind: string;
+  /** Whether the bytes are still there, as of this response.
+   *
+   *  Derived per request by the server from the same presence source the
+   *  export overview reads; it is not part of the stored record, which
+   *  says what a run produced and never changes. Cleanup deletes export
+   *  files and leaves the history alone, so ``false`` is a normal state
+   *  and not an error -- render the name, not a link. */
+  available: boolean;
+}
+
+/** One export invocation, as recorded at export time (#629).
+ *
+ *  ``formats`` is what the user *asked* for; ``artifacts`` is what got
+ *  written. Both are kept so "asked for an overlay, got none" is visible
+ *  in the history rather than inferred from an absence.
+ *
+ *  ``duration_seconds`` is wall-clock time for the run, not the length of
+ *  any rendered timeline. */
+export interface ExportRun {
+  run_id: string;
+  kind: "stage" | "match";
+  finished_at: string;
+  duration_seconds: number;
+  stage_numbers: number[];
+  formats: string[];
+  anomaly_count: number;
+  artifacts: ExportArtifact[];
+}
+
 /** Encoder for the alpha overlay MOV.
  *  - ``"auto"``: ``hevc-alpha`` on macOS w/ VideoToolbox, otherwise
  *    ``prores-4444``. Default; produces the smallest file the host can
@@ -3659,6 +3694,13 @@ export const api = {
   getExportOverview: (slug: string) =>
     request<ExportOverview>(
       `/api/shooters/${encodeURIComponent(slug)}/exports/overview`,
+    ),
+
+  /** The shooter's export history, newest first (#629). Persistent: a
+   *  record written at export time, not the in-session job result. */
+  getExportRuns: (slug: string) =>
+    request<{ runs: ExportRun[] }>(
+      `/api/shooters/${encodeURIComponent(slug)}/exports/runs`,
     ),
 
   /** Submit a stage export job. Returns a Job snapshot; poll

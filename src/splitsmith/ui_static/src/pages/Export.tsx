@@ -44,6 +44,7 @@ import {
 import { Navigate, useOutletContext, useParams } from "react-router-dom";
 
 import { CleanupDialog } from "@/components/CleanupDialog";
+import { ExportHistory } from "@/components/export/ExportHistory";
 import {
   LedCtaButton,
   Section,
@@ -57,6 +58,7 @@ import {
   capabilityDenied,
   READ_ONLY_MIRROR_MESSAGE,
   type ExportOverview,
+  type ExportRun,
   type Job,
   type MatchExportResult,
   type MatchProject,
@@ -146,6 +148,7 @@ function ExportInner({ slug }: { slug: string }) {
   const editDenied = capabilityDenied(ctx?.capabilities, "edit");
   const [project, setProject] = useState<MatchProject | null>(null);
   const [overview, setOverview] = useState<ExportOverview | null>(null);
+  const [runs, setRuns] = useState<ExportRun[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [result, setResult] = useState<MatchExportResult | null>(null);
@@ -166,6 +169,14 @@ function ExportInner({ slug }: { slug: string }) {
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    }
+    // History is secondary to the page's purpose (#629) -- a failed fetch
+    // here must never surface an error toast or block the form above.
+    try {
+      const { runs: fetchedRuns } = await api.getExportRuns(slug);
+      setRuns(fetchedRuns);
+    } catch {
+      setRuns([]);
     }
   }, [slug]);
 
@@ -531,6 +542,11 @@ function ExportInner({ slug }: { slug: string }) {
       const final = await api.pollJob(submitted.id, setJob);
       if (final.status === "succeeded" && final.result) {
         setResult(final.result as unknown as MatchExportResult);
+        // Same refresh the per-stage and trims-only paths already do. The
+        // job's own result drives the panel below, but the overview's
+        // match-export rows and the export history both come from the
+        // server and would otherwise stay as they were before the run.
+        void reload();
       } else if (final.status === "failed") {
         setError(final.error ?? "Export failed");
       }
@@ -906,6 +922,14 @@ function ExportInner({ slug }: { slug: string }) {
               )}
             </div>
           </Section>
+
+          {/* Rendered in both deployment modes -- only the reveal
+              affordance is desktop-specific; the download link works on
+              both (#629). */}
+          <ExportHistory
+            runs={runs}
+            exportFileUrl={(f) => (slug ? api.exportFileUrl(slug, f) : "#")}
+          />
         </div>
 
         {/* Right column: summary rail */}
@@ -1049,6 +1073,13 @@ function ExportInner({ slug }: { slug: string }) {
           // showing download links and presence badges for; without a
           // reload the page keeps offering downloads that now 404 (I5
           // whole-branch finding).
+          //
+          // The history is refetched by the same call but for a different
+          // reason. Its rows are durable -- cleanup does not touch
+          // ``export_runs`` -- so a reload does not remove them and is not
+          // meant to. What moves is each artefact's ``available`` flag,
+          // which the server derives per request; that is what turns the
+          // now-dead download links into plain struck-through names.
           void reload();
         }}
       />

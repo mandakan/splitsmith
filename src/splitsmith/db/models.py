@@ -342,18 +342,25 @@ class StateDocRow(Base):
     match resolution is stateless across redeploys/replicas and concurrent
     edits are *detected* (409) instead of lost.
 
-    **Polymorphic on ``doc_kind``** -- one table for all three kinds
-    because they share an identical load-whole / save-whole lifecycle and
-    are never queried *into* (the ``doc`` column is read and written
-    whole, never filtered on a key). Three near-duplicate tables would buy
+    **Polymorphic on ``doc_kind``** -- one table for every kind because
+    they share an identical load-whole / save-whole lifecycle and are
+    never queried *into* (the ``doc`` column is read and written whole,
+    never filtered on a key). Four near-duplicate tables would buy
     nothing. The shape per kind:
 
-    - ``"match"``   -- the match-level doc (``Match`` model). ``slug`` and
-      ``stage_number`` are NULL.
-    - ``"project"`` -- a per-shooter project doc (``MatchProject`` model).
-      ``slug`` is the shooter slug; ``stage_number`` is NULL.
-    - ``"audit"``   -- a per-stage audit doc (raw dict, no model).
+    - ``"match"``       -- the match-level doc (``Match`` model). ``slug``
+      and ``stage_number`` are NULL.
+    - ``"project"``     -- a per-shooter project doc (``MatchProject``
+      model). ``slug`` is the shooter slug; ``stage_number`` is NULL.
+    - ``"audit"``       -- a per-stage audit doc (raw dict, no model).
       ``slug`` is the shooter slug; ``stage_number`` is the 1-based stage.
+    - ``"export_runs"`` -- a per-shooter export history (#629;
+      ``splitsmith.export_runs.ExportRunLog``). Same identity shape as
+      ``"project"`` -- ``slug`` set, ``stage_number`` NULL -- and
+      separated from it by ``doc_kind`` alone.
+
+    Adding a kind here is not a local change: see CLAUDE.md's "State doc
+    kinds and the sync allowlist" for what else has to move with it.
 
     The existing ``matches`` table (:class:`MatchRow`) stays as the
     ownership/index registry resolved by ``(user_id, match_id)``; this

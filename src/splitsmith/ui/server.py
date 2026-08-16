@@ -86,7 +86,7 @@ import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
-from contextlib import asynccontextmanager
+from contextlib import AbstractContextManager, asynccontextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
@@ -136,6 +136,7 @@ from .. import (
     beep_windows,
     camera_select,
     cross_align,
+    export_runs,
     match_model,
     report,
     user_config,
@@ -190,7 +191,6 @@ from ..match_project import (
     StageStatus,
     StageVideo,
     VideoRole,
-    trim_blocker,
 )
 from ..match_registry import MatchRegistry
 from ..observability import StructuredJsonFormatter, init_sentry
@@ -225,6 +225,8 @@ from .comments import (
     CommentRateLimiter,
     to_out,
 )
+from .exports_api import ExportStageRequest, MatchExportRequest
+from .http_errors import ensure_source_reachable
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
 from .jobs import (
     Job,
@@ -254,34 +256,6 @@ from .scoreboard import (
 )
 from .scoreboard.local import DEFAULT_MATCH_FILENAME, DEFAULT_SCOREBOARD_DIRNAME
 from .scoreboard.reconcile import CompetitorRef, LocalShooter, propose_shooter_links
-
-
-def _ensure_source_reachable(stage_number: int | None, source: Path) -> None:
-    """Raise a structured 424 when ``source`` doesn't exist on disk.
-
-    The SPA reads ``detail.code == "source_unreachable"`` to render a
-    uniform "reconnect the USB / SD card" message wherever a source-bound
-    operation is invoked (detect-beep, audit-mode trim, beep preview,
-    video stream, export). Callers handle the "no primary" check with
-    their endpoint-specific status code before calling this -- the helper
-    only handles the upstream-dependency-offline case.
-    """
-    if source.exists():
-        return
-    raise HTTPException(
-        status_code=424,
-        detail={
-            "code": "source_unreachable",
-            "stage_number": stage_number,
-            "path": str(source),
-            "message": (
-                "Source video"
-                + (f" for stage {stage_number}" if stage_number is not None else "")
-                + f" is not reachable: {source}. If it lives on external "
-                f"storage (USB drive, SD card), reconnect and try again."
-            ),
-        },
-    )
 
 
 def _audit_trim_targets(
@@ -521,6 +495,18 @@ def _state_conflict_excs() -> tuple[type[BaseException], ...]:
 # thundering herd. Exhausting it re-raises -> the job fails loudly.
 _AUDIT_SAVE_MAX_ATTEMPTS = 4
 
+# Filename of the desktop export-run log, in the shooter root. NOT in
+# exports/: everything in that directory is listed by
+# ``MatchProject._stored_exports`` and offered to the user as a
+# deliverable, and the history is not a deliverable.
+EXPORT_RUNS_FILE = "export_runs.json"
+
+# How many times ``_record_export_run`` re-loads + re-appends when a
+# concurrent export job wins the version race. Batch export runs several
+# stages at once against one document, so contention is the normal case,
+# not the exotic one.
+_EXPORT_RUN_SAVE_MAX_ATTEMPTS = 4
+
 # Chunk size the multipart-upload client splits a file into. 16 MiB is
 # comfortably above S3/R2's 5 MiB non-final-part minimum and keeps the part
 # count modest (a 2 GB file = 128 parts), so per-part presign round-trips
@@ -599,6 +585,51 @@ def _save_audit_with_remerge(
             reloaded, version = state.load_audit(slug, stage_number)
             doc = reloaded if reloaded is not None else default()
     raise AssertionError("unreachable: loop returns or raises")  # pragma: no cover
+
+
+def _record_export_run(state: AppState, slug: str, run: export_runs.ExportRun) -> None:
+    """Append one run to the shooter's export history. Never raises.
+
+    Hosted: re-loads and re-appends on an optimistic-lock conflict rather
+    than retrying the same write -- a conflict means a concurrent export
+    job's run landed first, and re-appending onto the winner's doc keeps
+    both. Blind overwrite would silently drop a run.
+
+    Desktop: there is no version to lose a race on -- the file accessors
+    report and ignore version 0 -- so the whole load/append/save runs
+    under :attr:`AppState.export_run_lock`. Without it the read-modify-
+    write is simply unprotected, and it loses runs in practice: the
+    Export page's bundle button submits one job per selected stage and
+    the job registry runs two at a time against one document. The lock is
+    process-local; see its definition for why that is enough and what it
+    does not cover.
+
+    Every other failure -- store unavailable, disk full, retries exhausted
+    -- logs at WARNING and returns. The deliverables are the product and
+    they are already written by the time this is called; failing the job
+    over bookkeeping would report a successful export as broken.
+    """
+    guard: AbstractContextManager[object] = (
+        nullcontext() if state.export_runs_doc_target() is not None else state.export_run_lock
+    )
+    conflict_excs = _state_conflict_excs()
+    with guard:
+        for _attempt in range(_EXPORT_RUN_SAVE_MAX_ATTEMPTS):
+            try:
+                doc, version = state.load_export_runs(slug)
+                state.save_export_runs(slug, export_runs.append_run(doc, run), version=version)
+                return
+            except conflict_excs:
+                continue
+            except Exception as exc:  # noqa: BLE001 -- see docstring
+                logger.warning("export run record: not written for %s: %s", slug, exc)
+                return
+    logger.warning(
+        "export run record: lost %d version races for %s; run %s not recorded",
+        _EXPORT_RUN_SAVE_MAX_ATTEMPTS,
+        slug,
+        run.run_id,
+    )
 
 
 STATIC_DIR = Path(__file__).parent.parent / "ui_static" / "dist"
@@ -1679,6 +1710,20 @@ class AppState:
     # serving one operator, not a multi-worker server, so there is no
     # cross-process case to cover.
     device_flow_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Guards the whole load/append/save of the DESKTOP export-run log
+    # (#629). Local mode's ``load_export_runs`` always reports version 0
+    # and ``save_export_runs`` ignores the version it is handed, so the
+    # optimistic-lock retry in ``_record_export_run`` cannot protect the
+    # read-modify-write there -- and it genuinely races: the Export page's
+    # trims-only bundle button submits one export job per selected stage
+    # and ``JobRegistry`` runs two at a time against one document.
+    # A ``threading.Lock`` and not a file lock, deliberately: desktop is a
+    # single server process, so this serialises every writer that exists.
+    # It is NOT cross-process safe, and it does not need to be -- two
+    # ``splitsmith ui`` processes over one project folder already race on
+    # far more than this file. Hosted never takes it; its optimistic
+    # locking is the real mechanism there.
+    export_run_lock: threading.Lock = field(default_factory=threading.Lock)
     # Live SSE wake channels, one asyncio.Queue per connected self-hosted
     # worker. ``None`` in local mode and on the headless worker process
     # (which must never hold launcher capabilities); set by the non-worker
@@ -2002,6 +2047,79 @@ class AppState:
                         detail=f"audit delete failed: {exc}",
                     ) from exc
         return removed
+
+    def export_runs_doc_target(self) -> tuple[ProjectStateStore, str] | None:
+        """The hosted store + match id for the export history, or ``None``
+        when the history is file-based.
+
+        The one place the mode split for this document is decided. Both
+        accessors below branch on it, and ``_record_export_run`` takes its
+        desktop-only lock on exactly the ``None`` case -- so that lock can
+        never end up guarding a different set of calls than the file
+        writes it exists to serialise.
+        """
+        mid = current_match_id.get()
+        store = self.project_state
+        if store is not None and mid is not None:
+            return store, mid
+        return None
+
+    def load_export_runs(self, slug: str) -> tuple[dict | None, int]:
+        """The shooter's export history doc + version (#629).
+
+        Hosted: ``state_docs``. Local: ``<shooter_root>/export_runs.json``
+        (version always 0 -- no locking on files; ``_record_export_run``
+        holds :attr:`export_run_lock` across the read-modify-write
+        instead). Unlike :meth:`load_audit`, an unreadable document
+        degrades to "no history" rather than a 500: this is bookkeeping,
+        and it must not be able to break a page that would otherwise
+        render.
+        """
+        target = self.export_runs_doc_target()
+        if target is not None:
+            store, mid = target
+            return run_sync(store.load_export_runs(mid, slug))
+        path = self.shooter_root(slug) / EXPORT_RUNS_FILE
+        if not path.exists():
+            return None, 0
+        try:
+            return json.loads(path.read_text(encoding="utf-8")), 0
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("export run record: unreadable at %s: %s", path, exc)
+            return None, 0
+
+    def save_export_runs(self, slug: str, doc: dict, *, version: int) -> int:
+        """Persist the export history doc; return the new version.
+
+        Hosted: ``state_docs`` under optimistic locking, same contract as
+        :meth:`save_audit`. Local: write a temp file, then rename over the
+        real one (returns 0).
+
+        The temp file gets a unique ``mkstemp`` name rather than a fixed
+        ``export_runs.json.tmp``. A fixed name is shared by every writer
+        to the same shooter, so two concurrent stage exports write the one
+        temp file and the second ``replace`` raises ENOENT after the first
+        already consumed it -- a lost run for a reason that has nothing to
+        do with the document's contents. ``_record_export_run`` serialises
+        desktop writers anyway; this keeps the failure impossible rather
+        than merely unreached.
+        """
+        target = self.export_runs_doc_target()
+        if target is not None:
+            store, mid = target
+            return run_sync(store.save_export_runs(mid, slug, doc, expected_version=version))
+        path = self.shooter_root(slug) / EXPORT_RUNS_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+        tmp = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(doc, indent=2) + "\n")
+            tmp.replace(path)
+        except OSError:
+            tmp.unlink(missing_ok=True)
+            raise
+        return 0
 
     def materialize_audit(self, slug: str, stage_number: int) -> Path:
         """Ensure the stage's audit doc is present at its on-disk path and
@@ -3644,6 +3762,50 @@ def register_job_bodies(state: AppState) -> None:
         def _name(p: Path | None) -> str | None:
             return p.name if p is not None else None
 
+        # Durable record of this run (#629). Everything above is already
+        # written and pushed, so a failure here must not fail the job --
+        # ``_record_export_run`` swallows and logs. Placed after the
+        # "nothing was written" raise so a failed run leaves no history.
+        run_artifacts: list[export_runs.ExportArtifact] = []
+        for produced, artifact_kind in (
+            (result.trimmed_video_path, "trim"),
+            (result.csv_path, "csv"),
+            (result.fcpxml_path, "fcpxml"),
+            (result.report_path, "report"),
+            (result.overlay_path, "overlay"),
+        ):
+            if produced is not None:
+                run_artifacts.append(export_runs.ExportArtifact(filename=produced.name, kind=artifact_kind))
+        # ``.values()``, not the mapping: iterating ``secondary_trimmed_paths``
+        # yields video-id strings, which is the exact bug
+        # ``test_export_result_reports_secondary_trim_filenames`` pins.
+        run_artifacts.extend(
+            export_runs.ExportArtifact(filename=p.name, kind="secondary_trim")
+            for p in result.secondary_trimmed_paths.values()
+        )
+        _record_export_run(
+            state,
+            slug,
+            export_runs.ExportRun(
+                run_id=export_runs.new_run_id(),
+                kind="stage",
+                finished_at=datetime.now(UTC),
+                # Wall clock for the job body. NOT any duration a result
+                # object carries -- see export_runs.ExportRun's docstring.
+                duration_seconds=handle.timer.build()["total_ms"] / 1000.0,
+                stage_numbers=[stage_number],
+                formats=export_runs.stage_run_formats(
+                    trim=req.write_trim,
+                    csv=req.write_csv,
+                    fcpxml=req.write_fcpxml,
+                    report=req.write_report,
+                    overlay=req.write_overlay,
+                ),
+                anomaly_count=len(reported),
+                artifacts=run_artifacts,
+            ),
+        )
+
         handle.set_result(
             {
                 "stage_number": stage_number,
@@ -3872,13 +4034,60 @@ def register_job_bodies(state: AppState) -> None:
             except match_export_helpers.MatchExportError as exc:
                 raise RuntimeError(str(exc)) from exc
 
+        # The YouTube sidecar JSON is written next to the composed output as
+        # "<stem>-youtube.json", not "<stem>.json" -- see the sidecar block
+        # in match_exports.export_match (ui/match_exports.py, the
+        # ``if request.youtube_sidecar:`` branch). ``with_suffix(".json")``
+        # names a file the renderer never writes. One helper for both call
+        # sites below so the push line and the record block can't drift
+        # apart again (#629 review finding 1: both used to get this wrong).
+        def _youtube_sidecar_json(fcpxml_path: Path) -> Path:
+            return fcpxml_path.with_name(fcpxml_path.stem + "-youtube.json")
+
         # Hosted: push the stitched match deliverable (+ optional YouTube
         # sidecars, when youtube_sidecar wrote them) so the API can serve the
         # download. push_export_file skips any that don't exist. No-op local.
         with handle.timer.phase("r2_upload"):
             export_storage.push_export_file(proj, result.fcpxml_path)
             export_storage.push_export_file(proj, result.fcpxml_path.with_suffix(".srt"))
-            export_storage.push_export_file(proj, result.fcpxml_path.with_suffix(".json"))
+            export_storage.push_export_file(proj, _youtube_sidecar_json(result.fcpxml_path))
+
+        # Durable record of this run (#629). One run per invocation across
+        # every selected stage -- that grouping is precisely what a
+        # directory listing cannot reconstruct.
+        match_artifacts = [
+            export_runs.ExportArtifact(
+                filename=result.fcpxml_path.name,
+                kind="match_video" if result.fcpxml_path.suffix.lower() == ".mp4" else "fcpxml",
+            )
+        ]
+        match_artifacts.extend(
+            export_runs.ExportArtifact(filename=p.name, kind="sidecar")
+            for p in (
+                result.fcpxml_path.with_suffix(".srt"),
+                _youtube_sidecar_json(result.fcpxml_path),
+            )
+            if p.exists()
+        )
+        _record_export_run(
+            state,
+            slug,
+            export_runs.ExportRun(
+                run_id=export_runs.new_run_id(),
+                kind="match",
+                finished_at=datetime.now(UTC),
+                # Wall clock. ``result.duration_seconds`` is the stitched
+                # timeline's length, which is a different number entirely.
+                duration_seconds=handle.timer.build()["total_ms"] / 1000.0,
+                stage_numbers=list(req.stage_numbers),
+                formats=export_runs.match_run_formats(
+                    output_format=req.output_format,
+                    youtube_sidecar=req.youtube_sidecar,
+                ),
+                anomaly_count=len(result.anomalies),
+                artifacts=match_artifacts,
+            ),
+        )
 
         handle.set_result(
             {
@@ -5272,113 +5481,6 @@ class BeepWindowRequest(BaseModel):
 
     start_s: float
     end_s: float
-
-
-class ExportStageRequest(BaseModel):
-    """Body for POST /api/stages/{n}/export.
-
-    Each toggle defaults True; turning one off skips that artefact while
-    leaving the others on. ``write_trim`` produces the lossless stream-copy
-    trim into ``<project>/exports/`` -- distinct from the audit-mode
-    short-GOP scrub copy in ``<project>/trimmed/``. The FCPXML always
-    references the lossless trim so SPA exports match ``splitsmith single``.
-    """
-
-    write_trim: bool = True
-    write_csv: bool = True
-    write_fcpxml: bool = True
-    write_report: bool = True
-    # Pre-rendered alpha overlay MOV (issue #45). Defaults False because
-    # the render rasterizes sprites through a browser and encodes them --
-    # non-trivially slower than the other writers. The Analysis & Export
-    # checkbox opts-in per stage.
-    write_overlay: bool = False
-    # Overlay format knobs (issue #45 follow-up). Defaults match the
-    # legacy ProRes 4444 path on platforms without VideoToolbox; on macOS
-    # ``"auto"`` switches to ``hevc-alpha`` (~10-20x smaller). Resolution
-    # and fps caps are off by default to preserve frame-for-frame parity
-    # with the source clip.
-    overlay_codec: Literal["auto", "hevc-alpha", "prores-4444"] = "auto"
-    overlay_max_height: int | None = None
-    overlay_max_fps: float | None = None
-    # Palette preset for the overlay text + stroke. ``"splitsmith"``
-    # (default) uses the same tokens the web UI ships, mirrored into
-    # ``data/overlay_theme.json``. ``"clean"`` is the neutral
-    # white-on-amber alternative.
-    overlay_theme: Literal["splitsmith", "clean"] = "splitsmith"
-    # Multi-cam selection (issue #54). Allowlist of secondary
-    # ``video_id``s to ride the FCPXML / get their own lossless trim. The
-    # default ``None`` means "include every secondary with a beep" -- the
-    # legacy behaviour. An empty list excludes all secondaries; a non-empty
-    # list ships only the named cams (silently dropping any id not on the
-    # stage). Cams without a beep are still skipped regardless of selection
-    # since they can't be sync-aligned.
-    secondary_video_ids: list[str] | None = None
-
-
-class MatchExportRequest(BaseModel):
-    """Body for POST /api/match/export (issue #171).
-
-    Stitches the listed stages into one FCPXML, in the order given. Each
-    stage must already have a lossless trim + audit shots (run the per-stage
-    export first); the match export composes from those without re-encoding.
-    ``head_pad_seconds`` / ``tail_pad_seconds`` are the visible padding
-    around the beep / final shot per stage and are clamped server-side to
-    the project's pre/post buffer settings (default 5.0s) -- exceeding the
-    cap returns 400. ``project_name`` defaults to the bound project's name
-    when omitted.
-    """
-
-    stage_numbers: list[int]
-    head_pad_seconds: float = 5.0
-    tail_pad_seconds: float = 5.0
-    include_secondaries: bool = True
-    include_overlay: bool = True
-    # Overlay format knobs forwarded to per-stage re-renders. Match the
-    # single-stage defaults so a match export with no overlay edits is
-    # byte-comparable with the per-stage export.
-    overlay_codec: Literal["auto", "hevc-alpha", "prores-4444"] = "auto"
-    overlay_max_height: int | None = None
-    overlay_max_fps: float | None = None
-    overlay_theme: Literal["splitsmith", "clean"] = "splitsmith"
-    project_name: str | None = None
-    # Issue #193. ``"stacked"`` keeps secondaries full-frame (today's
-    # behaviour). ``"pip-corners"`` adds an ``<adjust-transform>`` to each
-    # secondary, rotating through TR -> TL -> BR -> BL at 25% scale.
-    pip_layout: Literal["stacked", "pip-corners"] = "stacked"
-    # Issue #197. ``"fcpxml"`` writes Final Cut Pro 1.10 (the default).
-    # ``"fcp7xml"`` writes a Final Cut Pro 7-style xmeml ``.xml``
-    # importable into Premiere Pro and DaVinci Resolve. Issue #174:
-    # ``"mp4"`` bakes the stitched composition into a single MP4 via
-    # ffmpeg (overlays / PiP burned in, no NLE needed).
-    output_format: Literal["fcpxml", "fcp7xml", "mp4"] = "fcpxml"
-    # Issue #195. Uniform transition between every consecutive stage
-    # pair, or ``"none"`` for hard cuts. Currently only the FCPXML
-    # renderer emits transitions; FCP7 / MP4 surface a "transitions
-    # ignored" anomaly when set together with those formats.
-    transition_kind: Literal["none", "zoom", "static"] = "none"
-    transition_duration_seconds: float = 0.5
-    # Issue #196. Per-stage title cards. ``"slate"`` adds a pre-stage
-    # card on the spine; ``"lower-third"`` is a connected text clip
-    # overlaid on the start of the primary. FCPXML only today;
-    # FCP7 / MP4 surface a "titles ignored" anomaly when combined.
-    title_kind: Literal["none", "slate", "lower-third"] = "none"
-    title_duration_seconds: float = 1.5
-    # Issue #173. Optional intro / outro video paths. Server expands
-    # ``~`` and probes the file to validate frame rate against the
-    # timeline. Missing files surface as anomalies; non-fatal so the
-    # rest of the export still ships.
-    intro_path: str | None = None
-    outro_path: str | None = None
-    # Issue #204 layer 1. Generate a YouTube-shaped JSON sidecar
-    # alongside the export plus a per-shot ``.srt``. FCPXML route
-    # also gets chapter markers embedded so they survive an NLE
-    # round-trip into an MP4 chapter atom.
-    youtube_sidecar: bool = False
-    # Issue #204 layer 2. Encode the MP4 with YouTube's recommended
-    # H.264 profile / GOP / colour / audio params. Only meaningful for
-    # ``output_format == "mp4"``; ignored otherwise (anomaly surfaced).
-    youtube_preset: bool = False
 
 
 class CompareGridRequest(BaseModel):
@@ -9962,7 +10064,7 @@ def create_app(
         # the API container just to decide whether to queue (#638).
         root = state.shooter_root(slug)
         if not project.source_present(root, video.path):
-            _ensure_source_reachable(stage_number, root / video.path)
+            ensure_source_reachable(stage_number, root / video.path)
         if video.beep_source == "manual" and not force:
             raise HTTPException(
                 status_code=409,
@@ -9997,7 +10099,7 @@ def create_app(
         # detect-beep endpoint above (#638).
         root = state.shooter_root(slug)
         if not project.source_present(root, primary.path):
-            _ensure_source_reachable(stage_number, root / primary.path)
+            ensure_source_reachable(stage_number, root / primary.path)
         if primary.beep_source == "manual" and not force:
             raise HTTPException(
                 status_code=409,
@@ -10048,7 +10150,7 @@ def create_app(
         # (#638).
         root = state.shooter_root(slug)
         if not project.source_present(root, video.path):
-            _ensure_source_reachable(stage_number, root / video.path)
+            ensure_source_reachable(stage_number, root / video.path)
         if video.beep_time is None:
             raise HTTPException(
                 status_code=400,
@@ -10656,7 +10758,7 @@ def create_app(
         """
         project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
         source = project.resolve_video_path(state.shooter_root(slug), video.path)
-        _ensure_source_reachable(stage_number, source)
+        ensure_source_reachable(stage_number, source)
         if req.hint_time < 0.0:
             raise HTTPException(status_code=400, detail="hint_time must be >= 0")
         if req.window_s <= 0.0:
@@ -11104,7 +11206,7 @@ def create_app(
         so both honour the same 404 / 424 / cache semantics.
         """
         source = project.resolve_video_path(state.shooter_root(slug), video.path)
-        _ensure_source_reachable(stage_number, source)
+        ensure_source_reachable(stage_number, source)
         center = t if t is not None else video.beep_time
         if center is None:
             raise HTTPException(
@@ -12166,7 +12268,7 @@ def create_app(
             served_path = project.resolve_video_path(root, video.path).resolve()
             # Same structured shape as detect-beep / trim / preview so
             # the SPA's "reconnect external storage" surface is uniform.
-            _ensure_source_reachable(stage.stage_number if stage is not None else None, served_path)
+            ensure_source_reachable(stage.stage_number if stage is not None else None, served_path)
 
         media_type = "video/mp4" if served_path.suffix.lower() == ".mp4" else "application/octet-stream"
         return FileResponse(served_path, media_type=media_type, filename=served_path.name)
@@ -12617,152 +12719,6 @@ def create_app(
 
         return JSONResponse(project.model_dump(mode="json"))
 
-    @app.get("/api/shooters/{slug}/exports/overview")
-    def export_overview(slug: str) -> JSONResponse:
-        """Match-overview payload for the Analysis & Export screen.
-
-        Returns one row per stage with audit + export status (shot count,
-        pending candidates, file paths, last export time, ready-to-export
-        flag). Pure stat: no detection, no rewriting of audit JSON.
-
-        ``match_exports`` lists the match-level deliverables the same way
-        (#629). Before this, the only thing that knew a match FCPXML
-        existed was the export job's own ``Job.result``, so a hosted user
-        who reloaded lost the download link to a file that was in R2 the
-        whole time -- the per-stage rows survived a reload and the match
-        output did not.
-        """
-        project = state.shooter_project(slug)
-        # Hosted: audit docs live in state_docs, not on this container's
-        # disk, so load each stage's doc and hand it to the overview
-        # (which would otherwise read an absent local file -> 0 shots).
-        # Local: load_audit reads the file, same as before.
-        audit_docs: dict[int, dict] = {}
-        for stg in project.stages:
-            doc, _ = state.load_audit(slug, stg.stage_number)
-            if doc is not None:
-                audit_docs[stg.stage_number] = doc
-        root = state.shooter_root(slug)
-        rows = project.export_overview(root, audit_docs=audit_docs)
-        match_files = project.match_export_files(root)
-        return JSONResponse(
-            {
-                "stages": [r.model_dump(mode="json") for r in rows],
-                "match_exports": [m.model_dump(mode="json") for m in match_files],
-            }
-        )
-
-    @app.get("/api/shooters/{slug}/exports/file/{filename:path}")
-    def download_export_file(slug: str, filename: str) -> FileResponse:
-        """Serve an export deliverable for download.
-
-        Local mode reads the file straight off the project's ``exports/``
-        dir. Hosted mode pulls it from object storage first: the worker that
-        produced it ran in a separate container, so the bytes only exist in
-        S3 until this seam mirrors them down (the export analogue of
-        ``stream_video``'s ``pull_trimmed_video``). The SPA uses this in
-        place of "Reveal in Finder", which is meaningless across containers.
-
-        ``filename`` is confined to the ``exports/`` dir: the resolved path
-        must stay inside it, so ``..`` traversal is a 400.
-        """
-        project = state.shooter_project(slug)
-        exports_dir = project.exports_path(state.shooter_root(slug)).resolve()
-        target = (exports_dir / filename).resolve()
-        try:
-            target.relative_to(exports_dir)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=400, detail="download path must be inside the exports folder"
-            ) from exc
-        if not (target.exists() and target.is_file()):
-            export_storage.pull_export_file(project, target)
-        if not (target.exists() and target.is_file()):
-            raise HTTPException(status_code=404, detail=f"export not found: {filename}")
-        media_types = {
-            ".mp4": "video/mp4",
-            ".mov": "video/quicktime",
-            ".fcpxml": "application/xml",
-            ".xml": "application/xml",
-            ".csv": "text/csv",
-            ".txt": "text/plain",
-            ".srt": "application/x-subrip",
-            ".json": "application/json",
-        }
-        media_type = media_types.get(target.suffix.lower(), "application/octet-stream")
-        return FileResponse(target, media_type=media_type, filename=target.name)
-
-    @app.post("/api/shooters/{slug}/stages/{stage_number}/export")
-    async def export_stage(slug: str, stage_number: int, req: ExportStageRequest) -> JSONResponse:
-        """Submit a per-stage export job.
-
-        Wraps the ``export_helpers.export_stage`` orchestrator (lossless trim
-        + CSV + FCPXML + report) in a JobRegistry entry so the SPA's
-        JobsPanel surfaces progress alongside detect-beep / trim /
-        shot-detect. Returns a Job snapshot; the SPA polls
-        ``/api/jobs/{id}`` until status leaves running, then re-fetches
-        ``/api/exports/overview`` to refresh paths and ``last_export_at``.
-
-        Pre-flight validations (stage exists, primary present, beep ready,
-        source reachable, scoreboard not placeholder) still raise HTTP
-        errors up front so the SPA can show a clear error before queueing
-        a useless job.
-        """
-        project = state.shooter_project(slug)
-        try:
-            stage = project.stage(stage_number)
-        except KeyError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        # One rule, three surfaces (#613): ``trim_blocker`` is what the CLI
-        # planner and ``export_overview.ready_to_trim`` ask too. The verdict
-        # is only decomposed here to word the 400 -- the SPA shows the
-        # detail verbatim, so "no beep" and "no stage time" can't share one
-        # message. Note a positive ``time_seconds`` is the whole duration
-        # test: an untouched placeholder has 0.0. Also demanding a
-        # ``scorecard_updated_at`` or a ``time_seconds_manual`` stamp used to
-        # reject a scoreboard row whose timestamp failed to parse -- a stage
-        # the CLI cut without complaint.
-        primary = stage.primary()
-        blocker = trim_blocker(stage, primary)
-        if blocker is not None:
-            detail = {
-                "skipped": f"stage {stage_number} is marked skipped; un-skip it before exporting",
-                "no_beep": (
-                    f"stage {stage_number} has no primary or no beep yet; "
-                    "finish ingest + audit before exporting"
-                ),
-                "no_stage_time": (
-                    f"stage {stage_number} is a placeholder; set a stage time "
-                    "or import a scoreboard before exporting"
-                ),
-            }[blocker]
-            raise HTTPException(status_code=400, detail=detail)
-        assert primary is not None  # guaranteed: ``trim_blocker`` said no_beep otherwise
-        # Source-reachability surfaces as a structured 424 so the SPA
-        # renders the same "reconnect external storage" message used
-        # elsewhere -- even if the user only wants CSV/report (those would
-        # still work, but the explicit 424 lets them re-try after
-        # reconnecting rather than hunting for the partial degradation
-        # message in the per-row anomaly list).
-        # ``source_present``, not ``resolve_video_path``: the export job owns
-        # the ffmpeg pass, so resolving here mirrored the raw source into the
-        # API container purely as an existence check (#638).
-        if req.write_trim or req.write_fcpxml:
-            root = state.shooter_root(slug)
-            if not project.source_present(root, primary.path):
-                _ensure_source_reachable(stage_number, root / primary.path)
-
-        existing = await state.jobs.find_active(kind="export", stage_number=stage_number, shooter_slug=slug)
-        if existing is not None:
-            return JSONResponse(existing.model_dump(mode="json"))
-        job = await state.jobs.submit(
-            kind="export",
-            stage_number=stage_number,
-            shooter_slug=slug,
-            args={"slug": slug, "stage_number": stage_number, "req": req},
-        )
-        return JSONResponse(job.model_dump(mode="json"))
-
     @app.get("/api/match/templates")
     def list_match_templates() -> JSONResponse:
         """List export templates from built-in + user dirs (issue #198).
@@ -12783,95 +12739,6 @@ def create_app(
             for e in entries
         ]
         return JSONResponse({"templates": payload})
-
-    @app.post("/api/shooters/{slug}/export/match")
-    async def export_match(slug: str, req: MatchExportRequest) -> JSONResponse:
-        """Stitch N stages into one FCPXML (issue #171, #172).
-
-        Job-queued: per-stage trims (and optional overlays) can take
-        minutes for a real match, so the response is a Job snapshot the
-        SPA polls via ``/api/me/jobs/{id}``. The worker re-runs any
-        missing per-stage exports before invoking the match composer,
-        so the user doesn't have to click Generate on each stage first.
-
-        Validation up-front (404 on unbound project, 400 on empty
-        selection / unknown stage / missing primary or beep / padding out
-        of range) so the SPA shows a clear error before queueing.
-        """
-        project = state.shooter_project(slug)
-        if not req.stage_numbers:
-            raise HTTPException(status_code=400, detail="stage_numbers cannot be empty")
-
-        # Padding cap: clamp at the project's pre/post buffer. Exceeding
-        # the cap is a 400 with a precise message, not a silent clamp --
-        # the user's slider in #172 already enforces the same bound, so a
-        # value above it is a real bug worth surfacing.
-        max_head = project.trim_pre_buffer_seconds
-        max_tail = project.trim_post_buffer_seconds
-        if not 0.0 <= req.head_pad_seconds <= max_head:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"head_pad_seconds={req.head_pad_seconds} out of range; "
-                    f"must be in [0.0, {max_head}] (project trim_pre_buffer)"
-                ),
-            )
-        if not 0.0 <= req.tail_pad_seconds <= max_tail:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"tail_pad_seconds={req.tail_pad_seconds} out of range; "
-                    f"must be in [0.0, {max_tail}] (project trim_post_buffer)"
-                ),
-            )
-
-        # Pre-flight stage validations. Loaded once here so a bad
-        # selection 400s before we queue a worker. The audit-shots check
-        # happens in the worker (it reads the JSON anyway) so we don't
-        # double-parse.
-        for stage_number in req.stage_numbers:
-            try:
-                stage = project.stage(stage_number)
-            except KeyError as exc:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"stage {stage_number} not found in project",
-                ) from exc
-            primary = stage.primary()
-            if primary is None or primary.beep_time is None:
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"stage {stage_number} has no primary or no beep yet; "
-                        "finish ingest + audit before match export"
-                    ),
-                )
-            # Source-reachability matters because the worker may have to
-            # produce missing trims via ffmpeg. Surface up-front rather
-            # than letting the worker fail mid-flight.
-            # ``source_present``, not ``resolve_video_path``: the latter
-            # mirrors a hosted object into the local cache, so a preflight
-            # that only decides whether to queue downloaded every source
-            # into the API container -- twice per stage (#637). The path
-            # handed to the 424 helper is rebuilt rather than resolved;
-            # ``root / path`` is what ``resolve_video_path`` returns in the
-            # no-storage and mirror-hit cases, and ``pathlib`` drops the
-            # left operand when ``primary.path`` is absolute.
-            if not project.source_present(state.shooter_root(slug), primary.path):
-                _ensure_source_reachable(
-                    stage_number,
-                    state.shooter_root(slug) / primary.path,
-                )
-
-        existing = await state.jobs.find_active(kind="match_export", shooter_slug=slug)
-        if existing is not None:
-            return JSONResponse(existing.model_dump(mode="json"))
-        job = await state.jobs.submit(
-            kind="match_export",
-            shooter_slug=slug,
-            args={"slug": slug, "req": req},
-        )
-        return JSONResponse(job.model_dump(mode="json"))
 
     def _reveal_in_file_manager(resolved: Path) -> None:
         """Launch the OS file manager for ``resolved``, surfacing failures.
@@ -15737,7 +15604,7 @@ def create_app(
                 )
 
             source = project.resolve_video_path(state.shooter_root(slug), video.path)
-            _ensure_source_reachable(stage_number, source)
+            ensure_source_reachable(stage_number, source)
 
             try:
                 secondary_wav_path = audio_helpers.ensure_video_audio(
@@ -15958,7 +15825,7 @@ def create_app(
                 )
 
             source = project.resolve_video_path(state.shooter_root(slug), video.path)
-            _ensure_source_reachable(stage_number, source)
+            ensure_source_reachable(stage_number, source)
 
             try:
                 secondary_wav_path = audio_helpers.ensure_video_audio(
@@ -16297,6 +16164,13 @@ def create_app(
     from .share_og import router as share_og_router
 
     app.include_router(share_og_router)
+
+    # Export routes (#629 / #919's lift-as-you-go rule). Included here so
+    # /api/shooters/{slug}/exports/* passes through the same middleware as
+    # the routes that stayed behind.
+    from .exports_api import router as exports_router
+
+    app.include_router(exports_router)
 
     # ----------------------------------------------------------------------
     # Static asset serving (SPA)
