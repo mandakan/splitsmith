@@ -137,6 +137,19 @@ Tuning notes:
 - `slugify(name, *, fallback)` takes its fallback explicitly. `stage` and `match` are both correct for their own job — an unnamed project should not produce `stage-match.fcpxml` — and letting each caller hard-code one is what caused two readers to look for files the exporter never wrote.
 - Distinct from `match_model.slugify_filename`, which strips diacritics and bounds its length for URL-safe ids. Merging them would rename existing files.
 
+**`export_runs.py`** -- pure. The durable record of one export invocation (#629).
+- `ExportRun` = `run_id`, `kind` (`stage` / `match`), `finished_at`, `duration_seconds`, `stage_numbers`, `formats`, `anomaly_count`, `artifacts`. `formats` is what the run *requested*; `artifacts` is what it *wrote*, each an `ExportArtifact(filename, kind)` whose `filename` is a basename under the shooter's `exports/` dir -- the same key `download_export_file` takes.
+- Exists because four facts are not derivable from a directory listing: which deliverables came out of one invocation, how long it took, which formats were selected, and how many anomalies it reported. Everything else about an export is already discoverable from `export_overview` / `match_export_files`.
+- `append_run(doc, run)` prepends; newest-first is the *stored* order, so no reader sorts. No cap on the log -- the retention decision on #629 keeps run records indefinitely and defers eviction of derived video to its own issue.
+- Reads never raise: `load_log` drops an entry it cannot validate and keeps its siblings. A malformed bookkeeping document must not fail an export or 500 a page.
+- `duration_seconds` is wall clock for the job body. `match_exports.MatchExportResult.duration_seconds` is the stitched timeline's length -- a different number, never wire one into the other.
+- Persistence is the caller's: `AppState.load_export_runs` / `save_export_runs` write a `state_docs` row of kind `export_runs` when hosted and `<shooter_root>/export_runs.json` on desktop. Deliberately *not* under `exports/` -- everything in that directory is listed and offered to the user as a deliverable, and the history is not one.
+- `server._record_export_run` is the only writer. It re-loads and re-appends on an optimistic-lock conflict (a concurrent export job's run landed first) and never raises: the deliverables are already written by the time it runs, so failing the job over bookkeeping would report a successful export as broken.
+
+**`ui/exports_api.py`** -- the export routes, lifted out of `server.py` under #919's lift-as-you-go rule. `GET exports/overview`, `GET exports/runs`, `GET exports/file/{filename:path}`, `POST stages/{n}/export`, `POST export/match`. Paths are unchanged, so the `/api/matches/{id}/` alias middleware, the capability table and every SPA call site are untouched.
+- Must never import `server`: `server` imports the two request models (`ExportStageRequest`, `MatchExportRequest`) from here, so an import back would be a load-time cycle. Anything shared goes to a third module -- that is why `ensure_source_reachable` lives in `ui/http_errors.py`.
+- The export *job bodies* stay in `server.py`; lifting `register_job_bodies` is a separate and much larger job.
+
 **`csv_gen.py`** — Write splits CSV.
 - Columns: `shot_number, time_from_start, split, peak_amplitude, confidence, notes`
 - Time format: seconds with 3 decimal places (millisecond precision).
