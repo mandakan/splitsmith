@@ -44,6 +44,14 @@ _STAGE_FILE_RE = re.compile(r"^stage\d+_")
 #: the segment is unambiguous between the two ``_`` delimiters.
 _CAM_ID_RE = re.compile(r"_cam_([0-9a-f]+)_")
 
+#: Stem suffixes a match-level *sidecar* writer appends after
+#: :func:`match_file_base`, so the stem no longer ends in ``-match``.
+#: ``ui.match_exports`` writes the YouTube metadata as
+#: ``<stem>-youtube.json`` (the captions ``.srt`` keeps the bare stem, so
+#: it needs no entry here). Without this, the metadata file is invisible
+#: to every reader that only has a directory listing.
+_MATCH_SIDECAR_STEM_SUFFIXES = ("-youtube",)
+
 
 def slugify(name: str, *, fallback: str) -> str:
     """Filesystem-friendly slug: lowercase, ``[a-z0-9]`` runs joined by ``-``.
@@ -99,10 +107,20 @@ def is_match_export(filename: str) -> bool:
     in ``-match``. Per-stage artefacts always begin ``stage<N>_`` --
     :func:`stage_file_base` guarantees it -- so excluding them first is
     what keeps that stage's FCPXML from being offered as the match's.
+
+    A sidecar suffix on the stem is stripped before the check. The
+    YouTube metadata is written as ``<stem>-youtube.json``, so a plain
+    ``-match`` suffix test says False for it and the file is invisible to
+    a directory-listing reader -- while its sibling ``.srt``, which keeps
+    the bare stem, is visible. That asymmetry is a bug, not a policy.
     """
     if _STAGE_FILE_RE.match(filename):
         return False
     stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+    for suffix in _MATCH_SIDECAR_STEM_SUFFIXES:
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
     return stem.endswith("-match")
 
 

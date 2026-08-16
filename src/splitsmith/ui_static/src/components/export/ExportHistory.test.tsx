@@ -14,7 +14,7 @@ function run(over: Partial<ExportRun> = {}): ExportRun {
     stage_numbers: [3],
     formats: ["trim", "csv"],
     anomaly_count: 0,
-    artifacts: [{ filename: "stage3_wall_trimmed.mp4", kind: "trim" }],
+    artifacts: [{ filename: "stage3_wall_trimmed.mp4", kind: "trim", available: true }],
     ...over,
   };
 }
@@ -67,6 +67,29 @@ describe("ExportHistory", () => {
       <ExportHistory runs={[run({ anomaly_count: 2 })]} exportFileUrl={(f) => `/dl/${f}`} />,
     );
     expect(screen.getByText("2 anomalies")).toBeInTheDocument();
+  });
+
+  it("renders an unavailable artefact as a non-link", () => {
+    // The reachable case, not a hypothetical: the same page offers the
+    // cleanup dialog, which deletes export files and deliberately leaves
+    // the history alone. A link here carries ``download``, so clicking
+    // one saves the JSON 404 body to disk under the video's filename.
+    render(
+      <ExportHistory
+        runs={[
+          run({
+            artifacts: [{ filename: "stage3_wall_trimmed.mp4", kind: "trim", available: false }],
+          }),
+        ]}
+        exportFileUrl={(f) => `/dl/${f}`}
+      />,
+    );
+    expect(
+      screen.queryByRole("link", { name: "stage3_wall_trimmed.mp4" }),
+    ).not.toBeInTheDocument();
+    // The name is still shown -- the run did produce it, and that is the
+    // fact the history is for.
+    expect(screen.getByText("stage3_wall_trimmed.mp4")).toBeInTheDocument();
   });
 
   it("renders an empty state rather than an empty list", () => {

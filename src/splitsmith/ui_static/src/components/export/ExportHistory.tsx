@@ -23,7 +23,14 @@ export function stageLabel(stages: number[]): string {
  *
  *  Rendered in both deployment modes. Only the *reveal* affordance was
  *  ever desktop-specific; the download endpoint reads local disk on
- *  desktop and object storage on hosted, so one link works for both. */
+ *  desktop and object storage on hosted, so one link works for both.
+ *
+ *  An artefact whose ``available`` is false renders as a struck-through
+ *  name and nothing clickable. This is not a rare edge: the same page
+ *  offers a cleanup dialog that deletes export files, and the history is
+ *  durable by design, so a run's record outlives its files. A link there
+ *  would carry ``download``, which saves the 404 body to disk under the
+ *  video's own filename. */
 export function ExportHistory({
   runs,
   exportFileUrl,
@@ -65,16 +72,26 @@ export function ExportHistory({
                 </time>
               </div>
               <div className="mt-1.5 flex flex-col gap-0.5">
-                {r.artifacts.map((a) => (
-                  <a
-                    key={a.filename}
-                    href={exportFileUrl(a.filename)}
-                    download={a.filename}
-                    className="inline-flex items-center gap-1.5 font-mono text-[0.6875rem] text-led hover:text-led-soft"
-                  >
-                    <Download className="size-3" /> {a.filename}
-                  </a>
-                ))}
+                {r.artifacts.map((a) =>
+                  a.available ? (
+                    <a
+                      key={a.filename}
+                      href={exportFileUrl(a.filename)}
+                      download={a.filename}
+                      className="inline-flex items-center gap-1.5 font-mono text-[0.6875rem] text-led hover:text-led-soft"
+                    >
+                      <Download className="size-3" /> {a.filename}
+                    </a>
+                  ) : (
+                    <span
+                      key={a.filename}
+                      title="Deleted -- this run's record is kept, the file is not"
+                      className="inline-flex items-center gap-1.5 font-mono text-[0.6875rem] text-muted line-through"
+                    >
+                      <Download className="size-3" /> {a.filename}
+                    </span>
+                  ),
+                )}
               </div>
             </li>
           ))}

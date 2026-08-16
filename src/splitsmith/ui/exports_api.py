@@ -193,11 +193,28 @@ def list_export_runs(slug: str, request: Request) -> JSONResponse:
 
     A malformed or unreadable log reads as an empty history rather than a
     500 -- ``export_runs.load_log`` drops what it cannot parse.
+
+    Each artefact carries an ``available`` flag the SPA uses to decide
+    whether to render a download link. It is derived here, per request,
+    from ``MatchProject.existing_export_names`` -- the same presence
+    source ``exports/overview`` reads -- and is deliberately **not** part
+    of the stored record. The record says what a run produced and that
+    never changes; whether the bytes are still there is a property of
+    now. The user's own cleanup deletes export files and does not touch
+    the history, so a run whose artefacts are all gone is a normal,
+    reachable state rather than an error.
     """
     state = request.app.state.splitsmith_state
     doc, _version = state.load_export_runs(slug)
     log = export_runs.load_log(doc)
-    return JSONResponse({"runs": [r.model_dump(mode="json") for r in log.runs]})
+    present = state.shooter_project(slug).existing_export_names(state.shooter_root(slug))
+    runs = []
+    for run in log.runs:
+        row = run.model_dump(mode="json")
+        for artifact in row["artifacts"]:
+            artifact["available"] = artifact["filename"] in present
+        runs.append(row)
+    return JSONResponse({"runs": runs})
 
 
 @router.get("/api/shooters/{slug}/exports/file/{filename:path}")

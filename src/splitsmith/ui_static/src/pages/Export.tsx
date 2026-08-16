@@ -1068,6 +1068,13 @@ function ExportInner({ slug }: { slug: string }) {
           // showing download links and presence badges for; without a
           // reload the page keeps offering downloads that now 404 (I5
           // whole-branch finding).
+          //
+          // The history is refetched by the same call but for a different
+          // reason. Its rows are durable -- cleanup does not touch
+          // ``export_runs`` -- so a reload does not remove them and is not
+          // meant to. What moves is each artefact's ``available`` flag,
+          // which the server derives per request; that is what turns the
+          // now-dead download links into plain struck-through names.
           void reload();
         }}
       />

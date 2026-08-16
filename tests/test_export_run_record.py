@@ -636,6 +636,46 @@ def test_export_runs_endpoint_serves_the_history_newest_first(tmp_path: Path, mo
     assert runs[0]["artifacts"][0]["filename"].endswith("_trimmed.mp4")
 
 
+def test_export_runs_endpoint_marks_a_deleted_artifact_unavailable(tmp_path: Path, monkeypatch) -> None:
+    """A run whose file the user has since deleted must not be offered as
+    a download.
+
+    Reachable on the very page that renders the history: it also renders
+    the cleanup dialog, and cleanup deletes export files while leaving
+    ``export_runs`` alone (the history is durable by design). The link
+    carries ``download``, so a click on a dead one saves the JSON 404 body
+    to disk under the video's own filename.
+
+    ``available`` is a property of the response, not of the record: the
+    stored run still names the file it produced -- that is what happened
+    -- and only the flag moves.
+    """
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+
+    monkeypatch.setattr(trim, "trim_video", _fake_trim_video)
+    assert client.post("/api/shooters/me/stages/1/time", json={"time_seconds": 10.0}).status_code == 200
+    _export_stage_trim_only(client, 1)
+
+    shooter_root = project_root / "shooters" / "me"
+    before = client.get("/api/shooters/me/exports/runs").json()["runs"]
+    filename = before[0]["artifacts"][0]["filename"]
+    assert before[0]["artifacts"][0]["available"] is True
+
+    (shooter_root / "exports" / filename).unlink()
+
+    after = client.get("/api/shooters/me/exports/runs").json()["runs"]
+    assert after[0]["artifacts"][0]["filename"] == filename, "the record itself must not change"
+    assert after[0]["artifacts"][0]["available"] is False
+    # ...and the stored document is untouched: no ``available`` key was
+    # written into it, and the run is still there.
+    stored = json.loads((shooter_root / "export_runs.json").read_text(encoding="utf-8"))
+    assert len(stored["runs"]) == 1
+    assert "available" not in stored["runs"][0]["artifacts"][0]
+    # The link the SPA would have rendered really is dead -- this is the
+    # 404 body that would otherwise be saved under the video's filename.
+    assert client.get(f"/api/shooters/me/exports/file/{filename}").status_code == 404
+
+
 def test_export_runs_endpoint_is_empty_before_any_export(tmp_path: Path) -> None:
     client, _ = _seed_match_export_project(tmp_path, stage_count=1)
     resp = client.get("/api/shooters/me/exports/runs")
