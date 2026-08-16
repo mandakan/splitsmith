@@ -216,6 +216,19 @@ recognise onto the audit URL shape, so an unhandled kind fails the
 ``sync.pull.PULLABLE_DOC_KINDS`` is an allowlist for exactly that reason
 -- it keeps the next kind inert by default rather than catastrophic.
 Widen it only together with a merge rule in ``sync.run._apply_pull``.
+
+The allowlist is applied in **two** places and they move together:
+``sync.pull.plan_pull`` (the client) and ``sync_api.get_doc_manifest``
+(the server). Neither is redundant. There is no client-version
+negotiation on the sync surface, so the client-side filter protects only
+clients that have already been upgraded -- a desktop install in the
+field still aborts its whole pull the first time a hosted export writes
+an ``export_runs`` row, unless the server declines to offer it. The
+server-side filter is the one that protects installs nobody controls;
+the client-side one is what protects a new client talking to an older
+server. Both are pinned:
+``tests/test_sync_api.py::test_doc_manifest_omits_kinds_a_desktop_client_cannot_pull``
+and the ``plan_pull`` cases in ``tests/test_sync_pull.py``.
 The cascade queries are the other half: ``delete_match`` filters on
 ``match_id`` alone and ``delete_shooter`` on ``(match_id, slug)``, so
 both sweep a new per-shooter kind without edits -- ``list_project_docs``
