@@ -86,7 +86,7 @@ import threading
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
-from contextlib import asynccontextmanager
+from contextlib import AbstractContextManager, asynccontextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
@@ -590,27 +590,40 @@ def _save_audit_with_remerge(
 def _record_export_run(state: AppState, slug: str, run: export_runs.ExportRun) -> None:
     """Append one run to the shooter's export history. Never raises.
 
-    Re-loads and re-appends on an optimistic-lock conflict rather than
-    retrying the same write: a conflict means a concurrent export job's
-    run landed first, and re-appending onto the winner's doc keeps both.
-    Blind overwrite would silently drop a run.
+    Hosted: re-loads and re-appends on an optimistic-lock conflict rather
+    than retrying the same write -- a conflict means a concurrent export
+    job's run landed first, and re-appending onto the winner's doc keeps
+    both. Blind overwrite would silently drop a run.
+
+    Desktop: there is no version to lose a race on -- the file accessors
+    report and ignore version 0 -- so the whole load/append/save runs
+    under :attr:`AppState.export_run_lock`. Without it the read-modify-
+    write is simply unprotected, and it loses runs in practice: the
+    Export page's bundle button submits one job per selected stage and
+    the job registry runs two at a time against one document. The lock is
+    process-local; see its definition for why that is enough and what it
+    does not cover.
 
     Every other failure -- store unavailable, disk full, retries exhausted
     -- logs at WARNING and returns. The deliverables are the product and
     they are already written by the time this is called; failing the job
     over bookkeeping would report a successful export as broken.
     """
+    guard: AbstractContextManager[object] = (
+        nullcontext() if state.export_runs_doc_target() is not None else state.export_run_lock
+    )
     conflict_excs = _state_conflict_excs()
-    for _attempt in range(_EXPORT_RUN_SAVE_MAX_ATTEMPTS):
-        try:
-            doc, version = state.load_export_runs(slug)
-            state.save_export_runs(slug, export_runs.append_run(doc, run), version=version)
-            return
-        except conflict_excs:
-            continue
-        except Exception as exc:  # noqa: BLE001 -- see docstring
-            logger.warning("export run record: not written for %s: %s", slug, exc)
-            return
+    with guard:
+        for _attempt in range(_EXPORT_RUN_SAVE_MAX_ATTEMPTS):
+            try:
+                doc, version = state.load_export_runs(slug)
+                state.save_export_runs(slug, export_runs.append_run(doc, run), version=version)
+                return
+            except conflict_excs:
+                continue
+            except Exception as exc:  # noqa: BLE001 -- see docstring
+                logger.warning("export run record: not written for %s: %s", slug, exc)
+                return
     logger.warning(
         "export run record: lost %d version races for %s; run %s not recorded",
         _EXPORT_RUN_SAVE_MAX_ATTEMPTS,
@@ -1697,6 +1710,20 @@ class AppState:
     # serving one operator, not a multi-worker server, so there is no
     # cross-process case to cover.
     device_flow_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Guards the whole load/append/save of the DESKTOP export-run log
+    # (#629). Local mode's ``load_export_runs`` always reports version 0
+    # and ``save_export_runs`` ignores the version it is handed, so the
+    # optimistic-lock retry in ``_record_export_run`` cannot protect the
+    # read-modify-write there -- and it genuinely races: the Export page's
+    # trims-only bundle button submits one export job per selected stage
+    # and ``JobRegistry`` runs two at a time against one document.
+    # A ``threading.Lock`` and not a file lock, deliberately: desktop is a
+    # single server process, so this serialises every writer that exists.
+    # It is NOT cross-process safe, and it does not need to be -- two
+    # ``splitsmith ui`` processes over one project folder already race on
+    # far more than this file. Hosted never takes it; its optimistic
+    # locking is the real mechanism there.
+    export_run_lock: threading.Lock = field(default_factory=threading.Lock)
     # Live SSE wake channels, one asyncio.Queue per connected self-hosted
     # worker. ``None`` in local mode and on the headless worker process
     # (which must never hold launcher capabilities); set by the non-worker
@@ -2021,18 +2048,36 @@ class AppState:
                     ) from exc
         return removed
 
-    def load_export_runs(self, slug: str) -> tuple[dict | None, int]:
-        """The shooter's export history doc + version (#629).
+    def export_runs_doc_target(self) -> tuple[ProjectStateStore, str] | None:
+        """The hosted store + match id for the export history, or ``None``
+        when the history is file-based.
 
-        Hosted: ``state_docs``. Local: ``<shooter_root>/export_runs.json``
-        (version always 0 -- no locking on files). Unlike
-        :meth:`load_audit`, an unreadable document degrades to "no
-        history" rather than a 500: this is bookkeeping, and it must not
-        be able to break a page that would otherwise render.
+        The one place the mode split for this document is decided. Both
+        accessors below branch on it, and ``_record_export_run`` takes its
+        desktop-only lock on exactly the ``None`` case -- so that lock can
+        never end up guarding a different set of calls than the file
+        writes it exists to serialise.
         """
         mid = current_match_id.get()
         store = self.project_state
         if store is not None and mid is not None:
+            return store, mid
+        return None
+
+    def load_export_runs(self, slug: str) -> tuple[dict | None, int]:
+        """The shooter's export history doc + version (#629).
+
+        Hosted: ``state_docs``. Local: ``<shooter_root>/export_runs.json``
+        (version always 0 -- no locking on files; ``_record_export_run``
+        holds :attr:`export_run_lock` across the read-modify-write
+        instead). Unlike :meth:`load_audit`, an unreadable document
+        degrades to "no history" rather than a 500: this is bookkeeping,
+        and it must not be able to break a page that would otherwise
+        render.
+        """
+        target = self.export_runs_doc_target()
+        if target is not None:
+            store, mid = target
             return run_sync(store.load_export_runs(mid, slug))
         path = self.shooter_root(slug) / EXPORT_RUNS_FILE
         if not path.exists():
@@ -2047,21 +2092,32 @@ class AppState:
         """Persist the export history doc; return the new version.
 
         Hosted: ``state_docs`` under optimistic locking, same contract as
-        :meth:`save_audit`. Local: atomic ``.tmp`` -> rename (returns 0).
+        :meth:`save_audit`. Local: write a temp file, then rename over the
+        real one (returns 0).
+
+        The temp file gets a unique ``mkstemp`` name rather than a fixed
+        ``export_runs.json.tmp``. A fixed name is shared by every writer
+        to the same shooter, so two concurrent stage exports write the one
+        temp file and the second ``replace`` raises ENOENT after the first
+        already consumed it -- a lost run for a reason that has nothing to
+        do with the document's contents. ``_record_export_run`` serialises
+        desktop writers anyway; this keeps the failure impossible rather
+        than merely unreached.
         """
-        mid = current_match_id.get()
-        store = self.project_state
-        if store is not None and mid is not None:
+        target = self.export_runs_doc_target()
+        if target is not None:
+            store, mid = target
             return run_sync(store.save_export_runs(mid, slug, doc, expected_version=version))
         path = self.shooter_root(slug) / EXPORT_RUNS_FILE
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".json.tmp")
+        fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f"{path.name}.", suffix=".tmp")
+        tmp = Path(tmp_name)
         try:
-            tmp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(doc, indent=2) + "\n")
             tmp.replace(path)
         except OSError:
-            if tmp.exists():
-                tmp.unlink()
+            tmp.unlink(missing_ok=True)
             raise
         return 0
 

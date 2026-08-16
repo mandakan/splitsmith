@@ -231,6 +231,124 @@ def test_conflict_retry_reloads_and_reappends_onto_the_winner(tmp_path: Path, mo
     assert [r["run_id"] for r in doc["runs"]] == ["d" * 32, "e" * 32]
 
 
+def test_concurrent_stage_exports_all_reach_the_desktop_history(tmp_path: Path, monkeypatch) -> None:
+    """Six stage exports submitted at once leave six history lines.
+
+    This is the Export page's own bundle button: it submits one export job
+    per selected stage, and ``JobRegistry`` runs two of them at a time
+    against the single ``export_runs.json`` for that shooter. Desktop's
+    ``load_export_runs`` always reports version 0 and ``save_export_runs``
+    ignores the version it is handed, so nothing in the optimistic-lock
+    retry protects that read-modify-write -- only
+    ``AppState.export_run_lock`` does.
+
+    ``load_export_runs`` is wrapped to sleep after reading so the window
+    between load and save is wide enough to hit every time rather than
+    one round in ten. The sleep changes no behaviour; it only makes an
+    unserialised implementation lose runs deterministically. With the
+    lock held across load/append/save the sleeps serialise and all six
+    survive.
+    """
+    import time
+
+    from .test_ui_server import _wait_for_job
+
+    stages = 6
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=stages)
+    monkeypatch.setattr(trim, "trim_video", _fake_trim_video)
+
+    state = client.app.state.splitsmith_state
+    real_load = type(state).load_export_runs
+
+    def slow_load(self, slug: str):  # type: ignore[no-untyped-def]
+        out = real_load(self, slug)
+        time.sleep(0.05)
+        return out
+
+    monkeypatch.setattr(type(state), "load_export_runs", slow_load, raising=True)
+
+    for n in range(1, stages + 1):
+        assert (
+            client.post(f"/api/shooters/me/stages/{n}/time", json={"time_seconds": 10.0}).status_code == 200
+        )
+    job_ids = []
+    for n in range(1, stages + 1):
+        resp = client.post(
+            f"/api/shooters/me/stages/{n}/export",
+            json={
+                "write_trim": True,
+                "write_csv": False,
+                "write_fcpxml": False,
+                "write_report": False,
+                "write_overlay": False,
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        job_ids.append(resp.json()["id"])
+    for job_id in job_ids:
+        assert _wait_for_job(client, job_id, timeout=30.0)["status"] == "succeeded"
+
+    doc = json.loads((project_root / "shooters" / "me" / "export_runs.json").read_text(encoding="utf-8"))
+    # Every stage, exactly once: a lost update drops a row, and a temp-file
+    # collision drops one too (that one at least logs; a lost update does
+    # not log anything at all).
+    assert sorted(r["stage_numbers"][0] for r in doc["runs"]) == list(range(1, stages + 1))
+    assert len(doc["runs"]) == stages
+    # No stray temp files left behind by the unique-name writer.
+    assert not list((project_root / "shooters" / "me").glob("*.tmp"))
+
+
+def test_two_concurrent_desktop_writers_do_not_collide_on_a_temp_file(tmp_path: Path, monkeypatch) -> None:
+    """``save_export_runs`` is safe to call from two threads at once.
+
+    Separate from the lock: a temp file named after the destination is
+    shared by every writer to that shooter, so two writers write the one
+    file and the second ``replace`` finds nothing there -- ENOENT, and a
+    lost run. ``_record_export_run`` serialises desktop writers so this
+    cannot be reached through the job bodies today, but the method's own
+    contract should not depend on its only caller holding a lock.
+
+    ``Path.replace`` is wrapped with a barrier so both writers have
+    written their temp file before either renames. With a unique
+    ``mkstemp`` name they rename different files and both succeed; with a
+    shared name the second raises.
+    """
+    import threading
+    import time
+
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    state = client.app.state.splitsmith_state
+
+    real_replace = Path.replace
+    both_written = threading.Barrier(2)
+
+    def slow_replace(self: Path, target):  # type: ignore[no-untyped-def]
+        if self.name.startswith("export_runs.json"):
+            both_written.wait(timeout=10)
+            time.sleep(0.05)
+        return real_replace(self, target)
+
+    monkeypatch.setattr(Path, "replace", slow_replace, raising=True)
+
+    errors: list[BaseException] = []
+
+    def writer(n: int) -> None:
+        with _match_context(project_root):
+            try:
+                state.save_export_runs("me", export_runs.append_run(None, _run(str(n) * 32, n)), version=0)
+            except BaseException as exc:  # noqa: BLE001 -- reported, not swallowed
+                errors.append(exc)
+
+    threads = [threading.Thread(target=writer, args=(n,)) for n in (1, 2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=20)
+
+    assert errors == [], f"concurrent save_export_runs raised: {errors!r}"
+    assert not list((project_root / "shooters" / "me").glob("*.tmp"))
+
+
 def test_a_stage_export_records_a_run(tmp_path: Path, monkeypatch) -> None:
     client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
 
