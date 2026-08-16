@@ -570,6 +570,71 @@ def test_a_match_export_with_youtube_sidecar_records_both_sidecar_files(tmp_path
     assert (exports_dir / expected_json).exists()
 
 
+def test_a_match_export_pushes_the_youtube_sidecar_json_under_its_real_name(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The hosted upload phase must push the metadata file the renderer
+    actually wrote.
+
+    ``_run_match_export``'s ``r2_upload`` phase pushed
+    ``fcpxml_path.with_suffix(".json")``, a name nothing ever writes:
+    ``match_exports.export_match`` writes ``<stem>-youtube.json``. On
+    hosted that made the metadata sidecar undownloadable -- it never
+    reached object storage, and the API container serving the link has
+    no other copy. ``push_export_file`` silently skips a file that is not
+    there, so the job stayed green and nothing logged.
+
+    The push is observed rather than driven through real storage: local
+    mode has no bound storage, so ``push_export_file`` would no-op and
+    prove nothing. What is asserted is which *paths the job asks to
+    push*, cross-checked against the files on disk -- so a wrong name
+    fails here whether it is skipped later or not.
+    """
+    from splitsmith.ui import export_storage
+
+    from .test_ui_server import _stub_match_export_probe, _wait_for_job
+
+    pushed: list[Path] = []
+    real_push = export_storage.push_export_file
+
+    def spy_push(project, local_file: Path) -> None:  # type: ignore[no-untyped-def]
+        pushed.append(local_file)
+        real_push(project, local_file)
+
+    monkeypatch.setattr(export_storage, "push_export_file", spy_push)
+
+    client, project_root = _seed_match_export_project(tmp_path)
+    _stub_match_export_probe(monkeypatch)
+
+    resp = client.post(
+        "/api/shooters/me/export/match",
+        json={
+            "stage_numbers": [1, 2],
+            "head_pad_seconds": 0.5,
+            "tail_pad_seconds": 1.0,
+            "include_secondaries": True,
+            "include_overlay": False,
+            "youtube_sidecar": True,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert _wait_for_job(client, resp.json()["id"])["status"] == "succeeded"
+
+    by_name = {p.name: p for p in pushed}
+    fcpxml_name = next(n for n in by_name if n.endswith("-match.fcpxml"))
+    stem = fcpxml_name.removesuffix(".fcpxml")
+
+    exports_dir = project_root / "shooters" / "me" / "exports"
+    assert (exports_dir / f"{stem}-youtube.json").exists(), "the fixture no longer writes the sidecar"
+
+    # All three match-level deliverables, each under the name on disk.
+    assert set(by_name) == {fcpxml_name, f"{stem}.srt", f"{stem}-youtube.json"}
+    # ...and specifically not the name the bug used, which no writer produces.
+    assert not (exports_dir / f"{stem}.json").exists()
+    for path in pushed:
+        assert path.exists(), f"asked to push a file that does not exist: {path}"
+
+
 def test_a_match_export_to_mp4_records_a_match_video_artifact(tmp_path: Path, monkeypatch) -> None:
     """``output_format="mp4"`` produces a single stitched deliverable, and
     the artefact kind must reflect that it's a video, not an FCPXML --
