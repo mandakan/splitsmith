@@ -226,6 +226,7 @@ from .comments import (
     CommentRateLimiter,
     to_out,
 )
+from .http_errors import ensure_source_reachable
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
 from .jobs import (
     Job,
@@ -255,34 +256,6 @@ from .scoreboard import (
 )
 from .scoreboard.local import DEFAULT_MATCH_FILENAME, DEFAULT_SCOREBOARD_DIRNAME
 from .scoreboard.reconcile import CompetitorRef, LocalShooter, propose_shooter_links
-
-
-def _ensure_source_reachable(stage_number: int | None, source: Path) -> None:
-    """Raise a structured 424 when ``source`` doesn't exist on disk.
-
-    The SPA reads ``detail.code == "source_unreachable"`` to render a
-    uniform "reconnect the USB / SD card" message wherever a source-bound
-    operation is invoked (detect-beep, audit-mode trim, beep preview,
-    video stream, export). Callers handle the "no primary" check with
-    their endpoint-specific status code before calling this -- the helper
-    only handles the upstream-dependency-offline case.
-    """
-    if source.exists():
-        return
-    raise HTTPException(
-        status_code=424,
-        detail={
-            "code": "source_unreachable",
-            "stage_number": stage_number,
-            "path": str(source),
-            "message": (
-                "Source video"
-                + (f" for stage {stage_number}" if stage_number is not None else "")
-                + f" is not reachable: {source}. If it lives on external "
-                f"storage (USB drive, SD card), reconnect and try again."
-            ),
-        },
-    )
 
 
 def _audit_trim_targets(
@@ -10142,7 +10115,7 @@ def create_app(
         # the API container just to decide whether to queue (#638).
         root = state.shooter_root(slug)
         if not project.source_present(root, video.path):
-            _ensure_source_reachable(stage_number, root / video.path)
+            ensure_source_reachable(stage_number, root / video.path)
         if video.beep_source == "manual" and not force:
             raise HTTPException(
                 status_code=409,
@@ -10177,7 +10150,7 @@ def create_app(
         # detect-beep endpoint above (#638).
         root = state.shooter_root(slug)
         if not project.source_present(root, primary.path):
-            _ensure_source_reachable(stage_number, root / primary.path)
+            ensure_source_reachable(stage_number, root / primary.path)
         if primary.beep_source == "manual" and not force:
             raise HTTPException(
                 status_code=409,
@@ -10228,7 +10201,7 @@ def create_app(
         # (#638).
         root = state.shooter_root(slug)
         if not project.source_present(root, video.path):
-            _ensure_source_reachable(stage_number, root / video.path)
+            ensure_source_reachable(stage_number, root / video.path)
         if video.beep_time is None:
             raise HTTPException(
                 status_code=400,
@@ -10836,7 +10809,7 @@ def create_app(
         """
         project, _stage, video = _resolve_stage_video(slug, stage_number, video_id)
         source = project.resolve_video_path(state.shooter_root(slug), video.path)
-        _ensure_source_reachable(stage_number, source)
+        ensure_source_reachable(stage_number, source)
         if req.hint_time < 0.0:
             raise HTTPException(status_code=400, detail="hint_time must be >= 0")
         if req.window_s <= 0.0:
@@ -11284,7 +11257,7 @@ def create_app(
         so both honour the same 404 / 424 / cache semantics.
         """
         source = project.resolve_video_path(state.shooter_root(slug), video.path)
-        _ensure_source_reachable(stage_number, source)
+        ensure_source_reachable(stage_number, source)
         center = t if t is not None else video.beep_time
         if center is None:
             raise HTTPException(
@@ -12346,7 +12319,7 @@ def create_app(
             served_path = project.resolve_video_path(root, video.path).resolve()
             # Same structured shape as detect-beep / trim / preview so
             # the SPA's "reconnect external storage" surface is uniform.
-            _ensure_source_reachable(stage.stage_number if stage is not None else None, served_path)
+            ensure_source_reachable(stage.stage_number if stage is not None else None, served_path)
 
         media_type = "video/mp4" if served_path.suffix.lower() == ".mp4" else "application/octet-stream"
         return FileResponse(served_path, media_type=media_type, filename=served_path.name)
@@ -12930,7 +12903,7 @@ def create_app(
         if req.write_trim or req.write_fcpxml:
             root = state.shooter_root(slug)
             if not project.source_present(root, primary.path):
-                _ensure_source_reachable(stage_number, root / primary.path)
+                ensure_source_reachable(stage_number, root / primary.path)
 
         existing = await state.jobs.find_active(kind="export", stage_number=stage_number, shooter_slug=slug)
         if existing is not None:
@@ -13038,7 +13011,7 @@ def create_app(
             # no-storage and mirror-hit cases, and ``pathlib`` drops the
             # left operand when ``primary.path`` is absolute.
             if not project.source_present(state.shooter_root(slug), primary.path):
-                _ensure_source_reachable(
+                ensure_source_reachable(
                     stage_number,
                     state.shooter_root(slug) / primary.path,
                 )
@@ -15917,7 +15890,7 @@ def create_app(
                 )
 
             source = project.resolve_video_path(state.shooter_root(slug), video.path)
-            _ensure_source_reachable(stage_number, source)
+            ensure_source_reachable(stage_number, source)
 
             try:
                 secondary_wav_path = audio_helpers.ensure_video_audio(
@@ -16138,7 +16111,7 @@ def create_app(
                 )
 
             source = project.resolve_video_path(state.shooter_root(slug), video.path)
-            _ensure_source_reachable(stage_number, source)
+            ensure_source_reachable(stage_number, source)
 
             try:
                 secondary_wav_path = audio_helpers.ensure_video_audio(
