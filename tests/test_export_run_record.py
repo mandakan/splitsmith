@@ -345,17 +345,24 @@ def test_a_stage_export_records_requested_formats_separately_from_produced_artif
 
 
 def test_a_match_export_records_one_run_spanning_its_stages(tmp_path: Path, monkeypatch) -> None:
-    """Run *grouping* is the point: one match export over two stages is one
-    history line, not two."""
+    """Run *grouping* is the point: one match export over four stages is
+    one history line, not four.
+
+    Stage numbers are gapped (1, 2, 4, 5 -- stage 3 removed, #521's shape)
+    rather than contiguous, so ``run["stage_numbers"]`` asserting equal to
+    the request only passes for a verbatim passthrough: a ``range(1,
+    n+1)`` reconstruction would produce ``[1, 2, 3, 4]`` instead and this
+    test would catch it (#629 review finding 4).
+    """
     from .test_ui_server import _stub_match_export_probe, _wait_for_job
 
-    client, project_root = _seed_match_export_project(tmp_path)
+    client, project_root = _seed_match_export_project(tmp_path, stage_numbers=[1, 2, 4, 5])
     _stub_match_export_probe(monkeypatch)
 
     resp = client.post(
         "/api/shooters/me/export/match",
         json={
-            "stage_numbers": [1, 2],
+            "stage_numbers": [1, 2, 4, 5],
             "head_pad_seconds": 0.5,
             "tail_pad_seconds": 1.0,
             "include_secondaries": True,
@@ -373,17 +380,116 @@ def test_a_match_export_records_one_run_spanning_its_stages(tmp_path: Path, monk
     assert len(doc["runs"]) == 1
     run = doc["runs"][0]
     assert run["kind"] == "match"
-    assert run["stage_numbers"] == [1, 2]
+    assert run["stage_numbers"] == [1, 2, 4, 5]
     assert run["formats"] == ["fcpxml"]
     assert [a["kind"] for a in run["artifacts"]] == ["fcpxml"]
     assert run["artifacts"][0]["filename"].endswith("-match.fcpxml")
 
     # The wall-clock trap, pinned rather than described:
     # ``MatchExportResult.duration_seconds`` is the *stitched timeline's*
-    # length, which this fixture makes 4.0s (2 stages x 2.0s effective).
-    # The run's duration is how long the job took, which for a fully
-    # mocked export is a fraction of a second. Asserting both is what
-    # makes the second assertion discriminating -- wire the wrong field in
-    # and it reads 4.0.
-    assert final["result"]["duration_seconds"] == pytest.approx(4.0, abs=0.1)
+    # length, which this fixture makes 8.0s (4 stages x 2.0s effective --
+    # same per-stage arithmetic as
+    # ``test_export_over_a_gapped_stage_list_covers_every_remaining_stage``
+    # in test_ui_server.py). The run's duration is how long the job took,
+    # which for a fully mocked export is a fraction of a second. Asserting
+    # both is what makes the second assertion discriminating -- wire the
+    # wrong field in and it reads 8.0.
+    assert final["result"]["duration_seconds"] == pytest.approx(8.0, abs=0.1)
     assert run["duration_seconds"] < 2.0
+
+
+def test_a_match_export_with_youtube_sidecar_records_both_sidecar_files(tmp_path: Path, monkeypatch) -> None:
+    """A run that asks for the YouTube sidecar writes two extra files next
+    to the composed FCPXML: a captions ``.srt`` and a metadata JSON named
+    ``"<stem>-youtube.json"`` (see ``ui/match_exports.export_match``'s
+    ``if request.youtube_sidecar:`` block) -- not ``"<stem>.json"``. That
+    naming is easy to get wrong (#629 review finding 1 found it wrong both
+    in the record block and in the hosted push three lines above it), and
+    nothing exercised the sidecar-present branch before this test (finding
+    2). Both files must show up in the recorded artifacts, under their
+    real filenames, with ``kind == "sidecar"``.
+    """
+    from .test_ui_server import _stub_match_export_probe, _wait_for_job
+
+    client, project_root = _seed_match_export_project(tmp_path)
+    _stub_match_export_probe(monkeypatch)
+
+    resp = client.post(
+        "/api/shooters/me/export/match",
+        json={
+            "stage_numbers": [1, 2],
+            "head_pad_seconds": 0.5,
+            "tail_pad_seconds": 1.0,
+            "include_secondaries": True,
+            "include_overlay": False,
+            "youtube_sidecar": True,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+
+    shooter_root = project_root / "shooters" / "me"
+    doc = json.loads((shooter_root / "export_runs.json").read_text(encoding="utf-8"))
+    run = doc["runs"][0]
+    assert run["formats"] == ["fcpxml", "youtube-sidecar"]
+
+    fcpxml_name = next(a["filename"] for a in run["artifacts"] if a["kind"] == "fcpxml")
+    stem = fcpxml_name.removesuffix(".fcpxml")
+    expected_srt = f"{stem}.srt"
+    expected_json = f"{stem}-youtube.json"
+
+    sidecar_filenames = {a["filename"] for a in run["artifacts"] if a["kind"] == "sidecar"}
+    assert sidecar_filenames == {expected_srt, expected_json}
+
+    # The record must not promise a file the download path can't serve --
+    # both are real files on disk, not just claimed in the record.
+    exports_dir = shooter_root / "exports"
+    assert (exports_dir / expected_srt).exists()
+    assert (exports_dir / expected_json).exists()
+
+
+def test_a_match_export_to_mp4_records_a_match_video_artifact(tmp_path: Path, monkeypatch) -> None:
+    """``output_format="mp4"`` produces a single stitched deliverable, and
+    the artefact kind must reflect that it's a video, not an FCPXML --
+    the only other test in this file uses the default ``fcpxml`` format,
+    so this branch of the kind ternary was previously untested (#629
+    review finding 3).
+
+    Stubs ``mp4_render.render_mp4`` the same way
+    ``test_youtube_preset_threads_through_to_mp4_renderer`` in
+    test_ui_match_exports.py does, so no real ffmpeg render happens.
+    """
+    from splitsmith.ui import match_exports as match_exports_mod
+
+    from .test_ui_server import _stub_match_export_probe, _wait_for_job
+
+    def fake_render_mp4(comp, *, output_path, **kwargs):  # type: ignore[no-untyped-def]
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"")
+
+    monkeypatch.setattr(match_exports_mod.mp4_render, "render_mp4", fake_render_mp4)
+
+    client, project_root = _seed_match_export_project(tmp_path)
+    _stub_match_export_probe(monkeypatch)
+
+    resp = client.post(
+        "/api/shooters/me/export/match",
+        json={
+            "stage_numbers": [1, 2],
+            "head_pad_seconds": 0.5,
+            "tail_pad_seconds": 1.0,
+            "include_secondaries": True,
+            "include_overlay": False,
+            "output_format": "mp4",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+
+    doc = json.loads((project_root / "shooters" / "me" / "export_runs.json").read_text(encoding="utf-8"))
+    run = doc["runs"][0]
+    assert run["formats"] == ["mp4"]
+    assert [a["kind"] for a in run["artifacts"]] == ["match_video"]
+    assert run["artifacts"][0]["filename"].endswith("-match.mp4")

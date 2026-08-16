@@ -4005,13 +4005,23 @@ def register_job_bodies(state: AppState) -> None:
             except match_export_helpers.MatchExportError as exc:
                 raise RuntimeError(str(exc)) from exc
 
+        # The YouTube sidecar JSON is written next to the composed output as
+        # "<stem>-youtube.json", not "<stem>.json" -- see the sidecar block
+        # in match_exports.export_match (ui/match_exports.py, the
+        # ``if request.youtube_sidecar:`` branch). ``with_suffix(".json")``
+        # names a file the renderer never writes. One helper for both call
+        # sites below so the push line and the record block can't drift
+        # apart again (#629 review finding 1: both used to get this wrong).
+        def _youtube_sidecar_json(fcpxml_path: Path) -> Path:
+            return fcpxml_path.with_name(fcpxml_path.stem + "-youtube.json")
+
         # Hosted: push the stitched match deliverable (+ optional YouTube
         # sidecars, when youtube_sidecar wrote them) so the API can serve the
         # download. push_export_file skips any that don't exist. No-op local.
         with handle.timer.phase("r2_upload"):
             export_storage.push_export_file(proj, result.fcpxml_path)
             export_storage.push_export_file(proj, result.fcpxml_path.with_suffix(".srt"))
-            export_storage.push_export_file(proj, result.fcpxml_path.with_suffix(".json"))
+            export_storage.push_export_file(proj, _youtube_sidecar_json(result.fcpxml_path))
 
         # Durable record of this run (#629). One run per invocation across
         # every selected stage -- that grouping is precisely what a
@@ -4026,7 +4036,7 @@ def register_job_bodies(state: AppState) -> None:
             export_runs.ExportArtifact(filename=p.name, kind="sidecar")
             for p in (
                 result.fcpxml_path.with_suffix(".srt"),
-                result.fcpxml_path.with_suffix(".json"),
+                _youtube_sidecar_json(result.fcpxml_path),
             )
             if p.exists()
         )
