@@ -296,7 +296,7 @@ export function DevCorpus() {
               <FixtureRow
                 key={fx.slug}
                 fx={fx}
-                onOpen={() => navigate(`/dev/corpus/${fx.slug}${detailSearch}`)}
+                onOpen={() => navigate(`/dev/review/${fx.slug}${detailSearch}`)}
               />
             ))}
           </ul>

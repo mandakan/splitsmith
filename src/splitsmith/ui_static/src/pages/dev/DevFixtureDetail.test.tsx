@@ -1,5 +1,5 @@
 /**
- * /dev/corpus/:slug -- the full-page replacement for legacy Lab.tsx's
+ * /dev/review/:slug -- the full-page replacement for legacy Lab.tsx's
  * below-the-fold fixture drawer.
  *
  * Three behaviours are load-bearing and pinned here:
@@ -192,10 +192,10 @@ function runWith(slug: string, candidates = twoCandidates()): LabEvalRun {
 
 function renderDetail(slug: string, search = "") {
   return render(
-    <MemoryRouter initialEntries={[`/dev/corpus/${slug}${search}`]}>
+    <MemoryRouter initialEntries={[`/dev/review/${slug}${search}`]}>
       <ConfirmProvider>
         <Routes>
-          <Route path="dev/corpus/:slug" element={<DevFixtureDetail />} />
+          <Route path="dev/review/:slug" element={<DevFixtureDetail />} />
           <Route path="dev/corpus" element={<div>corpus list</div>} />
         </Routes>
       </ConfirmProvider>
@@ -322,10 +322,10 @@ describe("DevFixtureDetail", () => {
     renderDetail("fixture-bravo", "?match=m-1");
 
     const next = await screen.findByRole("link", { name: /next fixture/i });
-    expect(next).toHaveAttribute("href", "/dev/corpus/fixture-charlie?match=m-1");
+    expect(next).toHaveAttribute("href", "/dev/review/fixture-charlie?match=m-1");
     expect(
       screen.getByRole("link", { name: /previous fixture/i }),
-    ).toHaveAttribute("href", "/dev/corpus/fixture-alpha?match=m-1");
+    ).toHaveAttribute("href", "/dev/review/fixture-alpha?match=m-1");
   });
 
   it("walks the filtered subset when the corpus link carried ?q=", async () => {
@@ -340,7 +340,7 @@ describe("DevFixtureDetail", () => {
     renderDetail("alpha-three", "?match=m-1&q=alpha");
 
     const prev = await screen.findByRole("link", { name: /previous fixture/i });
-    expect(prev).toHaveAttribute("href", "/dev/corpus/alpha-one?match=m-1&q=alpha");
+    expect(prev).toHaveAttribute("href", "/dev/review/alpha-one?match=m-1&q=alpha");
     expect(screen.getByText("02 / 02")).toBeInTheDocument();
     // Last of the subset: no next, even though the full catalog goes on.
     expect(screen.queryByRole("link", { name: /next fixture/i })).toBeNull();
@@ -356,7 +356,7 @@ describe("DevFixtureDetail", () => {
     renderDetail("fixture-bravo", "?q=alpha");
 
     const next = await screen.findByRole("link", { name: /next fixture/i });
-    expect(next).toHaveAttribute("href", "/dev/corpus/alpha-three?q=alpha");
+    expect(next).toHaveAttribute("href", "/dev/review/alpha-three?q=alpha");
     expect(screen.getByText("02 / 03")).toBeInTheDocument();
   });
 

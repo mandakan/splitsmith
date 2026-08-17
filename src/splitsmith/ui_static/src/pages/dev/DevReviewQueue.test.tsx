@@ -1,7 +1,7 @@
 /**
  * The review queue's detail pane links out for both kinds of work the
  * redesign spec's routes table promises (#902): /review for marker
- * edits, and /dev/corpus/:slug for candidate labeling -- carrying the
+ * edits, and /dev/review/:slug for candidate labeling -- carrying the
  * dev-mode ?match= context the way every other dev surface does.
  */
 import { render, screen } from "@testing-library/react";
@@ -18,6 +18,10 @@ vi.mock("@/lib/api", async (importOriginal) => {
     api: {
       ...actual.api,
       getDevReviewQueue: vi.fn(),
+      // useLabRun deps (the queue rail's eval-pending affordance).
+      getLastLabRun: vi.fn().mockRejectedValue(Object.assign(new Error("404"), { status: 404 })),
+      runLabEval: vi.fn(),
+      pollJob: vi.fn(),
     },
   };
 });
@@ -66,7 +70,7 @@ describe("DevReviewQueue detail pane", () => {
     const label = await screen.findByRole("link", { name: /label/i });
     expect(label).toHaveAttribute(
       "href",
-      "/dev/corpus/stage-shots-hfo-2026-stage1-s0fe3d797?match=m-1",
+      "/dev/review/stage-shots-hfo-2026-stage1-s0fe3d797?match=m-1",
     );
     expect(screen.getByRole("link", { name: /open in editor/i })).toHaveAttribute(
       "href",
@@ -84,6 +88,42 @@ describe("DevReviewQueue detail pane", () => {
     renderQueue();
 
     const label = await screen.findByRole("link", { name: /label/i });
-    expect(label).toHaveAttribute("href", "/dev/corpus/fixture-alpha");
+    expect(label).toHaveAttribute("href", "/dev/review/fixture-alpha");
+  });
+});
+
+describe("DevReviewQueue eval-pending rail", () => {
+  it("scores the pending + flagged set and reports run coverage", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    vi.mocked(api.getDevReviewQueue).mockResolvedValue({
+      pending: [item("fixture-alpha"), item("fixture-bravo")],
+      flagged: [{ ...item("fixture-charlie"), status: "flagged" }],
+      done: [{ ...item("fixture-done"), status: "done" }],
+    });
+    vi.mocked(api.runLabEval).mockResolvedValue({ id: "job-1", status: "running" } as never);
+    vi.mocked(api.pollJob).mockResolvedValue({ id: "job-1", status: "succeeded" } as never);
+    // Hydration 404s (factory default); the post-eval refetch returns a
+    // run covering two of the three work items.
+    vi.mocked(api.getLastLabRun)
+      .mockRejectedValueOnce(Object.assign(new Error("404"), { status: 404 }))
+      .mockResolvedValue({
+        universe: {
+          fixtures: [{ slug: "fixture-alpha" }, { slug: "fixture-bravo" }],
+        },
+        config: {},
+      } as never);
+
+    renderQueue();
+
+    expect(await screen.findByText(/no eval yet/i)).toBeInTheDocument();
+    const btn = await screen.findByRole("button", { name: /eval pending \(3\)/i });
+    await userEvent.click(btn);
+
+    expect(api.runLabEval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        slugs: ["fixture-alpha", "fixture-bravo", "fixture-charlie"],
+      }),
+    );
+    expect(await screen.findByText(/run covers 2 \/ 3 pending/i)).toBeInTheDocument();
   });
 });
