@@ -16160,6 +16160,19 @@ def create_app(
         done.sort(key=lambda x: x.slug)
         return DevReviewQueueResponse(pending=pending, flagged=flagged, done=done)
 
+    @app.post("/api/dev/review-queue/{slug}/confirm")
+    def dev_review_confirm(slug: str) -> JSONResponse:
+        """The queue's "Approve to corpus": stamp ``review.confirmed_at``
+        on the fixture JSON so ``needs_review`` clears without a label
+        pass. Registered alongside the other always-available /api/dev
+        endpoints -- the queue itself renders without ``--lab``.
+        """
+        fx = next((f for f in _lab_for_dev.list_fixtures() if f.slug == slug), None)
+        if fx is None:
+            raise HTTPException(status_code=404, detail=f"unknown fixture: {slug}")
+        stamp = _lab_for_dev.confirm_review(Path(fx.audit_path))
+        return JSONResponse({"slug": slug, "confirmed_at": stamp, "status": "done"})
+
     # Desktop-to-hosted sync router (#631). Included after every middleware
     # above is registered so /api/sync/* passes through the same auth gate
     # as the rest of /api/*. Its own imports are lazy where they'd pull in

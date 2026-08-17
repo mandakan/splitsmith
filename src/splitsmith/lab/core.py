@@ -166,6 +166,10 @@ class FixtureRecord(BaseModel):
     # works the fixture on the detail page.
     n_labeled_shots: int = 0
     n_labeled_rejects: int = 0
+    # Stamped by the review queue's "Approve to corpus" action
+    # (``confirm_review``). An explicit human sign-off; trumps every
+    # pending heuristic in ``needs_review``.
+    review_confirmed_at: str | None = None
     # Event grouping key (issue #149 follow-up). Identifies the same
     # shooter-stage-match across multi-camera coverage so the Lab table
     # can render siblings together. Stored on the fixture JSON when
@@ -176,13 +180,17 @@ class FixtureRecord(BaseModel):
     def needs_review(self) -> bool:
         """True when the fixture entered the corpus without a human label pass.
 
-        Anchor-promoted fixtures are always pending: their subclasses are
-        *copied* from the anchor, so label presence proves nothing --
-        the diff-confirm screen is their review. Batch-promoted fixtures
-        (``promoted_at`` without an anchor block) are pending until any
-        human label lands. Hand-dropped fixtures predate promotion
-        entirely and are treated as reviewed.
+        An explicit "Approve to corpus" sign-off (``review_confirmed_at``)
+        clears pending regardless of path. Otherwise: anchor-promoted
+        fixtures are always pending -- their subclasses are *copied* from
+        the anchor, so label presence proves nothing; the diff-confirm
+        screen is their review. Batch-promoted fixtures (``promoted_at``
+        without an anchor block) are pending until any human label lands.
+        Hand-dropped fixtures predate promotion entirely and are treated
+        as reviewed.
         """
+        if self.review_confirmed_at is not None:
+            return False
         if self.anchor_slug is not None:
             return True
         return self.promoted_at is not None and self.n_labeled_shots == 0 and self.n_labeled_rejects == 0
@@ -229,6 +237,8 @@ def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
         pending_block = payload.get("_candidates_pending_audit")
         labels_by_time = pending_block.get("labels_by_time") if isinstance(pending_block, dict) else None
         raw_promoted_at = payload.get("promoted_at")
+        review_block = payload.get("review")
+        raw_confirmed = review_block.get("confirmed_at") if isinstance(review_block, dict) else None
         out.append(
             FixtureRecord(
                 slug=json_path.stem,
@@ -239,6 +249,7 @@ def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
                 promoted_at=raw_promoted_at if isinstance(raw_promoted_at, str) else None,
                 n_labeled_shots=sum(1 for s in shots if isinstance(s, dict) and s.get("subclass")),
                 n_labeled_rejects=len(labels_by_time) if isinstance(labels_by_time, dict) else 0,
+                review_confirmed_at=raw_confirmed if isinstance(raw_confirmed, str) else None,
                 expected_rounds=rounds,
                 stage_time_seconds=payload.get("stage_time_seconds"),
                 beep_time=payload.get("beep_time"),
@@ -696,6 +707,32 @@ def apply_labels(audit_path: Path, labels: list[CandidateLabel]) -> dict[str, in
     audit_path.replace(backup)
     tmp.replace(audit_path)
     return counts
+
+
+def confirm_review(audit_path: Path) -> str:
+    """Stamp ``review.confirmed_at`` on a fixture JSON and return it.
+
+    The review queue's "Approve to corpus" action: an explicit human
+    sign-off that clears ``FixtureRecord.needs_review`` without
+    requiring a label pass. Same atomic ``.tmp`` + ``.bak`` rotation
+    as ``apply_labels``; the rest of the payload is preserved.
+    """
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    stamp = datetime.now(UTC).isoformat()
+    review = audit.setdefault("review", {})
+    if not isinstance(review, dict):
+        review = {}
+        audit["review"] = review
+    review["confirmed_at"] = stamp
+
+    tmp = audit_path.with_suffix(audit_path.suffix + ".tmp")
+    backup = audit_path.with_suffix(audit_path.suffix + ".bak")
+    tmp.write_text(json.dumps(audit, indent=2) + "\n", encoding="utf-8")
+    if backup.exists():
+        backup.unlink()
+    audit_path.replace(backup)
+    tmp.replace(audit_path)
+    return stamp
 
 
 def _find_shot_at_time(

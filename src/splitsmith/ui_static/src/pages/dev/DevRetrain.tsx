@@ -57,6 +57,39 @@ export function DevRetrain() {
   const [error, setError] = useState<string | null>(null);
   const [stageIdx, setStageIdx] = useState(-1);
 
+  // Re-attach on mount: the build runs server-side, so navigating away
+  // and back must resume watching the in-flight job, not present a
+  // fresh "Run build" as if nothing were happening (the jobs rail
+  // showed the truth; this page didn't).
+  useEffect(() => {
+    let alive = true;
+    api
+      .listJobs()
+      .then((jobs) => {
+        if (!alive) return;
+        const active = jobs.find(
+          (j) => j.kind === "rebuild_calibration" && (j.status === "running" || j.status === "pending"),
+        );
+        if (!active) return;
+        setJob(active);
+        setRunning(true);
+        setStageIdx(Math.min(STAGES.length - 1, Math.floor((active.progress ?? 0) * STAGES.length)));
+        setLogLines([
+          {
+            ts: new Date().toLocaleTimeString(undefined, { hour12: false }),
+            level: "INFO",
+            msg: "re-attached to the running build",
+          },
+        ]);
+      })
+      .catch(() => {
+        /* jobs rail unavailable -- the Run button still works */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   useEffect(() => {
     if (!job) return;
     if (job.status === "succeeded" || job.status === "failed") return;

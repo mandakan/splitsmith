@@ -8953,6 +8953,36 @@ def test_dev_review_queue_includes_batch_promoted_unlabeled(
     assert model["step_counts"]["review"] == 1
 
 
+def test_dev_review_confirm_clears_pending(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """POST /api/dev/review-queue/{slug}/confirm stamps review.confirmed_at
+    on the fixture JSON, moving it from the pending bucket to done and
+    dropping the model chip's review counter -- the "Approve to corpus"
+    button's backend."""
+    import splitsmith.lab.core as lab_core
+
+    _seed_review_state_fixtures(tmp_path / "fixtures")
+    monkeypatch.setattr(lab_core, "DEFAULT_FIXTURES_ROOT", tmp_path / "fixtures")
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
+
+    slug = "stage-shots-hfo-masters-2026-stage1-s0fe3d797"
+    assert slug in {i["slug"] for i in client.get("/api/dev/review-queue").json()["pending"]}
+
+    resp = client.post(f"/api/dev/review-queue/{slug}/confirm")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["slug"] == slug
+    assert body["confirmed_at"]
+
+    queue = client.get("/api/dev/review-queue").json()
+    assert slug not in {i["slug"] for i in queue["pending"]}
+    assert slug in {i["slug"] for i in queue["done"]}
+    assert client.get("/api/dev/model").json()["step_counts"]["review"] == 0
+
+    # Unknown slug -> 404, nothing written.
+    assert client.post("/api/dev/review-queue/nope/confirm").status_code == 404
+
+
 def test_lab_fixtures_reports_calibration_membership(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """/api/lab/fixtures augments each record with ``in_calibration`` by
     comparing slugs against the active artifact's calibration_fixtures."""

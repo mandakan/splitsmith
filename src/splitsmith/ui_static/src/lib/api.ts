@@ -3958,6 +3958,14 @@ export const api = {
    *  ad-hoc fixture review tasks. Drives /dev/review. */
   getDevReviewQueue: () => request<DevReviewQueueResponse>("/api/dev/review-queue"),
 
+  /** "Approve to corpus": stamp review.confirmed_at on the fixture so
+   *  it stops pending without a label pass. */
+  confirmReviewFixture: (slug: string) =>
+    request<{ slug: string; confirmed_at: string; status: string }>(
+      `/api/dev/review-queue/${encodeURIComponent(slug)}/confirm`,
+      { method: "POST" },
+    ),
+
   promoteFromAnchor: (payload: {
     anchor_path: string;
     secondary_wav_path: string;
