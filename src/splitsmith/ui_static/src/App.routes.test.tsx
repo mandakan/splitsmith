@@ -164,9 +164,9 @@ describe("route tree", () => {
    * corpus/detail pages that replaced it, carrying the query string
    * (``?match=``) along so a pinned match survives the bounce.
    */
-  it("redirects /dev/legacy/lab/:slug to /dev/corpus/:slug, keeping the query string", async () => {
+  it("redirects /dev/legacy/lab/:slug to /dev/review/:slug, keeping the query string", async () => {
     await renderAt("/dev/legacy/lab/some-slug?match=m1");
-    await waitFor(() => expect(window.location.pathname).toBe("/dev/corpus/some-slug"));
+    await waitFor(() => expect(window.location.pathname).toBe("/dev/review/some-slug"));
     expect(window.location.search).toBe("?match=m1");
   });
 
@@ -176,9 +176,9 @@ describe("route tree", () => {
     expect(window.location.search).toBe("?match=m1");
   });
 
-  it("redirects the old /lab/:slug bookmark to /dev/corpus/:slug, keeping the query string", async () => {
+  it("redirects the old /lab/:slug bookmark to /dev/review/:slug, keeping the query string", async () => {
     await renderAt("/lab/some-slug?match=m1");
-    await waitFor(() => expect(window.location.pathname).toBe("/dev/corpus/some-slug"));
+    await waitFor(() => expect(window.location.pathname).toBe("/dev/review/some-slug"));
     expect(window.location.search).toBe("?match=m1");
   });
 

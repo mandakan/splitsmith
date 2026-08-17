@@ -40,14 +40,19 @@ interface StepDef {
   to: string;
   num: string;
   label: string;
+  desc: string;
   countKey: keyof DeveloperModelInfo["step_counts"];
 }
 
+// One-line ``desc`` per step so the stepper narrates the actual loop
+// (grow -> eval + label -> tune -> ship) instead of implying a strict
+// line. The fixture-detail workbench lives under /dev/review, so the
+// whole queue -> open -> label walk stays on step 02.
 const STEPS: StepDef[] = [
-  { to: "/dev/corpus", num: "01", label: "Corpus", countKey: "corpus" },
-  { to: "/dev/review", num: "02", label: "Review queue", countKey: "review" },
-  { to: "/dev/validate", num: "03", label: "Validate", countKey: "validate_runs" },
-  { to: "/dev/retrain", num: "04", label: "Retrain", countKey: "retrain" },
+  { to: "/dev/corpus", num: "01", label: "Corpus", desc: "grow the fixture set", countKey: "corpus" },
+  { to: "/dev/review", num: "02", label: "Review queue", desc: "eval, then label", countKey: "review" },
+  { to: "/dev/validate", num: "03", label: "Validate", desc: "tune + judge the model", countKey: "validate_runs" },
+  { to: "/dev/retrain", num: "04", label: "Retrain", desc: "ship a new artifact", countKey: "retrain" },
 ];
 
 export function DeveloperShell() {
@@ -273,7 +278,17 @@ function DeveloperSidebar({
                 >
                   {done ? <Check className="size-3" /> : step.num}
                 </span>
-                <span className="truncate">{step.label}</span>
+                <span className="min-w-0">
+                  <span className="block truncate">{step.label}</span>
+                  <span
+                    className={cn(
+                      "block truncate font-mono text-[0.5625rem] font-normal uppercase tracking-[0.08em]",
+                      active ? "text-beep/70" : "text-subtle",
+                    )}
+                  >
+                    {step.desc}
+                  </span>
+                </span>
                 {count !== null && count > 0 && (
                   <span
                     className={cn(

@@ -1,5 +1,6 @@
 /**
- * Developer / Corpus / Fixture detail -- ``/dev/corpus/:slug`` (#331).
+ * Developer / Review / Fixture detail -- ``/dev/review/:slug`` (#331,
+ * rehomed from /dev/corpus/:slug so labeling lights up step 02).
  *
  * The full-page replacement for legacy ``Lab.tsx``'s below-the-fold
  * fixture drawer. Same job (per-candidate diff + labeling), but as a
@@ -392,7 +393,7 @@ export function DevFixtureDetail() {
           </div>
           <nav className="flex items-center gap-1.5">
             <StepLink
-              to={prev ? withContext(`/dev/corpus/${prev.slug}`) : null}
+              to={prev ? withContext(`/dev/review/${prev.slug}`) : null}
               label="Previous fixture"
               side="prev"
             />
@@ -402,7 +403,7 @@ export function DevFixtureDetail() {
                 : "-- / --"}
             </span>
             <StepLink
-              to={next ? withContext(`/dev/corpus/${next.slug}`) : null}
+              to={next ? withContext(`/dev/review/${next.slug}`) : null}
               label="Next fixture"
               side="next"
             />

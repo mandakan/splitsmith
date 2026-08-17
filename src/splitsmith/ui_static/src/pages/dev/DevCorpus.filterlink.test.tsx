@@ -75,7 +75,7 @@ describe("DevCorpus detail links", () => {
             <Route element={<Outlet context={outletContext} />}>
               <Route path="dev/corpus" element={<DevCorpus />} />
             </Route>
-            <Route path="dev/corpus/:slug" element={<LocationProbe />} />
+            <Route path="dev/review/:slug" element={<LocationProbe />} />
           </Routes>
         </ConfirmProvider>
       </MemoryRouter>,
@@ -89,7 +89,25 @@ describe("DevCorpus detail links", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "alpha-one" }));
     expect(screen.getByTestId("location")).toHaveTextContent(
-      "/dev/corpus/alpha-one?match=m-1&q=alpha",
+      "/dev/review/alpha-one?match=m-1&q=alpha",
+    );
+  });
+
+  it("redirects the old /dev/corpus/:slug home to /dev/review, keeping search", async () => {
+    // The workbench moved under Review so labeling lights up step 02;
+    // old bookmarks and stale deep-links bounce with their ?match / ?q
+    // intact (they drive prev/next subset walking on the detail page).
+    const { RedirectCorpusSlug } = await import("@/App");
+    render(
+      <MemoryRouter initialEntries={["/dev/corpus/alpha-one?match=m-1&q=alpha"]}>
+        <Routes>
+          <Route path="dev/corpus/:slug" element={<RedirectCorpusSlug />} />
+          <Route path="dev/review/:slug" element={<LocationProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(await screen.findByTestId("location")).toHaveTextContent(
+      "/dev/review/alpha-one?match=m-1&q=alpha",
     );
   });
 });

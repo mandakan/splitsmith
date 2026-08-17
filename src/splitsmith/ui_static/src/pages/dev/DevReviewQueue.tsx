@@ -5,7 +5,7 @@
  * persistent queue list, and a focused detail panel. The detail panel
  * routes the user out for the actual work: /review for marker edits
  * (the fixture-edit primitive lives there and we don't fork it) and
- * /dev/corpus/:slug for candidate labeling (#902 -- the redesign
+ * /dev/review/:slug for candidate labeling (#902 -- the redesign
  * spec's routes table promises both). The queue list itself is fully
  * redesigned per polished/10.
  */
@@ -14,16 +14,33 @@ import {
   CheckCircle2,
   Circle,
   ExternalLink,
+  FlaskConical,
   Inbox,
   Keyboard,
   ListChecks,
+  Loader2,
   Tags,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { useLabRun } from "@/components/lab/useLabRun";
 import { api, type DevReviewQueueItem, type DevReviewQueueResponse } from "@/lib/api";
 import { cn } from "@/lib/utils";
+
+/** State bundle for the queue rail's eval affordance. Labels attach to
+ *  detection candidates, and candidates only exist inside an eval run --
+ *  so "eval the pending set" is the step that comes BEFORE walking the
+ *  queue, and it lives right here instead of on another page. */
+interface PendingEvalState {
+  count: number;
+  covered: number;
+  running: boolean;
+  ready: boolean;
+  error: string | null;
+  hasRun: boolean;
+  onRun: () => void;
+}
 
 export function DevReviewQueue() {
   const [queue, setQueue] = useState<DevReviewQueueResponse | null>(null);
@@ -70,6 +87,38 @@ export function DevReviewQueue() {
   const totalFlagged = queue?.flagged.length ?? 0;
   const total = totalDone + totalPending + totalFlagged;
 
+  // Eval-the-pending-set affordance (workflow fix: eval comes before
+  // labeling, so it must be reachable from the queue). autoRescore off
+  // -- no tuning sliders here; hydration gate as on the other lab
+  // surfaces (submitting DEFAULT_CONFIG pre-hydration would replace a
+  // tuned universe under a different config hash). No-audio pending
+  // fixtures are fine to submit: the eval body skips WAV-less slugs.
+  const {
+    run: evalRun,
+    runEval,
+    evalLoading,
+    error: evalError,
+    hydrated: evalHydrated,
+  } = useLabRun({ autoRescore: false });
+  const workSlugs = useMemo(
+    () => (queue ? [...queue.pending, ...queue.flagged].map((i) => i.slug) : []),
+    [queue],
+  );
+  const coveredCount = useMemo(() => {
+    if (!evalRun) return 0;
+    const have = new Set(evalRun.universe.fixtures.map((f) => f.slug));
+    return workSlugs.filter((s) => have.has(s)).length;
+  }, [evalRun, workSlugs]);
+  const pendingEval: PendingEvalState = {
+    count: workSlugs.length,
+    covered: coveredCount,
+    running: evalLoading,
+    ready: evalHydrated,
+    error: evalError,
+    hasRun: evalRun !== null,
+    onRun: () => void runEval(workSlugs),
+  };
+
   return (
     <div className="grid h-[calc(100vh-86px)] grid-cols-[320px_1fr]">
       <QueueList
@@ -79,6 +128,7 @@ export function DevReviewQueue() {
         totalDone={totalDone}
         total={total}
         onSelect={selectItem}
+        pendingEval={pendingEval}
       />
       <DetailPane item={activeItem} loading={loading} />
     </div>
@@ -92,6 +142,7 @@ function QueueList({
   totalDone,
   total,
   onSelect,
+  pendingEval,
 }: {
   loading: boolean;
   queue: DevReviewQueueResponse | null;
@@ -99,6 +150,7 @@ function QueueList({
   totalDone: number;
   total: number;
   onSelect: (slug: string) => void;
+  pendingEval: PendingEvalState;
 }) {
   const donePct = total === 0 ? 0 : (totalDone / total) * 100;
   return (
@@ -122,6 +174,41 @@ function QueueList({
         </div>
         <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-3">
           <div className="h-full bg-done" style={{ width: `${donePct}%` }} />
+        </div>
+
+        {/* Step zero of working the queue: score the pending set so
+            every fixture opens with candidates ready to label. */}
+        <div className="mt-3 space-y-1.5">
+          <button
+            type="button"
+            onClick={pendingEval.onRun}
+            disabled={!pendingEval.ready || pendingEval.running || pendingEval.count === 0}
+            title="Run the ensemble eval over the pending fixtures so labeling has candidates to attach to"
+            className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-md border border-[rgba(6,182,212,0.4)] bg-[color:var(--color-beep-tint)] px-3 font-mono text-[0.6875rem] font-bold uppercase tracking-[0.06em] text-beep transition-colors hover:bg-[rgba(6,182,212,0.18)] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {pendingEval.running ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <FlaskConical className="size-3.5" />
+            )}
+            {pendingEval.running ? "Scoring..." : `Eval pending (${pendingEval.count})`}
+          </button>
+          <div
+            className={cn(
+              "font-mono text-[0.625rem] tabular-nums",
+              pendingEval.error ? "text-destructive" : "text-muted",
+            )}
+          >
+            {pendingEval.error
+              ? pendingEval.error
+              : pendingEval.running
+                ? "scoring pending fixtures..."
+                : !pendingEval.hasRun
+                  ? "no eval yet -- labels attach to candidates"
+                  : pendingEval.covered >= pendingEval.count
+                    ? "run covers all pending"
+                    : `run covers ${pendingEval.covered} / ${pendingEval.count} pending`}
+          </div>
         </div>
       </header>
 
@@ -302,7 +389,7 @@ function DetailPane({ item, loading }: { item: DevReviewQueueItem | null; loadin
   // there); marker edits stay in /review. The redesign spec's routes
   // table promises both links from a queue item (#902).
   const labelUrl = {
-    pathname: `/dev/corpus/${item.slug}`,
+    pathname: `/dev/review/${item.slug}`,
     ...(matchContext
       ? { search: `?match=${encodeURIComponent(matchContext)}` }
       : {}),

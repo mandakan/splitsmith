@@ -72,7 +72,18 @@ function RedirectLegacyLab() {
 function RedirectLegacyLabSlug() {
   const { slug } = useParams<{ slug: string }>();
   const { search } = useLocation();
-  return <Navigate to={{ pathname: `/dev/corpus/${slug ?? ""}`, search }} replace />;
+  return <Navigate to={{ pathname: `/dev/review/${slug ?? ""}`, search }} replace />;
+}
+
+/* The fixture-detail workbench moved from /dev/corpus/:slug to
+ * /dev/review/:slug: labeling is review work, and the old home made the
+ * stepper snap back to step 01 whenever the queue's "Label" link was
+ * followed. Old bookmarks and stale deep-links bounce here, keeping
+ * search (?match / ?q / ?filter drive prev/next subset walking). */
+export function RedirectCorpusSlug() {
+  const { slug } = useParams<{ slug: string }>();
+  const { search } = useLocation();
+  return <Navigate to={{ pathname: `/dev/review/${slug ?? ""}`, search }} replace />;
 }
 
 /* The pre-dev-mode ``/lab(/:slug)`` bookmarks land on the same targets
@@ -339,8 +350,9 @@ export function App() {
           <Route element={<DeveloperShell />}>
             <Route path="dev" element={<Navigate to="/dev/corpus" replace />} />
             <Route path="dev/corpus" element={<DesktopGate screen="Developer tools" links={false}><DevCorpus /></DesktopGate>} />
-            <Route path="dev/corpus/:slug" element={<DesktopGate screen="Developer tools" links={false}><DevFixtureDetail /></DesktopGate>} />
+            <Route path="dev/corpus/:slug" element={<RedirectCorpusSlug />} />
             <Route path="dev/review" element={<DesktopGate screen="Developer tools" links={false}><DevReviewQueue /></DesktopGate>} />
+            <Route path="dev/review/:slug" element={<DesktopGate screen="Developer tools" links={false}><DevFixtureDetail /></DesktopGate>} />
             <Route path="dev/validate" element={<DesktopGate screen="Developer tools" links={false}><DevValidate /></DesktopGate>} />
             <Route path="dev/retrain" element={<DesktopGate screen="Developer tools" links={false}><DevRetrain /></DesktopGate>} />
             {/* Legacy Lab redirects (#331 final task) so old dev-mode
