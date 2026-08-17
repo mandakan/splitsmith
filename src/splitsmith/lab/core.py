@@ -25,6 +25,7 @@ from ..ensemble.api import (
     EnsembleRuntime,
     detect_shots_ensemble,
 )
+from ..ensemble.calibration import camera_class_from_mount
 
 DEFAULT_FIXTURES_ROOT = Path(__file__).resolve().parents[3] / "tests" / "fixtures"
 DEFAULT_RUNS_ROOT = Path("build/lab/runs")
@@ -791,6 +792,13 @@ def run_eval(
         stage_time = float(audit.get("stage_time_seconds", 0.0))
         expected = fix.expected_rounds if cfg.use_expected_rounds else None
 
+        # Camera-class routing, matching production (server shot-detect
+        # passes camera_class/make/model). Without this every fixture
+        # scored through the DEFAULT (headcam) GBDT + thresholds, so the
+        # lab surface could not see per-class calibration changes at all
+        # -- a retrain that only moved the handheld class produced
+        # bit-identical eval numbers (2026-08-17 A/B).
+        camera_block = audit.get("camera") or {}
         result = detect_shots_ensemble(
             audio,
             sr,
@@ -799,6 +807,9 @@ def run_eval(
             runtime,
             expected_rounds=expected,
             ensemble_config=ec,
+            camera_class=camera_class_from_mount(camera_block.get("mount")),
+            camera_make=camera_block.get("make"),
+            camera_model=camera_block.get("model"),
         )
         cand_times = np.array([c.time for c in result.candidates], dtype=np.float64)
         labels, matched, truth_times = _label_truth(cand_times, audit.get("shots", []), cfg.tolerance_ms)
