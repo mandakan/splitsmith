@@ -4,7 +4,17 @@ import { Loader2 } from "lucide-react";
 import { LAB_REASONS, LAB_SUBCLASSES, type LabEvalFixture } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+import { REASON_SHORTCUTS, SUBCLASS_SHORTCUTS } from "./labels";
 import { SnippetPlayer } from "./SnippetPlayer";
+
+// label -> shortcut key, so each button can carry its own <kbd> hint
+// (the big per-key legend card is gone; see KeyboardLegend).
+const KEY_FOR_REASON: Record<string, string> = Object.fromEntries(
+  Object.entries(REASON_SHORTCUTS).map(([k, v]) => [v, k]),
+);
+const KEY_FOR_SUBCLASS: Record<string, string> = Object.fromEntries(
+  Object.entries(SUBCLASS_SHORTCUTS).map(([k, v]) => [v, k]),
+);
 
 type StepFilter =
   | "borderline"
@@ -186,13 +196,21 @@ export function StepThroughPanel({
     ? ordered.findIndex((c) => c.candidate_number === current.candidate_number)
     : -1;
 
-  // Keep the selected row visible in the queue's own scroll region as
-  // the operator walks -- same pattern as the candidate table.
+  // Keep the selected row visible in the queue as the operator walks.
+  // Container-scoped on purpose: scrollIntoView adjusts every scrollable
+  // ancestor, which made the whole aside (and the page) lurch on each
+  // J/K press. Only the queue's own scrollTop may move.
   useEffect(() => {
     if (selectedCn == null) return;
-    const el = document.querySelector(`[data-step-cn="${selectedCn}"]`);
-    if (el && "scrollIntoView" in el) {
-      (el as HTMLElement).scrollIntoView({ block: "nearest", behavior: "smooth" });
+    const el = document.querySelector<HTMLElement>(`[data-step-cn="${selectedCn}"]`);
+    const box = el?.closest<HTMLElement>("[data-step-queue]");
+    if (!el || !box) return;
+    const er = el.getBoundingClientRect();
+    const br = box.getBoundingClientRect();
+    if (er.top < br.top) {
+      box.scrollTop += er.top - br.top;
+    } else if (er.bottom > br.bottom) {
+      box.scrollTop += er.bottom - br.bottom;
     }
   }, [selectedCn]);
 
@@ -339,10 +357,61 @@ export function StepThroughPanel({
         )}
       </div>
 
+      {current && (
+        <div className="mt-3 flex shrink-0 flex-wrap gap-1 text-[10px]">
+          {(current.truth === 1 ? LAB_SUBCLASSES : LAB_REASONS).map((label) => {
+            const key = (current.truth === 1 ? KEY_FOR_SUBCLASS : KEY_FOR_REASON)[label];
+            return (
+              <button
+                key={label}
+                type="button"
+                onClick={(e) => {
+                  if (current.truth === 1) {
+                    onLabel(current.candidate_number, { subclass: label });
+                  } else {
+                    onLabel(current.candidate_number, { reason: label });
+                  }
+                  advanceFromCurrent();
+                  e.currentTarget.blur();
+                }}
+                className="inline-flex items-center gap-1 rounded border border-rule/60 bg-bg px-1.5 py-0.5 hover:bg-surface-3"
+              >
+                {key && (
+                  <kbd className="rounded-sm border border-rule/60 bg-surface-2 px-0.5 font-mono text-[9px] uppercase text-muted">
+                    {key}
+                  </kbd>
+                )}
+                {label}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={(e) => {
+              if (current.truth === 1) {
+                onLabel(current.candidate_number, { subclass: null });
+              } else {
+                onLabel(current.candidate_number, { reason: null });
+              }
+              e.currentTarget.blur();
+            }}
+            className="inline-flex items-center gap-1 rounded border border-rule/60 bg-bg px-1.5 py-0.5 text-muted hover:bg-surface-3"
+          >
+            <kbd className="rounded-sm border border-rule/60 bg-surface-2 px-0.5 font-mono text-[9px] uppercase text-muted">
+              0
+            </kbd>
+            clear
+          </button>
+        </div>
+      )}
+
       {/* Compact list -- shows position in the queue + assigned labels.
           The one flexing region of the panel: grows to whatever height
           the fixed sections leave, scrolls internally past its floor. */}
-      <div className="mt-3 min-h-[7rem] flex-1 overflow-y-auto rounded border border-rule/60 bg-bg/50">
+      <div
+        data-step-queue
+        className="mt-3 min-h-[4rem] flex-1 overflow-y-auto rounded border border-rule/60 bg-bg/50"
+      >
         <table className="w-full text-[11px]">
           <tbody>
             {ordered.map((c) => {
@@ -384,43 +453,6 @@ export function StepThroughPanel({
           </tbody>
         </table>
       </div>
-
-      {current && (
-        <div className="mt-3 flex shrink-0 flex-wrap gap-1 text-[10px]">
-          {(current.truth === 1 ? LAB_SUBCLASSES : LAB_REASONS).map((label) => (
-            <button
-              key={label}
-              type="button"
-              onClick={(e) => {
-                if (current.truth === 1) {
-                  onLabel(current.candidate_number, { subclass: label });
-                } else {
-                  onLabel(current.candidate_number, { reason: label });
-                }
-                advanceFromCurrent();
-                e.currentTarget.blur();
-              }}
-              className="rounded border border-rule/60 bg-bg px-2 py-0.5 hover:bg-surface-3"
-            >
-              {label}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={(e) => {
-              if (current.truth === 1) {
-                onLabel(current.candidate_number, { subclass: null });
-              } else {
-                onLabel(current.candidate_number, { reason: null });
-              }
-              e.currentTarget.blur();
-            }}
-            className="rounded border border-rule/60 bg-bg px-2 py-0.5 text-muted hover:bg-surface-3"
-          >
-            clear
-          </button>
-        </div>
-      )}
     </div>
   );
 }

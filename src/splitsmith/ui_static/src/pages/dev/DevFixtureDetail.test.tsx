@@ -297,7 +297,7 @@ describe("DevFixtureDetail", () => {
 
     const row = document.querySelector('[data-cn="2"]') as HTMLElement;
     await userEvent.click(row);
-    expect(screen.getByText(/row #2 selected/i)).toBeInTheDocument();
+    expect(screen.getByText(/^row #2$/i)).toBeInTheDocument();
 
     // "p" -> subclass paper on the selected truth-positive candidate.
     await userEvent.keyboard("p");
@@ -311,7 +311,7 @@ describe("DevFixtureDetail", () => {
       ).toHaveValue("paper"),
     );
 
-    expect(screen.getByText(/row #2 selected/i)).toBeInTheDocument();
+    expect(screen.getByText(/^row #2$/i)).toBeInTheDocument();
   });
 
   it("walks the corpus with prev/next preserving ?match=", async () => {
