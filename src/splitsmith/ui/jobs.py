@@ -916,7 +916,12 @@ class JobRegistry:
                     self._trim_retained_locked()
                 self._emit_terminal_event(job_id, kind, final_status, timer, error=None)
                 return
-            except Exception as exc:  # noqa: BLE001 -- worker exceptions become job state
+            # SystemExit included: a job body that reuses CLI-oriented code
+            # (rebuild_calibration imports the build script in-process) can
+            # exit via ``raise SystemExit(msg)``, which is a BaseException --
+            # without this it sails past the handler, the worker thread dies
+            # silently, and the job reads "running" forever.
+            except (Exception, SystemExit) as exc:  # noqa: BLE001 -- worker exceptions become job state
                 logger.exception("job %s failed", job_id)
                 with self._lock:
                     self._journal_discard(job_id)
