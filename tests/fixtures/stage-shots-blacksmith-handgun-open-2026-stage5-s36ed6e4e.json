@@ -9,7 +9,8 @@
       "candidate_number": 6,
       "time": 7.185,
       "ms_after_beep": 2185,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "steel"
     },
     {
       "shot_number": 2,
@@ -23,7 +24,8 @@
       "candidate_number": 10,
       "time": 8.523,
       "ms_after_beep": 3523,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "steel"
     },
     {
       "shot_number": 4,
@@ -37,21 +39,24 @@
       "candidate_number": 17,
       "time": 10.433,
       "ms_after_beep": 5433,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 6,
       "candidate_number": 18,
       "time": 11.014,
       "ms_after_beep": 6014,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 7,
       "candidate_number": 30,
       "time": 15.534,
       "ms_after_beep": 10534,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 8,
@@ -72,7 +77,8 @@
       "candidate_number": 33,
       "time": 16.788,
       "ms_after_beep": 11788,
-      "source": "detected"
+      "source": "detected",
+      "subclass": "paper"
     },
     {
       "shot_number": 11,
@@ -1120,7 +1126,14 @@
         "gunshot_prob": 0.2657,
         "voter_e_signal": 0
       }
-    ]
+    ],
+    "labels_by_time": {
+      "9.907": "cross_bay",
+      "6.005": "handling",
+      "6.062": "handling",
+      "10.235": "cross_bay",
+      "9.485": "unknown"
+    }
   },
   "audit_events": [
     {
