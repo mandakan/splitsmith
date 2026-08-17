@@ -1,12 +1,18 @@
 import { type LabEvalFixture } from "@/lib/api";
 
-// Centralized lab outcome palette. Uses the project's Okabe-Ito-derived
-// design tokens (defined in styles/index.css) so the same TP/FP/FN
-// colours are used everywhere and the palette stays color-blind safe.
+// Centralized lab outcome palette, on design tokens from
+// styles/index.css so the same TP/FP/FN colours are used everywhere.
+// Constraint: the three outcome tokens must resolve to *distinct*
+// values -- #525's token retune set --color-split-slow to the same
+// #FF2D2D as --color-destructive, which silently collapsed FP and FN
+// into one red (and made FP invisible on the red-tinted waveform
+// bars). FP therefore uses the amber token, matching outcomeColor's
+// badge convention below (FP orange-family, FN red);
+// labPalette.test.ts pins the distinctness.
 export const LAB_PALETTE = {
-  tp: "var(--color-split-good)", // Okabe-Ito bluish green
-  fp: "var(--color-split-slow)", // Okabe-Ito vermillion
-  fn: "var(--color-destructive)", // shadcn destructive
+  tp: "var(--color-split-good)", // green
+  fp: "var(--color-split-ok)", // amber
+  fn: "var(--color-destructive)", // "missing thing" red
   rejected: "var(--color-marker-rejected)", // neutral gray
   candidatePrimary: "var(--color-marker-detected)", // Okabe-Ito blue
   playhead: "var(--color-waveform-playhead)", // Okabe-Ito vermillion
