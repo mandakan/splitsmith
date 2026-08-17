@@ -14948,7 +14948,24 @@ def create_app(
 
         @app.get("/api/lab/fixtures")
         def lab_fixtures() -> JSONResponse:
-            return JSONResponse([r.model_dump(mode="json") for r in lab_module.list_fixtures()])
+            """Corpus listing, augmented with calibration membership.
+
+            ``in_calibration`` compares each slug against the active
+            artifact's ``calibration_fixtures`` (respects
+            ``SPLITSMITH_ARTIFACTS_DIR``), so the Corpus page can show
+            which fixtures the shipped model was actually built from
+            vs. the ones still waiting on a retrain.
+            """
+            try:
+                calibrated = set(ensemble_module.load_calibration().calibration_fixtures)
+            except Exception:
+                calibrated = set()
+            records = []
+            for r in lab_module.list_fixtures():
+                d = r.model_dump(mode="json")
+                d["in_calibration"] = r.slug in calibrated
+                records.append(d)
+            return JSONResponse(records)
 
         @app.get("/api/lab/last-run")
         def lab_last_run() -> JSONResponse:
@@ -16079,10 +16096,11 @@ def create_app(
             version = built_dt.strftime("v%Y.%m.%d")
         except (ValueError, AttributeError):
             version = "v0.0.0"
-        # "review" bucket counts fixtures that came in via promote-from-
-        # anchor (anchor_slug set) -- those need human confirmation
-        # before they're allowed into the calibration set.
-        review_count = sum(1 for f in fixtures if f.anchor_slug is not None)
+        # "review" bucket counts fixtures that entered the corpus without
+        # a human label pass -- promote-from-anchor (anchor_slug set) and
+        # batch promote-stages (promoted_at, no labels yet) both qualify.
+        # See FixtureRecord.needs_review for the exact rule.
+        review_count = sum(1 for f in fixtures if f.needs_review)
         return DeveloperModelInfo(
             active_version=version,
             recall=cal.voter_c_target_recall,
@@ -16102,11 +16120,13 @@ def create_app(
     def dev_review_queue() -> DevReviewQueueResponse:
         """Bucket fixtures into pending / flagged / done for the review queue.
 
-        v1 heuristic: anchor_slug present = pending (came in via
-        promote-from-anchor and needs human confirmation); explicit
-        ``review_flagged`` field on the fixture JSON = flagged; all
-        else = done. The flagged bucket is rarely populated today but
-        the shape is here so the UI doesn't need a follow-up wire.
+        Pending is ``FixtureRecord.needs_review``: anchor-promoted
+        fixtures (await the diff-confirm screen) and batch-promoted
+        fixtures with no human labels yet (await a label pass on the
+        fixture detail page). Explicit ``review_flagged`` field on the
+        fixture JSON = flagged; all else = done. The flagged bucket is
+        rarely populated today but the shape is here so the UI doesn't
+        need a follow-up wire.
         """
         fixtures = _lab_for_dev.list_fixtures()
         now = datetime.now(UTC).timestamp()
@@ -16115,15 +16135,16 @@ def create_app(
         done: list[DevReviewQueueItem] = []
         for fx in fixtures:
             age = int(now - fx.audit_mtime) if fx.audit_mtime else None
+            promoted = fx.anchor_slug is not None or fx.promoted_at is not None
             item = DevReviewQueueItem(
                 slug=fx.slug,
                 audit_path=fx.audit_path,
-                source="match" if fx.anchor_slug else "ad-hoc",
-                source_label="Promoted from match" if fx.anchor_slug else "Audited",
-                status="pending" if fx.anchor_slug else "done",
+                source="match" if promoted else "ad-hoc",
+                source_label="Promoted from match" if promoted else "Audited",
+                status="pending" if fx.needs_review else "done",
                 n_shots=fx.n_shots,
                 n_disagreements=0,
-                promoted_at=None,
+                promoted_at=fx.promoted_at,
                 venue=_venue_from_slug(fx.slug),
                 stage_number=_stage_from_slug(fx.slug),
                 shooter=_shooter_from_slug(fx.slug),
