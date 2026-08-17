@@ -32,6 +32,7 @@ import {
   ChevronRight,
   Link2,
   Loader2,
+  Pause,
   Pencil,
   Play,
   Trash2,
@@ -53,7 +54,7 @@ import {
   isFilterKey,
   type FilterKey,
 } from "@/components/lab/corpusFilter";
-import { disposeLabAudio } from "@/components/lab/labAudio";
+import { disposeLabAudio, useAudioBuffer, useBufferPlayback } from "@/components/lab/labAudio";
 import { LAB_PALETTE, fmtPct } from "@/components/lab/labPalette";
 import { REASON_SHORTCUTS, SUBCLASS_SHORTCUTS } from "@/components/lab/labels";
 import { useLabRun } from "@/components/lab/useLabRun";
@@ -212,6 +213,68 @@ export function DevFixtureDetail() {
     setSelectedCn(null);
     setTime(0);
   }, [slug]);
+
+  // ------------------------------------------------------------------
+  // Overview playback + playhead sync. Three sources move ``time``:
+  // scrubbing the overview waveform, the full-stage player below, and
+  // the snippet loop in the aside. Full playback and the snippet loop
+  // are mutually exclusive -- two sources over the same stage audio is
+  // noise, not review.
+  // ------------------------------------------------------------------
+  const { buffer: fullBuffer } = useAudioBuffer(
+    auditPath ? api.fixtureAudioUrl(auditPath) : null,
+  );
+  const scrubbingRef = useRef(false);
+  const timeRef = useRef(0);
+  useEffect(() => {
+    timeRef.current = time;
+  }, [time]);
+  const {
+    playing: fullPlaying,
+    play: playFull,
+    pause: pauseFull,
+  } = useBufferPlayback(
+    fullBuffer,
+    useCallback((t: number) => {
+      // While the user drags, the drag owns the playhead.
+      if (!scrubbingRef.current) setTime(t);
+    }, []),
+  );
+  // Stamped on every full-play start so a snippet tick that lands in
+  // the same commit window can't immediately silence the playback the
+  // user just asked for (the snippet's own pause effect follows within
+  // a frame).
+  const lastFullPlayAtRef = useRef(0);
+  const startFull = useCallback(() => {
+    lastFullPlayAtRef.current = performance.now();
+    playFull(timeRef.current);
+  }, [playFull]);
+  const handleScrub = useCallback((t: number) => {
+    scrubbingRef.current = true;
+    setTime(t);
+  }, []);
+  const handleScrubEnd = useCallback(() => {
+    scrubbingRef.current = false;
+    // Scrub-while-playing = seek: restart the source at the new spot.
+    if (fullPlaying) startFull();
+  }, [fullPlaying, startFull]);
+  // Snippet loop drives the overview playhead; its ticks also silence
+  // the full player (the snippet only ticks while audible).
+  const handleSnippetPlayhead = useCallback(
+    (t: number) => {
+      if (performance.now() - lastFullPlayAtRef.current > 250) pauseFull();
+      if (!scrubbingRef.current) setTime(t);
+    },
+    [pauseFull],
+  );
+  // Selecting a candidate (click or J/K) snaps the overview playhead to
+  // it even before any audio plays -- "the marker being reviewed" and
+  // the overview cursor stay one position.
+  useEffect(() => {
+    if (selectedCn == null || !focused) return;
+    const c = focused.candidates.find((x) => x.candidate_number === selectedCn);
+    if (c) setTime(c.time);
+  }, [selectedCn, focused]);
 
   const onLabelChanged = useCallback(
     (updated: LabEvalRun | null) => {
@@ -504,9 +567,28 @@ export function DevFixtureDetail() {
           truth the consensus missed. */}
       <section className="overflow-hidden rounded-md border border-rule bg-surface">
         <div className="flex items-center justify-between border-b border-rule px-4 py-2.5">
-          <h2 className="font-display text-[0.9375rem] font-bold uppercase tracking-tight text-ink">
-            Waveform diff
-          </h2>
+          <div className="flex items-center gap-3">
+            <h2 className="font-display text-[0.9375rem] font-bold uppercase tracking-tight text-ink">
+              Waveform diff
+            </h2>
+            <button
+              type="button"
+              onClick={() => (fullPlaying ? pauseFull() : startFull())}
+              disabled={!fullBuffer}
+              title={
+                fullPlaying
+                  ? "Pause full-stage playback"
+                  : "Play the full stage from the playhead (click the waveform to move it)"
+              }
+              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-rule px-2.5 font-mono text-[0.625rem] font-bold uppercase tracking-[0.08em] text-ink-2 transition-colors hover:border-[rgba(6,182,212,0.4)] hover:text-beep disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {fullPlaying ? <Pause className="size-3" /> : <Play className="size-3" />}
+              {fullPlaying ? "pause" : "play"}
+            </button>
+            <span className="font-mono text-[0.625rem] tabular-nums text-muted">
+              {time.toFixed(2)}s
+            </span>
+          </div>
           <div className="flex items-center gap-3 font-mono text-[0.625rem] font-bold uppercase tracking-[0.08em]">
             <Swatch color={LAB_PALETTE.tp} label="true positive" />
             <Swatch color={LAB_PALETTE.fp} label="false positive" />
@@ -519,7 +601,8 @@ export function DevFixtureDetail() {
               peaks={peaks.peaks}
               duration={peaks.duration}
               currentTime={time}
-              onScrub={setTime}
+              onScrub={handleScrub}
+              onScrubEnd={handleScrubEnd}
               beepTime={peaks.beep_time}
               height={150}
             >
@@ -629,6 +712,8 @@ export function DevFixtureDetail() {
                   registerAdvancer={setAdvancer}
                   savingLabel={savingLabel}
                   onLabel={handleLabel}
+                  onPlayhead={handleSnippetPlayhead}
+                  externalAudioPlaying={fullPlaying}
                 />
               </div>
             </section>

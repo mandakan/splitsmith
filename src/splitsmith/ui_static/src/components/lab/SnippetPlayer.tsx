@@ -18,6 +18,7 @@ export function SnippetPlayer({
   postMs,
   allCandidates,
   truthTimes,
+  onPlayhead,
 }: {
   fixture: LabEvalFixture;
   candidate: LabEvalFixture["candidates"][number];
@@ -27,6 +28,10 @@ export function SnippetPlayer({
   postMs: number;
   allCandidates: LabEvalFixture["candidates"];
   truthTimes: number[];
+  /** Fires with the loop playhead (buffer seconds) while audible,
+   *  throttled to ~12 fps -- lets the page's overview waveform track
+   *  the snippet instead of showing a dead playhead. */
+  onPlayhead?: (t: number) => void;
 }) {
   const url = api.fixtureAudioUrl(fixture.audit_path);
   const { buffer, loading, error } = useAudioBuffer(url);
@@ -125,6 +130,9 @@ export function SnippetPlayer({
   // time. After a slider drag the bracket moves but the underlying
   // source phase stays continuous, so the line may briefly fall out
   // of sync for one cycle -- it re-aligns on the next loop wrap.
+  const onPlayheadRef = useRef(onPlayhead);
+  onPlayheadRef.current = onPlayhead;
+  const lastEmitRef = useRef(0);
   useEffect(() => {
     if (!buffer || !playing) return;
     let raf = 0;
@@ -133,7 +141,13 @@ export function SnippetPlayer({
       const span = Math.max(0.001, loopEnd - loopStart);
       const elapsed = ctx.currentTime - startedAtRef.current;
       const phase = ((elapsed % span) + span) % span;
-      setPlayhead(loopStart + phase);
+      const pos = loopStart + phase;
+      setPlayhead(pos);
+      const now = performance.now();
+      if (now - lastEmitRef.current >= 80) {
+        lastEmitRef.current = now;
+        onPlayheadRef.current?.(pos);
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);

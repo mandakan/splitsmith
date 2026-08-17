@@ -28,8 +28,23 @@ import { ConfirmProvider } from "@/components/useConfirm";
 import { api, type LabEvalRun, type LabFixtureRecord } from "@/lib/api";
 import { DevFixtureDetail } from "@/pages/dev/DevFixtureDetail";
 
-vi.mock("@/components/Waveform", () => ({ Waveform: () => null }));
+// The stub surfaces currentTime so playhead-sync behavior is testable.
+vi.mock("@/components/Waveform", () => ({
+  Waveform: ({ currentTime }: { currentTime: number }) => (
+    <div data-testid="overview-waveform" data-time={String(currentTime)} />
+  ),
+}));
 vi.mock("@/components/lab/ZoomedWaveform", () => ({ ZoomedWaveform: () => null }));
+// jsdom has no AudioContext: stub the audio hooks the page now uses for
+// full-stage playback, keeping the rest of labAudio intact.
+vi.mock("@/components/lab/labAudio", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/lab/labAudio")>();
+  return {
+    ...actual,
+    useAudioBuffer: () => ({ buffer: null, loading: false, error: null }),
+    useBufferPlayback: () => ({ playing: false, play: vi.fn(), pause: vi.fn() }),
+  };
+});
 // Stubbed for jsdom (no AudioContext), but the stub keeps the one prop
 // that decides whether the page makes noise.
 vi.mock("@/components/lab/SnippetPlayer", () => ({
@@ -250,6 +265,24 @@ describe("DevFixtureDetail", () => {
     // auto-eval must never fire (a job per navigation otherwise).
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(api.runLabEval).not.toHaveBeenCalled();
+  });
+
+  it("snaps the overview playhead to the selected candidate", async () => {
+    vi.mocked(api.listLabFixtures).mockResolvedValue([record(SLUG)]);
+    vi.mocked(api.getLastLabRun).mockResolvedValue(runWith(SLUG));
+
+    renderDetail(SLUG);
+    await screen.findByText(/2 candidates \/ 2 kept/i);
+
+    // Candidate #2 sits at t=3.5s (see candidate()); clicking its row
+    // must move the overview waveform's playhead there even though no
+    // audio is playing -- "the marker being reviewed" and the overview
+    // cursor stay one position.
+    const row = document.querySelector('[data-cn="2"]') as HTMLElement;
+    await userEvent.click(row);
+    await waitFor(() =>
+      expect(screen.getByTestId("overview-waveform")).toHaveAttribute("data-time", "3.5"),
+    );
   });
 
   it("does not start audio playback on arrival", async () => {
