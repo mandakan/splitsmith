@@ -68,7 +68,7 @@ export function DevRetrain() {
       .then((jobs) => {
         if (!alive) return;
         const active = jobs.find(
-          (j) => j.kind === "rebuild_calibration" && (j.status === "running" || j.status === "queued"),
+          (j) => j.kind === "rebuild_calibration" && (j.status === "running" || j.status === "pending"),
         );
         if (!active) return;
         setJob(active);
