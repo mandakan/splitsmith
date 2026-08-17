@@ -82,6 +82,27 @@ export function DevReviewQueue() {
     setSearchParams({ slug }, { replace: true });
   }
 
+  // "Approve to corpus": stamp the sign-off, refetch the queue so the
+  // item moves to Cleared, and advance to the next pending fixture so
+  // approving down the queue is one click per item.
+  const [approving, setApproving] = useState(false);
+  const [approveError, setApproveError] = useState<string | null>(null);
+  async function approveItem(slug: string) {
+    setApproving(true);
+    setApproveError(null);
+    try {
+      await api.confirmReviewFixture(slug);
+      const q = await api.getDevReviewQueue();
+      setQueue(q);
+      const next = q.pending.find((i) => i.slug !== slug);
+      if (next) setSearchParams({ slug: next.slug }, { replace: true });
+    } catch (e) {
+      setApproveError(String(e));
+    } finally {
+      setApproving(false);
+    }
+  }
+
   const totalDone = queue?.done.length ?? 0;
   const totalPending = queue?.pending.length ?? 0;
   const totalFlagged = queue?.flagged.length ?? 0;
@@ -130,7 +151,13 @@ export function DevReviewQueue() {
         onSelect={selectItem}
         pendingEval={pendingEval}
       />
-      <DetailPane item={activeItem} loading={loading} />
+      <DetailPane
+        item={activeItem}
+        loading={loading}
+        approving={approving}
+        approveError={approveError}
+        onApprove={approveItem}
+      />
     </div>
   );
 }
@@ -356,7 +383,19 @@ function QueueItem({
   );
 }
 
-function DetailPane({ item, loading }: { item: DevReviewQueueItem | null; loading: boolean }) {
+function DetailPane({
+  item,
+  loading,
+  approving,
+  approveError,
+  onApprove,
+}: {
+  item: DevReviewQueueItem | null;
+  loading: boolean;
+  approving: boolean;
+  approveError: string | null;
+  onApprove: (slug: string) => void;
+}) {
   // Dev-mode match context, threaded the same way DeveloperShell's
   // stepper and the corpus row links do (#884).
   const [searchParams] = useSearchParams();
@@ -475,14 +514,17 @@ function DetailPane({ item, loading }: { item: DevReviewQueueItem | null; loadin
         </Link>
         <button
           type="button"
-          className="inline-flex items-center gap-2 rounded-md border border-rule bg-surface px-3 py-2 font-mono text-[0.75rem] font-bold uppercase tracking-[0.08em] text-ink-2 transition-colors hover:bg-surface-2"
-          disabled
-          title="Not yet wired"
+          onClick={() => onApprove(item.slug)}
+          className="inline-flex items-center gap-2 rounded-md border border-[rgba(74,222,128,0.4)] bg-[color:var(--color-done-tint)] px-3 py-2 font-mono text-[0.75rem] font-bold uppercase tracking-[0.08em] text-done transition-colors hover:bg-[rgba(74,222,128,0.18)] disabled:cursor-not-allowed disabled:opacity-50"
+          disabled={approving || item.status === "done"}
+          title={
+            item.status === "done"
+              ? "Already cleared"
+              : "Sign off this fixture's ground truth -- clears it from the review queue without requiring a label pass"
+          }
         >
-          Approve to corpus
-          <kbd className="ml-1 rounded border border-rule bg-bg/40 px-1 py-0.5 font-mono text-[0.625rem]">
-            A
-          </kbd>
+          {approving ? <Loader2 className="size-3.5 animate-spin" /> : null}
+          {item.status === "done" ? "Approved" : "Approve to corpus"}
         </button>
         <button
           type="button"
@@ -506,6 +548,11 @@ function DetailPane({ item, loading }: { item: DevReviewQueueItem | null; loadin
           </kbd>
         </button>
       </div>
+      {approveError && (
+        <div className="border-b border-rule bg-destructive/10 px-7 py-2 font-mono text-[0.75rem] text-destructive">
+          {approveError}
+        </div>
+      )}
 
       {/* Body */}
       <div className="flex-1 px-7 py-6">
@@ -520,14 +567,14 @@ function DetailPane({ item, loading }: { item: DevReviewQueueItem | null; loadin
               </span>
             </header>
             <p className="text-[0.8125rem] leading-relaxed text-muted">
-              This queue is intentionally light. Confirming a promotion needs the full
+              This queue is intentionally light. Verifying ground truth needs the full
               waveform + per-shot diff which the editor at{" "}
               <code className="rounded bg-surface-2 px-1.5 py-0.5 font-mono text-[0.75rem] text-ink">
                 /review
               </code>{" "}
-              already provides. The "Approve to corpus" / "Reject" buttons above are
-              placeholders for a future inline-confirm flow once the queue persists state on
-              the backend.
+              already provides; labeling happens on the fixture detail page. Once
+              you're satisfied, "Approve to corpus" signs the fixture off and clears
+              it from this queue -- labeling it does the same implicitly.
             </p>
             <div className="mt-4 rounded border border-rule bg-bg-glow px-4 py-3">
               <div className="font-mono text-[0.625rem] uppercase tracking-[0.18em] text-subtle">

@@ -18,6 +18,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
     api: {
       ...actual.api,
       getDevReviewQueue: vi.fn(),
+      confirmReviewFixture: vi.fn(),
       // useLabRun deps (the queue rail's eval-pending affordance).
       getLastLabRun: vi.fn().mockRejectedValue(Object.assign(new Error("404"), { status: 404 })),
       runLabEval: vi.fn(),
@@ -89,6 +90,37 @@ describe("DevReviewQueue detail pane", () => {
 
     const label = await screen.findByRole("link", { name: /label/i });
     expect(label).toHaveAttribute("href", "/dev/review/fixture-alpha");
+  });
+});
+
+describe("DevReviewQueue approve", () => {
+  it("signs off the active fixture, moves it to done, advances to the next", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    const alpha = item("fixture-alpha");
+    const bravo = item("fixture-bravo");
+    vi.mocked(api.getDevReviewQueue)
+      .mockResolvedValueOnce({ pending: [alpha, bravo], flagged: [], done: [] })
+      // Refetch after the confirm: alpha cleared, bravo up next.
+      .mockResolvedValue({
+        pending: [bravo],
+        flagged: [],
+        done: [{ ...alpha, status: "done" }],
+      });
+    vi.mocked(api.confirmReviewFixture).mockResolvedValue({
+      slug: alpha.slug,
+      confirmed_at: "2026-08-17T12:00:00+00:00",
+      status: "done",
+    });
+
+    renderQueue();
+
+    const approve = await screen.findByRole("button", { name: /approve to corpus/i });
+    expect(approve).toBeEnabled();
+    await userEvent.click(approve);
+
+    expect(api.confirmReviewFixture).toHaveBeenCalledWith(alpha.slug);
+    // The pane advanced to the next pending fixture.
+    expect(await screen.findByRole("heading", { name: bravo.slug })).toBeInTheDocument();
   });
 });
 

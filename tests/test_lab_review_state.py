@@ -73,6 +73,42 @@ def test_needs_review_batch_promoted_until_any_label_lands() -> None:
     assert reason_only.needs_review is False
 
 
+def test_confirm_review_stamps_and_clears_pending(tmp_path: Path) -> None:
+    """The queue's "Approve to corpus" writes ``review.confirmed_at``
+    into the fixture JSON; a confirmed fixture stops pending regardless
+    of promotion path or label state."""
+    from splitsmith.lab.core import confirm_review
+
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    _write_fixture(
+        fixtures,
+        "stage-shots-hfo-masters-2026-stage1-s0fe3d797",
+        {"promoted_at": "2026-08-14T12:38:39+00:00", "shots": [{"time": 5.5}]},
+    )
+    path = fixtures / "stage-shots-hfo-masters-2026-stage1-s0fe3d797.json"
+
+    (rec,) = list_fixtures(fixtures)
+    assert rec.needs_review is True
+
+    stamp = confirm_review(path)
+    assert stamp  # ISO timestamp
+
+    (rec,) = list_fixtures(fixtures)
+    assert rec.review_confirmed_at == stamp
+    assert rec.needs_review is False
+    # The payload's shots survived the rewrite.
+    assert json.loads(path.read_text())["shots"] == [{"time": 5.5}]
+
+
+def test_needs_review_confirmation_trumps_anchor() -> None:
+    rec = _record(
+        anchor_slug="stage-shots-foo-2026-stage1",
+        review_confirmed_at="2026-08-17T10:00:00+00:00",
+    )
+    assert rec.needs_review is False
+
+
 def _record(**overrides) -> FixtureRecord:
     base: dict = {
         "slug": "stage-shots-foo-2026-stage1",
