@@ -17,6 +17,8 @@ import { PromoteStagesPanel } from "@/components/lab/PromoteStagesPanel";
 import {
   FILTER_DEFS,
   filterFixtures,
+  isPromoted,
+  needsReview,
   type FilterKey,
 } from "@/components/lab/corpusFilter";
 import { api, type DevReviewQueueItem, type LabFixtureRecord } from "@/lib/api";
@@ -376,11 +378,38 @@ function InboxCard({
   );
 }
 
+type TagTone = "beep" | "live" | "done" | "muted";
+
+/** Row badges. ``short``: fewer audited shots than the scorecard's
+ *  minimum round count -- possible missed labels. Shooting *more* than
+ *  the minimum is normal IPSC (makeup shots) and is deliberately not
+ *  flagged; the old strict-equality "mismatch" tag lit up 91% of the
+ *  corpus for exactly that reason. */
+export function fixtureTags(fx: LabFixtureRecord): { key: string; tone: TagTone }[] {
+  const tags: { key: string; tone: TagTone }[] = [];
+  if (isPromoted(fx)) tags.push({ key: "promoted", tone: "beep" });
+  if (needsReview(fx)) tags.push({ key: "needs review", tone: "live" });
+  if (!fx.has_audio) tags.push({ key: "no-audio", tone: "muted" });
+  if (fx.expected_rounds && fx.n_shots && fx.n_shots < fx.expected_rounds) {
+    tags.push({ key: `short ${fx.expected_rounds - fx.n_shots}`, tone: "live" });
+  }
+  tags.push(
+    fx.in_calibration
+      ? { key: "in model", tone: "done" }
+      : { key: "not in model", tone: "muted" },
+  );
+  return tags;
+}
+
+const TAG_TONE_CLASSES: Record<TagTone, string> = {
+  beep: "border-[rgba(6,182,212,0.4)] bg-[color:var(--color-beep-tint)] text-beep",
+  live: "border-[rgba(251,191,36,0.4)] bg-[color:var(--color-live-tint)] text-live",
+  done: "border-[rgba(74,222,128,0.4)] bg-[color:var(--color-done-tint)] text-done",
+  muted: "border-rule bg-surface-2 text-muted",
+};
+
 function FixtureRow({ fx, onOpen }: { fx: LabFixtureRecord; onOpen: () => void }) {
-  const tags: string[] = [];
-  if (fx.anchor_slug) tags.push("promoted");
-  if (!fx.has_audio) tags.push("no-audio");
-  if (fx.expected_rounds && fx.n_shots && fx.expected_rounds !== fx.n_shots) tags.push("mismatch");
+  const tags = fixtureTags(fx);
   return (
     <li className="grid grid-cols-[1fr_140px_70px_70px_120px_28px] items-center gap-3 border-b border-rule px-4 py-2.5 transition-colors hover:bg-surface-2">
       <div className="min-w-0">
@@ -410,25 +439,17 @@ function FixtureRow({ fx, onOpen }: { fx: LabFixtureRecord; onOpen: () => void }
         {fx.has_audio ? "yes" : "no"}
       </span>
       <div className="flex flex-wrap gap-1">
-        {tags.length === 0 ? (
-          <span className="font-mono text-[0.625rem] text-whisper">--</span>
-        ) : (
-          tags.map((t) => (
-            <span
-              key={t}
-              className={cn(
-                "rounded border px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.06em]",
-                t === "promoted"
-                  ? "border-[rgba(6,182,212,0.4)] bg-[color:var(--color-beep-tint)] text-beep"
-                  : t === "mismatch"
-                    ? "border-[rgba(251,191,36,0.4)] bg-[color:var(--color-live-tint)] text-live"
-                    : "border-rule bg-surface-2 text-muted",
-              )}
-            >
-              {t}
-            </span>
-          ))
-        )}
+        {tags.map((t) => (
+          <span
+            key={t.key}
+            className={cn(
+              "rounded border px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.06em]",
+              TAG_TONE_CLASSES[t.tone],
+            )}
+          >
+            {t.key}
+          </span>
+        ))}
       </div>
       <button
         type="button"

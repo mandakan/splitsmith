@@ -8895,6 +8895,91 @@ def test_dev_review_queue_buckets_fixtures(tmp_path: Path) -> None:
             assert {"slug", "audit_path", "source", "status", "n_shots"} <= set(item)
 
 
+def _seed_review_state_fixtures(fixtures_root: Path) -> None:
+    """Three fixtures spanning the promotion paths: batch-promoted
+    unlabeled (pending), batch-promoted labeled (done), hand-dropped
+    legacy (done)."""
+    fixtures_root.mkdir(parents=True)
+
+    def write(slug: str, payload: dict) -> None:
+        (fixtures_root / f"{slug}.json").write_text(json.dumps(payload))
+        (fixtures_root / f"{slug}.wav").write_bytes(b"")
+
+    write(
+        "stage-shots-hfo-masters-2026-stage1-s0fe3d797",
+        {
+            "promoted_at": "2026-08-14T12:38:39+00:00",
+            "shots": [{"shot_number": 1, "time": 5.5}],
+        },
+    )
+    write(
+        "stage-shots-hfo-masters-2026-stage2-s0fe3d797",
+        {
+            "promoted_at": "2026-08-14T12:40:00+00:00",
+            "shots": [{"shot_number": 1, "time": 5.5, "subclass": "steel"}],
+        },
+    )
+    write("stage-shots-blacksmith-2026-stage6", {"shots": [{"time": 5.5}]})
+
+
+def test_dev_review_queue_includes_batch_promoted_unlabeled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Batch-promoted fixtures (promoted_at, no anchor block) enter the
+    pending bucket until a human label pass lands. Before this rule the
+    queue keyed on anchor_slug alone, so all 102 batch-promoted corpus
+    fixtures silently skipped review."""
+    import splitsmith.lab.core as lab_core
+
+    _seed_review_state_fixtures(tmp_path / "fixtures")
+    monkeypatch.setattr(lab_core, "DEFAULT_FIXTURES_ROOT", tmp_path / "fixtures")
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x")
+    client = _MatchClient(app)
+
+    body = client.get("/api/dev/review-queue").json()
+    pending = {i["slug"]: i for i in body["pending"]}
+    done = {i["slug"]: i for i in body["done"]}
+    assert set(pending) == {"stage-shots-hfo-masters-2026-stage1-s0fe3d797"}
+    item = pending["stage-shots-hfo-masters-2026-stage1-s0fe3d797"]
+    assert item["promoted_at"] == "2026-08-14T12:38:39+00:00"
+    assert item["source_label"] == "Promoted from match"
+    # Labeled batch-promote -> done; hand-dropped legacy -> done.
+    assert set(done) == {
+        "stage-shots-hfo-masters-2026-stage2-s0fe3d797",
+        "stage-shots-blacksmith-2026-stage6",
+    }
+    # The model chip's review counter follows the same rule.
+    model = client.get("/api/dev/model").json()
+    assert model["step_counts"]["review"] == 1
+
+
+def test_lab_fixtures_reports_calibration_membership(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """/api/lab/fixtures augments each record with ``in_calibration`` by
+    comparing slugs against the active artifact's calibration_fixtures."""
+    from types import SimpleNamespace
+
+    import splitsmith.ensemble as ensemble_pkg
+    import splitsmith.lab.core as lab_core
+
+    _seed_review_state_fixtures(tmp_path / "fixtures")
+    monkeypatch.setattr(lab_core, "DEFAULT_FIXTURES_ROOT", tmp_path / "fixtures")
+    monkeypatch.setattr(
+        ensemble_pkg,
+        "load_calibration",
+        lambda: SimpleNamespace(calibration_fixtures=["stage-shots-blacksmith-2026-stage6"]),
+    )
+    app = _match_create_app(project_root=tmp_path / "match", project_name="x", lab_enabled=True)
+    client = _MatchClient(app)
+
+    body = client.get("/api/lab/fixtures").json()
+    by_slug = {r["slug"]: r for r in body}
+    assert by_slug["stage-shots-blacksmith-2026-stage6"]["in_calibration"] is True
+    assert by_slug["stage-shots-hfo-masters-2026-stage1-s0fe3d797"]["in_calibration"] is False
+    # The review-state fields ride along for the Corpus page's tags.
+    assert by_slug["stage-shots-hfo-masters-2026-stage1-s0fe3d797"]["promoted_at"] is not None
+    assert by_slug["stage-shots-hfo-masters-2026-stage2-s0fe3d797"]["n_labeled_shots"] == 1
+
+
 def test_merge_plan_returns_reconciled_plan_for_legacy_inputs(tmp_path: Path) -> None:
     """/api/match/merge/plan accepts N legacy single-shooter project
     paths and returns the planned shooter slugs + reconciled stages

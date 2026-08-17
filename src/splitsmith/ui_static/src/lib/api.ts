@@ -4397,6 +4397,17 @@ export interface LabFixtureRecord {
    *  the standard pattern and which have no explicit ``event_id`` on
    *  disk -- those rows render ungrouped. */
   event_id: string | null;
+  /** ISO timestamp stamped by both promotion paths (anchor and batch
+   *  promote-stages). Null only for hand-dropped fixtures. */
+  promoted_at: string | null;
+  /** Kept shots carrying a human ``subclass`` label (paper/steel/...). */
+  n_labeled_shots: number;
+  /** Rejected candidates carrying a human ``reason`` label. */
+  n_labeled_rejects: number;
+  /** True when the slug is in the active calibration artifact's
+   *  ``calibration_fixtures`` -- i.e. the shipped model was trained on
+   *  this fixture. False means it's waiting on a retrain. */
+  in_calibration: boolean;
 }
 
 export interface LabEvalConfig {

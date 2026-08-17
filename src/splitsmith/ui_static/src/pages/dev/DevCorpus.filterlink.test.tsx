@@ -47,6 +47,10 @@ function record(slug: string): LabFixtureRecord {
     audio_mtime: 1,
     anchor_slug: null,
     event_id: "hfo-masters-2026:1",
+    promoted_at: null,
+    n_labeled_shots: 0,
+    n_labeled_rejects: 0,
+    in_calibration: false,
   };
 }
 

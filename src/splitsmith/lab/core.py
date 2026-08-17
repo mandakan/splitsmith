@@ -155,11 +155,37 @@ class FixtureRecord(BaseModel):
     # Non-null only for derived secondary fixtures; the SPA surfaces a
     # "re-review" link back to the diff-confirm screen for these.
     anchor_slug: str | None = None
+    # ISO timestamp stamped by ``promote_stage_to_fixture`` (both the
+    # anchor and the batch promote-stages paths set it). Null only for
+    # fixtures dropped into the directory by hand.
+    promoted_at: str | None = None
+    # Human-label coverage: kept shots carrying a ``subclass`` and
+    # rejected candidates carrying a ``labels_by_time`` reason. Together
+    # these are the evidence a human has done a label pass -- the batch
+    # promote-stages path copies neither, so both stay 0 until someone
+    # works the fixture on the detail page.
+    n_labeled_shots: int = 0
+    n_labeled_rejects: int = 0
     # Event grouping key (issue #149 follow-up). Identifies the same
     # shooter-stage-match across multi-camera coverage so the Lab table
     # can render siblings together. Stored on the fixture JSON when
     # available; falls back to slug derivation for legacy fixtures.
     event_id: str | None = None
+
+    @property
+    def needs_review(self) -> bool:
+        """True when the fixture entered the corpus without a human label pass.
+
+        Anchor-promoted fixtures are always pending: their subclasses are
+        *copied* from the anchor, so label presence proves nothing --
+        the diff-confirm screen is their review. Batch-promoted fixtures
+        (``promoted_at`` without an anchor block) are pending until any
+        human label lands. Hand-dropped fixtures predate promotion
+        entirely and are treated as reviewed.
+        """
+        if self.anchor_slug is not None:
+            return True
+        return self.promoted_at is not None and self.n_labeled_shots == 0 and self.n_labeled_rejects == 0
 
 
 def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
@@ -197,13 +223,22 @@ def list_fixtures(fixtures_root: Path | None = None) -> list[FixtureRecord]:
         # override the parser for cases where the slug doesn't match
         # the standard pattern.
         event_id = event_id_from_payload(json_path.stem, payload)
+        shots = payload.get("shots")
+        if not isinstance(shots, list):
+            shots = []
+        pending_block = payload.get("_candidates_pending_audit")
+        labels_by_time = pending_block.get("labels_by_time") if isinstance(pending_block, dict) else None
+        raw_promoted_at = payload.get("promoted_at")
         out.append(
             FixtureRecord(
                 slug=json_path.stem,
                 audit_path=str(json_path),
                 audio_path=str(wav),
                 has_audio=wav.exists(),
-                n_shots=len(payload.get("shots", [])),
+                n_shots=len(shots),
+                promoted_at=raw_promoted_at if isinstance(raw_promoted_at, str) else None,
+                n_labeled_shots=sum(1 for s in shots if isinstance(s, dict) and s.get("subclass")),
+                n_labeled_rejects=len(labels_by_time) if isinstance(labels_by_time, dict) else 0,
                 expected_rounds=rounds,
                 stage_time_seconds=payload.get("stage_time_seconds"),
                 beep_time=payload.get("beep_time"),
