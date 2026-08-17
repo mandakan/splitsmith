@@ -78,6 +78,18 @@ FULL_DIR = FIXTURES_DIR / "full"
 CACHE_DIR = FIXTURES_DIR / ".cache"
 MINED_NEGATIVES_PATH = CACHE_DIR / "_mined_negatives.npz"
 DATA_DIR = Path("src/splitsmith/data")
+
+
+class BuildError(RuntimeError):
+    """A calibration-build precondition failed.
+
+    A real exception (not SystemExit): the build runs both as a CLI and
+    imported in-process by the UI's rebuild_calibration job, and a
+    SystemExit raised on a worker thread sails past the job runner's
+    handler, leaving the job "running" forever with a dead thread.
+    ``main()`` converts it back to a clean CLI exit."""
+
+
 TESTS_DIR = Path("tests")
 TESTS_DATA_DIR = TESTS_DIR / "data"
 
@@ -165,10 +177,10 @@ def _build_universe(
 
         clap = np.load(clap_path, allow_pickle=True)
         if clap["audio_emb"].shape[0] != len(shots):
-            raise SystemExit(f"{fix}: CLAP cache stale; re-run extract_clap_features.py --force")
+            raise BuildError(f"{fix}: CLAP cache stale; re-run extract_clap_features.py --force")
         prompts_in_cache = [str(p) for p in clap["prompts"].tolist()]
         if tuple(prompts_in_cache) != feat.CLAP_PROMPTS:
-            raise SystemExit(
+            raise BuildError(
                 f"{fix}: CLAP cache prompt order mismatch with package CLAP_PROMPTS. "
                 "Update extract_clap_features.py to import the prompt bank from "
                 "splitsmith.ensemble.features and re-run with --force."
@@ -178,7 +190,7 @@ def _build_universe(
 
         pann = np.load(pann_path)
         if pann["gunshot_prob"].shape[0] != len(shots):
-            raise SystemExit(f"{fix}: PANN cache stale; re-run extract_audio_embeddings.py --force")
+            raise BuildError(f"{fix}: PANN cache stale; re-run extract_audio_embeddings.py --force")
         gunshot_prob = pann["gunshot_prob"]
 
         times = np.array(cand_t, dtype=np.float64)
@@ -411,14 +423,14 @@ def _load_mined_negatives(
         pann = np.load(pann_path)
         clap_times = clap["times"].astype(np.float64)
         if clap_times.shape != pann["gunshot_prob"].shape:
-            raise SystemExit(
+            raise BuildError(
                 f"{fix}: full CLAP and PANN caches disagree on candidate count "
                 f"({clap_times.shape[0]} vs {pann['gunshot_prob'].shape[0]}); "
                 "rebuild both with --full --force."
             )
         prompts_in_cache = [str(p) for p in clap["prompts"].tolist()]
         if tuple(prompts_in_cache) != feat.CLAP_PROMPTS:
-            raise SystemExit(
+            raise BuildError(
                 f"{fix}: full CLAP cache prompt order mismatch with package "
                 "CLAP_PROMPTS; rebuild with extract_clap_features.py --full --force."
             )
@@ -435,7 +447,7 @@ def _load_mined_negatives(
             t = times[mi]
             j = int(np.argmin(np.abs(clap_times - t)))
             if abs(clap_times[j] - t) > _TIME_MATCH_TOL_S:
-                raise SystemExit(
+                raise BuildError(
                     f"{fix}: mined-negative time {t:.4f}s has no match in "
                     f"full CLAP cache (closest {clap_times[j]:.4f}s, "
                     f"delta {abs(clap_times[j] - t)*1e3:.2f}ms). Rebuild full "
@@ -527,7 +539,7 @@ def _train_voter_c_for_class(rows: list[dict], target_recall: float):
     X = _x_from(rows)
     y = np.array([c["label"] for c in rows], dtype=np.int64)
     if y.sum() < 5:
-        raise SystemExit(
+        raise BuildError(
             f"need at least 5 positives per class for 5-fold CV; got {int(y.sum())}. "
             "Add more audited fixtures for this camera class."
         )
@@ -880,6 +892,14 @@ def build_artifacts(
     fixtures = list(fixtures) if fixtures else list(DEFAULT_FIXTURES)
     log(f"Calibrating ensemble over {len(fixtures)} fixture(s)...")
     universe = _build_universe(fixtures, tolerance_ms, log=log)
+    if not universe:
+        raise BuildError(
+            "candidate universe is empty -- every fixture was skipped (see the "
+            "per-fixture log lines). Most common cause: missing CLAP/PANN "
+            "feature caches under tests/fixtures/.cache -- run "
+            "`uv run python scripts/extract_clap_features.py` and "
+            "`uv run python scripts/extract_audio_embeddings.py`, then retrain."
+        )
     n_total = len(universe)
     n_pos = sum(c["label"] for c in universe)
     log(
@@ -973,7 +993,7 @@ def build_artifacts(
         )
 
     if not thresholds_by_class:
-        raise SystemExit("no camera class produced calibrated thresholds; need >= 1 positive")
+        raise BuildError("no camera class produced calibrated thresholds; need >= 1 positive")
 
     # Voter E (issue #183): train CLIP visual probe head on the head-mounted
     # corpus and merge per-class thresholds back in. Fully optional -- if
@@ -1134,16 +1154,21 @@ def main() -> None:
         ),
     )
     args = p.parse_args()
-    build_artifacts(
-        fixtures=args.fixture or None,
-        target_recall=args.target_recall,
-        tolerance_ms=args.tolerance_ms,
-        mining_cap_ratio=args.mining_cap_ratio,
-        use_mined_negatives=args.with_mining,
-        voter_e=args.voter_e,
-        voter_e_target_recall=args.voter_e_target_recall,
-        rebuild_visual=args.rebuild_visual,
-    )
+    try:
+        build_artifacts(
+            fixtures=args.fixture or None,
+            target_recall=args.target_recall,
+            tolerance_ms=args.tolerance_ms,
+            mining_cap_ratio=args.mining_cap_ratio,
+            use_mined_negatives=args.with_mining,
+            voter_e=args.voter_e,
+            voter_e_target_recall=args.voter_e_target_recall,
+            rebuild_visual=args.rebuild_visual,
+        )
+    except BuildError as exc:
+        # Clean CLI failure without a traceback; in-process callers (the
+        # UI's rebuild job) see the exception itself.
+        raise SystemExit(str(exc)) from exc
 
 
 if __name__ == "__main__":

@@ -120,6 +120,23 @@ def test_failed_job_records_error() -> None:
     assert reg.get(job.id).finished_at is not None
 
 
+def test_systemexit_in_body_becomes_a_failed_job() -> None:
+    """SystemExit is a BaseException: before the (Exception, SystemExit)
+    handler it sailed past the runner, the worker thread died silently,
+    and the job read "running" forever -- the rebuild_calibration hang
+    (the build script exits via ``raise SystemExit(msg)`` when run as a
+    CLI and used to do so when imported in-process too)."""
+    reg = _Sync(JobRegistry(max_concurrent=1))
+
+    def bail(_handle):
+        raise SystemExit("no camera class produced calibrated thresholds")
+
+    job = reg.submit(kind="test", fn=bail)
+    assert _wait_until(lambda: reg.get(job.id).status == JobStatus.FAILED)
+    assert "no camera class" in (reg.get(job.id).error or "")
+    assert reg.get(job.id).finished_at is not None
+
+
 def test_handle_update_changes_progress_and_message() -> None:
     reg = _Sync(JobRegistry(max_concurrent=1))
     proceed = threading.Event()
