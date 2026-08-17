@@ -4787,6 +4787,11 @@ class DeveloperModelInfo(BaseModel):
     f1: float | None
     fixture_count: int
     built_at: str | None = None
+    # Per-camera-class GBDT CV metrics recorded by the build itself
+    # (precision/recall/F1 at the picked threshold + tp/fp/fn). None on
+    # legacy artifacts. These are the "how did the build do" numbers the
+    # Retrain/Validate pages show without needing a separate eval run.
+    metrics_by_class: dict[str, dict[str, float]] | None = None
     step_counts: DeveloperStepCounts
 
 
@@ -15342,6 +15347,24 @@ def create_app(
                     handle.check_cancel()
                     handle.update(message=msg)
 
+                def _cal_snapshot() -> dict[str, Any] | None:
+                    # Summarise the currently-active calibration. Taken
+                    # before AND after the build so the Retrain page can
+                    # show a truthful previous-vs-new strip -- the build
+                    # overwrites the shipped artifacts in place, so
+                    # "before" exists nowhere else once it finishes.
+                    try:
+                        cal = ensemble_module.load_calibration()
+                    except Exception:
+                        return None
+                    return {
+                        "built_at": cal.built_at,
+                        "fixture_count": len(cal.calibration_fixtures),
+                        "target_recall": cal.voter_c_target_recall,
+                        "metrics_by_class": cal.voter_c_metrics_by_camera_class,
+                    }
+
+                before = _cal_snapshot()
                 build_mod.build_artifacts(
                     fixtures=fixtures if fixtures else None,
                     target_recall=target_recall,
@@ -15351,6 +15374,7 @@ def create_app(
                 # Drop the cached runtime so the next eval reloads the new
                 # calibration JSON + GBDT model.
                 _lab_runtime_cache.pop("runtime", None)
+                handle.set_result({"before": before, "after": _cal_snapshot()})
                 handle.update(progress=1.0, message="calibration rebuilt")
 
             state.jobs.bodies.register("rebuild_calibration", _run)
@@ -16108,6 +16132,7 @@ def create_app(
             f1=None,
             fixture_count=len(cal.calibration_fixtures),
             built_at=cal.built_at,
+            metrics_by_class=cal.voter_c_metrics_by_camera_class,
             step_counts=DeveloperStepCounts(
                 corpus=len(fixtures),
                 review=review_count,

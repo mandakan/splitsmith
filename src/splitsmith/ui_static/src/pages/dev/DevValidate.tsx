@@ -13,7 +13,7 @@
  * last-built calibration's recall as a baseline only.
  */
 
-import { ChevronDown, Play, Save, Undo2 } from "lucide-react";
+import { Play, Save, Undo2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useOutletContext } from "react-router-dom";
 
@@ -28,7 +28,7 @@ import type { DeveloperShellOutletContext } from "@/components/developer/Develop
 type SplitStrategy = "5fold" | "per-shooter" | "per-venue";
 
 const SPLITS: { key: SplitStrategy; label: string }[] = [
-  { key: "5fold", label: "5-fold CV" },
+  { key: "5fold", label: "Training CV" },
   { key: "per-shooter", label: "Per shooter" },
   { key: "per-venue", label: "Per venue" },
 ];
@@ -134,12 +134,17 @@ export function DevValidate() {
               ))}
             </div>
           </ConfigCell>
+          {/* Read-only: Run always scores the full corpus; subset
+              evals live on the Corpus page's filter bar (#941). The old
+              cell drew a chevron with no menu behind it. */}
           <ConfigCell label="Corpus">
             <div className="flex items-center gap-2 rounded-md border border-rule bg-surface-2 px-3 py-2 font-mono text-[0.75rem] tabular-nums text-ink">
               <span className="font-bold">{model?.fixture_count ?? "--"}</span>
               <span className="text-muted">fixtures</span>
               <span className="flex-1" />
-              <ChevronDown className="size-3.5 text-muted" />
+              <span className="text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
+                subset via corpus
+              </span>
             </div>
           </ConfigCell>
           {/* Read-only: the Tuning panel below owns the consensus knob
@@ -229,12 +234,19 @@ export function DevValidate() {
         <SweepsCard />
       </div>
 
-      {/* Per-shooter holdout */}
-      <ShooterHoldoutCard run={lastRun} split={split} />
-
-      {/* Per-venue + confusion */}
-      <div className="grid grid-cols-[1.5fr_1fr] gap-5">
+      {/* The split chips select which breakdown renders -- they used
+          to be decorative (both cards always showed, "5-fold CV" showed
+          nothing at all). "Training CV" is the build's own per-class
+          5-fold numbers from the calibration artifact. */}
+      {split === "5fold" ? (
+        <TrainingCvCard model={model} />
+      ) : split === "per-shooter" ? (
+        <ShooterHoldoutCard run={lastRun} split={split} />
+      ) : (
         <VenueBreakdown run={lastRun} />
+      )}
+
+      <div className="grid grid-cols-1 gap-5">
         <ConfusionPanel run={lastRun} />
       </div>
 
@@ -504,6 +516,66 @@ function SummaryStat({ label, value }: { label: string; value: string }) {
         {value}
       </div>
     </div>
+  );
+}
+
+/** The GBDT's own 5-fold cross-validation, per camera class, as
+ *  recorded in the active calibration artifact at build time. These are
+ *  training-corpus numbers (optimistic vs a true holdout) but they are
+ *  available the moment a build finishes, with no eval run. */
+function TrainingCvCard({ model }: { model: DeveloperShellOutletContext["model"] }) {
+  const metrics = model?.metrics_by_class ?? null;
+  return (
+    <section className="overflow-hidden rounded-md border border-rule bg-surface">
+      <header className="border-b border-rule px-5 py-4">
+        <h2 className="font-display text-[1rem] font-bold uppercase tracking-tight text-ink">
+          Training CV ({model?.active_version ?? "--"})
+        </h2>
+        <div className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+          Voter C 5-fold cross-validation at the shipped threshold, per camera class --
+          recorded by the build itself
+        </div>
+      </header>
+      {metrics ? (
+        <div className="divide-y divide-rule">
+          <div className="grid grid-cols-[1fr_repeat(6,90px)] gap-3 bg-surface-2 px-5 py-2 font-mono text-[0.625rem] font-bold uppercase tracking-[0.12em] text-subtle">
+            <span>Camera class</span>
+            <span className="text-right">Precision</span>
+            <span className="text-right">Recall</span>
+            <span className="text-right">F1</span>
+            <span className="text-right">TP</span>
+            <span className="text-right">FP</span>
+            <span className="text-right">FN</span>
+          </div>
+          {Object.entries(metrics)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([cls, m]) => (
+              <div
+                key={cls}
+                className="grid grid-cols-[1fr_repeat(6,90px)] items-center gap-3 px-5 py-2.5 font-mono text-[0.8125rem] tabular-nums"
+              >
+                <span className="font-bold uppercase tracking-[0.06em] text-ink">{cls}</span>
+                <span className="text-right text-ink">
+                  {m.voter_c_precision_cv?.toFixed(3) ?? "--"}
+                </span>
+                <span className="text-right text-ink">
+                  {m.voter_c_recall_cv?.toFixed(3) ?? "--"}
+                </span>
+                <span className="text-right font-bold text-done">
+                  {m.voter_c_f1_cv?.toFixed(3) ?? "--"}
+                </span>
+                <span className="text-right text-muted">{m.voter_c_tp ?? "--"}</span>
+                <span className="text-right text-muted">{m.voter_c_fp ?? "--"}</span>
+                <span className="text-right text-muted">{m.voter_c_fn ?? "--"}</span>
+              </div>
+            ))}
+        </div>
+      ) : (
+        <div className="px-5 py-8 text-center font-mono text-[0.75rem] text-muted">
+          The active calibration predates per-class CV metrics -- rebuild to record them.
+        </div>
+      )}
+    </section>
   );
 }
 

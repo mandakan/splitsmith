@@ -8873,6 +8873,11 @@ def test_dev_model_endpoint_returns_calibration_metadata(tmp_path: Path) -> None
     assert 0.0 < body["recall"] <= 1.0
     # Step counts always present, even when zero.
     assert {"corpus", "review", "validate_runs", "retrain"} <= set(body["step_counts"])
+    # Per-class CV metrics recorded by the build ride along so the
+    # Retrain/Validate pages can show real numbers without an eval run.
+    assert body["metrics_by_class"], "shipped calibration carries voter_c_metrics_by_camera_class"
+    a_class = next(iter(body["metrics_by_class"].values()))
+    assert {"voter_c_precision_cv", "voter_c_recall_cv", "voter_c_f1_cv"} <= set(a_class)
 
 
 def test_dev_review_queue_buckets_fixtures(tmp_path: Path) -> None:
