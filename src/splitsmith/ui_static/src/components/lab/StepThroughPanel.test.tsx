@@ -122,6 +122,25 @@ describe("StepThroughPanel audio arming", () => {
     expect(screen.getByTestId("snippet")).toHaveAttribute("data-playing", "false");
   });
 
+  it("yields to external audio: the full-stage player silences the loop", async () => {
+    const { rerender } = renderPanel({ externalAudioPlaying: false });
+    await userEvent.keyboard(" ");
+    expect(screen.getByTestId("snippet")).toHaveAttribute("data-playing", "true");
+
+    rerender(
+      <StepThroughPanel
+        fixture={fixtureWith()}
+        selectedCn={1}
+        onSelect={vi.fn()}
+        registerAdvancer={vi.fn()}
+        savingLabel={null}
+        onLabel={vi.fn()}
+        externalAudioPlaying
+      />,
+    );
+    expect(screen.getByTestId("snippet")).toHaveAttribute("data-playing", "false");
+  });
+
   it("plays once the operator asks for it, then stays armed across candidates", async () => {
     const { rerender, onSelect } = renderPanel();
     await userEvent.keyboard(" ");

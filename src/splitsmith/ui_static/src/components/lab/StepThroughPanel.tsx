@@ -57,6 +57,8 @@ export function StepThroughPanel({
   registerAdvancer,
   savingLabel,
   onLabel,
+  onPlayhead,
+  externalAudioPlaying = false,
 }: {
   fixture: LabEvalFixture;
   selectedCn: number | null;
@@ -67,6 +69,12 @@ export function StepThroughPanel({
     cn: number,
     patch: { reason?: string | null; subclass?: string | null },
   ) => void;
+  /** Forwarded to SnippetPlayer -- the page's overview waveform tracks
+   *  the snippet loop through this. */
+  onPlayhead?: (t: number) => void;
+  /** True while the page's full-waveform player is audible. The snippet
+   *  loop pauses so the two sources never talk over each other. */
+  externalAudioPlaying?: boolean;
 }) {
   const [filter, setFilter] = useState<StepFilter>("borderline");
   const [classFilter, setClassFilter] = useState<string>("");
@@ -97,6 +105,12 @@ export function StepThroughPanel({
     if (!armedRef.current) return;
     setPlaying(true);
   }, [selectedCn]);
+
+  // Yield to the page's full-waveform player: two simultaneous sources
+  // over the same stage audio is noise, not review.
+  useEffect(() => {
+    if (externalAudioPlaying) setPlaying(false);
+  }, [externalAudioPlaying]);
 
   // Spacebar toggles play/pause when not typing in an input.
   useEffect(() => {
@@ -347,6 +361,7 @@ export function StepThroughPanel({
             postMs={postMs}
             allCandidates={fixture.candidates}
             truthTimes={fixture.truth_times}
+            onPlayhead={onPlayhead}
           />
         ) : (
           <div className="rounded border border-dashed border-rule/60 px-4 py-6 text-center text-xs text-muted">
