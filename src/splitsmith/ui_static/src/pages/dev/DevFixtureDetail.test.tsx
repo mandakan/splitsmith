@@ -239,8 +239,8 @@ describe("DevFixtureDetail", () => {
 
     renderDetail(SLUG);
 
-    // CandidateTable: its <summary> carries the candidate count.
-    expect(await screen.findByText(/candidates \(2\)/i)).toBeInTheDocument();
+    // Candidate universe card header carries the candidate count.
+    expect(await screen.findByText(/2 candidates \/ 2 kept/i)).toBeInTheDocument();
     // StepThroughPanel: the filter select's default option.
     expect(
       screen.getByRole("option", { name: /borderline/i }),
@@ -293,7 +293,7 @@ describe("DevFixtureDetail", () => {
     });
 
     renderDetail(SLUG);
-    await screen.findByText(/candidates \(2\)/i);
+    await screen.findByText(/2 candidates \/ 2 kept/i);
 
     const row = document.querySelector('[data-cn="2"]') as HTMLElement;
     await userEvent.click(row);

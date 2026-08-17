@@ -186,6 +186,16 @@ export function StepThroughPanel({
     ? ordered.findIndex((c) => c.candidate_number === current.candidate_number)
     : -1;
 
+  // Keep the selected row visible in the queue's own scroll region as
+  // the operator walks -- same pattern as the candidate table.
+  useEffect(() => {
+    if (selectedCn == null) return;
+    const el = document.querySelector(`[data-step-cn="${selectedCn}"]`);
+    if (el && "scrollIntoView" in el) {
+      (el as HTMLElement).scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [selectedCn]);
+
   // Move to the next candidate in the active filter+sort. Used by the
   // label buttons so clicking a button advances like a keypress does.
   const advanceFromCurrent = useCallback(() => {
@@ -196,9 +206,13 @@ export function StepThroughPanel({
   // No frame of its own: the hosting card carries the accent border
   // (nesting a green frame inside the detail page's cyan card was the
   // #898 clash). Green stays for selection semantics in the queue below.
+  //
+  // Fill-height flex column: the hosting card is viewport-bounded, so
+  // controls / player / label buttons hold their place and the queue
+  // (flex-1 below) is the only part that grows and scrolls.
   return (
-    <div>
-      <div className="mb-3 flex flex-wrap items-end gap-3 text-[11px]">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="mb-3 flex shrink-0 flex-wrap items-end gap-3 text-[11px]">
         <label className="flex flex-col gap-1">
           <span className="font-medium text-muted">Filter</span>
           <select
@@ -304,25 +318,31 @@ export function StepThroughPanel({
         </span>
       </div>
 
-      {current ? (
-        <SnippetPlayer
-          fixture={fixture}
-          candidate={current}
-          playing={playing}
-          onTogglePlay={togglePlay}
-          preMs={preMs}
-          postMs={postMs}
-          allCandidates={fixture.candidates}
-          truthTimes={fixture.truth_times}
-        />
-      ) : (
-        <div className="rounded border border-dashed border-rule/60 px-4 py-6 text-center text-xs text-muted">
-          Adjust the filter or run eval to populate the candidate list.
-        </div>
-      )}
+      <div className="shrink-0">
+        {current ? (
+          <SnippetPlayer
+            fixture={fixture}
+            candidate={current}
+            playing={playing}
+            onTogglePlay={togglePlay}
+            preMs={preMs}
+            postMs={postMs}
+            allCandidates={fixture.candidates}
+            truthTimes={fixture.truth_times}
+          />
+        ) : (
+          <div className="rounded border border-dashed border-rule/60 px-4 py-6 text-center text-xs text-muted">
+            {ordered.length === 0
+              ? "Adjust the filter or run eval to populate the candidate list."
+              : "No candidate selected -- press J or click a row to start."}
+          </div>
+        )}
+      </div>
 
-      {/* Compact list -- shows position in the queue + assigned labels. */}
-      <div className="mt-3 max-h-60 overflow-y-auto rounded border border-rule/60 bg-bg/50">
+      {/* Compact list -- shows position in the queue + assigned labels.
+          The one flexing region of the panel: grows to whatever height
+          the fixed sections leave, scrolls internally past its floor. */}
+      <div className="mt-3 min-h-[7rem] flex-1 overflow-y-auto rounded border border-rule/60 bg-bg/50">
         <table className="w-full text-[11px]">
           <tbody>
             {ordered.map((c) => {
@@ -332,6 +352,7 @@ export function StepThroughPanel({
               return (
                 <tr
                   key={c.candidate_number}
+                  data-step-cn={c.candidate_number}
                   className={cn(
                     "cursor-pointer border-b border-rule/30 font-mono",
                     sel && "bg-led/15 outline outline-1 outline-led/60",
@@ -365,7 +386,7 @@ export function StepThroughPanel({
       </div>
 
       {current && (
-        <div className="mt-3 flex flex-wrap gap-1 text-[10px]">
+        <div className="mt-3 flex shrink-0 flex-wrap gap-1 text-[10px]">
           {(current.truth === 1 ? LAB_SUBCLASSES : LAB_REASONS).map((label) => (
             <button
               key={label}
