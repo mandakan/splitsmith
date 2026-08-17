@@ -8,12 +8,13 @@
  * Replaces the corpus-browsing slice of legacy Lab.tsx.
  */
 
-import { ArrowRight, Inbox, Search, Slash } from "lucide-react";
+import { ArrowRight, FlaskConical, Inbox, Loader2, Search, Slash } from "lucide-react";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useOutletContext } from "react-router-dom";
 
 import { PromoteFromAnchorPanel } from "@/components/lab/PromoteFromAnchorPanel";
 import { PromoteStagesPanel } from "@/components/lab/PromoteStagesPanel";
+import { useLabRun } from "@/components/lab/useLabRun";
 import {
   FILTER_DEFS,
   filterFixtures,
@@ -60,6 +61,49 @@ export function DevCorpus() {
     () => filterFixtures(fixtures, query, filter),
     [fixtures, query, filter],
   );
+
+  // Subset eval from the filter bar (#941): run /api/lab/eval over
+  // exactly what the operator is looking at. autoRescore off -- this
+  // page has no tuning sliders; the cached-run adoption + hydration
+  // gate is what we want (submitting DEFAULT_CONFIG before hydration
+  // settles would replace a tuned universe under a different hash).
+  const {
+    run: evalRun,
+    runEval,
+    evalLoading,
+    error: evalError,
+    hydrated: evalHydrated,
+  } = useLabRun({ autoRescore: false });
+  // Slugs of the last eval launched FROM THIS PAGE -- the summary
+  // strip aggregates over these, not over whatever else the merged
+  // run happens to cover.
+  const [evaledSlugs, setEvaledSlugs] = useState<string[] | null>(null);
+  const evalTargets = useMemo(
+    () => filtered.filter((f) => f.has_audio).map((f) => f.slug),
+    [filtered],
+  );
+  // Unscoped run when nothing narrows the view: that is the canonical
+  // full-corpus eval, same as Validate's Run button submits.
+  const wholeCorpus = filter === "all" && !query.trim();
+
+  async function onEval() {
+    setEvaledSlugs(evalTargets);
+    await runEval(wholeCorpus ? undefined : evalTargets);
+  }
+
+  const evalSummary = useMemo(() => {
+    if (!evalRun || !evaledSlugs || evalLoading) return null;
+    const wanted = new Set(evaledSlugs);
+    const covered = evalRun.universe.fixtures.filter((f) => wanted.has(f.slug));
+    if (covered.length === 0) return null;
+    const tp = covered.reduce((a, f) => a + f.metrics.true_positives, 0);
+    const kept = covered.reduce((a, f) => a + f.metrics.n_kept, 0);
+    const truth = covered.reduce((a, f) => a + f.metrics.n_truth, 0);
+    const precision = kept ? tp / kept : 0;
+    const recall = truth ? tp / truth : 0;
+    const f1 = precision + recall ? (2 * precision * recall) / (precision + recall) : 0;
+    return { n: covered.length, precision, recall, f1 };
+  }, [evalRun, evaledSlugs, evalLoading]);
 
   const pendingCount = queue.length;
 
@@ -160,7 +204,65 @@ export function DevCorpus() {
             );
           })}
         </div>
+        <button
+          type="button"
+          onClick={() => void onEval()}
+          disabled={!evalHydrated || evalLoading || evalTargets.length === 0}
+          title={
+            wholeCorpus
+              ? "Run the ensemble eval over the whole corpus (same as Validate's Run)"
+              : "Run the ensemble eval over the fixtures the current filter shows"
+          }
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-[rgba(6,182,212,0.4)] bg-[color:var(--color-beep-tint)] px-3 font-mono text-[0.6875rem] font-bold uppercase tracking-[0.06em] text-beep transition-colors hover:bg-[rgba(6,182,212,0.18)] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {evalLoading ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <FlaskConical className="size-3.5" />
+          )}
+          {evalLoading
+            ? "Running..."
+            : wholeCorpus
+              ? `Eval corpus (${evalTargets.length})`
+              : `Eval these ${evalTargets.length}`}
+        </button>
       </div>
+
+      {/* Subset-eval result strip: aggregates over the fixtures the
+          last eval launched here actually covered. */}
+      {evalError && (
+        <div className="mb-3 rounded-md border border-[rgba(255,45,45,0.4)] bg-destructive/10 px-4 py-2 font-mono text-[0.75rem] text-destructive">
+          {evalError}
+        </div>
+      )}
+      {evalSummary && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-1 rounded-md border border-rule bg-surface px-4 py-2 font-mono text-[0.75rem] tabular-nums">
+          <span className="font-bold uppercase tracking-[0.08em] text-muted">
+            Eval &middot; {evalSummary.n} fixture{evalSummary.n === 1 ? "" : "s"}
+          </span>
+          <span>
+            <span className="text-muted">precision</span>{" "}
+            <b className="text-ink">{(evalSummary.precision * 100).toFixed(1)}%</b>
+          </span>
+          <span>
+            <span className="text-muted">recall</span>{" "}
+            <b className="text-ink">{(evalSummary.recall * 100).toFixed(1)}%</b>
+          </span>
+          <span>
+            <span className="text-muted">F1</span>{" "}
+            <b className="text-ink">{evalSummary.f1.toFixed(3)}</b>
+          </span>
+          <button
+            type="button"
+            onClick={() =>
+              navigate(`/dev/validate${matchContext ? `?match=${encodeURIComponent(matchContext)}` : ""}`)
+            }
+            className="ml-auto inline-flex items-center gap-1 text-beep hover:underline"
+          >
+            Open in Validate <ArrowRight className="size-3" />
+          </button>
+        </div>
+      )}
 
       {/* Fixtures table */}
       <section className="overflow-hidden rounded-md border border-rule bg-surface">
