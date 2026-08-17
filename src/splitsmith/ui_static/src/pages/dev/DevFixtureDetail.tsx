@@ -604,19 +604,14 @@ export function DevFixtureDetail() {
             />
           </section>
 
-          {/* Fixed-height flex column: the queue absorbs the height
-              variance (flex-1, min-h floor), so the label buttons and
-              filters never scroll away. overflow-y-auto stays as the
-              short-viewport fallback -- a clipped sticky column hiding
-              the label buttons was the original #898-era bug. */}
-          <aside className="sticky top-[var(--shell-header-h,86px)] flex h-[calc(100dvh-var(--shell-header-h,86px)-1.5rem)] min-h-0 flex-col gap-3 self-start overflow-y-auto pr-0.5">
-            {/* Shrinkable with a floor: flex-1 lets the card fit the
-                aside (the queue inside compresses first), while the
-                min-h floor covers the filter controls + player + queue
-                floor + label buttons, so a short viewport makes the
-                aside scroll (legend drops below the fold) rather than
-                the card swallowing its own controls. */}
-            <section className="flex min-h-[42rem] flex-1 flex-col overflow-hidden rounded-md border border-[rgba(6,182,212,0.4)] bg-surface">
+          {/* Rigid fixed-height flex column -- the aside itself NEVER
+              scrolls. Every control (filters, player, label buttons,
+              nav-key strip) has a permanent position; the queue list is
+              the only element that flexes and scrolls. The per-label
+              shortcut legend that used to force an aside scrollbar now
+              lives as <kbd> hints on the label buttons themselves. */}
+          <aside className="sticky top-[var(--shell-header-h,86px)] flex h-[calc(100dvh-var(--shell-header-h,86px)-1.5rem)] min-h-0 flex-col gap-3 self-start overflow-hidden">
+            <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border border-[rgba(6,182,212,0.4)] bg-surface">
               <div className="flex shrink-0 items-center justify-between border-b border-rule px-4 py-2.5">
                 <h2 className="font-display text-[0.9375rem] font-bold uppercase tracking-tight text-ink">
                   Label
