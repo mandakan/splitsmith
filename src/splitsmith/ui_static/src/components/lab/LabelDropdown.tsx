@@ -12,14 +12,16 @@ export function LabelDropdown({
   onChange: (patch: { reason?: string | null; subclass?: string | null }) => void;
   saving: boolean;
 }) {
-  // Kept positive (TP): edit subclass. Kept FP: edit reason. Rejected
-  // candidates aren't worth labelling -- they don't survive consensus
-  // so they don't pollute precision -- but we still let the user tag a
-  // reason for rejected ones if they want a record (e.g. for #87
-  // mining cross-references).
+  // Truth decides the vocabulary, kept does not -- same rule as the
+  // keyboard shortcuts in DevFixtureDetail. A truth-positive candidate
+  // is a real shot whether or not the ensemble kept it, so an FN
+  // (rejected, truth=1) takes a subclass (paper/steel/...) exactly like
+  // a TP; the reason list is only for candidates that are not shots.
+  // Gating subclass on kept showed FN rows the FP reason list, which
+  // is unanswerable for a real shot.
   const isKept = candidate.kept;
   const isPositive = candidate.truth === 1;
-  if (isKept && isPositive) {
+  if (isPositive) {
     return (
       <div className="flex items-center gap-1">
         <select
@@ -46,7 +48,7 @@ export function LabelDropdown({
         onChange={(e) => onChange({ reason: e.target.value || null })}
         className={cn(
           "rounded border border-rule/60 bg-bg px-1 py-0.5 text-[11px]",
-          isKept && !isPositive && "border-orange-400/60",
+          isKept && "border-orange-400/60",
         )}
         disabled={saving}
       >
