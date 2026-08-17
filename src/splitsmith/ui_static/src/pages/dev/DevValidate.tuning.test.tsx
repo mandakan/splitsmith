@@ -73,7 +73,17 @@ const outletContext: DeveloperShellOutletContext = {
     precision: 0.98,
     f1: 0.96,
     fixture_count: 3,
-    built_at: null,
+    built_at: "2026-08-17T15:27:15+00:00",
+    metrics_by_class: {
+      handheld: {
+        voter_c_precision_cv: 0.991,
+        voter_c_recall_cv: 0.95,
+        voter_c_f1_cv: 0.97,
+        voter_c_tp: 842,
+        voter_c_fp: 8,
+        voter_c_fn: 44,
+      },
+    },
     step_counts: { corpus: 3, review: 0, validate_runs: 1, retrain: 1 },
   },
   refresh: () => {},
@@ -178,5 +188,31 @@ describe("DevValidate tuning panel", () => {
     // The readout tracks the tuning panel's slider -- same field.
     fireEvent.change(sliders[0], { target: { value: "3" } });
     expect(screen.getByTestId("consensus-readout")).toHaveTextContent("3");
+  });
+});
+
+describe("DevValidate split chips", () => {
+  it("switch the breakdown view; Training CV shows the build's own numbers", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    renderValidate();
+
+    // Default: per-shooter card present (h2; the page h1 shares the
+    // name), venue + training CV absent.
+    expect(
+      await screen.findByRole("heading", { level: 2, name: /per-shooter holdout/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/per-venue breakdown/i)).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: /per venue/i }));
+    expect(await screen.findByText(/per-venue breakdown/i)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { level: 2, name: /per-shooter holdout/i }),
+    ).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: /training cv/i }));
+    // The per-class CV row from the calibration artifact, no eval run needed.
+    expect(await screen.findByText("handheld")).toBeInTheDocument();
+    expect(screen.getByText("0.991")).toBeInTheDocument();
+    expect(screen.getByText("0.970")).toBeInTheDocument();
   });
 });

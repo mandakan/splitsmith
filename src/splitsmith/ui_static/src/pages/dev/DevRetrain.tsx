@@ -21,11 +21,9 @@ import {
   Clock,
   Pause,
   Play,
-  Save,
-  Undo2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { useOutletContext } from "react-router-dom";
+import { useLocation, useNavigate, useOutletContext } from "react-router-dom";
 
 import { api, type Job } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -49,6 +47,10 @@ const STAGES: PipelineStage[] = [
 
 export function DevRetrain() {
   const { model, refresh } = useOutletContext<DeveloperShellOutletContext>();
+  const navigate = useNavigate();
+  // Carried into the Validate CTA so the dev-mode ?match= context
+  // survives the hop, same as the stepper links.
+  const { search } = useLocation();
   const [job, setJob] = useState<Job | null>(null);
   const [logLines, setLogLines] = useState<
     { ts: string; level: "INFO" | "OK" | "WARN"; msg: string }[]
@@ -173,8 +175,9 @@ export function DevRetrain() {
             Build a new artifact
           </h1>
           <p className="mt-2 max-w-xl text-[0.875rem] text-muted">
-            Runs scripts/build_ensemble_artifacts.py end-to-end on the corpus. The shipped
-            model stays untouched until you explicitly promote.
+            Runs scripts/build_ensemble_artifacts.py end-to-end on the corpus. The build
+            writes src/splitsmith/data directly and the server reloads it on the next
+            eval -- a successful build is live immediately (git is the rollback).
           </p>
         </div>
         <button
@@ -209,43 +212,38 @@ export function DevRetrain() {
       {/* History */}
       <HistoryCard model={model} />
 
-      {/* Action zone */}
-      <footer className="sticky bottom-0 mt-8 flex items-center gap-3 border-t border-rule bg-surface px-7 py-3 -mx-7 -mb-7 backdrop-blur">
-        <button
-          type="button"
-          disabled
-          className="inline-flex items-center gap-2 rounded-md border border-rule px-3 py-2 font-mono text-[0.75rem] font-bold uppercase tracking-[0.08em] text-ink-2 disabled:opacity-60"
-          title="Saving candidates as artifacts isn't wired yet"
-        >
-          <Save className="size-3.5" />
-          Save as candidate
-        </button>
-        <button
-          type="button"
-          disabled
-          className="inline-flex items-center gap-2 rounded-md border border-[rgba(255,45,45,0.4)] px-3 py-2 font-mono text-[0.75rem] font-bold uppercase tracking-[0.08em] text-led disabled:opacity-60"
-          title="Rollback isn't wired yet"
-        >
-          <Undo2 className="size-3.5" />
-          Roll back &middot; {model?.active_version ?? "--"}
-        </button>
+      {/* Action zone. No promote/rollback theater: the build already
+          wrote the live artifacts; judging it is the next step. */}
+      <footer className="sticky bottom-0 mt-8 flex items-center gap-4 border-t border-rule bg-surface px-7 py-3 -mx-7 -mb-7 backdrop-blur">
+        <span className="font-mono text-[0.6875rem] leading-snug text-muted">
+          A successful build is live immediately (artifacts in{" "}
+          <code className="rounded bg-surface-2 px-1 py-0.5 text-[0.625rem] text-ink-2">
+            src/splitsmith/data
+          </code>
+          , runtime reloaded). Roll back with{" "}
+          <code className="rounded bg-surface-2 px-1 py-0.5 text-[0.625rem] text-ink-2">
+            git checkout src/splitsmith/data
+          </code>
+          .
+        </span>
         <div className="flex-1" />
         <button
           type="button"
+          onClick={() => navigate({ pathname: "/dev/validate", search })}
           disabled={!job || job.status !== "succeeded"}
           className={cn(
-            "inline-flex items-center gap-2 rounded-md px-4 py-2 font-mono text-[0.75rem] font-bold uppercase tracking-[0.08em]",
+            "inline-flex shrink-0 items-center gap-2 rounded-md px-4 py-2 font-mono text-[0.75rem] font-bold uppercase tracking-[0.08em]",
             job?.status === "succeeded"
               ? "bg-beep text-bg shadow-[0_0_12px_var(--color-beep-glow)] hover:opacity-90"
               : "border border-rule text-muted disabled:opacity-50",
           )}
           title={
             job?.status === "succeeded"
-              ? "Replace the shipped artifact with the just-built candidate"
-              : "Promote becomes active once a build succeeds"
+              ? "Score the corpus under the new build on the Validate page"
+              : "Becomes active once a build succeeds"
           }
         >
-          Promote to shipped
+          Validate the new build
           <ChevronRight className="size-3.5" />
         </button>
       </footer>
@@ -253,49 +251,78 @@ export function DevRetrain() {
   );
 }
 
+interface CalSnapshot {
+  built_at?: string | null;
+  fixture_count?: number;
+  target_recall?: number;
+  metrics_by_class?: Record<string, Record<string, number>> | null;
+}
+
+function versionOf(builtAt: string | null | undefined): string {
+  if (!builtAt) return "--";
+  const d = new Date(builtAt);
+  if (Number.isNaN(d.getTime())) return "--";
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `v${d.getFullYear()}.${mm}.${dd}`;
+}
+
+/** Previous-vs-new, told truthfully: the build overwrites the shipped
+ *  artifacts in place, so "previous" only exists in the snapshot the
+ *  rebuild job takes before running (job.result.before / .after). With
+ *  no completed build this session, the single card is the ACTIVE
+ *  artifact -- including the per-class CV metrics the build recorded. */
 function CompareStrip({ model, job }: { model: DeveloperShellOutletContext["model"]; job: Job | null }) {
-  const shipped = {
-    role: "Shipped",
-    ver: model?.active_version ?? "v0.0.0",
-    recall: model?.recall ?? 0,
-    fixtures: model?.fixture_count ?? 0,
+  const result =
+    job?.status === "succeeded"
+      ? (job.result as { before?: CalSnapshot | null; after?: CalSnapshot | null } | null)
+      : null;
+
+  const activeFromModel: CalSnapshot = {
+    built_at: model?.built_at ?? null,
+    fixture_count: model?.fixture_count,
+    target_recall: model?.recall,
+    metrics_by_class: model?.metrics_by_class ?? null,
   };
-  const candidate = job
-    ? {
-        role: "Candidate",
-        ver: "in build",
-        recall: 0,
-        fixtures: 0,
-      }
-    : null;
+
+  const left = result?.before ?? null;
+  const right = result?.after ?? activeFromModel;
+  const rightRole = result ? "New build (live)" : job ? "Building..." : "Active";
+
   return (
     <section className="mb-6 grid grid-cols-[1fr_64px_1fr] items-stretch gap-3">
-      <ComparePanel data={shipped} accent="ink" />
+      {left ? (
+        <ComparePanel role="Previous" snap={left} accent="ink" />
+      ) : (
+        <div className="flex items-center justify-center rounded-md border border-dashed border-rule bg-surface px-4 py-6 text-center font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
+          No previous build recorded
+          <br />
+          this session
+        </div>
+      )}
       <div aria-hidden className="flex items-center justify-center">
         <span className="size-7 rounded-full border border-beep bg-bg shadow-[0_0_12px_var(--color-beep-glow)] flex items-center justify-center text-beep">
           <ChevronRight className="size-4" />
         </span>
       </div>
-      {candidate ? (
-        <ComparePanel data={candidate} accent="beep" />
-      ) : (
-        <div className="flex items-center justify-center rounded-md border border-dashed border-rule bg-surface px-4 py-6 text-center font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
-          No candidate yet
-          <br />
-          Click Run build above
-        </div>
-      )}
+      <ComparePanel role={rightRole} snap={right} accent="beep" />
     </section>
   );
 }
 
+const CV_CLASS_KEYS = ["voter_c_precision_cv", "voter_c_recall_cv", "voter_c_f1_cv"] as const;
+const CV_LABELS = ["P", "R", "F1"] as const;
+
 function ComparePanel({
-  data,
+  role,
+  snap,
   accent,
 }: {
-  data: { role: string; ver: string; recall: number; fixtures: number };
+  role: string;
+  snap: CalSnapshot;
   accent: "ink" | "beep";
 }) {
+  const metrics = snap.metrics_by_class ?? null;
   return (
     <div
       className={cn(
@@ -312,7 +339,7 @@ function ComparePanel({
             accent === "beep" ? "bg-beep shadow-[0_0_6px_var(--color-beep-glow)]" : "bg-ink-2",
           )}
         />
-        {data.role}
+        {role}
       </div>
       <div
         className={cn(
@@ -320,24 +347,39 @@ function ComparePanel({
           accent === "beep" ? "text-beep" : "text-ink",
         )}
       >
-        ensemble {data.ver}
+        Ensemble {versionOf(snap.built_at)}
       </div>
-      <div className="mt-2 grid grid-cols-3 border-t border-dashed border-rule pt-2 font-mono text-[0.6875rem] tabular-nums">
-        <div>
-          <div className="text-muted">Fixtures</div>
-          <b className="text-ink">{data.fixtures || "--"}</b>
-        </div>
-        <div>
-          <div className="text-muted">Recall</div>
-          <b className={accent === "beep" ? "text-done" : "text-ink"}>
-            {data.recall ? data.recall.toFixed(3) : "--"}
-          </b>
-        </div>
-        <div>
-          <div className="text-muted">Built</div>
-          <b className="text-ink">--</b>
-        </div>
+      <div className="mt-3 flex items-center gap-6 border-t border-dashed border-rule pt-2 font-mono text-[0.6875rem] tabular-nums">
+        <span>
+          <span className="text-muted">Fixtures</span>{" "}
+          <b className="text-ink">{snap.fixture_count ?? "--"}</b>
+        </span>
+        <span>
+          <span className="text-muted">Recall target</span>{" "}
+          <b className="text-done">{snap.target_recall?.toFixed(3) ?? "--"}</b>
+        </span>
       </div>
+      {/* The build's own 5-fold CV numbers, per camera class -- the
+          performance indicators the build measured, no eval needed. */}
+      {metrics && (
+        <div className="mt-2 space-y-0.5 font-mono text-[0.6875rem] tabular-nums">
+          {Object.entries(metrics)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([cls, m]) => (
+              <div key={cls} className="flex items-center gap-3">
+                <span className="w-20 truncate uppercase tracking-[0.06em] text-muted">{cls}</span>
+                {CV_CLASS_KEYS.map((k, idx) => (
+                  <span key={k}>
+                    <span className="text-muted">{CV_LABELS[idx]}</span>{" "}
+                    <b className="text-ink">
+                      {typeof m[k] === "number" ? m[k].toFixed(3) : "--"}
+                    </b>
+                  </span>
+                ))}
+              </div>
+            ))}
+        </div>
+      )}
     </div>
   );
 }

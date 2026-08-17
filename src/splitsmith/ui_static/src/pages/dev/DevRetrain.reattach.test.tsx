@@ -81,3 +81,46 @@ describe("DevRetrain re-attach", () => {
     expect(await screen.findByRole("button", { name: /run build/i })).toBeEnabled();
   });
 });
+
+describe("DevRetrain compare strip", () => {
+  it("shows previous vs new-build numbers from the job's snapshot", async () => {
+    const userEvent = (await import("@testing-library/user-event")).default;
+    vi.mocked(api.listJobs).mockResolvedValue([]);
+    vi.mocked(api.rebuildLabCalibration).mockResolvedValue({
+      id: "job-7",
+      kind: "rebuild_calibration",
+      status: "running",
+    } as never);
+    const snap = (builtAt: string, fixtures: number, f1: number) => ({
+      built_at: builtAt,
+      fixture_count: fixtures,
+      target_recall: 0.95,
+      metrics_by_class: {
+        handheld: { voter_c_precision_cv: 0.99, voter_c_recall_cv: 0.95, voter_c_f1_cv: f1 },
+      },
+    });
+    vi.mocked(api.getJob).mockResolvedValue({
+      id: "job-7",
+      kind: "rebuild_calibration",
+      status: "succeeded",
+      progress: 1,
+      message: "calibration rebuilt",
+      result: {
+        before: snap("2026-05-13T00:00:00+00:00", 64, 0.917),
+        after: snap("2026-08-17T00:00:00+00:00", 124, 0.947),
+      },
+    } as never);
+
+    renderRetrain();
+    await userEvent.click(await screen.findByRole("button", { name: /run build/i }));
+
+    // Poll interval is 1s; the strip flips once the succeeded job lands.
+    expect(await screen.findByText(/new build \(live\)/i, {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(screen.getByText(/previous/i)).toBeInTheDocument();
+    expect(screen.getByText("0.917")).toBeInTheDocument();
+    expect(screen.getByText("0.947")).toBeInTheDocument();
+    // And the honest CTA replaced the promote-to-shipped fiction.
+    expect(screen.getByRole("button", { name: /validate the new build/i })).toBeEnabled();
+    expect(screen.queryByText(/promote to shipped/i)).toBeNull();
+  });
+});

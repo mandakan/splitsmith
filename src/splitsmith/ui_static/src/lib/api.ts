@@ -1971,6 +1971,10 @@ export interface DeveloperModelInfo {
   f1: number | null;
   fixture_count: number;
   built_at: string | null;
+  /** Per-camera-class GBDT CV metrics recorded at build time
+   *  (voter_c_precision_cv / voter_c_recall_cv / voter_c_f1_cv +
+   *  tp/fp/fn). Null on legacy artifacts. */
+  metrics_by_class: Record<string, Record<string, number>> | null;
   step_counts: {
     corpus: number;
     review: number;

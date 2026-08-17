@@ -273,6 +273,17 @@ class EnsembleCalibration(BaseModel):
             "rebuilds to protect the dominant class."
         ),
     )
+    voter_c_metrics_by_camera_class: dict[str, dict[str, float]] | None = Field(
+        default=None,
+        description=(
+            "Per-class GBDT cross-validation metrics recorded at build "
+            "time (precision/recall/F1 at the picked threshold, plus "
+            "tp/fp/fn counts). Written by build_ensemble_artifacts.py; "
+            "``None`` on legacy artifacts. Surfaced by /api/dev/model so "
+            "the Retrain and Validate pages can show what the build "
+            "measured without a separate eval run."
+        ),
+    )
     camera_model_metadata: dict[str, dict[str, str]] | None = Field(
         default=None,
         description=(
