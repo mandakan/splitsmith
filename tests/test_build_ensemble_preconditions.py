@@ -58,3 +58,20 @@ def test_builderror_is_a_real_exception_not_systemexit() -> None:
     # past a bare ``except Exception`` on a worker thread.
     assert issubclass(mod.BuildError, Exception)
     assert not issubclass(mod.BuildError, SystemExit)
+
+
+def test_model_artifacts_block_carries_across_rebuilds(tmp_path: Path) -> None:
+    """The slim-install download block is curated by the export/upload
+    scripts, not the calibration build -- a rebuild must carry it
+    forward, not drop it (broke ``fetch-models`` on slim wheels,
+    2026-08-17)."""
+    mod = _build_mod()
+    cal_path = tmp_path / "ensemble_calibration.json"
+    cal_path.write_text(
+        json.dumps({"voter_a_floor": 0.1, "model_artifacts": {"pann_cnn14": {"sha256": "x"}}})
+    )
+    assert mod._carry_model_artifacts(cal_path) == {"pann_cnn14": {"sha256": "x"}}
+    # No previous file / no block -> nothing to carry.
+    assert mod._carry_model_artifacts(tmp_path / "missing.json") is None
+    cal_path.write_text(json.dumps({"voter_a_floor": 0.1}))
+    assert mod._carry_model_artifacts(cal_path) is None
