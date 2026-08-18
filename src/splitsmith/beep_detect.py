@@ -16,16 +16,23 @@ Strategy:
    the band; ``min_abs_peak`` is a sub-noise sanity floor.
 
 3. **Composite scoring**: each candidate is ranked by
-   ``silence_score * tonal_score`` where:
+   ``tanh(silence_score / silence_saturation_scale) * tonal_score *
+   dur_factor`` where:
 
-   * ``silence_score = run_peak / (mean envelope in pre-silence window)``.
+   * ``silence_score = run_peak / (max envelope in pre-silence window)``.
      IPSC beeps are preceded by ~3 s of "Are you ready / Stand by" + a
      pause; mid-stage transients are not. Higher = quieter pre-roll.
    * ``tonal_score = energy_in_3_kHz_band / energy_in_full_band``,
      in [0, 1]. The IPSC timer emits a near-pure ~3.0-3.3 kHz tone;
      gunshots, steel rings, and RO chatter spread energy across the
      full 2-5 kHz band. ``tonal_weight`` controls how strongly this
-     component tilts the ranking.
+     component tilts the ranking. ``dur_factor`` ramps
+     0 -> 1 between ``dur_match_min_ms`` and ``dur_match_full_ms``,
+     squared, demoting short transients.
+
+   The silence term is the only unbounded one, so it is saturated before
+   the product. Raw, it scales with absolute loudness and decides the
+   ranking by itself -- which is how gunshots outrank beeps (issue #949).
 
 4. **Adaptive rise-foot leading edge**: walk backward from the run's peak
    while the envelope stays above ``max(peak * RISE_FOOT_FRAC, noise_floor
@@ -290,7 +297,13 @@ def detect_beep(
         dur_ratio = max(0.0, min(1.0, (dur_ms - config.dur_match_min_ms) / span_ms))
         dur_weight = max(0.0, min(1.0, config.dur_match_weight))
         dur_factor = (1.0 - dur_weight) + dur_weight * dur_ratio * dur_ratio
-        score = silence_score * tonal_factor * dur_factor
+        # Saturate silence-preference before combining (issue #949). Raw
+        # silence_score is unbounded and loudness-driven; tonal_factor and
+        # dur_factor are bounded to [0, 1]. Multiplying an unbounded term by
+        # bounded ones lets the loudest candidate win outright -- which is a
+        # gunshot, not a beep. tanh() puts all three on comparable footing.
+        saturated_silence = math.tanh(silence_score / config.silence_saturation_scale)
+        score = saturated_silence * tonal_factor * dur_factor
 
         candidates.append((s, e, run_peak, score, silence_score, tonal_ratio))
 

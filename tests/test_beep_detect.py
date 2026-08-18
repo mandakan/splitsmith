@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from splitsmith.beep_calibration import DEFAULT_TOLERANCE_MS
 from splitsmith.beep_detect import BeepNotFoundError, detect_beep, load_audio
 from splitsmith.config import BeepDetectConfig
 
@@ -304,3 +305,51 @@ def test_detect_beep_populates_confidence_on_winner_and_detection() -> None:
     assert result.confidence == pytest.approx(result.candidates[0].confidence, abs=1e-9)
     # Synthetic clean tone with no contender -- expect auto-trust band.
     assert result.confidence >= 0.7
+
+
+# Fixtures where an unsaturated silence-preference term let a mid-stage gunshot
+# outrank the real beep (issue #949). Each one is a real recording whose winner
+# moved from a shot 2-18 s into the stage back onto the beep once the ranking
+# stopped multiplying a bounded tonal factor by an unbounded loudness one.
+# These fail against the pre-#949 scoring; that is the point of them.
+_SATURATION_REGRESSION_STEMS = [
+    "stage-shots-bofors-bombardment-2026-stage5-s0fe3d797",
+    "stage-shots-bofors-bombardment-2026-stage6-s36ed6e4e",
+    "stage-shots-bofors-bombardment-2026-stage8-s0fe3d797",
+    "stage-shots-bofors-bombardment-2026-stage8-s36ed6e4e",
+    "stage-shots-hfo-masters-2026-stage10-s97dcec94",
+    "stage-shots-hfo-masters-2026-stage12-s36ed6e4e",
+    "stage-shots-vads-easter-shoot-gotta-go-fast-stage2-s0fe3d797",
+    "stage-shots-vads-easter-shoot-gotta-go-fast-stage2-s36ed6e4e",
+]
+
+
+@pytest.mark.parametrize("stem", _SATURATION_REGRESSION_STEMS)
+def test_loud_transient_does_not_outrank_the_beep(fixtures_dir: Path, stem: str) -> None:
+    """A gunshot is louder than a beep; loudness must not decide the ranking."""
+    audio, sr, truth = _load_fixture(fixtures_dir, stem)
+    result = detect_beep(audio, sr, BeepDetectConfig())
+    # Promoted stage fixtures carry no ``tolerance_ms`` of their own -- the
+    # calibration suite's default is what the eval harness scores them by.
+    tol_s = DEFAULT_TOLERANCE_MS / 1000.0
+    assert result.time == pytest.approx(truth["beep_time"], abs=tol_s), (
+        f"{stem}: detected {result.time:.4f}s, ground truth {truth['beep_time']:.4f}s "
+        f"(tolerance {DEFAULT_TOLERANCE_MS} ms)"
+    )
+
+
+def test_silence_saturation_bounds_the_ranking_term(fixtures_dir: Path) -> None:
+    """The composite score must stay bounded however loud the winner is.
+
+    Guards the mechanism rather than one fixture's outcome: pre-#949 ``score``
+    was ``silence_score * ...`` and ran into the hundreds, so nothing the tonal
+    or duration factors did could overcome a loud enough transient.
+    """
+    audio, sr, _ = _load_fixture(fixtures_dir, "stage-shots-hfo-masters-2026-stage10-s97dcec94")
+    result = detect_beep(audio, sr, BeepDetectConfig())
+    assert result.candidates, "expected ranked candidates"
+    for c in result.candidates:
+        assert 0.0 <= c.score < 1.0, f"score {c.score} outside [0, 1) -- saturation not applied"
+    # A raw silence_score well above the saturation scale is what used to blow
+    # the product up; confirm at least one candidate is in that regime.
+    assert max(c.silence_score for c in result.candidates) > BeepDetectConfig().silence_saturation_scale
