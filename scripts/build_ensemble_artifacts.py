@@ -871,6 +871,23 @@ def _write_voter_e_parity_reference(
     log(f"Wrote {VOTER_E_PARITY_REFERENCE_PATH} (X {X32.shape} float32)")
 
 
+def _carry_model_artifacts(cal_path: Path) -> dict | None:
+    """Return the previous calibration's ``model_artifacts`` block, if any.
+
+    That block (slim-install download URLs + sha256 for the CLAP/PANN
+    ONNX exports) is curated by the export/upload scripts, not by this
+    build -- a calibration rebuild does not retrain those models, so
+    dropping the block breaks ``fetch-models`` on slim wheels (caught by
+    CI's slim-wheel smoke test on the 2026-08-17 retrain).
+    """
+    try:
+        prev = json.loads(cal_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+    block = prev.get("model_artifacts")
+    return block if isinstance(block, dict) else None
+
+
 def build_artifacts(
     fixtures: list[str] | None = None,
     *,
@@ -1090,6 +1107,10 @@ def build_artifacts(
         "voter_e_provenance": voter_e_provenance,
         **mining_provenance,
     }
+    carried = _carry_model_artifacts(cal_path)
+    if carried is not None:
+        cal["model_artifacts"] = carried
+        log("Carried model_artifacts block forward from the previous calibration.")
     cal_path.write_text(json.dumps(cal, indent=2) + "\n")
     log(f"Wrote {cal_path}")
 

@@ -338,7 +338,6 @@
       "time": 44.0132,
       "ms_after_beep": 39013,
       "source": "promoted",
-      "subclass": "steel",
       "snap_displacement_ms": -9.58,
       "sanity_flag": ""
     },
@@ -1530,7 +1529,9 @@
         "kept": true
       }
     ],
-    "labels_by_time": {}
+    "labels_by_time": {
+      "44.023": "steel_ring"
+    }
   },
   "audit_notes": "",
   "stage_rounds": {
