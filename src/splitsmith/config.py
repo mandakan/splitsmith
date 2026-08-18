@@ -99,18 +99,30 @@ class BeepCandidate(BaseModel):
     Surfaced to the production UI so the user can pick a different candidate
     when the auto-winner is wrong (issue #22). Fields:
 
-    * ``score`` -- composite ranking score: silence-preference (``run_peak /
-      pre_window_mean``) tilted by tonal concentration. Higher = stronger.
+    * ``score`` -- composite ranking score: saturated silence-preference
+      (``tanh(run_peak / pre_window_max / silence_saturation_scale)``) tilted
+      by tonal concentration and duration match. Bounded to [0, 1). Higher =
+      stronger. Comparable only within one detection run -- nothing should
+      threshold on its absolute value.
     * ``silence_score`` -- raw silence-preference component, kept for
       diagnostics + threshold tuning.
     * ``tonal_score`` -- raw tonal-concentration ratio in [0, 1]: fraction
       of the run's bandpassed energy that falls inside the IPSC timer
       fundamental band. ~1.0 for a pure tone, << 1.0 for gunshots / steel.
     * ``confidence`` -- calibrated probability in [0, 1] that this candidate
-      is the real beep. Empirically validated against the labeled fixture
-      set (issue #220 layer 3); >=0.7 right ~95 % of the time, 0.5-0.7
-      lands in the HITL queue (issue #219). Layer 2's raw ``score`` ranks
-      candidates; ``confidence`` is the threshold-able trust value.
+      is the real beep. ``score`` ranks candidates; ``confidence`` is the
+      threshold-able trust value, and 0.5-0.7 lands in the HITL queue
+      (issue #219).
+
+      The ">=0.7 is right ~95 % of the time" figure from issue #220 was
+      measured on 33 fixtures. Over the 127-fixture corpus it is 88.1 %
+      (issue #949), and it was 71.0 % before the ranking term was
+      saturated -- ranking and confidence had disagreed about what a
+      strong candidate was. Note that saturation compresses
+      ``1 - runner_up_score / score``, so confidences are systematically
+      lower than pre-#949: more clips route to HITL, and the ones that
+      clear 0.7 are likelier to be right. Re-measure before quoting a
+      number here; do not assume this one still holds.
     """
 
     time: float
@@ -272,6 +284,17 @@ class BeepDetectConfig(BaseModel):
     dur_match_min_ms: float = 150.0
     dur_match_full_ms: float = 300.0
     dur_match_weight: float = 1.0
+    # Silence-preference saturation (issue #949). ``silence_score`` is
+    # ``run_peak / pre_window_max`` -- unbounded, and it scales with absolute
+    # loudness, while the tonal and duration factors it multiplies are both
+    # bounded to [0, 1]. Unsaturated, the loudest candidate wins regardless of
+    # tonal evidence: gunshots outscore beeps by up to 42x on silence alone
+    # while the beep holds a tonal_score of 1.000. ``tanh(silence / scale)``
+    # compresses that to [0, 1) so tonal purity and duration can actually
+    # decide. 5.0 matches the constant ``candidate_confidence`` has always
+    # used for the same quantity -- ranking and confidence now agree about
+    # what a strong pre-roll is worth.
+    silence_saturation_scale: float = 5.0
     # Hard search-window cap. Real IPSC beeps come within the first ~30 s of a
     # head-cam recording: shooter walks to the line, RO runs through commands,
     # beep. After that window we're inside the stage where mid-stage moments
