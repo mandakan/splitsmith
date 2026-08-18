@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from splitsmith.lab.core import FixtureRecord, list_fixtures
 
 
@@ -120,3 +122,54 @@ def _record(**overrides) -> FixtureRecord:
     }
     base.update(overrides)
     return FixtureRecord(**base)
+
+
+def test_run_eval_routes_the_fixture_camera_class(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The lab eval must score each fixture through its own camera-class
+    model, matching production's shot-detect endpoint. It used to omit
+    ``camera_class`` entirely, so every fixture went through the DEFAULT
+    (headcam) GBDT + thresholds and a retrain that only moved the
+    handheld class produced bit-identical eval numbers (2026-08-17 A/B).
+
+    Plumbing test only: the wav is synthetic silence because no audio is
+    analysed -- ``detect_shots_ensemble`` is stubbed to capture kwargs.
+    """
+    import wave
+    from types import SimpleNamespace
+
+    import splitsmith.lab.core as core
+
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    slug = "stage-shots-hfo-masters-2026-stage1-s0fe3d797"
+    (fixtures / f"{slug}.json").write_text(
+        json.dumps(
+            {
+                "beep_time": 1.0,
+                "stage_time_seconds": 2.0,
+                "shots": [{"shot_number": 1, "time": 1.5}],
+                "camera": {"mount": "hand", "make": "Apple", "model": "iPhone 17 Pro"},
+            }
+        )
+    )
+    with wave.open(str(fixtures / f"{slug}.wav"), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        w.writeframes(b"\x00\x00" * 1600)
+
+    captured: dict = {}
+
+    def fake_detect(_audio, _sr, _beep, _stage, _runtime, **kw):
+        captured.update(kw)
+        return SimpleNamespace(candidates=[])
+
+    monkeypatch.setattr(core, "detect_shots_ensemble", fake_detect)
+    runtime = SimpleNamespace(
+        calibration=SimpleNamespace(voter_a_floor=0.1, voter_b_threshold=0.1, voter_c_threshold=0.5)
+    )
+    core.run_eval(runtime, fixtures_root=fixtures, slugs=[slug])  # type: ignore[arg-type]
+
+    assert captured["camera_class"] == "handheld"
+    assert captured["camera_make"] == "Apple"
+    assert captured["camera_model"] == "iPhone 17 Pro"
