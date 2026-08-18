@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.33.0](https://github.com/mandakan/splitsmith/compare/v0.32.2...v0.33.0) (2026-08-18)
+
+
+### Features
+
+* **cleanup:** gate irreplaceable files on the CLI, and make the freed figure visible ([#925](https://github.com/mandakan/splitsmith/issues/925)) ([6b1c59c](https://github.com/mandakan/splitsmith/commit/6b1c59c88484611ada40ccb6bb38c89b4e691789))
+* **cleanup:** reclaim space on hosted, and give the dialog a caller ([#921](https://github.com/mandakan/splitsmith/issues/921)) ([8d96819](https://github.com/mandakan/splitsmith/commit/8d968191b83ebc2f7ecb007ccbbd0a86ea4783dc))
+* **dev:** eval the filtered subset from the Corpus toolbar ([#941](https://github.com/mandakan/splitsmith/issues/941)) ([a8e2742](https://github.com/mandakan/splitsmith/commit/a8e27423d044b6a1b4ddcd6701098b37c7a25fa4))
+* **dev:** full-stage playback + one synced playhead on the workbench ([#943](https://github.com/mandakan/splitsmith/issues/943)) ([32df8c1](https://github.com/mandakan/splitsmith/commit/32df8c1a73e26517ff32c639935d92d2b37559f4))
+* **dev:** honest post-build flow -- real numbers, no promote theater ([#946](https://github.com/mandakan/splitsmith/issues/946)) ([8ccd6c6](https://github.com/mandakan/splitsmith/commit/8ccd6c653ee02c52ff605774916791c88e0f0117))
+* **dev:** review state and model membership on the corpus ([#936](https://github.com/mandakan/splitsmith/issues/936)) ([d853971](https://github.com/mandakan/splitsmith/commit/d853971cd24715b5d62ad2d1b59545530461ff16))
+* **dev:** the labeling workbench belongs to Review, and Review can eval ([#942](https://github.com/mandakan/splitsmith/issues/942)) ([de4debd](https://github.com/mandakan/splitsmith/commit/de4debd4ffdbd5ee1da0bc0e1d1a1c5416ebb81c))
+* **exports:** persistent export-run history ([#629](https://github.com/mandakan/splitsmith/issues/629)) ([bfe6ad4](https://github.com/mandakan/splitsmith/commit/bfe6ad4f17be8ffe4b80e5581d0d6cb202152e9c))
+* **model:** ship ensemble v2026.08.17 with the 48-fixture HFO corpus ([#948](https://github.com/mandakan/splitsmith/issues/948)) ([f36fd75](https://github.com/mandakan/splitsmith/commit/f36fd75c5070967239807284612590bb5cbc36de))
+
+
+### Bug Fixes
+
+* **api:** gate the cleanup endpoint on the same opt-in the CLI and dialog use ([#927](https://github.com/mandakan/splitsmith/issues/927)) ([6618070](https://github.com/mandakan/splitsmith/commit/661807021d922b3c686191d72d84442725e64fb1)), closes [#926](https://github.com/mandakan/splitsmith/issues/926)
+* **dev:** distinct FP colour in the lab outcome palette ([#937](https://github.com/mandakan/splitsmith/issues/937)) ([65a0bb6](https://github.com/mandakan/splitsmith/commit/65a0bb6c88309d5c837a684bb4e5384d0f11328d))
+* **dev:** FN rows get the subclass vocabulary in the label dropdown ([#938](https://github.com/mandakan/splitsmith/issues/938)) ([c63c3b5](https://github.com/mandakan/splitsmith/commit/c63c3b5ef67d746215ad0ae19b9c0906116ab788))
+* **dev:** one scroll surface per pane on the labeling page ([#939](https://github.com/mandakan/splitsmith/issues/939)) ([43875a5](https://github.com/mandakan/splitsmith/commit/43875a5faec35ad04fac1f128b63a22230abb602))
+* **dev:** the labeling aside never scrolls ([#940](https://github.com/mandakan/splitsmith/issues/940)) ([33e88df](https://github.com/mandakan/splitsmith/commit/33e88df52f2490ef12a07e6d8d26c11b6f4ddc30))
+* **dev:** wire Approve to corpus, and Retrain re-attaches to its job ([#944](https://github.com/mandakan/splitsmith/issues/944)) ([7ea6769](https://github.com/mandakan/splitsmith/commit/7ea67690075c143caa2bc017bc2f45a8454dd8a4))
+* **jobs:** a SystemExit in a job body fails the job instead of hanging it ([#945](https://github.com/mandakan/splitsmith/issues/945)) ([9012d4c](https://github.com/mandakan/splitsmith/commit/9012d4c7a5f0fcc1ecad017094d8884309ef3f58))
+* **lab:** route each fixture's camera class through the eval ensemble ([#947](https://github.com/mandakan/splitsmith/issues/947)) ([95d02a8](https://github.com/mandakan/splitsmith/commit/95d02a81b991d4f1845aff65477cd3875aeb6513))
+
+
+### Refactors
+
+* **sync:** delete the unreachable clause in the delete-corroboration ([#860](https://github.com/mandakan/splitsmith/issues/860)) ([110a680](https://github.com/mandakan/splitsmith/commit/110a6808735affb5e802c7fb99d01c899b6a8d08))
+
 ## [0.32.2](https://github.com/mandakan/splitsmith/compare/v0.32.1...v0.32.2) (2026-08-15)
 
 
