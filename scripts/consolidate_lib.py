@@ -235,3 +235,112 @@ def plan_reconcile(source: ShooterInventory, destination: ShooterInventory) -> R
 
     plan.deletable = not plan.violations
     return plan
+
+
+class VerifyFinding(BaseModel):
+    """One thing that is wrong. An empty list of these means a pass."""
+
+    check: str
+    subject: str
+    detail: str
+
+
+def _pair_shooters(
+    before: ProjectInventory, after: ProjectInventory
+) -> list[tuple[ShooterInventory, ShooterInventory | None]]:
+    """Pair by shooter_token where available, else by slug.
+
+    Tokens are stable across the migration and slugs are not (a legacy
+    project has no slug until it becomes a shooter), so the token is the
+    stronger key when both sides carry one.
+    """
+    by_token = {s.shooter_token: s for s in after.shooters if s.shooter_token}
+    by_slug = {s.slug: s for s in after.shooters if s.slug}
+    pairs: list[tuple[ShooterInventory, ShooterInventory | None]] = []
+    for shooter in before.shooters:
+        counterpart = None
+        if shooter.shooter_token:
+            counterpart = by_token.get(shooter.shooter_token)
+        if counterpart is None and shooter.slug:
+            counterpart = by_slug.get(shooter.slug)
+        pairs.append((shooter, counterpart))
+    return pairs
+
+
+def _subject(shooter: ShooterInventory) -> str:
+    return shooter.shooter_token or shooter.slug or str(shooter.root)
+
+
+def verify_documents_survived(before: ProjectInventory, after: ProjectInventory) -> list[VerifyFinding]:
+    """Every audit doc that existed before must exist after."""
+    findings: list[VerifyFinding] = []
+    for shooter, counterpart in _pair_shooters(before, after):
+        if counterpart is None:
+            findings.append(
+                VerifyFinding(
+                    check="documents_survived",
+                    subject=_subject(shooter),
+                    detail=f"no counterpart shooter found in {after.root}",
+                )
+            )
+            continue
+        lost = sorted(set(shooter.audit_docs) - set(counterpart.audit_docs))
+        if lost:
+            findings.append(
+                VerifyFinding(
+                    check="documents_survived",
+                    subject=_subject(shooter),
+                    detail=f"missing after migration: {', '.join(lost)}",
+                )
+            )
+    return findings
+
+
+def verify_media_not_shrunk(before: ProjectInventory, after: ProjectInventory) -> list[VerifyFinding]:
+    """Per media directory, the destination must hold at least as many bytes."""
+    findings: list[VerifyFinding] = []
+    for shooter, counterpart in _pair_shooters(before, after):
+        if counterpart is None:
+            continue
+        for media_dir in MEDIA_DIRS:
+            was = shooter.media_bytes.get(media_dir, 0)
+            now = counterpart.media_bytes.get(media_dir, 0)
+            if now < was:
+                findings.append(
+                    VerifyFinding(
+                        check="media_not_shrunk",
+                        subject=_subject(shooter),
+                        detail=f"{media_dir}: {was} bytes before, {now} bytes after",
+                    )
+                )
+    return findings
+
+
+def verify_no_broken_links(after: ProjectInventory) -> list[VerifyFinding]:
+    """No shooter may hold a raw/ entry that does not resolve."""
+    return [
+        VerifyFinding(
+            check="no_broken_links",
+            subject=_subject(shooter),
+            detail=f"broken: {', '.join(shooter.broken_links)}",
+        )
+        for shooter in after.shooters
+        if shooter.broken_links
+    ]
+
+
+def verify_tokens_preserved(before: ProjectInventory, after: ProjectInventory) -> list[VerifyFinding]:
+    """A shooter that had a token must still have it."""
+    findings: list[VerifyFinding] = []
+    for shooter, counterpart in _pair_shooters(before, after):
+        if not shooter.shooter_token:
+            continue
+        if counterpart is None or counterpart.shooter_token != shooter.shooter_token:
+            findings.append(
+                VerifyFinding(
+                    check="tokens_preserved",
+                    subject=_subject(shooter),
+                    detail=f"shooter_token {shooter.shooter_token} not present after migration",
+                )
+            )
+    return findings
