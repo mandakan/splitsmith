@@ -318,9 +318,21 @@ def _pair_shooters(
     Tokens are stable across the migration and slugs are not (a legacy
     project has no slug until it becomes a shooter), so the token is the
     stronger key when both sides carry one.
+
+    A shooter with neither a token nor a slug -- never linked to the
+    scoreboard at all, so there is no id to derive a token from and
+    nothing to mint one from that would mean anything -- still pairs when
+    it is the only shooter on both sides. There is no ambiguity to
+    resolve: the project pair itself was already established through the
+    declared rename map, so "the one shooter" and "the other one shooter"
+    are each other by elimination, the same way a single-shooter project
+    has always worked. This is narrower than "the lookup failed": a
+    shooter that HAD a token or slug and still found no counterpart is a
+    real vanished-shooter signal and must not be papered over.
     """
     by_token = {s.shooter_token: s for s in after.shooters if s.shooter_token}
     by_slug = {s.slug: s for s in after.shooters if s.slug}
+    solo_fallback = len(before.shooters) == 1 and len(after.shooters) == 1
     pairs: list[tuple[ShooterInventory, ShooterInventory | None]] = []
     for shooter in before.shooters:
         counterpart = None
@@ -328,6 +340,8 @@ def _pair_shooters(
             counterpart = by_token.get(shooter.shooter_token)
         if counterpart is None and shooter.slug:
             counterpart = by_slug.get(shooter.slug)
+        if counterpart is None and not shooter.shooter_token and not shooter.slug and solo_fallback:
+            counterpart = after.shooters[0]
         pairs.append((shooter, counterpart))
     return pairs
 

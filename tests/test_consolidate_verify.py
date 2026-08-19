@@ -441,6 +441,44 @@ def test_a_shooter_that_vanished_entirely_loses_its_token(tmp_path: Path) -> Non
     assert "s97dcec94" in findings[0].detail
 
 
+def test_a_solo_shooter_never_linked_to_the_scoreboard_still_pairs(tmp_path: Path) -> None:
+    """No token, no slug, no scoreboard link at all -- jinglebell-challenge-2026's shape.
+
+    A token is derived from a real SSI shooter id (lab.core.shooter_token);
+    minting a fake one for a shooter the scoreboard never saw would not be
+    genuine and could collide with a real one later. With exactly one
+    shooter on each side of an already project-resolved pair, there is no
+    ambiguity to lose by pairing them directly.
+    """
+    mod = _mod()
+    before = mod.inventory_project(_legacy(tmp_path / "before", audits=["stage1.json"]))
+    after = mod.inventory_project(_match(tmp_path / "after", {"s_a": {"audits": ["stage1.json"]}}))
+
+    assert mod.verify_documents_survived(before, after) == []
+
+
+def test_a_vanished_shooter_that_had_a_token_is_not_papered_over_by_the_solo_fallback(
+    tmp_path: Path,
+) -> None:
+    """The solo fallback must not mask a real identity mismatch.
+
+    A shooter that HAD a token and still found no counterpart is a
+    genuine vanished-shooter signal, even when it is the only shooter on
+    both sides.
+    """
+    mod = _mod()
+    before = mod.inventory_project(_legacy(tmp_path / "before", token="s97dcec94", audits=["stage1.json"]))
+    after = mod.inventory_project(
+        _match(tmp_path / "after", {"s_a": {"token": "s36ed6e4e", "audits": ["stage1.json"]}})
+    )
+
+    findings = mod.verify_documents_survived(before, after)
+
+    assert len(findings) == 1
+    assert findings[0].subject == "s97dcec94"
+    assert "no counterpart shooter" in findings[0].detail
+
+
 def test_a_recorded_undeletable_reconcile_is_a_finding(tmp_path: Path) -> None:
     """The central safety rule has to reach the report a human reads."""
     mod = _mod()
