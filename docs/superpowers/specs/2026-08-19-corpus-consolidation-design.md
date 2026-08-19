@@ -120,9 +120,28 @@ share's own `<match>/<shooter>/<handheld|headcam>`. Renames required:
 | `2026-black-handgun` | `2026-ess-black-handgun` |
 | `2026-hfo-masters/*/handheld,headcam` | `.../hand,head` |
 | `2026-oden` | `2026-oden-cup` |
-| loose dirs (`2026-black-handgun-from-martin`, `Stockholm IPSC Open 2026 2`, ...) | quarantined under `_unsorted/`, not deleted |
+| loose dirs (`2026-black-handgun-from-martin`, `Stockholm IPSC Open 2026 2`, ...) | moved to `/Volumes/X9/raw/_unsorted/`, not deleted |
 
 `2026-stockholm-ipsc-open` is already correct.
+
+Incoming share directories map as follows. Note that the share's
+`blacksmith-handgun-2026` and X9's `2026-black-handgun` are **different
+events** (scoreboard 27046 vs 25460, 8 stages vs 12) despite the similar
+names; conflating them is the most likely way to corrupt this migration.
+
+| Share directory | X9 destination | Match |
+| --- | --- | --- |
+| `blacksmith-handgun-2026` | `2026-blacksmith-handgun-open` | Blacksmith Handgun Open 2026 |
+| `bofors-bombardment` | `2026-bofors-bombardment` | Bofors Bombardment 2026 |
+| `jinglebell-challenge-2026` | `2026-jinglebell-challenge` | Jinglebell Challenge 2026 |
+| `tallmilan-2025` | `2025-tallmilan` | Tallmilan 2025 |
+| `tallmilan-2026` | `2026-tallmilan` | Tallmilan 2026 |
+| `vads-easter-shoot-2026` | `2026-vads-easter-shoot` | VADS Easter Shoot |
+
+The match slug is `jinglebell-challenge-2026`, singular, matching the
+project's own `name` and the share directory. The existing project
+directory `jinglebells-challenge-2026-anton` is the odd one out and its
+spelling does not survive.
 
 Renaming a raw directory breaks every symlink pointing into it. Rename
 and relink are therefore one step per match, never two passes over the
@@ -204,6 +223,16 @@ Applied per shooter, in this order:
    the share copy rather than the canonical X9 one). Follows the existing
    `migrate_fixtures_add_camera.py` / `migrate_fixtures_event_id.py`
    precedent.
+
+   The canonical rewritten form is
+   `/Volumes/X9/matches/<match-slug>/shooters/<s_id>/raw/<filename>`, not
+   a path into `/Volumes/X9/raw`. This is the form the 83 already-correct
+   fixtures use, and it resolves through the project's own symlink, so a
+   future raw reorganisation is absorbed by relinking instead of another
+   fixture rewrite. Filenames never change during this migration, which is
+   what makes the rewrite a pure directory substitution. A fixture whose
+   filename matches no registered video in the target match is reported
+   and left untouched.
 3. Loud failure on unreachable `source_video`, behind an explicit
    `--allow-missing-video` opt-out, in `build_ensemble_artifacts.py`
    (`:645`), `regression_voter_e.py` (`:110`), `build_sweep_signals.py`
@@ -213,6 +242,11 @@ Applied per shooter, in this order:
    fixtures contributing visual features is greater than or equal to the
    pre-migration baseline captured in phase 0. A corpus that shrank is a
    failed migration, not a quiet one.
+
+The repo changes land as a normal branch and PR against `main`. The data
+migration is a local operation against X9 and the share, driven by the
+script but not gated on the PR merging; the phase order below interleaves
+them because the fixture rewrite needs the final on-disk paths to exist.
 
 ## Phases
 
