@@ -2238,9 +2238,16 @@ git commit -m "chore(migration): phase 2 legacy merges"
 cd /Users/mathias/work/splitsmith-lab
 uv run python scripts/consolidate_matches.py reconcile \
   --source /Volumes/X9/matches/blacksmith-2026 \
-  --destination ~/matches/blacksmith-handgun-open-2026/shooters/s_ce10fa76
+  --destination ~/matches/blacksmith-handgun-open-2026/shooters/s_ce10fa76 \
+  --reconcile-log build/consolidation/reconcile-log.json
 ```
-Expected: 7 `copy_audit_doc` actions (`stage1,2,3,5,6,7,8.json`), `violations=0`, `deletable=True`.
+Expected: 7 `copy_audit_doc` actions (`stage1,2,3,5,6,7,8.json`), `violations=0`, `deletable_after_apply=True`.
+
+Every reconcile below writes to that same log, which Task 16's `verify`
+reads. A record is keyed by `(source, destination)`, so re-running a pair
+after fixing something supersedes its earlier verdict rather than adding
+to it. A plan-only run is recorded as not applied and does **not**
+satisfy the gate: step 3 and step 4 are what make these records count.
 
 - [ ] **Step 2: Diff each restored document against its local .bak first**
 
@@ -2260,22 +2267,24 @@ Any stage that differs is reported to the user before applying. The spec commits
 uv run python scripts/consolidate_matches.py reconcile \
   --source /Volumes/X9/matches/blacksmith-2026 \
   --destination ~/matches/blacksmith-handgun-open-2026/shooters/s_ce10fa76 \
+  --reconcile-log build/consolidation/reconcile-log.json \
   --apply
 ```
 
 - [ ] **Step 4: Reconcile the remaining merged/legacy pairs**
 
 ```bash
-uv run python scripts/consolidate_matches.py reconcile \
+LOG=build/consolidation/reconcile-log.json
+uv run python scripts/consolidate_matches.py reconcile --reconcile-log "$LOG" \
   --source /Volumes/X9/matches/blacksmith-handgun-2026-anton \
   --destination ~/matches/blacksmith-handgun-open-2026/shooters/s_46039db3 --apply
-uv run python scripts/consolidate_matches.py reconcile \
+uv run python scripts/consolidate_matches.py reconcile --reconcile-log "$LOG" \
   --source /Volumes/X9/matches/blacksmith-handgun-2026-martin \
   --destination ~/matches/blacksmith-handgun-open-2026/shooters/s_b3d21334 --apply
-uv run python scripts/consolidate_matches.py reconcile \
+uv run python scripts/consolidate_matches.py reconcile --reconcile-log "$LOG" \
   --source /Volumes/X9/matches/vads-easter-shoot-2026-anton \
   --destination /Volumes/X9/matches/vads-easter-shoot-2026/shooters/s_9540b345 --apply
-uv run python scripts/consolidate_matches.py reconcile \
+uv run python scripts/consolidate_matches.py reconcile --reconcile-log "$LOG" \
   --source /Volumes/X9/matches/vads-easter-shoot-2026-martin \
   --destination /Volumes/X9/matches/vads-easter-shoot-2026/shooters/s_fac64ec6 --apply
 ```
@@ -2579,9 +2588,22 @@ Expected: exactly ten matches, all `kind=match`, zero broken links.
 - [ ] **Step 2: Full verification against the phase 0 baseline**
 
 ```bash
-uv run python scripts/consolidate_matches.py verify --before phase0 --after phase7
+uv run python scripts/consolidate_matches.py verify --before phase0 --after phase7 \
+  --rename-map scripts/consolidation_rename_map.json \
+  --reconcile-log build/consolidation/reconcile-log.json
 ```
-Expected: `0 finding(s)`. The command exits 1 if any finding exists.
+Expected: `0 blocking finding(s)`, `25 project pair(s) resolved`, and a
+non-zero reconcile-outcome count. The command exits 1 if any blocking
+finding exists.
+
+`--rename-map` is required and there is no fallback: which after-project
+each before-project became is declared, not inferred. A before-project
+with no entry, or one whose declared destination is absent from the
+phase 7 inventory, is a blocking finding naming it. If verify reports
+`project_mapped`, add the entry to
+`scripts/consolidation_rename_map.json` -- do not work around it.
+A missing or empty reconcile log is blocking too, as is a record whose
+`deletable: true` was only planned and never applied.
 
 - [ ] **Step 3: Confirm every match still loads**
 
@@ -2602,6 +2624,8 @@ Re-run the Task 14 Step 4 script over all five synced matches (now including the
 
 ```bash
 uv run python scripts/consolidate_matches.py verify --before phase0 --after phase7 \
+  --rename-map scripts/consolidation_rename_map.json \
+  --reconcile-log build/consolidation/reconcile-log.json \
   > build/consolidation/final-report.txt 2>&1
 git add build/consolidation
 git commit -m "chore(migration): phase 7 verification report"
@@ -2619,9 +2643,11 @@ git commit -m "chore(migration): phase 7 verification report"
 
 ```bash
 cd /Users/mathias/work/splitsmith-lab
-uv run python scripts/consolidate_matches.py verify --before phase0 --after phase7
+uv run python scripts/consolidate_matches.py verify --before phase0 --after phase7 \
+  --rename-map scripts/consolidation_rename_map.json \
+  --reconcile-log build/consolidation/reconcile-log.json
 ```
-Expected: `0 finding(s)`. If anything changed since Task 16, STOP.
+Expected: `0 blocking finding(s)`. If anything changed since Task 16, STOP.
 
 - [ ] **Step 2: Delete the legacy holding directory**
 

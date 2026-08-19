@@ -437,92 +437,194 @@ def verify_no_broken_links(after: ProjectInventory) -> list[VerifyFinding]:
     ]
 
 
-def pair_projects(
-    before: list[ProjectInventory], after: list[ProjectInventory]
-) -> list[tuple[ProjectInventory, ProjectInventory | None]]:
-    """Pair each before-project with the after-project that holds its data.
+class MalformedRenameMapError(ValueError):
+    """A rename map that cannot be read as an object of directory names."""
 
-    The migration renames and relocates: a legacy directory becomes a
-    shooter inside a merged match, two whole roots disappear, and the
-    surviving directory basenames are new. Pairing on the basename
-    therefore matches nothing for precisely the projects the migration
-    reshaped -- the ones whose data is most at risk.
 
-    Identity, strongest first:
+class RenameMap(BaseModel):
+    """Declared identity: which after-project each before-project lands in.
 
-    1. ``match_id`` where both sides carry one. It is the durable id of a
-       merged match and survives a move between volumes.
-    2. Any ``shooter_token`` the before-project contains. A legacy project
-       becomes a shooter inside a merged match and its token comes with
-       it, so the token is the identity that spans the reshaping. This is
-       the project-level analogue of :func:`_pair_shooters`.
-    3. The directory basename, for a project carrying neither a
-       ``match_id`` nor any token, which simply stayed where it was.
-
-    Several before-projects may legitimately pair to the same
-    after-project: that is what a merge is. A ``None`` counterpart is
-    never a pass -- see :func:`unpaired_project_finding`.
+    Keys and values are directory *names*, not paths: the before side
+    spans three roots and the after side is one, so a name is the only
+    thing both sides express. Several before-names may share a
+    destination -- three legacy blacksmith projects become three shooters
+    in one merged match -- but a name never resolves to two destinations.
     """
-    by_match_id: dict[str, ProjectInventory] = {}
-    by_token: dict[str, ProjectInventory] = {}
-    by_name: dict[str, ProjectInventory] = {}
+
+    destinations: dict[str, str] = Field(default_factory=dict)
+
+
+def load_rename_map(path: Path) -> RenameMap:
+    """Read a rename map from ``path``, naming it when it is unreadable."""
+    try:
+        doc = json.loads(path.read_text())
+    except FileNotFoundError as exc:
+        raise MalformedRenameMapError(f"{path}: no such rename map") from exc
+    except json.JSONDecodeError as exc:
+        raise MalformedRenameMapError(f"{path}: not valid JSON ({exc})") from exc
+    if not isinstance(doc, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) for key, value in doc.items()
+    ):
+        raise MalformedRenameMapError(
+            f"{path}: expected a JSON object mapping before-project name to after-project name"
+        )
+    return RenameMap(destinations=doc)
+
+
+def resolve_projects(
+    before: list[ProjectInventory], after: list[ProjectInventory], rename_map: RenameMap
+) -> tuple[list[tuple[ProjectInventory, ProjectInventory]], list[VerifyFinding]]:
+    """Resolve each before-project against the after-project it declares.
+
+    Identity is declared, never inferred. Two inferences were tried and
+    both were unsound:
+
+    - The directory basename skipped every project the migration renames
+      or relocates, which is exactly the set phase 8 deletes.
+    - Any shared ``shooter_token`` pairs a *shooter* to a *match*. Four
+      tokens span ten matches, so legacy ``bofors-bombardment-2026``
+      resolved to ``blacksmith-handgun-open-2026`` purely because the
+      same competitor shot both; audit docs are named ``stageN.json`` in
+      every match, so every document looked present and a lost project
+      verified clean.
+
+    Nothing in an inventory records which match a directory became. That
+    fact lives in the migration plan, so it is supplied as data.
+
+    Every unresolved before-project produces a blocking finding. The
+    caller compares only the pairs returned here, so a project that fails
+    to resolve is never silently skipped.
+    """
+    by_name: dict[str, list[ProjectInventory]] = {}
     for project in after:
-        if project.match_id:
-            by_match_id.setdefault(project.match_id, project)
-        by_name.setdefault(project.root.name, project)
-        for shooter in project.shooters:
-            if shooter.shooter_token:
-                by_token.setdefault(shooter.shooter_token, project)
+        by_name.setdefault(project.root.name, []).append(project)
 
-    pairs: list[tuple[ProjectInventory, ProjectInventory | None]] = []
+    pairs: list[tuple[ProjectInventory, ProjectInventory]] = []
+    findings: list[VerifyFinding] = []
     for project in before:
-        counterpart = by_match_id.get(project.match_id) if project.match_id else None
-        if counterpart is None:
-            for shooter in project.shooters:
-                if shooter.shooter_token and shooter.shooter_token in by_token:
-                    counterpart = by_token[shooter.shooter_token]
-                    break
-        if counterpart is None:
-            counterpart = by_name.get(project.root.name)
-        pairs.append((project, counterpart))
-    return pairs
+        name = project.root.name
+        destination = rename_map.destinations.get(name)
+        if destination is None:
+            findings.append(
+                VerifyFinding(
+                    check="project_mapped",
+                    subject=str(project.root),
+                    detail=(
+                        f"no entry for {name!r} in the rename map "
+                        f"({_project_identity(project)}); "
+                        f"{_project_doc_count(project)} audit doc(s) unaccounted for"
+                    ),
+                )
+            )
+            continue
+
+        candidates = by_name.get(destination, [])
+        if not candidates:
+            findings.append(
+                VerifyFinding(
+                    check="project_destination_present",
+                    subject=str(project.root),
+                    detail=(
+                        f"the rename map sends {name!r} to {destination!r}, "
+                        f"which is absent from the after inventory "
+                        f"({_project_identity(project)}); "
+                        f"{_project_doc_count(project)} audit doc(s) unaccounted for"
+                    ),
+                )
+            )
+            continue
+        if len(candidates) > 1:
+            roots = ", ".join(str(candidate.root) for candidate in candidates)
+            findings.append(
+                VerifyFinding(
+                    check="project_destination_ambiguous",
+                    subject=str(project.root),
+                    detail=f"the rename map sends {name!r} to {destination!r}, which names {roots}",
+                )
+            )
+            continue
+
+        pairs.append((project, candidates[0]))
+    return pairs, findings
 
 
-def unpaired_project_finding(project: ProjectInventory) -> VerifyFinding:
-    """A before-project with no counterpart after the migration is blocking.
-
-    Skipping it instead lets every document, byte and unlinked raw file a
-    project holds disappear under a report that says nothing is wrong --
-    and that report is what the deletion phase is gated on.
-    """
+def _project_identity(project: ProjectInventory) -> str:
     tokens = sorted({s.shooter_token for s in project.shooters if s.shooter_token})
-    docs = sum(len(s.audit_docs) for s in project.shooters)
     identity = f"tokens {', '.join(tokens)}" if tokens else "no shooter_token"
-    return VerifyFinding(
-        check="project_paired",
-        subject=str(project.root),
-        detail=(
-            f"no counterpart project in the after inventory "
-            f"(match_id {project.match_id or 'none'}, {identity}); "
-            f"{docs} audit doc(s) unaccounted for"
-        ),
-    )
+    return f"match_id {project.match_id or 'none'}, {identity}"
 
 
-def verify_reconcile_records(records: list[ReconcileRecord]) -> list[VerifyFinding]:
-    """Any reconcile that left its source undeletable blocks the migration."""
+def _project_doc_count(project: ProjectInventory) -> int:
+    return sum(len(s.audit_docs) for s in project.shooters)
+
+
+def supersede_records(records: list[ReconcileRecord], record: ReconcileRecord) -> list[ReconcileRecord]:
+    """Add ``record`` to ``records``, replacing any earlier one for its pair.
+
+    A reconcile is keyed by ``(source, destination)``. Re-running one
+    after fixing a violation used to append a second record beside the
+    stale ``deletable: false``, which blocked the gate forever; the only
+    escape was deleting the log, and a deleted log used to pass. The
+    later run is the current truth about that pair, and the position is
+    kept so a phase still reads in the order it was run.
+    """
+    key = (record.source, record.destination)
+    if any((r.source, r.destination) == key for r in records):
+        return [record if (r.source, r.destination) == key else r for r in records]
+    return [*records, record]
+
+
+def verify_reconcile_records(records: list[ReconcileRecord], *, log_path: Path) -> list[VerifyFinding]:
+    """The reconcile log's own verdicts, as blocking findings.
+
+    Three ways this gate fails open, all closed here:
+
+    - No records at all. A missing or emptied log is not a clean run, it
+      is a check that never ran, and this is the only place that can say
+      so -- the before/after inventories look identical either way.
+    - A recorded ``deletable: false``. The migration's central rule.
+    - A ``deletable: true`` that was only ever planned. Without
+      ``--apply`` nothing has been copied, so the verdict describes a
+      state the disk never reached.
+    """
+    if not records:
+        return [
+            VerifyFinding(
+                check="reconcile_log_present",
+                subject=str(log_path),
+                detail=(
+                    "no reconcile outcomes recorded; the log is missing or empty, "
+                    "which is a check that never ran, not a clean run"
+                ),
+            )
+        ]
+
     findings: list[VerifyFinding] = []
     for record in records:
-        if record.deletable:
-            continue
-        reasons = "; ".join(f"{v.document} ({v.reason})" for v in record.violations) or "no reason recorded"
-        findings.append(
-            VerifyFinding(
-                check="reconcile_deletable",
-                subject=str(record.source),
-                detail=f"source is not deletable after reconcile into {record.destination}: {reasons}",
+        if not record.deletable:
+            reasons = (
+                "; ".join(f"{v.document} ({v.reason})" for v in record.violations) or "no reason recorded"
             )
-        )
+            findings.append(
+                VerifyFinding(
+                    check="reconcile_deletable",
+                    subject=str(record.source),
+                    detail=f"source is not deletable after reconcile into {record.destination}: {reasons}",
+                )
+            )
+            continue
+        if not record.applied:
+            findings.append(
+                VerifyFinding(
+                    check="reconcile_applied",
+                    subject=str(record.source),
+                    detail=(
+                        f"reconcile into {record.destination} was planned but never applied: "
+                        f"{record.action_count} action(s) outstanding, so the destination "
+                        f"never received them"
+                    ),
+                )
+            )
     return findings
 
 

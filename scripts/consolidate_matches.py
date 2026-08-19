@@ -10,21 +10,31 @@ Subcommands:
     reconcile  Plan (and with --apply, execute) a source -> destination merge
     verify     Compare two inventories and report every finding
 
-Every reconcile appends its outcome -- source, destination, action count,
-violations and the ``deletable`` verdict -- to
-``build/consolidation/reconcile-log.json``, and ``verify`` turns any
-recorded ``deletable: false`` into a blocking finding. That log is the
-artifact encoding the migration's central rule ("never delete a source
-that still holds content the destination lacks") for the human who reads
-the report before phase 8 deletes the originals.
+Every reconcile records its outcome -- source, destination, action count,
+violations, whether ``--apply`` ran, and the ``deletable`` verdict -- in
+``build/consolidation/reconcile-log.json``, keyed by (source,
+destination) so a re-run supersedes its own earlier verdict instead of
+stacking a stale one beside it. ``verify`` turns a recorded
+``deletable: false``, a verdict that was never applied, and a missing or
+empty log alike into blocking findings. That log is the artifact
+encoding the migration's central rule ("never delete a source that still
+holds content the destination lacks") for the human who reads the report
+before phase 8 deletes the originals.
+
+``verify`` requires ``--rename-map``: which after-project a
+before-project became is declared, never inferred. See
+``scripts/consolidation_rename_map.json``.
 
 Usage:
     uv run python scripts/consolidate_matches.py inventory --label phase0 \
         --root /Volumes/X9/matches --root ~/matches --root ~/Splitsmith
     uv run python scripts/consolidate_matches.py reconcile \
         --source /Volumes/X9/matches/blacksmith-2026 \
-        --destination /Volumes/X9/matches/blacksmith-handgun-open-2026/shooters/s_ce10fa76
-    uv run python scripts/consolidate_matches.py verify --before phase0 --after phase7
+        --destination /Volumes/X9/matches/blacksmith-handgun-open-2026/shooters/s_ce10fa76 \
+        --reconcile-log build/consolidation/reconcile-log.json
+    uv run python scripts/consolidate_matches.py verify --before phase0 --after phase7 \
+        --rename-map scripts/consolidation_rename_map.json \
+        --reconcile-log build/consolidation/reconcile-log.json
 """
 
 from __future__ import annotations
@@ -44,10 +54,11 @@ from consolidate_lib import (  # noqa: E402
     ReconcileRecord,
     ShooterInventory,
     inventory_project,
-    pair_projects,
+    load_rename_map,
     plan_reconcile,
     record_reconcile,
-    unpaired_project_finding,
+    resolve_projects,
+    supersede_records,
     verify_documents_replaced,
     verify_documents_survived,
     verify_media_not_shrunk,
@@ -121,27 +132,35 @@ def _iter_projects(root: Path) -> list[Path]:
     return [child for child in sorted(root.expanduser().iterdir()) if child.is_dir()]
 
 
-def append_reconcile_record(record: ReconcileRecord, *, report_dir: Path) -> Path:
-    """Append one reconcile outcome to the phase's log, returning its path.
+def write_reconcile_record(record: ReconcileRecord, *, log_path: Path) -> Path:
+    """Record one reconcile outcome in ``log_path``, returning its path.
 
-    Appending, not overwriting: a phase runs one reconcile per shooter and
-    the human reading the report before phase 8 needs all of them, not the
-    last one.
+    Every pair a phase reconciles stays in the log -- the human reading it
+    before phase 8 needs all of them -- but a pair appears once. Re-running
+    a reconcile after fixing a violation supersedes the earlier verdict
+    rather than stacking a stale ``deletable: false`` on top of it.
     """
-    report_dir.mkdir(parents=True, exist_ok=True)
-    path = report_dir / RECONCILE_LOG_NAME
-    records = load_reconcile_records(report_dir)
-    records.append(record)
-    path.write_text(json.dumps([json.loads(r.model_dump_json()) for r in records], indent=2) + "\n")
-    return path
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    records = supersede_records(load_reconcile_records(log_path), record)
+    log_path.write_text(json.dumps([json.loads(r.model_dump_json()) for r in records], indent=2) + "\n")
+    return log_path
 
 
-def load_reconcile_records(report_dir: Path) -> list[ReconcileRecord]:
-    """Every reconcile outcome recorded under ``report_dir``, or none."""
-    path = report_dir / RECONCILE_LOG_NAME
-    if not path.exists():
+def load_reconcile_records(log_path: Path) -> list[ReconcileRecord]:
+    """Every reconcile outcome recorded in ``log_path``, or none.
+
+    A missing log reads as no records, which ``verify_reconcile_records``
+    turns into a blocking finding. It must never read as a pass.
+    """
+    if not log_path.exists():
         return []
-    return [ReconcileRecord(**doc) for doc in json.loads(path.read_text())]
+    return [ReconcileRecord(**doc) for doc in json.loads(log_path.read_text())]
+
+
+def reconcile_log_path(args: argparse.Namespace) -> Path:
+    """The log this invocation reads or writes."""
+    explicit: Path | None = getattr(args, "reconcile_log", None)
+    return explicit if explicit is not None else args.report_dir / RECONCILE_LOG_NAME
 
 
 def cmd_inventory(args: argparse.Namespace) -> None:
@@ -191,7 +210,7 @@ def cmd_reconcile(args: argparse.Namespace) -> None:
         verdict = "deletable" if applied else "deletable_after_apply"
         print(f"actions={len(plan.actions)} violations={len(plan.violations)} {verdict}={plan.deletable}")
         record = record_reconcile(source, destination, plan, applied=applied)
-        print(f"recorded -> {append_reconcile_record(record, report_dir=args.report_dir)}")
+        print(f"recorded -> {write_reconcile_record(record, log_path=reconcile_log_path(args))}")
 
 
 def cmd_verify(args: argparse.Namespace) -> None:
@@ -206,16 +225,16 @@ def cmd_verify(args: argparse.Namespace) -> None:
     # replacement, not a defect. It is reported separately, below, and never
     # folded into `blocking`.
     #
-    # Projects are paired by identity, never by directory name: the
-    # migration renames every project it reshapes and retires two roots
-    # entirely, so a name-keyed lookup skips exactly the projects whose
-    # data is at risk. An unpaired before-project is itself blocking.
-    blocking = []
+    # Which after-project a before-project became is DECLARED, in the
+    # rename map, and never inferred. Nothing in an inventory records it:
+    # the basename changes for every project the migration reshapes, and
+    # a shooter_token identifies a competitor, not a match. Both were
+    # tried and both verified a lost project clean. Every before-project
+    # that fails to resolve is itself blocking.
+    rename_map = load_rename_map(args.rename_map)
+    pairs, blocking = resolve_projects(before, after, rename_map)
     replaced = []
-    for project, counterpart in pair_projects(before, after):
-        if counterpart is None:
-            blocking.append(unpaired_project_finding(project))
-            continue
+    for project, counterpart in pairs:
         blocking.extend(verify_documents_survived(project, counterpart))
         blocking.extend(verify_media_not_shrunk(project, counterpart))
         blocking.extend(verify_tokens_preserved(project, counterpart))
@@ -226,8 +245,11 @@ def cmd_verify(args: argparse.Namespace) -> None:
     # Whatever the reconciles recorded about deletability outranks a
     # clean before/after diff: a source that held content its destination
     # never received is not deletable, however tidy the inventories look.
-    records = load_reconcile_records(report_dir)
-    blocking.extend(verify_reconcile_records(records))
+    # An absent log is not a clean run either -- it is a check that never
+    # ran, and verify_reconcile_records says so.
+    log_path = reconcile_log_path(args)
+    records = load_reconcile_records(log_path)
+    blocking.extend(verify_reconcile_records(records, log_path=log_path))
 
     out = report_dir / f"verify-{args.before}-vs-{args.after}.json"
     out.write_text(
@@ -244,7 +266,8 @@ def cmd_verify(args: argparse.Namespace) -> None:
     for finding in blocking:
         print(f"  {finding.check}: {finding.subject} -- {finding.detail}")
     print(f"{len(blocking)} blocking finding(s)")
-    print(f"{len(records)} reconcile outcome(s) consulted from {report_dir / RECONCILE_LOG_NAME}")
+    print(f"{len(pairs)} project pair(s) resolved through {args.rename_map}")
+    print(f"{len(records)} reconcile outcome(s) consulted from {log_path}")
 
     if replaced:
         print("replaced (not blocking):")
@@ -274,17 +297,37 @@ def build_parser() -> argparse.ArgumentParser:
     add_report_dir(p_inv)
     p_inv.set_defaults(func=cmd_inventory)
 
+    def add_reconcile_log(subparser: argparse.ArgumentParser) -> None:
+        subparser.add_argument(
+            "--reconcile-log",
+            type=Path,
+            default=None,
+            help=f"The reconcile log (default: <report-dir>/{RECONCILE_LOG_NAME}).",
+        )
+
     p_rec = sub.add_parser("reconcile")
     p_rec.add_argument("--source", type=Path, required=True)
     p_rec.add_argument("--destination", type=Path, required=True)
     p_rec.add_argument("--apply", action="store_true", help="Execute the plan. Off by default.")
     add_report_dir(p_rec)
+    add_reconcile_log(p_rec)
     p_rec.set_defaults(func=cmd_reconcile)
 
     p_ver = sub.add_parser("verify")
     p_ver.add_argument("--before", required=True)
     p_ver.add_argument("--after", required=True)
+    p_ver.add_argument(
+        "--rename-map",
+        type=Path,
+        required=True,
+        help=(
+            "JSON object mapping each before-project directory name to the "
+            "after-project directory name it is expected to land in. Required: "
+            "identity is declared, never inferred."
+        ),
+    )
     add_report_dir(p_ver)
+    add_reconcile_log(p_ver)
     p_ver.set_defaults(func=cmd_verify)
 
     return parser
