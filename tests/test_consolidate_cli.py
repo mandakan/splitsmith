@@ -153,6 +153,28 @@ def test_copied_media_keeps_its_nanosecond_mtime(tmp_path: Path) -> None:
     assert copied.stat().st_mtime_ns == clip.stat().st_mtime_ns
 
 
+def _write_inventory(report_dir: Path, label: str, projects: list) -> None:
+    report_dir.mkdir(parents=True, exist_ok=True)
+    (report_dir / f"{label}.json").write_text(
+        json.dumps([json.loads(p.model_dump_json()) for p in projects], indent=2) + "\n"
+    )
+
+
+def _verify(cli, report_dir: Path) -> Path:
+    """Run ``verify`` over the ``before``/``after`` labels, return the report path."""
+    import argparse
+
+    cli.cmd_verify(argparse.Namespace(before="before", after="after", report_dir=report_dir))
+    return report_dir / "verify-before-vs-after.json"
+
+
+def _merged_match(root: Path, *, slug: str, token: str, audits: dict[str, str]) -> Path:
+    (root / "shooters").mkdir(parents=True)
+    (root / "match.json").write_text(json.dumps({"match_id": "m-1", "name": "M"}))
+    _shooter(root / "shooters" / slug, audits=audits, token=token)
+    return root
+
+
 def test_verify_reports_a_replaced_document_without_blocking(tmp_path: Path) -> None:
     """A before/after pair differing only by a replaced document must not block.
 
@@ -163,13 +185,9 @@ def test_verify_reports_a_replaced_document_without_blocking(tmp_path: Path) -> 
     the migration's gate. It must still show up in the report, in a
     clearly separate, non-blocking section.
     """
-    import argparse
-    import uuid
-
     cli, lib = _cli(), _lib()
+    report_dir = tmp_path / "reports"
 
-    # cmd_verify pairs projects by root.name, so before/after must share it
-    # even though the shooters themselves live under distinct tmp_path trees.
     before_root = tmp_path / "before" / "match" / "s_a"
     _shooter(before_root, audits={"stage1.json": json.dumps({"v": 1})}, token="t1")
     before = lib.ProjectInventory(root=tmp_path / "before" / "match", kind="legacy", shooters=[])
@@ -180,28 +198,198 @@ def test_verify_reports_a_replaced_document_without_blocking(tmp_path: Path) -> 
     after = lib.ProjectInventory(root=tmp_path / "after" / "match", kind="legacy", shooters=[])
     after.shooters.append(lib.inventory_project(after_root).shooters[0])
 
-    label = f"pytest-{uuid.uuid4().hex}"
-    before_label, after_label = f"{label}-before", f"{label}-after"
-
-    report_dir = cli.REPORT_DIR
-    report_dir.mkdir(parents=True, exist_ok=True)
-    before_path = report_dir / f"{before_label}.json"
-    after_path = report_dir / f"{after_label}.json"
-    verify_path = report_dir / f"verify-{before_label}-vs-{after_label}.json"
-    before_path.write_text(json.dumps([json.loads(before.model_dump_json())], indent=2))
-    after_path.write_text(json.dumps([json.loads(after.model_dump_json())], indent=2))
+    _write_inventory(report_dir, "before", [before])
+    _write_inventory(report_dir, "after", [after])
 
     try:
-        args = argparse.Namespace(before=before_label, after=after_label)
-        try:
-            cli.cmd_verify(args)
-        except SystemExit as exc:
-            pytest.fail(f"verify must not block on a replaced-only document, exited with {exc.code}")
+        verify_path = _verify(cli, report_dir)
+    except SystemExit as exc:
+        pytest.fail(f"verify must not block on a replaced-only document, exited with {exc.code}")
 
-        report = json.loads(verify_path.read_text())
-        assert report["blocking"] == []
-        assert len(report["replaced"]) == 1
-        assert "stage1.json" in report["replaced"][0]["detail"]
-    finally:
-        for path in (before_path, after_path, verify_path):
-            path.unlink(missing_ok=True)
+    report = json.loads(verify_path.read_text())
+    assert report["blocking"] == []
+    assert len(report["replaced"]) == 1
+    assert "stage1.json" in report["replaced"][0]["detail"]
+
+
+def test_verify_blocks_when_a_before_project_is_absent_from_the_after_inventory(tmp_path: Path) -> None:
+    """The reviewer's scenario: a project with content, gone, reported clean.
+
+    Pairing by directory basename let every project the migration
+    actually reshapes fall out of the comparison, so a ``before`` holding
+    a project with an audit doc, media bytes and an unlinked raw file
+    could be verified against an ``after`` containing none of it and
+    still print "0 blocking finding(s)" and exit 0. Task 17 deletes the
+    originals on the strength of that report.
+    """
+    cli, lib = _cli(), _lib()
+    report_dir = tmp_path / "reports"
+
+    source = _shooter(tmp_path / "before" / "bofors-bombardment-2026", audits={"stage1.json": "{}"})
+    (source / "trimmed" / "stage1_trimmed.mp4").write_bytes(b"0" * 999)
+    (source / "raw" / "IMG_9001.MOV").write_bytes(b"0" * 32)
+    before = lib.inventory_project(source)
+
+    survivor = _shooter(tmp_path / "after" / "unrelated-2026", audits={"stage1.json": "{}"}, token="t9")
+    after = lib.inventory_project(survivor)
+
+    _write_inventory(report_dir, "before", [before])
+    _write_inventory(report_dir, "after", [after])
+
+    with pytest.raises(SystemExit) as excinfo:
+        _verify(cli, report_dir)
+
+    assert excinfo.value.code == 1
+    report = json.loads((report_dir / "verify-before-vs-after.json").read_text())
+    checks = {finding["check"] for finding in report["blocking"]}
+    assert "project_paired" in checks
+    assert any("bofors-bombardment-2026" in finding["subject"] for finding in report["blocking"])
+
+
+def test_verify_pairs_a_renamed_relocated_project_by_shooter_token(tmp_path: Path) -> None:
+    """Same data, new name, new home, inside a merged match: still one project."""
+    cli, lib = _cli(), _lib()
+    report_dir = tmp_path / "reports"
+
+    legacy = _shooter(
+        tmp_path / "home" / "blacksmith-2026",
+        audits={"stage1.json": "{}", "stage2.json": "{}"},
+        token="s97dcec94",
+    )
+    merged = _merged_match(
+        tmp_path / "x9" / "blacksmith-handgun-open-2026",
+        slug="s_ce10fa76",
+        token="s97dcec94",
+        audits={"stage1.json": "{}", "stage2.json": "{}"},
+    )
+
+    _write_inventory(report_dir, "before", [lib.inventory_project(legacy)])
+    _write_inventory(report_dir, "after", [lib.inventory_project(merged)])
+
+    verify_path = _verify(cli, report_dir)
+
+    assert json.loads(verify_path.read_text())["blocking"] == []
+
+
+def test_verify_compares_a_renamed_project_rather_than_skipping_it(tmp_path: Path) -> None:
+    """The pairing has to be worth something: a doc lost in the move is named."""
+    cli, lib = _cli(), _lib()
+    report_dir = tmp_path / "reports"
+
+    legacy = _shooter(
+        tmp_path / "home" / "blacksmith-2026",
+        audits={"stage1.json": "{}", "stage2.json": "{}"},
+        token="s97dcec94",
+    )
+    merged = _merged_match(
+        tmp_path / "x9" / "blacksmith-handgun-open-2026",
+        slug="s_ce10fa76",
+        token="s97dcec94",
+        audits={"stage1.json": "{}"},
+    )
+
+    _write_inventory(report_dir, "before", [lib.inventory_project(legacy)])
+    _write_inventory(report_dir, "after", [lib.inventory_project(merged)])
+
+    with pytest.raises(SystemExit):
+        _verify(cli, report_dir)
+
+    report = json.loads((report_dir / "verify-before-vs-after.json").read_text())
+    assert any(
+        finding["check"] == "documents_survived" and "stage2.json" in finding["detail"]
+        for finding in report["blocking"]
+    )
+
+
+def test_reconcile_persists_its_deletable_verdict_and_verify_reads_it(tmp_path: Path) -> None:
+    """ "Never delete a source the destination lacks content from" must reach disk.
+
+    The verdict used to exist only as a line on stdout during the
+    reconcile, so no artifact a human opens before deleting encoded it.
+    """
+    import argparse
+
+    cli = _cli()
+    report_dir = tmp_path / "reports"
+
+    source = _shooter(tmp_path / "legacy", audits={"stage1.json": "{}"})
+    (source / "raw" / "IMG_9001.MOV").write_bytes(b"0" * 32)
+    destination = _shooter(tmp_path / "merged", audits={"stage1.json": "{}"})
+
+    cli.cmd_reconcile(
+        argparse.Namespace(source=source, destination=destination, apply=False, report_dir=report_dir)
+    )
+
+    records = json.loads((report_dir / cli.RECONCILE_LOG_NAME).read_text())
+    assert len(records) == 1
+    assert records[0]["deletable"] is False
+    assert records[0]["violations"][0]["document"] == "IMG_9001.MOV"
+
+    _write_inventory(report_dir, "before", [])
+    _write_inventory(report_dir, "after", [])
+
+    with pytest.raises(SystemExit) as excinfo:
+        _verify(cli, report_dir)
+
+    assert excinfo.value.code == 1
+    report = json.loads((report_dir / "verify-before-vs-after.json").read_text())
+    assert any(finding["check"] == "reconcile_deletable" for finding in report["blocking"])
+    assert any("IMG_9001.MOV" in finding["detail"] for finding in report["blocking"])
+
+
+def test_reconcile_appends_so_a_whole_phase_accumulates(tmp_path: Path) -> None:
+    import argparse
+
+    cli = _cli()
+    report_dir = tmp_path / "reports"
+
+    for index in (1, 2):
+        source = _shooter(tmp_path / f"legacy{index}", audits={"stage1.json": "{}"})
+        destination = _shooter(tmp_path / f"merged{index}", audits={"stage1.json": "{}"})
+        cli.cmd_reconcile(
+            argparse.Namespace(source=source, destination=destination, apply=False, report_dir=report_dir)
+        )
+
+    records = json.loads((report_dir / cli.RECONCILE_LOG_NAME).read_text())
+    assert [Path(record["source"]).name for record in records] == ["legacy1", "legacy2"]
+    assert all(record["deletable"] is True for record in records)
+    assert all(record["applied"] is False for record in records)
+
+
+def test_a_plan_run_does_not_claim_the_source_is_already_deletable(tmp_path, capsys) -> None:
+    """Without --apply nothing has been copied, so nothing is deletable yet."""
+    import argparse
+
+    cli = _cli()
+    source = _shooter(tmp_path / "legacy", audits={"stage1.json": "{}", "stage2.json": "{}"})
+    destination = _shooter(tmp_path / "merged", audits={"stage1.json": "{}"})
+
+    cli.cmd_reconcile(
+        argparse.Namespace(
+            source=source, destination=destination, apply=False, report_dir=tmp_path / "reports"
+        )
+    )
+
+    out = capsys.readouterr().out
+    assert "deletable_after_apply=True" in out
+    assert "deletable=True" not in out
+
+
+def test_an_applied_reconcile_states_the_verdict_plainly(tmp_path, capsys) -> None:
+    import argparse
+
+    cli = _cli()
+    source = _shooter(tmp_path / "legacy", audits={"stage1.json": "{}", "stage2.json": "{}"})
+    destination = _shooter(tmp_path / "merged", audits={"stage1.json": "{}"})
+
+    cli.cmd_reconcile(
+        argparse.Namespace(
+            source=source, destination=destination, apply=True, report_dir=tmp_path / "reports"
+        )
+    )
+
+    out = capsys.readouterr().out
+    assert "deletable=True" in out
+    assert (destination / "audit" / "stage2.json").exists()
+    records = json.loads((tmp_path / "reports" / cli.RECONCILE_LOG_NAME).read_text())
+    assert records[0]["applied"] is True

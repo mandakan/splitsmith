@@ -47,12 +47,21 @@ class RewriteOutcome(BaseModel):
 
 
 class RunReport(BaseModel):
-    """Aggregate result of one pass over the fixture tree."""
+    """Aggregate result of one pass over the fixture tree.
+
+    ``rewritten + already_canonical + unmapped + skipped`` equals the
+    number of fixture JSONs seen. ``skipped`` is what makes that sum
+    total: without it a fixture with unreadable JSON, a non-object
+    document or an empty ``source_video`` would leave the corpus while
+    the arithmetic still balanced.
+    """
 
     rewritten: int = 0
     already_canonical: int = 0
     unmapped: int = 0
     unmapped_paths: list[str] = []
+    skipped: int = 0
+    skipped_files: list[str] = []
 
 
 def rewrite_source_video(source_video: str, mapping: dict[str, str]) -> RewriteOutcome:
@@ -89,8 +98,12 @@ def run(*, fixtures_root: Path, mapping: dict[str, str], dry_run: bool) -> RunRe
         try:
             doc = json.loads(fixture_path.read_text())
         except json.JSONDecodeError:
+            report.skipped += 1
+            report.skipped_files.append(fixture_path.name)
             continue
         if not isinstance(doc, dict) or not doc.get("source_video"):
+            report.skipped += 1
+            report.skipped_files.append(fixture_path.name)
             continue
 
         outcome = rewrite_source_video(doc["source_video"], mapping)
@@ -128,8 +141,11 @@ def main() -> None:
     print(f"rewritten:         {report.rewritten}")
     print(f"already canonical: {report.already_canonical}")
     print(f"unmapped:          {report.unmapped}")
+    print(f"skipped:           {report.skipped}")
     for path in report.unmapped_paths:
         print(f"  unmapped: {path}")
+    for name in report.skipped_files:
+        print(f"  skipped:  {name} (unreadable JSON, not an object, or no source_video)")
     if report.unmapped:
         raise SystemExit(1)
 

@@ -69,6 +69,10 @@ def iter_target_fixtures(only: str | None, *, allow_missing_video: bool = False)
             continue
         source_video = resolve_source_video(data, path.stem, allow_missing=allow_missing_video)
         if source_video is None:
+            # Only reachable under --allow-missing-video, which opts into a
+            # partial corpus -- not into a silent one. A probe over half the
+            # fixtures has to look different from a probe over all of them.
+            print(f"  SKIP (video missing): {path.name}", file=sys.stderr)
             continue
         yield path
 

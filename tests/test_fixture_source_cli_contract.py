@@ -46,3 +46,33 @@ def test_script_exposes_allow_missing_video(name: str) -> None:
     parser = mod.build_parser()
     options = {action.option_strings[0] for action in parser._actions if action.option_strings}
     assert "--allow-missing-video" in options
+
+
+def test_the_probe_says_which_fixture_it_skipped(tmp_path: Path, monkeypatch, capsys) -> None:
+    """--allow-missing-video opts into a partial corpus, not a silent one.
+
+    A skip that prints nothing is the exact failure this branch exists to
+    eliminate: a probe over half the fixtures looks like a probe over all
+    of them.
+    """
+    import json
+
+    mod = _load("probe_visual_voter")
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    (fixtures / "stage-shots-tallmilan-2026-stage1-s36ed6e4e.json").write_text(
+        json.dumps(
+            {
+                "camera": {"id": "go3s", "mount": "head"},
+                "source_video": str(tmp_path / "unmounted" / "IMG_9001.MOV"),
+            }
+        )
+    )
+    monkeypatch.setattr(mod, "FIXTURES_DIR", fixtures)
+
+    kept = list(mod.iter_target_fixtures(None, allow_missing_video=True))
+
+    assert kept == []
+    err = capsys.readouterr().err
+    assert "SKIP" in err
+    assert "stage-shots-tallmilan-2026-stage1-s36ed6e4e" in err

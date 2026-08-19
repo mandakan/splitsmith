@@ -149,3 +149,32 @@ def test_path_boundary_matching_not_bare_string_prefix() -> None:
     # Should be unmapped because the path boundary check rejects bare prefix match.
     assert outcome.status == "unmapped"
     assert outcome.rewritten is None
+
+
+def test_a_fixture_that_falls_out_of_the_arithmetic_is_counted_and_named(tmp_path: Path) -> None:
+    """rewritten + already_canonical + unmapped must account for every fixture.
+
+    Malformed JSON, a non-dict document and an empty ``source_video`` were
+    skipped with no counter at all, so a fixture could fall out of the
+    corpus while the plan's ``== 161`` arithmetic still added up.
+    """
+    mod = _mod()
+    fixtures = tmp_path / "fixtures"
+    fixtures.mkdir()
+    (fixtures / "stage-shots-broken-stage1-s0fe3d797.json").write_text("{not json")
+    (fixtures / "stage-shots-list-stage2-s0fe3d797.json").write_text(json.dumps([1, 2, 3]))
+    (fixtures / "stage-shots-empty-stage3-s0fe3d797.json").write_text(json.dumps({"source_video": ""}))
+    (fixtures / "stage-shots-good-stage4-s0fe3d797.json").write_text(
+        json.dumps({"source_video": "/Volumes/X9/matches/vads-easter-shoot-2026-anton/raw/IMG_1295.mov"})
+    )
+
+    report = mod.run(fixtures_root=fixtures, mapping=MAPPING, dry_run=True)
+
+    assert report.skipped == 3
+    assert sorted(report.skipped_files) == [
+        "stage-shots-broken-stage1-s0fe3d797.json",
+        "stage-shots-empty-stage3-s0fe3d797.json",
+        "stage-shots-list-stage2-s0fe3d797.json",
+    ]
+    total = report.rewritten + report.already_canonical + report.unmapped + report.skipped
+    assert total == 4
