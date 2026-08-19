@@ -1997,7 +1997,39 @@ Expected: `both mounted`. If the share is absent, STOP -- phase 1 cannot run.
 cp ~/.splitsmith/projects.json ~/.splitsmith/projects.json.bak.before-consolidation
 ```
 
-- [ ] **Step 3: Take the inventory**
+- [ ] **Step 3: Carry shooter_token onto the X9 legacy copies**
+
+This must run before the baseline inventory (Step 4), not after it. A
+legacy project's only pairing key (once its identity is resolved through
+the rename map) is `shooter_token` -- it has no `slug`. If the baseline
+snapshot is taken first, five projects
+(`jinglebells-challenge-2026-anton`, `tallmilan-2025`, `tallmilan-2026`,
+`tallmilan-2026-janne`, `tallmilan-2026-martin`) have no token to pair on
+at that snapshot and `verify` reports failure on an otherwise-perfect
+migration. Doing it here, before phase 0, also means pairing this step's
+own source against destination by same-named directory
+(`~/matches/tallmilan-2026` to `/Volumes/X9/matches/tallmilan-2026`) is
+unambiguous; doing it after the merge would mean matching a home project
+against an opaque `s_<hex>` slug by competitor name.
+
+```bash
+cd /Users/mathias/work/splitsmith-lab
+for name in blacksmith-2026 blacksmith-handgun-2026-anton blacksmith-handgun-2026-martin \
+            tallmilan-2025 tallmilan-2026 tallmilan-2026-janne tallmilan-2026-martin; do
+  echo "== $name"
+  uv run python scripts/consolidate_matches.py reconcile \
+    --source ~/matches/$name --destination /Volumes/X9/matches/$name
+done
+```
+
+Expected per pair: at most one `set_shooter_token` action, zero
+`copy_audit_doc` actions (the audit docs were measured byte-identical),
+`violations=0`. `blacksmith-handgun-2026-anton` already agrees on both
+sides and should show no actions at all.
+
+Re-run each with `--apply` once the plans read correctly.
+
+- [ ] **Step 4: Take the inventory**
 
 ```bash
 cd /Users/mathias/work/splitsmith-lab
@@ -2006,7 +2038,7 @@ uv run python scripts/consolidate_matches.py inventory --label phase0 \
 ```
 Expected: 26 projects inventoried, with `BROKEN LINKS` flagged on `blacksmith-2026` (8, both copies), `tallmilan-2025` (6, both copies) and `ess-black-handgun-2026` (9).
 
-- [ ] **Step 4: Record the artifact-build baseline**
+- [ ] **Step 5: Record the artifact-build baseline**
 
 ```bash
 uv run python -c "
@@ -2020,7 +2052,7 @@ print(f'reachable_now={reachable}')
 ```
 Expected: `fixtures_with_source_video=161`, `reachable_now=161`.
 
-- [ ] **Step 5: Commit the baseline**
+- [ ] **Step 6: Commit the baseline**
 
 ```bash
 git add build/consolidation/phase0.json build/consolidation/baseline.txt
@@ -2136,32 +2168,13 @@ git commit -m "chore(migration): phase 1 raw consolidation, zero broken links"
 
 ### Task 11: Phase 2 -- merge the remaining legacy projects
 
-Tokens are carried onto the X9 legacy copies FIRST. Those pairs are
-same-named (``~/matches/tallmilan-2026`` to
-``/Volumes/X9/matches/tallmilan-2026``) so the destination is
-unambiguous; doing it after the merge would mean matching a home project
-against an opaque ``s_<hex>`` slug by competitor name.
+Tokens were already carried onto the X9 legacy copies, in Task 9 Step 3
+-- before the phase 0 baseline, not after this task's merges. Doing it
+that early keeps the source/destination pairing unambiguous (same-named
+directories) and gives every legacy project an identity to pair on from
+the very first inventory.
 
-- [ ] **Step 1: Carry shooter_token onto the X9 legacy copies**
-
-```bash
-cd /Users/mathias/work/splitsmith-lab
-for name in blacksmith-2026 blacksmith-handgun-2026-anton blacksmith-handgun-2026-martin \
-            tallmilan-2025 tallmilan-2026 tallmilan-2026-janne tallmilan-2026-martin; do
-  echo "== $name"
-  uv run python scripts/consolidate_matches.py reconcile \
-    --source ~/matches/$name --destination /Volumes/X9/matches/$name
-done
-```
-
-Expected per pair: at most one `set_shooter_token` action, zero
-`copy_audit_doc` actions (the audit docs were measured byte-identical),
-`violations=0`. `blacksmith-handgun-2026-anton` already agrees on both
-sides and should show no actions at all.
-
-Re-run each with `--apply` once the plans read correctly.
-
-- [ ] **Step 2: Merge tallmilan-2026 (3 shooters)**
+- [ ] **Step 1: Merge tallmilan-2026 (3 shooters)**
 
 ```bash
 cd /Users/mathias/work/splitsmith-lab
@@ -2174,7 +2187,7 @@ uv run splitsmith match merge \
 ```
 Read the plan. Then re-run without `--dry-run`. The output goes to a dot-prefixed temporary directory because the final slug collides with an existing legacy directory name.
 
-- [ ] **Step 3: Merge bofors-bombardment-2026 (2 shooters)**
+- [ ] **Step 2: Merge bofors-bombardment-2026 (2 shooters)**
 
 ```bash
 uv run splitsmith match merge \
@@ -2185,7 +2198,7 @@ uv run splitsmith match merge \
 ```
 Then re-run without `--dry-run`.
 
-- [ ] **Step 4: Convert the two solo shooters**
+- [ ] **Step 3: Convert the two solo shooters**
 
 ```bash
 uv run splitsmith match merge /Volumes/X9/matches/tallmilan-2025 \
@@ -2196,7 +2209,7 @@ uv run splitsmith match merge /Volumes/X9/matches/jinglebells-challenge-2026-ant
 ```
 `jinglebells-challenge-2026-anton` has no `scoreboard_match_id`, so `--name` is required; `plan_merge` raises `MergeConflictError` without it. Re-run both without `--dry-run`.
 
-- [ ] **Step 5: Swap the merged directories into their final slugs**
+- [ ] **Step 4: Swap the merged directories into their final slugs**
 
 ```bash
 for pair in \
@@ -2215,11 +2228,11 @@ done
 ```
 The legacy originals move to `_legacy/`, they are not deleted. Task 14 removes that directory once verification passes.
 
-- [ ] **Step 6: Relink the newly merged matches**
+- [ ] **Step 5: Relink the newly merged matches**
 
 Re-run the relink script from Task 10 Step 4. The merged shooters carry copies of the legacy `raw/` symlinks and must be re-pointed the same way.
 
-- [ ] **Step 7: Inventory and commit**
+- [ ] **Step 6: Inventory and commit**
 
 ```bash
 uv run python scripts/consolidate_matches.py inventory --label phase2 \

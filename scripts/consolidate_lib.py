@@ -47,6 +47,7 @@ class ShooterInventory(BaseModel):
     slug: str | None
     root: Path
     shooter_token: str | None
+    scoreboard_match_id: str | None = None
     audit_docs: dict[str, str] = Field(default_factory=dict)
     media_counts: dict[str, int] = Field(default_factory=dict)
     media_bytes: dict[str, int] = Field(default_factory=dict)
@@ -73,8 +74,11 @@ def _sha256(path: Path) -> str:
 def _inventory_shooter(root: Path, slug: str | None) -> ShooterInventory:
     project_file = root / "project.json"
     token: str | None = None
+    scoreboard_match_id: str | None = None
     if project_file.exists():
-        token = _load_document(project_file).get("shooter_token")
+        doc = _load_document(project_file)
+        token = doc.get("shooter_token")
+        scoreboard_match_id = doc.get("scoreboard_match_id")
 
     audit_dir = root / "audit"
     audit_docs = (
@@ -112,6 +116,7 @@ def _inventory_shooter(root: Path, slug: str | None) -> ShooterInventory:
         slug=slug,
         root=root,
         shooter_token=token,
+        scoreboard_match_id=scoreboard_match_id,
         audit_docs=audit_docs,
         media_counts=media_counts,
         media_bytes=media_bytes,
@@ -424,6 +429,42 @@ def verify_media_not_shrunk(before: ProjectInventory, after: ProjectInventory) -
     return findings
 
 
+def verify_raw_files_survived(before: ProjectInventory, after: ProjectInventory) -> list[VerifyFinding]:
+    """Every real file under ``raw/`` that existed before must exist after.
+
+    ``plan_reconcile`` already refuses to call a source deletable while it
+    holds a raw file the destination lacks. This is the independent check
+    that runs after the fact, over the inventories alone -- without it, a
+    source that never went through reconcile at all (or was reconciled
+    against the wrong destination) could still pass verify clean.
+    """
+    findings: list[VerifyFinding] = []
+    for shooter, counterpart in _pair_shooters(before, after):
+        if counterpart is None:
+            if shooter.raw_files:
+                findings.append(
+                    VerifyFinding(
+                        check="raw_files_survived",
+                        subject=_subject(shooter),
+                        detail=(
+                            f"unlinked raw footage present before ({', '.join(sorted(shooter.raw_files))}), "
+                            f"no counterpart shooter after migration"
+                        ),
+                    )
+                )
+            continue
+        lost = sorted(set(shooter.raw_files) - set(counterpart.raw_files))
+        if lost:
+            findings.append(
+                VerifyFinding(
+                    check="raw_files_survived",
+                    subject=_subject(shooter),
+                    detail=f"unlinked raw footage missing after migration: {', '.join(lost)}",
+                )
+            )
+    return findings
+
+
 def verify_no_broken_links(after: ProjectInventory) -> list[VerifyFinding]:
     """No shooter may hold a raw/ entry that does not resolve."""
     return [
@@ -545,7 +586,144 @@ def resolve_projects(
             continue
 
         pairs.append((project, candidates[0]))
+
+    before_names = {project.root.name for project in before}
+    for key in sorted(rename_map.destinations):
+        if key not in before_names:
+            findings.append(
+                VerifyFinding(
+                    check="rename_map_unmatched",
+                    subject=key,
+                    detail=(
+                        f"the rename map declares {key!r} -> {rename_map.destinations[key]!r}, but no "
+                        f"before-project named {key!r} exists in the before inventory -- an omitted "
+                        f"--root at inventory time makes a project invisible, not absent"
+                    ),
+                )
+            )
     return pairs, findings
+
+
+def verify_before_inventory_nonempty(before: list[ProjectInventory]) -> list[VerifyFinding]:
+    """An empty before-inventory is never a clean migration -- it's an unread file.
+
+    A truncated or accidentally-overwritten ``before.json`` decodes to
+    ``[]`` exactly like a real zero-project corpus would. Every other
+    check here compares before against after; with nothing on the before
+    side there is nothing to compare, and the gate passes vacuously.
+    """
+    if before:
+        return []
+    return [
+        VerifyFinding(
+            check="before_inventory_nonempty",
+            subject="<before inventory>",
+            detail="the before inventory holds 0 projects; refusing to verify a migration against nothing",
+        )
+    ]
+
+
+def _project_match_identity(project: ProjectInventory) -> str | None:
+    """The one match id this project claims, or None if it cannot say.
+
+    A merged match's own ``match_id`` wins. A legacy project has no
+    match.json, so its single shooter's ``scoreboard_match_id`` stands in.
+    """
+    if project.match_id:
+        return project.match_id
+    ids = {s.scoreboard_match_id for s in project.shooters if s.scoreboard_match_id}
+    if len(ids) == 1:
+        return next(iter(ids))
+    return None
+
+
+def verify_project_identity(
+    pairs: list[tuple[ProjectInventory, ProjectInventory]],
+) -> tuple[list[tuple[ProjectInventory, ProjectInventory]], list[VerifyFinding], list[VerifyFinding]]:
+    """Cross-check each resolved pair against ``scoreboard_match_id``/``match_id``.
+
+    The rename map declares identity, but nothing stops the map itself
+    from naming the wrong destination -- a mistyped entry that happens to
+    resolve to a real, different match compares cleanly otherwise: audit
+    docs are named identically in every match, and a shared shooter_token
+    survives the swap. The match id is the one thing the map cannot forge.
+
+    A disagreement is blocking: the map is provably pointing somewhere
+    wrong. An identity that cannot be checked because the field is unset
+    on either side is reported as a separate, non-blocking note rather
+    than blocking outright -- ``jinglebell-challenge-2026`` has no
+    ``scoreboard_match_id`` in this corpus at all (its merge already needs
+    an explicit ``--name`` for the same reason), and a project unique on
+    disk carries little of the risk this check exists for.
+    """
+    verified: list[tuple[ProjectInventory, ProjectInventory]] = []
+    blocking: list[VerifyFinding] = []
+    notes: list[VerifyFinding] = []
+    for project, destination in pairs:
+        before_id = _project_match_identity(project)
+        after_id = _project_match_identity(destination)
+        if before_id is not None and after_id is not None and before_id != after_id:
+            blocking.append(
+                VerifyFinding(
+                    check="project_identity_mismatch",
+                    subject=str(project.root),
+                    detail=(
+                        f"{project.root.name!r} resolves to {destination.root.name!r}, but their match "
+                        f"ids disagree: {before_id!r} (before) vs {after_id!r} (after) -- unforgeable "
+                        f"by the rename map"
+                    ),
+                )
+            )
+            continue
+        if before_id is None or after_id is None:
+            notes.append(
+                VerifyFinding(
+                    check="project_identity_unverifiable",
+                    subject=str(project.root),
+                    detail=(
+                        f"{project.root.name!r} resolves to {destination.root.name!r}, but "
+                        f"scoreboard_match_id/match_id is unset on the "
+                        f"{'before' if before_id is None else 'after'} side; identity could not be "
+                        f"cross-checked"
+                    ),
+                )
+            )
+        verified.append((project, destination))
+    return verified, blocking, notes
+
+
+def verify_reconcile_coverage(
+    before: list[ProjectInventory], rename_map: RenameMap, records: list[ReconcileRecord]
+) -> list[VerifyFinding]:
+    """Every before-project the map relocates must have its own reconcile record.
+
+    ``verify_reconcile_records`` only judges the verdicts of whatever
+    records exist in the log -- nothing ties a record to the project it
+    claims to cover, so one unrelated ``applied: true, deletable: true``
+    record satisfied the gate for every project in the corpus. A
+    self-mapping project (its declared destination is its own name) never
+    runs through ``reconcile`` and needs none; every other project must
+    have a record whose ``source`` is its own root.
+    """
+    covered = {record.source for record in records}
+    findings: list[VerifyFinding] = []
+    for project in before:
+        name = project.root.name
+        destination = rename_map.destinations.get(name)
+        if destination is None or destination == name:
+            continue
+        if project.root not in covered:
+            findings.append(
+                VerifyFinding(
+                    check="reconcile_covers_project",
+                    subject=str(project.root),
+                    detail=(
+                        f"the rename map sends {name!r} to {destination!r}, but no reconcile record "
+                        f"has source={project.root}; the deletion gate cannot vouch for it"
+                    ),
+                )
+            )
+    return findings
 
 
 def _project_identity(project: ProjectInventory) -> str:

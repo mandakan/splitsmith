@@ -269,10 +269,11 @@ def test_a_before_project_absent_from_the_map_is_a_blocking_finding(tmp_path: Pa
     pairs, findings = mod.resolve_projects(before, after, _map({"other-2026": "other-2026"}))
 
     assert pairs == []
-    assert len(findings) == 1
-    assert findings[0].check == "project_mapped"
-    assert "gone-2026" in findings[0].subject
-    assert "s0fe3d797" in findings[0].detail
+    checks = {f.check for f in findings}
+    assert checks == {"project_mapped", "rename_map_unmatched"}
+    mapped = next(f for f in findings if f.check == "project_mapped")
+    assert "gone-2026" in mapped.subject
+    assert "s0fe3d797" in mapped.detail
 
 
 def test_a_mapped_destination_missing_from_the_after_inventory_names_both(tmp_path: Path) -> None:

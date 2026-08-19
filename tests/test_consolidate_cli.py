@@ -35,11 +35,15 @@ def _lib():
         sys.path.pop(0)
 
 
-def _shooter(root: Path, *, audits: dict[str, str], token: str | None = None) -> Path:
+def _shooter(
+    root: Path, *, audits: dict[str, str], token: str | None = None, scoreboard_match_id: str | None = None
+) -> Path:
     root.mkdir(parents=True)
     project = {"schema_version": 2, "name": "M", "stages": []}
     if token is not None:
         project["shooter_token"] = token
+    if scoreboard_match_id is not None:
+        project["scoreboard_match_id"] = scoreboard_match_id
     (root / "project.json").write_text(json.dumps(project))
     (root / "audit").mkdir()
     for name, body in audits.items():
@@ -192,6 +196,24 @@ def _clean_log(report_dir: Path, tmp_path: Path) -> Path:
     )
 
 
+def _covering_log(report_dir: Path, sources: list[Path]) -> Path:
+    """One applied, deletable record per source -- satisfies per-project coverage."""
+    return _write_reconcile_log(
+        report_dir,
+        [
+            {
+                "source": str(source),
+                "destination": str(source),
+                "applied": True,
+                "action_count": 0,
+                "violations": [],
+                "deletable": True,
+            }
+            for source in sources
+        ],
+    )
+
+
 def _verify(cli, report_dir: Path, *, rename_map: Path, reconcile_log: Path | None = None) -> Path:
     """Run ``verify`` over the ``before``/``after`` labels, return the report path."""
     import argparse
@@ -208,9 +230,11 @@ def _verify(cli, report_dir: Path, *, rename_map: Path, reconcile_log: Path | No
     return report_dir / "verify-before-vs-after.json"
 
 
-def _merged_match(root: Path, *, slug: str, token: str, audits: dict[str, str]) -> Path:
+def _merged_match(
+    root: Path, *, slug: str, token: str, audits: dict[str, str], match_id: str = "m-1"
+) -> Path:
     (root / "shooters").mkdir(parents=True)
-    (root / "match.json").write_text(json.dumps({"match_id": "m-1", "name": "M"}))
+    (root / "match.json").write_text(json.dumps({"match_id": match_id, "name": "M"}))
     _shooter(root / "shooters" / slug, audits=audits, token=token)
     return root
 
@@ -481,7 +505,7 @@ def test_verify_resolves_a_renamed_project_through_the_map(tmp_path: Path) -> No
     _write_inventory(report_dir, "before", [lib.inventory_project(legacy)])
     _write_inventory(report_dir, "after", [lib.inventory_project(merged)])
     rename_map = _write_rename_map(report_dir, {"blacksmith-2026": "blacksmith-handgun-open-2026"})
-    log = _clean_log(report_dir, tmp_path)
+    log = _covering_log(report_dir, [tmp_path / "home" / "blacksmith-2026"])
 
     verify_path = _verify(cli, report_dir, rename_map=rename_map, reconcile_log=log)
 
@@ -553,7 +577,14 @@ def test_three_before_projects_may_declare_the_same_destination(tmp_path: Path) 
             "blacksmith-handgun-2026-martin": "blacksmith-handgun-open-2026",
         },
     )
-    log = _clean_log(report_dir, tmp_path)
+    log = _covering_log(
+        report_dir,
+        [
+            tmp_path / "home" / "blacksmith-2026",
+            tmp_path / "home" / "blacksmith-handgun-2026-anton",
+            tmp_path / "home" / "blacksmith-handgun-2026-martin",
+        ],
+    )
 
     verify_path = _verify(cli, report_dir, rename_map=rename_map, reconcile_log=log)
 
@@ -633,11 +664,11 @@ def test_a_later_reconcile_of_the_same_pair_supersedes_the_earlier_one(tmp_path:
     """
     import argparse
 
-    cli = _cli()
+    cli, lib = _cli(), _lib()
     report_dir = tmp_path / "reports"
-    source = _shooter(tmp_path / "legacy", audits={"stage1.json": "{}"})
+    source = _shooter(tmp_path / "legacy", audits={"stage1.json": "{}"}, token="s97dcec94")
     (source / "raw" / "IMG_9001.MOV").write_bytes(b"0" * 32)
-    destination = _shooter(tmp_path / "merged", audits={"stage1.json": "{}"})
+    destination = _shooter(tmp_path / "merged", audits={"stage1.json": "{}"}, token="s97dcec94")
 
     def reconcile(apply: bool) -> None:
         cli.cmd_reconcile(
@@ -664,10 +695,183 @@ def test_a_later_reconcile_of_the_same_pair_supersedes_the_earlier_one(tmp_path:
     assert records[0]["deletable"] is True
     assert records[0]["applied"] is True
 
-    _write_inventory(report_dir, "before", [])
-    _write_inventory(report_dir, "after", [])
-    rename_map = _write_rename_map(report_dir, {})
+    _write_inventory(report_dir, "before", [lib.inventory_project(source)])
+    _write_inventory(report_dir, "after", [lib.inventory_project(destination)])
+    rename_map = _write_rename_map(report_dir, {"legacy": "merged"})
 
     verify_path = _verify(cli, report_dir, rename_map=rename_map)
 
     assert json.loads(verify_path.read_text())["blocking"] == []
+
+
+# --- Coverage round: a clean report has to prove coverage, not just consistency --
+
+
+def test_verify_blocks_a_rename_map_entry_with_no_before_project(tmp_path: Path) -> None:
+    """Omitting a --root at inventory time makes a project invisible, not absent.
+
+    ``resolve_projects`` used to walk only the before-projects it was
+    handed, so a map entry for a project the inventory never saw --
+    because ``--root ~/Splitsmith`` was left off phase 0, say -- was
+    silently nothing. Task 17 would then delete a project verify never
+    even looked at.
+    """
+    cli, lib = _cli(), _lib()
+    report_dir = tmp_path / "reports"
+
+    real = _shooter(tmp_path / "before" / "real-2026", audits={"stage1.json": "{}"}, token="t1")
+    after_real = _merged_match(
+        tmp_path / "after" / "real-2026", slug="s_a", token="t1", audits={"stage1.json": "{}"}
+    )
+
+    _write_inventory(report_dir, "before", [lib.inventory_project(real)])
+    _write_inventory(report_dir, "after", [lib.inventory_project(after_real)])
+    rename_map = _write_rename_map(report_dir, {"real-2026": "real-2026", "oden-cup-2026": "oden-cup-2026"})
+    log = _covering_log(report_dir, [tmp_path / "before" / "real-2026"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        _verify(cli, report_dir, rename_map=rename_map, reconcile_log=log)
+
+    assert excinfo.value.code == 1
+    report = json.loads((report_dir / "verify-before-vs-after.json").read_text())
+    assert any(
+        f["check"] == "rename_map_unmatched" and "oden-cup-2026" in f["subject"] for f in report["blocking"]
+    )
+
+
+def test_inventory_refuses_to_overwrite_an_existing_label_without_force(tmp_path: Path) -> None:
+    import argparse
+
+    cli = _cli()
+    report_dir = tmp_path / "reports"
+    root = tmp_path / "matches"
+    _shooter(root / "solo-2026", audits={"stage1.json": "{}"})
+
+    cli.cmd_inventory(argparse.Namespace(label="phase0", root=[root], report_dir=report_dir, force=False))
+
+    with pytest.raises(SystemExit) as excinfo:
+        cli.cmd_inventory(argparse.Namespace(label="phase0", root=[root], report_dir=report_dir, force=False))
+    assert excinfo.value.code == 1
+
+    cli.cmd_inventory(argparse.Namespace(label="phase0", root=[root], report_dir=report_dir, force=True))
+
+
+def test_verify_blocks_an_empty_before_inventory(tmp_path: Path) -> None:
+    """A truncated ``before.json`` decodes to ``[]`` exactly like a real empty corpus would."""
+    cli, lib = _cli(), _lib()
+    report_dir = tmp_path / "reports"
+
+    survivor = _merged_match(
+        tmp_path / "after" / "real-2026", slug="s_a", token="t1", audits={"stage1.json": "{}"}
+    )
+    _write_inventory(report_dir, "before", [])
+    _write_inventory(report_dir, "after", [lib.inventory_project(survivor)])
+    rename_map = _write_rename_map(report_dir, {})
+    log = _clean_log(report_dir, tmp_path)
+
+    with pytest.raises(SystemExit) as excinfo:
+        _verify(cli, report_dir, rename_map=rename_map, reconcile_log=log)
+
+    assert excinfo.value.code == 1
+    report = json.loads((report_dir / "verify-before-vs-after.json").read_text())
+    assert any(f["check"] == "before_inventory_nonempty" for f in report["blocking"])
+
+
+def test_verify_blocks_when_no_reconcile_record_covers_a_relocated_project(tmp_path: Path) -> None:
+    """One unrelated applied+deletable record must not satisfy the gate for every project."""
+    cli, lib = _cli(), _lib()
+    report_dir = tmp_path / "reports"
+
+    legacy = _shooter(tmp_path / "home" / "blacksmith-2026", audits={"stage1.json": "{}"}, token="t1")
+    merged = _merged_match(
+        tmp_path / "x9" / "blacksmith-handgun-open-2026",
+        slug="s_a",
+        token="t1",
+        audits={"stage1.json": "{}"},
+    )
+
+    _write_inventory(report_dir, "before", [lib.inventory_project(legacy)])
+    _write_inventory(report_dir, "after", [lib.inventory_project(merged)])
+    rename_map = _write_rename_map(report_dir, {"blacksmith-2026": "blacksmith-handgun-open-2026"})
+    log = _covering_log(report_dir, [tmp_path / "unrelated"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        _verify(cli, report_dir, rename_map=rename_map, reconcile_log=log)
+
+    assert excinfo.value.code == 1
+    report = json.loads((report_dir / "verify-before-vs-after.json").read_text())
+    assert any(
+        f["check"] == "reconcile_covers_project" and "blacksmith-2026" in f["subject"]
+        for f in report["blocking"]
+    )
+
+
+def test_verify_blocks_a_wrong_map_entry_that_shares_a_token_but_not_a_match_id(tmp_path: Path) -> None:
+    """A wrong-but-existing map entry must not resolve on name + shared token alone.
+
+    ``blacksmith-2026`` and ``ess-black-handgun-2026`` are different real
+    events (scoreboard 27046 vs 25460) that happen to share a competitor
+    -- and so a shooter_token -- and identically-named ``stageN.json``
+    audit docs. scoreboard_match_id/match_id is the one thing the rename
+    map cannot forge.
+    """
+    cli, lib = _cli(), _lib()
+    report_dir = tmp_path / "reports"
+
+    legacy = _shooter(
+        tmp_path / "home" / "blacksmith-2026",
+        audits={"stage1.json": "{}"},
+        token="t1",
+        scoreboard_match_id="27046",
+    )
+    wrong_destination = _merged_match(
+        tmp_path / "x9" / "ess-black-handgun-2026",
+        slug="s_a",
+        token="t1",
+        audits={"stage1.json": "{}"},
+        match_id="25460",
+    )
+
+    _write_inventory(report_dir, "before", [lib.inventory_project(legacy)])
+    _write_inventory(report_dir, "after", [lib.inventory_project(wrong_destination)])
+    rename_map = _write_rename_map(report_dir, {"blacksmith-2026": "ess-black-handgun-2026"})
+    log = _covering_log(report_dir, [tmp_path / "home" / "blacksmith-2026"])
+
+    with pytest.raises(SystemExit) as excinfo:
+        _verify(cli, report_dir, rename_map=rename_map, reconcile_log=log)
+
+    assert excinfo.value.code == 1
+    report = json.loads((report_dir / "verify-before-vs-after.json").read_text())
+    assert any(
+        f["check"] == "project_identity_mismatch" and "27046" in f["detail"] and "25460" in f["detail"]
+        for f in report["blocking"]
+    )
+
+
+def test_verify_blocks_when_a_source_only_raw_file_vanishes(tmp_path: Path) -> None:
+    """``plan_reconcile`` already refuses to call this deletable; ``verify`` must agree independently."""
+    cli, lib = _cli(), _lib()
+    report_dir = tmp_path / "reports"
+
+    before_root = _shooter(tmp_path / "before" / "match" / "s_a", audits={"stage1.json": "{}"}, token="t1")
+    (before_root / "raw" / "IMG_9001.MOV").write_bytes(b"0" * 32)
+    before = lib.ProjectInventory(root=tmp_path / "before" / "match", kind="legacy", shooters=[])
+    before.shooters.append(lib.inventory_project(before_root).shooters[0])
+
+    after_root = _shooter(tmp_path / "after" / "match" / "s_a", audits={"stage1.json": "{}"}, token="t1")
+    after = lib.ProjectInventory(root=tmp_path / "after" / "match", kind="legacy", shooters=[])
+    after.shooters.append(lib.inventory_project(after_root).shooters[0])
+
+    _write_inventory(report_dir, "before", [before])
+    _write_inventory(report_dir, "after", [after])
+    rename_map = _write_rename_map(report_dir, {"match": "match"})
+    log = _clean_log(report_dir, tmp_path)
+
+    with pytest.raises(SystemExit) as excinfo:
+        _verify(cli, report_dir, rename_map=rename_map, reconcile_log=log)
+
+    assert excinfo.value.code == 1
+    report = json.loads((report_dir / "verify-before-vs-after.json").read_text())
+    assert any(
+        f["check"] == "raw_files_survived" and "IMG_9001.MOV" in f["detail"] for f in report["blocking"]
+    )

@@ -59,10 +59,14 @@ from consolidate_lib import (  # noqa: E402
     record_reconcile,
     resolve_projects,
     supersede_records,
+    verify_before_inventory_nonempty,
     verify_documents_replaced,
     verify_documents_survived,
     verify_media_not_shrunk,
     verify_no_broken_links,
+    verify_project_identity,
+    verify_raw_files_survived,
+    verify_reconcile_coverage,
     verify_reconcile_records,
     verify_tokens_preserved,
 )
@@ -164,15 +168,21 @@ def reconcile_log_path(args: argparse.Namespace) -> Path:
 
 
 def cmd_inventory(args: argparse.Namespace) -> None:
+    out = args.report_dir / f"{args.label}.json"
+    if out.exists() and not args.force:
+        print(f"error: {out} already exists; pass --force to overwrite an existing label", file=sys.stderr)
+        raise SystemExit(1)
+
     projects: list[ProjectInventory] = []
+    skipped: list[Path] = []
     for root in args.root:
         for project_root in _iter_projects(root):
             if not (project_root / "project.json").exists() and not (project_root / "match.json").exists():
+                skipped.append(project_root)
                 continue
             projects.append(inventory_project(project_root))
 
     args.report_dir.mkdir(parents=True, exist_ok=True)
-    out = args.report_dir / f"{args.label}.json"
     out.write_text(json.dumps([json.loads(p.model_dump_json()) for p in projects], indent=2) + "\n")
     print(f"inventoried {len(projects)} project(s) -> {out}")
     for project in projects:
@@ -182,6 +192,10 @@ def cmd_inventory(args: argparse.Namespace) -> None:
         print(
             f"  {project.root.name:38s} {project.kind:6s} shooters={len(project.shooters)} docs={docs}{flag}"
         )
+    if skipped:
+        print(f"skipped {len(skipped)} director(ies) lacking project.json/match.json:")
+        for path in skipped:
+            print(f"  {path}")
 
 
 def cmd_reconcile(args: argparse.Namespace) -> None:
@@ -232,12 +246,24 @@ def cmd_verify(args: argparse.Namespace) -> None:
     # tried and both verified a lost project clean. Every before-project
     # that fails to resolve is itself blocking.
     rename_map = load_rename_map(args.rename_map)
-    pairs, blocking = resolve_projects(before, after, rename_map)
+    blocking = verify_before_inventory_nonempty(before)
+    pairs, resolve_findings = resolve_projects(before, after, rename_map)
+    blocking.extend(resolve_findings)
+    # scoreboard_match_id/match_id is the one thing the rename map cannot
+    # forge -- a mistyped destination that happens to name a real, different
+    # match would otherwise resolve and compare cleanly. Pairs whose
+    # identity cannot be verified are still compared (see the docstring on
+    # verify_project_identity); pairs whose identity provably disagrees are
+    # not.
+    pairs, identity_blocking, identity_notes = verify_project_identity(pairs)
+    blocking.extend(identity_blocking)
+
     replaced = []
     for project, counterpart in pairs:
         blocking.extend(verify_documents_survived(project, counterpart))
         blocking.extend(verify_media_not_shrunk(project, counterpart))
         blocking.extend(verify_tokens_preserved(project, counterpart))
+        blocking.extend(verify_raw_files_survived(project, counterpart))
         replaced.extend(verify_documents_replaced(project, counterpart))
     for project in after:
         blocking.extend(verify_no_broken_links(project))
@@ -246,10 +272,14 @@ def cmd_verify(args: argparse.Namespace) -> None:
     # clean before/after diff: a source that held content its destination
     # never received is not deletable, however tidy the inventories look.
     # An absent log is not a clean run either -- it is a check that never
-    # ran, and verify_reconcile_records says so.
+    # ran, and verify_reconcile_records says so. verify_reconcile_coverage
+    # closes the other half: a record has to name the project it covers,
+    # or one unrelated applied+deletable record satisfies the gate for
+    # every project in the corpus.
     log_path = reconcile_log_path(args)
     records = load_reconcile_records(log_path)
     blocking.extend(verify_reconcile_records(records, log_path=log_path))
+    blocking.extend(verify_reconcile_coverage(before, rename_map, records))
 
     out = report_dir / f"verify-{args.before}-vs-{args.after}.json"
     out.write_text(
@@ -257,6 +287,7 @@ def cmd_verify(args: argparse.Namespace) -> None:
             {
                 "blocking": [json.loads(f.model_dump_json()) for f in blocking],
                 "replaced": [json.loads(f.model_dump_json()) for f in replaced],
+                "identity_notes": [json.loads(f.model_dump_json()) for f in identity_notes],
             },
             indent=2,
         )
@@ -274,6 +305,12 @@ def cmd_verify(args: argparse.Namespace) -> None:
         for finding in replaced:
             print(f"  {finding.check}: {finding.subject} -- {finding.detail}")
     print(f"{len(replaced)} replaced document(s) (not blocking) -> {out}")
+
+    if identity_notes:
+        print("identity unverifiable (not blocking):")
+        for finding in identity_notes:
+            print(f"  {finding.check}: {finding.subject} -- {finding.detail}")
+    print(f"{len(identity_notes)} identity note(s) (not blocking) -> {out}")
 
     if blocking:
         raise SystemExit(1)
@@ -294,6 +331,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_inv = sub.add_parser("inventory")
     p_inv.add_argument("--label", required=True)
     p_inv.add_argument("--root", type=Path, action="append", required=True)
+    p_inv.add_argument("--force", action="store_true", help="Overwrite an existing label's inventory file.")
     add_report_dir(p_inv)
     p_inv.set_defaults(func=cmd_inventory)
 
