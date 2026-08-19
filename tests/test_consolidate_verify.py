@@ -33,8 +33,10 @@ def _match(root: Path, shooters: dict[str, dict]) -> Path:
             project["shooter_token"] = spec["token"]
         (shooter / "project.json").write_text(json.dumps(project))
         (shooter / "audit").mkdir()
+        audit_content = spec.get("audit_content", {})
         for name in spec.get("audits", []):
-            (shooter / "audit" / name).write_text(json.dumps({"doc": name}))
+            content = audit_content.get(name, json.dumps({"doc": name}))
+            (shooter / "audit" / name).write_text(content)
         (shooter / "trimmed").mkdir()
         for index in range(spec.get("trimmed", 0)):
             (shooter / "trimmed" / f"stage{index + 1}_trimmed.mp4").write_bytes(b"0" * 64)
@@ -102,3 +104,69 @@ def test_a_dropped_shooter_token_is_a_finding(tmp_path: Path) -> None:
 
     assert len(findings) == 1
     assert "s97dcec94" in findings[0].detail
+
+
+def test_a_same_name_different_hash_document_is_replaced_not_lost(tmp_path: Path) -> None:
+    mod = _mod()
+    before = mod.inventory_project(
+        _match(
+            tmp_path / "before",
+            {
+                "s_a": {
+                    "token": "t",
+                    "audits": ["stage1.json"],
+                    "audit_content": {"stage1.json": '{"v": 1}'},
+                }
+            },
+        )
+    )
+    after = mod.inventory_project(
+        _match(
+            tmp_path / "after",
+            {
+                "s_a": {
+                    "token": "t",
+                    "audits": ["stage1.json"],
+                    "audit_content": {"stage1.json": '{"v": 2}'},
+                }
+            },
+        )
+    )
+
+    replaced = mod.verify_documents_replaced(before, after)
+    survived = mod.verify_documents_survived(before, after)
+
+    assert survived == []
+    assert len(replaced) == 1
+    assert replaced[0].subject == "t"
+    assert "stage1.json" in replaced[0].detail
+
+
+def test_a_same_name_same_hash_document_reports_nothing(tmp_path: Path) -> None:
+    mod = _mod()
+    spec = {
+        "s_a": {
+            "token": "t",
+            "audits": ["stage1.json"],
+            "audit_content": {"stage1.json": '{"v": 1}'},
+        }
+    }
+    before = mod.inventory_project(_match(tmp_path / "before", spec))
+    after = mod.inventory_project(_match(tmp_path / "after", spec))
+
+    assert mod.verify_documents_replaced(before, after) == []
+    assert mod.verify_documents_survived(before, after) == []
+
+
+def test_a_vanished_shooter_is_a_media_finding_with_byte_counts(tmp_path: Path) -> None:
+    mod = _mod()
+    before = mod.inventory_project(
+        _match(tmp_path / "before", {"s_a": {"token": "t", "audits": [], "trimmed": 2}})
+    )
+    after = mod.inventory_project(_match(tmp_path / "after", {}))
+
+    findings = mod.verify_media_not_shrunk(before, after)
+
+    assert len(findings) == 1
+    assert findings[0].subject == "t"
+    assert "128" in findings[0].detail

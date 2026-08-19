@@ -296,11 +296,51 @@ def verify_documents_survived(before: ProjectInventory, after: ProjectInventory)
     return findings
 
 
+def verify_documents_replaced(before: ProjectInventory, after: ProjectInventory) -> list[VerifyFinding]:
+    """Audit docs present on both sides whose content hash differs.
+
+    Not blocking: ``plan_reconcile`` deliberately lets the destination's
+    copy win when both sides carry a document, because merged copies were
+    measured to carry strictly more audit history. A hash mismatch here is
+    the "documented newer replacement" half of the spec sentence -- it
+    exists so a human can confirm the replacement is that, not silent
+    corruption of a same-named file during the migration.
+    """
+    findings: list[VerifyFinding] = []
+    for shooter, counterpart in _pair_shooters(before, after):
+        if counterpart is None:
+            continue
+        for name in sorted(shooter.audit_docs):
+            if name not in counterpart.audit_docs:
+                continue
+            before_hash = shooter.audit_docs[name]
+            after_hash = counterpart.audit_docs[name]
+            if before_hash != after_hash:
+                findings.append(
+                    VerifyFinding(
+                        check="documents_replaced",
+                        subject=_subject(shooter),
+                        detail=f"{name}: {before_hash[:12]} before, {after_hash[:12]} after",
+                    )
+                )
+    return findings
+
+
 def verify_media_not_shrunk(before: ProjectInventory, after: ProjectInventory) -> list[VerifyFinding]:
     """Per media directory, the destination must hold at least as many bytes."""
     findings: list[VerifyFinding] = []
     for shooter, counterpart in _pair_shooters(before, after):
         if counterpart is None:
+            for media_dir in MEDIA_DIRS:
+                was = shooter.media_bytes.get(media_dir, 0)
+                if was:
+                    findings.append(
+                        VerifyFinding(
+                            check="media_not_shrunk",
+                            subject=_subject(shooter),
+                            detail=f"{media_dir}: {was} bytes before, no counterpart shooter after migration",
+                        )
+                    )
             continue
         for media_dir in MEDIA_DIRS:
             was = shooter.media_bytes.get(media_dir, 0)
