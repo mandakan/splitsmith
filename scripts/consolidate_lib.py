@@ -145,7 +145,13 @@ def inventory_project(root: Path) -> ProjectInventory:
             if shooters_dir.is_dir()
             else []
         )
-        return ProjectInventory(root=root, kind="match", match_id=doc.get("match_id"), shooters=shooters)
+        # match.json's own `match_id` is an internal identifier
+        # (match_model.generate_match_id) auto-filled on load/save, not the
+        # scoreboard link -- on disk before that first load it is null.
+        # `scoreboard_match_id` is what a legacy project's shooter-level
+        # field can actually be cross-checked against, so it takes priority.
+        identity = doc.get("scoreboard_match_id") or doc.get("match_id")
+        return ProjectInventory(root=root, kind="match", match_id=identity, shooters=shooters)
 
     return ProjectInventory(root=root, kind="legacy", shooters=[_inventory_shooter(root, None)])
 
