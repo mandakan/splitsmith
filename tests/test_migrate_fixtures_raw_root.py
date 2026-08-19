@@ -106,3 +106,46 @@ def test_dry_run_writes_nothing(tmp_path: Path) -> None:
 
     assert report.rewritten == 1
     assert json.loads(target.read_text())["source_video"] == original
+
+
+def test_longest_prefix_wins_when_overlapping_keys_match() -> None:
+    """Mapping may contain both match-level and shooter-level entries.
+
+    When both a shorter and longer prefix match the same input path,
+    the longest one wins (via max(matches, key=len)).
+    """
+    mod = _mod()
+    # This mapping has overlapping prefixes: the longer one is more specific.
+    overlapping_mapping = {
+        "/Volumes/X9/matches/rally-2026": "/Volumes/X9/matches/rally-2026/fixed",
+        "/Volumes/X9/matches/rally-2026/raw/shooter1": (
+            "/Volumes/X9/matches/rally-2026/shooters/s_abc123/raw"
+        ),
+    }
+    # Input matches both prefixes, but the longer one should win.
+    outcome = mod.rewrite_source_video(
+        "/Volumes/X9/matches/rally-2026/raw/shooter1/IMG_0001.mov", overlapping_mapping
+    )
+    assert outcome.status == "rewritten"
+    # Should use the destination of the longer (more specific) prefix.
+    assert outcome.rewritten == "/Volumes/X9/matches/rally-2026/shooters/s_abc123/raw/IMG_0001.mov"
+
+
+def test_path_boundary_matching_not_bare_string_prefix() -> None:
+    """Matching is on path boundaries, not bare string prefixes.
+
+    A mapping for /path/to/raw/2026-tallmilan should NOT match an input
+    under /path/to/raw/2026-tallmilan-extra/, even though the string is
+    a prefix. The boundary logic (parent.startswith(f"{old}/")) prevents
+    this.
+    """
+    mod = _mod()
+    # Mapping keyed on a directory whose NAME is a string prefix of another.
+    boundary_mapping = {
+        "/Volumes/X9/raw/2026-tallmilan": ("/Volumes/X9/matches/tallmilan-2026/shooters/s_deadbeef/raw"),
+    }
+    # Input is under a DIFFERENT directory that shares a name prefix.
+    outcome = mod.rewrite_source_video("/Volumes/X9/raw/2026-tallmilan-extra/IMG_1234.mov", boundary_mapping)
+    # Should be unmapped because the path boundary check rejects bare prefix match.
+    assert outcome.status == "unmapped"
+    assert outcome.rewritten is None
