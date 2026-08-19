@@ -75,3 +75,65 @@ def test_model_artifacts_block_carries_across_rebuilds(tmp_path: Path) -> None:
     assert mod._carry_model_artifacts(tmp_path / "missing.json") is None
     cal_path.write_text(json.dumps({"voter_a_floor": 0.1}))
     assert mod._carry_model_artifacts(cal_path) is None
+
+
+def test_visual_universe_raises_when_a_source_video_is_unreachable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unmounted drive must fail the build, not shrink the corpus.
+
+    The old behaviour appended the fixture to ``skipped_no_video`` and
+    carried on, so a build over 83 of 161 fixtures produced artifacts
+    that looked exactly like a full build.
+    """
+    from splitsmith.fixture_sources import MissingSourceVideoError
+
+    mod = _build_mod()
+    fixtures_dir = tmp_path / "fixtures"
+    fixtures_dir.mkdir()
+    fix = "stage-shots-hfo-masters-2026-stage1-s0fe3d797"
+    (fixtures_dir / f"{fix}.json").write_text(
+        json.dumps(
+            {
+                "stage_number": 1,
+                "beep_time": 1.0,
+                "shots": [{"time": 2.0}],
+                "source_video": str(tmp_path / "unmounted" / "stage_1.mov"),
+                "fixture_window_in_source": [0.0, 10.0],
+            }
+        )
+    )
+    (fixtures_dir / f"{fix}.wav").write_bytes(b"RIFF")
+    monkeypatch.setattr(mod, "FIXTURES_DIR", fixtures_dir)
+
+    with pytest.raises(MissingSourceVideoError) as excinfo:
+        mod._build_visual_universe([fix], 75.0, log=lambda _msg: None)
+
+    assert fix in str(excinfo.value)
+
+
+def test_visual_universe_skips_unreachable_video_when_explicitly_allowed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    mod = _build_mod()
+    fixtures_dir = tmp_path / "fixtures"
+    fixtures_dir.mkdir()
+    fix = "stage-shots-hfo-masters-2026-stage1-s0fe3d797"
+    (fixtures_dir / f"{fix}.json").write_text(
+        json.dumps(
+            {
+                "stage_number": 1,
+                "beep_time": 1.0,
+                "shots": [{"time": 2.0}],
+                "source_video": str(tmp_path / "unmounted" / "stage_1.mov"),
+                "fixture_window_in_source": [0.0, 10.0],
+            }
+        )
+    )
+    (fixtures_dir / f"{fix}.wav").write_bytes(b"RIFF")
+    monkeypatch.setattr(mod, "FIXTURES_DIR", fixtures_dir)
+
+    rows, missing = mod._build_visual_universe([fix], 75.0, allow_missing_video=True, log=lambda _msg: None)
+
+    assert rows == []
+    assert missing == [fix]
