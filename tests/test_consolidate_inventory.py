@@ -85,3 +85,22 @@ def test_records_broken_symlinks_by_name(tmp_path: Path) -> None:
     shooter = inv.shooters[0]
     assert shooter.broken_links == ["IMG_2979.MOV"]
     assert shooter.link_targets["IMG_2986.MOV"] == str(real)
+
+
+def test_records_real_files_in_raw_directory(tmp_path: Path) -> None:
+    mod = _mod()
+    root = _legacy_project(tmp_path / "stockton-2026")
+    # Add a real file (not a symlink) to raw/
+    (root / "raw" / "footage.MOV").write_bytes(b"x" * 256)
+    # Add a symlink to raw/ to verify they are not mixed
+    real_external = tmp_path / "external.MOV"
+    real_external.write_bytes(b"y" * 512)
+    (root / "raw" / "linked.MOV").symlink_to(real_external)
+
+    inv = mod.inventory_project(root)
+
+    shooter = inv.shooters[0]
+    assert shooter.raw_files["footage.MOV"] == 256
+    assert "linked.MOV" in shooter.link_targets
+    assert "linked.MOV" not in shooter.raw_files
+    assert "footage.MOV" not in shooter.link_targets

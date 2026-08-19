@@ -32,6 +32,7 @@ class ShooterInventory(BaseModel):
     media_bytes: dict[str, int] = Field(default_factory=dict)
     link_targets: dict[str, str] = Field(default_factory=dict)
     broken_links: list[str] = Field(default_factory=list)
+    raw_files: dict[str, int] = Field(default_factory=dict)
 
 
 class ProjectInventory(BaseModel):
@@ -75,6 +76,7 @@ def _inventory_shooter(root: Path, slug: str | None) -> ShooterInventory:
 
     link_targets: dict[str, str] = {}
     broken_links: list[str] = []
+    raw_files: dict[str, int] = {}
     raw_dir = root / "raw"
     if raw_dir.is_dir():
         for entry in sorted(raw_dir.iterdir()):
@@ -84,6 +86,8 @@ def _inventory_shooter(root: Path, slug: str | None) -> ShooterInventory:
                 link_targets[entry.name] = str(Path(entry.readlink()))
             if not entry.exists():
                 broken_links.append(entry.name)
+            elif entry.is_file() and not entry.is_symlink():
+                raw_files[entry.name] = entry.stat().st_size
 
     return ShooterInventory(
         slug=slug,
@@ -94,6 +98,7 @@ def _inventory_shooter(root: Path, slug: str | None) -> ShooterInventory:
         media_bytes=media_bytes,
         link_targets=link_targets,
         broken_links=broken_links,
+        raw_files=raw_files,
     )
 
 
