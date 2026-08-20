@@ -268,7 +268,7 @@ export function Home() {
             <>
               <span className="text-whisper">&middot;</span>
               <a
-                href={`https://scoreboard.urdr.dev/${project.scoreboard_content_type}/${project.scoreboard_match_id}`}
+                href={`https://scoreboard.urdr.dev/match/${project.scoreboard_content_type}/${project.scoreboard_match_id}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-led hover:text-led-soft"
