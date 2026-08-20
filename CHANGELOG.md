@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.33.1](https://github.com/mandakan/splitsmith/compare/v0.33.0...v0.33.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **beep:** saturate silence-preference so loudness stops deciding the ranking ([#950](https://github.com/mandakan/splitsmith/issues/950)) ([2f9e7d2](https://github.com/mandakan/splitsmith/commit/2f9e7d26b24bfaaec12050edb210903511cb77b0))
+* **ui:** point the scoreboard match link at /match, not the bare id path ([#954](https://github.com/mandakan/splitsmith/issues/954)) ([860d4b1](https://github.com/mandakan/splitsmith/commit/860d4b1f77e00a22607ff2eb8146d09f7793a72b))
+
 ## [0.33.0](https://github.com/mandakan/splitsmith/compare/v0.32.2...v0.33.0) (2026-08-18)
 
 
