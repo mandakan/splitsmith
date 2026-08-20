@@ -72,6 +72,7 @@ from splitsmith.ensemble.calibration import (
     load_voter_e_probe,
 )
 from splitsmith.ensemble.tta import compute_tta_agreement
+from splitsmith.fixture_sources import resolve_source_video
 from splitsmith.shot_detect import detect_shots
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -114,7 +115,9 @@ def _label(cand_t: list[float], truth_shots: list[dict], tol_ms: float) -> list[
     return labels
 
 
-def _locate_source_video(truth: dict, fixture: str) -> tuple[Path, float] | None:
+def _locate_source_video(
+    truth: dict, fixture: str, *, allow_missing_video: bool = False
+) -> tuple[Path, float] | None:
     """Return ``(video_path, source_beep_time)`` for Voter E, or None.
 
     The audit JSON carries the original source video filename + beep
@@ -128,15 +131,10 @@ def _locate_source_video(truth: dict, fixture: str) -> tuple[Path, float] | None
     beep = source.get("beep_time") or source.get("source_beep_time")
     if not name or beep is None:
         return None
-    candidates = [
-        FULL_DIR / name,
-        FIXTURES_DIR / name,
-        REPO_ROOT / name,
-    ]
-    for p in candidates:
-        if p.exists():
-            return p, float(beep)
-    return None
+    source_video = resolve_source_video(truth, fixture, allow_missing=allow_missing_video)
+    if source_video is None:
+        return None
+    return source_video, float(beep)
 
 
 def build_signals(
@@ -144,6 +142,7 @@ def build_signals(
     tolerance_ms: float,
     *,
     skip_voter_e: bool,
+    allow_missing_video: bool = False,
 ) -> tuple[pa.Table, dict]:
     """Produce the signals table + sidecar provenance dict."""
     cal = load_calibration()
@@ -231,7 +230,7 @@ def build_signals(
         voter_e_signal = np.full(n, np.nan, dtype=np.float64)
         voter_e_ok = False
         if visual_runtime is not None:
-            located = _locate_source_video(truth, fix)
+            located = _locate_source_video(truth, fix, allow_missing_video=allow_missing_video)
             if located is not None:
                 video_path, source_beep_time = located
                 source_times = vis.candidate_times_in_source(
@@ -307,7 +306,7 @@ def build_signals(
     return table, sidecar
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument(
         "--fixture",
@@ -326,12 +325,29 @@ def main() -> None:
         default=OUT_DIR / "signals.parquet",
         help="Output parquet path. Default: build/sweeps/signals.parquet",
     )
-    args = p.parse_args()
+    p.add_argument(
+        "--allow-missing-video",
+        action="store_true",
+        help=(
+            "Process only the fixtures whose source_video is reachable. "
+            "OFF by default so an unmounted volume fails loudly."
+        ),
+    )
+    return p
+
+
+def main() -> None:
+    args = build_parser().parse_args()
 
     fixtures = args.fixture or list(DEFAULT_FIXTURES)
     args.out.parent.mkdir(parents=True, exist_ok=True)
 
-    table, sidecar = build_signals(fixtures, args.tolerance_ms, skip_voter_e=args.skip_voter_e)
+    table, sidecar = build_signals(
+        fixtures,
+        args.tolerance_ms,
+        skip_voter_e=args.skip_voter_e,
+        allow_missing_video=args.allow_missing_video,
+    )
     pq.write_table(table, args.out)
     sidecar_path = args.out.with_suffix(".meta.json")
     sidecar_path.write_text(json.dumps(sidecar, indent=2))

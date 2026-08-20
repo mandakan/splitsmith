@@ -19,6 +19,7 @@ Run:
 
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 
@@ -29,6 +30,7 @@ from splitsmith.ensemble import (
     load_ensemble_runtime,
 )
 from splitsmith.ensemble.calibration import camera_class_from_mount
+from splitsmith.fixture_sources import resolve_source_video
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
@@ -90,7 +92,22 @@ def _eval(name: str, kept: list[bool], is_shot: list[bool]) -> dict:
     }
 
 
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    p.add_argument(
+        "--allow-missing-video",
+        action="store_true",
+        help=(
+            "Process only the fixtures whose source_video is reachable. "
+            "OFF by default so an unmounted volume fails loudly."
+        ),
+    )
+    return p
+
+
 def main() -> int:
+    args = build_parser().parse_args()
+
     runtime = load_ensemble_runtime(with_voter_e=True)
     if runtime.visual is None:
         print("Voter E artifacts not shipped; rebuild calibration first.")
@@ -107,7 +124,8 @@ def main() -> int:
         cam = d.get("camera") or {}
         if cam.get("id") != "go3s" or cam.get("mount") != "head":
             continue
-        if not d.get("source_video") or not Path(d["source_video"]).exists():
+        source_video = resolve_source_video(d, p.stem, allow_missing=args.allow_missing_video)
+        if source_video is None:
             continue
         fixtures.append(p)
 

@@ -65,6 +65,7 @@ from splitsmith.ensemble.fixtures import (
 )
 from splitsmith.ensemble.tta import compute_tta_agreement
 from splitsmith.ensemble.voters import within_stage_amp_anchor
+from splitsmith.fixture_sources import resolve_source_video
 from splitsmith.shot_detect import detect_shots
 
 # Every audited fixture; the discovery is filesystem-driven so adding a
@@ -595,6 +596,7 @@ def _build_visual_universe(
     tolerance_ms: float,
     *,
     rebuild: bool = False,
+    allow_missing_video: bool = False,
     log: Callable[[str], None] = print,
 ) -> tuple[list[dict], list[str]]:
     """Compute CLIP image embeddings + labels for Voter E calibration.
@@ -636,13 +638,9 @@ def _build_visual_universe(
         if cam_class != DEFAULT_CAMERA_CLASS:
             continue
 
-        source_video_str = truth.get("source_video") or ""
         window = truth.get("fixture_window_in_source") or [0.0, 0.0]
-        if not source_video_str:
-            skipped_no_video.append(fix)
-            continue
-        source_video = Path(source_video_str)
-        if not source_video.exists():
+        source_video = resolve_source_video(truth, fix, allow_missing=allow_missing_video)
+        if source_video is None:
             skipped_no_video.append(fix)
             continue
 
@@ -898,6 +896,7 @@ def build_artifacts(
     voter_e: bool = True,
     voter_e_target_recall: float = DEFAULT_VOTER_E_TARGET_RECALL,
     rebuild_visual: bool = False,
+    allow_missing_video: bool = False,
     log: Callable[[str], None] = print,
 ) -> dict:
     """Run the calibration build and write artifacts under ``DATA_DIR``.
@@ -1023,7 +1022,11 @@ def build_artifacts(
     if voter_e:
         log("Voter E: building visual universe...")
         visual_universe, missing_video = _build_visual_universe(
-            fixtures, tolerance_ms, rebuild=rebuild_visual, log=log
+            fixtures,
+            tolerance_ms,
+            rebuild=rebuild_visual,
+            allow_missing_video=allow_missing_video,
+            log=log,
         )
         if missing_video:
             log("  skipped (source_video unreachable): " + ", ".join(sorted(missing_video)))
@@ -1174,6 +1177,16 @@ def main() -> None:
             "ignoring tests/fixtures/.cache/{fix}_visual.npz."
         ),
     )
+    p.add_argument(
+        "--allow-missing-video",
+        action="store_true",
+        help=(
+            "Build Voter E features from only the fixtures whose source_video "
+            "is reachable. OFF by default: a partial corpus produces artifacts "
+            "indistinguishable from a full build, so an unmounted drive must "
+            "fail the build rather than silently shrink it."
+        ),
+    )
     args = p.parse_args()
     try:
         build_artifacts(
@@ -1185,6 +1198,7 @@ def main() -> None:
             voter_e=args.voter_e,
             voter_e_target_recall=args.voter_e_target_recall,
             rebuild_visual=args.rebuild_visual,
+            allow_missing_video=args.allow_missing_video,
         )
     except BuildError as exc:
         # Clean CLI failure without a traceback; in-process callers (the

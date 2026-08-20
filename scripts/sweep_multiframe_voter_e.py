@@ -27,6 +27,7 @@ Run:
 
 from __future__ import annotations
 
+import argparse
 import json
 import math
 import time
@@ -39,6 +40,7 @@ from sklearn.metrics import roc_auc_score
 from splitsmith.beep_detect import load_audio
 from splitsmith.config import ShotDetectConfig
 from splitsmith.ensemble import visual as vis
+from splitsmith.fixture_sources import resolve_source_video
 from splitsmith.shot_detect import detect_shots
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -93,7 +95,11 @@ def _cache_path(fixture: str, offsets: tuple[float, ...]) -> Path:
 
 
 def _embed_fixture(
-    fixture: str, offsets: tuple[float, ...], runtime: vis.VisualRuntime
+    fixture: str,
+    offsets: tuple[float, ...],
+    runtime: vis.VisualRuntime,
+    *,
+    allow_missing_video: bool = False,
 ) -> tuple[np.ndarray | None, np.ndarray, np.ndarray, list[str | None], float]:
     """Returns (embeddings, labels, candidate_times, subclasses, elapsed_s).
 
@@ -105,11 +111,8 @@ def _embed_fixture(
     if not truth_path.exists() or not wav_path.exists():
         return None, np.zeros(0), np.zeros(0), [], 0.0
     truth = json.loads(truth_path.read_text())
-    source_video_str = truth.get("source_video") or ""
-    if not source_video_str:
-        return None, np.zeros(0), np.zeros(0), [], 0.0
-    source_video = Path(source_video_str)
-    if not source_video.exists():
+    source_video = resolve_source_video(truth, fixture, allow_missing=allow_missing_video)
+    if source_video is None:
         return None, np.zeros(0), np.zeros(0), [], 0.0
 
     cache = _cache_path(fixture, offsets)
@@ -218,7 +221,22 @@ def _summary(scores: np.ndarray, labels: np.ndarray) -> dict[str, float | int]:
     return {"auc": auc, "p_at_r_1.0": p10, "p_at_r_0.95": p95}
 
 
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    p.add_argument(
+        "--allow-missing-video",
+        action="store_true",
+        help=(
+            "Process only the fixtures whose source_video is reachable. "
+            "OFF by default so an unmounted volume fails loudly."
+        ),
+    )
+    return p
+
+
 def main() -> int:
+    args = build_parser().parse_args()
+
     print("Loading CLIP backbone for embedding extraction...")
     runtime = vis.load_visual_runtime(probe=None)
 
@@ -248,7 +266,9 @@ def main() -> int:
             if cam.get("id") != "go3s" or cam.get("mount") != "head":
                 continue
 
-            embeds, labels, cand_t, subclasses, elapsed = _embed_fixture(fixture, offsets, runtime)
+            embeds, labels, cand_t, subclasses, elapsed = _embed_fixture(
+                fixture, offsets, runtime, allow_missing_video=args.allow_missing_video
+            )
             if embeds is None:
                 continue
             embeddings_by_fixture[fixture] = embeds

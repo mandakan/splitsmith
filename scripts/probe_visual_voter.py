@@ -27,6 +27,8 @@ import torch
 from PIL import Image
 from transformers import CLIPModel, CLIPProcessor
 
+from splitsmith.fixture_sources import resolve_source_video
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
 OUT_DIR = REPO_ROOT / "build" / "visual-probe"
@@ -51,7 +53,7 @@ NEGATIVE_PROMPTS = [
 ]
 
 
-def iter_target_fixtures(only: str | None) -> Iterable[Path]:
+def iter_target_fixtures(only: str | None, *, allow_missing_video: bool = False) -> Iterable[Path]:
     for path in sorted(FIXTURES_DIR.glob("stage-shots-*.json")):
         name = path.stem
         if any(skip in name for skip in ("peaks", "promotion-report", "iphone")):
@@ -65,10 +67,11 @@ def iter_target_fixtures(only: str | None) -> Iterable[Path]:
         camera = data.get("camera") or {}
         if camera.get("id") != "go3s" or camera.get("mount") != "head":
             continue
-        src = data.get("source_video")
-        if not src:
-            continue
-        if not Path(src).exists():
+        source_video = resolve_source_video(data, path.stem, allow_missing=allow_missing_video)
+        if source_video is None:
+            # Only reachable under --allow-missing-video, which opts into a
+            # partial corpus -- not into a silent one. A probe over half the
+            # fixtures has to look different from a probe over all of them.
             print(f"  SKIP (video missing): {path.name}", file=sys.stderr)
             continue
         yield path
@@ -238,7 +241,7 @@ def probe_fixture(
     }
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--fixture",
@@ -255,12 +258,24 @@ def main() -> int:
         default=None,
         help="limit number of candidates per fixture (for smoke tests)",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--allow-missing-video",
+        action="store_true",
+        help=(
+            "Process only the fixtures whose source_video is reachable. "
+            "OFF by default so an unmounted volume fails loudly."
+        ),
+    )
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     FRAME_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-    fixtures = list(iter_target_fixtures(args.fixture))
+    fixtures = list(iter_target_fixtures(args.fixture, allow_missing_video=args.allow_missing_video))
     if not fixtures:
         print("No matching fixtures found.", file=sys.stderr)
         return 1

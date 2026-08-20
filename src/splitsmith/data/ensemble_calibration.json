@@ -2,9 +2,9 @@
   "voter_a_floor": 0.013084496744631137,
   "voter_b_threshold": 0.03676433116197586,
   "voter_c_threshold": 0.198137727362238,
-  "voter_e_threshold": null,
+  "voter_e_threshold": 0.3946627290995392,
   "voter_c_target_recall": 0.95,
-  "voter_e_target_recall": null,
+  "voter_e_target_recall": 0.95,
   "tolerance_ms": 75.0,
   "clap_prompts_shot": [
     "a single gunshot at close range",
@@ -157,11 +157,13 @@
     "handheld": "voter_c_gbdt_handheld.onnx",
     "headcam": "voter_c_gbdt_headcam.onnx"
   },
-  "voter_e_clip_model_id": null,
-  "voter_e_frame_offsets": null,
-  "voter_e_probe_artifact": null,
-  "voter_e_audio_strong_min_votes_recommended": null,
-  "built_at": "2026-08-17T15:27:15.854625+00:00",
+  "voter_e_clip_model_id": "openai/clip-vit-base-patch32",
+  "voter_e_frame_offsets": [
+    0.0
+  ],
+  "voter_e_probe_artifact": "voter_e_visual_probe.onnx",
+  "voter_e_audio_strong_min_votes_recommended": 3,
+  "built_at": "2026-08-19T20:16:24.665694+00:00",
   "default_camera_class": "headcam",
   "thresholds_by_camera_class": {
     "handheld": {
@@ -304,7 +306,8 @@
         "stage-shots-tallmilan-2026-stage5-s97dcec94",
         "stage-shots-tallmilan-2026-stage6-s97dcec94",
         "stage-shots-tallmilan-2026-stage7-s97dcec94"
-      ]
+      ],
+      "voter_e_threshold": 0.3946627290995392
     }
   },
   "amp_floor_by_camera_model": {
@@ -340,31 +343,9 @@
     }
   },
   "voter_e_provenance": {
-    "n_visual_candidates": 0,
-    "n_visual_skipped_missing_video": 21,
-    "missing_video_fixtures": [
-      "stage-shots-blacksmith-2026-stage1-s97dcec94",
-      "stage-shots-blacksmith-2026-stage2-s97dcec94",
-      "stage-shots-blacksmith-2026-stage3-s97dcec94",
-      "stage-shots-blacksmith-2026-stage5-s97dcec94",
-      "stage-shots-blacksmith-2026-stage6-s97dcec94",
-      "stage-shots-blacksmith-2026-stage7-s97dcec94",
-      "stage-shots-blacksmith-2026-stage8-s97dcec94",
-      "stage-shots-blacksmith-handgun-open-2026-stage1-s0fe3d797",
-      "stage-shots-blacksmith-handgun-open-2026-stage2-s0fe3d797",
-      "stage-shots-blacksmith-handgun-open-2026-stage3-s0fe3d797",
-      "stage-shots-blacksmith-handgun-open-2026-stage4-s0fe3d797",
-      "stage-shots-blacksmith-handgun-open-2026-stage5-s0fe3d797",
-      "stage-shots-blacksmith-handgun-open-2026-stage6-s0fe3d797",
-      "stage-shots-blacksmith-handgun-open-2026-stage7-s0fe3d797",
-      "stage-shots-blacksmith-handgun-open-2026-stage8-s0fe3d797",
-      "stage-shots-tallmilan-2026-stage2-s97dcec94",
-      "stage-shots-tallmilan-2026-stage3-s97dcec94",
-      "stage-shots-tallmilan-2026-stage4-s97dcec94",
-      "stage-shots-tallmilan-2026-stage5-s97dcec94",
-      "stage-shots-tallmilan-2026-stage6-s97dcec94",
-      "stage-shots-tallmilan-2026-stage7-s97dcec94"
-    ]
+    "n_visual_candidates": 1572,
+    "n_visual_skipped_missing_video": 0,
+    "missing_video_fixtures": []
   },
   "n_mined_negatives_used": 0,
   "mining_source_fixtures": [],
