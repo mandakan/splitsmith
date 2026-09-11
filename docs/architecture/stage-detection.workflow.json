@@ -1,0 +1,340 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Per-stage detection job chain",
+    "output": "stage-detection.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "auto-path",
+        "label": "Auto-trust path",
+        "focus": [
+          "attach",
+          "beep",
+          "gate",
+          "trim",
+          "shots",
+          "audit"
+        ],
+        "note": "A confident beep runs the whole chain without a click; the operator only audits the result."
+      },
+      {
+        "id": "hitl",
+        "label": "Human in the loop",
+        "focus": [
+          "beep",
+          "gate",
+          "hitl",
+          "softfail",
+          "trim"
+        ],
+        "note": "Below the threshold the beep waits in the HITL queue; a windowed miss soft-fails instead of raising."
+      },
+      {
+        "id": "artifacts",
+        "label": "What gets written",
+        "focus": [
+          "windows",
+          "trimcache",
+          "auditdoc",
+          "audit"
+        ],
+        "note": "Pure modules decide; jobs write the trim cache and the audit document."
+      }
+    ],
+    "legend": {
+      "entries": {
+        "frontend": {
+          "label": "Operator UI"
+        },
+        "backend": {
+          "label": "Job / pure module"
+        },
+        "security": {
+          "label": "Gate"
+        },
+        "messagebus": {
+          "label": "Soft failure"
+        },
+        "database": {
+          "label": "Artifact"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "operator",
+      "label": "Operator / SPA"
+    },
+    {
+      "id": "jobs",
+      "label": "Compute jobs"
+    },
+    {
+      "id": "review",
+      "label": "Human review",
+      "variant": "exception"
+    },
+    {
+      "id": "engine",
+      "label": "Engine + artifacts"
+    }
+  ],
+  "phases": [
+    {
+      "id": "ingest",
+      "label": "Ingest",
+      "fromCol": 0,
+      "toCol": 0
+    },
+    {
+      "id": "beep-phase",
+      "label": "Beep",
+      "fromCol": 1,
+      "toCol": 2,
+      "variant": "emphasis"
+    },
+    {
+      "id": "detect-phase",
+      "label": "Trim + shots",
+      "fromCol": 3,
+      "toCol": 4
+    },
+    {
+      "id": "audit-phase",
+      "label": "Audit",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "groups": [
+    {
+      "id": "hitl-group",
+      "label": "HITL queue (#219)",
+      "lane": "review",
+      "fromCol": 2,
+      "toCol": 2,
+      "variant": "security"
+    }
+  ],
+  "mainPath": [
+    "attach",
+    "beep",
+    "gate",
+    "trim",
+    "shots",
+    "audit"
+  ],
+  "nodes": [
+    {
+      "id": "attach",
+      "lane": "operator",
+      "col": 0,
+      "type": "frontend",
+      "label": "Attach video",
+      "sublabel": "covers_stages -> N videos",
+      "width": 132
+    },
+    {
+      "id": "audit",
+      "lane": "operator",
+      "col": 5,
+      "type": "frontend",
+      "label": "Audit page",
+      "sublabel": "review markers, save",
+      "width": 132
+    },
+    {
+      "id": "beep",
+      "lane": "jobs",
+      "col": 1,
+      "type": "backend",
+      "label": "beep_detect job",
+      "sublabel": "ffmpeg -ss/-t in window",
+      "width": 132
+    },
+    {
+      "id": "gate",
+      "lane": "jobs",
+      "col": 2,
+      "type": "security",
+      "label": "Confidence gate",
+      "sublabel": "confidence >= threshold",
+      "tag": "default 0.95",
+      "width": 132
+    },
+    {
+      "id": "trim",
+      "lane": "jobs",
+      "col": 3,
+      "type": "backend",
+      "label": "trim job",
+      "sublabel": "short GOP, audio copied",
+      "width": 132
+    },
+    {
+      "id": "shots",
+      "lane": "jobs",
+      "col": 4,
+      "type": "backend",
+      "label": "shot_detect job",
+      "sublabel": "3-voter ensemble, 2-of-3",
+      "width": 132
+    },
+    {
+      "id": "softfail",
+      "lane": "review",
+      "col": 1,
+      "type": "messagebus",
+      "label": "Soft fail",
+      "sublabel": "beep_auto_detect_failed",
+      "tag": "next stage continues",
+      "width": 132
+    },
+    {
+      "id": "hitl",
+      "lane": "review",
+      "col": 2,
+      "type": "security",
+      "label": "HITL queue",
+      "sublabel": "pick candidate, review",
+      "width": 132
+    },
+    {
+      "id": "windows",
+      "lane": "engine",
+      "col": 1,
+      "type": "backend",
+      "label": "beep_windows",
+      "sublabel": "scoreboard or sequential",
+      "width": 132
+    },
+    {
+      "id": "trimcache",
+      "lane": "engine",
+      "col": 3,
+      "type": "database",
+      "label": "Trim cache",
+      "sublabel": "stageN_slug_trimmed.mp4",
+      "width": 132
+    },
+    {
+      "id": "auditdoc",
+      "lane": "engine",
+      "col": 5,
+      "type": "database",
+      "label": "Audit JSON",
+      "sublabel": "shots[], audit_events",
+      "width": 132
+    }
+  ],
+  "edges": [
+    {
+      "id": "enqueue",
+      "from": "attach",
+      "to": "beep",
+      "label": "enqueue beep_detect"
+    },
+    {
+      "id": "derive-window",
+      "from": "beep",
+      "to": "windows",
+      "label": "derive search window",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "confidence",
+      "from": "beep",
+      "to": "gate",
+      "label": "calibrated confidence"
+    },
+    {
+      "id": "auto-trust",
+      "from": "gate",
+      "to": "trim",
+      "label": "auto-trust: beep_reviewed",
+      "variant": "emphasis"
+    },
+    {
+      "id": "below",
+      "from": "gate",
+      "to": "hitl",
+      "label": "below threshold",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "reviewed",
+      "from": "hitl",
+      "to": "trim",
+      "label": "mark reviewed",
+      "role": "return"
+    },
+    {
+      "id": "no-candidate",
+      "from": "beep",
+      "to": "softfail",
+      "label": "no candidate in window",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "write-trim",
+      "from": "trim",
+      "to": "trimcache",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "chain",
+      "from": "trim",
+      "to": "shots",
+      "label": "shot_detect_on_beep_verified",
+      "variant": "emphasis"
+    },
+    {
+      "id": "seed",
+      "from": "shots",
+      "to": "audit",
+      "label": "stage -> in_progress"
+    },
+    {
+      "id": "write-shots",
+      "from": "shots",
+      "to": "auditdoc",
+      "label": "shots[] + shot_detect_run",
+      "variant": "dashed",
+      "role": "branch"
+    },
+    {
+      "id": "save",
+      "from": "audit",
+      "to": "auditdoc",
+      "label": "save event -> audited",
+      "variant": "dashed",
+      "role": "async"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "Gates",
+      "items": [
+        "Below 0.95 the beep waits in GET hitl-queue; above, beep_reviewed is pre-set",
+        "shot_detect_on_beep_verified chains trim -> shots; CLI and agents can turn it off"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Windows",
+      "items": [
+        "Scoreboard mode anchors on scorecard_updated_at; else the previous beep chains",
+        "A windowed miss soft-fails so the next covered stage still runs"
+      ]
+    }
+  ]
+}

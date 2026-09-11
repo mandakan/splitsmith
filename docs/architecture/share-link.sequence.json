@@ -1,0 +1,285 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "Share link preview request",
+    "output": "share-link.html",
+    "viewBox": [
+      1060,
+      620
+    ],
+    "column_fit": "spread",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "shell",
+        "label": "HTML shell",
+        "focus": [
+          "crawler",
+          "shell",
+          "alias",
+          "api",
+          "store"
+        ],
+        "note": "The shell never resolves the token itself; it re-enters the anonymous API through an in-process sub-request."
+      },
+      {
+        "id": "image",
+        "label": "Card image",
+        "focus": [
+          "crawler",
+          "alias",
+          "api",
+          "cards",
+          "chromium"
+        ],
+        "note": "The og:image URL carries ?v=<card_hash>; a re-audit changes the hash, so crawlers refetch without any invalidation."
+      },
+      {
+        "id": "failure",
+        "label": "Failure shape",
+        "focus": [
+          "shell",
+          "alias",
+          "crawler"
+        ],
+        "note": "Every failure collapses to the same output as an unknown token; nothing on this surface is a token-existence oracle."
+      }
+    ]
+  },
+  "participants": [
+    {
+      "id": "crawler",
+      "type": "external",
+      "label": "Crawler / browser",
+      "sublabel": "anonymous"
+    },
+    {
+      "id": "shell",
+      "type": "frontend",
+      "label": "Shell route",
+      "sublabel": "/share/{token}"
+    },
+    {
+      "id": "alias",
+      "type": "security",
+      "label": "_share_alias",
+      "sublabel": "/api/share/*"
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "Anonymous API",
+      "sublabel": "og-meta, og.png"
+    },
+    {
+      "id": "store",
+      "type": "database",
+      "label": "Postgres",
+      "sublabel": "state_docs"
+    },
+    {
+      "id": "cards",
+      "type": "database",
+      "label": "Card cache",
+      "sublabel": "by card_hash"
+    },
+    {
+      "id": "chromium",
+      "type": "external",
+      "label": "Chromium",
+      "sublabel": "rasterizer"
+    }
+  ],
+  "segments": [
+    {
+      "from": 150,
+      "to": 312,
+      "label": "Shell"
+    },
+    {
+      "from": 328,
+      "to": 464,
+      "label": "Image"
+    },
+    {
+      "from": 480,
+      "to": 534,
+      "label": "Failures"
+    }
+  ],
+  "messages": [
+    {
+      "id": "get-shell",
+      "from": "crawler",
+      "to": "shell",
+      "y": 160,
+      "label": "GET /share/{token}",
+      "variant": "emphasis"
+    },
+    {
+      "id": "sub-request",
+      "from": "shell",
+      "to": "alias",
+      "y": 188,
+      "label": "in-process GET /api/share/{token}/og-meta, headers={}",
+      "variant": "security"
+    },
+    {
+      "id": "rewrite",
+      "from": "alias",
+      "to": "api",
+      "y": 216,
+      "label": "resolve token, rewrite to /api/matches/{id}/og-meta, pin owner",
+      "variant": "security"
+    },
+    {
+      "id": "load-docs",
+      "from": "api",
+      "to": "store",
+      "y": 244,
+      "label": "load match + audit docs (sync, returns docs)",
+      "variant": "default"
+    },
+    {
+      "id": "og-meta",
+      "from": "api",
+      "to": "shell",
+      "y": 272,
+      "label": "OgMeta: title, image_path?v=<card_hash>",
+      "variant": "return"
+    },
+    {
+      "id": "html",
+      "from": "shell",
+      "to": "crawler",
+      "y": 300,
+      "label": "HTML + og tags, no-cache",
+      "variant": "return"
+    },
+    {
+      "id": "get-png",
+      "from": "crawler",
+      "to": "alias",
+      "y": 340,
+      "label": "GET /api/share/{token}/og/{slug}/{stage}.png?v=<hash>",
+      "variant": "emphasis"
+    },
+    {
+      "id": "rewrite-png",
+      "from": "alias",
+      "to": "api",
+      "y": 368,
+      "label": "rewritten, owner pinned",
+      "variant": "security"
+    },
+    {
+      "id": "cache-lookup",
+      "from": "api",
+      "to": "cards",
+      "y": 396,
+      "label": "cached_card_png by card_hash: miss",
+      "variant": "default"
+    },
+    {
+      "id": "rasterize",
+      "from": "api",
+      "to": "chromium",
+      "y": 424,
+      "label": "rasterize 1200x630, store PNG under hash",
+      "variant": "dashed"
+    },
+    {
+      "id": "png-response",
+      "from": "api",
+      "to": "crawler",
+      "y": 452,
+      "label": "200 image/png, long Cache-Control",
+      "variant": "return"
+    },
+    {
+      "id": "opaque-404",
+      "from": "alias",
+      "to": "crawler",
+      "y": 492,
+      "label": "unknown token, scope mismatch, storage down: same 404",
+      "variant": "security"
+    },
+    {
+      "id": "generic-shell",
+      "from": "shell",
+      "to": "crawler",
+      "y": 520,
+      "label": "generic token-free shell",
+      "variant": "dashed"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "shell",
+      "from": 160,
+      "to": 304,
+      "type": "frontend"
+    },
+    {
+      "participant": "alias",
+      "from": 188,
+      "to": 220,
+      "type": "security"
+    },
+    {
+      "participant": "api",
+      "from": 216,
+      "to": 276,
+      "type": "backend"
+    },
+    {
+      "participant": "store",
+      "from": 240,
+      "to": 252,
+      "type": "database"
+    },
+    {
+      "participant": "alias",
+      "from": 340,
+      "to": 372,
+      "type": "security"
+    },
+    {
+      "participant": "api",
+      "from": 368,
+      "to": 456,
+      "type": "backend"
+    },
+    {
+      "participant": "cards",
+      "from": 392,
+      "to": 404,
+      "type": "database"
+    },
+    {
+      "participant": "chromium",
+      "from": 420,
+      "to": 432,
+      "type": "external"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "One impersonation",
+      "items": [
+        "Token resolution and owner pinning live once, in _share_alias",
+        "Sub-requests carry no headers; the surface is anonymous"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Freshness by address",
+      "items": [
+        "?v=<card_hash>: a re-audit moves the hash, so crawlers refetch",
+        "Every failure is the same 404 or generic shell: no token oracle"
+      ]
+    }
+  ]
+}
