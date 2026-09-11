@@ -436,8 +436,11 @@ class StageStatus(StrEnum):
     - ``todo``        -- no primary video assigned yet; nothing to do here
     - ``partial``     -- primary video assigned but no stage time (no
                          scoreboard import yet)
-    - ``ready``       -- all prerequisites met (video + time + beep + trim
-                         cache) but detection hasn't run
+    - ``ready``       -- primary video and stage time present, no real
+                         audit document yet. Deliberately *not* gated on
+                         a beep or a trim cache: :func:`stage_audit_status`
+                         stays stat-light, and a missing trim surfaces as
+                         the Audit page's PrereqGate instead
     - ``in_progress`` -- detection has run; operator hasn't hit Save yet
                          (the audit JSON has a ``shot_detect_run`` event
                          but no ``save`` event)

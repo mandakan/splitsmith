@@ -11,13 +11,13 @@ Splitsmith treats *consistency across stages and matches* as more important than
    - tonal_factor = energy concentration in the IPSC fundamental band (2.2-3.5 kHz) vs the wider search band; demotes broadband shots and steel rings
    - duration_factor = squared ramp 150 -> 300 ms; demotes short transients without rejecting them outright
 4. **Adaptive rise-foot leading edge**: walk back from the run's peak while the envelope stays above `max(peak * 5%, noise_floor * 1.5x)`. The noise-floor floor stops the walk from sliding into pre-beep silence on faint beeps where 5 % of the peak is below the floor.
-5. **Calibrated confidence in [0, 1]** per candidate -- a weighted blend of tonal purity, duration plausibility, and saturating silence preference, tilted by the margin to the runner-up. Empirically validated against the labelled fixture set under `tests/fixtures/beep_calibration/`: confidence >= 0.7 is right ~95 % of the time. The production UI / MCP use this to gate the **auto-trust** chain (`automation.beep_low_confidence_threshold`, default 0.6); below the threshold the beep lands in the HITL queue.
+5. **Calibrated confidence in [0, 1]** per candidate -- a weighted blend of tonal purity, duration plausibility, and saturating silence preference, tilted by the margin to the runner-up. Empirically validated against the labelled fixture set under `tests/fixtures/beep_calibration/`: confidence >= 0.7 is right ~95 % of the time. The production UI / MCP use this to gate the **auto-trust** chain (`automation.beep_low_confidence_threshold`, default 0.95); below the threshold the beep lands in the HITL queue.
 
 Calibration evidence + per-confidence-bin precision live under `tests/fixtures/beep_calibration/baseline.json`; rebuild via `scripts/build_beep_calibration.py` after adding new audited fixtures and re-run `scripts/eval_beep_detector.py` to refresh the table.
 
 ### Auto-trust + HITL queue (issue #219)
 
-A detected beep with `confidence >= automation.beep_low_confidence_threshold` (default 0.6) flips `beep_reviewed=True` automatically -- the downstream chain (auto-trim, auto-shot-detect-on-beep-verified) fires without a manual review click. Below the threshold the beep stays unreviewed and shows up in the **HITL queue**:
+A detected beep with `confidence >= automation.beep_low_confidence_threshold` (default 0.95, raised from the originally calibrated 0.6 in #296) flips `beep_reviewed=True` automatically -- the downstream chain (auto-trim, auto-shot-detect-on-beep-verified) fires without a manual review click. Below the threshold the beep stays unreviewed and shows up in the **HITL queue**:
 
 - HTTP: `GET /api/hitl-queue` returns `{items: [...], threshold: float}`.
 - SPA: the **Needs review** card on the Ingest page polls the queue and surfaces each item's `suggested_action` text + a one-click "Open" button that scrolls to the relevant stage row.
@@ -27,7 +27,7 @@ Tune the threshold via `~/.splitsmith/config.yaml`:
 
 ```yaml
 automation:
-  beep_low_confidence_threshold: 0.6   # auto-trust >= this; below is HITL
+  beep_low_confidence_threshold: 0.95  # auto-trust >= this; below is HITL (0.95 is the default)
   shot_detect_on_beep_verified: true   # the existing chain gate
 ```
 
