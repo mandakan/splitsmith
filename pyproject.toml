@@ -241,7 +241,7 @@ dev = [
     # upstream torch checkpoints, (c) parity tests against the torch
     # reference. End users on the slim wheel never see these.
     "torch>=2.11.0",
-    "transformers>=5.7.0",
+    "transformers>=5.10.0",
     "panns-inference>=0.1.1",
 ]
 
