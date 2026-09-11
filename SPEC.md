@@ -20,9 +20,9 @@ This document is the source of truth for the splitsmith implementation. Read thi
 
 ## Architecture
 
-An interactive system-level diagram (request path, job dispatch, engine,
-exports, share links) lives at `docs/architecture/splitsmith.html`; its source
-and regeneration steps are in `docs/architecture/README.md`.
+Interactive diagrams live under `docs/architecture/` (see its README): the
+system view, the `StageStatus` lifecycle, the per-stage detection job chain,
+the share-link preview sequence, and the hosted data model.
 
 ### Pipeline
 

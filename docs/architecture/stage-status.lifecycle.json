@@ -1,0 +1,165 @@
+{
+  "schema_version": 1,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Stage status lifecycle",
+    "output": "stage-status.html",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "main-rail",
+        "label": "Workflow order",
+        "focus": [
+          "todo",
+          "partial",
+          "ready",
+          "in_progress",
+          "audited"
+        ],
+        "note": "StageStatus is derived, never stored: project state plus the audit document decide it."
+      },
+      {
+        "id": "exits",
+        "label": "Skip and reset",
+        "focus": [
+          "ready",
+          "skipped",
+          "audited",
+          "todo"
+        ],
+        "note": "Skip is a toggle on the stage; removing the primary video with reset_audit starts over."
+      }
+    ],
+    "viewBox": [
+      1030,
+      630
+    ]
+  },
+  "lanes": [
+    {
+      "id": "main",
+      "label": "StageStatus"
+    },
+    {
+      "id": "terminal",
+      "label": "Terminal exit"
+    }
+  ],
+  "states": [
+    {
+      "id": "todo",
+      "type": "start",
+      "label": "todo",
+      "sublabel": "no primary video",
+      "lane": "main",
+      "col": 0,
+      "step": "01"
+    },
+    {
+      "id": "partial",
+      "type": "active",
+      "label": "partial",
+      "sublabel": "video, no stage time",
+      "lane": "main",
+      "col": 1,
+      "step": "02"
+    },
+    {
+      "id": "ready",
+      "type": "active",
+      "label": "ready",
+      "sublabel": "video + time, no detection",
+      "lane": "main",
+      "col": 2,
+      "step": "03",
+      "tag": "stub audit = no audit"
+    },
+    {
+      "id": "in_progress",
+      "type": "waiting",
+      "label": "in_progress",
+      "sublabel": "detector ran, not saved",
+      "lane": "main",
+      "col": 3,
+      "step": "04"
+    },
+    {
+      "id": "audited",
+      "type": "success",
+      "label": "audited",
+      "sublabel": "save or accept event",
+      "lane": "main",
+      "col": 4,
+      "step": "05",
+      "tag": "re-run keeps the save event"
+    },
+    {
+      "id": "skipped",
+      "type": "neutral",
+      "label": "skipped",
+      "sublabel": "stage.skipped = true",
+      "lane": "terminal",
+      "col": 0,
+      "tag": "checked before everything"
+    }
+  ],
+  "transitions": [
+    {
+      "id": "assign-video",
+      "from": "todo",
+      "to": "partial",
+      "note": "assign primary video"
+    },
+    {
+      "id": "import-time",
+      "from": "partial",
+      "to": "ready",
+      "note": "scoreboard import sets time_seconds"
+    },
+    {
+      "id": "detect",
+      "from": "ready",
+      "to": "in_progress",
+      "note": "shot_detect_run event"
+    },
+    {
+      "id": "save",
+      "from": "in_progress",
+      "to": "audited",
+      "note": "save (desktop) or accept (mobile triage)"
+    },
+    {
+      "id": "skip",
+      "from": "ready",
+      "to": "skipped",
+      "label": "POST stages/{n}/skip",
+      "route": "drop"
+    },
+    {
+      "id": "reset",
+      "from": "audited",
+      "to": "todo",
+      "label": "remove primary video with reset_audit",
+      "variant": "security",
+      "route": "top-channel"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Derived, not stored",
+      "items": [
+        "One classifier feeds sidebar, Home, Shooters, chips",
+        "Hosted: audit docs from state_docs; desktop: the file"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Exits",
+      "items": [
+        "skipped is checked first; skip again restores status",
+        "Only removing the primary with reset_audit resets"
+      ]
+    }
+  ]
+}
