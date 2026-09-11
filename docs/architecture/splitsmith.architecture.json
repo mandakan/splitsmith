@@ -1,0 +1,435 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Splitsmith system architecture",
+    "output": "splitsmith.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/mandakan/splitsmith",
+      "provider": "github",
+      "revision": "860d4b1f77e00a22607ff2eb8146d09f7793a72b"
+    },
+    "views": [
+      {
+        "id": "request-path",
+        "label": "Request path",
+        "focus": [
+          "spa",
+          "api",
+          "db",
+          "worker"
+        ],
+        "note": "The browser talks only to FastAPI; Postgres is both state store and job queue."
+      },
+      {
+        "id": "compute",
+        "label": "Detection and export",
+        "focus": [
+          "worker",
+          "engine",
+          "exports",
+          "ffmpeg",
+          "storage"
+        ],
+        "note": "One worker drains a job, runs the pure engine modules, and writes artifacts back."
+      },
+      {
+        "id": "side-doors",
+        "label": "Other entry points",
+        "focus": [
+          "cli",
+          "engine",
+          "share",
+          "api"
+        ],
+        "note": "CLI and MCP call the engine in-process; share links re-enter the anonymous API through an ASGI sub-request."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "cli",
+      "type": "frontend",
+      "label": "CLI + MCP server",
+      "sublabel": "Typer / FastMCP",
+      "pos": [
+        1080,
+        60
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/splitsmith/cli.py",
+          "label": "cli.py"
+        },
+        {
+          "path": "src/splitsmith/mcp/server.py",
+          "label": "mcp/server.py"
+        }
+      ]
+    },
+    {
+      "id": "share",
+      "type": "security",
+      "label": "Share links",
+      "sublabel": "/share/{token}, anonymous",
+      "pos": [
+        300,
+        60
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/splitsmith/ui/share_og.py",
+          "label": "share_og.py"
+        },
+        {
+          "path": "src/splitsmith/db/share_guard.py",
+          "label": "share_guard.py"
+        }
+      ]
+    },
+    {
+      "id": "spa",
+      "type": "frontend",
+      "label": "Web SPA",
+      "sublabel": "React / Vite",
+      "pos": [
+        40,
+        240
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/splitsmith/ui_static/src/App.tsx",
+          "label": "ui_static/src/App.tsx"
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "FastAPI server",
+      "sublabel": "splitsmith serve / ui",
+      "pos": [
+        300,
+        240
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/splitsmith/ui/server.py",
+          "label": "ui/server.py"
+        },
+        {
+          "path": "src/splitsmith/ui/exports_api.py",
+          "label": "exports_api.py"
+        }
+      ]
+    },
+    {
+      "id": "db",
+      "type": "database",
+      "label": "Postgres",
+      "sublabel": "Neon; SQLite on desktop",
+      "pos": [
+        560,
+        240
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "state_docs + jobs",
+      "sources": [
+        {
+          "path": "src/splitsmith/db/engine.py",
+          "label": "db/engine.py"
+        },
+        {
+          "path": "src/splitsmith/db/job_backend.py",
+          "label": "job_backend.py"
+        }
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "Compute worker",
+      "sublabel": "Railway or self-hosted agent",
+      "pos": [
+        820,
+        240
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/splitsmith/agent.py",
+          "label": "agent.py"
+        },
+        {
+          "path": "src/splitsmith/worker_trigger.py",
+          "label": "worker_trigger.py"
+        },
+        {
+          "path": "src/splitsmith/ui/jobs.py",
+          "label": "ui/jobs.py"
+        }
+      ]
+    },
+    {
+      "id": "engine",
+      "type": "backend",
+      "label": "Detection engine",
+      "sublabel": "beep + 3-voter shot ensemble",
+      "pos": [
+        1080,
+        240
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "ONNX, pure modules",
+      "sources": [
+        {
+          "path": "src/splitsmith/beep_detect.py",
+          "label": "beep_detect.py"
+        },
+        {
+          "path": "src/splitsmith/shot_detect.py",
+          "label": "shot_detect.py"
+        },
+        {
+          "path": "src/splitsmith/ensemble/api.py",
+          "label": "ensemble/api.py"
+        }
+      ]
+    },
+    {
+      "id": "storage",
+      "type": "database",
+      "label": "Object storage",
+      "sublabel": "R2; filesystem on desktop",
+      "pos": [
+        300,
+        420
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/splitsmith/storage.py",
+          "label": "storage.py"
+        }
+      ]
+    },
+    {
+      "id": "exports",
+      "type": "backend",
+      "label": "Export pipeline",
+      "sublabel": "FCPXML, CSV, MP4 renders",
+      "pos": [
+        820,
+        420
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/splitsmith/fcpxml_gen.py",
+          "label": "fcpxml_gen.py"
+        },
+        {
+          "path": "src/splitsmith/ui/match_exports.py",
+          "label": "match_exports.py"
+        },
+        {
+          "path": "src/splitsmith/compare/emitter.py",
+          "label": "compare/emitter.py"
+        }
+      ]
+    },
+    {
+      "id": "ffmpeg",
+      "type": "external",
+      "label": "ffmpeg",
+      "sublabel": "subprocess",
+      "pos": [
+        1080,
+        420
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "sources": [
+        {
+          "path": "src/splitsmith/trim.py",
+          "label": "trim.py"
+        },
+        {
+          "path": "src/splitsmith/mp4_render.py",
+          "label": "mp4_render.py"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Serve tier: Railway + Neon + R2",
+      "wraps": [
+        "api",
+        "db",
+        "storage"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Compute tier: one worker per job",
+      "wraps": [
+        "worker",
+        "engine",
+        "exports",
+        "ffmpeg"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "spa-api",
+      "from": "spa",
+      "to": "api",
+      "label": "HTTPS /api",
+      "variant": "emphasis"
+    },
+    {
+      "id": "api-db",
+      "from": "api",
+      "to": "db",
+      "label": "state docs, enqueue",
+      "variant": "emphasis"
+    },
+    {
+      "id": "db-worker",
+      "from": "db",
+      "to": "worker",
+      "label": "Procrastinate drain",
+      "variant": "emphasis"
+    },
+    {
+      "id": "api-wake",
+      "from": "api",
+      "to": "worker",
+      "label": "wake: SSE channel or Railway redeploy",
+      "variant": "dashed",
+      "fromSide": "top",
+      "toSide": "top"
+    },
+    {
+      "id": "worker-engine",
+      "from": "worker",
+      "to": "engine",
+      "label": "detect beep, shots",
+      "variant": "emphasis"
+    },
+    {
+      "id": "worker-exports",
+      "from": "worker",
+      "to": "exports",
+      "label": "export jobs",
+      "labelDy": 70
+    },
+    {
+      "id": "engine-ffmpeg",
+      "from": "engine",
+      "to": "ffmpeg",
+      "label": "audio extract -ss/-t",
+      "labelDy": 70
+    },
+    {
+      "id": "exports-ffmpeg",
+      "from": "exports",
+      "to": "ffmpeg",
+      "label": "trim, render"
+    },
+    {
+      "id": "exports-storage",
+      "from": "exports",
+      "to": "storage",
+      "label": "write artifacts"
+    },
+    {
+      "id": "api-storage",
+      "from": "api",
+      "to": "storage",
+      "label": "presigned upload / download",
+      "labelDy": 70
+    },
+    {
+      "id": "share-api",
+      "from": "share",
+      "to": "api",
+      "label": "in-process ASGI sub-request",
+      "variant": "security",
+      "labelDy": 70
+    },
+    {
+      "id": "cli-engine",
+      "from": "cli",
+      "to": "engine",
+      "label": "in-process batch",
+      "labelDy": 70
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Entry points",
+      "items": [
+        "SPA calls FastAPI only; uploads go to storage via presigned URLs",
+        "CLI and MCP tools run the same engine modules in-process",
+        "Share links resolve the token once, in _share_alias, then re-enter the anonymous API"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Jobs",
+      "items": [
+        "Postgres is the queue (Procrastinate); no separate broker",
+        "Dispatcher wakes the cheapest tier first: self-hosted agent over SSE, Railway redeploy as fallback",
+        "Desktop mode runs the same server on SQLite + filesystem with jobs in-process"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Pipeline",
+      "items": [
+        "beep_windows -> beep_detect -> trim -> shot ensemble; pure functions over audio + config",
+        "Voters: envelope onsets, CLAP similarity, GBDT over features + PANN; 2-of-3 consensus; shipped as ONNX under src/splitsmith/data",
+        "Outputs: per-stage CSV, FCPXML and report; per-match FCPXML, MP4 overlay, compare grid, share cards"
+      ]
+    }
+  ]
+}

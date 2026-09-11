@@ -20,6 +20,10 @@ This document is the source of truth for the splitsmith implementation. Read thi
 
 ## Architecture
 
+An interactive system-level diagram (request path, job dispatch, engine,
+exports, share links) lives at `docs/architecture/splitsmith.html`; its source
+and regeneration steps are in `docs/architecture/README.md`.
+
 ### Pipeline
 
 ```
