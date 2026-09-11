@@ -122,16 +122,16 @@ ENV UV_PYTHON_DOWNLOADS=never \
 #
 # ``TARGETARCH`` is provided automatically by buildx (amd64 / arm64).
 ARG TARGETARCH
-ARG FFMPEG_BUILD=autobuild-2026-08-14-13-16
+ARG FFMPEG_BUILD=autobuild-2026-09-10-15-31
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl xz-utils; \
     rm -rf /var/lib/apt/lists/*; \
     case "${TARGETARCH:-amd64}" in \
-        amd64) ff_file=ffmpeg-N-126134-gc48230eb86-linux64-gpl-shared.tar.xz; \
-               ff_sha=b3bb57f31b7e5ad4a80f9557f5a81b0ef455c86e53c3219299754fb1bb9267ed ;; \
-        arm64) ff_file=ffmpeg-N-126133-gead4378652-linuxarm64-gpl-shared.tar.xz; \
-               ff_sha=ed55c70d198d0ad70e40bc2c98b6b2a45b3c4f6c477d37f4f80c22a55193288c ;; \
+        amd64) ff_file=ffmpeg-N-126492-gefb0a7e5e7-linux64-gpl-shared.tar.xz; \
+               ff_sha=d0738fe3bdc0ba68cb6d64d04a52f774ac645eac2825692d5f8911d9916db964 ;; \
+        arm64) ff_file=ffmpeg-N-126492-gefb0a7e5e7-linuxarm64-gpl-shared.tar.xz; \
+               ff_sha=4a208820e99456387aa2414d11b6bb2c559ab634c99305b13a16ef9afadc402e ;; \
         *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
