@@ -76,6 +76,8 @@ The repo ships a real Stage 3 audio sample at `tests/fixtures/stage-shots-tallmi
 3. **Audit** -- the 3-voter ensemble (envelope onsets + CLAP prompts + GBDT over hand-crafted + PANN features) emits shot times; review the waveform and drag / drop markers to fix outliers.
 4. **Export** -- generate a per-stage FCPXML (markers per shot) or a multi-shooter Compare FCPXML (beep-aligned grid). Splits CSV ships alongside for the cull workflow.
 
+How the pieces fit -- system architecture, the per-stage detection job chain, the stage status lifecycle, the share-link request path and the hosted data model -- is drawn in [`docs/architecture/DIAGRAMS.md`](docs/architecture/DIAGRAMS.md) (renders inline on GitHub; interactive versions alongside).
+
 ## Install
 
 ### Which path is for you
