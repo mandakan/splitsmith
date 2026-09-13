@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.34.0](https://github.com/mandakan/splitsmith/compare/v0.33.1...v0.34.0) (2026-09-13)
+
+
+### Features
+
+* **results:** play one shooter's audited stages back to back ([#967](https://github.com/mandakan/splitsmith/issues/967)) ([0176f03](https://github.com/mandakan/splitsmith/commit/0176f03c1cfdcf3431688811a5b96340e87b5aff))
+* **ui:** deep-link a synced match's local Results tab to its hosted share surface ([#966](https://github.com/mandakan/splitsmith/issues/966)) ([15d9d32](https://github.com/mandakan/splitsmith/commit/15d9d328b745413b076c5ea9509e53634ef7b9e2))
+
+
+### Bug Fixes
+
+* **ui:** keep the "Open on splitsmith.app" link once a match has been pushed ([#965](https://github.com/mandakan/splitsmith/issues/965)) ([ecb7be5](https://github.com/mandakan/splitsmith/commit/ecb7be52575185ff30cac2b852e4b7078925a3e2))
+* **ui:** rebind waveform zoom to + / 0 / - so it works in Safari ([#969](https://github.com/mandakan/splitsmith/issues/969)) ([20716e2](https://github.com/mandakan/splitsmith/commit/20716e2a9f771c3e5d5b31f6f6c9a4d476fb3ec7))
+
 ## [0.33.1](https://github.com/mandakan/splitsmith/compare/v0.33.0...v0.33.1) (2026-09-13)
 
 
