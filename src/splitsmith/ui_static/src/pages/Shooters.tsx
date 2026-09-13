@@ -315,6 +315,10 @@ export function Shooters() {
 
   const active = data?.shooters ?? [];
   const stagesTotal = active[0]?.stages_total ?? 0;
+  // Until the first list response lands the page has no answer yet; it
+  // must not present "0 active" and an empty section as if it did (a
+  // cold hosted server takes seconds).
+  const loading = data === null && error === null;
 
   return (
     <div className="px-7 py-5">
@@ -325,9 +329,15 @@ export function Shooters() {
             Shooters
           </h1>
           <p className="max-w-[40rem] text-sm text-muted">
-            <b className="font-bold text-ink">{active.length} active</b>{" "}
-            &middot; manage cameras, role assignments, and per-stage
-            coverage.
+            {loading ? (
+              "Loading shooters..."
+            ) : (
+              <>
+                <b className="font-bold text-ink">{active.length} active</b>{" "}
+                &middot; manage cameras, role assignments, and per-stage
+                coverage.
+              </>
+            )}
           </p>
           {/* #756: one note for the whole page, same placement idiom as
            *  Ingest, rather than repeating the reason on every disabled
@@ -375,25 +385,34 @@ export function Shooters() {
           help="Footage attached and participating in this match"
         />
         <div className="flex flex-col gap-3">
-          {active.map((shooter) => (
-            <ShooterCard
-              key={shooter.slug}
-              shooter={shooter}
-              stagesTotal={stagesTotal}
-              busy={busy === shooter.slug}
-              editDenied={editDenied}
-              onRemove={() => void remove(shooter.slug, shooter.name)}
-              onOpenAudit={() => navigate(href("audit", shooter.slug))}
-              onOpenIngest={() => navigate(href("ingest", shooter.slug))}
-              onRebuildTrims={() =>
-                void rebuildTrims(
-                  shooter.slug,
-                  shooter.name,
-                  shooter.stages_missing_trim,
-                )
-              }
-            />
-          ))}
+          {loading ? (
+            <div
+              role="status"
+              className="rounded-[10px] border border-rule bg-surface px-4 py-6 text-center text-sm text-muted"
+            >
+              Loading shooters...
+            </div>
+          ) : (
+            active.map((shooter) => (
+              <ShooterCard
+                key={shooter.slug}
+                shooter={shooter}
+                stagesTotal={stagesTotal}
+                busy={busy === shooter.slug}
+                editDenied={editDenied}
+                onRemove={() => void remove(shooter.slug, shooter.name)}
+                onOpenAudit={() => navigate(href("audit", shooter.slug))}
+                onOpenIngest={() => navigate(href("ingest", shooter.slug))}
+                onRebuildTrims={() =>
+                  void rebuildTrims(
+                    shooter.slug,
+                    shooter.name,
+                    shooter.stages_missing_trim,
+                  )
+                }
+              />
+            ))
+          )}
         </div>
       </section>
 
@@ -766,7 +785,7 @@ function CameraRow({
         )}
         {missing > 0 && (
           <span className="rounded border border-rule-strong bg-surface-2 px-1.5 py-0.5 text-subtle">
-            -{missing} missing
+            {missing} missing
           </span>
         )}
       </div>

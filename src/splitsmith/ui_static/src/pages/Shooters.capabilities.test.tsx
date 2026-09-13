@@ -223,4 +223,41 @@ describe("Shooters capability gating", () => {
     expect(removeButton).toBeEnabled();
     expect(removeButton).toHaveAttribute("title", "Remove Mathias");
   });
+  it("renders a loading state, never '0 active', before the shooter list resolves", () => {
+    // Never-resolving promise: the page must not present an empty answer
+    // while the request is in flight (7 s on a cold hosted server).
+    vi.mocked(api.listMatchShooters).mockReturnValue(new Promise(() => {}));
+    renderShooters({});
+    expect(screen.queryByText(/0 active/)).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent(/loading shooters/i);
+  });
+
+  it("describes uncovered stages as 'N missing', not a negative number", async () => {
+    vi.mocked(api.listMatchShooters).mockResolvedValue({
+      match_root: "/m",
+      match_name: "M",
+      origin: "desktop",
+      capabilities: ["review", "share_manage"],
+      shooters: [
+        {
+          ...shooterFixture(),
+          stages_total: 12,
+          cameras: [
+            {
+              group_key: "Insta360|GO 3S|head",
+              make: "Insta360",
+              model: "GO 3S",
+              mount: "head",
+              role: "primary",
+              video_count: 11,
+              stage_numbers: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+            },
+          ],
+        },
+      ],
+    });
+    renderShooters({});
+    expect(await screen.findByText("1 missing")).toBeInTheDocument();
+    expect(screen.queryByText("-1 missing")).toBeNull();
+  });
 });
