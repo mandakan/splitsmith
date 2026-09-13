@@ -62,6 +62,7 @@ import {
   type StageAudit,
 } from "@/lib/api";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
+import { zoomActionForKey } from "@/lib/zoomKeys";
 import { snapToPeak, type SnapPeaks } from "@/lib/peak-snap";
 import { useReleaseMediaOnUnmount } from "@/lib/utils";
 
@@ -604,10 +605,12 @@ export function Review() {
         void performSave();
         return;
       }
-      if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "2" || e.key === "3")) {
+      // Waveform zoom: + / 0 / - (Cmd+1/2/3 kept as aliases); see lib/zoomKeys.
+      const zoomAction = zoomActionForKey(e);
+      if (zoomAction) {
         e.preventDefault();
-        if (e.key === "2") setZoom(null);
-        else if (e.key === "1")
+        if (zoomAction === "fit") setZoom(null);
+        else if (zoomAction === "in")
           setZoom((z) => Math.min(16, (z ?? 1) * 1.5));
         else setZoom((z) => {
           const next = (z ?? 1) / 1.5;

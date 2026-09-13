@@ -16,7 +16,7 @@ function defaultSet(): ShortcutItem[] {
     { keys: ["Space"], label: "Play / pause" },
     { keys: ["M", "⇧M"], label: "Next / prev shot" },
     { keys: ["K"], label: "Toggle shot at playhead" },
-    { keys: [`${mod}1`, `${mod}2`, `${mod}3`], label: "Zoom in / fit / out" },
+    { keys: ["+", "0", "-"], label: "Zoom in / fit / out" },
     { keys: [`${mod}↵`], label: "Save & next stage", strong: true },
   ];
 }

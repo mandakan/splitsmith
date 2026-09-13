@@ -59,9 +59,9 @@ function sections(mode: HelpMode): Section[] {
   const view: ShortcutRow[] = [
     { keys: ["L"], desc: "Toggle the marker list drawer" },
     { keys: ["P", "(hold)"], desc: "Peek rejected shots while held" },
-    { keys: [mod, "1"], desc: "Zoom in" },
-    { keys: [mod, "2"], desc: "Fit waveform to view" },
-    { keys: [mod, "3"], desc: "Zoom out" },
+    { keys: ["+"], desc: "Zoom in" },
+    { keys: ["0"], desc: "Fit waveform to view" },
+    { keys: ["-"], desc: "Zoom out" },
   ];
   const edit: ShortcutRow[] = [
     { keys: [mod, "Z"], desc: "Undo last marker change" },

@@ -56,7 +56,6 @@ import {
 import { DESTRUCTIVE_RERUN_WARNING, keyOf, useBeepQueue } from "@/lib/useBeepQueue";
 import { takeHref, useMatchHref } from "@/lib/matchHref";
 import { findTakeForPath, takeFilename } from "@/lib/takes";
-import { modKeyGlyph } from "@/lib/platform";
 import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
 
 export function BeepReview() {
@@ -1049,7 +1048,7 @@ function ActiveDetail({
               <KbdRow what="Prev" keys={["↑", "K"]} />
               <KbdRow
                 what="Zoom in / fit / out"
-                keys={[`${modKeyGlyph()}1`, `${modKeyGlyph()}2`, `${modKeyGlyph()}3`]}
+                keys={["+", "0", "-"]}
               />
             </div>
           </SidePanel>

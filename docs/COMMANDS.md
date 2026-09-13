@@ -161,7 +161,7 @@ Keyboard:
 |---|---|
 | `Space` | play / pause |
 | `M` / `Shift+M` | next / previous marker |
-| `Cmd+1` / `Cmd+2` / `Cmd+3` | zoom in / fit / zoom out |
+| `+` / `0` / `-` | zoom in / fit / zoom out (`Cmd+1/2/3` still work where the browser lets them through; Safari does not) |
 | `Cmd+Z` | undo (toggle / drag / add / delete) |
 | `Cmd+S` | save |
 | right-click marker | delete (manual) or reject (detected) |

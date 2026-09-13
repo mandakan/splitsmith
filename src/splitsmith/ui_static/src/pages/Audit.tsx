@@ -105,6 +105,7 @@ import { buildAuditJson, deriveMarkers } from "@/lib/audit-doc";
 import { planServedClip } from "@/lib/camPlayback";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
 import { useMatchHref } from "@/lib/matchHref";
+import { zoomActionForKey } from "@/lib/zoomKeys";
 import { snapToPeak, type SnapPeaks } from "@/lib/peak-snap";
 import { deriveStageStatus } from "@/lib/stageStatus";
 import { cn } from "@/lib/utils";
@@ -1376,12 +1377,13 @@ export function Audit() {
           return;
         }
       }
-      if ((e.metaKey || e.ctrlKey) && (e.key === "1" || e.key === "2" || e.key === "3")) {
-        // Cmd+1 zoom in / Cmd+2 fit / Cmd+3 zoom out -- matches the old
-        // review SPA's bindings so muscle memory carries over.
+      // Waveform zoom: + / 0 / - (Cmd+1/2/3 kept as aliases). See
+      // lib/zoomKeys for why the chords alone were not enough (Safari).
+      const zoomAction = zoomActionForKey(e);
+      if (zoomAction) {
         e.preventDefault();
-        if (e.key === "2") setZoom(null);
-        else if (e.key === "1")
+        if (zoomAction === "fit") setZoom(null);
+        else if (zoomAction === "in")
           setZoom((z) => Math.min(16, (z ?? 1) * 1.5));
         else setZoom((z) => {
           const next = (z ?? 1) / 1.5;
@@ -1576,12 +1578,11 @@ export function Audit() {
 
   // Pull keyboard focus into the editor once it mounts (and on each stage
   // change) so the global ``window`` keydown shortcuts are delivered to
-  // the page right away. Browser accelerators like Cmd+1 are only
-  // cancelable when the document -- not the browser chrome -- owns focus;
-  // without this the page never saw Cmd+1 until the user first clicked the
-  // video, so the browser switched tabs instead of the handler zooming
-  // (the reported bug). Guarded so it never yanks focus out of a text
-  // field the operator is mid-typing in.
+  // the page right away. Without this the page saw no key at all until
+  // the user first clicked the video (the originally reported bug, back
+  // when zoom was Cmd+1 and the browser switched tabs instead). Guarded
+  // so it never yanks focus out of a text field the operator is
+  // mid-typing in.
   const editorReady = stage != null && primary != null;
   useEffect(() => {
     if (!editorReady) return;
@@ -1878,7 +1879,7 @@ export function Audit() {
           </div>
 
           {/* Visible-by-default keyboard shortcut strip. Five keys that
-              drive the audit loop -- Space, M/Shift+M, K, Cmd+1/2/3,
+              drive the audit loop -- Space, M/Shift+M, K, + / 0 / -,
               Cmd+Enter. Dismiss persists per user (localStorage); the
               compact restore pill lives in the same slot so the user has
               a clear path back without hunting through the toolbar. */}
