@@ -168,14 +168,15 @@ export function DesktopTokensSection() {
         {/* One-time raw-token reveal, announced to assistive tech. */}
         {/* Single aria-live region for the token reveal. We render the container
         - unconditionally so screen readers can pick up the token announcement; only
-        - the inner content is conditional. */}
-        <div
-          aria-live="polite"
-          className="space-y-2 rounded-md border border-amber-400/40 bg-amber-400/10 p-3"
-        >
+        - the inner content is conditional -- including the border and fill, so an
+        - empty region never paints as a warning box. */}
+        <div aria-live="polite">
           {justCreated ? (
-            <>
-              <div className="flex items-start gap-2 text-xs text-amber-600">
+            <div
+              data-testid="token-reveal"
+              className="space-y-2 rounded-md border border-live/40 bg-live/10 p-3"
+            >
+              <div className="flex items-start gap-2 text-xs text-live">
                 <AlertTriangle
                   className="size-4 shrink-0"
                   aria-hidden="true"
@@ -209,7 +210,7 @@ export function DesktopTokensSection() {
                   {copied ? "Copied" : "Copy"}
                 </Button>
               </div>
-            </>
+            </div>
           ) : null}
         </div>
 

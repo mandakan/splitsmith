@@ -194,4 +194,17 @@ describe("DesktopTokensSection", () => {
     expect(alert).toHaveTextContent("Name is required.");
     expect(api.createDesktopToken).not.toHaveBeenCalled();
   });
+  it("renders no bordered banner until a token has been created", async () => {
+    vi.mocked(api.listDesktopTokens).mockResolvedValue({ tokens: [] });
+
+    const { container } = render(<DesktopTokensSection />);
+    await waitFor(() => expect(api.listDesktopTokens).toHaveBeenCalled());
+
+    // The live region must exist so a new token gets announced, but it
+    // must not paint an empty warning box on the page.
+    const region = container.querySelector("[aria-live='polite']");
+    expect(region).not.toBeNull();
+    expect(region!.className).not.toMatch(/border|bg-amber|bg-live|p-3/);
+    expect(screen.queryByTestId("token-reveal")).toBeNull();
+  });
 });
