@@ -10856,6 +10856,51 @@ def create_app(
         await _maybe_chain_trim(slug, stage, video)
         return JSONResponse(project.model_dump(mode="json"))
 
+    async def _after_beep_reviewed(slug: str, stage_number: int, video: StageVideo) -> None:
+        """Everything that must follow ``beep_reviewed`` flipping to True.
+
+        Shared by the per-video review endpoint and the cross-shooter
+        queue so a beep confirmed from either place leaves the same state
+        behind: a stub audit document (status surfaces and the lab read a
+        document, never infer from absence; never overwrite a real one --
+        a re-confirm on an audited stage must not wipe shot data) and,
+        for a primary whose trim is already cached, a queued
+        ``shot_detect``. That submit is the explicit unblock point for the
+        downstream pipeline (auto-detect leaves the flag False so the
+        ensemble doesn't burn cycles on an unconfirmed beep). No-op for
+        secondaries (no shot timeline of their own) and for primaries
+        whose trim hasn't run yet -- the trim chain fires detection itself
+        once the gate is open.
+
+        Mirrors mark state only, like the beep override endpoint: a
+        ``desktop``-origin match has no raw media hosted-side to detect
+        against and the desktop owns its audit documents, so neither the
+        stub nor the job is written. Desktop re-derives on its next sync
+        pull.
+        """
+        if current_match_origin.get() == "desktop":
+            return
+        existing_doc, audit_version = state.load_audit(slug, stage_number)
+        if existing_doc is None:
+            state.save_audit(
+                slug,
+                stage_number,
+                {"shots": [], "detection": STUB_AUDIT_DETECTION},
+                version=audit_version,
+            )
+        if (
+            video.role == "primary"
+            and video.processed.get("trim")
+            and await state.jobs.find_active(kind="shot_detect", stage_number=stage_number, shooter_slug=slug)
+            is None
+        ):
+            await state.jobs.submit(
+                kind="shot_detect",
+                stage_number=stage_number,
+                shooter_slug=slug,
+                args={"slug": slug, "stage_number": stage_number},
+            )
+
     @app.post("/api/shooters/{slug}/stages/{stage_number}/videos/{video_id}/beep/review")
     async def set_beep_reviewed(
         slug: str, stage_number: int, video_id: str, req: BeepReviewRequest
@@ -10879,39 +10924,10 @@ def create_app(
         video.beep_reviewed = bool(req.reviewed)
         project.save(state.shooter_root(slug))
 
-        # Leave a concrete audit document behind so status surfaces and the
-        # lab read a document instead of inferring from absence. Never
-        # overwrite a real one -- a re-confirm on an audited stage must not
-        # wipe shot data. The exporter does not depend on this existing;
-        # projects predating this change have no stub and still export.
+        # The exporter does not depend on the stub audit doc existing;
+        # projects predating it have no stub and still export.
         if req.reviewed:
-            existing_doc, audit_version = state.load_audit(slug, stage_number)
-            if existing_doc is None:
-                state.save_audit(
-                    slug,
-                    stage_number,
-                    {"shots": [], "detection": STUB_AUDIT_DETECTION},
-                    version=audit_version,
-                )
-
-        # When the user confirms the primary's beep AND the trim is
-        # already cached from the auto-detect chain, kick off the
-        # gated shot-detect now. No-op when trim hasn't run yet (it
-        # will run after, then auto-chain because the gate is open),
-        # or for secondaries (no shot timeline of their own).
-        if (
-            req.reviewed
-            and video.role == "primary"
-            and video.processed.get("trim")
-            and await state.jobs.find_active(kind="shot_detect", stage_number=stage_number, shooter_slug=slug)
-            is None
-        ):
-            await state.jobs.submit(
-                kind="shot_detect",
-                stage_number=stage_number,
-                shooter_slug=slug,
-                args={"slug": slug, "stage_number": stage_number},
-            )
+            await _after_beep_reviewed(slug, stage_number, video)
 
         return JSONResponse(project.model_dump(mode="json"))
 
@@ -14419,13 +14435,17 @@ def create_app(
         )
 
     @app.post("/api/match/beep-queue/confirm", response_model=BeepQueueResponse)
-    def confirm_beep_in_queue(req: BeepQueueConfirmRequest) -> BeepQueueResponse:
+    async def confirm_beep_in_queue(req: BeepQueueConfirmRequest) -> BeepQueueResponse:
         """Confirm a beep on any shooter without changing the bound state.
 
         Writes through to the named shooter's ``project.json`` directly so
         the rest of the SPA's state (active shooter) is unaffected.
         When ``time`` is supplied, it overrides ``beep_time``; the call
-        always sets ``beep_reviewed = True``.
+        always sets ``beep_reviewed = True`` and then runs the same
+        post-review chain as the per-video endpoint (stub audit doc,
+        ``shot_detect`` for a primary with a cached trim). Before that
+        was shared, a low-confidence primary confirmed here stayed
+        trimmed with no shots until someone opened Audit and pressed Run.
         """
         match_root, match = _resolve_match_context()
         if req.slug not in match.shooters:
@@ -14454,6 +14474,7 @@ def create_app(
             )
         target_video.beep_reviewed = True
         proj.save(shooter_root)
+        await _after_beep_reviewed(req.slug, req.stage_number, target_video)
         return get_beep_queue()
 
     # ``/api/me/recent-projects/unbind`` was deleted in Tier 1

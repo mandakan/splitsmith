@@ -9645,6 +9645,51 @@ def test_beep_queue_confirm_secondary(tmp_path: Path) -> None:
     assert secondary.beep_time == 5.95
 
 
+def test_beep_queue_confirm_primary_chains_shot_detect(tmp_path: Path) -> None:
+    """Confirming a low-confidence primary through the queue must submit
+    shot detection when its trim is already cached -- the same chain the
+    per-video beep-reviewed endpoint fires. Before this fix the queue
+    only flipped the flag, leaving a trimmed stage with no shots."""
+    root = tmp_path / "match"
+    project = _build_project_with_primary(
+        root,
+        "Confirm Primary",
+        beep_time=22.5,
+        beep_source="auto",
+        beep_confidence=0.4,
+        beep_reviewed=False,
+    )
+    project.stages[0].videos[0].processed["trim"] = True
+    project.save(root / "shooters" / "me")
+    # video_id hashes "<path>#<stage_number>" and stage_number is stamped
+    # on load - read the id back from a fresh load, not the local object.
+    primary_id = MatchProject.load(root / "shooters" / "me").stages[0].videos[0].video_id
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
+    state = app.state.splitsmith_state
+
+    release = threading.Event()
+
+    def _blocked(_handle, **_args) -> None:
+        release.wait(timeout=10.0)
+
+    state.jobs.bodies.register("shot_detect", _blocked)
+    try:
+        resp = client.post(
+            "/api/match/beep-queue/confirm",
+            json={"slug": "me", "stage_number": 1, "video_id": primary_id},
+        )
+        assert resp.status_code == 200, resp.text
+        jobs = client.get("/api/me/jobs").json()
+        kinds = [(j["kind"], j["shooter_slug"], j["stage_number"]) for j in jobs]
+        assert ("shot_detect", "me", 1) in kinds, kinds
+    finally:
+        release.set()
+    for j in client.get("/api/me/jobs").json():
+        if j["kind"] == "shot_detect":
+            _wait_for_job(client, j["id"])
+
+
 def test_beep_queue_threshold_respects_project_override(tmp_path: Path) -> None:
     """Project-level threshold override flows through to item status.
 
