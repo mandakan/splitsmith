@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.33.1](https://github.com/mandakan/splitsmith/compare/v0.33.0...v0.33.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **beep:** saturate silence-preference so loudness stops deciding the ranking ([#950](https://github.com/mandakan/splitsmith/issues/950)) ([2f9e7d2](https://github.com/mandakan/splitsmith/commit/2f9e7d26b24bfaaec12050edb210903511cb77b0))
+* **docker:** bump the ffmpeg build pin to a release that still exists ([#962](https://github.com/mandakan/splitsmith/issues/962)) ([14170e5](https://github.com/mandakan/splitsmith/commit/14170e55169e555330b8522b124b7dac048c9af7))
+* **ui:** point the scoreboard match link at /match, not the bare id path ([#954](https://github.com/mandakan/splitsmith/issues/954)) ([860d4b1](https://github.com/mandakan/splitsmith/commit/860d4b1f77e00a22607ff2eb8146d09f7793a72b))
+
+
+### Documentation
+
+* add interactive system architecture diagram ([#957](https://github.com/mandakan/splitsmith/issues/957)) ([c724fac](https://github.com/mandakan/splitsmith/commit/c724fac71c28192e294dbf0326e306ad951e6f0e))
+* add lifecycle, detection workflow, share-link sequence and ER diagrams ([#958](https://github.com/mandakan/splitsmith/issues/958)) ([38085d9](https://github.com/mandakan/splitsmith/commit/38085d928dddfefff41da23ca84cf15b6876cf5b))
+* correct the beep auto-trust default and the ready-status docstring ([#959](https://github.com/mandakan/splitsmith/issues/959)) ([7766293](https://github.com/mandakan/splitsmith/commit/7766293781923053d92e6e9301f2c88fed345240))
+* render the architecture diagrams inline on GitHub as Mermaid ([#961](https://github.com/mandakan/splitsmith/issues/961)) ([677f78d](https://github.com/mandakan/splitsmith/commit/677f78d95e72d09aa604bea0aa780c12b2b54603))
+
+
+### Build / CI
+
+* check the ffmpeg build pin daily before upstream prunes it ([#963](https://github.com/mandakan/splitsmith/issues/963)) ([be63955](https://github.com/mandakan/splitsmith/commit/be639555971663348fc07e007ffc186086afc935))
+
 ## [0.33.0](https://github.com/mandakan/splitsmith/compare/v0.32.2...v0.33.0) (2026-08-18)
 
 
