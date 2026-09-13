@@ -52,7 +52,7 @@ import { Button } from "@/components/ui/button";
 import { useConfirm } from "@/components/useConfirm";
 import { Waveform } from "@/components/Waveform";
 import { useSpacePlayPause } from "@/lib/keyboard";
-import { modKeyGlyph } from "@/lib/platform";
+import { zoomActionForKey } from "@/lib/zoomKeys";
 import { cn, useReleaseMediaOnUnmount } from "@/lib/utils";
 import {
   ApiError,
@@ -965,25 +965,16 @@ export function BeepWaveformPicker({
     return Math.max(1, fitPps * zoom);
   }, [zoom, viewportWidth, peaks]);
 
-  // Cmd/Ctrl + 1/2/3 -- same bindings as the audit canvas waveform so
-  // muscle memory carries across surfaces. Cmd+1 = zoom in, Cmd+2 =
-  // fit, Cmd+3 = zoom out. Ignored when typing in an input/textarea so
-  // we don't steal the browser's tab-cycling shortcut from form fields.
+  // + / 0 / - (Cmd/Ctrl+1/2/3 kept as aliases) -- same bindings as the
+  // audit canvas waveform so muscle memory carries across surfaces; the
+  // typing-field guard lives in zoomActionForKey.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.key !== "1" && e.key !== "2" && e.key !== "3") return;
-      if (
-        e.target instanceof HTMLElement &&
-        (e.target.tagName === "INPUT" ||
-          e.target.tagName === "TEXTAREA" ||
-          e.target.isContentEditable)
-      ) {
-        return;
-      }
+      const action = zoomActionForKey(e);
+      if (!action) return;
       e.preventDefault();
-      if (e.key === "1") zoomIn();
-      else if (e.key === "2") zoomFit();
+      if (action === "in") zoomIn();
+      else if (action === "fit") zoomFit();
       else zoomOut();
     }
     window.addEventListener("keydown", onKey);
@@ -1055,26 +1046,26 @@ export function BeepWaveformPicker({
       </div>
       {/* Zoom-shortcut chrome -- mirrors the time-ruler footer that
           lives under the audit canvas waveform. Same bindings
-          (modKey+1/2/3) so muscle memory carries between surfaces.
+          (+ / 0 / -) so muscle memory carries between surfaces.
           Right-aligned; the eyebrow on the left labels the row so the
           chord doesn't read as orphan keys. */}
       <div className="-mx-3 mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-rule bg-surface-3/60 px-4 py-2 font-mono text-[0.625rem] uppercase tracking-[0.08em] text-subtle">
         <span className="tracking-[0.14em] text-muted">Zoom</span>
         <span className="ml-auto inline-flex items-center gap-1.5">
           <kbd className="rounded border border-rule-strong bg-surface-2 px-1.5 py-px font-mono text-[0.625rem] font-semibold text-ink-2">
-            {modKeyGlyph()}1
+            +
           </kbd>
           <span>in</span>
         </span>
         <span className="inline-flex items-center gap-1.5">
           <kbd className="rounded border border-rule-strong bg-surface-2 px-1.5 py-px font-mono text-[0.625rem] font-semibold text-ink-2">
-            {modKeyGlyph()}2
+            0
           </kbd>
           <span>fit</span>
         </span>
         <span className="inline-flex items-center gap-1.5">
           <kbd className="rounded border border-rule-strong bg-surface-2 px-1.5 py-px font-mono text-[0.625rem] font-semibold text-ink-2">
-            {modKeyGlyph()}3
+            -
           </kbd>
           <span>out</span>
         </span>
