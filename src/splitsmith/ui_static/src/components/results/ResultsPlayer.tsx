@@ -65,6 +65,18 @@ interface ResultsPlayerProps {
    *  marker (above the track, not on it) so the two annotation kinds
    *  never blend into one signal. */
   commentTimes?: readonly number[];
+  /** Play-all support (one shooter's stages back to back). When set,
+   *  playback that reaches the display window's end (or the clip's
+   *  own end, for trims cut inside the window) pauses there and fires
+   *  this once; the page decides what comes next. Absent, playback
+   *  runs on to the clip end as it always has. Never fires from a
+   *  paused seek past the window end - scrubbing is not watching. */
+  onWindowEnd?: () => void;
+  /** Start playing from the window start as soon as metadata arrives,
+   *  once per mount. The page sets it on the stage it auto-advanced
+   *  to; the viewer's earlier press of Play is what lets the browser
+   *  honour a programmatic play() here. Rejections are swallowed. */
+  autoplay?: boolean;
 }
 
 function clamp(t: number, lo: number, hi: number): number {
@@ -91,6 +103,8 @@ export function ResultsPlayer({
   momentTime,
   onCopyMoment,
   commentTimes,
+  onWindowEnd,
+  autoplay,
 }: ResultsPlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [duration, setDuration] = useState<number | null>(null);
@@ -130,6 +144,25 @@ export function ResultsPlayer({
     [onPlayingChange],
   );
 
+  // Window-end stop for play-all. Latched per (mount, play) so the
+  // trailing timeupdate/rAF after pause() cannot fire twice; the latch
+  // clears on the next play so re-watching the tail works. Only ever
+  // acts while actually playing - a paused scrub past winEnd is the
+  // viewer looking, not the stage finishing.
+  const windowEndFiredRef = useRef(false);
+  const checkWindowEnd = useCallback(
+    (v: HTMLVideoElement) => {
+      if (!onWindowEnd || windowEndFiredRef.current || v.paused) return;
+      if (v.currentTime < winEnd) return;
+      windowEndFiredRef.current = true;
+      v.pause();
+      v.currentTime = winEnd;
+      emitTime(winEnd);
+      onWindowEnd();
+    },
+    [onWindowEnd, winEnd, emitTime],
+  );
+
   // Playhead: rAF while playing (timeupdate is too coarse for a smooth
   // line), plain timeupdate events while paused / scrubbing.
   useEffect(() => {
@@ -137,12 +170,15 @@ export function ResultsPlayer({
     let raf = 0;
     const tick = () => {
       const v = videoRef.current;
-      if (v) emitTime(v.currentTime);
+      if (v) {
+        emitTime(v.currentTime);
+        checkWindowEnd(v);
+      }
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [isPlaying, videoRef, emitTime]);
+  }, [isPlaying, videoRef, emitTime, checkWindowEnd]);
 
   // Start playback at the window, not file zero. loadedmetadata covers
   // the normal path; the mount-time check covers a cached element whose
@@ -156,6 +192,20 @@ export function ResultsPlayer({
     }
   }, [videoRef, winStart, emitTime]);
 
+  const autoplayedRef = useRef(false);
+  const maybeAutoplay = useCallback(() => {
+    const v = videoRef.current;
+    if (!v || !autoplay || autoplayedRef.current) return;
+    autoplayedRef.current = true;
+    try {
+      // jsdom's play() returns undefined; a real browser's rejects when
+      // autoplay policy says no. Either way there is nothing to do.
+      void Promise.resolve(v.play()).catch(() => {});
+    } catch {
+      /* ignore */
+    }
+  }, [videoRef, autoplay]);
+
   useEffect(() => {
     // Covers a cached element whose metadata is already in at mount;
     // the normal path goes through onLoadedMetadata.
@@ -163,8 +213,9 @@ export function ResultsPlayer({
     if (v && v.readyState >= 1) {
       setDuration(Number.isFinite(v.duration) ? v.duration : null);
       seekToWindowStart();
+      maybeAutoplay();
     }
-  }, [videoRef, seekToWindowStart]);
+  }, [videoRef, seekToWindowStart, maybeAutoplay]);
 
   // Paused seek to the moment, once video metadata is available. A ref
   // (not state) tracks the last APPLIED momentTime - same-value
@@ -345,15 +396,26 @@ export function ResultsPlayer({
           preload="metadata"
           playsInline
           onTimeUpdate={(e) => {
-            if (!isPlaying) emitTime((e.target as HTMLVideoElement).currentTime);
+            const v = e.target as HTMLVideoElement;
+            if (!isPlaying) emitTime(v.currentTime);
+            checkWindowEnd(v);
           }}
-          onPlay={() => setPlaying(true)}
+          onPlay={() => {
+            windowEndFiredRef.current = false;
+            setPlaying(true);
+          }}
           onPause={() => setPlaying(false)}
+          onEnded={() => {
+            if (!onWindowEnd || windowEndFiredRef.current) return;
+            windowEndFiredRef.current = true;
+            onWindowEnd();
+          }}
           onLoadedMetadata={(e) => {
             const v = e.target as HTMLVideoElement;
             setDuration(Number.isFinite(v.duration) ? v.duration : null);
             setVideoError(false);
             seekToWindowStart();
+            maybeAutoplay();
           }}
           onError={() => setVideoError(true)}
           className={cn("w-full bg-black", isFs ? "h-full object-contain" : "aspect-video")}
