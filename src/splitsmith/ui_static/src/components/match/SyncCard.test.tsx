@@ -122,6 +122,28 @@ describe("SyncCard", () => {
     expect(await screen.findByText(/3 files changed since last sync/i)).toBeInTheDocument();
   });
 
+  it("keeps the hosted link while stale - the hosted match still exists", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue(
+      makeStatus({ stale: true, pending_media: 3, errors: [] }),
+    );
+
+    render(<SyncCard jobs={[]} matchId="m1" />);
+
+    const link = await screen.findByRole("link", { name: /open on splitsmith\.app/i });
+    expect(link).toHaveAttribute("href", "https://splitsmith.app/match/m1");
+  });
+
+  it("omits the hosted link before the first push", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue(
+      makeStatus({ last_synced_at: null, stale: true }),
+    );
+
+    render(<SyncCard jobs={[]} matchId="m1" />);
+
+    expect(await screen.findByText(/never synced/i)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /open on splitsmith\.app/i })).toBeNull();
+  });
+
   it("lists plan errors and disables the sync button", async () => {
     vi.mocked(api.getSyncStatus).mockResolvedValue(
       makeStatus({
