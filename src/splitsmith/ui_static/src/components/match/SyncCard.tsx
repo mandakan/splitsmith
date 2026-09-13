@@ -32,9 +32,11 @@
  *   stale           - last_synced_at is set but pending_media > 0 (or
  *                       the plan is otherwise stale): "N files changed
  *                       since last sync".
- *   synced          - up to date: relative time + an "Open on
- *                       splitsmith.app" link built from the settings
- *                       GET's base_url.
+ *   synced          - up to date: relative time.
+ *
+ * An "Open on splitsmith.app" link (built from the settings GET's
+ * base_url) renders in every state after the first push, i.e. whenever
+ * last_synced_at is set - stale or not, the hosted match is there.
  *
  * Status is this card's own fetch (GET .../sync/status doesn't belong
  * on the shell's per-poll project/beep-queue refetch); it refetches
@@ -258,13 +260,12 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
               </Button>
             </div>
           )}
-          {status?.configured &&
-          !hasErrors &&
-          !syncing &&
-          status.last_synced_at &&
-          !status.stale &&
-          settings?.base_url &&
-          matchId ? (
+          {/* The hosted match exists from the first push onward, so the
+              link stays through stale / syncing / plan-error states -
+              the status line beside it already says what is unpushed.
+              Gating it on "up to date" made the link vanish the moment
+              the owner edited an audit after the first sync. */}
+          {status?.configured && status.last_synced_at && settings?.base_url && matchId ? (
             <a
               href={`${settings.base_url}/match/${matchId}`}
               target="_blank"
