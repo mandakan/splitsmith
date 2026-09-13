@@ -13,7 +13,7 @@
  * contract for this page. isShareView gates the affordance client-side;
  * the server share whitelist is the backstop that actually enforces it.
  */
-import { ArrowLeft, ArrowRight, ChevronDown, ChevronLeft, Loader2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronDown, ChevronLeft, ListVideo, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Link,
@@ -150,8 +150,31 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const [sheetShot, setSheetShot] = useState<CoachShot | null>(null);
   const [patchBusy, setPatchBusy] = useState(false);
   const [snack, setSnack] = useState<SnackState | null>(null);
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const moment = useMemo(() => parseMoment(searchParams), [searchParams]);
+  // Play all: one shooter's audited stages back to back. The flag lives
+  // in the URL (``?play=all``) so a share link can carry it; the
+  // autoplay bit does NOT - it rides on navigation state, set only by
+  // this page's own advance, so a play-all link opened cold still
+  // waits for a press of Play (which the browser would demand anyway).
+  const playAll = searchParams.get("play") === "all";
+  // Armed for the first player mount only: a camera switch remounts the
+  // player (key={camIndex}) and restores the viewer's own play state via
+  // pendingSeekRef, so autoplay must not fire again there.
+  const [autoplayArmed, setAutoplayArmed] = useState(
+    () => playAll && Boolean((location.state as { autoplay?: boolean } | null)?.autoplay),
+  );
+  const togglePlayAll = useCallback(() => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (next.get("play") === "all") next.delete("play");
+        else next.set("play", "all");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [setSearchParams]);
   const [activeCamIndex, setActiveCamIndex] = useState(0);
   // Position to restore after a camera switch remounts the player.
   const pendingSeekRef = useRef<{ t: number; play: boolean } | null>(null);
@@ -377,6 +400,14 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const prevStage = idx > 0 ? auditedStages[idx - 1] : null;
   const nextStage = idx >= 0 && idx < auditedStages.length - 1 ? auditedStages[idx + 1] : null;
 
+  // Window end under play-all: go to the next audited stage with the
+  // flag kept and autoplay armed; on the last stage the player has
+  // already paused at the tail and there is nothing left to do.
+  const handleWindowEnd = useCallback(() => {
+    if (nextStage == null) return;
+    navigate(`${href("results", slug, String(nextStage))}?play=all`, { state: { autoplay: true } });
+  }, [navigate, href, slug, nextStage]);
+
   const shots = useMemo(() => coach?.shots ?? [], [coach]);
   // Shot times arrive in the primary clip's coordinates; replaying them
   // on another camera shifts them onto that clip's clock via the beep.
@@ -423,6 +454,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
 
   const handleSelectCam = useCallback(
     (index: number) => {
+      setAutoplayArmed(false);
       setActiveCamIndex((prev) => {
         if (index === prev || !coach) return prev;
         const prevBeep = camBeep(coach, resolveCamIndex(coach, prev));
@@ -562,6 +594,22 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
         >
           Compare shooters
         </Link>
+        <button
+          type="button"
+          onClick={togglePlayAll}
+          aria-pressed={playAll}
+          aria-label={playAll ? "Play all stages: on" : "Play all stages: off"}
+          title="Play this shooter's stages back to back"
+          className={cn(
+            "inline-flex min-h-11 items-center gap-1.5 rounded-md border px-3 font-display text-xs font-bold uppercase tracking-[0.08em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
+            playAll
+              ? "border-led bg-led-fill text-ink hover:bg-led-soft"
+              : "border-rule bg-surface-2 text-ink-2 hover:bg-surface-3 hover:text-ink",
+          )}
+        >
+          <ListVideo className="size-4" aria-hidden="true" />
+          Play all
+        </button>
         {prevStage != null ? (
           <Link
             to={href("results", slug, String(prevStage))}
@@ -653,6 +701,8 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           momentTime={momentTime}
           onCopyMoment={handleCopyMoment}
           commentTimes={commentAnchors.map((t) => coach.beep_time + camDelta + t)}
+          onWindowEnd={playAll ? handleWindowEnd : undefined}
+          autoplay={autoplayArmed}
         />
         <CamPicker
           entries={coach.videos}
