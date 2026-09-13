@@ -436,18 +436,22 @@ export function Pick() {
 
         {/* Action row */}
         <div className="mb-6 flex flex-wrap items-center gap-3">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() =>
-              document
-                .getElementById("import-backup")
-                ?.scrollIntoView({ behavior: "smooth" })
-            }
-            className="font-display uppercase tracking-[0.06em]"
-          >
-            <Upload className="size-3.5" /> Import Backup
-          </Button>
+          {/* Backup import extracts under a filesystem path; hosted has
+              none to name, so the button and its panel stay local-only. */}
+          {mode !== "hosted" && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() =>
+                document
+                  .getElementById("import-backup")
+                  ?.scrollIntoView({ behavior: "smooth" })
+              }
+              className="font-display uppercase tracking-[0.06em]"
+            >
+              <Upload className="size-3.5" /> Import Backup
+            </Button>
+          )}
           {/* Merge CTA only shows when there's something to merge -- 2+ legacy
               single-shooter projects in recents. Hidden otherwise so the
               picker stays uncluttered for users who started post-redesign. */}
@@ -569,6 +573,7 @@ export function Pick() {
                   <MatchRow
                     key={r.path}
                     project={r}
+                    showPath={mode !== "hosted"}
                     index={idx + 1}
                     selected={
                       filtered.indexOf(r) === selectedIdx && opening !== r.path
@@ -606,6 +611,7 @@ export function Pick() {
                     <MatchRow
                       key={r.path}
                       project={r}
+                      showPath={mode !== "hosted"}
                       index={active.length + idx + 1}
                       selected={
                         filtered.indexOf(r) === selectedIdx &&
@@ -624,7 +630,9 @@ export function Pick() {
           </>
         )}
 
-        {/* Open by path + Import accordions */}
+        {/* Open by path + Import accordions -- both name filesystem paths,
+            so they render only against a local install. */}
+        {mode !== "hosted" && (
         <div className="mt-10 grid gap-4 lg:grid-cols-2">
           <div className="rounded-xl border border-rule bg-surface p-5">
             <div className="mb-2 flex items-center gap-2 font-display text-sm font-semibold uppercase tracking-[0.06em] text-ink-2">
@@ -705,6 +713,7 @@ export function Pick() {
             </form>
           </div>
         </div>
+        )}
 
         {/* Kbd legend */}
         <div className="mt-10 flex items-center justify-between text-[0.6875rem] uppercase tracking-[0.16em] text-subtle">
@@ -772,6 +781,9 @@ function FilterChip({
 
 interface MatchRowProps {
   project: RecentProjectDetail;
+  /** Render the on-disk path under the name. False on hosted, where the
+   *  path is a container-internal detail nobody can act on. */
+  showPath: boolean;
   index: number;
   selected: boolean;
   busy: boolean;
@@ -783,6 +795,7 @@ interface MatchRowProps {
 
 function MatchRow({
   project,
+  showPath,
   index,
   selected,
   busy,
@@ -868,9 +881,11 @@ function MatchRow({
                 No date
               </span>
             )}
-            <span className="truncate font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-subtle">
-              {project.path}
-            </span>
+            {showPath && (
+              <span className="truncate font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-subtle">
+                {project.path}
+              </span>
+            )}
           </div>
         </div>
       </div>
