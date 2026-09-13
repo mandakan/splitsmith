@@ -9,12 +9,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router-dom";
-import { Loader2, Play, RefreshCw, Share2 } from "lucide-react";
+import { ExternalLink, Loader2, Play, RefreshCw, Share2 } from "lucide-react";
 
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
-import { ApiError, api, type StageScorecard, type StageStatus } from "@/lib/api";
+import { ApiError, api, type StageScorecard, type StageStatus, type SyncStatusResponse } from "@/lib/api";
 import { buildStageMatrix, matchTotals } from "@/lib/stageMatrix";
 import { statusLabel } from "@/lib/stageStatus";
 import { useDeploymentMode } from "@/lib/features";
@@ -144,11 +144,47 @@ export function Results() {
   // the button must not appear there. useDeploymentMode() reports mode "local"
   // until the features fetch resolves, so the button pops in after the first
   // fetch settles - the same behavior as other hosted-only chrome.
-  const { mode: deploymentMode } = useDeploymentMode();
-  const shareToken = useParams<{ token?: string }>().token;
+  const { mode: deploymentMode, resolved: modeResolved } = useDeploymentMode();
+  const { token: shareToken, matchId } = useParams<{ token?: string; matchId?: string }>();
   const isShare = Boolean(shareToken);
   const canShare = deploymentMode === "hosted" && !shareToken;
   const [showShare, setShowShare] = useState(false);
+
+  // Local mode cannot mint share links (the store and the public share
+  // surface are hosted-only), but a match that has been pushed at least
+  // once has a hosted twin whose Results tab carries the real Share
+  // button - so deep-link there instead of showing nothing. Gated on
+  // ``resolved`` because the sync endpoints 404 in hosted mode and the
+  // hook reports "local" until the features fetch settles. The link
+  // stays through stale states (same call as SyncCard's own link) with
+  // an "unsynced changes" hint so a fresh audit isn't shared before it
+  // has been pushed.
+  const probeHostedLink = modeResolved && deploymentMode === "local" && !shareToken && Boolean(matchId);
+  const [hosted, setHosted] = useState<{ status: SyncStatusResponse; baseUrl: string } | null>(null);
+  useEffect(() => {
+    if (!probeHostedLink) {
+      setHosted(null);
+      return;
+    }
+    let cancelled = false;
+    void Promise.all([api.getSyncStatus(), api.getSyncSettings()])
+      .then(([status, settings]) => {
+        if (cancelled) return;
+        setHosted(settings.base_url ? { status, baseUrl: settings.base_url } : null);
+      })
+      // Offline or unconfigured is a normal desktop condition - no link, no error.
+      .catch(() => {
+        if (!cancelled) setHosted(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [probeHostedLink, matchId]);
+  const hostedResultsHref =
+    hosted && hosted.status.configured && hosted.status.last_synced_at && matchId
+      ? `${hosted.baseUrl}/match/${matchId}/results`
+      : null;
+  const hostedStale = Boolean(hosted?.status.stale);
 
   // Refresh-from-scoreboard: owner-only (share viewers cannot fetch
   // upstream), and only worth showing once the match is scoreboard-linked.
@@ -342,6 +378,25 @@ export function Results() {
                 <Share2 className="size-4" aria-hidden="true" />
                 Share
               </Button>
+            ) : null}
+            {hostedResultsHref ? (
+              <span className="inline-flex flex-wrap items-center gap-2">
+                <Button asChild variant="outline" size="sm">
+                  <a
+                    href={hostedResultsHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="Share on splitsmith.app - opens the hosted results page"
+                  >
+                    <Share2 className="size-4" aria-hidden="true" />
+                    Share on splitsmith.app
+                    <ExternalLink className="size-3" aria-hidden="true" />
+                  </a>
+                </Button>
+                {hostedStale ? (
+                  <span className="text-xs text-ink-2">Unsynced changes - sync first to share them</span>
+                ) : null}
+              </span>
             ) : null}
           </div>
         </div>

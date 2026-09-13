@@ -1,16 +1,21 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
-import type { MatchProject, ShooterListEntry, StageStatus } from "@/lib/api";
+import { api, type MatchProject, type ShooterListEntry, type StageStatus } from "@/lib/api";
+import { useDeploymentMode } from "@/lib/features";
 
 import { Results } from "@/pages/Results";
 
 // Hosted-only chrome (Share button) is out of scope here; pin local mode.
+// Individual cases re-mock useDeploymentMode for the hosted-link gating.
 vi.mock("@/lib/features", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/features")>();
-  return { ...actual, useDeploymentMode: () => ({ mode: "local" as const, resolved: true }) };
+  return {
+    ...actual,
+    useDeploymentMode: vi.fn(() => ({ mode: "local" as const, resolved: true })),
+  };
 });
 
 // Multi-shooter Results fetches every shooter's project for stage times.
@@ -21,6 +26,21 @@ vi.mock("@/lib/api", async (importOriginal) => {
     api: {
       ...actual.api,
       getProject: vi.fn().mockImplementation(() => new Promise(() => {})),
+      // Local-mode hosted link (see "Share on splitsmith.app" below).
+      // Default: never synced, so the existing row cases see no link.
+      getSyncStatus: vi.fn().mockResolvedValue({
+        configured: false,
+        last_synced_at: null,
+        stale: true,
+        pending_media: 0,
+        errors: [],
+        remote_changes: null,
+      }),
+      getSyncSettings: vi.fn().mockResolvedValue({
+        base_url: "https://splitsmith.app",
+        token_set: false,
+        account: null,
+      }),
     },
   };
 });
@@ -225,5 +245,67 @@ describe("Results rows - hit counts", () => {
   it("keeps unscored audited rows free of hit-count chrome", () => {
     renderResults("/match/m1/results");
     expect(screen.queryByText("NS")).not.toBeInTheDocument();
+  });
+});
+
+// Local mode has no Share dialog - share links are minted on hosted. A
+// match that has been pushed at least once gets a deep link to its
+// hosted results page instead, where the real Share button lives.
+describe("Results - Share on splitsmith.app (local mode)", () => {
+  const synced = {
+    configured: true,
+    last_synced_at: "2026-09-01T00:00:00Z",
+    stale: false,
+    pending_media: 0,
+    errors: [],
+    remote_changes: null,
+  };
+
+  beforeEach(() => {
+    vi.mocked(useDeploymentMode).mockReturnValue({ mode: "local", resolved: true });
+    vi.mocked(api.getSyncStatus).mockClear();
+  });
+
+  it("links a synced match to its hosted results page", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue(synced);
+    renderResults("/match/m1/results");
+
+    const link = await screen.findByRole("link", { name: /share on splitsmith\.app/i });
+    expect(link).toHaveAttribute("href", "https://splitsmith.app/match/m1/results");
+    expect(link).toHaveAttribute("target", "_blank");
+  });
+
+  it("warns when local changes have not been pushed yet", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue({ ...synced, stale: true, pending_media: 2 });
+    renderResults("/match/m1/results");
+
+    await screen.findByRole("link", { name: /share on splitsmith\.app/i });
+    expect(screen.getByText(/unsynced changes/i)).toBeInTheDocument();
+  });
+
+  it("omits the link before the first push", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue({ ...synced, last_synced_at: null, stale: true });
+    renderResults("/match/m1/results");
+
+    await vi.waitFor(() => expect(api.getSyncStatus).toHaveBeenCalled());
+    expect(screen.queryByRole("link", { name: /share on splitsmith\.app/i })).toBeNull();
+  });
+
+  it("never probes the local-only sync endpoints in hosted mode", async () => {
+    vi.mocked(useDeploymentMode).mockReturnValue({ mode: "hosted", resolved: true });
+    renderResults("/match/m1/results");
+
+    await screen.findByRole("button", { name: /manage share links/i });
+    expect(api.getSyncStatus).not.toHaveBeenCalled();
+    expect(screen.queryByRole("link", { name: /share on splitsmith\.app/i })).toBeNull();
+  });
+
+  it("never probes them on the anonymous share surface", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue(synced);
+    renderResults("/share/tok/results");
+
+    await new Promise((r) => setTimeout(r, 0));
+    expect(api.getSyncStatus).not.toHaveBeenCalled();
+    expect(screen.queryByRole("link", { name: /share on splitsmith\.app/i })).toBeNull();
   });
 });
