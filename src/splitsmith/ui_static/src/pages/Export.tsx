@@ -648,6 +648,7 @@ function ExportInner({ slug }: { slug: string }) {
               readyStages.length,
               stages.length,
               trimsOnly,
+              deploymentMode === "hosted",
             )}
           >
             {sourceMissingNumbers.length > 0 && (
@@ -658,13 +659,12 @@ function ExportInner({ slug }: { slug: string }) {
                 />
                 <div className="min-w-0">
                   <div className="font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-live">
-                    Source offline
+                    {sourceOfflineCopy(deploymentMode === "hosted").title}
                   </div>
                   <div className="mt-0.5 text-muted">
-                    {sourceMissingNumbers.length} otherwise-ready{" "}
-                    {sourceMissingNumbers.length === 1 ? "stage" : "stages"} can't
-                    export -- the original video files aren't reachable. Mount
-                    the source drive (or use Relink) and reload the page.
+                    {sourceOfflineCopy(deploymentMode === "hosted").body(
+                      sourceMissingNumbers.length,
+                    )}
                   </div>
                 </div>
               </div>
@@ -681,7 +681,13 @@ function ExportInner({ slug }: { slug: string }) {
                     selected={selection.has(s.stage_number)}
                     eligible={eligible}
                     sourceMissing={sourceMissing}
-                    title={stageChipTitle(s, eligible, sourceMissing, trimsOnly)}
+                    title={stageChipTitle(
+                      s,
+                      eligible,
+                      sourceMissing,
+                      trimsOnly,
+                      deploymentMode === "hosted",
+                    )}
                     onToggle={() => toggleStage(s.stage_number)}
                   />
                 );
@@ -1276,6 +1282,28 @@ function PresetCard({
   );
 }
 
+/** Copy for a stage whose source file is unreachable. Desktop: the drive
+ *  is unplugged. Hosted: the raw upload left object storage (cleanup), so
+ *  the only fix is re-uploading from Videos -- never tell a hosted user
+ *  to mount a drive. */
+function sourceOfflineCopy(hosted: boolean): {
+  title: string;
+  body: (n: number) => string;
+} {
+  if (hosted) {
+    return {
+      title: "Upload missing",
+      body: (n) =>
+        `${n} otherwise-ready ${n === 1 ? "stage" : "stages"} can't export -- the original upload is no longer stored. Re-upload the stage's video from Videos.`,
+    };
+  }
+  return {
+    title: "Source offline",
+    body: (n) =>
+      `${n} otherwise-ready ${n === 1 ? "stage" : "stages"} can't export -- the original video files aren't reachable. Mount the source drive (or use Relink) and reload the page.`,
+  };
+}
+
 /** Tooltip text for one stage chip in Section 2. Mirrors the disabled-
  *  reason ladder the chip used to compute internally before `StageChip`
  *  moved to `components/export/primitives.tsx` and became agnostic to
@@ -1285,9 +1313,13 @@ function stageChipTitle(
   eligible: boolean,
   sourceMissing: boolean,
   trimsOnly: boolean,
+  hosted: boolean,
 ): string {
   if (eligible) return `Stage ${stage.stage_number} -- ${stage.stage_name}`;
-  if (sourceMissing) return "Source video offline -- reconnect the drive and reload.";
+  if (sourceMissing)
+    return hosted
+      ? "Original upload is no longer stored -- re-upload from Videos."
+      : "Source video offline -- reconnect the drive and reload.";
   if (stage.skipped) return "Stage skipped.";
   if (trimsOnly) return "Stage needs a beep and a stage time before it can be trimmed.";
   return "Stage not audited yet.";
@@ -1299,17 +1331,25 @@ function stageSectionHelp(
   readyCount: number,
   totalCount: number,
   trimsOnly: boolean,
+  hosted: boolean,
 ): string {
   if (eligibleCount > 0) {
     return `${eligibleCount} of ${totalCount} stages exportable.`;
   }
   if (sourceMissingCount > 0 && readyCount === sourceMissingCount) {
-    return "Ready, but every source video is offline. Mount the source drive and reload.";
+    return hosted
+      ? "Ready, but every original upload is no longer stored. Re-upload from Videos."
+      : "Ready, but every source video is offline. Mount the source drive and reload.";
   }
   if (readyCount === 0) {
     return trimsOnly
       ? "No stage is trimmable yet. A stage needs a confirmed beep and a stage time."
       : "No stage is exportable yet. Finish auditing a stage first.";
+  }
+  if (hosted) {
+    return trimsOnly
+      ? "No stage is trimmable. Re-upload the missing videos."
+      : "No stage is exportable. Finish auditing or re-upload missing videos.";
   }
   return trimsOnly
     ? "No stage is trimmable. Reconnect the missing sources."
