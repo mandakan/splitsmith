@@ -33,4 +33,25 @@ describe("StageStats", () => {
     // One "-" per absent figure: stage time, draw, fastest, avg.
     expect(screen.getAllByText("-")).toHaveLength(4);
   });
+  it("refuses to shrink inside a scroll column (the desktop clip, spec 7.1)", () => {
+    const { container } = render(
+      <StageStats stageTime={32.09} shotCount={30} draw={1.97} fastestSplit={0.249} avgSplit={0.386} />,
+    );
+    // jsdom has no layout; the class is the contract. ResultsStage mounts
+    // this strip first in a `flex flex-col lg:overflow-y-auto` column, and
+    // an overflow-hidden flex child with the default shrink collapses to
+    // its labels there.
+    expect(container.firstElementChild).toHaveClass("shrink-0");
+  });
+
+  it("leads with the stage time on a full row so five tiles never leave an orphan", () => {
+    render(
+      <StageStats stageTime={32.09} shotCount={30} draw={1.97} fastestSplit={0.249} avgSplit={0.386} />,
+    );
+    const stageTime = screen.getByText("Stage time").parentElement;
+    const avgSplit = screen.getByText("Avg split").parentElement;
+    expect(stageTime).toHaveClass("col-span-2");
+    expect(stageTime).toHaveClass("md:col-span-1");
+    expect(avgSplit).not.toHaveClass("col-span-2");
+  });
 });
