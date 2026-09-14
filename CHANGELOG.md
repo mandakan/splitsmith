@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.35.0](https://github.com/mandakan/splitsmith/compare/v0.34.0...v0.35.0) (2026-09-14)
+
+
+### Features
+
+* **api:** generated-card fields on the compare-grid export request ([#973](https://github.com/mandakan/splitsmith/issues/973)) ([#984](https://github.com/mandakan/splitsmith/issues/984)) ([9c2a1e8](https://github.com/mandakan/splitsmith/commit/9c2a1e87b6da0d624bd87caecb3a1c412751be15))
+* **api:** overlay, theme and summary hold on the compare-grid export request ([#705](https://github.com/mandakan/splitsmith/issues/705), endpoint half) ([#990](https://github.com/mandakan/splitsmith/issues/990)) ([ac9d1f0](https://github.com/mandakan/splitsmith/commit/ac9d1f00e166f2ee297f3070993580ee63bb03f7))
+* **cli:** match export --youtube-sidecar, moved with a renamed output ([#992](https://github.com/mandakan/splitsmith/issues/992)) ([63cc71d](https://github.com/mandakan/splitsmith/commit/63cc71d49dfcb074c45dc9484bf75e70ee169fdf))
+* **coach:** split &lt;= 1.0 s, transition &lt;= 2.0 s, thresholds from config, match reclassify verb ([#995](https://github.com/mandakan/splitsmith/issues/995)) ([019860e](https://github.com/mandakan/splitsmith/commit/019860e0654b6f2cb57db480330de96fc829dac9))
+* **compare:** generated title page, stage cards and closing card on the grid MP4 ([#973](https://github.com/mandakan/splitsmith/issues/973), part 2) ([#977](https://github.com/mandakan/splitsmith/issues/977)) ([888003e](https://github.com/mandakan/splitsmith/commit/888003eb10bb9c77dc8c28c379f43023326303d6))
+* **export:** --description-lead opens the YouTube sidecar's description ([#1006](https://github.com/mandakan/splitsmith/issues/1006)) ([2ee681b](https://github.com/mandakan/splitsmith/commit/2ee681b7dc33eee0599cf138a672d6ed401b5c30))
+* **export:** generated title page, stage cards and intro/outro in the rendered MP4 ([#973](https://github.com/mandakan/splitsmith/issues/973), part 1) ([#975](https://github.com/mandakan/splitsmith/issues/975)) ([5481093](https://github.com/mandakan/splitsmith/commit/54810935ef71dbd76ba9cda5d9ca8036b2099554))
+* **export:** paste-ready YouTube text and a thumbnail beside the sidecar ([#1007](https://github.com/mandakan/splitsmith/issues/1007)) ([78641a3](https://github.com/mandakan/splitsmith/commit/78641a30bae1d130aeddeb30297fe5cf49440b11))
+* **export:** per-stage summary card (PNG + held ProRes MOV) beside the overlay MOV ([#972](https://github.com/mandakan/splitsmith/issues/972)) ([#980](https://github.com/mandakan/splitsmith/issues/980)) ([1d6c5f0](https://github.com/mandakan/splitsmith/commit/1d6c5f05d36a704e83124ee9e31886e6e7ab5bfa))
+* **export:** stage summary held after each stage in the rendered MP4 ([#972](https://github.com/mandakan/splitsmith/issues/972)) ([#979](https://github.com/mandakan/splitsmith/issues/979)) ([31906f1](https://github.com/mandakan/splitsmith/commit/31906f122f238c384e7ab9347cebe3dc71e6877c))
+* **hosted:** the compare grid renders, pushes and downloads on a hosted install ([#755](https://github.com/mandakan/splitsmith/issues/755)) ([#993](https://github.com/mandakan/splitsmith/issues/993)) ([cacd04f](https://github.com/mandakan/splitsmith/commit/cacd04f341c8194304434a50742068b40423949d))
+* **mp4:** --youtube-sidecar embeds chapter atoms in the rendered MP4 ([#204](https://github.com/mandakan/splitsmith/issues/204) follow-up) ([#1004](https://github.com/mandakan/splitsmith/issues/1004)) ([dd5a6cb](https://github.com/mandakan/splitsmith/commit/dd5a6cb4881334dfac29a290451264c7408d3f18))
+* **site:** redo splitsmith.app on the restructured UI ([#1009](https://github.com/mandakan/splitsmith/issues/1009)) ([4e1d675](https://github.com/mandakan/splitsmith/commit/4e1d6751c4c3d48e8b34b03705992968aef378f0))
+* **ui:** Audit on the primitives with beep confirmation as step 1 (UX PR 5) ([#991](https://github.com/mandakan/splitsmith/issues/991)) ([20301c5](https://github.com/mandakan/splitsmith/commit/20301c5d6e74e2eea74359146202c03b0a4185e9))
+* **ui:** CamOptionsPanel for secondary cams and PiP layout ([#974](https://github.com/mandakan/splitsmith/issues/974) item A) ([#987](https://github.com/mandakan/splitsmith/issues/987)) ([44d32db](https://github.com/mandakan/splitsmith/commit/44d32db1deff30d3a12a05c0aff40c02e3ce26c7))
+* **ui:** Coach and Compare on the primitives with the time budget (UX PR 7) ([#997](https://github.com/mandakan/splitsmith/issues/997)) ([9da1ad6](https://github.com/mandakan/splitsmith/commit/9da1ad64a7d3749cfae825fdc2ceb52249484e08))
+* **ui:** Export mounts the card, cam and YouTube rows on the rebuilt page ([#1003](https://github.com/mandakan/splitsmith/issues/1003)) ([deed225](https://github.com/mandakan/splitsmith/commit/deed225ad51d452d207e2566595b9bdb87de6bae))
+* **ui:** Footage page with the coverage matrix and the clip sheet (UX PR 6) ([#994](https://github.com/mandakan/splitsmith/issues/994)) ([040db92](https://github.com/mandakan/splitsmith/commit/040db920d6d31e71425a0a60eb2342975d25cc5d))
+* **ui:** Matches, Export, Account on the primitives; Triage and Jobs routes retired (UX PR 8) ([#1001](https://github.com/mandakan/splitsmith/issues/1001)) ([c865662](https://github.com/mandakan/splitsmith/commit/c865662ad5b654a578ca9cda749892f2ac31f3d4))
+* **ui:** one-bar shell, progress strip, grouped nav and the budget primitives ([#978](https://github.com/mandakan/splitsmith/issues/978)) ([1f49956](https://github.com/mandakan/splitsmith/commit/1f49956d7b92e64158d1518ec11df407ba363fe7))
+* **ui:** Overview is the stage pipeline table ([#981](https://github.com/mandakan/splitsmith/issues/981)) ([14e5012](https://github.com/mandakan/splitsmith/commit/14e50126c8ae4e485518df5da9a97c52239b2f26))
+* **ui:** RenderOptionsPanel for generated cards and the stage summary ([#974](https://github.com/mandakan/splitsmith/issues/974) items C, D) ([#985](https://github.com/mandakan/splitsmith/issues/985)) ([9a523ed](https://github.com/mandakan/splitsmith/commit/9a523ed394da8008b4601e91030d388c23e4a96a))
+* **ui:** Splits page, stage page and share surface on the primitives (UX PR 4) ([#988](https://github.com/mandakan/splitsmith/issues/988)) ([4025db8](https://github.com/mandakan/splitsmith/commit/4025db8a7cc4d7d7dfc9cc2080f1358fc030630e))
+
+
+### Bug Fixes
+
+* **compare:** cut each grid tile's audio with atrim from an unseeked read of its trim ([#999](https://github.com/mandakan/splitsmith/issues/999)) ([1750bd0](https://github.com/mandakan/splitsmith/commit/1750bd0620b605919f8a33188818ac53e091346f))
+* **mp4:** cut a stage's audio with atrim from an unseeked read; input-side -ss mis-cut it ([#996](https://github.com/mandakan/splitsmith/issues/996)) ([ff2956a](https://github.com/mandakan/splitsmith/commit/ff2956a34ae3f0f6d9d2b05980165ab88006d016))
+* **scripts:** demo seeder keeps the draw fixed when stretching a shot sequence ([#1008](https://github.com/mandakan/splitsmith/issues/1008)) ([5ce832e](https://github.com/mandakan/splitsmith/commit/5ce832e85814aa501d058700cadc9d1b87deeb47))
+* **ui:** demo seeder writes the match stage table and a second shooter; audit draw counts from the beep ([#1005](https://github.com/mandakan/splitsmith/issues/1005)) ([cc8dd5f](https://github.com/mandakan/splitsmith/commit/cc8dd5fbf523485a8eeafd986b1cce4cf9e9ccb0))
+* **ui:** share bar names the match on a phone; marketing deploy installs wrangler ([#1010](https://github.com/mandakan/splitsmith/issues/1010)) ([d43752f](https://github.com/mandakan/splitsmith/commit/d43752fe54064cdea3f6c86f074d8acbfe15e323))
+* **ui:** six defects found in the UX review ([#970](https://github.com/mandakan/splitsmith/issues/970)) ([25fc8e8](https://github.com/mandakan/splitsmith/commit/25fc8e80593c6e652ca543422088ba57daba37e1))
+
+
+### Documentation
+
+* CLAUDE.md no-go list after UX PR 4 ([#989](https://github.com/mandakan/splitsmith/issues/989)) ([786451a](https://github.com/mandakan/splitsmith/commit/786451afce673c2885ae9e9779f0ba2c0a377bdc))
+* rendered cards and stage summaries ([#973](https://github.com/mandakan/splitsmith/issues/973), [#972](https://github.com/mandakan/splitsmith/issues/972)) ([#983](https://github.com/mandakan/splitsmith/issues/983)) ([3828941](https://github.com/mandakan/splitsmith/commit/3828941c9fc1f30bb57f4479fe6845e6e65863a7))
+* UI budget conventions for parallel work ([#982](https://github.com/mandakan/splitsmith/issues/982)) ([1f65467](https://github.com/mandakan/splitsmith/commit/1f654675ca71695eac75aaf8b6d7b6635278ca4c))
+
 ## [0.34.0](https://github.com/mandakan/splitsmith/compare/v0.33.1...v0.34.0) (2026-09-13)
 
 
