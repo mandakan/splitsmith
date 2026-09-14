@@ -137,31 +137,27 @@ STAGE3_CLS = [
 
 
 def synth_times(n: int, total: float) -> list[float]:
-    """Plausible shot sequence: draw ~1.8 s, then alternating quick pairs and moves."""
-    out = [1.8]
-    t = 1.8
-    i = 0
-    while len(out) < n:
-        gap = 0.28 if i % 3 != 2 else 1.1
-        t += gap
-        out.append(round(t, 2))
-        i += 1
-    scale = (total - 0.4) / out[-1]
-    return [round(x * scale, 2) for x in out]
+    """Plausible shot sequence: a 1.8 s draw, then alternating quick pairs and moves.
+
+    Only the gaps after the draw stretch to fill ``total``, so the draw
+    stays a draw whatever the stage time.
+    """
+    return _sequence(n, total, draw=1.8, gaps=[0.28 if i % 3 != 2 else 1.1 for i in range(n - 1)])
 
 
 def fast_times(n: int, total: float) -> list[float]:
-    """A quicker shooter: shorter draw, tighter pairs, fewer long moves."""
-    out = [1.4]
-    t = 1.4
-    i = 0
-    while len(out) < n:
-        gap = 0.22 if i % 4 != 3 else 0.9
-        t += gap
+    """A quicker shooter: a 1.4 s draw, tighter pairs, fewer long moves."""
+    return _sequence(n, total, draw=1.4, gaps=[0.22 if i % 4 != 3 else 0.9 for i in range(n - 1)])
+
+
+def _sequence(n: int, total: float, *, draw: float, gaps: list[float]) -> list[float]:
+    scale = (total - 0.4 - draw) / sum(gaps) if gaps else 1.0
+    out = [draw]
+    t = draw
+    for gap in gaps:
+        t += gap * scale
         out.append(round(t, 2))
-        i += 1
-    scale = (total - 0.4) / out[-1]
-    return [round(x * scale, 2) for x in out]
+    return out
 
 
 def audit_doc(times: list[float], classes: list[str] | None, *, audited: bool) -> dict:
