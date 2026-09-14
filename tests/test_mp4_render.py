@@ -781,3 +781,77 @@ def test_backdrop_grabs_take_the_head_frame_and_the_tail_window(tmp_path: Path) 
     for head in heads:
         assert head[head.index("-frames:v") + 1] == "1" and "-update" not in head
     assert "-update" in tail and tail[tail.index("-t") + 1] == "0.5"
+
+
+# --- summary hold (issue #972) ---------------------------------------------
+
+
+def _summarised_composition(tmp_path: Path) -> composition.Composition:
+    from splitsmith.match_project import StageScorecard
+    from splitsmith.stage_summary_data import TileShot, TileStageData
+
+    stage_a = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")
+    stage_b = _basic_stage(tmp_path=tmp_path, name="B", primary_name="b.mp4")
+    data = TileStageData(
+        label="Me",
+        stage_number=1,
+        shots=(TileShot(1.0, 1.0), TileShot(1.3, 0.3)),
+        stage_time_seconds=4.5,
+        scorecard=StageScorecard(hit_factor=12.0, alphas=10),
+    )
+    hold = composition.SummaryHold(data=data, label="Me", duration_seconds=3.0)
+    return composition.from_stage_compositions(
+        [stage_a, stage_b], project_name="m", summaries={0: hold, 1: hold}
+    )
+
+
+def test_plan_timeline_puts_a_summary_after_each_stage(tmp_path: Path) -> None:
+    plan = mp4_render.plan_timeline(_summarised_composition(tmp_path))
+    assert [item.kind for item in plan.items] == ["stage", "summary", "stage", "summary"]
+    assert plan.duration_seconds == pytest.approx(20.0 + 3.0 + 20.0 + 3.0)
+    assert plan.needs_rasterizer
+
+
+def test_render_mp4_holds_the_summary_after_the_stage(tmp_path: Path) -> None:
+    comp = _summarised_composition(tmp_path)
+    runner = MagicMock(side_effect=_ok)
+    work = tmp_path / "work"
+    fake = _FakeRasterizer()
+    result = mp4_render.render_mp4(
+        comp, output_path=tmp_path / "m.mp4", work_dir=work, runner=runner, rasterizer=fake
+    )
+    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    assert names == ["stage_000.mp4", "summary_000.mp4", "stage_001.mp4", "summary_001.mp4"]
+    assert len(fake.calls) == 2
+    assert "12.00" in fake.calls[0] and "Me" in fake.calls[0]
+    # The summary's backdrop is the stage's last visible frame: a tail grab.
+    grabs = [c.args[0] for c in runner.call_args_list if c.args[0][-1].endswith("summary_000_backdrop.png")]
+    (grab,) = grabs
+    assert "-update" in grab and grab[grab.index("-t") + 1] == "0.5"
+    assert result.duration_seconds == pytest.approx(46.0)
+
+
+def test_summary_without_browser_or_frame_is_skipped_not_fatal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The fake runner writes no frame and no browser launches: nothing
+    to hold on, so the summary is skipped and the render still stitches."""
+    from splitsmith.overlay_raster import RasterizerUnavailableError
+
+    class _NoBrowser:
+        def __enter__(self):
+            raise RasterizerUnavailableError("no browser", "boom")
+
+        def __exit__(self, *exc: object) -> None:
+            pass
+
+    monkeypatch.setattr(mp4_render, "ChromiumRasterizer", _NoBrowser)
+    comp = _summarised_composition(tmp_path)
+    work = tmp_path / "work"
+    result = mp4_render.render_mp4(
+        comp, output_path=tmp_path / "m.mp4", work_dir=work, runner=MagicMock(side_effect=_ok)
+    )
+    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    assert names == ["stage_000.mp4", "stage_001.mp4"]
+    assert len(result.degradations) == 1
+    assert result.duration_seconds == pytest.approx(40.0)

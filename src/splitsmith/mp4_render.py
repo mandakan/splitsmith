@@ -64,7 +64,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from .composition import Composition, ConnectedClip, Segment, SequenceFormat, Stage, TitleCard, Transform
+from .composition import (
+    Composition,
+    ConnectedClip,
+    Segment,
+    SequenceFormat,
+    Stage,
+    SummaryHold,
+    TitleCard,
+    Transform,
+)
 from .overlay_card import (
     LOWER_THIRD_FADE_SECONDS,
     Card,
@@ -73,6 +82,7 @@ from .overlay_card import (
     lower_third_filters,
 )
 from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
+from .overlay_summary_cell import build_summary_still
 from .overlay_theme import ThemeName, load_theme
 
 logger = logging.getLogger(__name__)
@@ -179,7 +189,7 @@ def render_mp4(
         except RasterizerUnavailableError as exc:
             owned = None
             active = None
-            degradations = (f"cards skipped: {exc.detail}",)
+            degradations = (f"generated cards and summaries skipped: {exc.detail}",)
             logger.warning("%s", degradations[0])
 
     try:
@@ -262,7 +272,13 @@ def _render_with_work_dir(
             if rasterizer is None or theme is None:
                 continue  # already recorded as a degradation up front
             backdrop = _grab_backdrop(
-                item, timeline, work_dir=work_dir, ffmpeg_binary=ffmpeg_binary, runner=runner
+                timeline,
+                name=item.name,
+                stage_index=item.backdrop_stage_index,
+                at=item.backdrop_at,
+                work_dir=work_dir,
+                ffmpeg_binary=ffmpeg_binary,
+                runner=runner,
             )
             image = build_card_still(
                 item.card,
@@ -274,6 +290,47 @@ def _render_with_work_dir(
             )
             if image is None:
                 continue  # logged by overlay_card; a card is its text
+            png = work_dir / f"{item.name}.png"
+            image.save(png)
+            still_out = work_dir / f"{item.name}.mp4"
+            cmd = _build_still_command(
+                png,
+                seconds=item.duration_seconds,
+                sequence=sequence,
+                output_path=still_out,
+                ffmpeg_binary=ffmpeg_binary,
+                youtube_preset=youtube_preset,
+            )
+            _run(cmd, runner=runner)
+            segments.append((still_out, item.duration_seconds))
+            generated = True
+        elif isinstance(item, _SummaryItem):
+            # The frame is grabbed whether or not there is a browser: the
+            # blurred freeze without text is the grid's own degradation,
+            # and a frame is a picture the viewer recognises.
+            backdrop = _grab_backdrop(
+                timeline,
+                name=item.name,
+                stage_index=item.stage_index,
+                at="tail",
+                work_dir=work_dir,
+                ffmpeg_binary=ffmpeg_binary,
+                runner=runner,
+            )
+            image = build_summary_still(
+                item.hold.data,
+                item.hold.label,
+                width=sequence.width,
+                height=sequence.height,
+                theme=theme if theme is not None else load_theme(overlay_theme),
+                rasterizer=rasterizer,
+                backdrop=backdrop,
+            )
+            if image is None:
+                logger.warning(
+                    "stage %d: no frame and no text to hold the summary on; skipped", item.stage_index
+                )
+                continue
             png = work_dir / f"{item.name}.png"
             image.save(png)
             still_out = work_dir / f"{item.name}.mp4"
@@ -329,31 +386,33 @@ _BACKDROP_WINDOW_SECONDS = 0.5
 
 
 def _grab_backdrop(
-    item: _StillItem,
     timeline: TimelinePlan,
     *,
+    name: str,
+    stage_index: int | None,
+    at: Literal["head", "tail"],
     work_dir: Path,
     ffmpeg_binary: str,
     runner: Runner,
 ) -> Path | None:
-    """Pull the frame a full-frame card sits on, or ``None`` when there is
+    """Pull the frame a full-frame still sits on, or ``None`` when there is
     no stage to take it from or the grab produced no file.
 
     A title page and a slate take the first visible frame of the stage
-    they precede; the closing card takes the last visible frame of the
-    last stage. A failed grab is not an error: the card composes on the
-    theme's flat surface instead.
+    they precede; the closing card and a stage's summary take the last
+    visible frame. A failed grab is not an error: the still composes on
+    the theme's flat surface instead.
     """
-    if item.backdrop_stage_index is None:
+    if stage_index is None:
         return None
-    stage = timeline.stage(item.backdrop_stage_index)
+    stage = timeline.stage(stage_index)
     if stage is None:
         return None
     plan = stage.plan
-    out = work_dir / f"{item.name}_backdrop.png"
+    out = work_dir / f"{name}_backdrop.png"
     out.unlink(missing_ok=True)
     primary = str(plan.stage.primary.path)
-    if item.backdrop_at == "head":
+    if at == "head":
         # There is always a frame at or after the head seek, so take
         # exactly the first one; a window here would keep a frame half a
         # second into the stage instead of its visible head.
@@ -383,7 +442,7 @@ def _grab_backdrop(
     try:
         _run(cmd, runner=runner)
     except FFmpegError as exc:
-        logger.warning("could not grab a backdrop frame for %s (%s); the card composes flat", item.name, exc)
+        logger.warning("could not grab a backdrop frame for %s (%s); the still composes flat", name, exc)
         return None
     try:
         if out.stat().st_size == 0:
@@ -433,7 +492,7 @@ class _CamAlignment:
     cam_visible_seconds: float  # how long the cam shows on the spine
 
 
-ItemKind = Literal["intro", "title_page", "slate", "stage", "closing", "outro"]
+ItemKind = Literal["intro", "title_page", "slate", "stage", "summary", "closing", "outro"]
 
 
 @dataclass(frozen=True)
@@ -468,6 +527,25 @@ class _StillItem:
 
 
 @dataclass(frozen=True)
+class _SummaryItem:
+    """The stage summary held after ``stage_index``'s action (issue #972):
+    a still of that stage's last visible frame, blurred and dimmed, with
+    the shooter's summary composed over it."""
+
+    stage_index: int
+    hold: SummaryHold
+    kind: ItemKind = "summary"
+
+    @property
+    def name(self) -> str:
+        return f"summary_{self.stage_index:03d}"
+
+    @property
+    def duration_seconds(self) -> float:
+        return self.hold.duration_seconds
+
+
+@dataclass(frozen=True)
 class _ClipItem:
     """An intro / outro clip, re-encoded to the sequence."""
 
@@ -479,7 +557,7 @@ class _ClipItem:
         return self.segment.asset.metadata.duration_seconds
 
 
-SpineItem = _StageItem | _StillItem | _ClipItem
+SpineItem = _StageItem | _StillItem | _SummaryItem | _ClipItem
 
 
 @dataclass(frozen=True)
@@ -501,7 +579,8 @@ class TimelinePlan:
     @property
     def needs_rasterizer(self) -> bool:
         return any(
-            isinstance(item, _StillItem) or (isinstance(item, _StageItem) and item.lower_third is not None)
+            isinstance(item, _StillItem | _SummaryItem)
+            or (isinstance(item, _StageItem) and item.lower_third is not None)
             for item in self.items
         )
 
@@ -518,10 +597,10 @@ class TimelinePlan:
 
 def plan_timeline(composition: Composition, *, plans: list[_StagePlan] | None = None) -> TimelinePlan:
     """Walk the IR into spine order: intro, title page, then per stage a
-    slate (when its title is one) and the stage itself, then the closing
-    card and the outro. A lower-third title is attached to its stage
-    rather than placed on the spine, since it overlays the head and adds
-    no time."""
+    slate (when its title is one), the stage itself and its summary hold
+    (when it has one), then the closing card and the outro. A lower-third
+    title is attached to its stage rather than placed on the spine, since
+    it overlays the head and adds no time."""
     stage_plans = (
         plans if plans is not None else [_plan_stage(s, composition.sequence) for s in composition.stages]
     )
@@ -554,6 +633,8 @@ def plan_timeline(composition: Composition, *, plans: list[_StagePlan] | None = 
         elif title is not None:
             lower_third = title
         items.append(_StageItem(index=index, plan=plan, lower_third=lower_third))
+        if stage.summary is not None:
+            items.append(_SummaryItem(stage_index=index, hold=stage.summary))
     if composition.closing is not None:
         items.append(
             _StillItem(

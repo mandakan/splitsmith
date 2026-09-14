@@ -33,6 +33,7 @@ seeking to a timestamp.
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import shutil
 import subprocess
 import sys
@@ -98,6 +99,10 @@ def _moments(plan: mp4_render.TimelinePlan, *, titles: str) -> tuple[Moment, ...
             Moment("card-2", starts["slate_1"] + CARD_SECONDS / 2, "stage 2 slate, no round count")
         )
     stage_1 = starts["stage_0"]
+    if "summary_0" in starts:
+        moments.append(
+            Moment("summary-1", starts["summary_0"] + 0.5, "stage 1's summary held after its action")
+        )
     moments.append(Moment("stage-1-head", stage_1 + 0.5, "lower-third fully up (with --titles lower-third)"))
     moments.append(
         Moment("stage-1-mid", stage_1 + BEEP_OFFSET_SECONDS + 2.0, "action; a lower-third has faded out")
@@ -156,6 +161,12 @@ def main() -> int:
     parser.add_argument("--theme", choices=("splitsmith", "clean"), default="splitsmith")
     parser.add_argument("--titles", choices=("slate", "lower-third"), default="slate")
     parser.add_argument("--keep-video", action="store_true")
+    parser.add_argument(
+        "--summary-hold",
+        type=float,
+        default=0.0,
+        help="seconds to hold each stage's summary after its action (#972); 0 is off",
+    )
     args = parser.parse_args()
 
     if not ffmpeg_available():
@@ -199,6 +210,27 @@ def main() -> int:
             text="Bromma Classifier", info=("2026-05-01",), duration_seconds=CLOSING_SECONDS
         ),
     )
+    if args.summary_hold > 0:
+        from splitsmith.match_project import StageScorecard
+        from splitsmith.stage_summary_data import TileStageData, load_stage_shots
+
+        summaries = {}
+        for index in range(len(stages)):
+            summaries[index] = composition.SummaryHold(
+                data=TileStageData(
+                    label="M. Axell",
+                    stage_number=index + 1,
+                    shots=load_stage_shots(work / f"stage{index + 1}.json"),
+                    stage_time_seconds=4.5,
+                    scorecard=StageScorecard(hit_factor=12.0, alphas=6, charlies=1, deltas=1, misses=0),
+                ),
+                label="M. Axell",
+                duration_seconds=args.summary_hold,
+            )
+        comp = dataclasses.replace(
+            comp,
+            stages=tuple(dataclasses.replace(s, summary=summaries[i]) for i, s in enumerate(comp.stages)),
+        )
     plan = mp4_render.plan_timeline(comp)
     rendered = work / "match.mp4"
     result = mp4_render.render_mp4(

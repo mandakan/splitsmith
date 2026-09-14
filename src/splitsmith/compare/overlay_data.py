@@ -11,74 +11,12 @@ already on disk rather than from the scoreboard.
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass
 
-from ..audit_data import audit_shots_to_engine_shots, read_audit_data
-from ..coach import heal_unclassified
-from ..config import IntervalClass, StageRounds
-from ..match_project import MatchProject, StageScorecard, is_stub_audit
+from ..match_project import MatchProject
+from ..stage_summary_data import TileShot, TileStageData, load_stage_shots
 from .project_loader import CompareShooterBundle, CompareStageBundle
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class TileShot:
-    """One accepted shot, measured from the beep.
-
-    ``time_from_beep`` is seconds after the start signal. It is
-    independent of the trim, the head pad and
-    :attr:`CompareStageBundle.beep_offset_in_clip` -- that field converts
-    to *clip-local* time, which is a different origin, and the grid's own
-    head pad is applied later by the sprite builder.
-
-    There is deliberately no shot number here. The sequence is ordered by
-    time and the overlay counts what has been fired, so an index over
-    this tuple is all any caller needs. A stored number would have been
-    that index plus one, which disagrees with the audit's own
-    ``shot_number`` on exactly the input that motivated re-deriving the
-    splits -- an audit whose row order is not its time order.
-
-    ``interval_class`` is the Coach annotation when the audit carries one
-    (#772): the split statistics need it to tell a split from a reload.
-    ``None`` means unclassified, and the statistics fall back to a
-    threshold rule - see :func:`splitsmith.coach.statistic_splits`.
-    """
-
-    time_from_beep: float
-    split: float
-    interval_class: IntervalClass | None = None
-
-
-@dataclass(frozen=True)
-class TileStageData:
-    """Everything the overlay knows about one shooter on one stage.
-
-    Every field is optional in practice: a shooter can have a trim with no
-    audit, an audit with no scorecard, or a manually entered stage time
-    with neither. Absent data stays absent -- nothing here substitutes a
-    zero for a number that was never read.
-    """
-
-    label: str
-    stage_number: int
-    shots: tuple[TileShot, ...] = ()
-    stage_time_seconds: float | None = None
-    stage_time_is_manual: bool = False
-    scorecard: StageScorecard | None = None
-    stage_rounds: StageRounds | None = None
-
-    @property
-    def shot_count(self) -> int:
-        return len(self.shots)
-
-    @property
-    def has_shots(self) -> bool:
-        return bool(self.shots)
-
-    @property
-    def last_shot_time(self) -> float | None:
-        return self.shots[-1].time_from_beep if self.shots else None
 
 
 def load_overlay_data(
@@ -150,78 +88,10 @@ def _load_project(bundle: CompareShooterBundle) -> MatchProject | None:
 
 
 def _load_shots(stage: CompareStageBundle) -> tuple[TileShot, ...]:
-    """Read this stage's audited shots, measured from the beep.
-
-    ``beep_time_in_source=0.0`` makes the engine's ``time_absolute``
-    degenerate to ``time_from_beep`` so nothing downstream can mistake it
-    for a source-absolute value. A corrupt audit degrades to no shots:
-    one bad file must not fail a 12-stage render.
-
-    Splits are re-derived over the time-sorted sequence rather than taken
-    from ``audit_shots_to_engine_shots``, which is the one audit consumer
-    in this codebase that orders by ``shot_number`` instead of by time
-    (``ui/server.py`` and ``coach_distributions`` both sort by time). The
-    two orderings agree on every audit a detector writes, but
-    ``audit.py``'s CSV apply preserves row order as ``shot_number``, so a
-    hand-sorted prep sheet can land shots out of time order -- and the
-    helper's splits would then be differences between non-adjacent shots,
-    including negative ones. The overlay draws the split on screen, so a
-    wrong number is worse than no number. Parsing and the helper's
-    rejection filtering are still its job; only ``split`` is recomputed.
-
-    #775: an audited stage is an invariant of "fully classified", but a
-    legacy doc on disk can still be partially classified. When that is
-    true here, ``coach.heal_unclassified`` runs the raw shot dicts through
-    the in-memory classifier before conversion - otherwise
-    ``statistic_splits`` (overlay_summary.py) sees a mixed doc and renders
-    the wrong average into the exported MP4. That helper is where "needs a
-    heal" is defined for every surface (#780); this path never writes back
-    to disk, so it ignores the return value. Only the coach GET/PUT
-    persist a heal.
-    """
-    try:
-        audit_data = read_audit_data(stage.audit_path)
-        if not isinstance(audit_data, dict):
-            # Valid JSON, wrong shape. ``read_audit_data`` returns whatever
-            # ``json.loads`` produced, so a list/null/string audit would
-            # otherwise reach ``.get`` and raise past this handler.
-            raise TypeError(f"audit JSON is {type(audit_data).__name__}, expected object")
-        if is_stub_audit(audit_data):
-            # A beep-confirm placeholder means the same thing as no audit.
-            # Belt and braces today: ``is_stub_audit`` requires an empty
-            # ``shots``, so this branch can never change the result while
-            # that definition holds. It is here so the intent survives a
-            # future loosening of the sentinel rather than becoming a
-            # silent bug.
-            return ()
-        # Heal in memory only - see the #775 note above. The guard lives in
-        # ``coach.heal_unclassified`` (#780); its return value is ignored
-        # here because this path never writes back.
-        heal_unclassified(audit_data.get("shots"))
-        engine_shots = audit_shots_to_engine_shots(audit_data, beep_time_in_source=0.0)
-    except Exception as exc:  # noqa: BLE001 -- one bad file must not fail the render
-        logger.warning(
-            "compare overlay: unreadable audit %s (%s); rendering this tile without shots",
-            stage.audit_path,
-            exc,
-        )
-        return ()
-    ordered = sorted(engine_shots, key=lambda s: s.time_from_beep)
-    shots: list[TileShot] = []
-    previous: float | None = None
-    for shot in ordered:
-        # Shot 1's split is the draw; every later split is the gap from
-        # the shot before it in time order.
-        split = shot.time_from_beep if previous is None else shot.time_from_beep - previous
-        previous = shot.time_from_beep
-        shots.append(
-            TileShot(
-                time_from_beep=shot.time_from_beep,
-                split=split,
-                interval_class=shot.interval_class,
-            )
-        )
-    return tuple(shots)
+    """This stage's audited shots, measured from the beep -- see
+    :func:`splitsmith.stage_summary_data.load_stage_shots`, where the
+    reader lives since issue #972."""
+    return load_stage_shots(stage.audit_path)
 
 
 def _load_tile(
@@ -255,3 +125,11 @@ def _load_tile(
         scorecard=entry.scorecard,
         stage_rounds=entry.stage_rounds,
     )
+
+
+__all__ = [
+    "TileShot",
+    "TileStageData",
+    "load_expected_rounds",
+    "load_overlay_data",
+]
