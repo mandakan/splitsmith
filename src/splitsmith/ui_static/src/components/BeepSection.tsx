@@ -402,12 +402,12 @@ export function BeepSection({
         )}
         <div className="ml-auto flex gap-1">
           {failed ? (
-            <Button size="sm" variant="default" onClick={() => setEditing(true)} disabled={busy}>
+            <Button size="sm" onClick={() => setEditing(true)} disabled={busy}>
               <Pencil />
               Pick on waveform
             </Button>
           ) : (
-            <Button size="sm" variant="default" onClick={() => detect(false)} disabled={busy}>
+            <Button size="sm" onClick={() => detect(false)} disabled={busy}>
               <RefreshCw />
               Detect beep
             </Button>
@@ -561,7 +561,7 @@ export function BeepSection({
           {!reviewed ? (
             <Button
               size="sm"
-              variant="default"
+             
               onClick={() => void markReviewed()}
               disabled={busy}
               title="Confirm the detected beep is correct after listening to the preview below"
@@ -1116,7 +1116,7 @@ export function BeepWaveformPicker({
           {snapEnabled ? (
             <Button
               size="sm"
-              variant="default"
+             
               onClick={() => void requestSnap()}
               disabled={draftSourceTime == null || snapping}
               title="Snap the marker to the rise-foot of the nearest beep tone (±1.5s)"
@@ -1178,7 +1178,7 @@ function SnapProposal({
           {Math.round(proposal.duration_ms)} ms
         </span>
         <div className="ml-auto flex gap-1">
-          <Button size="sm" variant="default" onClick={onAccept}>
+          <Button size="sm" onClick={onAccept}>
             <Check />
             Accept
           </Button>
@@ -1603,7 +1603,7 @@ function ShotRedetectBanner({
         detected against the old trim.
       </span>
       <div className="ml-auto flex gap-1">
-        <Button size="sm" variant="default" onClick={onRedetect} disabled={busy}>
+        <Button size="sm" onClick={onRedetect} disabled={busy}>
           {busy ? <Loader2 className="animate-spin" /> : <Sparkles />}
           Re-detect shots
         </Button>

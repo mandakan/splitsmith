@@ -129,7 +129,7 @@ export function StageTimeSection({
           </span>
           <Button
             size="sm"
-            variant="default"
+           
             className="ml-auto"
             onClick={() => setEditing(true)}
             disabled={busy}

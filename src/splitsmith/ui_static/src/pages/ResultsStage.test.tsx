@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -191,11 +191,15 @@ describe("ResultsStage stats strip", () => {
       makeShot(4, 4.7, 0.4, "split"),
     ];
     renderStage("/match/m1/results/anna/2", MULTI, shots);
-    // StageStats suffixes its figures with "s"; SplitsList renders bare
-    // numbers - so these matches are unambiguously the stats strip's.
-    expect(await screen.findByText("1.50s")).toBeInTheDocument(); // draw
-    expect(screen.getByText("0.200s")).toBeInTheDocument(); // fastest: the reload is not a split
-    expect(screen.getByText("0.300s")).toBeInTheDocument(); // avg over the two real splits
+    // Scope to the stats strip (the StatStrip root is the grid with shrink-0);
+    // SplitsList renders the same bare numbers and a "Draw" chip further
+    // down the page.
+    await screen.findByText("Fastest split");
+    const strip = within(document.querySelector("div.grid.shrink-0") as HTMLElement);
+    const cell = (label: string) => strip.getByText(label).parentElement!;
+    expect(cell("Draw")).toHaveTextContent("1.50"); // draw
+    expect(cell("Fastest split")).toHaveTextContent("0.200"); // the reload is not a split
+    expect(cell("Avg split")).toHaveTextContent("0.300"); // avg over the two real splits
   });
 });
 
