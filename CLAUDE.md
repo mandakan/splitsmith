@@ -148,6 +148,18 @@ encodes go through their own runner hooks (``card_runner``,
 and ``scripts/render_grid_frames.py`` with their card flags; look at the
 frames, a green argv test proves nothing about pixels.
 
+## YouTube upload (#1000)
+
+``splitsmith.youtube`` uploads a rendered MP4 with its ``-youtube.json``
+sidecar's metadata; the result is written back into the sidecar as
+``upload`` and that is the only record (a re-render rewrites the sidecar,
+which is when a new upload is allowed). The OAuth client is built in
+(``youtube/oauth.py`` constants, env overrides for development); a
+user-supplied client would not escape YouTube's private-only lock on
+unaudited projects, so there is none. One scope, ``youtube.force-ssl``.
+The spec's two corrections to the issue text are in
+``docs/superpowers/specs/2026-09-14-youtube-upload-design.md``.
+
 ## Multi-shooter comparison (`compare/` package)
 
 ``splitsmith compare export <manifest>`` reads N existing single-shooter

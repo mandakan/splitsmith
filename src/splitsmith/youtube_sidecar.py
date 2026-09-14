@@ -19,9 +19,12 @@ agnostic -- works whether the matched output is .fcpxml / .xml / .mp4.
 
 from __future__ import annotations
 
+import os
 import subprocess
+import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -36,6 +39,24 @@ class Chapter:
 
     start_seconds: float
     title: str
+
+
+class UploadRecord(BaseModel):
+    """What a direct upload left behind (issue #1000). Lives inside the
+    sidecar so the CLI and the UI share one record, and so a re-render,
+    which rewrites the sidecar, clears it: a new file is uploadable
+    again."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    video_id: str
+    url: str
+    privacy: str
+    uploaded_at: datetime
+    channel_title: str = ""
+    captions_uploaded: bool = False
+    thumbnail_set: bool = False
+    notes: list[str] = Field(default_factory=list)
 
 
 class YouTubeSidecar(BaseModel):
@@ -57,6 +78,7 @@ class YouTubeSidecar(BaseModel):
     captions_path: str | None = None
     output_video: str | None = None  # relative path to the .mp4/.fcpxml when known
     thumbnail_path: str | None = None  # relative path to the .jpg grabbed from the render
+    upload: UploadRecord | None = None  # set by youtube.upload after a direct upload
 
 
 def build_sidecar(
@@ -97,12 +119,43 @@ def build_sidecar(
 
 
 def write_sidecar(sidecar: YouTubeSidecar, output_path: Path) -> None:
-    """Write the sidecar JSON, indented for hand-editing."""
+    """Write the sidecar JSON, indented for hand-editing. Atomic (temp +
+    ``os.replace``): the upload record is written into this file after
+    a multi-minute upload and a crash mid-write must not lose it."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        sidecar.model_dump_json(indent=2),
-        encoding="utf-8",
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{output_path.name}.", suffix=".tmp", dir=str(output_path.parent)
     )
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(sidecar.model_dump_json(indent=2))
+        tmp.replace(output_path)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def load_sidecar(path: Path) -> YouTubeSidecar:
+    """Parse a sidecar written by :func:`write_sidecar`. Raises
+    ``FileNotFoundError`` / ``pydantic.ValidationError`` as they come; the
+    caller decides what a missing or malformed sidecar means."""
+    return YouTubeSidecar.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+def sidecar_path_for(video: Path) -> Path:
+    """``<stem>-youtube.json`` beside the rendered output. The one naming
+    rule for the sidecar; ``ui/server.py`` and ``match_cli`` spell the
+    same suffix, so a change here is a change there."""
+    return video.with_name(video.stem + "-youtube.json")
+
+
+def srt_path_for(video: Path) -> Path:
+    return video.with_suffix(".srt")
+
+
+def thumbnail_path_for(video: Path) -> Path:
+    return video.with_name(video.stem + "-thumbnail.jpg")
 
 
 def paste_text(sidecar: YouTubeSidecar) -> str:
