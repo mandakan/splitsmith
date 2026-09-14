@@ -16480,6 +16480,13 @@ def create_app(
 
     app.include_router(device_router)
 
+    # Issue #1000: the local YouTube surface (settings, connect, upload).
+    # Gated the other way round from device_router: ``_local_gate`` inside
+    # youtube_api answers 404 in hosted mode.
+    from .youtube_api import router as youtube_router
+
+    app.include_router(youtube_router)
+
     # Share-link OG card PNGs (spec 2026-08-09). Same lazy-import,
     # always-registered idiom as sync_router and device_router: every
     # route 404s outside hosted mode (see share_og._hosted_gate).
