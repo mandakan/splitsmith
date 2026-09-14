@@ -53,7 +53,7 @@ describe("CoverageMatrix", () => {
     const rows = buildFootageRows({ projects: SOLO_PROJECTS, shooters: [ME], jobs: [] });
     render(
       <MemoryRouter>
-        <CoverageMatrix rows={rows} currentVideoPath={null} currentStage={null} hrefs={HREFS} onOpen={onOpen} onAssign={onAssign} onDetectBeep={vi.fn()} editDenied={false} />
+        <CoverageMatrix rows={rows} currentVideoId={null} currentStage={null} hrefs={HREFS} onOpen={onOpen} onAssign={onAssign} onDetectBeep={vi.fn()} editDenied={false} />
       </MemoryRouter>,
     );
     const r1 = screen.getByText("B100 Höger").closest("tr")!;
@@ -76,7 +76,7 @@ describe("CoverageMatrix", () => {
     const rows = buildFootageRows({ projects: SOLO_PROJECTS, shooters: [ME], jobs: [] });
     render(
       <MemoryRouter>
-        <CoverageMatrix rows={rows} currentVideoPath={null} currentStage={null} hrefs={HREFS} onOpen={vi.fn()} onAssign={vi.fn()} onDetectBeep={onDetect} editDenied={false} />
+        <CoverageMatrix rows={rows} currentVideoId={null} currentStage={null} hrefs={HREFS} onOpen={vi.fn()} onAssign={vi.fn()} onDetectBeep={onDetect} editDenied={false} />
       </MemoryRouter>,
     );
     fireEvent.click(screen.getByRole("button", { name: "Stage 1 actions" }));
@@ -90,7 +90,7 @@ describe("CoverageMatrix", () => {
     const rows = buildFootageRows({ projects: { ...SOLO_PROJECTS, anna: project([{ n: 2, name: "B100 Vänster", videos: [video({ path: "raw/DJI_0044.MP4", video_id: "a1" })] }]) }, shooters: [ME, ANNA], jobs: [] });
     render(
       <MemoryRouter>
-        <CoverageMatrix rows={rows} currentVideoPath={null} currentStage={null} hrefs={HREFS} onOpen={vi.fn()} onAssign={vi.fn()} onDetectBeep={vi.fn()} editDenied={false} />
+        <CoverageMatrix rows={rows} currentVideoId={null} currentStage={null} hrefs={HREFS} onOpen={vi.fn()} onAssign={vi.fn()} onDetectBeep={vi.fn()} editDenied={false} />
       </MemoryRouter>,
     );
     expect(screen.getByRole("columnheader", { name: "Anna Berg" })).toBeInTheDocument();

@@ -44,7 +44,7 @@ export function FootageCards({ rows, hrefs, onOpen }: FootageCardsProps) {
               <div key={cell.slug} className="mt-2 flex flex-wrap items-center gap-1.5">
                 {row.cells.length > 1 ? <span className="mr-1 text-sm text-muted">{cell.shooterName}</span> : null}
                 {cell.videos.map((v) => (
-                  <FileChip key={v.path} video={v} onOpen={(video) => onOpen(cell.slug, n, video)} />
+                  <FileChip key={v.video_id} video={v} onOpen={(video) => onOpen(cell.slug, n, video)} />
                 ))}
                 {row.cells.length > 1 ? <BeepCell cell={cell} stage={n} hrefs={hrefs} className="ml-auto text-sm" /> : null}
               </div>

@@ -24,7 +24,7 @@ export interface FootageHrefs {
 
 export interface CoverageMatrixProps {
   rows: FootageRow[];
-  currentVideoPath: string | null;
+  currentVideoId: string | null;
   currentStage: number | null;
   hrefs: FootageHrefs;
   onOpen: (slug: string, stage: number, video: StageVideo) => void;
@@ -83,7 +83,7 @@ function Cell({ cell, stage, current, multi, hrefs, onOpen, onAssign, editDenied
     <Td>
       <span className="flex flex-wrap gap-1.5">
         {cell.videos.map((v) => (
-          <FileChip key={v.path} video={v} current={v.path === current} onOpen={(video) => onOpen(cell.slug, stage, video)} />
+          <FileChip key={v.video_id} video={v} current={v.video_id === current} onOpen={(video) => onOpen(cell.slug, stage, video)} />
         ))}
       </span>
       {multi ? <BeepCell cell={cell} stage={stage} hrefs={hrefs} className="mt-1 text-sm" /> : null}
@@ -92,7 +92,7 @@ function Cell({ cell, stage, current, multi, hrefs, onOpen, onAssign, editDenied
 }
 
 export function CoverageMatrix(props: CoverageMatrixProps) {
-  const { rows, currentVideoPath, currentStage, hrefs, onOpen, onAssign, onDetectBeep, editDenied } = props;
+  const { rows, currentVideoId, currentStage, hrefs, onOpen, onAssign, onDetectBeep, editDenied } = props;
   const [menuFor, setMenuFor] = useState<number | null>(null);
   const shooters = rows[0]?.cells ?? [];
   const multi = shooters.length > 1;
@@ -124,7 +124,7 @@ export function CoverageMatrix(props: CoverageMatrixProps) {
                   key={cell.slug}
                   cell={cell}
                   stage={n}
-                  current={currentVideoPath}
+                  current={currentVideoId}
                   multi={multi}
                   hrefs={hrefs}
                   onOpen={onOpen}

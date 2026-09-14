@@ -447,17 +447,19 @@ function IngestInner({ slug }: { slug: string }) {
 
   // The open clip: a path on a shooter's project, or an assign request
   // for an empty cell.
-  const [sheet, setSheet] = useState<{ slug: string; path: string | null; assignStage: number | null } | null>(null);
+  const [sheet, setSheet] = useState<{ slug: string; videoId: string | null; assignStage: number | null } | null>(null);
   const [addShooterOpen, setAddShooterOpen] = useState(false);
   const sheetProject = sheet ? projects[sheet.slug] : null;
   const sheetClip: ClipItem | null = useMemo(() => {
-    if (!sheet?.path || !sheetProject) return null;
+    if (!sheet?.videoId || !sheetProject) return null;
+    // By id, not path: one source file covering several stages is one
+    // path with a video id per stage.
     const model = buildClipModel(sheetProject);
-    return model.order.find((c) => c.video.path === sheet.path) ?? null;
+    return model.order.find((c) => c.video.video_id === sheet.videoId) ?? null;
   }, [sheet, sheetProject]);
   useEffect(() => {
     // A clip that vanished (removed, moved away) closes its sheet.
-    if (sheet?.path && sheetProject && !sheetClip) setSheet(null);
+    if (sheet?.videoId && sheetProject && !sheetClip) setSheet(null);
   }, [sheet, sheetProject, sheetClip]);
 
   const hrefs = useMemo<FootageHrefs & { footage: (s: string) => string; audit1: (s: string) => string }>(
@@ -567,12 +569,14 @@ function IngestInner({ slug }: { slug: string }) {
     }
   }
 
-  const openClip = (targetSlug: string, _stage: number, video: StageVideo) => setSheet({ slug: targetSlug, path: video.path, assignStage: null });
-  const openAssign = (targetSlug: string, stage: number) => setSheet({ slug: targetSlug, path: null, assignStage: stage });
-  const openUnassigned = (item: UnassignedItem) => setSheet({ slug: item.slug, path: item.video.path, assignStage: null });
+  const openClip = (targetSlug: string, _stage: number, video: StageVideo) => setSheet({ slug: targetSlug, videoId: video.video_id, assignStage: null });
+  const openAssign = (targetSlug: string, stage: number) => setSheet({ slug: targetSlug, videoId: null, assignStage: stage });
+  const openUnassigned = (item: UnassignedItem) => setSheet({ slug: item.slug, videoId: item.video.video_id, assignStage: null });
   const assignUnassigned = (item: UnassignedItem, stage: number) => {
     void moveOn(item.slug, item.video.path, stage, "secondary");
-    setSheet({ slug: item.slug, path: item.video.path, assignStage: null });
+    // The id changes with the stage (path + stage hash); the sheet finds
+    // the clip again by path once the optimistic move has landed.
+    setSheet(null);
   };
 
   const showBanner = lastImportedPaths != null && lastImportedPaths.length > 0 && shooters.length > 1;
@@ -718,7 +722,7 @@ function IngestInner({ slug }: { slug: string }) {
           ) : (
             <CoverageMatrix
               rows={rows}
-              currentVideoPath={sheet?.path ?? null}
+              currentVideoId={sheet?.videoId ?? null}
               currentStage={sheet?.assignStage ?? sheetClip?.stageNumber ?? null}
               hrefs={hrefs}
               onOpen={openClip}
