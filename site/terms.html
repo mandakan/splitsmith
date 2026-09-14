@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Terms of service - Splitsmith</title>
+<meta name="description" content="The terms for the Splitsmith desktop app, the hosted service and YouTube upload.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#050505">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Antonio:wght@500;700&family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --bg:#050505; --surface:rgba(255,255,255,0.035); --surface-2:rgba(255,255,255,0.06);
+    --hair:rgba(255,255,255,0.08); --hair-2:rgba(255,255,255,0.14);
+    --ink:#F4F4F5; --ink-2:#C9CCD2; --muted:#8E939B; --subtle:#6B7079;
+    --led:#FF2D2D; --led-fill:#DC2626;
+    --display:"Antonio","Arial Narrow",Impact,sans-serif;
+    --sans:"Geist",system-ui,-apple-system,"Segoe UI",sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+    --ease:cubic-bezier(0.32,0.72,0,1);
+    color-scheme:dark;
+  }
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  ::selection{background:var(--led-fill);color:#fff}
+  :focus-visible{outline:2px solid var(--led);outline-offset:3px;border-radius:6px}
+  a{color:inherit;text-decoration:none}
+  .ground{position:fixed;inset:0;z-index:0;pointer-events:none;background:radial-gradient(900px 520px at 18% -8%, rgba(255,45,45,0.14), transparent 60%)}
+  .page{position:relative;z-index:1}
+  .wrap{max-width:1180px;margin:0 auto;padding-inline:clamp(16px,4vw,40px)}
+  .nav{position:sticky;top:0;z-index:40;display:flex;justify-content:center;padding:18px 16px 0;pointer-events:none}
+  .nav .pill{pointer-events:auto;display:flex;align-items:center;gap:6px;padding:6px 6px 6px 14px;border-radius:999px;border:1px solid var(--hair-2);background:rgba(10,11,13,.72);backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 20px 50px -30px rgba(0,0,0,.9)}
+  .brand{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:700;font-size:15px;letter-spacing:.06em;text-transform:uppercase;margin-right:10px}
+  .brand i{width:14px;height:14px;border-radius:50%;border:2px solid var(--led);position:relative;display:inline-block}
+  .brand i::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--led)}
+  .nav .links{display:flex;gap:2px}
+  .nav .links a{padding:7px 12px;border-radius:999px;font-size:13px;color:var(--ink-2);transition:background .5s var(--ease),color .5s var(--ease)}
+  .nav .links a:hover,.nav .links a[aria-current]{background:var(--surface-2);color:var(--ink)}
+  main{max-width:720px;margin:0 auto;padding:clamp(48px,8vw,96px) clamp(16px,4vw,40px) 64px}
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--hair-2);border-radius:999px;padding:4px 12px;font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);background:var(--surface)}
+  h1{font-family:var(--display);font-weight:700;text-transform:uppercase;font-size:clamp(40px,5.7vw,64px);line-height:.95;letter-spacing:-.005em;margin:18px 0 8px}
+  .effective{font-family:var(--mono);font-size:12px;letter-spacing:.08em;color:var(--muted);margin:0 0 36px}
+  h2{font-family:var(--display);font-weight:700;text-transform:uppercase;font-size:24px;line-height:1;letter-spacing:.01em;margin:44px 0 12px;padding-top:20px;border-top:1px solid var(--hair)}
+  p,li{color:var(--ink-2)}
+  .lead{font-size:19px;line-height:1.5;color:var(--ink)}
+  ul{padding-left:20px}
+  li{margin:6px 0}
+  p a,li a{color:var(--ink);text-decoration:underline;text-decoration-color:var(--hair-2);text-underline-offset:3px}
+  p a:hover,li a:hover{text-decoration-color:var(--led)}
+  code{font-family:var(--mono);font-size:13.5px;background:var(--surface-2);border:1px solid var(--hair);border-radius:6px;padding:1px 6px;color:var(--ink)}
+  footer{border-top:1px solid var(--hair);padding:40px 0 60px;font-size:13px;color:var(--muted)}
+  footer .row{display:flex;flex-wrap:wrap;gap:16px 28px;align-items:center;justify-content:space-between}
+  footer a:hover{color:var(--ink)}
+  @media (max-width:640px){ .nav .links a{padding:7px 9px;font-size:12px} }
+</style>
+</head>
+<body>
+<div class="ground" aria-hidden="true"></div>
+<div class="page">
+<nav class="nav" aria-label="Site">
+  <div class="pill">
+    <a class="brand" href="/" aria-label="Splitsmith"><i></i>Splitsmith</a>
+    <div class="links">
+      <a href="/privacy">Privacy</a>
+      <a href="/terms" aria-current="page">Terms</a>
+      <a href="https://github.com/mandakan/splitsmith">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main>
+  <span class="eyebrow">Legal</span>
+  <h1>Terms of service</h1>
+  <p class="effective">Effective 2026-09-14</p>
+
+  <p class="lead">Short version: the software is open source and yours to run; the hosted service is provided as is; your footage is yours; do not use either to break the law or someone else's rights.</p>
+
+  <h2>Who</h2>
+  <p>Splitsmith is built and operated by Mathias Axell, Sweden (the "operator"). These terms cover the desktop app, the hosted service at <code>my.splitsmith.app</code>, and this site.</p>
+
+  <h2>The desktop app</h2>
+  <p>The desktop app is licensed under the <a href="https://github.com/mandakan/splitsmith/blob/main/LICENSE">MIT licence</a>. That licence, not this page, governs your use of the code. It is provided without warranty of any kind.</p>
+
+  <h2>The hosted service</h2>
+  <ul>
+    <li>You need an email address to sign in. Keep the one-time sign-in links to yourself; whoever opens one is signed in as you.</li>
+    <li>You keep all rights to the footage, audio, results and exports you upload. You give the operator only the permission needed to store, process and serve them back to you and to the people you share a link with.</li>
+    <li>Upload only footage you have the right to upload. Recordings of other competitors are their business as well as yours; check what your match and club allow.</li>
+    <li>The service is offered as is, without uptime guarantees, and may change or close. The operator will give reasonable notice before closing it and a way to export your data.</li>
+    <li>The operator may suspend an account that abuses the service, other users, or the law.</li>
+  </ul>
+
+  <h2>Share links and comments</h2>
+  <p>Anyone with a share link can see what it points at until you revoke it. Comments posted through a share link are public to everyone with that link; keep them civil. The match owner can delete comments and revoke links.</p>
+
+  <h2>YouTube upload</h2>
+  <p>Uploading through Splitsmith uses YouTube API Services. You agree to the <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a> when you use it, and you are responsible for what you publish on your channel, including the rights to any footage of other people. See the <a href="/privacy">privacy policy</a> for what Splitsmith stores when a channel is connected.</p>
+
+  <h2>Liability</h2>
+  <p>To the extent the law allows, the operator is not liable for lost data, lost matches, missed uploads, or anything the software gets wrong: splits are detected from audio and can be wrong, and the app says so. Nothing here limits liability that cannot be limited under Swedish law.</p>
+
+  <h2>Law</h2>
+  <p>Swedish law applies. Disputes go to the Swedish courts, without prejudice to any mandatory consumer protection where you live.</p>
+
+  <h2>Contact and changes</h2>
+  <p>Questions go through <a href="https://github.com/mandakan/splitsmith/issues">GitHub issues</a>. When these terms change, the effective date at the top moves and material changes are announced in the project's changelog.</p>
+</main>
+<footer class="wrap">
+  <div class="row">
+    <span class="brand"><i></i>Splitsmith</span>
+    <span>Open source &middot; MIT &middot; built for IPSC shooters, by one</span>
+    <span style="display:flex;gap:20px"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://github.com/mandakan/splitsmith">GitHub</a><a href="https://my.splitsmith.app">Sign in</a></span>
+  </div>
+</footer>
+</div>
+</body>
+</html>

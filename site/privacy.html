@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Privacy policy - Splitsmith</title>
+<meta name="description" content="What Splitsmith stores, where, and why, including what it does with your YouTube account.">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="index, follow">
+<meta name="theme-color" content="#050505">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Antonio:wght@500;700&family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --bg:#050505; --surface:rgba(255,255,255,0.035); --surface-2:rgba(255,255,255,0.06);
+    --hair:rgba(255,255,255,0.08); --hair-2:rgba(255,255,255,0.14);
+    --ink:#F4F4F5; --ink-2:#C9CCD2; --muted:#8E939B; --subtle:#6B7079;
+    --led:#FF2D2D; --led-fill:#DC2626;
+    --display:"Antonio","Arial Narrow",Impact,sans-serif;
+    --sans:"Geist",system-ui,-apple-system,"Segoe UI",sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+    --ease:cubic-bezier(0.32,0.72,0,1);
+    color-scheme:dark;
+  }
+  *,*::before,*::after{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  ::selection{background:var(--led-fill);color:#fff}
+  :focus-visible{outline:2px solid var(--led);outline-offset:3px;border-radius:6px}
+  a{color:inherit;text-decoration:none}
+  .ground{position:fixed;inset:0;z-index:0;pointer-events:none;background:radial-gradient(900px 520px at 18% -8%, rgba(255,45,45,0.14), transparent 60%)}
+  .page{position:relative;z-index:1}
+  .wrap{max-width:1180px;margin:0 auto;padding-inline:clamp(16px,4vw,40px)}
+  .nav{position:sticky;top:0;z-index:40;display:flex;justify-content:center;padding:18px 16px 0;pointer-events:none}
+  .nav .pill{pointer-events:auto;display:flex;align-items:center;gap:6px;padding:6px 6px 6px 14px;border-radius:999px;border:1px solid var(--hair-2);background:rgba(10,11,13,.72);backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 20px 50px -30px rgba(0,0,0,.9)}
+  .brand{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:700;font-size:15px;letter-spacing:.06em;text-transform:uppercase;margin-right:10px}
+  .brand i{width:14px;height:14px;border-radius:50%;border:2px solid var(--led);position:relative;display:inline-block}
+  .brand i::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--led)}
+  .nav .links{display:flex;gap:2px}
+  .nav .links a{padding:7px 12px;border-radius:999px;font-size:13px;color:var(--ink-2);transition:background .5s var(--ease),color .5s var(--ease)}
+  .nav .links a:hover,.nav .links a[aria-current]{background:var(--surface-2);color:var(--ink)}
+  main{max-width:720px;margin:0 auto;padding:clamp(48px,8vw,96px) clamp(16px,4vw,40px) 64px}
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--hair-2);border-radius:999px;padding:4px 12px;font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);background:var(--surface)}
+  h1{font-family:var(--display);font-weight:700;text-transform:uppercase;font-size:clamp(40px,5.7vw,64px);line-height:.95;letter-spacing:-.005em;margin:18px 0 8px}
+  .effective{font-family:var(--mono);font-size:12px;letter-spacing:.08em;color:var(--muted);margin:0 0 36px}
+  h2{font-family:var(--display);font-weight:700;text-transform:uppercase;font-size:24px;line-height:1;letter-spacing:.01em;margin:44px 0 12px;padding-top:20px;border-top:1px solid var(--hair)}
+  p,li{color:var(--ink-2)}
+  .lead{font-size:19px;line-height:1.5;color:var(--ink)}
+  ul{padding-left:20px}
+  li{margin:6px 0}
+  p a,li a{color:var(--ink);text-decoration:underline;text-decoration-color:var(--hair-2);text-underline-offset:3px}
+  p a:hover,li a:hover{text-decoration-color:var(--led)}
+  code{font-family:var(--mono);font-size:13.5px;background:var(--surface-2);border:1px solid var(--hair);border-radius:6px;padding:1px 6px;color:var(--ink)}
+  footer{border-top:1px solid var(--hair);padding:40px 0 60px;font-size:13px;color:var(--muted)}
+  footer .row{display:flex;flex-wrap:wrap;gap:16px 28px;align-items:center;justify-content:space-between}
+  footer a:hover{color:var(--ink)}
+  @media (max-width:640px){ .nav .links a{padding:7px 9px;font-size:12px} }
+</style>
+</head>
+<body>
+<div class="ground" aria-hidden="true"></div>
+<div class="page">
+<nav class="nav" aria-label="Site">
+  <div class="pill">
+    <a class="brand" href="/" aria-label="Splitsmith"><i></i>Splitsmith</a>
+    <div class="links">
+      <a href="/privacy" aria-current="page">Privacy</a>
+      <a href="/terms">Terms</a>
+      <a href="https://github.com/mandakan/splitsmith">GitHub</a>
+    </div>
+  </div>
+</nav>
+<main>
+  <span class="eyebrow">Legal</span>
+  <h1>Privacy policy</h1>
+  <p class="effective">Effective 2026-09-14</p>
+
+  <p class="lead">Splitsmith reads the beep and every shot out of the audio your camera recorded and turns them into splits. Most of that happens on your own computer. This page says what leaves it, when, and why.</p>
+
+  <p>Splitsmith is built and operated by Mathias Axell, Sweden (the "operator"). It is open source under the MIT licence; the code that handles your data is at <a href="https://github.com/mandakan/splitsmith">github.com/mandakan/splitsmith</a>.</p>
+
+  <h2>The desktop app</h2>
+  <p>The desktop app (<code>splitsmith</code>, installed from PyPI or run through Docker) processes your footage locally. Your videos, audio, audits and exports stay in the match folder you point it at. The app makes network requests only for these purposes:</p>
+  <ul>
+    <li>Downloading the detection models on first run from <code>models.splitsmith.app</code>.</li>
+    <li>Fetching match results from the SSI Scoreboard when you import a match, using the match id you supply.</li>
+    <li>Talking to the hosted service and to YouTube when, and only when, you connect them (below).</li>
+  </ul>
+  <p>Settings that span projects (recent projects, your scoreboard identity, connection tokens) are stored under <code>~/.splitsmith/</code> on your machine and nowhere else. The desktop app sends no usage analytics.</p>
+
+  <h2>The hosted service</h2>
+  <p>The hosted service at <code>my.splitsmith.app</code> is optional. When you use it, the operator stores:</p>
+  <ul>
+    <li>Your email address, used to sign you in with a one-time link and to send the emails you ask for. Sign-in emails are delivered through a transactional email provider that sees the address and the link.</li>
+    <li>The display name you choose, shown on comments you post.</li>
+    <li>The matches you upload or sync: footage, audio, detected shots, audits, scores, exports and comments.</li>
+    <li>Server logs and error reports needed to keep the service running. Error reports are scrubbed of personal data before they are stored.</li>
+  </ul>
+  <p>Data lives on infrastructure in the EU and the US operated by the hosting and storage providers the operator uses. Nothing is sold, and nothing is shared with anyone except those providers as processors and people you share a link with.</p>
+
+  <h2>Share links</h2>
+  <p>A share link makes one match or stage readable by anyone who has the link, including a preview card with the shooter's name, the match, and split figures. A link with the comment scope also lets viewers post comments under a display name or a generated handle. Revoke a link in the app and it stops working immediately.</p>
+
+  <h2>The marketing site</h2>
+  <p>This site sets no cookies and runs no analytics. If you join the waitlist, your email address, a hashed form of your IP address (used only for rate limiting), your browser's user agent and the time are stored so we can invite you and stop abuse.</p>
+
+  <h2>YouTube</h2>
+  <p>Splitsmith can upload a rendered match video to your YouTube channel. This feature uses YouTube API Services. By using it you agree to the <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>, and Google's handling of your data is described in the <a href="https://policies.google.com/privacy">Google Privacy Policy</a>.</p>
+  <p>When you connect a channel, Splitsmith asks Google for permission to manage your YouTube account (the <code>youtube.force-ssl</code> scope). It uses that permission for exactly four things: uploading the video you chose, attaching its caption track, setting its thumbnail, and reading your channel's name so the app can show which channel is connected.</p>
+  <p>What Splitsmith stores:</p>
+  <ul>
+    <li>A refresh token for your Google account. In the desktop app it is kept in <code>~/.splitsmith/youtube.json</code> on your machine and never leaves it. If the hosted service offers YouTube upload, the token is stored encrypted on your account.</li>
+    <li>Your channel id and name, shown in the app.</li>
+    <li>The id and URL of each video it uploaded, written into the export's sidecar file next to the video so the app does not upload the same file twice.</li>
+  </ul>
+  <p>Splitsmith does not read your subscriptions, watch history, comments, analytics or any other YouTube data, and it does not share data obtained through YouTube API Services with anyone. Stored data is kept until you disconnect.</p>
+  <p>To disconnect, run <code>splitsmith youtube logout</code> or use the Disconnect control in the app. Either deletes the stored token. You can also revoke Splitsmith's access at any time from your <a href="https://myaccount.google.com/permissions">Google account's third-party access page</a>.</p>
+
+  <h2>Your rights</h2>
+  <p>You can ask for a copy of the personal data the operator holds about you, ask for it to be corrected, or ask for it to be deleted. Deleting a hosted account removes its matches, exports, comments and email address. Under the GDPR you may also complain to the Swedish Authority for Privacy Protection (IMY).</p>
+
+  <h2>Contact</h2>
+  <p>Questions about this policy go to the operator through <a href="https://github.com/mandakan/splitsmith/issues">GitHub issues</a> or the support email listed on the Google consent screen when you connect YouTube.</p>
+
+  <h2>Changes</h2>
+  <p>This page changes when the software does. The effective date at the top moves with it; material changes are announced in the project's changelog.</p>
+</main>
+<footer class="wrap">
+  <div class="row">
+    <span class="brand"><i></i>Splitsmith</span>
+    <span>Open source &middot; MIT &middot; built for IPSC shooters, by one</span>
+    <span style="display:flex;gap:20px"><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="https://github.com/mandakan/splitsmith">GitHub</a><a href="https://my.splitsmith.app">Sign in</a></span>
+  </div>
+</footer>
+</div>
+</body>
+</html>
