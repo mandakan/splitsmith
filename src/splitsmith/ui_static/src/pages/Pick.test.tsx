@@ -8,10 +8,11 @@
  * chip on mobile rather than claiming its own (useShellOwnsMobileAccount
  * is MatchShell-only -- see shellChromeContext.tsx).
  */
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { api } from "@/lib/api";
 import { AuthProvider } from "@/lib/auth";
 import { ModeProvider } from "@/lib/mode";
 import { ConfirmProvider } from "@/components/useConfirm";
@@ -108,5 +109,34 @@ describe("Pick chrome (#550)", () => {
       screen.getByRole("navigation", { name: /global/i }),
     ).toBeInTheDocument();
     expect(screen.getByTestId("account-chip")).toBeInTheDocument();
+  });
+  it("hides filesystem affordances on hosted: paths, open-by-path, backup import", async () => {
+    vi.mocked(api.getRecentProjectsDetail).mockResolvedValueOnce([
+      {
+        path: "/home/splitsmith/data/users/01K/projects/stockholm-ipsc-open-2026",
+        name: "Stockholm IPSC Open 2026",
+        last_opened_at: "2026-08-01T00:00:00Z",
+        kind: "match",
+        match_id: "stockholm-ipsc-open-2026-e986b13643",
+        shooter_count: 1,
+        stage_count: 12,
+        stages_audited: 4,
+        video_count: 11,
+        match_date: null,
+        club: null,
+        last_modified_at: null,
+        status: "in_progress",
+        manual: false,
+        shooter_names: ["Mathias Axell"],
+        origin: "hosted",
+      },
+    ]);
+    renderPick();
+    await screen.findByText("Stockholm IPSC Open 2026");
+    await waitFor(() => expect(api.getServerFeatures).toHaveBeenCalled());
+    expect(screen.queryByText(/\/home\/splitsmith\/data/)).toBeNull();
+    expect(screen.queryByText(/open by path/i)).toBeNull();
+    expect(screen.queryByText(/import from backup/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /import backup/i })).toBeNull();
   });
 });

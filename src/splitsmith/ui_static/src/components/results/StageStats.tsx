@@ -3,7 +3,10 @@
  * Stage time, shot count, draw, fastest split, average split.
  * Presentational only; the page computes the numbers (split stats count
  * split-classed intervals only - lib/splits.statisticSplits owns the
- * rule, issue #772). 2-wide grid on mobile, one row of five at md+.
+ * rule, issue #772). Stage time on its own row then 2-wide on mobile, one
+ * row of five at md+. `shrink-0` because ResultsStage mounts it first in a
+ * capped overflow-y-auto column: an overflow-hidden flex child with the
+ * default shrink collapses to its label row there.
  * Read-only by contract: part of the future share-link surface.
  */
 import { cn } from "@/lib/utils";
@@ -39,31 +42,30 @@ function Cell({
 
 export function StageStats({ stageTime, shotCount, draw, fastestSplit, avgSplit }: StageStatsProps) {
   return (
-    <div className="grid grid-cols-2 overflow-hidden rounded-xl border border-rule-strong bg-surface-2 md:grid-cols-5">
+    <div className="grid shrink-0 grid-cols-2 overflow-hidden rounded-xl border border-rule-strong bg-surface-2 md:grid-cols-5">
       <Cell
         label="Stage time"
         value={stageTime != null ? `${stageTime.toFixed(2)}s` : "-"}
-        className="border-b border-r md:border-b-0"
+        className="col-span-2 border-b md:col-span-1 md:border-b-0 md:border-r"
       />
       <Cell
         label="Shots"
         value={String(shotCount)}
-        className="border-b md:border-b-0 md:border-r"
+        className="border-b border-r md:border-b-0"
       />
       <Cell
         label="Draw"
         value={draw != null ? `${draw.toFixed(2)}s` : "-"}
-        className="border-b border-r md:border-b-0"
+        className="border-b md:border-b-0 md:border-r"
       />
       <Cell
         label="Fastest split"
         value={fastestSplit != null ? `${fastestSplit.toFixed(3)}s` : "-"}
-        className="border-b md:border-b-0 md:border-r"
+        className="border-r md:border-b-0"
       />
       <Cell
         label="Avg split"
         value={avgSplit != null ? `${avgSplit.toFixed(3)}s` : "-"}
-        className="col-span-2 md:col-span-1"
       />
     </div>
   );
