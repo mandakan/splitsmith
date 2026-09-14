@@ -320,11 +320,11 @@ def _render_with_work_dir(
     )
 
 
-#: How far before a backdrop's target frame the grab starts reading. A
-#: seek straight to the last timestamp can land past the final frame
-#: and write nothing (see ``compare/overlay_summary`` on the same trap),
-#: so the read starts a window early and ``-update 1`` keeps the last
-#: frame decoded.
+#: How far before a *tail* backdrop's target frame the grab starts
+#: reading. A seek straight to the last timestamp can land past the final
+#: frame and write nothing (see ``compare/overlay_summary`` on the same
+#: trap), so the read starts a window early and ``-update 1`` keeps the
+#: last frame decoded. A head grab takes the first frame instead.
 _BACKDROP_WINDOW_SECONDS = 0.5
 
 
@@ -350,27 +350,36 @@ def _grab_backdrop(
     if stage is None:
         return None
     plan = stage.plan
-    if item.backdrop_at == "head":
-        seek = plan.head_trim_seconds
-    else:
-        seek = max(0.0, plan.head_trim_seconds + plan.effective_seconds - _BACKDROP_WINDOW_SECONDS)
     out = work_dir / f"{item.name}_backdrop.png"
     out.unlink(missing_ok=True)
-    cmd = (
-        ffmpeg_binary,
-        "-hide_banner",
-        "-y",
-        "-ss",
-        f"{seek:g}",
-        "-t",
-        f"{_BACKDROP_WINDOW_SECONDS:g}",
-        "-i",
-        str(plan.stage.primary.path),
-        "-an",
-        "-update",
-        "1",
-        str(out),
-    )
+    primary = str(plan.stage.primary.path)
+    if item.backdrop_at == "head":
+        # There is always a frame at or after the head seek, so take
+        # exactly the first one; a window here would keep a frame half a
+        # second into the stage instead of its visible head.
+        window: tuple[str, ...] = (
+            "-ss",
+            f"{plan.head_trim_seconds:g}",
+            "-i",
+            primary,
+            "-an",
+            "-frames:v",
+            "1",
+        )
+    else:
+        seek = max(0.0, plan.head_trim_seconds + plan.effective_seconds - _BACKDROP_WINDOW_SECONDS)
+        window = (
+            "-ss",
+            f"{seek:g}",
+            "-t",
+            f"{_BACKDROP_WINDOW_SECONDS:g}",
+            "-i",
+            primary,
+            "-an",
+            "-update",
+            "1",
+        )
+    cmd = (ffmpeg_binary, "-hide_banner", "-y", *window, str(out))
     try:
         _run(cmd, runner=runner)
     except FFmpegError as exc:

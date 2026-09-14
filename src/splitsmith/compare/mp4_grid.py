@@ -40,7 +40,7 @@ from ..overlay_text import FALLBACK_BUNDLED_FONT, overlay_font_file
 from ..overlay_theme import OverlayTheme, ThemeName, load_theme
 from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, quote_filter_value, runtime
 from .layout import Layout2Up, choose_grid, grid_shape
-from .overlay_data import TileStageData, load_overlay_data
+from .overlay_data import TileStageData, load_expected_rounds, load_overlay_data
 from .overlay_live import write_absent_sprite_sequence, write_sprite_sequence
 from .overlay_sprites import (
     SpriteGeometry,
@@ -2014,25 +2014,13 @@ def _stage_hold_still(
     )
 
 
-def _expected_rounds_for_stage(
-    data: Mapping[tuple[str, int], TileStageData], stage_number: int
-) -> int | None:
-    """The stage's expected round count, from whichever shooter's project
-    knows it -- a stage card is match-level, and every shooter's project
-    describes the same stage. ``None`` when nobody's does; the card then
-    prints no count rather than a guess. Empty when the overlay is off:
-    the data is only read for the overlay, and a card is not worth
-    re-parsing every project for."""
-    for (_label, number), tile in data.items():
-        if number == stage_number and tile.stage_rounds is not None and tile.stage_rounds.expected:
-            return tile.stage_rounds.expected
-    return None
-
-
-#: How far before a backdrop's target the grab starts reading, and how
-#: much it reads; ``-update 1`` keeps the last frame decoded. See
+#: How far before a *tail* backdrop's target the grab starts reading, and
+#: how much it reads; ``-update 1`` keeps the last frame decoded. See
 #: ``overlay_summary._FREEZE_TAIL_WINDOW_SECONDS`` for why a seek straight
-#: to the last timestamp can come back empty.
+#: to the last timestamp can come back empty. A *head* grab has no such
+#: problem -- there is always a frame at or after the seek -- so it takes
+#: exactly the first one (``-frames:v 1``); reading a window there would
+#: keep a frame half a second *into* the stage instead.
 _CARD_BACKDROP_WINDOW_SECONDS = 0.5
 
 
@@ -2055,27 +2043,24 @@ def _grab_card_backdrop(
         tile = next((t for t in plan.tiles if t.trim_path is not None), None)
     if tile is None or tile.trim_path is None:
         return None
-    if at == "head":
-        seek = tile.seek_seconds
-    else:
-        seek = max(0.0, tile.source_duration_seconds - _CARD_BACKDROP_WINDOW_SECONDS)
     out = work / f"{name}_backdrop.png"
     out.unlink(missing_ok=True)
-    cmd = [
-        ffmpeg_binary,
-        "-hide_banner",
-        "-y",
-        "-ss",
-        f"{seek:g}",
-        "-t",
-        f"{_CARD_BACKDROP_WINDOW_SECONDS:g}",
-        "-i",
-        str(tile.trim_path),
-        "-an",
-        "-update",
-        "1",
-        str(out),
-    ]
+    if at == "head":
+        window = ["-ss", f"{tile.seek_seconds:g}", "-i", str(tile.trim_path), "-an", "-frames:v", "1"]
+    else:
+        seek = max(0.0, tile.source_duration_seconds - _CARD_BACKDROP_WINDOW_SECONDS)
+        window = [
+            "-ss",
+            f"{seek:g}",
+            "-t",
+            f"{_CARD_BACKDROP_WINDOW_SECONDS:g}",
+            "-i",
+            str(tile.trim_path),
+            "-an",
+            "-update",
+            "1",
+        ]
+    cmd = [ffmpeg_binary, "-hide_banner", "-y", *window, str(out)]
     try:
         completed = runner(cmd, capture_output=True)
     except Exception as exc:  # noqa: BLE001 -- a card's backdrop is never worth the render
@@ -2416,6 +2401,10 @@ def render_grid_mp4(
     outcomes: list[StageOutcome] = []
     segments: list[Path] = []
     card_theme = load_theme(overlay_theme) if cards_requested else None
+    # Read for the stage cards whether or not the overlay is on: the count
+    # comes from project.json alone, so a slate without ``--overlay``
+    # still prints it (a review of #973 caught it silently absent).
+    expected_rounds = load_expected_rounds(shooters) if stage_titles != "none" else {}
     try:
         if title_page is not None:
             title_segment = _card_segment(
@@ -2439,9 +2428,11 @@ def render_grid_mp4(
             hold_still: Path | None = None
             lower_third: LowerThirdInput | None = None
             if stage_titles != "none":
-                rounds = _expected_rounds_for_stage(overlay_data, plan.stage_number)
                 card = stage_card(
-                    plan, style=stage_titles, seconds=title_duration_seconds, expected_rounds=rounds
+                    plan,
+                    style=stage_titles,
+                    seconds=title_duration_seconds,
+                    expected_rounds=expected_rounds.get(plan.stage_number),
                 )
                 if stage_titles == "slate":
                     slate_segment = _card_segment(

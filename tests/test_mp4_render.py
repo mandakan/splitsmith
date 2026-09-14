@@ -762,3 +762,22 @@ def test_render_mp4_lower_third_needs_no_extra_segment(tmp_path: Path) -> None:
     # The stage invocations carry the lower-third PNG as an input.
     stage_cmds = [c.args[0] for c in runner.call_args_list if c.args[0][-1].endswith("stage_000.mp4")]
     assert any(str(work / "lower_third_000.png") in cmd for cmd in stage_cmds)
+
+
+def test_backdrop_grabs_take_the_head_frame_and_the_tail_window(tmp_path: Path) -> None:
+    comp = _carded_composition(tmp_path)
+    runner = MagicMock(side_effect=_ok)
+    mp4_render.render_mp4(
+        comp,
+        output_path=tmp_path / "m.mp4",
+        work_dir=tmp_path / "w",
+        runner=runner,
+        rasterizer=_FakeRasterizer(),
+    )
+    grabs = [c.args[0] for c in runner.call_args_list if c.args[0][-1].endswith("_backdrop.png")]
+    heads = [g for g in grabs if not g[-1].endswith("closing_backdrop.png")]
+    (tail,) = [g for g in grabs if g[-1].endswith("closing_backdrop.png")]
+    assert len(heads) == 3
+    for head in heads:
+        assert head[head.index("-frames:v") + 1] == "1" and "-update" not in head
+    assert "-update" in tail and tail[tail.index("-t") + 1] == "0.5"

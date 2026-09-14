@@ -154,8 +154,10 @@ def test_cards_become_segments_in_spine_order_on_their_own_runner(tmp_path: Path
         with Image.open(work / f"{name}.png") as image:
             assert image.size == (640, 360)
     assert [c[-1].rsplit("/", 1)[-1] for c in cards] == ["title_page.mov", "slate-stage1.mov", "closing.mov"]
-    # Backdrop grabs went through the still hook, never the progress one.
-    assert all("-update" in cmd for cmd in stills)
+    # Backdrop grabs went through the still hook, never the progress one:
+    # a first frame for the title page and the slate, a last for the closing.
+    assert len(stills) == 3
+    assert all(cmd[-1].endswith("_backdrop.png") for cmd in stills)
     assert len(fake.calls) == 3
     assert "2026-05-01" in fake.calls[0]
     assert result.degradations == ()
@@ -286,3 +288,51 @@ def test_probe_is_still_only_asked_when_the_overlay_is_on(tmp_path: Path) -> Non
         title_page=MatchTitle(text="Bromma"),
     )
     assert probes == []
+
+
+def test_round_count_shows_on_a_slate_without_the_overlay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The count comes from project.json, not from the overlay's data, so
+    ``--titles slate`` alone prints it (a review caught it silently absent)."""
+    from splitsmith.compare import overlay_data
+
+    monkeypatch.setattr(mp4_grid, "load_expected_rounds", lambda shooters: {1: 24})
+    fake = _FakeRasterizer()
+    mp4_grid.render_grid_mp4(
+        _driver_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_ok_runner([]),
+        card_runner=_ok_runner([]),
+        still_runner=_still_runner([]),
+        rasterizer=fake,
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+        overlay=False,
+        stage_titles="slate",
+    )
+    assert "24 rounds" in fake.calls[0]
+    assert overlay_data.load_expected_rounds is not None
+
+
+def test_head_backdrop_is_the_first_frame_and_tail_backdrop_the_last(tmp_path: Path) -> None:
+    stills: list[tuple[str, ...]] = []
+    mp4_grid.render_grid_mp4(
+        _driver_shooters(tmp_path),
+        audio_label="Anders",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        runner=_ok_runner([]),
+        card_runner=_ok_runner([]),
+        still_runner=_still_runner(stills),
+        rasterizer=_FakeRasterizer(),
+        work_dir=tmp_path / "work",
+        ffmpeg_binary="/bin/ffmpeg",
+        title_page=MatchTitle(text="Bromma"),
+        closing=MatchTitle(text="Bromma"),
+    )
+    head, tail = stills
+    assert head[head.index("-frames:v") + 1] == "1" and "-update" not in head
+    assert "-update" in tail and "-t" in tail

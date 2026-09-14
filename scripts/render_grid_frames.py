@@ -510,9 +510,11 @@ def main(argv: list[str] | None = None) -> int:
             if args.title_page
             else None
         ),
-        closing=MatchTitle(text="Bromma Classifier", duration_seconds=CLOSING_SECONDS)
-        if args.closing_card
-        else None,
+        closing=(
+            MatchTitle(text="Bromma Classifier", duration_seconds=CLOSING_SECONDS)
+            if args.closing_card
+            else None
+        ),
         stage_titles=args.titles,
         title_duration_seconds=SLATE_SECONDS,
     )
