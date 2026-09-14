@@ -39,6 +39,23 @@ logger = logging.getLogger(__name__)
 
 Card = TitleCard | MatchTitle
 
+#: How long a lower-third fades out for, at the end of its window. Shared
+#: by both MP4 renderers so the two products fade alike.
+LOWER_THIRD_FADE_SECONDS = 0.5
+
+
+def lower_third_filters(input_index: int, seconds: float, *, source_label: str) -> tuple[list[str], str]:
+    """The two ``-filter_complex`` chains that composite a lower-third over
+    ``source_label`` and the label they end on: the PNG made ``rgba`` and
+    faded out over its last :data:`LOWER_THIRD_FADE_SECONDS`, then an
+    ``overlay`` disabled once ``seconds`` have passed. One spelling for
+    both renderers, so their fades cannot drift apart."""
+    fade_start = max(0.0, seconds - LOWER_THIRD_FADE_SECONDS)
+    return [
+        f"[{input_index}:v]format=rgba,fade=t=out:st={fade_start:g}:d={LOWER_THIRD_FADE_SECONDS:g}:alpha=1[lt]",
+        f"[{source_label}][lt]overlay=0:0:enable='lt(t,{seconds:g})'[withlt]",
+    ], "withlt"
+
 
 def _is_lower_third(card: Card) -> bool:
     return isinstance(card, TitleCard) and card.style == "lower-third"
@@ -150,4 +167,12 @@ def build_lower_third(
     return _rasterize(card, width=width, height=height, theme=theme, rasterizer=rasterizer)
 
 
-__all__ = ["Card", "build_card_still", "build_lower_third", "card_groups", "card_scale"]
+__all__ = [
+    "LOWER_THIRD_FADE_SECONDS",
+    "Card",
+    "build_card_still",
+    "build_lower_third",
+    "card_groups",
+    "card_scale",
+    "lower_third_filters",
+]

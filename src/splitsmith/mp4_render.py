@@ -65,7 +65,13 @@ from pathlib import Path
 from typing import Literal
 
 from .composition import Composition, ConnectedClip, Segment, SequenceFormat, Stage, TitleCard, Transform
-from .overlay_card import Card, build_card_still, build_lower_third
+from .overlay_card import (
+    LOWER_THIRD_FADE_SECONDS,
+    Card,
+    build_card_still,
+    build_lower_third,
+    lower_third_filters,
+)
 from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from .overlay_theme import ThemeName, load_theme
 
@@ -616,10 +622,6 @@ class _LowerThirdInput:
     card: TitleCard
 
 
-#: How long a lower-third fades out for, at the end of its window.
-LOWER_THIRD_FADE_SECONDS = 0.5
-
-
 def _build_stage_command(
     plan: _StagePlan,
     *,
@@ -851,13 +853,8 @@ def _build_stage_filter_graph(
 
     if lower_third is not None:
         input_index, seconds = lower_third
-        fade_start = max(0.0, seconds - LOWER_THIRD_FADE_SECONDS)
-        parts.append(
-            f"[{input_index}:v]format=rgba,"
-            f"fade=t=out:st={fade_start:g}:d={LOWER_THIRD_FADE_SECONDS:g}:alpha=1[lt]"
-        )
-        parts.append(f"[{base_label}][lt]overlay=0:0:enable='lt(t,{seconds:g})'[withlt]")
-        base_label = "withlt"
+        lt_parts, base_label = lower_third_filters(input_index, seconds, source_label=base_label)
+        parts.extend(lt_parts)
 
     parts.append(f"[{base_label}]null[final]")
     return ";".join(parts)

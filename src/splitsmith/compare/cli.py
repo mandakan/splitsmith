@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import typer
 from rich.console import Console
 
 from .. import camera_select
+from ..composition import MatchTitle
 from ..export_naming import slugify
 from ..match_model import Match, is_match_folder
 from ..overlay_theme import THEME_NAMES, ThemeName
@@ -24,6 +26,8 @@ compare_app = typer.Typer(
     add_completion=False,
 )
 console = Console()
+
+_TITLE_KINDS = ("none", "slate", "lower-third")
 
 
 @compare_app.command("export")
@@ -111,6 +115,30 @@ def export(
             "match."
         ),
     ),
+    titles: str = typer.Option(
+        "none",
+        "--titles",
+        help=(
+            "A generated card per stage on the rendered grid: 'slate' holds a "
+            "full-frame card before the stage, 'lower-third' fades one over its "
+            "first seconds, 'none' (the default) adds nothing. --format mp4 only."
+        ),
+    ),
+    title_duration: float = typer.Option(1.5, "--title-duration", help="Seconds a stage card shows for."),
+    title_page: bool = typer.Option(
+        False,
+        "--title-page/--no-title-page",
+        help="Open the rendered grid with a generated match title card. --format mp4 only.",
+    ),
+    title_info: str | None = typer.Option(
+        None, "--title-info", help="Free-text line under the match name on the title page."
+    ),
+    title_page_duration: float = typer.Option(
+        3.0, "--title-page-duration", help="Seconds the title page holds."
+    ),
+    closing_card: bool = typer.Option(
+        False, "--closing-card", help="Close the rendered grid with a generated card. --format mp4 only."
+    ),
 ) -> None:
     """Render a multi-shooter comparison FCPXML.
 
@@ -149,12 +177,22 @@ def export(
     # nothing and fails at the point the typo was made.
     if overlay_theme not in THEME_NAMES:
         console.print(
-            f"[red]Error:[/] --overlay-theme must be one of {', '.join(THEME_NAMES)}, "
-            f"got {overlay_theme!r}."
+            f"[red]Error:[/] --overlay-theme must be one of {', '.join(THEME_NAMES)}, got {overlay_theme!r}."
         )
         raise typer.Exit(code=2)
     if summary_hold < 0:
         console.print(f"[red]Error:[/] --summary-hold must not be negative, got {summary_hold:g}.")
+        raise typer.Exit(code=2)
+    if titles not in _TITLE_KINDS:
+        console.print(f"[red]Error:[/] --titles must be one of {', '.join(_TITLE_KINDS)}, got {titles!r}.")
+        raise typer.Exit(code=2)
+    # Same rule as --overlay: the FCPXML grid ships clean tiles by decision,
+    # and a card flag it would silently drop is refused by name instead.
+    if (titles != "none" or title_page or closing_card) and output_format != "mp4":
+        console.print(
+            "[red]Error:[/] --titles, --title-page and --closing-card require --format mp4 -- "
+            "the FCPXML grid carries no generated cards, so they would silently do nothing."
+        )
         raise typer.Exit(code=2)
     # A hold with no overlay is a contradiction, not a no-op: the summary
     # is drawn from the overlay's own shot data in the overlay's own
@@ -200,6 +238,14 @@ def export(
             overlay=overlay,
             overlay_theme=overlay_theme,  # type: ignore[arg-type]  # validated above against THEME_NAMES
             summary_hold=summary_hold,
+            cards=CardOptions(
+                stage_titles=titles,  # type: ignore[arg-type]  # validated above against _TITLE_KINDS
+                title_duration_seconds=title_duration,
+                title_page=title_page,
+                title_info=title_info,
+                title_page_duration_seconds=title_page_duration,
+                closing_card=closing_card,
+            ),
         )
         return
 
@@ -332,6 +378,7 @@ def _export_from_match(
     overlay: bool = False,
     overlay_theme: ThemeName = "splitsmith",
     summary_hold: float = 0.0,
+    cards: CardOptions | None = None,
 ) -> None:
     """Render the compare export directly from a merged Match."""
     match = Match.load(match_root)
@@ -400,6 +447,8 @@ def _export_from_match(
             overlay=overlay,
             overlay_theme=overlay_theme,
             summary_hold=summary_hold,
+            cards=cards or CardOptions(),
+            match_title=match_title(match, extra=(cards.title_info if cards else None)),
         )
         return
 
@@ -424,6 +473,8 @@ def _render_grid_mp4(
     overlay: bool = False,
     overlay_theme: ThemeName = "splitsmith",
     summary_hold: float = 0.0,
+    cards: CardOptions | None = None,
+    match_title: MatchTitle | None = None,
 ) -> None:
     """Render the grid straight to MP4, owning the scratch work dir.
 
@@ -485,6 +536,18 @@ def _render_grid_mp4(
     def _notice(message: str) -> None:
         console.print(f"[yellow]Note:[/] {message}")
 
+    cards = cards or CardOptions()
+    # The title page and the closing card say the same thing: the match
+    # name over its date and the free-text line. It is the data there is.
+    title = match_title if cards.title_page and match_title is not None else None
+    closing = (
+        replace(match_title, duration_seconds=cards.title_page_duration_seconds)
+        if cards.closing_card and match_title is not None
+        else None
+    )
+    if title is not None:
+        title = replace(title, duration_seconds=cards.title_page_duration_seconds)
+
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=output.parent, prefix=".compare-grid-work-") as tmp:
         try:
@@ -498,6 +561,10 @@ def _render_grid_mp4(
                 runner=_reporting_runner,
                 on_notice=_notice,
                 work_dir=Path(tmp),
+                title_page=title,
+                closing=closing,
+                stage_titles=cards.stage_titles,
+                title_duration_seconds=cards.title_duration_seconds,
             )
         except mp4_grid.GridRenderError as exc:
             console.print(f"[red]Error:[/] {exc}")
@@ -510,6 +577,31 @@ def _render_grid_mp4(
     rendered = len(result.stages) - len(result.failed)
     note = f", {result.degradation_summary}" if result.degradations else ""
     console.print(f"[green]Wrote[/] {output} ({rendered}/{len(result.stages)} stages{note})")
+
+
+@dataclass(frozen=True)
+class CardOptions:
+    """The generated-card flags, carried together so the two internal
+    render helpers take one argument rather than six (issue #973)."""
+
+    stage_titles: mp4_grid.StageTitleKind = "none"
+    title_duration_seconds: float = 1.5
+    title_page: bool = False
+    title_info: str | None = None
+    title_page_duration_seconds: float = 3.0
+    closing_card: bool = False
+
+
+def match_title(match: Match, *, extra: str | None = None) -> MatchTitle:
+    """The grid's match title card: the match name over its date (when
+    known) and the caller's free-text line. Only what the match carries;
+    a blank line is never printed."""
+    info: list[str] = []
+    if match.match_date is not None:
+        info.append(match.match_date.isoformat())
+    if extra and extra.strip():
+        info.append(extra.strip())
+    return MatchTitle(text=match.name, info=tuple(info))
 
 
 def _resolve_shooter_slug(match: Match, match_root: Path, name_or_slug: str) -> str | None:

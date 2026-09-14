@@ -809,3 +809,104 @@ def test_an_implausibly_long_hold_warns_but_still_renders(
     result = _invoke_mp4(match_root, output, "--overlay", "--summary-hold", str(at))
     assert result.exit_code == 0, result.output
     assert "unusually long" not in strip_ansi(result.output)
+
+
+# --- generated cards (issue #973) ---------------------------------------
+
+
+def _capture_render(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    captured: dict[str, Any] = {}
+
+    def fake_render(*args: Any, **kwargs: Any) -> mp4_grid.GridRenderResult:
+        captured.update(kwargs)
+        return mp4_grid.GridRenderResult(output_path=kwargs["output_path"], stages=())
+
+    monkeypatch.setattr(cli_mod.mp4_grid, "render_grid_mp4", fake_render)
+    return captured
+
+
+def test_card_flags_are_documented() -> None:
+    result = runner.invoke(app, ["compare", "export", "--help"])
+    output = " ".join(strip_ansi(result.output).replace("│", " ").split())
+    for flag in ("--titles", "--title-duration", "--title-page", "--title-info", "--closing-card"):
+        assert flag in output
+
+
+def test_cards_default_to_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    _patch_probe(monkeypatch)
+    captured = _capture_render(monkeypatch)
+    result = _invoke_mp4(match_root, tmp_path / "out.mp4")
+    assert result.exit_code == 0, result.output
+    assert captured["title_page"] is None
+    assert captured["closing"] is None
+    assert captured["stage_titles"] == "none"
+
+
+def test_card_flags_reach_the_renderer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    _patch_probe(monkeypatch)
+    captured = _capture_render(monkeypatch)
+    result = _invoke_mp4(
+        match_root,
+        tmp_path / "out.mp4",
+        "--titles",
+        "slate",
+        "--title-duration",
+        "2",
+        "--title-page",
+        "--title-info",
+        "Level II",
+        "--closing-card",
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["stage_titles"] == "slate"
+    assert captured["title_duration_seconds"] == 2.0
+    title = captured["title_page"]
+    assert title.text == "Compare Match"
+    assert title.info == ("Level II",)
+    assert captured["closing"].text == "Compare Match"
+
+
+def test_title_page_carries_the_match_date_when_known(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import date
+
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    match = Match.load(match_root)
+    match.match_date = date(2026, 5, 1)
+    match.save(match_root)
+    _patch_probe(monkeypatch)
+    captured = _capture_render(monkeypatch)
+    result = _invoke_mp4(match_root, tmp_path / "out.mp4", "--title-page")
+    assert result.exit_code == 0, result.output
+    assert captured["title_page"].info == ("2026-05-01",)
+
+
+def test_cards_with_fcpxml_are_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    _patch_probe(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "compare",
+            "export",
+            str(match_root),
+            "--audio-from",
+            "mathias",
+            "-o",
+            str(tmp_path / "o.fcpxml"),
+            "--title-page",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "--format mp4" in strip_ansi(result.output)
+
+
+def test_unknown_titles_kind_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    match_root = _seed_match_with_stages(tmp_path / "match", stage_count=1)
+    _patch_probe(monkeypatch)
+    result = _invoke_mp4(match_root, tmp_path / "out.mp4", "--titles", "banner")
+    assert result.exit_code == 2
+    assert "banner" in strip_ansi(result.output)
