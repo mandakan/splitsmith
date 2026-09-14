@@ -65,7 +65,13 @@ from pathlib import Path
 from typing import Literal
 
 from .composition import Composition, ConnectedClip, Segment, SequenceFormat, Stage, TitleCard, Transform
-from .overlay_card import Card, build_card_still, build_lower_third
+from .overlay_card import (
+    LOWER_THIRD_FADE_SECONDS,
+    Card,
+    build_card_still,
+    build_lower_third,
+    lower_third_filters,
+)
 from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from .overlay_theme import ThemeName, load_theme
 
@@ -314,11 +320,11 @@ def _render_with_work_dir(
     )
 
 
-#: How far before a backdrop's target frame the grab starts reading. A
-#: seek straight to the last timestamp can land past the final frame
-#: and write nothing (see ``compare/overlay_summary`` on the same trap),
-#: so the read starts a window early and ``-update 1`` keeps the last
-#: frame decoded.
+#: How far before a *tail* backdrop's target frame the grab starts
+#: reading. A seek straight to the last timestamp can land past the final
+#: frame and write nothing (see ``compare/overlay_summary`` on the same
+#: trap), so the read starts a window early and ``-update 1`` keeps the
+#: last frame decoded. A head grab takes the first frame instead.
 _BACKDROP_WINDOW_SECONDS = 0.5
 
 
@@ -344,27 +350,36 @@ def _grab_backdrop(
     if stage is None:
         return None
     plan = stage.plan
-    if item.backdrop_at == "head":
-        seek = plan.head_trim_seconds
-    else:
-        seek = max(0.0, plan.head_trim_seconds + plan.effective_seconds - _BACKDROP_WINDOW_SECONDS)
     out = work_dir / f"{item.name}_backdrop.png"
     out.unlink(missing_ok=True)
-    cmd = (
-        ffmpeg_binary,
-        "-hide_banner",
-        "-y",
-        "-ss",
-        f"{seek:g}",
-        "-t",
-        f"{_BACKDROP_WINDOW_SECONDS:g}",
-        "-i",
-        str(plan.stage.primary.path),
-        "-an",
-        "-update",
-        "1",
-        str(out),
-    )
+    primary = str(plan.stage.primary.path)
+    if item.backdrop_at == "head":
+        # There is always a frame at or after the head seek, so take
+        # exactly the first one; a window here would keep a frame half a
+        # second into the stage instead of its visible head.
+        window: tuple[str, ...] = (
+            "-ss",
+            f"{plan.head_trim_seconds:g}",
+            "-i",
+            primary,
+            "-an",
+            "-frames:v",
+            "1",
+        )
+    else:
+        seek = max(0.0, plan.head_trim_seconds + plan.effective_seconds - _BACKDROP_WINDOW_SECONDS)
+        window = (
+            "-ss",
+            f"{seek:g}",
+            "-t",
+            f"{_BACKDROP_WINDOW_SECONDS:g}",
+            "-i",
+            primary,
+            "-an",
+            "-update",
+            "1",
+        )
+    cmd = (ffmpeg_binary, "-hide_banner", "-y", *window, str(out))
     try:
         _run(cmd, runner=runner)
     except FFmpegError as exc:
@@ -616,10 +631,6 @@ class _LowerThirdInput:
     card: TitleCard
 
 
-#: How long a lower-third fades out for, at the end of its window.
-LOWER_THIRD_FADE_SECONDS = 0.5
-
-
 def _build_stage_command(
     plan: _StagePlan,
     *,
@@ -851,13 +862,8 @@ def _build_stage_filter_graph(
 
     if lower_third is not None:
         input_index, seconds = lower_third
-        fade_start = max(0.0, seconds - LOWER_THIRD_FADE_SECONDS)
-        parts.append(
-            f"[{input_index}:v]format=rgba,"
-            f"fade=t=out:st={fade_start:g}:d={LOWER_THIRD_FADE_SECONDS:g}:alpha=1[lt]"
-        )
-        parts.append(f"[{base_label}][lt]overlay=0:0:enable='lt(t,{seconds:g})'[withlt]")
-        base_label = "withlt"
+        lt_parts, base_label = lower_third_filters(input_index, seconds, source_label=base_label)
+        parts.extend(lt_parts)
 
     parts.append(f"[{base_label}]null[final]")
     return ";".join(parts)

@@ -99,6 +99,29 @@ def load_overlay_data(
     return out
 
 
+def load_expected_rounds(shooters: Sequence[CompareShooterBundle]) -> dict[int, int]:
+    """The expected round count per stage number, from whichever shooter's
+    project knows it (issue #973). A stage card is match-level and every
+    shooter's project describes the same stage, so the first project that
+    carries a count wins. Reads ``project.json`` only -- never an audit --
+    so a card can ask for it without paying for the overlay's data."""
+    out: dict[int, int] = {}
+    for bundle in shooters:
+        project = _load_project(bundle)
+        if project is None:
+            continue
+        for stage_number in bundle.stages_by_number:
+            if stage_number in out:
+                continue
+            try:
+                entry = project.stage(stage_number)
+            except KeyError:
+                continue
+            if entry.stage_rounds is not None and entry.stage_rounds.expected:
+                out[stage_number] = entry.stage_rounds.expected
+    return out
+
+
 def _load_project(bundle: CompareShooterBundle) -> MatchProject | None:
     """Return the shooter's project, or ``None`` when it cannot be read.
 

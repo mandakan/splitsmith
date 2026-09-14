@@ -29,15 +29,18 @@ import subprocess
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Literal
 
+from ..composition import MatchTitle, TitleCard, TitleStyle
+from ..overlay_card import build_card_still, build_lower_third, lower_third_filters
 from ..overlay_clock import clock_common_options, clock_text, elapsed_text_option
 from ..overlay_layout import Anchor, CellScale, anchor_ffmpeg_expr
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..overlay_text import FALLBACK_BUNDLED_FONT, overlay_font_file
-from ..overlay_theme import ThemeName, load_theme
+from ..overlay_theme import OverlayTheme, ThemeName, load_theme
 from ..runtime import FFmpegCapabilities, ffmpeg_capabilities, quote_filter_value, runtime
 from .layout import Layout2Up, choose_grid, grid_shape
-from .overlay_data import TileStageData, load_overlay_data
+from .overlay_data import TileStageData, load_expected_rounds, load_overlay_data
 from .overlay_live import write_absent_sprite_sequence, write_sprite_sequence
 from .overlay_sprites import (
     SpriteGeometry,
@@ -1111,6 +1114,107 @@ def _early_summary_filters(
     return filters, label
 
 
+@dataclass(frozen=True)
+class LowerThirdInput:
+    """A rasterized lower-third PNG (composed size) and how long it shows."""
+
+    path: Path
+    seconds: float
+
+
+StageTitleKind = Literal["none", "slate", "lower-third"]
+
+
+def stage_card(
+    plan: GridStagePlan, *, style: TitleStyle, seconds: float, expected_rounds: int | None
+) -> TitleCard:
+    """The generated card for one grid stage (issue #973): the stage name,
+    with its round count as an info line when known -- the same shape the
+    single-shooter export builds, so the two products read alike."""
+    return TitleCard(
+        text=plan.stage_name,
+        duration_seconds=seconds,
+        style=style,
+        info=(f"{expected_rounds} rounds",) if expected_rounds else (),
+    )
+
+
+def build_card_segment_command(
+    png_path: Path,
+    *,
+    seconds: float,
+    canvas: GridCanvas,
+    shooter_labels: Sequence[str],
+    output_path: Path,
+    ffmpeg_binary: str = "ffmpeg",
+) -> tuple[str, ...]:
+    """Hold one composed-size PNG for ``seconds`` as a segment with the
+    grid's own stream layout (issue #973).
+
+    A card is its own segment rather than a head extension of a stage's
+    graph so the title page and the closing card do not have to hang off
+    whichever stage happens to be first or last -- and so a failed stage
+    does not take the match's title with it. The price is the layout
+    rule :func:`build_stage_command` pins: one video plus the mix and
+    one track per shooter, all PCM, named and flagged the same way, or
+    the concat demuxer refuses the stitch. ``anullsrc`` split N+1 ways
+    is exactly that. ``-t`` is an output option: both inputs are
+    infinite and the hold is what bounds them.
+    """
+    rate = canvas.rate_string
+    slots = len(shooter_labels)
+    fan_out = "".join(f"[a{slot}]" for slot in range(slots))
+    graph = (
+        "[0:v]format=yuv420p,setsar=1[final];"
+        f"[1:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
+        f"asplit={slots + 1}[amix]{fan_out}"
+    )
+    args: list[str] = [
+        ffmpeg_binary,
+        "-hide_banner",
+        "-y",
+        "-loop",
+        "1",
+        "-framerate",
+        rate,
+        "-i",
+        str(png_path),
+        "-f",
+        "lavfi",
+        "-i",
+        "anullsrc=channel_layout=stereo:sample_rate=48000",
+        "-t",
+        f"{seconds:g}",
+        "-filter_complex",
+        graph,
+        "-map",
+        "[final]",
+        "-map",
+        "[amix]",
+    ]
+    for slot in range(slots):
+        args += ["-map", f"[a{slot}]"]
+    track_labels = audio_track_labels(shooter_labels)
+    args += list(_disposition_args(track_labels, 0))
+    args += list(_track_naming_args(track_labels))
+    args += [
+        "-r",
+        rate,
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "20",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        SEGMENT_AUDIO_CODEC,
+        str(output_path),
+    ]
+    return tuple(args)
+
+
 def build_stage_command(
     plan: GridStagePlan,
     *,
@@ -1119,6 +1223,7 @@ def build_stage_command(
     ffmpeg_binary: str = "ffmpeg",
     overlay: StageOverlayPlan | None = None,
     hold_still_path: Path | None = None,
+    lower_third: LowerThirdInput | None = None,
 ) -> tuple[str, ...]:
     """Build the ffmpeg invocation rendering one grid stage.
 
@@ -1309,6 +1414,25 @@ def build_stage_command(
         early_index = next_index
         next_index += 1
 
+    # After everything else, for the same reason everything else went
+    # after its predecessor: the only index safe to occupy is the next
+    # free one. Composited on the action (see ``_build_filter_graph``),
+    # so a card can never reach a frame of the hold.
+    lower_third_graph: tuple[int, float] | None = None
+    if lower_third is not None:
+        args += [
+            "-loop",
+            "1",
+            "-framerate",
+            rate,
+            "-t",
+            f"{lower_third.seconds:g}",
+            "-i",
+            str(lower_third.path),
+        ]
+        lower_third_graph = (next_index, lower_third.seconds)
+        next_index += 1
+
     args += [
         "-filter_complex",
         _build_filter_graph(
@@ -1321,6 +1445,7 @@ def build_stage_command(
             sprite_index=sprite_index,
             hold_index=hold_index,
             early_index=early_index,
+            lower_third=lower_third_graph,
         ),
     ]
 
@@ -1413,6 +1538,7 @@ def _build_filter_graph(
     sprite_index: int | None = None,
     hold_index: int | None = None,
     early_index: int | None = None,
+    lower_third: tuple[int, float] | None = None,
 ) -> str:
     """Scale + pad every tile to a uniform cell, then ``xstack`` the grid.
 
@@ -1553,6 +1679,14 @@ def _build_filter_graph(
             raise ValueError("an early summary needs the overlay plan whose action chain it draws onto")
         early_parts, video_label = _early_summary_filters(plan, canvas, video_label, early_index)
         parts.extend(early_parts)
+
+    # The lower-third (issue #973) is the last thing drawn on the action
+    # and sits upstream of the tail's ``concat``, like everything else
+    # that draws on the action: there is no expression to get wrong.
+    if lower_third is not None:
+        lt_index, lt_seconds = lower_third
+        lt_parts, video_label = lower_third_filters(lt_index, lt_seconds, source_label=video_label)
+        parts.extend(lt_parts)
 
     parts.extend(_video_tail(video_label, hold_label))
 
@@ -1880,6 +2014,121 @@ def _stage_hold_still(
     )
 
 
+#: How far before a *tail* backdrop's target the grab starts reading, and
+#: how much it reads; ``-update 1`` keeps the last frame decoded. See
+#: ``overlay_summary._FREEZE_TAIL_WINDOW_SECONDS`` for why a seek straight
+#: to the last timestamp can come back empty. A *head* grab has no such
+#: problem -- there is always a frame at or after the seek -- so it takes
+#: exactly the first one (``-frames:v 1``); reading a window there would
+#: keep a frame half a second *into* the stage instead.
+_CARD_BACKDROP_WINDOW_SECONDS = 0.5
+
+
+def _grab_card_backdrop(
+    plan: GridStagePlan,
+    *,
+    at: Literal["head", "tail"],
+    name: str,
+    work: Path,
+    ffmpeg_binary: str,
+    runner: Runner,
+) -> Path | None:
+    """One frame of the audio-source shooter's trim for a card to sit on:
+    its first frame for a card that precedes the stage, its last for the
+    closing card. ``None`` when that shooter has no trim on this stage or
+    the grab produced no file -- the card then composes flat, which is a
+    picture, not a failure."""
+    tile = next((t for t in plan.tiles if t.label == plan.audio_label and t.trim_path is not None), None)
+    if tile is None:
+        tile = next((t for t in plan.tiles if t.trim_path is not None), None)
+    if tile is None or tile.trim_path is None:
+        return None
+    out = work / f"{name}_backdrop.png"
+    out.unlink(missing_ok=True)
+    if at == "head":
+        window = ["-ss", f"{tile.seek_seconds:g}", "-i", str(tile.trim_path), "-an", "-frames:v", "1"]
+    else:
+        seek = max(0.0, tile.source_duration_seconds - _CARD_BACKDROP_WINDOW_SECONDS)
+        window = [
+            "-ss",
+            f"{seek:g}",
+            "-t",
+            f"{_CARD_BACKDROP_WINDOW_SECONDS:g}",
+            "-i",
+            str(tile.trim_path),
+            "-an",
+            "-update",
+            "1",
+        ]
+    cmd = [ffmpeg_binary, "-hide_banner", "-y", *window, str(out)]
+    try:
+        completed = runner(cmd, capture_output=True)
+    except Exception as exc:  # noqa: BLE001 -- a card's backdrop is never worth the render
+        logger.warning(
+            "compare grid: could not grab a backdrop for %s (%s); the card composes flat", name, exc
+        )
+        return None
+    if completed.returncode != 0:
+        return None
+    try:
+        return out if out.stat().st_size > 0 else None
+    except OSError:
+        return None
+
+
+def _card_segment(
+    card: MatchTitle | TitleCard,
+    *,
+    name: str,
+    plan: GridStagePlan,
+    backdrop_at: Literal["head", "tail"],
+    canvas: GridCanvas,
+    theme: OverlayTheme | None,
+    rasterizer: Rasterizer | None,
+    work: Path,
+    ffmpeg_binary: str,
+    card_runner: Runner,
+    still_runner: Runner,
+) -> Path | None:
+    """Compose one full-frame card and encode it as a segment; ``None``
+    when it was skipped -- no rasterizer (already recorded as a
+    degradation up front), a card whose text could not be rasterized, or
+    an encode ffmpeg refused. Each is logged; none stops the render.
+
+    Sized to the *composed* grid of ``plan``, not the canvas (#691): the
+    stage segments are that size, and the stitch stream-copies video.
+    """
+    if rasterizer is None or theme is None:
+        return None
+    composed_w, composed_h = _composed_size(canvas, plan)
+    backdrop = _grab_card_backdrop(
+        plan, at=backdrop_at, name=name, work=work, ffmpeg_binary=ffmpeg_binary, runner=still_runner
+    )
+    image = build_card_still(
+        card, width=composed_w, height=composed_h, theme=theme, rasterizer=rasterizer, backdrop=backdrop
+    )
+    if image is None:
+        return None
+    png = work / f"{name}.png"
+    image.save(png)
+    segment = work / f"{name}{SEGMENT_SUFFIX}"
+    cmd = build_card_segment_command(
+        png,
+        seconds=card.duration_seconds,
+        canvas=canvas,
+        shooter_labels=tuple(tile.label for tile in plan.tiles),
+        output_path=segment,
+        ffmpeg_binary=ffmpeg_binary,
+    )
+    completed = _run_ffmpeg(cmd, runner=card_runner)
+    if completed.returncode != 0:
+        logger.warning(
+            "compare grid: card %s failed to encode and is skipped: %s", name, _stderr_text(completed)
+        )
+        return None
+    return segment
+
+
 def _run_ffmpeg(cmd: tuple[str, ...], *, runner: Runner) -> subprocess.CompletedProcess:
     """Invoke ffmpeg, turning a missing binary into a clear error.
 
@@ -1920,9 +2169,14 @@ def render_grid_mp4(
     runner: Runner = subprocess.run,
     probe_runner: Runner = subprocess.run,
     still_runner: Runner = subprocess.run,
+    card_runner: Runner = subprocess.run,
     rasterizer: Rasterizer | None = None,
     on_notice: NoticeHook | None = None,
     work_dir: Path | None = None,
+    title_page: MatchTitle | None = None,
+    closing: MatchTitle | None = None,
+    stage_titles: StageTitleKind = "none",
+    title_duration_seconds: float = 1.5,
 ) -> GridRenderResult:
     """Render every stage as a grid, then stitch them into one MP4.
 
@@ -2002,6 +2256,19 @@ def render_grid_mp4(
     every hold still composes with the blurred freeze but no summary
     text, rather than failing the run. It never falls back to a second
     rendering engine.
+
+    ``title_page`` / ``closing`` / ``stage_titles`` (issue #973) are the
+    generated cards: a match title card first, a card per stage (a
+    ``slate`` segment before it, or a ``lower-third`` over its head that
+    adds no time), a closing card last. Each full-frame card is its own
+    segment in the grid's stream layout (see
+    :func:`build_card_segment_command`), encoded through ``card_runner``
+    -- not ``runner``, which both shipped callers count to say "stage N
+    of M" -- and composed by the same rasterizer the overlay uses, opened
+    for the cards alone when the overlay is off. No usable browser
+    degrades exactly as it does for the summary: every card skipped, the
+    loss recorded once. The ffmpeg capability probe stays gated on the
+    overlay; a card needs a browser, not ``drawtext``.
 
     ``work_dir`` holds the per-stage segments and the concat list. It
     defaults to a directory beside the output -- same filesystem, so a
@@ -2114,9 +2381,10 @@ def render_grid_mp4(
     # requested. Getting this gate wrong is silent -- a hold-less render
     # would simply find ``rasterizer is None`` per stage and degrade every
     # sprite to a blank canvas without anything having failed.
+    cards_requested = title_page is not None or closing is not None or stage_titles != "none"
     active_rasterizer: Rasterizer | None = rasterizer
     owned_rasterizer: ChromiumRasterizer | None = None
-    if overlay and rasterizer is None:
+    if (overlay or cards_requested) and rasterizer is None:
         owned_rasterizer = ChromiumRasterizer()
         try:
             active_rasterizer = owned_rasterizer.__enter__()
@@ -2132,11 +2400,69 @@ def render_grid_mp4(
 
     outcomes: list[StageOutcome] = []
     segments: list[Path] = []
+    card_theme = load_theme(overlay_theme) if cards_requested else None
+    # Read for the stage cards whether or not the overlay is on: the count
+    # comes from project.json alone, so a slate without ``--overlay``
+    # still prints it (a review of #973 caught it silently absent).
+    expected_rounds = load_expected_rounds(shooters) if stage_titles != "none" else {}
     try:
+        if title_page is not None:
+            title_segment = _card_segment(
+                title_page,
+                name="title_page",
+                plan=plans[0],
+                backdrop_at="head",
+                canvas=canvas,
+                theme=card_theme,
+                rasterizer=active_rasterizer,
+                work=work,
+                ffmpeg_binary=binary,
+                card_runner=card_runner,
+                still_runner=still_runner,
+            )
+            if title_segment is not None:
+                segments.append(title_segment)
         for plan in plans:
             segment = work / f"stage{plan.stage_number}{SEGMENT_SUFFIX}"
             stage_overlay: StageOverlayPlan | None = None
             hold_still: Path | None = None
+            lower_third: LowerThirdInput | None = None
+            if stage_titles != "none":
+                card = stage_card(
+                    plan,
+                    style=stage_titles,
+                    seconds=title_duration_seconds,
+                    expected_rounds=expected_rounds.get(plan.stage_number),
+                )
+                if stage_titles == "slate":
+                    slate_segment = _card_segment(
+                        card,
+                        name=f"slate-stage{plan.stage_number}",
+                        plan=plan,
+                        backdrop_at="head",
+                        canvas=canvas,
+                        theme=card_theme,
+                        rasterizer=active_rasterizer,
+                        work=work,
+                        ffmpeg_binary=binary,
+                        card_runner=card_runner,
+                        still_runner=still_runner,
+                    )
+                    if slate_segment is not None:
+                        segments.append(slate_segment)
+                elif active_rasterizer is not None and card_theme is not None:
+                    composed_w, composed_h = _composed_size(canvas, plan)
+                    image = build_lower_third(
+                        card,
+                        width=composed_w,
+                        height=composed_h,
+                        theme=card_theme,
+                        rasterizer=active_rasterizer,
+                    )
+                    if image is not None:
+                        png = work / f"lower-third-stage{plan.stage_number}.png"
+                        image.save(png)
+                        lower_third = LowerThirdInput(path=png, seconds=title_duration_seconds)
             # ``font_path`` is set exactly when ``overlay`` is; naming both
             # keeps that obvious rather than asserting it.
             if overlay and font_path is not None:
@@ -2210,6 +2536,7 @@ def render_grid_mp4(
                 ffmpeg_binary=binary,
                 overlay=stage_overlay,
                 hold_still_path=hold_still,
+                lower_third=lower_third,
             )
             completed = _run_ffmpeg(cmd, runner=runner)
             if completed.returncode != 0:
@@ -2224,6 +2551,22 @@ def render_grid_mp4(
                 continue
             segments.append(segment)
             outcomes.append(StageOutcome(stage_number=plan.stage_number, stage_name=plan.stage_name, ok=True))
+        if closing is not None:
+            closing_segment = _card_segment(
+                closing,
+                name="closing",
+                plan=plans[-1],
+                backdrop_at="tail",
+                canvas=canvas,
+                theme=card_theme,
+                rasterizer=active_rasterizer,
+                work=work,
+                ffmpeg_binary=binary,
+                card_runner=card_runner,
+                still_runner=still_runner,
+            )
+            if closing_segment is not None:
+                segments.append(closing_segment)
     finally:
         # Closed as soon as the stage loop is done, not held open through
         # the final concat/stitch below -- the stitch is ffmpeg-only and
@@ -2232,7 +2575,9 @@ def render_grid_mp4(
         if owned_rasterizer is not None:
             owned_rasterizer.__exit__(None, None, None)
 
-    if not segments:
+    if not any(outcome.ok for outcome in outcomes):
+        # Cards alone are not a match: a title page over no stages would
+        # stitch, exit 0 and hand back a video of nothing.
         raise GridRenderError(
             f"every stage failed to render ({len(outcomes)} attempted); nothing to stitch. "
             f"Last error: {outcomes[-1].error}"
@@ -2282,15 +2627,18 @@ __all__ = [
     "GridRenderResult",
     "GridStagePlan",
     "GridTile",
+    "LowerThirdInput",
     "NoticeHook",
     "OverlayDegradation",
     "StageOutcome",
     "StageOverlayPlan",
     "TileClock",
     "audio_track_labels",
+    "build_card_segment_command",
     "build_concat_command",
     "build_stage_command",
     "build_stage_plans",
     "derive_frame_rate",
     "render_grid_mp4",
+    "stage_card",
 ]

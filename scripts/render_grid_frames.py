@@ -67,6 +67,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from splitsmith.compare import mp4_grid  # noqa: E402
+from splitsmith.composition import MatchTitle  # noqa: E402
 from tests.compare_fixture import (  # noqa: E402
     HEAD_PAD_SECONDS,
     MAX_SHOOTERS,
@@ -91,6 +92,11 @@ from tests.synthetic_media import (  # noqa: E402
 )
 
 DEFAULT_OUT = REPO_ROOT / "build" / "grid-frames"
+#: Card lengths for the ``--title-page`` / ``--titles slate`` / ``--closing-card``
+#: options; fixed so a moment's frame index is derivable.
+TITLE_SECONDS = 3.0
+SLATE_SECONDS = 1.5
+CLOSING_SECONDS = 2.0
 
 
 @dataclass(frozen=True)
@@ -113,17 +119,31 @@ def _first_shot_seconds(shooters: int) -> float:
     return min(firsts) if firsts else 0.0
 
 
-def _moments(*, fps: int, hold_seconds: float, stages: int, shooters: int) -> list[tuple[int, Moment]]:
+def _moments(
+    *,
+    fps: int,
+    hold_seconds: float,
+    stages: int,
+    shooters: int,
+    title_seconds: float = 0.0,
+    slate_seconds: float = 0.0,
+    closing_seconds: float = 0.0,
+) -> list[tuple[int, Moment]]:
     """Every ``(stage number, moment)`` the render should be sampled at.
 
     Indices are derived from the segment geometry the fixture pins, not
     measured off the file: a stage is ``head pad + longest post-beep span
     + tail pad`` of action followed by the hold, and every tile's beep
-    lands at the head pad.
+    lands at the head pad. Generated cards (#973) sit in front: the title
+    page once, a slate before every stage, the closing card after the
+    last, each shifting every later index by its own length.
     """
     action_frames = round(SEGMENT_SECONDS * fps)
     hold_frames = round(hold_seconds * fps)
     segment_frames = action_frames + hold_frames
+    title_frames = round(title_seconds * fps)
+    slate_frames = round(slate_seconds * fps)
+    closing_frames = round(closing_seconds * fps)
 
     def at(seconds: float) -> int:
         return round(seconds * fps)
@@ -196,8 +216,12 @@ def _moments(*, fps: int, hold_seconds: float, stages: int, shooters: int) -> li
         ]
 
     out: list[tuple[int, Moment]] = []
+    if title_frames:
+        out.append((0, Moment("title-page", title_frames // 2, "the match title card")))
     for stage in range(1, stages + 1):
-        base = (stage - 1) * segment_frames
+        base = title_frames + (stage - 1) * (slate_frames + segment_frames) + slate_frames
+        if slate_frames:
+            out.append((stage, Moment("slate", base - slate_frames // 2, "the stage's slate")))
         for moment in per_stage:
             out.append((stage, Moment(moment.name, base + moment.index, moment.why)))
         if stage < stages:
@@ -207,10 +231,13 @@ def _moments(*, fps: int, hold_seconds: float, stages: int, shooters: int) -> li
                     Moment(
                         "next-stage",
                         base + segment_frames,
-                        "the first frame of the following stage, across the concat join",
+                        "the first frame of the following segment, across the concat join",
                     ),
                 )
             )
+    if closing_frames:
+        end = title_frames + stages * (slate_frames + segment_frames)
+        out.append((stages, Moment("closing", end + closing_frames // 2, "the closing card")))
     return out
 
 
@@ -225,9 +252,20 @@ def _extract(video: Path, index: int, destination: Path, *, ffmpeg: str) -> bool
     destination.unlink(missing_ok=True)
     done = subprocess.run(
         [
-            ffmpeg, "-hide_banner", "-y", "-v", "error", "-i", str(video),
-            "-vf", f"select=eq(n\\,{index})", "-fps_mode", "passthrough",
-            "-frames:v", "1", str(destination),
+            ffmpeg,
+            "-hide_banner",
+            "-y",
+            "-v",
+            "error",
+            "-i",
+            str(video),
+            "-vf",
+            f"select=eq(n\\,{index})",
+            "-fps_mode",
+            "passthrough",
+            "-frames:v",
+            "1",
+            str(destination),
         ],  # fmt: skip
         capture_output=True,
         text=True,
@@ -276,12 +314,35 @@ def _corpus_clips(
         destination.parent.mkdir(parents=True, exist_ok=True)
         done = subprocess.run(
             [
-                ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
-                "-vf", f"fps={SYNTHETIC_FPS_NUM}/{SYNTHETIC_FPS_DEN}",
-                "-frames:v", str(frames),
-                "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
-                "-g", "30", "-keyint_min", "30", "-sc_threshold", "0",
-                "-c:a", "aac", "-b:a", "128k", "-shortest", str(destination),
+                ffmpeg,
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-i",
+                str(source),
+                "-vf",
+                f"fps={SYNTHETIC_FPS_NUM}/{SYNTHETIC_FPS_DEN}",
+                "-frames:v",
+                str(frames),
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-pix_fmt",
+                "yuv420p",
+                "-g",
+                "30",
+                "-keyint_min",
+                "30",
+                "-sc_threshold",
+                "0",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "128k",
+                "-shortest",
+                str(destination),
             ],  # fmt: skip
             capture_output=True,
             text=True,
@@ -364,6 +425,14 @@ def main(argv: list[str] | None = None) -> int:
         help=f"output directory, wiped on each run so successive runs diff (default {DEFAULT_OUT})",
     )
     parser.add_argument("--keep-video", action="store_true", help="keep the rendered MP4 beside the frames")
+    parser.add_argument(
+        "--titles",
+        choices=("none", "slate", "lower-third"),
+        default="none",
+        help="a generated card per stage (#973): a slate segment before it, or a lower-third over its head",
+    )
+    parser.add_argument("--title-page", action="store_true", help="open with a generated match title card")
+    parser.add_argument("--closing-card", action="store_true", help="close with a generated card")
     args = parser.parse_args(argv)
 
     if not 1 <= args.shooters <= MAX_SHOOTERS:
@@ -434,6 +503,20 @@ def main(argv: list[str] | None = None) -> int:
         ffmpeg_binary=ffmpeg,
         work_dir=work / "render",
         on_notice=lambda text: print(f"  notice: {text}"),
+        title_page=(
+            MatchTitle(
+                text="Bromma Classifier", info=("2026-05-01", "Level II"), duration_seconds=TITLE_SECONDS
+            )
+            if args.title_page
+            else None
+        ),
+        closing=(
+            MatchTitle(text="Bromma Classifier", duration_seconds=CLOSING_SECONDS)
+            if args.closing_card
+            else None
+        ),
+        stage_titles=args.titles,
+        title_duration_seconds=SLATE_SECONDS,
     )
     if result.failed:
         print(f"  {len(result.failed)} stage(s) failed: {result.failed}", file=sys.stderr)
@@ -443,6 +526,9 @@ def main(argv: list[str] | None = None) -> int:
         hold_seconds=args.summary_hold,
         stages=args.stages,
         shooters=args.shooters,
+        title_seconds=TITLE_SECONDS if args.title_page else 0.0,
+        slate_seconds=SLATE_SECONDS if args.titles == "slate" else 0.0,
+        closing_seconds=CLOSING_SECONDS if args.closing_card else 0.0,
     )
     written = 0
     for stage, moment in moments:
