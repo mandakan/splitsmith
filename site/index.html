@@ -1,1460 +1,401 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Splitsmith — Splits from your stage video</title>
-<meta name="description" content="Extract per-shot split times from your stage video — any camera with audio works. Open source IPSC tooling.">
-
-<meta property="og:title" content="Splitsmith -- Detect. Coach. Cut.">
-<meta property="og:description" content="Per-shot split detection from head-mounted IPSC footage. CSV + FCPXML out.">
+<title>Splitsmith</title>
+<meta name="description" content="Splitsmith reads the beep and every shot out of the audio your camera already recorded, and turns them into splits you can audit, coach and compare. Open source, for IPSC shooters.">
+<meta property="og:title" content="Splitsmith">
+<meta property="og:description" content="Every shot you fired is in your footage. Splitsmith gets the splits out: audit, coach, compare, export.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://splitsmith.app">
 <meta property="og:image" content="https://splitsmith.app/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Splitsmith brand plate -- Detect. Coach. Cut.">
+<meta property="og:image:alt" content="Splitsmith">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Splitsmith -- Detect. Coach. Cut.">
-<meta name="twitter:description" content="Per-shot split detection from head-mounted IPSC footage. CSV + FCPXML out.">
-<meta name="twitter:image" content="https://splitsmith.app/og.png">
-
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-
+<meta name="theme-color" content="#050505">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Antonio:wght@400..700&family=Geist:wght@300..800&family=JetBrains+Mono:wght@400..700&display=swap" rel="stylesheet">
-
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Antonio:wght@500;700&family=Geist:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
 <style>
-/* ============================================================
-   SPLITSMITH — splitsmith.app marketing
-   Direction: Shot Timer
-   Dark instrument panel. Mono numerals are heroes. Heavy
-   condensed display. Single LED-red accent. No flourish.
-   ============================================================ */
-
-:root {
-  --bg:           #0A0B0D;
-  --bg-glow:      #0E1014;
-  --surface:      #14171C;
-  --surface-2:    #1A1E24;
-  --surface-3:    #232831;
-  --rule:         #262B33;
-  --rule-strong:  #3A4049;
-
-  --ink:          #F4F4F5;
-  --ink-2:        #C9CCD2;
-  --muted:        #8E939B;
-  --subtle:       #6B7079;
-  --whisper:      #4B5058;
-
-  --led:          #FF2D2D;
-  --led-soft:     #FF5555;
-  --led-deep:     #B91C1C;
-  --led-fill:     #DC2626;
-  --led-glow:     rgba(255, 45, 45, 0.30);
-  --led-tint:     rgba(255, 45, 45, 0.10);
-
-  --live:         #FBBF24;
-  --live-glow:    rgba(251, 191, 36, 0.30);
-  --done:         #4ADE80;
-  --done-glow:    rgba(74, 222, 128, 0.30);
-  --beep:         #06B6D4;
-  --beep-glow:    rgba(6, 182, 212, 0.30);
-
-  --sans:    'Geist', system-ui, sans-serif;
-  --display: 'Antonio', 'Helvetica Neue', sans-serif;
-  --mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-
-  --ease:    cubic-bezier(0.22, 1, 0.36, 1);
-  --feat-num: 'tnum' 1, 'lnum' 1;
-}
-
-* { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
-
-body {
-  font-family: var(--sans);
-  font-weight: 400;
-  font-size: 0.9375rem;
-  line-height: 1.6;
-  color: var(--ink);
-  background: var(--bg);
-  letter-spacing: -0.003em;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  min-height: 100vh;
-  background-image:
-    radial-gradient(1200px 600px at 50% -100px, rgba(255,45,45,0.05), transparent 60%),
-    radial-gradient(800px 500px at 100% 200px, rgba(74,222,128,0.015), transparent 60%),
-    linear-gradient(to bottom, var(--bg-glow), var(--bg));
-  background-attachment: fixed;
-}
-
-a { color: inherit; text-decoration: none; }
-::selection { background: var(--led); color: var(--bg); }
-
-:focus { outline: 0; }
-:focus-visible {
-  outline: 2px solid var(--led);
-  outline-offset: 2px;
-  border-radius: 6px;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+  :root{
+    --bg:#050505; --bg-2:#0A0B0D; --surface:rgba(255,255,255,0.035); --surface-2:rgba(255,255,255,0.06);
+    --hair:rgba(255,255,255,0.08); --hair-2:rgba(255,255,255,0.14);
+    --ink:#F4F4F5; --ink-2:#C9CCD2; --muted:#8E939B; --subtle:#6B7079;
+    --led:#FF2D2D; --led-fill:#DC2626; --led-text:#FFB4B4; --led-glow:rgba(255,45,45,0.35);
+    --live:#FBBF24; --done:#4ADE80; --beep:#06B6D4; --manual:#A78BFA;
+    --display:"Antonio","Arial Narrow",Impact,sans-serif;
+    --sans:"Geist",system-ui,-apple-system,"Segoe UI",sans-serif;
+    --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+    --ease:cubic-bezier(0.32,0.72,0,1);
+    --r-outer:2rem; --r-pad:0.375rem; --r-inner:calc(2rem - 0.375rem);
+    color-scheme:dark;
   }
-}
+  *,*::before,*::after{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  a{color:inherit;text-decoration:none}
+  img{max-width:100%;display:block}
+  ::selection{background:var(--led-fill);color:#fff}
+  :focus-visible{outline:2px solid var(--led);outline-offset:3px;border-radius:6px}
 
-/* ============================================================
-   SHELL
-   ============================================================ */
-header.shell {
-  border-bottom: 1px solid var(--rule);
-  background: linear-gradient(180deg, rgba(20,23,28,0.6), rgba(10,11,13,0.0));
-  backdrop-filter: blur(8px);
-  position: sticky;
-  top: 0;
-  z-index: 10;
-}
-.shell-top {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 18px 32px;
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  flex-wrap: wrap;
-}
+  /* ambient ground: one red radial, film grain, nothing else */
+  .ground{position:fixed;inset:0;z-index:0;pointer-events:none;background:
+    radial-gradient(900px 520px at 18% -8%, rgba(255,45,45,0.14), transparent 60%),
+    radial-gradient(700px 500px at 88% 110%, rgba(255,45,45,0.06), transparent 60%)}
+  .grain{position:fixed;inset:0;z-index:50;pointer-events:none;opacity:.035;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>")}
+  .page{position:relative;z-index:1}
+  .wrap{max-width:1180px;margin:0 auto;padding-inline:clamp(16px,4vw,40px)}
 
-.brand { display: flex; align-items: center; gap: 14px; }
-.brand .mark { width: 36px; height: 36px; flex-shrink: 0; }
-.brand .name {
-  font-family: var(--display);
-  font-weight: 700;
-  font-size: 1.5rem;
-  letter-spacing: 0.005em;
-  text-transform: uppercase;
-  line-height: 1;
-  color: var(--ink);
-}
-.brand .heartbeat {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--led);
-  box-shadow: 0 0 8px var(--led-glow), 0 0 2px var(--led);
-  animation: heartbeat 2.4s ease-in-out infinite;
-}
-@keyframes heartbeat {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50%      { opacity: 0.45; transform: scale(0.85); }
-}
+  /* type */
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--hair-2);border-radius:999px;padding:4px 12px;font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);background:var(--surface)}
+  .eyebrow i{width:6px;height:6px;border-radius:50%;background:var(--led);box-shadow:0 0 10px var(--led-glow)}
+  h1,h2,h3{margin:0;text-wrap:balance}
+  h1{font-family:var(--display);font-weight:700;text-transform:uppercase;font-size:clamp(44px,6.6vw,96px);line-height:.92;letter-spacing:-.005em}
+  h1 .led{color:var(--led)}
+  h2{font-family:var(--display);font-weight:700;text-transform:uppercase;font-size:clamp(36px,5.2vw,64px);line-height:.95}
+  h3{font-size:18px;font-weight:600;letter-spacing:-.01em}
+  .lede{font-size:clamp(17px,1.6vw,20px);color:var(--ink-2);max-width:56ch;margin:0}
+  p{margin:0;color:var(--ink-2)}
+  .muted{color:var(--muted)}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
 
-.spacer { flex: 1; }
+  /* island nav */
+  .nav{position:sticky;top:0;z-index:40;display:flex;justify-content:center;padding:18px 16px 0;pointer-events:none}
+  .nav .pill{pointer-events:auto;display:flex;align-items:center;gap:6px;padding:6px 6px 6px 14px;border-radius:999px;border:1px solid var(--hair-2);background:rgba(10,11,13,.72);backdrop-filter:blur(18px) saturate(140%);-webkit-backdrop-filter:blur(18px) saturate(140%);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 20px 50px -30px rgba(0,0,0,.9)}
+  .brand{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:700;font-size:15px;letter-spacing:.06em;text-transform:uppercase;margin-right:10px}
+  .brand i{width:14px;height:14px;border-radius:50%;border:2px solid var(--led);position:relative;display:inline-block}
+  .brand i::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--led)}
+  .nav .links{display:flex;gap:2px}
+  .nav .links a{padding:7px 12px;border-radius:999px;font-size:13px;color:var(--ink-2);transition:background .5s var(--ease),color .5s var(--ease)}
+  .nav .links a:hover{background:var(--surface-2);color:var(--ink)}
+  .nav .cta{margin-left:6px}
+  .ham{display:none;pointer-events:auto;width:40px;height:40px;border-radius:999px;border:1px solid var(--hair-2);background:rgba(10,11,13,.72);backdrop-filter:blur(18px);position:relative;cursor:pointer}
+  .ham span{position:absolute;left:12px;right:12px;height:2px;background:var(--ink);border-radius:2px;transition:transform .6s var(--ease),opacity .4s var(--ease);top:19px}
+  .ham span:first-child{transform:translateY(-4px)}
+  .ham span:last-child{transform:translateY(4px)}
+  .ham[aria-expanded="true"] span:first-child{transform:rotate(45deg)}
+  .ham[aria-expanded="true"] span:last-child{transform:rotate(-45deg)}
+  .sheet{position:fixed;inset:0;z-index:35;background:rgba(5,5,5,.86);backdrop-filter:blur(30px);-webkit-backdrop-filter:blur(30px);display:none;align-items:center;justify-content:center}
+  .sheet[data-open="true"]{display:flex}
+  .sheet a{display:block;font-family:var(--display);font-size:44px;text-transform:uppercase;line-height:1.1;padding:8px 0;opacity:0;transform:translateY(24px);transition:opacity .7s var(--ease),transform .7s var(--ease)}
+  .sheet[data-open="true"] a{opacity:1;transform:none}
+  .sheet a:nth-child(2){transition-delay:.08s}.sheet a:nth-child(3){transition-delay:.16s}.sheet a:nth-child(4){transition-delay:.24s}.sheet a:nth-child(5){transition-delay:.32s}
 
-.nav-link {
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--muted);
-  padding: 8px 14px;
-  border-radius: 8px;
-  transition: color 150ms var(--ease), background 150ms var(--ease);
-}
-.nav-link:hover { color: var(--ink); background: var(--surface-2); }
+  /* buttons: island pills, arrow in its own well */
+  .btn{display:inline-flex;align-items:center;gap:12px;padding:10px 10px 10px 20px;border-radius:999px;border:1px solid var(--hair-2);background:var(--surface-2);color:var(--ink);font-size:14px;font-weight:500;line-height:1;transition:transform .5s var(--ease),background .5s var(--ease),border-color .5s var(--ease);will-change:transform}
+  .btn:hover{background:rgba(255,255,255,.1)}
+  .btn:active{transform:scale(.98)}
+  .btn .well{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.08);display:inline-grid;place-items:center;transition:transform .5s var(--ease),background .5s var(--ease)}
+  .btn:hover .well{transform:translate(2px,-1px) scale(1.05)}
+  .btn.primary{background:var(--led-fill);border-color:var(--led-fill);font-family:var(--display);font-weight:700;font-size:16px;letter-spacing:.06em;text-transform:uppercase;box-shadow:0 0 0 1px rgba(255,45,45,.3),0 18px 40px -20px var(--led-glow)}
+  .btn.primary:hover{background:var(--led)}
+  .btn.primary .well{background:rgba(0,0,0,.28)}
+  .btn.quiet{background:transparent}
+  .btn svg{width:13px;height:13px}
 
-.gh-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 16px;
-  border-radius: 8px;
-  border: 1px solid var(--rule);
-  background: var(--surface-2);
-  color: var(--ink);
-  font-family: var(--display);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  transition: all 180ms var(--ease);
-}
-.gh-btn:hover {
-  border-color: var(--rule-strong);
-  background: var(--surface-3);
-}
-.gh-btn svg { width: 16px; height: 16px; }
+  /* double bezel */
+  .shell{background:rgba(255,255,255,.04);border:1px solid var(--hair-2);border-radius:var(--r-outer);padding:var(--r-pad);box-shadow:0 40px 80px -50px rgba(0,0,0,.9)}
+  .core{background:#0A0B0D;border-radius:var(--r-inner);overflow:hidden;box-shadow:inset 0 1px 1px rgba(255,255,255,.12)}
+  .core img{width:100%;height:auto}
 
-/* --- Sign-in chip (opens waitlist modal) ---
-   Faux-login button: visually signals "an app exists" but the
-   click opens an honest "coming soon" panel with a waitlist
-   form. LED-outlined to read as the primary header CTA without
-   stealing focus from the hero. */
-.signin-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 16px;
-  border-radius: 8px;
-  border: 1px solid var(--led);
-  background: var(--led-tint);
-  color: var(--led);
-  font-family: var(--display);
-  font-size: 0.8125rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: all 180ms var(--ease);
-}
-.signin-btn:hover {
-  background: var(--led-fill);
-  color: var(--ink);
-  box-shadow: 0 0 18px var(--led-glow);
-}
-.signin-btn:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(255, 45, 45, 0.28);
-}
-.signin-btn .signin-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
-  box-shadow: 0 0 6px currentColor;
-  flex-shrink: 0;
-}
+  /* sections */
+  section{padding-block:clamp(88px,12vw,160px)}
+  .sec-hd{display:grid;gap:18px;justify-items:start;max-width:64ch;margin-bottom:clamp(40px,6vw,72px)}
 
-/* --- Waitlist modal --- */
-.waitlist-modal {
-  position: fixed;
-  inset: 0;
-  background: rgba(8, 10, 14, 0.72);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  display: none;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  z-index: 100;
-}
-.waitlist-modal.open {
-  display: flex;
-  animation: waitlist-fade 160ms var(--ease);
-}
-@keyframes waitlist-fade {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-.waitlist-panel {
-  position: relative;
-  max-width: 540px;
-  width: 100%;
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: 14px;
-  padding: 28px 32px 32px;
-  box-shadow:
-    0 30px 80px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(255, 45, 45, 0.12);
-  animation: waitlist-rise 200ms var(--ease);
-}
-@keyframes waitlist-rise {
-  from { transform: translateY(8px); opacity: 0; }
-  to   { transform: translateY(0); opacity: 1; }
-}
-.waitlist-close {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  width: 32px;
-  height: 32px;
-  border-radius: 6px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.125rem;
-  line-height: 1;
-  transition: all 150ms var(--ease);
-}
-.waitlist-close:hover {
-  color: var(--ink);
-  border-color: var(--rule);
-  background: var(--surface-2);
-}
-.waitlist-kicker {
-  font-family: var(--mono);
-  font-size: 0.625rem;
-  font-weight: 600;
-  letter-spacing: 0.22em;
-  text-transform: uppercase;
-  color: var(--led);
-  margin: 0 0 10px;
-}
-.waitlist-panel h2 {
-  font-family: var(--display);
-  font-weight: 700;
-  font-size: 1.5rem;
-  text-transform: uppercase;
-  color: var(--ink);
-  margin: 0 0 14px;
-  letter-spacing: 0.01em;
-}
-.waitlist-body {
-  color: var(--ink-2);
-  font-size: 0.9375rem;
-  line-height: 1.6;
-  margin: 0 0 18px;
-}
-.waitlist-points {
-  list-style: none;
-  padding: 0;
-  margin: 0 0 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.waitlist-points li {
-  color: var(--muted);
-  font-size: 0.8125rem;
-  line-height: 1.5;
-  padding-left: 18px;
-  position: relative;
-}
-.waitlist-points li::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0.55em;
-  width: 8px;
-  height: 1px;
-  background: var(--led);
-}
-.waitlist-form {
-  display: flex;
-  gap: 8px;
-  margin: 0 0 12px;
-}
-.waitlist-form input[type="email"] {
-  flex: 1;
-  background: var(--surface-2);
-  border: 1px solid var(--rule);
-  border-radius: 8px;
-  padding: 11px 14px;
-  font-family: var(--mono);
-  font-size: 0.875rem;
-  color: var(--ink);
-  letter-spacing: 0;
-  outline: none;
-  transition: border-color 150ms var(--ease), box-shadow 150ms var(--ease);
-}
-.waitlist-form input[type="email"]::placeholder { color: var(--subtle); }
-.waitlist-form input[type="email"]:focus {
-  border-color: var(--led);
-  box-shadow: 0 0 0 3px rgba(255, 45, 45, 0.18);
-}
-.waitlist-form button {
-  background: var(--led-fill);
-  color: var(--ink);
-  border: none;
-  border-radius: 8px;
-  padding: 0 20px;
-  font-family: var(--display);
-  font-size: 0.8125rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  cursor: pointer;
-  transition: all 180ms var(--ease);
-  white-space: nowrap;
-}
-.waitlist-form button:hover:not(:disabled) {
-  background: var(--led-soft);
-  box-shadow: 0 0 18px var(--led-glow);
-}
-.waitlist-form button:disabled {
-  opacity: 0.65;
-  cursor: default;
-}
-.waitlist-foot {
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--subtle);
-  margin: 0;
-}
-body.modal-open { overflow: hidden; }
+  /* hero */
+  .hero{padding-block:clamp(56px,9vw,120px) clamp(48px,7vw,96px)}
+  .hero-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:clamp(28px,5vw,64px);align-items:center}
+  .hero h1{margin:22px 0 26px}
+  .hero .acts{display:flex;flex-wrap:wrap;gap:12px;margin-top:34px}
+  .hero .fine{margin-top:22px;font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--subtle)}
+  .hero .fine b{color:var(--muted);font-weight:500}
+  .hero-visual{position:relative}
+  .hero-visual .shell{transform:perspective(1600px) rotateY(-6deg) rotateX(2deg);transform-origin:left center;transition:transform 1.2s var(--ease)}
+  .hero-visual:hover .shell{transform:perspective(1600px) rotateY(-2deg)}
+  .hero-visual .tag{position:absolute;left:-14px;bottom:26px;display:flex;flex-direction:column;gap:2px;padding:12px 16px;border-radius:14px;border:1px solid var(--hair-2);background:rgba(10,11,13,.85);backdrop-filter:blur(18px);box-shadow:0 30px 60px -30px rgba(0,0,0,.9)}
+  .hero-visual .tag .k{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+  .hero-visual .tag .v{font-family:var(--mono);font-size:28px;line-height:1;color:var(--ink);font-variant-numeric:tabular-nums}
+  .hero-visual .tag .v small{font-size:12px;color:var(--muted);margin-left:4px}
 
-/* ============================================================
-   MAIN
-   ============================================================ */
-main {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 80px 32px 64px;
-}
+  /* figures strip */
+  .figs{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--hair);border:1px solid var(--hair);border-radius:18px;overflow:hidden}
+  .figs div{background:var(--bg-2);padding:22px 24px}
+  .figs .k{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+  .figs .v{font-family:var(--mono);font-size:30px;line-height:1.05;margin-top:8px;font-variant-numeric:tabular-nums}
+  .figs .v small{font-size:13px;color:var(--muted)}
+  .figs .d{font-size:13px;color:var(--muted);margin-top:8px}
 
-/* --- Hero --- */
-.hero {
-  display: grid;
-  grid-template-columns: 1.4fr 1fr;
-  gap: 64px;
-  align-items: end;
-  margin-bottom: 88px;
-}
-@media (max-width: 900px) {
-  .hero { grid-template-columns: 1fr; gap: 40px; }
-}
+  /* the loop: asymmetric bento */
+  .bento{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
+  .cell{position:relative;display:flex;flex-direction:column;gap:14px;padding:var(--r-pad);}
+  .cell .core{flex:1;display:flex;flex-direction:column}
+  .cell .body{padding:22px 24px 8px;display:grid;gap:8px}
+  .cell .phase{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--led)}
+  .cell h3{font-family:var(--display);font-size:26px;font-weight:700;text-transform:uppercase;letter-spacing:.01em}
+  .cell p{font-size:14px;color:var(--muted);max-width:44ch}
+  .cell .pic{margin-top:auto;padding:0 12px 12px}
+  .cell .pic img{border-radius:12px;border:1px solid var(--hair)}
+  .c-audit{grid-column:span 7}
+  .c-splits{grid-column:span 5}
+  .c-coach{grid-column:span 6}
+  .c-compare{grid-column:span 6}
+  .cell .pic + .pic{padding-top:0}
+  .c-export{grid-column:span 12}
+  .c-export .core{flex-direction:row;align-items:center;gap:20px}
+  .c-export .body{flex:1}
+  .c-export .pic{flex:1.2;padding:12px 12px 12px 0;margin:0}
 
-.kicker {
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--led);
-  margin: 0 0 22px;
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-}
-.kicker .ed {
-  color: var(--subtle);
-  padding-left: 10px;
-  border-left: 1px solid var(--rule);
-}
+  /* three ways */
+  .ways{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .way .core{padding:26px 26px 28px;display:grid;gap:14px;height:100%}
+  .way .k{font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)}
+  .way h3{font-family:var(--display);font-size:28px;font-weight:700;text-transform:uppercase}
+  .way ul{margin:6px 0 0;padding:0;list-style:none;display:grid;gap:8px;font-size:14px;color:var(--ink-2)}
+  .way li{display:flex;gap:10px;align-items:flex-start}
+  .way li::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--led);flex:none;margin-top:8px;box-shadow:0 0 8px var(--led-glow)}
+  .way .kbd{font-family:var(--mono);font-size:11px;border:1px solid var(--hair-2);border-radius:4px;padding:0 5px;color:var(--ink-2)}
 
-h1.title {
-  font-family: var(--display);
-  font-weight: 700;
-  font-size: clamp(2.75rem, 8vw, 5.5rem);
-  line-height: 0.95;
-  letter-spacing: -0.01em;
-  text-transform: uppercase;
-  color: var(--ink);
-  margin: 0 0 28px;
-}
-h1.title .accent {
-  color: var(--led);
-  text-shadow: 0 0 24px var(--led-glow);
-}
+  /* install */
+  .install{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:clamp(28px,5vw,64px);align-items:start}
+  .code{position:relative;font-family:var(--mono);font-size:13px;line-height:1.75;padding:18px 20px;color:var(--ink-2);overflow-x:auto}
+  .code .c{color:var(--subtle)}
+  .code .p{color:var(--led)}
+  .code + .code{border-top:1px solid var(--hair)}
+  .code .lbl{display:block;margin-bottom:6px;font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--led)}
+  .steps{display:grid;gap:18px}
+  .step{display:grid;grid-template-columns:44px 1fr;gap:14px;align-items:start}
+  .step .n{font-family:var(--mono);font-size:12px;color:var(--led);border:1px solid var(--hair-2);border-radius:999px;width:36px;height:36px;display:grid;place-items:center}
+  .step p{font-size:14px;color:var(--muted)}
+  .step b{display:block;color:var(--ink);font-weight:600;margin-bottom:2px}
 
-.lede {
-  font-size: 1.0625rem;
-  line-height: 1.6;
-  color: var(--ink-2);
-  max-width: 36em;
-  margin: 0 0 36px;
-}
-.lede .term {
-  color: var(--led);
-  font-weight: 500;
-}
-.lede .num {
-  font-family: var(--mono);
-  font-weight: 600;
-  color: var(--ink);
-  font-feature-settings: var(--feat-num);
-}
+  /* corpus */
+  .corpus{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:clamp(28px,5vw,64px);align-items:center}
+  .ticks{display:flex;flex-wrap:wrap;gap:6px}
+  .ticks span{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--hair-2);border-radius:999px;padding:5px 11px;color:var(--ink-2)}
+  .ticks span i{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:7px;vertical-align:1px}
 
-.cta-row { display: flex; gap: 14px; flex-wrap: wrap; }
+  footer{border-top:1px solid var(--hair);padding:40px 0 60px;font-size:13px;color:var(--muted)}
+  footer .row{display:flex;flex-wrap:wrap;gap:16px 28px;align-items:center;justify-content:space-between}
+  footer a:hover{color:var(--ink)}
 
-.cta {
-  display: inline-flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 22px;
-  border-radius: 8px;
-  font-family: var(--display);
-  font-size: 0.875rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  transition: all 180ms var(--ease);
-}
-.cta-primary {
-  background: var(--led-fill);
-  color: var(--ink);
-  text-shadow: 0 0 6px rgba(0,0,0,0.18);
-  box-shadow:
-    0 0 0 1px var(--led-fill),
-    0 0 18px var(--led-glow);
-}
-.cta-primary:hover {
-  background: var(--led-soft);
-  box-shadow:
-    0 0 0 1px var(--led-soft),
-    0 0 28px var(--led-glow);
-}
-.cta-secondary {
-  background: var(--surface-2);
-  border: 1px solid var(--rule);
-  color: var(--ink-2);
-}
-.cta-secondary:hover {
-  border-color: var(--rule-strong);
-  background: var(--surface-3);
-  color: var(--ink);
-}
-.cta svg { width: 18px; height: 18px; }
+  /* reveal */
+  .rv{opacity:0;transform:translateY(28px);filter:blur(6px);transition:opacity .9s var(--ease),transform .9s var(--ease),filter .9s var(--ease)}
+  .rv.in{opacity:1;transform:none;filter:none}
+  .rv.d1{transition-delay:.08s}.rv.d2{transition-delay:.16s}.rv.d3{transition-delay:.24s}.rv.d4{transition-delay:.32s}
 
-/* --- Readout panel (hero-side telemetry) --- */
-.readout {
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: 14px;
-  padding: 28px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 28px 36px;
-  box-shadow:
-    0 1px 0 rgba(255,255,255,0.02) inset,
-    0 18px 40px -24px rgba(0,0,0,0.7);
-}
-.cell .k {
-  font-family: var(--mono);
-  font-size: 0.625rem;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--subtle);
-  margin-bottom: 8px;
-}
-.cell .v {
-  font-family: var(--display);
-  font-weight: 700;
-  font-size: 2.5rem;
-  line-height: 1;
-  color: var(--ink);
-  font-feature-settings: var(--feat-num);
-  letter-spacing: -0.01em;
-}
-.cell .v.led   { color: var(--led);   text-shadow: 0 0 16px var(--led-glow); }
-.cell .v.live  { color: var(--live);  text-shadow: 0 0 12px var(--live-glow); }
-.cell .v.done  { color: var(--done);  text-shadow: 0 0 12px var(--done-glow); }
-.cell .v.beep  { color: var(--beep);  text-shadow: 0 0 12px var(--beep-glow); }
-.cell .u {
-  font-family: var(--mono);
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--muted);
-  margin-left: 6px;
-  letter-spacing: 0.04em;
-}
-
-/* --- Section block --- */
-.section {
-  margin-bottom: 96px;
-}
-.section-head {
-  display: flex;
-  align-items: baseline;
-  gap: 18px;
-  margin-bottom: 32px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--rule);
-}
-.section-head h2 {
-  font-family: var(--display);
-  font-weight: 700;
-  font-size: 1.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.01em;
-  color: var(--ink);
-  margin: 0;
-}
-.section-head .index {
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--led);
-}
-.section-head .spacer-line {
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(to right, var(--rule), transparent);
-}
-
-/* --- Pipeline grid --- */
-.pipeline {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-}
-@media (max-width: 900px) {
-  .pipeline { grid-template-columns: 1fr 1fr; }
-}
-@media (max-width: 540px) {
-  .pipeline { grid-template-columns: 1fr; }
-}
-
-.step {
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: 12px;
-  padding: 22px 22px 26px;
-  position: relative;
-  transition: border-color 180ms var(--ease), transform 180ms var(--ease);
-}
-.step:hover {
-  border-color: var(--rule-strong);
-}
-.step .step-num {
-  font-family: var(--mono);
-  font-size: 0.625rem;
-  font-weight: 600;
-  letter-spacing: 0.18em;
-  color: var(--subtle);
-  margin-bottom: 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.step .step-num .dot {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--led);
-  box-shadow: 0 0 8px var(--led-glow);
-}
-.step h3 {
-  font-family: var(--display);
-  font-weight: 700;
-  font-size: 1.125rem;
-  text-transform: uppercase;
-  letter-spacing: 0.01em;
-  color: var(--ink);
-  margin: 0 0 10px;
-}
-.step p {
-  font-size: 0.875rem;
-  line-height: 1.55;
-  color: var(--muted);
-  margin: 0;
-}
-
-/* --- Two ways (coach vs. export) ---
-   Paired-card layout: same surface/border as .io-card so it sits in
-   the same family, but the body is prose + a feature list (no chip
-   column) so it does not visually echo the IO grid that follows. */
-.ways-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 24px;
-}
-@media (max-width: 720px) {
-  .ways-grid { grid-template-columns: 1fr; }
-}
-.way-card {
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: 12px;
-  padding: 24px 26px 28px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.way-card .way-label {
-  font-family: var(--mono);
-  font-size: 0.625rem;
-  font-weight: 600;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--led);
-  margin: 0;
-}
-.way-card h3 {
-  font-family: var(--display);
-  font-weight: 700;
-  font-size: 1.25rem;
-  text-transform: uppercase;
-  color: var(--ink);
-  margin: 0;
-}
-.way-card .way-body {
-  color: var(--ink-2);
-  font-size: 0.9375rem;
-  line-height: 1.55;
-  margin: 0;
-}
-.way-card .way-points {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.way-card .way-points li {
-  color: var(--muted);
-  font-size: 0.8125rem;
-  line-height: 1.5;
-  padding-left: 18px;
-  position: relative;
-}
-.way-card .way-points li::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  top: 0.55em;
-  width: 8px;
-  height: 1px;
-  background: var(--led);
-}
-.way-card .way-foot {
-  margin: auto 0 0;
-  padding-top: 4px;
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--subtle);
-}
-
-/* --- IO panel (inputs/outputs) --- */
-.io-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-}
-@media (max-width: 720px) {
-  .io-grid { grid-template-columns: 1fr; }
-}
-.io-card {
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: 12px;
-  padding: 24px 26px 28px;
-}
-.io-card .io-label {
-  font-family: var(--mono);
-  font-size: 0.625rem;
-  font-weight: 600;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  color: var(--led);
-  margin-bottom: 16px;
-}
-.io-card h3 {
-  font-family: var(--display);
-  font-weight: 700;
-  font-size: 1.25rem;
-  text-transform: uppercase;
-  color: var(--ink);
-  margin: 0 0 14px;
-}
-.io-list {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-.io-list li {
-  padding: 9px 0;
-  border-bottom: 1px solid var(--rule);
-  font-size: 0.875rem;
-  color: var(--ink-2);
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-}
-.io-list li:last-child { border-bottom: 0; }
-.io-list li code {
-  font-family: var(--mono);
-  font-size: 0.75rem;
-  color: var(--led);
-  background: var(--led-tint);
-  padding: 2px 6px;
-  border-radius: 4px;
-  letter-spacing: 0;
-}
-.io-list li .desc { color: var(--muted); font-size: 0.8125rem; }
-
-/* --- Quickstart code block ---
-   Each snippet is a <pre> (preserves newlines) wrapped in .snippet so
-   the copy button can absolute-position over it. Avoid setting a
-   margin on the snippet container -- gaps come from .snippet + .snippet. */
-.snippet { position: relative; }
-.snippet + .snippet { margin-top: 14px; }
-.snippet-alt {
-  margin: 28px 0 10px;
-  color: var(--muted);
-  font-size: 0.875rem;
-  line-height: 1.6;
-}
-pre.quickstart {
-  margin: 0;
-  background: var(--surface);
-  border: 1px solid var(--rule);
-  border-radius: 12px;
-  padding: 22px 24px;
-  padding-right: 96px; /* clear the copy button */
-  font-family: var(--mono);
-  font-size: 0.8125rem;
-  color: var(--ink-2);
-  line-height: 1.7;
-  overflow-x: auto;
-  letter-spacing: 0;
-  font-feature-settings: var(--feat-num);
-  white-space: pre;
-}
-pre.quickstart .prompt { color: var(--led); user-select: none; padding-right: 8px; }
-pre.quickstart .comment { color: var(--subtle); }
-pre.quickstart .kw { color: var(--ink); font-weight: 600; }
-
-.copy-btn {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 1px solid var(--rule);
-  background: rgba(20, 23, 28, 0.7);
-  color: var(--ink-2);
-  border-radius: 6px;
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  cursor: pointer;
-  font-feature-settings: var(--feat-num);
-  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
-}
-.copy-btn:hover { color: var(--ink); border-color: var(--led); }
-.copy-btn:focus-visible {
-  outline: none;
-  color: var(--ink);
-  border-color: var(--led);
-  box-shadow: 0 0 0 2px rgba(255, 92, 70, 0.25);
-}
-.copy-btn.copied { color: var(--led); border-color: var(--led); }
-
-/* --- Corpus prose block ---
-   Borderless prose section so the page rhythm breaks out of the
-   chip / card grid pattern once before the colophon. */
-.corpus {
-  max-width: 720px;
-}
-.corpus p {
-  color: var(--ink-2);
-  font-size: 1rem;
-  line-height: 1.7;
-  margin: 0 0 18px;
-}
-.corpus .corpus-foot {
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--subtle);
-  margin: 0;
-}
-
-/* --- Colophon --- */
-footer.colophon {
-  border-top: 1px solid var(--rule);
-  margin-top: 32px;
-  padding: 32px;
-  background: linear-gradient(to top, rgba(20,23,28,0.6), transparent);
-}
-.colophon-inner {
-  max-width: 1280px;
-  margin: 0 auto;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 24px;
-  align-items: center;
-  font-family: var(--mono);
-  font-size: 0.6875rem;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--subtle);
-  font-feature-settings: var(--feat-num);
-}
-.colophon-inner b {
-  color: var(--ink-2);
-  font-weight: 600;
-}
-.colophon-inner a:hover { color: var(--ink); }
-.colophon-inner .spacer { flex: 1; }
-.colophon-inner .sep { color: var(--whisper); }
-
-/* ============================================================
-   RESPONSIVE — mobile shell + chrome
-   The body sections (hero, pipeline, io-grid) have their own
-   breakpoints higher up. This block fixes the top bar, main
-   padding, and colophon for narrow viewports.
-   ============================================================ */
-@media (max-width: 720px) {
-  .shell-top {
-    padding: 14px 18px;
-    gap: 12px;
+  @media (max-width:980px){
+    .hero-grid,.install,.corpus{grid-template-columns:1fr}
+    .hero-visual .shell{transform:none}
+    .figs{grid-template-columns:repeat(2,1fr)}
+    .ways{grid-template-columns:1fr}
+    .c-audit,.c-coach,.c-splits,.c-compare,.c-export{grid-column:span 12}
+    .c-export .core{flex-direction:column;align-items:stretch}
+    .c-export .pic{padding:0 12px 12px}
   }
-  .brand { gap: 10px; }
-  .brand .mark { width: 30px; height: 30px; }
-  .brand .name { font-size: 1.25rem; }
-
-  /* Anchors target sections already visible on a short page —
-     drop them on mobile rather than wrap into a hamburger. */
-  .nav-link { display: none; }
-
-  /* Icon-only GitHub button. Keep aria-label on the anchor for SR. */
-  .gh-btn { padding: 9px 11px; gap: 0; }
-  .gh-btn span { display: none; }
-
-  /* Compact sign-in chip on narrow viewports; keep label visible
-     because the chip is the primary "an app exists" signal. */
-  .signin-btn { padding: 8px 12px; font-size: 0.75rem; gap: 8px; }
-  .signin-btn .signin-dot { width: 6px; height: 6px; }
-
-  .waitlist-panel { padding: 24px 22px 26px; }
-  .waitlist-panel h2 { font-size: 1.25rem; }
-  .waitlist-form { flex-direction: column; }
-  .waitlist-form button { padding: 12px 18px; }
-
-  main {
-    padding: 56px 18px 48px;
+  @media (max-width:767px){
+    .nav .links,.nav .cta{display:none}
+    .ham{display:block}
+    .nav .pill{padding:6px 10px 6px 14px}
+    section{padding-block:64px}
+    .hero{padding-block:40px 48px}
+    .hero-visual .tag{left:8px;bottom:14px}
+    .figs{grid-template-columns:1fr 1fr}
+    .figs .v{font-size:24px}
+    :root{--r-outer:1.25rem;--r-inner:calc(1.25rem - 0.375rem)}
   }
-
-  .hero { margin-bottom: 64px; }
-  h1.title { font-size: clamp(2.25rem, 9vw, 3.25rem); margin-bottom: 22px; }
-  .lede { font-size: 1rem; margin-bottom: 28px; }
-
-  .readout { padding: 22px; gap: 22px 24px; border-radius: 12px; }
-  .cell .v { font-size: 2.125rem; }
-
-  .section { margin-bottom: 64px; }
-  .section-head { gap: 14px; margin-bottom: 24px; }
-  .section-head h2 { font-size: 1.375rem; }
-
-  .step { padding: 20px 20px 22px; }
-
-  .io-card { padding: 20px 20px 22px; }
-
-  pre.quickstart {
-    padding: 18px 16px;
-    padding-right: 76px;
-    font-size: 0.75rem;
-    border-radius: 10px;
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{transition:none!important;animation:none!important}
+    .rv{opacity:1;transform:none;filter:none}
+    html{scroll-behavior:auto}
   }
-  .copy-btn {
-    top: 10px;
-    right: 10px;
-    padding: 5px 8px;
-  }
-
-  footer.colophon { padding: 24px 18px; }
-  .colophon-inner { gap: 10px 16px; }
-  .colophon-inner .spacer { display: none; }
-}
-
-@media (max-width: 380px) {
-  .brand .name { font-size: 1.125rem; }
-  h1.title { font-size: 2rem; }
-  .cta { padding: 12px 16px; font-size: 0.8125rem; }
-  .cell .v { font-size: 1.875rem; }
-}
-
 </style>
 </head>
 <body>
+<div class="ground" aria-hidden="true"></div>
+<div class="grain" aria-hidden="true"></div>
 
-<header class="shell">
-  <div class="shell-top">
-    <a href="/" class="brand" aria-label="Splitsmith home">
-      <svg class="mark" viewBox="0 0 36 36" fill="none" aria-hidden="true">
-        <rect x="1.5" y="1.5" width="33" height="33" rx="7" fill="#14171C" stroke="#3A4049" stroke-width="1"/>
-        <rect x="10" y="8" width="3" height="20" rx="1.2" fill="#F4F4F5"/>
-        <rect x="23" y="8" width="3" height="20" rx="1.2" fill="#F4F4F5"/>
-        <circle cx="18" cy="18" r="2.4" fill="#FF2D2D"/>
-        <circle cx="18" cy="18" r="3.8" fill="none" stroke="#FF2D2D" stroke-width="0.8" opacity="0.4"/>
-        <line x1="3" y1="32" x2="33" y2="32" stroke="#FF2D2D" stroke-width="0.8" stroke-dasharray="2 2" opacity="0.6"/>
-      </svg>
-      <span class="name">Splitsmith</span>
-      <span class="heartbeat" aria-hidden="true"></span>
-    </a>
-
-    <span class="spacer"></span>
-
-    <a class="nav-link" href="#pipeline">Pipeline</a>
-    <a class="nav-link" href="#quickstart">Quickstart</a>
-    <button class="signin-btn" type="button" aria-haspopup="dialog" aria-controls="waitlist-modal" data-open-waitlist>
-      <span class="signin-dot" aria-hidden="true"></span>
-      <span>Sign in</span>
-    </button>
-    <a class="gh-btn" href="https://github.com/mandakan/splitsmith" target="_blank" rel="noopener" aria-label="Splitsmith on GitHub">
-      <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-        <path d="M12 .5C5.65.5.5 5.65.5 12.02c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56v-2c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.47.11-3.06 0 0 .97-.31 3.18 1.18a11.04 11.04 0 0 1 5.8 0c2.21-1.49 3.18-1.18 3.18-1.18.63 1.59.23 2.77.11 3.06.74.81 1.19 1.84 1.19 3.1 0 4.43-2.69 5.41-5.26 5.69.41.35.78 1.05.78 2.11v3.13c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12.02C23.5 5.65 18.35.5 12 .5Z"/>
-      </svg>
-      <span>GitHub</span>
-    </a>
+<nav class="nav" aria-label="Site">
+  <div class="pill">
+    <a class="brand" href="#top" aria-label="Splitsmith"><i></i>Splitsmith</a>
+    <div class="links">
+      <a href="#loop">The loop</a>
+      <a href="#ways">Outputs</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/mandakan/splitsmith">GitHub</a>
+    </div>
+    <a class="btn primary cta" href="https://my.splitsmith.app">Open the app <span class="well"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12 12 4M6 4h6v6"/></svg></span></a>
+    <button class="ham" aria-label="Menu" aria-expanded="false" aria-controls="sheet"><span></span><span></span><span></span></button>
   </div>
-</header>
-
-<main>
-
-  <!-- ============================================================
-       HERO
-       ============================================================ -->
-  <section class="hero">
-    <div>
-      <span class="kicker">
-        Project Register
-        <span class="ed">Vol. 01 · Ed. 04</span>
-      </span>
-      <h1 class="title">Detect. Coach. <span class="accent">Cut.</span></h1>
-      <p class="lede">
-        Any camera with audio already captured every shot you took on stage. <span class="term">Splitsmith</span> turns that audio
-        into per-shot splits you can review and coach inside the app — shot-by-shot playback, multi-shooter compare,
-        per-shot notes — or export an FCPXML timeline with frame-aligned markers you can pop open in
-        Final Cut Pro and step through on <span class="num">M</span> / <span class="num">Shift+M</span>.
-        The RO's timer only records your total stage time — the splits live in your video, and this is how you get them out.
-      </p>
-
-      <div class="cta-row">
-        <a class="cta cta-primary" href="https://github.com/mandakan/splitsmith" target="_blank" rel="noopener">
-          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M12 .5C5.65.5.5 5.65.5 12.02c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56v-2c-3.2.7-3.87-1.36-3.87-1.36-.52-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.71 1.26 3.37.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.47.11-3.06 0 0 .97-.31 3.18 1.18a11.04 11.04 0 0 1 5.8 0c2.21-1.49 3.18-1.18 3.18-1.18.63 1.59.23 2.77.11 3.06.74.81 1.19 1.84 1.19 3.1 0 4.43-2.69 5.41-5.26 5.69.41.35.78 1.05.78 2.11v3.13c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12.02C23.5 5.65 18.35.5 12 .5Z"/>
-          </svg>
-          <span>View on GitHub</span>
-        </a>
-        <a class="cta cta-secondary" href="#quickstart">
-          <span>Quickstart</span>
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M5 12h14M13 6l6 6-6 6"/>
-          </svg>
-        </a>
-      </div>
-    </div>
-
-    <aside class="readout" aria-label="Telemetry">
-      <div class="cell">
-        <div class="k">Voters</div>
-        <div class="v led">3</div>
-      </div>
-      <div class="cell">
-        <div class="k">Typical splits</div>
-        <div class="v live">0.18<span class="u">s</span></div>
-      </div>
-      <div class="cell">
-        <div class="k">Beep timing</div>
-        <div class="v beep">±15<span class="u">ms</span></div>
-      </div>
-      <div class="cell">
-        <div class="k">License</div>
-        <div class="v done">MIT</div>
-      </div>
-    </aside>
-  </section>
-
-  <!-- ============================================================
-       PIPELINE
-       ============================================================ -->
-  <section class="section" id="pipeline">
-    <div class="section-head">
-      <span class="index">01</span>
-      <h2>Pipeline</h2>
-      <span class="spacer-line"></span>
-    </div>
-
-    <div class="pipeline">
-      <div class="step">
-        <div class="step-num"><span class="dot"></span>Step 01</div>
-        <h3>Ingest</h3>
-        <p>Drop a folder of stage clips from any camera. The engine auto-matches them to stages by file timestamp.</p>
-      </div>
-      <div class="step">
-        <div class="step-num"><span class="dot"></span>Step 02</div>
-        <h3>Beep</h3>
-        <p>Auto-snap to the start beep on each stage. Low-confidence detections land in a review queue.</p>
-      </div>
-      <div class="step">
-        <div class="step-num"><span class="dot"></span>Step 03</div>
-        <h3>Audit</h3>
-        <p>Waveform + per-shot markers from a 3-voter ensemble. Click a marker to inspect votes. Drag to fine-tune.</p>
-      </div>
-      <div class="step">
-        <div class="step-num"><span class="dot"></span>Step 04</div>
-        <h3>Export</h3>
-        <p>Per-stage or whole-match FCPXML. Open in Final Cut Pro, navigate with M / Shift+M.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============================================================
-       TWO WAYS TO USE SPLITSMITH
-       ============================================================ -->
-  <section class="section" id="ways">
-    <div class="section-head">
-      <span class="index">02</span>
-      <h2>Three ways to use Splitsmith</h2>
-      <span class="spacer-line"></span>
-    </div>
-
-    <div class="ways-grid">
-      <article class="way-card">
-        <p class="way-label">Path A · In the app</p>
-        <h3>Coach in-app</h3>
-        <p class="way-body">
-          Review every stage shot-by-shot without leaving Splitsmith. The video timeline,
-          shot ruler, and per-shot list stay in sync as the playhead moves.
-        </p>
-        <ul class="way-points">
-          <li>Shot-by-shot playback with playhead-synced video</li>
-          <li>Multi-shooter compare — squadmates side-by-side, aligned to the beep</li>
-          <li>Per-shot coaching notes and improvement flags</li>
-        </ul>
-        <p class="way-foot">No Final Cut Pro required</p>
-      </article>
-
-      <article class="way-card">
-        <p class="way-label">Path B · Take it out</p>
-        <h3>Export to Final Cut Pro</h3>
-        <p class="way-body">
-          When you'd rather edit in your NLE, export an FCPXML timeline with a frame-aligned
-          marker on every shot. Open it in Final Cut Pro and step through marker-to-marker.
-        </p>
-        <ul class="way-points">
-          <li>Per-stage or whole-match FCPXML</li>
-          <li>Frame-aligned markers, one per detected shot</li>
-          <li>Navigate marker-to-marker on M / Shift+M</li>
-        </ul>
-        <p class="way-foot">More NLE formats coming</p>
-      </article>
-
-      <article class="way-card">
-        <p class="way-label">Path C · Send it out</p>
-        <h3>Share a link</h3>
-        <p class="way-body">
-          Every match gets a shareable results page. Send one link and your
-          squad watches each run with beep-aligned playback and a live
-          splits ticker. Phone-friendly, no account, no install.
-        </p>
-        <ul class="way-points">
-          <li>Read-only - viewers watch results, not your workflow</li>
-          <li>Beep-aligned playback with per-shot splits</li>
-          <li>Works in any mobile browser</li>
-        </ul>
-        <p class="way-foot">Links are revocable any time</p>
-      </article>
-    </div>
-  </section>
-
-  <!-- ============================================================
-       INPUTS / OUTPUTS
-       ============================================================ -->
-  <section class="section">
-    <div class="section-head">
-      <span class="index">03</span>
-      <h2>What goes in. What comes out.</h2>
-      <span class="spacer-line"></span>
-    </div>
-
-    <div class="io-grid">
-      <div class="io-card">
-        <div class="io-label">Inputs</div>
-        <h3>Any camera with audio</h3>
-        <ul class="io-list">
-          <li><code>VIDEO</code><span class="desc">Head, chest, gimbal, handheld — if it recorded the beep and the shots, it works. MP4, MOV, MKV, .360, and more</span></li>
-        </ul>
-      </div>
-      <div class="io-card">
-        <div class="io-label">Outputs · per stage</div>
-        <h3>Reviewable training data</h3>
-        <ul class="io-list">
-          <li><code>CLIP</code><span class="desc">Lossless trim around the start beep</span></li>
-          <li><code>SPLITS</code><span class="desc">Per-shot times — the editable source of truth</span></li>
-          <li><code>TIMELINE</code><span class="desc">Final Cut Pro markers, frame-aligned</span></li>
-          <li><code>REVIEW</code><span class="desc">Anomalies flagged — echoes, overshoots, low confidence</span></li>
-        </ul>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============================================================
-       QUICKSTART
-       ============================================================ -->
-  <section class="section" id="quickstart">
-    <div class="section-head">
-      <span class="index">04</span>
-      <h2>Quickstart</h2>
-      <span class="spacer-line"></span>
-    </div>
-
-    <div class="snippet">
-<pre class="quickstart" data-copy="uv tool install splitsmith
-splitsmith ui"><span class="comment"># Install from PyPI and launch the UI</span>
-<span class="comment"># The UI auto-downloads ~440 MB of detection models in the background on first boot.</span>
-<span class="prompt">$</span> <span class="kw">uv</span> tool install splitsmith
-<span class="prompt">$</span> <span class="kw">splitsmith</span> ui</pre>
-      <button class="copy-btn" type="button" aria-label="Copy commands">
-        <span class="copy-label">Copy</span>
-      </button>
-    </div>
-
-    <p class="snippet-alt">Prefer the CLI? The envelope-only single-clip path needs no model download:</p>
-
-    <div class="snippet">
-<pre class="quickstart" data-copy="splitsmith single \
-    --video path/to/your_stage.mp4 \
-    --time 14.74 \
-    --output ./demo_analysis \
-    --stage-name &quot;Per told me to do it&quot; \
-    --stage-number 3"><span class="comment"># One-shot pipeline: detect shots, write report + FCPXML</span>
-<span class="prompt">$</span> <span class="kw">splitsmith</span> single \
-    --video path/to/your_stage.mp4 \
-    --time 14.74 \
-    --output ./demo_analysis \
-    --stage-name "Per told me to do it" \
-    --stage-number 3</pre>
-      <button class="copy-btn" type="button" aria-label="Copy commands">
-        <span class="copy-label">Copy</span>
-      </button>
-    </div>
-
-    <p class="snippet-alt">Running a server, worker, or self-hosted agent? Pull the published image from GHCR - same image, the subcommand picks the role:</p>
-
-    <div class="snippet">
-<pre class="quickstart" data-copy="docker pull ghcr.io/mandakan/splitsmith:latest
-docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d"><span class="comment"># Server / worker roles - :edge tracks main, :X.Y.Z pins a release</span>
-<span class="prompt">$</span> <span class="kw">docker</span> pull ghcr.io/mandakan/splitsmith:latest
-<span class="comment"># Or run the whole stack (server, worker, Postgres, MinIO) from the release</span>
-<span class="prompt">$</span> <span class="kw">docker</span> compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d</pre>
-      <button class="copy-btn" type="button" aria-label="Copy commands">
-        <span class="copy-label">Copy</span>
-      </button>
-    </div>
-
-    <p class="snippet-alt">Building from source instead? Clone, sync, and build the UI:</p>
-
-    <div class="snippet">
-<pre class="quickstart" data-copy="git clone https://github.com/mandakan/splitsmith.git
-cd splitsmith
-uv sync
-(cd src/splitsmith/ui_static && pnpm install && pnpm build)
-uv run splitsmith ui"><span class="comment"># Source checkout -- contributors / latest main</span>
-<span class="prompt">$</span> <span class="kw">git</span> clone https://github.com/mandakan/splitsmith.git
-<span class="prompt">$</span> <span class="kw">cd</span> splitsmith
-<span class="prompt">$</span> <span class="kw">uv</span> sync
-<span class="prompt">$</span> (<span class="kw">cd</span> src/splitsmith/ui_static &amp;&amp; pnpm install &amp;&amp; pnpm build)
-<span class="prompt">$</span> <span class="kw">uv</span> run splitsmith ui</pre>
-      <button class="copy-btn" type="button" aria-label="Copy commands">
-        <span class="copy-label">Copy</span>
-      </button>
-    </div>
-  </section>
-
-  <!-- ============================================================
-       THE CORPUS
-       ============================================================ -->
-  <section class="section" id="corpus">
-    <div class="section-head">
-      <span class="index">05</span>
-      <h2>Detection is good. It gets better.</h2>
-      <span class="spacer-line"></span>
-    </div>
-    <div class="corpus">
-      <p>
-        Every release retrains the shot-detection ensemble against a growing
-        corpus of audited stages — real beep-to-last-shot audio with
-        hand-labeled shot times across head, chest, gimbal, and handheld
-        setups. The fixtures shipping today are from me and a handful of
-        squadmates; each one sharpens the next release on every camera.
-      </p>
-      <p>
-        Soon, anyone running Splitsmith will be able to opt in and share
-        their own audited stages so the corpus — and everyone's detection
-        — keeps growing.
-      </p>
-      <p class="corpus-foot">Contributor uploads coming soon</p>
-    </div>
-  </section>
-
-</main>
-
-<footer class="colophon">
-  <div class="colophon-inner">
-    <span><b>Splitsmith</b></span>
-    <span class="sep">·</span>
-    <span>Open source · MIT licensed</span>
-    <span class="sep">·</span>
-    <span>Built for IPSC athletes</span>
-    <span class="spacer"></span>
-    <a href="https://github.com/mandakan/splitsmith" target="_blank" rel="noopener"><b>github.com/mandakan/splitsmith</b></a>
-  </div>
-</footer>
-
-<!-- ============================================================
-     WAITLIST MODAL
-     Opened by the .signin-btn in the header. Form is intentionally
-     not wired to a backend yet -- the submit handler just confirms
-     the click without storing the email. Backend (Cloudflare Pages
-     Function + KV / Resend audience / etc.) is a separate step.
-     ============================================================ -->
-<div class="waitlist-modal" id="waitlist-modal" role="dialog" aria-modal="true" aria-labelledby="waitlist-title" aria-describedby="waitlist-body" hidden>
-  <div class="waitlist-panel">
-    <button class="waitlist-close" type="button" aria-label="Close" data-close-waitlist>&times;</button>
-    <p class="waitlist-kicker">Hosted Splitsmith</p>
-    <h2 id="waitlist-title">Coming soon</h2>
-    <p class="waitlist-body" id="waitlist-body">
-      Share projects with a coach or a squadmate for review, without anyone
-      needing a local environment.
-    </p>
-    <ul class="waitlist-points">
-      <li>Hosted projects — no local install required</li>
-      <li>Invite a coach to annotate your stages</li>
-      <li>Cross-device split history and match recaps</li>
-    </ul>
-    <form class="waitlist-form" novalidate>
-      <!-- Honeypot: hidden from users, bots fill it. Server returns
-           200 without writing when hp is non-empty. -->
-      <input type="text" name="hp" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;" />
-      <input type="email" name="email" placeholder="you@example.com" autocomplete="email" required />
-      <button type="submit">Notify me</button>
-    </form>
-    <p class="waitlist-foot" data-waitlist-status>We'll only email you when there's news.</p>
+</nav>
+<div class="sheet" id="sheet" data-open="false">
+  <div>
+    <a href="#loop">The loop</a>
+    <a href="#ways">Outputs</a>
+    <a href="#install">Install</a>
+    <a href="https://github.com/mandakan/splitsmith">GitHub</a>
+    <a href="https://my.splitsmith.app" style="color:var(--led)">Open the app</a>
   </div>
 </div>
 
+<main class="page" id="top">
+
+  <section class="hero wrap">
+    <div class="hero-grid">
+      <div>
+        <span class="eyebrow rv"><i></i>Splits from the footage you already have</span>
+        <h1 class="rv d1">The timer knows your stage time.<br><span class="led">Your camera knows every shot.</span></h1>
+        <p class="lede rv d2">Splitsmith reads the start beep and every shot out of the audio your head cam recorded, and turns them into splits you can audit shot by shot, coach against your own match, and line up next to your squad.</p>
+        <div class="acts rv d3">
+          <a class="btn primary" href="https://my.splitsmith.app">Open the app <span class="well"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12 12 4M6 4h6v6"/></svg></span></a>
+          <a class="btn" href="#install">Install locally <span class="well"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v9M4 8l4 4 4-4"/></svg></span></a>
+        </div>
+        <p class="fine rv d4">Open source <b>MIT</b> &middot; any camera with a microphone &middot; nothing is uploaded on a local install</p>
+      </div>
+      <div class="hero-visual rv d2">
+        <div class="shell"><div class="core"><img src="img/hero-overview.png" width="1440" height="900" alt="Splitsmith's match overview: twelve stages, each with footage, beep, shots, audit state, draw, average split and stage time" loading="eager"></div></div>
+        <div class="tag" aria-hidden="true"><span class="k">Stage 03 &middot; avg split</span><span class="v">0.385<small>s</small></span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap" style="padding-top:0">
+    <div class="figs rv">
+      <div><div class="k">Beep timing</div><div class="v">&plusmn;15<small> ms</small></div><div class="d">Located in the clip, then confirmed by you.</div></div>
+      <div><div class="k">Shot detection</div><div class="v">3<small> voters</small></div><div class="d">Envelope onsets, CLAP similarity and a gradient-boosted classifier vote per shot.</div></div>
+      <div><div class="k">Per shot</div><div class="v">split<small> &middot; class</small></div><div class="d">Draw, fire, transition, movement, reload, activation.</div></div>
+      <div><div class="k">Licence</div><div class="v">MIT</div><div class="d">Runs on your machine, or hosted at my.splitsmith.app.</div></div>
+    </div>
+  </section>
+
+  <section class="wrap" id="loop">
+    <div class="sec-hd">
+      <span class="eyebrow rv"><i></i>The loop</span>
+      <h2 class="rv d1">Prepare. Review. Analyse. Deliver.</h2>
+      <p class="lede rv d2">One match, one folder of clips, four phases. The app keeps score of where every stage is and always knows what to do next.</p>
+    </div>
+    <div class="bento">
+      <div class="cell shell c-audit rv">
+        <div class="core">
+          <div class="body"><span class="phase">Review &middot; Audit</span><h3>Every shot, on the waveform</h3><p>The detector's candidates sit on the stage audio with their votes. Reject an echo, add a shot at the playhead, jump to the next flag. Confirm the beep first; the trim and detection chain from there.</p></div>
+          <div class="pic"><img src="img/waveform.png" width="746" height="400" alt="The audit waveform with thirty shot markers, two flagged, and the current-shot line" loading="lazy"></div>
+        </div>
+      </div>
+      <div class="cell shell c-splits rv d1">
+        <div class="core">
+          <div class="body"><span class="phase">Analyse &middot; Splits</span><h3>The shot table</h3><p>Time from beep, split, interval class, tier against your baseline. Play the stage and the table follows.</p></div>
+          <div class="pic"><img src="img/splits-table.png" width="452" height="580" alt="Shot table: shot number, time, split and interval class chips" loading="lazy"></div>
+        </div>
+      </div>
+      <div class="cell shell c-coach rv">
+        <div class="core">
+          <div class="body"><span class="phase">Analyse &middot; Coach</span><h3>Where the seconds went</h3><p>One bar per stage sums your intervals by type against your own match. An interval over twice its type's median is an outlier, and it is named.</p></div>
+          <div class="pic"><img src="img/budget.png" width="1144" height="258" alt="The time budget: movement 18.92 s, transitions 9.66 s, draw 1.97 s, fire 1.54 s, each with its share, count and delta against the match" loading="lazy"></div>
+        </div>
+      </div>
+      <div class="cell shell c-compare rv d1">
+        <div class="core">
+          <div class="body"><span class="phase">Analyse &middot; Compare</span><h3>Your squad, aligned to the beep</h3><p>Every shooter's run on one clock. Shot lanes, a leaderboard with the gap at each shooter's last shot, and audio from whoever you pick.</p></div>
+          <div class="pic"><img src="img/leaderboard.png" width="340" height="162" alt="Leaderboard: Anna Jonsson 28.27 s, Mathias Axell 32.12 s, +3.85 s" loading="lazy" style="width:340px;max-width:100%"></div>
+          <div class="pic"><img src="img/lanes.png" width="1144" height="176" alt="Two shooters' shot lanes on one time axis, 32.12 s and 28.27 s" loading="lazy"></div>
+        </div>
+      </div>
+      <div class="cell shell c-export rv">
+        <div class="core">
+          <div class="body"><span class="phase">Deliver &middot; Export</span><h3>Say why, or ship it</h3><p>A stage that cannot export says why in one line and offers the fix. The ones that can go out as a Final Cut timeline with a marker per shot, a rendered MP4 with the overlay burned in, a compare grid of the whole squad, or lossless trims.</p></div>
+          <div class="pic"><img src="img/export.png" width="1200" height="782" alt="The export page: output mode, the stage table with ready and blocked stages, options and the bundle summary" loading="lazy"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="wrap" id="ways">
+    <div class="sec-hd">
+      <span class="eyebrow rv"><i></i>Outputs</span>
+      <h2 class="rv d1">Keep it in the app, or take it out.</h2>
+    </div>
+    <div class="ways">
+      <div class="way shell rv"><div class="core">
+        <span class="k">In the app</span><h3>Coach and compare</h3>
+        <p class="muted" style="font-size:14px">Shot-by-shot playback with the video, the ruler and the table in sync. Per-shot notes and flags. The whole squad side by side.</p>
+        <ul><li>Hosted at my.splitsmith.app or on your own machine</li><li>Desktop sync pushes a local match to your account</li><li>Share a read-only link to a match or a stage</li></ul>
+      </div></div>
+      <div class="way shell rv d1"><div class="core">
+        <span class="k">Final Cut Pro</span><h3>A marker per shot</h3>
+        <p class="muted" style="font-size:14px">An FCPXML timeline with the stages back to back and a frame-aligned marker on every detected shot. Step through on <span class="kbd">M</span> / <span class="kbd">Shift+M</span>.</p>
+        <ul><li>Per stage or the whole match</li><li>Transitions, slates and lower thirds</li><li>FCP 7 XML for Premiere and Resolve</li></ul>
+      </div></div>
+      <div class="way shell rv d2"><div class="core">
+        <span class="k">Rendered MP4</span><h3>Ready to post</h3>
+        <p class="muted" style="font-size:14px">A finished cut with the shot counter and splits burned in, a title page and a stage card, or every shooter in one beep-aligned grid.</p>
+        <ul><li>Alpha overlay with the shot clock</li><li>Compare grid with a mixed squad track</li><li>YouTube chapters embedded per stage</li></ul>
+      </div></div>
+    </div>
+  </section>
+
+  <section class="wrap" id="install">
+    <div class="install">
+      <div>
+        <span class="eyebrow rv"><i></i>Install</span>
+        <h2 class="rv d1" style="margin:18px 0 20px">Two minutes to your first stage.</h2>
+        <div class="steps rv d2">
+          <div class="step"><span class="n">01</span><p><b>Open the app</b>Sign in at my.splitsmith.app with a magic link. Upload a stage clip, or install locally and let desktop sync push a match up.</p></div>
+          <div class="step"><span class="n">02</span><p><b>Drop your clips</b>Footage from any camera with a microphone: head, chest, gimbal or handheld. Each clip is matched to its stage by recording time.</p></div>
+          <div class="step"><span class="n">03</span><p><b>Confirm the beep, audit the shots</b>The app finds the beep, trims the stage and runs detection. You confirm what it found; the splits are yours.</p></div>
+        </div>
+      </div>
+      <div class="shell rv d2"><div class="core">
+        <div class="code"><span class="lbl">Local install</span><span class="c"># Python 3.11+ and uv; the UI fetches ~440 MB of detection models on first boot</span><br><span class="p">$</span> uv tool install splitsmith<br><span class="p">$</span> splitsmith ui</div>
+        <div class="code"><span class="lbl">One clip, no models</span><span class="c"># The envelope-only single-clip path: shots, report and FCPXML</span><br><span class="p">$</span> splitsmith single --video stage3.mp4 --time 32.12 \<br>&nbsp;&nbsp;--stage-name "B6 Rear" --stage-number 3 --output ./b6-rear</div>
+        <div class="code"><span class="lbl">Containers</span><span class="c"># Server, worker and agent roles from one image</span><br><span class="p">$</span> docker pull ghcr.io/mandakan/splitsmith:latest<br><span class="p">$</span> docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d</div>
+      </div></div>
+    </div>
+  </section>
+
+  <section class="wrap">
+    <div class="corpus">
+      <div>
+        <span class="eyebrow rv"><i></i>Detection</span>
+        <h2 class="rv d1" style="margin:18px 0 20px">Trained on audited stages, not on a demo reel.</h2>
+        <p class="lede rv d2" style="font-size:16px">Every release retrains the shot ensemble on a corpus of real beep-to-last-shot audio with hand-labelled shot times, across cameras and mounts. Every stage you audit is the same kind of data. Contributing your own audited stages to the corpus is on the roadmap; today the fixtures come from the maintainer and a handful of squadmates.</p>
+      </div>
+      <div class="shell rv d2"><div class="core" style="padding:22px 24px;display:grid;gap:14px">
+        <span class="k mono" style="font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)">Interval classes</span>
+        <div class="ticks"><span><i style="background:var(--led)"></i>Draw</span><span><i style="background:var(--done)"></i>Fire</span><span><i style="background:var(--manual)"></i>Transition</span><span><i style="background:var(--beep)"></i>Movement</span><span><i style="background:var(--live)"></i>Reload</span><span><i style="background:var(--ink-2)"></i>Activation</span></div>
+        <p class="muted" style="font-size:14px">A split under 1.0 s is a split, under 2.0 s a transition, longer is movement; the auto-classifier's cutoffs, and every class is yours to override per shot in Coach.</p>
+        <span class="k mono" style="font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin-top:6px">Reads</span>
+        <div class="ticks"><span>MP4</span><span>MOV</span><span>MKV</span><span>.360</span><span>any ffmpeg input</span></div>
+      </div></div>
+    </div>
+  </section>
+
+  <footer class="wrap">
+    <div class="row">
+      <span class="brand"><i></i>Splitsmith</span>
+      <span>Open source &middot; MIT &middot; built for IPSC shooters, by one</span>
+      <span style="display:flex;gap:20px"><a href="https://github.com/mandakan/splitsmith">GitHub</a><a href="https://github.com/mandakan/splitsmith/blob/main/CHANGELOG.md">Changelog</a><a href="https://my.splitsmith.app">Open the app</a></span>
+    </div>
+  </footer>
+</main>
+
 <script>
-  document.querySelectorAll('.copy-btn').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const snippet = btn.closest('.snippet');
-      const target = snippet && snippet.querySelector('[data-copy]');
-      if (!target) return;
-      const text = target.getAttribute('data-copy') || '';
-      try {
-        await navigator.clipboard.writeText(text);
-      } catch (err) {
-        console.error('Copy failed', err);
-        return;
-      }
-      const label = btn.querySelector('.copy-label');
-      const original = label.textContent;
-      btn.classList.add('copied');
-      label.textContent = 'Copied';
-      window.setTimeout(() => {
-        btn.classList.remove('copied');
-        label.textContent = original;
-      }, 1500);
-    });
-  });
-
-  // --- Waitlist modal ----------------------------------------
   (function () {
-    const modal = document.getElementById('waitlist-modal');
-    if (!modal) return;
-    const panel = modal.querySelector('.waitlist-panel');
-    const openers = document.querySelectorAll('[data-open-waitlist]');
-    const closers = modal.querySelectorAll('[data-close-waitlist]');
-    const emailInput = modal.querySelector('input[type="email"]');
-    const form = modal.querySelector('.waitlist-form');
-    const submitBtn = form ? form.querySelector('button[type="submit"]') : null;
-    const status = modal.querySelector('[data-waitlist-status]');
-    const originalLabel = submitBtn ? submitBtn.textContent : '';
-    const defaultStatus = status ? status.textContent : '';
-    let lastTrigger = null;
-
-    function setStatus(text) {
-      if (status) status.textContent = text;
-    }
-
-    function resetForm() {
-      if (submitBtn) {
-        submitBtn.disabled = false;
-        submitBtn.textContent = originalLabel;
-      }
-      setStatus(defaultStatus);
-      if (emailInput) emailInput.value = '';
-    }
-
-    function openModal(trigger) {
-      lastTrigger = trigger || null;
-      resetForm();
-      modal.hidden = false;
-      modal.classList.add('open');
-      document.body.classList.add('modal-open');
-      window.setTimeout(() => {
-        if (emailInput) emailInput.focus();
-      }, 50);
-    }
-    function closeModal() {
-      modal.classList.remove('open');
-      modal.hidden = true;
-      document.body.classList.remove('modal-open');
-      if (lastTrigger && typeof lastTrigger.focus === 'function') {
-        lastTrigger.focus();
-      }
-    }
-
-    openers.forEach((btn) => {
-      btn.addEventListener('click', () => openModal(btn));
-    });
-    closers.forEach((btn) => {
-      btn.addEventListener('click', closeModal);
-    });
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) closeModal();
-    });
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && modal.classList.contains('open')) closeModal();
-    });
-
-    if (form && submitBtn) {
-      form.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const fd = new FormData(form);
-        const email = String(fd.get('email') || '').trim();
-        const hp = String(fd.get('hp') || '');
-        if (!email) {
-          setStatus('Please enter an email.');
-          return;
-        }
-        submitBtn.disabled = true;
-        submitBtn.textContent = 'Sending...';
-        try {
-          const res = await fetch('/api/waitlist', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ email, hp }),
-          });
-          if (res.ok) {
-            const data = await res.json().catch(() => ({}));
-            submitBtn.textContent = data.already ? 'Already on the list' : "You're on the list";
-            setStatus(
-              data.already
-                ? "Thanks — we already have you. We'll email when it's live."
-                : "Thanks — we'll email you when hosted Splitsmith is live."
-            );
-          } else if (res.status === 429) {
-            submitBtn.disabled = false;
-            submitBtn.textContent = originalLabel;
-            setStatus('Too many tries from this network. Please wait a bit.');
-          } else {
-            const data = await res.json().catch(() => ({}));
-            submitBtn.disabled = false;
-            submitBtn.textContent = originalLabel;
-            setStatus(data.error === 'invalid email' ? "That email doesn't look right." : 'Something went wrong. Try again?');
-          }
-        } catch (err) {
-          submitBtn.disabled = false;
-          submitBtn.textContent = originalLabel;
-          setStatus('Network error. Try again?');
-        }
-      });
-    }
+    var ham = document.querySelector('.ham'), sheet = document.getElementById('sheet');
+    function setOpen(open) { ham.setAttribute('aria-expanded', String(open)); sheet.setAttribute('data-open', String(open)); document.body.style.overflow = open ? 'hidden' : ''; }
+    ham.addEventListener('click', function () { setOpen(ham.getAttribute('aria-expanded') !== 'true'); });
+    sheet.querySelectorAll('a').forEach(function (a) { a.addEventListener('click', function () { setOpen(false); }); });
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    var els = document.querySelectorAll('.rv');
+    if (reduce || !('IntersectionObserver' in window)) { els.forEach(function (e) { e.classList.add('in'); }); return; }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) { if (en.isIntersecting) { en.target.classList.add('in'); io.unobserve(en.target); } });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+    els.forEach(function (e) { io.observe(e); });
   })();
 </script>
-
 </body>
 </html>
