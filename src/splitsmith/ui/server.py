@@ -197,6 +197,7 @@ from ..match_project import (
 )
 from ..match_registry import MatchRegistry
 from ..observability import StructuredJsonFormatter, init_sentry
+from ..overlay_theme import ThemeName
 from ..runtime import runtime as process_runtime
 from ..share_card import stage_figures
 from ..shot_id import ensure_shot_ids, has_usable_id
@@ -2506,6 +2507,13 @@ def _run_compare_grid(handle: JobHandle, req: CompareGridRequest, match_root: st
     )
     skipped = [number for number in requested if number not in {p.stage_number for p in plans}]
 
+    def _notice(text: str) -> None:
+        # Said as it is decided, before any stage encodes: the message is
+        # what the job shows while the render runs, and the same text
+        # lands on the result as ``degradations`` for the viewer who only
+        # reads the end.
+        handle.update(message=text)
+
     handle.update(progress=0.05, message=f"Rendering {len(plans)} stage(s)...")
     with (
         handle.timer.phase("render"),
@@ -2533,6 +2541,10 @@ def _run_compare_grid(handle: JobHandle, req: CompareGridRequest, match_root: st
             closing=closing,
             stage_titles=req.stage_titles,
             title_duration_seconds=req.title_duration_seconds,
+            overlay=req.overlay,
+            overlay_theme=req.overlay_theme,
+            summary_hold_seconds=req.summary_hold_seconds,
+            on_notice=_notice,
         )
 
     handle.update(progress=1.0, message=f"Wrote {output_path}")
@@ -2547,6 +2559,10 @@ def _run_compare_grid(handle: JobHandle, req: CompareGridRequest, match_root: st
                 {"stage_number": s.stage_number, "stage_name": s.stage_name, "error": s.error}
                 for s in result.failed
             ],
+            # What the render did *not* do (#705): a host with no usable
+            # browser or a drawtext-less ffmpeg still renders, and this is
+            # how the viewer learns the hold or the clock was skipped.
+            "degradations": [{"summary": d.summary, "detail": d.detail} for d in result.degradations],
         }
     )
 
@@ -5529,6 +5545,15 @@ class CompareGridRequest(BaseModel):
     closing_card: bool = False
     stage_titles: Literal["none", "slate", "lower-third"] = "none"
     title_duration_seconds: float = 1.5
+    # Issue #705. The splits overlay (per-tile counter and split, the
+    # running clock) in the grid's own typography, and the end-of-stage
+    # summary hold in seconds. The hold needs the overlay: it is drawn
+    # from the overlay's own data, so a hold on a clean grid would be a
+    # blurred still with nothing on it -- the endpoint refuses that shape
+    # as a 400 rather than queueing a job the engine then fails.
+    overlay: bool = False
+    overlay_theme: ThemeName = "splitsmith"
+    summary_hold_seconds: float = Field(default=0.0, ge=0.0)
 
 
 class RevealRequest(BaseModel):
@@ -14157,6 +14182,15 @@ def create_app(
                 detail=(
                     f"audio_from={req.audio_from!r} matches no shooter on this match. "
                     f"Slugs available: {', '.join(match.shooters)}"
+                ),
+            )
+        if req.summary_hold_seconds > 0 and not req.overlay:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "summary_hold_seconds needs overlay=true: the end-of-stage summary is drawn "
+                    "from the overlay's own shot data and typography, so a hold on a clean grid "
+                    "would freeze on a blurred still with nothing written on it."
                 ),
             )
 
