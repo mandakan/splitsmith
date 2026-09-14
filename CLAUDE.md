@@ -285,11 +285,13 @@ PR 6 ``pages/Ingest.tsx``, ``pages/ingest/*``, ``pages/Shooters.tsx``,
 rows live in ``components/match/navItems.tsx`` (grouped by phase:
 Prepare / Review / Analyse / Deliver); a new row needs a group.
 
-**Verifying a screen locally without real footage:** seed a demo match
-and run the desktop server against it -- see the memory note
-``ux-restructure-2026-09`` for the seeder and the ``splitsmith ui
---project`` recipe -- then screenshot with Playwright. Show the rendered
-page before calling a visual change done.
+**Verifying a screen locally without real footage:**
+``uv run python scripts/seed_demo_match.py ~/.claude-tmp/demo-match``
+then ``uv run splitsmith ui --project ~/.claude-tmp/demo-match
+--skip-system-check --no-browser --port 5174`` (wait for
+``/api/health``; the match id is in ``match.json``), then screenshot
+with Playwright. Show the rendered page before calling a visual change
+done.
 
 ## Things Claude Code should not do
 
