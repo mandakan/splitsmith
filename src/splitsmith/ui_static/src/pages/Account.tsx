@@ -1,4 +1,3 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * Account settings (#867).
  *
@@ -25,15 +24,11 @@
 import { useState } from "react";
 import { Navigate } from "react-router-dom";
 
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { DesktopTokensSection } from "@/components/account/DesktopTokensSection";
+import { Button } from "@/components/ui/button";
+import { Field, inputClass } from "@/components/ui/Field";
+import { Label } from "@/components/ui/Label";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { api, apiErrorText } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useDeploymentMode } from "@/lib/features";
@@ -73,76 +68,55 @@ export function Account() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-6">
-      <Card>
-        <CardHeader>
-          <CardTitle>Account</CardTitle>
-          <CardDescription>{user?.email}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <div className="flex flex-col gap-1">
-            <div className="flex items-baseline justify-between">
-              <label
-                htmlFor="account-display-name"
-                className="font-mono text-xs uppercase tracking-[0.08em] text-muted"
-              >
-                Display name
-              </label>
-              {/* maxLength below stops a paste silently rather than
-                  rejecting it, so this counter is what tells the user
-                  their input was cut down to the server's cap instead
-                  of them just wondering why the field looks short. */}
-              <span className="font-mono text-xs text-muted">
-                {name.length}/{DISPLAY_NAME_MAX}
-              </span>
-            </div>
-            <input
-              id="account-display-name"
-              type="text"
-              value={name}
-              maxLength={DISPLAY_NAME_MAX}
-              onChange={(e) => {
-                setName(e.target.value);
-                // "Saved" describes a prior submission; it stops being
-                // true the moment the field diverges from what was sent.
-                setSaved(false);
-              }}
-              disabled={saving}
-              placeholder="Leave blank for a generated name"
-              className="rounded border border-rule bg-bg px-3 py-1.5 text-sm disabled:opacity-50"
-            />
-            {/* Announces only at the cap, not on every keystroke -- a
-                counter that narrates each character is noise a
-                screen-reader user has to tune out, which teaches them to
-                ignore the region right when it matters (a paste that got
-                cut down). Worded for "you are at the limit" rather than
-                "truncated": reaching 60 by typing and reaching it by a
-                cut-down paste look identical from here, and the former
-                is not actually a truncation. */}
-            <span aria-live="polite" className="sr-only">
-              {name.length === DISPLAY_NAME_MAX
-                ? `${DISPLAY_NAME_MAX} character limit reached. Additional characters will not be saved.`
-                : ""}
-            </span>
-            <p className="text-xs text-muted">
-              The name shown on comments you post on other people's shared
-              stages. Leave it blank and your comments get a generated name
-              instead - splitsmith never publishes your email address.
-            </p>
-          </div>
-          {error ? (
-            <p role="alert" className="text-xs text-destructive">
-              {error}
-            </p>
-          ) : null}
-          <div className="flex items-center gap-2">
-            <Button type="button" size="sm" onClick={() => void onSave()} disabled={saving}>
+    <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-7 py-5">
+      <PageHeader title="Account" sub={user?.email} />
+      <section className="rounded-[10px] border border-rule bg-surface">
+        <div className="border-b border-rule px-3.5 py-2">
+          <Label>Profile</Label>
+        </div>
+        <Field
+          label="Display name"
+          htmlFor="account-display-name"
+          // maxLength below stops a paste silently rather than rejecting
+          // it, so this counter is what tells the user their input was
+          // cut down to the server's cap.
+          hint={`${name.length} / ${DISPLAY_NAME_MAX}`}
+          help="The name shown on comments you post on other people's shared stages. Leave it blank and your comments get a generated name instead - splitsmith never publishes your email address."
+          error={error}
+        >
+          <input
+            id="account-display-name"
+            type="text"
+            value={name}
+            maxLength={DISPLAY_NAME_MAX}
+            onChange={(e) => {
+              setName(e.target.value);
+              // "Saved" describes a prior submission; it stops being
+              // true the moment the field diverges from what was sent.
+              setSaved(false);
+            }}
+            disabled={saving}
+            placeholder="Leave blank for a generated name"
+            className={inputClass}
+          />
+          {/* Announces only at the cap, not on every keystroke -- a
+              counter that narrates each character is noise a
+              screen-reader user has to tune out. Worded for "you are at
+              the limit" rather than "truncated": reaching 60 by typing
+              and by a cut-down paste look identical from here. */}
+          <span aria-live="polite" className="sr-only">
+            {name.length === DISPLAY_NAME_MAX
+              ? `${DISPLAY_NAME_MAX} character limit reached. Additional characters will not be saved.`
+              : ""}
+          </span>
+          <div className="mt-2.5 flex items-center gap-2">
+            <Button type="button" variant="primary" size="sm" onClick={() => void onSave()} disabled={saving}>
               {saving ? "Saving..." : "Save"}
             </Button>
-            {saved ? <span className="text-xs text-muted">Saved</span> : null}
+            {saved ? <span className="text-sm text-done">Saved</span> : null}
           </div>
-        </CardContent>
-      </Card>
+        </Field>
+      </section>
 
       <DesktopTokensSection />
     </div>
