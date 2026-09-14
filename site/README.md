@@ -7,11 +7,21 @@ UI — see `docs/ux-redesign/06-design-system.md`.
 
 ## Files
 
-- `index.html` — the page
+- `index.html` — the page (redone 2026-09-14 on the restructured UI:
+  island nav, editorial hero, the loop as a bento of real screenshots,
+  outputs, install, a Hosted section with the invite request form,
+  detection; hosted is invite-only, so the primary action is the local
+  install)
+- `img/` — screenshots of the app on the demo match
+  (`scripts/seed_demo_match.py --media`, 1440x900, cropped with PIL);
+  re-shoot them after a visible UI change
+- `og.png` — the link card, a 1200x630 render of the hero
 - `favicon.svg` — the brand mark (also inlined into the page header)
-- `../functions/api/waitlist.js` — Pages Function backing the
-  "Hosted Splitsmith — coming soon" modal (POST /api/waitlist).
-  Reads/writes the `WAITLIST` KV namespace bound in `wrangler.toml`.
+- `../functions/api/waitlist.js` — Pages Function behind the "Request an
+  invite" form in the Hosted section (POST /api/waitlist). Hosted is
+  invite-only: only whitelisted emails can sign in, so the list is how
+  people ask. Reads/writes the `WAITLIST` KV namespace bound in
+  `wrangler.toml`; `pnpm waitlist:list` dumps it.
 
 ## Deploy on Cloudflare Pages
 
