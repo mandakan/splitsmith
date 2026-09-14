@@ -1,16 +1,14 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * StageStats - read-only stats strip for the Results stage view.
  * Stage time, shot count, draw, fastest split, average split.
  * Presentational only; the page computes the numbers (split stats count
  * split-classed intervals only - lib/splits.statisticSplits owns the
- * rule, issue #772). Stage time on its own row then 2-wide on mobile, one
- * row of five at md+. `shrink-0` because ResultsStage mounts it first in a
- * capped overflow-y-auto column: an overflow-hidden flex child with the
- * default shrink collapses to its label row there.
- * Read-only by contract: part of the future share-link surface.
+ * rule, issue #772). Composes StatStrip (lead): stage time on its own row
+ * below md, one row of five at md+, and shrink-0 so ResultsStage's scroll
+ * column cannot crush it (#970).
+ * Read-only by contract: part of the share-link surface.
  */
-import { cn } from "@/lib/utils";
+import { Stat, StatStrip } from "@/components/ui/Stat";
 
 interface StageStatsProps {
   stageTime: number | null;
@@ -20,54 +18,18 @@ interface StageStatsProps {
   avgSplit: number | null;
 }
 
-function Cell({
-  label,
-  value,
-  className,
-}: {
-  label: string;
-  value: string;
-  className?: string;
-}) {
-  return (
-    <div className={cn("flex flex-col gap-1 border-rule px-4 py-3", className)}>
-      <span className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
-        {label}
-      </span>
-      <span className="font-mono text-xl font-bold leading-none tabular-nums text-ink">
-        {value}
-      </span>
-    </div>
-  );
+function secs(v: number | null, digits: number): { value: string; unit?: string } {
+  return v != null ? { value: v.toFixed(digits), unit: "s" } : { value: "-" };
 }
 
 export function StageStats({ stageTime, shotCount, draw, fastestSplit, avgSplit }: StageStatsProps) {
   return (
-    <div className="grid shrink-0 grid-cols-2 overflow-hidden rounded-xl border border-rule-strong bg-surface-2 md:grid-cols-5">
-      <Cell
-        label="Stage time"
-        value={stageTime != null ? `${stageTime.toFixed(2)}s` : "-"}
-        className="col-span-2 border-b md:col-span-1 md:border-b-0 md:border-r"
-      />
-      <Cell
-        label="Shots"
-        value={String(shotCount)}
-        className="border-b border-r md:border-b-0"
-      />
-      <Cell
-        label="Draw"
-        value={draw != null ? `${draw.toFixed(2)}s` : "-"}
-        className="border-b md:border-b-0 md:border-r"
-      />
-      <Cell
-        label="Fastest split"
-        value={fastestSplit != null ? `${fastestSplit.toFixed(3)}s` : "-"}
-        className="border-r md:border-b-0"
-      />
-      <Cell
-        label="Avg split"
-        value={avgSplit != null ? `${avgSplit.toFixed(3)}s` : "-"}
-      />
-    </div>
+    <StatStrip lead>
+      <Stat label="Stage time" {...secs(stageTime, 2)} />
+      <Stat label="Shots" value={String(shotCount)} />
+      <Stat label="Draw" {...secs(draw, 2)} />
+      <Stat label="Fastest split" {...secs(fastestSplit, 3)} />
+      <Stat label="Avg split" {...secs(avgSplit, 3)} />
+    </StatStrip>
   );
 }

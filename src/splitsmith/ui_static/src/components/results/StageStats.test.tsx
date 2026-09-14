@@ -15,9 +15,9 @@ describe("StageStats", () => {
       />,
     );
     expect(screen.getByText("Draw")).toBeInTheDocument();
-    expect(screen.getByText("1.50s")).toBeInTheDocument();
-    expect(screen.getByText("0.200s")).toBeInTheDocument();
-    expect(screen.getByText("0.300s")).toBeInTheDocument();
+    expect(screen.getByText("1.50")).toBeInTheDocument();
+    expect(screen.getByText("0.200")).toBeInTheDocument();
+    expect(screen.getByText("0.300")).toBeInTheDocument();
   });
 
   it("renders placeholders, never zeros, when figures are absent", () => {
