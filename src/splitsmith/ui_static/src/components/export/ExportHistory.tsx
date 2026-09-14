@@ -1,8 +1,21 @@
-import { Download } from "lucide-react";
+import { Download, ExternalLink, MoreHorizontal } from "lucide-react";
+import { useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/Label";
+import { Menu, menuItemClass } from "@/components/ui/Menu";
 import type { ExportRun } from "@/lib/api";
 import { stageLabel } from "@/lib/exportPlan";
+import { uploadLabel, uploadableArtifact, youtubeLink } from "@/lib/youtubeRows";
+
+/** The YouTube controls a row may carry (local mode, channel connected).
+ *  ``onUpload(filename, again)`` submits the job; ``busyFilename`` is the
+ *  MP4 an upload job is running for right now. */
+export interface ExportHistoryYouTube {
+  connected: boolean;
+  onUpload: (filename: string, again: boolean) => void;
+  busyFilename?: string | null;
+}
 
 /** What each export run produced, newest first (#629).
  *
@@ -19,14 +32,22 @@ import { stageLabel } from "@/lib/exportPlan";
  *  offers a cleanup dialog that deletes export files, and the history is
  *  durable by design, so a run's record outlives its files. A link there
  *  would carry ``download``, which saves the 404 body to disk under the
- *  video's own filename. */
+ *  video's own filename.
+ *
+ *  A row whose MP4 and ``-youtube.json`` sidecar are both present gets an
+ *  "Upload to YouTube" action while a channel is connected; once the
+ *  sidecar records an upload the row's one visible control is the
+ *  ``youtu.be`` link and "Upload again" moves behind the row menu. */
 export function ExportHistory({
   runs,
   exportFileUrl,
+  youtube,
 }: {
   runs: ExportRun[];
   exportFileUrl: (filename: string) => string;
+  youtube?: ExportHistoryYouTube;
 }) {
+  const [menuFor, setMenuFor] = useState<string | null>(null);
   return (
     <section className="rounded-[10px] border border-rule bg-surface">
       <h2 className="border-b border-rule px-3.5 py-2">
@@ -51,6 +72,15 @@ export function ExportHistory({
                   {new Date(r.finished_at).toLocaleString()}
                 </time>
               </div>
+              {youtube?.connected && uploadableArtifact(r) ? (
+                <YouTubeRowControls
+                  run={r}
+                  filename={uploadableArtifact(r) ?? ""}
+                  youtube={youtube}
+                  menuFor={menuFor}
+                  setMenuFor={setMenuFor}
+                />
+              ) : null}
               <div className="mt-1 flex flex-col gap-0.5">
                 {r.artifacts.map((a) =>
                   a.available ? (
@@ -78,5 +108,74 @@ export function ExportHistory({
         </ul>
       )}
     </section>
+  );
+}
+
+function YouTubeRowControls({
+  run,
+  filename,
+  youtube,
+  menuFor,
+  setMenuFor,
+}: {
+  run: ExportRun;
+  filename: string;
+  youtube: ExportHistoryYouTube;
+  menuFor: string | null;
+  setMenuFor: (id: string | null) => void;
+}) {
+  const link = youtubeLink(run);
+  const busy = youtube.busyFilename === filename;
+  const stages = stageLabel(run.stage_numbers);
+  if (!link) {
+    return (
+      <div className="mt-1.5">
+        <Button
+          type="button"
+          variant="default"
+          size="sm"
+          disabled={busy}
+          onClick={() => youtube.onUpload(filename, false)}
+        >
+          {busy ? "Uploading..." : uploadLabel(run)}
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="relative mt-1.5 flex items-center gap-1">
+      <a
+        href={link.href}
+        target="_blank"
+        rel="noopener"
+        className="inline-flex items-center gap-1.5 font-mono text-sm text-ink-2 hover:text-ink"
+      >
+        <ExternalLink className="size-3" aria-hidden /> {link.label}
+      </a>
+      <Button
+        size="icon"
+        variant="ghost"
+        aria-label={`${stages} actions`}
+        aria-haspopup="menu"
+        aria-expanded={menuFor === run.run_id}
+        onClick={() => setMenuFor(menuFor === run.run_id ? null : run.run_id)}
+      >
+        <MoreHorizontal className="size-4" aria-hidden />
+      </Button>
+      <Menu open={menuFor === run.run_id} onClose={() => setMenuFor(null)} align="left">
+        <button
+          type="button"
+          role="menuitem"
+          className={menuItemClass}
+          disabled={busy}
+          onClick={() => {
+            setMenuFor(null);
+            youtube.onUpload(filename, true);
+          }}
+        >
+          {busy ? "Uploading..." : uploadLabel(run)}
+        </button>
+      </Menu>
+    </div>
   );
 }

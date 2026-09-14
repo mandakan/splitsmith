@@ -1,8 +1,8 @@
 /**
- * The rendered-video rows on Export (#973, #972, #974): the card panel,
- * the cam rows and the YouTube toggle reach the request bodies, and
- * only what the chosen format can draw travels. The grid takes the same
- * card state plus its own overlay and hold (#705).
+ * The YouTube row on Export (#1000): the connection state comes from the
+ * settings route, "Upload after render" reaches the request body as
+ * ``youtube_upload`` + ``youtube_privacy``, and a history-row upload
+ * submits the job with the same privacy.
  */
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -24,6 +24,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getExportOverview: vi.fn(),
       getExportRuns: vi.fn().mockResolvedValue({ runs: [] }),
       getCleanupPlan: vi.fn().mockResolvedValue({ items: [], totals_by_category: {}, total_bytes: 0, total_file_count: 0 }),
+      getYouTubeSettings: vi.fn(),
+      uploadToYouTube: vi.fn(),
       exportMatch: vi.fn(),
       exportCompareGrid: vi.fn(),
       pollJob: vi.fn(),
@@ -198,13 +200,30 @@ function choice(group: string, label: string): HTMLElement {
   return within(screen.getByRole("group", { name: group })).getByRole("button", { name: label });
 }
 
+
+const CONNECTED = { configured: true, connected: true, channel_title: "Mine", connected_at: "2026-09-14T00:00:00Z" };
+
+const UPLOADED_RUN = {
+  run_id: "r1",
+  kind: "match" as const,
+  finished_at: "2026-09-14T12:00:00Z",
+  duration_seconds: 30,
+  stage_numbers: [1, 2],
+  formats: ["mp4", "youtube-sidecar"],
+  anomaly_count: 0,
+  artifacts: [
+    { filename: "bromma-2026.mp4", kind: "match_video", available: true },
+    { filename: "bromma-2026-youtube.json", kind: "sidecar", available: true },
+  ],
+  youtube: null,
+};
+
 beforeEach(() => {
   vi.mocked(api.getProject).mockResolvedValue(PROJECT);
   vi.mocked(api.getExportOverview).mockResolvedValue(OVERVIEW);
+  vi.mocked(api.getYouTubeSettings).mockResolvedValue(CONNECTED);
   vi.mocked(api.exportMatch).mockResolvedValue(job({ status: "running" }));
-  vi.mocked(api.exportCompareGrid).mockResolvedValue(job({ status: "running", kind: "compare-grid" }));
-  // The real poller reports every update, the final one included, so the
-  // page leaves its busy state; the mock has to do the same.
+  vi.mocked(api.uploadToYouTube).mockResolvedValue(job({ status: "running", kind: "youtube_upload" }));
   vi.mocked(api.pollJob).mockImplementation(async (_id, onUpdate) => {
     const final = job({ status: "failed", error: "stopped by the test" });
     onUpdate?.(final);
@@ -216,91 +235,44 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("Export rendered-video rows", () => {
-  it("on FCPXML sends the stage card and the cams, no match card, no YouTube", async () => {
-    const { user } = await renderPage();
-    // One synced secondary across the two stages: the cam rows show.
-    expect(screen.getByText("1 synced camera")).toBeInTheDocument();
-    expect(screen.queryByRole("group", { name: "YouTube" })).toBeNull();
-    expect(choice("Title page", "Opening")).toBeDisabled();
-    await user.click(choice("Stage card style", "Slate"));
-    await user.click(choice("Secondary cam layout", "Picture-in-picture"));
-    await user.click(screen.getByRole("button", { name: /export bundle/i }));
-
-    await waitFor(() => expect(api.exportMatch).toHaveBeenCalledTimes(1));
-    const body = vi.mocked(api.exportMatch).mock.calls[0][1];
-    expect(body).toMatchObject({
-      output_format: "fcpxml",
-      title_kind: "slate",
-      title_duration_seconds: 1.5,
-      include_secondaries: true,
-      pip_layout: "pip-corners",
-      youtube_sidecar: false,
-      youtube_preset: false,
-      youtube_upload: false,
-      youtube_privacy: "unlisted",
-    });
-    expect("title_page" in body).toBe(false);
-    expect("summary_hold_seconds" in body).toBe(false);
-    expect(body.description_lead).toBeUndefined();
-  });
-
-  it("on MP4 sends the title page, the summary hold and the YouTube pair, and lists the sidecar files", async () => {
+describe("Export YouTube row", () => {
+  it("sends youtube_upload off by default and the chosen privacy when set", async () => {
     const { user } = await renderPage();
     await user.selectOptions(screen.getByLabelText("Timeline format"), "mp4");
-    await user.click(choice("Title page", "Opening + closing"));
-    await user.type(screen.getByLabelText("Title page info line"), "Production Optics");
-    await user.clear(screen.getByLabelText("Summary hold seconds"));
-    await user.type(screen.getByLabelText("Summary hold seconds"), "3");
     await user.click(choice("YouTube", "Preset + sidecar"));
-    await user.type(screen.getByLabelText("Description lead"), "  Production Optics, head cam  ");
-    await user.click(choice("Secondary cams", "Primary only"));
-
-    expect(screen.getByText("bromma-2026-youtube.json")).toBeInTheDocument();
-    expect(screen.getByText("bromma-2026.srt")).toBeInTheDocument();
-    expect(screen.getByText("title page · summary 3 s · closing")).toBeInTheDocument();
-
+    await screen.findByText("Connected as Mine");
     await user.click(screen.getByRole("button", { name: /export bundle/i }));
     await waitFor(() => expect(api.exportMatch).toHaveBeenCalledTimes(1));
     expect(vi.mocked(api.exportMatch).mock.calls[0][1]).toMatchObject({
-      output_format: "mp4",
-      title_page: true,
-      title_info: "Production Optics",
-      title_page_duration_seconds: 3,
-      closing_card: true,
-      summary_hold_seconds: 3,
-      title_kind: "none",
-      include_secondaries: false,
       youtube_sidecar: true,
-      youtube_preset: true,
       youtube_upload: false,
       youtube_privacy: "unlisted",
-      description_lead: "Production Optics, head cam",
+    });
+
+    await user.click(choice("Upload after render", "Private"));
+    await user.click(screen.getByRole("button", { name: /export bundle/i }));
+    await waitFor(() => expect(api.exportMatch).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.exportMatch).mock.calls[1][1]).toMatchObject({
+      youtube_upload: true,
+      youtube_privacy: "private",
     });
   });
 
-  it("the grid takes the same cards plus its own overlay and hold, and nothing when untouched", async () => {
-    const { user } = await renderPage([shooter("mathias", "Mathias"), shooter("casper", "Casper")]);
-    await user.click(screen.getByRole("button", { name: /compare grid/i }));
-    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage 2/i })).toBeChecked());
-    expect(screen.queryByLabelText("Summary hold seconds")).toBeNull();
-    await user.click(screen.getByRole("button", { name: /render grid/i }));
-    await waitFor(() => expect(api.exportCompareGrid).toHaveBeenCalledTimes(1));
-    const untouched = vi.mocked(api.exportCompareGrid).mock.calls[0][0];
-    expect("title_page" in untouched).toBe(false);
-    expect("overlay" in untouched).toBe(false);
+  it("uploads a history row with the form's privacy", async () => {
+    vi.mocked(api.getExportRuns).mockResolvedValue({ runs: [UPLOADED_RUN] });
+    const { user } = await renderPage();
+    await user.click(await screen.findByRole("button", { name: "Upload to YouTube" }));
+    await waitFor(() => expect(api.uploadToYouTube).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.uploadToYouTube).mock.calls[0]).toEqual([
+      "mathias",
+      { filename: "bromma-2026.mp4", privacy: "unlisted", again: false },
+    ]);
+  });
 
-    await user.click(choice("Title page", "Opening"));
-    await user.click(choice("Grid overlay", "Counter + splits"));
-    await user.clear(screen.getByLabelText("Grid summary hold seconds"));
-    await user.type(screen.getByLabelText("Grid summary hold seconds"), "2");
-    await user.click(screen.getByRole("button", { name: /render grid/i }));
-    await waitFor(() => expect(api.exportCompareGrid).toHaveBeenCalledTimes(2));
-    expect(vi.mocked(api.exportCompareGrid).mock.calls[1][0]).toMatchObject({
-      title_page: true,
-      stage_titles: "none",
-      overlay: true,
-      summary_hold_seconds: 2,
-    });
+  it("hides the row when the install has no client and the export is not a YouTube mp4", async () => {
+    vi.mocked(api.getYouTubeSettings).mockResolvedValue({ configured: false, connected: false, channel_title: null, connected_at: null });
+    await renderPage();
+    expect(screen.queryByText("Connected as Mine")).toBeNull();
+    expect(screen.queryByRole("group", { name: "Upload after render" })).toBeNull();
   });
 });
