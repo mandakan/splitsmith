@@ -820,6 +820,45 @@ export interface ExportRun {
   formats: string[];
   anomaly_count: number;
   artifacts: ExportArtifact[];
+  /** The sidecar's upload record, read per request; null when the run
+   *  has no ``-youtube.json`` artifact or it was never uploaded. */
+  youtube?: ExportRunYouTube | null;
+}
+
+export type YouTubePrivacy = "unlisted" | "private" | "public";
+
+/** What a direct YouTube upload left in the run's sidecar. */
+export interface ExportRunYouTube {
+  video_id: string;
+  url: string;
+  privacy: string;
+  uploaded_at: string;
+}
+
+/** GET /api/settings/youtube (local mode only). */
+export interface YouTubeSettings {
+  configured: boolean;
+  connected: boolean;
+  channel_title: string | null;
+  connected_at: string | null;
+}
+
+/** GET /api/settings/youtube/connect/status. */
+export interface YouTubeConnectStatus {
+  state: "idle" | "pending" | "connected" | "failed";
+  channel_title: string | null;
+  error: string | null;
+}
+
+export interface YouTubeConnectStart {
+  auth_url: string;
+  expires_at: string;
+}
+
+export interface YouTubeUploadPayload {
+  filename: string;
+  privacy: YouTubePrivacy;
+  again: boolean;
 }
 
 /** Encoder for the alpha overlay MOV.
@@ -941,6 +980,10 @@ export interface MatchExportRequestPayload {
    *  H.264 profile / GOP / colour / audio params. Only meaningful
    *  when ``output_format == "mp4"``. */
   youtube_preset?: boolean;
+  /** Chain a ``youtube_upload`` job onto the render. The server refuses
+   *  it without ``youtube_sidecar`` and an mp4 output (422). */
+  youtube_upload?: boolean;
+  youtube_privacy?: YouTubePrivacy;
   /** Issue #973. Open the rendered MP4 with a generated match title
    *  card (match name, date, shooter, plus ``title_info`` as a free-text
    *  line). Other renderers surface an "ignored" anomaly. */
@@ -3903,7 +3946,22 @@ export const api = {
         ...(payload.youtube_preset !== undefined
           ? { youtube_preset: payload.youtube_preset }
           : {}),
+        ...(payload.youtube_upload !== undefined
+          ? { youtube_upload: payload.youtube_upload }
+          : {}),
+        ...(payload.youtube_privacy !== undefined
+          ? { youtube_privacy: payload.youtube_privacy }
+          : {}),
       },
+    }),
+
+  /** Queue a ``youtube_upload`` job for one rendered MP4 in the shooter's
+   *  exports (local mode only). 409 when no channel is connected, 400 when
+   *  the file is not an MP4 with its sidecar. Poll via {@link api.pollJob}. */
+  uploadToYouTube: (slug: string, payload: YouTubeUploadPayload) =>
+    request<Job>(`/api/shooters/${encodeURIComponent(slug)}/exports/youtube-upload`, {
+      method: "POST",
+      json: payload,
     }),
 
   /** Render every shooter on the bound match into one grid MP4 (phase 0).
@@ -4308,6 +4366,22 @@ export const api = {
 
   /** Read the current hosted-sync target. */
   getSyncSettings: () => request<HostedSyncSettings>("/api/settings/hosted-sync"),
+
+  // YouTube (issue #1000): an operator-global install setting like
+  // hosted-sync; local mode only, the routes 404 hosted.
+
+  getYouTubeSettings: () => request<YouTubeSettings>("/api/settings/youtube"),
+
+  /** Start a login. The SPA opens ``auth_url`` itself and polls
+   *  {@link api.youtubeConnectStatus} until it leaves ``pending``. */
+  startYouTubeConnect: () =>
+    request<YouTubeConnectStart>("/api/settings/youtube/connect/start", { method: "POST" }),
+
+  youtubeConnectStatus: () => request<YouTubeConnectStatus>("/api/settings/youtube/connect/status"),
+
+  /** Forget the stored login (revokes upstream, best effort). */
+  disconnectYouTube: () =>
+    request<{ connected: boolean }>("/api/settings/youtube/session", { method: "DELETE" }),
 
   /** Save the hosted-sync target. ``token: null`` keeps whatever token is
    *  already stored so the caller can resubmit ``baseUrl`` alone without
