@@ -437,7 +437,8 @@ describe("MatchShell mirror banner (#631 Task 10)", () => {
     });
     renderShell();
 
-    await screen.findByText(/shooters/i);
+    await waitFor(() => expect(api.listMatchShooters).toHaveBeenCalled());
+    await screen.findAllByText(/footage/i);
     expect(
       screen.queryByText(/synced from a desktop install/i),
     ).toBeNull();

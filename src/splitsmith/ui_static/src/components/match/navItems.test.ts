@@ -5,7 +5,6 @@ const base = {
   base: "/match/m1",
   shooterSlug: "s",
   hasFootage: true,
-  shooterCount: 1,
   beepReviewPendingCount: 0,
   triageFlaggedCount: 0,
 };
@@ -20,7 +19,6 @@ describe("matchNavItems shape", () => {
     expect(items.map((i) => [i.key, i.group ?? null, i.label])).toEqual([
       ["overview", null, "Overview"],
       ["videos", "prepare", "Footage"],
-      ["shooters", "prepare", "Shooters"],
       ["audit", "review", "Audit"],
       ["triage", "review", "Triage"],
       ["results", "analyse", "Splits"],

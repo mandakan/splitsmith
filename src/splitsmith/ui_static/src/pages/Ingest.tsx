@@ -1,43 +1,39 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
- * Ingest route (/ingest) - redesigned in the Shot Timer aesthetic (#325).
+ * Footage (/match/:id/ingest/:slug) -- the Prepare phase in one screen
+ * (spec 2026-09-13 s4.3, UX PR 6): every stage-by-shooter cell with its
+ * files and the primary's beep state, the videos not yet placed, the
+ * shooters, the cameras. Add footage is the one primary and the drop
+ * zone is always present, so adding more never needs another screen.
  *
- * Two deployment modes, each with dedicated UI:
- *
- *   Local mode: fixed-height FolderPicker dialog (left sidebar with Places,
- *   center listing, footer with storage toggle + actions). Scans recursively;
- *   storage choice (symlink vs copy) honored end-to-end via /api/videos/scan
- *   ``link_mode`` parameter.
- *
- *   Hosted mode: HostedUploadModal (drag-drop or file-pick), full-page
- *   overlay dropzone when dragging, S3 backend, per-file progress, list of
- *   existing uploads, attach to project after upload.
- *
- * Both flow through the same Review state: post-import, renders cameras card
- * (derived from probed metadata), per-stage assignment cards with per-video
- * role toggles + reassignment, unassigned tray, footer with Confirm.
+ * Two deployment modes feed the same page: local mode opens the
+ * FolderPicker (scan, link-in-place or copy), hosted mode the upload
+ * modal and the window-level drop (files land in object storage and
+ * attach through the upload dock). Assign / role / remove are applied
+ * optimistically and serialised on one write chain (the backend saves
+ * the project doc under optimistic version locking). The clip's detail
+ * opens in ClipSheet; shooters are added through AddShooterSheet.
  */
-
-import {
-  ArrowLeft,
-  ArrowRight,
-  Camera,
-  Clock,
-  Folder,
-  Info,
-  Upload,
-} from "lucide-react";
+import { Upload } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useOutletContext, useParams } from "react-router-dom";
 
 import { FolderPicker, type FolderPickerCommitFile } from "@/components/FolderPicker";
+import { AddShooterSheet } from "@/components/footage/AddShooterSheet";
+import { CamerasPanel } from "@/components/footage/CamerasPanel";
+import { ClipSheet } from "@/components/footage/ClipSheet";
+import { CoverageMatrix, type FootageHrefs } from "@/components/footage/CoverageMatrix";
+import { FootageCards } from "@/components/footage/FootageCards";
+import { ShootersPanel } from "@/components/footage/ShootersPanel";
+import { UnassignedPanel } from "@/components/footage/UnassignedPanel";
 import { HostedUploadModal } from "@/components/HostedUploadModal";
+import { IngestMoveBanner } from "@/components/ingest/IngestMoveBanner";
+import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { RelinkDialog } from "@/components/RelinkDialog";
-import { useConfirm } from "@/components/useConfirm";
-import { ShooterChipStrip } from "@/components/match/ShooterChipStrip";
-import { Brand, Kicker } from "@/components/ui";
 import { Button } from "@/components/ui/button";
+import { Chip } from "@/components/ui/Chip";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { Portal } from "@/components/ui/Portal";
+import { useConfirm } from "@/components/useConfirm";
 import {
   ApiError,
   api,
@@ -45,41 +41,79 @@ import {
   READ_ONLY_MIRROR_MESSAGE,
   type MatchProject,
   type MoveShooterBlocked,
-  type ServerHealth,
   type ShooterListEntry,
+  type StageVideo,
   type VideoRole,
 } from "@/lib/api";
 import { useWindowFileDrag } from "@/lib/dragDepth";
 import { useDeploymentMode } from "@/lib/features";
+import { buildFootageRows, footageStats, unassignedVideos, type UnassignedItem } from "@/lib/footage";
+import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 import { useMatchHref } from "@/lib/matchHref";
 import { useUploads } from "@/lib/uploads";
-import { applyAssignmentLocally, removeVideoLocally } from "@/pages/ingest/model";
-import { ReviewLayout } from "@/pages/ingest/ReviewLayout";
+import { useIsMobile } from "@/lib/useIsMobile";
+import { applyAssignmentLocally, buildClipModel, removeVideoLocally, type ClipItem } from "@/pages/ingest/model";
 
 type StorageMode = "symlink" | "copy";
 
 export function Ingest() {
-  const { slug, matchId } = useParams<{ slug: string; matchId?: string }>();
-  if (!slug)
-    return (
-      <Navigate
-        to={matchId ? `/match/${matchId}/shooters` : "/shooters"}
-        replace
+  const { slug } = useParams<{ slug: string }>();
+  if (!slug) return <FootageEntry />;
+  return <IngestInner key={slug} slug={slug} />;
+}
+
+/** The slug-less ``/ingest`` route: the default shooter's Footage, or,
+ *  on a match with no shooter yet, the page reduced to Add shooter --
+ *  the one place a first shooter gets created (UX PR 6). */
+function FootageEntry() {
+  const outletCtx = useOutletContext<MatchShellOutletContext | undefined>();
+  const href = useMatchHref();
+  const shooters = outletCtx?.shooters ?? [];
+  const editDenied = capabilityDenied(outletCtx?.capabilities, "edit");
+  const [open, setOpen] = useState(false);
+  const slug = pickDefaultShooterSlug(shooters);
+  if (slug) return <Navigate to={href("ingest", slug)} replace />;
+  if (!outletCtx?.project && shooters.length === 0 && outletCtx?.shooters == null) {
+    return <p className="px-7 py-10 text-md text-muted">Reading match state...</p>;
+  }
+  return (
+    <div className="px-4 py-4 md:px-7 md:py-5">
+      <PageHeader
+        title="Footage"
+        sub="No shooters yet"
+        actions={
+          <Button variant="primary" onClick={() => setOpen(true)} disabled={editDenied}>
+            Add shooter
+          </Button>
+        }
       />
-    );
-  return <IngestInner slug={slug} />;
+      <p className="max-w-[52ch] text-md text-muted">
+        Add the first shooter, then drop their camera files here; each one is matched to its stage by recording time.
+      </p>
+      <AddShooterSheet
+        open={open}
+        onClose={() => setOpen(false)}
+        project={outletCtx?.project ?? null}
+        shooters={shooters}
+        editDenied={editDenied}
+        onChanged={() => {
+          setOpen(false);
+          outletCtx?.refresh();
+        }}
+      />
+    </div>
+  );
 }
 
 function IngestInner({ slug }: { slug: string }) {
-  const navigate = useNavigate();
   const href = useMatchHref();
+  const isMobile = useIsMobile();
   const confirm = useConfirm();
   // Relink rewrites on-disk raw/ symlinks, a local-filesystem concept.
   // In hosted mode the container FS is ephemeral and sources live in object
   // storage, so the "Find moved videos" affordance is meaningless there.
   const { mode, resolved: modeResolved } = useDeploymentMode();
   const [project, setProject] = useState<MatchProject | null>(null);
-  const [health, setHealth] = useState<ServerHealth | null>(null);
   const [error, setError] = useState<string | null>(null);
   // #756: mirrors (and any future non-editable match) get a read-only
   // Ingest - the page's whole surface is edit-class writes. Disable
@@ -93,12 +127,12 @@ function IngestInner({ slug }: { slug: string }) {
   const [showRelinkDialog, setShowRelinkDialog] = useState(false);
   const [busy, setBusy] = useState(false);
   const [lastScannedDir, setLastScannedDir] = useState<string | null>(null);
-  // Beep-review pending count -- drives the "Review N beeps" CTA in the
-  // review state header so the operator has a clear next step from the
-  // videos page (no more digging for /beep-review by URL).
-  const [beepPending, setBeepPending] = useState<number>(0);
-  // A1: Shooter list for the ShooterChipStrip + move UI.
-  const [shooters, setShooters] = useState<ShooterListEntry[]>([]);
+  // The shooter list: the shell's when mounted under MatchShell, else our
+  // own fetch (the page also refetches after a move).
+  const outletCtx = useOutletContext<MatchShellOutletContext | undefined>();
+  const [ownShooters, setOwnShooters] = useState<ShooterListEntry[]>([]);
+  const shooters = outletCtx?.shooters?.length ? outletCtx.shooters : ownShooters;
+  const jobs = useMemo(() => outletCtx?.jobs ?? [], [outletCtx?.jobs]);
   // B1: Paths from the most recent import batch. Cleared on banner dismiss
   // or after a successful move. Not persisted across reloads.
   const [lastImportedPaths, setLastImportedPaths] = useState<string[] | null>(null);
@@ -116,12 +150,8 @@ function IngestInner({ slug }: { slug: string }) {
   async function reload() {
     setError(null);
     try {
-      const [p, h] = await Promise.all([
-        api.getProject(slug),
-        api.getHealth(),
-      ]);
+      const p = await api.getProject(slug);
       setProject(p);
-      setHealth(h);
       if (p.last_scanned_dir) setLastScannedDir(p.last_scanned_dir);
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
@@ -129,17 +159,9 @@ function IngestInner({ slug }: { slug: string }) {
     // A1: Shooter list. Errors here are silent -- the strip just hides.
     try {
       const r = await api.listMatchShooters();
-      setShooters(r.shooters);
+      setOwnShooters(r.shooters);
     } catch {
       // non-fatal; leave existing list
-    }
-    // Refresh the beep-queue summary in parallel; errors here are silent
-    // (the CTA just hides when the count is zero or unknown).
-    try {
-      const q = await api.getBeepQueue();
-      setBeepPending(q.pending_count);
-    } catch {
-      setBeepPending(0);
     }
   }
 
@@ -215,18 +237,8 @@ function IngestInner({ slug }: { slug: string }) {
     }, 5000);
     return () => window.clearInterval(id);
   }, [anyProxyPending, slug]);
-  // Count unassigned too -- a successful import where nothing auto-
-  // matched a stage still produces visible work for the user (the
-  // "To assign" queue in the ReviewLayout clip list). Without this the
-  // page sits on the EmptyState placeholder and reads as "nothing
-  // happened" after the modal closes.
-  const unassignedCount = project?.unassigned_videos?.length ?? 0;
-  const isEmpty =
-    (project?.stages.length ?? 0) === 0 ||
-    assignedCount + unassignedCount === 0;
-
-  // Active shooter name for A2 modal header echo.
   const activeShooterName = shooters.find((s) => s.slug === slug)?.name;
+  void assignedCount;
 
   async function afterImport(_imported: number, paths: string[]) {
     // Reload regardless of count -- partial successes also need a refresh
@@ -293,12 +305,9 @@ function IngestInner({ slug }: { slug: string }) {
       setProject(resp.source_project);
       void api
         .listMatchShooters()
-        .then((r) => setShooters(r.shooters))
+        .then((r) => setOwnShooters(r.shooters))
         .catch(() => {});
-      void api
-        .getBeepQueue()
-        .then((q) => setBeepPending(q.pending_count))
-        .catch(() => {});
+      outletCtx?.refresh();
     } catch (e: unknown) {
       setError(e instanceof ApiError ? e.detail : String(e));
     } finally {
@@ -334,15 +343,7 @@ function IngestInner({ slug }: { slug: string }) {
         const updated = await api.moveAssignment(slug, videoPath, toStage, role);
         // Only the last write in the burst reconciles; an earlier response
         // predates the still-queued optimistic moves and would revert them.
-        if (inflight.current === 1) {
-          setProject(updated);
-          // Assigning to a real stage auto-queues a beep; refresh the CTA count
-          // out of band so it never gates the click. Non-fatal on error.
-          void api
-            .getBeepQueue()
-            .then((q) => setBeepPending(q.pending_count))
-            .catch(() => {});
-        }
+        if (inflight.current === 1) setProject(updated);
       } catch (e: unknown) {
         setError(e instanceof ApiError ? e.detail : String(e));
         // Optimistic state may be ahead of the server now; pull the truth back.
@@ -386,13 +387,7 @@ function IngestInner({ slug }: { slug: string }) {
     moveChain.current = moveChain.current.then(async () => {
       try {
         const resp = await api.removeVideo(slug, videoPath, false);
-        if (inflight.current === 1) {
-          setProject(resp.project);
-          void api
-            .getBeepQueue()
-            .then((q) => setBeepPending(q.pending_count))
-            .catch(() => {});
-        }
+        if (inflight.current === 1) setProject(resp.project);
       } catch (e: unknown) {
         setError(e instanceof ApiError ? e.detail : String(e));
         // Optimistic state may be ahead of the server now; pull the truth back.
@@ -415,430 +410,427 @@ function IngestInner({ slug }: { slug: string }) {
     return reload();
   }
 
-  return (
-    <div
-      className="relative min-h-screen text-ink"
-      style={{
-        backgroundImage:
-          "radial-gradient(1400px 600px at 50% -100px, rgba(255,45,45,0.04), transparent 60%), linear-gradient(to bottom, var(--color-bg-glow), var(--color-bg))",
-        backgroundAttachment: "fixed",
-      }}
-    >
-      <header className="sticky top-0 z-chrome border-b border-rule bg-gradient-to-b from-surface to-bg">
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 -bottom-px h-px"
-          style={{
-            background:
-              "linear-gradient(to right, transparent, var(--color-led) 18%, var(--color-led) 22%, var(--color-rule-strong) 30%, var(--color-rule-strong) 70%, var(--color-led) 78%, var(--color-led) 82%, transparent)",
-            opacity: 0.55,
-          }}
-        />
-        <div className="mx-auto flex max-w-[1240px] items-center gap-6 px-8 py-3.5">
-          <Brand variant="compact" />
-          <div className="ml-auto inline-flex items-center gap-3 text-[0.8125rem]">
+  // ---- Footage page state (UX PR 6) ----------------------------------------
+
+  // Every other shooter's project feeds the matrix; the ``slug`` project
+  // above is the write target and refreshes through the write paths.
+  const [others, setOthers] = useState<Record<string, MatchProject | null>>({});
+  const otherSlugs = shooters.filter((s) => s.slug !== slug).map((s) => s.slug);
+  const otherKey = otherSlugs.join(",");
+  const [othersTick, setOthersTick] = useState(0);
+  useEffect(() => {
+    if (!otherKey) {
+      setOthers({});
+      return;
+    }
+    let alive = true;
+    Promise.all(
+      otherKey.split(",").map((s) =>
+        api
+          .getProject(s)
+          .then((p) => [s, p] as const)
+          .catch(() => [s, null] as const),
+      ),
+    ).then((entries) => {
+      if (alive) setOthers(Object.fromEntries(entries));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [otherKey, othersTick]);
+  const projects = useMemo<Record<string, MatchProject | null>>(() => ({ ...others, [slug]: project }), [others, slug, project]);
+
+  const rows = useMemo(() => buildFootageRows({ projects, shooters, jobs }), [projects, shooters, jobs]);
+  const unassigned = useMemo(() => unassignedVideos({ projects, shooters }), [projects, shooters]);
+  const stats = useMemo(() => footageStats(rows, unassigned, shooters.length), [rows, unassigned, shooters.length]);
+  const clipModel = useMemo(() => (project ? buildClipModel(project) : null), [project]);
+
+  // The open clip: a path on a shooter's project, or an assign request
+  // for an empty cell.
+  const [sheet, setSheet] = useState<{ slug: string; path: string | null; assignStage: number | null } | null>(null);
+  const [addShooterOpen, setAddShooterOpen] = useState(false);
+  const sheetProject = sheet ? projects[sheet.slug] : null;
+  const sheetClip: ClipItem | null = useMemo(() => {
+    if (!sheet?.path || !sheetProject) return null;
+    const model = buildClipModel(sheetProject);
+    return model.order.find((c) => c.video.path === sheet.path) ?? null;
+  }, [sheet, sheetProject]);
+  useEffect(() => {
+    // A clip that vanished (removed, moved away) closes its sheet.
+    if (sheet?.path && sheetProject && !sheetClip) setSheet(null);
+  }, [sheet, sheetProject, sheetClip]);
+
+  const hrefs = useMemo<FootageHrefs & { footage: (s: string) => string; audit1: (s: string) => string }>(
+    () => ({
+      audit: (s, n) => href("audit", s, String(n)),
+      footage: (s) => href("ingest", s),
+      audit1: (s) => href("audit", s),
+    }),
+    [href],
+  );
+
+  // Writes on another shooter's clip go through the same endpoints with
+  // that slug; the matrix refetches that project afterwards.
+  async function moveOn(targetSlug: string, videoPath: string, toStage: number | null, role: VideoRole): Promise<void> {
+    if (targetSlug === slug) {
+      await moveAssignment(videoPath, toStage, role);
+      return;
+    }
+    if (editDenied) {
+      setError(READ_ONLY_MIRROR_MESSAGE);
+      return;
+    }
+    try {
+      const updated = await api.moveAssignment(targetSlug, videoPath, toStage, role);
+      setOthers((cur) => ({ ...cur, [targetSlug]: updated }));
+    } catch (e: unknown) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
+  async function removeOn(targetSlug: string, videoPath: string): Promise<void> {
+    if (targetSlug === slug) {
+      await removeVideo(videoPath);
+      return;
+    }
+    if (editDenied) {
+      setError(READ_ONLY_MIRROR_MESSAGE);
+      return;
+    }
+    const ok = await confirm({
+      title: "Remove this video?",
+      body: "It's removed from this project and its cached audio and trims are cleared. Your original footage isn't deleted, so you can re-add it to bring it back.",
+      confirmLabel: "Remove video",
+    });
+    if (!ok.confirmed) return;
+    try {
+      const resp = await api.removeVideo(targetSlug, videoPath, false);
+      setOthers((cur) => ({ ...cur, [targetSlug]: resp.project }));
+    } catch (e: unknown) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
+  async function moveShooterFrom(fromSlug: string, targetSlug: string, videoPaths: string[]): Promise<void> {
+    if (fromSlug === slug) {
+      await moveShooterBatch(targetSlug, videoPaths);
+      setOthersTick((n) => n + 1);
+      return;
+    }
+    if (editDenied) {
+      setError(READ_ONLY_MIRROR_MESSAGE);
+      return;
+    }
+    try {
+      const resp = await api.moveShooter(fromSlug, targetSlug, videoPaths);
+      setOthers((cur) => ({ ...cur, [fromSlug]: resp.source_project }));
+      if (targetSlug === slug) await reload();
+      else setOthersTick((n) => n + 1);
+    } catch (e: unknown) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
+  async function detectBeepOn(targetSlug: string, stage: number) {
+    const prim = projects[targetSlug]?.stages.find((s) => s.stage_number === stage)?.videos.find((v) => v.role === "primary");
+    if (!prim) return;
+    setError(null);
+    try {
+      await api.detectBeepForVideo(targetSlug, stage, prim.video_id);
+    } catch (e: unknown) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
+  async function removeShooter(s: ShooterListEntry) {
+    const ok = await confirm({
+      title: `Remove ${s.name}?`,
+      body: "Their footage, audit, and exports inside the match folder will be deleted. This cannot be undone.",
+      confirmLabel: "Remove shooter",
+    });
+    if (!ok.confirmed) return;
+    setError(null);
+    try {
+      await api.removeMatchShooter(s.slug);
+      outletCtx?.refresh();
+      await reload();
+      setOthersTick((n) => n + 1);
+    } catch (e: unknown) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
+  async function rebuildTrims(s: ShooterListEntry) {
+    setError(null);
+    try {
+      const result = await api.buildShooterTrimCaches(s.slug);
+      if (result.jobs_submitted.length === 0) {
+        setError(`No trim jobs to run for ${s.name}: every eligible angle was already cached, missing prerequisites, or already queued.`);
+      }
+    } catch (e: unknown) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
+
+  const openClip = (targetSlug: string, _stage: number, video: StageVideo) => setSheet({ slug: targetSlug, path: video.path, assignStage: null });
+  const openAssign = (targetSlug: string, stage: number) => setSheet({ slug: targetSlug, path: null, assignStage: stage });
+  const openUnassigned = (item: UnassignedItem) => setSheet({ slug: item.slug, path: item.video.path, assignStage: null });
+  const assignUnassigned = (item: UnassignedItem, stage: number) => {
+    void moveOn(item.slug, item.video.path, stage, "secondary");
+    setSheet({ slug: item.slug, path: item.video.path, assignStage: null });
+  };
+
+  const showBanner = lastImportedPaths != null && lastImportedPaths.length > 0 && shooters.length > 1;
+  const subLine = [
+    `${stats.shooters} ${stats.shooters === 1 ? "shooter" : "shooters"}`,
+    `${stats.videos} ${stats.videos === 1 ? "video" : "videos"}`,
+    `${stats.covered} of ${stats.total} ${shooters.length > 1 ? "stage takes" : "stages"} covered`,
+    stats.unassigned > 0 ? `${stats.unassigned} unassigned` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  const dropZone = !modeResolved ? (
+    <div role="status" aria-label="Checking how footage can be added" className="mb-4 h-11 rounded-[10px] border border-dashed border-rule-strong" />
+  ) : (
+    <div className="mb-4 flex flex-wrap items-center gap-3 rounded-[10px] border border-dashed border-rule-strong bg-surface px-4 py-2.5 text-md text-ink-2">
+      <Upload className="size-4 text-muted" aria-hidden />
+      {mode === "hosted" ? (
+        editDenied ? (
+          <span className="text-muted">Footage for this match is added on the desktop install and syncs here.</span>
+        ) : (
+          <>
+            <span>Drop video files anywhere on this page, or browse.</span>
             <span className="text-muted">
-              {project?.name ?? health?.project_name ?? ""}
+              Files are matched to stages by recording time
+              {shooters.length > 1 && activeShooterName ? (
+                <>
+                  {" "}
+                  and added to <b className="font-medium text-ink">{activeShooterName}</b>
+                </>
+              ) : null}
+              .
             </span>
-          </div>
-        </div>
-        <div className="border-t border-rule bg-bg">
-          <div className="mx-auto flex max-w-[1240px] items-center gap-3 px-8 py-2.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-subtle">
-            <button
-              type="button"
-              // Replace: same reasoning as MatchShell's breadcrumb --
-              // picking a different match would otherwise leave a
-              // stale stage URL in history pointing at the wrong
-              // project.
-              onClick={() => navigate("/pick", { replace: true })}
-              className="inline-flex items-center gap-1.5 text-subtle transition-colors hover:text-ink-2"
-            >
-              <ArrowLeft className="size-3" />
-              Matches
-            </button>
-            <span className="text-whisper">/</span>
-            {/* The match crumb returns to THIS match's overview -- not "/"
-             *  (app root), which ejected the user out of the match they were
-             *  viewing back toward the global picker. */}
-            <Link to={href("")} className="text-subtle hover:text-ink-2">
-              {project?.name ?? health?.project_name ?? "..."}
-            </Link>
-            <span className="text-whisper">/</span>
-            <span className="font-bold text-ink">Add footage</span>
-          </div>
-        </div>
-      </header>
+          </>
+        )
+      ) : (
+        <>
+          <span>Add footage from a folder on this machine.</span>
+          <span className="text-muted">
+            Files are matched to stages by recording time
+            {shooters.length > 1 && activeShooterName ? (
+              <>
+                {" "}
+                and added to <b className="font-medium text-ink">{activeShooterName}</b>
+              </>
+            ) : null}
+            .
+          </span>
+        </>
+      )}
+      <span className="ml-auto flex items-center gap-2">
+        {mode === "local" && !editDenied ? (
+          <button
+            type="button"
+            onClick={() => setStorage((v) => (v === "symlink" ? "copy" : "symlink"))}
+            aria-pressed={storage === "copy"}
+            title="Link videos in place, or copy them into the match folder"
+          >
+            <Chip tick="muted">{storage === "symlink" ? "Link in place" : "Copy files"}</Chip>
+          </button>
+        ) : null}
+        <Button size="sm" onClick={() => setShowAddFootage(true)} disabled={editDenied}>
+          {mode === "hosted" ? "Browse files" : "Pick a folder"}
+        </Button>
+      </span>
+    </div>
+  );
 
-      <main className="mx-auto max-w-[1240px] px-8 pb-20 pt-9">
-        <div className="mb-6">
-          <Kicker className="mb-2.5">
-            Ingest &middot; {isEmpty ? "add footage" : "auto-matched"}
-          </Kicker>
-          <h1 className="mb-2.5 font-display text-4xl font-bold uppercase leading-none tracking-tight text-ink">
-            Add footage
-          </h1>
-          {/* A1: shooter identity strip -- hides itself for single-shooter */}
-          <ShooterChipStrip
-            shooters={shooters}
-            activeSlug={slug}
-            urlBase="ingest"
-            label="Adding to"
-            count={(s) => String(s.video_count)}
-          />
-          <p className="max-w-[40rem] text-[0.875rem] text-muted">
-            {isEmpty
-              ? "Splitsmith auto-matches each video to a stage by recording timestamp."
-              : "Auto-matched to stages by recording timestamp. Review the assignments and confirm to start processing."}
-          </p>
-          {/* #756: one note for the whole page rather than repeating the
-           *  reason on every disabled control below. */}
-          {editDenied && (
-            <p className="mt-2 text-[0.75rem] uppercase tracking-[0.06em] text-muted">
-              {READ_ONLY_MIRROR_MESSAGE}
-            </p>
-          )}
-        </div>
-
-        {/* Top-level actions. The relink dialog handles the "I moved my
-         *  source videos and the project's symlinks are now broken"
-         *  JTBD. It scans a folder recursively, matches by basename, and
-         *  rewrites the per-video symlinks. Reachable here so the user
-         *  doesn't have to dig through Settings or the CLI. */}
-        {!isEmpty && modeResolved && mode === "local" && (
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setShowRelinkDialog(true)}
-            >
-              <Folder className="size-3.5" />
-              <span className="font-display uppercase tracking-[0.08em]">
+  return (
+    <div className="px-4 py-4 md:px-7 md:py-5">
+      <PageHeader
+        title="Footage"
+        sub={subLine}
+        actions={
+          <>
+            {modeResolved && mode === "local" && !editDenied ? (
+              <Button onClick={() => setShowRelinkDialog(true)} title="Use this when source files have moved and the project's links are broken">
                 Find moved videos
-              </span>
+              </Button>
+            ) : null}
+            <Button onClick={() => setAddShooterOpen(true)} disabled={editDenied}>
+              Add shooter
             </Button>
-            <span className="text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
-              Use this when source files have moved and the project's symlinks are broken.
-            </span>
+            <Button variant="primary" onClick={() => setShowAddFootage(true)} disabled={!modeResolved || editDenied}>
+              Add footage
+            </Button>
+          </>
+        }
+      >
+        {shooters.length > 1 ? (
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Adding footage to">
+            {shooters.map((s) => (
+              <Link key={s.slug} to={hrefs.footage(s.slug)} aria-current={s.slug === slug ? "true" : undefined}>
+                <Chip tone={s.slug === slug ? "ok" : "neutral"} tick={s.slug === slug ? "draw" : "muted"}>
+                  {s.name}
+                </Chip>
+              </Link>
+            ))}
           </div>
-        )}
+        ) : null}
+      </PageHeader>
 
-        {showRelinkDialog && modeResolved && mode === "local" && (
-          <RelinkDialog
-            slug={slug}
-            onClose={() => setShowRelinkDialog(false)}
-            onApplied={() => void reload()}
-          />
-        )}
+      {editDenied ? <p className="mb-3 text-sm text-muted">{READ_ONLY_MIRROR_MESSAGE}</p> : null}
+      {error ? (
+        <p role="alert" className="mb-3 text-sm text-led-text">
+          {error}
+        </p>
+      ) : null}
 
-        {error && (
-          <div className="mb-4 rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
-            {error}
-          </div>
-        )}
+      {dropZone}
 
-        {isEmpty ? (
-          modeResolved ? (
-            <EmptyState
-              mode={mode}
-              onAdd={() => setShowAddFootage(true)}
-              lastScannedDir={lastScannedDir}
-              disabled={editDenied}
-            />
-          ) : (
-            <AddFootageSkeleton />
-          )
-        ) : project ? (
-          <ReviewLayout
-            slug={slug}
-            project={project}
+      {showBanner ? (
+        <div className="mb-4">
+          <IngestMoveBanner
+            shooterName={activeShooterName ?? slug}
+            videoPaths={lastImportedPaths}
             shooters={shooters}
-            lastImportedPaths={lastImportedPaths}
-            moveBlocked={moveBlocked}
-            onDismissBanner={() => {
+            excludeSlug={slug}
+            blocked={moveBlocked}
+            busy={busy}
+            onMove={moveShooterBatch}
+            onDismiss={() => {
               setLastImportedPaths(null);
               setMoveBlocked([]);
             }}
-            onMoveShooter={moveShooterBatch}
-            onAddMore={() => {
-              if (editDenied) {
-                setError(READ_ONLY_MIRROR_MESSAGE);
-                return;
-              }
-              setShowAddFootage(true);
-            }}
-            onMoveAssignment={moveAssignment}
-            onRemoveVideo={removeVideo}
-            onConfirm={() => navigate(href(""), { replace: true })}
-            onSaved={handleSaved}
-            busy={busy}
-            lastScannedDir={lastScannedDir}
-            onError={setError}
-            beepPending={beepPending}
           />
-        ) : null}
+        </div>
+      ) : moveBlocked.length > 0 ? (
+        <p role="status" className="mb-4 text-sm text-live">
+          {moveBlocked.length} {moveBlocked.length === 1 ? "stage" : "stages"} not moved: the destination already had reviewed footage.{" "}
+          <button type="button" onClick={() => setMoveBlocked([])} className="text-ink-2 hover:text-ink">
+            Dismiss
+          </button>
+        </p>
+      ) : null}
 
-        {showAddFootage &&
-          modeResolved &&
-          (mode === "hosted" ? (
-            <HostedUploadModal
-              slug={slug}
-              onClose={() => setShowAddFootage(false)}
-              onImported={(imported, paths) => {
-                void afterImport(imported, paths);
-              }}
-              stages={project?.stages ?? []}
-            />
+      {!project ? (
+        <p className="py-6 text-md text-muted">Reading footage...</p>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px] lg:items-start">
+          {isMobile ? (
+            <FootageCards rows={rows} hrefs={hrefs} onOpen={openClip} />
           ) : (
-            <FolderPicker
-              slug={slug}
-              title="Add footage"
-              subtitle={
-                activeShooterName ? `Adding to ${activeShooterName}` : undefined
-              }
-              initialPath={lastScannedDir}
-              allowEmptyFolder
-              folderLabel="Add this folder"
-              storage={{ value: storage, onChange: setStorage }}
-              onCommitFolder={commitFolder}
-              onCommitFiles={commitFiles}
-              onClose={() => setShowAddFootage(false)}
+            <CoverageMatrix
+              rows={rows}
+              currentVideoPath={sheet?.path ?? null}
+              currentStage={sheet?.assignStage ?? sheetClip?.stageNumber ?? null}
+              hrefs={hrefs}
+              onOpen={openClip}
+              onAssign={openAssign}
+              onDetectBeep={(s, n) => void detectBeepOn(s, n)}
+              editDenied={editDenied}
             />
-          ))}
-
-        {hostedDropActive && (
-          <span className="sr-only" role="status" aria-live="polite">
-            {pageDragActive ? "Release to add the files to the upload queue" : ""}
-          </span>
-        )}
-        {pageDragActive && (
-          <Portal>
-            <div
-              aria-hidden
-              className="pointer-events-none fixed inset-0 z-takeover flex items-center justify-center bg-bg/80 backdrop-blur-sm"
-            >
-              <div className="rounded-2xl border-2 border-dashed border-led bg-surface px-10 py-8 text-center shadow-[0_0_28px_var(--color-led-glow)]">
-                <div className="font-display text-2xl font-bold uppercase tracking-tight text-ink">
-                  Drop videos to upload
-                </div>
-                <div className="mt-1 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
-                  They join this shooter's upload queue
-                </div>
-              </div>
-            </div>
-          </Portal>
-        )}
-      </main>
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Empty state                                                                */
-/* -------------------------------------------------------------------------- */
-
-function EmptyState({
-  mode,
-  onAdd,
-  lastScannedDir,
-  disabled,
-}: {
-  mode: "local" | "hosted";
-  onAdd: () => void;
-  lastScannedDir: string | null;
-  disabled: boolean;
-}) {
-  return (
-    <>
-      <AddFootageCard mode={mode} onAdd={onAdd} disabled={disabled} />
-      {mode === "local" && lastScannedDir && !disabled && (
-        <RecentSources
-          items={[
-            {
-              path: lastScannedDir,
-              label: "Last scanned",
-              when: "previously",
-            },
-          ]}
-          onUse={onAdd}
-        />
+          )}
+          <div className="flex flex-col gap-4">
+            <UnassignedPanel
+              items={unassigned}
+              stages={project.stages}
+              multi={shooters.length > 1}
+              editDenied={editDenied}
+              onOpen={openUnassigned}
+              onAssign={assignUnassigned}
+              onRemove={(item) => void removeOn(item.slug, item.video.path)}
+            />
+            <ShootersPanel
+              shooters={shooters}
+              activeSlug={slug}
+              editDenied={editDenied}
+              hrefs={{ footage: hrefs.footage, audit: hrefs.audit1 }}
+              onAdd={() => setAddShooterOpen(true)}
+              onRemove={(s) => void removeShooter(s)}
+              onRebuildTrims={(s) => void rebuildTrims(s)}
+            />
+            {clipModel ? <CamerasPanel slug={slug} cameras={clipModel.cameras} editDenied={editDenied} onSaved={handleSaved} /> : null}
+          </div>
+        </div>
       )}
-      <TipCards />
-    </>
-  );
-}
 
-/** Neutral placeholder while /api/server/features is in flight - the
- *  local picker and the hosted upload surface must not flash at the
- *  wrong audience (spec: deployment-mode resolution). */
-function AddFootageSkeleton() {
-  return (
-    <div
-      role="status"
-      aria-label="Checking how footage can be added"
-      className="mb-5 animate-pulse rounded-2xl border border-rule bg-surface px-10 py-14 text-center"
-    >
-      <div className="mx-auto mb-4 size-[72px] rounded-2xl bg-surface-3" />
-      <div className="mx-auto mb-3 h-8 w-64 rounded bg-surface-3" />
-      <div className="mx-auto h-9 w-40 rounded-md bg-surface-3" />
-    </div>
-  );
-}
+      <ClipSheet
+        open={sheet != null}
+        onClose={() => setSheet(null)}
+        slug={sheet?.slug ?? slug}
+        shooterName={shooters.find((s) => s.slug === sheet?.slug)?.name ?? activeShooterName ?? ""}
+        clip={sheetClip}
+        assignStage={sheet?.assignStage ?? null}
+        unassigned={unassigned}
+        allStages={sheetProject?.stages ?? project?.stages ?? []}
+        shooters={shooters}
+        rawVideos={sheetProject?.raw_videos ?? []}
+        mediaOnDesktop={project?.origin === "desktop"}
+        busy={busy}
+        editDenied={editDenied}
+        auditHref={hrefs.audit}
+        onMove={(path, toStage, role) => moveOn(sheet?.slug ?? slug, path, toStage, role)}
+        onRemove={(path) => removeOn(sheet?.slug ?? slug, path)}
+        onMoveShooter={(target, paths) => moveShooterFrom(sheet?.slug ?? slug, target, paths)}
+        onPickUnassigned={assignUnassigned}
+        onError={setError}
+        onReload={handleSaved}
+      />
+      <AddShooterSheet
+        open={addShooterOpen}
+        onClose={() => setAddShooterOpen(false)}
+        project={project}
+        shooters={shooters}
+        editDenied={editDenied}
+        onChanged={() => {
+          outletCtx?.refresh();
+          void reload();
+          setOthersTick((n) => n + 1);
+        }}
+      />
 
-function AddFootageCard({
-  mode,
-  onAdd,
-  disabled,
-}: {
-  mode: "local" | "hosted";
-  onAdd: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="relative mb-5 overflow-hidden rounded-2xl border border-rule-strong bg-surface px-10 py-14 text-center">
-      <div className="mx-auto mb-4 inline-flex size-[72px] items-center justify-center rounded-2xl border border-led-deep bg-led/10 text-led shadow-[0_0_24px_var(--color-led-glow)]">
-        {mode === "local" ? (
-          <Folder className="size-9" strokeWidth={1.6} />
+      {showRelinkDialog && modeResolved && mode === "local" ? (
+        <RelinkDialog slug={slug} onClose={() => setShowRelinkDialog(false)} onApplied={() => void reload()} />
+      ) : null}
+
+      {showAddFootage &&
+        modeResolved &&
+        (mode === "hosted" ? (
+          <HostedUploadModal
+            slug={slug}
+            onClose={() => setShowAddFootage(false)}
+            onImported={(imported, paths) => {
+              void afterImport(imported, paths);
+            }}
+            stages={project?.stages ?? []}
+          />
         ) : (
-          <Upload className="size-9" strokeWidth={1.6} />
-        )}
-      </div>
-      <h2 className="mb-3 font-display text-3xl font-bold uppercase tracking-tight text-ink">
-        Add footage
-      </h2>
-      <p className="mx-auto mb-5 max-w-xl text-[0.9375rem] leading-relaxed text-muted">
-        {mode === "local"
-          ? "Pick the folder your camera footage lives in. Splitsmith scans it for video files and groups them by camera."
-          : disabled
-            ? "Footage for this match is added on the desktop install and syncs here."
-            : "Drop video files anywhere on this page, or browse for them. Uploads land in your hosted storage and attach to this shooter."}
-      </p>
-      <div className="inline-flex gap-2.5">
-        <Button
-          onClick={onAdd}
-          disabled={disabled}
-          className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] hover:bg-led hover:text-ink"
-        >
-          <Folder className="size-3.5" />
-          <span className="font-display uppercase tracking-[0.1em]">
-            {mode === "local" ? "Pick a folder" : "Browse files"}
-          </span>
-        </Button>
-      </div>
-      <p className="mt-5 font-mono text-[0.625rem] tabular-nums text-subtle">
-        Supported:{" "}
-        <code className="rounded border border-rule bg-surface-3 px-1.5 py-0.5 text-[0.6875rem] text-ink-2">
-          .mp4
-        </code>{" "}
-        &middot;{" "}
-        <code className="rounded border border-rule bg-surface-3 px-1.5 py-0.5 text-[0.6875rem] text-ink-2">
-          .mov
-        </code>{" "}
-        &middot;{" "}
-        <code className="rounded border border-rule bg-surface-3 px-1.5 py-0.5 text-[0.6875rem] text-ink-2">
-          .mkv
-        </code>{" "}
-        &middot;{" "}
-        <code className="rounded border border-rule bg-surface-3 px-1.5 py-0.5 text-[0.6875rem] text-ink-2">
-          .360
-        </code>
-      </p>
-    </div>
-  );
-}
+          <FolderPicker
+            slug={slug}
+            title="Add footage"
+            subtitle={activeShooterName ? `Adding to ${activeShooterName}` : undefined}
+            initialPath={lastScannedDir}
+            allowEmptyFolder
+            folderLabel="Add this folder"
+            storage={{ value: storage, onChange: setStorage }}
+            onCommitFolder={commitFolder}
+            onCommitFiles={commitFiles}
+            onClose={() => setShowAddFootage(false)}
+          />
+        ))}
 
-function RecentSources({
-  items,
-  onUse,
-}: {
-  items: { path: string; label: string; when: string }[];
-  onUse: () => void;
-}) {
-  if (items.length === 0) return null;
-  return (
-    <div className="mb-5 overflow-hidden rounded-xl border border-rule-strong bg-surface">
-      <div className="flex items-center justify-between border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3.5">
-        <span className="font-display text-sm font-bold uppercase tracking-[0.06em] text-ink">
-          Recent sources
+      {hostedDropActive ? (
+        <span className="sr-only" role="status" aria-live="polite">
+          {pageDragActive ? "Release to add the files to the upload queue" : ""}
         </span>
-        <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-          Scan the same folder again
-        </span>
-      </div>
-      {items.map((it, i) => (
-        <div
-          key={i}
-          className="grid grid-cols-[32px_1fr_120px_100px] items-center gap-3.5 border-t border-rule px-5 py-3 first:border-t-0 hover:bg-surface-2"
-        >
-          <span className="inline-flex size-8 items-center justify-center rounded-md border border-rule-strong bg-surface-3 text-muted">
-            <Folder className="size-3.5" />
-          </span>
-          <div>
-            <div className="truncate font-mono text-[0.8125rem] font-semibold text-ink">
-              {it.path}
-            </div>
-            <div className="mt-1 font-mono text-[0.5625rem] uppercase tracking-[0.08em] text-muted">
-              {it.label}
+      ) : null}
+      {pageDragActive ? (
+        <Portal>
+          <div aria-hidden className="pointer-events-none fixed inset-0 z-takeover flex items-center justify-center bg-bg/80">
+            <div className="rounded-[10px] border border-dashed border-led bg-surface px-10 py-8 text-center">
+              <div className="text-lg font-semibold text-ink">Drop videos to upload</div>
+              <div className="mt-1 text-sm text-muted">They join {activeShooterName ? `${activeShooterName}'s` : "this shooter's"} upload queue</div>
             </div>
           </div>
-          <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
-            {it.when}
-          </span>
-          <button
-            type="button"
-            onClick={onUse}
-            className="inline-flex items-center justify-center gap-1.5 rounded-md border border-rule-strong bg-surface-2 px-3 py-2 font-display text-[0.625rem] font-semibold uppercase tracking-[0.1em] text-ink transition-colors hover:border-led hover:bg-led/10 hover:text-led"
-          >
-            Use this <ArrowRight className="size-3" />
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function TipCards() {
-  return (
-    <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-3">
-      <TipCard
-        icon={<Clock className="size-3.5" />}
-        title="Use recording timestamps"
-        body="Splitsmith reads each video's mtime to suggest the right stage. Don't rename files before import."
-      />
-      <TipCard
-        icon={<Camera className="size-3.5" />}
-        title="Filename prefix = camera"
-        body="Files starting with GH01, GX01, etc. group into per-camera lanes automatically."
-      />
-      <TipCard
-        icon={<Info className="size-3.5" />}
-        title="Detection runs in background"
-        body="The jobs drawer shows beep detection per video as soon as you confirm -- keep working while it processes."
-      />
-    </div>
-  );
-}
-
-function TipCard({
-  icon,
-  title,
-  body,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  body: string;
-}) {
-  return (
-    <div className="flex gap-3 rounded-xl border border-rule-strong bg-surface p-4">
-      <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-led-deep bg-led/10 text-led">
-        {icon}
-      </span>
-      <div className="text-[0.8125rem] leading-relaxed text-ink-2">
-        <b className="font-display font-bold uppercase tracking-[0.04em] text-ink">
-          {title}.
-        </b>{" "}
-        {body}
-      </div>
+        </Portal>
+      ) : null}
     </div>
   );
 }

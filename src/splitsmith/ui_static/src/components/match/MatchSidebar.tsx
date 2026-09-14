@@ -57,10 +57,8 @@ interface MatchSidebarProps {
   matchName: string;
   matchSubtitle?: ReactNode;
   stages: MatchSidebarStage[];
-  /** Optional shooter count to render in the Shooters nav row. */
-  shooterCount?: number;
   /** Beeps still awaiting confirm/adjust across all shooters. Drives the
-   *  badge on the Beep review nav row -- when it's > 0 the row gains a
+   *  badge on the Audit nav row -- when it's > 0 the row gains a
    *  count chip so the operator can see at a glance that there's work
    *  there. */
   beepReviewPendingCount?: number;
@@ -112,7 +110,6 @@ export function MatchSidebar({
   matchName,
   matchSubtitle,
   stages,
-  shooterCount,
   beepReviewPendingCount,
   triageFlaggedCount,
   awaiting = false,
@@ -200,7 +197,6 @@ export function MatchSidebar({
           base,
           shooterSlug,
           hasFootage,
-          shooterCount,
           beepReviewPendingCount: beepReviewPendingCount ?? 0,
           triageFlaggedCount: triageFlaggedCount ?? 0,
           footageHint,
