@@ -250,3 +250,54 @@ def test_youtube_sidecar_and_captions_move_with_a_renamed_output(
     assert out.with_name("lt-youtube.json").exists()
     # Nothing left behind under the default name.
     assert not list((root / "shooters" / "me" / "exports").glob("*-youtube.json"))
+
+
+def test_reclassify_rejudges_auto_intervals_and_keeps_manual_ones(tmp_path: Path) -> None:
+    """The verb re-runs the classifier with the current thresholds over a
+    stored audit: an interval auto-classed under an old rule moves, a
+    manual override does not, a reclassify event is appended, and
+    --dry-run writes nothing."""
+    root = _seed(tmp_path)
+    audit = root / "shooters" / "me" / "audit" / "stage1.json"
+    doc = json.loads(audit.read_text())
+    doc["shots"] = [
+        {
+            "shot_number": 1,
+            "ms_after_beep": 1500,
+            "interval_class": "first_shot",
+            "interval_class_source": "auto",
+        },
+        # 0.80 s: 'transition' under the old 0.5 s rule, a split now.
+        {
+            "shot_number": 2,
+            "ms_after_beep": 2300,
+            "interval_class": "transition",
+            "interval_class_source": "auto",
+        },
+        # 1.50 s, manually called a reload: stays.
+        {
+            "shot_number": 3,
+            "ms_after_beep": 3800,
+            "interval_class": "reload",
+            "interval_class_source": "manual",
+        },
+    ]
+    audit.write_text(json.dumps(doc))
+
+    dry = runner.invoke(app, ["match", "reclassify", str(root), "--shooter", "me", "--dry-run"])
+    assert dry.exit_code == 0, dry.output
+    assert "1 intervals moved (nothing written)" in strip_ansi(dry.output)
+    assert json.loads(audit.read_text())["shots"][1]["interval_class"] == "transition"
+
+    result = runner.invoke(app, ["match", "reclassify", str(root), "--shooter", "me"])
+    assert result.exit_code == 0, result.output
+    text = strip_ansi(result.output)
+    assert "split <= 1s, transition <= 2s" in text
+    assert (
+        "stage 1 Speed: first_shot=1 transition=1 reload=1 -> first_shot=1 split=1 reload=1  (1 moved)"
+        in text
+    )
+    written = json.loads(audit.read_text())
+    assert [s["interval_class"] for s in written["shots"]] == ["first_shot", "split", "reload"]
+    assert written["shots"][2]["interval_class_source"] == "manual"
+    assert written["audit_events"][-1]["kind"] == "coach_reclassify"

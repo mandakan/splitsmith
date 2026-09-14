@@ -73,6 +73,9 @@ ENV_FFMPEG = "SPLITSMITH_FFMPEG"
 ENV_FFPROBE = "SPLITSMITH_FFPROBE"
 ENV_CACHE_DIR = "SPLITSMITH_CACHE_DIR"
 ENV_CONFIG_DIR = "SPLITSMITH_CONFIG_DIR"
+#: Optional YAML overriding ``config.Config`` for the server and the CLI
+#: verbs that take no ``--config`` (the coach auto-classifier thresholds).
+ENV_CONFIG_FILE = "SPLITSMITH_CONFIG"
 
 _PACKAGE_DATA_DIR = Path(__file__).parent / "data"
 

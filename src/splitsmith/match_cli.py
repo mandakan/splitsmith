@@ -22,6 +22,7 @@ Today's commands:
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from pathlib import Path
 
 import typer
@@ -622,6 +623,100 @@ def export(
     console.print(f"  {result.stage_count} stages, {result.duration_seconds:.1f}s timeline")
     for note in result.anomalies:
         console.print(f"[yellow]note[/] {note}", soft_wrap=True)
+
+
+@match_app.command("reclassify")
+def reclassify(
+    match_path: Path = typer.Argument(..., exists=True, readable=True, help="Match folder."),
+    shooter: str | None = typer.Option(
+        None, "--shooter", help="Slug or display name. Optional when the match has one shooter."
+    ),
+    stage: list[int] = typer.Option([], "--stage", help="Limit to these stage numbers (repeatable)."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print what would move; write nothing."),
+) -> None:
+    """Re-run the Coach interval auto-classifier over a shooter's stored audits.
+
+    For when the thresholds change (``CoachAutoClassifyConfig``, or a
+    ``SPLITSMITH_CONFIG`` YAML): every auto-classified interval is
+    re-judged against the current rule, manual overrides are kept, and
+    the per-stage class counts before and after are printed so the audit
+    trail shows what moved. Each rewritten audit records a
+    ``coach_reclassify`` event, as the Coach view's own reclassify does.
+    """
+    import json
+    import uuid
+    from datetime import UTC, datetime
+
+    from . import coach as coach_module
+    from .match_project import MatchProject, atomic_write_json
+
+    if not is_match_folder(match_path):
+        console.print(f"[red]Error:[/] {match_path} is not a match folder (no {MATCH_FILE}).")
+        raise typer.Exit(code=2)
+    match = Match.load(match_path)
+    if shooter is None:
+        if len(match.shooters) != 1:
+            console.print(
+                f"[red]Error:[/] --shooter is required; this match has {len(match.shooters)} shooters: "
+                f"{', '.join(match.shooters)}"
+            )
+            raise typer.Exit(code=2)
+        slug: str | None = match.shooters[0]
+    else:
+        slug = match.resolve_shooter_slug(match_path, shooter)
+    if slug is None:
+        console.print(f"[red]Error:[/] --shooter {shooter!r} names no shooter on this match.")
+        raise typer.Exit(code=2)
+
+    shooter_root = Match.shooter_root(match_path, slug)
+    project = MatchProject.load(shooter_root)
+    audit_dir = project.audit_path(shooter_root)
+    cfg = coach_module.auto_classify_config()
+    console.print(
+        f"[dim]split <= {cfg.split_max_s:g}s, transition <= {cfg.transition_max_s:g}s, "
+        f"movement above{' (dry run)' if dry_run else ''}[/]"
+    )
+    wanted = set(stage) if stage else None
+    moved_total = 0
+    for entry in project.stages:
+        if wanted is not None and entry.stage_number not in wanted:
+            continue
+        audit_file = audit_dir / f"stage{entry.stage_number}.json"
+        if not audit_file.exists():
+            continue
+        doc = json.loads(audit_file.read_text(encoding="utf-8"))
+        shots = doc.get("shots")
+        if not isinstance(shots, list) or not shots:
+            continue
+        before = Counter(s.get("interval_class") or "unset" for s in shots if isinstance(s, dict))
+        coach_module.classify_intervals_in_dicts([s for s in shots if isinstance(s, dict)], cfg)
+        after = Counter(s.get("interval_class") or "unset" for s in shots if isinstance(s, dict))
+        moved = sum((after - before).values())
+        moved_total += moved
+        label = f"stage {entry.stage_number} {entry.stage_name}"
+        console.print(
+            f"{label}: {_counts(before)} -> {_counts(after)}" + (f"  ({moved} moved)" if moved else ""),
+            soft_wrap=True,
+        )
+        if dry_run or not moved:
+            continue
+        events = list(doc.get("audit_events") or [])
+        events.append(
+            {
+                "id": uuid.uuid4().hex,
+                "ts": datetime.now(UTC).isoformat(),
+                "kind": "coach_reclassify",
+                "payload": {"shot_count": len(shots), "source": "cli"},
+            }
+        )
+        doc["audit_events"] = events
+        atomic_write_json(audit_file, doc)
+    console.print(f"[bold]{moved_total}[/] intervals moved{' (nothing written)' if dry_run else ''}")
+
+
+def _counts(counter: Counter[str]) -> str:
+    order = ("first_shot", "split", "transition", "movement", "reload", "activation", "unset")
+    return " ".join(f"{k}={counter[k]}" for k in order if counter.get(k))
 
 
 # ---------------------------------------------------------------------------

@@ -25,7 +25,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from .coach import SPLIT_STAT_SPLIT_MAX, SplitStatInterval, statistic_splits
+from .coach import SplitStatInterval, statistic_splits
 
 FigureSource = Literal["coach", "threshold", "empty"]
 
@@ -44,13 +44,13 @@ class StageFigures:
 def stage_figures(
     shots: Sequence[SplitStatInterval],
     *,
-    split_max: float = SPLIT_STAT_SPLIT_MAX,
+    split_max: float | None = None,
 ) -> StageFigures:
     """The two headline figures a stage card shows, plus their provenance.
 
     **This function does not own the split rule.** ``coach.statistic_splits``
     does (issue #772, landed in #774; #773/#776 set the unclassified cutoff
-    to the auto-classifier's 0.5 s ``split_max_s``), mirrored in TS by
+    to the auto-classifier's own ``split_max_s``), mirrored in TS by
     ``statisticSplits``. All this adds is the card's shape: the draw, the
     mean of whatever the shared helper returned, and how it was derived.
 

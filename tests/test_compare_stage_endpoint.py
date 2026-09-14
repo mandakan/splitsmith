@@ -74,8 +74,8 @@ def _legacy_shots() -> list[dict[str, Any]]:
     return [
         {"shot_number": 1, "time": 6.5, "ms_after_beep": 1500, "source": "detected"},
         {"shot_number": 2, "time": 6.8, "ms_after_beep": 1800, "source": "detected"},
-        {"shot_number": 3, "time": 7.7, "ms_after_beep": 2700, "source": "detected"},
-        {"shot_number": 4, "time": 10.3, "ms_after_beep": 5300, "source": "detected"},
+        {"shot_number": 3, "time": 8.3, "ms_after_beep": 3300, "source": "detected"},
+        {"shot_number": 4, "time": 10.9, "ms_after_beep": 5900, "source": "detected"},
     ]
 
 
@@ -190,7 +190,7 @@ def test_compare_shot_without_ms_stays_unclassified(tmp_path: Path) -> None:
     assert resp.status_code == 200, resp.text
     (shooter,) = resp.json()["shooters"]
     # The heal skips ms-less shots; the others classify around it
-    # (5300 - 1800 = 3.5s -> movement).
+    # (5900 - 1800 = 4.1s -> movement).
     assert [s["interval_class"] for s in shooter["shots"]] == [
         "first_shot",
         "split",

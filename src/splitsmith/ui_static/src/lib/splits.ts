@@ -97,7 +97,7 @@ export function baselinesFromMatchDistributions(
  *  Mirrors ``CoachAutoClassifyConfig.split_max_s`` (config.py) - the
  *  auto-classifier's own split cutoff, so classifying a stage never
  *  moves the figures (issue #773). */
-export const SPLIT_STAT_SPLIT_MAX = 0.5;
+export const SPLIT_STAT_SPLIT_MAX = 1.0;
 
 /**
  * The splits eligible for split statistics (fastest/avg/slowest), in
