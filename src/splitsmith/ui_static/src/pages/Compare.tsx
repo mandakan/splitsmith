@@ -534,17 +534,18 @@ export function Compare() {
 
   if (error) {
     return (
-      <div className="px-7 py-8">
-        <div className="rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
+      <div className="px-4 py-4 md:px-7 md:py-5">
+        <PageHeader ordinal={pad2(stageNumber)} title="Compare" />
+        <p role="alert" className="text-sm text-led-text">
           {error}
-        </div>
+        </p>
       </div>
     );
   }
 
   if (!bundle) {
     return (
-      <div className="flex h-64 items-center justify-center gap-2 text-sm text-muted">
+      <div className="flex h-64 items-center justify-center gap-2 text-md text-muted">
         <Loader2 className="size-4 animate-spin" /> Loading compare data...
       </div>
     );

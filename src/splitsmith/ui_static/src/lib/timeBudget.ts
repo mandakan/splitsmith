@@ -76,8 +76,22 @@ export interface TimeBudget {
 
 const OUTLIER_FACTOR = 2;
 
-function baseline(distributions: CoachMatchDistributions | null, cls: BudgetClass) {
+/** The class's match baseline. The draw has no distribution row; its
+ *  baseline is derived from the payload's per-stage first-shot list. */
+function baseline(
+  distributions: CoachMatchDistributions | null,
+  cls: BudgetClass,
+): { mean_s: number | null; median_s: number | null } | null {
   if (!distributions || cls === "unclassified") return null;
+  if (cls === "first_shot") {
+    const v = (distributions.first_shot_seconds ?? []).filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+    if (v.length === 0) return null;
+    const mid = Math.floor(v.length / 2);
+    return {
+      mean_s: v.reduce((a, b) => a + b, 0) / v.length,
+      median_s: v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2,
+    };
+  }
   return distributions.distributions.find((d) => d.interval_class === cls) ?? null;
 }
 

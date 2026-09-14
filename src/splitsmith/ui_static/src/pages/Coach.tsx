@@ -359,6 +359,20 @@ function CoachMatchInner({ slug }: { slug: string }) {
   );
 }
 
+/** The draw's row for the averages table, from the per-stage first-shot list. */
+function firstShotRow(distributions: CoachMatchDistributions | null): { mean_s: number; median_s: number; p90_s: number; count: number } | null {
+  const v = (distributions?.first_shot_seconds ?? []).filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+  if (v.length === 0) return null;
+  const at = (q: number) => v[Math.min(v.length - 1, Math.floor(q * v.length))];
+  const mid = Math.floor(v.length / 2);
+  return {
+    mean_s: v.reduce((a, b) => a + b, 0) / v.length,
+    median_s: v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2,
+    p90_s: at(0.9),
+    count: v.length,
+  };
+}
+
 const LEGEND_BG: Record<string, string> = {
   first_shot: "bg-led",
   movement: "bg-beep",
@@ -438,7 +452,10 @@ function IntervalBreakdownCard({
         <Label className="text-right">Count</Label>
       </div>
       {classes.map((cls) => {
-        const d = distributions?.distributions.find((x) => x.interval_class === cls) ?? null;
+        const d =
+          cls === "first_shot"
+            ? firstShotRow(distributions)
+            : (distributions?.distributions.find((x) => x.interval_class === cls) ?? null);
         return (
           <div key={cls} className="numeral grid grid-cols-[minmax(110px,1fr)_repeat(4,minmax(0,72px))] items-center gap-3 border-b border-rule px-3.5 py-1.5 text-md text-ink-2 last:border-b-0">
             <span className="inline-flex items-center gap-2 font-sans text-ink">

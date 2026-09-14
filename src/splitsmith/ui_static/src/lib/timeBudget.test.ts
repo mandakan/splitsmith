@@ -26,8 +26,8 @@ function shots(times: number[], classes: (CoachIntervalClass | null)[]): CoachSh
 }
 
 const DIST = {
+  first_shot_seconds: [1.84, 1.97, 1.72, 1.69],
   distributions: [
-    { interval_class: "first_shot", mean_s: 1.81, median_s: 1.8, count: 4 },
     { interval_class: "movement", mean_s: 1.41, median_s: 1.4, count: 30 },
     { interval_class: "transition", mean_s: 0.73, median_s: 0.7, count: 40 },
     { interval_class: "split", mean_s: 0.405, median_s: 0.4, count: 20 },
@@ -54,6 +54,8 @@ describe("timeBudget", () => {
     expect(by.split.seconds).toBeCloseTo(1.54, 2);
     expect(by.split.avg).toBeCloseTo(0.385, 3);
     expect(by.split.vsMatch).toBeCloseTo(-0.02, 3);
+    // Draw baseline from first_shot_seconds: mean 1.805.
+    expect(by.first_shot.vsMatch).toBeCloseTo(1.97 - 1.805, 3);
   });
 
   it("names shots 13 and 29 as movement outliers (over twice the match median)", () => {

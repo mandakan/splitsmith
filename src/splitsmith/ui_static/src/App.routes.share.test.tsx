@@ -140,7 +140,7 @@ describe("share compare route (#700)", () => {
     expect(
       await screen.findByText(/this screen needs a desktop/i),
     ).toBeInTheDocument();
-    const link = screen.getByRole("link", { name: /^results$/i });
+    const link = screen.getByRole("link", { name: /^splits$/i });
     expect(link).toHaveAttribute("href", "/share/tok123/results");
   });
 });
