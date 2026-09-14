@@ -160,6 +160,7 @@ from ..comment_identity import (
     derive_handle,
     hash_author_key,
 )
+from ..compare import cards as compare_cards
 from ..compare import mp4_grid, project_loader
 from ..compute import ComputeBackend, LocalComputeBackend
 from ..config import (
@@ -2509,6 +2510,17 @@ def _run_compare_grid(handle: JobHandle, req: CompareGridRequest, match_root: st
         handle.timer.phase("render"),
         tempfile.TemporaryDirectory(dir=output_dir, prefix=".compare-grid-work-") as tmp,
     ):
+        title_page, closing = compare_cards.title_cards(
+            match,
+            compare_cards.CardOptions(
+                stage_titles=req.stage_titles,
+                title_duration_seconds=req.title_duration_seconds,
+                title_page=req.title_page,
+                title_info=req.title_info,
+                title_page_duration_seconds=req.title_page_duration_seconds,
+                closing_card=req.closing_card,
+            ),
+        )
         result = mp4_grid.render_grid_mp4(
             filtered,
             audio_label=audio_label,
@@ -2516,6 +2528,10 @@ def _run_compare_grid(handle: JobHandle, req: CompareGridRequest, match_root: st
             canvas=mp4_grid.GridCanvas(width=req.canvas_width, height=req.canvas_height),
             work_dir=Path(tmp),
             runner=_compare_grid_progress_runner(handle, plans),
+            title_page=title_page,
+            closing=closing,
+            stage_titles=req.stage_titles,
+            title_duration_seconds=req.title_duration_seconds,
         )
 
     handle.update(progress=1.0, message=f"Wrote {output_path}")
@@ -5502,6 +5518,16 @@ class CompareGridRequest(BaseModel):
     canvas_width: int = mp4_grid.DEFAULT_CANVAS_WIDTH
     canvas_height: int = mp4_grid.DEFAULT_CANVAS_HEIGHT
     output_name: str = "compare-grid"
+    # Issue #973. Generated cards on the rendered grid: a match title
+    # page (name, date, plus ``title_info`` as a free-text line), a
+    # closing card, and a card per stage (``slate`` before it, or a
+    # ``lower-third`` over its head). All off by default.
+    title_page: bool = False
+    title_info: str | None = None
+    title_page_duration_seconds: float = 3.0
+    closing_card: bool = False
+    stage_titles: Literal["none", "slate", "lower-third"] = "none"
+    title_duration_seconds: float = 1.5
 
 
 class RevealRequest(BaseModel):

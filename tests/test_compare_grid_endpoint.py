@@ -658,3 +658,71 @@ def test_an_ordinary_output_name_still_lands_in_the_match_exports_dir(
     assert job["status"] == "succeeded", job
     assert captured["output_path"].name == "bromma_grid-2026.v2.mp4"
     assert captured["output_path"].parent.name == "exports"
+
+
+# --- generated cards (issue #973) --------------------------------------------
+
+
+def test_card_fields_default_off_and_reach_the_renderer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The endpoint forwards the card knobs to ``render_grid_mp4``: a
+    ``MatchTitle`` from the match's name and date plus the free-text
+    line, the stage-card style and durations. Omitted, every one is off
+    and the render is the one it always was."""
+    from datetime import date
+
+    from splitsmith import match_model
+
+    captured: list[dict[str, Any]] = []
+
+    def fake_render(shooters: Any, *, audio_label: str, output_path: Path, **kwargs: Any) -> Any:
+        captured.append(kwargs)
+        return _fake_render_grid_mp4(shooters, audio_label=audio_label, output_path=output_path)
+
+    monkeypatch.setattr(pl_mod.fcpxml_gen, "probe_video", _fake_probe)
+    monkeypatch.setattr(mp4_grid_mod, "render_grid_mp4", fake_render)
+    match_root = _seed_match(tmp_path, shooters=["mathias"], stage_numbers=[1])
+    _write_trims(match_root, slug="mathias", stage_numbers=[1])
+    match = match_model.Match.load(match_root)
+    match.match_date = date(2026, 5, 1)
+    match.save(match_root)
+    client = _MatchClient(_match_create_app(project_root=match_root, project_name="Compare Match"))
+
+    response = client.post("/api/match/compare-export", json={"stage_numbers": [1], "audio_from": "mathias"})
+    assert response.status_code == 200
+    assert _wait_for_job(client, response.json()["id"])["status"] == "succeeded"
+    plain = captured[-1]
+    assert plain["title_page"] is None and plain["closing"] is None
+    assert plain["stage_titles"] == "none"
+
+    response = client.post(
+        "/api/match/compare-export",
+        json={
+            "stage_numbers": [1],
+            "audio_from": "mathias",
+            "title_page": True,
+            "title_info": "Level II",
+            "title_page_duration_seconds": 4.0,
+            "closing_card": True,
+            "stage_titles": "slate",
+            "title_duration_seconds": 2.0,
+        },
+    )
+    assert response.status_code == 200
+    assert _wait_for_job(client, response.json()["id"])["status"] == "succeeded"
+    carded = captured[-1]
+    assert carded["title_page"].text == match.name
+    assert carded["title_page"].info == ("2026-05-01", "Level II")
+    assert carded["title_page"].duration_seconds == 4.0
+    assert carded["closing"].text == match.name
+    assert carded["stage_titles"] == "slate"
+    assert carded["title_duration_seconds"] == 2.0
+
+
+def test_unknown_stage_title_kind_is_422(match_client_with_trims: _MatchClient) -> None:
+    response = match_client_with_trims.post(
+        "/api/match/compare-export",
+        json={"stage_numbers": [1], "audio_from": "mathias", "stage_titles": "banner"},
+    )
+    assert response.status_code == 422

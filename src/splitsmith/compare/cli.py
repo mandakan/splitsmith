@@ -4,20 +4,19 @@ from __future__ import annotations
 
 import subprocess
 import tempfile
-from dataclasses import dataclass, replace
 from pathlib import Path
 
 import typer
 from rich.console import Console
 
 from .. import camera_select
-from ..composition import MatchTitle
 from ..export_naming import slugify
 from ..match_model import Match, is_match_folder
 from ..overlay_theme import THEME_NAMES, ThemeName
 from . import emitter as emitter_mod
 from . import manifest as manifest_mod
 from . import mp4_grid, project_loader
+from .cards import CardOptions, title_cards
 
 compare_app = typer.Typer(
     name="compare",
@@ -448,7 +447,7 @@ def _export_from_match(
             overlay_theme=overlay_theme,
             summary_hold=summary_hold,
             cards=cards or CardOptions(),
-            match_title=match_title(match, extra=(cards.title_info if cards else None)),
+            match=match,
         )
         return
 
@@ -474,7 +473,7 @@ def _render_grid_mp4(
     overlay_theme: ThemeName = "splitsmith",
     summary_hold: float = 0.0,
     cards: CardOptions | None = None,
-    match_title: MatchTitle | None = None,
+    match: Match | None = None,
 ) -> None:
     """Render the grid straight to MP4, owning the scratch work dir.
 
@@ -537,16 +536,7 @@ def _render_grid_mp4(
         console.print(f"[yellow]Note:[/] {message}")
 
     cards = cards or CardOptions()
-    # The title page and the closing card say the same thing: the match
-    # name over its date and the free-text line. It is the data there is.
-    title = match_title if cards.title_page and match_title is not None else None
-    closing = (
-        replace(match_title, duration_seconds=cards.title_page_duration_seconds)
-        if cards.closing_card and match_title is not None
-        else None
-    )
-    if title is not None:
-        title = replace(title, duration_seconds=cards.title_page_duration_seconds)
+    title, closing = title_cards(match, cards) if match is not None else (None, None)
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=output.parent, prefix=".compare-grid-work-") as tmp:
@@ -577,31 +567,6 @@ def _render_grid_mp4(
     rendered = len(result.stages) - len(result.failed)
     note = f", {result.degradation_summary}" if result.degradations else ""
     console.print(f"[green]Wrote[/] {output} ({rendered}/{len(result.stages)} stages{note})")
-
-
-@dataclass(frozen=True)
-class CardOptions:
-    """The generated-card flags, carried together so the two internal
-    render helpers take one argument rather than six (issue #973)."""
-
-    stage_titles: mp4_grid.StageTitleKind = "none"
-    title_duration_seconds: float = 1.5
-    title_page: bool = False
-    title_info: str | None = None
-    title_page_duration_seconds: float = 3.0
-    closing_card: bool = False
-
-
-def match_title(match: Match, *, extra: str | None = None) -> MatchTitle:
-    """The grid's match title card: the match name over its date (when
-    known) and the caller's free-text line. Only what the match carries;
-    a blank line is never printed."""
-    info: list[str] = []
-    if match.match_date is not None:
-        info.append(match.match_date.isoformat())
-    if extra and extra.strip():
-        info.append(extra.strip())
-    return MatchTitle(text=match.name, info=tuple(info))
 
 
 def _resolve_shooter_slug(match: Match, match_root: Path, name_or_slug: str) -> str | None:
