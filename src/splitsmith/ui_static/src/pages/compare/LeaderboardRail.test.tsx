@@ -66,9 +66,9 @@ describe("LeaderboardRail", () => {
     render(
       <LeaderboardRail shooters={[shooter("a", "Empty Shooter", null, [])]} />,
     );
-    expect(screen.getByTestId("rail-draw")).toHaveTextContent("-");
-    expect(screen.getByTestId("rail-fast")).toHaveTextContent("-");
-    expect(screen.getByTestId("rail-avg")).toHaveTextContent("-");
+    expect(screen.getByTestId("rail-draw")).toHaveTextContent("\u2014");
+    expect(screen.getByTestId("rail-fast")).toHaveTextContent("\u2014");
+    expect(screen.getByTestId("rail-avg")).toHaveTextContent("\u2014");
   });
 
   it("renders placeholders when no interval counts as a split", () => {
@@ -83,7 +83,7 @@ describe("LeaderboardRail", () => {
       />,
     );
     expect(screen.getByTestId("rail-draw")).toHaveTextContent("3.00");
-    expect(screen.getByTestId("rail-fast")).toHaveTextContent("-");
-    expect(screen.getByTestId("rail-avg")).toHaveTextContent("-");
+    expect(screen.getByTestId("rail-fast")).toHaveTextContent("\u2014");
+    expect(screen.getByTestId("rail-avg")).toHaveTextContent("\u2014");
   });
 });

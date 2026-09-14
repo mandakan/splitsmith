@@ -1,4 +1,3 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * Compare route (/compare/:stage) - multi-shooter cockpit (#328, #700).
  *
@@ -25,7 +24,6 @@
  */
 
 import {
-  ArrowDownToLine,
   ArrowLeft,
   ArrowRight,
   ChevronDown,
@@ -50,6 +48,8 @@ import {
 
 import { Avatar } from "@/components/ui";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/Label";
+import { PageHeader } from "@/components/ui/PageHeader";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { Snackbar, type SnackState } from "@/components/Snackbar";
 import {
@@ -564,71 +564,15 @@ export function Compare() {
           : "h-[calc(100dvh-var(--shell-header-h,86px))] min-h-[560px]",
       )}
     >
-      {/* Merged header row: stage nav + title + tab strip, then the
-       *  chips, layout pills and export in the right cluster. */}
-      <div className="flex flex-none flex-wrap items-center gap-x-4 gap-y-2 border-b border-rule pb-3">
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={prevStage}
-            aria-label="Previous stage"
-            className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink"
-          >
-            <ArrowLeft className="size-4" />
-          </button>
-          <button
-            type="button"
-            onClick={nextStage}
-            aria-label="Next stage"
-            className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink"
-          >
-            <ArrowRight className="size-4" />
-          </button>
-        </div>
-        <h1 className="font-display text-2xl font-bold uppercase leading-none tracking-tight text-ink">
-          <span className="text-led">STAGE {pad2(stageNumber)}</span>
-          <span className="mx-2 text-whisper">·</span>
-          <span>{bundle.stage_name}</span>
-        </h1>
-        <nav
-          aria-label="Stage views"
-          className="inline-flex overflow-hidden rounded-lg border border-rule bg-surface-2 p-0.5"
-        >
-          {/* Audit/Coach are operator-only surfaces (mutate state, need a
-              session) - hidden on the anonymous share view (#700). */}
-          {!shareView && (
-            <button
-              type="button"
-              onClick={() => {
-                // Compare is multi-shooter; pick the audio source (the
-                // primary shown in this view) as the target shooter so
-                // the user lands on the same camera they were watching.
-                const target = audioSlug ?? orderedShooters[0]?.slug;
-                if (target) navigate(href("audit", target, String(stageNumber)));
-              }}
-              className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink-2"
-            >
-              Audit
-            </button>
-          )}
-          <span className="tab-pill-led-fill inline-flex min-h-9 items-center rounded-md px-3.5">
-            Compare
-          </span>
-          {!shareView && (
-            <button
-              type="button"
-              onClick={() => {
-                const target = audioSlug ?? orderedShooters[0]?.slug;
-                if (target) navigate(href("coach", target, String(stageNumber)));
-              }}
-              className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink"
-            >
-              Coach
-            </button>
-          )}
-        </nav>
-        <div className="ml-auto flex flex-wrap items-center gap-3">
-          <div className="flex flex-wrap items-center gap-2">
+      <PageHeader
+        ordinal={pad2(stageNumber)}
+        title={bundle.stage_name}
+        className="mb-3"
+        sub={
+          <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span>
+              {orderedShooters.length} {orderedShooters.length === 1 ? "shooter" : "shooters"}
+            </span>
             {orderedShooters.map((shooter) => (
               <ShooterChip
                 key={shooter.slug}
@@ -639,47 +583,60 @@ export function Compare() {
                 onPickAudio={() => setAudioSlug(shooter.slug)}
               />
             ))}
-          </div>
-          <div className="inline-flex overflow-hidden rounded-lg border border-rule bg-surface-2 p-0.5">
-            <LayoutPill
-              label="2x2"
-              active={layout === "grid"}
-              onClick={() => setLayout("grid")}
-            />
-            <LayoutPill
-              label="1x4"
-              active={layout === "row"}
-              onClick={() => setLayout("row")}
-            />
-            <LayoutPill
-              label="Stack"
-              active={layout === "stack"}
-              onClick={() => setLayout("stack")}
-            />
-          </div>
-          {/* Grid export ships with #328; disabled + badged like the
-           *  Export page's compare ModeOption so the two surfaces agree.
-           *  Operator-only affordance (mutates nothing yet, but the
-           *  destination Export page needs a session) - hidden on the
-           *  anonymous share view, same as Audit/Coach above (#700). */}
-          {!shareView && (
-            <Button
-              type="button"
-              variant="outline"
-              disabled
-              title="Multi-shooter grid export arrives with #328. Single-shooter export lives on the Export page."
-            >
-              <ArrowDownToLine className="size-3.5" />
-              <span className="font-display uppercase tracking-[0.08em]">
+            {/* The layout picker offers only what the shooter count allows:
+                one shooter is one tile, no picker. */}
+            {playableShooters.length >= 2 ? (
+              <span role="group" aria-label="Layout" className="inline-flex gap-0.5 rounded-md border border-rule-strong bg-surface-2 p-0.5">
+                <LayoutPill label="2 \u00d7 2" active={layout === "grid"} onClick={() => setLayout("grid")} />
+                <LayoutPill label="1 \u00d7 4" active={layout === "row"} onClick={() => setLayout("row")} />
+                <LayoutPill label="Stack" active={layout === "stack"} onClick={() => setLayout("stack")} />
+              </span>
+            ) : null}
+          </span>
+        }
+        actions={
+          <>
+            {/* Audit and Coach are operator-only surfaces (mutate state,
+                need a session): hidden on the anonymous share view (#700).
+                They land on the audio shooter, the camera being watched. */}
+            {!shareView ? (
+              <Button
+                type="button"
+                onClick={() => {
+                  const target = audioSlug ?? orderedShooters[0]?.slug;
+                  if (target) navigate(href("audit", target, String(stageNumber)));
+                }}
+              >
+                Audit
+              </Button>
+            ) : null}
+            {!shareView ? (
+              <Button
+                type="button"
+                onClick={() => {
+                  const target = audioSlug ?? orderedShooters[0]?.slug;
+                  if (target) navigate(href("coach", target, String(stageNumber)));
+                }}
+              >
+                Coach
+              </Button>
+            ) : null}
+            {/* Grid export ships with #328; disabled with the reason as its
+                title, no badge. Hidden on the share view like Audit. */}
+            {!shareView ? (
+              <Button type="button" disabled title="Multi-shooter grid export arrives with a later release. Single-shooter export lives on the Export page.">
                 Export FCPXML
-              </span>
-              <span className="rounded border border-rule px-1.5 font-mono text-[0.625rem] font-semibold text-muted">
-                #328
-              </span>
+              </Button>
+            ) : null}
+            <Button type="button" size="icon" onClick={prevStage} aria-label="Previous stage">
+              <ArrowLeft className="size-4" aria-hidden />
             </Button>
-          )}
-        </div>
-      </div>
+            <Button type="button" size="icon" onClick={nextStage} aria-label="Next stage">
+              <ArrowRight className="size-4" aria-hidden />
+            </Button>
+          </>
+        }
+      />
 
       {/* Unfinished banner: when at least one shooter is playable, the
        *  grid renders the playable subset. Shooters without a cached
@@ -820,12 +777,10 @@ function UnfinishedShootersBanner({
   };
 
   return (
-    <div className="rounded-2xl border border-rule bg-surface px-5 py-3 text-sm text-muted">
+    <div role="status" className="rounded-[10px] border border-rule bg-surface px-3.5 py-2.5 text-md text-muted">
       <div className="flex flex-wrap items-center gap-3">
-        <span className="font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-ink-2">
-          Missing footage
-        </span>
-        <span className="text-ink-2">{unfinished.length}</span>
+        <Label tone="live">Missing footage</Label>
+        <span className="numeral text-ink-2">{unfinished.length}</span>
         {shareView ? (
           <span>
             {unfinished.length === 1
@@ -847,9 +802,9 @@ function UnfinishedShootersBanner({
           return (
             <div
               key={s.slug}
-              className="inline-flex items-center gap-2 rounded-lg border border-rule-strong bg-surface-2 px-3 py-1.5 text-xs"
+              className="inline-flex items-center gap-2 rounded-md border border-rule-strong bg-surface-2 px-2.5 py-1 text-sm"
             >
-              <span className="font-semibold text-ink-2">{s.name}</span>
+              <span className="font-medium text-ink-2">{s.name}</span>
               {/* Both CTAs are operator actions (rebuild POSTs, audit
                   needs a session) - a share viewer just sees the name
                   and the "missing footage" status above (#700). Rebuild
@@ -858,31 +813,17 @@ function UnfinishedShootersBanner({
                   page whose primary value is reading. */}
               {shareView ? null : auditedButUncached ? (
                 queued ? (
-                  <span className="text-[0.6875rem] uppercase tracking-[0.08em] text-done">
-                    Build queued -- check Jobs
-                  </span>
+                  <span className="text-sm text-done">Build queued</span>
                 ) : editDenied ? null : (
-                  <button
-                    type="button"
-                    onClick={() => rebuild(s.slug)}
-                    disabled={busySlug === s.slug}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-rule-strong bg-surface px-2 py-1 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-ink hover:border-led hover:text-led disabled:opacity-50"
-                  >
-                    {busySlug === s.slug ? (
-                      <Loader2 className="size-3 animate-spin" />
-                    ) : null}
+                  <Button type="button" size="sm" onClick={() => rebuild(s.slug)} disabled={busySlug === s.slug}>
+                    {busySlug === s.slug ? <Loader2 className="size-3 animate-spin" aria-hidden /> : null}
                     Build trim cache
-                  </button>
+                  </Button>
                 )
               ) : (
-                <button
-                  type="button"
-                  onClick={() => onOpenInAudit(s.slug)}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-rule-strong bg-surface px-2 py-1 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-ink hover:border-led hover:text-led"
-                >
-                  <ArrowRight className="size-3" />
+                <Button type="button" size="sm" onClick={() => onOpenInAudit(s.slug)}>
                   Open in audit
-                </button>
+                </Button>
               )}
             </div>
           );
@@ -933,15 +874,9 @@ function CompareEmptyState({
           </p>
           <div className="mt-6 flex flex-wrap items-center justify-center gap-2">
             {unfinished.map((s) => (
-              <button
-                key={s.slug}
-                type="button"
-                onClick={() => onOpenInAudit(s.slug)}
-                className="inline-flex items-center gap-2 rounded-lg border border-rule-strong bg-surface-2 px-3 py-2 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-ink hover:border-led hover:text-led"
-              >
-                <ArrowRight className="size-3.5" />
+              <Button key={s.slug} type="button" onClick={() => onOpenInAudit(s.slug)}>
                 Audit {s.name}
-              </button>
+              </Button>
             ))}
           </div>
         </>
@@ -968,32 +903,22 @@ function ShooterChip({
   onPickAudio: () => void;
 }) {
   return (
-    <div
+    <span
       className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-2 py-1 text-[0.8125rem] transition-colors",
-        visible
-          ? "border-rule-strong bg-surface-2"
-          : "border-rule bg-surface-2/40 text-muted opacity-60",
-        isAudio &&
-          "border-led shadow-[0_0_0_1px_var(--color-led-deep),0_0_14px_var(--color-led-glow)]",
+        "inline-flex items-center gap-1.5 rounded-full border py-0.5 pl-2.5 pr-1 text-sm",
+        visible ? "border-rule-strong text-ink-2" : "border-rule text-subtle",
+        isAudio && "border-beep/60",
       )}
     >
-      <Avatar
-        size="xs"
-        initials={initials(shooter.name)}
-        tone={undefined}
-        seed={shooter.slug}
-        name={shooter.name}
-      />
       <button
         type="button"
         onClick={onToggleVisibility}
-        className="font-display text-[0.6875rem] font-semibold uppercase tracking-[0.06em] text-ink-2 hover:text-ink"
         title={`${shooter.name} - ${visible ? "hide" : "show"}`}
         aria-label={`${shooter.name} - ${visible ? "hide" : "show"}`}
         aria-pressed={visible}
+        className="hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
       >
-        {initials(shooter.name)}
+        {shooter.name}
       </button>
       <button
         type="button"
@@ -1002,15 +927,13 @@ function ShooterChip({
         aria-label={`${shooter.name} - audio source`}
         aria-pressed={isAudio}
         className={cn(
-          "inline-flex size-6 items-center justify-center rounded-full transition-colors",
-          isAudio
-            ? "bg-led-fill text-ink shadow-[0_0_10px_var(--color-led-glow)]"
-            : "bg-surface-3 text-subtle hover:text-ink",
+          "inline-flex size-5 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
+          isAudio ? "text-beep" : "text-subtle hover:text-ink",
         )}
       >
-        {isAudio ? <Volume2 className="size-3" /> : <VolumeX className="size-3" />}
+        {isAudio ? <Volume2 className="size-3" aria-hidden /> : <VolumeX className="size-3" aria-hidden />}
       </button>
-    </div>
+    </span>
   );
 }
 
@@ -1018,25 +941,15 @@ function ShooterChip({
 /* Layout                                                                     */
 /* -------------------------------------------------------------------------- */
 
-function LayoutPill({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
+function LayoutPill({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "inline-flex min-h-9 items-center rounded-md px-3.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] transition-colors",
-        active
-          ? "bg-ink text-bg"
-          : "text-muted hover:text-ink",
+        "rounded px-2.5 py-0.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
+        active ? "bg-surface-3 text-ink" : "text-muted hover:text-ink",
       )}
     >
       {label}
@@ -1087,9 +1000,7 @@ function VideoTile({
           seed={shooter.slug}
           name={shooter.name}
         />
-        <span className="font-display text-[0.75rem] font-bold uppercase tracking-[0.06em] text-ink">
-          {shooter.name}
-        </span>
+        <span className="text-sm font-medium text-ink">{shooter.name}</span>
         <span className="ml-auto flex items-center gap-2">
           {cams && cams.length > 1 ? (
             <span className="relative inline-flex items-center">
@@ -1097,7 +1008,7 @@ function VideoTile({
                 value={camIndex}
                 onChange={(e) => onPickCam(Number(e.target.value))}
                 aria-label={`${shooter.name} - camera`}
-                className="cursor-pointer appearance-none bg-transparent pr-4 font-mono text-[0.625rem] font-bold uppercase tracking-[0.1em] text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
+                className="cursor-pointer appearance-none bg-transparent pr-4 text-sm text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
               >
                 {cams.map((c, i) => (
                   <option key={c.path} value={i} disabled={c.beep_in_clip == null}>
@@ -1112,9 +1023,9 @@ function VideoTile({
             </span>
           ) : null}
           {isAudio && (
-            <span className="inline-flex items-center gap-1 rounded border border-led-deep bg-led px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-ink shadow-[0_0_8px_var(--color-led-glow)]">
-              <Volume2 className="size-2.5" />
-              Audio
+            <span className="inline-flex items-center gap-1 text-sm text-beep">
+              <Volume2 className="size-3" aria-hidden />
+              audio
             </span>
           )}
         </span>

@@ -28,6 +28,15 @@ describe("matchNavItems shape", () => {
   });
 });
 
+describe("matchNavItems compare entry", () => {
+  it("shows Compare only on a multi-shooter match, landing on the first audited stage", () => {
+    expect(matchNavItems(base).find((i) => i.key === "compare")).toBeUndefined();
+    const items = matchNavItems({ ...base, multiShooter: true, compareStage: 3 });
+    expect(items.map((i) => i.key)).toEqual(["overview", "videos", "audit", "triage", "results", "coach", "compare", "export"]);
+    expect(items.find((i) => i.key === "compare")).toMatchObject({ group: "analyse", to: "/match/m1/compare/3", label: "Compare" });
+  });
+});
+
 describe("matchNavItems audit entry", () => {
   it("badges the beeps still to confirm (beep confirmation is Audit's step 1)", () => {
     const audit = matchNavItems({ ...base, beepReviewPendingCount: 2 }).find((i) => i.key === "audit");

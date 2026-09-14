@@ -621,6 +621,8 @@ export function MatchShell() {
             hasFootage: shooters.some((s) => s.video_count > 0),
             beepReviewPendingCount: beepReviewPending,
             triageFlaggedCount,
+            multiShooter: shooters.length > 1,
+            compareStage: stages.find((s) => s.status === "audited")?.stage_number ?? 1,
             footageHint: FOOTAGE_HINT,
           })}
           header={{ matchName: project?.name ?? health?.project_name ?? "..." }}
@@ -660,6 +662,8 @@ export function MatchShell() {
           stages={stages}
           beepReviewPendingCount={beepReviewPending}
           triageFlaggedCount={triageFlaggedCount}
+          multiShooter={shooters.length > 1}
+          compareStage={stages.find((s) => s.status === "audited")?.stage_number ?? 1}
           awaiting={
             stages.length > 0 && stages.every((s) => s.status === "todo")
           }
