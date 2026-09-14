@@ -4344,6 +4344,15 @@ def test_beep_confirm_seeds_the_stub_in_hosted_state_docs(tmp_path: Path) -> Non
     "already has a doc" check reads back through the same store -- so a
     re-confirm on an audited stage must not wipe shot data there either.
     Neither half had a hosted test; only the status *reader* did.
+
+    The store is a file-backed SQLite with a NullPool, not ``:memory:``
+    (#998). The first confirm chains a trim job (UX PR 5) that runs on a
+    worker thread with its own event loop and persists the project
+    through this same store; an in-memory SQLite is one shared
+    connection, so that thread's session and the test's shared one
+    transaction and its rollback could discard the test's audit write,
+    which then read back as the stub. A file DB gives every session its
+    own connection, the same shape the hosted boot path uses.
     """
     import asyncio as _asyncio
 
@@ -4351,7 +4360,7 @@ def test_beep_confirm_seeds_the_stub_in_hosted_state_docs(tmp_path: Path) -> Non
     from splitsmith.db import Base, ProjectStateStore, User, create_engine, sessionmaker
     from splitsmith.match_project import is_stub_audit
 
-    engine = create_engine("sqlite+aiosqlite:///:memory:")
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'state.sqlite'}", pool_disabled=True)
     sf = sessionmaker(engine)
 
     async def _setup_db() -> str:
