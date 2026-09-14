@@ -13,13 +13,17 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from .. import youtube_sidecar
 from ..youtube import oauth
 from ..youtube.client import default_http
+from ..youtube.upload import AlreadyUploadedError, connected_client, upload_export
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -159,3 +163,95 @@ def delete_youtube_session(request: Request) -> dict[str, Any]:
         oauth.clear_connection()
     request.app.state.youtube_connect = None
     return {"connected": False}
+
+
+# ---------------------------------------------------------------------------
+# Upload: the route and the job body
+# ---------------------------------------------------------------------------
+
+
+class YouTubeUploadRequest(BaseModel):
+    """Body for POST /api/shooters/{slug}/exports/youtube-upload. ``filename``
+    is a basename under the shooter's ``exports/`` dir, the key
+    ``download_export_file`` takes."""
+
+    filename: str
+    privacy: Literal["unlisted", "private", "public"] = "unlisted"
+    again: bool = False
+
+
+def exports_dir_for(state: Any, slug: str) -> Path:
+    return state.shooter_project(slug).exports_path(state.shooter_root(slug)).resolve()
+
+
+def confine_export_filename(exports_dir: Path, filename: str) -> Path:
+    """The ``download_export_file`` rule: the resolved path must stay
+    inside ``exports/``; ``..`` traversal is a 400."""
+    target = (exports_dir / filename).resolve()
+    try:
+        target.relative_to(exports_dir)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="filename escapes the exports directory") from exc
+    return target
+
+
+def _format_mb(n: int) -> str:
+    if n >= 1024**3:
+        return f"{n / 1024**3:.1f} GB"
+    return f"{n // (1024 * 1024)} MB"
+
+
+@router.post("/api/shooters/{slug}/exports/youtube-upload")
+async def submit_youtube_upload(slug: str, req: YouTubeUploadRequest, request: Request) -> JSONResponse:
+    """Queue a ``youtube_upload`` job for one rendered MP4. Everything
+    that can refuse it is checked here, before a job exists."""
+    _local_gate()
+    state = request.app.state.splitsmith_state
+    if oauth.load_connection() is None:
+        raise HTTPException(status_code=409, detail="not connected to YouTube")
+    exports_dir = exports_dir_for(state, slug)
+    target = confine_export_filename(exports_dir, req.filename)
+    if target.suffix.lower() != ".mp4":
+        raise HTTPException(status_code=400, detail="only a rendered .mp4 can be uploaded")
+    if not target.exists():
+        raise HTTPException(status_code=400, detail=f"{req.filename} is not in exports/")
+    if not youtube_sidecar.sidecar_path_for(target).exists():
+        raise HTTPException(status_code=400, detail=f"{req.filename} has no -youtube.json sidecar beside it")
+    job = await state.jobs.submit(
+        kind="youtube_upload",
+        shooter_slug=slug,
+        args={"slug": slug, "filename": req.filename, "privacy": req.privacy, "again": req.again},
+    )
+    return JSONResponse(job.model_dump(mode="json"))
+
+
+def run_youtube_upload(
+    handle: Any, *, state: Any, slug: str, filename: str, privacy: str, again: bool
+) -> None:
+    """Job body for ``youtube_upload``. Progress is bytes sent; a cancel
+    lands between chunks through ``handle.check_cancel``. Registered by
+    ``server`` with ``state`` bound."""
+    handle.update(progress=0.0, message="Connecting to YouTube...")
+    client, conn = connected_client()
+    mp4 = confine_export_filename(exports_dir_for(state, slug), filename)
+    total = mp4.stat().st_size
+
+    def on_progress(sent: int, _total: int) -> None:
+        handle.update(
+            progress=sent / max(1, total), message=f"Uploading {_format_mb(sent)} of {_format_mb(total)}"
+        )
+
+    try:
+        record = upload_export(
+            mp4,
+            client=client,
+            privacy=privacy,  # type: ignore[arg-type]
+            channel_title=conn.channel_title,
+            again=again,
+            progress=on_progress,
+            check_cancel=handle.check_cancel,
+        )
+    except AlreadyUploadedError as exc:
+        raise RuntimeError(f"already uploaded: {exc.record.url}") from exc
+    handle.set_result({"video_id": record.video_id, "url": record.url, "notes": record.notes})
+    handle.update(progress=1.0, message=f"Uploaded {record.url}")

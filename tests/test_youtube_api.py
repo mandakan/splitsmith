@@ -124,3 +124,141 @@ def test_routes_404_in_hosted_mode(client, monkeypatch: pytest.MonkeyPatch) -> N
         ("delete", "/api/settings/youtube/session"),
     ):
         assert getattr(client, method)(path).status_code == 404, path
+
+
+# --- upload route and job ---------------------------------------------------
+
+
+def _seed_render(client_and_root: tuple[Any, Path], name: str = "bromma.mp4") -> Path:
+    from splitsmith import youtube_sidecar
+
+    _client, project_root = client_and_root
+    exports = project_root / "shooters" / "me" / "exports"
+    exports.mkdir(parents=True, exist_ok=True)
+    mp4 = exports / name
+    mp4.write_bytes(b"\x00" * 2048)
+    youtube_sidecar.write_sidecar(
+        youtube_sidecar.YouTubeSidecar(title="Bromma", description="0:00 Stage 1", tags=["ipsc"]),
+        youtube_sidecar.sidecar_path_for(mp4),
+    )
+    return mp4
+
+
+@pytest.fixture
+def export_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from .test_ui_server import _seed_match_export_project
+
+    monkeypatch.setenv(oauth.ENV_CLIENT_ID, "cid")
+    monkeypatch.setenv(oauth.ENV_CLIENT_SECRET, "sec")
+    return _seed_match_export_project(tmp_path)
+
+
+def _fake_upload(monkeypatch: pytest.MonkeyPatch, *, video_id: str = "vid1") -> dict[str, Any]:
+    from splitsmith import youtube_sidecar
+
+    seen: dict[str, Any] = {}
+
+    def fake_upload_export(
+        mp4: Path,
+        *,
+        client: Any,
+        privacy: str,
+        channel_title: str = "",
+        again: bool = False,
+        progress: Any = None,
+        check_cancel: Any = None,
+    ) -> youtube_sidecar.UploadRecord:
+        seen.update(mp4=mp4, privacy=privacy, again=again, channel_title=channel_title)
+        if progress:
+            progress(1024, 2048)
+            progress(2048, 2048)
+        rec = youtube_sidecar.UploadRecord(
+            video_id=video_id,
+            url=f"https://youtu.be/{video_id}",
+            privacy=privacy,
+            uploaded_at=datetime.now(UTC),
+            channel_title=channel_title,
+        )
+        sc = youtube_sidecar.load_sidecar(youtube_sidecar.sidecar_path_for(mp4))
+        sc.upload = rec
+        youtube_sidecar.write_sidecar(sc, youtube_sidecar.sidecar_path_for(mp4))
+        return rec
+
+    monkeypatch.setattr(youtube_api, "upload_export", fake_upload_export)
+    monkeypatch.setattr(youtube_api, "connected_client", lambda: (object(), _conn("Mine")))
+    return seen
+
+
+def test_upload_route_runs_the_job_and_records_the_video(
+    export_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith import youtube_sidecar
+
+    from .test_ui_server import _wait_for_job
+
+    client, _root = export_client
+    mp4 = _seed_render(export_client)
+    oauth.save_connection(_conn("Mine"))
+    seen = _fake_upload(monkeypatch)
+    r = client.post(
+        "/api/shooters/me/exports/youtube-upload", json={"filename": "bromma.mp4", "privacy": "public"}
+    )
+    assert r.status_code == 200, r.text
+    final = _wait_for_job(client, r.json()["id"])
+    assert final["status"] == "succeeded", final
+    assert final["result"]["url"] == "https://youtu.be/vid1"
+    assert final["progress"] == 1.0
+    assert seen["privacy"] == "public" and seen["mp4"] == mp4.resolve() and seen["again"] is False
+    assert seen["channel_title"] == "Mine"
+    stored = youtube_sidecar.load_sidecar(youtube_sidecar.sidecar_path_for(mp4)).upload
+    assert stored is not None and stored.video_id == "vid1"
+
+
+def test_upload_route_refusals(export_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    client, root = export_client
+    _seed_render(export_client)
+    r = client.post("/api/shooters/me/exports/youtube-upload", json={"filename": "bromma.mp4"})
+    assert r.status_code == 409
+    oauth.save_connection(_conn())
+    _fake_upload(monkeypatch)
+    for bad in ("../bromma.mp4", "bromma.fcpxml", "missing.mp4"):
+        r = client.post("/api/shooters/me/exports/youtube-upload", json={"filename": bad})
+        assert r.status_code == 400, (bad, r.text)
+    bare = root / "shooters" / "me" / "exports" / "bare.mp4"
+    bare.write_bytes(b"0")
+    r = client.post("/api/shooters/me/exports/youtube-upload", json={"filename": "bare.mp4"})
+    assert r.status_code == 400 and "sidecar" in r.json()["detail"]
+    r = client.post(
+        "/api/shooters/me/exports/youtube-upload", json={"filename": "bromma.mp4", "privacy": "x"}
+    )
+    assert r.status_code == 422
+
+
+def test_upload_job_reports_already_uploaded_as_a_failure_with_the_url(
+    export_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith import youtube_sidecar
+    from splitsmith.youtube.upload import AlreadyUploadedError
+
+    from .test_ui_server import _wait_for_job
+
+    client, _root = export_client
+    _seed_render(export_client)
+    oauth.save_connection(_conn())
+    rec = youtube_sidecar.UploadRecord(
+        video_id="old", url="https://youtu.be/old", privacy="unlisted", uploaded_at=datetime.now(UTC)
+    )
+
+    def refuse(*a: Any, **kw: Any) -> None:
+        raise AlreadyUploadedError(rec)
+
+    monkeypatch.setattr(youtube_api, "upload_export", refuse)
+    monkeypatch.setattr(youtube_api, "connected_client", lambda: (object(), _conn()))
+    r = client.post("/api/shooters/me/exports/youtube-upload", json={"filename": "bromma.mp4"})
+    final = _wait_for_job(client, r.json()["id"])
+    assert final["status"] == "failed" and "https://youtu.be/old" in final["error"]
+
+
+def test_format_mb() -> None:
+    assert youtube_api._format_mb(412 * 1024 * 1024) == "412 MB"
+    assert youtube_api._format_mb(int(1.9 * 1024**3)) == "1.9 GB"

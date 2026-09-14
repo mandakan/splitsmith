@@ -4314,6 +4314,9 @@ def register_job_bodies(state: AppState) -> None:
     state.jobs.bodies.register("match_export", _run_match_export)
     state.jobs.bodies.register("generate_proxy", _run_generate_proxy)
     state.jobs.bodies.register("compare-grid", functools.partial(_run_compare_grid, state=state))
+    from .youtube_api import run_youtube_upload
+
+    state.jobs.bodies.register("youtube_upload", functools.partial(run_youtube_upload, state=state))
     state.jobs.bodies.register("sync_match", _run_sync_match)
 
 
