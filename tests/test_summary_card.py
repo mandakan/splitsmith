@@ -235,4 +235,7 @@ def test_overlay_verb_writes_the_card_beside_the_overlay(
     data = captured["data"]
     assert data.stage_time_seconds == 8.0
     assert [s.time_from_beep for s in data.shots] == [0.5]
-    assert "stage1_summary.mov" in result.output
+    # Joined across newlines: on a narrow CI terminal rich would otherwise
+    # wrap the path mid-name and the assertion would fail for the wrong
+    # reason (#617).
+    assert "stage1_summary.mov" in result.output.replace("\n", "")

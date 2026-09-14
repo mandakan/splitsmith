@@ -1250,7 +1250,9 @@ def overlay(
         except SummaryCardError as exc:
             console.print(f"[red]Error:[/] summary card not written: {exc}")
             raise typer.Exit(code=1) from exc
-        console.print(f"[green]Wrote[/] {card.mov_path} (+ {card.png_path.name})")
+        # ``soft_wrap``: a path is one line the user copies; rich's hard
+        # wrap would break it mid-name (#617).
+        console.print(f"[green]Wrote[/] {card.mov_path} (+ {card.png_path.name})", soft_wrap=True)
         for note in card.degradations:
             console.print(f"[yellow]note[/] {note}", soft_wrap=True)
 
