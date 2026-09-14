@@ -518,7 +518,7 @@ function ExportInner({ slug }: { slug: string }) {
     return <div className="px-7 py-6 text-md text-muted">Loading project...</div>;
   }
 
-  const shooterName = shooters.find((s) => s.slug === slug)?.name ?? project?.competitor_name ?? null;
+  const shooterName = project?.competitor_name ?? shooters.find((s) => s.slug === slug)?.name ?? null;
   const totalStages = rows.length;
   const lines = summaryLines({
     mode,

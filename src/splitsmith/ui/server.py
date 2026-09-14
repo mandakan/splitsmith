@@ -5891,11 +5891,23 @@ def _next_step_from_statuses(
         return None
     if video_total == 0:
         return NextStep(kind="footage")
+    # A stage that can be audited now (footage and a time, not saved yet)
+    # beats one that first needs footage or scores: the card names work
+    # the operator can do from the Audit page.
     for slug, statuses in per_shooter:
         for n in sorted(statuses):
-            if statuses[n] not in (StageStatus.audited, StageStatus.skipped):
+            if statuses[n] in (StageStatus.ready, StageStatus.in_progress):
                 return NextStep(
                     kind="audit",
+                    shooter_slug=slug,
+                    stage_number=n,
+                    stage_name=stage_names.get(n, f"Stage {n}"),
+                )
+    for slug, statuses in per_shooter:
+        for n in sorted(statuses):
+            if statuses[n] in (StageStatus.todo, StageStatus.partial):
+                return NextStep(
+                    kind="footage",
                     shooter_slug=slug,
                     stage_number=n,
                     stage_name=stage_names.get(n, f"Stage {n}"),
@@ -5947,6 +5959,7 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
             video_total = 0
             shooter_names: list[str] = []
             per_shooter: list[tuple[str, dict[int, StageStatus]]] = []
+            stage_names = {s.stage_number: s.stage_name for s in match.stages}
             for slug in match.shooters:
                 shooter_root = match_model.Match.shooter_root(path, slug)
                 try:
@@ -5962,14 +5975,14 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
                 statuses = legacy.stage_statuses(shooter_root)
                 audited_total += sum(1 for st in statuses.values() if st == StageStatus.audited)
                 per_shooter.append((slug, statuses))
+                for st_entry in legacy.stages:
+                    stage_names.setdefault(st_entry.stage_number, st_entry.stage_name)
                 video_total += len(legacy.all_videos())
                 shooter_names.append(shooter.name or slug)
             detail.shooter_names = shooter_names
             detail.stages_audited = audited_total // max(len(match.shooters), 1) if match.shooters else 0
             detail.video_count = video_total
-            detail.next_step = _next_step_from_statuses(
-                per_shooter, {s.stage_number: s.stage_name for s in match.stages}, video_total
-            )
+            detail.next_step = _next_step_from_statuses(per_shooter, stage_names, video_total)
             metadata_path = path / match_model.MATCH_FILE
         else:
             # Path exists but is not a Match folder -- a pre-Tier-1
@@ -6054,6 +6067,9 @@ async def _enrich_recent_project_hosted(
     video_total = 0
     audited_total = 0
     per_shooter: list[tuple[str, dict[int, StageStatus]]] = []
+    stage_names = {
+        int(s["stage_number"]): str(s.get("stage_name") or "") for s in (match_doc.get("stages") or [])
+    }
     project_root = Path(rp.path)  # unused by stage_statuses in docs mode
     for slug in shooters:
         pdoc, _ = await state.project_state.load_project(rp.match_id, slug)
@@ -6067,16 +6083,14 @@ async def _enrich_recent_project_hosted(
             statuses = proj.stage_statuses(project_root, audit_docs=audit_by_slug.get(slug, {}))
             audited_total += sum(1 for st in statuses.values() if st == StageStatus.audited)
             per_shooter.append((slug, statuses))
+            for st_entry in proj.stages:
+                stage_names.setdefault(st_entry.stage_number, st_entry.stage_name)
         except Exception:  # noqa: BLE001 -- never break the listing on one bad doc
             names.append(slug)
     detail.shooter_names = names
     detail.video_count = video_total
     detail.stages_audited = audited_total // max(len(shooters), 1) if shooters else 0
-    detail.next_step = _next_step_from_statuses(
-        per_shooter,
-        {int(s["stage_number"]): str(s.get("stage_name") or "") for s in (match_doc.get("stages") or [])},
-        video_total,
-    )
+    detail.next_step = _next_step_from_statuses(per_shooter, stage_names, video_total)
     # Mirror the local enricher's status derivation (minus "archived",
     # which needs an on-disk mtime we don't have here): all stages audited
     # -> exported; no footage -> awaiting_footage; otherwise in_progress.

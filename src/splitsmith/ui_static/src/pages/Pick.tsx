@@ -318,10 +318,12 @@ export function Pick() {
                     label={`${continueMatch.stages_audited} of ${continueMatch.stage_count} stages audited`}
                   />
                 ) : null}
-                <span>
-                  <span className="numeral">{continueMatch.stages_audited}</span> /{" "}
-                  <span className="numeral">{continueMatch.stage_count}</span> stages audited
-                </span>
+                {continueMatch.stage_count > 0 ? (
+                  <span>
+                    <span className="numeral">{continueMatch.stages_audited}</span> /{" "}
+                    <span className="numeral">{continueMatch.stage_count}</span> stages audited
+                  </span>
+                ) : null}
                 <span>touched {formatRelative(touchedAt(continueMatch))}</span>
               </div>
             </div>

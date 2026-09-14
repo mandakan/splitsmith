@@ -7209,7 +7209,8 @@ def test_recent_projects_detail_names_the_next_step(tmp_path: Path, _user_config
         "stage_name": "Two",
     }
 
-    # Audit stage 2 too: the next step becomes the export.
+    # Audit stage 2 too: nothing is auditable, so the next step is the
+    # export -- unless a stage still lacks footage, which comes first.
     (audit_dir / "stage2.json").write_text(
         _json.dumps({"shots": [], "audit_events": [{"ts": "2026-09-14T10:01:00Z", "kind": "save"}]}),
         encoding="utf-8",
@@ -7217,6 +7218,17 @@ def test_recent_projects_detail_names_the_next_step(tmp_path: Path, _user_config
     by_kind = {p["kind"]: p for p in client.get("/api/me/recent-projects?detail=true").json()["projects"]}
     assert by_kind["match"]["next_step"]["kind"] == "export"
     assert by_kind["match"]["next_step"]["shooter_slug"] == "ma"
+
+    legacy = MatchProject.load(shooter_root)
+    legacy.stages.append(StageEntry(stage_number=3, stage_name="Three", time_seconds=9.0, videos=[]))
+    legacy.save(shooter_root)
+    by_kind = {p["kind"]: p for p in client.get("/api/me/recent-projects?detail=true").json()["projects"]}
+    assert by_kind["match"]["next_step"] == {
+        "kind": "footage",
+        "shooter_slug": "ma",
+        "stage_number": 3,
+        "stage_name": "Three",
+    }
 
 
 def test_recent_projects_detail_marks_missing_path(tmp_path: Path, _user_config_home: Path) -> None:
