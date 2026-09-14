@@ -259,3 +259,65 @@ def test_upload_bytes_4xx_is_not_retried(tmp_path: Path) -> None:
     with pytest.raises(yt.UploadFailedError, match="Bad Request"):
         c.upload_bytes(SESSION, video, sleep=lambda s: None)
     assert route.call_count == 1
+
+
+# --- captions and thumbnail -------------------------------------------------
+
+
+@respx.mock
+def test_insert_caption_sends_multipart_related_with_snippet_and_srt(tmp_path: Path) -> None:
+    srt = tmp_path / "m.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:01,500\nShot 1\n", encoding="utf-8")
+    route = respx.post(f"{yt.UPLOAD_API}/captions").mock(
+        return_value=httpx.Response(200, json={"id": "cap1"})
+    )
+    c, _ = _client()
+    assert c.insert_caption("vid", srt) == "cap1"
+    req = route.calls.last.request
+    assert req.url.params["uploadType"] == "multipart"
+    assert req.url.params["part"] == "snippet"
+    ctype = req.headers["Content-Type"]
+    assert ctype.startswith("multipart/related; boundary=")
+    boundary = ctype.split("boundary=", 1)[1]
+    body = req.content
+    assert body.count(f"--{boundary}".encode()) == 3  # two parts + closing
+    assert b'"videoId": "vid"' in body and b'"language": "en"' in body and b'"name": "Shots"' in body
+    assert b"Shot 1" in body
+    assert b"Content-Type: application/octet-stream" in body
+
+
+@respx.mock
+def test_set_thumbnail_posts_the_jpeg_bytes(tmp_path: Path) -> None:
+    jpg = tmp_path / "t.jpg"
+    jpg.write_bytes(b"\xff\xd8jpegbytes")
+    route = respx.post(f"{yt.UPLOAD_API}/thumbnails/set").mock(return_value=httpx.Response(200, json={}))
+    c, _ = _client()
+    c.set_thumbnail("vid", jpg)
+    req = route.calls.last.request
+    assert req.url.params["videoId"] == "vid"
+    assert req.url.params["uploadType"] == "media"
+    assert req.headers["Content-Type"] == "image/jpeg"
+    assert req.content == b"\xff\xd8jpegbytes"
+
+
+@respx.mock
+def test_set_thumbnail_failure_is_an_upload_failed_error(tmp_path: Path) -> None:
+    jpg = tmp_path / "t.jpg"
+    jpg.write_bytes(b"x")
+    respx.post(f"{yt.UPLOAD_API}/thumbnails/set").mock(
+        return_value=httpx.Response(
+            403,
+            json={
+                "error": {
+                    "message": (
+                        "The authenticated user doesn't have permissions to upload and set "
+                        "custom video thumbnails."
+                    ),
+                    "errors": [{"reason": "forbidden"}],
+                }
+            },
+        )
+    )
+    c, _ = _client()
+    with pytest.raises(yt.UploadFailedError, match="custom video thumbnails"):
+        c.set_thumbnail("vid", jpg)

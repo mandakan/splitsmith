@@ -12,6 +12,8 @@ to read the file it is sending.
 
 from __future__ import annotations
 
+import json
+import secrets
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -35,6 +37,7 @@ __all__ = [
     "YouTubeClient",
     "YouTubeError",
     "default_http",
+    "multipart_related",
     "raise_for_api_error",
 ]
 
@@ -125,6 +128,29 @@ def raise_for_api_error(resp: httpx.Response) -> None:
     if resp.status_code == 403 and reasons & _QUOTA_REASONS:
         raise QuotaExceededError(message or "YouTube API quota exceeded")
     raise UploadFailedError(f"HTTP {resp.status_code}: {message or 'no message'}")
+
+
+def multipart_related(meta: dict[str, Any], data: bytes, data_content_type: str) -> tuple[bytes, str]:
+    """Google's ``uploadType=multipart`` body: a JSON part then the media
+    part, ``multipart/related``. Built by hand because httpx's multipart
+    support is ``form-data``, which the upload endpoint rejects."""
+    boundary = f"splitsmith-{secrets.token_hex(12)}"
+    crlf = b"\r\n"
+    body = crlf.join(
+        [
+            f"--{boundary}".encode(),
+            b"Content-Type: application/json; charset=UTF-8",
+            b"",
+            json.dumps(meta).encode("utf-8"),
+            f"--{boundary}".encode(),
+            f"Content-Type: {data_content_type}".encode(),
+            b"",
+            data,
+            f"--{boundary}--".encode(),
+            b"",
+        ]
+    )
+    return body, f"multipart/related; boundary={boundary}"
 
 
 class YouTubeClient:
@@ -280,3 +306,26 @@ class YouTubeClient:
             return 0, None
         raise_for_api_error(resp)
         raise AssertionError("unreachable")  # pragma: no cover
+
+    def insert_caption(
+        self, video_id: str, srt_path: Path, *, language: str = "en", name: str = "Shots"
+    ) -> str:
+        meta = {"snippet": {"videoId": video_id, "language": language, "name": name, "isDraft": False}}
+        body, ctype = multipart_related(meta, srt_path.read_bytes(), "application/octet-stream")
+        resp = self._request(
+            "POST",
+            f"{UPLOAD_API}/captions",
+            params={"uploadType": "multipart", "part": "snippet"},
+            headers={"Content-Type": ctype},
+            content=body,
+        )
+        return str(resp.json().get("id", ""))
+
+    def set_thumbnail(self, video_id: str, jpg_path: Path) -> None:
+        self._request(
+            "POST",
+            f"{UPLOAD_API}/thumbnails/set",
+            params={"videoId": video_id, "uploadType": "media"},
+            headers={"Content-Type": "image/jpeg"},
+            content=jpg_path.read_bytes(),
+        )
