@@ -276,7 +276,7 @@ the length of the stitched timeline. Never assign one from the other.
 
 The SPA is mid-restructure (spec
 ``docs/superpowers/specs/2026-09-13-ux-restructure-and-visual-budget-design.md``,
-eight PRs, four merged as of 2026-09-14; PR 5 Audit in progress). Any new screen or surface,
+eight PRs, five merged as of 2026-09-14; PR 6 Footage next). Any new screen or surface,
 whatever session builds it, follows the budget below; the ESLint rule
 ``no-restricted-syntax`` in ``ui_static/eslint.config.js`` enforces the
 mechanical half.
@@ -314,16 +314,24 @@ case); Splits and the stage page (``pages/Results.tsx``,
 ``SplitsList.tsx`` / ``Scorecard.tsx`` / ``StageStats.tsx``,
 ``components/share/ShareShell.tsx``); per-stage split figures for any
 share-surface consumer come from ``stages[].figures`` on the project
-payload, never from triage (owner-only). Still grandfathered and not in
-any rebuild PR -- restyle onto the primitives whenever you touch them:
+payload, never from triage (owner-only). Audit (``pages/Audit.tsx``,
+``components/audit/*``, ``lib/auditStep.ts``): beep confirmation is its
+step 1 (``BeepStep`` on ``useBeepQueue``; ``/beep-review`` redirects
+there on desktop, the phone keeps ``MobileBeepReview``); a new control
+belongs on ``TransportLine``'s overflow menu or ``CurrentShotLine``, a
+new per-shot signal on ``ShotList`` through ``lib/auditStep.shotRows``;
+``_after_beep_reviewed`` in ``ui/server.py`` is the one place a confirm
+chains trim and detection. Still grandfathered and not in any rebuild
+PR -- restyle onto the primitives whenever you touch them:
 ``components/results/ResultsPlayer.tsx``, ``CamPicker.tsx``,
 ``ReclassifySheet.tsx``, ``ShareDialog.tsx``,
-``components/comments/CommentPanel.tsx``.
+``components/comments/CommentPanel.tsx``, ``components/BeepSection.tsx``,
+``components/Waveform.tsx``, ``components/MarkerLayer.tsx``,
+``components/VideoPanel.tsx``, ``components/audit/MultiCamColumn.tsx``,
+``CamGridModal.tsx``, ``CamSyncPill.tsx``, ``AnomalyPins.tsx``.
 
 **Files the restructure will rewrite -- do not edit them in a parallel
 branch, put new functionality in a component the rebuild can mount:**
-PR 5 ``pages/Audit.tsx``, ``components/audit/*``, ``pages/BeepReview.tsx``,
-``components/BeepSection.tsx``;
 PR 6 ``pages/Ingest.tsx``, ``pages/ingest/*``, ``pages/Shooters.tsx``,
 ``components/ingest/*``; PR 7 ``pages/Coach.tsx``, ``pages/Compare.tsx``,
 ``pages/compare/*``; PR 8 ``pages/Export.tsx``, ``pages/Pick.tsx``,
@@ -335,8 +343,10 @@ Prepare / Review / Analyse / Deliver); a new row needs a group.
 ``uv run python scripts/seed_demo_match.py ~/.claude-tmp/demo-match``
 then ``uv run splitsmith ui --project ~/.claude-tmp/demo-match
 --skip-system-check --no-browser --port 5174`` (wait for
-``/api/health``; the match id is in ``match.json``), then screenshot
-with Playwright. Show the rendered page before calling a visual change
+``/api/health``; the match id is ``match_id`` in ``match.json``), then
+screenshot with Playwright. Add ``--media`` to the seeder (ffmpeg on
+PATH) for a real clip with a beep and shots, so Audit's waveform, the
+beep picker and the trim -> detect chain run locally. Show the rendered page before calling a visual change
 done.
 
 ## Things Claude Code should not do
