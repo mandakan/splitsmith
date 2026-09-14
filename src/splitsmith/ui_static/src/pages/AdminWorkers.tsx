@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpCircle, Trash2 } from "lucide-react";
 

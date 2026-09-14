@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * The stage's waveform wrapped into stacked rows like a text editor
  * wraps a long line: whole stage on one screen, playhead sweeping row

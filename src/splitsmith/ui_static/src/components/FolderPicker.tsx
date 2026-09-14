@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * FolderPicker - the one modal picker dialog for choosing a server-side
  * folder (or files within it). Used by the Ingest add-footage flow,

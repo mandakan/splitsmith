@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * Batch-promote every eligible stage of a match's shooters as primary
  * fixtures. Moved out of the legacy Lab page (#886 follow-up) so the

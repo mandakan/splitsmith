@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 import { ArrowRight, CheckCircle2, Loader2, Undo2 } from "lucide-react";
 
 import { Kbd } from "@/components/ui/Kbd";

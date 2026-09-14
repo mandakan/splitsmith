@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * SplitsList - per-shot list for the Results stage view. One row per
  * shot: a seek button (number, time from beep, split, tier chip - text

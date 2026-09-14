@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * StageStats - read-only stats strip for the Results stage view.
  * Stage time, shot count, draw, fastest split, average split.

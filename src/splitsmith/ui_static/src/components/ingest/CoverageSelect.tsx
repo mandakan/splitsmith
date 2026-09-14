@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * Controlled multi-select of the match's stages for raw-video coverage
  * declaration (multi-stage takes). Chips show the stage number and name;

@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * Shared visual primitives for the export surfaces (single-shooter
  * `Export.tsx` and the match-scoped `MatchExport.tsx`).

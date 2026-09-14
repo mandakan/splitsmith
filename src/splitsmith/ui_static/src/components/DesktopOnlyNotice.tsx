@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * DesktopGate - phones get a signpost instead of a broken desktop
  * layout. Pass-through above md; below md the wrapped page never

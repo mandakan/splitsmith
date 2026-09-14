@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /** Cockpit bottom dock: the Transport bar and the SyncTimeline fused
  *  into one panel behind one playhead. The lane gutter is HTML (real
  *  buttons, no SVG-text distortion); the track SVG renders at measured

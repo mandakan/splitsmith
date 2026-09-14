@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * Developer / Review / Fixture detail -- ``/dev/review/:slug`` (#331,
  * rehomed from /dev/corpus/:slug so labeling lights up step 02).
