@@ -429,10 +429,13 @@ class CoachAutoClassifyConfig(BaseModel):
     from movement without target metadata or hand cues.
     """
 
-    # gap <= split_max_s -> "split"
-    split_max_s: float = Field(default=0.50, gt=0.0)
+    # gap <= split_max_s -> "split". Raised from 0.50 to 1.00 on
+    # 2026-09-14: a second shot on a far or moving target sits well above
+    # half a second, and 0.50 classed whole stages as transitions, which
+    # emptied their split statistics.
+    split_max_s: float = Field(default=1.00, gt=0.0)
     # split_max_s < gap <= transition_max_s -> "transition"
-    transition_max_s: float = Field(default=1.00, gt=0.0)
+    transition_max_s: float = Field(default=2.00, gt=0.0)
     # transition_max_s < gap -> "movement". The UI surfaces a "could be
     # reload?" hint when the gap exceeds reload_hint_min_s.
     reload_hint_min_s: float = Field(default=2.50, gt=0.0)

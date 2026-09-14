@@ -11569,7 +11569,7 @@ def create_app(
             # minter (see _may_mint_shot_ids) - a client-supplied id is still
             # kept, so a shot the SPA added arrives with its own identity.
             ensure_shot_ids(shot_dicts, mint=_may_mint_shot_ids())
-            coach_module.classify_intervals_in_dicts(shot_dicts, CoachAutoClassifyConfig())
+            coach_module.classify_intervals_in_dicts(shot_dicts, coach_module.auto_classify_config())
         # Sync merge unions audit_events by id (bidirectional sync
         # slice); the SPA authors events without one, so stamp them here
         # at the save boundary.
@@ -11643,7 +11643,7 @@ def create_app(
             # that must not mint a second id for a legacy shot the desktop
             # will stamp itself. See _may_mint_shot_ids.
             ensure_shot_ids(shots, mint=_may_mint_shot_ids())
-            coach_module.classify_intervals_in_dicts(shots, CoachAutoClassifyConfig())
+            coach_module.classify_intervals_in_dicts(shots, coach_module.auto_classify_config())
             if any(not s.get("interval_class") for s in kept):
                 raise HTTPException(status_code=409, detail="not_fully_classified")
             events = payload.setdefault("audit_events", [])
@@ -11964,7 +11964,7 @@ def create_app(
         if audit_payload is None:
             return JSONResponse(None)
         payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
-        cfg = CoachAutoClassifyConfig()
+        cfg = coach_module.auto_classify_config()
         # #775: heal legacy docs on read so consumers (Results, share view,
         # statistic_splits) always see a fully classified stage. Owners get
         # the heal persisted; share-token readers are read-only, so the
@@ -11992,7 +11992,7 @@ def create_app(
         preserved. Idempotent.
         """
         payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
-        cfg = CoachAutoClassifyConfig()
+        cfg = coach_module.auto_classify_config()
         shots = payload.get("shots") or []
         if not isinstance(shots, list):
             raise HTTPException(status_code=500, detail="audit shots is not a list")
@@ -12021,7 +12021,7 @@ def create_app(
         payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
         if body.expected_version is not None and body.expected_version != version:
             raise HTTPException(status_code=409, detail="version_conflict")
-        cfg = CoachAutoClassifyConfig()
+        cfg = coach_module.auto_classify_config()
         shots = payload.get("shots") or []
         if not isinstance(shots, list):
             raise HTTPException(status_code=500, detail="audit shots is not a list")
@@ -12120,7 +12120,7 @@ def create_app(
         UI can render an empty histogram without a special case.
         """
         payload, _version, _beep_in_clip, stg, _project = _load_audit_for_coach(slug, stage_number)
-        cfg = CoachAutoClassifyConfig()
+        cfg = coach_module.auto_classify_config()
         shots = payload.get("shots") or []
         if not isinstance(shots, list):
             raise HTTPException(status_code=500, detail="audit shots is not a list")
@@ -12139,7 +12139,7 @@ def create_app(
         haven't been audited yet so they'd just dilute the average.
         """
         project = state.shooter_project(slug)
-        cfg = CoachAutoClassifyConfig()
+        cfg = coach_module.auto_classify_config()
         triples: list[tuple[int, str, list[dict[str, Any]]]] = []
         for stg in project.stages:
             stage_payload, _ = state.load_audit(slug, stg.stage_number)

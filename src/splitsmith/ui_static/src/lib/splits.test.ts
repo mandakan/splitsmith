@@ -26,11 +26,11 @@ describe("statisticSplits", () => {
   });
 
   it("falls back to the draw + threshold rule on an unclassified stage", () => {
-    // index 0 is the draw, anything above split_max_s (0.5s) is not a
+    // index 0 is the draw, anything above split_max_s (1.0s) is not a
     // split; the boundary itself is inclusive, as in the auto-classifier,
     // so classifying the stage never moves the figures (issue #773).
-    const shots = [gap(1.5), gap(0.2), gap(2.6), gap(0.5), gap(0.3), gap(0.8)];
-    expect(statisticSplits(shots)).toEqual([0.2, 0.5, 0.3]);
+    const shots = [gap(1.5), gap(0.2), gap(2.6), gap(1.0), gap(0.3), gap(1.2)];
+    expect(statisticSplits(shots)).toEqual([0.2, 1.0, 0.3]);
   });
 
   it("trusts the classes once any shot is classified", () => {

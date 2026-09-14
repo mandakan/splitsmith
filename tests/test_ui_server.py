@@ -4880,8 +4880,8 @@ def test_put_stage_audit_classifies_intervals(tmp_path: Path) -> None:
         "shots": [
             {"shot_number": 1, "ms_after_beep": 1500, "source": "detected"},
             {"shot_number": 2, "ms_after_beep": 1800, "source": "detected"},  # 0.30 -> split
-            {"shot_number": 3, "ms_after_beep": 2700, "source": "detected"},  # 0.90 -> transition
-            {"shot_number": 4, "ms_after_beep": 5300, "source": "detected"},  # 2.60 -> movement
+            {"shot_number": 3, "ms_after_beep": 3300, "source": "detected"},  # 1.50 -> transition
+            {"shot_number": 4, "ms_after_beep": 5900, "source": "detected"},  # 2.60 -> movement
         ],
         "audit_events": [{"ts": "2026-08-09T12:00:00Z", "kind": "save", "payload": {}}],
     }
@@ -4942,7 +4942,7 @@ def test_put_stage_audit_skips_shots_without_ms(tmp_path: Path) -> None:
         "shots": [
             {"shot_number": 1, "ms_after_beep": 1500},
             {"shot_number": 2, "time": 2.0},  # no ms_after_beep
-            {"shot_number": 3, "ms_after_beep": 2700},
+            {"shot_number": 3, "ms_after_beep": 3700},
         ],
     }
     resp = client.put("/api/shooters/me/stages/1/audit", json=payload)

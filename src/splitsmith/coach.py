@@ -19,15 +19,19 @@ Pure functions only -- no I/O. Callers own the audit JSON read/write.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, Final, Protocol, get_args
 
 from .config import (
     CoachAutoClassifyConfig,
+    Config,
     IntervalClass,
     IntervalClassSource,
     Shot,
 )
+from .runtime import ENV_CONFIG_FILE
 
 COACH_INTERVAL_CLASSES: Final[tuple[str, ...]] = get_args(IntervalClass)
 COACH_INTERVAL_CLASS_SOURCES: Final[tuple[str, ...]] = get_args(IntervalClassSource)
@@ -163,11 +167,34 @@ def reload_hinted(gap_s: float | None, config: CoachAutoClassifyConfig) -> bool:
 # the run's dead time, so only ``"split"``-classed intervals feed them.
 # ---------------------------------------------------------------------------
 
+
+def auto_classify_config() -> CoachAutoClassifyConfig:
+    """The auto-classifier's thresholds, from ``SPLITSMITH_CONFIG`` (a YAML
+    ``config.Config`` document) when set, else the shipped defaults.
+
+    The one place the server, the CLI and the statistics read them.
+    Every call site used to construct ``CoachAutoClassifyConfig()`` bare,
+    which made "it is config" true on paper and false in practice: no
+    running process ever loaded a config, so the defaults were the only
+    values a user could get.
+    """
+    raw = os.environ.get(ENV_CONFIG_FILE, "").strip()
+    if not raw:
+        return CoachAutoClassifyConfig()
+    return Config.load(Path(raw).expanduser()).coach_auto_classify
+
+
 # The unclassified fallback mirrors the auto-classifier's split rule
-# (``CoachAutoClassifyConfig.split_max_s``) rather than the FCPXML band's
-# ``transition_min`` (1.0s): 35% of corpus intervals sit between the two,
-# so any other cutoff would move the figures the moment a stage gets
-# classified (issue #773).
+# (``CoachAutoClassifyConfig.split_max_s``), so classifying a stage never
+# moves the figures (issue #773). Read through the same accessor the
+# classifier uses; a module-level constant froze the shipped default and
+# ignored any configured value.
+def split_stat_split_max() -> float:
+    return auto_classify_config().split_max_s
+
+
+#: The shipped default, for callers that want a fixed number in a
+#: signature or a docstring. Runtime code reads :func:`split_stat_split_max`.
 SPLIT_STAT_SPLIT_MAX: Final[float] = CoachAutoClassifyConfig().split_max_s
 
 
@@ -184,7 +211,7 @@ class SplitStatInterval(Protocol):
 def statistic_splits(
     shots: Sequence[SplitStatInterval],
     *,
-    split_max: float = SPLIT_STAT_SPLIT_MAX,
+    split_max: float | None = None,
 ) -> list[float]:
     """The splits eligible for split statistics (best/avg/worst), in order.
 
@@ -210,7 +237,8 @@ def statistic_splits(
     """
     if any(s.interval_class is not None for s in shots):
         return [s.split for s in shots if s.interval_class == "split"]
-    return [s.split for i, s in enumerate(shots) if i > 0 and s.split <= split_max]
+    cutoff = split_max if split_max is not None else split_stat_split_max()
+    return [s.split for i, s in enumerate(shots) if i > 0 and s.split <= cutoff]
 
 
 def classify_intervals_in_dicts(
@@ -298,7 +326,7 @@ def heal_unclassified(
     )
     if not needs_heal:
         return False
-    classify_intervals_in_dicts(dicts, config or CoachAutoClassifyConfig())
+    classify_intervals_in_dicts(dicts, config or auto_classify_config())
     return True
 
 

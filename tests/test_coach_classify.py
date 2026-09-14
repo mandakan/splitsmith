@@ -55,32 +55,32 @@ def test_split_under_threshold(cfg: CoachAutoClassifyConfig) -> None:
 
 
 def test_split_at_boundary_inclusive(cfg: CoachAutoClassifyConfig) -> None:
-    # gap exactly == split_max_s (0.50) -> split
-    shots = [_shot(1, 1500), _shot(2, 2000)]
+    # gap exactly == split_max_s (1.00) -> split
+    shots = [_shot(1, 1500), _shot(2, 2500)]
     classify_intervals_in_dicts(shots, cfg)
     assert shots[1]["interval_class"] == "split"
 
 
 def test_transition_in_band(cfg: CoachAutoClassifyConfig) -> None:
-    # gap = 0.80 s
-    shots = [_shot(1, 1500), _shot(2, 2300)]
+    # gap = 1.50 s
+    shots = [_shot(1, 1500), _shot(2, 3000)]
     classify_intervals_in_dicts(shots, cfg)
     assert shots[1]["interval_class"] == "transition"
 
 
 def test_transition_at_boundary_inclusive(cfg: CoachAutoClassifyConfig) -> None:
-    # gap exactly == 1.00
-    shots = [_shot(1, 1500), _shot(2, 2500)]
+    # gap exactly == transition_max_s (2.00)
+    shots = [_shot(1, 1500), _shot(2, 3500)]
     classify_intervals_in_dicts(shots, cfg)
     assert shots[1]["interval_class"] == "transition"
 
 
 def test_movement_above_transition(cfg: CoachAutoClassifyConfig) -> None:
-    # gap = 1.50 s
-    shots = [_shot(1, 1500), _shot(2, 3000)]
+    # gap = 2.20 s
+    shots = [_shot(1, 1500), _shot(2, 3700)]
     classify_intervals_in_dicts(shots, cfg)
     assert shots[1]["interval_class"] == "movement"
-    assert reload_hinted(1.5, cfg) is False
+    assert reload_hinted(2.2, cfg) is False
 
 
 def test_movement_with_reload_hint(cfg: CoachAutoClassifyConfig) -> None:
@@ -150,11 +150,11 @@ def test_auto_stale_when_gap_changes(cfg: CoachAutoClassifyConfig) -> None:
     shots = [_shot(1, 1500), _shot(2, 1800)]
     classify_intervals_in_dicts(shots, cfg)
     assert shots[1]["interval_class"] == "split"
-    # Audit edit: shift shot 2 later so the gap is now 0.70 s -> transition.
-    new_gap = 0.70
+    # Audit edit: shift shot 2 later so the gap is now 1.40 s -> transition.
+    new_gap = 1.40
     assert is_classification_stale(shots[1], gap_s=new_gap, config=cfg) is True
     # Reclassify with the new gap; stale clears.
-    shots[1]["ms_after_beep"] = 2200
+    shots[1]["ms_after_beep"] = 2900
     classify_intervals_in_dicts(shots, cfg)
     assert shots[1]["interval_class"] == "transition"
     assert is_classification_stale(shots[1], gap_s=new_gap, config=cfg) is False
@@ -176,10 +176,10 @@ def test_move_timestamp_recomputes_neighbours(cfg: CoachAutoClassifyConfig) -> N
     classify_intervals_in_dicts(shots, cfg)
     assert [s["interval_class"] for s in shots] == ["first_shot", "split", "split"]
 
-    # Audit moves shot 2 to ms 2400 -> gap_2_from_1 = 0.90 (transition),
-    # gap_3_from_2 = -0.30 ... not realistic; pick a forward move.
-    shots[1]["ms_after_beep"] = 2400
-    shots[2]["ms_after_beep"] = 3500  # gap_3_from_2 = 1.10 -> movement
+    # Audit moves shot 2 to ms 2900 -> gap_2_from_1 = 1.40 (transition),
+    # and shot 3 to ms 5100 -> gap_3_from_2 = 2.20 (movement).
+    shots[1]["ms_after_beep"] = 2900
+    shots[2]["ms_after_beep"] = 5100
     classify_intervals_in_dicts(shots, cfg)
     assert [s["interval_class"] for s in shots] == [
         "first_shot",
@@ -205,27 +205,27 @@ def test_move_timestamp_preserves_manual(cfg: CoachAutoClassifyConfig) -> None:
 
 
 def test_delete_shot_recomputes_trailing(cfg: CoachAutoClassifyConfig) -> None:
-    shots = [_shot(1, 1500), _shot(2, 1800), _shot(3, 2100)]
+    shots = [_shot(1, 1500), _shot(2, 2200), _shot(3, 3000)]
     classify_intervals_in_dicts(shots, cfg)
-    # Delete shot 2; shot 3's interval is now (2100 - 1500) = 0.60 -> transition.
+    # Delete shot 2; shot 3's interval is now (3000 - 1500) = 1.50 -> transition.
     del shots[1]
     classify_intervals_in_dicts(shots, cfg)
     assert [s["interval_class"] for s in shots] == ["first_shot", "transition"]
 
 
 def test_insert_shot_classifies_new_and_neighbours(cfg: CoachAutoClassifyConfig) -> None:
-    shots = [_shot(1, 1500), _shot(2, 3000)]  # gap 1.5 -> movement
+    shots = [_shot(1, 1500), _shot(2, 4000)]  # gap 2.5 -> movement
     classify_intervals_in_dicts(shots, cfg)
     assert shots[1]["interval_class"] == "movement"
     # User inserts a missed shot at ms 2200; reorder by shot_number.
-    inserted = _shot(99, 2200)  # caller assigns proper shot_number later
+    inserted = _shot(99, 2800)  # caller assigns proper shot_number later
     shots.insert(1, inserted)
     classify_intervals_in_dicts(shots, cfg)
-    # Sort key uses ms_after_beep so the order is 1500/2200/3000.
+    # Sort key uses ms_after_beep so the order is 1500/2800/4000.
     classified = sorted(shots, key=lambda s: s["ms_after_beep"])
     assert classified[0]["interval_class"] == "first_shot"
-    assert classified[1]["interval_class"] == "transition"  # 0.70 s gap
-    assert classified[2]["interval_class"] == "transition"  # 0.80 s gap
+    assert classified[1]["interval_class"] == "transition"  # 1.30 s gap
+    assert classified[2]["interval_class"] == "transition"  # 1.20 s gap
 
 
 def test_bulk_redetect_drops_annotations(cfg: CoachAutoClassifyConfig) -> None:
@@ -264,7 +264,7 @@ def test_classify_models_matches_dicts(cfg: CoachAutoClassifyConfig) -> None:
     models = [
         _model_shot(1, 1.5),
         _model_shot(2, 1.8),  # 0.30 split
-        _model_shot(3, 2.7),  # 0.90 transition
+        _model_shot(3, 3.3),  # 1.50 transition
     ]
     out = classify_intervals_in_models(models, cfg)
     assert [s.interval_class for s in out] == ["first_shot", "split", "transition"]
@@ -320,12 +320,12 @@ def test_statistic_splits_counts_only_split_classed_intervals() -> None:
 
 def test_statistic_splits_unclassified_falls_back_to_draw_and_threshold() -> None:
     # No classification anywhere: the auto-classifier's split rule applies -
-    # index 0 is the draw, anything above split_max_s (0.5s) is not a
-    # split. The 0.5 boundary itself is inclusive, exactly as in
+    # index 0 is the draw, anything above split_max_s (1.0s) is not a
+    # split. The 1.0 boundary itself is inclusive, exactly as in
     # _classify_gap, so classifying the stage never moves the figures
     # (issue #773).
-    shots = [_Gap(1.5), _Gap(0.2), _Gap(2.6), _Gap(0.5), _Gap(0.3), _Gap(0.8)]
-    assert statistic_splits(shots) == [0.2, 0.5, 0.3]
+    shots = [_Gap(1.5), _Gap(0.2), _Gap(2.6), _Gap(1.0), _Gap(0.3), _Gap(1.2)]
+    assert statistic_splits(shots) == [0.2, 1.0, 0.3]
 
 
 def test_statistic_splits_partial_classification_trusts_the_classes() -> None:
@@ -409,3 +409,21 @@ def test_heal_unclassified_classifies_around_non_dict_entries() -> None:
     shots: list[Any] = [_shot(1, 1500), "junk", _shot(2, 1800)]
     assert heal_unclassified(shots) is True
     assert [shots[0]["interval_class"], shots[2]["interval_class"]] == ["first_shot", "split"]
+
+
+def test_auto_classify_config_reads_the_env_yaml(tmp_path, monkeypatch) -> None:
+    """``SPLITSMITH_CONFIG`` is the one way to tune the thresholds without a
+    code change; unset, the shipped defaults apply."""
+    from splitsmith.coach import auto_classify_config, split_stat_split_max
+    from splitsmith.runtime import ENV_CONFIG_FILE
+
+    monkeypatch.delenv(ENV_CONFIG_FILE, raising=False)
+    assert auto_classify_config().split_max_s == 1.0
+    assert auto_classify_config().transition_max_s == 2.0
+    cfg = tmp_path / "splitsmith.yaml"
+    cfg.write_text("coach_auto_classify:\n  split_max_s: 0.7\n  transition_max_s: 1.4\n", encoding="utf-8")
+    monkeypatch.setenv(ENV_CONFIG_FILE, str(cfg))
+    assert auto_classify_config().split_max_s == 0.7
+    assert split_stat_split_max() == 0.7
+    shots = [_Gap(1.5), _Gap(0.7), _Gap(0.8)]
+    assert statistic_splits(shots) == [0.7]

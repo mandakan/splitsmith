@@ -172,12 +172,17 @@ itself computes. The split rule lives in ``coach.statistic_splits``
 (main, issue #772) -- ``share_card.stage_figures`` does not own it, only
 shapes its output into a card's two headline figures. An uncoached stage
 falls back to the auto-classifier's own cutoff,
-``coach.SPLIT_STAT_SPLIT_MAX`` (``CoachAutoClassifyConfig.split_max_s``,
-0.5 s) -- *not* ``split_color_band``'s ``transition_min`` (1.0 s), which
-#773/#776 retired for this purpose because 35% of corpus intervals sit
-between the two, so the figures would jump the moment a stage got
-classified. (#772 also brings the video summary and results page onto
-that same definition.) ``ui/share_og.py``'s ``build_stage_card`` heals legacy
+``coach.split_stat_split_max()`` (``CoachAutoClassifyConfig.split_max_s``,
+1.0 s since 2026-09-14; 0.5 s before) -- *not* an independent constant,
+which #773/#776 retired for this purpose because the figures would
+otherwise jump the moment a stage got classified. (#772 also brings the
+video summary and results page onto that same definition.) The
+thresholds (``split_max_s`` 1.0, ``transition_max_s`` 2.0) are read
+through ``coach.auto_classify_config()``, which honours a
+``SPLITSMITH_CONFIG`` YAML; ``lib/splits.ts`` mirrors the split cutoff
+as a literal and moves with it. ``splitsmith match reclassify`` re-runs
+the auto-classifier over stored audits (manual overrides survive) after
+a threshold change. ``ui/share_og.py``'s ``build_stage_card`` heals legacy
 unclassified audit docs in memory and never persists -- a share-only
 route must not mutate a doc an anonymous caller reached through
 impersonation. The heal's guard is ``coach.heal_unclassified`` (#780),

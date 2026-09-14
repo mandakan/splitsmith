@@ -39,8 +39,8 @@ def test_stage_distribution_classifies_unset_in_memory(cfg: CoachAutoClassifyCon
         _shot(2, 1700),  # 0.20 split
         _shot(3, 1900),  # 0.20 split
         _shot(4, 2100),  # 0.20 split
-        _shot(5, 2900),  # 0.80 transition
-        _shot(6, 4500),  # 1.60 movement
+        _shot(5, 3600),  # 1.50 transition
+        _shot(6, 6100),  # 2.50 movement
     ]
     out = stage_distributions(
         stage_number=1,
@@ -136,16 +136,16 @@ def test_match_top_shots_sorted_desc(cfg: CoachAutoClassifyConfig) -> None:
     # can verify top-N ordering.
     shots = [
         _shot(1, 1500),
-        _shot(2, 2200),  # 0.70 transition
-        _shot(3, 3000),  # 0.80 transition
-        _shot(4, 3950),  # 0.95 transition
+        _shot(2, 2700),  # 1.20 transition
+        _shot(3, 4000),  # 1.30 transition
+        _shot(4, 5450),  # 1.45 transition
     ]
     out = match_distributions(
         stages=[(1, "A", shots)],
         config=cfg,
         top_n=3,
     )
-    assert [e.gap_s for e in out.top_transitions] == pytest.approx([0.95, 0.80, 0.70])
+    assert [e.gap_s for e in out.top_transitions] == pytest.approx([1.45, 1.30, 1.20])
     assert all(e.interval_class == "transition" for e in out.top_transitions)
 
 
@@ -192,7 +192,7 @@ def test_stage_distribution_percentiles_none_for_empty_class(cfg: CoachAutoClass
 
 def test_stage_distribution_percentiles_none_for_single_sample(cfg: CoachAutoClassifyConfig) -> None:
     # A single transition -- one sample isn't enough for quartiles.
-    shots = [_shot(1, 1500), _shot(2, 2200)]  # one 0.70 transition
+    shots = [_shot(1, 1500), _shot(2, 2900)]  # one 1.40 transition
     out = stage_distributions(stage_number=1, stage_name="x", shots=shots, config=cfg)
     transitions = next(d for d in out.distributions if d.interval_class == "transition")
     assert transitions.count == 1

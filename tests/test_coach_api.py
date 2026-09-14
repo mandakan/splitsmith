@@ -53,8 +53,8 @@ def _bootstrap(tmp_path: Path) -> tuple[TestClient, Path, str]:
         "shots": [
             {"shot_number": 1, "ms_after_beep": 1500, "source": "detected"},
             {"shot_number": 2, "ms_after_beep": 1800, "source": "detected"},  # 0.30 -> split
-            {"shot_number": 3, "ms_after_beep": 2700, "source": "detected"},  # 0.90 -> transition
-            {"shot_number": 4, "ms_after_beep": 5300, "source": "detected"},  # 2.60 -> movement
+            {"shot_number": 3, "ms_after_beep": 3300, "source": "detected"},  # 1.50 -> transition
+            {"shot_number": 4, "ms_after_beep": 5900, "source": "detected"},  # 2.60 -> movement
         ],
     }
     audit_file.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -533,11 +533,11 @@ def test_stale_after_audit_edit(tmp_path: Path) -> None:
     # First persist auto classes.
     client.post(f"{base}/shooters/me/stages/1/coach/reclassify")
 
-    # Simulate an Audit-side timestamp move: shot 2 drifts from 0.30 -> 0.70 s gap.
+    # Simulate an Audit-side timestamp move: shot 2 drifts from 0.30 -> 1.40 s gap.
     saved = _read(audit_file)
     for s in saved["shots"]:
         if s["shot_number"] == 2:
-            s["ms_after_beep"] = 2200  # 1500 + 700 ms
+            s["ms_after_beep"] = 2900  # 1500 + 1400 ms
     audit_file.write_text(json.dumps(saved, indent=2) + "\n", encoding="utf-8")
 
     # GET surfaces stale=True; the stored class is "split" but the rule

@@ -79,7 +79,10 @@ def test_unclassified_stage_falls_back_through_the_shared_helper() -> None:
 #: distance takes 0.60 and is still a split. Every other fixture in this
 #: file lands on the same side of both rules, which is why they all stay
 #: green with the classification branch disabled.
-_DISCRIMINATING_SECONDS = [1.20, 0.20, 0.30, 0.60, 0.20]
+# A coached ``split`` above the 1.0 s threshold and a coached
+# ``transition`` below it, so the coached and the threshold-only averages
+# cannot coincide whatever the rule's cutoff is.
+_DISCRIMINATING_SECONDS = [1.20, 0.20, 0.30, 1.40, 0.20]
 _DISCRIMINATING_CLASSES = ["first_shot", "split", "transition", "split", "split"]
 
 
@@ -105,7 +108,7 @@ def test_classification_changes_the_numbers_not_just_the_provenance_label() -> N
     assert coach.source == "coach"
     assert threshold.source == "threshold"
     # Coached: 0.20 + 0.60 + 0.20, the 0.30 transition dropped as dead time.
-    assert coach.avg_split == pytest.approx((0.20 + 0.60 + 0.20) / 3)
+    assert coach.avg_split == pytest.approx((0.20 + 1.40 + 0.20) / 3)
     # Uncoached: 0.20 + 0.30 + 0.20, the 0.60 dropped for being over the
     # cutoff -- the rule cannot see either class.
     assert threshold.avg_split == pytest.approx((0.20 + 0.30 + 0.20) / 3)
