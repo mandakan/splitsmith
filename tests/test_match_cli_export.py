@@ -32,12 +32,12 @@ def _meta(_path: Path) -> VideoMetadata:
     return VideoMetadata(width=1920, height=1080, duration_seconds=20.0, frame_rate_num=30, frame_rate_den=1)
 
 
-def _seed(tmp_path: Path, *, with_trim: bool = True) -> Path:
+def _seed(tmp_path: Path, *, with_trim: bool = True, competitor_name: str | None = "M. Axell") -> Path:
     root, shooter_root = scaffold_match(
         tmp_path, name="Bromma Classifier", shooter_slug="me", shooter_name="Me"
     )
     project = MatchProject.load(shooter_root)
-    project.competitor_name = "M. Axell"
+    project.competitor_name = competitor_name
     project.match_date = date(2026, 5, 1)
     project.stages = [
         StageEntry(
@@ -200,3 +200,24 @@ def test_negative_summary_hold_is_a_usage_error(tmp_path: Path) -> None:
     root = _seed(tmp_path)
     result = runner.invoke(app, ["match", "export", str(root), "--shooter", "me", "--summary-hold", "-1"])
     assert result.exit_code == 2
+
+
+def test_summary_label_falls_back_to_the_roster_name(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _seed(tmp_path, competitor_name=None)
+    captured = _capture_mp4(monkeypatch)
+    result = runner.invoke(
+        app, ["match", "export", str(root), "--shooter", "me", "--format", "mp4", "--summary-hold", "2"]
+    )
+    assert result.exit_code == 0, result.output
+    assert captured["comp"].stages[0].summary.label == "Me"
+
+
+def test_plain_export_never_reads_the_roster_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Without a summary the shooter's roster entry is not consulted, so a
+    missing shooter.json cannot fail an ordinary export (review finding)."""
+    root = _seed(tmp_path, competitor_name=None)
+    captured = _capture_mp4(monkeypatch)
+    (root / "shooters" / "me" / "shooter.json").unlink()
+    result = runner.invoke(app, ["match", "export", str(root), "--shooter", "me", "--format", "mp4"])
+    assert result.exit_code == 0, result.output
+    assert captured["comp"].stages[0].summary is None

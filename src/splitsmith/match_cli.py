@@ -524,6 +524,16 @@ def export(
 
     shooter_root = Match.shooter_root(match_path, slug)
     project = MatchProject.load(shooter_root)
+    # The summary's identity row: the scoreboard's competitor name when
+    # the project has one, else the match roster's display name. Only
+    # read when a summary is asked for -- the roster file is not part of
+    # an ordinary export and must not be able to fail one.
+    shooter_label: str | None = project.competitor_name
+    if summary_hold > 0 and not shooter_label:
+        try:
+            shooter_label = match.load_shooter(match_path, slug).name
+        except (OSError, KeyError, ValueError):
+            shooter_label = None  # export_match falls back to the match name
     stage_numbers = stage or [
         entry.stage_number
         for entry in project.stages
@@ -559,7 +569,7 @@ def export(
         closing_card=closing_card,
         overlay_theme=overlay_theme,  # type: ignore[arg-type]
         summary_hold_seconds=summary_hold,
-        shooter_label=project.competitor_name or match.load_shooter(match_path, slug).name,
+        shooter_label=shooter_label,
     )
     exports_dir = project.exports_path(shooter_root)
     if output is not None:
