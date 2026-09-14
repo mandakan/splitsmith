@@ -13,6 +13,10 @@ Today's commands:
 - ``trims``: write lossless per-stage trims for every shooter in a match
   from a beep and a stage time alone -- no shot detection. Feeds
   ``splitsmith compare export``.
+
+- ``export``: stitch one shooter's existing per-stage trims into a match
+  video -- FCPXML, FCP7 XML or a rendered MP4 with generated title /
+  stage cards (issue #973). Reads finished artefacts; never re-cuts.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ from rich.console import Console
 from rich.table import Table
 
 from . import camera_select, match_model, match_trims, user_config
+from .config import Config
 from .match_model import (
     MATCH_FILE,
     Match,
@@ -70,8 +75,7 @@ def merge(
         "--output",
         "-o",
         help=(
-            "Path for the new merged match folder. Must not exist (or must "
-            "not already contain match.json)."
+            "Path for the new merged match folder. Must not exist (or must not already contain match.json)."
         ),
     ),
     name: str | None = typer.Option(
@@ -139,9 +143,7 @@ def merge(
         console.print(f"[red]Refused:[/] {exc}")
         raise typer.Exit(code=1) from exc
 
-    console.print(
-        f"\n[green]Merged[/] {len(match.shooters)} shooter(s) into " f"[bold]{plan.output_root}[/]."
-    )
+    console.print(f"\n[green]Merged[/] {len(match.shooters)} shooter(s) into [bold]{plan.output_root}[/].")
 
     if register:
         user_config.record_project_open(plan.output_root, match.name, kind="match")
@@ -218,7 +220,7 @@ def rename_shooter_slugs(
         file_okay=False,
         dir_okay=True,
         readable=True,
-        help=("Match folder (with match.json) whose shooter slugs should be " "replaced with opaque ids."),
+        help=("Match folder (with match.json) whose shooter slugs should be replaced with opaque ids."),
     ),
     dry_run: bool = typer.Option(
         False,
@@ -237,7 +239,7 @@ def rename_shooter_slugs(
     """
     if not is_match_folder(path):
         console.print(
-            f"[red]Not a match folder:[/] {path}\n" f"Expected {MATCH_FILE} alongside a shooters/ subdir."
+            f"[red]Not a match folder:[/] {path}\nExpected {MATCH_FILE} alongside a shooters/ subdir."
         )
         raise typer.Exit(code=2)
 
@@ -401,6 +403,184 @@ def trims(
         raise typer.Exit(code=1)
 
 
+_EXPORT_FORMATS = ("fcpxml", "fcp7xml", "mp4")
+_TITLE_KINDS = ("none", "slate", "lower-third")
+
+
+@match_app.command("export")
+def export(
+    match_path: Path = typer.Argument(..., exists=True, readable=True, help="Match folder."),
+    shooter: str | None = typer.Option(
+        None,
+        "--shooter",
+        help="Slug or display name of the shooter to export. Optional when the match has one shooter.",
+    ),
+    stage: list[int] = typer.Option([], "--stage", help="Limit to these stage numbers (repeatable)."),
+    output_format: str = typer.Option(
+        "fcpxml",
+        "--format",
+        help="'fcpxml' (Final Cut Pro), 'fcp7xml' (Premiere / Resolve) or 'mp4' (rendered by ffmpeg).",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Where to write. Defaults to the shooter's exports directory, named after the match.",
+    ),
+    head_pad: float = typer.Option(5.0, "--head-pad", help="Seconds of footage kept before each beep."),
+    tail_pad: float = typer.Option(5.0, "--tail-pad", help="Seconds of footage kept after each last shot."),
+    no_secondaries: bool = typer.Option(False, "--no-secondaries", help="Leave secondary cams out."),
+    no_overlay: bool = typer.Option(False, "--no-overlay", help="Leave the rendered overlay out."),
+    pip_layout: str = typer.Option("stacked", "--pip", help="'stacked' or 'pip-corners' for secondary cams."),
+    titles: str = typer.Option("none", "--titles", help="Per-stage title: 'slate', 'lower-third' or 'none'."),
+    title_duration: float = typer.Option(1.5, "--title-duration", help="Seconds a stage title shows for."),
+    title_page: bool = typer.Option(
+        False, "--title-page/--no-title-page", help="Open with a generated match title card (mp4 only)."
+    ),
+    title_info: str | None = typer.Option(
+        None, "--title-info", help="Free-text line under the match name on the title page."
+    ),
+    title_page_duration: float = typer.Option(
+        3.0, "--title-page-duration", help="Seconds the title page holds."
+    ),
+    closing_card: bool = typer.Option(
+        False, "--closing-card", help="Close with a generated card (mp4 only)."
+    ),
+    intro: Path | None = typer.Option(None, "--intro", help="Video clip to play before the first stage."),
+    outro: Path | None = typer.Option(None, "--outro", help="Video clip to play after the last stage."),
+    youtube_preset: bool = typer.Option(
+        False, "--youtube-preset", help="YouTube's recommended H.264 encode."
+    ),
+    overlay_theme: str = typer.Option(
+        "splitsmith", "--theme", help="Overlay / card theme: 'splitsmith' or 'clean'."
+    ),
+    config_path: Path | None = typer.Option(None, "--config", help="Optional YAML config."),
+) -> None:
+    """Stitch one shooter's finished per-stage exports into a match video.
+
+    Reads the lossless trims, audits and overlay MOVs the per-stage export
+    already wrote under the shooter's ``exports/`` and ``audit/``; a stage
+    without a trim fails the run and names the stage. Nothing is re-cut
+    -- run the per-stage export in the UI first.
+
+    ``--format mp4`` renders the stitched match with ffmpeg and can add
+    generated cards: ``--titles slate`` before each stage, ``--title-page``
+    at the head, ``--closing-card`` at the tail (issue #973). The XML
+    formats carry the stage titles FCP can draw and record the rest as
+    notes.
+    """
+    from .match_project import MatchProject
+    from .ui import match_exports
+
+    if output_format not in _EXPORT_FORMATS:
+        console.print(
+            f"[red]Error:[/] --format must be one of {', '.join(_EXPORT_FORMATS)}, got {output_format!r}."
+        )
+        raise typer.Exit(code=2)
+    if titles not in _TITLE_KINDS:
+        console.print(f"[red]Error:[/] --titles must be one of {', '.join(_TITLE_KINDS)}, got {titles!r}.")
+        raise typer.Exit(code=2)
+    if pip_layout not in ("stacked", "pip-corners"):
+        console.print(f"[red]Error:[/] --pip must be 'stacked' or 'pip-corners', got {pip_layout!r}.")
+        raise typer.Exit(code=2)
+    if overlay_theme not in ("splitsmith", "clean"):
+        console.print(f"[red]Error:[/] --theme must be 'splitsmith' or 'clean', got {overlay_theme!r}.")
+        raise typer.Exit(code=2)
+    if not is_match_folder(match_path):
+        console.print(f"[red]Error:[/] {match_path} is not a match folder (no {MATCH_FILE}).")
+        raise typer.Exit(code=2)
+
+    match = Match.load(match_path)
+    if shooter is None:
+        if len(match.shooters) != 1:
+            console.print(
+                f"[red]Error:[/] --shooter is required; this match has {len(match.shooters)} shooters: "
+                f"{', '.join(match.shooters)}"
+            )
+            raise typer.Exit(code=2)
+        slug: str | None = match.shooters[0]
+    else:
+        slug = match.resolve_shooter_slug(match_path, shooter)
+    if slug is None:
+        console.print(
+            f"[red]Error:[/] --shooter {shooter!r} names no shooter on this match. "
+            f"Slugs available: {', '.join(match.shooters)}"
+        )
+        raise typer.Exit(code=2)
+
+    shooter_root = Match.shooter_root(match_path, slug)
+    project = MatchProject.load(shooter_root)
+    stage_numbers = stage or [
+        entry.stage_number
+        for entry in project.stages
+        if not entry.skipped and (primary := entry.primary()) is not None and primary.beep_time is not None
+    ]
+    if not stage_numbers:
+        console.print("[red]Error:[/] no stage has a primary video with a confirmed beep.")
+        raise typer.Exit(code=1)
+    try:
+        stages_input = match_exports.stage_inputs_for_project(project, shooter_root, stage_numbers)
+    except (KeyError, ValueError) as exc:
+        console.print(f"[red]Error:[/] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    project_name = project.name or match.name or "match"
+    request = match_exports.MatchExportRequestData(
+        stage_numbers=tuple(stage_numbers),
+        head_pad_seconds=head_pad,
+        tail_pad_seconds=tail_pad,
+        include_secondaries=not no_secondaries,
+        include_overlay=not no_overlay,
+        project_name=project_name,
+        pip_layout=pip_layout,  # type: ignore[arg-type]
+        output_format=output_format,  # type: ignore[arg-type]
+        title_kind=titles,  # type: ignore[arg-type]
+        title_duration_seconds=title_duration,
+        intro_path=intro.expanduser() if intro else None,
+        outro_path=outro.expanduser() if outro else None,
+        youtube_preset=youtube_preset,
+        title_page=title_page,
+        title_page_info=match_exports.title_info_lines(project, extra=title_info),
+        title_page_duration_seconds=title_page_duration,
+        closing_card=closing_card,
+        overlay_theme=overlay_theme,  # type: ignore[arg-type]
+    )
+    exports_dir = project.exports_path(shooter_root)
+    if output is not None:
+        # ``export_match`` names the file itself; steer it by handing the
+        # requested directory over and renaming afterwards, so the
+        # naming rule stays in one place.
+        target_dir = output.expanduser().resolve().parent
+    else:
+        target_dir = exports_dir
+    console.print(
+        f"[dim]exporting {project_name} ({slug}), {len(stage_numbers)} stages, {output_format}...[/]"
+    )
+    try:
+        result = match_exports.export_match(
+            stages=stages_input,
+            request=request,
+            exports_dir=target_dir,
+            config=Config.load(config_path).output,
+        )
+    except match_exports.MatchExportError as exc:
+        console.print(f"[red]Error:[/] {exc}")
+        raise typer.Exit(code=1) from exc
+
+    written = result.fcpxml_path
+    if output is not None:
+        wanted = output.expanduser().resolve()
+        if wanted != written:
+            written.replace(wanted)
+            written = wanted
+    # ``soft_wrap``: a path or a note is one line the user copies or reads
+    # whole; rich's hard wrap would break it mid-word (#617).
+    console.print(f"[bold]Wrote[/] {written}", soft_wrap=True)
+    console.print(f"  {result.stage_count} stages, {result.duration_seconds:.1f}s timeline")
+    for note in result.anomalies:
+        console.print(f"[yellow]note[/] {note}", soft_wrap=True)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -414,8 +594,7 @@ def _render_plan(plan: match_model.MergePlan, *, dry_run: bool, move: bool) -> N
     console.print(f"  output:         {plan.output_root}")
     if plan.scoreboard_match_id:
         console.print(
-            f"  scoreboard:     id={plan.scoreboard_match_id} "
-            f"(content_type={plan.scoreboard_content_type})"
+            f"  scoreboard:     id={plan.scoreboard_match_id} (content_type={plan.scoreboard_content_type})"
         )
     if plan.match_date:
         console.print(f"  match date:     {plan.match_date.isoformat()}")
