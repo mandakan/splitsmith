@@ -35,6 +35,7 @@ function makeValue(over: Partial<ShellChromeValue> = {}): ShellChromeValue {
   return {
     contextSlot: null,
     stripSlot: null,
+    crumbSlot: null,
     setAccent: vi.fn(),
     setOwnsMobileAccount: vi.fn(),
     ...over,

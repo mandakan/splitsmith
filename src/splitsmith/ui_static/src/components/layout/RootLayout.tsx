@@ -64,6 +64,7 @@ export function RootLayout() {
   const location = useLocation();
   const [contextSlot, setContextSlot] = useState<HTMLElement | null>(null);
   const [stripSlot, setStripSlot] = useState<HTMLElement | null>(null);
+  const [crumbSlot, setCrumbSlot] = useState<HTMLElement | null>(null);
   const [accent, setAccent] = useState<ShellAccent>("led");
   const [ownsMobileAccount, setOwnsMobileAccount] = useState(false);
   const { headerRef, headerStyle } = useShellHeaderHeight();
@@ -78,8 +79,8 @@ export function RootLayout() {
   // same reason) -- don't rewrite as inline arrows, or useShellAccent's
   // and useShellOwnsMobileAccount's unmount cleanup will fire every render.
   const value = useMemo<ShellChromeValue>(
-    () => ({ contextSlot, stripSlot, setAccent, setOwnsMobileAccount }),
-    [contextSlot, stripSlot],
+    () => ({ contextSlot, stripSlot, crumbSlot, setAccent, setOwnsMobileAccount }),
+    [contextSlot, stripSlot, crumbSlot],
   );
 
   // Suppressed on mobile only when the mounted shell says it already has
@@ -98,7 +99,7 @@ export function RootLayout() {
             "bg-gradient-to-b from-surface to-bg",
           )}
         >
-          {showGlobalBar ? <GlobalBar /> : null}
+          {showGlobalBar ? <GlobalBar onCrumbSlot={setCrumbSlot} /> : null}
           {/* Progress strip slot: the mounted shell's JobsSurface portals
               its ProgressStrip here while jobs run; empty otherwise, so it
               costs no height. The ResizeObserver in useShellHeaderHeight

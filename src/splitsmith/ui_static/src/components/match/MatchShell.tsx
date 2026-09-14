@@ -31,6 +31,7 @@ import { JobsSurface } from "@/components/Jobs";
 import {
   useShellAccent,
   useShellContextSlot,
+  useShellCrumbSlot,
   useShellOwnsMobileAccount,
 } from "@/components/layout/shellChromeContext";
 import { MobileNav } from "@/components/match/MobileNav";
@@ -51,7 +52,6 @@ import {
   type MatchCapability,
   type MatchOrigin,
   type MatchProject,
-  type ScoreboardIdentity,
   type ServerHealth,
   type ShooterListEntry,
 } from "@/lib/api";
@@ -230,6 +230,7 @@ export function MatchShell() {
   // carries the account menu on a phone, so RootLayout suppresses the
   // global bar there rather than stacking a second one.
   const slot = useShellContextSlot();
+  const crumbSlot = useShellCrumbSlot();
   useShellAccent("led");
   useShellOwnsMobileAccount();
 
@@ -271,7 +272,6 @@ export function MatchShell() {
   const [capabilities, setCapabilities] = useState<MatchCapability[] | null>(
     null,
   );
-  const [identity, setIdentity] = useState<ScoreboardIdentity | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [beepReviewPending, setBeepReviewPending] = useState<number>(0);
   const [triageFlaggedCount, setTriageFlaggedCount] = useState<number>(0);
@@ -283,20 +283,6 @@ export function MatchShell() {
   // ``undefined`` only when the match has no shooters yet.
   const defaultShooterSlug = slug ?? pickDefaultShooterSlug(shooters);
 
-  useEffect(() => {
-    let alive = true;
-    api
-      .getScoreboardIdentity()
-      .then((id) => {
-        if (alive) setIdentity(id);
-      })
-      .catch(() => {
-        if (alive) setIdentity(null);
-      });
-    return () => {
-      alive = false;
-    };
-  }, []);
 
   // Server-state drift recovery: when ANY request returns 409 ``no_project``
   // (typical cause: dev server restart wiped the in-memory bind state),
@@ -549,74 +535,48 @@ export function MatchShell() {
       </span>
       <div className="flex-1" />
     </div>
-  ) : (
-    <div className="flex flex-wrap items-center gap-4 border-t border-rule bg-bg px-7 py-2.5">
-      <nav
-        aria-label="Breadcrumb"
-        className="inline-flex items-center gap-2 font-display text-[0.8125rem] font-bold uppercase tracking-[0.06em]"
-      >
-        <a
-          href="#"
-          onClick={(e) => {
-            e.preventDefault();
-            // Replace so that picking a different match in /pick
-            // and hitting back doesn't return to a stage URL whose
-            // data now belongs to a different project (confusing).
-            navigate("/pick", { replace: true });
-          }}
-          className="text-ink-2 transition-colors hover:text-ink"
-        >
-          Matches
-        </a>
-        <span aria-hidden className="text-rule-strong">
-          /
-        </span>
-        <span className="text-ink-2">
-          {project?.name ?? health?.project_name ?? "..."}
-        </span>
-        {viewLabel ? (
-          <>
-            <span aria-hidden className="text-rule-strong">
-              /
-            </span>
-            <span className="text-led">{viewLabel}</span>
-          </>
-        ) : null}
-      </nav>
-      {shooters.length > 1 ? (
-        <ShooterChipStrip
-          shooters={shooters}
-          activeSlug={slug}
-          urlBase={breadcrumbUrlBase(relativePath)}
-          label={shooterStripLabel}
-          variant="inline"
-        />
-      ) : null}
-      <div className="flex-1" />
+  ) : shooters.length > 1 ? (
+    // Desktop context row: only the shooter switcher, and only on
+    // multi-shooter matches. The breadcrumb lives in the global bar now;
+    // on a single-shooter match this row is null and the slot collapses.
+    // PRs 3-6 move the strip under each page title and retire this row.
+    <div className="flex flex-wrap items-center gap-4 border-t border-rule bg-bg px-7 py-2">
+      <ShooterChipStrip
+        shooters={shooters}
+        activeSlug={slug}
+        urlBase={breadcrumbUrlBase(relativePath)}
+        label={shooterStripLabel}
+        variant="inline"
+      />
+    </div>
+  ) : null;
+
+  // Breadcrumb in the global bar (spec 2026-09-13 s3.3): Geist, sentence
+  // case; "Matches" is the switch-project action.
+  const breadcrumb = (
+    <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 text-[13px]">
       <button
         type="button"
-        onClick={switchProject}
-        title="Switch project"
-        className="inline-flex min-h-10 items-center gap-2.5 rounded-full border border-rule bg-surface-2 py-1 pl-1 pr-3.5 text-[0.8125rem] text-ink-2 transition-colors hover:bg-surface-3"
+        onClick={() => void switchProject()}
+        className="shrink-0 text-muted transition-colors hover:text-ink"
       >
-        {identity?.display_name && (
-          <span
-            aria-hidden
-            className="inline-flex size-7 items-center justify-center rounded-full font-mono text-[0.6875rem] font-bold text-ink"
-            style={{
-              background:
-                "linear-gradient(135deg, var(--color-led), var(--color-led-deep))",
-              boxShadow:
-                "0 0 0 1px rgba(255,45,45,0.4), 0 0 12px var(--color-led-glow)",
-            }}
-          >
-            {userInitials(identity.display_name)}
-          </span>
-        )}
-        <span>{identity?.display_name ?? "Switch project"}</span>
-        <Repeat className="size-3.5 text-subtle" />
+        Matches
       </button>
-    </div>
+      <span aria-hidden className="text-rule-strong">
+        /
+      </span>
+      <span className="truncate font-medium text-ink">
+        {project?.name ?? health?.project_name ?? "..."}
+      </span>
+      {viewLabel ? (
+        <>
+          <span aria-hidden className="text-rule-strong">
+            /
+          </span>
+          <span className="shrink-0 text-ink-2">{viewLabel}</span>
+        </>
+      ) : null}
+    </nav>
   );
 
   return (
@@ -629,7 +589,8 @@ export function MatchShell() {
         ...shellStyle,
       }}
     >
-      {slot ? createPortal(contextRow, slot) : null}
+      {slot && contextRow ? createPortal(contextRow, slot) : null}
+      {crumbSlot && !isMobile ? createPortal(breadcrumb, crumbSlot) : null}
 
       {capabilityDenied(capabilities, "edit") ? (
         // READ_ONLY_MIRROR_MESSAGE's copy ("this is a desktop mirror...")
@@ -764,13 +725,6 @@ function breadcrumbUrlBase(
   if (pathname.startsWith("/ingest") || pathname.startsWith("/videos"))
     return "ingest";
   return "audit";
-}
-
-function userInitials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
 function formatDateShort(iso: string): string {

@@ -43,6 +43,25 @@ function renderBar() {
 }
 
 describe("GlobalBar", () => {
+  it("publishes a breadcrumb slot between the wordmark and the mode switch", () => {
+    const seen: (HTMLElement | null)[] = [];
+    render(
+      <MemoryRouter>
+        <ModeProvider>
+          <AuthProvider>
+            <GlobalBar onCrumbSlot={(el) => seen.push(el)} />
+          </AuthProvider>
+        </ModeProvider>
+      </MemoryRouter>,
+    );
+    const slot = screen.getByTestId("crumb-slot");
+    expect(seen).toContain(slot);
+    const wordmark = screen.getByText("Splitsmith");
+    const mode = screen.getByRole("radiogroup", { name: /mode/i });
+    expect(wordmark.compareDocumentPosition(slot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(slot.compareDocumentPosition(mode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("renders the brand wordmark", () => {
     renderBar();
     expect(screen.getByText("Splitsmith")).toBeInTheDocument();

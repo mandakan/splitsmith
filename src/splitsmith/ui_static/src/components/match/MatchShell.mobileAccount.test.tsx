@@ -154,6 +154,7 @@ function ShellChromeHarness({ children }: { children: ReactNode }) {
     () => ({
       contextSlot: slot,
       stripSlot: null,
+      crumbSlot: null,
       setAccent: () => {},
       setOwnsMobileAccount: () => {},
     }),
