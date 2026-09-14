@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * Manual stage-duration editor for projects without scoreboard data.
  *
@@ -128,7 +129,7 @@ export function StageTimeSection({
           </span>
           <Button
             size="sm"
-            variant="default"
+           
             className="ml-auto"
             onClick={() => setEditing(true)}
             disabled={busy}

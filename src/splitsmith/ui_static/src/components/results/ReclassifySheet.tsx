@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * ReclassifySheet - the mobile interval-reclassify bottom sheet
  * (slice 5 of the mobile operator surfaces program). Wraps

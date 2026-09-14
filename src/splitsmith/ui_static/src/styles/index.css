@@ -309,6 +309,16 @@
   font-variant-numeric: tabular-nums lining-nums;
 }
 
+@utility numeral {
+  /* The Numeral type role (spec 2026-09-13 s5): every count, time and
+   * split. Never zero-padded -- ordinals are Label. Size comes from the
+   * caller (text-[13px] / text-[20px] / text-[26px]). */
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums lining-nums;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+}
+
 /* ============================================================================
  * Base layer
  * ========================================================================== */
@@ -429,6 +439,26 @@
       0 0 18px var(--color-led-glow);
   }
   .btn-led-fill:hover {
+    background: var(--color-led);
+    color: var(--color-ink);
+  }
+
+  /* Button variant="primary" (spec 2026-09-13 s5): the .btn-led-fill
+   * typography and fill without the 18 px halo -- glow is reserved for
+   * live state (running job, playhead, focus). A 1 px ring keeps the edge
+   * crisp against surface-2. */
+  .btn-primary {
+    background: var(--color-led-fill);
+    color: var(--color-ink);
+    font-family: var(--font-display);
+    font-size: 0.875rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    text-shadow: 0 0 6px rgba(0, 0, 0, 0.18);
+    box-shadow: 0 0 0 1px var(--color-led-fill);
+  }
+  .btn-primary:hover {
     background: var(--color-led);
     color: var(--color-ink);
   }

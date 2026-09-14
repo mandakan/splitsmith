@@ -21,7 +21,15 @@ export {
 export { Skeleton } from "./skeleton";
 
 export { Brand, BrandMark } from "./Brand";
+// Deprecated: Kicker -> Label (spec 2026-09-13 s6). Kept until the last consumer migrates.
 export { Kicker } from "./Kicker";
+export { Label } from "./Label";
+export { Stat, StatStrip } from "./Stat";
+export { Chip, type ChipTick } from "./Chip";
+export { PageHeader } from "./PageHeader";
+export { Table, Th, Td, Tr } from "./DataTable";
+export { PipelineDots, type PipelineState } from "./PipelineDots";
+export { ProgressStrip } from "./ProgressStrip";
 export { DisplayHeading } from "./DisplayHeading";
 export { ModeSwitch } from "./ModeSwitch";
 export { Kbd } from "./Kbd";

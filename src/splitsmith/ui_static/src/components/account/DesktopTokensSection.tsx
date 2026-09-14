@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * DesktopTokensSection - owner-facing desktop sync token management
  * (#631 Task 10; moved from a dialog to an account-page section in

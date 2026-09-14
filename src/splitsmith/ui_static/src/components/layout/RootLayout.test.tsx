@@ -17,6 +17,7 @@ import {
   useShellAccent,
   useShellContextSlot,
   useShellOwnsMobileAccount,
+  useShellStripSlot,
 } from "@/components/layout/shellChromeContext";
 import { RootLayout } from "@/components/layout/RootLayout";
 
@@ -57,11 +58,15 @@ function FakeShell({
 }) {
   useShellAccent(accent);
   const slot = useShellContextSlot();
+  const strip = useShellStripSlot();
   return (
     <>
       {ownsMobile ? <OwnsMobile /> : null}
       {slot
         ? createPortal(<div data-testid="ctx-row">breadcrumbs</div>, slot)
+        : null}
+      {strip
+        ? createPortal(<div data-testid="strip-row">detecting shots</div>, strip)
         : null}
     </>
   );
@@ -93,6 +98,18 @@ describe("RootLayout", () => {
     const row = await screen.findByTestId("ctx-row");
     expect(row).toBeInTheDocument();
     expect(row.closest("header")).not.toBeNull();
+  });
+
+  it("renders a shell's portalled progress strip inside the header, above the context row", async () => {
+    renderAt();
+    const strip = await screen.findByTestId("strip-row");
+    const row = await screen.findByTestId("ctx-row");
+    const header = strip.closest("header")!;
+    expect(header).not.toBeNull();
+    // Strip slot precedes the context slot in DOM order (top bar, strip,
+    // context row, hairline).
+    expect(strip.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(header.querySelector("[data-testid='shell-strip-slot']")).toContainElement(strip);
   });
 
   it("uses the led hairline by default", async () => {

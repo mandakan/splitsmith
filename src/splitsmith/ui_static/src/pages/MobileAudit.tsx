@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * Mobile audit screen (#700 follow-up, mobile audit UI program).
  *

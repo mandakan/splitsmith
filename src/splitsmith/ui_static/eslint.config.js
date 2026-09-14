@@ -23,4 +23,35 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
     },
   },
+  // Visual budget (docs/superpowers/specs/2026-09-13-ux-restructure-and-visual-budget-design.md s5).
+  // Pages and feature components get type and spacing from components/ui,
+  // never from arbitrary Tailwind values. Files that predate the rule carry
+  // a file-level disable that the PR rebuilding that page deletes, so the
+  // count only goes down.
+  {
+    files: ["src/pages/**/*.{ts,tsx}", "src/components/**/*.{ts,tsx}"],
+    ignores: ["src/components/ui/**", "**/*.test.{ts,tsx}"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector: "Literal[value=/text-\\[[0-9.]+(rem|px)\\]/], TemplateElement[value.raw=/text-\\[[0-9.]+(rem|px)\\]/]",
+          message:
+            "Arbitrary text size. Use a type role from components/ui (PageHeader, Label, Stat) or the Tailwind text-* scale.",
+        },
+        {
+          selector: "Literal[value=/tracking-\\[/], TemplateElement[value.raw=/tracking-\\[/]",
+          message: "Arbitrary letter-spacing. Label is the only tracked-caps style.",
+        },
+        {
+          selector: "Literal[value=/\\bfont-display\\b/], TemplateElement[value.raw=/\\bfont-display\\b/]",
+          message: 'Antonio is PageHeader and Button variant="primary" only.',
+        },
+        {
+          selector: "Literal[value=/\\bbg-led\\b.*\\btext-bg\\b/], TemplateElement[value.raw=/\\bbg-led\\b.*\\btext-bg\\b/]",
+          message: 'Cream on saturated red fails contrast; use Button variant="primary".',
+        },
+      ],
+    },
+  },
 );

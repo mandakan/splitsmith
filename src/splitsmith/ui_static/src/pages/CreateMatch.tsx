@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * CreateMatch route (/pick/new) -- two-variant create-match flow (#322).
  *
@@ -889,13 +890,11 @@ function ScoreboardVariant({
             primary={
               <Button
                 type="button"
+                variant="primary"
                 onClick={() => void create()}
                 disabled={!canCreate}
-                className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_16px_var(--color-led-glow)] hover:bg-led hover:text-ink"
               >
-                <span className="font-display uppercase tracking-[0.08em]">
-                  {creating ? "Creating..." : "Create match"}
-                </span>
+                <span>{creating ? "Creating..." : "Create match"}</span>
                 <ArrowRight className="size-3.5" />
               </Button>
             }
@@ -1303,6 +1302,7 @@ function ManualVariant({
         primary={
           <Button
             type="button"
+            variant="primary"
             onClick={() => void submit()}
             disabled={
               creating ||
@@ -1311,11 +1311,8 @@ function ManualVariant({
               !shooterName.trim() ||
               stages.length === 0
             }
-            className="bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_16px_var(--color-led-glow)] hover:bg-led hover:text-ink"
           >
-            <span className="font-display uppercase tracking-[0.08em]">
-              {creating ? "Creating..." : "Create match"}
-            </span>
+            <span>{creating ? "Creating..." : "Create match"}</span>
             <ArrowRight className="size-3.5" />
           </Button>
         }

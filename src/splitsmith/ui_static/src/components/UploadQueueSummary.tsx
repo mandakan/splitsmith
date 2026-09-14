@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 import { cn } from "@/lib/utils";
 import { summaryParts, type QueueStats } from "@/lib/uploadStats";
 

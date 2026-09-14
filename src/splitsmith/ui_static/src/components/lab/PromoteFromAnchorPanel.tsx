@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * Promote-from-anchor trigger (issue #125). Moved out of legacy
  * ``Lab.tsx`` (#886 follow-up) alongside {@link PromoteStagesPanel}.

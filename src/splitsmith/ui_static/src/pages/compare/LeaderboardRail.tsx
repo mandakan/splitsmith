@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /** Cockpit right rail: the RankingTable's data at a third of the height.
  *  One card per shooter - rank, name, stage time, delta to leader, and
  *  the draw / fastest / avg-split microstats (#774 semantics via

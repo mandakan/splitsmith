@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 import { type LabEvalFixture } from "@/lib/api";
 
 import { fmtPct } from "./labPalette";

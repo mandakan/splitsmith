@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 import type { Anomaly } from "@/lib/anomalies";
 import type { WaveformView } from "@/components/Waveform";
 import { cn } from "@/lib/utils";

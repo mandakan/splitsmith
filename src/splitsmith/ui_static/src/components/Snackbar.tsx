@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * Snackbar - the codebase's first interactive toast. Follows the
  * SaveToast/DropGuard shell (body Portal, z-toast token, live region

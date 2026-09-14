@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * CompetitorRow -- a single scoreboard competitor rendered as a checkbox
  * row (#598).

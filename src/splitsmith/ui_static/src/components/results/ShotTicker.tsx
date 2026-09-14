@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * ShotTicker - chronograph HUD overlaid bottom-left on the Results
  * video. Elapsed-from-beep clock + shot counter on top; the current

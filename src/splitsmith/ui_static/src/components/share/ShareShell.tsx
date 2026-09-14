@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * ShareShell - the public, token-authorized wrapper around the read-only
  * Results surface (#349). Mounts under /share/:token and provides the same

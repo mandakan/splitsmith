@@ -1,22 +1,33 @@
 import { describe, expect, it } from "vitest";
 import { matchNavItems } from "@/components/match/navItems";
 
-describe("matchNavItems jobs entry", () => {
-  it("links to the jobs page and badges the failed count", () => {
-    const items = matchNavItems({
-      base: "/match/m1",
-      hasFootage: true,
-      beepReviewPendingCount: 0,
-      triageFlaggedCount: 0,
-      jobsAttentionCount: 2,
-    });
-    const jobs = items.find((i) => i.key === "jobs");
-    expect(jobs).toMatchObject({
-      to: "/match/m1/jobs",
-      label: "Jobs",
-      count: 2,
-      badgeKind: "pending",
-    });
+const base = {
+  base: "/match/m1",
+  shooterSlug: "s",
+  hasFootage: true,
+  shooterCount: 1,
+  beepReviewPendingCount: 0,
+  triageFlaggedCount: 0,
+};
+
+describe("matchNavItems shape", () => {
+  it("has no jobs row; the progress strip and drawer own jobs", () => {
+    expect(matchNavItems(base).find((i) => i.key === "jobs")).toBeUndefined();
+  });
+
+  it("groups rows by phase in loop order and carries the approved labels", () => {
+    const items = matchNavItems(base);
+    expect(items.map((i) => [i.key, i.group ?? null, i.label])).toEqual([
+      ["overview", null, "Overview"],
+      ["videos", "prepare", "Footage"],
+      ["shooters", "prepare", "Shooters"],
+      ["audit", "review", "Audit"],
+      ["beep-review", "review", "Beep review"],
+      ["triage", "review", "Triage"],
+      ["results", "analyse", "Splits"],
+      ["coach", "analyse", "Coach"],
+      ["export", "deliver", "Export"],
+    ]);
   });
 });
 
@@ -27,7 +38,6 @@ describe("matchNavItems triage entry", () => {
       hasFootage: true,
       beepReviewPendingCount: 0,
       triageFlaggedCount: 2,
-      jobsAttentionCount: 0,
     });
     const triage = items.find((i) => i.key === "triage");
     expect(triage).toMatchObject({
@@ -45,7 +55,6 @@ describe("matchNavItems triage entry", () => {
       hasFootage: true,
       beepReviewPendingCount: 0,
       triageFlaggedCount: 1,
-      jobsAttentionCount: 0,
     });
     const triage = items.find((i) => i.key === "triage");
     expect(triage).toMatchObject({

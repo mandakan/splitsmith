@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * Triage - the responsive stage worklist (slice 4, mobile audit triage
  * program, #700 follow-up). One card per shooter-stage cell that still

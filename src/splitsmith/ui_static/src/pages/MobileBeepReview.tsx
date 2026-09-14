@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * MobileBeepReview - the mobile beep review card pager (slice 3, #326
  * follow-up). Desktop's BeepReview is a list + detail layout that

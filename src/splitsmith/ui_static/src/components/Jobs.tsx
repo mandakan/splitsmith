@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * Jobs surface (v2 audit chrome).
  *
@@ -42,25 +43,21 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import { useLocation } from "react-router-dom";
 
+import { useShellStripSlot } from "@/components/layout/shellChromeContext";
 import { Portal } from "@/components/ui/Portal";
+import { ProgressStrip } from "@/components/ui/ProgressStrip";
 import { type Job } from "@/lib/api";
+import { kindLabel } from "@/lib/jobLabels";
 import { useDialogFocus } from "@/lib/dialogFocus";
 import { type JobsState } from "@/lib/jobs";
 import { cn } from "@/lib/utils";
 
-export const KIND_LABEL: Record<string, string> = {
-  detect_beep: "Detect beep",
-  trim: "Trim stage video",
-  shot_detect: "Detect shots",
-  export: "Export stage",
-  match_export: "Match export",
-  audio_extract: "Audio extract",
-  model_download: "Download models",
-  generate_proxy: "Generating preview",
-  sync_match: "Sync to hosted",
-};
+// Re-exported so existing importers keep working; the table itself lives
+// in lib/jobLabels.ts (shared with the ProgressStrip primitive).
+export { KIND_LABEL } from "@/lib/jobLabels";
 
 export const KIND_ICON: Record<string, ReactNode> = {
   detect_beep: <Volume2 className="size-3.5" />,
@@ -74,9 +71,6 @@ export const KIND_ICON: Record<string, ReactNode> = {
   sync_match: <CloudUpload className="size-3.5" />,
 };
 
-function kindLabel(kind: string): string {
-  return KIND_LABEL[kind] ?? kind;
-}
 
 export function jobTarget(job: Job): string {
   const bits: string[] = [];
@@ -554,6 +548,9 @@ export function JobsSurface({
   const [open, setOpen] = useState(false);
   const toggle = useCallback(() => setOpen((v) => !v), []);
   const { pathname } = useLocation();
+  // The ambient strip under the top bar. Same state, same drawer: the
+  // strip's "All jobs" opens this surface's sheet.
+  const stripSlot = useShellStripSlot();
 
   // Escape / focus handling lives in JobsSheet (useDialogFocus).
 
@@ -573,6 +570,16 @@ export function JobsSurface({
 
   return (
     <>
+      {stripSlot
+        ? createPortal(
+            <ProgressStrip
+              state={state}
+              onOpen={() => setOpen(true)}
+              onDismissFailed={(j) => void state.acknowledge(j)}
+            />,
+            stripSlot,
+          )
+        : null}
       {mobile ? (
         <MobileJobsRow state={state} open={open} onToggle={toggle} />
       ) : (

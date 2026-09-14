@@ -33,6 +33,13 @@ export interface ShellChromeValue {
   /** Node the mounted shell portals its context row into. Null on the
    *  first paint, before RootLayout's ref callback has run. */
   contextSlot: HTMLElement | null;
+  /** Node under the global bar that the mounted shell's JobsSurface
+   *  portals its ProgressStrip into. Null until RootLayout mounts. */
+  stripSlot: HTMLElement | null;
+  /** Node inside the GlobalBar (after the wordmark) that the mounted
+   *  shell portals its breadcrumb into. Null on mobile, where the bar
+   *  is either hidden or has no room for one. */
+  crumbSlot: HTMLElement | null;
   setAccent: (accent: ShellAccent) => void;
   /** Declared true by a shell that already carries an account menu on
    *  mobile, so RootLayout can suppress the global bar there. */
@@ -57,6 +64,14 @@ export function ShellChromeProvider({
 
 export function useShellContextSlot(): HTMLElement | null {
   return useContext(ShellChromeContext)?.contextSlot ?? null;
+}
+
+export function useShellStripSlot(): HTMLElement | null {
+  return useContext(ShellChromeContext)?.stripSlot ?? null;
+}
+
+export function useShellCrumbSlot(): HTMLElement | null {
+  return useContext(ShellChromeContext)?.crumbSlot ?? null;
 }
 
 /** Declare this shell's hairline accent for as long as it is mounted.

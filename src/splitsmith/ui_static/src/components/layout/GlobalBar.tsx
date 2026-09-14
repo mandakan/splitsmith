@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * GlobalBar - row one of the app's single header (#550).
  *
@@ -30,7 +31,13 @@ import { Brand, ModeSwitch } from "@/components/ui";
 import { useIsMobile } from "@/lib/useIsMobile";
 import { cn } from "@/lib/utils";
 
-export function GlobalBar() {
+export interface GlobalBarProps {
+  /** Receives the breadcrumb slot node (desktop only); the mounted shell
+   *  portals its breadcrumb there through useShellCrumbSlot(). */
+  onCrumbSlot?: (el: HTMLElement | null) => void;
+}
+
+export function GlobalBar({ onCrumbSlot }: GlobalBarProps = {}) {
   // One definition of "mobile" for the whole bar rather than a JS gate for
   // the wordmark and a CSS `sm:` for the spacing -- those two disagree
   // between 640 and 767px, which is exactly the range a small tablet sits
@@ -47,7 +54,17 @@ export function GlobalBar() {
           Splitsmith
         </span>
       )}
-      <div className="flex-1" />
+      {/* Breadcrumb slot doubles as the spacer; on mobile there is no
+          breadcrumb and the plain spacer stays. */}
+      {isMobile ? (
+        <div className="flex-1" />
+      ) : (
+        <div
+          ref={onCrumbSlot}
+          data-testid="crumb-slot"
+          className="ml-3 flex min-w-0 flex-1 items-center"
+        />
+      )}
       <ModeSwitch size="sm" />
       <HostedAccountChip />
       <AccountChip />

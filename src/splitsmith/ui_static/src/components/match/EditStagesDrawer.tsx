@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * EditStagesDrawer -- add, remove, and rename stages on the bound match (#521).
  *
@@ -387,7 +388,7 @@ export function EditStagesDrawer({
               <Button type="button" variant="ghost" onClick={onClose} disabled={saving}>
                 Cancel
               </Button>
-              <Button type="button" onClick={handleSaveClick} disabled={saveDisabled}>
+              <Button type="button" variant="primary" onClick={handleSaveClick} disabled={saveDisabled}>
                 {saving ? <Loader2 className="size-4 animate-spin" /> : null}
                 Save
               </Button>

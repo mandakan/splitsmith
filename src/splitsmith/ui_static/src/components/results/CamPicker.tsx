@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * CamPicker - read-only camera strip for the Results stage surface
  * (owner and share mounts alike). Click-to-focus tiles; only the page's

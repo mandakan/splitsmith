@@ -12,7 +12,7 @@
  * transition lands within ~1.2s of render.
  */
 import { useMemo, useState, type ReactNode } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -76,17 +76,21 @@ beforeEach(() => {
 // RootLayout provides in the real app.
 function ShellChromeHarness({ children }: { children: ReactNode }) {
   const [slot, setSlot] = useState<HTMLElement | null>(null);
+  const [crumb, setCrumb] = useState<HTMLElement | null>(null);
   const value = useMemo<ShellChromeValue>(
     () => ({
       contextSlot: slot,
+      stripSlot: null,
+      crumbSlot: crumb,
       setAccent: () => {},
       setOwnsMobileAccount: () => {},
     }),
-    [slot],
+    [slot, crumb],
   );
   return (
     <ShellChromeProvider value={value}>
-      <div ref={setSlot} />
+      <div ref={setCrumb} data-testid="crumb-slot" />
+      <div ref={setSlot} data-testid="context-slot" />
       {children}
     </ShellChromeProvider>
   );
@@ -451,14 +455,37 @@ describe("MatchShell chrome ownership (#550)", () => {
     expect(document.querySelector("header")).toBeNull();
   });
 
-  it("keeps the breadcrumb, shooter chips and switch project", async () => {
+  it("portals the breadcrumb into the global bar's crumb slot; Matches is the switch-project action", async () => {
     renderShell();
+    const crumb = await screen.findByRole("navigation", { name: /breadcrumb/i });
+    expect(screen.getByTestId("crumb-slot")).toContainElement(crumb);
+    expect(crumb.className).not.toMatch(/font-display|uppercase/);
     expect(
-      await screen.findByRole("navigation", { name: /breadcrumb/i }),
+      within(crumb).getByRole("button", { name: "Matches" }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /switch project/i }),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /switch project/i })).toBeNull();
+  });
+
+  it("leaves the context slot empty on a single-shooter match", async () => {
+    renderShell();
+    await screen.findByRole("navigation", { name: /breadcrumb/i });
+    expect(screen.getByTestId("context-slot")).toBeEmptyDOMElement();
+  });
+
+  it("keeps the shooter chip strip in the context slot on a multi-shooter match", async () => {
+    vi.mocked(api.listMatchShooters).mockResolvedValue({
+      match_root: "/root",
+      match_name: "Bromma Classic 2026",
+      shooters: [makeShooter("mathias", "Mathias"), makeShooter("anna", "Anna")],
+      origin: "local",
+      capabilities: ["edit", "review"],
+    });
+    renderShell();
+    await screen.findByRole("navigation", { name: /breadcrumb/i });
+    await waitFor(() =>
+      expect(screen.getByTestId("context-slot")).not.toBeEmptyDOMElement(),
+    );
+    expect(within(screen.getByTestId("context-slot")).getByText("Anna")).toBeInTheDocument();
   });
 
   // "still mounts the account menu inside the mobile drawer" lives in

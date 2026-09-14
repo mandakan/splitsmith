@@ -173,6 +173,7 @@ export function ShareDialog({ onClose }: ShareDialogProps) {
             <div>
               <Button
                 type="button"
+                variant="primary"
                 size="sm"
                 onClick={() => void handleCreate()}
                 disabled={busy}
