@@ -32,6 +32,16 @@ describe("ShotList", () => {
     expect(onJump).toHaveBeenCalledWith(MARKERS[3]);
     expect(screen.getByText("Flagged · 1")).toBeInTheDocument();
   });
+
+  it("measures the first shot's split from the beep, not from the clip start", () => {
+    render(<ShotList rows={shotRows(MARKERS, [])} beep={3} currentMarkerId={null} onJump={vi.fn()} />);
+    const list = screen.getByRole("region", { name: "Shots" });
+    const buttons = within(list).getAllByRole("button");
+    // Shot a at 5 s with the beep at 3 s: a 2.000 s draw. Shot b at 8 s
+    // follows the kept shot a (the rejected r in between does not count).
+    expect(buttons[0]).toHaveTextContent("2.000");
+    expect(buttons[2]).toHaveTextContent("3.000");
+  });
 });
 
 describe("TransportLine", () => {
@@ -100,6 +110,23 @@ describe("CurrentShotLine", () => {
     fireEvent.change(screen.getByLabelText("Notes for this shot"), { target: { value: "late" } });
     expect(onNoteChange).toHaveBeenCalledWith("b", "late");
     expect(screen.getByRole("button", { name: /Add shot here/ })).toBeDisabled();
+  });
+
+  it("reads the first shot's split as the draw from the beep", () => {
+    render(
+      <CurrentShotLine
+        shots={[marker("a", 6.97)]}
+        currentIndex={0}
+        beep={5}
+        onStep={vi.fn()}
+        flag={null}
+        onNoteChange={vi.fn()}
+        onReject={vi.fn()}
+        onAddHere={vi.fn()}
+        canAddHere={false}
+      />,
+    );
+    expect(screen.getByText("1.970")).toBeInTheDocument();
   });
 });
 

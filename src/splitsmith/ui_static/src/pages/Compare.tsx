@@ -588,8 +588,8 @@ export function Compare() {
                 one shooter is one tile, no picker. */}
             {playableShooters.length >= 2 ? (
               <span role="group" aria-label="Layout" className="inline-flex gap-0.5 rounded-md border border-rule-strong bg-surface-2 p-0.5">
-                <LayoutPill label="2 \u00d7 2" active={layout === "grid"} onClick={() => setLayout("grid")} />
-                <LayoutPill label="1 \u00d7 4" active={layout === "row"} onClick={() => setLayout("row")} />
+                <LayoutPill label={"2 \u00d7 2"} active={layout === "grid"} onClick={() => setLayout("grid")} />
+                <LayoutPill label={"1 \u00d7 4"} active={layout === "row"} onClick={() => setLayout("row")} />
                 <LayoutPill label="Stack" active={layout === "stack"} onClick={() => setLayout("stack")} />
               </span>
             ) : null}

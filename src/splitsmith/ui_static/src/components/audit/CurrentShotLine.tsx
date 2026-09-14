@@ -14,6 +14,8 @@ import { Kbd } from "@/components/ui/Kbd";
 export interface CurrentShotLineProps {
   shots: AuditMarker[];
   currentIndex: number;
+  /** The beep's clip time: the origin of the first shot's split (the draw). */
+  beep?: number | null;
   onStep: (delta: number) => void;
   flag: string | null;
   onNoteChange: (markerId: string, note: string) => void;
@@ -35,12 +37,13 @@ function Figure({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function CurrentShotLine({ shots, currentIndex, onStep, flag, onNoteChange, onReject, onAddHere, canAddHere }: CurrentShotLineProps) {
+export function CurrentShotLine({ shots, currentIndex, beep = null, onStep, flag, onNoteChange, onReject, onAddHere, canAddHere }: CurrentShotLineProps) {
   const total = shots.length;
   const idx = total > 0 ? Math.min(Math.max(currentIndex, 0), total - 1) : -1;
   const current = idx >= 0 ? shots[idx] : null;
   const previous = idx > 0 ? shots[idx - 1] : null;
-  const split = current ? current.time - (previous?.time ?? 0) : null;
+  // Marker times are clip times; the draw counts from the beep, not from 0.
+  const split = current ? current.time - (previous?.time ?? beep ?? 0) : null;
 
   return (
     <div className="border-t border-rule-strong bg-surface-2 px-3 py-2 text-md text-ink-2">
