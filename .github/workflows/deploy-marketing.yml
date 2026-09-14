@@ -35,6 +35,11 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # wrangler-action shells out to `pnpm exec wrangler`; without the
+      # install it falls back to downloading its own wrangler (a warning
+      # on every run since the lockfile landed).
+      - run: pnpm install --frozen-lockfile
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
