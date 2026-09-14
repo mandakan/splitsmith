@@ -276,7 +276,7 @@ the length of the stitched timeline. Never assign one from the other.
 
 The SPA is mid-restructure (spec
 ``docs/superpowers/specs/2026-09-13-ux-restructure-and-visual-budget-design.md``,
-eight PRs, three merged as of 2026-09-14). Any new screen or surface,
+eight PRs, four merged as of 2026-09-14; PR 5 Audit in progress). Any new screen or surface,
 whatever session builds it, follows the budget below; the ESLint rule
 ``no-restricted-syntax`` in ``ui_static/eslint.config.js`` enforces the
 mechanical half.
@@ -305,11 +305,25 @@ no issue numbers in the UI; splits rank at least equal with scorecard
 figures in any summary. Every page's data derivation lives in a pure
 ``lib/*.ts`` module with tests; the page maps results to primitives.
 
+**Rebuilt and open for parallel work (build on their seams, not around
+them):** Overview (``pages/Home.tsx``, ``components/overview/*``,
+``lib/overview.ts`` -- a new per-stage state or action is a ``rowAction``
+case); Splits and the stage page (``pages/Results.tsx``,
+``pages/ResultsStage.tsx``, ``lib/splitsTable.ts``,
+``components/results/SplitsTable.tsx`` / ``SplitsCards.tsx`` /
+``SplitsList.tsx`` / ``Scorecard.tsx`` / ``StageStats.tsx``,
+``components/share/ShareShell.tsx``); per-stage split figures for any
+share-surface consumer come from ``stages[].figures`` on the project
+payload, never from triage (owner-only). Still grandfathered and not in
+any rebuild PR -- restyle onto the primitives whenever you touch them:
+``components/results/ResultsPlayer.tsx``, ``CamPicker.tsx``,
+``ReclassifySheet.tsx``, ``ShareDialog.tsx``,
+``components/comments/CommentPanel.tsx``.
+
 **Files the restructure will rewrite -- do not edit them in a parallel
 branch, put new functionality in a component the rebuild can mount:**
-PR 4 ``pages/Results.tsx``, ``pages/ResultsStage.tsx``,
-``components/results/*``, ``components/share/ShareShell.tsx``; PR 5
-``pages/Audit.tsx``, ``components/audit/*``, ``pages/BeepReview.tsx``;
+PR 5 ``pages/Audit.tsx``, ``components/audit/*``, ``pages/BeepReview.tsx``,
+``components/BeepSection.tsx``;
 PR 6 ``pages/Ingest.tsx``, ``pages/ingest/*``, ``pages/Shooters.tsx``,
 ``components/ingest/*``; PR 7 ``pages/Coach.tsx``, ``pages/Compare.tsx``,
 ``pages/compare/*``; PR 8 ``pages/Export.tsx``, ``pages/Pick.tsx``,
