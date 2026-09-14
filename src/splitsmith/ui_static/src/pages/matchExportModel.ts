@@ -6,6 +6,7 @@
  */
 
 import type { CompareGridRequestPayload, CompareGridResult } from "@/lib/api";
+import { anyRenderOptionOn, gridExportFields, type RenderOptions } from "@/lib/renderOptions";
 
 export interface CanvasChoice {
   id: "uhd" | "hd";
@@ -26,20 +27,35 @@ export const CANVAS_CHOICES: readonly CanvasChoice[] = [
  *  state. Stage numbers are sorted ascending -- the chip selector's
  *  ``Set`` iteration order is insertion order, not numeric order, and
  *  the render should always walk the stages low-to-high regardless of
- *  click order. */
+ *  click order. The card fields travel only when a card is on: every
+ *  default equals the server's own, so an untouched panel leaves the
+ *  body exactly as it was before the cards existed (#973). */
 export function buildCompareGridPayload(input: {
   stageNumbers: number[];
   audioFrom: string;
   canvas: CanvasChoice;
   outputName: string;
+  render?: RenderOptions;
+  /** #705: the per-tile overlay and, with it on, the summary hold. The
+   *  server refuses a hold without the overlay, so the hold travels
+   *  only alongside it. */
+  overlay?: boolean;
+  summaryHoldSeconds?: number;
 }): CompareGridRequestPayload {
-  return {
+  const payload: CompareGridRequestPayload = {
     stage_numbers: [...input.stageNumbers].sort((a, b) => a - b),
     audio_from: input.audioFrom,
     canvas_width: input.canvas.width,
     canvas_height: input.canvas.height,
     output_name: input.outputName,
   };
+  if (input.render && anyRenderOptionOn(input.render)) Object.assign(payload, gridExportFields(input.render));
+  if (input.overlay) {
+    payload.overlay = true;
+    const hold = input.summaryHoldSeconds ?? 0;
+    if (Number.isFinite(hold) && hold > 0) payload.summary_hold_seconds = Math.min(30, hold);
+  }
+  return payload;
 }
 
 export interface GridResultSummary {

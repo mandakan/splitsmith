@@ -25,6 +25,8 @@ import { CleanupDialog } from "@/components/CleanupDialog";
 import { ExportHistory } from "@/components/export/ExportHistory";
 import { SelectField } from "@/components/export/SelectField";
 import { StageTable } from "@/components/export/StageTable";
+import { CamOptionsPanel } from "@/components/render/CamOptionsPanel";
+import { RenderOptionsPanel, Seconds } from "@/components/render/RenderOptionsPanel";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { Button } from "@/components/ui/button";
 import { Field, inputClass } from "@/components/ui/Field";
@@ -45,6 +47,7 @@ import {
   type MatchProject,
   type OverlayCodec,
 } from "@/lib/api";
+import { camExportFields, DEFAULT_CAM_OPTIONS, syncedSecondaryCount, type CamOptions } from "@/lib/camOptions";
 import { hostedDownloads as buildHostedDownloads } from "@/lib/exportDownloads";
 import {
   estimateDuration,
@@ -56,6 +59,14 @@ import {
 } from "@/lib/exportPlan";
 import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
+import {
+  DEFAULT_RENDER_OPTIONS,
+  describeRenderOptions,
+  matchExportFields,
+  renderOptionsSeconds,
+  type OutputFormat,
+  type RenderOptions,
+} from "@/lib/renderOptions";
 import { cn } from "@/lib/utils";
 import {
   buildCompareGridPayload,
@@ -65,6 +76,9 @@ import {
 } from "@/pages/matchExportModel";
 
 type PaddingPreset = "full" | "action" | "highlight" | "custom";
+
+/** What ``ui/match_exports.py`` names the timeline file per format. */
+const BUNDLE_EXTENSION: Record<OutputFormat, string> = { fcpxml: ".fcpxml", fcp7xml: ".xml", mp4: ".mp4" };
 
 const PADDING_PRESETS: Record<Exclude<PaddingPreset, "custom">, { label: string; head: number; tail: number }> = {
   full: { label: "Full", head: 5.0, tail: 5.0 },
@@ -78,15 +92,6 @@ const TRANSITIONS: { value: TransitionKind; label: string }[] = [
   { value: "static", label: "Static frame" },
   { value: "zoom", label: "Zoom blur" },
 ];
-
-type TitleKind = "none" | "slate" | "lower-third";
-const TITLE_STYLES: { value: TitleKind; label: string }[] = [
-  { value: "none", label: "None" },
-  { value: "slate", label: "Slate" },
-  { value: "lower-third", label: "Lower third" },
-];
-
-type OutputFormat = "fcpxml" | "fcp7xml" | "mp4";
 
 export function Export() {
   const { slug, matchId } = useParams<{ slug: string; matchId?: string }>();
@@ -160,16 +165,26 @@ function ExportInner({ slug }: { slug: string }) {
   const [tailPad, setTailPad] = useState<number>(PADDING_PRESETS.full.tail);
   const [transitionKind, setTransitionKind] = useState<TransitionKind>("none");
   const [transitionDurationSeconds, setTransitionDurationSeconds] = useState<number>(0.5);
-  const [titleKind, setTitleKind] = useState<TitleKind>("none");
-  const [titleDurationSeconds, setTitleDurationSeconds] = useState<number>(1.5);
   const [includeOverlay, setIncludeOverlay] = useState<boolean>(false);
   const [overlayCodec, setOverlayCodec] = useState<OverlayCodec>("auto");
   const [outputFormat, setOutputFormat] = useState<OutputFormat>("fcpxml");
   const [projectName, setProjectName] = useState<string>("");
+  // The generated cards and the summary hold (#973, #972) are one piece
+  // of state shared by the timeline and the grid: switching mode keeps a
+  // title page the user already set up. Which of them a format can draw
+  // is the panel's and the mappers' business, never this page's.
+  const [renderOptions, setRenderOptions] = useState<RenderOptions>(DEFAULT_RENDER_OPTIONS);
+  const [camOptions, setCamOptions] = useState<CamOptions>(DEFAULT_CAM_OPTIONS);
+  // The YouTube encode preset and the upload sidecar (description with
+  // chapters, captions) travel together: one is pointless without the
+  // other and both exist only for the rendered MP4.
+  const [youtube, setYoutube] = useState<boolean>(false);
   // Compare grid: the reference shooter sets the frame rate; the canvas
-  // sets the render size.
+  // sets the render size; the overlay and its summary hold are #705's.
   const [audioFrom, setAudioFrom] = useState<string>("");
   const [canvas, setCanvas] = useState<CanvasChoice>(CANVAS_CHOICES[0]);
+  const [gridOverlay, setGridOverlay] = useState<boolean>(false);
+  const [gridHoldSeconds, setGridHoldSeconds] = useState<number>(0);
 
   useEffect(() => {
     if (project && !projectName) setProjectName(project.name);
@@ -181,6 +196,7 @@ function ExportInner({ slug }: { slug: string }) {
   const trimsOnly = mode === "trims";
   const compare = mode === "compare";
   const multiShooter = shooters.length >= 2;
+  const renderedMp4 = mode === "single" && outputFormat === "mp4";
 
   // Stage time lives on the project (overview rows don't carry it).
   const stageTimeByNumber = useMemo(() => {
@@ -227,6 +243,13 @@ function ExportInner({ slug }: { slug: string }) {
   const orderedSelection = useMemo(
     () => rows.map((r) => r.stage.stage_number).filter((n) => selection.has(n)),
     [rows, selection],
+  );
+
+  // Secondaries with a confirmed beep on the selected stages: what the
+  // cam rows offer, and zero is what hides them.
+  const secondaryCount = useMemo(
+    () => syncedSecondaryCount(project?.stages ?? [], orderedSelection),
+    [project, orderedSelection],
   );
 
   // Switching mode changes which stages are exportable, so drop the
@@ -298,14 +321,22 @@ function ExportInner({ slug }: { slug: string }) {
     }
   }
 
+  const cardSeconds =
+    mode === "trims"
+      ? 0
+      : renderOptionsSeconds(
+          renderOptions,
+          orderedSelection.length,
+          compare ? "grid" : "single",
+          compare ? "mp4" : outputFormat,
+        ) + (compare && gridOverlay ? Math.max(0, gridHoldSeconds || 0) * orderedSelection.length : 0);
   const duration = estimateDuration(orderedSelection, stageTimeByNumber, {
     mode,
     head: mode === "single" ? headPad : (project?.trim_pre_buffer_seconds ?? 0),
     tail: mode === "single" ? tailPad : (project?.trim_post_buffer_seconds ?? 0),
     transitionKind,
     transitionSeconds: transitionDurationSeconds,
-    titleKind,
-    titleSeconds: titleDurationSeconds,
+    cardSeconds,
   });
 
   const busy = job?.status === "pending" || job?.status === "running" || queueing;
@@ -384,21 +415,22 @@ function ExportInner({ slug }: { slug: string }) {
   async function submitBundle() {
     if (!project) return;
     try {
+      // The cam rows render only with a synced secondary on the selection;
+      // without one the server's own default (cams on) changes nothing,
+      // so the chosen value travels either way.
       const submitted = await api.exportMatch(slug, {
         stage_numbers: orderedSelection,
         head_pad_seconds: headPad,
         tail_pad_seconds: tailPad,
-        include_secondaries: false,
-        pip_layout: "stacked",
+        ...camExportFields(camOptions),
         output_format: outputFormat,
         transition_kind: transitionKind,
         transition_duration_seconds: transitionDurationSeconds,
-        title_kind: titleKind,
-        title_duration_seconds: titleDurationSeconds,
+        ...matchExportFields(renderOptions, outputFormat),
         intro_path: undefined,
         outro_path: undefined,
-        youtube_sidecar: false,
-        youtube_preset: false,
+        youtube_sidecar: renderedMp4 && youtube,
+        youtube_preset: renderedMp4 && youtube,
         include_overlay: includeOverlay,
         overlay_codec: overlayCodec,
         overlay_max_height: null,
@@ -427,6 +459,9 @@ function ExportInner({ slug }: { slug: string }) {
         audioFrom,
         canvas,
         outputName: "compare-grid",
+        render: renderOptions,
+        overlay: gridOverlay,
+        summaryHoldSeconds: gridHoldSeconds,
       });
       const submitted = await api.exportCompareGrid(payload);
       setJob(submitted);
@@ -528,8 +563,10 @@ function ExportInner({ slug }: { slug: string }) {
     tail: tailPad,
     transitionKind,
     transitionSeconds: transitionDurationSeconds,
-    titleKind,
-    overlay: includeOverlay,
+    cards: describeRenderOptions(renderOptions, compare ? "grid" : "single", compare ? "mp4" : outputFormat),
+    overlay: compare ? gridOverlay : includeOverlay,
+    cams: mode === "single" && secondaryCount > 0 ? (camOptions.includeSecondaries ? secondaryCount : 0) : null,
+    youtube: renderedMp4 ? youtube : null,
     gridCamera: project?.compare_camera ?? null,
     reference: shooters.find((s) => s.slug === audioFrom)?.name ?? null,
     canvas: canvas.label,
@@ -638,6 +675,43 @@ function ExportInner({ slug }: { slug: string }) {
                     options={CANVAS_CHOICES.map((c) => ({ value: c.id, label: c.label }))}
                   />
                 </Field>
+                <Field
+                  label="Overlay"
+                  help={
+                    gridOverlay
+                      ? "Per-tile shot counter and split with the running clock; the summary holds each tile's own stage figures after its last shot, 0 is off."
+                      : "Off: a faster render with no counters on the tiles."
+                  }
+                >
+                  <div className="flex flex-wrap items-center gap-3">
+                    <Segmented<"off" | "on">
+                      label="Grid overlay"
+                      value={gridOverlay ? "on" : "off"}
+                      onChange={(v) => setGridOverlay(v === "on")}
+                      options={[
+                        { value: "off", label: "None" },
+                        { value: "on", label: "Counter + splits" },
+                      ]}
+                    />
+                    {gridOverlay ? (
+                      <Seconds
+                        id="export-grid-hold"
+                        label="Grid summary hold seconds"
+                        value={gridHoldSeconds}
+                        min={0}
+                        disabled={busy}
+                        onChange={setGridHoldSeconds}
+                      />
+                    ) : null}
+                  </div>
+                </Field>
+                <RenderOptionsPanel
+                  value={renderOptions}
+                  onChange={setRenderOptions}
+                  surface="grid"
+                  outputFormat="mp4"
+                  busy={busy}
+                />
               </>
             ) : null}
           </Section>
@@ -663,6 +737,19 @@ function ExportInner({ slug }: { slug: string }) {
           {/* Options: only a timeline has a cut to shape. */}
           {mode === "single" ? (
             <Section label="Options">
+              <Field label="Format" help="The splits CSV and the text report are always written alongside.">
+                <SelectField
+                  label="Timeline format"
+                  value={outputFormat}
+                  onChange={setOutputFormat}
+                  options={[
+                    { value: "fcpxml", label: "FCPXML 1.10 (Final Cut Pro)" },
+                    { value: "fcp7xml", label: "FCP 7 XML (Premiere / Resolve)" },
+                    { value: "mp4", label: "MP4 (rendered)" },
+                  ]}
+                  className="w-full max-w-xs"
+                />
+              </Field>
               <Field
                 label="Padding"
                 help={`${headPad.toFixed(1)} s before the beep · ${tailPad.toFixed(1)} s after the last shot`}
@@ -707,14 +794,13 @@ function ExportInner({ slug }: { slug: string }) {
                   ) : null}
                 </div>
               </Field>
-              <Field label="Title card">
-                <div className="flex flex-wrap items-center gap-3">
-                  <Segmented<TitleKind> label="Title card" value={titleKind} onChange={setTitleKind} options={TITLE_STYLES} />
-                  {titleKind !== "none" ? (
-                    <NumInput label="Title hold (s)" value={titleDurationSeconds} step={0.1} min={0.5} onChange={setTitleDurationSeconds} />
-                  ) : null}
-                </div>
-              </Field>
+              <RenderOptionsPanel
+                value={renderOptions}
+                onChange={setRenderOptions}
+                surface="single"
+                outputFormat={outputFormat}
+                busy={busy}
+              />
               <Field
                 label="Overlay"
                 help={
@@ -748,19 +834,27 @@ function ExportInner({ slug }: { slug: string }) {
                   ) : null}
                 </div>
               </Field>
-              <Field label="Format" help="The splits CSV and the text report are always written alongside.">
-                <SelectField
-                  label="Timeline format"
-                  value={outputFormat}
-                  onChange={setOutputFormat}
-                  options={[
-                    { value: "fcpxml", label: "FCPXML 1.10 (Final Cut Pro)" },
-                    { value: "fcp7xml", label: "FCP 7 XML (Premiere / Resolve)" },
-                    { value: "mp4", label: "MP4 (rendered)" },
-                  ]}
-                  className="w-full max-w-xs"
-                />
-              </Field>
+              <CamOptionsPanel value={camOptions} onChange={setCamOptions} secondaryCount={secondaryCount} busy={busy} />
+              {renderedMp4 ? (
+                <Field
+                  label="YouTube"
+                  help={
+                    youtube
+                      ? "Encodes with the YouTube preset and writes the description with chapters, plus per-shot captions (.srt), beside the video."
+                      : "Off: the default encode, no upload sidecar."
+                  }
+                >
+                  <Segmented<"off" | "on">
+                    label="YouTube"
+                    value={youtube ? "on" : "off"}
+                    onChange={(v) => setYoutube(v === "on")}
+                    options={[
+                      { value: "off", label: "Off" },
+                      { value: "on", label: "Preset + sidecar" },
+                    ]}
+                  />
+                </Field>
+              ) : null}
               <Field label="Bundle name" htmlFor="export-bundle-name" help={project?.exports_dir ?? "exports/"}>
                 <input
                   id="export-bundle-name"
@@ -805,9 +899,18 @@ function ExportInner({ slug }: { slug: string }) {
                 <span>compare-grid.mp4</span>
               ) : (
                 <>
-                  <div className="truncate">{bundleName}.fcpxml</div>
+                  <div className="truncate">
+                    {bundleName}
+                    {BUNDLE_EXTENSION[outputFormat]}
+                  </div>
                   <div className="truncate text-muted">{bundleName}.csv</div>
                   <div className="truncate text-muted">{bundleName}.txt</div>
+                  {renderedMp4 && youtube ? (
+                    <>
+                      <div className="truncate text-muted">{bundleName}-youtube.json</div>
+                      <div className="truncate text-muted">{bundleName}.srt</div>
+                    </>
+                  ) : null}
                 </>
               )}
             </div>

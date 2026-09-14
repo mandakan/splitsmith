@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { DEFAULT_RENDER_OPTIONS } from "@/lib/renderOptions";
 import {
   CANVAS_CHOICES,
   buildCompareGridPayload,
@@ -20,6 +21,32 @@ describe("buildCompareGridPayload", () => {
     expect(payload.canvas_width).toBe(3840);
     expect(payload.canvas_height).toBe(2160);
     expect(payload.output_name).toBe("bromma-grid");
+  });
+
+  it("sends no card field until a card is on, so an untouched panel leaves the body as it was", () => {
+    const base = { stageNumbers: [1], audioFrom: "mathias", canvas: CANVAS_CHOICES[1], outputName: "g" };
+    expect(buildCompareGridPayload({ ...base, render: DEFAULT_RENDER_OPTIONS })).toEqual(
+      buildCompareGridPayload(base),
+    );
+    const on = buildCompareGridPayload({
+      ...base,
+      render: { ...DEFAULT_RENDER_OPTIONS, titlePage: true, titleInfo: " L2 " },
+    });
+    expect(on).toMatchObject({ title_page: true, title_info: "L2", closing_card: false, stage_titles: "none" });
+    expect("summary_hold_seconds" in on).toBe(false);
+  });
+
+  it("sends the overlay, and the hold only with it, since the server refuses a hold alone", () => {
+    const base = { stageNumbers: [1], audioFrom: "mathias", canvas: CANVAS_CHOICES[1], outputName: "g" };
+    expect("overlay" in buildCompareGridPayload({ ...base, overlay: false, summaryHoldSeconds: 3 })).toBe(false);
+    expect(buildCompareGridPayload({ ...base, overlay: true, summaryHoldSeconds: 3 })).toMatchObject({
+      overlay: true,
+      summary_hold_seconds: 3,
+    });
+    const noHold = buildCompareGridPayload({ ...base, overlay: true, summaryHoldSeconds: 0 });
+    expect(noHold.overlay).toBe(true);
+    expect("summary_hold_seconds" in noHold).toBe(false);
+    expect(buildCompareGridPayload({ ...base, overlay: true, summaryHoldSeconds: Number.NaN }).summary_hold_seconds).toBeUndefined();
   });
 
   it("defaults to 4K UHD as the first canvas choice", () => {
