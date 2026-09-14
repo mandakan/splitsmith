@@ -252,6 +252,34 @@ def test_youtube_sidecar_and_captions_move_with_a_renamed_output(
     assert not list((root / "shooters" / "me" / "exports").glob("*-youtube.json"))
 
 
+def test_youtube_sidecar_embeds_chapter_atoms_in_the_mp4(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The sidecar flag hands the renderer the same chapters the
+    description carries, on the renderer's own timeline; without the
+    flag the renderer gets none (#204 follow-up)."""
+    from splitsmith import youtube_sidecar
+
+    root = _seed(tmp_path)
+    captured = _capture_mp4(monkeypatch)
+    out = tmp_path / "out" / "lt.mp4"
+    args = ["match", "export", str(root), "--shooter", "me", "--format", "mp4", "-o", str(out)]
+    result = runner.invoke(app, [*args, "--youtube-sidecar", "--title-page", "--titles", "slate"])
+    assert result.exit_code == 0, result.output
+    chapters = captured["kwargs"]["chapters"]
+    sidecar = json.loads(out.with_name("lt-youtube.json").read_text())
+    assert [(c.start_seconds, c.title) for c in chapters] == [
+        (c["start_seconds"], c["title"]) for c in sidecar["chapters"]
+    ]
+    assert chapters == youtube_sidecar.compute_chapters(captured["comp"])
+    assert chapters[0].start_seconds == 0.0 and len(chapters) >= 2
+    assert "chapters written to the sidecar description only" not in strip_ansi(result.output)
+
+    plain = runner.invoke(app, args)
+    assert plain.exit_code == 0, plain.output
+    assert captured["kwargs"]["chapters"] is None
+
+
 def test_reclassify_rejudges_auto_intervals_and_keeps_manual_ones(tmp_path: Path) -> None:
     """The verb re-runs the classifier with the current thresholds over a
     stored audit: an interval auto-classed under an old rule moves, a

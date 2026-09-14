@@ -59,10 +59,10 @@ from __future__ import annotations
 import logging
 import subprocess
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Protocol
 
 from .composition import (
     Composition,
@@ -126,6 +126,7 @@ def render_mp4(
     youtube_preset: bool = False,
     rasterizer: Rasterizer | None = None,
     overlay_theme: ThemeName = "splitsmith",
+    chapters: Sequence[ChapterMark] | None = None,
 ) -> Mp4RenderResult:
     """Render ``composition`` as a stitched ``.mp4`` at ``output_path``.
 
@@ -147,6 +148,14 @@ def render_mp4(
     degrades: every card is skipped and the loss is recorded on
     :attr:`Mp4RenderResult.degradations`; the render never fails
     because of a card. ``overlay_theme`` picks the card typography.
+
+    ``chapters`` (the #204 follow-up) embeds chapter atoms in the file:
+    one ``[CHAPTER]`` per mark, on the timeline the renderer itself lays
+    down (:func:`plan_timeline`), each ending where the next begins and
+    the last at the end of the stitched output. QuickTime, VLC and
+    YouTube's own chapter detection read them; the description text the
+    sidecar writes stays the portable copy. ``None`` leaves the stitch
+    argv exactly as it was.
     """
     plans = [_plan_stage(stage, composition.sequence) for stage in composition.stages]
     if not plans:
@@ -207,6 +216,7 @@ def render_mp4(
                     rasterizer=active,
                     overlay_theme=overlay_theme,
                     degradations=degradations,
+                    chapters=chapters,
                 )
         work_dir.mkdir(parents=True, exist_ok=True)
         return _render_with_work_dir(
@@ -220,6 +230,7 @@ def render_mp4(
             rasterizer=active,
             overlay_theme=overlay_theme,
             degradations=degradations,
+            chapters=chapters,
         )
     finally:
         if owned is not None:
@@ -238,6 +249,7 @@ def _render_with_work_dir(
     rasterizer: Rasterizer | None,
     overlay_theme: ThemeName,
     degradations: tuple[str, ...],
+    chapters: Sequence[ChapterMark] | None,
 ) -> Mp4RenderResult:
     sequence = composition.sequence
     theme = load_theme(overlay_theme) if timeline.needs_rasterizer else None
@@ -365,16 +377,22 @@ def _render_with_work_dir(
         "".join(f"file '{p.resolve().as_posix()}'\n" for p, _ in segments),
         encoding="utf-8",
     )
+    total_seconds = sum(seconds for _, seconds in segments)
+    chapters_path: Path | None = None
+    if chapters:
+        chapters_path = work_dir / "chapters.ffmeta"
+        chapters_path.write_text(chapter_metadata(chapters, total_seconds), encoding="utf-8")
     cmd = _build_concat_command(
         list_path=list_path,
         output_path=output_path,
         ffmpeg_binary=ffmpeg_binary,
         reencode_audio=generated,
+        chapters_path=chapters_path,
     )
     _run(cmd, runner=runner)
     return Mp4RenderResult(
         output_path=output_path,
-        duration_seconds=sum(seconds for _, seconds in segments),
+        duration_seconds=total_seconds,
         degradations=degradations,
     )
 
@@ -1123,14 +1141,22 @@ def _build_concat_command(
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
     reencode_audio: bool = False,
+    chapters_path: Path | None = None,
 ) -> tuple[str, ...]:
     """Build the ``concat``-demuxer invocation that stitches the segment
     temps. The video is always a stream copy. ``reencode_audio`` (set
     when generated segments are present, issue #973) encodes the audio
     once over the whole match instead, so a card's ``anullsrc`` and a
     trim's camera audio need not share a sample rate; off, the argv is
-    the plain ``-c copy`` it has always been."""
+    the plain ``-c copy`` it has always been.
+
+    ``chapters_path`` is an ffmetadata file (:func:`chapter_metadata`)
+    read as a second input whose global metadata -- the chapters -- is
+    mapped onto the output. It carries no streams, so ``-map 0`` pins
+    every stream to the concat input rather than leaving the choice to
+    ffmpeg's default selection; ``None`` adds nothing to the argv."""
     codec_args = ("-c:v", "copy", "-c:a", "aac", "-b:a", "192k") if reencode_audio else ("-c", "copy")
+    chapter_args = ("-i", str(chapters_path), "-map_metadata", "1", "-map", "0") if chapters_path else ()
     return (
         ffmpeg_binary,
         "-hide_banner",
@@ -1141,11 +1167,68 @@ def _build_concat_command(
         "0",
         "-i",
         str(list_path),
+        *chapter_args,
         *codec_args,
         "-movflags",
         "+faststart",
         str(output_path),
     )
+
+
+class ChapterMark(Protocol):
+    """What :func:`render_mp4` needs of a chapter: where it starts on the
+    rendered timeline and what to call it. ``youtube_sidecar.Chapter``
+    satisfies it; the renderer does not import the sidecar."""
+
+    @property
+    def start_seconds(self) -> float: ...
+
+    @property
+    def title(self) -> str: ...
+
+
+def _ffmetadata_escape(text: str) -> str:
+    """Escape a value for ffmpeg's ffmetadata format, where ``=``, ``;``,
+    ``#``, ``\\`` and a newline are structural."""
+    out = []
+    for ch in text:
+        if ch in "=;#\\":
+            out.append("\\" + ch)
+        elif ch == "\n":
+            out.append("\\\n")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def chapter_metadata(chapters: Sequence[ChapterMark], total_seconds: float) -> str:
+    """The ffmetadata text for ``chapters`` on a timeline ``total_seconds``
+    long: one ``[CHAPTER]`` block per mark in start order, millisecond
+    timebase, each ending where the next begins and the last at the end.
+    A mark at or past the end, or one that would not be after the
+    previous one, is dropped rather than written as a zero-length or
+    reversed chapter the muxer would then rewrite in its own way."""
+    lines = [";FFMETADATA1"]
+    end_ms = int(round(total_seconds * 1000))
+    ordered = sorted(chapters, key=lambda c: c.start_seconds)
+    starts = [int(round(c.start_seconds * 1000)) for c in ordered]
+    previous: int | None = None
+    for idx, chapter in enumerate(ordered):
+        start = starts[idx]
+        following = [s for s in starts[idx + 1 :] if s > start]
+        end = following[0] if following else end_ms
+        if start >= end_ms or end <= start or (previous is not None and start <= previous):
+            continue
+        previous = start
+        lines += [
+            "",
+            "[CHAPTER]",
+            "TIMEBASE=1/1000",
+            f"START={start}",
+            f"END={end}",
+            f"title={_ffmetadata_escape(chapter.title)}",
+        ]
+    return "\n".join(lines) + "\n"
 
 
 __all__ = [
