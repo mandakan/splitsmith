@@ -23,9 +23,10 @@ import { JobsSurface } from "@/components/Jobs";
 import { type StageStatus } from "@/lib/api";
 import { type JobsState } from "@/lib/jobs";
 import { countsAsDone } from "@/lib/stageStatus";
+import { Label } from "@/components/ui/Label";
 import { StageDot } from "@/components/ui/StageDot";
 import { cn } from "@/lib/utils";
-import { FOOTAGE_HINT, matchNavItems } from "./navItems";
+import { FOOTAGE_HINT, NAV_GROUP_LABEL, matchNavItems, type MatchNavGroup } from "./navItems";
 
 // The sidebar consumes the canonical :type:`StageStatus` from the
 // backend. The previous local narrow union ("done" | "partial" |
@@ -55,7 +56,6 @@ interface MatchSidebarProps {
   jobsState: JobsState;
   matchName: string;
   matchSubtitle?: ReactNode;
-  matchKicker?: string;
   stages: MatchSidebarStage[];
   /** Optional shooter count to render in the Shooters nav row. */
   shooterCount?: number;
@@ -68,9 +68,6 @@ interface MatchSidebarProps {
    *  worklist. Drives the badge on the Triage nav row, mirroring
    *  ``beepReviewPendingCount``'s contract. */
   triageFlaggedCount?: number;
-  /** Failed jobs still awaiting acknowledgement across the match, mirroring
-   *  ``beepReviewPendingCount``'s badge contract for the Jobs nav row. */
-  jobsAttentionCount: number;
   /** When true the sidebar renders the "no footage yet" sub for the stage
    *  list (matches polished/17). Defaults to false. */
   awaiting?: boolean;
@@ -114,12 +111,10 @@ export function MatchSidebar({
   jobsState,
   matchName,
   matchSubtitle,
-  matchKicker = "Active match",
   stages,
   shooterCount,
   beepReviewPendingCount,
   triageFlaggedCount,
-  jobsAttentionCount,
   awaiting = false,
   hasFootage = true,
   onStageClick,
@@ -181,18 +176,14 @@ export function MatchSidebar({
 
       {/* Match card -- hidden while collapsed; not enough room for it. */}
       {collapsed ? null : (
-        <div className="mx-3 mb-3 border-b border-rule px-1 pb-3.5">
-          <div className="mb-1.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
-            {matchKicker}
-          </div>
-          <div className="mb-1.5 font-display text-[0.9375rem] font-bold uppercase leading-tight tracking-tight text-ink">
+        <div className="mx-3 mb-2 px-1 pb-3">
+          {/* The sidebar's one Antonio use: the match name. The "Active
+              match" kicker is gone -- the name under the brand is the
+              context, and the breadcrumb repeats it. */}
+          <div className="mb-1 font-display text-[17px] font-bold uppercase leading-tight tracking-tight text-ink">
             {matchName}
           </div>
-          {matchSubtitle ? (
-            <div className="font-mono text-[0.625rem] uppercase tracking-[0.08em] text-muted">
-              {matchSubtitle}
-            </div>
-          ) : null}
+          {matchSubtitle ? <Label>{matchSubtitle}</Label> : null}
         </div>
       )}
 
@@ -212,35 +203,48 @@ export function MatchSidebar({
           shooterCount,
           beepReviewPendingCount: beepReviewPendingCount ?? 0,
           triageFlaggedCount: triageFlaggedCount ?? 0,
-          jobsAttentionCount,
           footageHint,
-        }).map((item) => (
-          <SidebarLink
-            key={item.key}
-            to={item.to}
-            icon={item.icon}
-            end={item.end}
-            collapsed={collapsed}
-            disabled={item.disabled}
-            disabledHint={item.disabledHint}
-            count={item.count}
-            badgeKind={item.badgeKind}
-            badgeAriaLabel={item.badgeAriaLabel}
-          >
-            {item.label}
-          </SidebarLink>
-        ))}
+        }).flatMap((item, i, items) => {
+          // A phase label whenever the group changes (spec 2026-09-13
+          // s3.2). Collapsed sidebars have no room for it.
+          const prev: MatchNavGroup | undefined = i > 0 ? items[i - 1].group : undefined;
+          const nodes: ReactNode[] = [];
+          if (item.group && item.group !== prev && !collapsed) {
+            nodes.push(
+              <Label key={`group-${item.group}`} tone="subtle" className="mt-2 px-2.5 pb-1">
+                {NAV_GROUP_LABEL[item.group]}
+              </Label>,
+            );
+          }
+          nodes.push(
+            <SidebarLink
+              key={item.key}
+              to={item.to}
+              icon={item.icon}
+              end={item.end}
+              collapsed={collapsed}
+              disabled={item.disabled}
+              disabledHint={item.disabledHint}
+              count={item.count}
+              badgeKind={item.badgeKind}
+              badgeAriaLabel={item.badgeAriaLabel}
+            >
+              {item.label}
+            </SidebarLink>,
+          );
+          return nodes;
+        })}
       </div>
 
       {/* Stages -- hidden while collapsed. */}
       {collapsed ? null : (
-        <div className="mx-3 mt-2 flex items-center justify-between px-1 py-2 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
-          Stages
+        <div className="mx-3 mt-3 flex items-center justify-between px-2.5 py-1">
+          <Label tone="subtle">Stages</Label>
           <span
-            className="badge-count"
+            className="numeral text-[11px] text-ink-2"
             title={`${audited} of ${total} audited or skipped`}
           >
-            {pad2(audited)} / {pad2(total)}
+            {audited} / {total}
           </span>
         </div>
       )}
@@ -290,43 +294,26 @@ export function MatchSidebar({
                 onClick={() => onStageClick?.(stage.stage_number)}
                 aria-current={isActive ? "page" : undefined}
                 className={cn(
-                  "grid w-full grid-cols-[26px_1fr_auto] items-center gap-2 rounded-md py-1 pl-1.5 pr-2.5 text-left text-[0.8125rem] font-medium transition-colors",
+                  "grid w-full grid-cols-[22px_1fr_auto] items-center gap-2 rounded-md py-1.5 pl-2.5 pr-2.5 text-left text-[13px] transition-colors",
+                  // Red marks the current position only (spec s5): an
+                  // inset bar, not a tint plus red text.
                   isActive
-                    ? "bg-led-tint text-led"
-                    : isNextUp
-                      ? "text-ink hover:bg-surface-2"
-                      : "text-ink-2 hover:bg-surface-2",
+                    ? "bg-surface-3 font-medium text-ink shadow-[inset_2px_0_0_var(--color-led)]"
+                    : "text-ink-2 hover:bg-surface-2 hover:text-ink",
                 )}
                 disabled={awaiting}
               >
-                <span
-                  className={cn(
-                    "inline-flex size-[26px] items-center justify-center rounded-md font-mono text-[0.6875rem] font-bold tabular-nums",
-                    isActive
-                      ? "badge-led-fill border-transparent"
-                      : isNextUp
-                        ? "border border-led-deep bg-led-tint text-led-text"
-                        : "border border-transparent bg-surface-3 text-ink-2",
-                  )}
-                >
+                {/* Stage ordinals keep their leading zero: the one place
+                    a padded number belongs (spec s5). */}
+                <span className="font-mono text-[11px] tabular-nums text-muted">
                   {pad2(stage.stage_number)}
                 </span>
-                <span
-                  className={cn(
-                    "truncate",
-                    isActive && "font-bold text-led",
-                  )}
-                >
-                  {stage.stage_name}
-                </span>
-                <span className="inline-flex items-center gap-1.5">
+                <span className="truncate">{stage.stage_name}</span>
+                <span className="inline-flex items-center gap-2">
                   {isNextUp ? (
-                    <span
-                      aria-hidden
-                      className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.12em] text-led-text"
-                    >
+                    <Label aria-hidden tone="subtle" className="text-[10px]">
                       next
-                    </span>
+                    </Label>
                   ) : null}
                   <StageDot status={stage.status} />
                 </span>
@@ -426,14 +413,14 @@ function SidebarLink({
         className={cn(
           "relative flex h-9 items-center justify-center rounded-md transition-colors",
           isActive
-            ? "bg-led-tint text-led"
+            ? "bg-surface-3 text-ink"
             : "text-muted hover:bg-surface-2 hover:text-ink",
         )}
       >
         {isActive ? (
           <span
             aria-hidden
-            className="absolute -left-px top-1/2 h-[18px] w-[3px] -translate-y-1/2 rounded-sm bg-led shadow-[0_0_8px_var(--color-led-glow)]"
+            className="absolute -left-px top-1/2 h-[18px] w-[2px] -translate-y-1/2 rounded-sm bg-led"
           />
         ) : null}
         <span className="inline-flex">{icon}</span>
@@ -456,16 +443,17 @@ function SidebarLink({
       to={to}
       end={end}
       className={cn(
-        "flex min-h-9 items-center gap-3 rounded-md px-2.5 py-2 text-[0.8125rem] font-medium transition-colors",
+        "flex min-h-9 items-center gap-3 rounded-md px-2.5 py-2 text-[13px] transition-colors",
+        // Red marks the current position only (spec s5).
         isActive
-          ? "border border-led-deep bg-[color:var(--color-led-tint)] px-[9px] font-bold text-led"
-          : "border border-transparent text-ink-2 hover:bg-surface-2 hover:text-ink",
+          ? "bg-surface-3 font-medium text-ink shadow-[inset_2px_0_0_var(--color-led)]"
+          : "text-ink-2 hover:bg-surface-2 hover:text-ink",
       )}
     >
       <span
         className={cn(
-          "inline-flex shrink-0 text-muted",
-          isActive ? "text-led" : "group-hover:text-ink",
+          "inline-flex shrink-0",
+          isActive ? "text-ink" : "text-muted group-hover:text-ink",
         )}
       >
         {icon}
@@ -479,7 +467,7 @@ function SidebarLink({
             badgeKind === "pending" ? "badge-pending" : "badge-count",
           )}
         >
-          {pad2(count!)}
+          {count}
         </span>
       ) : null}
     </NavLink>

@@ -80,9 +80,8 @@ export function toMatchRelativePath(
 }
 
 /** Trailing breadcrumb segment ("Audit" / "Coach" / ...) for a
- *  match-relative path. The current-view label is the only breadcrumb
- *  segment shown in LED red; everything else stays in the muted
- *  breadcrumb tone. ``null`` means no trailing segment (e.g. the match
+ *  match-relative path. Rendered as the last segment of the breadcrumb
+ *  in the global bar (ink-2; nothing in the breadcrumb is red). ``null`` means no trailing segment (e.g. the match
  *  overview / home route). */
 export function viewLabelForPath(relativePath: string): string | null {
   if (relativePath.startsWith("/audit")) return "Audit";
@@ -90,7 +89,8 @@ export function viewLabelForPath(relativePath: string): string | null {
   if (relativePath.startsWith("/compare")) return "Compare";
   if (relativePath.startsWith("/export")) return "Export";
   if (relativePath.startsWith("/ingest") || relativePath.startsWith("/videos"))
-    return "Videos";
+    return "Footage";
+  if (relativePath.startsWith("/results")) return "Splits";
   if (relativePath.startsWith("/beep-review")) return "Beep review";
   if (relativePath.startsWith("/jobs")) return "Jobs";
   if (relativePath.startsWith("/shooters")) return "Shooters";
@@ -621,7 +621,6 @@ export function MatchShell() {
             shooterCount,
             beepReviewPendingCount: beepReviewPending,
             triageFlaggedCount,
-            jobsAttentionCount: jobsState.failed.length,
             footageHint: FOOTAGE_HINT,
           })}
           header={{ matchName: project?.name ?? health?.project_name ?? "..." }}
@@ -662,7 +661,6 @@ export function MatchShell() {
           shooterCount={shooterCount}
           beepReviewPendingCount={beepReviewPending}
           triageFlaggedCount={triageFlaggedCount}
-          jobsAttentionCount={jobsState.failed.length}
           awaiting={
             stages.length > 0 && stages.every((s) => s.status === "todo")
           }

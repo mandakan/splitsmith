@@ -12,7 +12,9 @@
  *
  *   todo         hollow ring, ``--status-todo``
  *   partial      dashed ring, ``--status-partial`` (video assigned, no time)
- *   ready        LED halo, no fill -- prereqs met, detection not run
+ *   ready        hollow ring, ``--rule-strong`` -- prereqs met, detection not
+ *                run (was an LED halo; red is reserved for the current
+ *                position since spec 2026-09-13 s5)
  *   in_progress  filled amber + 1.6s pulse (detected, save not hit)
  *   audited      filled green + check -- terminal
  *   skipped      hollow + horizontal bar -- terminal (operator opted out)
@@ -27,15 +29,13 @@ import { cn } from "@/lib/utils";
 
 export interface StageDotProps {
   status: StageStatus;
-  /** Sites can dial down the ready-state outer halo when the surrounding
-   *  chrome already paints LED red (e.g. inside an active chip in the
-   *  audit chip rail). Default ``"sidebar"`` matches the reference render
-   *  in ``preview/components-stage-dots.html``. */
+  /** Kept for call-site compatibility; the ready tier no longer has a
+   *  halo to dial down, so both values render the same. */
   context?: "sidebar" | "chip";
   className?: string;
 }
 
-export function StageDot({ status, context = "sidebar", className }: StageDotProps) {
+export function StageDot({ status, className }: StageDotProps) {
   switch (status) {
     case "audited":
       return (
@@ -93,18 +93,12 @@ export function StageDot({ status, context = "sidebar", className }: StageDotPro
           aria-label="Ready to audit"
           className={cn(
             "relative inline-flex size-3 items-center justify-center rounded-full",
-            "bg-surface-3",
-            // Outer halo dialled down inside a chip so it doesn't compete
-            // with the active-chip LED border treatment.
-            context === "chip"
-              ? "shadow-[0_0_0_2px_rgba(255,45,45,0.10)]"
-              : "shadow-[0_0_0_2px_rgba(255,45,45,0.14)]",
             className,
           )}
         >
           <span
             aria-hidden
-            className="block size-[7px] rounded-full border border-[color:color-mix(in_srgb,var(--color-led)_70%,transparent)] bg-transparent"
+            className="block size-2 rounded-full border-[1.5px] border-rule-strong bg-transparent"
           />
         </span>
       );

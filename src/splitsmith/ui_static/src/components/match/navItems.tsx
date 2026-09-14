@@ -5,7 +5,6 @@
  */
 import type { ReactNode } from "react";
 import {
-  Activity,
   ArrowDownToLine,
   ClipboardCheck,
   Crosshair,
@@ -22,11 +21,24 @@ import {
 export const FOOTAGE_HINT =
   "Attach footage to this match before this surface is usable";
 
+export type MatchNavGroup = "prepare" | "review" | "analyse" | "deliver";
+
+export const NAV_GROUP_LABEL: Record<MatchNavGroup, string> = {
+  prepare: "Prepare",
+  review: "Review",
+  analyse: "Analyse",
+  deliver: "Deliver",
+};
+
 export interface MatchNavItem {
   key: string;
   to: string;
   icon: ReactNode;
   label: string;
+  /** Loop phase the row belongs to (spec 2026-09-13 s3.2). Undefined for
+   *  Overview, which sits above the groups. Renderers emit a group label
+   *  whenever it changes between consecutive rows. */
+  group?: MatchNavGroup;
   end?: boolean;
   disabled?: boolean;
   disabledHint?: string;
@@ -45,7 +57,6 @@ export function matchNavItems(args: {
   shooterCount?: number;
   beepReviewPendingCount: number;
   triageFlaggedCount: number;
-  jobsAttentionCount: number;
   footageHint?: string;
 }): MatchNavItem[] {
   const {
@@ -55,30 +66,20 @@ export function matchNavItems(args: {
     shooterCount,
     beepReviewPendingCount,
     triageFlaggedCount,
-    jobsAttentionCount,
     footageHint,
   } = args;
   return [
     { key: "overview", to: `${base}/`, icon: <LayoutGrid className="size-[15px]" />, label: "Overview", end: true },
-    { key: "results", to: `${base}/results`, icon: <MonitorPlay className="size-[15px]" />, label: "Results" },
     {
-      key: "audit",
-      to: shooterSlug ? `${base}/audit/${shooterSlug}` : `${base}/shooters?pick=audit`,
-      icon: <Crosshair className="size-[15px]" />,
-      label: "Audit",
-      disabled: !hasFootage,
-      disabledHint: footageHint,
-    },
-    {
-      key: "coach",
-      to: shooterSlug ? `${base}/coach/${shooterSlug}` : `${base}/shooters?pick=coach`,
-      icon: <ClipboardCheck className="size-[15px]" />,
-      label: "Coach",
-      disabled: !hasFootage,
-      disabledHint: footageHint,
+      key: "videos",
+      group: "prepare",
+      to: shooterSlug ? `${base}/ingest/${shooterSlug}` : `${base}/shooters?pick=videos`,
+      icon: <Film className="size-[15px]" />,
+      label: "Footage",
     },
     {
       key: "shooters",
+      group: "prepare",
       to: `${base}/shooters`,
       icon: <Users className="size-[15px]" />,
       label: "Shooters",
@@ -86,13 +87,17 @@ export function matchNavItems(args: {
       badgeKind: "count",
     },
     {
-      key: "videos",
-      to: shooterSlug ? `${base}/ingest/${shooterSlug}` : `${base}/shooters?pick=videos`,
-      icon: <Film className="size-[15px]" />,
-      label: "Videos",
+      key: "audit",
+      group: "review",
+      to: shooterSlug ? `${base}/audit/${shooterSlug}` : `${base}/shooters?pick=audit`,
+      icon: <Crosshair className="size-[15px]" />,
+      label: "Audit",
+      disabled: !hasFootage,
+      disabledHint: footageHint,
     },
     {
       key: "beep-review",
+      group: "review",
       to: `${base}/beep-review`,
       icon: <Volume2 className="size-[15px]" />,
       label: "Beep review",
@@ -101,6 +106,7 @@ export function matchNavItems(args: {
     },
     {
       key: "triage",
+      group: "review",
       to: `${base}/triage`,
       icon: <Flag className="size-[15px]" />,
       label: "Triage",
@@ -108,16 +114,19 @@ export function matchNavItems(args: {
       badgeKind: "pending",
       badgeAriaLabel: `${triageFlaggedCount} stage${triageFlaggedCount === 1 ? "" : "s"} flagged for desktop`,
     },
+    { key: "results", group: "analyse", to: `${base}/results`, icon: <MonitorPlay className="size-[15px]" />, label: "Splits" },
     {
-      key: "jobs",
-      to: `${base}/jobs`,
-      icon: <Activity className="size-[15px]" />,
-      label: "Jobs",
-      count: jobsAttentionCount,
-      badgeKind: "pending",
+      key: "coach",
+      group: "analyse",
+      to: shooterSlug ? `${base}/coach/${shooterSlug}` : `${base}/shooters?pick=coach`,
+      icon: <ClipboardCheck className="size-[15px]" />,
+      label: "Coach",
+      disabled: !hasFootage,
+      disabledHint: footageHint,
     },
     {
       key: "export",
+      group: "deliver",
       to: shooterSlug ? `${base}/export/${shooterSlug}` : `${base}/shooters?pick=export`,
       icon: <ArrowDownToLine className="size-[15px]" />,
       label: "Export",
