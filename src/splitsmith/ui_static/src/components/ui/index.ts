@@ -21,7 +21,9 @@ export {
 export { Skeleton } from "./skeleton";
 
 export { Brand, BrandMark } from "./Brand";
+// Deprecated: Kicker -> Label (spec 2026-09-13 s6). Kept until the last consumer migrates.
 export { Kicker } from "./Kicker";
+export { Label } from "./Label";
 export { DisplayHeading } from "./DisplayHeading";
 export { ModeSwitch } from "./ModeSwitch";
 export { Kbd } from "./Kbd";
