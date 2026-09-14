@@ -45,7 +45,7 @@ function Row({ row, split, current, onJump }: { row: ShotRow; split: number | nu
       <span className="text-right text-muted">
         {row.marker.confidence != null ? row.marker.confidence.toFixed(2) : "—"}
       </span>
-      <span className="truncate font-sans">
+      <span className="truncate font-sans" title={row.flag ?? undefined}>
         {row.flag ? (
           <span className="text-live">
             <i aria-hidden className="mr-1.5 inline-block size-1.5 rounded-full bg-live align-middle" />
@@ -68,16 +68,13 @@ export function ShotList({ rows, currentMarkerId, onJump }: ShotListProps) {
     if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
   }, [currentMarkerId]);
 
-  // Split = time since the previous kept shot; the draw for the first.
+  // Split = time since the previous kept shot; the first kept shot's is
+  // its time from the beep (the draw), matching the current-shot line.
   const splitById = new Map<string, number | null>();
-  let prev: number | null = null;
+  let prev = 0;
   for (const r of rows.all) {
-    if (r.rejected) {
-      splitById.set(r.marker.id, prev == null ? null : r.marker.time - prev);
-      continue;
-    }
-    splitById.set(r.marker.id, prev == null ? null : r.marker.time - prev);
-    prev = r.marker.time;
+    splitById.set(r.marker.id, r.marker.time - prev);
+    if (!r.rejected) prev = r.marker.time;
   }
 
   return (

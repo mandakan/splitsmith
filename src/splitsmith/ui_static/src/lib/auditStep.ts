@@ -39,7 +39,9 @@ const MATCH_TOLERANCE_S = 0.02;
  *  are (shot numbers renumber on every keep / reject; times do not). */
 function flagFor(marker: AuditMarker, anomalies: Anomaly[]): string | null {
   const hit = anomalies.find((a) => a.time != null && Math.abs(a.time - marker.time) <= MATCH_TOLERANCE_S);
-  return hit ? hit.message : null;
+  // The row carries the shot number already; the message's own prefix
+  // ("Shot 13 split is ...") would repeat it.
+  return hit ? hit.message.replace(/^Shot \d+ /, "") : null;
 }
 
 /** The right-column list: flagged kept shots first (by time), then every

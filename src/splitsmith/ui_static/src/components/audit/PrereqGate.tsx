@@ -1,8 +1,9 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { StageTimeSection } from "@/components/StageTimeSection";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/Label";
 import {
   ApiError,
   api,
@@ -51,11 +52,9 @@ export interface PrereqGateProps {
    *  neither low confidence nor the heuristic diagnostic can flip it back
    *  to "likely wrong". */
   beepReviewed?: boolean;
-  /** Ping the toolbar's :class:`BeepStatusChip` -- the chip owns beep
-   *  state, so the gate's beep row no longer renders its own Re-pick.
-   *  Clicking the row instead calls this callback, which scrolls the
-   *  chip into view and flashes it. */
-  onPingBeepChip?: () => void;
+  /** Opens the page's step 1 (the beep picker) in place; the beep row
+   *  is a button when this is set. */
+  onRepickBeep?: () => void;
   /** True when the audit clip has been trimmed. */
   hasTrim: boolean;
   /** Full stage entry + primary video, needed to mount the manual
@@ -78,8 +77,8 @@ interface ChecklistItem {
   tone?: "done" | "warn" | "todo";
   sub: string;
   /** Optional click handler. When set, the entire row reads as a
-   *  pointer affordance and dispatches on click. Used to ping the
-   *  toolbar's beep chip from the beep-position row. */
+   *  pointer affordance and dispatches on click (the beep row opens
+   *  step 1). */
   onClick?: () => void;
 }
 
@@ -113,7 +112,7 @@ export function PrereqGate({
   beepDiagnostic = null,
   beepLowConfThreshold = 0.85,
   beepReviewed = false,
-  onPingBeepChip,
+  onRepickBeep,
   hasTrim,
   stageEntry,
   primaryVideo,
@@ -250,7 +249,7 @@ export function PrereqGate({
         done: false,
         tone: "todo",
         sub: "not yet picked",
-        ...(onPingBeepChip ? { onClick: onPingBeepChip } : {}),
+        ...(onRepickBeep ? { onClick: onRepickBeep } : {}),
       }
     : beepLikelyWrong
       ? {
@@ -261,7 +260,7 @@ export function PrereqGate({
           done: true,
           tone: "warn",
           sub: beepDiagnostic ?? "likely wrong",
-          ...(onPingBeepChip ? { onClick: onPingBeepChip } : {}),
+          ...(onRepickBeep ? { onClick: onRepickBeep } : {}),
         }
       : {
           label: "Beep position",
@@ -335,71 +334,30 @@ export function PrereqGate({
   }`;
 
   return (
-    <div className="flex flex-1 items-center justify-center px-5 py-10">
+    <div className="flex flex-1 items-start justify-center py-4">
       <div
         role="region"
         aria-label={headline}
-        className={cn(
-          "relative w-full max-w-[40rem] overflow-hidden rounded-3xl p-8 pb-7",
-          // Two distinct chromes:
-          //   running -- neutral. No amber anywhere; the gate is doing
-          //              the work the user asked for, not warning them.
-          //   blocked -- the canonical amber. Honest "fix this first".
-          running
-            ? "border border-rule-strong bg-surface shadow-[inset_0_0_0_1px_var(--color-rule),0_24px_60px_-24px_rgba(0,0,0,0.7)]"
-            : "border border-live/30 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--color-live)_4%,var(--color-surface))_0%,var(--color-surface)_100%)] shadow-[inset_0_0_0_1px_var(--color-rule),0_24px_60px_-24px_rgba(0,0,0,0.7),0_0_32px_color-mix(in_srgb,var(--color-live)_14%,transparent)]",
-        )}
+        className="w-full max-w-[40rem] rounded-[10px] border border-rule bg-surface p-5"
       >
-        <span
-          aria-hidden
-          className={cn(
-            "absolute inset-y-0 left-0 w-[3px]",
-            running
-              ? "bg-[color:color-mix(in_srgb,var(--color-ink-2)_45%,transparent)]"
-              : "bg-live shadow-[0_0_14px_var(--color-live-glow)]",
-          )}
-        />
-
-        <div className="flex items-start gap-5">
+        <div className="flex items-start gap-4">
           <span
             aria-hidden
             className={cn(
-              "inline-flex size-[52px] shrink-0 items-center justify-center rounded-full",
-              running
-                ? "border border-rule-strong bg-surface-2 text-ink-2"
-                : "border border-live/40 bg-live-tint text-live shadow-[0_0_20px_var(--color-live-glow)]",
+              "mt-0.5 inline-flex size-9 shrink-0 items-center justify-center rounded-full border",
+              running ? "border-rule-strong text-ink-2" : "border-live/45 text-live",
             )}
           >
-            {running ? (
-              <Loader2 className="size-6 animate-spin" aria-hidden />
-            ) : (
-              <span className="font-mono text-[1.375rem] font-extrabold">
-                !
-              </span>
-            )}
+            {running ? <Loader2 className="size-4 animate-spin" aria-hidden /> : <span className="font-mono text-md font-medium">!</span>}
           </span>
           <div className="min-w-0 flex-1">
-            <div
-              className={cn(
-                "font-mono text-[0.6875rem] font-bold uppercase tracking-[0.14em]",
-                running ? "text-ink-2" : "text-live",
-              )}
-            >
-              {stageLabel}
-              {stage.stage_name ? (
-                <span className="ml-1.5 text-muted">· {stage.stage_name}</span>
-              ) : null}
-            </div>
-            <h2 className="mb-1.5 mt-1.5 font-display text-[1.625rem] font-bold uppercase leading-[1.05] tracking-[-0.01em] text-ink">
-              {headline}
-            </h2>
-            <p className="m-0 max-w-[30rem] text-sm leading-[1.5] text-muted">
-              {body}
-            </p>
+            <Label tone={running ? "ink" : "live"}>{stageLabel}</Label>
+            <h2 className="mt-1 text-lg font-semibold text-ink">{headline}</h2>
+            <p className="mt-1 max-w-[52ch] text-md text-muted">{body}</p>
           </div>
         </div>
 
-        <ul className="mb-5 mt-[1.375rem] flex list-none flex-col gap-1.5 p-0">
+        <ul className="mt-4 mb-4 flex list-none flex-col p-0 rounded-[10px] border border-rule">
           {checklist.map((c, i) => {
             const tone = c.tone ?? (c.done ? "done" : "todo");
             const interactive = c.onClick != null;
@@ -411,86 +369,33 @@ export function PrereqGate({
                   ? {
                       type: "button" as const,
                       onClick: c.onClick,
-                      "aria-label": `${c.label} -- ${c.sub}. Click to highlight the beep status chip.`,
+                      "aria-label": `${c.label} -- ${c.sub}. Opens the beep picker.`,
                     }
                   : {})}
                 className={cn(
-                  "flex w-full items-center gap-2.5 rounded-md border px-3 py-2.5 text-left",
-                  tone === "warn"
-                    ? "border-live/40 bg-live-tint"
-                    : tone === "done"
-                      ? "border-rule bg-[color-mix(in_srgb,var(--color-done)_5%,var(--color-surface-2))]"
-                      : "border-rule bg-surface-2",
-                  interactive &&
-                    "cursor-pointer transition-colors hover:border-rule-strong hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led/60",
+                  "flex w-full items-center gap-2.5 border-b border-rule px-3 py-2 text-left text-md last:border-b-0",
+                  interactive && "cursor-pointer transition-colors hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-led",
                 )}
               >
                 <span
                   aria-hidden
                   className={cn(
-                    "inline-flex size-[18px] shrink-0 items-center justify-center rounded-full text-bg",
-                    tone === "done"
-                      ? "border-0 bg-done"
-                      : tone === "warn"
-                        ? "border-0 bg-live"
-                        : "border-[1.5px] border-dashed border-rule-strong",
+                    "inline-block size-2 shrink-0 rounded-full",
+                    tone === "done" ? "bg-done" : tone === "warn" ? "bg-live" : "border-[1.5px] border-rule-strong",
                   )}
-                >
-                  {tone === "done" ? (
-                    <svg
-                      width={10}
-                      height={10}
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="3.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  ) : tone === "warn" ? (
-                    <span className="font-mono text-[0.625rem] font-extrabold leading-none">
-                      !
-                    </span>
-                  ) : null}
-                </span>
-                <span
-                  className={cn(
-                    "flex-1 font-display text-[0.75rem] font-bold uppercase tracking-[0.04em]",
-                    tone === "warn" ? "text-live" : c.done ? "text-ink-2" : "text-ink",
-                  )}
-                >
-                  {c.label}
-                </span>
-                <span
-                  className={cn(
-                    "font-mono text-[0.625rem] tabular-nums",
-                    tone === "warn" ? "text-ink-2" : "text-muted",
-                  )}
-                >
-                  {c.sub}
-                </span>
-                {interactive ? (
-                  <span
-                    aria-hidden
-                    className="ml-1 inline-flex shrink-0 font-mono text-[0.625rem] font-bold uppercase tracking-[0.08em] text-muted"
-                  >
-                    Highlight chip →
-                  </span>
-                ) : null}
+                />
+                <span className={cn("flex-1", tone === "warn" ? "text-live" : c.done ? "text-ink-2" : "text-ink")}>{c.label}</span>
+                <span className={cn("numeral text-sm", tone === "warn" ? "text-ink-2" : "text-muted")}>{c.sub}</span>
+                {interactive ? <span aria-hidden className="text-sm text-muted">Re-pick &rsaquo;</span> : null}
               </Tag>
             );
           })}
         </ul>
 
         {/* Manual stage-time entry, mounted inside the trim gate so a
-         *  match without scoreboard data can unblock itself right here.
-         *  The section self-gates: null until the primary has a beep,
-         *  a "Set stage time" affordance while the time is missing, a
-         *  pencil once a manual value exists. */}
+         *  match without scoreboard data can unblock itself right here. */}
         {kind === "trim" && stageEntry && primaryVideo && onProjectUpdate ? (
-          <div className="mb-5">
+          <div className="mb-4">
             <StageTimeSection
               slug={slug}
               stageNumber={stageNumber}
@@ -502,31 +407,13 @@ export function PrereqGate({
           </div>
         ) : null}
 
-        <div className="flex flex-wrap items-center gap-2.5">
-          <button
-            type="button"
-            onClick={() => void run()}
-            disabled={running || blocked}
-            title={blockedReason ?? undefined}
-            className={cn(
-              "inline-flex items-center gap-2.5 rounded-md border-0 bg-led-fill px-[1.125rem] py-[0.6875rem] font-display text-[0.8125rem] font-bold uppercase tracking-[0.08em] text-ink shadow-[0_0_0_1px_var(--color-led),0_0_22px_var(--color-led-glow)]",
-              running ? "cursor-wait opacity-85" : "cursor-pointer",
-              blocked && "cursor-not-allowed opacity-50",
-            )}
-          >
-            {running ? (
-              <Loader2 className="size-3.5 animate-spin" aria-hidden />
-            ) : null}
-            <span className="tabular-nums">{runLabel}</span>
-          </button>
-          {error ? (
-            <span className="text-xs text-destructive">{error}</span>
-          ) : null}
-          <span className="ml-auto font-mono text-[0.625rem] uppercase tracking-[0.1em] text-muted">
-            {blocked
-              ? (blockedReason ?? "Audit unlocks when prerequisites pass")
-              : "Audit unlocks when prerequisites pass"}
-          </span>
+        <div className="flex flex-wrap items-center gap-3">
+          <Button type="button" variant="primary" onClick={() => void run()} disabled={running || blocked} title={blockedReason ?? undefined}>
+            {running ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : null}
+            {runLabel}
+          </Button>
+          {error ? <span className="text-sm text-led-text">{error}</span> : null}
+          <span className="ml-auto text-sm text-muted">{blocked ? (blockedReason ?? "Audit unlocks when these pass") : "Audit unlocks when these pass"}</span>
         </div>
       </div>
     </div>
