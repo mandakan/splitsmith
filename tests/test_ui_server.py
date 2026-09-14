@@ -7109,6 +7109,12 @@ def test_recent_projects_detail_enriches_metadata(tmp_path: Path, _user_config_h
     # a softer "ready for footage" empty state (#425).
     assert by_kind["match"]["status"] == "awaiting_footage"
     assert by_kind["match"]["video_count"] == 0
+    assert by_kind["match"]["next_step"] == {
+        "kind": "footage",
+        "shooter_slug": None,
+        "stage_number": None,
+        "stage_name": None,
+    }
 
 
 def test_recent_projects_detail_in_progress_once_footage_attached(
@@ -7148,6 +7154,69 @@ def test_recent_projects_detail_in_progress_once_footage_attached(
     by_kind = {p["kind"]: p for p in resp.json()["projects"]}
     assert by_kind["match"]["status"] == "in_progress"
     assert by_kind["match"]["video_count"] == 1
+
+
+def test_recent_projects_detail_names_the_next_step(tmp_path: Path, _user_config_home: Path) -> None:
+    """The picker's Continue card names the first open stage (UX PR 8).
+
+    Stage 1 is audited (a ``save`` event in its audit doc), stage 2 has a
+    primary and a time but no audit yet, so ``next_step`` is an audit of
+    stage 2 for this shooter. The no-footage fixture reports ``footage``.
+    """
+    import json as _json
+
+    from splitsmith import match_model, user_config
+    from splitsmith.match_project import StageEntry, StageVideo
+
+    match_root = tmp_path / "next-step"
+    match = match_model.Match.init(match_root, name="Next Step")
+    match.stages = [
+        match_model.MatchStageDefinition(stage_number=1, stage_name="One"),
+        match_model.MatchStageDefinition(stage_number=2, stage_name="Two"),
+    ]
+    match.save(match_root)
+    match.add_shooter(match_root, match_model.Shooter(slug="ma", name="Mathias"))
+    shooter_root = match_model.Match.shooter_root(match_root, "ma")
+    legacy = MatchProject.init(shooter_root, name="Next Step")
+    legacy.stages = [
+        StageEntry(
+            stage_number=n,
+            stage_name=name,
+            time_seconds=12.0,
+            videos=[StageVideo(path=Path(f"raw/v{n}.mp4"), role="primary")],
+        )
+        for n, name in ((1, "One"), (2, "Two"))
+    ]
+    legacy.save(shooter_root)
+    audit_dir = legacy.audit_path(shooter_root)
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    (audit_dir / "stage1.json").write_text(
+        _json.dumps({"shots": [], "audit_events": [{"ts": "2026-09-14T10:00:00Z", "kind": "save"}]}),
+        encoding="utf-8",
+    )
+    user_config.record_project_open(match_root, match.name, kind="match")
+
+    app = create_app()
+    client = _MatchClient(app)
+    resp = client.get("/api/me/recent-projects?detail=true")
+    assert resp.status_code == 200
+    by_kind = {p["kind"]: p for p in resp.json()["projects"]}
+    assert by_kind["match"]["stages_audited"] == 1
+    assert by_kind["match"]["next_step"] == {
+        "kind": "audit",
+        "shooter_slug": "ma",
+        "stage_number": 2,
+        "stage_name": "Two",
+    }
+
+    # Audit stage 2 too: the next step becomes the export.
+    (audit_dir / "stage2.json").write_text(
+        _json.dumps({"shots": [], "audit_events": [{"ts": "2026-09-14T10:01:00Z", "kind": "save"}]}),
+        encoding="utf-8",
+    )
+    by_kind = {p["kind"]: p for p in client.get("/api/me/recent-projects?detail=true").json()["projects"]}
+    assert by_kind["match"]["next_step"]["kind"] == "export"
+    assert by_kind["match"]["next_step"]["shooter_slug"] == "ma"
 
 
 def test_recent_projects_detail_marks_missing_path(tmp_path: Path, _user_config_home: Path) -> None:
