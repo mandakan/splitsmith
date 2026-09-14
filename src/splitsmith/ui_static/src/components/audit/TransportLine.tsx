@@ -88,7 +88,7 @@ export function TransportLine(props: TransportLineProps) {
   const toggle = (key: keyof MarkerFilters) => onFiltersChange({ ...filters, [key]: !filters[key] });
 
   return (
-    <div className="flex flex-wrap items-center gap-2 border-t border-rule px-3 py-2 text-md text-ink-2">
+    <div className="flex items-center gap-2 border-t border-rule px-3 py-2 text-md text-ink-2">
       <Button
         type="button"
         size="icon"
@@ -99,7 +99,7 @@ export function TransportLine(props: TransportLineProps) {
       >
         {isPlaying ? <Pause className="size-4" aria-hidden /> : <Play className="size-4 fill-current" aria-hidden />}
       </Button>
-      <span className="numeral whitespace-nowrap text-ink-2">
+      <span className="numeral shrink-0 whitespace-nowrap text-ink-2">
         {clock(currentTime)} / {clock(duration)}
       </span>
       <span aria-hidden className="mx-1 h-4 w-px bg-rule-strong" />
@@ -113,7 +113,7 @@ export function TransportLine(props: TransportLineProps) {
         +
       </Button>
       <span aria-hidden className="mx-1 h-4 w-px bg-rule-strong" />
-      <span className="relative">
+      <span className="relative min-w-0">
         <Button
           type="button"
           size="sm"
@@ -121,10 +121,12 @@ export function TransportLine(props: TransportLineProps) {
           aria-haspopup="menu"
           aria-expanded={showOpen}
           onClick={() => setShowOpen((v) => !v)}
-          className="text-muted"
+          className="max-w-full text-muted"
         >
-          show <b className="font-medium text-ink-2">{counts.detected} detected</b> &middot; {counts.manual} manual &middot;{" "}
-          {counts.rejected} rejected &#9662;
+          <span className="truncate">
+            show <b className="font-medium text-ink-2">{counts.detected} detected</b> &middot; {counts.manual} manual &middot;{" "}
+            {counts.rejected} rejected &#9662;
+          </span>
         </Button>
         <Menu open={showOpen} onClose={() => setShowOpen(false)}>
           {(
@@ -153,7 +155,7 @@ export function TransportLine(props: TransportLineProps) {
         </Menu>
       </span>
       <span className="flex-1" />
-      <span className="relative">
+      <span className="relative shrink-0">
         <Button
           type="button"
           size="icon"

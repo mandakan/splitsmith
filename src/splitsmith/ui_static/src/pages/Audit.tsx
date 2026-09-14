@@ -1842,7 +1842,9 @@ export function Audit() {
               }
             />
 
-            {chainRunning ? (
+            {/* The gate carries its own running state; this line is for a
+                chain that runs while the editor is up (a re-run). */}
+            {chainRunning && !prereqShouldShow ? (
               <div role="status" className="mb-4 flex flex-wrap items-center gap-3 rounded-[10px] border border-rule bg-surface px-3.5 py-2.5 text-md text-ink-2">
                 <span aria-hidden className="size-2 rounded-full bg-live shadow-[0_0_8px_var(--color-live)]" />
                 <span>{chainRunning.kind === "trim" ? "Trimming, then detecting shots" : "Detecting shots"}</span>

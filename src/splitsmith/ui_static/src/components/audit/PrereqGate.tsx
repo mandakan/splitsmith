@@ -408,7 +408,7 @@ export function PrereqGate({
         ) : null}
 
         <div className="flex flex-wrap items-center gap-3">
-          <Button type="button" variant="primary" onClick={() => void run()} disabled={running || blocked} title={blockedReason ?? undefined}>
+          <Button type="button" variant={running ? "default" : "primary"} onClick={() => void run()} disabled={running || blocked} title={blockedReason ?? undefined}>
             {running ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : null}
             {runLabel}
           </Button>
