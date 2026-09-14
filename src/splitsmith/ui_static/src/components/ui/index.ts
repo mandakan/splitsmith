@@ -27,6 +27,8 @@ export { Label } from "./Label";
 export { Stat, StatStrip } from "./Stat";
 export { Chip, type ChipTick } from "./Chip";
 export { PageHeader } from "./PageHeader";
+export { Table, Th, Td, Tr } from "./DataTable";
+export { PipelineDots, type PipelineState } from "./PipelineDots";
 export { DisplayHeading } from "./DisplayHeading";
 export { ModeSwitch } from "./ModeSwitch";
 export { Kbd } from "./Kbd";
