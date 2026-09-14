@@ -837,6 +837,13 @@ export interface ExportStageRequestPayload {
    *  the legacy "every secondary with a beep" default; pass ``[]`` to
    *  exclude all secondaries; pass a list to ship only the named cams. */
   secondary_video_ids?: string[] | null;
+  /** Issue #972. Also write the stage's result screen beside the
+   *  overlay MOV: ``<base>_summary.png`` plus a held ProRes
+   *  ``<base>_summary.mov`` an editor drops after the stage. Off by
+   *  default. */
+  write_summary_card?: boolean;
+  /** Seconds the summary MOV holds for. Server default 3.0. */
+  summary_hold_seconds?: number;
 }
 
 export interface ExportStageResult {
@@ -916,6 +923,20 @@ export interface MatchExportRequestPayload {
    *  H.264 profile / GOP / colour / audio params. Only meaningful
    *  when ``output_format == "mp4"``. */
   youtube_preset?: boolean;
+  /** Issue #973. Open the rendered MP4 with a generated match title
+   *  card (match name, date, shooter, plus ``title_info`` as a free-text
+   *  line). Other renderers surface an "ignored" anomaly. */
+  title_page?: boolean;
+  title_info?: string | null;
+  /** Seconds the title page (and the closing card) holds for. Server
+   *  default 3.0. */
+  title_page_duration_seconds?: number;
+  /** Close the rendered MP4 with a generated card. */
+  closing_card?: boolean;
+  /** Issue #972. Hold each stage's summary -- name, scoring, splits over
+   *  the blurred last frame -- for this many seconds after its action in
+   *  the rendered MP4. 0 (the server default) is off. */
+  summary_hold_seconds?: number;
 }
 
 /** Body of a single export template (issue #198). Mirrors the dialog's
@@ -937,6 +958,12 @@ export interface MatchExportTemplate {
   title_duration_seconds?: number;
   intro_path?: string;
   outro_path?: string;
+  /** Issues #973 / #972: the generated-card and summary knobs. */
+  title_page?: boolean;
+  title_info?: string;
+  title_page_duration_seconds?: number;
+  closing_card?: boolean;
+  summary_hold_seconds?: number;
 }
 
 export interface MatchExportTemplateEntry {
@@ -968,6 +995,16 @@ export interface CompareGridRequestPayload {
   canvas_width?: number;
   canvas_height?: number;
   output_name?: string;
+  /** Issue #973. Generated cards on the rendered grid: a match title
+   *  page (name, date, plus ``title_info``), a closing card, and a card
+   *  per stage (``slate`` before it, ``lower-third`` over its head).
+   *  All off by default. */
+  title_page?: boolean;
+  title_info?: string | null;
+  title_page_duration_seconds?: number;
+  closing_card?: boolean;
+  stage_titles?: "none" | "slate" | "lower-third";
+  title_duration_seconds?: number;
 }
 
 /** ``Job.result`` shape for a ``"compare-grid"`` job, mirrors the dict
