@@ -27,10 +27,12 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .. import export_runs
+from ..compare.mp4_grid import DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH
 from ..match_project import trim_blocker
+from ..overlay_theme import ThemeName
 from . import export_storage
 from .http_errors import ensure_source_reachable
 
@@ -158,6 +160,46 @@ class MatchExportRequest(BaseModel):
     # the blurred last frame) for this many seconds after its action in
     # the rendered MP4. 0 is off. Other renderers surface an anomaly.
     summary_hold_seconds: float = 0.0
+
+
+class CompareGridRequest(BaseModel):
+    """Body for POST /api/match/compare-export (phase 0).
+
+    The response is a Job snapshot the SPA polls, since a full-match grid
+    re-encode runs for minutes; the result's ``output_name`` is the
+    deliverable, downloadable in either mode (#755). ``cameras`` keys match
+    either a shooter's slug or its display name, mirroring ``compare
+    export``'s ``--camera SHOOTER=VALUE`` flag. ``canvas_width`` /
+    ``canvas_height`` default to 4K; the frame rate is never taken from
+    the request -- it always derives from the audio-source shooter's
+    footage (see ``mp4_grid.derive_frame_rate``).
+    """
+
+    stage_numbers: list[int]
+    audio_from: str
+    cameras: dict[str, str] = Field(default_factory=dict)
+    canvas_width: int = DEFAULT_CANVAS_WIDTH
+    canvas_height: int = DEFAULT_CANVAS_HEIGHT
+    output_name: str = "compare-grid"
+    # Issue #973. Generated cards on the rendered grid: a match title
+    # page (name, date, plus ``title_info`` as a free-text line), a
+    # closing card, and a card per stage (``slate`` before it, or a
+    # ``lower-third`` over its head). All off by default.
+    title_page: bool = False
+    title_info: str | None = None
+    title_page_duration_seconds: float = 3.0
+    closing_card: bool = False
+    stage_titles: Literal["none", "slate", "lower-third"] = "none"
+    title_duration_seconds: float = 1.5
+    # Issue #705. The splits overlay (per-tile counter and split, the
+    # running clock) in the grid's own typography, and the end-of-stage
+    # summary hold in seconds. The hold needs the overlay: it is drawn
+    # from the overlay's own data, so a hold on a clean grid would be a
+    # blurred still with nothing on it -- the endpoint refuses that shape
+    # as a 400 rather than queueing a job the engine then fails.
+    overlay: bool = False
+    overlay_theme: ThemeName = "splitsmith"
+    summary_hold_seconds: float = Field(default=0.0, ge=0.0)
 
 
 @router.get("/api/shooters/{slug}/exports/overview")

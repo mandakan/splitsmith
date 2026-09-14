@@ -228,6 +228,9 @@ def load_shooter_from_match(
     *,
     camera: str | None = None,
     probe: ProbeFn | None = None,
+    match: Match | None = None,
+    project: MatchProject | None = None,
+    ensure_trim: Callable[[Path], object] | None = None,
 ) -> CompareShooterBundle:
     """Build a :class:`CompareShooterBundle` from one shooter inside a merged Match.
 
@@ -237,10 +240,20 @@ def load_shooter_from_match(
     has no primary video with a beep time, or its lossless trim is
     missing from the shooter's exports dir. ``camera`` selects the
     contributing camera exactly as in :func:`load_shooter`.
+
+    ``match`` / ``project`` (#755) let a caller hand over documents it
+    already holds instead of reading ``match.json`` / ``project.json``
+    off ``match_root`` -- on a hosted worker those live in the state
+    store and the disk has neither. ``ensure_trim`` is called with each
+    stage's expected trim path *before* its existence is checked, so a
+    hosted caller can mirror the trim down from object storage; a local
+    caller leaves it ``None`` and the check reads the disk as it always
+    has.
     """
     if probe is None:
         probe = fcpxml_gen.probe_video
-    match = Match.load(match_root)
+    if match is None:
+        match = Match.load(match_root)
     shooter_root = Match.shooter_root(match_root, slug)
     # Per-stage data comes from project.json: it is authoritative for
     # everything the server writes (beeps, roles, buffers). shooter.json is
@@ -256,7 +269,8 @@ def load_shooter_from_match(
     #   - the grid *label* follows match.json, which owns the shared stage
     #     definitions: one stage must read the same across every tile,
     #     whatever a single shooter's scorecard called it.
-    project = MatchProject.load(shooter_root)
+    if project is None:
+        project = MatchProject.load(shooter_root)
     stage_names: dict[int, str] = {s.stage_number: s.stage_name for s in match.stages}
     pre_buffer = project.trim_pre_buffer_seconds
     effective_camera = _resolve_effective_camera(project, camera)
@@ -271,6 +285,8 @@ def load_shooter_from_match(
             continue
         stage_label = stage_names.get(stage.stage_number, stage.stage_name)
         trim = trim_path_for_video(project, shooter_root, stage.stage_number, stage.stage_name, chosen)
+        if ensure_trim is not None:
+            ensure_trim(trim)
         if not trim.exists():
             missing.append(
                 MissingTrim(

@@ -832,3 +832,26 @@ def test_negative_hold_and_unknown_theme_are_422(match_client_with_trims: _Match
     ):
         response = match_client_with_trims.post("/api/match/compare-export", json=body)
         assert response.status_code == 422, body
+
+
+# --- match-scoped download (issue #755) --------------------------------------
+
+
+def test_match_export_download_serves_confines_and_404s(match_client_with_trims: _MatchClient) -> None:
+    """Local mode: a rendered grid is served straight off ``<match>/exports``;
+    a path outside it is a 400 and an unknown name a 404."""
+    response = match_client_with_trims.post(
+        "/api/match/compare-export",
+        json={"stage_numbers": [1], "audio_from": "mathias", "output_name": "my-grid"},
+    )
+    assert response.status_code == 200
+    job = _wait_for_job(match_client_with_trims, response.json()["id"])
+    assert job["status"] == "succeeded", job
+    assert job["result"]["output_name"] == "my-grid.mp4"
+
+    download = match_client_with_trims.get("/api/match/exports/file/my-grid.mp4")
+    assert download.status_code == 200
+    assert download.content == b"stub"
+    assert download.headers["content-type"].startswith("video/mp4")
+    assert match_client_with_trims.get("/api/match/exports/file/../match.json").status_code in (400, 404)
+    assert match_client_with_trims.get("/api/match/exports/file/nope.mp4").status_code == 404

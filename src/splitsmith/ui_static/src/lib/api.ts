@@ -1042,6 +1042,10 @@ export interface CompareGridRequestPayload {
  *  optional so a snapshot from a job queued before they existed still
  *  parses. */
 export interface CompareGridResult {
+  /** Basename of the finished grid, resolvable in either mode through
+   *  ``GET /api/match/exports/file/{output_name}`` (#755). Optional so a
+   *  snapshot from a job queued before it existed still parses. */
+  output_name?: string;
   output_path: string;
   stages_rendered: number;
   stages_total: number;
