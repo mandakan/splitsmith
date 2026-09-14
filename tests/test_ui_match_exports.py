@@ -682,15 +682,15 @@ def _one_stage_input(
 
 
 def _card_request(**overrides: object) -> match_exports_mod.MatchExportRequestData:
-    fields: dict[str, object] = dict(
-        stage_numbers=(1,),
-        head_pad_seconds=10.0,
-        tail_pad_seconds=20.0,
-        include_secondaries=False,
-        include_overlay=False,
-        project_name="Bromma Classifier",
-        output_format="mp4",
-    )
+    fields: dict[str, object] = {
+        "stage_numbers": (1,),
+        "head_pad_seconds": 10.0,
+        "tail_pad_seconds": 20.0,
+        "include_secondaries": False,
+        "include_overlay": False,
+        "project_name": "Bromma Classifier",
+        "output_format": "mp4",
+    }
     fields.update(overrides)
     return match_exports_mod.MatchExportRequestData(**fields)  # type: ignore[arg-type]
 
