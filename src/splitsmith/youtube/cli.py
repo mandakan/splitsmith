@@ -26,6 +26,7 @@ from rich.progress import (
 from ..youtube_sidecar import UploadRecord
 from . import oauth, upload
 from .client import YouTubeClient, default_http
+from .upload import build_client  # noqa: F401 -- module-level so tests can monkeypatch the seam
 
 youtube_app = typer.Typer(
     name="youtube",
@@ -36,14 +37,6 @@ youtube_app = typer.Typer(
 console = Console()
 
 _PRIVACY_CHOICES = ("unlisted", "private", "public")
-
-
-def build_client(conn: oauth.YouTubeConnection) -> YouTubeClient:
-    """A Data API client over the stored connection. One place so the
-    ``match export`` verb and the UI job build it the same way."""
-    client = oauth.OAuthClient.configured()
-    http = default_http()
-    return YouTubeClient(http, oauth.AccessTokenProvider(client, http, refresh_token=conn.refresh_token))
 
 
 def open_client() -> tuple[YouTubeClient, oauth.YouTubeConnection]:
