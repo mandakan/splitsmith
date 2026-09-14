@@ -24,6 +24,12 @@ import { StatusPill } from "@/components/ui/StatusPill";
 import { Tick, TickStrip, type TickState } from "@/components/ui/Tick";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Chip } from "@/components/ui/Chip";
+import { Table, Td, Th, Tr } from "@/components/ui/DataTable";
+import { Label } from "@/components/ui/Label";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { PipelineDots } from "@/components/ui/PipelineDots";
+import { Stat, StatStrip } from "@/components/ui/Stat";
 import { useMode } from "@/lib/mode";
 import { modKeyGlyph } from "@/lib/platform";
 
@@ -61,23 +67,188 @@ export function Design() {
   return (
     <div className="space-y-12 pb-16 font-sans text-ink">
       {/* ----- Page header ---------------------------------------------- */}
-      <header className="space-y-4">
-        <Kicker>Project Register · Vol. 01 · Ed. 04</Kicker>
-        <DisplayHeading variant="hero" as="h1">
-          Design system
-        </DisplayHeading>
-        <p className="max-w-2xl text-sm text-muted">
-          Shot Timer instrument-panel system. Every token, every foundational
-          primitive on a single scrollable page. Mode flip is live --
-          everything tagged "accent" follows it.
-        </p>
-        <div className="flex items-center gap-3 pt-2">
-          <ModeSwitch />
-          <span className="font-mono text-xs uppercase tracking-[0.16em] text-muted">
-            current: {mode}
-          </span>
+      <PageHeader
+        title="Design system"
+        sub="Shot Timer instrument-panel system. Every token and primitive on one page; the mode flip is live and everything tagged accent follows it."
+        actions={
+          <>
+            <ModeSwitch />
+            <Label>{mode}</Label>
+          </>
+        }
+      />
+
+      {/* ----- Budget primitives (spec 2026-09-13 s6) ------------------- */}
+      <Section title="Budget primitives" kicker="00 / Primitive">
+        <div className="space-y-8">
+          <div className="space-y-2">
+            <Label>PageHeader</Label>
+            <div className="rounded-[10px] border border-rule bg-surface p-5">
+              <PageHeader
+                ordinal="03"
+                title="B6 Rear"
+                sub="Mathias Axell · Production Optics · 30 shots"
+                back={{ label: "All stages", to: "/design" }}
+                actions={
+                  <>
+                    <Button>Compare</Button>
+                    <Button variant="primary">Share</Button>
+                  </>
+                }
+                className="mb-0"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Label tones</Label>
+            <div className="flex flex-wrap gap-4">
+              <Label>Avg split</Label>
+              <Label tone="ink">Stages</Label>
+              <Label tone="accent">Results</Label>
+              <Label tone="live">Running</Label>
+              <Label tone="done">Audited</Label>
+              <Label tone="subtle">next</Label>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>StatStrip (lead)</Label>
+            <StatStrip lead>
+              <Stat label="Stage time" value="32.09" unit="s" />
+              <Stat label="Draw" value="1.97" unit="s" />
+              <Stat label="Avg split" value="0.386" unit="s" />
+              <Stat label="Fastest split" value="0.249" unit="s" />
+              <Stat label="Shots" value="30" />
+            </StatStrip>
+            <StatStrip>
+              <Stat label="Draw" value="1.93" unit="s" tone="dim" />
+              <Stat label="Avg split" value="0.44" unit="s" tone="dim" />
+              <Stat label="Shots" value="33" tone="dim" />
+            </StatStrip>
+          </div>
+
+          <div className="space-y-2">
+            <Label>DataTable</Label>
+            <Table>
+              <thead>
+                <tr>
+                  <Th>#</Th>
+                  <Th>Stage</Th>
+                  <Th align="right">Draw</Th>
+                  <Th align="right">Avg split</Th>
+                  <Th align="right">Time</Th>
+                  <Th>State</Th>
+                </tr>
+              </thead>
+              <tbody>
+                <Tr>
+                  <Td kind="ordinal">02</Td>
+                  <Td kind="name">B100 Vänster</Td>
+                  <Td kind="num">1.84</Td>
+                  <Td kind="num">0.52</Td>
+                  <Td kind="num">48.63</Td>
+                  <Td>
+                    <Chip tone="ok" tick="fire">
+                      audited
+                    </Chip>
+                  </Td>
+                </Tr>
+                <Tr current>
+                  <Td kind="ordinal">03</Td>
+                  <Td kind="name">B6 Rear</Td>
+                  <Td kind="num">1.97</Td>
+                  <Td kind="num">0.39</Td>
+                  <Td kind="num">32.09</Td>
+                  <Td>
+                    <Chip tone="ok" tick="fire">
+                      audited
+                    </Chip>
+                  </Td>
+                </Tr>
+                <Tr>
+                  <Td kind="ordinal">06</Td>
+                  <Td kind="name" dim>
+                    B5 All
+                  </Td>
+                  <Td kind="num" dim>
+                    1.93
+                  </Td>
+                  <Td kind="num" dim>
+                    0.44
+                  </Td>
+                  <Td kind="num" dim>
+                    38.2
+                  </Td>
+                  <Td>
+                    <Chip tone="warn" tick="reload">
+                      4 flags
+                    </Chip>
+                  </Td>
+                </Tr>
+              </tbody>
+            </Table>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Chip</Label>
+            <div className="flex flex-wrap gap-2">
+              <Chip tick="muted">Typical</Chip>
+              <Chip tick="draw">Draw</Chip>
+              <Chip tick="movement">Movement</Chip>
+              <Chip tick="transition">Transition</Chip>
+              <Chip tick="fire">Fire</Chip>
+              <Chip tick="reload">Reload</Chip>
+              <Chip tick="activation">Activation</Chip>
+              <Chip tone="warn" tick="reload">
+                4 flags
+              </Chip>
+              <Chip tone="ok" tick="fire">
+                audited
+              </Chip>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Button</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button variant="primary">
+                Save &amp; next <Kbd>{modKeyGlyph()}↵</Kbd>
+              </Button>
+              <Button>Compare shooters</Button>
+              <Button variant="ghost">Undo</Button>
+              <Button variant="destructive">Remove shooter</Button>
+              <Button size="sm">Splits</Button>
+              <Button size="sm" variant="primary">
+                Confirm
+              </Button>
+              <Button size="icon" aria-label="Next">
+                <Plus />
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>PipelineDots</Label>
+            <div className="flex items-center gap-3">
+              <PipelineDots
+                states={["done", "done", "done", "done", "progress", "todo", "todo", "todo", "todo", "todo", "todo", "todo"]}
+                label="4 of 12 stages audited"
+              />
+              <span className="numeral text-[12px] text-muted">4 / 12</span>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Numeral</Label>
+            <div className="flex flex-wrap items-baseline gap-6">
+              <span className="numeral text-[26px] text-ink">0.386</span>
+              <span className="numeral text-[20px] text-ink">32.09</span>
+              <span className="numeral text-[13px] text-ink">4 / 12</span>
+            </div>
+          </div>
         </div>
-      </header>
+      </Section>
 
       {/* ----- Surfaces ------------------------------------------------- */}
       <Section title="Surfaces" kicker="01 / Color">
