@@ -389,3 +389,148 @@ def test_reclassify_rejudges_auto_intervals_and_keeps_manual_ones(tmp_path: Path
     assert [s["interval_class"] for s in written["shots"]] == ["first_shot", "split", "reload"]
     assert written["shots"][2]["interval_class_source"] == "manual"
     assert written["audit_events"][-1]["kind"] == "coach_reclassify"
+
+
+# --- --youtube-upload (issue #1000) -----------------------------------------
+
+
+def _stub_youtube(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    from datetime import UTC, datetime
+
+    from splitsmith import youtube_sidecar
+    from splitsmith.youtube import cli as ycli
+    from splitsmith.youtube import oauth
+
+    seen: dict[str, Any] = {}
+    oauth.save_connection(
+        oauth.YouTubeConnection(
+            refresh_token="rt", channel_id="c", channel_title="Chan", connected_at=datetime.now(UTC)
+        )
+    )
+    monkeypatch.setattr(ycli, "build_client", lambda conn: object())
+
+    def fake_run(mp4: Path, *, client: Any, channel_title: str, privacy: str, again: bool) -> Any:
+        seen["mp4"] = mp4
+        seen["privacy"] = privacy
+        return youtube_sidecar.UploadRecord(
+            video_id="v1",
+            url="https://youtu.be/v1",
+            privacy=privacy,
+            uploaded_at=datetime.now(UTC),
+            channel_title=channel_title,
+        )
+
+    monkeypatch.setattr(match_cli, "_run_youtube_upload", fake_run)
+    return seen
+
+
+def test_youtube_upload_runs_after_the_render_on_the_final_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith import youtube_sidecar
+
+    root = _seed(tmp_path)
+    _capture_mp4(monkeypatch)
+    monkeypatch.setattr(youtube_sidecar, "write_thumbnail", lambda *a, **k: None)
+    seen = _stub_youtube(monkeypatch)
+    out = tmp_path / "out" / "final.mp4"
+    result = runner.invoke(
+        app,
+        [
+            "match",
+            "export",
+            str(root),
+            "--shooter",
+            "me",
+            "--format",
+            "mp4",
+            "--youtube-upload",
+            "--youtube-privacy",
+            "private",
+            "--output",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert seen["mp4"] == out.resolve()
+    assert seen["privacy"] == "private"
+    assert out.with_name("final-youtube.json").exists()  # --youtube-upload implied --youtube-sidecar
+    assert "https://youtu.be/v1" in strip_ansi(result.output)
+
+
+def test_youtube_upload_refuses_non_mp4(tmp_path: Path) -> None:
+    root = _seed(tmp_path)
+    result = runner.invoke(app, ["match", "export", str(root), "--shooter", "me", "--youtube-upload"])
+    assert result.exit_code == 2
+    assert "mp4" in strip_ansi(result.output)
+
+
+def test_youtube_upload_rejects_an_unknown_privacy(tmp_path: Path) -> None:
+    root = _seed(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "match",
+            "export",
+            str(root),
+            "--shooter",
+            "me",
+            "--format",
+            "mp4",
+            "--youtube-upload",
+            "--youtube-privacy",
+            "secret",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "unlisted" in strip_ansi(result.output)
+
+
+def test_youtube_upload_not_connected_fails_before_rendering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _seed(tmp_path)
+    captured = _capture_mp4(monkeypatch)
+    result = runner.invoke(
+        app, ["match", "export", str(root), "--shooter", "me", "--format", "mp4", "--youtube-upload"]
+    )
+    assert result.exit_code == 2
+    assert "youtube login" in strip_ansi(result.output)
+    assert "comp" not in captured  # nothing rendered
+
+
+def test_youtube_upload_failure_after_a_good_render_exits_1_and_keeps_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith import youtube_sidecar
+    from splitsmith.youtube import oauth
+
+    root = _seed(tmp_path)
+    _capture_mp4(monkeypatch)
+    monkeypatch.setattr(youtube_sidecar, "write_thumbnail", lambda *a, **k: None)
+    _stub_youtube(monkeypatch)
+
+    def boom(*a: Any, **kw: Any) -> Any:
+        raise oauth.YouTubeError("HTTP 500: upload gave up after 8 attempts")
+
+    monkeypatch.setattr(match_cli, "_run_youtube_upload", boom)
+    out = tmp_path / "out" / "final.mp4"
+    result = runner.invoke(
+        app,
+        [
+            "match",
+            "export",
+            str(root),
+            "--shooter",
+            "me",
+            "--format",
+            "mp4",
+            "--youtube-upload",
+            "--output",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 1
+    assert out.exists()
+    text = strip_ansi(result.output)
+    assert "Wrote" in text and "gave up" in text

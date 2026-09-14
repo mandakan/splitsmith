@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 import typer
 from rich.console import Console
@@ -479,6 +480,17 @@ def export(
             "(division, camera, the day). Needs --youtube-sidecar."
         ),
     ),
+    youtube_upload: bool = typer.Option(
+        False,
+        "--youtube-upload",
+        help=(
+            "After the render, upload the MP4 to the connected YouTube channel (implies "
+            "--youtube-sidecar; run `splitsmith youtube login` first)."
+        ),
+    ),
+    youtube_privacy: str = typer.Option(
+        "unlisted", "--youtube-privacy", help="Privacy for --youtube-upload: unlisted, private or public."
+    ),
     overlay_theme: str = typer.Option(
         "splitsmith", "--theme", help="Overlay / card theme: 'splitsmith' or 'clean'."
     ),
@@ -514,6 +526,26 @@ def export(
     if overlay_theme not in ("splitsmith", "clean"):
         console.print(f"[red]Error:[/] --theme must be 'splitsmith' or 'clean', got {overlay_theme!r}.")
         raise typer.Exit(code=2)
+    yt_client: Any = None
+    yt_conn = None
+    if youtube_upload:
+        # Everything that can refuse the upload is checked before a
+        # multi-minute render, not after it.
+        from .youtube import oauth as yt_oauth
+        from .youtube.cli import open_client
+
+        if output_format != "mp4":
+            console.print("[red]Error:[/] --youtube-upload needs --format mp4.")
+            raise typer.Exit(code=2)
+        if youtube_privacy not in ("unlisted", "private", "public"):
+            console.print("[red]Error:[/] --youtube-privacy must be unlisted, private or public.")
+            raise typer.Exit(code=2)
+        try:
+            yt_client, yt_conn = open_client()
+        except yt_oauth.NotConnectedError as exc:
+            console.print(f"[red]Error:[/] {exc}")
+            raise typer.Exit(code=2) from exc
+        youtube_sidecar = True
     if not is_match_folder(match_path):
         console.print(f"[red]Error:[/] {match_path} is not a match folder (no {MATCH_FILE}).")
         raise typer.Exit(code=2)
@@ -637,6 +669,39 @@ def export(
     console.print(f"  {result.stage_count} stages, {result.duration_seconds:.1f}s timeline")
     for note in result.anomalies:
         console.print(f"[yellow]note[/] {note}", soft_wrap=True)
+
+    if youtube_upload:
+        from .youtube import oauth as yt_oauth
+        from .youtube.cli import report_upload
+
+        assert yt_conn is not None
+        # ``again=True``: the render just rewrote the sidecar, so there is
+        # no earlier record to protect and AlreadyUploadedError cannot fire.
+        try:
+            record = _run_youtube_upload(
+                written,
+                client=yt_client,
+                channel_title=yt_conn.channel_title,
+                privacy=youtube_privacy,
+                again=True,
+            )
+        except yt_oauth.YouTubeError as exc:
+            console.print(f"[red]Error:[/] upload failed: {exc}", soft_wrap=True)
+            raise typer.Exit(code=1) from exc
+        report_upload(record)
+
+
+def _run_youtube_upload(mp4: Path, *, client: Any, channel_title: str, privacy: str, again: bool) -> Any:
+    """Indirection so the export test can stub the upload without an HTTP client."""
+    from .youtube.cli import run_upload_with_progress
+
+    return run_upload_with_progress(
+        mp4,
+        client=client,
+        channel_title=channel_title,
+        privacy=privacy,  # type: ignore[arg-type]
+        again=again,
+    )
 
 
 @match_app.command("reclassify")
