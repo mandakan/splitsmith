@@ -4,9 +4,9 @@ import { describe, expect, it } from "vitest";
 import { Button } from "./button";
 
 describe("Button budget", () => {
-  it("primary is the Antonio led-fill recipe", () => {
+  it("primary is the Antonio led-fill recipe without the halo", () => {
     render(<Button variant="primary">Save</Button>);
-    expect(screen.getByRole("button").className).toMatch(/btn-led-fill/);
+    expect(screen.getByRole("button").className).toMatch(/btn-primary/);
   });
 
   it("default is neutral Geist, not red", () => {

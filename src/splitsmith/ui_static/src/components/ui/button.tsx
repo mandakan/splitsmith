@@ -15,7 +15,7 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        primary: "btn-led-fill rounded-lg",
+        primary: "btn-primary rounded-lg",
         default: "border border-rule-strong bg-surface-2 text-ink hover:bg-surface-3",
         secondary: "border border-rule-strong bg-surface-2 text-ink hover:bg-surface-3",
         outline: "border border-rule-strong bg-surface-2 text-ink hover:bg-surface-3",
