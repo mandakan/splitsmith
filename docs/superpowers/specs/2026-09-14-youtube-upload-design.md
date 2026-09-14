@@ -154,7 +154,7 @@ registered from `cli.py` beside `match`.
   (`soft_wrap=True`, they are one-line facts the user copies). Exit codes:
   2 not connected or no sidecar, 1 upload failed, 3 already uploaded
   (prints the existing URL and how to re-upload).
-- `match export --youtube-upload [--privacy ...]`: implies
+- `match export --youtube-upload [--youtube-privacy ...]`: implies
   `--youtube-sidecar`; exit 2 with `--format` other than `mp4`. Runs after
   the render and the `--output` rename, so the sidecar it reads is the one
   beside the final file.
