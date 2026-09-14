@@ -58,6 +58,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
           manual: false,
           shooter_names: ["Mathias"],
           origin: "local",
+          next_step: null,
         } satisfies RecentProjectDetail,
       ]),
       bindProject: vi.fn().mockResolvedValue({

@@ -129,6 +129,7 @@ describe("Pick chrome (#550)", () => {
         manual: false,
         shooter_names: ["Mathias Axell"],
         origin: "hosted",
+        next_step: null,
       },
     ]);
     renderPick();

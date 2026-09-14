@@ -1664,6 +1664,15 @@ export function capabilityDenied(
 }
 
 /** Detailed RecentProject with on-disk metadata (`?detail=true`, #322). */
+/** The picker's Continue card target (UX PR 8): the first open stage in
+ *  shooter then stage order, or the phase the match is in. */
+export interface NextStep {
+  kind: "footage" | "audit" | "export";
+  shooter_slug: string | null;
+  stage_number: number | null;
+  stage_name: string | null;
+}
+
 export interface RecentProjectDetail {
   path: string;
   name: string;
@@ -1693,6 +1702,8 @@ export interface RecentProjectDetail {
   shooter_names: string[];
   /** See :type:`MatchOrigin` (#631). */
   origin: MatchOrigin;
+  /** ``null`` for unresolved kinds. */
+  next_step: NextStep | null;
 }
 
 export interface CreateMatchStageDraft {
