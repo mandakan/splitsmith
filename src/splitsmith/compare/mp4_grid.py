@@ -1284,8 +1284,10 @@ def build_stage_command(
     rate = canvas.rate_string
 
     args: list[str] = [ffmpeg_binary, "-hide_banner", "-y"]
-    # Filler tiles take two inputs where a real tile takes one, so a
-    # tile's slot is not its input index past the first filler.
+    # Every tile takes two inputs -- a real one its trim twice (video
+    # seeked, audio not), a filler its colour and its anullsrc -- so a
+    # tile's slot is never its input index; the graph is built from
+    # these lists.
     video_index: list[int] = []
     audio_index: list[int] = []
     next_index = 0
@@ -1306,6 +1308,26 @@ def build_stage_command(
                 str(tile.trim_path),
             ]
             video_index.append(next_index)
+            next_index += 1
+            # The audio is *not* taken from that seeked input. Input-side
+            # ``-ss`` is exact for video (keyframe seek, then decode and
+            # discard to the target) but not for the audio of a
+            # stream-copied trim: measured on a real match in the
+            # single-shooter renderer (``mp4_render``), one stage's audio
+            # came out cut 0.42 s late while its video was cut exactly.
+            # Here the ``apad,atrim`` clamp keeps the *length* honest, so
+            # nothing accumulates across stages, but the tile's sound
+            # would still sit 0.4 s early against its own picture for the
+            # whole stage. The trim is opened a second time with no seek
+            # and its audio cut by ``atrim`` on decoded timestamps, which
+            # honour the trim's edit list. ``-t`` bounds the read to the
+            # same window so the decoder stops where the cut does.
+            args += [
+                "-t",
+                f"{tile.seek_seconds + plan.duration_seconds - tile.lead_pad_seconds:g}",
+                "-i",
+                str(tile.trim_path),
+            ]
             audio_index.append(next_index)
             next_index += 1
         else:
@@ -1718,10 +1740,20 @@ def _build_filter_graph(
         # lead-padded shooter would sit half a second early in the mix
         # while his own track was on time -- the exact desync the grid
         # exists to prevent, audible only in the track everyone hears.
+        # A real tile's audio input is unseeked (see
+        # ``build_stage_command``): ``atrim`` cuts the same window the
+        # video's ``-ss`` / ``-t`` describe, on decoded timestamps, before
+        # the re-base. A filler's ``anullsrc`` starts at zero and the
+        # cut is a no-op on it.
         delay_ms = int(round(tile.lead_pad_seconds * 1000))
         lead = f"adelay={delay_ms}:all=1," if delay_ms > 0 else ""
+        cut = (
+            f"atrim=start={tile.seek_seconds:g}:duration={plan.duration_seconds - tile.lead_pad_seconds:g},"
+            if tile.trim_path is not None
+            else ""
+        )
         parts.append(
-            f"[{audio_index[slot]}:a]asetpts=PTS-STARTPTS,{lead}aresample=async=1,"
+            f"[{audio_index[slot]}:a]{cut}asetpts=PTS-STARTPTS,{lead}aresample=async=1,"
             f"aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
             f"apad,atrim=0:{plan.total_seconds:g},asplit=2[a{slot}][m{slot}]"
         )

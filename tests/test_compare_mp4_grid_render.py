@@ -1062,7 +1062,13 @@ def _video_mark_times(path: Path, fps: float = 1 / FRAME_SECONDS) -> list[float]
 
 
 def _marked_source(
-    path: Path, *, seconds: float, mark_at: float, width: int = 320, height: int = 240
+    path: Path,
+    *,
+    seconds: float,
+    mark_at: float,
+    width: int = 320,
+    height: int = 240,
+    gop_frames: int | None = None,
 ) -> Path:
     """A clip whose picture cuts and whose audio fires on the same instant.
 
@@ -1107,6 +1113,8 @@ def _marked_source(
         "-i", str(raw_video),
         "-f", "s16le", "-ar", "48000", "-ac", "1", "-i", str(raw_audio),
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18",
+        *(["-g", str(gop_frames), "-keyint_min", str(gop_frames), "-sc_threshold", "0"]
+          if gop_frames else []),
         "-c:a", "aac", "-ac", "2", str(path),
     ]  # fmt: skip
     done = subprocess.run(cmd, capture_output=True, text=True)
@@ -1194,6 +1202,80 @@ def test_a_long_stitch_does_not_drift_audio_late_against_video(tmp_path: Path):
         # was authored on -- and the last one is where drift accumulates.
         marks = _audio_mark_times(result.output_path, slot)
         assert len(marks) == DRIFT_STAGE_COUNT, marks
+        for index, (mark, cut) in enumerate(zip(marks, picture, strict=True)):
+            assert mark - cut == pytest.approx(0.0, abs=MARKER_TOLERANCE_SECONDS), (
+                f"track {slot} stage {index + 1}: sound at {mark:.4f}s against a picture cut at "
+                f"{cut:.4f}s -- {1000 * (mark - cut):+.1f}ms out"
+            )
+
+
+@integration
+@needs_ffprobe
+def test_a_seeked_tile_keeps_its_sound_on_its_picture(tmp_path: Path):
+    """The stream-copied trim, cut between keyframes, that the drift test
+    above never seeks into (its head pad equals its beep offset).
+
+    ``trim.py`` writes such trims: the video starts on the keyframe before
+    the cut and an edit list realigns the audio. Input-side ``-ss`` on
+    one of those is exact for the picture and not for the sound -- on a
+    real match the tile's audio sat 0.42 s early against its own picture
+    for the whole stage. Two tiles, each cut at a different offset from
+    the keyframe, so an error that happened to cancel on one cannot hide
+    behind the other.
+    """
+    source = _marked_source(tmp_path / "source.mp4", seconds=6.0, mark_at=4.0, gop_frames=30)
+    shooters = []
+    for label, cut in (("Anders", 1.42), ("Mathias", 1.0)):
+        trim = tmp_path / f"{label}.mp4"
+        done = subprocess.run(
+            [
+                FFMPEG, "-v", "error", "-y", "-ss", f"{cut}", "-i", str(source),
+                "-t", "4", "-c", "copy", str(trim),
+            ],  # fmt: skip
+            capture_output=True,
+            text=True,
+        )
+        assert done.returncode == 0, done.stderr[-2000:]
+        shooters.append(
+            CompareShooterBundle(
+                label=label,
+                project_root=tmp_path / label,
+                stages_by_number={
+                    number: CompareStageBundle(
+                        stage_number=number,
+                        stage_name=f"Stage {number}",
+                        trim_path=trim,
+                        audit_path=tmp_path / "audit.json",
+                        beep_offset_in_clip=4.0 - cut,
+                        duration_seconds=4.0,
+                        width=320,
+                        height=240,
+                        frame_rate_num=30,
+                        frame_rate_den=1,
+                    )
+                    for number in (1, 2)
+                },
+            )
+        )
+
+    result = mp4_grid.render_grid_mp4(
+        shooters,
+        audio_label="Mathias",
+        output_path=tmp_path / "grid.mp4",
+        canvas=CANVAS,
+        head_pad_seconds=1.0,
+        ffmpeg_binary=FFMPEG,
+        work_dir=tmp_path / "work",
+    )
+    assert result.failed == ()
+
+    # Both tiles cut to white on the same frame, so the grid's picture
+    # cuts once per stage.
+    picture = _video_mark_times(result.output_path)
+    assert len(picture) == 2, picture
+    for slot in (1, 2):
+        marks = _audio_mark_times(result.output_path, slot)
+        assert len(marks) == 2, marks
         for index, (mark, cut) in enumerate(zip(marks, picture, strict=True)):
             assert mark - cut == pytest.approx(0.0, abs=MARKER_TOLERANCE_SECONDS), (
                 f"track {slot} stage {index + 1}: sound at {mark:.4f}s against a picture cut at "
