@@ -75,7 +75,7 @@ def build_sidecar(
     callouts, etc. Trailing whitespace is normalised so the chapter
     timestamps always land cleanly without YouTube munging.
     """
-    chapters = _compute_chapters(composition)
+    chapters = compute_chapters(composition)
     description = _format_description(
         chapters,
         lead=description_lead,
@@ -129,7 +129,7 @@ def write_srt(composition: Composition, output_path: Path) -> None:
 # --- internals -------------------------------------------------------------
 
 
-def _compute_chapters(composition: Composition) -> list[Chapter]:
+def compute_chapters(composition: Composition) -> list[Chapter]:
     """One chapter per stage at the stage's first visible frame, walking
     the same spine the MP4 renderer lays down (issue #973 / #972): intro,
     title page, then per stage its slate, the action and its summary
@@ -301,3 +301,7 @@ __all__ = [
     "write_sidecar",
     "write_srt",
 ]
+
+
+#: The pre-#204-follow-up private name; the MP4 renderer imports the public one.
+_compute_chapters = compute_chapters

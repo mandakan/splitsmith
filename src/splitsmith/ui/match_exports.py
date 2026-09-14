@@ -214,11 +214,10 @@ class MatchExportRequestData:
     intro_path: Path | None = None
     outro_path: Path | None = None
     # Issue #204 layer 1. Generate a YouTube-shaped JSON sidecar
-    # alongside the export, plus a per-shot ``.srt`` and chapter
-    # markers in the FCPXML so they survive the NLE round-trip into
-    # an MP4 chapter atom. Off by default; enabling on FCP7 / MP4
-    # writes the sidecar but no chapter markers (those renderers
-    # don't carry chapters yet).
+    # alongside the export, plus a per-shot ``.srt`` and chapters in
+    # the output itself: markers in the FCPXML so they survive the NLE
+    # round-trip, chapter atoms in the MP4. Off by default; enabling on
+    # FCP7 writes the sidecar but embeds nothing (no title track).
     youtube_sidecar: bool = False
     # Issue #204 layer 2. Encode the MP4 with YouTube's recommended
     # H.264 profile / GOP / colour / audio params. Only meaningful for
@@ -487,12 +486,12 @@ def export_match(
             )
             title_page = card if request.title_page else None
             closing = card if request.closing_card else None
-    # Chapter markers in the FCPXML output: only useful when YouTube
-    # sidecar is requested AND the renderer actually carries chapter
-    # markers (FCPXML today; FCP7 / MP4 follow-ups). When the user
-    # picks a non-FCPXML format with sidecar on, we still write the
-    # JSON sidecar but skip embedding chapters.
-    embed_chapter_markers = request.youtube_sidecar and request.output_format == "fcpxml"
+    # Chapter markers in the output: only when the YouTube sidecar is
+    # requested AND the renderer carries chapters -- FCPXML as markers
+    # on the timeline, MP4 as chapter atoms in the file (#204 and its
+    # follow-up). FCP 7 XML has nowhere to put them; with the sidecar
+    # on we still write the JSON but embed nothing.
+    embed_chapter_markers = request.youtube_sidecar and request.output_format in ("fcpxml", "mp4")
     comp = composition.from_stage_compositions(
         compositions,
         project_name=request.project_name,
@@ -525,6 +524,7 @@ def export_match(
                 output_path=output_path,
                 youtube_preset=youtube_preset_active,
                 overlay_theme=request.overlay_theme,
+                chapters=youtube_sidecar.compute_chapters(comp) if embed_chapter_markers else None,
             )
             rendered_seconds = rendered.duration_seconds
             anomalies.extend(rendered.degradations)
@@ -545,10 +545,10 @@ def export_match(
             output_video=output_path.relative_to(exports_dir),
         )
         youtube_sidecar.write_sidecar(sidecar, sidecar_path)
-        if request.output_format != "fcpxml":
+        if not embed_chapter_markers:
             anomalies.append(
-                "youtube chapter markers embedded only on FCPXML "
-                "(FCP7 / MP4 chapter atoms are #204 follow-ups)"
+                "youtube chapters written to the sidecar description only: "
+                f"the {request.output_format} renderer carries no chapter markers"
             )
 
     # Compute total duration for the response. Mirrors the composer's math

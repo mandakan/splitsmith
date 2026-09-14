@@ -465,7 +465,8 @@ def export(
         "--youtube-sidecar",
         help=(
             "Also write <output>-youtube.json (title, chaptered description, tags) and "
-            "<output>.srt (per-shot captions) for the upload."
+            "<output>.srt (per-shot captions) for the upload, and embed the chapters in "
+            "the output (FCPXML markers, MP4 chapter atoms)."
         ),
     ),
     overlay_theme: str = typer.Option(

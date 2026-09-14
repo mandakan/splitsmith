@@ -1032,3 +1032,131 @@ def test_stage_audio_stays_on_the_video_across_a_keyframe_misaligned_trim(tmp_pa
         ), f"{item.kind} {item.index}: tone at {onset:.3f}, expected {expected:.3f}"
         cursor += item.duration_seconds
     assert result.duration_seconds == pytest.approx(cursor)
+
+
+# --- chapter atoms (#204 follow-up) ----------------------------------------
+
+
+class _Mark:
+    def __init__(self, start_seconds: float, title: str) -> None:
+        self.start_seconds = start_seconds
+        self.title = title
+
+
+def test_chapter_metadata_chains_ends_and_escapes_titles() -> None:
+    text = mp4_render.chapter_metadata(
+        [_Mark(0.0, "Match"), _Mark(5.0, "Stage 1; A=B #2"), _Mark(12.345, "Stage\\2")],
+        total_seconds=20.0,
+    )
+    assert text.startswith(";FFMETADATA1\n")
+    blocks = text.split("[CHAPTER]")[1:]
+    assert len(blocks) == 3
+    assert "TIMEBASE=1/1000\nSTART=0\nEND=5000\ntitle=Match" in blocks[0]
+    assert "START=5000\nEND=12345\ntitle=Stage 1\\; A\\=B \\#2" in blocks[1]
+    assert "START=12345\nEND=20000\ntitle=Stage\\\\2" in blocks[2]
+
+
+def test_chapter_metadata_drops_marks_the_timeline_cannot_hold() -> None:
+    # Out of order in, ordered out; a mark at the end, past it, or on top
+    # of the previous one would be a zero-length or reversed chapter.
+    text = mp4_render.chapter_metadata(
+        [_Mark(8.0, "B"), _Mark(0.0, "A"), _Mark(8.0, "B again"), _Mark(20.0, "end"), _Mark(25.0, "past")],
+        total_seconds=20.0,
+    )
+    blocks = text.split("[CHAPTER]")[1:]
+    assert [b.split("title=")[1].strip() for b in blocks] == ["A", "B"]
+    assert "START=0\nEND=8000" in blocks[0]
+    assert "START=8000\nEND=20000" in blocks[1]
+
+
+def test_chapters_ride_the_stitch_as_a_metadata_input_and_leave_a_plain_render_alone(tmp_path: Path) -> None:
+    stage_a = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")
+    stage_b = _basic_stage(tmp_path=tmp_path, name="B", primary_name="b.mp4")
+    comp = composition.from_stage_compositions([stage_a, stage_b], project_name="m")
+
+    plain = MagicMock(side_effect=_ok)
+    mp4_render.render_mp4(comp, output_path=tmp_path / "plain.mp4", work_dir=tmp_path / "w1", runner=plain)
+    plain_concat = plain.call_args_list[-1].args[0]
+    assert "-map_metadata" not in plain_concat
+    assert not (tmp_path / "w1" / "chapters.ffmeta").exists()
+
+    marks = [_Mark(0.0, "A"), _Mark(float(mp4_render.plan_timeline(comp).items[0].duration_seconds), "B")]
+    chaptered = MagicMock(side_effect=_ok)
+    result = mp4_render.render_mp4(
+        comp, output_path=tmp_path / "c.mp4", work_dir=tmp_path / "w2", runner=chaptered, chapters=marks
+    )
+    concat = chaptered.call_args_list[-1].args[0]
+    meta = tmp_path / "w2" / "chapters.ffmeta"
+    assert meta.exists()
+    i = concat.index("-map_metadata")
+    assert list(concat[i - 2 : i + 4]) == ["-i", str(meta), "-map_metadata", "1", "-map", "0"]
+    # The metadata input sits after the concat input and before the codecs.
+    assert concat.index(str(meta)) > concat.index("concat")
+    assert concat.index("-map") < concat.index("-c")
+    # The last chapter ends where the stitched timeline does.
+    assert f"END={int(round(result.duration_seconds * 1000))}" in meta.read_text()
+    # Everything but the chapter slice is the plain argv.
+    stripped = list(concat[: i - 2]) + list(concat[i + 4 :])
+    assert [a for a in stripped if not a.endswith(".mp4") and "concat.txt" not in a] == [
+        a for a in plain_concat if not a.endswith(".mp4") and "concat.txt" not in a
+    ]
+
+
+@pytest.mark.integration
+def test_rendered_mp4_carries_the_chapter_atoms(tmp_path: Path) -> None:
+    """ffprobe reads the chapters back out of a real stitch, at the
+    timeline's own stage starts, titles intact."""
+    import json
+    import shutil
+
+    from splitsmith.fcpxml_gen import probe_video
+    from tests.synthetic_media import ffmpeg_available
+
+    if not ffmpeg_available():
+        pytest.skip("ffmpeg not on PATH")
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    assert ffmpeg is not None and ffprobe is not None
+    source = tmp_path / "src.mp4"
+    subprocess.run(
+        [
+            ffmpeg, "-v", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25:duration=8",
+            "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
+            "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", str(source),
+        ],  # fmt: skip
+        check=True,
+        capture_output=True,
+    )
+    stages = [
+        StageComposition(
+            stage_name=name,
+            video_path=source,
+            video=probe_video(source),
+            shots=[_shot(1, 1.0, 1.0)],
+            beep_offset_seconds=2.0,
+            head_pad_seconds=1.0,
+            tail_pad_seconds=1.0,
+        )
+        for name in ("Skolhuset", "Parkeringen; B=2")
+    ]
+    comp = composition.from_stage_compositions(stages, project_name="m")
+    plan = mp4_render.plan_timeline(comp)
+    marks = [_Mark(0.0, "Skolhuset"), _Mark(plan.items[0].duration_seconds, "Parkeringen; B=2")]
+    out = tmp_path / "m.mp4"
+    result = mp4_render.render_mp4(
+        comp, output_path=out, work_dir=tmp_path / "work", ffmpeg_binary=ffmpeg, chapters=marks
+    )
+    probe = json.loads(
+        subprocess.run(
+            [ffprobe, "-v", "error", "-show_chapters", "-of", "json", str(out)],
+            capture_output=True,
+            check=True,
+            text=True,
+        ).stdout
+    )
+    chapters = probe["chapters"]
+    assert [c["tags"]["title"] for c in chapters] == ["Skolhuset", "Parkeringen; B=2"]
+    assert float(chapters[0]["start_time"]) == pytest.approx(0.0, abs=0.001)
+    assert float(chapters[1]["start_time"]) == pytest.approx(plan.items[0].duration_seconds, abs=0.001)
+    assert float(chapters[1]["end_time"]) == pytest.approx(result.duration_seconds, abs=0.001)

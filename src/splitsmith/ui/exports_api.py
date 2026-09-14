@@ -140,9 +140,9 @@ class MatchExportRequest(BaseModel):
     intro_path: str | None = None
     outro_path: str | None = None
     # Issue #204 layer 1. Generate a YouTube-shaped JSON sidecar
-    # alongside the export plus a per-shot ``.srt``. FCPXML route
-    # also gets chapter markers embedded so they survive an NLE
-    # round-trip into an MP4 chapter atom.
+    # alongside the export plus a per-shot ``.srt``, and chapters in
+    # the output itself: markers on the FCPXML timeline, chapter atoms
+    # in the MP4.
     youtube_sidecar: bool = False
     # Issue #204 layer 2. Encode the MP4 with YouTube's recommended
     # H.264 profile / GOP / colour / audio params. Only meaningful for
