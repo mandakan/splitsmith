@@ -10,7 +10,7 @@
  * replacement gate - ``capabilityDenied(capabilities, "edit")`` - and
  * prove it is independent of origin.
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -26,6 +26,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
     api: {
       ...actual.api,
       listMatchShooters: vi.fn(),
+      getTriage: vi.fn(),
+      acceptStage: vi.fn(),
     },
   };
 });
@@ -136,18 +138,37 @@ describe("Home capability gating", () => {
       origin: "desktop",
       capabilities: ["review", "share_manage"],
     });
+    // One detected stage so the row carries an Accept (an edit-class write).
+    vi.mocked(api.getTriage).mockResolvedValue({
+      beep_low_confidence_threshold: 0.5,
+      flagged_count: 0,
+      cells: [
+        {
+          slug: "mathias",
+          shooter_name: "Mathias",
+          stage_number: 1,
+          stage_name: "Stage One",
+          status: "in_progress",
+          beep_confidence: 0.9,
+          anomalies: [],
+          needs_attention: null,
+          video_count: 1,
+          beep_time: 5,
+          beep_reviewed: true,
+          shot_count: 12,
+          draw: 1.5,
+          avg_split: 0.3,
+          time_seconds: 20,
+        },
+      ],
+    });
   });
 
   it("hides edit entry points when the capability set lacks edit", async () => {
     renderHome({ capabilities: ["review", "share_manage"] });
-    await waitFor(() => expect(api.listMatchShooters).toHaveBeenCalled());
-    // "Edit Stages" (exact, title case): the page-header button. A
-    // case-insensitive regex would also catch the EmptyVariant help
-    // card's "Edit stages" cta, which this test doesn't target.
-    expect(screen.queryByRole("button", { name: "Edit Stages" })).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: /add a squadmate/i }),
-    ).toBeNull();
+    await screen.findByRole("link", { name: /^audit$/i });
+    expect(screen.queryByRole("button", { name: "Edit stages" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /accept/i })).toBeNull();
   });
 
   it("shows edit entry points on a desktop-origin match WITH edit (forward compat)", async () => {
@@ -157,12 +178,7 @@ describe("Home capability gating", () => {
       origin: "desktop",
       capabilities: ["edit", "review", "share_manage"],
     });
-    await waitFor(() => expect(api.listMatchShooters).toHaveBeenCalled());
-    expect(
-      await screen.findByRole("button", { name: "Edit Stages" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /add a squadmate/i }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Edit stages" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /accept/i })).toBeInTheDocument();
   });
 });

@@ -1705,6 +1705,16 @@ export interface TriageCell {
   beep_confidence: number | null;
   anomalies: Anomaly[];
   needs_attention: TriageAttention | null;
+  /** UX PR 3: the Overview's pipeline table reads these instead of a
+   *  second per-stage walk. Split figures follow the share card's rule
+   *  (`share_card.stage_figures`); both null without an audit doc. */
+  video_count: number;
+  beep_time: number | null;
+  beep_reviewed: boolean;
+  shot_count: number;
+  draw: number | null;
+  avg_split: number | null;
+  time_seconds: number;
 }
 
 /** Response from GET /api/match/triage and POST accept/attention mutations.

@@ -1,4 +1,3 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * SyncCard - local-only hosted-sync status card on MatchOverview
  * (desktop-to-hosted sync MVP, #631 Task 11).
@@ -208,44 +207,55 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
   const buttonDisabled = starting || syncing || hasErrors || otherMatchSyncing;
 
   return (
-    <section className="mb-6 rounded-xl border border-rule-strong bg-surface p-5">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <span
-            aria-hidden="true"
-            className="inline-flex size-9 shrink-0 items-center justify-center rounded-md border border-led-deep bg-surface-3 text-led shadow-[0_0_12px_var(--color-led-glow)]"
-          >
-            <CloudUpload className="size-4" />
-          </span>
-          <div>
-            <h2 className="font-display text-sm font-bold uppercase tracking-[0.06em] text-ink">
-              Hosted sync
-            </h2>
-            <SyncStatusLine
-              status={status}
-              loadError={loadError}
-              syncing={syncing}
-              runningJob={runningJob}
-              otherMatchSyncing={otherMatchSyncing}
-            />
-          </div>
-        </div>
-
-        <div className="flex flex-col items-end gap-1.5">
+    // One-line row (spec 2026-09-13 s4.2; UX PR 3): icon, name, status
+    // sentence, then the actions on the right. Errors and the start
+    // failure render as extra lines inside the same row. No card padding,
+    // no glow; the page's primary button is the next-step action, so the
+    // sync button stays `default`.
+    <section
+      aria-label="Hosted sync"
+      className="mb-4 rounded-[10px] border border-rule bg-surface px-3.5 py-2"
+    >
+      <div className="flex flex-wrap items-center gap-3">
+        <span
+          aria-hidden="true"
+          className="inline-flex size-[22px] shrink-0 items-center justify-center rounded-md border border-rule-strong text-muted"
+        >
+          <CloudUpload className="size-3" />
+        </span>
+        <h2 className="text-md font-medium text-ink">Hosted sync</h2>
+        <SyncStatusLine
+          status={status}
+          loadError={loadError}
+          syncing={syncing}
+          runningJob={runningJob}
+          otherMatchSyncing={otherMatchSyncing}
+        />
+        <div className="ml-auto flex items-center gap-2">
+          {/* The hosted match exists from the first push onward, so the
+              link stays through stale / syncing / plan-error states -
+              the status line beside it already says what is unpushed. */}
+          {status?.configured && status.last_synced_at && settings?.base_url && matchId ? (
+            <a
+              href={`${settings.base_url}/match/${matchId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-sm text-ink-2 hover:text-ink"
+            >
+              Open on splitsmith.app
+              <ExternalLink className="size-3" aria-hidden="true" />
+            </a>
+          ) : null}
           {notConfigured ? (
             <Button type="button" size="sm" onClick={() => setSettingsOpen(true)}>
               <Settings2 className="size-3.5" aria-hidden="true" />
               Set up hosted sync
             </Button>
           ) : (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setSettingsOpen(true)}
-                className="font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-subtle hover:text-ink-2"
-              >
+            <>
+              <Button type="button" size="sm" variant="ghost" onClick={() => setSettingsOpen(true)}>
                 Settings
-              </button>
+              </Button>
               <Button
                 type="button"
                 size="sm"
@@ -259,37 +269,15 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
                 )}
                 {syncing || starting ? "Syncing..." : "Sync now"}
               </Button>
-            </div>
+            </>
           )}
-          {/* The hosted match exists from the first push onward, so the
-              link stays through stale / syncing / plan-error states -
-              the status line beside it already says what is unpushed.
-              Gating it on "up to date" made the link vanish the moment
-              the owner edited an audit after the first sync. */}
-          {status?.configured && status.last_synced_at && settings?.base_url && matchId ? (
-            <a
-              href={`${settings.base_url}/match/${matchId}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-led hover:text-led-soft"
-            >
-              Open on splitsmith.app
-              <ExternalLink className="size-3" aria-hidden="true" />
-            </a>
-          ) : null}
         </div>
       </div>
 
       {hasErrors ? (
-        <ul
-          aria-live="polite"
-          className="mt-3 space-y-1.5 rounded-md border border-destructive/40 bg-destructive/10 p-2.5"
-        >
+        <ul aria-live="polite" className="mt-2 space-y-1 pl-[34px]">
           {status?.errors.map((e, i) => (
-            <li
-              key={i}
-              className="flex items-start gap-1.5 text-xs text-destructive"
-            >
+            <li key={i} className="flex items-start gap-1.5 text-sm text-led-text">
               <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
               <span>{e}</span>
             </li>
@@ -298,7 +286,7 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
       ) : null}
 
       {startError ? (
-        <p role="alert" className="mt-2.5 text-xs text-destructive">
+        <p role="alert" className="mt-1.5 pl-[34px] text-sm text-led-text">
           {startError}
         </p>
       ) : null}
@@ -327,12 +315,12 @@ function SyncStatusLine({
   runningJob: Job | null;
   otherMatchSyncing: boolean;
 }) {
-  const lineClass = "mt-0.5 flex items-center gap-1.5 font-mono text-[0.75rem] text-muted";
+  const lineClass = "flex items-center gap-1.5 text-sm text-muted";
 
   if (syncing) {
     return (
       <p className={lineClass} aria-live="polite">
-        <Loader2 className="size-3.5 shrink-0 animate-spin text-led" aria-hidden="true" />
+        <Loader2 className="size-3.5 shrink-0 animate-spin text-live" aria-hidden="true" />
         {runningJob?.message ?? "Push in progress..."}
       </p>
     );
@@ -347,7 +335,7 @@ function SyncStatusLine({
   }
   if (loadError && !status) {
     return (
-      <p className={cn(lineClass, "text-destructive")}>
+      <p className={cn(lineClass, "text-led-text")}>
         <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
         {loadError}
       </p>
@@ -366,7 +354,7 @@ function SyncStatusLine({
   }
   if (status.errors.length > 0) {
     return (
-      <p className={cn(lineClass, "text-destructive")} aria-live="polite">
+      <p className={cn(lineClass, "text-led-text")} aria-live="polite">
         <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
         Sync can&apos;t run until these are fixed
       </p>
@@ -375,7 +363,7 @@ function SyncStatusLine({
   if ((status.remote_changes ?? 0) > 0) {
     return (
       <p className={lineClass}>
-        <RefreshCw className="size-3.5 shrink-0 text-led" aria-hidden="true" />
+        <RefreshCw className="size-3.5 shrink-0 text-live" aria-hidden="true" />
         Hosted has newer changes - sync now
       </p>
     );
@@ -399,7 +387,7 @@ function SyncStatusLine({
   }
   return (
     <p className={lineClass}>
-      <CheckCircle2 className="size-3.5 shrink-0 text-beep" aria-hidden="true" />
+      <CheckCircle2 className="size-3.5 shrink-0 text-done" aria-hidden="true" />
       Synced {relativeTime(status.last_synced_at)}
     </p>
   );
