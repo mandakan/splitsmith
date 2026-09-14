@@ -1,10 +1,11 @@
 /**
  * RootLayout - the app's one always-mounted layout (#550).
  *
- * Owns a single sticky header made of three parts:
- *   1. GlobalBar        - brand, mode switch, account menu (desktop only)
- *   2. the context slot - whichever shell is mounted portals its own row here
- *   3. the hairline     - accent colour declared by that shell
+ * Owns a single sticky header made of four parts:
+ *   1. GlobalBar        - brand, breadcrumb slot, mode switch, account menu
+ *   2. the strip slot   - the mounted shell's ProgressStrip while jobs run
+ *   3. the context slot - whichever shell is mounted portals its own row here
+ *   4. the hairline     - accent colour declared by that shell
  *
  * Why one header rather than a bar stacked above each shell's own: both
  * MatchShell and DeveloperShell already rendered two rows, so the global
@@ -62,6 +63,7 @@ export function RootLayout() {
   const isMobile = useIsMobile();
   const location = useLocation();
   const [contextSlot, setContextSlot] = useState<HTMLElement | null>(null);
+  const [stripSlot, setStripSlot] = useState<HTMLElement | null>(null);
   const [accent, setAccent] = useState<ShellAccent>("led");
   const [ownsMobileAccount, setOwnsMobileAccount] = useState(false);
   const { headerRef, headerStyle } = useShellHeaderHeight();
@@ -76,8 +78,8 @@ export function RootLayout() {
   // same reason) -- don't rewrite as inline arrows, or useShellAccent's
   // and useShellOwnsMobileAccount's unmount cleanup will fire every render.
   const value = useMemo<ShellChromeValue>(
-    () => ({ contextSlot, setAccent, setOwnsMobileAccount }),
-    [contextSlot],
+    () => ({ contextSlot, stripSlot, setAccent, setOwnsMobileAccount }),
+    [contextSlot, stripSlot],
   );
 
   // Suppressed on mobile only when the mounted shell says it already has
@@ -97,6 +99,11 @@ export function RootLayout() {
           )}
         >
           {showGlobalBar ? <GlobalBar /> : null}
+          {/* Progress strip slot: the mounted shell's JobsSurface portals
+              its ProgressStrip here while jobs run; empty otherwise, so it
+              costs no height. The ResizeObserver in useShellHeaderHeight
+              re-measures --shell-header-h when it appears. */}
+          <div ref={setStripSlot} data-testid="shell-strip-slot" />
           <div ref={setContextSlot} />
           <div
             data-testid="shell-hairline"

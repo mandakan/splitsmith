@@ -29,6 +29,7 @@ export { Chip, type ChipTick } from "./Chip";
 export { PageHeader } from "./PageHeader";
 export { Table, Th, Td, Tr } from "./DataTable";
 export { PipelineDots, type PipelineState } from "./PipelineDots";
+export { ProgressStrip } from "./ProgressStrip";
 export { DisplayHeading } from "./DisplayHeading";
 export { ModeSwitch } from "./ModeSwitch";
 export { Kbd } from "./Kbd";

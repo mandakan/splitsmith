@@ -79,6 +79,7 @@ function ShellChromeHarness({ children }: { children: ReactNode }) {
   const value = useMemo<ShellChromeValue>(
     () => ({
       contextSlot: slot,
+      stripSlot: null,
       setAccent: () => {},
       setOwnsMobileAccount: () => {},
     }),
