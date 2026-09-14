@@ -5,12 +5,13 @@
  * detect actions the page passes in) and help. Replaces the toolbar's
  * five filter pills, the zoom cluster and the auto-step pill.
  */
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { MoreHorizontal, Pause, Play } from "lucide-react";
 
 import { MAX_ZOOM, MIN_ZOOM, ZOOM_STEP, type MarkerFilters } from "@/components/AuditControls";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/Kbd";
+import { Menu, menuItemClass as ITEM } from "@/components/ui/Menu";
 import { cn } from "@/lib/utils";
 
 export interface TransportLineProps {
@@ -38,41 +39,6 @@ function clock(s: number): string {
   const r = s - m * 60;
   return `${m}:${r.toFixed(2).padStart(5, "0")}`;
 }
-
-/** A small popover anchored under its trigger; closes on outside click and Escape. */
-function Menu({ open, onClose, children, align = "left" }: { open: boolean; onClose: () => void; children: ReactNode; align?: "left" | "right" }) {
-  const ref = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open, onClose]);
-  if (!open) return null;
-  return (
-    <div
-      ref={ref}
-      role="menu"
-      className={cn(
-        "absolute top-full z-20 mt-1 flex min-w-52 flex-col gap-0.5 rounded-[10px] border border-rule-strong bg-surface p-1.5 text-md text-ink-2 shadow-lg",
-        align === "right" ? "right-0" : "left-0",
-      )}
-    >
-      {children}
-    </div>
-  );
-}
-
-const ITEM = "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-led";
 
 export function TransportLine(props: TransportLineProps) {
   const { isPlaying, onTogglePlay, currentTime, duration, zoom, onZoomChange, filters, counts, onFiltersChange } = props;
