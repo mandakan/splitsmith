@@ -240,6 +240,59 @@ mis-wire apart: ``export_runs.ExportRun.duration_seconds`` is wall clock
 for the job body, ``match_exports.MatchExportResult.duration_seconds`` is
 the length of the stitched timeline. Never assign one from the other.
 
+## UI: the visual budget and the restructure in flight (Sep 2026)
+
+The SPA is mid-restructure (spec
+``docs/superpowers/specs/2026-09-13-ux-restructure-and-visual-budget-design.md``,
+eight PRs, three merged as of 2026-09-14). Any new screen or surface,
+whatever session builds it, follows the budget below; the ESLint rule
+``no-restricted-syntax`` in ``ui_static/eslint.config.js`` enforces the
+mechanical half.
+
+**Build with the primitives in ``components/ui``, nothing else:**
+``PageHeader`` (the only way to get a page or stage title), ``Label``
+(the only tracked-caps style, 1-3 words, never a sentence), ``Stat`` /
+``StatStrip``, ``Table`` / ``Th`` / ``Td`` / ``Tr``, ``Chip`` (neutral
+pill with a coloured tick; never a coloured fill), ``Button``
+(``primary`` is Antonio led-fill and there is **one per view**;
+``default`` neutral; ``destructive`` is an outline, never a red fill),
+``PipelineDots``, ``ProgressStrip``, and the ``numeral`` utility for
+every count, time and split. Sizes come from the theme scale
+(``text-sm`` 12 px, ``text-md`` 14 px, ``text-base`` 15 px); arbitrary
+``text-[...]`` and ``tracking-[...]`` are lint errors outside
+``components/ui``. ``Kicker``, ``DisplayHeading``, ``Readout`` and
+``TickStrip`` are deprecated exports: do not add consumers.
+
+**Rules the lint cannot check:** red marks the brand, the one primary
+action, the current position and focus, nothing else (stage state is
+amber / green / hollow, errors are ``--color-destructive`` as outline +
+text); glow only on live state; leading zeros only on stage and shot
+ordinals (``Stage 03``), never on counts (``4 / 12``); one card level
+per view, lists are hairline rows not stacked cards; no flavour copy,
+no issue numbers in the UI; splits rank at least equal with scorecard
+figures in any summary. Every page's data derivation lives in a pure
+``lib/*.ts`` module with tests; the page maps results to primitives.
+
+**Files the restructure will rewrite -- do not edit them in a parallel
+branch, put new functionality in a component the rebuild can mount:**
+PR 4 ``pages/Results.tsx``, ``pages/ResultsStage.tsx``,
+``components/results/*``, ``components/share/ShareShell.tsx``; PR 5
+``pages/Audit.tsx``, ``components/audit/*``, ``pages/BeepReview.tsx``;
+PR 6 ``pages/Ingest.tsx``, ``pages/ingest/*``, ``pages/Shooters.tsx``,
+``components/ingest/*``; PR 7 ``pages/Coach.tsx``, ``pages/Compare.tsx``,
+``pages/compare/*``; PR 8 ``pages/Export.tsx``, ``pages/Pick.tsx``,
+``pages/Account.tsx``, ``pages/Triage.tsx``, ``pages/Jobs.tsx``. Nav
+rows live in ``components/match/navItems.tsx`` (grouped by phase:
+Prepare / Review / Analyse / Deliver); a new row needs a group.
+
+**Verifying a screen locally without real footage:**
+``uv run python scripts/seed_demo_match.py ~/.claude-tmp/demo-match``
+then ``uv run splitsmith ui --project ~/.claude-tmp/demo-match
+--skip-system-check --no-browser --port 5174`` (wait for
+``/api/health``; the match id is in ``match.json``), then screenshot
+with Playwright. Show the rendered page before calling a visual change
+done.
+
 ## Things Claude Code should not do
 
 - Add new dependencies without asking. The dep list is small on purpose.
