@@ -173,6 +173,15 @@ Tuning notes:
 - Frame rate: detect from source video via ffprobe, generate fcpxml at matching rate.
 - Add markers on the V1 clip at each shot timestamp for keyboard navigation in FCP.
 
+**Rendered output: `composition.py`, `mp4_render.py`, `overlay_card.py`, `overlay_still.py`, `overlay_summary_cell.py`, `stage_summary_data.py`, `summary_card.py`** (issues #973, #972).
+- `composition.py`: the renderer-agnostic timeline IR. Besides the stages it carries `TitleCard` (per-stage slate / lower-third, with optional `info` lines such as the round count), `MatchTitle` (`title_page` / `closing`), intro / outro `Segment`s and, per stage, a `SummaryHold` (the summary's `TileStageData` plus the shooter's label and a duration). FCPXML lowers only what FCP's Basic Title can draw and records the rest as anomalies at the request layer.
+- `mp4_render.py`: the single-shooter MP4 renderer. `plan_timeline` walks the IR into spine order (intro, title page, per stage: slate, stage, summary hold; closing, outro); every non-stage item is its own segment encoded like a stage, a lower-third rides the stage's own filter graph with a fade. Returns `Mp4RenderResult` (timeline length as written, degradations). The compare grid's `compare/mp4_grid.py` does the same for the grid with its own N+1-track stream layout (`build_card_segment_command`).
+- `overlay_card.py`: declares a card in the overlay typography (`card_groups`) and composes it through the injected rasterizer over a blurred, dimmed frame (`build_card_still`, `build_lower_third`); `lower_third_filters` is the one spelling of the fade both renderers use.
+- `overlay_still.py`: the letterbox / blur / dim trio under every held still, shared by the cards, the grid's summary and the single-shooter summary.
+- `stage_summary_data.py` + `overlay_summary_cell.py`: what a stage summary knows (`TileStageData`, `load_stage_shots`) and says (`summary_groups`, the approved bands design), hoisted out of `compare/` so core code never imports from it; `build_summary_still` composes it full-frame.
+- `summary_card.py`: the per-stage `<base>_summary.png` + held ProRes `<base>_summary.mov` beside the overlay MOV, for FCP editors -- the alpha overlay cannot extend the trim or blur the footage, so the result screen is a separate clip.
+- Degradation policy, everywhere: no usable Chromium skips a card (a card is its text) but keeps a summary's blurred freeze without text; a render never fails because of a card. A missing head frame composes on the theme's surface colour.
+
 **`audio.py`** - Audio extraction and caching for multi-stage clips.
 - `ensure_video_audio(...)`: Extract a stage's audio at 48 kHz mono; keyed per-stage per-video so reassignments don't reuse stale caches.
 - `take_audio_path(...)` and `ensure_take_audio(...)`: Extract a whole-take audio at 8 kHz mono (lightweight); keyed by blake2s(storage_path) so it cannot collide with per-stage 48 kHz WAVs. Reuses the same extract/cache/storage-push pattern as per-stage audio.
@@ -487,6 +496,12 @@ splitsmith fcpxml \
 # Multi-shooter comparison: render N shooters' beep-aligned trims as
 # a per-stage grid into one FCPXML.
 splitsmith compare export PATH/TO/manifest.yaml
+
+# One shooter's stitched match video from finished per-stage exports:
+# FCPXML, FCP7 XML or a rendered MP4 with generated cards and summaries.
+splitsmith match export PATH/TO/match --shooter SLUG --format mp4 \
+    [--titles slate|lower-third|none] [--title-page] [--title-info TEXT] \
+    [--closing-card] [--summary-hold SECONDS] [--intro PATH] [--outro PATH]
 ```
 
 The `fcpxml` regeneration command matters — the user will manually fix detection errors in the CSV and want to rebuild the timeline.

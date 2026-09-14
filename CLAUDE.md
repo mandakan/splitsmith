@@ -116,6 +116,38 @@ shipped one (see ``splitsmith.runtime`` for the full env-var list).
 The review-time variant generator ``scripts/build_ensemble_fixture.py``
 still exists for offline comparison under ``build/ensemble-review/``.
 
+## Rendered cards and stage summaries (#973, #972)
+
+Both MP4 renderers (``mp4_render`` for one shooter, ``compare/mp4_grid``
+for the grid) put every generated card -- title page, stage slate,
+closing card, and the single-shooter summary hold -- on the spine as
+**its own segment**, encoded exactly like a stage so the final stitch
+stays a video stream copy. The grid's card segment therefore carries the
+grid's full N+1 audio layout (``build_card_segment_command``); the
+single-shooter stitch re-encodes audio only when a generated segment is
+present, so a zero-card render's argv is byte-identical to before. A
+lower-third is the one card that is not a segment: it rides the stage's
+own filter graph through ``overlay_card.lower_third_filters``, upstream
+of the grid's hold ``concat``, so it can never reach a summary frame.
+
+Backdrop grabs differ by end and the difference is deliberate: a *head*
+grab takes the first frame (``-frames:v 1``); a *tail* grab reads a
+0.5 s window and keeps the last decoded frame, because a seek straight
+to the last timestamp can come back empty. Using the tail technique for
+a head lands 0.5 s into the stage (a review caught it).
+
+The stage card's round count comes from ``project.json`` alone
+(``overlay_data.load_expected_rounds``), never from the overlay's data,
+so ``--titles slate`` prints it without ``--overlay``. The summary's
+declaration lives in core (``overlay_summary_cell``,
+``stage_summary_data``); ``compare/overlay_summary`` rebinds the old
+private names because its tests monkeypatch them. Card and summary
+encodes go through their own runner hooks (``card_runner``,
+``still_runner``), never the progress ``runner`` both CLIs count for
+"stage N of M". The visual checks are ``scripts/render_match_frames.py``
+and ``scripts/render_grid_frames.py`` with their card flags; look at the
+frames, a green argv test proves nothing about pixels.
+
 ## Multi-shooter comparison (`compare/` package)
 
 ``splitsmith compare export <manifest>`` reads N existing single-shooter
