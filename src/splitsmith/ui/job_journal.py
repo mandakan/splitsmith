@@ -78,18 +78,28 @@ def rehydrate_args(kind: str, args: dict[str, Any]) -> dict[str, Any]:
     """Rebuild the typed ``req`` Pydantic model dropped to a dict by
     :func:`to_wire_args`.
 
-    Only ``export`` / ``match_export`` carry a ``req``; every other kind
-    passes through. The request models moved to ``exports_api`` under
+    ``export`` / ``match_export`` / ``compare-grid`` carry a ``req``;
+    every other kind passes through. The request models moved to ``exports_api`` under
     #919's lift-as-you-go rule, and the import stays lazy under the same
     cycle rule that governs that module: ``server`` imports the models
     back from it, so nothing on the export-router side may be pulled in
     eagerly from a module ``server`` itself imports -- this one included.
     """
-    if kind not in ("export", "match_export") or "req" not in args:
+    if "req" not in args:
         return args
-    from .exports_api import ExportStageRequest, MatchExportRequest
+    from .exports_api import CompareGridRequest, ExportStageRequest, MatchExportRequest
 
-    model = ExportStageRequest if kind == "export" else MatchExportRequest
+    models: dict[str, type[BaseModel]] = {
+        "export": ExportStageRequest,
+        "match_export": MatchExportRequest,
+        # #755: the compare grid queues a typed ``req`` too; without this
+        # a hosted worker handed the body a dict and it died on the first
+        # attribute read.
+        "compare-grid": CompareGridRequest,
+    }
+    model = models.get(kind)
+    if model is None:
+        return args
     out = dict(args)
     out["req"] = model.model_validate(args["req"])
     return out

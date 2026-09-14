@@ -72,6 +72,7 @@ Design notes:
 from __future__ import annotations
 
 import asyncio
+import functools
 import hashlib
 import json
 import logging
@@ -197,7 +198,6 @@ from ..match_project import (
 )
 from ..match_registry import MatchRegistry
 from ..observability import StructuredJsonFormatter, init_sentry
-from ..overlay_theme import ThemeName
 from ..runtime import runtime as process_runtime
 from ..share_card import stage_figures
 from ..shot_id import ensure_shot_ids, has_usable_id
@@ -230,7 +230,7 @@ from .comments import (
     CommentRateLimiter,
     to_out,
 )
-from .exports_api import ExportStageRequest, MatchExportRequest
+from .exports_api import CompareGridRequest, ExportStageRequest, MatchExportRequest
 from .http_errors import ensure_source_reachable
 from .job_journal import JobJournal, default_journal_path, resume_journaled_jobs
 from .jobs import (
@@ -2320,15 +2320,28 @@ def warm_ensemble_runtime() -> None:
     _get_ensemble_runtime()
 
 
-def _shooter_label(match: match_model.Match, match_root: Path, slug: str) -> str:
+def _shooter_label(
+    match: match_model.Match, match_root: Path, slug: str, *, project: MatchProject | None = None
+) -> str:
     """The display label a slug binds to: the shooter's name, or the slug itself.
 
     Mirrors ``compare/cli.py::_export_from_match``'s ``label = shooter.name
     or slug``. Shared so the compare-grid endpoint's audio-source check and
     its worker's ``audio_label`` resolution can't drift from
     ``_load_compare_bundles``'s own per-shooter labelling.
+
+    Hosted (#755) has no ``shooter.json`` on disk -- the roster's names
+    come from the project document, the same field the shooter list
+    shows (``competitor_name``, else the slug) -- so a caller that holds
+    the store-loaded ``project`` passes it and that is what names the
+    tile when the file is absent.
     """
-    shooter = match.load_shooter(match_root, slug)
+    try:
+        shooter = match.load_shooter(match_root, slug)
+    except (FileNotFoundError, KeyError):
+        if project is None:
+            raise
+        return project.competitor_name or slug
     return shooter.name or slug
 
 
@@ -2337,6 +2350,7 @@ def _load_compare_bundles(
     match: match_model.Match,
     *,
     cameras: dict[str, str] | None = None,
+    state: AppState | None = None,
 ) -> list[project_loader.CompareShooterBundle]:
     """Load every shooter on ``match`` as a compare-grid bundle.
 
@@ -2353,9 +2367,34 @@ def _load_compare_bundles(
     cameras = cameras or {}
     bundles: list[project_loader.CompareShooterBundle] = []
     for slug in match.shooters:
-        label = _shooter_label(match, match_root, slug)
+        # Hosted (#755): the project document is in the state store and
+        # the trims are in object storage, so hand the loader the doc and
+        # a hook that mirrors each expected trim down before the loader
+        # looks for it. Local: ``project=None`` reads ``project.json`` off
+        # disk and ``ensure_trim=None`` checks the disk, as always.
+        project: MatchProject | None = None
+        ensure_trim: Callable[[Path], object] | None = None
+        if state is not None and state.project_state is not None:
+            project = state.shooter_project(slug)
+            hosted_project = project
+
+            def _pull(trim: Path, _project: MatchProject = hosted_project) -> bool:
+                return export_storage.pull_export_file(_project, trim)
+
+            ensure_trim = _pull
+        label = _shooter_label(match, match_root, slug, project=project)
         camera = cameras.get(slug, cameras.get(label))
-        bundles.append(project_loader.load_shooter_from_match(match_root, slug, label, camera=camera))
+        bundles.append(
+            project_loader.load_shooter_from_match(
+                match_root,
+                slug,
+                label,
+                camera=camera,
+                match=match,
+                project=project,
+                ensure_trim=ensure_trim,
+            )
+        )
     return bundles
 
 
@@ -2462,15 +2501,24 @@ def _compare_grid_progress_runner(
     return _runner
 
 
-def _run_compare_grid(handle: JobHandle, req: CompareGridRequest, match_root: str) -> None:
+def _run_compare_grid(
+    handle: JobHandle, req: CompareGridRequest, match_root: str, *, state: AppState | None = None
+) -> None:
     """Worker for the match-scoped compare-grid MP4 export (phase 0).
 
     Mirrors ``compare/cli.py::_render_grid_mp4``'s shape: owns a scratch
     work dir beside the output and always removes it, success or not.
-    Local mode only -- no Storage push, no download deliverable; the
-    result carries the on-disk output path and per-stage outcomes so a
-    partially-successful render (some stages failed, others didn't) is
-    reported rather than treated as an all-or-nothing failure.
+    The result carries the output's name (and, for a local install, its
+    on-disk path) plus per-stage outcomes so a partially-successful
+    render (some stages failed, others didn't) is reported rather than
+    treated as an all-or-nothing failure.
+
+    Hosted (#755): the match and project documents come from the state
+    store, every selected stage's trim and audit is mirrored down before
+    the render, and the finished grid is pushed to the match-scoped key
+    ``matches/<id>/exports/<name>`` on produce -- the single-shooter
+    export job's pattern, one level up because the grid has no owning
+    shooter. ``GET /api/match/exports/file/{name}`` pulls it back.
 
     ``stages_total`` counts the stages the *request* asked for, not the
     ones that got planned. ``build_stage_plans`` derives its stage list
@@ -2481,15 +2529,23 @@ def _run_compare_grid(handle: JobHandle, req: CompareGridRequest, match_root: st
     in ``missing_trims``.
     """
     root = Path(match_root)
-    match = match_model.Match.load(root)
+    hosted = state is not None and state.project_state is not None
+    match = state.match() if state is not None and hosted else match_model.Match.load(root)
     stem = _compare_output_stem(req.output_name)
     requested = sorted(set(req.stage_numbers))
 
     handle.update(progress=0.02, message="Loading shooters...")
     with handle.timer.phase("load_shooters"):
-        bundles = _load_compare_bundles(root, match, cameras=req.cameras)
+        if state is not None and hosted:
+            # The overlay reads each stage's audit off disk; materialize
+            # the selected stages' docs before the loader builds paths.
+            for slug in match.shooters:
+                for number in requested:
+                    state.materialize_audit(slug, number)
+        bundles = _load_compare_bundles(root, match, cameras=req.cameras, state=state)
         filtered = _filter_bundles_to_stages(bundles, requested)
-        audio_label = _shooter_label(match, root, req.audio_from)
+        audio_project = state.shooter_project(req.audio_from) if state is not None and hosted else None
+        audio_label = _shooter_label(match, root, req.audio_from, project=audio_project)
 
     output_dir = root / "exports"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -2547,10 +2603,19 @@ def _run_compare_grid(handle: JobHandle, req: CompareGridRequest, match_root: st
             on_notice=_notice,
         )
 
-    handle.update(progress=1.0, message=f"Wrote {output_path}")
+    if state is not None and hosted:
+        handle.update(progress=0.98, message="Uploading the grid...")
+        with handle.timer.phase("push"):
+            export_storage.push_match_export_file(state.storage, current_match_id.get(), result.output_path)
+
+    handle.update(progress=1.0, message=f"Wrote {output_path.name}")
     handle.set_result(
         {
             "output_path": str(result.output_path),
+            # The deliverable's name, resolvable in either mode through
+            # ``GET /api/match/exports/file/{name}`` (#755). An absolute
+            # ``output_path`` means nothing to a hosted API container.
+            "output_name": result.output_path.name,
             "stages_rendered": len(result.stages) - len(result.failed),
             "stages_total": len(requested),
             "skipped_stages": skipped,
@@ -4237,7 +4302,7 @@ def register_job_bodies(state: AppState) -> None:
     state.jobs.bodies.register("export", _run_export_for_stage)
     state.jobs.bodies.register("match_export", _run_match_export)
     state.jobs.bodies.register("generate_proxy", _run_generate_proxy)
-    state.jobs.bodies.register("compare-grid", _run_compare_grid)
+    state.jobs.bodies.register("compare-grid", functools.partial(_run_compare_grid, state=state))
     state.jobs.bodies.register("sync_match", _run_sync_match)
 
 
@@ -5515,45 +5580,6 @@ class BeepWindowRequest(BaseModel):
 
     start_s: float
     end_s: float
-
-
-class CompareGridRequest(BaseModel):
-    """Body for POST /api/match/compare-export (phase 0).
-
-    Local mode only: the response is a Job snapshot the SPA polls, since
-    a full-match grid re-encode runs for minutes. ``cameras`` keys match
-    either a shooter's slug or its display name, mirroring ``compare
-    export``'s ``--camera SHOOTER=VALUE`` flag. ``canvas_width`` /
-    ``canvas_height`` default to 4K; the frame rate is never taken from
-    the request -- it always derives from the audio-source shooter's
-    footage (see ``mp4_grid.derive_frame_rate``).
-    """
-
-    stage_numbers: list[int]
-    audio_from: str
-    cameras: dict[str, str] = Field(default_factory=dict)
-    canvas_width: int = mp4_grid.DEFAULT_CANVAS_WIDTH
-    canvas_height: int = mp4_grid.DEFAULT_CANVAS_HEIGHT
-    output_name: str = "compare-grid"
-    # Issue #973. Generated cards on the rendered grid: a match title
-    # page (name, date, plus ``title_info`` as a free-text line), a
-    # closing card, and a card per stage (``slate`` before it, or a
-    # ``lower-third`` over its head). All off by default.
-    title_page: bool = False
-    title_info: str | None = None
-    title_page_duration_seconds: float = 3.0
-    closing_card: bool = False
-    stage_titles: Literal["none", "slate", "lower-third"] = "none"
-    title_duration_seconds: float = 1.5
-    # Issue #705. The splits overlay (per-tile counter and split, the
-    # running clock) in the grid's own typography, and the end-of-stage
-    # summary hold in seconds. The hold needs the overlay: it is drawn
-    # from the overlay's own data, so a hold on a clean grid would be a
-    # blurred still with nothing on it -- the endpoint refuses that shape
-    # as a 400 rather than queueing a job the engine then fails.
-    overlay: bool = False
-    overlay_theme: ThemeName = "splitsmith"
-    summary_hold_seconds: float = Field(default=0.0, ge=0.0)
 
 
 class RevealRequest(BaseModel):
@@ -14202,7 +14228,7 @@ def create_app(
             )
 
         try:
-            bundles = _load_compare_bundles(match_root, match, cameras=req.cameras)
+            bundles = _load_compare_bundles(match_root, match, cameras=req.cameras, state=state)
         except camera_select.CameraResolutionError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -14224,7 +14250,8 @@ def create_app(
         # 4K render before the user learns the result has no sound at all;
         # catch it here instead, naming the shooter and the fix (a
         # different audio source, or a different stage selection).
-        audio_label = _shooter_label(match, match_root, req.audio_from)
+        audio_project = state.shooter_project(req.audio_from) if state.project_state is not None else None
+        audio_label = _shooter_label(match, match_root, req.audio_from, project=audio_project)
         audio_bundle = next((bundle for bundle in bundles if bundle.label == audio_label), None)
         if audio_bundle is None or not any(
             number in audio_bundle.stages_by_number for number in req.stage_numbers
@@ -14244,6 +14271,32 @@ def create_app(
             args={"req": req, "match_root": str(match_root)},
         )
         return JSONResponse(job.model_dump(mode="json"))
+
+    @app.get("/api/match/exports/file/{filename:path}")
+    def download_match_export_file(filename: str) -> FileResponse:
+        """Serve a match-scoped deliverable (a compare grid, #755).
+
+        The match analogue of ``download_export_file``: local mode reads
+        ``<match>/exports/<name>``; hosted mode mirrors it down from the
+        match-scoped storage key first, since the worker that rendered it
+        ran in another container. ``filename`` is confined to the match's
+        ``exports/`` dir, so ``..`` traversal is a 400.
+        """
+        match_root, _match = _resolve_match_context()
+        exports_dir = (match_root / "exports").resolve()
+        target = (exports_dir / filename).resolve()
+        try:
+            target.relative_to(exports_dir)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail="download path must be inside the exports folder"
+            ) from exc
+        if not (target.exists() and target.is_file()):
+            export_storage.pull_match_export_file(state.storage, current_match_id.get(), target)
+        if not (target.exists() and target.is_file()):
+            raise HTTPException(status_code=404, detail=f"export not found: {filename}")
+        media_type = "video/mp4" if target.suffix.lower() == ".mp4" else "application/octet-stream"
+        return FileResponse(target, media_type=media_type, filename=target.name)
 
     @app.get("/api/match/shooters/{slug}/videos/stream", response_model=None)
     def stream_shooter_video(

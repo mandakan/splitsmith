@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..match_project import MatchProject
+from ..storage import Storage
 
 if TYPE_CHECKING:
     from .exports import StageExportResult
@@ -122,3 +123,53 @@ def push_stage_export_outputs(project: MatchProject | None, result: StageExportR
     paths.extend(result.secondary_trimmed_paths.values())
     for p in paths:
         push_export_file(project, p)
+
+
+# --- match-scoped deliverables (#755) --------------------------------------
+#
+# A compare grid is the whole match in one file and has no owning shooter,
+# so the per-shooter ``<scope>/exports/<name>`` key above has no answer
+# for it. Match-scoped deliverables live one level up, under the match's
+# own storage prefix: ``matches/<match_id>/exports/<name>``. The desktop-
+# origin upload path (#752) is meant to land its renders under the same
+# key, so the share surface (#753) never has to branch on how an
+# artifact was produced to find its bytes.
+
+
+def match_export_key(match_id: str, local_file: Path) -> str:
+    """Storage key for a match-scoped deliverable: ``matches/<id>/exports/<basename>``."""
+    return f"matches/{match_id}/exports/{local_file.name}"
+
+
+def push_match_export_file(storage: Storage | None, match_id: str | None, local_file: Path) -> None:
+    """Push one match-scoped deliverable. No-op in local mode (no storage
+    or no match id); best-effort otherwise, like :func:`push_export_file`."""
+    if storage is None or match_id is None:
+        return
+    if not (local_file.exists() and local_file.stat().st_size > 0):
+        return
+    key = match_export_key(match_id, local_file)
+    try:
+        if local_file.suffix.lower() in _BINARY_SUFFIXES:
+            with local_file.open("rb") as f:
+                storage.upload_stream(key, f)
+        else:
+            storage.write_bytes(key, local_file.read_bytes())
+    except Exception as exc:
+        logger.info("export cache: push to %s failed: %s", key, exc)
+
+
+def pull_match_export_file(storage: Storage | None, match_id: str | None, local_file: Path) -> bool:
+    """Mirror a match-scoped deliverable down when it isn't local. Same
+    contract as :func:`pull_export_file`."""
+    if local_file.exists() and local_file.stat().st_size > 0:
+        return True
+    if storage is None or match_id is None:
+        return False
+    key = match_export_key(match_id, local_file)
+    try:
+        MatchProject._mirror_from_storage(storage, key, local_file)
+    except Exception as exc:
+        logger.info("export cache: pull from %s failed: %s", key, exc)
+        return False
+    return local_file.exists() and local_file.stat().st_size > 0
