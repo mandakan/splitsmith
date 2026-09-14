@@ -51,13 +51,22 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from PIL import Image, ImageFilter
+from PIL import Image
 
 from ..coach import statistic_splits
 from ..match_project import StageScorecard
 from ..overlay_html import grid_html
 from ..overlay_layout import Anchor, CellScale, ColorToken, Element, Emphasis, Flow, Group, Role
 from ..overlay_raster import Rasterizer
+
+# Hoisted to ``splitsmith.overlay_still`` (issue #973) so the single-shooter
+# MP4's generated cards share the treatment. Bound under the old names
+# because ``test_compare_overlay_summary`` monkeypatches ``_apply_blur``
+# on this module, and ``_prepare_cell`` resolves the global at call time.
+from ..overlay_still import DEFAULT_DIM
+from ..overlay_still import apply_blur as _apply_blur
+from ..overlay_still import dim as _dim
+from ..overlay_still import letterbox as _letterbox
 from ..overlay_theme import OverlayTheme
 from .mp4_grid import GridStagePlan, Runner
 from .overlay_data import TileStageData
@@ -65,10 +74,6 @@ from .overlay_sprites import SpriteGeometry, TilePlacement
 
 logger = logging.getLogger(__name__)
 
-#: Default fraction of black composited over a tile's still. Chosen so the
-#: summary text is legible over any footage without crushing the picture
-#: to nothing -- it is still recognisably the shooter's own frame.
-DEFAULT_DIM = 0.45
 
 #: How far before a tile's own footage end the freeze extraction starts
 #: reading, in seconds.
@@ -258,49 +263,6 @@ def _wrote_a_frame(out_path: Path) -> bool:
         return out_path.stat().st_size > 0
     except OSError:
         return False
-
-
-def _letterbox(frame: Image.Image, cell_width: int, cell_height: int) -> Image.Image:
-    """Scale ``frame`` to fit inside a ``cell_width x cell_height`` cell,
-    preserving aspect ratio, and centre it on black -- the PIL equivalent
-    of ``mp4_grid``'s per-tile
-    ``scale=cw:ch:force_original_aspect_ratio=decrease,pad=cw:ch:...``
-    filter pair, so a freeze frame lands in its cell exactly the way the
-    live footage did."""
-    scale = min(cell_width / frame.width, cell_height / frame.height)
-    new_size = (max(1, round(frame.width * scale)), max(1, round(frame.height * scale)))
-    resized = frame.resize(new_size, Image.LANCZOS)
-    cell = Image.new("RGB", (cell_width, cell_height), (0, 0, 0))
-    cell.paste(resized, ((cell_width - new_size[0]) // 2, (cell_height - new_size[1]) // 2))
-    return cell
-
-
-def _apply_blur(image: Image.Image, radius: int) -> Image.Image:
-    """The one place a Gaussian blur touches a hold-still tile.
-
-    Kept as its own named function -- not inlined -- so a test can count
-    calls to it directly rather than to ``Image.filter`` in general,
-    which the overlay's own text drawing used to call as well (for its
-    drop shadow) and would otherwise have been double-counted. That text
-    path is CSS now, but counting the named function is still the
-    stricter assertion.
-    """
-    if radius <= 0:
-        return image
-    return image.filter(ImageFilter.GaussianBlur(radius))
-
-
-def _dim(image: Image.Image, amount: float) -> Image.Image:
-    """Darken ``image`` by compositing a black layer at ``amount`` alpha.
-
-    ``Image.blend(image, black, amount)`` over two same-size RGB images is
-    the same operation as alpha-compositing an opaque black layer at
-    ``amount``, without needing to round-trip through an alpha channel.
-    """
-    if amount <= 0:
-        return image
-    black = Image.new("RGB", image.size, (0, 0, 0))
-    return Image.blend(image, black, min(1.0, amount))
 
 
 def _prepare_cell(

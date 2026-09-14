@@ -151,6 +151,17 @@ def test_match_export_template_round_trip() -> None:
     }
 
 
+def test_match_export_template_carries_the_card_fields() -> None:
+    """#973: the generated-card knobs round-trip like every other field."""
+    t = MatchExportTemplate(schema_version=1, title_page=True, title_info="PO", closing_card=False)
+    assert t.model_dump(exclude_none=True) == {
+        "schema_version": 1,
+        "title_page": True,
+        "title_info": "PO",
+        "closing_card": False,
+    }
+
+
 def test_list_templates_handles_missing_dirs(tmp_path: Path) -> None:
     """Fresh installs may not have either dir present; the loader
     must not raise."""

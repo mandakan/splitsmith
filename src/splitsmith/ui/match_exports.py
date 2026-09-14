@@ -14,6 +14,7 @@ That keeps the unit tests free of project fixtures.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -21,7 +22,9 @@ from typing import Literal
 from .. import composition, fcp7xml_render, fcpxml_gen, mp4_render, youtube_sidecar
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..config import OutputConfig
-from ..export_naming import match_file_base
+from ..export_naming import match_file_base, stage_file_base
+from ..match_project import MatchProject
+from ..overlay_theme import ThemeName
 
 PipLayout = Literal["stacked", "pip-corners"]
 # Issue #197. ``"fcpxml"`` writes a Final Cut Pro 1.10 timeline (current
@@ -40,10 +43,17 @@ OutputFormat = Literal["fcpxml", "fcp7xml", "mp4"]
 TransitionKind = Literal["none", "zoom", "static"]
 # Issue #196. ``"none"`` keeps today's title-less stitching.
 # ``"slate"`` adds a pre-stage card on the spine; ``"lower-third"`` is
-# a connected text clip overlaid on the start of the primary. Only
-# the FCPXML renderer emits titles today; FCP7 / MP4 ignore the
-# request until they grow title support.
+# a connected text clip overlaid on the start of the primary. FCPXML
+# emits them as Basic Title; MP4 draws them itself (issue #973); FCP7
+# ignores the request until it grows title support.
 TitleKind = Literal["none", "slate", "lower-third"]
+
+#: Renderers with no path for a generated card or a user-supplied clip.
+#: The request layer records an anomaly for each ignored feature rather
+#: than letting the renderer drop it silently.
+_RENDERERS_WITHOUT_TITLES: frozenset[OutputFormat] = frozenset({"fcp7xml"})
+_RENDERERS_WITHOUT_SEGMENTS: frozenset[OutputFormat] = frozenset({"fcp7xml"})
+_RENDERERS_WITHOUT_MATCH_CARDS: frozenset[OutputFormat] = frozenset({"fcpxml", "fcp7xml"})
 
 
 @dataclass(frozen=True)
@@ -73,6 +83,78 @@ class MatchStageInput:
     beep_offset_seconds: float
     secondaries: tuple[MatchSecondaryInput, ...] = ()
     overlay_path: Path | None = None
+    # Issue #973. The stage's expected round count when the scoreboard or
+    # the audit knows it; a generated stage card prints it as an info
+    # line. ``None`` prints nothing -- never a guess.
+    expected_rounds: int | None = None
+
+
+def stage_inputs_for_project(
+    project: MatchProject,
+    root: Path,
+    stage_numbers: Sequence[int],
+) -> list[MatchStageInput]:
+    """Assemble the per-stage inputs for ``export_match`` from a project's
+    existing artefacts -- the one place the server job and the CLI verb
+    share, so the two cannot drift on a file name or a beep offset.
+
+    Reads nothing from disk and re-cuts nothing: the paths are what the
+    per-stage exporter *would have* written, and ``export_match`` is what
+    checks they exist. A stage whose primary has no beep is a caller
+    error and raises ``ValueError``.
+    """
+    exports_dir = project.exports_path(root)
+    audit_dir = project.audit_path(root)
+    inputs: list[MatchStageInput] = []
+    for stage_number in stage_numbers:
+        stage = project.stage(stage_number)
+        primary = stage.primary()
+        if primary is None or primary.beep_time is None:
+            raise ValueError(f"stage {stage_number}: no primary video with a confirmed beep")
+        base = stage_file_base(stage_number, stage.stage_name)
+        secondaries: list[MatchSecondaryInput] = []
+        for video in stage.videos:
+            if video.role != "secondary" or video.beep_time is None:
+                continue
+            secondaries.append(
+                MatchSecondaryInput(
+                    video_id=video.video_id,
+                    trimmed_path=exports_dir / f"{base}_cam_{video.video_id}_trimmed.mp4",
+                    # Clip-local beep: the pre-buffer, unless the beep sat
+                    # inside it in the source.
+                    beep_offset_seconds=min(project.trim_pre_buffer_seconds, video.beep_time),
+                    label=f"Cam {video.video_id}",
+                )
+            )
+        rounds = stage.stage_rounds.expected if stage.stage_rounds is not None else None
+        inputs.append(
+            MatchStageInput(
+                stage_number=stage_number,
+                stage_name=stage.stage_name,
+                audit_path=audit_dir / f"stage{stage_number}.json",
+                trimmed_path=exports_dir / f"{base}_trimmed.mp4",
+                beep_offset_seconds=min(project.trim_pre_buffer_seconds, primary.beep_time),
+                secondaries=tuple(secondaries),
+                overlay_path=exports_dir / f"{base}_overlay.mov",
+                expected_rounds=rounds,
+            )
+        )
+    return inputs
+
+
+def title_info_lines(project: MatchProject, *, extra: str | None = None) -> tuple[str, ...]:
+    """The info lines under the match name on a generated title page
+    (issue #973): the match date, the shooter, then the caller's free
+    text. Only what the project actually carries; a blank line is never
+    printed."""
+    lines: list[str] = []
+    if project.match_date is not None:
+        lines.append(project.match_date.isoformat())
+    if project.competitor_name:
+        lines.append(project.competitor_name)
+    if extra and extra.strip():
+        lines.append(extra.strip())
+    return tuple(lines)
 
 
 @dataclass(frozen=True)
@@ -127,6 +209,17 @@ class MatchExportRequestData:
     # ``output_format == "mp4"`` -- gets surfaced as an anomaly when
     # set against a non-MP4 renderer.
     youtube_preset: bool = False
+    # Issue #973. Generated cards, MP4 only (an anomaly elsewhere). The
+    # title page is the match name over ``title_page_info`` -- assembled
+    # by the caller from the project (see :func:`title_info_lines`) so
+    # this dataclass stays a request and not a project reader. The
+    # closing card repeats the title page: it is the data there is.
+    title_page: bool = False
+    title_page_info: tuple[str, ...] = ()
+    title_page_duration_seconds: float = 3.0
+    closing_card: bool = False
+    # The overlay theme also styles the cards, so the two read as one.
+    overlay_theme: ThemeName = "splitsmith"
 
 
 @dataclass(frozen=True)
@@ -204,7 +297,7 @@ def export_match(
             primary_meta = probe(stage_input.trimmed_path)  # type: ignore[operator]
         except fcpxml_gen.FFprobeError as exc:
             raise MatchExportError(
-                f"stage {stage_input.stage_number}: ffprobe failed on " f"{stage_input.trimmed_path}: {exc}"
+                f"stage {stage_input.stage_number}: ffprobe failed on {stage_input.trimmed_path}: {exc}"
             ) from exc
 
         secondaries: list[fcpxml_gen.SecondaryClip] = []
@@ -302,7 +395,7 @@ def export_match(
         duration=request.title_duration_seconds,
         stage_inputs=stages,
     )
-    if titles and request.output_format != "fcpxml":
+    if titles and request.output_format in _RENDERERS_WITHOUT_TITLES:
         anomalies.append(
             f"titles ignored: not yet supported by the "
             f"{request.output_format} renderer (issue #196 follow-ups)"
@@ -312,7 +405,7 @@ def export_match(
         # Mirror the emitter's guard at the request layer so the
         # response carries an explicit anomaly instead of a 500-shaped
         # error from generate_match_fcpxml.
-        anomalies.append("slate titles dropped: cannot combine with transitions " "(issue #196)")
+        anomalies.append("slate titles dropped: cannot combine with transitions (issue #196)")
         titles = {}
     intro_segment = _resolve_segment(
         request.intro_path,
@@ -328,6 +421,26 @@ def export_match(
         anomalies=anomalies,
         renderer=request.output_format,
     )
+    # Generated match cards (issue #973): only the MP4 renderer draws
+    # them. Same text on both; the closing card repeats the title page.
+    title_page: composition.MatchTitle | None = None
+    closing: composition.MatchTitle | None = None
+    if request.title_page or request.closing_card:
+        if request.output_format in _RENDERERS_WITHOUT_MATCH_CARDS:
+            for wanted, label in ((request.title_page, "title page"), (request.closing_card, "closing card")):
+                if wanted:
+                    anomalies.append(
+                        f"{label} ignored: only the mp4 renderer draws generated cards "
+                        f"(current renderer: {request.output_format})"
+                    )
+        else:
+            card = composition.MatchTitle(
+                text=request.project_name,
+                info=request.title_page_info,
+                duration_seconds=request.title_page_duration_seconds,
+            )
+            title_page = card if request.title_page else None
+            closing = card if request.closing_card else None
     # Chapter markers in the FCPXML output: only useful when YouTube
     # sidecar is requested AND the renderer actually carries chapter
     # markers (FCPXML today; FCP7 / MP4 follow-ups). When the user
@@ -342,6 +455,8 @@ def export_match(
         intro=intro_segment,
         outro=outro_segment,
         chapter_markers=embed_chapter_markers,
+        title_page=title_page,
+        closing=closing,
     )
     youtube_preset_active = request.youtube_preset and request.output_format == "mp4"
     if request.youtube_preset and request.output_format != "mp4":
@@ -349,17 +464,23 @@ def export_match(
             f"youtube encode preset ignored: only the mp4 renderer "
             f"applies it (current renderer: {request.output_format})"
         )
+    # The MP4 renderer reports the timeline it actually wrote -- footage
+    # plus every card and clip that made it in -- and what it skipped.
+    rendered_seconds: float | None = None
     try:
         if request.output_format == "fcpxml":
             composition.render_fcpxml(comp, output_path=output_path, config=config)
         elif request.output_format == "fcp7xml":
             fcp7xml_render.render_fcp7xml(comp, output_path=output_path)
         else:
-            mp4_render.render_mp4(
+            rendered = mp4_render.render_mp4(
                 comp,
                 output_path=output_path,
                 youtube_preset=youtube_preset_active,
+                overlay_theme=request.overlay_theme,
             )
+            rendered_seconds = rendered.duration_seconds
+            anomalies.extend(rendered.degradations)
     except (ValueError, FileNotFoundError, mp4_render.FFmpegError) as exc:
         raise MatchExportError(str(exc)) from exc
 
@@ -385,18 +506,27 @@ def export_match(
 
     # Compute total duration for the response. Mirrors the composer's math
     # (head_avail / tail_avail per stage, frame-aligned). Cheaper than
-    # re-parsing the FCPXML and good enough for a status line.
+    # re-parsing the FCPXML and good enough for a status line. The MP4
+    # path already knows its timeline (cards and clips included), so it
+    # reports that instead.
+    if rendered_seconds is not None:
+        return MatchExportResult(
+            fcpxml_path=output_path,
+            stage_count=len(compositions),
+            duration_seconds=rendered_seconds,
+            anomalies=anomalies,
+        )
     total_seconds = 0.0
-    for comp in compositions:
-        head_avail = max(0.0, comp.beep_offset_seconds)
-        if comp.shots:
-            last_local = comp.beep_offset_seconds + max(s.time_from_beep for s in comp.shots)
+    for stage_comp in compositions:
+        head_avail = max(0.0, stage_comp.beep_offset_seconds)
+        if stage_comp.shots:
+            last_local = stage_comp.beep_offset_seconds + max(s.time_from_beep for s in stage_comp.shots)
         else:
-            last_local = comp.beep_offset_seconds
-        tail_avail = max(0.0, comp.video.duration_seconds - last_local)
-        head_trim = max(0.0, head_avail - comp.head_pad_seconds)
-        tail_trim = max(0.0, tail_avail - comp.tail_pad_seconds)
-        total_seconds += max(0.0, comp.video.duration_seconds - head_trim - tail_trim)
+            last_local = stage_comp.beep_offset_seconds
+        tail_avail = max(0.0, stage_comp.video.duration_seconds - last_local)
+        head_trim = max(0.0, head_avail - stage_comp.head_pad_seconds)
+        tail_trim = max(0.0, tail_avail - stage_comp.tail_pad_seconds)
+        total_seconds += max(0.0, stage_comp.video.duration_seconds - head_trim - tail_trim)
 
     return MatchExportResult(
         fcpxml_path=output_path,
@@ -451,9 +581,9 @@ def _resolve_segment(
     """
     if path is None:
         return None
-    if renderer != "fcpxml":
+    if renderer in _RENDERERS_WITHOUT_SEGMENTS:
         anomalies.append(
-            f"{label} ignored: not yet supported by the " f"{renderer} renderer (issue #173 follow-ups)"
+            f"{label} ignored: not yet supported by the {renderer} renderer (issue #173 follow-ups)"
         )
         return None
     if not path.exists():
@@ -478,7 +608,9 @@ def _build_uniform_titles(
 ) -> dict[int, composition.TitleCard]:
     """Expand a single ``(kind, duration)`` into one ``TitleCard`` per
     stage. Each title's text defaults to the stage name -- templating
-    will let users customise this in #198."""
+    will let users customise this in #198. The round count, when known,
+    rides along as an info line for the renderers that draw one (#973).
+    """
     if kind == "none":
         return {}
     return {
@@ -486,6 +618,7 @@ def _build_uniform_titles(
             text=stage_input.stage_name,
             duration_seconds=duration,
             style=kind,
+            info=(f"{stage_input.expected_rounds} rounds",) if stage_input.expected_rounds else (),
         )
         for idx, stage_input in enumerate(stage_inputs)
     }

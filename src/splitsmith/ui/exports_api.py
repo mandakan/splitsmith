@@ -142,6 +142,14 @@ class MatchExportRequest(BaseModel):
     # H.264 profile / GOP / colour / audio params. Only meaningful for
     # ``output_format == "mp4"``; ignored otherwise (anomaly surfaced).
     youtube_preset: bool = False
+    # Issue #973. Generated cards in the rendered MP4: a title page at
+    # the head (match name, date, shooter, plus ``title_info`` as a
+    # free-text line) and a closing card at the tail. Other renderers
+    # surface an "ignored" anomaly.
+    title_page: bool = False
+    title_info: str | None = None
+    title_page_duration_seconds: float = 3.0
+    closing_card: bool = False
 
 
 @router.get("/api/shooters/{slug}/exports/overview")
@@ -298,8 +306,7 @@ async def export_stage(
         detail = {
             "skipped": f"stage {stage_number} is marked skipped; un-skip it before exporting",
             "no_beep": (
-                f"stage {stage_number} has no primary or no beep yet; "
-                "finish ingest + audit before exporting"
+                f"stage {stage_number} has no primary or no beep yet; finish ingest + audit before exporting"
             ),
             "no_stage_time": (
                 f"stage {stage_number} is a placeholder; set a stage time "

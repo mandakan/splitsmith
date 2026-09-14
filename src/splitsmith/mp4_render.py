@@ -19,10 +19,30 @@ in-scope features:
 - Alpha overlay composited on the topmost layer.
 - Per-stage trim via ``-ss`` / ``-t`` on the input.
 
-Out of scope for this PR (sibling issues): transitions (#195), title
-cards (#196), intro / outro segments (#173), audio mix tweaks,
-codec-tuned presets such as the YouTube preset (#204). Audio is taken
-from the primary; secondaries / overlay contribute video only.
+Generated cards and clips (issue #973). ``plan_timeline`` walks the IR
+into an ordered spine -- intro, title page, (slate, stage) per stage,
+closing, outro -- and every item that is not a stage becomes its own
+segment temp encoded with the same ``_encode_args`` at the sequence
+size and rate: a still (``-loop 1`` over a PNG plus ``anullsrc`` audio)
+for a card, a conforming re-encode for an intro / outro clip. A
+lower-third rides the stage's own filter graph instead (an ``overlay``
+with an alpha fade-out), so it adds no time. The cards themselves are
+composed by :mod:`splitsmith.overlay_card` through an injected
+:class:`~splitsmith.overlay_raster.Rasterizer`; no usable browser
+degrades -- every card skipped, the degradation recorded on the
+result -- rather than failing the render, mirroring
+``compare/mp4_grid``'s preflight.
+
+With generated segments present the stitch re-encodes the audio (video
+stays a stream copy) so ``anullsrc`` and the trims' audio need not
+agree on a sample rate; with none, the argv is what it always was.
+Known limit: a primary trim with no audio stream next to a card
+segment would break the stitch. Every primary is a camera trim with
+audio, so this does not occur in practice.
+
+Out of scope (sibling issues): transitions (#195), audio mix tweaks.
+Audio is taken from the primary; secondaries / overlay contribute
+video only.
 
 The IR is the contract: ``render_mp4`` is the second non-XML renderer
 that consumes it (FCPXML, FCP7 XML, MP4 -- three targets, one IR).
@@ -36,19 +56,47 @@ runner is injectable, mirroring the pattern in
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
-from .composition import Composition, ConnectedClip, Stage, Transform
+from .composition import Composition, ConnectedClip, Segment, SequenceFormat, Stage, TitleCard, Transform
+from .overlay_card import Card, build_card_still, build_lower_third
+from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
+from .overlay_theme import ThemeName, load_theme
+
+logger = logging.getLogger(__name__)
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
 
 class FFmpegError(RuntimeError):
     """ffmpeg exited non-zero or could not be invoked."""
+
+
+@dataclass(frozen=True)
+class Mp4RenderResult:
+    """What a render wrote.
+
+    ``duration_seconds`` is the length of the stitched timeline as
+    actually written -- footage plus every card and clip that made it
+    in, so a skipped card is not counted. It is the figure
+    ``match_exports.MatchExportResult.duration_seconds`` reports, and
+    never a wall clock (see CLAUDE.md on the two ``duration_seconds``
+    fields).
+
+    ``degradations`` is what the render did *not* do -- today, only
+    "no usable browser, every card skipped". A returned field and not
+    only a log line so every caller can put it in front of the user.
+    """
+
+    output_path: Path
+    duration_seconds: float
+    degradations: tuple[str, ...] = ()
 
 
 def render_mp4(
@@ -59,7 +107,9 @@ def render_mp4(
     ffmpeg_binary: str = "ffmpeg",
     runner: Runner = subprocess.run,
     youtube_preset: bool = False,
-) -> None:
+    rasterizer: Rasterizer | None = None,
+    overlay_theme: ThemeName = "splitsmith",
+) -> Mp4RenderResult:
     """Render ``composition`` as a stitched ``.mp4`` at ``output_path``.
 
     ``work_dir`` is where per-stage temps live; defaults to a fresh
@@ -69,7 +119,17 @@ def render_mp4(
 
     ``youtube_preset`` swaps the default per-stage encode for YouTube's
     recommended H.264 profile / GOP / colour tags (issue #204 layer 2).
-    The concat step keeps stream-copy in either case.
+    The concat step keeps the video a stream copy in either case.
+
+    ``rasterizer`` (issue #973) composes the generated cards. Left
+    ``None``, a composition that carries any card gets one
+    :class:`~splitsmith.overlay_raster.ChromiumRasterizer` for the whole
+    render, preflighted before any encode so a missing browser is found
+    in the first second rather than after every stage has rendered. A
+    caller who passes their own owns its lifecycle. No usable browser
+    degrades: every card is skipped and the loss is recorded on
+    :attr:`Mp4RenderResult.degradations`; the render never fails
+    because of a card. ``overlay_theme`` picks the card typography.
     """
     plans = [_plan_stage(stage, composition.sequence) for stage in composition.stages]
     if not plans:
@@ -98,65 +158,224 @@ def render_mp4(
             "per-asset rates) or convert the sources to a shared rate first."
         )
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    timeline = plan_timeline(composition, plans=plans)
 
-    if work_dir is None:
-        with tempfile.TemporaryDirectory(prefix="splitsmith-mp4-") as tmp:
-            _render_with_work_dir(
-                composition,
-                plans,
-                output_path=output_path,
-                work_dir=Path(tmp),
-                ffmpeg_binary=ffmpeg_binary,
-                runner=runner,
-                youtube_preset=youtube_preset,
-            )
-    else:
+    # The rasterizer preflight, mirroring ``compare/mp4_grid``'s: opened
+    # once for the whole render, before any encode, and only when a card
+    # actually needs one. A caller-supplied rasterizer is used as-is.
+    degradations: tuple[str, ...] = ()
+    active: Rasterizer | None = rasterizer
+    owned: ChromiumRasterizer | None = None
+    if timeline.needs_rasterizer and rasterizer is None:
+        owned = ChromiumRasterizer()
+        try:
+            active = owned.__enter__()
+        except RasterizerUnavailableError as exc:
+            owned = None
+            active = None
+            degradations = (f"cards skipped: {exc.detail}",)
+            logger.warning("%s", degradations[0])
+
+    try:
+        if work_dir is None:
+            with tempfile.TemporaryDirectory(prefix="splitsmith-mp4-") as tmp:
+                return _render_with_work_dir(
+                    composition,
+                    timeline,
+                    output_path=output_path,
+                    work_dir=Path(tmp),
+                    ffmpeg_binary=ffmpeg_binary,
+                    runner=runner,
+                    youtube_preset=youtube_preset,
+                    rasterizer=active,
+                    overlay_theme=overlay_theme,
+                    degradations=degradations,
+                )
         work_dir.mkdir(parents=True, exist_ok=True)
-        _render_with_work_dir(
+        return _render_with_work_dir(
             composition,
-            plans,
+            timeline,
             output_path=output_path,
             work_dir=work_dir,
             ffmpeg_binary=ffmpeg_binary,
             runner=runner,
             youtube_preset=youtube_preset,
+            rasterizer=active,
+            overlay_theme=overlay_theme,
+            degradations=degradations,
         )
+    finally:
+        if owned is not None:
+            owned.__exit__(None, None, None)
 
 
 def _render_with_work_dir(
     composition: Composition,
-    plans: list[_StagePlan],
+    timeline: TimelinePlan,
     *,
     output_path: Path,
     work_dir: Path,
     ffmpeg_binary: str,
     runner: Runner,
-    youtube_preset: bool = False,
-) -> None:
-    stage_files: list[Path] = []
-    for idx, plan in enumerate(plans):
-        stage_out = work_dir / f"stage_{idx:03d}.mp4"
-        cmd = _build_stage_command(
-            plan,
-            sequence=composition.sequence,
-            output_path=stage_out,
-            ffmpeg_binary=ffmpeg_binary,
-            youtube_preset=youtube_preset,
-        )
-        _run(cmd, runner=runner)
-        stage_files.append(stage_out)
+    youtube_preset: bool,
+    rasterizer: Rasterizer | None,
+    overlay_theme: ThemeName,
+    degradations: tuple[str, ...],
+) -> Mp4RenderResult:
+    sequence = composition.sequence
+    theme = load_theme(overlay_theme) if timeline.needs_rasterizer else None
+    segments: list[tuple[Path, float]] = []
+    generated = False
+    for item in timeline.items:
+        if isinstance(item, _StageItem):
+            lower_third: _LowerThirdInput | None = None
+            if item.lower_third is not None and rasterizer is not None and theme is not None:
+                image = build_lower_third(
+                    item.lower_third,
+                    width=sequence.width,
+                    height=sequence.height,
+                    theme=theme,
+                    rasterizer=rasterizer,
+                )
+                if image is not None:
+                    png = work_dir / f"lower_third_{item.index:03d}.png"
+                    image.save(png)
+                    lower_third = _LowerThirdInput(path=png, card=item.lower_third)
+            stage_out = work_dir / f"stage_{item.index:03d}.mp4"
+            cmd = _build_stage_command(
+                item.plan,
+                sequence=sequence,
+                output_path=stage_out,
+                ffmpeg_binary=ffmpeg_binary,
+                youtube_preset=youtube_preset,
+                lower_third=lower_third,
+            )
+            _run(cmd, runner=runner)
+            segments.append((stage_out, item.duration_seconds))
+        elif isinstance(item, _StillItem):
+            if rasterizer is None or theme is None:
+                continue  # already recorded as a degradation up front
+            backdrop = _grab_backdrop(
+                item, timeline, work_dir=work_dir, ffmpeg_binary=ffmpeg_binary, runner=runner
+            )
+            image = build_card_still(
+                item.card,
+                width=sequence.width,
+                height=sequence.height,
+                theme=theme,
+                rasterizer=rasterizer,
+                backdrop=backdrop,
+            )
+            if image is None:
+                continue  # logged by overlay_card; a card is its text
+            png = work_dir / f"{item.name}.png"
+            image.save(png)
+            still_out = work_dir / f"{item.name}.mp4"
+            cmd = _build_still_command(
+                png,
+                seconds=item.duration_seconds,
+                sequence=sequence,
+                output_path=still_out,
+                ffmpeg_binary=ffmpeg_binary,
+                youtube_preset=youtube_preset,
+            )
+            _run(cmd, runner=runner)
+            segments.append((still_out, item.duration_seconds))
+            generated = True
+        else:
+            clip_out = work_dir / f"{item.kind}.mp4"
+            cmd = _build_segment_command(
+                item.segment,
+                sequence=sequence,
+                output_path=clip_out,
+                ffmpeg_binary=ffmpeg_binary,
+                youtube_preset=youtube_preset,
+            )
+            _run(cmd, runner=runner)
+            segments.append((clip_out, item.duration_seconds))
+            generated = True
 
     list_path = work_dir / "concat.txt"
     list_path.write_text(
-        "".join(f"file '{p.resolve().as_posix()}'\n" for p in stage_files),
+        "".join(f"file '{p.resolve().as_posix()}'\n" for p, _ in segments),
         encoding="utf-8",
     )
     cmd = _build_concat_command(
         list_path=list_path,
         output_path=output_path,
         ffmpeg_binary=ffmpeg_binary,
+        reencode_audio=generated,
     )
     _run(cmd, runner=runner)
+    return Mp4RenderResult(
+        output_path=output_path,
+        duration_seconds=sum(seconds for _, seconds in segments),
+        degradations=degradations,
+    )
+
+
+#: How far before a backdrop's target frame the grab starts reading. A
+#: seek straight to the last timestamp can land past the final frame
+#: and write nothing (see ``compare/overlay_summary`` on the same trap),
+#: so the read starts a window early and ``-update 1`` keeps the last
+#: frame decoded.
+_BACKDROP_WINDOW_SECONDS = 0.5
+
+
+def _grab_backdrop(
+    item: _StillItem,
+    timeline: TimelinePlan,
+    *,
+    work_dir: Path,
+    ffmpeg_binary: str,
+    runner: Runner,
+) -> Path | None:
+    """Pull the frame a full-frame card sits on, or ``None`` when there is
+    no stage to take it from or the grab produced no file.
+
+    A title page and a slate take the first visible frame of the stage
+    they precede; the closing card takes the last visible frame of the
+    last stage. A failed grab is not an error: the card composes on the
+    theme's flat surface instead.
+    """
+    if item.backdrop_stage_index is None:
+        return None
+    stage = timeline.stage(item.backdrop_stage_index)
+    if stage is None:
+        return None
+    plan = stage.plan
+    if item.backdrop_at == "head":
+        seek = plan.head_trim_seconds
+    else:
+        seek = max(0.0, plan.head_trim_seconds + plan.effective_seconds - _BACKDROP_WINDOW_SECONDS)
+    out = work_dir / f"{item.name}_backdrop.png"
+    out.unlink(missing_ok=True)
+    cmd = (
+        ffmpeg_binary,
+        "-hide_banner",
+        "-y",
+        "-ss",
+        f"{seek:g}",
+        "-t",
+        f"{_BACKDROP_WINDOW_SECONDS:g}",
+        "-i",
+        str(plan.stage.primary.path),
+        "-an",
+        "-update",
+        "1",
+        str(out),
+    )
+    try:
+        _run(cmd, runner=runner)
+    except FFmpegError as exc:
+        logger.warning("could not grab a backdrop frame for %s (%s); the card composes flat", item.name, exc)
+        return None
+    try:
+        if out.stat().st_size == 0:
+            return None
+    except OSError:
+        return None
+    return out
 
 
 def _run(cmd: tuple[str, ...], *, runner: Runner) -> None:
@@ -197,6 +416,143 @@ class _CamAlignment:
     cam_seek_seconds: float  # ``-ss`` value for the cam input
     cam_spine_start: float  # spine time when the cam first appears
     cam_visible_seconds: float  # how long the cam shows on the spine
+
+
+ItemKind = Literal["intro", "title_page", "slate", "stage", "closing", "outro"]
+
+
+@dataclass(frozen=True)
+class _StageItem:
+    """One stage on the spine, with the lower-third that rides its head."""
+
+    index: int
+    plan: _StagePlan
+    lower_third: TitleCard | None
+    kind: ItemKind = "stage"
+
+    @property
+    def duration_seconds(self) -> float:
+        return self.plan.effective_seconds
+
+
+@dataclass(frozen=True)
+class _StillItem:
+    """A generated full-frame card held on the spine for its duration.
+
+    ``backdrop_stage_index`` / ``backdrop_at`` say which stage's frame the
+    card sits on: the head of the stage it precedes, or the tail of the
+    last stage for the closing card.
+    """
+
+    kind: ItemKind
+    name: str
+    card: Card
+    duration_seconds: float
+    backdrop_stage_index: int | None
+    backdrop_at: Literal["head", "tail"] = "head"
+
+
+@dataclass(frozen=True)
+class _ClipItem:
+    """An intro / outro clip, re-encoded to the sequence."""
+
+    kind: ItemKind
+    segment: Segment
+
+    @property
+    def duration_seconds(self) -> float:
+        return self.segment.asset.metadata.duration_seconds
+
+
+SpineItem = _StageItem | _StillItem | _ClipItem
+
+
+@dataclass(frozen=True)
+class TimelinePlan:
+    """The ordered spine and its total length (issue #973).
+
+    Pure: derived from the IR alone, so ``match_exports`` can quote the
+    timeline length before anything is encoded. ``duration_seconds``
+    counts every item as planned; :attr:`Mp4RenderResult.duration_seconds`
+    is the same sum over what was actually written.
+    """
+
+    items: tuple[SpineItem, ...]
+
+    @property
+    def duration_seconds(self) -> float:
+        return sum(item.duration_seconds for item in self.items)
+
+    @property
+    def needs_rasterizer(self) -> bool:
+        return any(
+            isinstance(item, _StillItem) or (isinstance(item, _StageItem) and item.lower_third is not None)
+            for item in self.items
+        )
+
+    @property
+    def has_generated_segments(self) -> bool:
+        return any(not isinstance(item, _StageItem) for item in self.items)
+
+    def stage(self, index: int) -> _StageItem | None:
+        for item in self.items:
+            if isinstance(item, _StageItem) and item.index == index:
+                return item
+        return None
+
+
+def plan_timeline(composition: Composition, *, plans: list[_StagePlan] | None = None) -> TimelinePlan:
+    """Walk the IR into spine order: intro, title page, then per stage a
+    slate (when its title is one) and the stage itself, then the closing
+    card and the outro. A lower-third title is attached to its stage
+    rather than placed on the spine, since it overlays the head and adds
+    no time."""
+    stage_plans = (
+        plans if plans is not None else [_plan_stage(s, composition.sequence) for s in composition.stages]
+    )
+    items: list[SpineItem] = []
+    if composition.intro is not None:
+        items.append(_ClipItem(kind="intro", segment=composition.intro))
+    if composition.title_page is not None:
+        items.append(
+            _StillItem(
+                kind="title_page",
+                name="title_page",
+                card=composition.title_page,
+                duration_seconds=composition.title_page.duration_seconds,
+                backdrop_stage_index=0,
+            )
+        )
+    for index, (stage, plan) in enumerate(zip(composition.stages, stage_plans, strict=True)):
+        title = stage.title
+        lower_third: TitleCard | None = None
+        if title is not None and title.style == "slate":
+            items.append(
+                _StillItem(
+                    kind="slate",
+                    name=f"slate_{index:03d}",
+                    card=title,
+                    duration_seconds=title.duration_seconds,
+                    backdrop_stage_index=index,
+                )
+            )
+        elif title is not None:
+            lower_third = title
+        items.append(_StageItem(index=index, plan=plan, lower_third=lower_third))
+    if composition.closing is not None:
+        items.append(
+            _StillItem(
+                kind="closing",
+                name="closing",
+                card=composition.closing,
+                duration_seconds=composition.closing.duration_seconds,
+                backdrop_stage_index=len(composition.stages) - 1,
+                backdrop_at="tail",
+            )
+        )
+    if composition.outro is not None:
+        items.append(_ClipItem(kind="outro", segment=composition.outro))
+    return TimelinePlan(items=tuple(items))
 
 
 def _plan_stage(stage: Stage, sequence_format) -> _StagePlan:  # type: ignore[no-untyped-def]
@@ -252,6 +608,18 @@ def _plan_stage(stage: Stage, sequence_format) -> _StagePlan:  # type: ignore[no
 # --- command construction -------------------------------------------------
 
 
+@dataclass(frozen=True)
+class _LowerThirdInput:
+    """A rasterized lower-third PNG and the card that says how long it shows."""
+
+    path: Path
+    card: TitleCard
+
+
+#: How long a lower-third fades out for, at the end of its window.
+LOWER_THIRD_FADE_SECONDS = 0.5
+
+
 def _build_stage_command(
     plan: _StagePlan,
     *,
@@ -259,6 +627,7 @@ def _build_stage_command(
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
     youtube_preset: bool = False,
+    lower_third: _LowerThirdInput | None = None,
 ) -> tuple[str, ...]:
     """Build the ffmpeg invocation that renders one stage to ``output_path``.
 
@@ -270,6 +639,11 @@ def _build_stage_command(
 
     ``youtube_preset`` swaps the encode params (codec, GOP, colour
     tags, audio bitrate) to YouTube's recommended profile.
+
+    ``lower_third`` (issue #973) adds the rasterized card as one more
+    looped image input, composited last -- above the alpha overlay --
+    over the stage's head, and fading out over the last
+    :data:`LOWER_THIRD_FADE_SECONDS` of the card's own duration.
     """
     args: list[str] = [ffmpeg_binary, "-hide_banner", "-y"]
     stage = plan.stage
@@ -311,10 +685,26 @@ def _build_stage_command(
             str(stage.overlay.asset.path),
         ]
 
+    lower_third_graph: tuple[int, float] | None = None
+    if lower_third is not None:
+        lower_third_index = 1 + len(plan.cam_alignments) + (1 if overlay_index is not None else 0)
+        lower_third_graph = (lower_third_index, lower_third.card.duration_seconds)
+        args += [
+            "-loop",
+            "1",
+            "-framerate",
+            _rate_string(sequence),
+            "-t",
+            f"{lower_third.card.duration_seconds:g}",
+            "-i",
+            str(lower_third.path),
+        ]
+
     filter_graph = _build_stage_filter_graph(
         plan,
         sequence=sequence,
         overlay_input_index=overlay_index,
+        lower_third=lower_third_graph,
     )
 
     args += [
@@ -405,11 +795,16 @@ def _encode_args(
     )
 
 
+def _rate_string(sequence: SequenceFormat) -> str:
+    return f"{sequence.frame_rate_num}/{sequence.frame_rate_den}"
+
+
 def _build_stage_filter_graph(
     plan: _StagePlan,
     *,
     sequence,  # type: ignore[no-untyped-def]
     overlay_input_index: int | None,
+    lower_third: tuple[int, float] | None = None,
 ) -> str:
     """Compose primary + cams + overlay into a single ``-filter_complex``.
 
@@ -446,15 +841,23 @@ def _build_stage_filter_graph(
         # on the spine; outside that range the base shows through.
         end_time = align.cam_spine_start + align.cam_visible_seconds
         enable = f"between(t,{align.cam_spine_start:g},{end_time:g})"
-        parts.append(
-            f"[{base_label}][{scaled_label}]" f"overlay=x={x:g}:y={y:g}:enable='{enable}'[{out_label}]"
-        )
+        parts.append(f"[{base_label}][{scaled_label}]overlay=x={x:g}:y={y:g}:enable='{enable}'[{out_label}]")
         base_label = out_label
 
     if overlay_input_index is not None:
         parts.append(f"[{overlay_input_index}:v]setpts=PTS-STARTPTS[overlay_v]")
         parts.append(f"[{base_label}][overlay_v]overlay=0:0[withov]")
         base_label = "withov"
+
+    if lower_third is not None:
+        input_index, seconds = lower_third
+        fade_start = max(0.0, seconds - LOWER_THIRD_FADE_SECONDS)
+        parts.append(
+            f"[{input_index}:v]format=rgba,"
+            f"fade=t=out:st={fade_start:g}:d={LOWER_THIRD_FADE_SECONDS:g}:alpha=1[lt]"
+        )
+        parts.append(f"[{base_label}][lt]overlay=0:0:enable='lt(t,{seconds:g})'[withlt]")
+        base_label = "withlt"
 
     parts.append(f"[{base_label}]null[final]")
     return ";".join(parts)
@@ -484,14 +887,100 @@ def _overlay_position(
     return centre_x - clip_w / 2.0, centre_y - clip_h / 2.0
 
 
+def _build_still_command(
+    png_path: Path,
+    *,
+    seconds: float,
+    sequence: SequenceFormat,
+    output_path: Path,
+    ffmpeg_binary: str = "ffmpeg",
+    youtube_preset: bool = False,
+) -> tuple[str, ...]:
+    """Hold one canvas-sized PNG for ``seconds`` as a segment with silent
+    audio, encoded exactly like a stage so the stitch stream-copies it.
+
+    ``-t`` is an output option: both inputs (the looped image and
+    ``anullsrc``) are infinite, and the hold is what bounds them.
+    """
+    return (
+        ffmpeg_binary,
+        "-hide_banner",
+        "-y",
+        "-loop",
+        "1",
+        "-framerate",
+        _rate_string(sequence),
+        "-i",
+        str(png_path),
+        "-f",
+        "lavfi",
+        "-i",
+        "anullsrc=channel_layout=stereo:sample_rate=48000",
+        "-t",
+        f"{seconds:g}",
+        "-filter_complex",
+        "[0:v]format=yuv420p,setsar=1[final]",
+        "-map",
+        "[final]",
+        "-map",
+        "1:a",
+        *_encode_args(sequence, youtube_preset=youtube_preset),
+        str(output_path),
+    )
+
+
+def _build_segment_command(
+    segment: Segment,
+    *,
+    sequence: SequenceFormat,
+    output_path: Path,
+    ffmpeg_binary: str = "ffmpeg",
+    youtube_preset: bool = False,
+) -> tuple[str, ...]:
+    """Re-encode an intro / outro clip to the sequence's size and rate.
+
+    Scale-to-fit and pad rather than stretch, ``setsar=1`` and ``fps=``
+    so the segment agrees with the stages on everything the concat
+    demuxer stream-copies -- which is what lets the MP4 path accept a
+    clip at a different frame rate where the FCPXML path refuses one.
+    Audio is the clip's own when it has any (``0:a?``).
+    """
+    graph = (
+        f"[0:v]scale={sequence.width}:{sequence.height}:force_original_aspect_ratio=decrease,"
+        f"pad={sequence.width}:{sequence.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
+        f"fps={_rate_string(sequence)},format=yuv420p[final]"
+    )
+    return (
+        ffmpeg_binary,
+        "-hide_banner",
+        "-y",
+        "-i",
+        str(segment.asset.path),
+        "-filter_complex",
+        graph,
+        "-map",
+        "[final]",
+        "-map",
+        "0:a?",
+        *_encode_args(sequence, youtube_preset=youtube_preset),
+        str(output_path),
+    )
+
+
 def _build_concat_command(
     *,
     list_path: Path,
     output_path: Path,
     ffmpeg_binary: str = "ffmpeg",
+    reencode_audio: bool = False,
 ) -> tuple[str, ...]:
-    """Build the ``concat``-demuxer invocation that stitches per-stage
-    temps without re-encoding."""
+    """Build the ``concat``-demuxer invocation that stitches the segment
+    temps. The video is always a stream copy. ``reencode_audio`` (set
+    when generated segments are present, issue #973) encodes the audio
+    once over the whole match instead, so a card's ``anullsrc`` and a
+    trim's camera audio need not share a sample rate; off, the argv is
+    the plain ``-c copy`` it has always been."""
+    codec_args = ("-c:v", "copy", "-c:a", "aac", "-b:a", "192k") if reencode_audio else ("-c", "copy")
     return (
         ffmpeg_binary,
         "-hide_banner",
@@ -502,12 +991,18 @@ def _build_concat_command(
         "0",
         "-i",
         str(list_path),
-        "-c",
-        "copy",
+        *codec_args,
         "-movflags",
         "+faststart",
         str(output_path),
     )
 
 
-__all__ = ["FFmpegError", "render_mp4"]
+__all__ = [
+    "LOWER_THIRD_FADE_SECONDS",
+    "FFmpegError",
+    "Mp4RenderResult",
+    "TimelinePlan",
+    "plan_timeline",
+    "render_mp4",
+]

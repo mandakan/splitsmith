@@ -653,6 +653,8 @@ def test_a_match_export_to_mp4_records_a_match_video_artifact(tmp_path: Path, mo
     def fake_render_mp4(comp, *, output_path, **kwargs):  # type: ignore[no-untyped-def]
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_bytes(b"")
+        # #973: the renderer reports the timeline it wrote.
+        return match_exports_mod.mp4_render.Mp4RenderResult(output_path=output_path, duration_seconds=0.0)
 
     monkeypatch.setattr(match_exports_mod.mp4_render, "render_mp4", fake_render_mp4)
 

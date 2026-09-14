@@ -200,9 +200,13 @@ class TitleCard:
     bigger sequences may want larger sizes but Basic Title scales
     automatically across formats.
 
-    The FCPXML renderer (this PR) emits both styles via FCP's Basic
-    Title generator. FCP7 XML / ffmpeg renderers ignore titles for
-    now -- they'll grow support in follow-up PRs.
+    The FCPXML renderer emits both styles via FCP's Basic Title
+    generator, from ``text`` alone. The MP4 renderer (issue #973) draws
+    the card itself through the overlay typography
+    (``splitsmith.overlay_card``) and also draws ``info`` -- optional
+    smaller lines under the text, such as the stage's round count.
+    FCP users restyle a Basic Title in FCP, so the extra lines are not
+    lowered there; the FCP7 XML renderer ignores titles altogether.
     """
 
     text: str
@@ -211,6 +215,28 @@ class TitleCard:
     font_size: int = 144
     font: str = "Helvetica"
     color: str = "1 1 1 1"
+    info: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class MatchTitle:
+    """A generated full-frame card for the match itself (issue #973).
+
+    ``Composition.title_page`` is the head of the timeline (the match
+    name, with optional info lines: date, shooter, a free-text line);
+    ``Composition.closing`` is the tail. Both are rendered from data
+    splitsmith already has, in the overlay typography, so the video
+    reads as one piece with the live overlay and the stage summary.
+
+    Only the MP4 renderers draw these. FCPXML / FCP7 XML have no
+    generated-card path (intro / outro there are user-supplied clips,
+    issue #173), so they ignore the field and the request layer records
+    an anomaly saying so.
+    """
+
+    text: str
+    info: tuple[str, ...] = ()
+    duration_seconds: float = 3.0
 
 
 @dataclass(frozen=True)
@@ -240,6 +266,11 @@ class Composition:
     ``<chapter-marker>``; FCP / Premiere / DaVinci forward chapter
     markers into the chapter atom on MP4 export, which is what
     YouTube reads. Off by default to keep existing exports unchanged.
+
+    ``title_page`` / ``closing`` (issue #973) are generated
+    :class:`MatchTitle` cards at the head and tail. Spine order on a
+    renderer that honours everything: intro, title page, stages (each
+    with its own slate first), closing, outro.
     """
 
     project_name: str
@@ -249,6 +280,8 @@ class Composition:
     outro: Segment | None = None
     transitions: tuple[Transition, ...] = ()
     chapter_markers: bool = False
+    title_page: MatchTitle | None = None
+    closing: MatchTitle | None = None
 
 
 # --- conversions -----------------------------------------------------------
@@ -277,6 +310,8 @@ def from_stage_compositions(
     intro: Segment | None = None,
     outro: Segment | None = None,
     chapter_markers: bool = False,
+    title_page: MatchTitle | None = None,
+    closing: MatchTitle | None = None,
 ) -> Composition:
     """Build a :class:`Composition` from today's ``StageComposition`` inputs.
 
@@ -300,6 +335,9 @@ def from_stage_compositions(
     placed before stage 0 / after stage N-1 on the spine. The
     segment's video must match the timeline frame rate; the FCPXML
     renderer raises ``ValueError`` otherwise.
+
+    ``title_page`` / ``closing`` (issue #973): optional generated
+    :class:`MatchTitle` cards; only the MP4 renderers draw them.
     """
     titles_map = dict(titles) if titles else {}
     if not stages:
@@ -363,6 +401,8 @@ def from_stage_compositions(
         intro=intro,
         outro=outro,
         chapter_markers=chapter_markers,
+        title_page=title_page,
+        closing=closing,
     )
 
 
@@ -592,6 +632,7 @@ __all__ = [
     "ConnectedClip",
     "ConnectedRole",
     "Marker",
+    "MatchTitle",
     "Segment",
     "SequenceFormat",
     "Stage",
