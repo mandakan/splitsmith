@@ -153,6 +153,7 @@ from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
 from ..auth import AuthBackend, CompositeAuth, LoopbackAuth, User
+from ..coach import statistic_splits
 from ..comment_identity import (
     MAX_AUTHOR_KEY_LEN,
     MIN_AUTHOR_KEY_LEN,
@@ -6588,6 +6589,28 @@ def _resolve_compare_trim(
     return None
 
 
+def _stage_figures_payload(doc: dict | None, project: MatchProject, stage_number: int) -> dict | None:
+    """Per-stage splits summary for the project payload (UX PR 4). The
+    split rule is ``coach.statistic_splits``; ``share_card.stage_figures``
+    shapes draw + average, this adds the fastest split and the counts.
+    ``None`` (not zeros) when the stage has no audit doc."""
+    if doc is None:
+        return None
+    stage = next((s for s in project.stages if s.stage_number == stage_number), None)
+    prim = stage.primary() if stage is not None else None
+    beep = prim.beep_time if prim is not None and prim.beep_time is not None else 0.0
+    shots = audit_shots_to_engine_shots(doc, beep_time_in_source=beep)
+    fig = stage_figures(shots)
+    splits = statistic_splits(shots) if shots else []
+    return {
+        "draw": fig.draw,
+        "avg_split": fig.avg_split,
+        "fastest_split": min(splits) if splits else None,
+        "shot_count": len(shots),
+        "split_count": fig.split_count,
+    }
+
+
 def _proxy_ready_for(storage: Storage | None, proxy_keys: set[str], path_str: str) -> bool:
     """One honest answer for every endpoint (#821). Local mode streams
     the source directly (ready). Hosted: only ``raw/`` uploads ever get
@@ -7842,7 +7865,8 @@ def create_app(
         # 0/N (and the anonymous share/Results view shows no audited
         # stages to stream). Local: load_audit_docs returns None and the
         # helper reads the on-disk audit files as before.
-        statuses = project.stage_statuses(root, audit_docs=state.load_audit_docs(slug))
+        audit_docs = state.load_audit_docs(slug)
+        statuses = project.stage_statuses(root, audit_docs=audit_docs)
         payload = project.model_dump(mode="json")
         # Compute proxy_ready set once per request - one storage.list call
         # covers all videos. Local mode (storage is None) reports True for
@@ -7864,6 +7888,17 @@ def create_app(
             status = statuses.get(int(n))
             if status is not None:
                 stage_dict["status"] = status.value
+            # Splits figures per stage (UX PR 4): the Splits page and the
+            # share surface read them here, not from triage (owner-only).
+            doc = (audit_docs or {}).get(int(n))
+            if doc is None and audit_docs is None:
+                try:
+                    doc, _ = state.load_audit(slug, int(n))
+                except HTTPException:
+                    # An unreadable audit file surfaces on the audit route;
+                    # it must not take the project payload down with it.
+                    doc = None
+            stage_dict["figures"] = _stage_figures_payload(doc, project, int(n))
             for video_dict in stage_dict.get("videos", []):
                 video_dict["proxy_ready"] = _proxy_ready_for(
                     _storage, proxy_keys, str(video_dict.get("path", ""))
