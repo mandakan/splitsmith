@@ -144,6 +144,8 @@ class MatchExportRequest(BaseModel):
     # the output itself: markers on the FCPXML timeline, chapter atoms
     # in the MP4.
     youtube_sidecar: bool = False
+    # Text the sidecar's description opens with, above the chapter list.
+    description_lead: str | None = None
     # Issue #204 layer 2. Encode the MP4 with YouTube's recommended
     # H.264 profile / GOP / colour / audio params. Only meaningful for
     # ``output_format == "mp4"``; ignored otherwise (anomaly surfaced).

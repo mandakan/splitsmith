@@ -179,6 +179,7 @@ function ExportInner({ slug }: { slug: string }) {
   // chapters, captions) travel together: one is pointless without the
   // other and both exist only for the rendered MP4.
   const [youtube, setYoutube] = useState<boolean>(false);
+  const [descriptionLead, setDescriptionLead] = useState<string>("");
   // Compare grid: the reference shooter sets the frame rate; the canvas
   // sets the render size; the overlay and its summary hold are #705's.
   const [audioFrom, setAudioFrom] = useState<string>("");
@@ -430,6 +431,7 @@ function ExportInner({ slug }: { slug: string }) {
         intro_path: undefined,
         outro_path: undefined,
         youtube_sidecar: renderedMp4 && youtube,
+        description_lead: renderedMp4 && youtube ? descriptionLead.trim() || null : undefined,
         youtube_preset: renderedMp4 && youtube,
         include_overlay: includeOverlay,
         overlay_codec: overlayCodec,
@@ -853,6 +855,17 @@ function ExportInner({ slug }: { slug: string }) {
                       { value: "on", label: "Preset + sidecar" },
                     ]}
                   />
+                  {youtube ? (
+                    <textarea
+                      id="export-description-lead"
+                      aria-label="Description lead"
+                      rows={2}
+                      className={cn(inputClass, "mt-2 max-w-md")}
+                      placeholder="What the video is, above the chapter list: division, camera, the day"
+                      value={descriptionLead}
+                      onChange={(e) => setDescriptionLead(e.target.value)}
+                    />
+                  ) : null}
                 </Field>
               ) : null}
               <Field label="Bundle name" htmlFor="export-bundle-name" help={project?.exports_dir ?? "exports/"}>

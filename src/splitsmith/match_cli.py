@@ -469,6 +469,14 @@ def export(
             "the output (FCPXML markers, MP4 chapter atoms)."
         ),
     ),
+    description_lead: str | None = typer.Option(
+        None,
+        "--description-lead",
+        help=(
+            "Text the sidecar's YouTube description opens with, above the chapter list "
+            "(division, camera, the day). Needs --youtube-sidecar."
+        ),
+    ),
     overlay_theme: str = typer.Option(
         "splitsmith", "--theme", help="Overlay / card theme: 'splitsmith' or 'clean'."
     ),
@@ -574,6 +582,7 @@ def export(
         outro_path=outro.expanduser() if outro else None,
         youtube_preset=youtube_preset,
         youtube_sidecar=youtube_sidecar,
+        description_lead=description_lead,
         title_page=title_page,
         title_page_info=match_exports.title_info_lines(project, extra=title_info),
         title_page_duration_seconds=title_page_duration,

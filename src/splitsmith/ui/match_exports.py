@@ -219,6 +219,10 @@ class MatchExportRequestData:
     # round-trip, chapter atoms in the MP4. Off by default; enabling on
     # FCP7 writes the sidecar but embeds nothing (no title track).
     youtube_sidecar: bool = False
+    # Free text the sidecar's description opens with, above the chapter
+    # list: what the video is (division, camera, the day) in the
+    # uploader's own words. The generated text alone is a chapter list.
+    description_lead: str | None = None
     # Issue #204 layer 2. Encode the MP4 with YouTube's recommended
     # H.264 profile / GOP / colour / audio params. Only meaningful for
     # ``output_format == "mp4"`` -- gets surfaced as an anomaly when
@@ -541,6 +545,7 @@ def export_match(
         youtube_sidecar.write_srt(comp, srt_path)
         sidecar = youtube_sidecar.build_sidecar(
             comp,
+            description_lead=(request.description_lead or "").strip() or None,
             captions_path=srt_path.relative_to(exports_dir),
             output_video=output_path.relative_to(exports_dir),
         )
