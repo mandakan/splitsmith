@@ -185,7 +185,7 @@ def test_overlay_defaults_to_off(tmp_path):
 
 
 def test_sprite_input_is_appended_after_every_other_input(tmp_path):
-    # A filler tile takes two inputs and an unreached cell takes one, so
+    # Every tile takes two inputs and an unreached cell takes one, so
     # the sprite must land last or every index behind it shifts.
     plan = _plan([_tile("ann", 0, 0), _tile("bo", 0, 1, present=False), _tile("cy", 1, 0)])
     cmd = mp4_grid.build_stage_command(
@@ -194,8 +194,8 @@ def test_sprite_input_is_appended_after_every_other_input(tmp_path):
     inputs = [i for i, a in enumerate(cmd) if a == "-i"]
     assert cmd[inputs[-1] + 1] == str(tmp_path / "sprites.txt")
     assert cmd[inputs[-1] - 4 : inputs[-1]] == ("-f", "concat", "-safe", "0")
-    # ann(1) + bo filler(2) + cy(1) + one unreached cell(1) + sprite(1).
-    assert len(inputs) == 6
+    # ann(2) + bo filler(2) + cy(2) + one unreached cell(1) + sprite(1).
+    assert len(inputs) == 8
 
 
 def test_the_sprite_stream_index_is_the_last_one(tmp_path):

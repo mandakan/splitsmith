@@ -250,22 +250,47 @@ def test_a_filler_tile_runs_the_whole_stage_at_the_canvas_rate():
     assert "-f lavfi -t 12.5 -i anullsrc=channel_layout=stereo:sample_rate=48000" in joined
 
 
-def test_a_filler_tile_shifts_the_input_indices_of_the_tiles_behind_it():
-    # Erik's filler burns two input slots (color + anullsrc), so Johan and
-    # Mathias are inputs 3 and 4 -- not 2 and 3. Indexing the graph by tile
-    # slot instead of by input would hand Johan Erik's silent track and
-    # drop Mathias' audio entirely.
+def test_every_tile_takes_two_inputs_and_the_graph_reads_each_by_index():
+    # A real tile opens its trim twice (video seeked, audio unseeked) and
+    # a filler burns two slots (color + anullsrc), so Johan is inputs 4/5
+    # and Mathias 6/7. Indexing the graph by tile slot instead of by
+    # input would hand a tile its own seeked video as audio or Erik's
+    # silent track, and drop Mathias' audio entirely.
     graph = _graph(
         mp4_grid.build_stage_command(
             _plan(missing="Erik"), canvas=mp4_grid.GridCanvas(), output_path=Path("/o.mp4")
         )
     )
-    assert "[0:v]" in graph and "[0:a]" in graph  # Anders
-    assert "[1:v]" in graph and "[2:a]" in graph  # Erik's color + anullsrc
-    assert "[3:v]" in graph and "[3:a]" in graph  # Johan
-    assert "[4:v]" in graph and "[4:a]" in graph  # Mathias
-    # The two indices the filler does not own must not be referenced.
-    assert "[2:v]" not in graph and "[1:a]" not in graph
+    assert "[0:v]" in graph and "[1:a]" in graph  # Anders: trim, trim
+    assert "[2:v]" in graph and "[3:a]" in graph  # Erik's color + anullsrc
+    assert "[4:v]" in graph and "[5:a]" in graph  # Johan
+    assert "[6:v]" in graph and "[7:a]" in graph  # Mathias
+    # The seeked video input is never read for audio, and the unseeked
+    # audio input never for video.
+    for n in (0, 2, 4, 6):
+        assert f"[{n}:a]" not in graph
+    for n in (1, 3, 5, 7):
+        assert f"[{n}:v]" not in graph
+
+
+def test_a_real_tile_cuts_its_audio_with_atrim_from_an_unseeked_second_read():
+    # Input-side -ss mis-cuts the audio of a stream-copied trim (the edit
+    # list): on a real match the sound landed 0.42 s early against its
+    # own picture. The video keeps the fast seek; the audio comes from a
+    # second, unseeked read of the same trim, bounded by -t, and is cut
+    # on decoded timestamps by atrim before the re-base.
+    cmd = mp4_grid.build_stage_command(_plan(), canvas=mp4_grid.GridCanvas(), output_path=Path("/o.mp4"))
+    joined = " ".join(cmd)
+    assert "-ss 1 -t 12.5 -i /trims/Anders.mp4 -t 13.5 -i /trims/Anders.mp4" in joined
+    graph = _graph(cmd)
+    assert "[1:a]atrim=start=1:duration=12.5,asetpts=PTS-STARTPTS," in graph
+    # A filler's anullsrc starts at zero: no cut on it.
+    filler = _graph(
+        mp4_grid.build_stage_command(
+            _plan(missing="Erik"), canvas=mp4_grid.GridCanvas(), output_path=Path("/o.mp4")
+        )
+    )
+    assert "[3:a]asetpts=PTS-STARTPTS," in filler
 
 
 # --- cells the roster does not reach -------------------------------------
@@ -571,7 +596,7 @@ def test_concat_names_nothing_when_it_is_given_no_roster():
 #: To regenerate after a *deliberate* change, print
 #: ``_default_off_fingerprint()`` and read the diff against the previous
 #: value in the commit that changes it. A surprise here is a regression.
-DEFAULT_OFF_ARGV_SHA256 = "94be2bea08809578634b32d709967ca46180639ee2312ee109f3a676663c2544"
+DEFAULT_OFF_ARGV_SHA256 = "8157331fa70a804fd2f51e4f4e5a16808db6640032b7a32cdef7337bfaf2cc83"
 
 
 def _matrix_tile(label: str, row: int, col: int, present: bool, lead: float) -> mp4_grid.GridTile:
@@ -679,8 +704,9 @@ def test_the_default_off_stage_command_names_no_overlay_machinery():
     assert "drawtext" not in joined
     assert "overlay=" not in joined
     assert "-f concat" not in joined
-    # two real tiles, one filler (video + audio), one unreached cell
-    assert cmd.count("-i") == 5
+    # two real tiles (trim twice each), one filler (video + audio), one
+    # unreached cell
+    assert cmd.count("-i") == 7
     assert "[grid]format=yuv420p[final]" in _graph_of(cmd)
 
 

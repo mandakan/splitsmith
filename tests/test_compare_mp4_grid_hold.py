@@ -304,7 +304,10 @@ def test_negative_hold_is_rejected_on_a_hand_built_plan():
 # --- the default-off guarantee ---------------------------------------------
 
 
-#: One stage command, captured verbatim from ``main`` at ``b6732de``.
+#: One stage command, captured verbatim from ``main`` at ``b6732de``
+#: and re-captured when the tile audio moved to an unseeked second read
+#: of the trim (the input-side ``-ss`` mis-cut it; see
+#: ``build_stage_command``).
 #:
 #: Not a hash: a hash proves something moved, this says what. Three
 #: shooters, one filler, one lead-padded tile, one unreached cell.
@@ -330,10 +333,18 @@ MAIN_STAGE_ARGV: tuple[str, ...] = (
     "12.5",
     "-i",
     "/trims/Bo.mov",
+    "-t",
+    "12.75",
+    "-i",
+    "/trims/Bo.mov",
     "-ss",
     "0.25",
     "-t",
     "12",
+    "-i",
+    "/trims/Cy.mov",
+    "-t",
+    "12.25",
     "-i",
     "/trims/Cy.mov",
     "-f",
@@ -350,11 +361,11 @@ MAIN_STAGE_ARGV: tuple[str, ...] = (
         "[2:v]setpts=PTS-STARTPTS,scale=960:540:force_original_aspect_ratio=decrease,"
         "pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25/1,"
         "tpad=stop_duration=12.5:stop_mode=add:color=black,trim=0:12.5[t1];"
-        "[3:v]tpad=start_duration=0.5:start_mode=add:color=black,setpts=PTS-STARTPTS,"
+        "[4:v]tpad=start_duration=0.5:start_mode=add:color=black,setpts=PTS-STARTPTS,"
         "scale=960:540:force_original_aspect_ratio=decrease,"
         "pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25/1,"
         "tpad=stop_duration=12.5:stop_mode=add:color=black,trim=0:12.5[t2];"
-        "[4:v]setpts=PTS-STARTPTS,scale=960:540:force_original_aspect_ratio=decrease,"
+        "[6:v]setpts=PTS-STARTPTS,scale=960:540:force_original_aspect_ratio=decrease,"
         "pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=25/1,"
         "tpad=stop_duration=12.5:stop_mode=add:color=black,trim=0:12.5[e0];"
         "[t0][t1][t2][e0]xstack=inputs=4:layout=0_0|960_0|0_540|960_540[grid];"
@@ -362,10 +373,10 @@ MAIN_STAGE_ARGV: tuple[str, ...] = (
         "[1:a]asetpts=PTS-STARTPTS,aresample=async=1,"
         "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
         "apad,atrim=0:12.5,asplit=2[a0][m0];"
-        "[2:a]asetpts=PTS-STARTPTS,aresample=async=1,"
+        "[3:a]atrim=start=0.25:duration=12.5,asetpts=PTS-STARTPTS,aresample=async=1,"
         "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
         "apad,atrim=0:12.5,asplit=2[a1][m1];"
-        "[3:a]asetpts=PTS-STARTPTS,adelay=500:all=1,aresample=async=1,"
+        "[5:a]atrim=start=0.25:duration=12,asetpts=PTS-STARTPTS,adelay=500:all=1,aresample=async=1,"
         "aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,"
         "apad,atrim=0:12.5,asplit=2[a2][m2];"
         "[m0][m1][m2]amix=inputs=3:normalize=1[amix]"
@@ -426,7 +437,7 @@ MAIN_STAGE_ARGV: tuple[str, ...] = (
 #: where a rows/cols swap is not a no-op), three filler counts and two
 #: canvases. Regenerate only alongside a *deliberate* change to the
 #: no-flags path, and say so in the commit.
-ZERO_HOLD_ARGV_SHA256 = "1d8e6d717f6f63d48b3d4804cd77839f94f1cbdb46b3dec7b9a8b4a3fcad7ba2"
+ZERO_HOLD_ARGV_SHA256 = "7f1b6faf3b205047501b3dff2309fc83a6e6f6c40c41d3145a7d40aa7fe6c138"
 
 _ZERO_HOLD_ROSTERS = (
     (("Ann", "Bo", "Cy"), 2, 2),
@@ -670,9 +681,9 @@ def test_the_hold_does_not_move_the_beep():
     assert lead in _graph_of(held)
     assert "adelay=500:all=1,aresample=async=1," in _graph_of(held)
 
-    # Two tiles + one filler + one unreached cell occupy inputs 0-4, so
-    # the still is input 5.
-    hold_chain = f"[5:v]setpts=PTS-STARTPTS,scale=1920:1080,setsar=1,fps=25/1,trim=0:{HOLD:g}[hold]"
+    # Two tiles (trim twice each) + one filler + one unreached cell
+    # occupy inputs 0-6, so the still is input 7.
+    hold_chain = f"[7:v]setpts=PTS-STARTPTS,scale=1920:1080,setsar=1,fps=25/1,trim=0:{HOLD:g}[hold]"
     expected = _graph_of(plain).replace(f"atrim=0:{ACTION:g}", f"atrim=0:{TOTAL:g}")
     expected = expected.replace(
         "[grid]format=yuv420p[final]",
