@@ -4199,6 +4199,25 @@ def register_job_bodies(state: AppState) -> None:
             message=(f"Done: {result.stage_count} stages, {result.duration_seconds:.1f}s{anom_suffix}"),
         )
 
+        # Issue #1000: the upload is its own job so it has its own
+        # progress and cancel, and so a failed upload never marks a
+        # finished render as failed. Same thread-to-loop bridge as
+        # ``_run_trim``'s shot_detect chain. ``again=True`` because the
+        # render just rewrote the sidecar: there is no earlier record.
+        if req.youtube_upload and result.fcpxml_path.suffix.lower() == ".mp4":
+            asyncio.run(
+                state.jobs.submit(
+                    kind="youtube_upload",
+                    shooter_slug=slug,
+                    args={
+                        "slug": slug,
+                        "filename": result.fcpxml_path.name,
+                        "privacy": req.youtube_privacy,
+                        "again": True,
+                    },
+                )
+            )
+
     def _run_generate_proxy(handle: JobHandle, *, raw_path: str) -> None:
         """Worker that builds a low-res scrub proxy for a raw upload.
 

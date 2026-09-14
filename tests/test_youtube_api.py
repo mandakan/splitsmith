@@ -262,3 +262,77 @@ def test_upload_job_reports_already_uploaded_as_a_failure_with_the_url(
 def test_format_mb() -> None:
     assert youtube_api._format_mb(412 * 1024 * 1024) == "412 MB"
     assert youtube_api._format_mb(int(1.9 * 1024**3)) == "1.9 GB"
+
+
+# --- chaining from the match export ----------------------------------------
+
+
+def _match_export_body(**over: Any) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "stage_numbers": [1, 2],
+        "head_pad_seconds": 0.5,
+        "tail_pad_seconds": 1.0,
+        "include_secondaries": False,
+        "include_overlay": False,
+    }
+    body.update(over)
+    return body
+
+
+def test_youtube_upload_needs_mp4_and_sidecar(export_client) -> None:
+    client, _root = export_client
+    r = client.post("/api/shooters/me/export/match", json=_match_export_body(youtube_upload=True))
+    assert r.status_code == 422
+    r = client.post(
+        "/api/shooters/me/export/match", json=_match_export_body(youtube_upload=True, output_format="mp4")
+    )
+    assert r.status_code == 422
+
+
+def _stub_mp4_render(monkeypatch: pytest.MonkeyPatch) -> None:
+    from splitsmith import mp4_render, youtube_sidecar
+    from splitsmith.ui import match_exports as match_exports_mod
+
+    def fake_render_mp4(comp: Any, *, output_path: Path, **kwargs: Any) -> mp4_render.Mp4RenderResult:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(b"\x00" * 100)
+        return mp4_render.Mp4RenderResult(output_path=output_path, duration_seconds=4.0)
+
+    monkeypatch.setattr(match_exports_mod.mp4_render, "render_mp4", fake_render_mp4)
+    monkeypatch.setattr(youtube_sidecar, "write_thumbnail", lambda *a, **k: None)
+
+
+def test_match_export_chains_an_upload_job(export_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    from .test_ui_server import _stub_match_export_probe, _wait_for_job, _wait_for_jobs_to_drain
+
+    client, _root = export_client
+    _stub_match_export_probe(monkeypatch)
+    _stub_mp4_render(monkeypatch)
+    oauth.save_connection(_conn("Mine"))
+    seen = _fake_upload(monkeypatch, video_id="chained")
+    r = client.post(
+        "/api/shooters/me/export/match",
+        json=_match_export_body(
+            output_format="mp4", youtube_sidecar=True, youtube_upload=True, youtube_privacy="private"
+        ),
+    )
+    assert r.status_code == 200, r.text
+    final = _wait_for_job(client, r.json()["id"])
+    assert final["status"] == "succeeded", final
+    jobs = _wait_for_jobs_to_drain(client)
+    uploads = [j for j in jobs if j["kind"] == "youtube_upload"]
+    assert len(uploads) == 1, jobs
+    assert uploads[0]["status"] == "succeeded", uploads[0]
+    assert seen["privacy"] == "private" and seen["again"] is True
+    assert seen["mp4"].name.endswith(".mp4")
+    assert uploads[0]["result"]["url"] == "https://youtu.be/chained"
+
+
+def test_match_export_without_the_flag_chains_nothing(export_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    from .test_ui_server import _stub_match_export_probe, _wait_for_job, _wait_for_jobs_to_drain
+
+    client, _root = export_client
+    _stub_match_export_probe(monkeypatch)
+    r = client.post("/api/shooters/me/export/match", json=_match_export_body())
+    _wait_for_job(client, r.json()["id"])
+    assert [j for j in _wait_for_jobs_to_drain(client) if j["kind"] == "youtube_upload"] == []

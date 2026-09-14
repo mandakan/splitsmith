@@ -27,7 +27,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .. import export_runs
 from ..compare.mp4_grid import DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH
@@ -162,6 +162,16 @@ class MatchExportRequest(BaseModel):
     # the blurred last frame) for this many seconds after its action in
     # the rendered MP4. 0 is off. Other renderers surface an anomaly.
     summary_hold_seconds: float = 0.0
+    # Issue #1000. Chain a ``youtube_upload`` job onto this export. Needs
+    # the sidecar (it is the upload's metadata) and a rendered MP4.
+    youtube_upload: bool = False
+    youtube_privacy: Literal["unlisted", "private", "public"] = "unlisted"
+
+    @model_validator(mode="after")
+    def _youtube_upload_needs_an_mp4_and_a_sidecar(self) -> MatchExportRequest:
+        if self.youtube_upload and not (self.youtube_sidecar and self.output_format == "mp4"):
+            raise ValueError("youtube_upload needs youtube_sidecar and output_format mp4")
+        return self
 
 
 class CompareGridRequest(BaseModel):
