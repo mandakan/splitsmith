@@ -314,8 +314,8 @@ describe("viewLabelForPath (#691)", () => {
     expect(viewLabelForPath("/jobs")).toBe("Jobs");
   });
 
-  it('maps "/beep-review" to "Beep review"', () => {
-    expect(viewLabelForPath("/beep-review")).toBe("Beep review");
+  it('maps "/beep-review" to "Audit" (the queue folded into Audit)', () => {
+    expect(viewLabelForPath("/beep-review")).toBe("Audit");
   });
 
   it('has no trailing segment for "/" or ""', () => {

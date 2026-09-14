@@ -116,9 +116,11 @@ export function Home() {
       audit: (slug, stage) => href("audit", slug, String(stage)),
       splits: (slug, stage) => href("results", slug, String(stage)),
       footage: (slug) => href("ingest", slug),
-      beep: (_slug, stage) => `${href("beep-review")}?stage=${stage}`,
+      // Beep confirmation is Audit's step 1 on desktop; the phone keeps
+      // its own beep surface (MobileBeepReview).
+      beep: (slug, stage) => (isMobile ? `${href("beep-review")}?stage=${stage}` : href("audit", slug, String(stage))),
     }),
-    [href],
+    [href, isMobile],
   );
 
   async function accept(slug: string, stage: number) {

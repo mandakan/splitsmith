@@ -1,4 +1,3 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * The stage's waveform wrapped into stacked rows like a text editor
  * wraps a long line: whole stage on one screen, playhead sweeping row
@@ -106,7 +105,7 @@ export function WrappedWaveform({
         const toX = (t: number) => ((t - rowStart) / rowDur) * 1000;
         return (
           <div key={r} className="flex min-h-0 flex-1 items-stretch gap-1">
-            <span className="w-8 shrink-0 self-center text-right font-mono text-[10px] text-muted">
+            <span className="w-8 shrink-0 self-center text-right font-mono text-xs text-muted">
               {formatRowStart(rowStart)}
             </span>
             <div

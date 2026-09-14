@@ -13,7 +13,6 @@ import {
   LayoutGrid,
   MonitorPlay,
   Users,
-  Volume2,
 } from "lucide-react";
 
 /** Shared disabled-row hint for footage-dependent surfaces. Single
@@ -87,6 +86,8 @@ export function matchNavItems(args: {
       badgeKind: "count",
     },
     {
+      // Beep confirmation is step 1 of Audit (UX PR 5); the pending
+      // count that used to badge the Beep review row badges Audit.
       key: "audit",
       group: "review",
       to: shooterSlug ? `${base}/audit/${shooterSlug}` : `${base}/shooters?pick=audit`,
@@ -94,15 +95,9 @@ export function matchNavItems(args: {
       label: "Audit",
       disabled: !hasFootage,
       disabledHint: footageHint,
-    },
-    {
-      key: "beep-review",
-      group: "review",
-      to: `${base}/beep-review`,
-      icon: <Volume2 className="size-[15px]" />,
-      label: "Beep review",
       count: beepReviewPendingCount,
       badgeKind: "pending",
+      badgeAriaLabel: `${beepReviewPendingCount} ${beepReviewPendingCount === 1 ? "beep" : "beeps"} to confirm`,
     },
     {
       key: "triage",

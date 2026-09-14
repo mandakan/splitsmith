@@ -1,4 +1,3 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * Mobile audit screen (#700 follow-up, mobile audit UI program).
  *
@@ -24,6 +23,8 @@ import { ZoomLane, type ZoomFactor } from "@/components/audit/mobile/ZoomLane";
 import type { AuditMarker } from "@/components/MarkerLayer";
 import { MobileConfirmSheet } from "@/components/MobileConfirmSheet";
 import { Snackbar, type SnackState } from "@/components/Snackbar";
+import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { Portal } from "@/components/ui/Portal";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import {
@@ -428,7 +429,7 @@ export function MobileAudit() {
     );
     return (
       <div className="mx-auto max-w-md p-4">
-        <h1 className="mb-4 font-display text-lg uppercase tracking-wide">Audit</h1>
+        <PageHeader title="Audit" />
         {stages.length === 0 ? (
           <p className="text-sm text-muted">No stages with footage yet.</p>
         ) : (
@@ -462,18 +463,20 @@ export function MobileAudit() {
             >
               <ArrowLeft className="size-5" aria-hidden />
             </button>
-            <span className="font-display text-sm uppercase tracking-wide">
-              Audit . stage {stageNumber}
+            <span className="text-md font-medium text-ink">
+              <span className="mr-1.5 font-mono text-sm text-led">{String(stageNumber).padStart(2, "0")}</span>
+              Audit
             </span>
             {audit != null && (
-              <button
+              <Button
                 type="button"
+                variant="primary"
                 disabled={readOnly || !dirty || saving}
                 onClick={handleSave}
-                className="btn-led-fill ml-auto min-h-11 rounded-md px-4 disabled:opacity-50"
+                className="ml-auto min-h-11"
               >
                 {saving ? "Saving..." : dirty ? "Save *" : "Save"}
-              </button>
+              </Button>
             )}
           </header>
 

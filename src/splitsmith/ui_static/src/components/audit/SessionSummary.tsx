@@ -1,7 +1,8 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 import { CheckCircle2 } from "lucide-react";
 
-import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/Label";
+import { Stat, StatStrip } from "@/components/ui/Stat";
 
 export interface SessionSummaryStat {
   label: string;
@@ -25,10 +26,10 @@ export interface SessionSummaryProps {
 }
 
 /**
- * Audit-complete card. Renders in place of the StageActionBar CTA when
- * the operator finishes the last stage of the last shooter (?done=1).
- * Matches the design's ARSessionSummary -- done-green hairline, big
- * "Audit complete" heading, 4-up stat block.
+ * Audit-complete block. Renders under the canvas when the operator
+ * finishes the last stage of the last shooter (?done=1): a done Label,
+ * one heading, the stats as a strip, and the next step as the one
+ * primary (Audit the next shooter while shooters remain, else Export).
  */
 export function SessionSummary({
   shooterName,
@@ -38,113 +39,44 @@ export function SessionSummary({
   onAuditNextShooter,
   onExport,
 }: SessionSummaryProps) {
-  // With shooters left to audit, "Audit next" keeps the primary (green)
-  // slot and Export renders as a secondary link; once the whole match is
-  // signed off, Export is the natural next step and takes the primary.
   const hasNext = Boolean(onAuditNextShooter && nextShooterLabel);
   return (
-    <div
-      role="region"
-      aria-label="Audit complete"
-      className="relative overflow-hidden rounded-3xl border border-done/40 bg-surface px-7 py-6 shadow-[inset_0_0_0_1px_var(--color-rule),0_24px_60px_-24px_rgba(0,0,0,0.7),0_0_32px_color-mix(in_srgb,_var(--color-done)_22%,_transparent)]"
-      style={{
-        background:
-          "linear-gradient(180deg, color-mix(in srgb, var(--color-done) 6%, var(--color-surface)) 0%, var(--color-surface) 100%)",
-      }}
-    >
-      <span
-        aria-hidden
-        className="absolute inset-y-0 left-0 w-[3px] bg-done shadow-[0_0_14px_var(--color-done-glow)]"
-      />
-      <div className="flex items-start gap-4">
-        <span
-          aria-hidden
-          className="inline-flex size-12 shrink-0 items-center justify-center rounded-full border border-done/50 bg-done/15 text-done shadow-[0_0_24px_var(--color-done-glow)]"
-        >
-          <CheckCircle2 className="size-6" strokeWidth={2.6} />
+    <div role="region" aria-label="Audit complete" className="rounded-[10px] border border-rule bg-surface p-5">
+      <div className="flex flex-wrap items-start gap-4">
+        <span aria-hidden className="inline-flex size-9 shrink-0 items-center justify-center rounded-full border border-done/45 text-done">
+          <CheckCircle2 className="size-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <div className="font-mono text-[0.625rem] font-bold uppercase tracking-[0.18em] text-done">
-            Audit complete
-          </div>
-          <div className="mt-1 font-display text-2xl font-bold uppercase leading-tight tracking-[-0.01em] text-ink">
-            {shooterName
-              ? `${shooterName}'s stages are signed off`
-              : "All stages signed off"}
-          </div>
-          <p className="mt-1 max-w-prose text-sm leading-snug text-muted">
-            Shot tables are written. Trim caches are warm. Ready for Coach
-            review or FCPXML export.
-          </p>
+          <Label tone="done">Audit complete</Label>
+          <h2 className="mt-1 text-lg font-semibold text-ink">
+            {shooterName ? `${shooterName}'s stages are signed off` : "All stages signed off"}
+          </h2>
+          <p className="mt-1 max-w-[52ch] text-md text-muted">Shot tables are written. Next: Coach, Splits or Export.</p>
         </div>
-        <div className="ml-auto inline-flex items-center gap-2 self-start">
+        <div className="flex flex-wrap items-center gap-2">
           {onJumpToOverview ? (
-            <button
-              type="button"
-              onClick={onJumpToOverview}
-              className="inline-flex items-center rounded-md border border-rule bg-surface-2 px-3.5 py-2 font-display text-[0.75rem] font-bold uppercase tracking-[0.08em] text-ink-2 hover:bg-surface-3 hover:text-ink"
-            >
-              Match overview
-            </button>
+            <Button type="button" onClick={onJumpToOverview}>
+              Overview
+            </Button>
           ) : null}
           {onExport ? (
-            <button
-              type="button"
-              onClick={onExport}
-              className={cn(
-                "inline-flex items-center rounded-md px-3.5 py-2 font-display text-[0.75rem] font-bold uppercase tracking-[0.08em]",
-                hasNext
-                  ? "border border-rule bg-surface-2 text-ink-2 hover:bg-surface-3 hover:text-ink"
-                  : "border-0 bg-done text-bg shadow-[0_0_0_1px_var(--color-done),0_0_22px_var(--color-done-glow)] hover:brightness-110",
-              )}
-            >
+            <Button type="button" variant={hasNext ? "default" : "primary"} onClick={onExport}>
               Export
-            </button>
+            </Button>
           ) : null}
           {hasNext ? (
-            <button
-              type="button"
-              onClick={onAuditNextShooter}
-              className="inline-flex items-center rounded-md border-0 bg-done px-3.5 py-2 font-display text-[0.75rem] font-bold uppercase tracking-[0.08em] text-bg shadow-[0_0_0_1px_var(--color-done),0_0_22px_var(--color-done-glow)] hover:brightness-110"
-            >
+            <Button type="button" variant="primary" onClick={onAuditNextShooter}>
               Audit {nextShooterLabel}
-            </button>
+            </Button>
           ) : null}
         </div>
       </div>
-
       {stats.length > 0 ? (
-        <div
-          className={cn(
-            "mt-5 grid gap-3",
-            stats.length === 1
-              ? "grid-cols-1"
-              : stats.length === 2
-                ? "grid-cols-2"
-                : stats.length === 3
-                  ? "grid-cols-3"
-                  : "grid-cols-4",
-          )}
-        >
+        <StatStrip className="mt-4">
           {stats.map((s) => (
-            <div
-              key={s.label}
-              className="rounded-2xl border border-rule bg-surface-2 px-4 py-3"
-            >
-              <div className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-subtle">
-                {s.label}
-              </div>
-              <div className="mt-1 font-mono text-xl font-bold leading-none tabular-nums text-ink">
-                {s.value}
-              </div>
-              {s.sub ? (
-                <div className="mt-1 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-                  {s.sub}
-                </div>
-              ) : null}
-            </div>
+            <Stat key={s.label} label={s.label} value={s.value} unit={s.sub} />
           ))}
-        </div>
+        </StatStrip>
       ) : null}
     </div>
   );

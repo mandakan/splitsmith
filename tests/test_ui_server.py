@@ -9690,6 +9690,51 @@ def test_beep_queue_confirm_primary_chains_shot_detect(tmp_path: Path) -> None:
             _wait_for_job(client, j["id"])
 
 
+def test_beep_queue_confirm_primary_submits_trim_when_uncached(tmp_path: Path) -> None:
+    """Confirming the detector's beep as-is on an untrimmed stage must
+    submit the trim (which chains detection once it lands). Before this
+    fix only a manual override chained a trim; a plain confirm left the
+    stage untrimmed with no shots until someone pressed Run trim (spec
+    2026-09-13 s4.4, UX PR 5)."""
+    root = tmp_path / "match"
+    project = _build_project_with_primary(
+        root,
+        "Confirm Untrimmed",
+        beep_time=22.5,
+        beep_source="auto",
+        beep_confidence=0.4,
+        beep_reviewed=False,
+    )
+    assert project.stages[0].videos[0].processed.get("trim") is not True
+    assert project.stages[0].time_seconds > 0
+    project.save(root / "shooters" / "me")
+    primary_id = MatchProject.load(root / "shooters" / "me").stages[0].videos[0].video_id
+    app = _match_create_app(project_root=root, project_name="ignored")
+    client = _MatchClient(app)
+    state = app.state.splitsmith_state
+
+    release = threading.Event()
+
+    def _blocked(_handle, **_args) -> None:
+        release.wait(timeout=10.0)
+
+    state.jobs.bodies.register("trim", _blocked)
+    try:
+        resp = client.post(
+            "/api/match/beep-queue/confirm",
+            json={"slug": "me", "stage_number": 1, "video_id": primary_id},
+        )
+        assert resp.status_code == 200, resp.text
+        jobs = client.get("/api/me/jobs").json()
+        kinds = [(j["kind"], j["shooter_slug"], j["stage_number"]) for j in jobs]
+        assert ("trim", "me", 1) in kinds, kinds
+    finally:
+        release.set()
+    for j in client.get("/api/me/jobs").json():
+        if j["kind"] == "trim":
+            _wait_for_job(client, j["id"])
+
+
 def test_beep_queue_threshold_respects_project_override(tmp_path: Path) -> None:
     """Project-level threshold override flows through to item status.
 

@@ -187,9 +187,9 @@ export interface ZoomControlsProps {
   className?: string;
 }
 
-const MIN_ZOOM = 0.25;
-const MAX_ZOOM = 16;
-const ZOOM_STEP = 1.5;
+export const MIN_ZOOM = 0.25;
+export const MAX_ZOOM = 16;
+export const ZOOM_STEP = 1.5;
 
 export function ZoomControls({ zoom, onZoomChange, className }: ZoomControlsProps) {
   const display = useMemo(() => {

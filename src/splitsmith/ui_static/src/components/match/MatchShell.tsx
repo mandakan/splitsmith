@@ -91,7 +91,8 @@ export function viewLabelForPath(relativePath: string): string | null {
   if (relativePath.startsWith("/ingest") || relativePath.startsWith("/videos"))
     return "Footage";
   if (relativePath.startsWith("/results")) return "Splits";
-  if (relativePath.startsWith("/beep-review")) return "Beep review";
+  // The beep queue folded into Audit (UX PR 5); the route redirects.
+  if (relativePath.startsWith("/beep-review")) return "Audit";
   if (relativePath.startsWith("/jobs")) return "Jobs";
   if (relativePath.startsWith("/shooters")) return "Shooters";
   return null;

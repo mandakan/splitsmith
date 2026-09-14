@@ -22,12 +22,19 @@ describe("matchNavItems shape", () => {
       ["videos", "prepare", "Footage"],
       ["shooters", "prepare", "Shooters"],
       ["audit", "review", "Audit"],
-      ["beep-review", "review", "Beep review"],
       ["triage", "review", "Triage"],
       ["results", "analyse", "Splits"],
       ["coach", "analyse", "Coach"],
       ["export", "deliver", "Export"],
     ]);
+  });
+});
+
+describe("matchNavItems audit entry", () => {
+  it("badges the beeps still to confirm (beep confirmation is Audit's step 1)", () => {
+    const audit = matchNavItems({ ...base, beepReviewPendingCount: 2 }).find((i) => i.key === "audit");
+    expect(audit).toMatchObject({ count: 2, badgeKind: "pending", badgeAriaLabel: "2 beeps to confirm" });
+    expect(matchNavItems(base).find((i) => i.key === "beep-review")).toBeUndefined();
   });
 });
 

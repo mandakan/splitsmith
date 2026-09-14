@@ -44,7 +44,8 @@ function sections(mode: HelpMode): Section[] {
     { keys: ["Space"], desc: "Play / pause" },
     { keys: ["←", "→"], desc: "Nudge playhead 250 ms" },
     { keys: ["Shift", "←", "→"], desc: "Nudge playhead 25 ms" },
-    { keys: ["R"], desc: "Toggle loop (snaps back to anchor)" },
+    { keys: ["R"], desc: "Reject the current shot (manual: delete)" },
+    { keys: ["F"], desc: "Jump to the next flagged shot" },
   ];
   const markers: ShortcutRow[] = [
     { keys: ["M"], desc: "Next kept shot" },
@@ -58,7 +59,7 @@ function sections(mode: HelpMode): Section[] {
     { keys: ["Double-click"], desc: "Add a manual marker at click time" },
   ];
   const view: ShortcutRow[] = [
-    { keys: ["L"], desc: "Toggle the marker list drawer" },
+    { keys: ["L"], desc: "Toggle loop (snaps back to anchor)" },
     { keys: ["P", "(hold)"], desc: "Peek rejected shots while held" },
     { keys: ["+"], desc: "Zoom in" },
     { keys: ["0"], desc: "Fit waveform to view" },

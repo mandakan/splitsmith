@@ -10949,10 +10949,14 @@ def create_app(
         for a primary whose trim is already cached, a queued
         ``shot_detect``. That submit is the explicit unblock point for the
         downstream pipeline (auto-detect leaves the flag False so the
-        ensemble doesn't burn cycles on an unconfirmed beep). No-op for
-        secondaries (no shot timeline of their own) and for primaries
-        whose trim hasn't run yet -- the trim chain fires detection itself
-        once the gate is open.
+        ensemble doesn't burn cycles on an unconfirmed beep). A video
+        whose trim is not cached gets the trim submitted instead (when
+        the stage time and beep allow it, same rule as
+        ``_maybe_chain_trim``); the trim job chains detection itself for
+        a reviewed primary. Before UX PR 5 only a manual override chained
+        the trim, so confirming the detector's time as-is on an untrimmed
+        stage left it untrimmed with no shots. Secondaries get their trim
+        and no detection (no shot timeline of their own).
 
         Mirrors mark state only, like the beep override endpoint: a
         ``desktop``-origin match has no raw media hosted-side to detect
@@ -10970,9 +10974,12 @@ def create_app(
                 {"shots": [], "detection": STUB_AUDIT_DETECTION},
                 version=audit_version,
             )
+        if not video.processed.get("trim"):
+            stage = state.shooter_project(slug).stage(stage_number)
+            await _maybe_chain_trim(slug, stage, video)
+            return
         if (
             video.role == "primary"
-            and video.processed.get("trim")
             and await state.jobs.find_active(kind="shot_detect", stage_number=stage_number, shooter_slug=slug)
             is None
         ):

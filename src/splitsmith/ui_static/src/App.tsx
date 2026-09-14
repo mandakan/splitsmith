@@ -28,7 +28,7 @@ import { ShooterScopedRoute } from "@/components/ShooterScopedRoute";
 import { Login } from "@/pages/Login";
 import { Audit } from "@/pages/Audit";
 import { MobileAudit } from "@/pages/MobileAudit";
-import { BeepReview } from "@/pages/BeepReview";
+import { BeepReviewRedirect } from "@/components/match/BeepReviewRedirect";
 import { MobileBeepReview } from "@/pages/MobileBeepReview";
 import { Coach } from "@/pages/Coach";
 import { Compare } from "@/pages/Compare";
@@ -92,13 +92,12 @@ function RedirectLabSlug() {
   return <RedirectLegacyLabSlug />;
 }
 
-/* Beep review is the one match-scoped screen with a real mobile surface
- * (slice 3, #326 follow-up) - every other match-scoped route still goes
- * through DesktopGate. Below the 768 px breakpoint this renders the
- * card-pager MobileBeepReview instead of gating the desktop layout. */
+/* Beep review keeps its phone surface (the card-pager MobileBeepReview,
+ * slice 3, #326 follow-up). On desktop the queue folded into Audit as its
+ * step 1 (UX PR 5), so the route redirects there for one release. */
 function BeepReviewRoute() {
   const isMobile = useIsMobile();
-  return isMobile ? <MobileBeepReview /> : <BeepReview />;
+  return isMobile ? <MobileBeepReview /> : <BeepReviewRedirect />;
 }
 
 /* Audit joins beep review as a match-scoped screen with a real mobile

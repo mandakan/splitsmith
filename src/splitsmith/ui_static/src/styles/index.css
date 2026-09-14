@@ -195,7 +195,7 @@
   --color-status-warning:           #FBBF24;       /* live (amber) */
   --color-status-info:              #06B6D4;       /* beep cyan */
 
-  --color-marker-detected:          #06B6D4;       /* beep */
+  --color-marker-detected:          #C9CCD2;       /* ink-2: a shot, not the beep (spec 2026-09-13 s5) */
   --color-marker-rejected:          #6B7079;       /* cold */
   --color-marker-manual:            #A78BFA;       /* manual */
 

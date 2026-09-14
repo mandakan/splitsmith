@@ -1,4 +1,3 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * Audit screen v2 (#15).
  *
@@ -35,20 +34,15 @@ import {
   useParams,
   useSearchParams,
 } from "react-router-dom";
-import {
-  AlertTriangle,
-  Crosshair,
-  HelpCircle,
-  ListChecks,
-  Loader2,
-  MoreHorizontal,
-} from "lucide-react";
+import { Loader2 } from "lucide-react";
 
-import { AnomalyChips } from "@/components/audit/AnomalyChips";
 import { AnomalyPins } from "@/components/audit/AnomalyPins";
-import { BeepAnomalyBanner } from "@/components/audit/BeepAnomalyBanner";
-import { BeepStatusChip, type BeepStatusChipHandle } from "@/components/audit/BeepStatusChip";
+import { AuditFooter } from "@/components/audit/AuditFooter";
+import { BeepStep } from "@/components/audit/BeepStep";
+import { CurrentShotLine } from "@/components/audit/CurrentShotLine";
 import { PrereqGate } from "@/components/audit/PrereqGate";
+import { ShotList } from "@/components/audit/ShotList";
+import { TransportLine } from "@/components/audit/TransportLine";
 import {
   CamSyncPill,
   type CamSyncState,
@@ -57,39 +51,23 @@ import { CamGridModal } from "@/components/audit/CamGridModal";
 import { MultiCamColumn, type CamLayout } from "@/components/audit/MultiCamColumn";
 import { SessionSummary } from "@/components/audit/SessionSummary";
 import {
-  ShortcutHints,
-  ShortcutHintsRestore,
-} from "@/components/audit/ShortcutHints";
-import { StageActionBar } from "@/components/audit/StageActionBar";
-import { StageChipRail } from "@/components/audit/StageChipRail";
-import {
   DEFAULT_FILTERS,
-  FilterBar,
-  ZoomControls,
   type MarkerFilters,
   visibleKindsFromFilters,
   zoomToPixelsPerSecond,
 } from "@/components/AuditControls";
 import { HelpOverlay } from "@/components/HelpOverlay";
 import { useConfirm } from "@/components/useConfirm";
-import { ListDrawer } from "@/components/ListDrawer";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
-import { ShotStepper } from "@/components/ShotStepper";
 import { VideoPanel } from "@/components/VideoPanel";
 import { Waveform, type WaveformView } from "@/components/Waveform";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Chip } from "@/components/ui/Chip";
 import { Kbd } from "@/components/ui/Kbd";
+import { Label } from "@/components/ui/Label";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { Portal } from "@/components/ui/Portal";
-import { StatusPill } from "@/components/ui/StatusPill";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import {
   ApiError,
   api,
@@ -103,6 +81,8 @@ import {
 import { detectAnomalies, keptShotsFromMarkers } from "@/lib/anomalies";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { buildAuditJson, deriveMarkers } from "@/lib/audit-doc";
+import { beepStepVideos, headerState, nextFlaggedIndex, shotRows } from "@/lib/auditStep";
+import { isJobActive } from "@/lib/jobs";
 import { planServedClip } from "@/lib/camPlayback";
 import { computeAuditNextStep } from "@/lib/audit-next-step";
 import { useMatchHref } from "@/lib/matchHref";
@@ -113,6 +93,17 @@ import { cn } from "@/lib/utils";
 
 const PEAK_BINS = 1500;
 const MAX_UNDO = 50;
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+const MOD_LABEL = IS_MAC ? "Cmd" : "Ctrl";
+const MOD_GLYPH = IS_MAC ? "\u2318" : "\u2303";
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/** Row style for the transport line's overflow menu items. */
+const MENU_ITEM =
+  "flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-md text-ink-2 hover:bg-surface-2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-led";
 const K_AUTO_PROGRESS_KEY = "splitsmith.audit.k_auto_progress";
 
 /** Region-loop window around the focused marker (#29): 0.5 s of pre-roll
@@ -162,32 +153,11 @@ export function Audit() {
   // Stepper navigates kept shots (detected + manual) in time order. The
   // index is decoupled from the playhead -- scrubbing doesn't reset it.
   const [currentShotIndex, setCurrentShotIndex] = useState(0);
-  const [showDrawer, setShowDrawer] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  // Shortcut hints strip below the toolbar. Visible by default; dismiss
-  // persists per-user via localStorage so a returning shooter who has
-  // already memorised the keys doesn't have to dismiss it every session.
-  const [hintsDismissed, setHintsDismissed] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem("splitsmith.audit.shortcutHints") === "hidden";
-  });
-  const dismissHints = useCallback(() => {
-    setHintsDismissed(true);
-    try {
-      window.localStorage.setItem("splitsmith.audit.shortcutHints", "hidden");
-    } catch {
-      // localStorage can throw (private mode, quota); the in-memory
-      // state still hides the strip for the current session.
-    }
-  }, []);
-  const showHints = useCallback(() => {
-    setHintsDismissed(false);
-    try {
-      window.localStorage.removeItem("splitsmith.audit.shortcutHints");
-    } catch {
-      // see above.
-    }
-  }, []);
+  // Step 1 (the beep) in place of the editor: forced by Re-pick, or by a
+  // camera pill / the ``?beep=<video_id>`` redirect from the old queue.
+  const [repick, setRepick] = useState(false);
+  const [beepFocusVideoId, setBeepFocusVideoId] = useState<string | null>(null);
 
   // Save flow (Step 5).
   // sessionEventsRef accumulates audit_events for this session; appended
@@ -196,12 +166,6 @@ export function Audit() {
   const sessionEventsRef = useRef<AuditEvent[]>([]);
   const isDirtyRef = useRef(false);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: "idle" });
-
-  // Ping handle for the toolbar's BeepStatusChip. PrereqGate's beep row
-  // (and any future surface that wants to point at "the beep") calls
-  // flash() here -- the chip owns beep state, so re-pick affordances
-  // never duplicate.
-  const beepChipRef = useRef<BeepStatusChipHandle>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   // Focus target for the editor shell. Focused on mount so the page owns
@@ -244,11 +208,8 @@ export function Audit() {
   // scrubbing.
   const [camLayout, setCamLayout] = useState<CamLayout>("focus");
 
-  // Beep editing previously lived here as a "sync mode" inline picker.
-  // That UI moved to /beep-review (#396); per-cam pills + the toolbar
-  // chip are read-only on this page. The amber BeepAnomalyBanner above
-  // and every per-cam pill deep-link into the queue with this exact
-  // item active -- see ``openBeepReview`` below.
+  // Beep editing is step 1 of this page (BeepStep); the header's Re-pick
+  // and every per-cam pill open it in place -- see ``openBeepReview``.
   // Anchor for loop-to-start semantics: the audit-timeline position
   // playback last started from (or where the user last scrubbed). On
   // pause / end-of-clip while loopMode is on, the playhead snaps back
@@ -384,8 +345,6 @@ export function Audit() {
       })),
     [stagesWithPrimary],
   );
-
-  const stageRailItems = stageSelectorOptions;
 
   // Neighbour stage numbers for prev/next nav. `null` at the boundaries
   // so the header buttons disable instead of wrapping -- accidental wrap
@@ -540,7 +499,8 @@ export function Audit() {
     setActiveVideoIndex(0);
     setFocusedMarkerId(null);
     setCurrentShotIndex(0);
-    setShowDrawer(false);
+    setRepick(false);
+    setBeepFocusVideoId(null);
     setZoom(null);
     setFilters(DEFAULT_FILTERS);
     undoStackRef.current = [];
@@ -1071,13 +1031,6 @@ export function Audit() {
     return null;
   }, [keptShots, auditBeep, stage, primary?.beep_reviewed]);
 
-  // Anomaly chips shown above the waveform. The "beep looks wrong"
-  // diagnostic used to ride along as a synthetic warn chip here; it now
-  // lives on BeepStatusChip directly (tooltip + amber tone), so the
-  // anomaly row reflects only the structured shot-level anomalies. One
-  // signal, one home, attached to its trigger.
-  const anomalyChips = anomalies;
-
   // Whenever the kept-shot list shrinks (reject / delete), keep the index
   // in range. Don't change otherwise -- the user's position is sticky.
   useEffect(() => {
@@ -1323,14 +1276,11 @@ export function Audit() {
   // Open the /beep-review queue with this exact item active. Replaces
   // the old per-cam "start sync" entry; beep editing lives in the
   // queue now (#396).
-  const openBeepReview = useCallback(
-    (cam: StageVideo) => {
-      if (stageNumber == null) return;
-      const focusKey = `${slug}::${stageNumber}::${cam.video_id}`;
-      navigate(`${href("beep-review")}?focus=${encodeURIComponent(focusKey)}`);
-    },
-    [navigate, href, slug, stageNumber],
-  );
+  // A camera pill's "sync" opens step 1 on that camera, in place.
+  const openBeepReview = useCallback((cam: StageVideo) => {
+    setBeepFocusVideoId(cam.video_id);
+    setRepick(true);
+  }, []);
 
   // ---- Global keyboard shortcuts -----------------------------------------
 
@@ -1450,16 +1400,30 @@ export function Audit() {
           return;
         }
         if (e.key === "l" || e.key === "L") {
+          // Loop ("L" as in the old review SPA); the visible button next
+          // to play/pause matches the same icon.
           e.preventDefault();
-          setShowDrawer((v) => !v);
+          setLoopMode((v) => !v);
           return;
         }
         if (e.key === "r" || e.key === "R") {
-          // Old review SPA used L for loop; L is now the drawer here, so
-          // loop moves to R ("repeat"). Visible button next to play/pause
-          // matches the same icon.
+          // Reject the current shot (the footer's R). Manual markers are
+          // deleted, detected ones flip to rejected.
           e.preventDefault();
-          setLoopMode((v) => !v);
+          const idx = Math.min(currentShotIndex, keptShots.length - 1);
+          const target = keptShots[idx] ?? null;
+          if (target) handleMarkerDelete(target);
+          return;
+        }
+        if (e.key === "f" || e.key === "F") {
+          // Next flagged shot, wrapping.
+          e.preventDefault();
+          const next = nextFlaggedIndex(shotRows(markers, anomalies).all, currentShotIndex);
+          if (next != null && keptShots[next]) {
+            setCurrentShotIndex(next);
+            setFocusedMarkerId(keptShots[next].id);
+            handleScrub(keptShots[next].time);
+          }
           return;
         }
         if ((e.key === "Delete" || e.key === "Backspace") && focusedMarkerId) {
@@ -1539,6 +1503,7 @@ export function Audit() {
     navigateToStage,
     prevStageNumber,
     nextStageNumber,
+    anomalies,
   ]);
 
   // Stage switch / unmount: flush any pending nudge bracket so the
@@ -1619,50 +1584,113 @@ export function Audit() {
   // here in a previous iteration; those moved to /beep-review.
   const displayPeaks = peaks;
 
+  // ---- Step 1 / step 2 and the processing chain ---------------------------
+
+  const rows = useMemo(() => shotRows(markers, anomalies), [markers, anomalies]);
+  // Step 1 when a video on the stage still needs its beep confirmed, or
+  // on Re-pick. Auto-trusted beeps are already reviewed server-side.
+  const beepStep = stage != null && (repick || beepStepVideos(stage).length > 0);
+  // The ``?beep=<video_id>`` redirect from the old queue page opens step 1
+  // on that camera; consumed once.
+  useEffect(() => {
+    const v = searchParams.get("beep");
+    if (v) {
+      setBeepFocusVideoId(v);
+      setRepick(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- read once on mount
+  }, []);
+
+  const reloadPeaks = useCallback(() => {
+    if (stageNumber == null) return;
+    api
+      .getStagePeaks(slug, stageNumber, PEAK_BINS)
+      .then((np) => setPeaks(np))
+      .catch(() => {});
+  }, [slug, stageNumber]);
+  const reloadAudit = useCallback(async () => {
+    if (stageNumber == null) return;
+    const a = await api.getStageAudit(slug, stageNumber);
+    setAudit(a);
+    setMarkers(deriveMarkers(a));
+  }, [slug, stageNumber]);
+  const reloadProject = useCallback(async () => {
+    try {
+      setProject(await api.getProject(slug));
+    } catch {
+      /* the next poll or navigation refetches */
+    }
+  }, [slug]);
+
+  // Confirm chains trim -> shot_detect for this shooter and stage; the
+  // shell's poller is the signal (one poller per shell). While a chain
+  // job is active the page shows its progress; when the active set goes
+  // empty, refetch so the gate flips to the editor without a reload.
+  const jobs = outletCtx?.jobs ?? [];
+  const chainJob = jobs.find(
+    (j) =>
+      isJobActive(j) &&
+      (j.kind === "trim" || j.kind === "shot_detect") &&
+      j.shooter_slug === slug &&
+      j.stage_number === stageNumber,
+  );
+  const chainRunning = chainJob ? { kind: chainJob.kind, progress: chainJob.progress ?? null } : null;
+  const chainWasRunningRef = useRef(false);
+  useEffect(() => {
+    if (chainJob) {
+      chainWasRunningRef.current = true;
+      return;
+    }
+    if (!chainWasRunningRef.current) return;
+    chainWasRunningRef.current = false;
+    void reloadProject();
+    reloadPeaks();
+    void reloadAudit();
+  }, [chainJob, reloadProject, reloadPeaks, reloadAudit]);
+
+  const handleBeepConfirmed = useCallback(
+    async (next: { slug: string; stageNumber: number } | null) => {
+      setRepick(false);
+      setBeepFocusVideoId(null);
+      await reloadProject();
+      reloadPeaks();
+      void reloadAudit();
+      if (next && (next.slug !== slug || next.stageNumber !== stageNumber)) {
+        navigate(href("audit", next.slug, String(next.stageNumber)));
+      }
+    },
+    [reloadProject, reloadPeaks, reloadAudit, navigate, href, slug, stageNumber],
+  );
+
   // ---- Render ------------------------------------------------------------
 
   if (projectError) {
     return (
-      <div className="space-y-4">
-        <h1 className="text-2xl font-semibold tracking-tight">Audit</h1>
-        <Card>
-          <CardHeader>
-            <CardTitle>Failed to load project</CardTitle>
-            <CardDescription>{projectError}</CardDescription>
-          </CardHeader>
-        </Card>
+      <div className="px-4 py-4 md:px-7">
+        <PageHeader title="Audit" />
+        <p role="alert" className="text-sm text-led-text">
+          Failed to load project: {projectError}
+        </p>
       </div>
     );
   }
 
   if (!project) {
     return (
-      <div className="space-y-4">
-        <h1 className="text-2xl font-semibold tracking-tight">Audit</h1>
-        <Card>
-          <CardContent className="flex items-center gap-2 py-6 text-muted">
-            <Loader2 className="size-4 animate-spin" /> Loading project...
-          </CardContent>
-        </Card>
+      <div className="flex h-64 items-center justify-center gap-2 text-md text-muted">
+        <Loader2 className="size-4 animate-spin" /> Loading project...
       </div>
     );
   }
 
   if (stagesWithPrimary.length === 0) {
     return (
-      <div className="space-y-4">
-        <h1 className="text-2xl font-semibold tracking-tight">Audit</h1>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Crosshair className="size-5" /> Nothing to audit yet
-            </CardTitle>
-            <CardDescription>
-              Assign a primary video to at least one stage on the Ingest screen.
-              Audit always operates on a stage's primary audio.
-            </CardDescription>
-          </CardHeader>
-        </Card>
+      <div className="px-4 py-4 md:px-7">
+        <PageHeader title="Audit" />
+        <p className="max-w-[52ch] text-md text-muted">
+          Nothing to audit yet. Assign a primary video to at least one stage on the Footage page; Audit works on a
+          stage's primary audio.
+        </p>
       </div>
     );
   }
@@ -1718,572 +1746,425 @@ export function Audit() {
   const prereqActive = prereqKind != null && stage != null && primary != null;
   const prereqShouldShow = prereqActive;
 
+  // ---- Render --------------------------------------------------------------
+
+  const flagCount = anomalies.filter((a) => a.time != null).length;
+  const chips = primary ? headerState({ primary, keptCount: keptShots.length, flagCount }) : null;
+  const header = stage
+    ? {
+        ordinal: pad2(stage.stage_number),
+        title: stage.stage_name || "Stage",
+        sub: (
+          <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+            {activeShooter ? <span>{activeShooter.name}</span> : null}
+            {chips ? (
+              <>
+                <Chip tick="muted">{chips.camera}</Chip>
+                <Chip tone={chips.beep.tone} tick={chips.beep.tick}>
+                  {chips.beep.label}
+                </Chip>
+                <Chip tick="muted">{chips.shots}</Chip>
+                {chips.flags ? <Chip tone="warn">{chips.flags}</Chip> : null}
+              </>
+            ) : null}
+            {audit?.needs_attention?.flagged ? (
+              <Chip tone="warn" title={audit.needs_attention.note ?? undefined}>
+                Flagged for desktop
+              </Chip>
+            ) : null}
+          </span>
+        ),
+      }
+    : null;
+
+  const nextStep = computeAuditNextStep({
+    shooters,
+    activeSlug: slugParam,
+    stages: stageSelectorOptions,
+    activeStage: stageNumber,
+  });
+  const saving = saveStatus.kind === "saving";
+  const currentShot = keptShots[Math.min(currentShotIndex, keptShots.length - 1)] ?? null;
+  const currentFlag = currentShot ? (rows.all.find((r) => r.marker.id === currentShot.id)?.flag ?? null) : null;
+  const shotAtPlayhead = keptShots.some((s) => Math.abs(s.time - currentTime) < 0.05);
+
   return (
     <div
       ref={editorRootRef}
       tabIndex={-1}
-      className="relative flex min-h-full flex-col gap-4 px-7 pb-24 pt-5 text-ink outline-none"
+      className="relative flex min-h-full flex-col px-4 pt-4 text-ink outline-none md:px-7 md:pt-5"
     >
-      {stage && primary ? (
-        <>
-          {/* Stage chip rail. Audit / Compare / Coach view switching
-              lives in the sidebar; this rail only walks stages. */}
-          <div className="border-b border-rule pb-3">
-            <StageChipRail
-              stages={stageRailItems}
-              activeStage={stageNumber ?? null}
-              onPick={(n) => {
-                void navigateToStage(n);
-              }}
+      {stage && primary && header ? (
+        beepStep ? (
+          <BeepStep
+            slug={slug}
+            stageNumber={stage.stage_number}
+            focusVideoId={beepFocusVideoId}
+            repick={repick}
+            onCancel={() => {
+              setRepick(false);
+              setBeepFocusVideoId(null);
+            }}
+            onConfirmed={(next) => void handleBeepConfirmed(next)}
+            header={header}
+            mediaOnDesktop={project?.origin === "desktop"}
+          />
+        ) : (
+          <>
+            <PageHeader
+              {...header}
+              actions={
+                <>
+                  <Button type="button" onClick={() => setRepick(true)}>
+                    Re-pick beep
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={undo}
+                    disabled={undoStackRef.current.length === 0}
+                    aria-label={`Undo (${MOD_LABEL}+Z)`}
+                  >
+                    Undo <Kbd size="sm">{MOD_GLYPH}Z</Kbd>
+                  </Button>
+                  {saveStatus.kind === "saved" ? <Chip tone="ok">Saved</Chip> : null}
+                  {/* The gate's Run button is the primary while the gate shows. */}
+                  <Button
+                    type="button"
+                    variant={prereqShouldShow ? "default" : "primary"}
+                    onClick={() => void performSave({ advance: true })}
+                    disabled={saving || prereqShouldShow}
+                    aria-label={nextStep.label}
+                    title={`${nextStep.label} (${MOD_LABEL}+Enter)`}
+                  >
+                    {saving ? "Saving..." : nextStep.label} <Kbd size="sm">{MOD_GLYPH}&#9166;</Kbd>
+                  </Button>
+                </>
+              }
             />
-          </div>
 
-          {/* Triage flag (#823): a mobile operator marked this stage for
-              desktop follow-up. Saving from here clears the flag
-              server-side (put_stage_audit), so no unflag action lives
-              here -- this is status, not a control. */}
-          {audit?.needs_attention?.flagged ? (
-            <div role="status" className="flex flex-wrap items-center gap-2">
-              <StatusPill tone="in-progress" icon={<AlertTriangle aria-hidden className="size-3" />}>
-                Flagged for desktop
-              </StatusPill>
-              {audit.needs_attention.note ? (
-                <span className="text-sm text-muted">{audit.needs_attention.note}</span>
-              ) : null}
-            </div>
-          ) : null}
+            {/* The gate carries its own running state; this line is for a
+                chain that runs while the editor is up (a re-run). */}
+            {chainRunning && !prereqShouldShow ? (
+              <div role="status" className="mb-4 flex flex-wrap items-center gap-3 rounded-[10px] border border-rule bg-surface px-3.5 py-2.5 text-md text-ink-2">
+                <span aria-hidden className="size-2 rounded-full bg-live shadow-[0_0_8px_var(--color-live)]" />
+                <span>{chainRunning.kind === "trim" ? "Trimming, then detecting shots" : "Detecting shots"}</span>
+                <span className="relative h-0.5 w-40 overflow-hidden rounded-full bg-surface-3">
+                  <span
+                    className="absolute inset-y-0 left-0 rounded-full bg-live"
+                    style={{ width: `${Math.round((chainRunning.progress ?? 0) * 100)}%` }}
+                  />
+                </span>
+                {chainRunning.progress != null ? (
+                  <span className="numeral text-sm text-muted">{Math.round(chainRunning.progress * 100)}%</span>
+                ) : null}
+              </div>
+            ) : null}
 
-          {/* Toolbar: beep status + re-pick + trim/detect + filter chips
-              + zoom + drawer toggle. Save & next + Undo live in the
-              sticky bottom action bar; shooter switcher lives in the
-              MatchShell breadcrumb. */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Confidence-aware beep status -- read-only chip. Beep work
-                lives in /beep-review (#396); the proactive amber
-                ``BeepAnomalyBanner`` rendered below the toolbar carries
-                the "Review this beep" deep-link when the heuristic
-                thinks the beep is wrong. */}
-            <BeepStatusChip
-              ref={beepChipRef}
-              beepTime={primary.beep_time}
-              confidence={primary.beep_confidence ?? null}
-              diagnostic={beepDiagnostic?.reason ?? null}
-              reviewed={primary.beep_reviewed}
-            />
-            {peaks && !peaks.trimmed && !prereqActive ? (
-              <TrimNowBadge
+            {/* When the stage isn't ready to audit (trim missing, or no
+                candidates yet), the canvas is replaced by PrereqGate. */}
+            {prereqShouldShow ? (
+              <PrereqGate
+                kind={prereqKind!}
                 slug={slug}
                 stageNumber={stage.stage_number}
-                hasBeep={primary.beep_time != null}
+                stage={stage}
+                blocked={primary.beep_time == null || stage.time_seconds <= 0}
+                blockedReason={
+                  primary.beep_time == null
+                    ? "Detect or set the beep first."
+                    : stage.time_seconds <= 0
+                      ? "Set the stage time above, or import a scoreboard."
+                      : null
+                }
+                hasSource
                 hasStageTime={stage.time_seconds > 0}
+                stageEntry={stage}
+                primaryVideo={primary}
+                hasBeep={primary.beep_time != null}
+                beepConfidence={primary.beep_confidence ?? null}
+                beepDiagnostic={beepDiagnostic?.reason ?? null}
+                beepLowConfThreshold={beepLowConfThreshold}
+                beepReviewed={primary.beep_reviewed}
+                onRepickBeep={() => setRepick(true)}
+                hasTrim={!!peaks?.trimmed}
                 onProjectUpdate={(p) => {
                   setProject(p);
-                  if (stageNumber != null) {
-                    api
-                      .getStagePeaks(slug, stageNumber, PEAK_BINS)
-                      .then((np) => setPeaks(np))
-                      .catch(() => {});
-                  }
+                  reloadPeaks();
                 }}
+                onAuditRefresh={reloadAudit}
               />
             ) : null}
-            {peaks && !prereqShouldShow ? (
-              <FilterBar
-                filters={filters}
-                counts={{
-                  detected: detectedCount,
-                  rejected: rejectedCount,
-                  manual: manualCount,
-                  // The audit waveform anchors on the primary; the beep
-                  // marker reflects ``auditBeep`` (= peaks.beep_time
-                  // falling back to primary.beep_time). 0 when the
-                  // primary has no beep yet.
-                  beep: auditBeep != null ? 1 : 0,
-                }}
-                onChange={setFilters}
-                peeking={peeking}
-                onPeekStart={() => setPeeking(true)}
-                onPeekEnd={() => setPeeking(false)}
-              />
-            ) : null}
-            <div className="ml-auto inline-flex items-center gap-2">
-              {/* K-auto-step toggle. The transport bar is gone but this
-                  is a behaviour preference, not a transport control --
-                  keep it visible so the operator who relies on "mark
-                  and advance" doesn't lose it. Quiet pill per design
-                  spec: a *preference toggle* shouldn't read as a
-                  primary action. */}
-              <button
-                type="button"
-                onClick={() => setKAutoProgress((v) => !v)}
-                aria-pressed={kAutoProgress}
-                title={
-                  kAutoProgress
-                    ? "Auto-step to next shot on accept (K to toggle)"
-                    : "Stay on shot after accept (K to toggle)"
-                }
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-display text-[0.625rem] font-bold uppercase tracking-[0.06em] transition-colors",
-                  kAutoProgress
-                    ? "border-led/35 bg-led-tint text-ink"
-                    : "border-rule bg-surface-2 text-muted hover:border-rule-strong hover:bg-surface-3 hover:text-ink",
-                )}
-              >
-                <span
-                  aria-hidden
-                  className={cn(
-                    "inline-block size-1.5 rounded-full",
-                    kAutoProgress
-                      ? "bg-led shadow-[0_0_6px_var(--color-led-glow)]"
-                      : "bg-rule-strong",
-                  )}
-                />
-                <Kbd size="sm">K</Kbd>
-                <span>Auto-step</span>
-              </button>
-              {peaks ? <ZoomControls zoom={zoom} onZoomChange={setZoom} /> : null}
-              <button
-                type="button"
-                onClick={() => setShowDrawer((v) => !v)}
-                aria-label="Toggle marker drawer (L)"
-                aria-pressed={showDrawer}
-                title="Marker list (L)"
-                className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-muted transition-colors hover:bg-surface-3 hover:text-ink"
-              >
-                <ListChecks className="size-4" />
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowHelp(true)}
-                aria-label="Keyboard shortcuts (?)"
-                title="Keyboard shortcuts (?)"
-                className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-muted transition-colors hover:bg-surface-3 hover:text-ink"
-              >
-                <HelpCircle className="size-4" />
-              </button>
-              {peaks && peaks.trimmed && !prereqActive ? (
-                <DetectShotsBadge
-                  slug={slug}
-                  stageNumber={stage.stage_number}
-                  hasBeep={primary.beep_time != null}
-                  hasStageTime={stage.time_seconds > 0}
-                  hasCandidates={markers.length > 0}
-                  onComplete={async () => {
-                    if (stageNumber == null) return;
-                    const a = await api.getStageAudit(slug, stageNumber);
-                    setAudit(a);
-                    setMarkers(deriveMarkers(a));
-                  }}
-                />
-              ) : null}
-            </div>
-          </div>
 
-          {/* Visible-by-default keyboard shortcut strip. Five keys that
-              drive the audit loop -- Space, M/Shift+M, K, + / 0 / -,
-              Cmd+Enter. Dismiss persists per user (localStorage); the
-              compact restore pill lives in the same slot so the user has
-              a clear path back without hunting through the toolbar. */}
-          {hintsDismissed ? (
-            <ShortcutHintsRestore onShow={showHints} />
-          ) : (
-            <ShortcutHints
-              onDismiss={dismissHints}
-              onOpenAll={() => setShowHelp(true)}
-            />
-          )}
-
-          {/* Proactive "beep looks wrong" banner. Fires only on the active
-              shooter's video (scoping: cross-shooter awareness lives in
-              /beep-review, not here). CTA deep-links into the queue with
-              this exact item already active. */}
-          {beepDiagnostic ? (
-            <BeepAnomalyBanner
-              reason={beepDiagnostic.reason}
-              slug={slug}
-              stageNumber={stage.stage_number}
-              videoId={primary.video_id}
-            />
-          ) : null}
-
-          {/* When the stage isn't ready to audit (trim missing, or no
-              candidates yet), the entire canvas is replaced by
-              PrereqGate. The toolbar's beep / filter chips stay
-              visible (those are status, not actions), but PiP bay,
-              waveform, shot stepper, and bottom action bar all
-              suspend until prerequisites pass. */}
-          {prereqShouldShow && stage && primary ? (
-            <PrereqGate
-              kind={prereqKind!}
-              slug={slug}
-              stageNumber={stage.stage_number}
-              stage={stage}
-              blocked={primary.beep_time == null || stage.time_seconds <= 0}
-              blockedReason={
-                primary.beep_time == null
-                  ? "Detect or set the beep first."
-                  : stage.time_seconds <= 0
-                    ? "Set the stage time above, or import a scoreboard."
-                    : null
-              }
-              hasSource
-              hasStageTime={stage.time_seconds > 0}
-              stageEntry={stage}
-              primaryVideo={primary}
-              hasBeep={primary.beep_time != null}
-              beepConfidence={primary.beep_confidence ?? null}
-              beepDiagnostic={beepDiagnostic?.reason ?? null}
-              beepLowConfThreshold={beepLowConfThreshold}
-              beepReviewed={primary.beep_reviewed}
-              onPingBeepChip={() => beepChipRef.current?.flash()}
-              hasTrim={!!peaks?.trimmed}
-              onProjectUpdate={(p) => {
-                setProject(p);
-                if (stageNumber != null) {
-                  api
-                    .getStagePeaks(slug, stageNumber, PEAK_BINS)
-                    .then((np) => setPeaks(np))
-                    .catch(() => {});
-                }
-              }}
-              onAuditRefresh={async () => {
-                if (stageNumber == null) return;
-                const a = await api.getStageAudit(slug, stageNumber);
-                setAudit(a);
-                setMarkers(deriveMarkers(a));
-              }}
-            />
-          ) : null}
-
-          {/* Audit canvas: two-column layout.
-              left  -- AnomalyChips + waveform + ShotStepper.
-              right -- 380px docked MultiCamColumn (video + transport).
-              The sidebar (in MatchShell) is collapsible to buy back
-              the column's horizontal budget. */}
-          {!prereqShouldShow && displayPeaks ? (
-            <div className="flex gap-4">
-              <div className="flex min-w-0 flex-1 flex-col gap-4">
-              {/* Transport bar removed -- playback (play/pause/loop/step
-                  frame) lives in the video column's shared transport row per
-                  design. Position/clip readouts also live in the bay;
-                  stage time is in the bottom action bar's kicker.
-                  Kept/rejected/manual counts are covered by the filter
-                  chips in the toolbar. */}
-
-              <AnomalyChips
-                anomalies={anomalyChips}
-                onJump={(a) => {
-                  if (a.time != null) handleScrub(a.time);
-                }}
-              />
-
-              {/* Scope waveform with framed chrome. Header is the
-                  design's mono `● PRIMARY · {n} peaks · {d}s` line on
-                  the left and a one-line action hint on the right --
-                  no Antonio brand header, no legend dot row (the
-                  filter chips in the toolbar own those tones). */}
-              <div className="overflow-hidden rounded-2xl border border-rule-strong bg-bg-glow shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rule bg-surface-2 px-4 py-2.5 font-mono text-[0.625rem] uppercase tracking-[0.14em] text-subtle">
-                  <span className="inline-flex items-center gap-1.5 tabular-nums">
-                    <span
-                      aria-hidden
-                      className="inline-block size-1.5 rounded-full bg-led shadow-[0_0_6px_var(--color-led-glow)]"
-                    />
-                    <b className="font-bold text-led-soft">Primary</b>
-                    <span aria-hidden className="text-rule-strong">
-                      ·
-                    </span>
-                    <span>{displayPeaks.peaks.length} peaks</span>
-                    <span aria-hidden className="text-rule-strong">
-                      ·
-                    </span>
-                    <span>{displayPeaks.duration.toFixed(2)}s</span>
-                  </span>
-                  <span className="inline-flex items-center gap-2">
+            {!prereqShouldShow && displayPeaks ? (
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+                <div className="min-w-0 overflow-hidden rounded-[10px] border border-rule bg-surface">
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-rule px-3 py-2">
+                    <Label tone="ink">{chips?.camera ?? "Head cam"}</Label>
+                    <Label>
+                      {displayPeaks.peaks.length} peaks &middot; {displayPeaks.duration.toFixed(2)} s
+                    </Label>
                     {peaksLoading ? (
-                      <span
-                        className="inline-flex items-center gap-1.5 text-led"
-                        aria-live="polite"
-                      >
-                        <Loader2 className="size-3 animate-spin" aria-hidden />
+                      <Label tone="live" aria-live="polite">
                         Loading
-                      </span>
+                      </Label>
                     ) : null}
-                    <span className="text-whisper">
-                      scrub or double-click to add marker
+                    <span className="ml-auto flex flex-wrap gap-3 text-sm text-muted">
+                      <Legend className="bg-beep" label="Beep" />
+                      <Legend className="bg-ink-2" label="Shot" />
+                      <Legend className="bg-manual" label="Manual" />
+                      <Legend className="border border-rule-strong bg-transparent" label="Rejected" />
+                      <Legend className="bg-live" label="Flag" />
+                      <Legend className="bg-led" label="Current" />
                     </span>
-                  </span>
-                </div>
-                <div className="relative px-4 py-3" ref={waveformWrapperRef}>
-                  <Waveform
-                    peaks={displayPeaks.peaks}
-                    duration={displayPeaks.duration}
-                    currentTime={currentTime}
-                    beepTime={filters.beep ? auditBeep : null}
-                    loopRegion={loopRegion}
-                    pixelsPerSecond={pixelsPerSecond}
-                    onScrub={handleScrub}
-                    onDoubleClick={handleAddManual}
-                    onViewChange={setWaveView}
-                    height={180}
-                  >
-                    <MarkerLayer
-                      markers={markers}
-                      duration={displayPeaks.duration}
-                      focusedId={focusedMarkerId}
-                      onFocusChange={setFocusedMarkerId}
-                      onClick={handleMarkerClick}
-                      onDelete={handleMarkerDelete}
-                      onTimeChange={handleMarkerTimeChange}
-                      onTimeChangeBegin={handleMarkerTimeChangeBegin}
-                      onTimeChangeCommit={handleMarkerTimeChangeCommit}
-                      visibleKinds={visibleKinds}
-                      forcedVisibleId={forcedVisibleId}
-                      snapPeaks={snapPeaks ?? undefined}
-                    />
-                  </Waveform>
-                  {/* Anomaly pins sit on the seam between the legend
-                      header and the waveform bars. `inset-x-4` matches
-                      the wrapper's px-4 so the overlay's left edge aligns
-                      with the Waveform's scroll host; `waveView` maps the
-                      pin times into that host's zoom + scroll space. The
-                      h-0 overlay + per-pin `-translate-y-1/2` puts each
-                      pin visually centred on the seam. */}
-                  <div
-                    aria-hidden
-                    className="pointer-events-none absolute inset-x-4 top-0 z-10 h-0"
-                  >
-                    <AnomalyPins
-                      anomalies={anomalies}
-                      duration={displayPeaks.duration}
-                      view={waveView}
-                      onJump={(a) => {
-                        if (a.time != null) handleScrub(a.time);
-                      }}
-                    />
                   </div>
+                  <div className="relative bg-bg px-3 py-3" ref={waveformWrapperRef}>
+                    <Waveform
+                      peaks={displayPeaks.peaks}
+                      duration={displayPeaks.duration}
+                      currentTime={currentTime}
+                      beepTime={filters.beep ? auditBeep : null}
+                      loopRegion={loopRegion}
+                      pixelsPerSecond={pixelsPerSecond}
+                      onScrub={handleScrub}
+                      onDoubleClick={handleAddManual}
+                      onViewChange={setWaveView}
+                      height={180}
+                    >
+                      <MarkerLayer
+                        markers={markers}
+                        duration={displayPeaks.duration}
+                        focusedId={focusedMarkerId}
+                        onFocusChange={setFocusedMarkerId}
+                        onClick={handleMarkerClick}
+                        onDelete={handleMarkerDelete}
+                        onTimeChange={handleMarkerTimeChange}
+                        onTimeChangeBegin={handleMarkerTimeChangeBegin}
+                        onTimeChangeCommit={handleMarkerTimeChangeCommit}
+                        visibleKinds={visibleKinds}
+                        forcedVisibleId={forcedVisibleId}
+                        snapPeaks={snapPeaks ?? undefined}
+                      />
+                    </Waveform>
+                    {/* Anomaly pins sit on the seam above the waveform bars.
+                        `inset-x-3` matches the wrapper's px-3 so the overlay's
+                        left edge aligns with the Waveform's scroll host. */}
+                    <div aria-hidden className="pointer-events-none absolute inset-x-3 top-0 z-10 h-0">
+                      <AnomalyPins
+                        anomalies={anomalies}
+                        duration={displayPeaks.duration}
+                        view={waveView}
+                        onJump={(a) => {
+                          if (a.time != null) handleScrub(a.time);
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div className="numeral flex justify-between border-t border-rule px-3 py-1 text-xs text-subtle">
+                    {Array.from({ length: 6 }, (_, i) => (
+                      <span key={i}>{((i / 5) * displayPeaks.duration).toFixed(2)}</span>
+                    ))}
+                  </div>
+                  <TransportLine
+                    isPlaying={isPlaying}
+                    onTogglePlay={togglePlay}
+                    currentTime={currentTime}
+                    duration={displayPeaks.duration}
+                    zoom={zoom}
+                    onZoomChange={setZoom}
+                    filters={filters}
+                    counts={{
+                      detected: detectedCount,
+                      rejected: rejectedCount,
+                      manual: manualCount,
+                      beep: auditBeep != null ? 1 : 0,
+                    }}
+                    onFiltersChange={setFilters}
+                    peeking={peeking}
+                    onPeekStart={() => setPeeking(true)}
+                    onPeekEnd={() => setPeeking(false)}
+                    kAutoProgress={kAutoProgress}
+                    onToggleKAuto={() => setKAutoProgress((v) => !v)}
+                    onOpenHelp={() => setShowHelp(true)}
+                    menuExtra={
+                      <>
+                        {peaks && !peaks.trimmed ? (
+                          <TrimNowBadge
+                            slug={slug}
+                            stageNumber={stage.stage_number}
+                            hasBeep={primary.beep_time != null}
+                            hasStageTime={stage.time_seconds > 0}
+                            onProjectUpdate={(p) => {
+                              setProject(p);
+                              reloadPeaks();
+                            }}
+                          />
+                        ) : null}
+                        {peaks && peaks.trimmed ? (
+                          <DetectShotsBadge
+                            slug={slug}
+                            stageNumber={stage.stage_number}
+                            hasBeep={primary.beep_time != null}
+                            hasStageTime={stage.time_seconds > 0}
+                            hasCandidates={markers.length > 0}
+                            onComplete={reloadAudit}
+                          />
+                        ) : null}
+                      </>
+                    }
+                  />
+                  <CurrentShotLine
+                    shots={keptShots}
+                    currentIndex={currentShotIndex}
+                    onStep={stepShot}
+                    flag={currentFlag}
+                    onNoteChange={handleNoteChange}
+                    onReject={() => {
+                      if (currentShot) handleMarkerDelete(currentShot);
+                    }}
+                    onAddHere={() => handleAddManual(currentTime)}
+                    canAddHere={!shotAtPlayhead}
+                  />
                 </div>
-                {/* Time ruler -- six evenly-spaced ticks across the
-                    fit-zoom duration. Mono, whisper-toned. */}
-                <div className="flex justify-between border-t border-rule bg-surface-2 px-4 py-1.5 font-mono text-[0.625rem] tabular-nums text-whisper">
-                  {Array.from({ length: 6 }, (_, i) => (
-                    <span key={i}>
-                      {((i / 5) * displayPeaks.duration).toFixed(2)}
-                    </span>
-                  ))}
-                </div>
-                {/* Cam offset readout moved onto each secondary's
-                    CamSyncPill -- the offset surfaces next to the cam
-                    it applies to instead of as a separate footer. */}
-              </div>
 
-              {/* Shot stepper. The right column owns its own width now
-                  (MultiCamColumn) so the stepper never ends up under the
-                  bay -- the legacy margin offsets are gone. */}
-              <ShotStepper
-                shots={keptShots}
-                currentIndex={currentShotIndex}
-                onStep={stepShot}
-                onNoteChange={handleNoteChange}
-              />
-              </div>
-
-              {/* Docked video column. Replaces video column. VideoPanel renders
-                  inside CamTile so the Audit page keeps owning the
-                  primary <video> ref + secondary refs map. */}
-              {primary ? (
-                <MultiCamColumn
-                  videos={videos}
-                  activeIndex={activeVideoIndex}
-                  onActiveIndexChange={setActiveVideoIndex}
-                  camSyncStates={camSyncStates}
-                  primaryBeepTime={primaryBeep}
-                  onStartSync={openBeepReview}
-                  onPromote={(cam) => {
-                    const idx = videos.findIndex(
-                      (v) => v.video_id === cam.video_id,
-                    );
-                    if (idx > 0) setActiveVideoIndex(idx);
-                  }}
-                  layout={camLayout}
-                  onLayoutChange={setCamLayout}
-                  isPlaying={isPlaying}
-                  loopMode={loopMode}
-                  currentTime={currentTime}
-                  duration={peaks?.duration ?? 0}
-                  onTogglePlay={togglePlay}
-                  onToggleLoop={() => setLoopMode((v) => !v)}
-                  onStepFrame={(dir) => {
-                    const v = videoRef.current;
-                    if (!v || !peaks) return;
-                    const t = v.currentTime - beepOffset;
-                    handleScrub(
-                      Math.min(peaks.duration, Math.max(0, t + dir * 0.025)),
-                    );
-                  }}
-                >
-                  <VideoPanel
-                    ref={videoRef}
-                    slug={slug}
+                <div className="flex flex-col gap-4">
+                  <MultiCamColumn
                     videos={videos}
-                    primaryBeepTime={primaryBeep}
                     activeIndex={activeVideoIndex}
                     onActiveIndexChange={setActiveVideoIndex}
-                    videoSrc={videoSrc}
-                    proxyReady={activeVideo?.proxy_ready}
-                    mediaOnDesktop={project?.origin === "desktop"}
-                    // v2 column: focus mode shows a single tile in the
-                    // primary slot; secondaries surface as picker tiles
-                    // below (CamStrip / CamThumb) rather than as live
-                    // <video> elements. Grid review happens in
-                    // CamGridModal which is a click-to-focus picker.
-                    gridMode={false}
-                    onGridModeToggle={handleGridModeToggle}
-                    onSecondaryRef={handleSecondaryRef}
-                    onSecondaryBuffering={handleSecondaryBuffering}
-                    onPrimaryTimeUpdate={handlePrimaryTimeUpdate}
-                    showHeader={false}
-                    renderCamOverlay={(video, index) => {
-                      const state = camSyncStates[index] ?? "no_beep";
-                      const offsetSeconds =
-                        index === 0 ||
-                        video.beep_time == null ||
-                        primaryBeep == null
-                          ? null
-                          : video.beep_time - primaryBeep;
-                      return (
-                        <CamSyncPill
-                          state={state}
-                          beepTime={video.beep_time}
-                          beepConfidence={video.beep_confidence}
-                          offsetSeconds={offsetSeconds}
-                          size="xs"
-                          onClick={() => openBeepReview(video)}
-                        />
-                      );
+                    camSyncStates={camSyncStates}
+                    primaryBeepTime={primaryBeep}
+                    onStartSync={openBeepReview}
+                    onPromote={(cam) => {
+                      const idx = videos.findIndex((v) => v.video_id === cam.video_id);
+                      if (idx > 0) setActiveVideoIndex(idx);
                     }}
-                    className="size-full [&_video]:!max-h-full [&_video]:!w-full"
-                  />
-                </MultiCamColumn>
-              ) : null}
-            </div>
-          ) : !prereqShouldShow && peaksLoading ? (
-            <div className="flex h-32 items-center justify-center gap-2 text-sm text-muted">
-              <Loader2 className="size-4 animate-spin" /> Computing waveform...
-            </div>
-          ) : !prereqShouldShow && peaksError ? (
-            <div className="rounded-md border border-led/40 bg-led/10 p-4 text-sm text-led">
-              Couldn't load peaks: {peaksError}
-            </div>
-          ) : null}
+                    layout={camLayout}
+                    onLayoutChange={setCamLayout}
+                    isPlaying={isPlaying}
+                    loopMode={loopMode}
+                    currentTime={currentTime}
+                    duration={peaks?.duration ?? 0}
+                    onTogglePlay={togglePlay}
+                    onToggleLoop={() => setLoopMode((v) => !v)}
+                    onStepFrame={(dir) => {
+                      const v = videoRef.current;
+                      if (!v || !peaks) return;
+                      const t = v.currentTime - beepOffset;
+                      handleScrub(Math.min(peaks.duration, Math.max(0, t + dir * 0.025)));
+                    }}
+                  >
+                    <VideoPanel
+                      ref={videoRef}
+                      slug={slug}
+                      videos={videos}
+                      primaryBeepTime={primaryBeep}
+                      activeIndex={activeVideoIndex}
+                      onActiveIndexChange={setActiveVideoIndex}
+                      videoSrc={videoSrc}
+                      proxyReady={activeVideo?.proxy_ready}
+                      mediaOnDesktop={project?.origin === "desktop"}
+                      gridMode={false}
+                      onGridModeToggle={handleGridModeToggle}
+                      onSecondaryRef={handleSecondaryRef}
+                      onSecondaryBuffering={handleSecondaryBuffering}
+                      onPrimaryTimeUpdate={handlePrimaryTimeUpdate}
+                      showHeader={false}
+                      renderCamOverlay={(video, index) => {
+                        const state = camSyncStates[index] ?? "no_beep";
+                        const offsetSeconds =
+                          index === 0 || video.beep_time == null || primaryBeep == null
+                            ? null
+                            : video.beep_time - primaryBeep;
+                        return (
+                          <CamSyncPill
+                            state={state}
+                            beepTime={video.beep_time}
+                            beepConfidence={video.beep_confidence}
+                            offsetSeconds={offsetSeconds}
+                            size="xs"
+                            onClick={() => openBeepReview(video)}
+                          />
+                        );
+                      }}
+                      className="size-full [&_video]:!max-h-full [&_video]:!w-full"
+                    />
+                  </MultiCamColumn>
+                  <ShotList rows={rows} currentMarkerId={focusedMarkerId ?? currentShot?.id ?? null} onJump={jumpToMarker} />
+                </div>
+              </div>
+            ) : !prereqShouldShow && peaksLoading ? (
+              <div className="flex h-32 items-center justify-center gap-2 text-md text-muted">
+                <Loader2 className="size-4 animate-spin" /> Computing waveform...
+              </div>
+            ) : !prereqShouldShow && peaksError ? (
+              <p role="alert" className="text-sm text-led-text">
+                Couldn't load peaks: {peaksError}
+              </p>
+            ) : null}
 
-          {/* Fullscreen grid review. The column's "Grid" segment opens
-              this; clicking a tile promotes that cam to primary and
-              returns to focus mode. */}
-          {!prereqShouldShow && camLayout === "grid" && videos.length >= 2 ? (
-            <CamGridModal
-              videos={videos}
-              primaryBeepTime={primaryBeep}
-              isPlaying={isPlaying}
-              currentTime={currentTime}
-              duration={peaks?.duration ?? 0}
-              onTogglePlay={togglePlay}
-              onClose={() => setCamLayout("focus")}
-              onPickFocus={(cam) => {
-                const idx = videos.findIndex(
-                  (v) => v.video_id === cam.video_id,
-                );
-                if (idx >= 0) setActiveVideoIndex(idx);
-                setCamLayout("focus");
-              }}
-              renderTile={(cam, _i) => {
-                // The actual <video> stays in MultiCamColumn behind the
-                // backdrop. Grid mode is a click-to-focus picker per the
-                // kit -- a stylized tile is enough for the operator to
-                // pick which cam to promote.
-                void cam;
-                return (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="inline-flex size-14 items-center justify-center rounded-full border border-led/40 bg-led-tint">
-                      <span
-                        aria-hidden
-                        className="size-5 rounded-full bg-led shadow-[0_0_16px_var(--color-led-glow)]"
-                      />
-                    </span>
-                  </div>
-                );
-              }}
-            />
-          ) : null}
-        </>
-      ) : null}
-      <ListDrawer
-        open={showDrawer}
-        onClose={() => setShowDrawer(false)}
-        markers={markers}
-        currentMarkerId={focusedMarkerId}
-        onJumpTo={jumpToMarker}
-        onDelete={handleMarkerDelete}
-      />
-      <HelpOverlay
-        open={showHelp}
-        onClose={() => setShowHelp(false)}
-        mode="audit"
-      />
-      {stagesWithPrimary.length > 0 && !prereqActive ? (
-        sessionDone ? (
-          <div className="fixed bottom-0 left-[var(--shell-sidebar-w,0px)] right-0 z-chrome border-t border-rule-strong bg-bg/95 px-5 py-3 backdrop-blur">
-            <SessionSummary
-              shooterName={
-                shooters.find((s) => s.slug === slugParam)?.name ?? null
-              }
-              stats={summaryStats}
-              onJumpToOverview={() => navigate(href(""))}
-              onExport={
-                slugParam
-                  ? () => navigate(href("export", slugParam))
-                  : undefined
-              }
-              nextShooterLabel={
-                nextShooterParam
-                  ? (shooters.find((s) => s.slug === nextShooterParam)?.name ??
-                    null)
-                  : null
-              }
-              onAuditNextShooter={
-                nextShooterParam
-                  ? () => navigate(href("audit", nextShooterParam))
-                  : undefined
-              }
-            />
-          </div>
-        ) : (
-          <StageActionBar
-            shooters={shooters}
-            activeSlug={slugParam}
-            activeStage={stageNumber}
-            stages={stageRailItems.map((s) => ({
-              stageNumber: s.stageNumber,
-              stageName: s.stageName,
-              status: s.status,
-            }))}
-            step={computeAuditNextStep({
-              shooters,
-              activeSlug: slugParam,
-              stages: stageSelectorOptions,
-              activeStage: stageNumber,
-            })}
-            dirty={isDirtyRef.current && saveStatus.kind !== "saving"}
-            saving={saveStatus.kind === "saving"}
-            justSaved={saveStatus.kind === "saved"}
-            canUndo={undoStackRef.current.length > 0}
-            onSave={() => void performSave({ advance: true })}
-            onUndo={undo}
-          />
+            {sessionDone ? (
+              <div className="mt-4">
+                <SessionSummary
+                  shooterName={activeShooter?.name ?? null}
+                  stats={summaryStats}
+                  onJumpToOverview={() => navigate(href(""))}
+                  onExport={slugParam ? () => navigate(href("export", slugParam)) : undefined}
+                  nextShooterLabel={
+                    nextShooterParam ? (shooters.find((s) => s.slug === nextShooterParam)?.name ?? null) : null
+                  }
+                  onAuditNextShooter={nextShooterParam ? () => navigate(href("audit", nextShooterParam)) : undefined}
+                />
+              </div>
+            ) : null}
+
+            {/* Fullscreen grid review. The column's "Grid" segment opens
+                this; clicking a tile promotes that cam to primary and
+                returns to focus mode. */}
+            {!prereqShouldShow && camLayout === "grid" && videos.length >= 2 ? (
+              <CamGridModal
+                videos={videos}
+                primaryBeepTime={primaryBeep}
+                isPlaying={isPlaying}
+                currentTime={currentTime}
+                duration={peaks?.duration ?? 0}
+                onTogglePlay={togglePlay}
+                onClose={() => setCamLayout("focus")}
+                onPickFocus={(cam) => {
+                  const idx = videos.findIndex((v) => v.video_id === cam.video_id);
+                  if (idx >= 0) setActiveVideoIndex(idx);
+                  setCamLayout("focus");
+                }}
+                renderTile={(cam, _i) => {
+                  // The actual <video> stays in MultiCamColumn behind the
+                  // backdrop. Grid mode is a click-to-focus picker -- a
+                  // stylised tile is enough to pick which cam to promote.
+                  void cam;
+                  return (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="inline-flex size-14 items-center justify-center rounded-full border border-rule-strong bg-surface-2">
+                        <span aria-hidden className="size-5 rounded-full bg-ink-2" />
+                      </span>
+                    </div>
+                  );
+                }}
+              />
+            ) : null}
+          </>
         )
       ) : null}
+      <HelpOverlay open={showHelp} onClose={() => setShowHelp(false)} mode="audit" />
+      {!beepStep ? <AuditFooter onOpenHelp={() => setShowHelp(true)} /> : null}
       {saveStatus.kind === "error" ? <SaveToast status={saveStatus} /> : null}
     </div>
+  );
+}
+
+function Legend({ className, label }: { className: string; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <i aria-hidden className={cn("inline-block size-2 rounded-full", className)} />
+      {label}
+    </span>
   );
 }
 
@@ -2451,187 +2332,41 @@ function DetectShotsBadge({
 
   const pct = job?.progress != null ? Math.round(job.progress * 100) : null;
 
-  // While a job is running we always surface progress inline so the
-  // operator sees what's happening. When idle, behaviour depends on
-  // whether candidates exist: no candidates = inline action-required
-  // button; candidates = collapsed "..." overflow menu (the design's
-  // intended utility placement).
+  // Overflow-menu rows (UX PR 5): the running state is a status row, an
+  // empty candidate list gets the one-click detect, otherwise the three
+  // utilities. The page's chain line carries the visible progress.
   if (running) {
     return (
-      <span
-        role="status"
-        title={`Shot detection ${pct != null ? `(${pct}%)` : "running"}`}
-        className="inline-flex items-center gap-1.5 rounded-md border border-led-deep bg-led-tint px-2.5 py-2 font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-led-soft"
-      >
-        <Loader2 className="size-3 animate-spin" aria-hidden />
-        <span className="tabular-nums">
-          Detecting
-          {pct != null ? ` ${pct.toString().padStart(2, " ")}%` : "..."}
-        </span>
+      <span role="status" className={MENU_ITEM + " text-muted"}>
+        <Loader2 className="size-3.5 animate-spin" aria-hidden />
+        <span className="numeral">Detecting{pct != null ? ` ${pct}%` : "..."}</span>
       </span>
     );
   }
-
-  if (!hasCandidates) {
-    return (
-      <span className="flex items-center gap-2">
-        <Badge variant="secondary" title="No candidates yet -- run shot detection">
-          no candidates
-        </Badge>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={onClick}
-          disabled={blocked}
-          title={reason ?? "Run splitsmith.shot_detect on the audit clip"}
-        >
-          Detect shots
-        </Button>
-        {error ? <span className="text-xs text-destructive">{error}</span> : null}
-      </span>
-    );
-  }
-
   return (
-    <DetectShotsMenu
-      blocked={blocked}
-      reason={reason}
-      onRerun={onClick}
-      onReset={onResetClick}
-      onExportShots={onExportShotsClick}
-      error={error}
-    />
-  );
-}
-
-interface DetectShotsMenuProps {
-  blocked: boolean;
-  reason: string | null;
-  onRerun: () => void;
-  onReset: () => void;
-  onExportShots: () => void;
-  error: string | null;
-}
-
-function DetectShotsMenu({
-  blocked,
-  reason,
-  onRerun,
-  onReset,
-  onExportShots,
-  error,
-}: DetectShotsMenuProps) {
-  const [open, setOpen] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (!wrapperRef.current) return;
-      if (!wrapperRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-  return (
-    <div ref={wrapperRef} className="relative inline-flex">
+    <>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Detection utilities"
-        title={reason ?? "Detection utilities"}
-        className={cn(
-          "inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-muted transition-colors hover:bg-surface-3 hover:text-ink",
-          open && "border-rule-strong bg-surface-3 text-ink",
-        )}
+        role="menuitem"
+        className={MENU_ITEM}
+        onClick={onClick}
+        disabled={blocked}
+        title={reason ?? "Run shot detection on the audit clip"}
       >
-        <MoreHorizontal className="size-4" aria-hidden />
+        {hasCandidates ? "Re-run shot detection" : "Detect shots"}
       </button>
-      {open ? (
-        <div
-          role="menu"
-          // Page-local band (below z-chrome): the menu drops downward
-          // from the toolbar and should scroll UNDER the sticky header,
-          // not over it.
-          className="absolute right-0 top-[calc(100%+6px)] z-30 w-64 overflow-hidden rounded-md border border-rule-strong bg-surface-1 shadow-[0_12px_32px_-12px_rgba(0,0,0,0.7)]"
-        >
-          <button
-            role="menuitem"
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              onRerun();
-            }}
-            disabled={blocked}
-            className="flex w-full items-start gap-2 px-3 py-2.5 text-left text-[0.8125rem] text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <div className="min-w-0">
-              <div className="font-display text-[0.75rem] font-bold uppercase tracking-[0.06em]">
-                Re-run detection
-              </div>
-              <div className="mt-0.5 text-[0.6875rem] text-muted">
-                Refresh candidates; kept shots are preserved.
-              </div>
-            </div>
+      {hasCandidates ? (
+        <>
+          <button type="button" role="menuitem" className={MENU_ITEM} onClick={() => void onResetClick()} disabled={blocked}>
+            Reset to detector output
           </button>
-          <button
-            role="menuitem"
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              onExportShots();
-            }}
-            className="flex w-full items-start gap-2 px-3 py-2.5 text-left text-[0.8125rem] text-ink-2 transition-colors hover:bg-surface-2 hover:text-ink"
-          >
-            <div className="min-w-0">
-              <div className="font-display text-[0.75rem] font-bold uppercase tracking-[0.06em]">
-                Export shot table
-              </div>
-              <div className="mt-0.5 text-[0.6875rem] text-muted">
-                CSV · all confirmed shots in this stage.
-              </div>
-            </div>
+          <button type="button" role="menuitem" className={MENU_ITEM} onClick={onExportShotsClick}>
+            Export shot table
           </button>
-          <button
-            role="menuitem"
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              onReset();
-            }}
-            disabled={blocked}
-            className="flex w-full items-start gap-2 border-t border-rule px-3 py-2.5 text-left text-[0.8125rem] text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <div className="min-w-0">
-              <div className="font-display text-[0.75rem] font-bold uppercase tracking-[0.06em]">
-                Reset & re-detect
-              </div>
-              <div className="mt-0.5 text-[0.6875rem] text-destructive/80">
-                Wipes kept / rejected decisions and starts over.
-              </div>
-            </div>
-          </button>
-          {reason ? (
-            <div className="border-t border-rule px-3 py-2 text-[0.6875rem] text-muted">
-              {reason}
-            </div>
-          ) : null}
-          {error ? (
-            <div className="border-t border-rule px-3 py-2 text-[0.6875rem] text-destructive">
-              {error}
-            </div>
-          ) : null}
-        </div>
+        </>
       ) : null}
-    </div>
+      {error ? <span className="px-2.5 py-1 text-sm text-led-text">{error}</span> : null}
+    </>
   );
 }
 
@@ -2727,32 +2462,21 @@ function TrimNowBadge({
   const pct = job?.progress != null ? Math.round(job.progress * 100) : null;
 
   return (
-    <span className="flex items-center gap-2">
-      <Badge
-        variant="destructive"
-        title="The audit screen is reading the full source clip. Trim makes scrubbing frame-accurate."
-      >
-        untrimmed -- scrubbing will be slow
-      </Badge>
-      <Button
-        size="sm"
-        variant="outline"
-        onClick={onClick}
+    <>
+      <button
+        type="button"
+        role="menuitem"
+        className={MENU_ITEM}
+        onClick={() => void onClick()}
         disabled={running || blocked}
-        // Fixed width so progress text changes (e.g. "Trimming... (12%)" ->
-        // "(45%)") don't reflow the row. Reflow on Chromium closes any open
-        // native <select> dropdown elsewhere on the page.
-        className="min-w-[12rem] justify-center"
         title={reason ?? "Re-encode with short GOP for scrub-friendly playback"}
       >
-        {running ? <Loader2 className="mr-1 size-3 animate-spin" /> : null}
-        <span className="tabular-nums">
-          {running ? "Trimming..." : "Trim now"}
-          {running && pct != null ? ` (${pct.toString().padStart(2, " ")}%)` : null}
-        </span>
-      </Button>
-      {error ? <span className="text-xs text-destructive">{error}</span> : null}
-    </span>
+        {running ? <Loader2 className="size-3.5 animate-spin" aria-hidden /> : null}
+        <span className="numeral">{running ? `Trimming${pct != null ? ` ${pct}%` : "..."}` : "Trim now"}</span>
+        <span className="ml-auto text-sm text-muted">untrimmed</span>
+      </button>
+      {error ? <span className="px-2.5 py-1 text-sm text-led-text">{error}</span> : null}
+    </>
   );
 }
 
