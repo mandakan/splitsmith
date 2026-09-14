@@ -89,33 +89,50 @@ describe("exportRows", () => {
 
 describe("estimateDuration", () => {
   const times = new Map([[1, 20], [2, 30]]);
-  it("adds pads, one transition between stages and a slate per stage in timeline mode", () => {
+  it("adds pads, one transition between stages and whatever the cards add in timeline mode", () => {
     expect(
       estimateDuration([1, 2], times, {
-        mode: "single", head: 3, tail: 2, transitionKind: "cross-dissolve", transitionSeconds: 0.5, titleKind: "slate", titleSeconds: 1.5,
+        mode: "single", head: 3, tail: 2, transitionKind: "cross-dissolve", transitionSeconds: 0.5, cardSeconds: 2 * 1.5,
       }),
     ).toBeCloseTo(20 + 30 + 2 * 5 + 0.5 + 2 * 1.5, 6);
   });
-  it("trims and the grid add only the project buffers", () => {
+  it("trims add only the project buffers, whatever else is passed", () => {
     expect(
       estimateDuration([1, 2], times, {
-        mode: "trims", head: 5, tail: 5, transitionKind: "cross-dissolve", transitionSeconds: 0.5, titleKind: "slate", titleSeconds: 1.5,
+        mode: "trims", head: 5, tail: 5, transitionKind: "cross-dissolve", transitionSeconds: 0.5, cardSeconds: 3,
       }),
     ).toBe(70);
+  });
+  it("the grid takes cards but never transitions", () => {
+    expect(
+      estimateDuration([1, 2], times, {
+        mode: "compare", head: 5, tail: 5, transitionKind: "cross-dissolve", transitionSeconds: 0.5, cardSeconds: 3,
+      }),
+    ).toBe(73);
   });
 });
 
 describe("summaryLines", () => {
   const base = {
-    selected: 4, eligible: 4, head: 3, tail: 2, transitionKind: "none", transitionSeconds: 0.5, titleKind: "none", overlay: false, gridCamera: null, reference: null, canvas: null,
+    selected: 4, eligible: 4, head: 3, tail: 2, transitionKind: "none", transitionSeconds: 0.5, cards: null, overlay: false, cams: null, youtube: null, gridCamera: null, reference: null, canvas: null,
   };
   it("reads the timeline options with defaults dimmed", () => {
     const lines = summaryLines({ ...base, mode: "single" });
-    expect(lines.map((l) => l.label)).toEqual(["Stages", "Padding", "Transitions", "Titles", "Overlay"]);
+    expect(lines.map((l) => l.label)).toEqual(["Stages", "Padding", "Transitions", "Cards", "Overlay"]);
     expect(lines[2]).toEqual({ label: "Transitions", value: "cut", dim: true });
+    expect(lines[3]).toEqual({ label: "Cards", value: "off", dim: true });
   });
-  it("trims show the grid camera, the grid shows reference and canvas", () => {
+  it("names the cards, the cams and YouTube only when the mode and format offer them", () => {
+    const lines = summaryLines({ ...base, mode: "single", cards: "title page · slate", cams: 2, youtube: true });
+    expect(lines.map((l) => l.label)).toEqual(["Stages", "Padding", "Transitions", "Cards", "Overlay", "Cams", "YouTube"]);
+    expect(lines[3]).toEqual({ label: "Cards", value: "title page · slate" });
+    expect(lines[5]).toEqual({ label: "Cams", value: "2 synced" });
+    expect(lines[6]).toEqual({ label: "YouTube", value: "preset + sidecar" });
+    // Cams on the shooter but switched off read as "primary only", dimmed.
+    expect(summaryLines({ ...base, mode: "single", cams: 0 }).at(-1)).toEqual({ label: "Cams", value: "primary only", dim: true });
+  });
+  it("trims show the grid camera, the grid shows reference, canvas and cards", () => {
     expect(summaryLines({ ...base, mode: "trims", gridCamera: "head" })[1]).toEqual({ label: "Grid camera", value: "head", dim: false });
-    expect(summaryLines({ ...base, mode: "compare", reference: "Mathias", canvas: "4K UHD" }).map((l) => l.value)).toEqual(["4 / 4", "Mathias", "4K UHD"]);
+    expect(summaryLines({ ...base, mode: "compare", reference: "Mathias", canvas: "4K UHD", cards: "closing" }).map((l) => l.value)).toEqual(["4 / 4", "Mathias", "4K UHD", "closing"]);
   });
 });

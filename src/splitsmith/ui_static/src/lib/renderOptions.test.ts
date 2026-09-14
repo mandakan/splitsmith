@@ -5,10 +5,13 @@ import {
   cardsSupported,
   clampSeconds,
   DEFAULT_RENDER_OPTIONS,
+  describeRenderOptions,
   gridExportFields,
   matchExportFields,
   MAX_HOLD_SECONDS,
   MIN_CARD_SECONDS,
+  renderOptionsSeconds,
+  stageCardsSupported,
   type RenderOptions,
 } from "./renderOptions";
 
@@ -98,5 +101,47 @@ describe("anyRenderOptionOn", () => {
     expect(anyRenderOptionOn(DEFAULT_RENDER_OPTIONS)).toBe(false);
     expect(anyRenderOptionOn({ ...DEFAULT_RENDER_OPTIONS, summaryHoldSeconds: 2 })).toBe(true);
     expect(anyRenderOptionOn({ ...DEFAULT_RENDER_OPTIONS, stageCardStyle: "lower-third" })).toBe(true);
+  });
+});
+
+describe("stageCardsSupported", () => {
+  it("is every format but the FCP 7 XML, and the mapper sends none there", () => {
+    expect(stageCardsSupported("fcpxml")).toBe(true);
+    expect(stageCardsSupported("mp4")).toBe(true);
+    expect(stageCardsSupported("fcp7xml")).toBe(false);
+    expect(matchExportFields(ON, "fcp7xml").title_kind).toBe("none");
+    expect(matchExportFields(ON, "fcpxml").title_kind).toBe("slate");
+  });
+});
+
+describe("describeRenderOptions", () => {
+  it("names what is on in render order and nothing the format cannot draw", () => {
+    expect(describeRenderOptions(DEFAULT_RENDER_OPTIONS, "single", "mp4")).toBeNull();
+    expect(describeRenderOptions(ON, "single", "mp4")).toBe("title page · slate · summary 3 s · closing");
+    expect(describeRenderOptions(ON, "grid", "mp4")).toBe("title page · slate · closing");
+    expect(describeRenderOptions(ON, "single", "fcpxml")).toBe("slate");
+    expect(describeRenderOptions(ON, "single", "fcp7xml")).toBeNull();
+    expect(describeRenderOptions({ ...ON, stageCardStyle: "lower-third" }, "single", "fcpxml")).toBe("lower third");
+  });
+});
+
+describe("renderOptionsSeconds", () => {
+  it("adds a slate per stage, the match cards once each and a summary per stage", () => {
+    expect(renderOptionsSeconds(ON, 3, "single", "mp4")).toBe(3 * 2 + 4 + 4 + 3 * 3);
+    expect(renderOptionsSeconds(ON, 3, "grid", "mp4")).toBe(3 * 2 + 4 + 4);
+    expect(renderOptionsSeconds(ON, 3, "single", "fcpxml")).toBe(3 * 2);
+    expect(renderOptionsSeconds(ON, 3, "single", "fcp7xml")).toBe(0);
+    expect(renderOptionsSeconds(ON, 0, "single", "mp4")).toBe(0);
+  });
+  it("a lower third adds nothing and a blank seconds field counts as the floor", () => {
+    expect(renderOptionsSeconds({ ...DEFAULT_RENDER_OPTIONS, stageCardStyle: "lower-third" }, 3, "single", "mp4")).toBe(0);
+    expect(
+      renderOptionsSeconds(
+        { ...DEFAULT_RENDER_OPTIONS, stageCardStyle: "slate", stageCardDurationSeconds: Number.NaN },
+        2,
+        "single",
+        "mp4",
+      ),
+    ).toBe(2 * MIN_CARD_SECONDS);
   });
 });

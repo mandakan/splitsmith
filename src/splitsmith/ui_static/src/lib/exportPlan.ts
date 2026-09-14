@@ -84,13 +84,15 @@ export interface EstimateOptions {
   tail: number;
   transitionKind: string;
   transitionSeconds: number;
-  titleKind: string;
-  titleSeconds: number;
+  /** What the generated cards add (``renderOptionsSeconds``); the
+   *  caller has already applied the mode and format rules. */
+  cardSeconds?: number;
 }
 
 /** Sum of the selected stage times plus pads, transitions between
- *  stages and a slate per stage. Trims and the grid pad with the
- *  project's own buffers (passed as head / tail) and add nothing else. */
+ *  stages and whatever the cards add. Trims pad with the project's own
+ *  buffers (passed as head / tail) and add nothing else; the grid pads
+ *  the same way but does take cards. */
 export function estimateDuration(
   selected: number[],
   times: Map<number, number>,
@@ -98,11 +100,12 @@ export function estimateDuration(
 ): number {
   let duration = 0;
   for (const n of selected) duration += (times.get(n) ?? 0) + opts.head + opts.tail;
-  if (opts.mode !== "single") return duration;
+  if (opts.mode === "trims") return duration;
   const count = selected.length;
-  if (opts.transitionKind !== "none" && count > 1) duration += opts.transitionSeconds * (count - 1);
-  if (opts.titleKind === "slate" && count > 0) duration += opts.titleSeconds * count;
-  return duration;
+  if (opts.mode === "single" && opts.transitionKind !== "none" && count > 1) {
+    duration += opts.transitionSeconds * (count - 1);
+  }
+  return duration + (opts.cardSeconds ?? 0);
 }
 
 export function formatDuration(seconds: number): string {
@@ -126,8 +129,15 @@ export function summaryLines(args: {
   tail: number;
   transitionKind: string;
   transitionSeconds: number;
-  titleKind: string;
+  /** ``describeRenderOptions`` for the mode and format; null is off. */
+  cards: string | null;
   overlay: boolean;
+  /** Synced secondaries riding the bundle; null hides the line (the
+   *  shooter has none, or the mode does not take them). */
+  cams: number | null;
+  /** The YouTube encode preset and sidecar; null when the format has
+   *  neither to offer. */
+  youtube: boolean | null;
   gridCamera: string | null;
   reference: string | null;
   canvas: string | null;
@@ -137,9 +147,12 @@ export function summaryLines(args: {
     lines.push({ label: "Grid camera", value: args.gridCamera ?? "primary", dim: args.gridCamera === null });
     return lines;
   }
+  const cards: SummaryLine =
+    args.cards === null ? { label: "Cards", value: "off", dim: true } : { label: "Cards", value: args.cards };
   if (args.mode === "compare") {
     lines.push({ label: "Reference", value: args.reference ?? "—", dim: args.reference === null });
     lines.push({ label: "Canvas", value: args.canvas ?? "—" });
+    lines.push(cards);
     return lines;
   }
   lines.push({ label: "Padding", value: `${args.head.toFixed(1)} / ${args.tail.toFixed(1)} s` });
@@ -148,12 +161,18 @@ export function summaryLines(args: {
       ? { label: "Transitions", value: "cut", dim: true }
       : { label: "Transitions", value: `${args.transitionKind} ${args.transitionSeconds.toFixed(1)} s` },
   );
-  lines.push(
-    args.titleKind === "none"
-      ? { label: "Titles", value: "off", dim: true }
-      : { label: "Titles", value: args.titleKind },
-  );
+  lines.push(cards);
   lines.push(args.overlay ? { label: "Overlay", value: "on" } : { label: "Overlay", value: "off", dim: true });
+  if (args.cams !== null) {
+    lines.push(
+      args.cams > 0
+        ? { label: "Cams", value: `${args.cams} synced` }
+        : { label: "Cams", value: "primary only", dim: true },
+    );
+  }
+  if (args.youtube !== null) {
+    lines.push(args.youtube ? { label: "YouTube", value: "preset + sidecar" } : { label: "YouTube", value: "off", dim: true });
+  }
   return lines;
 }
 

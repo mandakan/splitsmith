@@ -52,9 +52,16 @@ export const MIN_CARD_SECONDS = 0.5;
 /** Above this a hold is almost certainly a typo (the grid's own rule). */
 export const MAX_HOLD_SECONDS = 30;
 
-/** Generated cards and the summary hold exist only in the rendered MP4. */
+/** The match cards (title page, closing card) and the summary hold exist
+ *  only in the rendered MP4. */
 export function cardsSupported(outputFormat: OutputFormat | undefined): boolean {
   return outputFormat === "mp4";
+}
+
+/** The per-stage card predates the match cards (#196) and reaches FCPXML
+ *  too, as a Basic Title; only the FCP 7 XML has nowhere to put it. */
+export function stageCardsSupported(outputFormat: OutputFormat | undefined): boolean {
+  return outputFormat !== "fcp7xml";
 }
 
 /** Clamp a seconds field into its sane range; NaN and blanks become the
@@ -87,7 +94,7 @@ export function matchExportFields(
   outputFormat: OutputFormat | undefined,
 ): MatchExportCardFields {
   const fields: MatchExportCardFields = {
-    title_kind: options.stageCardStyle,
+    title_kind: stageCardsSupported(outputFormat) ? options.stageCardStyle : "none",
     title_duration_seconds: clampSeconds(options.stageCardDurationSeconds, MIN_CARD_SECONDS),
   };
   if (!cardsSupported(outputFormat)) return fields;
@@ -133,4 +140,51 @@ export function anyRenderOptionOn(options: RenderOptions): boolean {
     options.stageCardStyle !== "none" ||
     options.summaryHoldSeconds > 0
   );
+}
+
+/** The summary rail's one line for the cards: what is on, in render
+ *  order, or `null` when nothing is. `surface` decides whether the
+ *  summary hold counts (the grid has none) and `outputFormat` whether
+ *  the match cards can exist at all (MP4 only), so the line never names
+ *  a card the export will not draw. */
+export function describeRenderOptions(
+  options: RenderOptions,
+  surface: "single" | "grid",
+  outputFormat: OutputFormat | undefined,
+): string | null {
+  const parts: string[] = [];
+  const cards = cardsSupported(outputFormat);
+  if (cards && options.titlePage) parts.push("title page");
+  if (stageCardsSupported(outputFormat) && options.stageCardStyle !== "none") {
+    parts.push(options.stageCardStyle === "slate" ? "slate" : "lower third");
+  }
+  if (cards && surface === "single" && options.summaryHoldSeconds > 0) {
+    parts.push(`summary ${clampSeconds(options.summaryHoldSeconds, 0)} s`);
+  }
+  if (cards && options.closingCard) parts.push("closing");
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+/** Seconds the cards add to a timeline of `stageCount` stages: a slate
+ *  per stage, the title page, the closing card and, on the single-
+ *  shooter export, one summary hold per stage. A lower-third rides the
+ *  stage's own head and adds nothing. Mirrors what the two renderers
+ *  put on the spine; the estimate is a status line, not a promise. */
+export function renderOptionsSeconds(
+  options: RenderOptions,
+  stageCount: number,
+  surface: "single" | "grid",
+  outputFormat: OutputFormat | undefined,
+): number {
+  if (stageCount <= 0) return 0;
+  let seconds = 0;
+  if (stageCardsSupported(outputFormat) && options.stageCardStyle === "slate") {
+    seconds += clampSeconds(options.stageCardDurationSeconds, MIN_CARD_SECONDS) * stageCount;
+  }
+  if (!cardsSupported(outputFormat)) return seconds;
+  const titleSeconds = clampSeconds(options.titlePageDurationSeconds, MIN_CARD_SECONDS);
+  if (options.titlePage) seconds += titleSeconds;
+  if (options.closingCard) seconds += titleSeconds;
+  if (surface === "single") seconds += clampSeconds(options.summaryHoldSeconds, 0) * stageCount;
+  return seconds;
 }
