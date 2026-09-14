@@ -165,8 +165,9 @@ class MatchExportRequest(BaseModel):
 class CompareGridRequest(BaseModel):
     """Body for POST /api/match/compare-export (phase 0).
 
-    Local mode only: the response is a Job snapshot the SPA polls, since
-    a full-match grid re-encode runs for minutes. ``cameras`` keys match
+    The response is a Job snapshot the SPA polls, since a full-match grid
+    re-encode runs for minutes; the result's ``output_name`` is the
+    deliverable, downloadable in either mode (#755). ``cameras`` keys match
     either a shooter's slug or its display name, mirroring ``compare
     export``'s ``--camera SHOOTER=VALUE`` flag. ``canvas_width`` /
     ``canvas_height`` default to 4K; the frame rate is never taken from

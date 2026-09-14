@@ -14193,9 +14193,10 @@ def create_app(
     async def export_compare_grid(req: CompareGridRequest) -> JSONResponse:
         """Render the match's shooters as one grid MP4 (phase 0).
 
-        Local mode only -- no Storage writes, no download deliverables,
-        no export history. Job-queued: a full-match grid re-encode runs
-        for minutes.
+        Job-queued: a full-match grid re-encode runs for minutes. Hosted
+        (#755), the job pulls the trims from storage and pushes the grid
+        to the match-scoped key ``GET /api/match/exports/file/{name}``
+        serves; no export-history row yet.
 
         Validation up-front so the SPA shows a clear error before
         queueing: empty selection, an unknown audio shooter, an
