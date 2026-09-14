@@ -630,7 +630,18 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
       ref={rootRef}
       className="flex flex-col gap-4 px-4 py-4 md:px-7 lg:grid lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start"
     >
-      <div className="lg:col-span-2">{header}</div>
+      <div className="lg:col-span-2">
+        {header}
+        {/* Leading and full-width (spec s4.5): five cells need the whole
+            row; in the side column their labels wrap. */}
+        <StageStats
+          stageTime={stageTime}
+          shotCount={shots.length}
+          draw={draw}
+          fastestSplit={fastestSplit}
+          avgSplit={avgSplit}
+        />
+      </div>
       {/* Sticky below lg so playback + auto-scrolling splits never lose
           the video. Disabled at viewport heights <= 500px: landscape
           phones report ~330-440px and the pinned player would eat the
@@ -677,13 +688,6 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
         {legend}
       </div>
       <div className="flex flex-col gap-4 lg:max-h-[calc(100dvh-var(--shell-header-h,86px)-2rem)] lg:overflow-y-auto">
-        <StageStats
-          stageTime={stageTime}
-          shotCount={shots.length}
-          draw={draw}
-          fastestSplit={fastestSplit}
-          avgSplit={avgSplit}
-        />
         <SplitsList
           shots={displayShots}
           activeShotNumber={activeShotNumber}
