@@ -398,3 +398,35 @@ def test_triage_includes_skipped_stages_with_skipped_status(client: _MatchClient
     body = client.get("/api/match/triage").json()
     cell = next(c for c in body["cells"] if c["slug"] == "alice" and c["stage_number"] == 3)
     assert cell["status"] == "skipped"
+
+
+def test_triage_cells_carry_pipeline_fields(client: _MatchClient) -> None:
+    """The Overview's stage table reads one triage GET per load (UX PR 3):
+    every cell carries its footage, beep, shot and split figures. Stage 1
+    gets an audit doc with a 0.4 s draw and two 0.3 s splits (a 1.2 s gap
+    would be a transition, not a split, and average to None); stage 2 has
+    no doc and reports null figures rather than zeros."""
+    doc = {
+        "stage_number": 1,
+        "shots": [
+            {"shot_number": 1, "ms_after_beep": 400},
+            {"shot_number": 2, "ms_after_beep": 700},
+            {"shot_number": 3, "ms_after_beep": 1000},
+        ],
+        "audit_events": [],
+    }
+    assert client.put("/api/shooters/alice/stages/1/audit", json=doc).status_code == 200
+    resp = client.get("/api/match/triage")
+    assert resp.status_code == 200, resp.text
+    cells = {c["stage_number"]: c for c in resp.json()["cells"]}
+    s1, s2 = cells[1], cells[2]
+    assert s1["video_count"] == 1
+    assert s1["beep_time"] == 5.0
+    assert s1["beep_reviewed"] is False
+    assert s1["shot_count"] == 3
+    assert s1["draw"] == pytest.approx(0.4)
+    assert s1["avg_split"] == pytest.approx(0.3)
+    assert s1["time_seconds"] == 10.0
+    assert s2["shot_count"] == 0
+    assert s2["draw"] is None
+    assert s2["avg_split"] is None

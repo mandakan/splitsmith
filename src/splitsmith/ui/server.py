@@ -169,6 +169,7 @@ from ..config import (
     Config,
     IntervalClass,
     IntervalClassSource,
+    Shot,
     StageRounds,
 )
 from ..display_name import normalize_display_name
@@ -195,6 +196,7 @@ from ..match_project import (
 from ..match_registry import MatchRegistry
 from ..observability import StructuredJsonFormatter, init_sentry
 from ..runtime import runtime as process_runtime
+from ..share_card import stage_figures
 from ..shot_id import ensure_shot_ids, has_usable_id
 from ..storage import Storage
 from ..sync.client import HostedSyncClient, SyncClientError
@@ -4549,6 +4551,16 @@ class TriageCell(BaseModel):
     beep_confidence: float | None  # min across stage videos that have one
     anomalies: list[dict]  # report.Anomaly.model_dump() records
     needs_attention: TriageAttentionOut | None = None
+    # UX PR 3: the Overview's pipeline table reads these instead of a
+    # second per-stage walk. All derived from data the builder already
+    # holds; the split figures use the same rule as the share card.
+    video_count: int = 0
+    beep_time: float | None = None
+    beep_reviewed: bool = False
+    shot_count: int = 0
+    draw: float | None = None
+    avg_split: float | None = None
+    time_seconds: float = 0.0
 
 
 class TriageResponse(BaseModel):
@@ -13497,12 +13509,14 @@ def create_app(
                     doc, _ = state.load_audit(slug, stg.stage_number)
                 docs.append(doc)
                 anomalies: list[dict] = []
+                engine_shots: list[Shot] = []
                 if doc is not None:
                     engine_shots = audit_shots_to_engine_shots(doc, beep_time_in_source=beep)
                     anomalies = [
                         a.model_dump()
                         for a in report.detect_anomalies_structured(engine_shots, beep, stg.time_seconds)
                     ]
+                figures = stage_figures(engine_shots) if doc is not None else None
                 confs = [v.beep_confidence for v in stg.videos if v.beep_confidence is not None]
                 na_raw = doc.get("needs_attention") if isinstance(doc, dict) else None
                 needs_attention: TriageAttentionOut | None = None
@@ -13521,6 +13535,13 @@ def create_app(
                         beep_confidence=min(confs) if confs else None,
                         anomalies=anomalies,
                         needs_attention=needs_attention,
+                        video_count=len([v for v in stg.videos if v.role != "ignored"]),
+                        beep_time=prim.beep_time if prim is not None else None,
+                        beep_reviewed=bool(prim.beep_reviewed) if prim is not None else False,
+                        shot_count=len(engine_shots),
+                        draw=figures.draw if figures is not None else None,
+                        avg_split=figures.avg_split if figures is not None else None,
+                        time_seconds=float(stg.time_seconds),
                     )
                 )
         cells.sort(key=lambda c: (c.stage_number, c.shooter_name.lower()))
