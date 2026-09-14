@@ -10,7 +10,6 @@ import {
   Columns2,
   Crosshair,
   Film,
-  Flag,
   LayoutGrid,
   MonitorPlay,
 } from "lucide-react";
@@ -54,7 +53,6 @@ export function matchNavItems(args: {
   shooterSlug?: string;
   hasFootage: boolean;
   beepReviewPendingCount: number;
-  triageFlaggedCount: number;
   footageHint?: string;
   /** Compare needs two shooters; the row shows only then (spec s4.7). */
   multiShooter?: boolean;
@@ -66,7 +64,6 @@ export function matchNavItems(args: {
     shooterSlug,
     hasFootage,
     beepReviewPendingCount,
-    triageFlaggedCount,
     footageHint,
     multiShooter = false,
     compareStage = 1,
@@ -93,16 +90,6 @@ export function matchNavItems(args: {
       count: beepReviewPendingCount,
       badgeKind: "pending",
       badgeAriaLabel: `${beepReviewPendingCount} ${beepReviewPendingCount === 1 ? "beep" : "beeps"} to confirm`,
-    },
-    {
-      key: "triage",
-      group: "review",
-      to: `${base}/triage`,
-      icon: <Flag className="size-[15px]" />,
-      label: "Triage",
-      count: triageFlaggedCount,
-      badgeKind: "pending",
-      badgeAriaLabel: `${triageFlaggedCount} stage${triageFlaggedCount === 1 ? "" : "s"} flagged for desktop`,
     },
     { key: "results", group: "analyse", to: `${base}/results`, icon: <MonitorPlay className="size-[15px]" />, label: "Splits" },
     {

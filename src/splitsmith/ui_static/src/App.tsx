@@ -43,7 +43,6 @@ import { DevValidate } from "@/pages/dev/DevValidate";
 import { Export } from "@/pages/Export";
 import { Home } from "@/pages/Home";
 import { Ingest } from "@/pages/Ingest";
-import { Jobs } from "@/pages/Jobs";
 import { MergeMatches } from "@/pages/MergeMatches";
 import { Pick } from "@/pages/Pick";
 import { TakeOverview } from "@/pages/TakeOverview";
@@ -53,7 +52,6 @@ import { Account } from "@/pages/Account";
 import { Results } from "@/pages/Results";
 import { ResultsStage } from "@/pages/ResultsStage";
 import { Review } from "@/pages/Review";
-import { Triage } from "@/pages/Triage";
 
 /* The legacy Lab page is deleted (#331 final task). Every legacy Lab URL
  * family redirects to the dev-mode corpus / fixture-detail pages that
@@ -88,6 +86,14 @@ export function RedirectCorpusSlug() {
  * as the ``/dev/legacy/lab(/:slug)`` family above. */
 function RedirectLabSlug() {
   return <RedirectLegacyLabSlug />;
+}
+
+/* Triage and Jobs left the nav (UX PR 8). Their match-scoped URLs land
+ * on Overview, which carries the accept / audit actions and the flag
+ * count, and whose progress strip opens the jobs drawer. */
+function RedirectToOverview() {
+  const { matchId } = useParams<{ matchId?: string }>();
+  return <Navigate to={matchId ? `/match/${matchId}/` : "/pick"} replace />;
 }
 
 /* Beep review keeps its phone surface (the card-pager MobileBeepReview,
@@ -330,10 +336,11 @@ export function App() {
                 path="results/:slug/:stage"
                 element={<ShooterScopedRoute element={<ResultsStage />} />}
               />
-              {/* Triage is responsive by design - it doubles as the desktop
-                  flagged-stage worklist, so no DesktopGate (slice 4). */}
-              <Route path="triage" element={<Triage />} />
-              <Route path="jobs" element={<Jobs />} />
+              {/* Triage's actions live on the Overview rows and Jobs is the
+                  progress strip + drawer (UX PR 8); both routes redirect
+                  for one release. */}
+              <Route path="triage" element={<RedirectToOverview />} />
+              <Route path="jobs" element={<RedirectToOverview />} />
             </Route>
           </Route>
           {/* Developer mode (#331). All four workflow steps sit under the
