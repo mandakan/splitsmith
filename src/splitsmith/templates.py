@@ -78,6 +78,11 @@ class MatchExportTemplate(BaseModel):
     transition_duration_seconds: float | None = None
     title_kind: Literal["none", "slate", "lower-third"] | None = None
     title_duration_seconds: float | None = None
+    # Issue #973: generated match cards (MP4 only).
+    title_page: bool | None = None
+    title_info: str | None = None
+    title_page_duration_seconds: float | None = None
+    closing_card: bool | None = None
     intro_path: str | None = None  # filesystem path; ``~`` expands at apply time
     outro_path: str | None = None
 

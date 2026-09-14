@@ -2447,8 +2447,7 @@ def _compare_grid_progress_runner(
             handle.update(
                 progress=0.05 + 0.9 * (index / total) if total else 0.05,
                 message=(
-                    f"Rendering stage {plan.stage_number} ({plan.stage_name}) "
-                    f"-- {index + 1} of {total}..."
+                    f"Rendering stage {plan.stage_number} ({plan.stage_name}) -- {index + 1} of {total}..."
                 ),
             )
         else:
@@ -2939,9 +2938,7 @@ def register_job_bodies(state: AppState) -> None:
                 if aligned is not None and aligned.confidence >= _align_confidence_floor:
                     handle.update(
                         progress=0.55,
-                        message=(
-                            f"Aligned to primary (conf {aligned.confidence:.2f}); " "verify on waveform"
-                        ),
+                        message=(f"Aligned to primary (conf {aligned.confidence:.2f}); verify on waveform"),
                     )
                     video.beep_time = aligned.secondary_beep_time
                     video.beep_source = "aligned"
@@ -3900,7 +3897,7 @@ def register_job_bodies(state: AppState) -> None:
                 if needs_per_stage:
                     handle.update(
                         progress=0.02 + idx * per_stage_share,
-                        message=(f"Stage {stage_number} ({idx + 1} of {n}): " "running per-stage export..."),
+                        message=(f"Stage {stage_number} ({idx + 1} of {n}): running per-stage export..."),
                     )
                     # Build the secondaries list for the per-stage exporter --
                     # mirrors the single-stage endpoint's logic.
@@ -3958,9 +3955,7 @@ def register_job_bodies(state: AppState) -> None:
                 else:
                     handle.update(
                         progress=0.02 + idx * per_stage_share,
-                        message=(
-                            f"Stage {stage_number} ({idx + 1} of {n}): " "trim already present; skipping"
-                        ),
+                        message=(f"Stage {stage_number} ({idx + 1} of {n}): trim already present; skipping"),
                     )
 
         handle.check_cancel()
@@ -3970,40 +3965,14 @@ def register_job_bodies(state: AppState) -> None:
         # via project.save() side-effects, so a fresh load picks those up.
         with handle.timer.phase("compose"):
             proj = state.shooter_project(slug)
-            stages_input: list[match_export_helpers.MatchStageInput] = []
-            for stage_number in req.stage_numbers:
-                stg = proj.stage(stage_number)
-                prim = stg.primary()
-                assert prim is not None and prim.beep_time is not None
-                base = stage_file_base(stage_number, stg.stage_name)
-                trimmed_path = exports_dir / f"{base}_trimmed.mp4"
-                audit_path = audit_dir / f"stage{stage_number}.json"
-                overlay_path = exports_dir / f"{base}_overlay.mov"
-                secondaries: list[match_export_helpers.MatchSecondaryInput] = []
-                for sv in stg.videos:
-                    if sv.role != "secondary" or sv.beep_time is None:
-                        continue
-                    sec_clip_beep = min(proj.trim_pre_buffer_seconds, sv.beep_time)
-                    secondaries.append(
-                        match_export_helpers.MatchSecondaryInput(
-                            video_id=sv.video_id,
-                            trimmed_path=exports_dir / f"{base}_cam_{sv.video_id}_trimmed.mp4",
-                            beep_offset_seconds=sec_clip_beep,
-                            label=f"Cam {sv.video_id}",
-                        )
-                    )
-                primary_clip_beep = min(proj.trim_pre_buffer_seconds, prim.beep_time)
-                stages_input.append(
-                    match_export_helpers.MatchStageInput(
-                        stage_number=stage_number,
-                        stage_name=stg.stage_name,
-                        audit_path=audit_path,
-                        trimmed_path=trimmed_path,
-                        beep_offset_seconds=primary_clip_beep,
-                        secondaries=tuple(secondaries),
-                        overlay_path=overlay_path,
-                    )
+            # One assembler for the job and the CLI verb (#973), so the
+            # two cannot drift on a file name or a beep offset.
+            try:
+                stages_input = match_export_helpers.stage_inputs_for_project(
+                    proj, state.shooter_root(slug), req.stage_numbers
                 )
+            except ValueError as exc:
+                raise RuntimeError(f"{exc} (disappeared mid-flight)") from exc
 
             project_name = req.project_name or proj.name or "match"
             request_data = match_export_helpers.MatchExportRequestData(
@@ -4023,6 +3992,11 @@ def register_job_bodies(state: AppState) -> None:
                 outro_path=Path(req.outro_path).expanduser() if req.outro_path else None,
                 youtube_sidecar=req.youtube_sidecar,
                 youtube_preset=req.youtube_preset,
+                title_page=req.title_page,
+                title_page_info=match_export_helpers.title_info_lines(proj, extra=req.title_info),
+                title_page_duration_seconds=req.title_page_duration_seconds,
+                closing_card=req.closing_card,
+                overlay_theme=req.overlay_theme,
             )
             try:
                 result = match_export_helpers.export_match(
@@ -4101,7 +4075,7 @@ def register_job_bodies(state: AppState) -> None:
         anom_suffix = f" ({len(result.anomalies)} {anom_word})" if result.anomalies else ""
         handle.update(
             progress=1.0,
-            message=(f"Done: {result.stage_count} stages, " f"{result.duration_seconds:.1f}s{anom_suffix}"),
+            message=(f"Done: {result.stage_count} stages, {result.duration_seconds:.1f}s{anom_suffix}"),
         )
 
     def _run_generate_proxy(handle: JobHandle, *, raw_path: str) -> None:
@@ -5715,7 +5689,7 @@ async def _register_match_at(
             status_code=409,
             detail={
                 "code": "match_empty",
-                "message": (f"Match {resolved} has no shooters yet. " "Add a shooter or recreate the match."),
+                "message": (f"Match {resolved} has no shooters yet. Add a shooter or recreate the match."),
             },
         )
     name = match.name or fallback_name
@@ -7259,7 +7233,7 @@ def create_app(
                 content={
                     "detail": {
                         "code": "version_conflict",
-                        "message": ("this match state changed since you loaded it; " "reload and try again"),
+                        "message": ("this match state changed since you loaded it; reload and try again"),
                     }
                 },
             )
@@ -9408,7 +9382,7 @@ def create_app(
                 detail={
                     "code": "competitor_not_in_match",
                     "message": (
-                        f"competitor {req.competitor_id} isn't in this match. " "Pick a different shooter."
+                        f"competitor {req.competitor_id} isn't in this match. Pick a different shooter."
                     ),
                 },
             )
@@ -13121,7 +13095,7 @@ def create_app(
             if pick.selected_competitor_id in comp_ids_seen:
                 raise HTTPException(
                     status_code=400,
-                    detail=(f"duplicate competitor {pick.selected_competitor_id} " "in picks"),
+                    detail=(f"duplicate competitor {pick.selected_competitor_id} in picks"),
                 )
             comp_ids_seen.add(pick.selected_competitor_id)
 
@@ -13389,7 +13363,7 @@ def create_app(
             if not match_model.is_legacy_project_folder(src):
                 raise HTTPException(
                     status_code=400,
-                    detail=(f"{src} is not a legacy single-shooter project " "(no project.json)"),
+                    detail=(f"{src} is not a legacy single-shooter project (no project.json)"),
                 )
         # output is optional for plan -- the user may not have picked a
         # destination yet. Fall back to "(unset)" so the response still
@@ -15141,8 +15115,7 @@ def create_app(
                 raise HTTPException(
                     status_code=409,
                     detail=(
-                        f"stage {stage_n} primary has no beep_time; "
-                        "detect or set the beep before promoting"
+                        f"stage {stage_n} primary has no beep_time; detect or set the beep before promoting"
                     ),
                 )
             if not primary.camera_mount:
@@ -15158,7 +15131,7 @@ def create_app(
             if stage_time_seconds is None:
                 raise HTTPException(
                     status_code=409,
-                    detail=(f"stage {stage_n} has no time_seconds; cannot " "compute the trim window."),
+                    detail=(f"stage {stage_n} has no time_seconds; cannot compute the trim window."),
                 )
             source_video_path = project.resolve_video_path(state.shooter_root(shooter_slug), primary.path)
             trim_start = max(0.0, float(primary.beep_time) - float(project.trim_pre_buffer_seconds))
@@ -15622,7 +15595,7 @@ def create_app(
             if project.selected_shooter_id is None:
                 raise HTTPException(
                     status_code=400,
-                    detail=("this project has no SSI shooter pinned; " "cannot resolve anchor fixture slug."),
+                    detail=("this project has no SSI shooter pinned; cannot resolve anchor fixture slug."),
                 )
             anchor_token = lab_module.shooter_token(project.selected_shooter_id)
             name_slug = slugify(project.name, fallback="stage")
@@ -15675,7 +15648,7 @@ def create_app(
             if target_json.exists() and not body.overwrite:
                 raise HTTPException(
                     status_code=409,
-                    detail=(f"fixture already exists: {target_json.name}" " (set overwrite=true to replace)"),
+                    detail=(f"fixture already exists: {target_json.name} (set overwrite=true to replace)"),
                 )
 
             try:
@@ -15893,7 +15866,7 @@ def create_app(
             if target_json.exists() and not body.overwrite:
                 raise HTTPException(
                     status_code=409,
-                    detail=(f"fixture already exists: {target_json.name}" " (set overwrite=true to replace)"),
+                    detail=(f"fixture already exists: {target_json.name} (set overwrite=true to replace)"),
                 )
 
             try:
@@ -16781,7 +16754,7 @@ def _print_active_jobs(app: FastAPI) -> None:
         print("Shutting down (no background jobs running).", file=sys.stderr, flush=True)
         return
     print(
-        f"Shutting down -- waiting for {len(active)} background job" f"{'' if len(active) == 1 else 's'}:",
+        f"Shutting down -- waiting for {len(active)} background job{'' if len(active) == 1 else 's'}:",
         file=sys.stderr,
         flush=True,
     )
