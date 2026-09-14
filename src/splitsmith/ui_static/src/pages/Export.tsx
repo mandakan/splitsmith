@@ -842,7 +842,7 @@ function ExportInner({ slug }: { slug: string }) {
                   label="YouTube"
                   help={
                     youtube
-                      ? "Encodes with the YouTube preset and writes the description with chapters, plus per-shot captions (.srt), beside the video."
+                      ? "Encodes with the YouTube preset and writes the title, description with chapters and tags (paste-ready), per-shot captions (.srt) and a thumbnail beside the video."
                       : "Off: the default encode, no upload sidecar."
                   }
                 >
@@ -920,7 +920,9 @@ function ExportInner({ slug }: { slug: string }) {
                   <div className="truncate text-muted">{bundleName}.txt</div>
                   {renderedMp4 && youtube ? (
                     <>
+                      <div className="truncate text-muted">{bundleName}-youtube.txt</div>
                       <div className="truncate text-muted">{bundleName}-youtube.json</div>
+                      <div className="truncate text-muted">{bundleName}-thumbnail.jpg</div>
                       <div className="truncate text-muted">{bundleName}.srt</div>
                     </>
                   ) : null}

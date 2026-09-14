@@ -19,6 +19,8 @@ agnostic -- works whether the matched output is .fcpxml / .xml / .mp4.
 
 from __future__ import annotations
 
+import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -54,6 +56,7 @@ class YouTubeSidecar(BaseModel):
     category: str = "Sports"
     captions_path: str | None = None
     output_video: str | None = None  # relative path to the .mp4/.fcpxml when known
+    thumbnail_path: str | None = None  # relative path to the .jpg grabbed from the render
 
 
 def build_sidecar(
@@ -64,6 +67,7 @@ def build_sidecar(
     tags: list[str] | None = None,
     captions_path: Path | None = None,
     output_video: Path | None = None,
+    thumbnail_path: Path | None = None,
 ) -> YouTubeSidecar:
     """Build a :class:`YouTubeSidecar` from a composition.
 
@@ -88,6 +92,7 @@ def build_sidecar(
         tags=list(tags or _default_tags(composition)),
         captions_path=str(captions_path) if captions_path is not None else None,
         output_video=str(output_video) if output_video is not None else None,
+        thumbnail_path=str(thumbnail_path) if thumbnail_path is not None else None,
     )
 
 
@@ -98,6 +103,34 @@ def write_sidecar(sidecar: YouTubeSidecar, output_path: Path) -> None:
         sidecar.model_dump_json(indent=2),
         encoding="utf-8",
     )
+
+
+def paste_text(sidecar: YouTubeSidecar) -> str:
+    """The sidecar as Studio wants it typed: the title on its own, then
+    the description verbatim -- real line breaks, since a description
+    copied out of the JSON carries ``\\n`` escapes and YouTube shows them
+    as text (it then sees no chapters at all) -- then the tags as the
+    comma list Studio's tag box takes."""
+    return "\n".join(
+        [
+            "TITLE",
+            sidecar.title,
+            "",
+            "DESCRIPTION",
+            sidecar.description,
+            "",
+            "TAGS",
+            ", ".join(sidecar.tags),
+            "",
+            *(["THUMBNAIL", sidecar.thumbnail_path, ""] if sidecar.thumbnail_path else []),
+        ]
+    )
+
+
+def write_paste_text(sidecar: YouTubeSidecar, output_path: Path) -> None:
+    """Write :func:`paste_text` beside the JSON as ``<stem>-youtube.txt``."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(paste_text(sidecar), encoding="utf-8")
 
 
 def write_srt(composition: Composition, output_path: Path) -> None:
@@ -305,3 +338,56 @@ __all__ = [
 
 #: The pre-#204-follow-up private name; the MP4 renderer imports the public one.
 _compute_chapters = compute_chapters
+
+
+def thumbnail_time_seconds(composition: Composition) -> float:
+    """Where on the rendered spine the thumbnail frame is taken from: the
+    middle of the title page when there is one, else the first stage's
+    first shot (the beep, for a stage with no shot) -- the frame a head
+    cam has the gun on the first target."""
+    cursor = _spine_offset_seconds_intro(composition)
+    if composition.title_page is not None:
+        intro = composition.intro.asset.metadata.duration_seconds if composition.intro else 0.0
+        return intro + composition.title_page.duration_seconds / 2
+    if not composition.stages:
+        return 0.0
+    stage = composition.stages[0]
+    start, head_trim = _stage_spine_window(composition, 0, cursor)
+    first_shot = min((m.time_seconds for m in stage.markers), default=stage.beep_offset_seconds)
+    return start + max(0.0, first_shot - head_trim)
+
+
+def write_thumbnail(
+    video_path: Path,
+    at_seconds: float,
+    output_path: Path,
+    *,
+    ffmpeg_binary: str = "ffmpeg",
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+) -> None:
+    """Grab one frame of the rendered video as a JPEG YouTube will take
+    as a custom thumbnail: 1280 wide, the height following the aspect,
+    quality 2 (well under the 2 MB cap). Output-side seek so the frame
+    is exact, not the previous keyframe."""
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    runner(
+        [
+            ffmpeg_binary,
+            "-hide_banner",
+            "-y",
+            "-i",
+            str(video_path),
+            "-ss",
+            f"{at_seconds:.3f}",
+            "-frames:v",
+            "1",
+            "-vf",
+            "scale=1280:-2",
+            "-q:v",
+            "2",
+            str(output_path),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )

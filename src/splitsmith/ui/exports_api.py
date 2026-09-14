@@ -314,6 +314,7 @@ def download_export_file(slug: str, filename: str, request: Request) -> FileResp
         ".txt": "text/plain",
         ".srt": "application/x-subrip",
         ".json": "application/json",
+        ".jpg": "image/jpeg",
     }
     media_type = media_types.get(target.suffix.lower(), "application/octet-stream")
     return FileResponse(target, media_type=media_type, filename=target.name)
