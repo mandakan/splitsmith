@@ -182,7 +182,7 @@ export function Home() {
     </Button>
   ) : noFootage ? (
     <Button variant="primary" asChild>
-      <Link to={leadSlug ? hrefs.footage(leadSlug) : href("shooters")}>Add footage</Link>
+      <Link to={leadSlug ? hrefs.footage(leadSlug) : href("ingest")}>Add footage</Link>
     </Button>
   ) : rows.length > 0 ? (
     <Button variant="primary" asChild>
@@ -282,7 +282,7 @@ export function Home() {
           </p>
           <div className="mt-4 inline-flex">
             <Button variant="primary" asChild>
-              <Link to={leadSlug ? hrefs.footage(leadSlug) : href("shooters")}>Add footage</Link>
+              <Link to={leadSlug ? hrefs.footage(leadSlug) : href("ingest")}>Add footage</Link>
             </Button>
           </div>
         </div>

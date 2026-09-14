@@ -1,4 +1,3 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /** Cockpit bottom dock: the Transport bar and the SyncTimeline fused
  *  into one panel behind one playhead. The lane gutter is HTML (real
  *  buttons, no SVG-text distortion); the track SVG renders at measured
@@ -10,6 +9,7 @@ import { Link2, MoveLeft, MoveRight, Pause, Play, Volume2 } from "lucide-react";
 import { useCallback, useRef, useState } from "react";
 
 import { type CompareShooterRecord } from "@/lib/api";
+import { Label } from "@/components/ui/Label";
 import { cn } from "@/lib/utils";
 
 const TRACK_PALETTE: string[] = [
@@ -143,20 +143,12 @@ export function TransportDock({
         </button>
         <div className="ml-2 flex items-center gap-4 font-mono tabular-nums">
           <span className="flex flex-col items-start gap-0.5">
-            <span className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
-              t-beep
-            </span>
-            <span className="font-mono text-base font-bold leading-none text-led-text [text-shadow:0_0_10px_var(--color-led-glow)]">
-              {timeSinceBeep.toFixed(3)}s
-            </span>
+            <Label tone="subtle">t-beep</Label>
+            <span className="numeral text-base leading-none text-ink">{timeSinceBeep.toFixed(3)}s</span>
           </span>
           <span className="flex flex-col items-start gap-0.5">
-            <span className="font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
-              span
-            </span>
-            <span className="font-mono text-base font-bold leading-none text-ink">
-              {maxTime.toFixed(2)}s
-            </span>
+            <Label tone="subtle">span</Label>
+            <span className="numeral text-base leading-none text-ink-2">{maxTime.toFixed(2)}s</span>
           </span>
         </div>
         <input
@@ -169,9 +161,7 @@ export function TransportDock({
           value={clampedT}
           onChange={(e) => onScrub(parseFloat(e.target.value))}
         />
-        <span className="hidden font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle lg:inline">
-          drag the tracks to scrub - click a lane for audio
-        </span>
+        <span className="hidden text-sm text-subtle lg:inline">Drag the tracks to scrub; click a lane for audio.</span>
       </div>
 
       {/* Lane gutter + track SVG */}
@@ -202,13 +192,9 @@ export function TransportDock({
                   className="size-2.5 flex-none rounded-full"
                   style={{ background: color }}
                 />
-                <span className="min-w-0 truncate font-display text-[0.75rem] font-bold uppercase tracking-[0.05em]">
-                  {s.name}
-                </span>
-                {isAudio ? (
-                  <Volume2 className="size-3 flex-none text-led" />
-                ) : null}
-                <span className="ml-auto font-mono text-[0.75rem] font-bold tabular-nums text-muted">
+                <span className="min-w-0 truncate text-sm font-medium">{s.name}</span>
+                {isAudio ? <Volume2 className="size-3 flex-none text-beep" aria-hidden /> : null}
+                <span className="numeral ml-auto text-sm text-muted">
                   {s.stage_time_seconds != null
                     ? s.stage_time_seconds.toFixed(2)
                     : "-"}

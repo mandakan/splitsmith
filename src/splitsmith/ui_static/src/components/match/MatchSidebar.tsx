@@ -66,6 +66,10 @@ interface MatchSidebarProps {
    *  worklist. Drives the badge on the Triage nav row, mirroring
    *  ``beepReviewPendingCount``'s contract. */
   triageFlaggedCount?: number;
+  /** Compare needs two shooters; its nav row shows only then. */
+  multiShooter?: boolean;
+  /** Where the Compare row lands: the first audited stage, else 1. */
+  compareStage?: number;
   /** When true the sidebar renders the "no footage yet" sub for the stage
    *  list (matches polished/17). Defaults to false. */
   awaiting?: boolean;
@@ -112,6 +116,8 @@ export function MatchSidebar({
   stages,
   beepReviewPendingCount,
   triageFlaggedCount,
+  multiShooter,
+  compareStage,
   awaiting = false,
   hasFootage = true,
   onStageClick,
@@ -199,6 +205,8 @@ export function MatchSidebar({
           hasFootage,
           beepReviewPendingCount: beepReviewPendingCount ?? 0,
           triageFlaggedCount: triageFlaggedCount ?? 0,
+          multiShooter,
+          compareStage,
           footageHint,
         }).flatMap((item, i, items) => {
           // A phase label whenever the group changes (spec 2026-09-13

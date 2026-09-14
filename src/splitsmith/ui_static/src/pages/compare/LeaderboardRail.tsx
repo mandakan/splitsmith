@@ -5,6 +5,7 @@
  *  statisticSplits, same as the retired RankingTable). */
 
 import { Avatar } from "@/components/ui";
+import { Label } from "@/components/ui/Label";
 import { type CompareShooterRecord } from "@/lib/api";
 import { splitsFromTimeline, statisticSplits } from "@/lib/splits";
 import { cn } from "@/lib/utils";
@@ -36,80 +37,38 @@ export function LeaderboardRail({
     <aside
       data-testid="leaderboard-rail"
       aria-label="Leaderboard"
-      className="flex w-[360px] flex-none flex-col overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]"
+      className="flex w-[340px] flex-none flex-col overflow-hidden rounded-[10px] border border-rule bg-surface"
     >
-      <div className="flex items-baseline justify-between border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-4 py-2.5">
-        <span className="font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
-          Leaderboard
-        </span>
-        <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-          stage time
-        </span>
+      <div className="flex items-baseline justify-between border-b border-rule-strong px-3 py-2">
+        <Label>Leaderboard</Label>
+        <Label tone="subtle">stage time &middot; gap</Label>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {rows.map((row) => (
-          <div
-            key={row.shooter.slug}
-            className="grid grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1.5 border-b border-rule px-4 py-3 last:border-b-0"
-          >
-            <span
-              className={cn(
-                "font-display text-xl font-bold tabular-nums",
-                row.rank === 1
-                  ? "text-led drop-shadow-[0_0_10px_var(--color-led-glow)]"
-                  : "text-whisper",
-              )}
-            >
-              {row.rank}
-            </span>
+          <div key={row.shooter.slug} className="grid grid-cols-[1.5rem_minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-1 border-b border-rule px-3 py-2.5 last:border-b-0">
+            <span className={cn("numeral text-md", row.rank === 1 ? "text-led" : "text-muted")}>{row.rank}</span>
             <span className="inline-flex min-w-0 items-center gap-2">
-              <Avatar
-                size="xs"
-                initials={initials(row.shooter.name)}
-                tone={undefined}
-                seed={row.shooter.slug}
-              />
-              <span
-                data-testid="rail-name"
-                className="truncate font-display text-[0.8125rem] font-bold uppercase tracking-[0.04em] text-ink"
-              >
+              <Avatar size="xs" initials={initials(row.shooter.name)} tone={undefined} seed={row.shooter.slug} />
+              <span data-testid="rail-name" className="truncate text-md font-medium text-ink">
                 {row.shooter.name}
               </span>
             </span>
-            <span
-              className={cn(
-                "text-right font-mono text-lg font-bold leading-none tabular-nums",
-                row.rank === 1
-                  ? "text-led drop-shadow-[0_0_8px_var(--color-led-glow)]"
-                  : "text-ink",
-              )}
-            >
-              {Number.isFinite(row.time) ? `${row.time.toFixed(2)}s` : "-"}
+            <span className="numeral text-right text-md text-ink">
+              {Number.isFinite(row.time) ? row.time.toFixed(2) : "\u2014"}
+              {row.rank !== 1 && Number.isFinite(row.time) ? (
+                <span className="ml-1.5 text-sm text-live">{`+${(row.time - leaderTime).toFixed(2)}s`}</span>
+              ) : null}
             </span>
             <span aria-hidden="true" />
-            <div className="col-span-2 col-start-2 flex items-center gap-3 font-mono text-[0.625rem] uppercase tracking-[0.08em] text-muted tabular-nums">
+            <div className="numeral col-span-2 col-start-2 flex items-center gap-3 text-sm text-muted">
               <span data-testid="rail-draw">
-                draw{" "}
-                <b className="font-bold text-ink-2">
-                  {row.draw != null ? row.draw.toFixed(2) : "-"}
-                </b>
+                draw <b className="font-medium text-ink-2">{row.draw != null ? row.draw.toFixed(2) : "\u2014"}</b>
               </span>
               <span data-testid="rail-fast">
-                fast{" "}
-                <b className="font-bold text-ink-2">
-                  {row.fastestSplit != null ? row.fastestSplit.toFixed(3) : "-"}
-                </b>
+                fast <b className="font-medium text-ink-2">{row.fastestSplit != null ? row.fastestSplit.toFixed(3) : "\u2014"}</b>
               </span>
               <span data-testid="rail-avg">
-                avg{" "}
-                <b className="font-bold text-ink-2">
-                  {row.avgSplit != null ? row.avgSplit.toFixed(3) : "-"}
-                </b>
-              </span>
-              <span className="ml-auto text-subtle">
-                {row.rank === 1 || !Number.isFinite(row.time)
-                  ? ""
-                  : `+${(row.time - leaderTime).toFixed(2)}s`}
+                avg <b className="font-medium text-ink-2">{row.avgSplit != null ? row.avgSplit.toFixed(3) : "\u2014"}</b>
               </span>
             </div>
           </div>

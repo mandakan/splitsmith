@@ -1,4 +1,3 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * DesktopGate - phones get a signpost instead of a broken desktop
  * layout. Pass-through above md; below md the wrapped page never
@@ -8,6 +7,8 @@
 import type { ReactNode } from "react";
 import { MonitorSmartphone } from "lucide-react";
 import { Link } from "react-router-dom";
+
+import { Button } from "@/components/ui/button";
 import { useMatchHref } from "@/lib/matchHref";
 import { useIsMobile } from "@/lib/useIsMobile";
 
@@ -35,31 +36,23 @@ export function DesktopOnlyNotice({
   const href = useMatchHref();
   return (
     <div className="grid min-h-[60dvh] place-items-center px-6 py-10">
-      <div className="flex max-w-sm flex-col items-center gap-4 text-center">
+      <div className="flex max-w-sm flex-col items-center gap-3 text-center">
         <MonitorSmartphone className="size-8 text-subtle" aria-hidden />
-        <div className="font-display text-xl font-bold uppercase tracking-tight text-ink">
-          This screen needs a desktop
-        </div>
-        <p className="text-sm text-muted">
-          {screen} is a desktop workflow - its layout and controls do not fit a
-          phone.{links ? " Results and the match overview work great here." : ""}
+        <h1 className="text-lg font-semibold text-ink">This screen needs a desktop</h1>
+        <p className="text-md text-muted">
+          {screen} is a desktop workflow; its layout and controls do not fit a phone.
+          {links ? " Splits and the Overview work here." : ""}
         </p>
-        {links && (
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            <Link
-              to={href("results")}
-              className="btn-led-fill inline-flex items-center justify-center rounded-md min-h-11 px-5"
-            >
-              Results
-            </Link>
-            <Link
-              to={href("")}
-              className="btn-led-outline inline-flex items-center justify-center rounded-md min-h-11 px-5"
-            >
-              Match overview
-            </Link>
+        {links ? (
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button variant="primary" asChild>
+              <Link to={href("results")}>Splits</Link>
+            </Button>
+            <Button asChild>
+              <Link to={href("")}>Overview</Link>
+            </Button>
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

@@ -281,7 +281,7 @@ the length of the stitched timeline. Never assign one from the other.
 
 The SPA is mid-restructure (spec
 ``docs/superpowers/specs/2026-09-13-ux-restructure-and-visual-budget-design.md``,
-eight PRs, six merged as of 2026-09-14; PR 7 Coach / Compare next). Any new screen or surface,
+eight PRs, seven merged as of 2026-09-14; PR 8 Export / Matches / Account next). Any new screen or surface,
 whatever session builds it, follows the budget below; the ESLint rule
 ``no-restricted-syntax`` in ``ui_static/eslint.config.js`` enforces the
 mechanical half.
@@ -333,7 +333,17 @@ per-video control belongs on ``ClipSheet``, a new per-stage action on
 ``CoverageMatrix``'s row menu, shooter management on ``ShootersPanel`` /
 ``AddShooterSheet`` (the Shooters page is gone; ``/shooters`` redirects).
 ``components/ui/Sheet`` and ``components/ui/Menu`` are the side-panel and
-popover primitives. Still grandfathered and not in any rebuild PR --
+popover primitives. Coach (``pages/Coach.tsx``, ``components/coach/*``,
+``lib/timeBudget.ts``): the time budget sums each shot's split into its
+stored interval class (``timeBudget`` / ``matchBudget``; the segments
+equal the stage time to 1 ms, pinned by fixture); the budget hues are
+the chip ticks (``BUDGET_TICK``), and an outlier is an interval over
+twice its type's match median. A new per-shot control belongs on
+``ShotEditor``, a new per-type figure on ``TimeBudgetCard``. Compare
+(``pages/Compare.tsx``, ``pages/compare/*``): header on ``PageHeader``,
+the nav row appears only on multi-shooter matches
+(``matchNavItems({ multiShooter })``). Still grandfathered and not in
+any rebuild PR --
 restyle onto the primitives whenever you touch them:
 ``components/results/ResultsPlayer.tsx``, ``CamPicker.tsx``,
 ``ReclassifySheet.tsx``, ``ShareDialog.tsx``,
@@ -347,8 +357,7 @@ restyle onto the primitives whenever you touch them:
 
 **Files the restructure will rewrite -- do not edit them in a parallel
 branch, put new functionality in a component the rebuild can mount:**
-PR 7 ``pages/Coach.tsx``, ``pages/Compare.tsx``,
-``pages/compare/*``; PR 8 ``pages/Export.tsx``, ``pages/Pick.tsx``,
+PR 8 ``pages/Export.tsx``, ``pages/Pick.tsx``,
 ``pages/Account.tsx``, ``pages/Triage.tsx``, ``pages/Jobs.tsx``. Nav
 rows live in ``components/match/navItems.tsx`` (grouped by phase:
 Prepare / Review / Analyse / Deliver); a new row needs a group.

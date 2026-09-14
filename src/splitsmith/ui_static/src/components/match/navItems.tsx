@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import {
   ArrowDownToLine,
   ClipboardCheck,
+  Columns2,
   Crosshair,
   Film,
   Flag,
@@ -55,6 +56,10 @@ export function matchNavItems(args: {
   beepReviewPendingCount: number;
   triageFlaggedCount: number;
   footageHint?: string;
+  /** Compare needs two shooters; the row shows only then (spec s4.7). */
+  multiShooter?: boolean;
+  /** Where the Compare row lands: the first audited stage, else stage 1. */
+  compareStage?: number;
 }): MatchNavItem[] {
   const {
     base,
@@ -63,6 +68,8 @@ export function matchNavItems(args: {
     beepReviewPendingCount,
     triageFlaggedCount,
     footageHint,
+    multiShooter = false,
+    compareStage = 1,
   } = args;
   return [
     { key: "overview", to: `${base}/`, icon: <LayoutGrid className="size-[15px]" />, label: "Overview", end: true },
@@ -107,6 +114,17 @@ export function matchNavItems(args: {
       disabled: !hasFootage,
       disabledHint: footageHint,
     },
+    ...(multiShooter
+      ? [
+          {
+            key: "compare",
+            group: "analyse" as const,
+            to: `${base}/compare/${compareStage}`,
+            icon: <Columns2 className="size-[15px]" />,
+            label: "Compare",
+          },
+        ]
+      : []),
     {
       key: "export",
       group: "deliver",
