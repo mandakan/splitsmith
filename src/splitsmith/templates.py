@@ -83,6 +83,8 @@ class MatchExportTemplate(BaseModel):
     title_info: str | None = None
     title_page_duration_seconds: float | None = None
     closing_card: bool | None = None
+    # Issue #972: the stage summary hold (MP4 only).
+    summary_hold_seconds: float | None = None
     intro_path: str | None = None  # filesystem path; ``~`` expands at apply time
     outro_path: str | None = None
 

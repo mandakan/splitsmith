@@ -21,10 +21,11 @@ from typing import Literal
 
 from .. import composition, fcp7xml_render, fcpxml_gen, mp4_render, youtube_sidecar
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
-from ..config import OutputConfig
+from ..config import OutputConfig, StageRounds
 from ..export_naming import match_file_base, stage_file_base
-from ..match_project import MatchProject
+from ..match_project import MatchProject, StageScorecard
 from ..overlay_theme import ThemeName
+from ..stage_summary_data import TileStageData, load_stage_shots
 
 PipLayout = Literal["stacked", "pip-corners"]
 # Issue #197. ``"fcpxml"`` writes a Final Cut Pro 1.10 timeline (current
@@ -87,6 +88,15 @@ class MatchStageInput:
     # the audit knows it; a generated stage card prints it as an info
     # line. ``None`` prints nothing -- never a guess.
     expected_rounds: int | None = None
+    # Issue #972. What the stage summary says beyond the audit's shots:
+    # the scoreboard's scorecard and the stage time, straight off the
+    # ``StageEntry``. Absent stays absent -- the summary draws less,
+    # never a zero. ``stage_rounds`` is the full model ``expected_rounds``
+    # is read from, for the summary's own data shape.
+    scorecard: StageScorecard | None = None
+    stage_time_seconds: float | None = None
+    stage_time_is_manual: bool = False
+    stage_rounds: StageRounds | None = None
 
 
 def stage_inputs_for_project(
@@ -137,6 +147,12 @@ def stage_inputs_for_project(
                 secondaries=tuple(secondaries),
                 overlay_path=exports_dir / f"{base}_overlay.mov",
                 expected_rounds=rounds,
+                scorecard=stage.scorecard,
+                # The model treats <=0 as unset: an untouched placeholder
+                # stage carries 0.0, and a zero-second stage time is never real.
+                stage_time_seconds=stage.time_seconds if stage.time_seconds > 0 else None,
+                stage_time_is_manual=stage.time_seconds_manual,
+                stage_rounds=stage.stage_rounds,
             )
         )
     return inputs
@@ -220,6 +236,12 @@ class MatchExportRequestData:
     closing_card: bool = False
     # The overlay theme also styles the cards, so the two read as one.
     overlay_theme: ThemeName = "splitsmith"
+    # Issue #972. Seconds to hold each stage's summary after its action
+    # in the rendered MP4; 0 (the default) is off, as on the compare
+    # grid. ``shooter_label`` is the name on the summary's identity row;
+    # ``None`` falls back to the project name.
+    summary_hold_seconds: float = 0.0
+    shooter_label: str | None = None
 
 
 @dataclass(frozen=True)
@@ -421,6 +443,30 @@ def export_match(
         anomalies=anomalies,
         renderer=request.output_format,
     )
+    # The stage summary hold (issue #972): only the MP4 renderer draws it.
+    summaries: dict[int, composition.SummaryHold] = {}
+    if request.summary_hold_seconds > 0:
+        if request.output_format != "mp4":
+            anomalies.append(
+                f"summary hold ignored: only the mp4 renderer holds a stage summary "
+                f"(current renderer: {request.output_format})"
+            )
+        else:
+            label = request.shooter_label or request.project_name
+            for idx, stage_input in enumerate(stages):
+                summaries[idx] = composition.SummaryHold(
+                    data=TileStageData(
+                        label=label,
+                        stage_number=stage_input.stage_number,
+                        shots=load_stage_shots(stage_input.audit_path),
+                        stage_time_seconds=stage_input.stage_time_seconds,
+                        stage_time_is_manual=stage_input.stage_time_is_manual,
+                        scorecard=stage_input.scorecard,
+                        stage_rounds=stage_input.stage_rounds,
+                    ),
+                    label=label,
+                    duration_seconds=request.summary_hold_seconds,
+                )
     # Generated match cards (issue #973): only the MP4 renderer draws
     # them. Same text on both; the closing card repeats the title page.
     title_page: composition.MatchTitle | None = None
@@ -457,6 +503,7 @@ def export_match(
         chapter_markers=embed_chapter_markers,
         title_page=title_page,
         closing=closing,
+        summaries=summaries,
     )
     youtube_preset_active = request.youtube_preset and request.output_format == "mp4"
     if request.youtube_preset and request.output_format != "mp4":

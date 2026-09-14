@@ -150,6 +150,10 @@ class MatchExportRequest(BaseModel):
     title_info: str | None = None
     title_page_duration_seconds: float = 3.0
     closing_card: bool = False
+    # Issue #972. Hold each stage's summary (name, scoring, splits over
+    # the blurred last frame) for this many seconds after its action in
+    # the rendered MP4. 0 is off. Other renderers surface an anomaly.
+    summary_hold_seconds: float = 0.0
 
 
 @router.get("/api/shooters/{slug}/exports/overview")

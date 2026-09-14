@@ -882,3 +882,78 @@ def test_stage_inputs_for_project_reads_existing_artefacts(tmp_path: Path) -> No
         stage.secondaries[0].trimmed_path == tmp_path / "exports" / f"stage3_speed_cam_{cam_id}_trimmed.mp4"
     )
     assert stage.expected_rounds == 24
+    # The summary's inputs (#972) ride along from the same StageEntry.
+    assert stage.stage_time_seconds == 8.0
+    assert stage.stage_time_is_manual is False
+    assert stage.scorecard is None
+    assert stage.stage_rounds is not None and stage.stage_rounds.expected == 24
+
+
+# --- summary hold (issue #972) ---------------------------------------------
+
+
+def test_summary_hold_reaches_the_mp4_composition(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    from splitsmith.match_project import StageScorecard
+
+    captured = _capture_mp4(monkeypatch)
+    stage = _one_stage_input(tmp_path)
+    stage = match_exports_mod.MatchStageInput(
+        **{
+            **stage.__dict__,
+            "scorecard": StageScorecard(hit_factor=12.0, alphas=10),
+            "stage_time_seconds": 4.5,
+        }
+    )
+    result = match_exports_mod.export_match(
+        stages=[stage],
+        request=_card_request(summary_hold_seconds=3.0, shooter_label="M. Axell"),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    hold = captured["comp"].stages[0].summary
+    assert hold is not None
+    assert hold.duration_seconds == 3.0
+    assert hold.label == "M. Axell"
+    assert hold.data.stage_time_seconds == 4.5
+    assert hold.data.scorecard is not None and hold.data.scorecard.hit_factor == 12.0
+    # Shots come from the audit, measured from the beep, splits re-derived.
+    assert [s.time_from_beep for s in hold.data.shots] == [0.5]
+    assert not any("summary" in a for a in result.anomalies)
+
+
+def test_summary_hold_label_falls_back_to_the_project_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    captured = _capture_mp4(monkeypatch)
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(summary_hold_seconds=2.0),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert captured["comp"].stages[0].summary.label == "Bromma Classifier"
+
+
+def test_summary_hold_off_by_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured = _capture_mp4(monkeypatch)
+    match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert captured["comp"].stages[0].summary is None
+
+
+def test_summary_hold_is_an_anomaly_on_the_xml_renderers(tmp_path: Path) -> None:
+    result = match_exports_mod.export_match(
+        stages=[_one_stage_input(tmp_path)],
+        request=_card_request(output_format="fcpxml", summary_hold_seconds=3.0),
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    assert any("summary hold ignored" in a for a in result.anomalies)

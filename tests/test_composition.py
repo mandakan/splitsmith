@@ -464,3 +464,18 @@ def test_lower_titles_ignores_info_lines(tmp_path: Path) -> None:
     assert len(lowered) == 1
     assert lowered[0].text == "Stage 1"
     assert not hasattr(lowered[0], "info")
+
+
+# --- summary hold (issue #972) ---------------------------------------------
+
+
+def test_summary_hold_attaches_to_its_stage(tmp_path: Path) -> None:
+    from splitsmith.stage_summary_data import TileStageData
+
+    hold = composition.SummaryHold(
+        data=TileStageData(label="Me", stage_number=1), label="Me", duration_seconds=3.0
+    )
+    comp = composition.from_stage_compositions(_one_stage(tmp_path), project_name="m", summaries={0: hold})
+    assert comp.stages[0].summary is hold
+    bare = composition.from_stage_compositions(_one_stage(tmp_path), project_name="m")
+    assert bare.stages[0].summary is None

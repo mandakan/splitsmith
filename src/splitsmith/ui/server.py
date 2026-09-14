@@ -3997,6 +3997,8 @@ def register_job_bodies(state: AppState) -> None:
                 title_page_duration_seconds=req.title_page_duration_seconds,
                 closing_card=req.closing_card,
                 overlay_theme=req.overlay_theme,
+                summary_hold_seconds=req.summary_hold_seconds,
+                shooter_label=proj.competitor_name,
             )
             try:
                 result = match_export_helpers.export_match(

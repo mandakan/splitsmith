@@ -446,6 +446,14 @@ def export(
     closing_card: bool = typer.Option(
         False, "--closing-card", help="Close with a generated card (mp4 only)."
     ),
+    summary_hold: float = typer.Option(
+        0.0,
+        "--summary-hold",
+        help=(
+            "Seconds to hold each stage's summary -- name, scoring, splits over the blurred last frame "
+            "-- after its action (mp4 only). 0 is off."
+        ),
+    ),
     intro: Path | None = typer.Option(None, "--intro", help="Video clip to play before the first stage."),
     outro: Path | None = typer.Option(None, "--outro", help="Video clip to play after the last stage."),
     youtube_preset: bool = typer.Option(
@@ -488,6 +496,9 @@ def export(
         raise typer.Exit(code=2)
     if not is_match_folder(match_path):
         console.print(f"[red]Error:[/] {match_path} is not a match folder (no {MATCH_FILE}).")
+        raise typer.Exit(code=2)
+    if summary_hold < 0:
+        console.print(f"[red]Error:[/] --summary-hold must not be negative, got {summary_hold:g}.")
         raise typer.Exit(code=2)
     if output is not None and output.expanduser().is_dir():
         console.print(f"[red]Error:[/] --output {output} is a directory; pass the file to write.")
@@ -547,6 +558,8 @@ def export(
         title_page_duration_seconds=title_page_duration,
         closing_card=closing_card,
         overlay_theme=overlay_theme,  # type: ignore[arg-type]
+        summary_hold_seconds=summary_hold,
+        shooter_label=project.competitor_name or match.load_shooter(match_path, slug).name,
     )
     exports_dir = project.exports_path(shooter_root)
     if output is not None:

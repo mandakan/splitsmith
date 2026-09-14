@@ -182,3 +182,21 @@ def test_output_naming_a_directory_is_a_usage_error(tmp_path: Path, monkeypatch:
 
 def test_verb_is_registered() -> None:
     assert "export" in {c.name for c in match_cli.match_app.registered_commands}
+
+
+def test_summary_hold_reaches_the_composition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _seed(tmp_path)
+    captured = _capture_mp4(monkeypatch)
+    result = runner.invoke(
+        app, ["match", "export", str(root), "--shooter", "me", "--format", "mp4", "--summary-hold", "2.5"]
+    )
+    assert result.exit_code == 0, result.output
+    hold = captured["comp"].stages[0].summary
+    assert hold is not None and hold.duration_seconds == 2.5
+    assert hold.label == "M. Axell"
+
+
+def test_negative_summary_hold_is_a_usage_error(tmp_path: Path) -> None:
+    root = _seed(tmp_path)
+    result = runner.invoke(app, ["match", "export", str(root), "--shooter", "me", "--summary-hold", "-1"])
+    assert result.exit_code == 2

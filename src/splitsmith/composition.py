@@ -43,6 +43,7 @@ from typing import Literal
 
 from . import fcpxml_gen
 from .config import OutputConfig, Shot, VideoMetadata
+from .stage_summary_data import TileStageData
 
 
 @dataclass(frozen=True)
@@ -131,6 +132,24 @@ class ConnectedClip:
 
 
 @dataclass(frozen=True)
+class SummaryHold:
+    """The stage summary held after a stage's action (issue #972).
+
+    ``data`` is what the summary says -- shots, stage time, scorecard --
+    in the same shape the compare grid's per-cell summary reads
+    (:class:`~splitsmith.stage_summary_data.TileStageData`); ``label``
+    is the shooter's name on the identity row. Only the MP4 renderer
+    draws it: the alpha-overlay MOV cannot extend the trim or blur the
+    footage, so the FCPXML / FCP7 renderers ignore the field and the
+    request layer records an anomaly.
+    """
+
+    data: TileStageData
+    label: str
+    duration_seconds: float = 3.0
+
+
+@dataclass(frozen=True)
 class Stage:
     """One stage's contribution to the composition.
 
@@ -138,6 +157,9 @@ class Stage:
     slate (pre-stage card on the spine) or lower-third (connected
     text clip overlaid on the primary). Renderers that don't support
     titles ignore the field.
+
+    ``summary`` (issue #972) is an optional :class:`SummaryHold` the
+    MP4 renderer appends after the stage's action.
     """
 
     name: str
@@ -149,6 +171,7 @@ class Stage:
     overlay: ConnectedClip | None = None
     markers: tuple[Marker, ...] = ()
     title: TitleCard | None = None
+    summary: SummaryHold | None = None
 
 
 TransitionKind = Literal["zoom", "static"]
@@ -312,6 +335,7 @@ def from_stage_compositions(
     chapter_markers: bool = False,
     title_page: MatchTitle | None = None,
     closing: MatchTitle | None = None,
+    summaries: dict[int, SummaryHold] | None = None,
 ) -> Composition:
     """Build a :class:`Composition` from today's ``StageComposition`` inputs.
 
@@ -338,8 +362,12 @@ def from_stage_compositions(
 
     ``title_page`` / ``closing`` (issue #973): optional generated
     :class:`MatchTitle` cards; only the MP4 renderers draw them.
+
+    ``summaries`` (issue #972): optional mapping from stage index to a
+    :class:`SummaryHold`; only the MP4 renderer draws it.
     """
     titles_map = dict(titles) if titles else {}
+    summaries_map = dict(summaries) if summaries else {}
     if not stages:
         raise ValueError("Composition requires at least one stage")
     base = stages[0].video
@@ -390,6 +418,7 @@ def from_stage_compositions(
                 overlay=overlay,
                 markers=markers,
                 title=titles_map.get(stage_idx),
+                summary=summaries_map.get(stage_idx),
             )
         )
 
@@ -636,6 +665,7 @@ __all__ = [
     "Segment",
     "SequenceFormat",
     "Stage",
+    "SummaryHold",
     "TitleCard",
     "TitleStyle",
     "Transform",
