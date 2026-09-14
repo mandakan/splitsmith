@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from splitsmith import composition, youtube_sidecar
 from splitsmith.config import Shot, VideoMetadata
 from splitsmith.fcpxml_gen import StageComposition
@@ -392,3 +394,130 @@ def test_fcpxml_chapter_markers_off_by_default(tmp_path: Path) -> None:
     )
     root = ET.fromstring(out.read_bytes())
     assert root.find(".//chapter-marker") is None
+
+
+# --- the paste-ready text and the thumbnail --------------------------------
+
+
+def test_paste_text_carries_real_line_breaks_and_the_thumbnail_line(tmp_path: Path) -> None:
+    """A description copied out of the JSON carries ``\\n`` escapes and
+    YouTube shows them as text (then sees no chapters). The .txt is what
+    the user pastes: real lines, the title on its own, the tags as
+    Studio's comma list, the thumbnail named when there is one."""
+    comp = _two_stage_composition(tmp_path)
+    sidecar = youtube_sidecar.build_sidecar(
+        comp, description_lead="Production Optics, head cam.", thumbnail_path=Path("m-thumbnail.jpg")
+    )
+    text = youtube_sidecar.paste_text(sidecar)
+    assert "\\n" not in text
+    lines = text.splitlines()
+    assert lines[:2] == ["TITLE", "Bromma Spring"]
+    assert lines[3] == "DESCRIPTION"
+    assert lines[4] == "Production Optics, head cam."
+    assert "0:00 Stage 1 -- Skipper" in lines
+    assert "0:11 Stage 2 -- Long Range" in lines
+    i = lines.index("TAGS")
+    assert lines[i + 1] == ", ".join(sidecar.tags)
+    assert lines[lines.index("THUMBNAIL") + 1] == "m-thumbnail.jpg"
+    assert sidecar.thumbnail_path == "m-thumbnail.jpg"
+
+    # Without a thumbnail the section is absent, not empty.
+    assert "THUMBNAIL" not in youtube_sidecar.paste_text(youtube_sidecar.build_sidecar(comp))
+    out = tmp_path / "m-youtube.txt"
+    youtube_sidecar.write_paste_text(sidecar, out)
+    assert out.read_text(encoding="utf-8") == text
+
+
+def test_thumbnail_time_is_the_title_page_middle_else_the_first_shot(tmp_path: Path) -> None:
+    comp = _two_stage_composition(tmp_path)
+    # No title page: stage 1's first shot, 1.0 s after a beep that sits
+    # at the visible head (the 5 s pad covers the whole lead).
+    assert youtube_sidecar.thumbnail_time_seconds(comp) == 6.0
+    with_title = composition.from_stage_compositions(
+        [
+            StageComposition(
+                stage_name="S0",
+                video_path=_make_video(tmp_path, "t.mp4"),
+                video=_meta_30fps(),
+                shots=[_shot(1, 1.0, 1.0)],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=5.0,
+                tail_pad_seconds=5.0,
+            )
+        ],
+        project_name="Bromma",
+        title_page=composition.MatchTitle(text="Bromma", duration_seconds=4.0),
+    )
+    assert youtube_sidecar.thumbnail_time_seconds(with_title) == 2.0
+    # A slate before stage 1 pushes the first-shot frame back by its hold.
+    slated = composition.from_stage_compositions(
+        [
+            StageComposition(
+                stage_name="S0",
+                video_path=_make_video(tmp_path, "s.mp4"),
+                video=_meta_30fps(),
+                shots=[],
+                beep_offset_seconds=5.0,
+                head_pad_seconds=2.0,
+                tail_pad_seconds=5.0,
+            )
+        ],
+        project_name="Bromma",
+        titles={0: composition.TitleCard(text="S0", style="slate", duration_seconds=2.0)},
+    )
+    # No shot: the beep, 2 s of pad into the action, after the 2 s slate.
+    assert youtube_sidecar.thumbnail_time_seconds(slated) == 4.0
+
+
+def test_write_thumbnail_seeks_on_the_output_side_and_scales_to_1280(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(list(cmd))
+
+    out = tmp_path / "x" / "m-thumbnail.jpg"
+    youtube_sidecar.write_thumbnail(tmp_path / "m.mp4", 2.5, out, ffmpeg_binary="/bin/ffmpeg", runner=runner)
+    assert out.parent.is_dir()
+    cmd = calls[0]
+    assert cmd[0] == "/bin/ffmpeg"
+    assert cmd.index("-i") < cmd.index("-ss")
+    assert cmd[cmd.index("-ss") + 1] == "2.500"
+    assert cmd[cmd.index("-frames:v") + 1] == "1"
+    assert cmd[cmd.index("-vf") + 1] == "scale=1280:-2"
+    assert cmd[-1] == str(out)
+
+
+@pytest.mark.integration
+def test_write_thumbnail_produces_a_1280_wide_jpeg_of_the_asked_frame(tmp_path: Path) -> None:
+    import shutil
+    import subprocess
+
+    from PIL import Image
+
+    from tests.synthetic_media import ffmpeg_available
+
+    if not ffmpeg_available():
+        pytest.skip("ffmpeg not on PATH")
+    ffmpeg = shutil.which("ffmpeg")
+    assert ffmpeg is not None
+    # Red for the first second, green after: the frame at 1.5 s is green.
+    src = tmp_path / "src.mp4"
+    subprocess.run(
+        [
+            ffmpeg, "-v", "error", "-y",
+            "-f", "lavfi", "-i", "color=c=red:s=640x360:r=25:d=1",
+            "-f", "lavfi", "-i", "color=c=green:s=640x360:r=25:d=2",
+            "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]",
+            "-map", "[v]", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(src),
+        ],  # fmt: skip
+        check=True,
+        capture_output=True,
+    )
+    out = tmp_path / "src-thumbnail.jpg"
+    youtube_sidecar.write_thumbnail(src, 1.5, out, ffmpeg_binary=ffmpeg)
+    with Image.open(out) as img:
+        assert img.format == "JPEG"
+        assert img.size == (1280, 720)
+        r, g, b = img.convert("RGB").getpixel((640, 360))
+    assert g > 100 and r < 80 and b < 80, (r, g, b)
+    assert out.stat().st_size < 2_000_000

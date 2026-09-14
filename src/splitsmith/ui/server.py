@@ -4129,6 +4129,12 @@ def register_job_bodies(state: AppState) -> None:
         def _youtube_sidecar_json(fcpxml_path: Path) -> Path:
             return fcpxml_path.with_name(fcpxml_path.stem + "-youtube.json")
 
+        def _youtube_paste_text(fcpxml_path: Path) -> Path:
+            return fcpxml_path.with_name(fcpxml_path.stem + "-youtube.txt")
+
+        def _youtube_thumbnail(fcpxml_path: Path) -> Path:
+            return fcpxml_path.with_name(fcpxml_path.stem + "-thumbnail.jpg")
+
         # Hosted: push the stitched match deliverable (+ optional YouTube
         # sidecars, when youtube_sidecar wrote them) so the API can serve the
         # download. push_export_file skips any that don't exist. No-op local.
@@ -4136,6 +4142,8 @@ def register_job_bodies(state: AppState) -> None:
             export_storage.push_export_file(proj, result.fcpxml_path)
             export_storage.push_export_file(proj, result.fcpxml_path.with_suffix(".srt"))
             export_storage.push_export_file(proj, _youtube_sidecar_json(result.fcpxml_path))
+            export_storage.push_export_file(proj, _youtube_paste_text(result.fcpxml_path))
+            export_storage.push_export_file(proj, _youtube_thumbnail(result.fcpxml_path))
 
         # Durable record of this run (#629). One run per invocation across
         # every selected stage -- that grouping is precisely what a
@@ -4151,6 +4159,8 @@ def register_job_bodies(state: AppState) -> None:
             for p in (
                 result.fcpxml_path.with_suffix(".srt"),
                 _youtube_sidecar_json(result.fcpxml_path),
+                _youtube_paste_text(result.fcpxml_path),
+                _youtube_thumbnail(result.fcpxml_path),
             )
             if p.exists()
         )

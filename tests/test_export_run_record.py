@@ -559,15 +559,18 @@ def test_a_match_export_with_youtube_sidecar_records_both_sidecar_files(tmp_path
     stem = fcpxml_name.removesuffix(".fcpxml")
     expected_srt = f"{stem}.srt"
     expected_json = f"{stem}-youtube.json"
+    expected_txt = f"{stem}-youtube.txt"
 
     sidecar_filenames = {a["filename"] for a in run["artifacts"] if a["kind"] == "sidecar"}
-    assert sidecar_filenames == {expected_srt, expected_json}
+    # No thumbnail on an FCPXML export: it is a frame of the render.
+    assert sidecar_filenames == {expected_srt, expected_json, expected_txt}
 
     # The record must not promise a file the download path can't serve --
-    # both are real files on disk, not just claimed in the record.
+    # all are real files on disk, not just claimed in the record.
     exports_dir = shooter_root / "exports"
     assert (exports_dir / expected_srt).exists()
     assert (exports_dir / expected_json).exists()
+    assert (exports_dir / expected_txt).read_text(encoding="utf-8").startswith("TITLE\n")
 
 
 def test_a_match_export_pushes_the_youtube_sidecar_json_under_its_real_name(
@@ -627,11 +630,22 @@ def test_a_match_export_pushes_the_youtube_sidecar_json_under_its_real_name(
     exports_dir = project_root / "shooters" / "me" / "exports"
     assert (exports_dir / f"{stem}-youtube.json").exists(), "the fixture no longer writes the sidecar"
 
-    # All three match-level deliverables, each under the name on disk.
-    assert set(by_name) == {fcpxml_name, f"{stem}.srt", f"{stem}-youtube.json"}
+    # Every match-level deliverable, each under the name on disk. The
+    # thumbnail is asked for too; on this FCPXML export it does not exist
+    # and ``push_export_file`` skips it, which the loop below confirms is
+    # the only absent one.
+    assert set(by_name) == {
+        fcpxml_name,
+        f"{stem}.srt",
+        f"{stem}-youtube.json",
+        f"{stem}-youtube.txt",
+        f"{stem}-thumbnail.jpg",
+    }
     # ...and specifically not the name the bug used, which no writer produces.
     assert not (exports_dir / f"{stem}.json").exists()
     for path in pushed:
+        if path.name.endswith("-thumbnail.jpg"):
+            continue
         assert path.exists(), f"asked to push a file that does not exist: {path}"
 
 

@@ -14,6 +14,7 @@ That keeps the unit tests free of project fixtures.
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +26,7 @@ from ..config import OutputConfig, StageRounds
 from ..export_naming import match_file_base, stage_file_base
 from ..match_project import MatchProject, StageScorecard
 from ..overlay_theme import ThemeName
+from ..runtime import runtime
 from ..stage_summary_data import TileStageData, load_stage_shots
 
 PipLayout = Literal["stacked", "pip-corners"]
@@ -543,13 +545,33 @@ def export_match(
         srt_path = output_path.with_suffix(".srt")
         sidecar_path = output_path.with_name(output_path.stem + "-youtube.json")
         youtube_sidecar.write_srt(comp, srt_path)
+        # The thumbnail is a frame of the render, so only the MP4 has one;
+        # a grab that fails is a note, never a failed export.
+        thumbnail_path: Path | None = None
+        if request.output_format == "mp4":
+            candidate = output_path.with_name(output_path.stem + "-thumbnail.jpg")
+            try:
+                youtube_sidecar.write_thumbnail(
+                    output_path,
+                    youtube_sidecar.thumbnail_time_seconds(comp),
+                    candidate,
+                    ffmpeg_binary=runtime().ffmpeg_binary,
+                )
+                thumbnail_path = candidate
+            except (OSError, subprocess.CalledProcessError) as exc:
+                detail = (
+                    exc.stderr.strip()[-300:] if isinstance(exc, subprocess.CalledProcessError) else str(exc)
+                )
+                anomalies.append(f"youtube thumbnail not written: {detail}")
         sidecar = youtube_sidecar.build_sidecar(
             comp,
             description_lead=(request.description_lead or "").strip() or None,
             captions_path=srt_path.relative_to(exports_dir),
             output_video=output_path.relative_to(exports_dir),
+            thumbnail_path=thumbnail_path.relative_to(exports_dir) if thumbnail_path else None,
         )
         youtube_sidecar.write_sidecar(sidecar, sidecar_path)
+        youtube_sidecar.write_paste_text(sidecar, output_path.with_name(output_path.stem + "-youtube.txt"))
         if not embed_chapter_markers:
             anomalies.append(
                 "youtube chapters written to the sidecar description only: "

@@ -248,8 +248,49 @@ def test_youtube_sidecar_and_captions_move_with_a_renamed_output(
     assert out.exists()
     assert out.with_suffix(".srt").exists()
     assert out.with_name("lt-youtube.json").exists()
+    assert out.with_name("lt-youtube.txt").exists()
+    # The render is a stub here, so the frame grab fails and is a note,
+    # not an error -- and no half-written thumbnail is left behind.
+    assert any("youtube thumbnail not written" in line for line in strip_ansi(result.output).splitlines())
+    assert not out.with_name("lt-thumbnail.jpg").exists()
     # Nothing left behind under the default name.
-    assert not list((root / "shooters" / "me" / "exports").glob("*-youtube.json"))
+    assert not list((root / "shooters" / "me" / "exports").glob("*-youtube.*"))
+
+
+def test_thumbnail_is_grabbed_from_the_render_and_moves_with_the_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The grab runs against the file the renderer wrote, at the spine
+    time the sidecar names, and lands beside the rest of the kit."""
+    from splitsmith import youtube_sidecar
+
+    root = _seed(tmp_path)
+    captured = _capture_mp4(monkeypatch)
+    grabs: list[tuple[Path, float, Path]] = []
+
+    def fake_grab(video_path, at_seconds, output_path, **kwargs):  # type: ignore[no-untyped-def]
+        grabs.append((video_path, at_seconds, output_path))
+        output_path.write_bytes(b"jpg")
+
+    monkeypatch.setattr(youtube_sidecar, "write_thumbnail", fake_grab)
+    out = tmp_path / "out" / "lt.mp4"
+    result = runner.invoke(
+        app,
+        [
+            "match", "export", str(root), "--shooter", "me", "--format", "mp4", "-o", str(out),
+            "--youtube-sidecar", "--title-page", "--title-page-duration", "4",
+        ],  # fmt: skip
+    )
+    assert result.exit_code == 0, result.output
+    assert len(grabs) == 1
+    video, at, thumb = grabs[0]
+    assert video.name == thumb.name.replace("-thumbnail.jpg", ".mp4")
+    assert at == youtube_sidecar.thumbnail_time_seconds(captured["comp"]) == 2.0
+    assert out.with_name("lt-thumbnail.jpg").read_bytes() == b"jpg"
+    sidecar = json.loads(out.with_name("lt-youtube.json").read_text())
+    assert sidecar["thumbnail_path"].endswith("-thumbnail.jpg")
+    assert "THUMBNAIL" in out.with_name("lt-youtube.txt").read_text()
+    assert "thumbnail not written" not in strip_ansi(result.output)
 
 
 def test_youtube_sidecar_embeds_chapter_atoms_in_the_mp4(

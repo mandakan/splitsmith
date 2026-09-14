@@ -464,9 +464,11 @@ def export(
         False,
         "--youtube-sidecar",
         help=(
-            "Also write <output>-youtube.json (title, chaptered description, tags) and "
-            "<output>.srt (per-shot captions) for the upload, and embed the chapters in "
-            "the output (FCPXML markers, MP4 chapter atoms)."
+            "Also write <output>-youtube.txt (title, chaptered description and tags, ready to "
+            "paste into Studio), <output>-youtube.json (the same, machine-readable), "
+            "<output>.srt (per-shot captions) and, for MP4, <output>-thumbnail.jpg (the title "
+            "page, else the first shot), and embed the chapters in the output (FCPXML markers, "
+            "MP4 chapter atoms)."
         ),
     ),
     description_lead: str | None = typer.Option(
@@ -622,6 +624,8 @@ def export(
             for companion, suffix in (
                 (written.with_suffix(".srt"), ".srt"),
                 (written.with_name(written.stem + "-youtube.json"), "-youtube.json"),
+                (written.with_name(written.stem + "-youtube.txt"), "-youtube.txt"),
+                (written.with_name(written.stem + "-thumbnail.jpg"), "-thumbnail.jpg"),
             ):
                 if companion.exists():
                     companion.replace(wanted.with_name(wanted.stem + suffix))
