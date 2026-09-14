@@ -95,4 +95,20 @@ describe("SplitsList", () => {
     fireEvent.click(screen.getByRole("button", { name: "011.000.500" }));
     expect(onSeek).toHaveBeenCalledTimes(1);
   });
+
+  it("the split numeral carries the tier colour when a baseline judges it", () => {
+    const baselines = { split: { p25: 0.3, p75: 0.6, count: 8 } };
+    render(
+      <SplitsList
+        shots={[shot(1, { split: 0.25 }), shot(2, { split: 0.5 }), shot(3, { split: 0.9 })]}
+        activeShotNumber={null}
+        onSeek={() => {}}
+        isPlaying={false}
+        baselines={baselines}
+      />,
+    );
+    expect(screen.getByText("0.250")).toHaveClass("text-done");
+    expect(screen.getByText("0.500")).toHaveClass("text-ink");
+    expect(screen.getByText("0.900")).toHaveClass("text-live");
+  });
 });
