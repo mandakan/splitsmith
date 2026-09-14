@@ -20,8 +20,15 @@ from pathlib import Path
 from typing import Literal, Protocol
 
 from .. import youtube_sidecar
-from .client import UploadFailedError, VideoMetadata
-from .oauth import YouTubeError
+from .client import UploadFailedError, VideoMetadata, YouTubeClient, default_http
+from .oauth import (
+    AccessTokenProvider,
+    NotConnectedError,
+    OAuthClient,
+    YouTubeConnection,
+    YouTubeError,
+    load_connection,
+)
 
 Privacy = Literal["unlisted", "private", "public"]
 
@@ -35,6 +42,22 @@ CATEGORY_IDS: dict[str, str] = {
     "Howto & Style": "26",
 }
 _DEFAULT_CATEGORY = "17"
+
+
+def build_client(conn: YouTubeConnection) -> YouTubeClient:
+    """A Data API client over the stored connection. One place so the CLI
+    verbs and the UI job build it the same way."""
+    client = OAuthClient.configured()
+    http = default_http()
+    return YouTubeClient(http, AccessTokenProvider(client, http, refresh_token=conn.refresh_token))
+
+
+def connected_client() -> tuple[YouTubeClient, YouTubeConnection]:
+    """The client for the stored connection, or :class:`NotConnectedError`."""
+    conn = load_connection()
+    if conn is None:
+        raise NotConnectedError("not connected to YouTube; run `splitsmith youtube login` first")
+    return build_client(conn), conn
 
 
 class SidecarMissingError(UploadFailedError):

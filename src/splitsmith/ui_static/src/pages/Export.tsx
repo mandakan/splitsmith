@@ -25,6 +25,7 @@ import { CleanupDialog } from "@/components/CleanupDialog";
 import { ExportHistory } from "@/components/export/ExportHistory";
 import { SelectField } from "@/components/export/SelectField";
 import { StageTable } from "@/components/export/StageTable";
+import { YouTubeConnect, type UploadAfterRender } from "@/components/export/YouTubeConnect";
 import { CamOptionsPanel } from "@/components/render/CamOptionsPanel";
 import { RenderOptionsPanel, Seconds } from "@/components/render/RenderOptionsPanel";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
@@ -46,8 +47,10 @@ import {
   type MatchExportResult,
   type MatchProject,
   type OverlayCodec,
+  type YouTubeSettings,
 } from "@/lib/api";
 import { camExportFields, DEFAULT_CAM_OPTIONS, syncedSecondaryCount, type CamOptions } from "@/lib/camOptions";
+import { rowPrivacy } from "@/lib/youtubeRows";
 import { hostedDownloads as buildHostedDownloads } from "@/lib/exportDownloads";
 import {
   estimateDuration,
@@ -114,6 +117,11 @@ function ExportInner({ slug }: { slug: string }) {
   const [project, setProject] = useState<MatchProject | null>(null);
   const [overview, setOverview] = useState<ExportOverview | null>(null);
   const [runs, setRuns] = useState<ExportRun[]>([]);
+  // The YouTube connection is an install-level setting the local server
+  // owns; null until it answers (and always null hosted, where the
+  // routes do not exist). The row renders nothing while null.
+  const [youtubeSettings, setYoutubeSettings] = useState<YouTubeSettings | null>(null);
+  const [uploadBusy, setUploadBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [result, setResult] = useState<MatchExportResult | null>(null);
@@ -142,6 +150,19 @@ function ExportInner({ slug }: { slug: string }) {
       setRuns([]);
     }
   }, [slug]);
+
+  const reloadYouTube = useCallback(async () => {
+    if (hosted) return;
+    try {
+      setYoutubeSettings(await api.getYouTubeSettings());
+    } catch {
+      setYoutubeSettings(null);
+    }
+  }, [hosted]);
+
+  useEffect(() => {
+    void reloadYouTube();
+  }, [reloadYouTube]);
 
   useEffect(() => {
     void reload();
@@ -180,6 +201,8 @@ function ExportInner({ slug }: { slug: string }) {
   // other and both exist only for the rendered MP4.
   const [youtube, setYoutube] = useState<boolean>(false);
   const [descriptionLead, setDescriptionLead] = useState<string>("");
+  // One privacy control per page: the history rows upload with it too.
+  const [uploadAfterRender, setUploadAfterRender] = useState<UploadAfterRender>("off");
   // Compare grid: the reference shooter sets the frame rate; the canvas
   // sets the render size; the overlay and its summary hold are #705's.
   const [audioFrom, setAudioFrom] = useState<string>("");
@@ -413,6 +436,29 @@ function ExportInner({ slug }: { slug: string }) {
     }
   }
 
+  /** Upload one finished render from its history row. The job rides the
+   *  same rail as an export; the history re-reads once it settles so the
+   *  row picks up the sidecar's new record. */
+  async function uploadRow(filename: string, again: boolean) {
+    setUploadBusy(filename);
+    setError(null);
+    try {
+      const submitted = await api.uploadToYouTube(slug, {
+        filename,
+        privacy: rowPrivacy(uploadAfterRender),
+        again,
+      });
+      setJob(submitted);
+      const final = await api.pollJob(submitted.id, setJob);
+      if (final.status === "failed") setError(final.error ?? "Upload failed");
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setUploadBusy(null);
+      if (mountedRef.current) void reload();
+    }
+  }
+
   async function submitBundle() {
     if (!project) return;
     try {
@@ -433,6 +479,8 @@ function ExportInner({ slug }: { slug: string }) {
         youtube_sidecar: renderedMp4 && youtube,
         description_lead: renderedMp4 && youtube ? descriptionLead.trim() || null : undefined,
         youtube_preset: renderedMp4 && youtube,
+        youtube_upload: renderedMp4 && youtube && !!youtubeSettings?.connected && uploadAfterRender !== "off",
+        youtube_privacy: rowPrivacy(uploadAfterRender),
         include_overlay: includeOverlay,
         overlay_codec: overlayCodec,
         overlay_max_height: null,
@@ -866,6 +914,18 @@ function ExportInner({ slug }: { slug: string }) {
                       onChange={(e) => setDescriptionLead(e.target.value)}
                     />
                   ) : null}
+                  {!hosted ? (
+                    <div className="mt-2.5">
+                      <YouTubeConnect
+                        settings={youtubeSettings}
+                        onSettingsChange={() => void reloadYouTube()}
+                        uploadAfterRender={uploadAfterRender}
+                        onUploadAfterRenderChange={setUploadAfterRender}
+                        showUploadControl={renderedMp4 && youtube}
+                        busy={busy}
+                      />
+                    </div>
+                  ) : null}
                 </Field>
               ) : null}
               <Field label="Bundle name" htmlFor="export-bundle-name" help={project?.exports_dir ?? "exports/"}>
@@ -883,7 +943,15 @@ function ExportInner({ slug }: { slug: string }) {
           {/* Rendered in both deployment modes -- only the reveal
               affordance is desktop-specific; the download link works on
               both (#629). */}
-          <ExportHistory runs={runs} exportFileUrl={(f) => api.exportFileUrl(slug, f)} />
+          <ExportHistory
+            runs={runs}
+            exportFileUrl={(f) => api.exportFileUrl(slug, f)}
+            youtube={
+              !hosted && youtubeSettings?.connected
+                ? { connected: true, onUpload: (f, again) => void uploadRow(f, again), busyFilename: uploadBusy }
+                : undefined
+            }
+          />
         </div>
 
         {/* Summary rail */}

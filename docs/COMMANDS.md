@@ -116,6 +116,10 @@ rewrites the sidecar and is uploadable again. Exit 2 means nothing reached
 the network (no client configured, not logged in, no sidecar, a bad flag);
 exit 1 means the upload or login failed.
 
+The Export page in the local web app does the same: "Connect YouTube" on
+the YouTube row, "Upload after render" beside it, and "Upload to YouTube"
+on a finished render in the export history.
+
 Until the splitsmith Google Cloud project passes the YouTube API audit,
 every upload lands private and stays private. The OAuth client id is built
 in; `SPLITSMITH_YOUTUBE_CLIENT_ID` / `SPLITSMITH_YOUTUBE_CLIENT_SECRET`

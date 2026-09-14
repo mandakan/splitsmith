@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 
 import type { ExportRun } from "@/lib/api";
 
@@ -95,5 +95,61 @@ describe("ExportHistory", () => {
   it("renders an empty state rather than an empty list", () => {
     render(<ExportHistory runs={[]} exportFileUrl={(f) => `/dl/${f}`} />);
     expect(screen.getByText("No exports yet")).toBeInTheDocument();
+  });
+});
+
+describe("ExportHistory YouTube actions", () => {
+  const uploadable = () =>
+    run({
+      kind: "match",
+      stage_numbers: [1, 2],
+      formats: ["mp4", "youtube-sidecar"],
+      artifacts: [
+        { filename: "bromma.mp4", kind: "match_video", available: true },
+        { filename: "bromma-youtube.json", kind: "sidecar", available: true },
+      ],
+      youtube: null,
+    });
+
+  it("offers the upload only when a channel is connected and the row has an mp4 with its sidecar", () => {
+    const onUpload = vi.fn();
+    const { rerender } = render(
+      <ExportHistory runs={[uploadable()]} exportFileUrl={(f) => `/dl/${f}`} youtube={{ connected: false, onUpload }} />,
+    );
+    expect(screen.queryByRole("button", { name: "Upload to YouTube" })).toBeNull();
+    rerender(
+      <ExportHistory runs={[uploadable()]} exportFileUrl={(f) => `/dl/${f}`} youtube={{ connected: true, onUpload }} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Upload to YouTube" }));
+    expect(onUpload).toHaveBeenCalledWith("bromma.mp4", false);
+    rerender(<ExportHistory runs={[run()]} exportFileUrl={(f) => `/dl/${f}`} youtube={{ connected: true, onUpload }} />);
+    expect(screen.queryByRole("button", { name: "Upload to YouTube" })).toBeNull();
+  });
+
+  it("links an uploaded run and keeps 'Upload again' behind the row menu", () => {
+    const onUpload = vi.fn();
+    const done = {
+      ...uploadable(),
+      youtube: { video_id: "abc", url: "https://youtu.be/abc", privacy: "unlisted", uploaded_at: "2026-09-14T00:00:00Z" },
+    };
+    render(<ExportHistory runs={[done]} exportFileUrl={(f) => `/dl/${f}`} youtube={{ connected: true, onUpload }} />);
+    const link = screen.getByRole("link", { name: "youtu.be/abc" });
+    expect(link).toHaveAttribute("href", "https://youtu.be/abc");
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(screen.queryByRole("button", { name: "Upload to YouTube" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Stages 1-2 actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Upload again" }));
+    expect(onUpload).toHaveBeenCalledWith("bromma.mp4", true);
+  });
+
+  it("shows the busy row as uploading", () => {
+    render(
+      <ExportHistory
+        runs={[uploadable()]}
+        exportFileUrl={(f) => `/dl/${f}`}
+        youtube={{ connected: true, onUpload: vi.fn(), busyFilename: "bromma.mp4" }}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Uploading..." })).toBeDisabled();
   });
 });

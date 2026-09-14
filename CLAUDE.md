@@ -160,6 +160,18 @@ unaudited projects, so there is none. One scope, ``youtube.force-ssl``.
 The spec's two corrections to the issue text are in
 ``docs/superpowers/specs/2026-09-14-youtube-upload-design.md``.
 
+The local server side is ``ui/youtube_api.py`` (local mode only; the
+routes 404 hosted): ``/api/settings/youtube`` plus the connect state
+machine (``ConnectAttempt`` runs ``oauth.connect`` on a thread, the SPA
+opens the consent URL itself and polls), the ``youtube_upload`` job and
+``POST /api/shooters/{slug}/exports/youtube-upload``. ``_run_match_export``
+chains that job when the request carries ``youtube_upload``; the history
+route reads each run's ``youtube`` record from the sidecar per request.
+In the SPA, a new upload option belongs on
+``components/export/YouTubeConnect``, a new per-run action on
+``ExportHistory`` through ``lib/youtubeRows``; one privacy control per
+page (the form's "Upload after render"), the rows reuse it.
+
 ## Multi-shooter comparison (`compare/` package)
 
 ``splitsmith compare export <manifest>`` reads N existing single-shooter

@@ -4199,6 +4199,25 @@ def register_job_bodies(state: AppState) -> None:
             message=(f"Done: {result.stage_count} stages, {result.duration_seconds:.1f}s{anom_suffix}"),
         )
 
+        # Issue #1000: the upload is its own job so it has its own
+        # progress and cancel, and so a failed upload never marks a
+        # finished render as failed. Same thread-to-loop bridge as
+        # ``_run_trim``'s shot_detect chain. ``again=True`` because the
+        # render just rewrote the sidecar: there is no earlier record.
+        if req.youtube_upload and result.fcpxml_path.suffix.lower() == ".mp4":
+            asyncio.run(
+                state.jobs.submit(
+                    kind="youtube_upload",
+                    shooter_slug=slug,
+                    args={
+                        "slug": slug,
+                        "filename": result.fcpxml_path.name,
+                        "privacy": req.youtube_privacy,
+                        "again": True,
+                    },
+                )
+            )
+
     def _run_generate_proxy(handle: JobHandle, *, raw_path: str) -> None:
         """Worker that builds a low-res scrub proxy for a raw upload.
 
@@ -4314,6 +4333,9 @@ def register_job_bodies(state: AppState) -> None:
     state.jobs.bodies.register("match_export", _run_match_export)
     state.jobs.bodies.register("generate_proxy", _run_generate_proxy)
     state.jobs.bodies.register("compare-grid", functools.partial(_run_compare_grid, state=state))
+    from .youtube_api import run_youtube_upload
+
+    state.jobs.bodies.register("youtube_upload", functools.partial(run_youtube_upload, state=state))
     state.jobs.bodies.register("sync_match", _run_sync_match)
 
 
@@ -16479,6 +16501,13 @@ def create_app(
     from .device_auth_api import router as device_router
 
     app.include_router(device_router)
+
+    # Issue #1000: the local YouTube surface (settings, connect, upload).
+    # Gated the other way round from device_router: ``_local_gate`` inside
+    # youtube_api answers 404 in hosted mode.
+    from .youtube_api import router as youtube_router
+
+    app.include_router(youtube_router)
 
     # Share-link OG card PNGs (spec 2026-08-09). Same lazy-import,
     # always-registered idiom as sync_router and device_router: every

@@ -184,3 +184,19 @@ def test_sidecar_round_trips_an_upload_record(tmp_path: Path) -> None:
     youtube_sidecar.write_sidecar(sc, path)
     assert json.loads(path.read_text())["upload"]["video_id"] == "v"
     assert youtube_sidecar.load_sidecar(path).upload == rec
+
+
+def test_connected_client_needs_a_stored_connection() -> None:
+    from splitsmith.youtube import oauth
+    from splitsmith.youtube.oauth import NotConnectedError
+
+    with pytest.raises(NotConnectedError, match="youtube login"):
+        upload.connected_client()
+    oauth.save_connection(
+        oauth.YouTubeConnection(
+            refresh_token="rt", channel_id="c", channel_title="Chan", connected_at=datetime.now(UTC)
+        )
+    )
+    client, conn = upload.connected_client()
+    assert conn.channel_title == "Chan"
+    assert isinstance(client, yt.YouTubeClient)
