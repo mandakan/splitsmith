@@ -336,3 +336,63 @@ def test_match_export_without_the_flag_chains_nothing(export_client, monkeypatch
     r = client.post("/api/shooters/me/export/match", json=_match_export_body())
     _wait_for_job(client, r.json()["id"])
     assert [j for j in _wait_for_jobs_to_drain(client) if j["kind"] == "youtube_upload"] == []
+
+
+# --- history enrichment -----------------------------------------------------
+
+
+def test_history_rows_carry_the_sidecars_upload_record(export_client) -> None:
+    import json
+
+    from splitsmith import export_runs, youtube_sidecar
+
+    client, root = export_client
+    mp4 = _seed_render(export_client)
+    sc_path = youtube_sidecar.sidecar_path_for(mp4)
+    sc = youtube_sidecar.load_sidecar(sc_path)
+    sc.upload = youtube_sidecar.UploadRecord(
+        video_id="v9",
+        url="https://youtu.be/v9",
+        privacy="unlisted",
+        uploaded_at=datetime(2026, 9, 14, tzinfo=UTC),
+    )
+    youtube_sidecar.write_sidecar(sc, sc_path)
+    (root / "shooters" / "me" / "exports" / "other-youtube.json").write_text("{not json", encoding="utf-8")
+
+    def run(run_id: str, artifacts: list[export_runs.ExportArtifact], kind: str = "match") -> dict[str, Any]:
+        return export_runs.ExportRun(
+            run_id=run_id,
+            kind=kind,  # type: ignore[arg-type]
+            finished_at=datetime.now(UTC),
+            duration_seconds=1.0,
+            stage_numbers=[1],
+            formats=["mp4"],
+            anomaly_count=0,
+            artifacts=artifacts,
+        ).model_dump(mode="json")
+
+    log = {
+        "schema_version": 1,
+        "runs": [
+            run(
+                "a",
+                [
+                    export_runs.ExportArtifact(filename="bromma.mp4", kind="match_video"),
+                    export_runs.ExportArtifact(filename="bromma-youtube.json", kind="sidecar"),
+                ],
+            ),
+            run("b", [export_runs.ExportArtifact(filename="other-youtube.json", kind="sidecar")]),
+            run("c", [], kind="stage"),
+        ],
+    }
+    (root / "shooters" / "me" / "export_runs.json").write_text(json.dumps(log), encoding="utf-8")
+    rows = client.get("/api/shooters/me/exports/runs").json()["runs"]
+    by_id = {r["run_id"]: r for r in rows}
+    assert by_id["a"]["youtube"] == {
+        "video_id": "v9",
+        "url": "https://youtu.be/v9",
+        "privacy": "unlisted",
+        "uploaded_at": "2026-09-14T00:00:00Z",
+    }
+    assert by_id["b"]["youtube"] is None  # an unparseable sidecar never 500s
+    assert by_id["c"]["youtube"] is None

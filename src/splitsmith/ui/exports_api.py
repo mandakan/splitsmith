@@ -23,13 +23,15 @@ The export *job bodies* stay in ``server.py``. Lifting
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field, model_validator
 
-from .. import export_runs
+from .. import export_runs, youtube_sidecar
 from ..compare.mp4_grid import DEFAULT_CANVAS_HEIGHT, DEFAULT_CANVAS_WIDTH
 from ..match_project import trim_blocker
 from ..overlay_theme import ThemeName
@@ -251,6 +253,37 @@ def export_overview(slug: str, request: Request) -> JSONResponse:
     )
 
 
+def youtube_record_for(
+    exports_dir: Path, artifacts: list[dict], *, pull: Callable[[Path], object]
+) -> dict | None:
+    """The sidecar's ``upload`` block for one run, or ``None`` (issue #1000).
+
+    Read per request like ``available``, from the first ``-youtube.json``
+    artifact the run lists; ``pull`` mirrors it down from object storage
+    first (a no-op locally). Never raises: a missing or unparseable
+    sidecar is ``None``, the history never 500s over bookkeeping.
+    """
+    for artifact in artifacts:
+        name = str(artifact.get("filename", ""))
+        if not name.endswith("-youtube.json"):
+            continue
+        path = exports_dir / name
+        try:
+            pull(path)
+            record = youtube_sidecar.load_sidecar(path).upload
+        except Exception:  # noqa: BLE001 -- see docstring
+            return None
+        if record is None:
+            return None
+        return {
+            "video_id": record.video_id,
+            "url": record.url,
+            "privacy": record.privacy,
+            "uploaded_at": record.uploaded_at.isoformat().replace("+00:00", "Z"),
+        }
+    return None
+
+
 @router.get("/api/shooters/{slug}/exports/runs")
 def list_export_runs(slug: str, request: Request) -> JSONResponse:
     """The shooter's export history, newest first (#629).
@@ -264,7 +297,8 @@ def list_export_runs(slug: str, request: Request) -> JSONResponse:
     A malformed or unreadable log reads as an empty history rather than a
     500 -- ``export_runs.load_log`` drops what it cannot parse.
 
-    Each artefact carries an ``available`` flag the SPA uses to decide
+    Each run carries ``youtube`` (the sidecar's upload record, or null)
+    and each artefact carries an ``available`` flag the SPA uses to decide
     whether to render a download link. It is derived here, per request,
     from ``MatchProject.existing_export_names`` -- the same presence
     source ``exports/overview`` reads -- and is deliberately **not** part
@@ -277,12 +311,19 @@ def list_export_runs(slug: str, request: Request) -> JSONResponse:
     state = request.app.state.splitsmith_state
     doc, _version = state.load_export_runs(slug)
     log = export_runs.load_log(doc)
-    present = state.shooter_project(slug).existing_export_names(state.shooter_root(slug))
+    project = state.shooter_project(slug)
+    present = project.existing_export_names(state.shooter_root(slug))
+    exports_dir = project.exports_path(state.shooter_root(slug))
     runs = []
     for run in log.runs:
         row = run.model_dump(mode="json")
         for artifact in row["artifacts"]:
             artifact["available"] = artifact["filename"] in present
+        # The upload record rides on the sidecar, not on the stored run
+        # (#1000): one record for the CLI and the UI, cleared by a re-render.
+        row["youtube"] = youtube_record_for(
+            exports_dir, row["artifacts"], pull=lambda p: export_storage.pull_export_file(project, p)
+        )
         runs.append(row)
     return JSONResponse({"runs": runs})
 
