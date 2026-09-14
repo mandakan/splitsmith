@@ -84,7 +84,7 @@
   .sheet[data-open="true"]{display:flex}
   .sheet a{display:block;font-family:var(--display);font-size:44px;text-transform:uppercase;line-height:1.1;padding:8px 0;opacity:0;transform:translateY(24px);transition:opacity .7s var(--ease),transform .7s var(--ease)}
   .sheet[data-open="true"] a{opacity:1;transform:none}
-  .sheet a:nth-child(2){transition-delay:.08s}.sheet a:nth-child(3){transition-delay:.16s}.sheet a:nth-child(4){transition-delay:.24s}.sheet a:nth-child(5){transition-delay:.32s}
+  .sheet a:nth-child(2){transition-delay:.08s}.sheet a:nth-child(3){transition-delay:.16s}.sheet a:nth-child(4){transition-delay:.24s}.sheet a:nth-child(5){transition-delay:.32s}.sheet a:nth-child(6){transition-delay:.4s}
 
   /* buttons: island pills, arrow in its own well */
   .btn{display:inline-flex;align-items:center;gap:12px;padding:10px 10px 10px 20px;border-radius:999px;border:1px solid var(--hair-2);background:var(--surface-2);color:var(--ink);font-size:14px;font-weight:500;line-height:1;transition:transform .5s var(--ease),background .5s var(--ease),border-color .5s var(--ease);will-change:transform}
@@ -179,6 +179,20 @@
   .ticks span{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--hair-2);border-radius:999px;padding:5px 11px;color:var(--ink-2)}
   .ticks span i{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:7px;vertical-align:1px}
 
+
+  /* invite */
+  .invite{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:clamp(28px,5vw,64px);align-items:center}
+  .invite form{display:grid;gap:10px}
+  .invite .row{display:flex;gap:8px;flex-wrap:wrap}
+  .invite input[type="email"]{flex:1;min-width:220px;padding:12px 16px;border-radius:999px;border:1px solid var(--hair-2);background:rgba(255,255,255,.04);color:var(--ink);font:inherit;font-size:14px;outline:none;transition:border-color .5s var(--ease),background .5s var(--ease)}
+  .invite input[type="email"]:focus{border-color:var(--led);background:rgba(255,255,255,.06)}
+  .invite input[type="email"]::placeholder{color:var(--subtle)}
+  .invite button{cursor:pointer;font:inherit}
+  .invite .hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+  .invite .status{font-size:13px;color:var(--muted);min-height:1.4em}
+  .invite .status[data-tone="ok"]{color:var(--done)}
+  .invite .status[data-tone="err"]{color:var(--led-text)}
+
   footer{border-top:1px solid var(--hair);padding:40px 0 60px;font-size:13px;color:var(--muted)}
   footer .row{display:flex;flex-wrap:wrap;gap:16px 28px;align-items:center;justify-content:space-between}
   footer a:hover{color:var(--ink)}
@@ -189,7 +203,7 @@
   .rv.d1{transition-delay:.08s}.rv.d2{transition-delay:.16s}.rv.d3{transition-delay:.24s}.rv.d4{transition-delay:.32s}
 
   @media (max-width:980px){
-    .hero-grid,.install,.corpus{grid-template-columns:1fr}
+    .hero-grid,.install,.corpus,.invite{grid-template-columns:1fr}
     .hero-visual .shell{transform:none}
     .figs{grid-template-columns:repeat(2,1fr)}
     .ways{grid-template-columns:1fr}
@@ -226,6 +240,7 @@
       <a href="#loop">The loop</a>
       <a href="#ways">Outputs</a>
       <a href="#install">Install</a>
+      <a href="#hosted">Hosted</a>
       <a href="https://github.com/mandakan/splitsmith">GitHub</a>
     </div>
     <a class="btn primary cta" href="#install">Install <span class="well"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v9M4 8l4 4 4-4"/></svg></span></a>
@@ -237,6 +252,7 @@
     <a href="#loop">The loop</a>
     <a href="#ways">Outputs</a>
     <a href="#install">Install</a>
+    <a href="#hosted">Hosted</a>
     <a href="https://github.com/mandakan/splitsmith">GitHub</a>
     <a href="#install" style="color:var(--led)">Install</a>
   </div>
@@ -254,7 +270,7 @@
           <a class="btn primary" href="#install">Install locally <span class="well"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v9M4 8l4 4 4-4"/></svg></span></a>
           <a class="btn" href="https://github.com/mandakan/splitsmith">View on GitHub <span class="well"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12 12 4M6 4h6v6"/></svg></span></a>
         </div>
-        <p class="fine rv d4">Open source <b>MIT</b> &middot; any camera with a microphone &middot; runs on your machine, nothing is uploaded &middot; hosted by invitation</p>
+        <p class="fine rv d4">Open source <b>MIT</b> &middot; any camera with a microphone &middot; runs on your machine, nothing is uploaded &middot; <a href="#hosted" style="color:var(--muted);text-decoration:underline;text-underline-offset:3px">hosted by invitation</a></p>
       </div>
       <div class="hero-visual rv d2">
         <div class="shell"><div class="core"><img src="img/hero-overview.png" width="1440" height="900" alt="Splitsmith's match overview: twelve stages, each with footage, beep, shots, audit state, draw, average split and stage time" loading="eager"></div></div>
@@ -268,7 +284,7 @@
       <div><div class="k">Beep timing</div><div class="v">&plusmn;15<small> ms</small></div><div class="d">Located in the clip, then confirmed by you.</div></div>
       <div><div class="k">Shot detection</div><div class="v">3<small> voters</small></div><div class="d">Envelope onsets, CLAP similarity and a gradient-boosted classifier vote per shot.</div></div>
       <div><div class="k">Per shot</div><div class="v">split<small> &middot; class</small></div><div class="d">Draw, fire, transition, movement, reload, activation.</div></div>
-      <div><div class="k">Licence</div><div class="v">MIT</div><div class="d">Runs on your machine. Hosted at my.splitsmith.app by invitation.</div></div>
+      <div><div class="k">Licence</div><div class="v">MIT</div><div class="d">Runs on your machine. Hosted at my.splitsmith.app <a href="#hosted" style="text-decoration:underline;text-underline-offset:3px">by invitation</a>.</div></div>
     </div>
   </section>
 
@@ -356,6 +372,27 @@
     </div>
   </section>
 
+  <section class="wrap" id="hosted">
+    <div class="invite">
+      <div>
+        <span class="eyebrow rv"><i></i>Hosted</span>
+        <h2 class="rv d1" style="margin:18px 0 20px">my.splitsmith.app, by invitation.</h2>
+        <p class="lede rv d2" style="font-size:16px">The same app, hosted: upload from any device, sync a local match up, share read-only links, and let a coach or squadmate comment on your stages. Sign-in is a magic link and only invited emails get one. Leave yours and we will email an invite when there is room.</p>
+      </div>
+      <div class="shell rv d2"><div class="core" style="padding:24px 26px;position:relative">
+        <form id="invite" novalidate>
+          <label for="invite-email" class="mono" style="font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)">Request an invite</label>
+          <div class="row">
+            <input id="invite-email" name="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" required>
+            <button class="btn primary" type="submit" id="invite-submit">Request <span class="well"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12 12 4M6 4h6v6"/></svg></span></button>
+          </div>
+          <label class="hp" aria-hidden="true">Leave this empty<input name="hp" type="text" tabindex="-1" autocomplete="off"></label>
+          <p class="status" id="invite-status" aria-live="polite">One email when there is an invite for you, nothing else.</p>
+        </form>
+      </div></div>
+    </div>
+  </section>
+
   <section class="wrap">
     <div class="corpus">
       <div>
@@ -388,6 +425,25 @@
     function setOpen(open) { ham.setAttribute('aria-expanded', String(open)); sheet.setAttribute('data-open', String(open)); document.body.style.overflow = open ? 'hidden' : ''; }
     ham.addEventListener('click', function () { setOpen(ham.getAttribute('aria-expanded') !== 'true'); });
     sheet.querySelectorAll('a').forEach(function (a) { a.addEventListener('click', function () { setOpen(false); }); });
+
+    var form = document.getElementById('invite'), submit = document.getElementById('invite-submit'), status = document.getElementById('invite-status');
+    if (form) {
+      var label = submit.innerHTML;
+      function say(text, tone) { status.textContent = text; if (tone) status.setAttribute('data-tone', tone); else status.removeAttribute('data-tone'); }
+      form.addEventListener('submit', async function (e) {
+        e.preventDefault();
+        var fd = new FormData(form), email = String(fd.get('email') || '').trim(), hp = String(fd.get('hp') || '');
+        if (!email) { say('Enter an email first.', 'err'); return; }
+        submit.disabled = true; submit.textContent = 'Sending...';
+        try {
+          var res = await fetch('/api/waitlist', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email: email, hp: hp }) });
+          var data = await res.json().catch(function () { return {}; });
+          if (res.ok) { submit.textContent = data.already ? 'Already on the list' : 'Requested'; say(data.already ? 'We already have you. You will hear from us.' : 'Thanks. We will email an invite when there is room.', 'ok'); return; }
+          submit.disabled = false; submit.innerHTML = label;
+          say(res.status === 429 ? 'Too many tries from this network. Wait a bit.' : data.error === 'invalid email' ? 'That email does not look right.' : 'Something went wrong. Try again?', 'err');
+        } catch (err) { submit.disabled = false; submit.innerHTML = label; say('Network error. Try again?', 'err'); }
+      });
+    }
     var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     var els = document.querySelectorAll('.rv');
     if (reduce || !('IntersectionObserver' in window)) { els.forEach(function (e) { e.classList.add('in'); }); return; }
