@@ -726,3 +726,109 @@ def test_unknown_stage_title_kind_is_422(match_client_with_trims: _MatchClient) 
         json={"stage_numbers": [1], "audio_from": "mathias", "stage_titles": "banner"},
     )
     assert response.status_code == 422
+
+
+# --- overlay + summary hold (issue #705) ------------------------------------
+
+
+def _overlay_capturing_render(captured: list[dict[str, Any]], *, degradations: tuple[Any, ...] = ()):
+    def fake_render(shooters: Any, *, audio_label: str, output_path: Path, **kwargs: Any) -> Any:
+        captured.append(kwargs)
+        result = _fake_render_grid_mp4(shooters, audio_label=audio_label, output_path=output_path)
+        if kwargs.get("on_notice") is not None:
+            for degradation in degradations:
+                kwargs["on_notice"](degradation.detail)
+        return mp4_grid_mod.GridRenderResult(
+            output_path=result.output_path, stages=result.stages, degradations=degradations
+        )
+
+    return fake_render
+
+
+def test_overlay_and_hold_default_off_and_reach_the_renderer(
+    match_client_with_trims: _MatchClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: list[dict[str, Any]] = []
+    monkeypatch.setattr(mp4_grid_mod, "render_grid_mp4", _overlay_capturing_render(captured))
+
+    response = match_client_with_trims.post(
+        "/api/match/compare-export", json={"stage_numbers": [1], "audio_from": "mathias"}
+    )
+    assert response.status_code == 200
+    job = _wait_for_job(match_client_with_trims, response.json()["id"])
+    assert job["status"] == "succeeded", job
+    plain = captured[-1]
+    assert plain["overlay"] is False
+    assert plain["summary_hold_seconds"] == 0.0
+    assert job["result"]["degradations"] == []
+
+    response = match_client_with_trims.post(
+        "/api/match/compare-export",
+        json={
+            "stage_numbers": [1],
+            "audio_from": "mathias",
+            "overlay": True,
+            "overlay_theme": "clean",
+            "summary_hold_seconds": 2.5,
+        },
+    )
+    assert response.status_code == 200
+    assert _wait_for_job(match_client_with_trims, response.json()["id"])["status"] == "succeeded"
+    on = captured[-1]
+    assert on["overlay"] is True
+    assert on["overlay_theme"] == "clean"
+    assert on["summary_hold_seconds"] == 2.5
+    # The engine's notice channel is wired, so a degradation is said as
+    # it is decided rather than only found in the result.
+    assert callable(on["on_notice"])
+
+
+def test_degradations_reach_the_job_result(
+    match_client_with_trims: _MatchClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A browserless host keeps rendering; the viewer learns the summary
+    was skipped from the result, not from a shorter video."""
+    degraded = (
+        mp4_grid_mod.OverlayDegradation(
+            summary="stage summaries omitted: no usable Chromium",
+            detail="Chromium could not be launched: boom. Run `playwright install`.",
+        ),
+    )
+    captured: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        mp4_grid_mod, "render_grid_mp4", _overlay_capturing_render(captured, degradations=degraded)
+    )
+    response = match_client_with_trims.post(
+        "/api/match/compare-export",
+        json={"stage_numbers": [1], "audio_from": "mathias", "overlay": True, "summary_hold_seconds": 2},
+    )
+    assert response.status_code == 200
+    job = _wait_for_job(match_client_with_trims, response.json()["id"])
+    assert job["status"] == "succeeded", job
+    assert job["result"]["degradations"] == [
+        {
+            "summary": "stage summaries omitted: no usable Chromium",
+            "detail": "Chromium could not be launched: boom. Run `playwright install`.",
+        }
+    ]
+
+
+def test_hold_without_overlay_is_refused_before_queueing(match_client_with_trims: _MatchClient) -> None:
+    """The engine refuses this shape (a hold on a clean grid is a blurred
+    still with nothing on it); the endpoint says so as a 400 with the
+    flag to add, rather than a failed job."""
+    response = match_client_with_trims.post(
+        "/api/match/compare-export",
+        json={"stage_numbers": [1], "audio_from": "mathias", "summary_hold_seconds": 3},
+    )
+    assert response.status_code == 400
+    assert "overlay" in response.json()["detail"]
+
+
+def test_negative_hold_and_unknown_theme_are_422(match_client_with_trims: _MatchClient) -> None:
+    for body in (
+        {"stage_numbers": [1], "audio_from": "mathias", "overlay": True, "summary_hold_seconds": -1},
+        {"stage_numbers": [1], "audio_from": "mathias", "overlay": True, "overlay_theme": "neon"},
+    ):
+        response = match_client_with_trims.post("/api/match/compare-export", json=body)
+        assert response.status_code == 422, body

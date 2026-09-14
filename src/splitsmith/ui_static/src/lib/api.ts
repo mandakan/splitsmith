@@ -1005,6 +1005,13 @@ export interface CompareGridRequestPayload {
   closing_card?: boolean;
   stage_titles?: "none" | "slate" | "lower-third";
   title_duration_seconds?: number;
+  /** Issue #705. The splits overlay (per-tile counter and split, the
+   *  running clock) and the end-of-stage summary hold in seconds. The
+   *  hold needs the overlay on; the server refuses the pair otherwise
+   *  with a 400. */
+  overlay?: boolean;
+  overlay_theme?: "splitsmith" | "clean";
+  summary_hold_seconds?: number;
 }
 
 /** ``Job.result`` shape for a ``"compare-grid"`` job, mirrors the dict
@@ -1031,6 +1038,12 @@ export interface CompareGridResult {
     expected_path: string;
     camera: string | null;
   }>;
+  /** Issue #705. What the render did *not* do -- a browserless host or a
+   *  drawtext-less ffmpeg still renders, and this is how a viewer learns
+   *  the summary hold or the clock was skipped. ``summary`` is the short
+   *  clause for a status line, ``detail`` the whole story. Optional so a
+   *  snapshot from a job queued before it existed still parses. */
+  degradations?: Array<{ summary: string; detail: string }>;
 }
 
 export interface RemovalPlan {
