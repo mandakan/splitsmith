@@ -48,13 +48,18 @@ function ShareFrame({ matchName, children }: { matchName: string | null; childre
             aria-label="Splitsmith"
             className="shrink-0 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
           >
-            <Brand variant="bar" />
+            {/* Mark only on a phone: the match name is what the visitor
+                needs to see, and the wordmark is on the pill and the footer. */}
+            <span className="md:hidden"><Brand variant="compact" /></span>
+            <span className="hidden md:inline"><Brand variant="bar" /></span>
           </a>
+          {/* A share visitor is usually on a phone and has only this
+              link to go on: the match name must show at every width. */}
           {matchName ? (
-            <span className="hidden min-w-0 items-center gap-2 text-md md:flex">
+            <span className="flex min-w-0 items-center gap-2 text-md">
               <span className="truncate font-medium text-ink">{matchName}</span>
-              <span className="text-muted">/</span>
-              <span className="text-ink-2">Splits</span>
+              <span className="hidden text-muted md:inline">/</span>
+              <span className="hidden text-ink-2 md:inline">Splits</span>
             </span>
           ) : null}
           <span className="flex-1" />
@@ -64,7 +69,8 @@ function ShareFrame({ matchName, children }: { matchName: string | null; childre
             rel="noopener"
             className="shrink-0 rounded-full border border-rule-strong px-3 py-1 text-md text-ink-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
           >
-            Analyse your own matches &#8599;
+            <span className="md:hidden">Splitsmith &#8599;</span>
+            <span className="hidden md:inline">Analyse your own matches &#8599;</span>
           </a>
         </nav>
         <div
