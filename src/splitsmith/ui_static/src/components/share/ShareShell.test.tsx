@@ -31,7 +31,7 @@ function renderShare() {
 }
 
 describe("ShareShell branding chrome", () => {
-  it("renders branded header + footer around live share content", async () => {
+  it("renders the share bar and footer around live share content", async () => {
     // Empty roster: pickDefaultShooterSlug finds no slug, so no project
     // fetch fires and the outlet renders directly.
     vi.mocked(api.listMatchShooters).mockResolvedValue({
@@ -42,12 +42,14 @@ describe("ShareShell branding chrome", () => {
     } as never);
     renderShare();
     expect(await screen.findByText("SHARE CONTENT")).toBeInTheDocument();
-    const brand = screen.getByRole("link", { name: /splitsmith$/i });
+    const brand = screen.getByRole("link", { name: /^splitsmith$/i });
     expect(brand).toHaveAttribute("href", "https://splitsmith.app");
     expect(brand).toHaveAttribute("target", "_blank");
-    const footer = screen.getByRole("link", {
-      name: /made with splitsmith - analyze your own matches/i,
-    });
+    expect(screen.getByRole("link", { name: /analyse your own matches/i })).toHaveAttribute(
+      "href",
+      "https://splitsmith.app",
+    );
+    const footer = screen.getByRole("link", { name: /made with splitsmith/i });
     expect(footer).toHaveAttribute("href", "https://splitsmith.app");
   });
 
@@ -57,7 +59,7 @@ describe("ShareShell branding chrome", () => {
     expect(
       await screen.findByText("This link is no longer available"),
     ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /splitsmith$/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /^splitsmith$/i })).toHaveAttribute(
       "href",
       "https://splitsmith.app",
     );
