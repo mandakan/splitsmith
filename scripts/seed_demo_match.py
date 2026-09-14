@@ -305,6 +305,11 @@ def main(root: Path, *, media: bool = False) -> None:
             )
         stages.append(StageEntry(stage_number=number, stage_name=name, time_seconds=secs, videos=videos))
     project.stages = stages
+    # One file in the unassigned tray so the Footage page has something
+    # to place (a second copy of the source; the trimmed copies come below).
+    extra = shooter_root / "raw" / "demo-extra.mp4"
+    shutil.copyfile(source, extra)
+    project.unassigned_videos = [StageVideo(path=Path("raw/demo-extra.mp4"), role="secondary")]
     project.save(shooter_root)
     if media:
         # Reload: video ids hash path + owning stage, which only a loaded

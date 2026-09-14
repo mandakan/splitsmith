@@ -1,4 +1,3 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 import type { VideoRole } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
@@ -18,21 +17,20 @@ export function RoleToggles({
     { v: "ignored", label: "Ignore" },
   ];
   return (
-    <div className="inline-flex gap-0.5 rounded-md border border-rule bg-surface-2 p-0.5">
+    <div role="group" aria-label="Role" className="inline-flex gap-0.5 rounded-md border border-rule-strong bg-surface-2 p-0.5">
       {opts.map((o) => {
         const on = value === o.v;
         return (
           <button
             key={o.v}
             type="button"
+            aria-pressed={on}
             onClick={() => onChange(o.v)}
             disabled={disabled}
             className={cn(
-              "rounded px-2.5 py-1 font-display text-[0.625rem] font-semibold uppercase tracking-[0.06em] transition-all",
-              on && o.v === "primary" && "border border-led-deep bg-led/10 text-led",
-              on && o.v === "secondary" && "bg-surface-4 text-ink",
-              on && o.v === "ignored" && "bg-surface-4 text-muted line-through",
-              !on && "text-muted hover:text-ink",
+              "rounded px-2.5 py-1 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led disabled:opacity-50",
+              on ? "bg-surface-3 text-ink" : "text-muted hover:text-ink",
+              on && o.v === "ignored" && "line-through",
             )}
           >
             {o.label}

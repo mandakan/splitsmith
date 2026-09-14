@@ -40,16 +40,13 @@ export function DefaultShooterRedirect({ base }: Props) {
       .then((r) => {
         if (!alive) return;
         const slug = pickDefaultShooterSlug(r.shooters);
-        setTarget(
-          slug
-            ? matchHref(matchId, base, slug)
-            : matchHref(matchId, "shooters"),
-        );
+        // No shooter yet: Footage is where one gets added (UX PR 6).
+        setTarget(slug ? matchHref(matchId, base, slug) : matchHref(matchId, "ingest"));
       })
       .catch(() => {
         // Unknown match / transient failure: the list handles both the
         // empty state and the "switch project" escape hatch.
-        if (alive) setTarget(matchHref(matchId, "shooters"));
+        if (alive) setTarget(matchHref(matchId, "ingest"));
       });
     return () => {
       alive = false;

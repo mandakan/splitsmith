@@ -47,7 +47,6 @@ import { Ingest } from "@/pages/Ingest";
 import { Jobs } from "@/pages/Jobs";
 import { MergeMatches } from "@/pages/MergeMatches";
 import { Pick } from "@/pages/Pick";
-import { Shooters } from "@/pages/Shooters";
 import { TakeOverview } from "@/pages/TakeOverview";
 import { PromoteReview } from "@/pages/PromoteReview";
 import { AdminWorkers } from "@/pages/AdminWorkers";
@@ -282,13 +281,14 @@ export function App() {
               live under ``/match/:matchId/...``. Bare match-scoped paths
               fall through to the catch-all below and land on /pick. */}
           <Route path="match/:matchId">
-            <Route
-              path="ingest/:slug"
-              element={<ShooterScopedRoute element={<DesktopGate screen="Ingest"><Ingest /></DesktopGate>} />}
-            />
-            <Route path="ingest" element={<DefaultShooterRedirect base="ingest" />} />
             <Route element={<MatchShell />}>
               <Route index element={<Home />} />
+              {/* Footage renders inside the shell like every other page
+                  (UX PR 6); the Shooters page folded into it, so its
+                  route redirects here for one release. */}
+              <Route path="ingest/:slug" element={<ShooterScopedRoute element={<Ingest />} />} />
+              <Route path="ingest" element={<Ingest />} />
+              <Route path="shooters" element={<Ingest />} />
               <Route
                 path="audit/:slug"
                 element={<ShooterScopedRoute element={<AuditRoute />} />}
@@ -308,7 +308,6 @@ export function App() {
                 element={<ShooterScopedRoute element={<DesktopGate screen="Coach"><Coach /></DesktopGate>} />}
               />
               <Route path="coach" element={<DefaultShooterRedirect base="coach" />} />
-              <Route path="shooters" element={<DesktopGate screen="Shooter management"><Shooters /></DesktopGate>} />
               <Route path="beep-review" element={<BeepReviewRoute />} />
               {/* Take overview: carve-up review for one multi-stage raw
                   recording. :filename is the raw video's basename. */}

@@ -1,7 +1,9 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
-import { X } from "lucide-react";
-
-import { ShooterPickerPopover } from "@/components/ingest/ShooterPickerPopover";
+/**
+ * IngestMoveBanner -- after an import on a multi-shooter match: "n videos
+ * added to X, wrong shooter?" with one button per other shooter that
+ * moves the whole batch (UX PR 6 restyle of the post-import banner).
+ */
+import { Button } from "@/components/ui/button";
 import type { MoveShooterBlocked, ShooterListEntry } from "@/lib/api";
 
 export function IngestMoveBanner({
@@ -24,44 +26,28 @@ export function IngestMoveBanner({
   onDismiss: () => void;
 }) {
   return (
-    <div className="mb-4 overflow-hidden rounded-xl border border-beep/40 bg-beep-tint">
-      <div className="relative flex flex-wrap items-center gap-3 px-4 py-3">
-        <span
-          aria-hidden
-          className="absolute inset-y-0 left-0 w-0.5 bg-beep shadow-[0_0_8px_var(--color-beep-glow)]"
-        />
-        <span className="font-mono text-[0.75rem] text-ink-2">
-          <b className="font-bold text-beep">{videoPaths.length}</b>{" "}
-          video{videoPaths.length === 1 ? "" : "s"} added to{" "}
-          <b className="text-ink">{shooterName}</b>.{" "}
-          <span className="text-muted">Wrong shooter?</span>
+    <div role="status" className="rounded-[10px] border border-rule bg-surface px-4 py-2.5 text-md text-ink-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <span>
+          <b className="numeral font-medium text-ink">{videoPaths.length}</b> {videoPaths.length === 1 ? "video" : "videos"} added to{" "}
+          <b className="font-medium text-ink">{shooterName}</b>. <span className="text-muted">Wrong shooter? Move all to</span>
         </span>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-mono text-[0.625rem] uppercase tracking-[0.08em] text-muted">
-            Move all to
-          </span>
-          <ShooterPickerPopover
-            shooters={shooters}
-            excludeSlug={excludeSlug}
-            busy={busy}
-            onPick={(targetSlug) => void onMove(targetSlug, videoPaths)}
-          />
-        </div>
-        <button
-          type="button"
-          onClick={onDismiss}
-          aria-label="Dismiss banner"
-          className="ml-auto rounded p-0.5 text-subtle hover:text-ink"
-        >
-          <X className="size-4" />
-        </button>
+        {shooters
+          .filter((s) => s.slug !== excludeSlug)
+          .map((s) => (
+            <Button key={s.slug} size="sm" disabled={busy} onClick={() => void onMove(s.slug, videoPaths)}>
+              {s.name}
+            </Button>
+          ))}
+        <Button size="sm" variant="ghost" onClick={onDismiss} aria-label="Dismiss banner" className="ml-auto">
+          Dismiss
+        </Button>
       </div>
-      {blocked.length > 0 && (
-        <div className="border-t border-beep/20 bg-live/10 px-4 py-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-live">
-          {blocked.length} stage{blocked.length === 1 ? "" : "s"} already had reviewed footage
-          -- not moved. Resolve manually.
-        </div>
-      )}
+      {blocked.length > 0 ? (
+        <p className="mt-1.5 text-sm text-live">
+          {blocked.length} {blocked.length === 1 ? "stage" : "stages"} already had reviewed footage and stayed. Resolve manually.
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -276,7 +276,7 @@ the length of the stitched timeline. Never assign one from the other.
 
 The SPA is mid-restructure (spec
 ``docs/superpowers/specs/2026-09-13-ux-restructure-and-visual-budget-design.md``,
-eight PRs, five merged as of 2026-09-14; PR 6 Footage next). Any new screen or surface,
+eight PRs, six merged as of 2026-09-14; PR 7 Coach / Compare next). Any new screen or surface,
 whatever session builds it, follows the budget below; the ESLint rule
 ``no-restricted-syntax`` in ``ui_static/eslint.config.js`` enforces the
 mechanical half.
@@ -321,19 +321,28 @@ there on desktop, the phone keeps ``MobileBeepReview``); a new control
 belongs on ``TransportLine``'s overflow menu or ``CurrentShotLine``, a
 new per-shot signal on ``ShotList`` through ``lib/auditStep.shotRows``;
 ``_after_beep_reviewed`` in ``ui/server.py`` is the one place a confirm
-chains trim and detection. Still grandfathered and not in any rebuild
-PR -- restyle onto the primitives whenever you touch them:
+chains trim and detection. Footage (``pages/Ingest.tsx``,
+``components/footage/*``, ``lib/footage.ts``): the coverage matrix
+derives from ``buildFootageRows`` over every shooter's project; a new
+per-video control belongs on ``ClipSheet``, a new per-stage action on
+``CoverageMatrix``'s row menu, shooter management on ``ShootersPanel`` /
+``AddShooterSheet`` (the Shooters page is gone; ``/shooters`` redirects).
+``components/ui/Sheet`` and ``components/ui/Menu`` are the side-panel and
+popover primitives. Still grandfathered and not in any rebuild PR --
+restyle onto the primitives whenever you touch them:
 ``components/results/ResultsPlayer.tsx``, ``CamPicker.tsx``,
 ``ReclassifySheet.tsx``, ``ShareDialog.tsx``,
 ``components/comments/CommentPanel.tsx``, ``components/BeepSection.tsx``,
 ``components/Waveform.tsx``, ``components/MarkerLayer.tsx``,
 ``components/VideoPanel.tsx``, ``components/audit/MultiCamColumn.tsx``,
-``CamGridModal.tsx``, ``CamSyncPill.tsx``, ``AnomalyPins.tsx``.
+``CamGridModal.tsx``, ``CamSyncPill.tsx``, ``AnomalyPins.tsx``,
+``components/FolderPicker.tsx``, ``HostedUploadModal.tsx``,
+``RelinkDialog.tsx``, ``UploadDock.tsx``, ``StageTimeSection.tsx``,
+``components/scoreboard/ConnectMatchDialog.tsx``.
 
 **Files the restructure will rewrite -- do not edit them in a parallel
 branch, put new functionality in a component the rebuild can mount:**
-PR 6 ``pages/Ingest.tsx``, ``pages/ingest/*``, ``pages/Shooters.tsx``,
-``components/ingest/*``; PR 7 ``pages/Coach.tsx``, ``pages/Compare.tsx``,
+PR 7 ``pages/Coach.tsx``, ``pages/Compare.tsx``,
 ``pages/compare/*``; PR 8 ``pages/Export.tsx``, ``pages/Pick.tsx``,
 ``pages/Account.tsx``, ``pages/Triage.tsx``, ``pages/Jobs.tsx``. Nav
 rows live in ``components/match/navItems.tsx`` (grouped by phase:

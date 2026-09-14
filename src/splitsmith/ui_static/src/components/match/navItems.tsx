@@ -12,7 +12,6 @@ import {
   Flag,
   LayoutGrid,
   MonitorPlay,
-  Users,
 } from "lucide-react";
 
 /** Shared disabled-row hint for footage-dependent surfaces. Single
@@ -53,7 +52,6 @@ export function matchNavItems(args: {
   base: string;
   shooterSlug?: string;
   hasFootage: boolean;
-  shooterCount?: number;
   beepReviewPendingCount: number;
   triageFlaggedCount: number;
   footageHint?: string;
@@ -62,7 +60,6 @@ export function matchNavItems(args: {
     base,
     shooterSlug,
     hasFootage,
-    shooterCount,
     beepReviewPendingCount,
     triageFlaggedCount,
     footageHint,
@@ -72,25 +69,16 @@ export function matchNavItems(args: {
     {
       key: "videos",
       group: "prepare",
-      to: shooterSlug ? `${base}/ingest/${shooterSlug}` : `${base}/shooters?pick=videos`,
+      to: shooterSlug ? `${base}/ingest/${shooterSlug}` : `${base}/ingest`,
       icon: <Film className="size-[15px]" />,
       label: "Footage",
-    },
-    {
-      key: "shooters",
-      group: "prepare",
-      to: `${base}/shooters`,
-      icon: <Users className="size-[15px]" />,
-      label: "Shooters",
-      count: shooterCount,
-      badgeKind: "count",
     },
     {
       // Beep confirmation is step 1 of Audit (UX PR 5); the pending
       // count that used to badge the Beep review row badges Audit.
       key: "audit",
       group: "review",
-      to: shooterSlug ? `${base}/audit/${shooterSlug}` : `${base}/shooters?pick=audit`,
+      to: shooterSlug ? `${base}/audit/${shooterSlug}` : `${base}/audit`,
       icon: <Crosshair className="size-[15px]" />,
       label: "Audit",
       disabled: !hasFootage,
@@ -113,7 +101,7 @@ export function matchNavItems(args: {
     {
       key: "coach",
       group: "analyse",
-      to: shooterSlug ? `${base}/coach/${shooterSlug}` : `${base}/shooters?pick=coach`,
+      to: shooterSlug ? `${base}/coach/${shooterSlug}` : `${base}/coach`,
       icon: <ClipboardCheck className="size-[15px]" />,
       label: "Coach",
       disabled: !hasFootage,
@@ -122,7 +110,7 @@ export function matchNavItems(args: {
     {
       key: "export",
       group: "deliver",
-      to: shooterSlug ? `${base}/export/${shooterSlug}` : `${base}/shooters?pick=export`,
+      to: shooterSlug ? `${base}/export/${shooterSlug}` : `${base}/export`,
       icon: <ArrowDownToLine className="size-[15px]" />,
       label: "Export",
       disabled: !hasFootage,

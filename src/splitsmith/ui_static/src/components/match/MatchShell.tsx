@@ -94,7 +94,8 @@ export function viewLabelForPath(relativePath: string): string | null {
   // The beep queue folded into Audit (UX PR 5); the route redirects.
   if (relativePath.startsWith("/beep-review")) return "Audit";
   if (relativePath.startsWith("/jobs")) return "Jobs";
-  if (relativePath.startsWith("/shooters")) return "Shooters";
+  // The Shooters page folded into Footage (UX PR 6); the route redirects.
+  if (relativePath.startsWith("/shooters")) return "Footage";
   return null;
 }
 
@@ -276,7 +277,6 @@ export function MatchShell() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [beepReviewPending, setBeepReviewPending] = useState<number>(0);
   const [triageFlaggedCount, setTriageFlaggedCount] = useState<number>(0);
-  const shooterCount = shooters.length || undefined;
   // Per-shooter pages (Audit / Coach / Videos / Export) need a shooter in
   // the URL. Rather than forcing the user to the shooter list, default to
   // one -- the URL slug if present, else the shared default-shooter rule
@@ -619,7 +619,6 @@ export function MatchShell() {
             base: mobileNavBase,
             shooterSlug: defaultShooterSlug,
             hasFootage: shooters.some((s) => s.video_count > 0),
-            shooterCount,
             beepReviewPendingCount: beepReviewPending,
             triageFlaggedCount,
             footageHint: FOOTAGE_HINT,
@@ -659,7 +658,6 @@ export function MatchShell() {
           matchName={project?.name ?? health?.project_name ?? "..."}
           matchSubtitle={renderMatchSubtitle(project)}
           stages={stages}
-          shooterCount={shooterCount}
           beepReviewPendingCount={beepReviewPending}
           triageFlaggedCount={triageFlaggedCount}
           awaiting={

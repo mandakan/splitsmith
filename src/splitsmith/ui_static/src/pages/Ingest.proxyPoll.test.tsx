@@ -125,7 +125,7 @@ describe("Ingest proxy poll", () => {
     renderIngest();
     await waitFor(() => expect(api.getProject).toHaveBeenCalledTimes(1));
     // Let any effects scheduled off the resolved project settle.
-    await screen.findByRole("heading", { level: 1, name: /add footage/i });
+    await screen.findByRole("heading", { level: 1, name: /footage/i });
     expect(pollIntervalCalls(setIntervalSpy)).toHaveLength(0);
   });
 
@@ -134,7 +134,7 @@ describe("Ingest proxy poll", () => {
     const setIntervalSpy = vi.spyOn(window, "setInterval");
     renderIngest();
     await waitFor(() => expect(api.getProject).toHaveBeenCalledTimes(1));
-    await screen.findByRole("heading", { level: 1, name: /add footage/i });
+    await screen.findByRole("heading", { level: 1, name: /footage/i });
     await waitFor(() => expect(pollIntervalCalls(setIntervalSpy).length).toBeGreaterThan(0));
   });
 });
