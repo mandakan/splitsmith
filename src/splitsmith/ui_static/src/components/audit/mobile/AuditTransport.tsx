@@ -37,7 +37,7 @@ export function AuditTransport({
         aria-pressed={loopActive}
         onClick={onLoopToggle}
         className={`flex min-h-11 min-w-11 items-center justify-center rounded-md border border-rule ${
-          loopActive ? "text-[var(--color-waveform-beep)]" : "opacity-70"
+          loopActive ? "text-beep" : "opacity-70"
         }`}
       >
         <Repeat className="size-5" aria-hidden />
