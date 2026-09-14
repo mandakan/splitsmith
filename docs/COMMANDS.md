@@ -98,6 +98,29 @@ uv run splitsmith match trims ~/splitsmith/matches/bromma-classifier-2026
 
 Output is a table of shooter/stage/camera/status, followed by a summary line. A stage missing a beep, a stage time, its source file, or resolved to an ambiguous camera is reported and skipped rather than aborting the run; the command exits non-zero only when zero trims were written and at least one stage still needs one. An already-exported or a deliberately skipped stage is not outstanding work, so re-running `match trims` against a match that's already fully exported exits 0 -- safe to chain as `splitsmith match trims <match> && splitsmith compare export <match> ...`.
 
+## `youtube` -- put rendered match videos on YouTube
+
+```bash
+splitsmith youtube login          # opens Google's consent page; stores the refresh token in ~/.splitsmith/youtube.json
+splitsmith youtube status
+splitsmith youtube logout
+splitsmith youtube upload exports/bromma.mp4 --privacy unlisted   # reads bromma-youtube.json, bromma.srt, bromma-thumbnail.jpg beside it
+splitsmith match export <match> --shooter me --format mp4 --youtube-upload --youtube-privacy private
+```
+
+The sidecar (`--youtube-sidecar`, implied by `--youtube-upload`) is the
+metadata: title, description with chapter lines, tags. After an upload the
+sidecar carries an `upload` block with the video id and URL; a second
+`upload` of the same file is refused (exit 3) unless `--again`. A re-render
+rewrites the sidecar and is uploadable again. Exit 2 means nothing reached
+the network (no client configured, not logged in, no sidecar, a bad flag);
+exit 1 means the upload or login failed.
+
+Until the splitsmith Google Cloud project passes the YouTube API audit,
+every upload lands private and stays private. The OAuth client id is built
+in; `SPLITSMITH_YOUTUBE_CLIENT_ID` / `SPLITSMITH_YOUTUBE_CLIENT_SECRET`
+override it for development.
+
 ## `compare` -- multi-shooter side-by-side FCPXML
 
 Render one FCPXML where each stage is a beep-aligned grid of N shooters' trims. Tile slots are alphabetical by label and stay fixed across every stage so a shooter who's missing a stage gets a black filler tile rather than reshuffling the grid. Audio comes from a single nominated shooter; everyone else is muted.
