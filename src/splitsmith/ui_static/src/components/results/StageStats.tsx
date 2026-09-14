@@ -1,6 +1,6 @@
 /**
  * StageStats - read-only stats strip for the Results stage view.
- * Stage time, shot count, draw, fastest split, average split.
+ * Stage time, draw, average split, fastest split, shot count (spec s4.5 order).
  * Presentational only; the page computes the numbers (split stats count
  * split-classed intervals only - lib/splits.statisticSplits owns the
  * rule, issue #772). Composes StatStrip (lead): stage time on its own row
@@ -26,10 +26,10 @@ export function StageStats({ stageTime, shotCount, draw, fastestSplit, avgSplit 
   return (
     <StatStrip lead>
       <Stat label="Stage time" {...secs(stageTime, 2)} />
-      <Stat label="Shots" value={String(shotCount)} />
       <Stat label="Draw" {...secs(draw, 2)} />
-      <Stat label="Fastest split" {...secs(fastestSplit, 3)} />
       <Stat label="Avg split" {...secs(avgSplit, 3)} />
+      <Stat label="Fastest split" {...secs(fastestSplit, 3)} />
+      <Stat label="Shots" value={String(shotCount)} />
     </StatStrip>
   );
 }

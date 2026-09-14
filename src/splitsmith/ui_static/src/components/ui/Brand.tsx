@@ -9,12 +9,22 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 interface BrandProps extends React.HTMLAttributes<HTMLDivElement> {
-  variant?: "default" | "compact";
+  /** `compact` is the mark alone; `bar` is the mark plus the wordmark at
+   *  top-bar size (the share surface's bar; GlobalBar draws the same). */
+  variant?: "default" | "compact" | "bar";
   serial?: React.ReactNode;
 }
 
 export function Brand({ variant = "default", serial, className, ...props }: BrandProps) {
   const compact = variant === "compact";
+  if (variant === "bar") {
+    return (
+      <div className={cn("flex items-center gap-2.5", className)} {...props}>
+        <BrandMark className="size-6" />
+        <span className="font-display text-base font-bold uppercase tracking-tight text-ink">Splitsmith</span>
+      </div>
+    );
+  }
   return (
     <div className={cn("flex items-center gap-3", className)} {...props}>
       <BrandMark className={compact ? "size-6" : "size-8"} />

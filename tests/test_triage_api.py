@@ -430,3 +430,30 @@ def test_triage_cells_carry_pipeline_fields(client: _MatchClient) -> None:
     assert s2["shot_count"] == 0
     assert s2["draw"] is None
     assert s2["avg_split"] is None
+
+
+def test_project_stages_carry_figures(client: _MatchClient) -> None:
+    """The Splits page (UX PR 4) reads draw / avg split / fastest split /
+    shot count per stage from the project payload, on both the owner and
+    the share surface. Stage 1: 0.4 s draw, splits 0.3 and 0.25 (the
+    fastest); stage 2 has no doc and reports null, not zeros."""
+    doc = {
+        "stage_number": 1,
+        "shots": [
+            {"shot_number": 1, "ms_after_beep": 400},
+            {"shot_number": 2, "ms_after_beep": 700},
+            {"shot_number": 3, "ms_after_beep": 950},
+        ],
+        "audit_events": [],
+    }
+    assert client.put("/api/shooters/alice/stages/1/audit", json=doc).status_code == 200
+    resp = client.get("/api/shooters/alice/project")
+    assert resp.status_code == 200, resp.text
+    stages = {s["stage_number"]: s for s in resp.json()["stages"]}
+    f1 = stages[1]["figures"]
+    assert f1["draw"] == pytest.approx(0.4)
+    assert f1["avg_split"] == pytest.approx(0.275)
+    assert f1["fastest_split"] == pytest.approx(0.25)
+    assert f1["shot_count"] == 3
+    assert f1["split_count"] == 2
+    assert stages[2]["figures"] is None

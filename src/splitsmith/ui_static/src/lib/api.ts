@@ -228,6 +228,22 @@ export interface StageEntry {
    *  for placeholders and pre-scorecard projects. Populated on scoreboard
    *  sync; displayed in the scored results view. */
   scorecard: StageScorecard | null;
+  /** Splits summary derived server-side from the stage's audit doc (UX
+   *  PR 4). Null when the stage has no audit doc; optional because
+   *  legacy responses omit it. */
+  figures?: StageFigures | null;
+}
+
+/** Per-stage splits summary on the project payload. The split rule is
+ *  the server's ``coach.statistic_splits`` (mirrored by ``statisticSplits``
+ *  in ``lib/splits``); ``avg_split`` and ``fastest_split`` are null when
+ *  the stage has no split-classed interval. */
+export interface StageFigures {
+  draw: number | null;
+  avg_split: number | null;
+  fastest_split: number | null;
+  shot_count: number;
+  split_count: number;
 }
 
 export interface MatchProject {

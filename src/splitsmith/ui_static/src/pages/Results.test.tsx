@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -71,36 +71,65 @@ function makeProject(): MatchProject {
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     competitor_name: null,
-    scoreboard_match_id: null,
-    scoreboard_content_type: null,
+    scoreboard_match_id: "sb-1",
+    scoreboard_content_type: 1,
     selected_shooter_id: null,
     selected_competitor_id: null,
     shooter_token: null,
-    match_date: null,
+    match_date: "2026-06-27",
     stages: [
       {
         stage_number: 1,
         stage_name: "Steel Rush",
         time_seconds: 20,
-        scorecard_updated_at: null,
+        scorecard_updated_at: "2026-06-28T09:40:00Z",
         videos: [],
         skipped: false,
         placeholder: false,
         time_seconds_manual: false,
+        status: "audited",
         stage_rounds: null,
-        scorecard: null,
+        scorecard: {
+          hit_factor: 5.15,
+          stage_points: 103,
+          stage_pct: 71.5,
+          alphas: 10,
+          charlies: 16,
+          deltas: 5,
+          misses: 0,
+          no_shoots: 0,
+          procedurals: 0,
+          dq: false,
+        },
+        figures: { draw: 1.84, avg_split: 0.52, fastest_split: 0.31, shot_count: 28, split_count: 9 },
       },
       {
         stage_number: 2,
         stage_name: "Brass Monkey",
         time_seconds: 0,
         scorecard_updated_at: null,
+        videos: [{ role: "primary" } as unknown as MatchProject["stages"][number]["videos"][number]],
+        skipped: false,
+        placeholder: false,
+        time_seconds_manual: false,
+        status: "ready",
+        stage_rounds: null,
+        scorecard: null,
+        figures: null,
+      },
+      {
+        stage_number: 3,
+        stage_name: "Quiet",
+        time_seconds: 0,
+        scorecard_updated_at: null,
         videos: [],
         skipped: false,
         placeholder: false,
         time_seconds_manual: false,
+        status: "todo",
         stage_rounds: null,
         scorecard: null,
+        figures: null,
       },
     ],
     unassigned_videos: [],
@@ -121,21 +150,22 @@ function makeProject(): MatchProject {
   };
 }
 
-const SHOOTERS = [
-  makeShooter("anna", "Anna", [[1, "audited"], [2, "ready"]]),
-  makeShooter("bjorn", "Bjorn", [[1, "ready"], [2, "todo"]]),
-  makeShooter("cleo", "Cleo", [[1, "skipped"], [2, "todo"]]),
+const SOLO = [makeShooter("anna", "Anna", [[1, "audited"], [2, "ready"], [3, "todo"]])];
+const TRIO = [
+  makeShooter("anna", "Anna", [[1, "audited"], [2, "ready"], [3, "todo"]]),
+  makeShooter("bjorn", "Bjorn", [[1, "ready"], [2, "todo"], [3, "todo"]]),
+  makeShooter("cleo", "Cleo", [[1, "skipped"], [2, "todo"], [3, "todo"]]),
 ];
 
 function Shell({ ctx }: { ctx: MatchShellOutletContext }) {
   return <Outlet context={ctx} />;
 }
 
-function renderResults(path: string) {
+function renderResults(path: string, shooters: ShooterListEntry[] = SOLO) {
   const ctx: MatchShellOutletContext = {
     project: makeProject(),
     health: null,
-    shooters: SHOOTERS,
+    shooters,
     refresh: vi.fn(),
     origin: null,
     capabilities: null,
@@ -152,105 +182,87 @@ function renderResults(path: string) {
   );
 }
 
-// At jsdom's default viewport both the mobile cards and the desktop
-// matrix render (Tailwind lg: classes are media-query CSS jsdom does
-// not apply), hence getAllByText for row-level assertions.
+function rowOf(text: string): HTMLElement {
+  const tr = screen.getByText(text).closest("tr");
+  if (!tr) throw new Error(`no row for ${text}`);
+  return tr;
+}
 
-describe("Results rows - owner surface", () => {
-  it("gives audited rows a watch affordance instead of the audited chip", () => {
+describe("Splits - owner surface", () => {
+  it("renders the header, five stats and one row per stage with splits before scoring", () => {
     renderResults("/match/m1/results");
-    expect(screen.getAllByText(", watch run").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Audited")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Splits" })).toBeInTheDocument();
+    expect(screen.getByText(/1 of 3 stages audited/)).toBeInTheDocument();
+    expect(screen.getByText(/Scorecard synced/)).toBeInTheDocument();
+    expect(screen.getByText("Avg draw")).toBeInTheDocument();
+    expect(screen.getByText("Fastest split")).toBeInTheDocument();
+    const tr = rowOf("Steel Rush");
+    const cells = within(tr).getAllByRole("cell").map((c) => c.textContent);
+    expect(cells.slice(0, 9)).toEqual(["01", "Steel Rush", "1.84", "0.520", "0.310", "28", "20.00", "5.15", "10A 16C 5D"]);
+    expect(within(tr).getByRole("link", { name: "Play stage 1" })).toHaveAttribute("href", "/match/m1/results/anna/1");
   });
 
-  it("keeps operator status chips on non-audited rows", () => {
+  it("keeps not-audited rows with an Audit link and collapses no-footage stages", () => {
     renderResults("/match/m1/results");
-    expect(screen.getAllByText("Ready").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Skipped").length).toBeGreaterThan(0);
+    expect(within(rowOf("Brass Monkey")).getByRole("link", { name: "Audit" })).toHaveAttribute("href", "/match/m1/audit/anna/2");
+    expect(within(rowOf("Quiet")).getByText("no footage")).toBeInTheDocument();
   });
 
-  it("keeps the audited wording in the header counter", () => {
+  it("the one primary is Play all, pointing at the first audited stage with ?play=all", () => {
     renderResults("/match/m1/results");
-    // /audited/ also matches the "Not audited" row labels; the header
-    // check is that the videos wording never leaks onto the owner view.
-    expect(screen.getAllByText(/audited/).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/videos/)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Play all" })).toHaveAttribute("href", "/match/m1/results/anna/1?play=all");
+  });
+
+  it("offers the refresh glyph on a scoreboard-linked match", () => {
+    renderResults("/match/m1/results");
+    expect(screen.getByRole("button", { name: "Refresh from scoreboard" })).toBeInTheDocument();
+  });
+
+  it("multi-shooter: chips filter the table to one shooter", async () => {
+    vi.mocked(api.getProject).mockImplementation((slug: string) =>
+      Promise.resolve({
+        ...makeProject(),
+        stages: makeProject().stages.map((st) =>
+          st.stage_number === 1
+            ? {
+                ...st,
+                status: "ready" as const,
+                figures: null,
+                videos: [{ role: "primary" } as unknown as MatchProject["stages"][number]["videos"][number]],
+                scorecard: { ...st.scorecard!, hit_factor: 2.9 },
+              }
+            : st,
+        ),
+        competitor_name: slug,
+      }),
+    );
+    renderResults("/match/m1/results", TRIO);
+    expect(screen.getByRole("group", { name: "Filter by shooter" })).toBeInTheDocument();
+    expect(screen.getByText(/1 of 3 stage takes audited/)).toBeInTheDocument();
+    await vi.waitFor(() => expect(api.getProject).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "Bjorn" }));
+    await screen.findByText("2.90");
+    expect(within(rowOf("Steel Rush")).getByText(/not audited/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Play all" })).toBeNull();
+    vi.mocked(api.getProject).mockImplementation(() => new Promise(() => {}));
   });
 });
 
-describe("Results rows - share surface", () => {
-  it("gives audited rows the watch affordance", () => {
-    renderResults("/share/tok123/results");
-    expect(screen.getAllByText(", watch run").length).toBeGreaterThan(0);
-  });
-
-  it("collapses non-audited and skipped rows to a No video label", () => {
-    renderResults("/share/tok123/results");
-    expect(screen.queryByText("Ready")).not.toBeInTheDocument();
-    expect(screen.queryByText("Skipped")).not.toBeInTheDocument();
-    expect(screen.queryByText("Not audited")).not.toBeInTheDocument();
-    expect(screen.getAllByText("No video").length).toBeGreaterThan(0);
-  });
-
-  it("counts videos, not audits, in the header", () => {
-    renderResults("/share/tok123/results");
-    expect(screen.getAllByText(/videos/).length).toBeGreaterThan(0);
-    expect(screen.queryByText(/audited/)).not.toBeInTheDocument();
-  });
-
-  it("collapses a stage with no watchable runs to one No videos yet line", () => {
-    renderResults("/share/tok123/results");
-    // Stage 2 has no audited cell: the per-shooter No video rows give way
-    // to a single line (mobile card + desktop matrix render one each).
-    expect(screen.getAllByText("No videos yet").length).toBeGreaterThan(0);
-    // Stage 1 has a watchable run, so its non-audited siblings keep their
-    // per-shooter No video rows.
-    expect(screen.getAllByText("No video").length).toBeGreaterThan(0);
-  });
-
-  it("never collapses stages on the owner surface", () => {
-    renderResults("/match/m1/results");
-    expect(screen.queryByText("No videos yet")).not.toBeInTheDocument();
+describe("Splits - share surface", () => {
+  it("reads no video, shows the date line, and offers no Share, refresh or Audit link", () => {
+    renderResults("/share/tok/results");
+    expect(screen.getByText(/27 Jun 2026/)).toBeInTheDocument();
+    expect(screen.getByText(/1 stage on video/)).toBeInTheDocument();
+    expect(screen.queryByText(/audited/)).toBeNull();
+    expect(screen.queryByRole("link", { name: "Audit" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /refresh/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /share/i })).toBeNull();
+    expect(screen.getAllByText("no video").length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: "Play stage 1" })).toHaveAttribute("href", "/share/tok/results/anna/1");
+    expect(screen.getByRole("link", { name: "Play all" })).toHaveAttribute("href", "/share/tok/results/anna/1?play=all");
   });
 });
 
-describe("Results rows - hit counts", () => {
-  it("renders the A/C/D/NS/M/P breakdown on scored audited rows", async () => {
-    const scored = makeProject();
-    scored.stages[0].scorecard = {
-      hit_factor: 5.24,
-      stage_points: 100,
-      stage_pct: 87.5,
-      alphas: 10,
-      charlies: 2,
-      deltas: 1,
-      misses: 0,
-      no_shoots: 0,
-      procedurals: 3,
-      dq: false,
-    };
-    const { api } = await import("@/lib/api");
-    vi.mocked(api.getProject).mockResolvedValue(scored);
-    try {
-      renderResults("/match/m1/results");
-      // Multi-shooter cells resolve per-shooter projects async.
-      expect((await screen.findAllByText("NS")).length).toBeGreaterThan(0);
-      expect(screen.getAllByText("P").length).toBeGreaterThan(0);
-      expect(screen.getAllByText("3").length).toBeGreaterThan(0);
-    } finally {
-      vi.mocked(api.getProject).mockImplementation(() => new Promise(() => {}));
-    }
-  });
-
-  it("keeps unscored audited rows free of hit-count chrome", () => {
-    renderResults("/match/m1/results");
-    expect(screen.queryByText("NS")).not.toBeInTheDocument();
-  });
-});
-
-// Local mode has no Share dialog - share links are minted on hosted. A
-// match that has been pushed at least once gets a deep link to its
-// hosted results page instead, where the real Share button lives.
 describe("Results - Share on splitsmith.app (local mode)", () => {
   const synced = {
     configured: true,

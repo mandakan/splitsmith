@@ -1,4 +1,3 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * ResultsStage - stage playback page (/results/:slug/:stage), also
  * mounted anonymously at /share/:token/results/:slug/:stage.
@@ -14,8 +13,8 @@
  * contract for this page. isShareView gates the affordance client-side;
  * the server share whitelist is the backstop that actually enforces it.
  */
-import { ArrowLeft, ArrowRight, ChevronDown, ChevronLeft, ListVideo, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowLeft, ArrowRight, ChevronDown, ListVideo, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   Link,
   useLocation,
@@ -32,9 +31,12 @@ import { CamPicker } from "@/components/results/CamPicker";
 import { ReclassifySheet } from "@/components/results/ReclassifySheet";
 import { ResultsPlayer, type FullscreenMode } from "@/components/results/ResultsPlayer";
 import { Scorecard } from "@/components/results/Scorecard";
+import { ShareDialog } from "@/components/results/ShareDialog";
 import { SplitsList } from "@/components/results/SplitsList";
 import { StageStats } from "@/components/results/StageStats";
-import { Kicker } from "@/components/ui";
+import { Button } from "@/components/ui/button";
+import { Chip } from "@/components/ui/Chip";
+import { PageHeader } from "@/components/ui/PageHeader";
 import {
   ApiError,
   api,
@@ -46,6 +48,7 @@ import {
   type StageScorecard,
 } from "@/lib/api";
 import { buildUndoPatch } from "@/lib/coachPatch";
+import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
 import { momentHref, momentToSearch, parseMoment } from "@/lib/moment";
 import { isShareView } from "@/lib/shareView";
@@ -65,18 +68,6 @@ function pad2(n: number): string {
 
 // Sentence case - display CSS owns any uppercasing.
 const PATCH_FAILED_FALLBACK = "Could not save the change - check the connection and retry.";
-
-function formatTimestamp(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 export function ResultsStage() {
   const { slug, stage } = useParams<{ slug?: string; stage?: string }>();
@@ -147,6 +138,11 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [playerBox, setPlayerBox] = useState<HTMLDivElement | null>(null);
   const canReclassify = !shareView;
+  // Share is the hosted owner's: the same dialog Splits opens (you share
+  // what you look at). Local installs deep-link from Splits instead.
+  const { mode: deploymentMode } = useDeploymentMode();
+  const canShare = deploymentMode === "hosted" && !shareView;
+  const [showShare, setShowShare] = useState(false);
   const { shareUrl } = useActiveShare();
   const [sheetShot, setSheetShot] = useState<CoachShot | null>(null);
   const [patchBusy, setPatchBusy] = useState(false);
@@ -475,37 +471,30 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   if (error) {
     return (
       <div className="px-4 py-8 md:px-7">
-        <div role="alert" className="rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
+        <p role="alert" className="text-sm text-led-text">
           {error}
-        </div>
-        <button
-          type="button"
-          onClick={() => setAttempt((n) => n + 1)}
-          className="mt-3 inline-flex min-h-11 items-center rounded-md border border-rule-strong bg-surface-2 px-4 font-display text-xs font-bold uppercase tracking-[0.08em] text-ink transition-colors hover:bg-surface-3"
-        >
+        </p>
+        <Button type="button" className="mt-3" onClick={() => setAttempt((n) => n + 1)}>
           Retry
-        </button>
+        </Button>
       </div>
     );
   }
   if (!loaded) {
     return (
-      <div className="flex h-64 items-center justify-center gap-2 text-sm text-muted">
+      <div className="flex h-64 items-center justify-center gap-2 text-md text-muted">
         <Loader2 className="size-4 animate-spin" /> Loading stage...
       </div>
     );
   }
   if (!coach) {
     return (
-      <div className="px-4 py-16 text-center md:px-7">
-        <Kicker>Stage {pad2(stage)}</Kicker>
-        <p className="mt-4 text-sm text-muted">Stage not audited yet.</p>
-        <Link
-          to={href("results")}
-          className="mt-4 inline-flex min-h-11 items-center rounded-md border border-rule-strong bg-surface-2 px-4 font-display text-xs font-bold uppercase tracking-[0.08em] text-ink transition-colors hover:bg-surface-3"
-        >
-          Back to results
-        </Link>
+      <div className="px-4 py-4 md:px-7">
+        <PageHeader ordinal={pad2(stage)} title="Stage" back={{ label: "All stages", to: href("results") }} />
+        <p className="text-md text-muted">Stage not audited yet.</p>
+        <Button asChild className="mt-4">
+          <Link to={href("results")}>Back to results</Link>
+        </Button>
       </div>
     );
   }
@@ -516,148 +505,122 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
   const camDelta = activeBeep - coach.beep_time;
   camIndexRef.current = camIndex;
   activeBeepRef.current = activeBeep;
-  const navButton =
-    "inline-flex size-11 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led";
-
-  const header = (
-    <div className="flex items-center gap-3">
-      <div className="min-w-0 flex-1">
-        {/* The only route back to the overview on the bare share
-            surface; on the owner surface it complements the shell nav.
-            href round-trips the /share/:token prefix. */}
-        <Link
-          to={href("results")}
-          className="mb-1 inline-flex items-center gap-0.5 font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
+  const shooterLine = shooter ? (
+    shooters.length > 1 ? (
+      // Minimal shooter switcher: the name line itself is a native
+      // select (OS picker on mobile), one caret of added chrome.
+      // Shooters without an audited take of this stage are disabled -
+      // the same contract the Splits links use.
+      <span className="relative inline-flex max-w-full items-center">
+        <select
+          value={slug}
+          onChange={(e) => navigate(href("results", e.target.value, String(stage)))}
+          aria-label="Shooter"
+          className="cursor-pointer appearance-none truncate bg-transparent pr-4 text-md text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
         >
-          <ChevronLeft className="size-3.5" aria-hidden />
-          All stages
-        </Link>
-        <div className="flex flex-wrap items-center gap-x-2">
-          <h1 className="truncate font-display text-xl font-bold uppercase leading-tight tracking-tight text-ink md:text-2xl">
-            <span className="text-led">Stage {pad2(stage)}</span>
-            {coach?.stage_name ? <span className="text-ink"> - {coach.stage_name}</span> : null}
-          </h1>
-          {trimStale ? (
-            <span
-              role="status"
-              className="ml-2 inline-flex min-h-6 items-center rounded border border-rule px-2 text-xs text-muted"
+          {shooters.map((s) => (
+            <option
+              key={s.slug}
+              value={s.slug}
+              disabled={!s.stage_statuses.some((e) => e.stage_number === stage && e.status === "audited")}
             >
+              {s.name}
+            </option>
+          ))}
+        </select>
+        <ChevronDown aria-hidden className="pointer-events-none absolute right-0 size-3 text-subtle" />
+      </span>
+    ) : (
+      <span>{shooter.name}</span>
+    )
+  ) : null;
+
+  const stepButton = (label: string, to: number | null, icon: ReactNode) =>
+    to != null ? (
+      <Button asChild size="icon" aria-label={label}>
+        <Link to={href("results", slug, String(to))}>{icon}</Link>
+      </Button>
+    ) : (
+      <Button type="button" size="icon" disabled aria-label={label}>
+        {icon}
+      </Button>
+    );
+
+  // The only route back to the overview on the bare share surface; on
+  // the owner surface it complements the shell nav. href round-trips
+  // the /share/:token prefix.
+  const header = (
+    <PageHeader
+      ordinal={pad2(stage)}
+      title={coach.stage_name || "Stage"}
+      back={{ label: "All stages", to: href("results") }}
+      sub={
+        <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+          {shooterLine}
+          {trimStale ? (
+            <Chip tone="warn" role="status">
               Awaiting desktop re-process
-            </span>
+            </Chip>
           ) : null}
-        </div>
-        {shooter ? (
-          shooters.length > 1 ? (
-            // Minimal shooter switcher: the name line itself is a
-            // native select (OS picker on mobile), one caret of added
-            // chrome. Shooters without an audited take of this stage
-            // are disabled - the same contract the overview links use.
-            <span className="relative inline-flex max-w-full items-center">
-              <select
-                value={slug}
-                onChange={(e) => navigate(href("results", e.target.value, String(stage)))}
-                aria-label="Shooter"
-                className="cursor-pointer appearance-none truncate bg-transparent pr-4 font-mono text-xs uppercase tracking-[0.08em] text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
-              >
-                {shooters.map((s) => (
-                  <option
-                    key={s.slug}
-                    value={s.slug}
-                    disabled={
-                      !s.stage_statuses.some(
-                        (e) => e.stage_number === stage && e.status === "audited",
-                      )
-                    }
-                  >
-                    {s.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                aria-hidden
-                className="pointer-events-none absolute right-0 size-3 text-subtle"
-              />
-            </span>
-          ) : (
-            <p className="truncate font-mono text-xs uppercase tracking-[0.08em] text-muted">
-              {shooter.name}
-            </p>
-          )
-        ) : null}
-      </div>
-      <div className="flex shrink-0 items-center gap-1.5">
-        {/* Compare is a desktop-only workflow (#700); the link works
-            owner- and share-side via useMatchHref, hidden on phones the
-            same way DesktopGate would reject the mount anyway. */}
-        <Link
-          to={href("compare", String(stage))}
-          className="hidden min-h-11 items-center rounded-md border border-rule-strong bg-surface-2 px-4 font-display text-xs font-bold uppercase tracking-[0.08em] text-ink transition-colors hover:bg-surface-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led md:inline-flex"
-        >
-          Compare shooters
-        </Link>
-        <button
-          type="button"
-          onClick={togglePlayAll}
-          aria-pressed={playAll}
-          aria-label={playAll ? "Play all stages: on" : "Play all stages: off"}
-          title="Play this shooter's stages back to back"
-          className={cn(
-            "inline-flex min-h-11 items-center gap-1.5 rounded-md border px-3 font-display text-xs font-bold uppercase tracking-[0.08em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
-            playAll
-              ? "border-led bg-led-fill text-ink hover:bg-led-soft"
-              : "border-rule bg-surface-2 text-ink-2 hover:bg-surface-3 hover:text-ink",
-          )}
-        >
-          <ListVideo className="size-4" aria-hidden="true" />
-          Play all
-        </button>
-        {prevStage != null ? (
-          <Link
-            to={href("results", slug, String(prevStage))}
-            aria-label="Previous stage"
-            className={navButton}
-          >
-            <ArrowLeft className="size-4" />
-          </Link>
-        ) : (
-          <button
+        </span>
+      }
+      actions={
+        <>
+          {canShare ? (
+            <Button type="button" onClick={() => setShowShare(true)} aria-label="Manage share links for these results">
+              Share
+            </Button>
+          ) : null}
+          {/* Compare is a desktop-only workflow (#700); the link works
+              owner- and share-side via useMatchHref, hidden on phones the
+              same way DesktopGate would reject the mount anyway. */}
+          {shooters.length > 1 ? (
+            <Button asChild className="hidden md:inline-flex">
+              <Link to={href("compare", String(stage))}>Compare shooters</Link>
+            </Button>
+          ) : null}
+          {/* Live state is the page's one primary while it is on. */}
+          <Button
             type="button"
-            disabled
-            aria-label="Previous stage"
-            className={cn(navButton, "opacity-40")}
+            variant={playAll ? "primary" : "default"}
+            onClick={togglePlayAll}
+            aria-pressed={playAll}
+            aria-label={playAll ? "Play all stages: on" : "Play all stages: off"}
+            title="Play this shooter's stages back to back"
           >
-            <ArrowLeft className="size-4" />
-          </button>
-        )}
-        {nextStage != null ? (
-          <Link
-            to={href("results", slug, String(nextStage))}
-            aria-label="Next stage"
-            className={navButton}
-          >
-            <ArrowRight className="size-4" />
-          </Link>
-        ) : (
-          <button
-            type="button"
-            disabled
-            aria-label="Next stage"
-            className={cn(navButton, "opacity-40")}
-          >
-            <ArrowRight className="size-4" />
-          </button>
-        )}
-      </div>
-    </div>
+            <ListVideo className="size-4" aria-hidden="true" />
+            Play all
+          </Button>
+          {stepButton("Previous stage", prevStage, <ArrowLeft className="size-4" />)}
+          {stepButton("Next stage", nextStage, <ArrowRight className="size-4" />)}
+        </>
+      }
+    />
   );
+
+  const legend = baselines ? (
+    <div className="flex flex-wrap items-center gap-4 px-1 py-2 text-sm text-muted">
+      <span>
+        <i aria-hidden className="mr-1.5 inline-block size-2 rounded-full bg-done" />
+        Quick
+      </span>
+      <span>
+        <i aria-hidden className="mr-1.5 inline-block size-2 rounded-full bg-ink-2" />
+        Typical
+      </span>
+      <span>
+        <i aria-hidden className="mr-1.5 inline-block size-2 rounded-full bg-live" />
+        Long
+      </span>
+      <span className="ml-auto">Against your match baseline, per interval class</span>
+    </div>
+  ) : null;
 
   if (!activeVideo) {
     return (
-      <div className="flex flex-col gap-4 px-4 py-4 md:px-7">
+      <div className="px-4 py-4 md:px-7">
         {header}
-        <div className="rounded-md border border-rule-strong bg-surface-2 px-4 py-6 text-center text-sm text-muted">
-          No video for this stage.
-        </div>
+        <p className="text-md text-muted">No video for this stage.</p>
       </div>
     );
   }
@@ -667,7 +630,18 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
       ref={rootRef}
       className="flex flex-col gap-4 px-4 py-4 md:px-7 lg:grid lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start"
     >
-      <div className="flex flex-col gap-4 lg:col-span-2">{header}</div>
+      <div className="lg:col-span-2">
+        {header}
+        {/* Leading and full-width (spec s4.5): five cells need the whole
+            row; in the side column their labels wrap. */}
+        <StageStats
+          stageTime={stageTime}
+          shotCount={shots.length}
+          draw={draw}
+          fastestSplit={fastestSplit}
+          avgSplit={avgSplit}
+        />
+      </div>
       {/* Sticky below lg so playback + auto-scrolling splits never lose
           the video. Disabled at viewport heights <= 500px: landscape
           phones report ~330-440px and the pinned player would eat the
@@ -711,15 +685,9 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           onSelect={handleSelectCam}
           srcFor={(e) => api.videoStreamUrl(slug, e.path, e.kind)}
         />
+        {legend}
       </div>
       <div className="flex flex-col gap-4 lg:max-h-[calc(100dvh-var(--shell-header-h,86px)-2rem)] lg:overflow-y-auto">
-        <StageStats
-          stageTime={stageTime}
-          shotCount={shots.length}
-          draw={draw}
-          fastestSplit={fastestSplit}
-          avgSplit={avgSplit}
-        />
         <SplitsList
           shots={displayShots}
           activeShotNumber={activeShotNumber}
@@ -728,16 +696,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
           baselines={baselines}
           onReclassify={canReclassify ? setSheetShot : undefined}
         />
-        {scorecard ? (
-          <div className="flex flex-col gap-2">
-            <Scorecard scorecard={scorecard} />
-            {scorecardUpdatedAt ? (
-              <p className="font-mono text-xs uppercase tracking-[0.08em] text-muted">
-                from scoreboard, updated {formatTimestamp(scorecardUpdatedAt)}
-              </p>
-            ) : null}
-          </div>
-        ) : null}
+        <Scorecard scorecard={scorecard} updatedAt={scorecardUpdatedAt} />
         <CommentPanel
           slug={slug}
           stage={stage}
@@ -761,6 +720,7 @@ function ResultsStageInner({ slug, stage }: { slug: string; stage: number }) {
         onCancel={() => setSheetShot(null)}
       />
       <Snackbar snack={snack} onDismiss={() => setSnack(null)} />
+      {canShare && showShare ? <ShareDialog onClose={() => setShowShare(false)} /> : null}
     </div>
   );
 }

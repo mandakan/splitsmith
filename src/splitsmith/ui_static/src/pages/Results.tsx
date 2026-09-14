@@ -1,150 +1,67 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
- * Results - read-only match results overview. One card per stage; each
- * row inside is one shooter's run: time + status, tap -> stage playback.
- * Desktop (lg+) renders the same rows as a stages-x-shooters matrix.
- * Read-only by contract: this surface (and everything under
- * components/results/) is the future share-view; no mutations, no
- * operator-only assumptions. See the 2026-07-04 spec.
+ * Splits -- the match read as numbers (spec 2026-09-13 s4.5, UX PR 4).
+ * Route stays ``/results``; also mounted anonymously under
+ * ``/share/:token/results``, where it renders the same table minus every
+ * owner affordance (Share, refresh, Audit links, audit wording).
+ *
+ * Five stats over the audited stages, then one row per stage with the
+ * splits the audit produced before the scorecard the scoreboard
+ * imported. Everything comes from one project GET per shooter, derived
+ * through lib/splitsTable.ts; the page maps rows to primitives and owns
+ * only the fetches, the share / refresh chrome and the shooter filter.
  */
-
 import { useEffect, useMemo, useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router-dom";
-import { ExternalLink, Loader2, Play, RefreshCw, Share2 } from "lucide-react";
+import { Loader2, RefreshCw } from "lucide-react";
 
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
-import { Kicker } from "@/components/ui";
+import { ShareDialog } from "@/components/results/ShareDialog";
+import { SplitsCards } from "@/components/results/SplitsCards";
+import { SplitsTable, type SplitsHrefs } from "@/components/results/SplitsTable";
 import { Button } from "@/components/ui/button";
-import { ApiError, api, type StageScorecard, type StageStatus, type SyncStatusResponse } from "@/lib/api";
-import { buildStageMatrix, matchTotals } from "@/lib/stageMatrix";
-import { statusLabel } from "@/lib/stageStatus";
+import { Chip } from "@/components/ui/Chip";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Stat, StatStrip } from "@/components/ui/Stat";
+import { ApiError, api, type MatchProject, type SyncStatusResponse } from "@/lib/api";
+import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
-import { cn } from "@/lib/utils";
-import { ShareDialog } from "@/components/results/ShareDialog";
-import { StageCompareLink } from "@/components/match/StageCompareLink";
-import { matchTotals as scorecardTotals } from "@/components/results/Scorecard";
-
-/* -------------------------------------------------------------------------- */
-/* Status chip                                                                 */
-/* -------------------------------------------------------------------------- */
-
-/** Per-tone Tailwind class string for the status chip. Color is always a
- *  redundant cue - the chip carries a text label (accessibility requirement). */
-const CHIP_TONE: Record<string, string> = {
-  done: "border-led-deep bg-led/15 text-led",
-  in_progress: "border-live/50 bg-live/10 text-live",
-  ready: "border-rule-strong bg-surface-3 text-ink-2",
-  partial: "border-beep/40 bg-beep-tint text-beep",
-  todo: "border-rule bg-surface-2 text-whisper",
-  skipped: "border-rule bg-surface-2 text-muted",
-};
-
-function StatusChip({ tone, status }: { tone: string; status: StageStatus }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center rounded border px-2 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.1em]",
-        CHIP_TONE[tone] ?? CHIP_TONE.todo,
-      )}
-    >
-      {statusLabel(status)}
-    </span>
-  );
-}
-
-/** Row-trailing play affordance for audited (watchable) rows. Muted at
- *  rest, LED on the row's hover/focus (the row Link carries `group`).
- *  aria-hidden - the row's sr-only ", watch run" suffix names the action
- *  so the icon is never the sole cue. */
-function PlayAffordance() {
-  return (
-    <span
-      aria-hidden
-      className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border border-rule text-muted transition-colors group-hover:border-led group-hover:text-led group-focus-visible:border-led group-focus-visible:text-led"
-    >
-      <Play className="size-3.5 fill-current" />
-    </span>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Helpers                                                                     */
-/* -------------------------------------------------------------------------- */
-
-function pad2(n: number): string {
-  return n.toString().padStart(2, "0");
-}
+import { formatClock } from "@/lib/overview";
+import {
+  buildSplitsRows,
+  firstPlayable,
+  scoreboardTotals,
+  scorecardSyncedAt,
+  splitsStats,
+} from "@/lib/splitsTable";
+import { useIsMobile } from "@/lib/useIsMobile";
 
 function formatDate(iso: string): string {
   const d = new Date(iso + "T00:00:00Z");
   if (Number.isNaN(d.getTime())) return iso;
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  const months = [
-    "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
-    "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
-  ];
-  return `${day} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+  const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${d.getUTCDate()} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
-/** Format a stage duration as "MM:SS.ss" (omit minutes if zero). */
-function formatTime(seconds: number): string {
-  if (!seconds || seconds <= 0) return "-";
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds - mins * 60;
-  const secsStr = secs.toFixed(2).padStart(5, "0");
-  return mins > 0 ? `${pad2(mins)}:${secsStr}` : secsStr;
+function formatDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-/** Compact "HF 5.24" label - text-paired so hit factor is never a bare,
- *  color-only number. 2dp (vs the 4dp Scorecard detail view) keeps the
- *  dense grid/card cells from wrapping. */
-function formatHitFactor(hitFactor: number): string {
-  return `HF ${hitFactor.toFixed(2)}`;
+function fmt(v: number | null, digits: number): string {
+  return v == null ? "—" : v.toFixed(digits);
 }
-
-/** One-line A/C/D/NS/M/P breakdown for a scored row. Same label-beside-
- *  count pairing as the Scorecard detail view (color never sole carrier),
- *  compressed to single-letter labels; zeros stay visible so rows keep
- *  comparable shape when scanning across shooters. Null counts render
- *  "--" (unknown, not zero), matching Scorecard's fmt. */
-function HitCounts({ scorecard }: { scorecard: StageScorecard }) {
-  const items: [string, number | null][] = [
-    ["A", scorecard.alphas],
-    ["C", scorecard.charlies],
-    ["D", scorecard.deltas],
-    ["NS", scorecard.no_shoots],
-    ["M", scorecard.misses],
-    ["P", scorecard.procedurals],
-  ];
-  return (
-    <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 font-mono text-[0.625rem] leading-tight tabular-nums">
-      {items.map(([label, value]) => (
-        <span key={label} className="inline-flex items-center gap-0.5">
-          <span className="text-subtle">{label}</span>
-          <span className="text-muted">{value == null ? "--" : value}</span>
-        </span>
-      ))}
-      {scorecard.dq ? (
-        <span className="font-bold uppercase text-led">DQ</span>
-      ) : null}
-    </span>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Page                                                                        */
-/* -------------------------------------------------------------------------- */
 
 export function Results() {
   const { project, shooters, refresh } = useOutletContext<MatchShellOutletContext>();
   const href = useMatchHref();
+  const isMobile = useIsMobile();
 
   // Share button: hosted mode only, and only on the owner route. The same
-  // Results component renders for anonymous share viewers under /share/:token -
-  // the button must not appear there. useDeploymentMode() reports mode "local"
-  // until the features fetch resolves, so the button pops in after the first
-  // fetch settles - the same behavior as other hosted-only chrome.
+  // component renders for anonymous share viewers under /share/:token -
+  // the button must not appear there. useDeploymentMode() reports "local"
+  // until the features fetch resolves, so the button pops in after it.
   const { mode: deploymentMode, resolved: modeResolved } = useDeploymentMode();
   const { token: shareToken, matchId } = useParams<{ token?: string; matchId?: string }>();
   const isShare = Boolean(shareToken);
@@ -153,7 +70,7 @@ export function Results() {
 
   // Local mode cannot mint share links (the store and the public share
   // surface are hosted-only), but a match that has been pushed at least
-  // once has a hosted twin whose Results tab carries the real Share
+  // once has a hosted twin whose Splits page carries the real Share
   // button - so deep-link there instead of showing nothing. Gated on
   // ``resolved`` because the sync endpoints 404 in hosted mode and the
   // hook reports "local" until the features fetch settles. The link
@@ -189,8 +106,7 @@ export function Results() {
 
   // Refresh-from-scoreboard: owner-only (share viewers cannot fetch
   // upstream), and only worth showing once the match is scoreboard-linked.
-  // Unlike Share, this works in local mode too - it just re-pulls each
-  // linked shooter's scorecard from the already-linked match.
+  // Works in local mode too - it re-pulls each linked shooter's scorecard.
   const canRefresh = !shareToken && project?.scoreboard_match_id != null;
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -200,9 +116,7 @@ export function Results() {
     setError(null);
     try {
       const linked = shooters.filter((s) => s.selected_competitor_id != null);
-      const results = await Promise.allSettled(
-        linked.map((s) => api.refreshScoreboardTimes(s.slug)),
-      );
+      const results = await Promise.allSettled(linked.map((s) => api.refreshScoreboardTimes(s.slug)));
       // Always refresh, even on partial failure - shooters whose refresh
       // DID succeed must still become visible instead of being hidden
       // behind a sibling's error.
@@ -218,537 +132,193 @@ export function Results() {
     }
   }
 
-  const rows = useMemo(
-    () => (project ? buildStageMatrix(project.stages, shooters) : []),
-    [project, shooters],
-  );
-  const totals = useMemo(() => matchTotals(rows, shooters), [rows, shooters]);
-
-  const isSingleShooter = shooters.length <= 1;
-
-  // Per-shooter stage times. The outlet-context project belongs to ONE
-  // shooter (the URL/default one), so multi-shooter matches fetch every
-  // shooter's project (read-only GET) and pivot to slug -> stage -> time.
-  // Null while in flight; a shooter whose fetch failed is simply absent
-  // from the map - its cells render the status chip without a time. A
-  // wrong time is worse than no time on a results surface.
-  const [shooterStageTimes, setShooterStageTimes] = useState<Record<
-    string,
-    Record<number, { time_seconds: number; scorecard: StageScorecard | null }>
-  > | null>(null);
+  // One project per shooter. The outlet project belongs to the default
+  // shooter and seeds the map synchronously so the first paint has rows;
+  // the other shooters' projects (read-only GET) arrive after. A shooter
+  // whose fetch failed is absent from the map and renders no cell: a
+  // wrong figure is worse than no figure on a results surface.
+  const defaultSlug = pickDefaultShooterSlug(shooters) ?? null;
+  const [fetched, setFetched] = useState<Record<string, MatchProject | null>>({});
   useEffect(() => {
-    if (shooters.length <= 1) {
-      setShooterStageTimes(null);
+    const others = shooters.filter((s) => s.slug !== defaultSlug);
+    if (others.length === 0) {
+      setFetched({});
       return;
     }
     let alive = true;
-    setShooterStageTimes(null);
+    setFetched({});
     Promise.all(
-      shooters.map((s) =>
+      others.map((s) =>
         api
           .getProject(s.slug)
           .then((p) => [s.slug, p] as const)
           .catch(() => [s.slug, null] as const),
       ),
     ).then((entries) => {
-      if (!alive) return;
-      const map: Record<
-        string,
-        Record<number, { time_seconds: number; scorecard: StageScorecard | null }>
-      > = {};
-      for (const [slug, p] of entries) {
-        if (!p) continue;
-        map[slug] = Object.fromEntries(
-          p.stages.map((st) => [
-            st.stage_number,
-            { time_seconds: st.time_seconds, scorecard: st.scorecard },
-          ]),
-        );
-      }
-      setShooterStageTimes(map);
+      if (alive) setFetched(Object.fromEntries(entries));
     });
     return () => {
       alive = false;
     };
-  }, [shooters]);
-
-  // Stage time for one cell, or null when unknown (multi-shooter fetch
-  // still in flight / failed for that shooter). Single-shooter reads the
-  // outlet-context project directly - it IS that shooter's project.
-  const cellTime = (slug: string, stageNumber: number): number | null => {
-    if (isSingleShooter) {
-      return (
-        project?.stages.find((s) => s.stage_number === stageNumber)
-          ?.time_seconds ?? null
-      );
-    }
-    const t = shooterStageTimes?.[slug]?.[stageNumber];
-    return typeof t?.time_seconds === "number" ? t.time_seconds : null;
-  };
-
-  // Scorecard for one cell, or null when unknown/unscored. Mirrors cellTime's
-  // sibling-lookup pattern rather than threading through buildStageMatrix -
-  // scorecard, like time, is per-shooter data outside the status matrix.
-  const cellScorecard = (
-    slug: string,
-    stageNumber: number,
-  ): StageScorecard | null => {
-    if (isSingleShooter) {
-      return (
-        project?.stages.find((s) => s.stage_number === stageNumber)
-          ?.scorecard ?? null
-      );
-    }
-    return shooterStageTimes?.[slug]?.[stageNumber]?.scorecard ?? null;
-  };
-
-  // Total match time: single-shooter only. In multi-shooter mode there is
-  // no single "match total" to show in the header (each shooter has their
-  // own), so the header omits it rather than showing one shooter's sum.
-  const totalTimeSecs = useMemo(
-    () =>
-      isSingleShooter && project
-        ? project.stages.reduce((sum, s) => sum + (s.time_seconds ?? 0), 0)
-        : 0,
-    [isSingleShooter, project],
+  }, [shooters, defaultSlug]);
+  const projects = useMemo<Record<string, MatchProject | null>>(
+    () => (defaultSlug ? { ...fetched, [defaultSlug]: project } : fetched),
+    [fetched, defaultSlug, project],
   );
 
-  // Scoring totals summary: single-shooter only. A multi-shooter match has
-  // no single "match total" score to show (each shooter has their own),
-  // same reasoning as totalTimeSecs above omitting the header time for
-  // multi-shooter. Null when no stage has a scorecard yet, so the overview
-  // renders exactly as it did pre-scoring (time-only, no empty chrome).
-  const scoreTotals = useMemo(() => {
-    if (!isSingleShooter || !project) return null;
-    if (!project.stages.some((s) => s.scorecard != null)) return null;
-    return scorecardTotals(project.stages);
-  }, [isSingleShooter, project]);
+  const [filterSlug, setFilterSlug] = useState<string | null>(null);
+  const rows = useMemo(
+    () => buildSplitsRows({ projects, shooters, leadSlug: defaultSlug, filterSlug, share: isShare }),
+    [projects, shooters, defaultSlug, filterSlug, isShare],
+  );
+  const stats = useMemo(() => splitsStats(rows), [rows]);
+  const totals = useMemo(() => scoreboardTotals(rows), [rows]);
+  const playable = useMemo(() => firstPlayable(rows), [rows]);
+  const syncedAt = scorecardSyncedAt(project);
+
+  const hrefs = useMemo<SplitsHrefs>(
+    () => ({
+      stage: (slug, n) => href("results", slug, String(n)),
+      audit: (slug, n) => href("audit", slug, String(n)),
+    }),
+    [href],
+  );
 
   if (!project) {
-    return (
-      <div className="px-4 py-16 text-center text-muted">
-        <Kicker>Loading</Kicker>
-        <p className="mt-4 font-mono text-xs uppercase tracking-[0.14em]">
-          Standby...
-        </p>
-      </div>
-    );
+    return <p className="px-7 py-10 text-md text-muted">Reading match state...</p>;
   }
 
+  const shooterLine =
+    shooters.length > 1 ? `${shooters.length} shooters` : (shooters[0]?.name ?? project.competitor_name ?? null);
+  const stageTakes = shooters.length > 1 ? "stage takes" : "stages";
+
+  const sub = isShare ? (
+    <>
+      {shooterLine}
+      {project.match_date ? (
+        <>
+          {" · "}
+          <time dateTime={project.match_date}>{formatDate(project.match_date)}</time>
+        </>
+      ) : null}
+      {" · "}
+      {stats.audited} {stats.audited === 1 ? "stage" : "stages"} on video
+    </>
+  ) : (
+    <>
+      {shooterLine ? <>{shooterLine} &middot; </> : null}
+      {stats.audited} of {stats.total} {stageTakes} audited
+      {syncedAt ? (
+        <>
+          {" · "}Scorecard synced {formatDateTime(syncedAt)}
+          {canRefresh ? (
+            <button
+              type="button"
+              onClick={() => void refreshFromScoreboard()}
+              disabled={refreshing}
+              aria-label={refreshing ? "Refreshing from scoreboard" : "Refresh from scoreboard"}
+              className="ml-1.5 inline-flex align-middle text-ink-2 transition-colors hover:text-ink disabled:opacity-60"
+            >
+              {refreshing ? (
+                <Loader2 className="size-3.5 animate-spin" aria-hidden />
+              ) : (
+                <RefreshCw className="size-3.5" aria-hidden />
+              )}
+            </button>
+          ) : null}
+        </>
+      ) : null}
+    </>
+  );
+
+  const shareButton = canShare ? (
+    <Button type="button" onClick={() => setShowShare(true)} aria-label="Manage share links for these results">
+      Share
+    </Button>
+  ) : hostedResultsHref ? (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      {hostedStale ? <span className="text-sm text-ink-2">Unsynced changes - sync first to share them</span> : null}
+      <Button asChild>
+        <a
+          href={hostedResultsHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Share on splitsmith.app - opens the hosted results page"
+        >
+          Share on splitsmith.app
+        </a>
+      </Button>
+    </span>
+  ) : null;
+
+  // The one primary action on the page.
+  const playAll = playable ? (
+    <Button variant="primary" asChild>
+      <Link to={`${hrefs.stage(playable.slug, playable.stageNumber)}?play=all`}>Play all</Link>
+    </Button>
+  ) : null;
+
   return (
-    // w-full is load-bearing: under ShareShell this page is a direct child
-    // of a column flex container, where horizontal auto margins absorb the
-    // free space instead of centering a stretched box - without an explicit
-    // width the page shrink-wraps to its widest line (#349 mobile bug).
-    <div className="w-full max-w-[1100px] mx-auto px-4 md:px-7 pb-20 pt-6">
-      {/* Match header */}
-      <header className="mb-6">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <Kicker className="mb-2">Results</Kicker>
-            <h1 className="font-display text-3xl font-bold uppercase leading-none tracking-tight text-ink mb-2">
-              {project.name}
-            </h1>
-          </div>
-          <div className="mt-1 flex shrink-0 items-center gap-2">
-            {canRefresh ? (
-              <Button
+    <div className="mx-auto w-full max-w-[1100px] px-4 py-4 md:px-7 md:py-5">
+      <PageHeader
+        title="Splits"
+        sub={sub}
+        actions={
+          <>
+            {shareButton}
+            {playAll}
+          </>
+        }
+      >
+        {shooters.length > 1 ? (
+          <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by shooter">
+            <button type="button" onClick={() => setFilterSlug(null)} aria-pressed={filterSlug == null}>
+              <Chip tone={filterSlug == null ? "ok" : "neutral"}>All</Chip>
+            </button>
+            {shooters.map((s) => (
+              <button
+                key={s.slug}
                 type="button"
-                variant="outline"
-                size="sm"
-                disabled={refreshing}
-                onClick={() => void refreshFromScoreboard()}
-                aria-label={refreshing ? "Refreshing from scoreboard" : "Refresh from scoreboard"}
+                onClick={() => setFilterSlug(s.slug === filterSlug ? null : s.slug)}
+                aria-pressed={filterSlug === s.slug}
               >
-                {refreshing ? (
-                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-                ) : (
-                  <RefreshCw className="size-4" aria-hidden="true" />
-                )}
-                {refreshing ? "Refreshing..." : "Refresh from scoreboard"}
-              </Button>
-            ) : null}
-            {canShare ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setShowShare(true)}
-                aria-label="Manage share links for these results"
-              >
-                <Share2 className="size-4" aria-hidden="true" />
-                Share
-              </Button>
-            ) : null}
-            {hostedResultsHref ? (
-              <span className="inline-flex flex-wrap items-center gap-2">
-                <Button asChild variant="outline" size="sm">
-                  <a
-                    href={hostedResultsHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label="Share on splitsmith.app - opens the hosted results page"
-                  >
-                    <Share2 className="size-4" aria-hidden="true" />
-                    Share on splitsmith.app
-                    <ExternalLink className="size-3" aria-hidden="true" />
-                  </a>
-                </Button>
-                {hostedStale ? (
-                  <span className="text-xs text-ink-2">Unsynced changes - sync first to share them</span>
-                ) : null}
-              </span>
-            ) : null}
-          </div>
-        </div>
-        {error ? (
-          <div role="alert" className="mt-3 rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
-            {error}
+                <Chip tone={filterSlug === s.slug ? "ok" : "neutral"} tick={s.slug === defaultSlug ? "draw" : "muted"}>
+                  {s.name}
+                </Chip>
+              </button>
+            ))}
           </div>
         ) : null}
-        <div className="flex flex-wrap items-center gap-3 font-mono text-xs uppercase tracking-[0.06em] text-muted">
-          {project.match_date ? (
-            <time
-              dateTime={project.match_date}
-              className="border-r border-rule pr-3 font-bold text-ink-2"
-            >
-              {formatDate(project.match_date)}
-            </time>
-          ) : null}
-          {totalTimeSecs > 0 ? (
-            <span className="border-r border-rule pr-3">
-              <span className="font-mono tabular-nums text-ink-2">
-                {formatTime(totalTimeSecs)}
-              </span>
-              {" "}match total
-            </span>
-          ) : null}
-          <span>
-            <span className="font-bold text-ink-2">{totals.auditedShooterStages}</span>
-            {" / "}
-            <span>{totals.totalShooterStages}</span>
-            {/* Share viewers count what there is to watch, not audit
-                workflow progress - a row is watchable iff audited. */}
-            {isShare ? " videos" : " audited"}
-          </span>
-        </div>
-      </header>
+      </PageHeader>
 
-      {/* Share dialog - owner + hosted only */}
-      {canShare && showShare ? (
-        <ShareDialog onClose={() => setShowShare(false)} />
+      {error ? (
+        <p role="alert" className="mb-3 text-sm text-led-text">
+          {error}
+        </p>
       ) : null}
 
-      {/* Mobile: one card per stage */}
-      <div className="lg:hidden space-y-3">
-        {rows.map((row) => {
-          return (
-            <section
-              key={row.stageNumber}
-              className="rounded-xl border border-rule-strong bg-surface-2 overflow-hidden"
-            >
-              {/* Stage kicker */}
-              <div className="flex items-center gap-2.5 px-4 py-2.5 border-b border-rule">
-                <span className="font-mono text-[0.625rem] font-bold uppercase tracking-[0.14em] text-muted">
-                  Stage {pad2(row.stageNumber)}
-                </span>
-                {row.stageName ? (
-                  <span className="truncate font-display text-xs font-bold uppercase tracking-[0.06em] text-ink-2">
-                    {row.stageName}
-                  </span>
-                ) : null}
-              </div>
-              {/* Shooter rows. Share viewers scanning for something to
-                  watch get one quiet line when a stage has nothing -
-                  repeating the full roster x "No video" is pure noise
-                  (single-shooter already renders exactly one row). */}
-              <div className="divide-y divide-rule">
-                {isShare &&
-                !isSingleShooter &&
-                !row.cells.some((c) => c.status === "audited") ? (
-                  <div className="flex min-h-11 items-center px-4 py-2">
-                    <span className="font-mono text-xs uppercase tracking-[0.08em] text-subtle">
-                      No videos yet
-                    </span>
-                  </div>
-                ) : (
-                row.cells.map((cell) => {
-                  const audited = cell.status === "audited";
-                  if (audited) {
-                    const time = cellTime(cell.shooter.slug, row.stageNumber);
-                    const scorecard = cellScorecard(cell.shooter.slug, row.stageNumber);
-                    const hitFactor = scorecard?.hit_factor;
-                    return (
-                      <Link
-                        key={cell.shooter.slug}
-                        to={href("results", cell.shooter.slug, String(row.stageNumber))}
-                        className="group flex min-h-11 flex-col justify-center gap-1 px-4 py-2 hover:bg-surface-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led focus-visible:ring-inset"
-                      >
-                        <span className="flex items-center gap-3">
-                          {!isSingleShooter && (
-                            <span className="flex-1 truncate font-display text-sm font-semibold uppercase tracking-tight text-ink">
-                              {cell.shooter.name}
-                            </span>
-                          )}
-                          <span
-                            className={cn(
-                              "flex flex-col leading-tight",
-                              isSingleShooter ? "flex-1 items-start" : "items-end",
-                            )}
-                          >
-                            <span className="font-mono text-sm tabular-nums text-ink-2">
-                              {time != null ? formatTime(time) : "-"}
-                            </span>
-                            {hitFactor != null ? (
-                              <span className="font-mono text-[0.6875rem] tabular-nums text-muted">
-                                {formatHitFactor(hitFactor)}
-                              </span>
-                            ) : null}
-                          </span>
-                          <span className="sr-only">, watch run</span>
-                          <PlayAffordance />
-                        </span>
-                        {scorecard ? <HitCounts scorecard={scorecard} /> : null}
-                      </Link>
-                    );
-                  }
-                  // Share viewers get no workflow states - any row
-                  // without a watchable run reads "No video", including
-                  // skipped (the skip decision is operator context).
-                  if (isShare) {
-                    return (
-                      <div
-                        key={cell.shooter.slug}
-                        className="flex min-h-11 items-center gap-3 px-4 py-2"
-                      >
-                        {!isSingleShooter && (
-                          <span className="flex-1 truncate font-display text-sm font-semibold uppercase tracking-tight text-subtle">
-                            {cell.shooter.name}
-                          </span>
-                        )}
-                        <span
-                          className={cn(
-                            "font-mono text-xs uppercase tracking-[0.08em] text-subtle",
-                            isSingleShooter && "flex-1",
-                          )}
-                        >
-                          No video
-                        </span>
-                      </div>
-                    );
-                  }
-                  // Skipped rows carry their state in the chip alone - a
-                  // "Not audited" label next to a "Skipped" chip contradicts
-                  // itself (skipping was a decision, not missing work).
-                  const skipped = cell.status === "skipped";
-                  return (
-                    <div
-                      key={cell.shooter.slug}
-                      className="flex min-h-11 items-center gap-3 px-4 py-2"
-                    >
-                      {!isSingleShooter && (
-                        <span className="flex-1 truncate font-display text-sm font-semibold uppercase tracking-tight text-subtle">
-                          {cell.shooter.name}
-                        </span>
-                      )}
-                      {skipped ? (
-                        isSingleShooter && <span aria-hidden className="flex-1" />
-                      ) : (
-                        <span
-                          className={cn(
-                            "font-mono text-xs uppercase tracking-[0.08em] text-subtle",
-                            isSingleShooter && "flex-1",
-                          )}
-                        >
-                          Not audited
-                        </span>
-                      )}
-                      <StatusChip tone={cell.tone} status={cell.status} />
-                    </div>
-                  );
-                })
-                )}
-              </div>
-            </section>
-          );
-        })}
-      </div>
+      <StatStrip lead className="mb-4">
+        <Stat label="Avg draw" value={fmt(stats.avgDraw, 2)} unit={stats.avgDraw != null ? "s" : undefined} tone={stats.avgDraw == null ? "dim" : "ink"} />
+        <Stat label="Avg split" value={fmt(stats.avgSplit, 3)} unit={stats.avgSplit != null ? "s" : undefined} tone={stats.avgSplit == null ? "dim" : "ink"} />
+        <Stat label="Fastest split" value={fmt(stats.fastestSplit, 3)} unit={stats.fastestSplit != null ? "s" : undefined} tone={stats.fastestSplit == null ? "dim" : "ink"} />
+        <Stat label="Shots" value={String(stats.shots)} tone={stats.shots === 0 ? "dim" : "ink"} />
+        <Stat label="Scored time" value={stats.scoredTime != null ? formatClock(stats.scoredTime) : "—"} tone={stats.scoredTime == null ? "dim" : "ink"} />
+      </StatStrip>
 
-      {/* Desktop (lg+): stages x shooters matrix */}
-      <div className="hidden lg:block">
-        {/* Header row */}
-        <div
-          className="mb-1 grid gap-px"
-          style={{
-            gridTemplateColumns: `200px repeat(${Math.max(shooters.length, 1)}, 1fr)`,
-          }}
-        >
-          <div className="px-3 py-2 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-subtle">
-            Stage
-          </div>
-          {isSingleShooter ? (
-            <div className="px-3 py-2 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-subtle">
-              Result
-            </div>
-          ) : (
-            shooters.map((s) => (
-              <div
-                key={s.slug}
-                className="px-3 py-2 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em] text-subtle truncate"
-              >
-                {s.name}
-              </div>
-            ))
-          )}
-        </div>
-        {/* Stage rows */}
-        <div className="space-y-px">
-          {rows.map((row) => {
-            return (
-              <div
-                key={row.stageNumber}
-                className="grid gap-px rounded-lg overflow-hidden border border-rule-strong bg-surface-2"
-                style={{
-                  gridTemplateColumns: `200px repeat(${Math.max(shooters.length, 1)}, 1fr)`,
-                }}
-              >
-                {/* Stage label cell */}
-                <div className="flex items-center gap-2 bg-surface px-3 py-3">
-                  <span className="font-mono text-xs font-bold tabular-nums text-muted">
-                    {pad2(row.stageNumber)}
-                  </span>
-                  <span className="min-w-0 flex-1 truncate font-display text-xs font-semibold uppercase tracking-[0.04em] text-ink">
-                    {row.stageName || `Stage ${row.stageNumber}`}
-                  </span>
-                  <StageCompareLink
-                    stageNumber={row.stageNumber}
-                    comparableCount={row.auditedCount}
-                  />
-                </div>
-                {/* Shooter cells. Same share-view collapse as the mobile
-                    cards: an all-unwatchable stage spans one quiet cell
-                    across the shooter columns instead of N "No video"s. */}
-                {isShare &&
-                !isSingleShooter &&
-                !row.cells.some((c) => c.status === "audited") ? (
-                  <div
-                    className="flex min-h-11 items-center bg-surface-2 px-3 py-2"
-                    style={{ gridColumn: "2 / -1" }}
-                  >
-                    <span className="font-mono text-xs uppercase tracking-[0.08em] text-subtle">
-                      No videos yet
-                    </span>
-                  </div>
-                ) : (
-                row.cells.map((cell) => {
-                  const audited = cell.status === "audited";
-                  if (audited) {
-                    const time = cellTime(cell.shooter.slug, row.stageNumber);
-                    const scorecard = cellScorecard(cell.shooter.slug, row.stageNumber);
-                    const hitFactor = scorecard?.hit_factor;
-                    return (
-                      <Link
-                        key={cell.shooter.slug}
-                        to={href("results", cell.shooter.slug, String(row.stageNumber))}
-                        className="group flex min-h-11 items-center justify-between gap-2 bg-surface-2 px-3 py-2 hover:bg-surface-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led focus-visible:ring-inset"
-                      >
-                        <span className="flex flex-col gap-0.5 leading-tight">
-                          <span className="font-mono text-sm tabular-nums text-ink-2">
-                            {time != null ? formatTime(time) : "-"}
-                          </span>
-                          {hitFactor != null ? (
-                            <span className="font-mono text-[0.6875rem] tabular-nums text-muted">
-                              {formatHitFactor(hitFactor)}
-                            </span>
-                          ) : null}
-                          {scorecard ? <HitCounts scorecard={scorecard} /> : null}
-                        </span>
-                        <span className="sr-only">, watch run</span>
-                        <PlayAffordance />
-                      </Link>
-                    );
-                  }
-                  // Share viewers: no workflow states (see the mobile
-                  // rows note), skipped included.
-                  if (isShare) {
-                    return (
-                      <div
-                        key={cell.shooter.slug}
-                        className="flex min-h-11 items-center justify-end gap-2 bg-surface-2 px-3 py-2"
-                      >
-                        <span className="font-mono text-xs uppercase tracking-[0.08em] text-subtle">
-                          No video
-                        </span>
-                      </div>
-                    );
-                  }
-                  // Skipped cells: chip only (see the mobile rows note).
-                  return (
-                    <div
-                      key={cell.shooter.slug}
-                      className={cn(
-                        "flex min-h-11 items-center gap-2 bg-surface-2 px-3 py-2",
-                        cell.status === "skipped"
-                          ? "justify-end"
-                          : "justify-between",
-                      )}
-                    >
-                      {cell.status !== "skipped" && (
-                        <span className="font-mono text-xs uppercase tracking-[0.08em] text-subtle">
-                          -
-                        </span>
-                      )}
-                      <StatusChip tone={cell.tone} status={cell.status} />
-                    </div>
-                  );
-                })
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
+      {isMobile ? (
+        <SplitsCards rows={rows} share={isShare} hrefs={hrefs} />
+      ) : (
+        <SplitsTable
+          rows={rows}
+          multi={shooters.length > 1}
+          filterSlug={filterSlug}
+          share={isShare}
+          totals={totals}
+          hrefs={hrefs}
+        />
+      )}
 
-      {/* Match totals summary - single-shooter only. Multi-shooter mode has
-          no single match total to show (each shooter has their own scoring
-          run), the same reasoning the header above uses to omit total time
-          for multi-shooter. Renders nothing until at least one stage has a
-          scorecard, so an unscored match keeps today's time-only overview. */}
-      {scoreTotals ? (
-        <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 rounded-xl border border-rule-strong bg-surface-2 px-4 py-3 font-mono text-xs uppercase tracking-[0.06em] text-muted">
-          <span className="font-bold text-ink-2">Match totals</span>
-          <span>
-            <span className="tabular-nums text-ink-2">{formatTime(scoreTotals.time)}</span>
-            {" scored time"}
-          </span>
-          <span>
-            <span className="tabular-nums text-ink-2">{scoreTotals.points}</span>
-            {" points"}
-          </span>
-          {scoreTotals.hitFactor != null ? (
-            <span>
-              <span className="tabular-nums text-ink-2">
-                {scoreTotals.hitFactor.toFixed(4)}
-              </span>
-              {" hit factor (derived)"}
-            </span>
-          ) : null}
-          <span className="flex items-center gap-3">
-            <span>
-              <span className="tabular-nums text-ink-2">{scoreTotals.alphas}</span> A
-            </span>
-            <span>
-              <span className="tabular-nums text-ink-2">{scoreTotals.charlies}</span> C
-            </span>
-            <span>
-              <span className="tabular-nums text-ink-2">{scoreTotals.deltas}</span> D
-            </span>
-            <span>
-              <span className="tabular-nums text-ink-2">{scoreTotals.misses}</span> M
-            </span>
-          </span>
-        </div>
-      ) : null}
+      {canShare && showShare ? <ShareDialog onClose={() => setShowShare(false)} /> : null}
     </div>
   );
 }

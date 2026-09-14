@@ -1,4 +1,3 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * ShareShell - the public, token-authorized wrapper around the read-only
  * Results surface (#349). Mounts under /share/:token and provides the same
@@ -9,7 +8,7 @@
  */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { Outlet } from "react-router-dom";
-import { Link2Off, RotateCcw } from "lucide-react";
+import { Link2Off } from "lucide-react";
 
 import {
   api,
@@ -18,61 +17,76 @@ import {
   type ShooterListEntry,
 } from "@/lib/api";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
-import { BrandMark } from "@/components/ui/Brand";
+import { Brand } from "@/components/ui/Brand";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/Label";
 import { pickDefaultShooterSlug } from "@/lib/defaultShooter";
 
 const MARKETING_URL = "https://splitsmith.app";
 
-/** Branded page frame for every share render path (results, dead link,
- *  load error): one thin header + one footer line, both linking to the
- *  marketing site. At md+ the frame locks to the viewport (h-dvh) and
- *  the middle region owns scrolling, so the branded header/footer stay
- *  pinned and a child that renders min-h-0 flex-1 (Compare's cockpit
- *  layout, desktop-gated at the same md breakpoint) is viewport-bounded
- *  without needing --shell-header-h. Below md the frame grows and the
- *  document scrolls as before - the mobile results viewer keeps its
- *  shipped scroll-away header/footer. */
-function ShareFrame({ children }: { children: ReactNode }) {
+/** Page frame for every share render path (results, dead link, load
+ *  error): one bar shaped like the app's GlobalBar (brand, the match
+ *  name as the crumb, a call to the marketing site) and one footer
+ *  line. At md+ the frame locks to the viewport (h-dvh) and the middle
+ *  region owns scrolling, so the bar and footer stay pinned and a child
+ *  that renders min-h-0 flex-1 (Compare's cockpit layout, desktop-gated
+ *  at the same md breakpoint) is viewport-bounded without needing
+ *  --shell-header-h. Below md the frame grows and the document scrolls
+ *  as before - the mobile results viewer keeps its shipped scroll-away
+ *  header/footer. */
+function ShareFrame({ matchName, children }: { matchName: string | null; children: ReactNode }) {
+  const linkClass =
+    "rounded text-sm text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led";
   return (
     <div className="flex min-h-dvh flex-col bg-bg md:h-dvh">
-      <header className="flex-none border-b border-rule bg-surface">
-        <div className="mx-auto flex w-full max-w-[1100px] items-center justify-between gap-3 px-4 py-2.5 md:px-7">
+      <header className="relative flex-none border-b border-rule bg-surface">
+        <nav aria-label="Global" className="flex items-center gap-4 px-4 py-3 md:px-7">
           <a
             href={MARKETING_URL}
             target="_blank"
             rel="noopener"
-            className="inline-flex items-center gap-2 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
+            aria-label="Splitsmith"
+            className="shrink-0 rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
           >
-            <BrandMark className="size-5" />
-            <span className="font-display text-sm font-bold uppercase tracking-tight text-ink">
-              Splitsmith
+            <Brand variant="bar" />
+          </a>
+          {matchName ? (
+            <span className="hidden min-w-0 items-center gap-2 text-md md:flex">
+              <span className="truncate font-medium text-ink">{matchName}</span>
+              <span className="text-muted">/</span>
+              <span className="text-ink-2">Splits</span>
             </span>
-          </a>
+          ) : null}
+          <span className="flex-1" />
           <a
             href={MARKETING_URL}
             target="_blank"
             rel="noopener"
-            className="rounded font-mono text-[0.625rem] uppercase tracking-[0.14em] text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
+            className="shrink-0 rounded-full border border-rule-strong px-3 py-1 text-md text-ink-2 transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
           >
-            splitsmith.app
+            Analyse your own matches &#8599;
           </a>
-        </div>
+        </nav>
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 -bottom-px h-px opacity-55"
+          style={{
+            background:
+              "linear-gradient(to right, transparent, var(--color-led) 18%, var(--color-led) 22%, var(--color-rule-strong) 30%, var(--color-rule-strong) 70%, var(--color-led) 78%, var(--color-led) 82%, transparent)",
+          }}
+        />
       </header>
       {/* flex column (not a plain block): the dead/error cards center
           themselves with flex-1 + place-items-center, which needs a
           flex parent - a percentage min-height would resolve to 0 here. */}
       <div className="flex flex-1 flex-col md:min-h-0 md:overflow-y-auto">{children}</div>
-      <footer className="flex-none border-t border-rule">
-        <div className="mx-auto w-full max-w-[1100px] px-4 py-4 md:px-7">
-          <a
-            href={MARKETING_URL}
-            target="_blank"
-            rel="noopener"
-            className="rounded font-mono text-[0.625rem] uppercase tracking-[0.14em] text-muted transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led"
-          >
-            Made with Splitsmith - analyze your own matches
-          </a>
-        </div>
+      <footer className="flex flex-none items-center justify-between gap-3 border-t border-rule px-4 py-3 md:px-7">
+        <a href={MARKETING_URL} target="_blank" rel="noopener" className={linkClass}>
+          Made with Splitsmith
+        </a>
+        <a href={MARKETING_URL} target="_blank" rel="noopener" className={linkClass}>
+          splitsmith.app
+        </a>
       </footer>
     </div>
   );
@@ -128,13 +142,13 @@ export function ShareShell() {
 
   if (dead)
     return (
-      <ShareFrame>
+      <ShareFrame matchName={null}>
         <ShareUnavailable />
       </ShareFrame>
     );
   if (loadFailed)
     return (
-      <ShareFrame>
+      <ShareFrame matchName={null}>
         <ShareLoadError onRetry={refresh} />
       </ShareFrame>
     );
@@ -151,7 +165,7 @@ export function ShareShell() {
     capabilities: [],
   };
   return (
-    <ShareFrame>
+    <ShareFrame matchName={project?.name ?? null}>
       <Outlet context={context} />
     </ShareFrame>
   );
@@ -163,46 +177,30 @@ export function ShareShell() {
 function ShareLoadError({ onRetry }: { onRetry: () => void }) {
   return (
     <div className="grid flex-1 place-items-center px-6 py-10">
-      <div className="flex max-w-sm flex-col items-center gap-4 text-center">
-        <span className="font-mono text-[0.625rem] uppercase tracking-[0.14em] text-subtle">
-          Share link
-        </span>
-        <h1 className="font-display text-xl font-bold uppercase tracking-tight text-ink">
-          Could not load results
-        </h1>
-        <p className="text-sm text-muted">
-          The link is fine, but the results data did not load. This is
-          usually temporary.
+      <div className="flex max-w-sm flex-col items-center gap-3 text-center">
+        <Label tone="subtle">Share link</Label>
+        <h1 className="text-lg font-semibold text-ink">Could not load results</h1>
+        <p className="text-md text-muted">
+          The link is fine, but the results data did not load. This is usually temporary.
         </p>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="inline-flex min-h-11 items-center gap-2 rounded border border-edge bg-surface-2 px-4 font-mono text-xs uppercase tracking-[0.14em] text-ink hover:bg-surface-3"
-        >
-          <RotateCcw className="size-3.5" aria-hidden />
+        <Button type="button" onClick={onRetry}>
           Try again
-        </button>
+        </Button>
       </div>
     </div>
   );
 }
 
 /** Full-page dead-link state. Shown when the share token 404s - revoked,
- *  expired, or never valid. Instrument-panel aesthetic; no login CTA. */
+ *  expired, or never valid. No login CTA. */
 function ShareUnavailable() {
   return (
     <div className="grid flex-1 place-items-center px-6 py-10">
-      <div className="flex max-w-sm flex-col items-center gap-4 text-center">
+      <div className="flex max-w-sm flex-col items-center gap-3 text-center">
         <Link2Off className="size-8 text-subtle" aria-hidden />
-        <span className="font-mono text-[0.625rem] uppercase tracking-[0.14em] text-subtle">
-          Share link
-        </span>
-        <h1 className="font-display text-xl font-bold uppercase tracking-tight text-ink">
-          This link is no longer available
-        </h1>
-        <p className="text-sm text-muted">
-          Ask whoever shared it for a fresh link.
-        </p>
+        <Label tone="subtle">Share link</Label>
+        <h1 className="text-lg font-semibold text-ink">This link is no longer available</h1>
+        <p className="text-md text-muted">Ask whoever shared it for a fresh link.</p>
       </div>
     </div>
   );
