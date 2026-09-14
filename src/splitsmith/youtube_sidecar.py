@@ -130,32 +130,34 @@ def write_srt(composition: Composition, output_path: Path) -> None:
 
 
 def _compute_chapters(composition: Composition) -> list[Chapter]:
-    """One chapter per stage; an "Intro" anchor at 0:00 when the
-    composition has an intro segment so YouTube's three-chapter
-    minimum is met for short matches."""
+    """One chapter per stage at the stage's first visible frame, walking
+    the same spine the MP4 renderer lays down (issue #973 / #972): intro,
+    title page, then per stage its slate, the action and its summary
+    hold, then the closing card and the outro.
+
+    YouTube ignores the whole list unless the first chapter starts at
+    ``0:00``, so when anything precedes the first stage -- an intro (its
+    own chapter, as before), a title page or a slate -- an opening
+    chapter named after the match anchors the list there. That also
+    helps a short match reach YouTube's three-chapter minimum.
+    """
     chapters: list[Chapter] = []
     cursor = 0.0
     if composition.intro is not None:
         chapters.append(Chapter(start_seconds=0.0, title=_segment_label(composition.intro)))
         cursor += composition.intro.asset.metadata.duration_seconds
+    if composition.title_page is not None:
+        cursor += composition.title_page.duration_seconds
     for stage_idx, stage in enumerate(composition.stages):
-        # Account for slate before the stage primary.
-        if stage.title is not None and stage.title.style == "slate":
-            cursor += stage.title.duration_seconds
-        chapters.append(
-            Chapter(
-                start_seconds=cursor,
-                title=stage.name or f"Stage {stage_idx + 1}",
-            )
-        )
-        cursor += _effective_seconds(stage)
+        start, _head = _stage_spine_window(composition, stage_idx, cursor)
+        if not chapters and start > 0.0:
+            chapters.append(Chapter(start_seconds=0.0, title=composition.project_name))
+        chapters.append(Chapter(start_seconds=start, title=stage.name or f"Stage {stage_idx + 1}"))
+        cursor += _stage_spine_duration(composition, stage_idx)
     if composition.outro is not None:
-        chapters.append(
-            Chapter(
-                start_seconds=cursor,
-                title=_segment_label(composition.outro),
-            )
-        )
+        if composition.closing is not None:
+            cursor += composition.closing.duration_seconds
+        chapters.append(Chapter(start_seconds=cursor, title=_segment_label(composition.outro)))
     return chapters
 
 
@@ -223,16 +225,24 @@ def _effective_seconds(stage: Stage) -> float:
 
 
 def _stage_spine_duration(composition: Composition, stage_idx: int) -> float:
-    """Total spine time the stage occupies (slate + effective)."""
+    """Total spine time the stage occupies: slate + action + summary hold
+    (#972), the same three the MP4 renderer lays down for it."""
     stage = composition.stages[stage_idx]
     extra = 0.0
     if stage.title is not None and stage.title.style == "slate":
         extra = stage.title.duration_seconds
+    if stage.summary is not None:
+        extra += stage.summary.duration_seconds
     return extra + _effective_seconds(stage)
 
 
 def _spine_offset_seconds_intro(composition: Composition) -> float:
-    return composition.intro.asset.metadata.duration_seconds if composition.intro else 0.0
+    """Spine time at which stage 0's slate (or action) begins: the intro
+    clip and the title page (#973), when the composition has them."""
+    cursor = composition.intro.asset.metadata.duration_seconds if composition.intro else 0.0
+    if composition.title_page is not None:
+        cursor += composition.title_page.duration_seconds
+    return cursor
 
 
 def _stage_spine_window(

@@ -138,10 +138,62 @@ def test_slate_titles_shift_chapter_offsets(tmp_path: Path) -> None:
         },
     )
     chapters = youtube_sidecar._compute_chapters(comp)
+    # YouTube ignores a chapter list that does not start at 0:00, so the
+    # slate in front of stage 0 gets an opener named after the match.
     # Slate S0 = 2s -> stage 0 chapter at 2s. Stage 0 effective ~11s
     # -> stage 1 slate starts at 13s, stage 1 chapter at 15s.
-    assert chapters[0].start_seconds == 2.0
-    assert abs(chapters[1].start_seconds - 15.0) < 0.001
+    assert [c.title for c in chapters] == ["m", "S0", "S1"]
+    assert chapters[0].start_seconds == 0.0
+    assert chapters[1].start_seconds == 2.0
+    assert abs(chapters[2].start_seconds - 15.0) < 0.001
+
+
+def test_title_page_and_summary_holds_shift_chapters_and_captions(tmp_path: Path) -> None:
+    """The rendered MP4 (#973 / #972) puts a title page at the head and a
+    summary hold after every stage; the chapters and the .srt walk that
+    same spine or every timestamp after the first is early."""
+    from splitsmith.stage_summary_data import TileStageData
+
+    stages = [
+        StageComposition(
+            stage_name=f"S{i}",
+            video_path=_make_video(tmp_path, f"{i}.mp4"),
+            video=_meta_30fps(),
+            shots=[_shot(1, 1.0, 1.0)],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=5.0,
+        )
+        for i in (0, 1)
+    ]
+    hold = composition.SummaryHold(
+        data=TileStageData(label="Me", stage_number=1), label="Me", duration_seconds=3.0
+    )
+    comp = composition.from_stage_compositions(
+        stages,
+        project_name="Bromma",
+        titles={0: composition.TitleCard(text="S0", style="slate", duration_seconds=2.0)},
+        title_page=composition.MatchTitle(text="Bromma", duration_seconds=4.0),
+        summaries={0: hold, 1: hold},
+        closing=composition.MatchTitle(text="Bromma", duration_seconds=2.0),
+    )
+    chapters = youtube_sidecar._compute_chapters(comp)
+    # Title page 4s + slate 2s -> stage 0 at 6s; effective ~11s + hold 3s
+    # -> stage 1 (no slate) at 20s. Opener at 0:00 covers the title page.
+    assert [(c.title, round(c.start_seconds, 3)) for c in chapters] == [
+        ("Bromma", 0.0),
+        ("S0", 6.0),
+        ("S1", 20.0),
+    ]
+
+    srt = tmp_path / "c.srt"
+    youtube_sidecar.write_srt(comp, srt)
+    blocks = srt.read_text().strip().split("\n\n")
+    # Shot 1 is 1s after the beep; the beep sits at the visible head (pad
+    # covers the whole 5s lead), so the caption lands 6s into stage 0's
+    # action: 6 + 6 = 12s, and 20 + 6 = 26s for stage 1.
+    assert blocks[0].splitlines()[1].startswith("00:00:12,000")
+    assert blocks[1].splitlines()[1].startswith("00:00:26,000")
 
 
 def test_format_chapter_time_under_hour() -> None:

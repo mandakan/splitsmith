@@ -459,6 +459,14 @@ def export(
     youtube_preset: bool = typer.Option(
         False, "--youtube-preset", help="YouTube's recommended H.264 encode."
     ),
+    youtube_sidecar: bool = typer.Option(
+        False,
+        "--youtube-sidecar",
+        help=(
+            "Also write <output>-youtube.json (title, chaptered description, tags) and "
+            "<output>.srt (per-shot captions) for the upload."
+        ),
+    ),
     overlay_theme: str = typer.Option(
         "splitsmith", "--theme", help="Overlay / card theme: 'splitsmith' or 'clean'."
     ),
@@ -563,6 +571,7 @@ def export(
         intro_path=intro.expanduser() if intro else None,
         outro_path=outro.expanduser() if outro else None,
         youtube_preset=youtube_preset,
+        youtube_sidecar=youtube_sidecar,
         title_page=title_page,
         title_page_info=match_exports.title_info_lines(project, extra=title_info),
         title_page_duration_seconds=title_page_duration,
@@ -597,6 +606,14 @@ def export(
     if output is not None:
         wanted = output.expanduser().resolve()
         if wanted != written:
+            # The sidecar and the captions sit beside the video under its
+            # stem; they move with it or the upload kit is split in two.
+            for companion, suffix in (
+                (written.with_suffix(".srt"), ".srt"),
+                (written.with_name(written.stem + "-youtube.json"), "-youtube.json"),
+            ):
+                if companion.exists():
+                    companion.replace(wanted.with_name(wanted.stem + suffix))
             written.replace(wanted)
             written = wanted
     # ``soft_wrap``: a path or a note is one line the user copies or reads

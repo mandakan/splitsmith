@@ -221,3 +221,32 @@ def test_plain_export_never_reads_the_roster_file(tmp_path: Path, monkeypatch: p
     result = runner.invoke(app, ["match", "export", str(root), "--shooter", "me", "--format", "mp4"])
     assert result.exit_code == 0, result.output
     assert captured["comp"].stages[0].summary is None
+
+
+def test_youtube_sidecar_and_captions_move_with_a_renamed_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _seed(tmp_path)
+    _capture_mp4(monkeypatch)
+    out = tmp_path / "out" / "lt.mp4"
+    result = runner.invoke(
+        app,
+        [
+            "match",
+            "export",
+            str(root),
+            "--shooter",
+            "me",
+            "--format",
+            "mp4",
+            "--youtube-sidecar",
+            "-o",
+            str(out),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+    assert out.with_suffix(".srt").exists()
+    assert out.with_name("lt-youtube.json").exists()
+    # Nothing left behind under the default name.
+    assert not list((root / "shooters" / "me" / "exports").glob("*-youtube.json"))
