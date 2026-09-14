@@ -489,6 +489,9 @@ def export(
     if not is_match_folder(match_path):
         console.print(f"[red]Error:[/] {match_path} is not a match folder (no {MATCH_FILE}).")
         raise typer.Exit(code=2)
+    if output is not None and output.expanduser().is_dir():
+        console.print(f"[red]Error:[/] --output {output} is a directory; pass the file to write.")
+        raise typer.Exit(code=2)
 
     match = Match.load(match_path)
     if shooter is None:

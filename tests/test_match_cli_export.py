@@ -172,5 +172,13 @@ def test_anomalies_are_printed_as_notes(tmp_path: Path, monkeypatch: pytest.Monk
     assert "title page ignored" in strip_ansi(result.output)
 
 
+def test_output_naming_a_directory_is_a_usage_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    root = _seed(tmp_path)
+    _capture_mp4(monkeypatch)
+    result = runner.invoke(app, ["match", "export", str(root), "--shooter", "me", "--output", str(tmp_path)])
+    assert result.exit_code == 2
+    assert "directory" in strip_ansi(result.output)
+
+
 def test_verb_is_registered() -> None:
     assert "export" in {c.name for c in match_cli.match_app.registered_commands}

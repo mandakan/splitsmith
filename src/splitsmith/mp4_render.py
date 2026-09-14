@@ -704,9 +704,7 @@ def _build_stage_command(
         plan,
         sequence=sequence,
         overlay_input_index=overlay_index,
-        lower_third=(lower_third_index, lower_third.card.duration_seconds)
-        if lower_third is not None
-        else None,
+        lower_third=lower_third_graph,
     )
 
     args += [
