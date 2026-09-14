@@ -25,6 +25,7 @@ export { Brand, BrandMark } from "./Brand";
 export { Kicker } from "./Kicker";
 export { Label } from "./Label";
 export { Stat, StatStrip } from "./Stat";
+export { Chip, type ChipTick } from "./Chip";
 export { DisplayHeading } from "./DisplayHeading";
 export { ModeSwitch } from "./ModeSwitch";
 export { Kbd } from "./Kbd";
