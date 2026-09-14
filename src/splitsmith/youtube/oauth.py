@@ -20,11 +20,14 @@ import logging
 import os
 import secrets
 import threading
-from datetime import datetime
+import time
+from collections.abc import Callable
+from datetime import UTC, datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
+import httpx
 from pydantic import BaseModel, Field
 
 from .. import user_config
@@ -35,6 +38,7 @@ SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
 REVOKE_URL = "https://oauth2.googleapis.com/revoke"
+CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
 
 ENV_CLIENT_ID = "SPLITSMITH_YOUTUBE_CLIENT_ID"
 ENV_CLIENT_SECRET = "SPLITSMITH_YOUTUBE_CLIENT_SECRET"
@@ -272,3 +276,163 @@ class LoopbackListener:
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+
+# ---------------------------------------------------------------------------
+# Token exchange, refresh, the whole login
+# ---------------------------------------------------------------------------
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    expires_in: int
+    refresh_token: str | None = None
+    scope: str = ""
+
+
+def _oauth_error(resp: httpx.Response) -> tuple[str, str]:
+    """(error, error_description) from an OAuth error body; tolerant of non-JSON."""
+    try:
+        body = resp.json()
+    except ValueError:
+        return ("", resp.text[:200])
+    if isinstance(body, dict):
+        return (str(body.get("error", "")), str(body.get("error_description", "")))
+    return ("", "")
+
+
+def _token_request(client: OAuthClient, http: httpx.Client, form: dict[str, str]) -> TokenResponse:
+    form = {**form, "client_id": client.client_id, "client_secret": client.client_secret}
+    try:
+        resp = http.post(TOKEN_URL, data=form, timeout=30.0)
+    except httpx.HTTPError as exc:
+        raise YouTubeError(f"token endpoint unreachable: {exc}") from exc
+    if resp.status_code == 200:
+        try:
+            return TokenResponse.model_validate(resp.json())
+        except Exception as exc:  # noqa: BLE001 -- any malformed body is the same failure
+            raise YouTubeError(f"token endpoint returned an unexpected body: {exc}") from exc
+    error, description = _oauth_error(resp)
+    if error == "invalid_grant":
+        raise ReauthorizeError(description or "the stored YouTube login is no longer valid")
+    raise YouTubeError(f"token endpoint: HTTP {resp.status_code} {error} {description}".rstrip())
+
+
+def exchange_code(
+    client: OAuthClient, http: httpx.Client, *, code: str, redirect_uri: str, code_verifier: str
+) -> TokenResponse:
+    return _token_request(
+        client,
+        http,
+        {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+            "code_verifier": code_verifier,
+        },
+    )
+
+
+def refresh_access_token(client: OAuthClient, http: httpx.Client, *, refresh_token: str) -> TokenResponse:
+    return _token_request(client, http, {"grant_type": "refresh_token", "refresh_token": refresh_token})
+
+
+def revoke_token(http: httpx.Client, token: str) -> None:
+    """Best effort. Logout must succeed locally whether or not Google agrees."""
+    try:
+        http.post(REVOKE_URL, params={"token": token}, timeout=10.0)
+    except httpx.HTTPError as exc:
+        logger.info("YouTube token revoke skipped: %s", exc)
+
+
+class AccessTokenProvider:
+    """Hands out a bearer token, refreshing it from the stored refresh
+    token when it is missing, near expiry, or explicitly invalidated.
+
+    On ``invalid_grant`` the stored connection is cleared before the error
+    propagates, so the next ``load_connection`` says "not connected"
+    rather than handing out a token Google will reject again.
+    """
+
+    _EARLY_S = 60.0
+
+    def __init__(self, client: OAuthClient, http: httpx.Client, *, refresh_token: str) -> None:
+        self._client = client
+        self._http = http
+        self._refresh_token = refresh_token
+        self._access: str | None = None
+        self._expires_at = 0.0
+
+    def token(self) -> str:
+        if self._access is None or time.monotonic() >= self._expires_at - self._EARLY_S:
+            try:
+                tok = refresh_access_token(self._client, self._http, refresh_token=self._refresh_token)
+            except ReauthorizeError:
+                clear_connection()
+                raise
+            self._access = tok.access_token
+            self._expires_at = time.monotonic() + tok.expires_in
+        return self._access
+
+    def invalidate(self) -> None:
+        self._access = None
+
+
+def fetch_my_channel(http: httpx.Client, access_token: str) -> tuple[str, str]:
+    """(channel id, channel title) of the account behind ``access_token``."""
+    resp = http.get(
+        CHANNELS_URL,
+        params={"part": "snippet", "mine": "true"},
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=30.0,
+    )
+    if resp.status_code != 200:
+        raise YouTubeError(f"channels.list: HTTP {resp.status_code} {resp.text[:200]}")
+    items = resp.json().get("items") or []
+    if not items:
+        raise YouTubeError("this Google account has no YouTube channel; create one in YouTube first")
+    return str(items[0]["id"]), str(items[0].get("snippet", {}).get("title", ""))
+
+
+def connect(
+    client: OAuthClient,
+    http: httpx.Client,
+    *,
+    open_browser: Callable[[str], object],
+    on_auth_url: Callable[[str], object] | None = None,
+    timeout_s: float = 300.0,
+) -> YouTubeConnection:
+    """The whole login: consent URL, browser, callback, exchange, channel
+    lookup, store. ``open_browser`` is injected so the CLI passes
+    ``webbrowser.open`` and a server passes a no-op (the SPA opens the URL
+    itself); ``on_auth_url`` lets the CLI print the URL for a headless
+    shell."""
+    if not client.is_configured:
+        raise NotConfiguredError(
+            f"no YouTube OAuth client is configured; set {ENV_CLIENT_ID} and {ENV_CLIENT_SECRET}"
+        )
+    state = secrets.token_urlsafe(16)
+    pkce = new_pkce()
+    with LoopbackListener(expected_state=state) as listener:
+        redirect_uri = listener.start()
+        url = authorize_url(client, redirect_uri=redirect_uri, state=state, code_challenge=pkce.challenge)
+        if on_auth_url is not None:
+            on_auth_url(url)
+        open_browser(url)
+        code = listener.wait(timeout_s)
+    tok = exchange_code(client, http, code=code, redirect_uri=redirect_uri, code_verifier=pkce.verifier)
+    if not tok.refresh_token:
+        raise YouTubeError(
+            "Google issued no refresh token; remove splitsmith under your Google account's "
+            "third-party access and log in again"
+        )
+    channel_id, channel_title = fetch_my_channel(http, tok.access_token)
+    conn = YouTubeConnection(
+        refresh_token=tok.refresh_token,
+        channel_id=channel_id,
+        channel_title=channel_title,
+        connected_at=datetime.now(UTC),
+        scopes=tok.scope.split() if tok.scope else [SCOPE],
+    )
+    save_connection(conn)
+    return conn

@@ -14,6 +14,7 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 import pytest
+import respx
 
 from splitsmith import user_config
 from splitsmith.youtube import oauth
@@ -152,3 +153,131 @@ def test_loopback_listener_times_out() -> None:
         listener.start()
         with pytest.raises(oauth.LoopbackError, match="timed out"):
             listener.wait(timeout_s=0.2)
+
+
+# --- token exchange, refresh, connect --------------------------------------
+
+CLIENT = oauth.OAuthClient(client_id="cid", client_secret="sec")
+
+
+@respx.mock
+def test_exchange_code_posts_the_pkce_verifier_and_returns_tokens() -> None:
+    route = respx.post(oauth.TOKEN_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={"access_token": "at", "expires_in": 3599, "refresh_token": "rt", "scope": oauth.SCOPE},
+        )
+    )
+    with httpx.Client() as http:
+        tok = oauth.exchange_code(
+            CLIENT, http, code="4/xyz", redirect_uri="http://127.0.0.1:1/callback", code_verifier="ver"
+        )
+    assert tok.access_token == "at" and tok.refresh_token == "rt"
+    form = parse_qs(route.calls.last.request.content.decode())
+    assert form["grant_type"] == ["authorization_code"]
+    assert form["code"] == ["4/xyz"]
+    assert form["code_verifier"] == ["ver"]
+    assert form["client_id"] == ["cid"] and form["client_secret"] == ["sec"]
+
+
+@respx.mock
+def test_refresh_maps_invalid_grant_to_reauthorize() -> None:
+    respx.post(oauth.TOKEN_URL).mock(
+        return_value=httpx.Response(
+            400, json={"error": "invalid_grant", "error_description": "Token revoked"}
+        )
+    )
+    with httpx.Client() as http, pytest.raises(oauth.ReauthorizeError, match="Token revoked"):
+        oauth.refresh_access_token(CLIENT, http, refresh_token="rt")
+
+
+@respx.mock
+def test_refresh_other_failures_are_youtube_errors_not_reauthorize() -> None:
+    respx.post(oauth.TOKEN_URL).mock(return_value=httpx.Response(500, text="boom"))
+    with httpx.Client() as http, pytest.raises(oauth.YouTubeError) as info:
+        oauth.refresh_access_token(CLIENT, http, refresh_token="rt")
+    assert not isinstance(info.value, oauth.ReauthorizeError)
+
+
+@respx.mock
+def test_access_token_provider_caches_and_invalidates() -> None:
+    route = respx.post(oauth.TOKEN_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"access_token": "at1", "expires_in": 3600}),
+            httpx.Response(200, json={"access_token": "at2", "expires_in": 3600}),
+        ]
+    )
+    with httpx.Client() as http:
+        provider = oauth.AccessTokenProvider(CLIENT, http, refresh_token="rt")
+        assert provider.token() == "at1"
+        assert provider.token() == "at1"
+        assert route.call_count == 1
+        provider.invalidate()
+        assert provider.token() == "at2"
+        assert route.call_count == 2
+
+
+@respx.mock
+def test_access_token_provider_clears_the_store_on_reauthorize() -> None:
+    oauth.save_connection(_conn())
+    respx.post(oauth.TOKEN_URL).mock(return_value=httpx.Response(400, json={"error": "invalid_grant"}))
+    with httpx.Client() as http:
+        provider = oauth.AccessTokenProvider(CLIENT, http, refresh_token="rt")
+        with pytest.raises(oauth.ReauthorizeError):
+            provider.token()
+    assert oauth.load_connection() is None
+
+
+@respx.mock
+def test_revoke_never_raises() -> None:
+    respx.post(oauth.REVOKE_URL).mock(return_value=httpx.Response(400, json={"error": "invalid_token"}))
+    with httpx.Client() as http:
+        oauth.revoke_token(http, "rt")
+
+
+@respx.mock
+def test_connect_runs_the_whole_flow_and_saves_the_connection() -> None:
+    respx.route(host="127.0.0.1").pass_through()
+    respx.post(oauth.TOKEN_URL).mock(
+        return_value=httpx.Response(
+            200, json={"access_token": "at", "expires_in": 3600, "refresh_token": "rt"}
+        )
+    )
+    respx.get(oauth.CHANNELS_URL).mock(
+        return_value=httpx.Response(200, json={"items": [{"id": "UC9", "snippet": {"title": "My channel"}}]})
+    )
+    opened: list[str] = []
+
+    def fake_browser(url: str) -> None:
+        opened.append(url)
+        q = parse_qs(urlparse(url).query)
+        redirect = q["redirect_uri"][0]
+        threading.Thread(target=lambda: _hit(f"{redirect}?state={q['state'][0]}&code=4/ok")).start()
+
+    with httpx.Client() as http:
+        conn = oauth.connect(CLIENT, http, open_browser=fake_browser, timeout_s=5.0)
+    assert opened and opened[0].startswith(oauth.AUTH_URL)
+    assert conn.refresh_token == "rt"
+    assert conn.channel_id == "UC9" and conn.channel_title == "My channel"
+    stored = oauth.load_connection()
+    assert stored is not None and stored.channel_title == "My channel"
+
+
+def test_connect_refuses_an_unconfigured_client() -> None:
+    with httpx.Client() as http, pytest.raises(oauth.NotConfiguredError, match=oauth.ENV_CLIENT_ID):
+        oauth.connect(oauth.OAuthClient(client_id="", client_secret=""), http, open_browser=lambda u: None)
+
+
+@respx.mock
+def test_connect_fails_when_google_issues_no_refresh_token() -> None:
+    respx.route(host="127.0.0.1").pass_through()
+    respx.post(oauth.TOKEN_URL).mock(
+        return_value=httpx.Response(200, json={"access_token": "at", "expires_in": 1})
+    )
+
+    def fake_browser(url: str) -> None:
+        q = parse_qs(urlparse(url).query)
+        threading.Thread(target=lambda: _hit(f"{q['redirect_uri'][0]}?state={q['state'][0]}&code=c")).start()
+
+    with httpx.Client() as http, pytest.raises(oauth.YouTubeError, match="refresh token"):
+        oauth.connect(CLIENT, http, open_browser=fake_browser, timeout_s=5.0)
