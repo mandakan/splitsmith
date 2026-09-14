@@ -377,7 +377,8 @@ and a queue about state belongs on the Overview rows or the progress
 strip, never as a row of its own.
 
 **Verifying a screen locally without real footage:**
-``uv run python scripts/seed_demo_match.py ~/.claude-tmp/demo-match``
+``uv run python scripts/seed_demo_match.py ~/.claude-tmp/demo-match`` (two
+shooters and the match stage table, so Compare renders too)
 then ``uv run splitsmith ui --project ~/.claude-tmp/demo-match
 --skip-system-check --no-browser --port 5174`` (wait for
 ``/api/health``; the match id is ``match_id`` in ``match.json``), then

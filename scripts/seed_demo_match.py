@@ -1,14 +1,17 @@
 """Seed a local demo match for visual verification of the SPA.
 
-Builds ``<root>`` as a match folder with one shooter, twelve stages named
-after the Stockholm IPSC Open 2026 match, primaries on stages 2-12
-(paths point at a placeholder mp4, so ``source_present`` is true but
-nothing plays and every ffmpeg-backed job fails fast), audited docs on
-stages 2-5 (stage 3 carries the real shot times read off staging on
-2026-09-13), detected-not-audited docs on 6-8, an unconfirmed beep on 10,
-and nothing on 9, 11, 12. Stages 2, 4 and 5 use synthetic shot sequences
-whose gaps sit above the 0.5 s split cutoff, so their average split is
-None by design.
+Builds ``<root>`` as a match folder with twelve stages named after the
+Stockholm IPSC Open 2026 match (the match-level stage table Compare and
+the picker's next-step read) and two shooters. The lead, Mathias Axell,
+has primaries on stages 2-12 (paths point at a placeholder mp4, so
+``source_present`` is true but nothing plays and every ffmpeg-backed job
+fails fast), audited docs on stages 2-5 (stage 3 carries the real shot
+times read off staging on 2026-09-13), detected-not-audited docs on 6-8,
+an unconfirmed beep on 10, and nothing on 9, 11, 12. The second shooter,
+Anna Jonsson, has primaries on stages 2-5, audited on 2-4 and detected
+on 5, with a faster rhythm so Compare's leaderboard has a gap to show.
+Stages 2, 4 and 5 use synthetic shot sequences whose gaps sit above the
+0.5 s split cutoff, so their average split is None by design.
 
 Usage:
   uv run python scripts/seed_demo_match.py ~/.claude-tmp/demo-match [--media]
@@ -37,6 +40,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from splitsmith import match_model
+from splitsmith.match_model import MatchStageDefinition
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 from splitsmith.ui.audio import trimmed_video_path
 
@@ -45,6 +49,10 @@ MEDIA_BEEP_S = 5.32
 # The trimmer anchors the audit clip at beep - pre_buffer (5 s), so the
 # "trimmed" copy starts 0.32 s in and its beep lands at 5.00 s.
 MEDIA_TRIM_START_S = MEDIA_BEEP_S - 5.0
+# Where the beep sits in the audit clip: the audit doc's ``beep_time``, and
+# the origin every shot's clip-time ``time`` is measured from (the
+# detector writes ``time = beep_in_clip + seconds after the beep``).
+BEEP_IN_CLIP_S = 5.0
 
 STAGES = [
     (1, "B100 Höger", 48.6),
@@ -142,6 +150,20 @@ def synth_times(n: int, total: float) -> list[float]:
     return [round(x * scale, 2) for x in out]
 
 
+def fast_times(n: int, total: float) -> list[float]:
+    """A quicker shooter: shorter draw, tighter pairs, fewer long moves."""
+    out = [1.4]
+    t = 1.4
+    i = 0
+    while len(out) < n:
+        gap = 0.22 if i % 4 != 3 else 0.9
+        t += gap
+        out.append(round(t, 2))
+        i += 1
+    scale = (total - 0.4) / out[-1]
+    return [round(x * scale, 2) for x in out]
+
+
 def audit_doc(times: list[float], classes: list[str] | None, *, audited: bool) -> dict:
     shots = []
     for i, t in enumerate(times):
@@ -149,7 +171,7 @@ def audit_doc(times: list[float], classes: list[str] | None, *, audited: bool) -
             "shot_number": i + 1,
             "candidate_number": i + 1,
             "id": f"cand-{i + 1}",
-            "time": t,
+            "time": round(BEEP_IN_CLIP_S + t, 3),
             "ms_after_beep": int(round(t * 1000)),
             "source": "detected",
             "confidence": 0.8,
@@ -161,7 +183,12 @@ def audit_doc(times: list[float], classes: list[str] | None, *, audited: bool) -
     # The detector's candidate list: every kept shot plus a few rejected
     # candidates between them, so the Audit canvas shows both kinds.
     candidates = [
-        {"candidate_number": i + 1, "time": t, "confidence": 0.8, "peak_amplitude": 0.6}
+        {
+            "candidate_number": i + 1,
+            "time": round(BEEP_IN_CLIP_S + t, 3),
+            "confidence": 0.8,
+            "peak_amplitude": 0.6,
+        }
         for i, t in enumerate(times)
     ]
     for j, (a, b) in enumerate(zip(times, times[1:], strict=False)):
@@ -169,7 +196,7 @@ def audit_doc(times: list[float], classes: list[str] | None, *, audited: bool) -
             candidates.append(
                 {
                     "candidate_number": len(times) + j + 1,
-                    "time": round((a + b) / 2, 2),
+                    "time": round(BEEP_IN_CLIP_S + (a + b) / 2, 3),
                     "confidence": 0.12,
                     "peak_amplitude": 0.2,
                 }
@@ -179,6 +206,9 @@ def audit_doc(times: list[float], classes: list[str] | None, *, audited: bool) -
     if audited:
         events.append({"ts": now, "kind": "save", "payload": {}})
     return {
+        # Compare converts each shot's clip-time ``time`` to time-after-beep
+        # with the doc's own beep, the way the detector writes both.
+        "beep_time": BEEP_IN_CLIP_S,
         "shots": shots,
         "detection": {"engine": "ensemble", "consensus": 2},
         "_candidates_pending_audit": {"candidates": candidates},
@@ -272,44 +302,75 @@ def cut_trimmed(source: Path, dest: Path) -> None:
     subprocess.run(cmd, check=True, capture_output=True, text=True)
 
 
-def main(root: Path, *, media: bool = False) -> None:
-    root.mkdir(parents=True, exist_ok=True)
-    match = match_model.Match.init(root, name="Stockholm IPSC Open 2026")
-    match.add_shooter(root, match_model.Shooter(slug="s_demo0001", name="Mathias Axell"))
-    shooter_root = match_model.Match.shooter_root(root, "s_demo0001")
-    project = MatchProject.init(shooter_root, name="Stockholm IPSC Open 2026")
-    # Shooter-relative like ingest writes them; absolute paths trip the sync card.
+def seed_shooter(
+    root: Path,
+    match: match_model.Match,
+    *,
+    slug: str,
+    name: str,
+    source: Path | None,
+    footage: dict[int, dict],
+    audits: dict[int, dict],
+    media: bool,
+    unassigned: bool = False,
+    time_scale: float = 1.0,
+) -> None:
+    """One shooter: project with a primary per ``footage`` stage, audit docs per ``audits``.
+
+    ``footage`` maps stage number -> StageVideo overrides (``done`` marks
+    trim + detection as processed); ``audits`` maps stage number -> audit
+    doc. ``source`` is the clip every primary points at, copied into the
+    shooter's own ``raw/`` (ingest writes shooter-relative paths, and an
+    absolute path trips the sync card); ``None`` writes a placeholder.
+    ``time_scale`` multiplies every stage time (a faster shooter).
+    """
+    match.add_shooter(root, match_model.Shooter(slug=slug, name=name))
+    shooter_root = match_model.Match.shooter_root(root, slug)
+    project = MatchProject.init(shooter_root, name=match.name)
     (shooter_root / "raw").mkdir(parents=True, exist_ok=True)
-    source = shooter_root / "raw" / "demo-source.mp4"
-    if media:
-        render_media(source)
-    else:
-        source.write_bytes(b"\x00" * 1024)  # presence only
+    own_source = shooter_root / "raw" / "demo-source.mp4"
+    if source is None:
+        if media:
+            render_media(own_source)
+        else:
+            own_source.write_bytes(b"\x00" * 1024)  # presence only
+    elif source != own_source:
+        shutil.copyfile(source, own_source)
     media_rel = Path("raw/demo-source.mp4")
-    project.match_date = date(2026, 6, 27)
+    project.competitor_name = name
+    project.match_date = match.match_date
     stages: list[StageEntry] = []
-    for number, name, secs in STAGES:
+    for number, stage_name, secs in STAGES:
         videos: list[StageVideo] = []
-        if number >= 2:
-            done = number <= 8
+        spec = footage.get(number)
+        if spec is not None:
+            done = spec.get("done", True)
             videos.append(
                 StageVideo(
                     path=media_rel,
                     role="primary",
                     beep_time=MEDIA_BEEP_S,
                     beep_source="auto",
-                    beep_confidence=0.91 if number != 10 else 0.42,
-                    beep_reviewed=number != 10,
+                    beep_confidence=spec.get("beep_confidence", 0.91),
+                    beep_reviewed=spec.get("beep_reviewed", True),
                     processed={"beep": True, "trim": done, "shot_detect": done},
                 )
             )
-        stages.append(StageEntry(stage_number=number, stage_name=name, time_seconds=secs, videos=videos))
+        stages.append(
+            StageEntry(
+                stage_number=number,
+                stage_name=stage_name,
+                time_seconds=round(secs * time_scale, 2),
+                videos=videos,
+            )
+        )
     project.stages = stages
-    # One file in the unassigned tray so the Footage page has something
-    # to place (a second copy of the source; the trimmed copies come below).
-    extra = shooter_root / "raw" / "demo-extra.mp4"
-    shutil.copyfile(source, extra)
-    project.unassigned_videos = [StageVideo(path=Path("raw/demo-extra.mp4"), role="secondary")]
+    if unassigned:
+        # One file in the unassigned tray so the Footage page has something
+        # to place (a second copy of the source).
+        extra = shooter_root / "raw" / "demo-extra.mp4"
+        shutil.copyfile(own_source, extra)
+        project.unassigned_videos = [StageVideo(path=Path("raw/demo-extra.mp4"), role="secondary")]
     project.save(shooter_root)
     if media:
         # Reload: video ids hash path + owning stage, which only a loaded
@@ -318,22 +379,67 @@ def main(root: Path, *, media: bool = False) -> None:
         for st in loaded.stages:
             prim = st.primary()
             if prim is not None and prim.processed.get("trim"):
-                cut_trimmed(source, trimmed_video_path(shooter_root, st.stage_number, prim, project=loaded))
+                cut_trimmed(
+                    own_source, trimmed_video_path(shooter_root, st.stage_number, prim, project=loaded)
+                )
 
     audit_dir = project.audit_path(shooter_root)
     audit_dir.mkdir(parents=True, exist_ok=True)
-    for number, _name, secs in STAGES:
-        if number == 3:
-            doc = audit_doc(STAGE3_T, STAGE3_CLS, audited=True)
-        elif number in (2, 4, 5):
-            n = {2: 28, 4: 18, 5: 12}[number]
-            doc = audit_doc(synth_times(n, secs), None, audited=True)
-        elif number in (6, 7, 8):
-            n = {6: 33, 7: 21, 8: 24}[number]
-            doc = audit_doc(synth_times(n, secs), None, audited=False)
-        else:
-            continue
+    for number, doc in audits.items():
         (audit_dir / f"stage{number}.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
+
+
+def main(root: Path, *, media: bool = False) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    match = match_model.Match.init(root, name="Stockholm IPSC Open 2026")
+    # The match-level stage table: what Compare resolves a stage against
+    # and what the picker's Continue card names.
+    match.stages = [MatchStageDefinition(stage_number=n, stage_name=name) for n, name, _secs in STAGES]
+    match.match_date = date(2026, 6, 27)
+    match.save(root)
+
+    secs_of = {n: secs for n, _name, secs in STAGES}
+
+    # Lead shooter: footage on 2-12, audited 2-5, detected 6-8, an
+    # unconfirmed beep on 10.
+    lead_footage = {
+        n: {"done": n <= 8, "beep_confidence": 0.91 if n != 10 else 0.42, "beep_reviewed": n != 10}
+        for n in range(2, 13)
+    }
+    lead_audits = {3: audit_doc(STAGE3_T, STAGE3_CLS, audited=True)}
+    for n, shots in {2: 28, 4: 18, 5: 12}.items():
+        lead_audits[n] = audit_doc(synth_times(shots, secs_of[n]), None, audited=True)
+    for n, shots in {6: 33, 7: 21, 8: 24}.items():
+        lead_audits[n] = audit_doc(synth_times(shots, secs_of[n]), None, audited=False)
+    seed_shooter(
+        root,
+        match,
+        slug="s_demo0001",
+        name="Mathias Axell",
+        source=None,
+        footage=lead_footage,
+        audits=lead_audits,
+        media=media,
+        unassigned=True,
+    )
+
+    # Second shooter: footage on 2-5, audited 2-4, detected on 5, faster.
+    lead_source = match_model.Match.shooter_root(root, "s_demo0001") / "raw" / "demo-source.mp4"
+    second_audits = {
+        n: audit_doc(fast_times(shots, secs_of[n] * 0.88), None, audited=n != 5)
+        for n, shots in {2: 30, 3: 28, 4: 16, 5: 12}.items()
+    }
+    seed_shooter(
+        root,
+        match,
+        slug="s_demo0002",
+        name="Anna Jonsson",
+        source=lead_source,
+        footage={n: {"done": True} for n in range(2, 6)},
+        audits=second_audits,
+        media=media,
+        time_scale=0.88,
+    )
     print(f"seeded {root}{' with media' if media else ''}")
 
 

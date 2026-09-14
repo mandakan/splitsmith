@@ -16,6 +16,8 @@ export interface ShotListProps {
   rows: { flagged: ShotRow[]; all: ShotRow[] };
   currentMarkerId: string | null;
   onJump: (marker: AuditMarker) => void;
+  /** The beep's clip time: the origin of the first kept shot's split (the draw). */
+  beep?: number | null;
 }
 
 const GRID = "grid grid-cols-[30px_54px_58px_44px_minmax(0,1fr)] items-center gap-2";
@@ -59,7 +61,7 @@ function Row({ row, split, current, onJump }: { row: ShotRow; split: number | nu
   );
 }
 
-export function ShotList({ rows, currentMarkerId, onJump }: ShotListProps) {
+export function ShotList({ rows, currentMarkerId, onJump, beep = null }: ShotListProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!currentMarkerId) return;
@@ -70,8 +72,10 @@ export function ShotList({ rows, currentMarkerId, onJump }: ShotListProps) {
 
   // Split = time since the previous kept shot; the first kept shot's is
   // its time from the beep (the draw), matching the current-shot line.
+  // Marker times are clip times, so without the beep the draw would read
+  // the pre-buffer too long.
   const splitById = new Map<string, number | null>();
-  let prev = 0;
+  let prev = beep ?? 0;
   for (const r of rows.all) {
     splitById.set(r.marker.id, r.marker.time - prev);
     if (!r.rejected) prev = r.marker.time;

@@ -2015,6 +2015,7 @@ export function Audit() {
                   <CurrentShotLine
                     shots={keptShots}
                     currentIndex={currentShotIndex}
+                    beep={auditBeep}
                     onStep={stepShot}
                     flag={currentFlag}
                     onNoteChange={handleNoteChange}
@@ -2089,7 +2090,7 @@ export function Audit() {
                       className="size-full [&_video]:!max-h-full [&_video]:!w-full"
                     />
                   </MultiCamColumn>
-                  <ShotList rows={rows} currentMarkerId={focusedMarkerId ?? currentShot?.id ?? null} onJump={jumpToMarker} />
+                  <ShotList rows={rows} beep={auditBeep} currentMarkerId={focusedMarkerId ?? currentShot?.id ?? null} onJump={jumpToMarker} />
                 </div>
               </div>
             ) : !prereqShouldShow && peaksLoading ? (
