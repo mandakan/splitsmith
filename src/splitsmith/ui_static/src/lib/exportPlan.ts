@@ -156,3 +156,16 @@ export function summaryLines(args: {
   lines.push(args.overlay ? { label: "Overlay", value: "on" } : { label: "Overlay", value: "off", dim: true });
   return lines;
 }
+
+/** "Stage 3", "Stages 1-3" for a contiguous run, "Stages 1, 2, 4"
+ *  otherwise. A range label over a gapped selection would be a lie, and
+ *  gaps are normal since #521 let a stage be removed without renumbering. */
+export function stageLabel(stages: number[]): string {
+  if (stages.length === 0) return "No stages";
+  if (stages.length === 1) return `Stage ${stages[0]}`;
+  const sorted = [...stages].sort((a, b) => a - b);
+  const contiguous = sorted.every((n, i) => i === 0 || n === sorted[i - 1] + 1);
+  return contiguous
+    ? `Stages ${sorted[0]}-${sorted[sorted.length - 1]}`
+    : `Stages ${sorted.join(", ")}`;
+}

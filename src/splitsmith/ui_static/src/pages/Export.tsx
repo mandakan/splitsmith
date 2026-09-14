@@ -1,158 +1,118 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
- * Export route (/export) -- final-cut bundle configurator (#330).
+ * Export (/match/:id/export/:slug) -- spec 2026-09-13 s4.8.
  *
- * Two-column workspace per polished/08:
+ * Mode / stages / options / summary, on the primitives. The output mode
+ * is one segmented control: Timeline (FCPXML + CSV + report), Trims only
+ * (one lossless cut per stage) and, on a multi-shooter match, Compare
+ * grid (every shooter beep-aligned into one MP4 -- what the slug-less
+ * Match export page used to do on its own). The stage picker is a table
+ * where every stage that cannot export says why in one line and offers
+ * the fix; the ladder lives in lib/exportPlan.ts, and hosted copy never
+ * names a drive. The summary rail carries the page's one primary and,
+ * in its footer, the storage actions (Reclaim space, Delete match).
  *
- *   Left -- numbered sections the user fills in top-to-bottom:
- *     1. Output mode (single-shooter timeline -- compare-grid disabled
- *        until #328 lands)
- *     2. Stages chip selector (only audited stages exportable)
- *     3. Trim padding presets + custom inputs
- *     4. Transitions between stages + duration + title-card style
- *     5. Overlay (none / include) -- variant tiles (counter, timer,
- *        banner) are out of scope until the backend exposes them
- *     6. Output formats (FCPXML always; CSV + text report always
- *        written as siblings) + destination preview
- *
- *   Right -- sticky summary rail with live stage/duration counts and
- *   the LED Export CTA.
- *
- * Mounted under <MatchShell />, so the page chrome (Shot Timer header,
- * per-match sidebar with stage status) is shared with /audit + /overview.
+ * Mounted under <MatchShell />, so the chrome is shared with the other
+ * match pages. Data plumbing (overview + project + runs load, the three
+ * submit paths, the cleanup dialog reload) is unchanged from the
+ * pre-restructure page.
  */
 
-import {
-  Check,
-  CheckCircle2,
-  Download,
-  ExternalLink,
-  FileBarChart,
-  FileText,
-  Film,
-  HardDrive,
-  Scissors,
-} from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-
-import { Navigate, useOutletContext, useParams } from "react-router-dom";
+import { Download, ExternalLink } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Navigate, useNavigate, useOutletContext, useParams } from "react-router-dom";
 
 import { CleanupDialog } from "@/components/CleanupDialog";
 import { ExportHistory } from "@/components/export/ExportHistory";
-import {
-  LedCtaButton,
-  Section,
-  SelectField,
-  StageChip,
-} from "@/components/export/primitives";
+import { SelectField } from "@/components/export/SelectField";
+import { StageTable } from "@/components/export/StageTable";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
+import { Button } from "@/components/ui/button";
+import { Field, inputClass } from "@/components/ui/Field";
+import { Label } from "@/components/ui/Label";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Segmented } from "@/components/ui/Segmented";
+import { useConfirm } from "@/components/useConfirm";
 import {
   ApiError,
   api,
   capabilityDenied,
   READ_ONLY_MIRROR_MESSAGE,
+  type CompareGridResult,
   type ExportOverview,
   type ExportRun,
   type Job,
   type MatchExportResult,
   type MatchProject,
   type OverlayCodec,
-  type StageExportStatus,
 } from "@/lib/api";
 import { hostedDownloads as buildHostedDownloads } from "@/lib/exportDownloads";
+import {
+  estimateDuration,
+  exportRows,
+  formatDuration,
+  summaryLines,
+  type ExportMode,
+  type FixTarget,
+} from "@/lib/exportPlan";
 import { useDeploymentMode } from "@/lib/features";
+import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
+import {
+  buildCompareGridPayload,
+  CANVAS_CHOICES,
+  summarizeGridResult,
+  type CanvasChoice,
+} from "@/pages/matchExportModel";
 
-type OutputMode = "single" | "compare" | "trims";
 type PaddingPreset = "full" | "action" | "highlight" | "custom";
 
-const PADDING_PRESETS: Record<
-  Exclude<PaddingPreset, "custom">,
-  { label: string; head: number; tail: number; help: string }
-> = {
-  full: {
-    label: "Full",
-    head: 5.0,
-    tail: 5.0,
-    help: "Matches the per-stage export defaults.",
-  },
-  action: {
-    label: "Action",
-    head: 0.5,
-    tail: 1.0,
-    help: "Tight: 0.5s before beep, 1s after final shot.",
-  },
-  highlight: {
-    label: "Highlight",
-    head: 1.5,
-    tail: 2.0,
-    help: "Mid: 1.5s before beep, 2s after final shot.",
-  },
+const PADDING_PRESETS: Record<Exclude<PaddingPreset, "custom">, { label: string; head: number; tail: number }> = {
+  full: { label: "Full", head: 5.0, tail: 5.0 },
+  action: { label: "Action", head: 0.5, tail: 1.0 },
+  highlight: { label: "Highlight", head: 1.5, tail: 2.0 },
 };
 
-const TRANSITIONS: {
-  kind: "none" | "zoom" | "static";
-  label: string;
-  body: string;
-}[] = [
-  {
-    kind: "none",
-    label: "Hard cut",
-    body: "Adjacent stages butt-cut on the spine. Closest to a raw stitch.",
-  },
-  {
-    kind: "static",
-    label: "Static frame",
-    body: "FCP 'Lights / Static' between stages -- a steady held frame.",
-  },
-  {
-    kind: "zoom",
-    label: "Zoom blur",
-    body: "FCP 'Blurs / Zoom' between stages. Punchy match-reel feel.",
-  },
+type TransitionKind = "none" | "zoom" | "static";
+const TRANSITIONS: { value: TransitionKind; label: string }[] = [
+  { value: "none", label: "Hard cut" },
+  { value: "static", label: "Static frame" },
+  { value: "zoom", label: "Zoom blur" },
 ];
 
-const TITLE_STYLES: {
-  kind: "none" | "slate" | "lower-third";
-  label: string;
-}[] = [
-  { kind: "none", label: "No title card" },
-  { kind: "slate", label: "Pre-stage slate" },
-  { kind: "lower-third", label: "Lower-third banner" },
+type TitleKind = "none" | "slate" | "lower-third";
+const TITLE_STYLES: { value: TitleKind; label: string }[] = [
+  { value: "none", label: "None" },
+  { value: "slate", label: "Slate" },
+  { value: "lower-third", label: "Lower third" },
 ];
+
+type OutputFormat = "fcpxml" | "fcp7xml" | "mp4";
 
 export function Export() {
   const { slug, matchId } = useParams<{ slug: string; matchId?: string }>();
-  if (!slug)
-    return (
-      <Navigate
-        to={matchId ? `/match/${matchId}/shooters` : "/shooters"}
-        replace
-      />
-    );
+  if (!slug) return <Navigate to={matchId ? `/match/${matchId}/ingest` : "/pick"} replace />;
   return <ExportInner slug={slug} />;
 }
 
 function ExportInner({ slug }: { slug: string }) {
   const { mode: deploymentMode } = useDeploymentMode();
+  const hosted = deploymentMode === "hosted";
   const ctx = useOutletContext<MatchShellOutletContext>();
+  const href = useMatchHref();
+  const navigate = useNavigate();
+  const confirm = useConfirm();
   // #756: gate on the server-derived capability, not this page's own
   // `project` (that's the per-shooter export overview, not the match
   // capability set) - a mirror match 403s every write here.
   const editDenied = capabilityDenied(ctx?.capabilities, "edit");
+  const shooters = useMemo(() => ctx?.shooters ?? [], [ctx?.shooters]);
   const [project, setProject] = useState<MatchProject | null>(null);
   const [overview, setOverview] = useState<ExportOverview | null>(null);
   const [runs, setRuns] = useState<ExportRun[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [result, setResult] = useState<MatchExportResult | null>(null);
+  const [gridResult, setGridResult] = useState<CompareGridResult | null>(null);
   // Trims-only queues one job per stage instead of a single bundle job,
   // so it reports "N queued" here and hands progress to the jobs rail.
   const [queueing, setQueueing] = useState<boolean>(false);
@@ -161,10 +121,7 @@ function ExportInner({ slug }: { slug: string }) {
 
   const reload = useCallback(async () => {
     try {
-      const [proj, ov] = await Promise.all([
-        api.getProject(slug),
-        api.getExportOverview(slug),
-      ]);
+      const [proj, ov] = await Promise.all([api.getProject(slug), api.getExportOverview(slug)]);
       setProject(proj);
       setOverview(ov);
       setError(null);
@@ -195,80 +152,54 @@ function ExportInner({ slug }: { slug: string }) {
     };
   }, []);
 
-
   // === Form state ===
-  const [mode, setMode] = useState<OutputMode>("single");
+  const [mode, setMode] = useState<ExportMode>("single");
   const [selection, setSelection] = useState<Set<number>>(() => new Set());
   const [preset, setPreset] = useState<PaddingPreset>("full");
   const [headPad, setHeadPad] = useState<number>(PADDING_PRESETS.full.head);
   const [tailPad, setTailPad] = useState<number>(PADDING_PRESETS.full.tail);
-  const [transitionKind, setTransitionKind] = useState<
-    "none" | "zoom" | "static"
-  >("none");
-  const [transitionDurationSeconds, setTransitionDurationSeconds] =
-    useState<number>(0.5);
-  const [titleKind, setTitleKind] = useState<"none" | "slate" | "lower-third">(
-    "none",
-  );
+  const [transitionKind, setTransitionKind] = useState<TransitionKind>("none");
+  const [transitionDurationSeconds, setTransitionDurationSeconds] = useState<number>(0.5);
+  const [titleKind, setTitleKind] = useState<TitleKind>("none");
   const [titleDurationSeconds, setTitleDurationSeconds] = useState<number>(1.5);
   const [includeOverlay, setIncludeOverlay] = useState<boolean>(false);
   const [overlayCodec, setOverlayCodec] = useState<OverlayCodec>("auto");
-  const [outputFormat, setOutputFormat] = useState<
-    "fcpxml" | "fcp7xml" | "mp4"
-  >("fcpxml");
+  const [outputFormat, setOutputFormat] = useState<OutputFormat>("fcpxml");
   const [projectName, setProjectName] = useState<string>("");
+  // Compare grid: the reference shooter sets the frame rate; the canvas
+  // sets the render size.
+  const [audioFrom, setAudioFrom] = useState<string>("");
+  const [canvas, setCanvas] = useState<CanvasChoice>(CANVAS_CHOICES[0]);
 
-  // Sync the project name once project loads.
   useEffect(() => {
     if (project && !projectName) setProjectName(project.name);
   }, [project, projectName]);
+  useEffect(() => {
+    if (!audioFrom && shooters.length > 0) setAudioFrom(shooters[0].slug);
+  }, [shooters, audioFrom]);
 
   const trimsOnly = mode === "trims";
+  const compare = mode === "compare";
+  const multiShooter = shooters.length >= 2;
 
-  // Stage eligibility
-  const stages: StageExportStatus[] = overview?.stages ?? [];
-  // A bare trim needs no audit: it is cut from a beep plus a stage
-  // duration, which is exactly what ``ready_to_trim`` reports. Holding
-  // trims-only to ``ready_to_export`` would gate the mode on the shot
-  // detection it exists to skip. Both flags come off the overview row --
-  // this page used to hand-port the server's trim rule into TypeScript and
-  // derive it from ``project.stages`` while filtering ``overview.stages``,
-  // which is two sources of truth for one list and drifted (#613).
-  const readyStages = useMemo(
-    () =>
-      stages.filter(
-        (s) => !s.skipped && (trimsOnly ? s.ready_to_trim : s.ready_to_export),
-      ),
-    [stages, trimsOnly],
-  );
-  const eligibleNumbers = useMemo(
-    () =>
-      readyStages
-        .filter((s) => s.source_reachable !== false)
-        .map((s) => s.stage_number),
-    [readyStages],
-  );
-  const eligibleSet = useMemo(
-    () => new Set(eligibleNumbers),
-    [eligibleNumbers],
-  );
-  const sourceMissingNumbers = useMemo(
-    () =>
-      readyStages
-        .filter((s) => s.source_reachable === false)
-        .map((s) => s.stage_number),
-    [readyStages],
-  );
-  const sourceMissingSet = useMemo(
-    () => new Set(sourceMissingNumbers),
-    [sourceMissingNumbers],
-  );
+  // Stage time lives on the project (overview rows don't carry it).
+  const stageTimeByNumber = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const s of project?.stages ?? []) m.set(s.stage_number, s.time_seconds);
+    return m;
+  }, [project]);
 
-  // Pre-select all eligible stages on first load.
+  const rows = useMemo(
+    () => exportRows(overview?.stages ?? [], stageTimeByNumber, mode, hosted),
+    [overview, stageTimeByNumber, mode, hosted],
+  );
+  const eligibleNumbers = useMemo(() => rows.filter((r) => r.eligible).map((r) => r.stage.stage_number), [rows]);
+  const eligibleSet = useMemo(() => new Set(eligibleNumbers), [eligibleNumbers]);
+
+  // Pre-select all eligible stages on first load (and after a mode switch
+  // empties the selection).
   useEffect(() => {
-    if (eligibleNumbers.length > 0 && selection.size === 0) {
-      setSelection(new Set(eligibleNumbers));
-    }
+    if (eligibleNumbers.length > 0 && selection.size === 0) setSelection(new Set(eligibleNumbers));
   }, [eligibleNumbers, selection.size]);
 
   // Drop any stages that became ineligible.
@@ -294,17 +225,18 @@ function ExportInner({ slug }: { slug: string }) {
   );
 
   const orderedSelection = useMemo(
-    () => stages.map((s) => s.stage_number).filter((n) => selection.has(n)),
-    [stages, selection],
+    () => rows.map((r) => r.stage.stage_number).filter((n) => selection.has(n)),
+    [rows, selection],
   );
 
   // Switching mode changes which stages are exportable, so drop the
-  // selection and let the pre-select effect above refill it from the new
+  // selection and let the pre-select effect refill it from the new
   // eligible set rather than leaving the previous mode's picks behind.
-  const selectMode = useCallback((next: OutputMode) => {
+  const selectMode = useCallback((next: ExportMode) => {
     setMode(next);
     setSelection(new Set());
     setResult(null);
+    setGridResult(null);
     setQueuedNote(null);
   }, []);
 
@@ -325,18 +257,11 @@ function ExportInner({ slug }: { slug: string }) {
   }, [project]);
 
   // The persisted ``compare_camera`` can name a selector this project no
-  // longer offers -- set via the CLI, or a mount later untagged. A <select>
-  // with no matching <option> renders blank, so the picker would claim
-  // "Primary (default)" while the summary rail reports the real value: two
-  // widgets disagreeing about one field. Carry the orphan as its own
-  // option, labelled, so the picker stays truthful and the user can see
-  // what to change.
+  // longer offers; carry the orphan as its own option, labelled, so the
+  // picker stays truthful (see #761).
   const cameraOptions = useMemo(() => {
     const current = project?.compare_camera ?? null;
-    const options = [
-      { value: "", label: "Primary (default)" },
-      ...cameraSelectors.map((s) => ({ value: s, label: s })),
-    ];
+    const options = [{ value: "", label: "Primary (default)" }, ...cameraSelectors.map((s) => ({ value: s, label: s }))];
     if (current !== null && !cameraSelectors.includes(current)) {
       options.push({ value: current, label: `${current} (not on this shooter)` });
     }
@@ -344,9 +269,6 @@ function ExportInner({ slug }: { slug: string }) {
   }, [cameraSelectors, project]);
 
   async function changeCamera(value: string) {
-    // Belt-and-suspenders: the control itself is disabled below, this
-    // guards the rare path where onChange still fires (e.g. programmatic
-    // dispatch) before the server 403s it anyway.
     if (editDenied) return;
     const next = value || null;
     if (next === (project?.compare_camera ?? null)) return;
@@ -358,19 +280,16 @@ function ExportInner({ slug }: { slug: string }) {
     }
   }
 
-  // #629: every input to this is persistent -- see ``lib/exportDownloads``
-  // for why that matters. It used to be gated on the export job's
-  // in-session ``result`` and so emptied itself on every reload.
+  // #629: every input to this is persistent -- see ``lib/exportDownloads``.
   const hostedDownloads = useMemo(() => {
-    if (deploymentMode !== "hosted") return [];
+    if (!hosted) return [];
     return buildHostedDownloads({
       matchExports: overview?.match_exports ?? [],
-      stages,
+      stages: overview?.stages ?? [],
       selection: orderedSelection,
     });
-  }, [deploymentMode, overview, stages, orderedSelection]);
+  }, [hosted, overview, orderedSelection]);
 
-  // Custom preset auto-sync.
   function selectPreset(next: PaddingPreset) {
     setPreset(next);
     if (next !== "custom") {
@@ -379,54 +298,19 @@ function ExportInner({ slug }: { slug: string }) {
     }
   }
 
-  // Estimated stats for the summary rail. Duration is summed from each
-  // stage's time_seconds (off the project, since overview rows don't
-  // carry it) plus head/tail pads, with transitions added in when non-
-  // cut. Not exact but close enough for a "~mm:ss" indicator.
-  const stageTimeByNumber = useMemo(() => {
-    const m = new Map<number, number>();
-    for (const s of project?.stages ?? []) m.set(s.stage_number, s.time_seconds);
-    return m;
-  }, [project]);
-  const estimate = useMemo(() => {
-    const selectedCount = orderedSelection.length;
-    let duration = 0;
-    // Trims-only doesn't expose the padding controls; the per-stage
-    // export job pads with the project's own trim buffers instead.
-    const head = trimsOnly ? (project?.trim_pre_buffer_seconds ?? 0) : headPad;
-    const tail = trimsOnly ? (project?.trim_post_buffer_seconds ?? 0) : tailPad;
-    for (const n of orderedSelection) {
-      duration += (stageTimeByNumber.get(n) ?? 0) + head + tail;
-    }
-    if (trimsOnly) return { duration };
-    if (transitionKind !== "none" && selectedCount > 1) {
-      duration += transitionDurationSeconds * (selectedCount - 1);
-    }
-    if (titleKind === "slate" && selectedCount > 0) {
-      duration += titleDurationSeconds * selectedCount;
-    }
-    return { duration };
-  }, [
-    orderedSelection,
-    stageTimeByNumber,
-    trimsOnly,
-    project,
-    headPad,
-    tailPad,
+  const duration = estimateDuration(orderedSelection, stageTimeByNumber, {
+    mode,
+    head: mode === "single" ? headPad : (project?.trim_pre_buffer_seconds ?? 0),
+    tail: mode === "single" ? tailPad : (project?.trim_post_buffer_seconds ?? 0),
     transitionKind,
-    transitionDurationSeconds,
+    transitionSeconds: transitionDurationSeconds,
     titleKind,
-    titleDurationSeconds,
-  ]);
+    titleSeconds: titleDurationSeconds,
+  });
 
-  const busy =
-    job?.status === "pending" || job?.status === "running" || queueing;
+  const busy = job?.status === "pending" || job?.status === "running" || queueing;
   const canExport =
-    !busy &&
-    mode !== "compare" &&
-    orderedSelection.length > 0 &&
-    !!project &&
-    !editDenied;
+    !busy && orderedSelection.length > 0 && !!project && !editDenied && (!compare || audioFrom !== "");
 
   /** Queue one trim-only job per selected stage through the per-stage
    *  export endpoint. The write flags are literals rather than the
@@ -437,9 +321,8 @@ function ExportInner({ slug }: { slug: string }) {
     setQueueing(true);
     // The endpoint returns the *existing* job when one is already active
     // for a stage rather than queueing a second one -- and that job may be
-    // a full-bundle export with entirely different flags. Counting those
-    // as queued trims promises work nobody scheduled, so find them first
-    // and report the two outcomes separately.
+    // a full-bundle export with entirely different flags. Report the two
+    // outcomes separately.
     let active = new Set<number>();
     try {
       const running = await api.listJobs();
@@ -477,46 +360,29 @@ function ExportInner({ slug }: { slug: string }) {
         [
           `Queued ${queued} trim ${queued === 1 ? "job" : "jobs"}.`,
           attached > 0
-            ? ` ${attached} ${attached === 1 ? "stage" : "stages"} already had an export running -- ` +
-              `that job was joined, not replaced.`
+            ? ` ${attached} ${attached === 1 ? "stage" : "stages"} already had an export running -- that job was joined, not replaced.`
             : "",
-          " Track progress in the jobs rail.",
+          " Progress shows under the top bar.",
         ].join(""),
       );
     } catch (e) {
       setError(e instanceof ApiError ? e.detail : String(e));
-      if (queuedIds.length > 0) {
-        setQueuedNote(
-          `Queued ${queuedIds.length} of ${orderedSelection.length} trim jobs.`,
-        );
-      }
+      if (queuedIds.length > 0) setQueuedNote(`Queued ${queuedIds.length} of ${orderedSelection.length} trim jobs.`);
     } finally {
       setQueueing(false);
     }
 
-    // Progress lives in the jobs rail from here, but this page's own state
-    // (has_exports, lossless_trim_present, last_export_at) is written by
-    // those jobs and would otherwise stay stale until a manual reload.
-    // Refresh once they settle, without blocking the button on trims that
-    // can take minutes.
+    // This page's own state (has_exports, lossless_trim_present) is
+    // written by those jobs; refresh once they settle.
     if (queuedIds.length > 0) {
-      void Promise.allSettled(
-        queuedIds.map((id) => api.pollJob(id, () => {})),
-      ).then(() => {
+      void Promise.allSettled(queuedIds.map((id) => api.pollJob(id, () => {}))).then(() => {
         if (mountedRef.current) void reload();
       });
     }
   }
 
-  async function submitExport() {
-    if (!canExport || !project) return;
-    setError(null);
-    setResult(null);
-    setQueuedNote(null);
-    if (trimsOnly) {
-      await submitTrims();
-      return;
-    }
+  async function submitBundle() {
+    if (!project) return;
     try {
       const submitted = await api.exportMatch(slug, {
         stage_numbers: orderedSelection,
@@ -543,9 +409,7 @@ function ExportInner({ slug }: { slug: string }) {
       const final = await api.pollJob(submitted.id, setJob);
       if (final.status === "succeeded" && final.result) {
         setResult(final.result as unknown as MatchExportResult);
-        // Same refresh the per-stage and trims-only paths already do. The
-        // job's own result drives the panel below, but the overview's
-        // match-export rows and the export history both come from the
+        // The overview's match-export rows and the history come from the
         // server and would otherwise stay as they were before the run.
         void reload();
       } else if (final.status === "failed") {
@@ -556,6 +420,38 @@ function ExportInner({ slug }: { slug: string }) {
     }
   }
 
+  async function submitGrid() {
+    try {
+      const payload = buildCompareGridPayload({
+        stageNumbers: orderedSelection,
+        audioFrom,
+        canvas,
+        outputName: "compare-grid",
+      });
+      const submitted = await api.exportCompareGrid(payload);
+      setJob(submitted);
+      const final = await api.pollJob(submitted.id, setJob);
+      if (final.status === "succeeded" && final.result) {
+        setGridResult(final.result as unknown as CompareGridResult);
+      } else if (final.status === "failed") {
+        setError(final.error ?? "Render failed.");
+      }
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
+
+  async function submitExport() {
+    if (!canExport || !project) return;
+    setError(null);
+    setResult(null);
+    setGridResult(null);
+    setQueuedNote(null);
+    if (trimsOnly) await submitTrims();
+    else if (compare) await submitGrid();
+    else await submitBundle();
+  }
+
   async function reveal(path: string) {
     try {
       await api.revealFile(path);
@@ -564,64 +460,148 @@ function ExportInner({ slug }: { slug: string }) {
     }
   }
 
-  if (!project && !error) {
-    return (
-      <div className="px-7 py-6 text-sm text-muted">Loading project...</div>
-    );
+  async function deleteMatch() {
+    const matchRoot = ctx?.health?.project_root;
+    const matchName = ctx?.project?.name ?? project?.name ?? "this match";
+    if (!matchRoot) return;
+    // Mode-specific opt-in extras. Desktop can wipe the folder on disk;
+    // hosted can additionally drop raw uploads that fed only this match.
+    const checkboxes = hosted
+      ? [
+          {
+            key: "deleteRawUploads",
+            label: "Also delete raw uploads that fed only this match",
+            help: "Uploaded videos still attached to another match are kept.",
+          },
+        ]
+      : [
+          {
+            key: "deleteLocalFiles",
+            label: "Also delete the project folder on disk",
+            help: "Permanently removes the footage, audit work, and exports under this match's folder. This cannot be undone.",
+          },
+        ];
+    const answer = await confirm({
+      title: `Delete ${matchName}?`,
+      body: "This removes the match and every resource it owns -- detection state, trims, exports, and any running jobs. This cannot be undone.",
+      confirmLabel: "Delete match",
+      checkboxes,
+    });
+    if (!answer.confirmed) return;
+    try {
+      const resp = await api.deleteProject(matchRoot, {
+        deleteLocalFiles: Boolean(answer.checked.deleteLocalFiles),
+        deleteRawUploads: Boolean(answer.checked.deleteRawUploads),
+      });
+      if (resp.summary.errors.length > 0) {
+        setError(
+          `Deleted with ${resp.summary.errors.length} issue${resp.summary.errors.length === 1 ? "" : "s"}: ${resp.summary.errors.join("; ")}`,
+        );
+        return;
+      }
+      navigate("/pick", { replace: true });
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    }
   }
+
+  const fixHref = useCallback(
+    (to: FixTarget, stageNumber: number): string => {
+      if (to === "audit") return href("audit", slug, String(stageNumber));
+      if (to === "scores") return href("");
+      return href("ingest", slug);
+    },
+    [href, slug],
+  );
+
+  if (!project && !error) {
+    return <div className="px-7 py-6 text-md text-muted">Loading project...</div>;
+  }
+
+  const shooterName = shooters.find((s) => s.slug === slug)?.name ?? project?.competitor_name ?? null;
+  const totalStages = rows.length;
+  const lines = summaryLines({
+    mode,
+    selected: orderedSelection.length,
+    eligible: eligibleNumbers.length,
+    head: headPad,
+    tail: tailPad,
+    transitionKind,
+    transitionSeconds: transitionDurationSeconds,
+    titleKind,
+    overlay: includeOverlay,
+    gridCamera: project?.compare_camera ?? null,
+    reference: shooters.find((s) => s.slug === audioFrom)?.name ?? null,
+    canvas: canvas.label,
+  });
+  const primaryLabel = trimsOnly ? "Export trims" : compare ? "Render grid" : "Export bundle";
+  const busyLabel = trimsOnly ? "Queueing..." : compare ? "Rendering..." : "Exporting...";
+  const bundleName = projectName || project?.name || "";
+  const gridSummary = gridResult ? summarizeGridResult(gridResult) : null;
 
   return (
     <div className="px-7 py-5">
-      <div className="mb-5">
-        <Kicker className="mb-2">Final cut &middot; bundle</Kicker>
-        <h1 className="mb-2 font-display text-4xl font-bold uppercase leading-none tracking-tight text-ink">
-          Export
-        </h1>
-        <p className="max-w-[40rem] text-sm text-muted">
-          {trimsOnly
-            ? "Pick stages and Splitsmith cuts one lossless trim each -- beep to last shot, no shot detection needed. These are what the multi-shooter compare grid stacks."
-            : "Pick stages, trim, transitions, and overlays. Splitsmith writes a final-cut bundle (FCPXML + CSV + text report) to the project's exports folder. Open the FCPXML in Final Cut to finish the cut."}
-        </p>
-      </div>
+      <PageHeader
+        title="Export"
+        sub={
+          <>
+            {shooterName ? `${shooterName} · ` : null}
+            <span className="numeral">{eligibleNumbers.length}</span> of{" "}
+            <span className="numeral">{totalStages}</span> stages ready
+          </>
+        }
+        actions={
+          project?.exports_dir && !hosted ? (
+            <Button type="button" onClick={() => void reveal(project.exports_dir!)}>
+              Reveal folder <ExternalLink className="size-3.5" />
+            </Button>
+          ) : null
+        }
+      />
 
-      {error && (
-        <div className="mb-4 rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
+      {error ? (
+        <p role="alert" className="mb-4 rounded-md border border-destructive/45 px-3 py-2 text-md text-destructive">
           {error}
-        </div>
-      )}
+        </p>
+      ) : null}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
-        {/* Left column: sections */}
-        <div className="flex min-w-0 flex-col gap-5">
-          {/* Section 1: Output mode */}
-          <Section number={1} title="Output mode" help="Single-shooter timeline or bare trims; compare grid arrives in #328.">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <ModeOption
-                selected={mode === "single"}
-                onClick={() => selectMode("single")}
-                title="Single-shooter timeline"
-                body="One FCPXML with selected stages back-to-back on the spine."
-                icon={<Film className="size-4" />}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="flex min-w-0 flex-col gap-3">
+          {/* Output mode */}
+          <Section
+            label="Output"
+            aside={
+              <span className="text-sm text-muted">
+                {trimsOnly
+                  ? "one lossless trim per stage"
+                  : compare
+                    ? "one MP4, every shooter beep-aligned per stage"
+                    : "FCPXML + CSV + report"}
+              </span>
+            }
+            control={
+              <Segmented<ExportMode>
+                label="Output mode"
+                value={mode}
+                onChange={selectMode}
+                options={[
+                  { value: "single", label: "Timeline" },
+                  { value: "trims", label: "Trims only" },
+                  {
+                    value: "compare",
+                    label: "Compare grid",
+                    disabled: !multiShooter,
+                    title: "The compare grid needs two or more shooters on the match",
+                  },
+                ]}
               />
-              <ModeOption
-                disabled
-                selected={mode === "compare"}
-                onClick={() => selectMode("compare")}
-                title="Multi-shooter compare grid"
-                body="Side-by-side grid per stage, audio from one shooter. Arrives with #328."
-                icon={<Film className="size-4" />}
-                badge="#328"
-              />
-              <ModeOption
-                selected={trimsOnly}
-                onClick={() => selectMode("trims")}
-                title="Trims only"
-                body="Lossless per-stage trims, no shot detection. Feeds the compare grid."
-                icon={<Scissors className="size-4" />}
-              />
-            </div>
-            {trimsOnly && (
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            }
+          >
+            {trimsOnly ? (
+              <Field
+                label="Grid camera"
+                help="Which of this shooter's cameras the compare grid uses. Saved on the shooter; the trims cover every camera on the stage."
+              >
                 <SelectField
                   label="Camera for the grid"
                   value={project?.compare_camera ?? ""}
@@ -629,134 +609,94 @@ function ExportInner({ slug }: { slug: string }) {
                   options={cameraOptions}
                   disabled={editDenied}
                   title={READ_ONLY_MIRROR_MESSAGE}
+                  className="w-full max-w-xs"
                 />
-                <p className="self-end text-[0.75rem] leading-relaxed text-muted">
-                  Which of this shooter's cameras the compare grid uses.
-                  Saved on the shooter; the trims themselves cover every
-                  camera on the stage.
-                </p>
-              </div>
-            )}
+              </Field>
+            ) : null}
+            {compare ? (
+              <>
+                <Field label="Reference" help="Sets the frame rate from this shooter's footage; every shooter is in the mixed track.">
+                  <Segmented
+                    label="Reference shooter"
+                    value={audioFrom}
+                    onChange={setAudioFrom}
+                    options={shooters.map((s) => ({
+                      value: s.slug,
+                      label: s.name,
+                      tick: s.slug === audioFrom ? ("movement" as const) : undefined,
+                    }))}
+                  />
+                </Field>
+                <Field label="Canvas" help="1080p renders faster.">
+                  <Segmented
+                    label="Canvas"
+                    value={canvas.id}
+                    onChange={(id) => {
+                      const next = CANVAS_CHOICES.find((c) => c.id === id);
+                      if (next) setCanvas(next);
+                    }}
+                    options={CANVAS_CHOICES.map((c) => ({ value: c.id, label: c.label }))}
+                  />
+                </Field>
+              </>
+            ) : null}
           </Section>
 
-          {/* Section 2: Stages */}
+          {/* Stages */}
           <Section
-            number={2}
-            title="Stages"
-            help={stageSectionHelp(
-              eligibleNumbers.length,
-              sourceMissingNumbers.length,
-              readyStages.length,
-              stages.length,
-              trimsOnly,
-              deploymentMode === "hosted",
-            )}
+            label="Stages"
+            aside={
+              <span className="text-sm text-muted">
+                <span className="numeral">{eligibleNumbers.length}</span> of <span className="numeral">{totalStages}</span>{" "}
+                exportable {"·"} <span className="numeral">{orderedSelection.length}</span> selected
+              </span>
+            }
+            flush
           >
-            {sourceMissingNumbers.length > 0 && (
-              <div className="mb-3 flex items-start gap-2.5 rounded-md border border-live/40 bg-live/10 px-3 py-2 text-[0.8125rem] text-ink-2">
-                <span
-                  aria-hidden
-                  className="mt-1 inline-block size-2 shrink-0 rounded-full bg-live shadow-[0_0_8px_var(--color-live-glow)]"
-                />
-                <div className="min-w-0">
-                  <div className="font-display text-[0.6875rem] font-bold uppercase tracking-[0.08em] text-live">
-                    {sourceOfflineCopy(deploymentMode === "hosted").title}
-                  </div>
-                  <div className="mt-0.5 text-muted">
-                    {sourceOfflineCopy(deploymentMode === "hosted").body(
-                      sourceMissingNumbers.length,
-                    )}
-                  </div>
-                </div>
-              </div>
+            {rows.length === 0 ? (
+              <p className="px-3.5 py-3 text-md text-muted">No stages on this match yet.</p>
+            ) : (
+              <StageTable rows={rows} selected={selection} onToggle={toggleStage} fixHref={fixHref} />
             )}
-            <div className="flex flex-wrap gap-2">
-              {stages.map((s) => {
-                const eligible = eligibleSet.has(s.stage_number);
-                const sourceMissing = sourceMissingSet.has(s.stage_number);
-                return (
-                  <StageChip
-                    key={s.stage_number}
-                    stageNumber={s.stage_number}
-                    stageName={s.stage_name}
-                    selected={selection.has(s.stage_number)}
-                    eligible={eligible}
-                    sourceMissing={sourceMissing}
-                    title={stageChipTitle(
-                      s,
-                      eligible,
-                      sourceMissing,
-                      trimsOnly,
-                      deploymentMode === "hosted",
-                    )}
-                    onToggle={() => toggleStage(s.stage_number)}
-                  />
-                );
-              })}
-            </div>
           </Section>
 
-          {/* Sections 3-5 shape a cut: padding, transitions/titles and the
-              burned-in overlay. None of them apply to a bare trim, so
-              trims-only hides them and the Output section renumbers. */}
-          {!trimsOnly && (
-            <>
-              {/* Section 3: Trim padding */}
-              <Section number={3} title="Trim padding" help="Padding around each stage's beep and last shot.">
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                  {(Object.keys(PADDING_PRESETS) as Array<
-                    Exclude<PaddingPreset, "custom">
-                  >).map((key) => (
-                    <PresetCard
-                      key={key}
-                      selected={preset === key}
-                      onClick={() => selectPreset(key)}
-                      title={PADDING_PRESETS[key].label}
-                      body={`${PADDING_PRESETS[key].head}s / ${PADDING_PRESETS[key].tail}s`}
-                    />
-                  ))}
-                  <PresetCard
-                    selected={preset === "custom"}
-                    onClick={() => selectPreset("custom")}
-                    title="Custom"
-                    body="set below"
+          {/* Options: only a timeline has a cut to shape. */}
+          {mode === "single" ? (
+            <Section label="Options">
+              <Field
+                label="Padding"
+                help={`${headPad.toFixed(1)} s before the beep · ${tailPad.toFixed(1)} s after the last shot`}
+              >
+                <div className="flex flex-wrap items-center gap-3">
+                  <Segmented<PaddingPreset>
+                    label="Trim padding"
+                    value={preset}
+                    onChange={selectPreset}
+                    options={[
+                      ...(Object.keys(PADDING_PRESETS) as Array<Exclude<PaddingPreset, "custom">>).map((k) => ({
+                        value: k as PaddingPreset,
+                        label: PADDING_PRESETS[k].label,
+                      })),
+                      { value: "custom" as PaddingPreset, label: "Custom" },
+                    ]}
                   />
+                  {preset === "custom" ? (
+                    <>
+                      <NumInput label="Before beep (s)" value={headPad} step={0.1} min={0} onChange={setHeadPad} />
+                      <NumInput label="After last shot (s)" value={tailPad} step={0.1} min={0} onChange={setTailPad} />
+                    </>
+                  ) : null}
                 </div>
-                {preset === "custom" && (
-                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <NumInput
-                      label="Before beep (s)"
-                      value={headPad}
-                      step={0.1}
-                      min={0}
-                      onChange={setHeadPad}
-                    />
-                    <NumInput
-                      label="After last shot (s)"
-                      value={tailPad}
-                      step={0.1}
-                      min={0}
-                      onChange={setTailPad}
-                    />
-                  </div>
-                )}
-              </Section>
-
-              {/* Section 4: Transitions */}
-              <Section number={4} title="Transitions" help="How adjacent stages connect on the spine.">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  {TRANSITIONS.map((t) => (
-                    <PresetCard
-                      key={t.kind}
-                      selected={transitionKind === t.kind}
-                      onClick={() => setTransitionKind(t.kind)}
-                      title={t.label}
-                      body={t.body}
-                    />
-                  ))}
-                </div>
-                {transitionKind !== "none" && (
-                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              </Field>
+              <Field label="Transition">
+                <div className="flex flex-wrap items-center gap-3">
+                  <Segmented<TransitionKind>
+                    label="Transition"
+                    value={transitionKind}
+                    onChange={setTransitionKind}
+                    options={TRANSITIONS}
+                  />
+                  {transitionKind !== "none" ? (
                     <NumInput
                       label="Duration (s)"
                       value={transitionDurationSeconds}
@@ -764,54 +704,36 @@ function ExportInner({ slug }: { slug: string }) {
                       min={0.1}
                       onChange={setTransitionDurationSeconds}
                     />
-                  </div>
-                )}
-                <div className="mt-4 border-t border-rule pt-4">
-                  <div className="mb-2 font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-muted">
-                    Title card
-                  </div>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    {TITLE_STYLES.map((t) => (
-                      <PresetCard
-                        key={t.kind}
-                        selected={titleKind === t.kind}
-                        onClick={() => setTitleKind(t.kind)}
-                        title={t.label}
-                      />
-                    ))}
-                  </div>
-                  {titleKind !== "none" && (
-                    <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <NumInput
-                        label="Title hold (s)"
-                        value={titleDurationSeconds}
-                        step={0.1}
-                        min={0.5}
-                        onChange={setTitleDurationSeconds}
-                      />
-                    </div>
-                  )}
+                  ) : null}
                 </div>
-              </Section>
-
-              {/* Section 5: Overlay */}
-              <Section number={5} title="Overlay" help="Burned-in shot counter + splits. Heavier render -- opt in.">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <PresetCard
-                    selected={!includeOverlay}
-                    onClick={() => setIncludeOverlay(false)}
-                    title="No overlay"
-                    body="Faster export. FCPXML still carries shot markers."
-                  />
-                  <PresetCard
-                    selected={includeOverlay}
-                    onClick={() => setIncludeOverlay(true)}
-                    title="Shot counter + splits"
-                    body="Render shot index + split time per shot, burned in."
-                  />
+              </Field>
+              <Field label="Title card">
+                <div className="flex flex-wrap items-center gap-3">
+                  <Segmented<TitleKind> label="Title card" value={titleKind} onChange={setTitleKind} options={TITLE_STYLES} />
+                  {titleKind !== "none" ? (
+                    <NumInput label="Title hold (s)" value={titleDurationSeconds} step={0.1} min={0.5} onChange={setTitleDurationSeconds} />
+                  ) : null}
                 </div>
-                {includeOverlay && (
-                  <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              </Field>
+              <Field
+                label="Overlay"
+                help={
+                  includeOverlay
+                    ? "Burned-in shot counter and splits; a slower render. The overlay is a transparent MOV, so the codec has to carry alpha: Auto picks HEVC on macOS and ProRes 4444 elsewhere."
+                    : "Off: a faster export; the FCPXML still carries shot markers."
+                }
+              >
+                <div className="flex flex-wrap items-center gap-3">
+                  <Segmented<"off" | "on">
+                    label="Overlay"
+                    value={includeOverlay ? "on" : "off"}
+                    onChange={(v) => setIncludeOverlay(v === "on")}
+                    options={[
+                      { value: "off", label: "None" },
+                      { value: "on", label: "Shot counter + splits" },
+                    ]}
+                  />
+                  {includeOverlay ? (
                     <SelectField
                       label="Overlay codec"
                       value={overlayCodec}
@@ -821,251 +743,160 @@ function ExportInner({ slug }: { slug: string }) {
                         { value: "hevc-alpha", label: "HEVC + alpha (macOS)" },
                         { value: "prores-4444", label: "ProRes 4444" },
                       ]}
+                      className="w-56"
                     />
-                    <p className="self-end text-[0.75rem] leading-relaxed text-muted">
-                      The overlay is a transparent MOV, so the codec has to
-                      carry alpha. Auto picks HEVC on macOS (far smaller) and
-                      ProRes 4444 everywhere else.
-                    </p>
-                  </div>
-                )}
-              </Section>
-            </>
-          )}
-
-          {/* Section 6 (3 in trims-only): Output */}
-          <Section
-            number={trimsOnly ? 3 : 6}
-            title="Output"
-            help={
-              trimsOnly
-                ? "One lossless trim per stage, written to the project's exports folder."
-                : "Bundle written to the project's exports folder."
-            }
-          >
-            {trimsOnly ? (
-              <FormatRow
-                icon={<Scissors className="size-4" />}
-                name="Lossless trim"
-                suffix=".mp4"
-                detail="Stream-copy cut per stage, beep-aligned. No re-encode, no detection."
-                selected
-                locked
-              />
-            ) : (
-              <>
-            <FormatRow
-              icon={<Film className="size-4" />}
-              name="FCPXML"
-              suffix={
-                outputFormat === "fcp7xml"
-                  ? ".fcpxml (xmeml 7)"
-                  : outputFormat === "mp4"
-                    ? ".mp4 (rendered)"
-                    : ".fcpxml (1.10)"
-              }
-              detail="Final Cut Pro X timeline with stages, markers, transitions."
-              selected
-            >
-              <SelectField
-                label="Variant"
-                value={outputFormat}
-                onChange={setOutputFormat}
-                options={[
-                  { value: "fcpxml", label: "FCPXML 1.10 (Final Cut Pro)" },
-                  { value: "fcp7xml", label: "FCP 7 XML (Premiere / Resolve)" },
-                  { value: "mp4", label: "MP4 (rendered)" },
-                ]}
-              />
-            </FormatRow>
-            <FormatRow
-              icon={<FileBarChart className="size-4" />}
-              name="Splits CSV"
-              suffix=".csv"
-              detail="Per-shot splits. Always written alongside the FCPXML."
-              selected
-              locked
-            />
-            <FormatRow
-              icon={<FileText className="size-4" />}
-              name="Text report"
-              suffix=".txt"
-              detail="Human-readable summary. Always written alongside the FCPXML."
-              selected
-              locked
-            />
-              </>
-            )}
-            <div className="mt-4">
-              <label className="mb-1.5 block font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-muted">
-                Destination
-              </label>
-              <div className="flex items-stretch gap-2">
-                <code className="flex-1 truncate rounded-md border border-rule bg-surface-3 px-3 py-2 font-mono text-xs text-ink-2">
-                  {project?.exports_dir ?? `${project?.name ?? ""}/exports/`}
-                </code>
-                {project?.exports_dir && deploymentMode !== "hosted" && (
-                  <button
-                    type="button"
-                    onClick={() => void reveal(project.exports_dir!)}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-rule bg-surface-2 px-3 py-2 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-ink-2 hover:bg-surface-3 hover:text-ink"
-                  >
-                    Reveal <ExternalLink className="size-3" />
-                  </button>
-                )}
-              </div>
-              {/* The bundle name only names the match FCPXML/CSV/report;
-                  trim filenames come from the stage. */}
-              {!trimsOnly && (
-                <p className="mt-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
-                  Bundle name:{" "}
-                  <input
-                    type="text"
-                    value={projectName}
-                    onChange={(e) => setProjectName(e.target.value)}
-                    className="rounded border border-rule bg-surface-3 px-2 py-0.5 font-mono text-[0.6875rem] text-ink-2 outline-none focus:border-led"
-                  />
-                </p>
-              )}
-            </div>
-          </Section>
+                  ) : null}
+                </div>
+              </Field>
+              <Field label="Format" help="The splits CSV and the text report are always written alongside.">
+                <SelectField
+                  label="Timeline format"
+                  value={outputFormat}
+                  onChange={setOutputFormat}
+                  options={[
+                    { value: "fcpxml", label: "FCPXML 1.10 (Final Cut Pro)" },
+                    { value: "fcp7xml", label: "FCP 7 XML (Premiere / Resolve)" },
+                    { value: "mp4", label: "MP4 (rendered)" },
+                  ]}
+                  className="w-full max-w-xs"
+                />
+              </Field>
+              <Field label="Bundle name" htmlFor="export-bundle-name" help={project?.exports_dir ?? "exports/"}>
+                <input
+                  id="export-bundle-name"
+                  type="text"
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  className={cn(inputClass, "max-w-xs font-mono text-sm")}
+                />
+              </Field>
+            </Section>
+          ) : null}
 
           {/* Rendered in both deployment modes -- only the reveal
               affordance is desktop-specific; the download link works on
               both (#629). */}
-          <ExportHistory
-            runs={runs}
-            exportFileUrl={(f) => (slug ? api.exportFileUrl(slug, f) : "#")}
-          />
+          <ExportHistory runs={runs} exportFileUrl={(f) => api.exportFileUrl(slug, f)} />
         </div>
 
-        {/* Right column: summary rail */}
-        <aside className="lg:sticky lg:top-[6.5rem] lg:self-start">
-          <div className="overflow-hidden rounded-2xl border border-rule-strong bg-gradient-to-b from-surface to-surface-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
-            <div className="border-b border-rule px-5 py-3.5">
-              <div className="font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
-                {trimsOnly ? "Trim summary" : "Bundle summary"}
-              </div>
-              <div className="mt-1 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-                Pre-flight check
-              </div>
+        {/* Summary rail */}
+        <aside className="lg:sticky lg:top-3 lg:self-start">
+          <div className="overflow-hidden rounded-[10px] border border-rule-strong bg-surface">
+            <div className="flex items-center justify-between border-b border-rule px-3.5 py-2.5">
+              <Label>{trimsOnly ? "Trims" : compare ? "Grid" : "Bundle"}</Label>
+              <span className="numeral text-sm text-ink-2" title="Estimated duration">
+                ~ {formatDuration(duration)}
+              </span>
             </div>
-            <div className="flex flex-col gap-2.5 px-5 py-4 font-mono text-[0.75rem] uppercase tracking-[0.04em] text-muted tabular-nums">
-              <SummaryStat
-                label="Stages"
-                value={`${orderedSelection.length} / ${eligibleNumbers.length}`}
-              />
+            <dl>
+              {lines.map((l) => (
+                <div key={l.label} className="flex justify-between gap-3 border-b border-rule px-3.5 py-1.5 text-md">
+                  <dt className="text-muted">{l.label}</dt>
+                  <dd className={cn("numeral", l.dim ? "text-muted" : "text-ink")}>{l.value}</dd>
+                </div>
+              ))}
+            </dl>
+            <div className="border-b border-rule px-3.5 py-2.5 font-mono text-sm leading-relaxed text-ink-2">
               {trimsOnly ? (
-                <SummaryStat
-                  label="Grid camera"
-                  value={project?.compare_camera ?? "primary"}
-                />
+                <span>
+                  {orderedSelection.length} lossless {orderedSelection.length === 1 ? "trim" : "trims"} into exports/
+                </span>
+              ) : compare ? (
+                <span>compare-grid.mp4</span>
               ) : (
                 <>
-                  <SummaryStat
-                    label="Padding"
-                    value={`${headPad.toFixed(1)}s / ${tailPad.toFixed(1)}s`}
-                  />
-                  <SummaryStat
-                    label="Transitions"
-                    value={
-                      transitionKind === "none"
-                        ? "hard cut"
-                        : `${transitionKind} ${transitionDurationSeconds.toFixed(1)}s`
-                    }
-                  />
-                  <SummaryStat
-                    label="Titles"
-                    value={titleKind === "none" ? "off" : titleKind}
-                  />
-                  <SummaryStat
-                    label="Overlay"
-                    value={includeOverlay ? "on" : "off"}
-                  />
+                  <div className="truncate">{bundleName}.fcpxml</div>
+                  <div className="truncate text-muted">{bundleName}.csv</div>
+                  <div className="truncate text-muted">{bundleName}.txt</div>
                 </>
               )}
-              <SummaryStat
-                label="~ Duration"
-                value={formatDuration(estimate.duration)}
-              />
             </div>
-            <div className="border-t border-rule bg-surface px-5 py-3 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
-              Will write:
-              <div className="mt-1.5 flex flex-col gap-0.5 text-ink-2 normal-case tracking-normal">
-                {trimsOnly ? (
-                  <span className="truncate">
-                    {orderedSelection.length} lossless{" "}
-                    {orderedSelection.length === 1 ? "trim" : "trims"} into
-                    exports/
-                  </span>
-                ) : (
-                  <>
-                    <span className="truncate">
-                      {projectName || project?.name}.fcpxml
-                    </span>
-                    <span className="truncate text-muted">
-                      {projectName || project?.name}.csv
-                    </span>
-                    <span className="truncate text-muted">
-                      {projectName || project?.name}.txt
-                    </span>
-                  </>
-                )}
-              </div>
-            </div>
-            {/* #629/#772 storage-aware cleanup: this is the deliverables
-                list ("Will write:" above, downloads in ResultPanel below)
-                where the intent "I have too many of these" forms, so it's
-                where the reclaim-space entry point lives. It's an
-                imperfect fit -- cleanup also spans caches, audio and
-                audit-trims, which aren't export concepts -- Home would be
-                the alternative if this needs to move. CleanupDialog is
-                self-contained (just slug/open/onClose), so relocating it
-                is a small, mechanical change. */}
-            <div className="border-t border-rule px-5 py-3">
-              <button
+            <div className="border-b border-rule px-3.5 py-3">
+              <Button
                 type="button"
-                onClick={() => setCleanupOpen(true)}
-                className="inline-flex items-center gap-1.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-muted hover:text-ink"
-              >
-                <HardDrive className="size-3.5" /> Reclaim space
-              </button>
-            </div>
-            <div className="border-t border-rule px-5 py-4">
-              <LedCtaButton
-                busy={busy}
-                icon={<Check className="size-3.5" strokeWidth={3} />}
-                label={trimsOnly ? "Export trims" : "Export bundle"}
-                busyLabel={trimsOnly ? "Queueing..." : "Exporting..."}
+                variant="primary"
+                className="w-full"
                 onClick={() => void submitExport()}
                 disabled={!canExport}
                 title={editDenied ? READ_ONLY_MIRROR_MESSAGE : undefined}
-              />
-              {busy && job?.message && (
-                <div className="mt-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
+              >
+                {busy ? busyLabel : primaryLabel}
+              </Button>
+              {busy && job?.message ? (
+                <div className="mt-2 text-sm text-muted">
                   {job.message}
+                  {job.progress != null ? ` (${Math.round(job.progress * 100)}%)` : ""}
                 </div>
-              )}
-              {queuedNote && (
-                <div className="mt-3 rounded-lg border border-done/40 bg-done/10 px-3 py-2 text-[0.8125rem] text-ink-2">
-                  <span className="inline-flex items-center gap-1.5 font-display font-bold uppercase tracking-[0.08em] text-done">
-                    <CheckCircle2 className="size-3.5" strokeWidth={2.5} />{" "}
-                    Queued
-                  </span>
-                  <div className="mt-1 text-muted">{queuedNote}</div>
-                </div>
-              )}
-              {result && (
+              ) : null}
+              {queuedNote ? (
+                <p className="mt-3 text-sm text-ink-2">
+                  <span className="text-done">Queued</span> {"·"} {queuedNote}
+                </p>
+              ) : null}
+              {result ? (
                 <ResultPanel
                   result={result}
                   onReveal={reveal}
-                  hosted={deploymentMode === "hosted"}
+                  hosted={hosted}
                   downloads={hostedDownloads}
-                  exportFileUrl={(filename) =>
-                    slug ? api.exportFileUrl(slug, filename) : "#"
-                  }
+                  exportFileUrl={(filename) => api.exportFileUrl(slug, filename)}
                 />
-              )}
+              ) : null}
+              {gridResult && gridSummary ? (
+                <div className="mt-3 text-sm text-ink-2">
+                  <div className={cn("font-medium", gridSummary.partial ? "text-live" : "text-done")}>
+                    {gridSummary.headline}
+                  </div>
+                  {gridSummary.partial ? (
+                    <ul className="mt-1 list-disc pl-4 text-muted">
+                      {gridSummary.failedStages.map((name) => (
+                        <li key={`failed-${name}`}>{name} did not render</li>
+                      ))}
+                      {gridSummary.skippedStages.map((n) => (
+                        <li key={`skipped-${n}`}>Stage {n} had no trim from any shooter -- not rendered</li>
+                      ))}
+                      {gridSummary.missingTrims.map((line) => (
+                        <li key={`missing-${line}`}>{line} -- that cell is black</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                  {hosted && gridResult.output_name ? (
+                    <a
+                      href={api.matchExportFileUrl(gridResult.output_name)}
+                      download={gridResult.output_name}
+                      className="mt-2 inline-flex items-center gap-1.5 text-ink-2 underline underline-offset-4 hover:text-ink"
+                    >
+                      <Download className="size-3" /> Download grid
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void reveal(gridResult.output_path)}
+                      className="mt-2 inline-flex items-center gap-1.5 text-ink-2 underline underline-offset-4 hover:text-ink"
+                    >
+                      Reveal file <ExternalLink className="size-3" />
+                    </button>
+                  )}
+                </div>
+              ) : null}
+            </div>
+            {/* Storage row: the deliverables list above is where "I have
+                too many of these" forms, so cleanup lives here; delete
+                moved here from the Matches row (spec s4.1). */}
+            <div className="flex items-center justify-between px-3.5 py-2">
+              <Button type="button" variant="ghost" size="sm" onClick={() => setCleanupOpen(true)}>
+                Reclaim space
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={() => void deleteMatch()}
+                disabled={editDenied || !ctx?.health?.project_root}
+                title={editDenied ? READ_ONLY_MIRROR_MESSAGE : undefined}
+              >
+                Delete match
+              </Button>
             </div>
           </div>
         </aside>
@@ -1078,15 +909,9 @@ function ExportInner({ slug }: { slug: string }) {
           setCleanupOpen(false);
           // A cleanup can delete exports/trims this page is currently
           // showing download links and presence badges for; without a
-          // reload the page keeps offering downloads that now 404 (I5
-          // whole-branch finding).
-          //
-          // The history is refetched by the same call but for a different
-          // reason. Its rows are durable -- cleanup does not touch
-          // ``export_runs`` -- so a reload does not remove them and is not
-          // meant to. What moves is each artefact's ``available`` flag,
-          // which the server derives per request; that is what turns the
-          // now-dead download links into plain struck-through names.
+          // reload the page keeps offering downloads that now 404. The
+          // history rows are durable -- what moves is each artefact's
+          // ``available`` flag.
           void reload();
         }}
       />
@@ -1095,8 +920,34 @@ function ExportInner({ slug }: { slug: string }) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Result                                                                     */
+/* Pieces                                                                     */
 /* -------------------------------------------------------------------------- */
+
+function Section({
+  label,
+  aside,
+  control,
+  flush = false,
+  children,
+}: {
+  label: string;
+  aside?: React.ReactNode;
+  control?: React.ReactNode;
+  /** No inner padding: the child brings its own rows. */
+  flush?: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-[10px] border border-rule bg-surface">
+      <div className={cn("flex flex-wrap items-center gap-3 px-3.5 py-2", children ? "border-b border-rule" : null)}>
+        <Label>{label}</Label>
+        {control}
+        {aside ? <span className="ml-auto">{aside}</span> : null}
+      </div>
+      {children ? <div className={cn(flush ? "[&>div]:rounded-none [&>div]:border-0" : null)}>{children}</div> : null}
+    </section>
+  );
+}
 
 function ResultPanel({
   result,
@@ -1112,28 +963,22 @@ function ResultPanel({
   exportFileUrl: (filename: string) => string;
 }) {
   return (
-    <div className="mt-3 rounded-lg border border-done/40 bg-done/10 px-3 py-2.5 text-[0.8125rem] text-ink-2">
-      <div className="mb-1.5 inline-flex items-center gap-1.5 font-display font-bold uppercase tracking-[0.08em] text-done">
-        <CheckCircle2 className="size-3.5" strokeWidth={2.5} /> Exported
-      </div>
-      <div className="font-mono text-[0.6875rem] uppercase tracking-[0.04em] text-muted tabular-nums">
-        {result.stage_count} stages &middot;{" "}
-        {formatDuration(result.duration_seconds)}
-        {result.anomalies.length > 0 && (
-          <> &middot; {result.anomalies.length} warnings</>
-        )}
+    <div className="mt-3 text-sm text-ink-2">
+      <div className="font-medium text-done">Exported</div>
+      <div className="numeral text-muted">
+        {result.stage_count} stages {"·"} {formatDuration(result.duration_seconds)}
+        {result.anomalies.length > 0 ? <> {"·"} {result.anomalies.length} warnings</> : null}
       </div>
       {hosted ? (
         // Hosted: the bundle lives in object storage, not on a local disk to
-        // reveal. Download each file (FCPXML + the media it references) so
-        // the operator can pull them down and open the timeline in FCP.
+        // reveal. Download each file (FCPXML + the media it references).
         <div className="mt-2 flex flex-col gap-1">
           {downloads.map((d) => (
             <a
               key={d.filename}
               href={exportFileUrl(d.filename)}
               download={d.filename}
-              className="inline-flex items-center gap-1.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-led hover:text-led-soft"
+              className="inline-flex items-center gap-1.5 text-ink-2 underline underline-offset-4 hover:text-ink"
             >
               <Download className="size-3" /> {d.label}
             </a>
@@ -1143,218 +988,13 @@ function ResultPanel({
         <button
           type="button"
           onClick={() => onReveal(result.fcpxml_path)}
-          className="mt-2 inline-flex items-center gap-1.5 font-display text-[0.6875rem] font-semibold uppercase tracking-[0.1em] text-led hover:text-led-soft"
+          className="mt-2 inline-flex items-center gap-1.5 text-ink-2 underline underline-offset-4 hover:text-ink"
         >
           Reveal bundle <ExternalLink className="size-3" />
         </button>
       )}
     </div>
   );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Section primitives                                                         */
-/* -------------------------------------------------------------------------- */
-
-function Kicker({ className, children }: { className?: string; children: ReactNode }) {
-  return (
-    <div
-      className={cn(
-        "inline-flex items-center gap-2.5 font-mono text-[0.625rem] font-bold uppercase tracking-[0.2em] text-led",
-        className,
-      )}
-    >
-      <span
-        aria-hidden
-        className="inline-block h-px w-[26px] bg-led shadow-[0_0_4px_var(--color-led-glow)]"
-      />
-      {children}
-    </div>
-  );
-}
-
-function ModeOption({
-  selected,
-  disabled,
-  onClick,
-  title,
-  body,
-  icon,
-  badge,
-}: {
-  selected: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  title: string;
-  body: string;
-  icon?: ReactNode;
-  badge?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-pressed={selected}
-      className={cn(
-        "relative flex items-start gap-3 overflow-hidden rounded-xl border-[1.5px] p-4 text-left transition-all",
-        selected
-          ? "border-led bg-led/10 shadow-[0_0_0_1px_var(--color-led-deep),0_0_18px_var(--color-led-glow)]"
-          : disabled
-            ? "border-rule bg-surface-2 text-muted opacity-50"
-            : "border-rule-strong bg-bg-glow hover:border-ink-2",
-      )}
-    >
-      {selected && (
-        <span
-          aria-hidden
-          className="absolute inset-y-0 left-0 w-[3px] bg-led shadow-[0_0_12px_var(--color-led-glow)]"
-        />
-      )}
-      <span
-        className={cn(
-          "mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-full border-[1.5px]",
-          selected
-            ? "border-led bg-led"
-            : "border-rule-strong bg-surface",
-        )}
-      >
-        {selected && <span className="size-2 rounded-full bg-bg" />}
-      </span>
-      <div className="min-w-0 flex-1">
-        <div className="mb-1 inline-flex items-center gap-2 font-display text-sm font-bold uppercase tracking-[0.04em] text-ink">
-          {icon}
-          <span>{title}</span>
-          {badge && (
-            <span className="rounded border border-rule-strong bg-surface-3 px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.1em] text-muted">
-              {badge}
-            </span>
-          )}
-        </div>
-        <p className="text-[0.8125rem] leading-relaxed text-muted">{body}</p>
-      </div>
-    </button>
-  );
-}
-
-function PresetCard({
-  selected,
-  onClick,
-  title,
-  body,
-}: {
-  selected: boolean;
-  onClick: () => void;
-  title: string;
-  body?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={selected}
-      className={cn(
-        "relative flex flex-col items-start gap-1 overflow-hidden rounded-xl border-[1.5px] p-3 text-left transition-all",
-        selected
-          ? "border-led bg-led/10 shadow-[0_0_0_1px_var(--color-led-deep),0_0_14px_var(--color-led-glow)]"
-          : "border-rule-strong bg-bg-glow hover:border-ink-2",
-      )}
-    >
-      {selected && (
-        <span
-          aria-hidden
-          className="absolute inset-y-0 left-0 w-[2px] bg-led shadow-[0_0_10px_var(--color-led-glow)]"
-        />
-      )}
-      <div className="font-display text-[0.8125rem] font-bold uppercase tracking-[0.04em] text-ink">
-        {title}
-      </div>
-      {body && (
-        <div
-          className={cn(
-            "font-mono text-[0.6875rem] tabular-nums",
-            selected ? "text-ink-2" : "text-muted",
-          )}
-        >
-          {body}
-        </div>
-      )}
-    </button>
-  );
-}
-
-/** Copy for a stage whose source file is unreachable. Desktop: the drive
- *  is unplugged. Hosted: the raw upload left object storage (cleanup), so
- *  the only fix is re-uploading from Videos -- never tell a hosted user
- *  to mount a drive. */
-function sourceOfflineCopy(hosted: boolean): {
-  title: string;
-  body: (n: number) => string;
-} {
-  if (hosted) {
-    return {
-      title: "Upload missing",
-      body: (n) =>
-        `${n} otherwise-ready ${n === 1 ? "stage" : "stages"} can't export -- the original upload is no longer stored. Re-upload the stage's video from Videos.`,
-    };
-  }
-  return {
-    title: "Source offline",
-    body: (n) =>
-      `${n} otherwise-ready ${n === 1 ? "stage" : "stages"} can't export -- the original video files aren't reachable. Mount the source drive (or use Relink) and reload the page.`,
-  };
-}
-
-/** Tooltip text for one stage chip in Section 2. Mirrors the disabled-
- *  reason ladder the chip used to compute internally before `StageChip`
- *  moved to `components/export/primitives.tsx` and became agnostic to
- *  this page's `StageExportStatus` shape. */
-function stageChipTitle(
-  stage: StageExportStatus,
-  eligible: boolean,
-  sourceMissing: boolean,
-  trimsOnly: boolean,
-  hosted: boolean,
-): string {
-  if (eligible) return `Stage ${stage.stage_number} -- ${stage.stage_name}`;
-  if (sourceMissing)
-    return hosted
-      ? "Original upload is no longer stored -- re-upload from Videos."
-      : "Source video offline -- reconnect the drive and reload.";
-  if (stage.skipped) return "Stage skipped.";
-  if (trimsOnly) return "Stage needs a beep and a stage time before it can be trimmed.";
-  return "Stage not audited yet.";
-}
-
-function stageSectionHelp(
-  eligibleCount: number,
-  sourceMissingCount: number,
-  readyCount: number,
-  totalCount: number,
-  trimsOnly: boolean,
-  hosted: boolean,
-): string {
-  if (eligibleCount > 0) {
-    return `${eligibleCount} of ${totalCount} stages exportable.`;
-  }
-  if (sourceMissingCount > 0 && readyCount === sourceMissingCount) {
-    return hosted
-      ? "Ready, but every original upload is no longer stored. Re-upload from Videos."
-      : "Ready, but every source video is offline. Mount the source drive and reload.";
-  }
-  if (readyCount === 0) {
-    return trimsOnly
-      ? "No stage is trimmable yet. A stage needs a confirmed beep and a stage time."
-      : "No stage is exportable yet. Finish auditing a stage first.";
-  }
-  if (hosted) {
-    return trimsOnly
-      ? "No stage is trimmable. Re-upload the missing videos."
-      : "No stage is exportable. Finish auditing or re-upload missing videos.";
-  }
-  return trimsOnly
-    ? "No stage is trimmable. Reconnect the missing sources."
-    : "No stage is exportable. Finish auditing or reconnect missing sources.";
 }
 
 function NumInput({
@@ -1371,10 +1011,8 @@ function NumInput({
   onChange: (v: number) => void;
 }) {
   return (
-    <label className="flex flex-col gap-1.5">
-      <span className="font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.08em] text-muted">
-        {label}
-      </span>
+    <label className="inline-flex items-center gap-2 text-sm text-muted">
+      {label}
       <input
         type="number"
         value={value}
@@ -1384,104 +1022,8 @@ function NumInput({
           const n = parseFloat(e.target.value);
           if (Number.isFinite(n)) onChange(n);
         }}
-        className="rounded-md border border-rule bg-surface-3 px-3 py-2 font-mono text-sm tabular-nums text-ink outline-none focus:border-led focus:bg-bg-glow focus:shadow-[0_0_0_3px_var(--color-led-tint)]"
+        className={cn(inputClass, "w-20 font-mono text-sm")}
       />
     </label>
   );
-}
-
-function FormatRow({
-  icon,
-  name,
-  suffix,
-  detail,
-  selected,
-  locked,
-  children,
-}: {
-  icon: ReactNode;
-  name: string;
-  suffix: string;
-  detail: string;
-  selected: boolean;
-  locked?: boolean;
-  children?: ReactNode;
-}) {
-  return (
-    <div
-      className={cn(
-        "mb-3 overflow-hidden rounded-xl border-[1.5px] last:mb-0",
-        selected ? "border-led" : "border-rule",
-      )}
-    >
-      <div
-        className={cn(
-          "flex items-start gap-3 px-4 py-3",
-          selected ? "bg-led/10" : "bg-bg-glow",
-        )}
-      >
-        <span
-          className={cn(
-            "mt-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded border-[1.5px]",
-            selected
-              ? "border-led bg-led-fill text-ink"
-              : "border-rule-strong bg-surface",
-          )}
-        >
-          {selected && <Check className="size-3" strokeWidth={3} />}
-        </span>
-        <span
-          className={cn(
-            "inline-flex size-7 shrink-0 items-center justify-center rounded-md border border-rule-strong bg-surface-3",
-            selected ? "text-led" : "text-muted",
-          )}
-        >
-          {icon}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-1.5">
-            <span className="font-display text-sm font-bold uppercase tracking-[0.04em] text-ink">
-              {name}
-            </span>
-            <span className="font-mono text-[0.625rem] tabular-nums text-muted">
-              {suffix}
-            </span>
-            {locked && (
-              <span className="ml-auto rounded border border-rule-strong bg-surface-2 px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.12em] text-muted">
-                Always
-              </span>
-            )}
-          </div>
-          <div className="mt-0.5 text-[0.75rem] text-muted">{detail}</div>
-          {children && <div className="mt-3">{children}</div>}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SummaryStat({
-  label,
-  value,
-}: {
-  label: string;
-  value: ReactNode;
-}) {
-  return (
-    <div className="flex items-baseline justify-between gap-3">
-      <span>{label}</span>
-      <span className="font-bold text-ink">{value}</span>
-    </div>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Helpers                                                                    */
-/* -------------------------------------------------------------------------- */
-
-function formatDuration(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0) return "0:00";
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
 }

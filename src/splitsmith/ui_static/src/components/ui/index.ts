@@ -25,6 +25,7 @@ export { Brand, BrandMark } from "./Brand";
 export { Kicker } from "./Kicker";
 export { Label } from "./Label";
 export { Field, inputClass } from "./Field";
+export { Segmented, type SegmentedOption } from "./Segmented";
 export { Stat, StatStrip } from "./Stat";
 export { Chip, type ChipTick } from "./Chip";
 export { PageHeader } from "./PageHeader";

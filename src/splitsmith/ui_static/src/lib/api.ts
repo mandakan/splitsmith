@@ -3618,6 +3618,11 @@ export const api = {
       `/api/shooters/${encodeURIComponent(slug)}/exports/file/${encodeURIComponent(filename)}`,
     ),
 
+  /** Download URL for a match-level deliverable -- the compare grid MP4
+   *  (#755). ``filename`` is ``CompareGridResult.output_name``. */
+  matchExportFileUrl: (filename: string) =>
+    scopeRequestPath(`/api/match/exports/file/${encodeURIComponent(filename)}`),
+
   getStagePeaks: (slug: string, stageNumber: number, bins = 1200) =>
     request<PeaksResult>(
       `/api/shooters/${encodeURIComponent(slug)}/stages/${stageNumber}/peaks?bins=${bins}`,

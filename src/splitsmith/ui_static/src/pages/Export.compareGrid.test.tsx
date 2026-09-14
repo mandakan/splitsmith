@@ -1,10 +1,26 @@
+/**
+ * The compare grid as Export's third output mode (UX PR 8; the cases are
+ * the retired MatchExport page's). The mode exists only on a multi-
+ * shooter match; the reference shooter and canvas are segmented rows;
+ * a partial render is a success with the failed stages named, never a
+ * failure; a short render is never reported as complete.
+ */
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ApiError, api, type Job, type MatchProject, type ShooterListEntry } from "@/lib/api";
-
-import { MatchExport } from "@/pages/MatchExport";
+import {
+  ApiError,
+  api,
+  type ExportOverview,
+  type Job,
+  type MatchProject,
+  type ShooterListEntry,
+  type StageExportStatus,
+} from "@/lib/api";
+import { ConfirmProvider } from "@/components/useConfirm";
+import { Export } from "@/pages/Export";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -12,8 +28,11 @@ vi.mock("@/lib/api", async (importOriginal) => {
     ...actual,
     api: {
       ...actual.api,
-      listMatchShooters: vi.fn(),
+      getServerFeatures: vi.fn().mockResolvedValue({ lab: false, mode: "local" }),
       getProject: vi.fn(),
+      getExportOverview: vi.fn(),
+      getExportRuns: vi.fn().mockResolvedValue({ runs: [] }),
+      getCleanupPlan: vi.fn().mockResolvedValue({ items: [], totals_by_category: {}, total_bytes: 0, total_file_count: 0 }),
       exportCompareGrid: vi.fn(),
       pollJob: vi.fn(),
       revealFile: vi.fn(),
@@ -57,7 +76,7 @@ function makeProject(stages: MatchProject["stages"]): MatchProject {
     name: "bromma-2026",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
-    competitor_name: null,
+    competitor_name: "Mathias",
     scoreboard_match_id: null,
     scoreboard_content_type: null,
     selected_shooter_id: null,
@@ -80,6 +99,31 @@ function makeProject(stages: MatchProject["stages"]): MatchProject {
     compare_camera: null,
     raw_videos: [],
     origin: "local",
+  };
+}
+
+function overviewStage(n: number, name: string, skipped = false): StageExportStatus {
+  return {
+    stage_number: n,
+    stage_name: name,
+    skipped,
+    has_primary: false,
+    primary_processed: { beep: false, shot_detect: false, trim: false },
+    audit_shot_count: 0,
+    total_candidate_count: 0,
+    audit_path: null,
+    trimmed_video_path: null,
+    lossless_trim_present: false,
+    csv_path: null,
+    fcpxml_path: null,
+    report_path: null,
+    overlay_path: null,
+    has_exports: false,
+    last_export_at: null,
+    ready_to_export: false,
+    ready_to_trim: false,
+    source_reachable: null,
+    secondaries: [],
   };
 }
 
@@ -113,74 +157,85 @@ const PROJECT = makeProject([
   makeStage(2, "Stage Two"),
   makeStage(3, "Stage Three", true), // skipped -- must not default-select
 ]);
+const OVERVIEW: ExportOverview = {
+  match_exports: [],
+  stages: [overviewStage(1, "Stage One"), overviewStage(2, "Stage Two"), overviewStage(3, "Stage Three", true)],
+};
 
-function setUpLoad() {
-  vi.mocked(api.listMatchShooters).mockResolvedValue({
-    match_root: "/root",
-    match_name: "Bromma Classic 2026",
-    shooters: SHOOTERS,
-    origin: "local",
-    capabilities: ["edit", "review"],
-  });
-  vi.mocked(api.getProject).mockResolvedValue(PROJECT);
+function Shell({ shooters }: { shooters: ShooterListEntry[] }) {
+  return (
+    <Outlet
+      context={{
+        project: PROJECT,
+        health: { project_root: "/m/bromma" },
+        shooters,
+        refresh: () => {},
+        origin: "local",
+        capabilities: ["edit", "review"],
+      }}
+    />
+  );
+}
+
+async function renderCompare(shooters = SHOOTERS) {
+  const user = userEvent.setup();
+  render(
+    <MemoryRouter initialEntries={["/match/m1/export/mathias"]}>
+      <ConfirmProvider>
+        <Routes>
+          <Route path="/match/:matchId" element={<Shell shooters={shooters} />}>
+            <Route path="export/:slug" element={<Export />} />
+          </Route>
+        </Routes>
+      </ConfirmProvider>
+    </MemoryRouter>,
+  );
+  const grid = await screen.findByRole("button", { name: /compare grid/i });
+  return { user, grid };
 }
 
 beforeEach(() => {
-  setUpLoad();
+  vi.mocked(api.getProject).mockResolvedValue(PROJECT);
+  vi.mocked(api.getExportOverview).mockResolvedValue(OVERVIEW);
 });
 
 afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("MatchExport", () => {
-  it("pre-selects every non-skipped stage and defaults audio to the first shooter", async () => {
-    render(<MatchExport />);
+describe("Export compare grid mode", () => {
+  it("is offered only on a multi-shooter match", async () => {
+    const { grid } = await renderCompare([SHOOTERS[0]]);
+    expect(grid).toBeDisabled();
+    expect(grid).toHaveAttribute("title", expect.stringMatching(/two or more shooters/i));
+  });
 
-    expect(await screen.findByRole("radio", { name: /Mathias/i })).toBeChecked();
-    expect(screen.getByRole("radio", { name: /Casper/i })).not.toBeChecked();
-
-    const stageOne = await screen.findByRole("button", { name: /Stage One/i });
-    const stageTwo = screen.getByRole("button", { name: /Stage Two/i });
-    const stageThree = screen.getByRole("button", { name: /Stage Three/i });
-
-    // The stage buttons mount as soon as ``project`` loads, with
-    // ``aria-pressed="false"``; the pre-select effect that flips eligible
-    // stages to "true" is a separate state update landing after that
-    // render. Asserting without a wait is a race (a real CI flake, #718).
-    //
-    // Both stages go inside the wait. They currently flip in the same
-    // state update, so waiting on stageOne alone happens to cover
-    // stageTwo -- but that is a coincidence of the current effect, not a
-    // guarantee, and the whole point here is not to assert on timing that
-    // holds by luck.
+  it("pre-selects every non-skipped stage and defaults the reference to the first shooter", async () => {
+    const { user, grid } = await renderCompare();
+    await user.click(grid);
+    expect(screen.getByRole("button", { name: /^Mathias$/ })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /^Casper$/ })).toHaveAttribute("aria-pressed", "false");
     await waitFor(() => {
-      expect(stageOne).toHaveAttribute("aria-pressed", "true");
-      expect(stageTwo).toHaveAttribute("aria-pressed", "true");
+      expect(screen.getByRole("checkbox", { name: /Stage One/i })).toBeChecked();
+      expect(screen.getByRole("checkbox", { name: /Stage Two/i })).toBeChecked();
     });
-    // Skipped stage: not selected and not clickable.
-    expect(stageThree).toHaveAttribute("aria-pressed", "false");
-    expect(stageThree).toBeDisabled();
+    const three = screen.getByRole("checkbox", { name: /Stage Three/i });
+    expect(three).not.toBeChecked();
+    expect(three).toBeDisabled();
+    expect(screen.getByText("Skipped")).toBeInTheDocument();
   });
 
   it("submits the expected payload and shows a clean render as a success", async () => {
-    const user = userEvent.setup();
     vi.mocked(api.exportCompareGrid).mockResolvedValue(makeJob({ status: "running" }));
     vi.mocked(api.pollJob).mockResolvedValue(
       makeJob({
         status: "succeeded",
-        result: {
-          output_path: "/m/exports/compare-grid.mp4",
-          stages_rendered: 2,
-          stages_total: 2,
-          failed: [],
-        },
+        result: { output_path: "/m/exports/compare-grid.mp4", stages_rendered: 2, stages_total: 2, failed: [] },
       }),
     );
-
-    render(<MatchExport />);
-    await screen.findByRole("radio", { name: /Mathias/i });
-
+    const { user, grid } = await renderCompare();
+    await user.click(grid);
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage Two/i })).toBeChecked());
     await user.click(screen.getByRole("button", { name: /render grid/i }));
 
     await waitFor(() => expect(api.exportCompareGrid).toHaveBeenCalledTimes(1));
@@ -191,17 +246,13 @@ describe("MatchExport", () => {
       canvas_height: 2160,
       output_name: "compare-grid",
     });
-
     expect(await screen.findByText(/rendered all 2 stages/i)).toBeInTheDocument();
     expect(screen.queryByText(/did not render/i)).not.toBeInTheDocument();
-
-    const revealButton = screen.getByRole("button", { name: /reveal file/i });
-    await user.click(revealButton);
+    await user.click(screen.getByRole("button", { name: /reveal file/i }));
     expect(api.revealFile).toHaveBeenCalledWith("/m/exports/compare-grid.mp4");
   });
 
   it("shows a partial render as a success with the failed stages named, never as a failure", async () => {
-    const user = userEvent.setup();
     vi.mocked(api.exportCompareGrid).mockResolvedValue(makeJob({ status: "running" }));
     vi.mocked(api.pollJob).mockResolvedValue(
       makeJob({
@@ -214,25 +265,18 @@ describe("MatchExport", () => {
         },
       }),
     );
-
-    render(<MatchExport />);
-    await screen.findByRole("radio", { name: /Mathias/i });
+    const { user, grid } = await renderCompare();
+    await user.click(grid);
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage Two/i })).toBeChecked());
     await user.click(screen.getByRole("button", { name: /render grid/i }));
 
-    // The output is shown -- this is a success, not an error banner.
     expect(await screen.findByText(/rendered 1 of 2 stages/i)).toBeInTheDocument();
     expect(screen.getByText(/Stage Two did not render/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /reveal file/i })).toBeInTheDocument();
-    // A failed render (job.status === "failed") would show this text instead;
-    // partial success must never be reported through that path.
     expect(screen.queryByText(/render failed/i)).not.toBeInTheDocument();
   });
 
   it("never reports a short render as a complete success", async () => {
-    // Three stages requested, one of which nobody had a trim for: the
-    // renderer never planned it, so the result is 2 of 3. Reading
-    // "Rendered all 2 stages" under a green tick is the defect.
-    const user = userEvent.setup();
     vi.mocked(api.exportCompareGrid).mockResolvedValue(makeJob({ status: "running" }));
     vi.mocked(api.pollJob).mockResolvedValue(
       makeJob({
@@ -255,91 +299,61 @@ describe("MatchExport", () => {
         },
       }),
     );
-
-    render(<MatchExport />);
-    await screen.findByRole("radio", { name: /Mathias/i });
+    const { user, grid } = await renderCompare();
+    await user.click(grid);
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage Two/i })).toBeChecked());
     await user.click(screen.getByRole("button", { name: /render grid/i }));
 
     expect(await screen.findByText(/rendered 2 of 3 stages/i)).toBeInTheDocument();
     expect(screen.queryByText(/rendered all/i)).not.toBeInTheDocument();
     expect(screen.getByText(/stage 3 had no trim from any shooter/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(/Casper has no trim for stage 3 \(Stage Three\)/i),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Casper has no trim for stage 3 \(Stage Three\)/i)).toBeInTheDocument();
   });
 
   it("deselecting a stage removes it from the render payload", async () => {
-    const user = userEvent.setup();
     vi.mocked(api.exportCompareGrid).mockResolvedValue(makeJob({ status: "running" }));
     vi.mocked(api.pollJob).mockResolvedValue(
       makeJob({
         status: "succeeded",
-        result: {
-          output_path: "/m/exports/compare-grid.mp4",
-          stages_rendered: 1,
-          stages_total: 1,
-          failed: [],
-        },
+        result: { output_path: "/m/exports/compare-grid.mp4", stages_rendered: 1, stages_total: 1, failed: [] },
       }),
     );
-
-    render(<MatchExport />);
-    const stageTwo = await screen.findByRole("button", { name: /Stage Two/i });
-    await user.click(stageTwo);
-    expect(stageTwo).toHaveAttribute("aria-pressed", "false");
-
+    const { user, grid } = await renderCompare();
+    await user.click(grid);
+    const two = screen.getByRole("checkbox", { name: /Stage Two/i });
+    await waitFor(() => expect(two).toBeChecked());
+    await user.click(two);
+    expect(two).not.toBeChecked();
     await user.click(screen.getByRole("button", { name: /render grid/i }));
 
     await waitFor(() => expect(api.exportCompareGrid).toHaveBeenCalledTimes(1));
-    expect(api.exportCompareGrid).toHaveBeenCalledWith(
-      expect.objectContaining({ stage_numbers: [1] }),
-    );
+    expect(api.exportCompareGrid).toHaveBeenCalledWith(expect.objectContaining({ stage_numbers: [1] }));
   });
 
-  it("picking a different audio source changes audio_from in the payload", async () => {
-    const user = userEvent.setup();
+  it("picking a different reference shooter changes audio_from; 1080p changes the canvas", async () => {
     vi.mocked(api.exportCompareGrid).mockResolvedValue(makeJob({ status: "running" }));
     vi.mocked(api.pollJob).mockResolvedValue(makeJob({ status: "succeeded" }));
-
-    render(<MatchExport />);
-    await user.click(await screen.findByRole("radio", { name: /Casper/i }));
+    const { user, grid } = await renderCompare();
+    await user.click(grid);
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage Two/i })).toBeChecked());
+    await user.click(screen.getByRole("button", { name: /^Casper$/ }));
+    await user.click(screen.getByRole("button", { name: /1080p/i }));
     await user.click(screen.getByRole("button", { name: /render grid/i }));
 
     await waitFor(() => expect(api.exportCompareGrid).toHaveBeenCalledTimes(1));
     expect(api.exportCompareGrid).toHaveBeenCalledWith(
-      expect.objectContaining({ audio_from: "casper" }),
-    );
-  });
-
-  it("switching the canvas choice to 1080p changes the render dimensions", async () => {
-    const user = userEvent.setup();
-    vi.mocked(api.exportCompareGrid).mockResolvedValue(makeJob({ status: "running" }));
-    vi.mocked(api.pollJob).mockResolvedValue(makeJob({ status: "succeeded" }));
-
-    render(<MatchExport />);
-    await screen.findByRole("radio", { name: /Mathias/i });
-    await user.selectOptions(screen.getByLabelText(/canvas/i), "hd");
-    await user.click(screen.getByRole("button", { name: /render grid/i }));
-
-    await waitFor(() => expect(api.exportCompareGrid).toHaveBeenCalledTimes(1));
-    expect(api.exportCompareGrid).toHaveBeenCalledWith(
-      expect.objectContaining({ canvas_width: 1920, canvas_height: 1080 }),
+      expect.objectContaining({ audio_from: "casper", canvas_width: 1920, canvas_height: 1080 }),
     );
   });
 
   it("surfaces a submit-time rejection as an error without claiming success", async () => {
-    const user = userEvent.setup();
-    vi.mocked(api.exportCompareGrid).mockRejectedValue(
-      new ApiError(400, "audio_from matches no shooter on this match"),
-    );
-
-    render(<MatchExport />);
-    await screen.findByRole("radio", { name: /Mathias/i });
+    vi.mocked(api.exportCompareGrid).mockRejectedValue(new ApiError(400, "audio_from matches no shooter on this match"));
+    const { user, grid } = await renderCompare();
+    await user.click(grid);
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage Two/i })).toBeChecked());
     await user.click(screen.getByRole("button", { name: /render grid/i }));
 
-    expect(
-      await screen.findByText(/audio_from matches no shooter on this match/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/audio_from matches no shooter on this match/i)).toBeInTheDocument();
     expect(screen.queryByText(/rendered/i)).not.toBeInTheDocument();
   });
 });

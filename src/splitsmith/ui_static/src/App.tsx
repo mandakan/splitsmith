@@ -41,7 +41,6 @@ import { DevRetrain } from "@/pages/dev/DevRetrain";
 import { DevReviewQueue } from "@/pages/dev/DevReviewQueue";
 import { DevValidate } from "@/pages/dev/DevValidate";
 import { Export } from "@/pages/Export";
-import { MatchExport } from "@/pages/MatchExport";
 import { Home } from "@/pages/Home";
 import { Ingest } from "@/pages/Ingest";
 import { Jobs } from "@/pages/Jobs";
@@ -323,14 +322,9 @@ export function App() {
                 path="export/:slug/:stage"
                 element={<ShooterScopedRoute element={<DesktopGate screen="Export"><Export /></DesktopGate>} />}
               />
-              <Route
-                path="export"
-                element={
-                  <DesktopGate screen="Match export">
-                    <MatchExport />
-                  </DesktopGate>
-                }
-              />
+              {/* The compare grid is Export's third mode now (UX PR 8);
+                  the slug-less route lands on the lead shooter's export. */}
+              <Route path="export" element={<DefaultShooterRedirect base="export" />} />
               <Route path="results" element={<Results />} />
               <Route
                 path="results/:slug/:stage"
