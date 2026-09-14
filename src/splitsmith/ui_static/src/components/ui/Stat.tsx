@@ -24,13 +24,21 @@ export interface StatProps extends React.HTMLAttributes<HTMLDivElement> {
 
 export function Stat({ label, value, unit, tone = "ink", className, ...props }: StatProps) {
   return (
-    <div className={cn("flex flex-col gap-1 bg-surface px-4 py-3", className)} {...props}>
-      <Label>{label}</Label>
+    <div
+      className={cn("flex min-w-0 flex-col gap-1 bg-surface px-3 py-2.5 @[560px]:px-4 @[560px]:py-3", className)}
+      {...props}
+    >
+      <Label className="leading-tight">{label}</Label>
       <span className="flex items-baseline gap-1 leading-none">
-        <span className={cn("numeral text-[26px]", tone === "dim" ? "text-muted" : "text-ink")}>
+        <span
+          className={cn(
+            "numeral text-[20px] @[560px]:text-[26px]",
+            tone === "dim" ? "text-muted" : "text-ink",
+          )}
+        >
           {value}
         </span>
-        {unit ? <span className="text-[13px] text-muted">{unit}</span> : null}
+        {unit ? <span className="text-[12px] text-muted @[560px]:text-[13px]">{unit}</span> : null}
       </span>
     </div>
   );
@@ -47,7 +55,10 @@ export function StatStrip({ lead = false, className, children, ...props }: StatS
   return (
     <div
       className={cn(
-        "grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-[10px] border border-rule-strong bg-rule-strong md:auto-cols-fr md:grid-flow-col",
+        // @container: cells size to the strip's own width (a 450 px side
+        // column gets 20 px numerals, a full-width strip 26 px), not the
+        // viewport's.
+        "@container grid shrink-0 grid-cols-2 gap-px overflow-hidden rounded-[10px] border border-rule-strong bg-rule-strong md:auto-cols-fr md:grid-flow-col",
         className,
       )}
       {...props}
