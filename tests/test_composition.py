@@ -405,3 +405,62 @@ def test_to_stage_compositions_recovers_secondaries_without_pip(tmp_path: Path) 
     assert len(lowered) == 1
     sec = lowered[0].secondaries[0]
     assert sec.pip is None
+
+
+# --- generated cards (issue #973) -----------------------------------------
+
+
+def _one_stage(tmp_path: Path) -> list[StageComposition]:
+    return [
+        StageComposition(
+            stage_name="s1",
+            video_path=_make_video(tmp_path, "primary.mp4"),
+            video=_meta_30fps(),
+            shots=[_shot(1, 1.0, 1.0)],
+            beep_offset_seconds=5.0,
+            head_pad_seconds=5.0,
+            tail_pad_seconds=5.0,
+        )
+    ]
+
+
+def test_title_card_info_lines_default_empty() -> None:
+    card = composition.TitleCard(text="Stage 1", duration_seconds=1.5)
+    assert card.info == ()
+    with_info = composition.TitleCard(text="Stage 1", duration_seconds=1.5, info=("24 rounds",))
+    assert with_info.info == ("24 rounds",)
+
+
+def test_match_title_defaults() -> None:
+    title = composition.MatchTitle(text="Bromma Classifier")
+    assert title.info == ()
+    assert title.duration_seconds == 3.0
+
+
+def test_from_stage_compositions_carries_title_page_and_closing(tmp_path: Path) -> None:
+    title = composition.MatchTitle(text="Bromma Classifier", info=("2026-05-01", "M. Axell"))
+    closing = composition.MatchTitle(text="Thanks for watching", duration_seconds=2.0)
+    comp = composition.from_stage_compositions(
+        _one_stage(tmp_path), project_name="m", title_page=title, closing=closing
+    )
+    assert comp.title_page is title
+    assert comp.closing is closing
+    # Default stays card-free so every existing caller's composition is unchanged.
+    bare = composition.from_stage_compositions(_one_stage(tmp_path), project_name="m")
+    assert bare.title_page is None
+    assert bare.closing is None
+
+
+def test_lower_titles_ignores_info_lines(tmp_path: Path) -> None:
+    """The FCPXML emitter keeps drawing a Basic Title from ``text`` alone
+    (#196): ``info`` is for the rendered outputs and never reaches the
+    legacy ``StageTitle``, so the #196 snapshot cannot move."""
+    comp = composition.from_stage_compositions(
+        _one_stage(tmp_path),
+        project_name="m",
+        titles={0: composition.TitleCard(text="Stage 1", duration_seconds=1.5, info=("24 rounds",))},
+    )
+    lowered = composition._lower_titles(comp)
+    assert len(lowered) == 1
+    assert lowered[0].text == "Stage 1"
+    assert not hasattr(lowered[0], "info")

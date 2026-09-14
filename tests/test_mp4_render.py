@@ -511,3 +511,254 @@ def test_render_mp4_rejects_mixed_frame_rates_with_clear_message(
     comp = composition.from_stage_compositions([stage_a, stage_b], project_name="match")
     with pytest.raises(ValueError, match="mp4 renderer requires"):
         mp4_render.render_mp4(comp, output_path=tmp_path / "out.mp4", work_dir=tmp_path / "work")
+
+
+# --- generated cards, intro / outro (issue #973) ---------------------------
+
+
+class _FakeRasterizer:
+    """Returns a real transparent PNG so the compositing is exercised."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def png(self, html: str, *, width: int, height: int) -> bytes:
+        import io
+
+        from PIL import Image
+
+        self.calls.append(html)
+        buf = io.BytesIO()
+        Image.new("RGBA", (width, height), (0, 0, 0, 0)).save(buf, format="PNG")
+        return buf.getvalue()
+
+
+def _asset(tmp_path: Path, name: str, *, seconds: float = 4.0) -> composition.Asset:
+    meta = _meta_30fps().model_copy(update={"duration_seconds": seconds})
+    return composition.Asset(path=_make_video(tmp_path, name), metadata=meta)
+
+
+def _carded_composition(tmp_path: Path, *, lower_third: bool = False) -> composition.Composition:
+    """Two 20 s stages kept whole (pads cover the clip), a 3 s title page,
+    1.5 s slates, a 2 s closing card and 4 s intro / outro clips."""
+    stage_a = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")
+    stage_b = _basic_stage(tmp_path=tmp_path, name="B", primary_name="b.mp4")
+    style = "lower-third" if lower_third else "slate"
+    titles = {
+        0: composition.TitleCard(text="Stage 1", duration_seconds=1.5, style=style, info=("24 rounds",)),
+        1: composition.TitleCard(text="Stage 2", duration_seconds=1.5, style=style),
+    }
+    return composition.from_stage_compositions(
+        [stage_a, stage_b],
+        project_name="m",
+        titles=titles,
+        intro=composition.Segment(asset=_asset(tmp_path, "intro.mp4"), name="intro"),
+        outro=composition.Segment(asset=_asset(tmp_path, "outro.mp4"), name="outro"),
+        title_page=composition.MatchTitle(text="Bromma", info=("2026-05-01",), duration_seconds=3.0),
+        closing=composition.MatchTitle(text="Thanks", duration_seconds=2.0),
+    )
+
+
+def test_plan_timeline_orders_the_spine_and_sums_durations(tmp_path: Path) -> None:
+    """Intro, title page, (slate, stage) x N, closing, outro; the total is
+    footage plus every card and clip -- the figure
+    ``MatchExportResult.duration_seconds`` reports."""
+    plan = mp4_render.plan_timeline(_carded_composition(tmp_path))
+    assert [item.kind for item in plan.items] == [
+        "intro",
+        "title_page",
+        "slate",
+        "stage",
+        "slate",
+        "stage",
+        "closing",
+        "outro",
+    ]
+    assert plan.duration_seconds == pytest.approx(4.0 + 3.0 + 1.5 + 20.0 + 1.5 + 20.0 + 2.0 + 4.0)
+    assert plan.needs_rasterizer
+    assert plan.has_generated_segments
+
+
+def test_plan_timeline_without_cards_is_stages_only(tmp_path: Path) -> None:
+    comp = composition.from_stage_compositions(
+        [_basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")], project_name="m"
+    )
+    plan = mp4_render.plan_timeline(comp)
+    assert [item.kind for item in plan.items] == ["stage"]
+    assert plan.duration_seconds == pytest.approx(20.0)
+    assert not plan.needs_rasterizer
+    assert not plan.has_generated_segments
+
+
+def test_plan_timeline_lower_third_rides_the_stage_not_the_spine(tmp_path: Path) -> None:
+    plan = mp4_render.plan_timeline(_carded_composition(tmp_path, lower_third=True))
+    kinds = [item.kind for item in plan.items]
+    assert "slate" not in kinds
+    stages = [item for item in plan.items if item.kind == "stage"]
+    assert all(item.lower_third is not None for item in stages)
+    # A lower-third overlays the stage's own head: it adds no time.
+    assert plan.duration_seconds == pytest.approx(4.0 + 3.0 + 20.0 + 20.0 + 2.0 + 4.0)
+    assert plan.needs_rasterizer
+
+
+def test_build_still_command_loops_the_png_with_silent_audio(tmp_path: Path) -> None:
+    comp = _carded_composition(tmp_path)
+    cmd = mp4_render._build_still_command(
+        tmp_path / "card.png", seconds=3.0, sequence=comp.sequence, output_path=tmp_path / "card.mp4"
+    )
+    assert cmd[cmd.index("-loop") + 1] == "1"
+    assert cmd[cmd.index("-framerate") + 1] == "30/1"
+    assert any(arg.startswith("anullsrc") for arg in cmd)
+    # Output-side ``-t``: both inputs are infinite, the hold bounds them.
+    assert cmd[cmd.index("-t") + 1] == "3"
+    # Same encode as a stage so the stitch can stream-copy the video.
+    assert cmd[cmd.index("-c:v") + 1] == "libx264"
+    assert cmd[cmd.index("-crf") + 1] == "20"
+    assert cmd[-1] == str(tmp_path / "card.mp4")
+
+
+def test_build_segment_command_conforms_the_clip_to_the_sequence(tmp_path: Path) -> None:
+    comp = _carded_composition(tmp_path)
+    assert comp.intro is not None
+    cmd = mp4_render._build_segment_command(
+        comp.intro, sequence=comp.sequence, output_path=tmp_path / "i.mp4"
+    )
+    fg = cmd[cmd.index("-filter_complex") + 1]
+    assert "scale=1920:1080:force_original_aspect_ratio=decrease" in fg
+    assert "pad=1920:1080:(ow-iw)/2:(oh-ih)/2" in fg
+    assert "fps=30/1" in fg
+    assert "format=yuv420p" in fg
+    assert str(comp.intro.asset.path) in cmd
+
+
+def test_build_stage_command_lower_third_fades_out_over_the_head(tmp_path: Path) -> None:
+    stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")
+    comp, plan = _build_plan(stage)
+    card = composition.TitleCard(text="Stage 1", duration_seconds=2.0, style="lower-third")
+    cmd = mp4_render._build_stage_command(
+        plan,
+        sequence=comp.sequence,
+        output_path=tmp_path / "stage.mp4",
+        lower_third=mp4_render._LowerThirdInput(path=tmp_path / "lt.png", card=card),
+    )
+    fg = cmd[cmd.index("-filter_complex") + 1]
+    assert str(tmp_path / "lt.png") in cmd
+    # Input 1 (no cams, no overlay) is the PNG; it fades over its last
+    # half second and is disabled after ``duration_seconds``.
+    assert "[1:v]format=rgba,fade=t=out:st=1.5:d=0.5:alpha=1[lt]" in fg
+    assert "overlay=0:0:enable='lt(t,2)'[withlt]" in fg
+    assert "[withlt]null[final]" in fg
+
+
+def test_build_stage_command_without_lower_third_is_unchanged(tmp_path: Path) -> None:
+    stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")
+    comp, plan = _build_plan(stage)
+    before = mp4_render._build_stage_command(plan, sequence=comp.sequence, output_path=tmp_path / "s.mp4")
+    after = mp4_render._build_stage_command(
+        plan, sequence=comp.sequence, output_path=tmp_path / "s.mp4", lower_third=None
+    )
+    assert before == after
+
+
+def test_build_concat_command_reencodes_audio_when_asked(tmp_path: Path) -> None:
+    """Generated segments carry ``anullsrc`` audio; the trims carry the
+    camera's. Re-encoding audio at the stitch is what lets the two
+    differ in sample rate, and the video half stays a stream copy."""
+    cmd = mp4_render._build_concat_command(
+        list_path=tmp_path / "l.txt", output_path=tmp_path / "o.mp4", reencode_audio=True
+    )
+    assert cmd[cmd.index("-c:v") + 1] == "copy"
+    assert cmd[cmd.index("-c:a") + 1] == "aac"
+    assert "-c" not in cmd[: cmd.index("-c:v")]
+    plain = mp4_render._build_concat_command(list_path=tmp_path / "l.txt", output_path=tmp_path / "o.mp4")
+    assert cmd != plain
+
+
+def test_render_mp4_splices_cards_and_clips_in_spine_order(tmp_path: Path) -> None:
+    comp = _carded_composition(tmp_path)
+    runner = MagicMock(side_effect=_ok)
+    work = tmp_path / "work"
+    fake = _FakeRasterizer()
+    result = mp4_render.render_mp4(
+        comp, output_path=tmp_path / "m.mp4", work_dir=work, runner=runner, rasterizer=fake
+    )
+    contents = (work / "concat.txt").read_text().splitlines()
+    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in contents]
+    assert names == [
+        "intro.mp4",
+        "title_page.mp4",
+        "slate_000.mp4",
+        "stage_000.mp4",
+        "slate_001.mp4",
+        "stage_001.mp4",
+        "closing.mp4",
+        "outro.mp4",
+    ]
+    # Every card was rasterized once: title page, two slates, closing.
+    assert len(fake.calls) == 4
+    assert "24 rounds" in fake.calls[1]
+    final = runner.call_args_list[-1].args[0]
+    assert final[final.index("-c:v") + 1] == "copy"
+    assert final[final.index("-c:a") + 1] == "aac"
+    assert result.duration_seconds == pytest.approx(56.0)
+    assert result.degradations == ()
+
+
+def test_render_mp4_without_cards_returns_the_stage_duration_and_copies(tmp_path: Path) -> None:
+    comp = composition.from_stage_compositions(
+        [_basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")], project_name="m"
+    )
+    runner = MagicMock(side_effect=_ok)
+    result = mp4_render.render_mp4(
+        comp, output_path=tmp_path / "m.mp4", work_dir=tmp_path / "w", runner=runner
+    )
+    assert result.duration_seconds == pytest.approx(20.0)
+    final = runner.call_args_list[-1].args[0]
+    assert final[final.index("-c") + 1] == "copy"
+
+
+def test_render_mp4_skips_every_card_when_no_browser_launches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The degradation path: no usable Chromium records one degradation,
+    every card is skipped, the clips and stages still render and stitch,
+    and the reported duration is what was actually written."""
+    from splitsmith.overlay_raster import RasterizerUnavailableError
+
+    class _NoBrowser:
+        def __enter__(self):
+            raise RasterizerUnavailableError("no browser", "Chromium could not be launched: boom")
+
+        def __exit__(self, *exc: object) -> None:
+            pass
+
+    monkeypatch.setattr(mp4_render, "ChromiumRasterizer", _NoBrowser)
+    comp = _carded_composition(tmp_path)
+    runner = MagicMock(side_effect=_ok)
+    work = tmp_path / "work"
+    result = mp4_render.render_mp4(comp, output_path=tmp_path / "m.mp4", work_dir=work, runner=runner)
+    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    assert names == ["intro.mp4", "stage_000.mp4", "stage_001.mp4", "outro.mp4"]
+    assert len(result.degradations) == 1
+    assert "boom" in result.degradations[0]
+    assert result.duration_seconds == pytest.approx(4.0 + 20.0 + 20.0 + 4.0)
+
+
+def test_render_mp4_lower_third_needs_no_extra_segment(tmp_path: Path) -> None:
+    comp = _carded_composition(tmp_path, lower_third=True)
+    runner = MagicMock(side_effect=_ok)
+    work = tmp_path / "work"
+    fake = _FakeRasterizer()
+    mp4_render.render_mp4(comp, output_path=tmp_path / "m.mp4", work_dir=work, runner=runner, rasterizer=fake)
+    names = [line.rsplit("/", 1)[-1].rstrip("'") for line in (work / "concat.txt").read_text().splitlines()]
+    assert names == [
+        "intro.mp4",
+        "title_page.mp4",
+        "stage_000.mp4",
+        "stage_001.mp4",
+        "closing.mp4",
+        "outro.mp4",
+    ]
+    # The stage invocations carry the lower-third PNG as an input.
+    stage_cmds = [c.args[0] for c in runner.call_args_list if c.args[0][-1].endswith("stage_000.mp4")]
+    assert any(str(work / "lower_third_000.png") in cmd for cmd in stage_cmds)
