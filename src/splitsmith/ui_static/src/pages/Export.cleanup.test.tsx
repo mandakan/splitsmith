@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import { api, type CleanupPlan, type ExportOverview, type MatchProject } from "@/lib/api";
 
+import { ConfirmProvider } from "@/components/useConfirm";
 import { Export } from "@/pages/Export";
 
 /** Task 9: the Export page is the only caller of `CleanupDialog` (Task 8)
@@ -74,9 +75,11 @@ function renderExportPage() {
   vi.mocked(api.getCleanupPlan).mockResolvedValue(makePlan());
   return render(
     <MemoryRouter initialEntries={["/export/anna"]}>
-      <Routes>
-        <Route path="/export/:slug" element={<Export />} />
-      </Routes>
+      <ConfirmProvider>
+        <Routes>
+          <Route path="/export/:slug" element={<Export />} />
+        </Routes>
+      </ConfirmProvider>
     </MemoryRouter>,
   );
 }

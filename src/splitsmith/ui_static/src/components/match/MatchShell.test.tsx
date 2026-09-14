@@ -310,8 +310,9 @@ function setupHappyPath() {
 }
 
 describe("viewLabelForPath (#691)", () => {
-  it('maps "/jobs" to "Jobs"', () => {
-    expect(viewLabelForPath("/jobs")).toBe("Jobs");
+  it('maps "/jobs" and "/triage" to no title (both redirect to Overview)', () => {
+    expect(viewLabelForPath("/jobs")).toBeNull();
+    expect(viewLabelForPath("/triage")).toBeNull();
   });
 
   it('maps "/beep-review" to "Audit" (the queue folded into Audit)', () => {

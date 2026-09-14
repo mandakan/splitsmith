@@ -277,14 +277,14 @@ mis-wire apart: ``export_runs.ExportRun.duration_seconds`` is wall clock
 for the job body, ``match_exports.MatchExportResult.duration_seconds`` is
 the length of the stitched timeline. Never assign one from the other.
 
-## UI: the visual budget and the restructure in flight (Sep 2026)
+## UI: the visual budget (Sep 2026)
 
-The SPA is mid-restructure (spec
+The SPA was restructured in eight PRs (spec
 ``docs/superpowers/specs/2026-09-13-ux-restructure-and-visual-budget-design.md``,
-eight PRs, seven merged as of 2026-09-14; PR 8 Export / Matches / Account next). Any new screen or surface,
-whatever session builds it, follows the budget below; the ESLint rule
-``no-restricted-syntax`` in ``ui_static/eslint.config.js`` enforces the
-mechanical half.
+all merged 2026-09-14). Every page is on the primitives now; any new
+screen or surface, whatever session builds it, follows the budget below.
+The ESLint rule ``no-restricted-syntax`` in ``ui_static/eslint.config.js``
+enforces the mechanical half.
 
 **Build with the primitives in ``components/ui``, nothing else:**
 ``PageHeader`` (the only way to get a page or stage title), ``Label``
@@ -342,8 +342,24 @@ twice its type's match median. A new per-shot control belongs on
 ``ShotEditor``, a new per-type figure on ``TimeBudgetCard``. Compare
 (``pages/Compare.tsx``, ``pages/compare/*``): header on ``PageHeader``,
 the nav row appears only on multi-shooter matches
-(``matchNavItems({ multiShooter })``). Still grandfathered and not in
-any rebuild PR --
+(``matchNavItems({ multiShooter })``). Matches (``pages/Pick.tsx``,
+``lib/matches.ts``): the Continue card names ``RecentProjectDetail.
+next_step``, which both recent-project enrichers in ``ui/server.py``
+derive from the same per-stage status walk as ``stages_audited``
+(``_next_step_from_statuses``: first ready / in-progress stage, then the
+first stage still needing footage or scores, then export). Export
+(``pages/Export.tsx``, ``components/export/*``, ``lib/exportPlan.ts``):
+the blocker ladder in ``stageBlock`` is the one place a stage's "why
+not" and its fix are worded, and it is what keeps hosted copy free of
+drives; the compare grid is the page's third mode (``pages/
+matchExportModel.ts`` still owns the payload and the partial-result
+summary); Delete match lives in the summary rail's footer. Account
+(``pages/Account.tsx``, ``components/account/*``) and every settings
+surface use ``components/ui/Field`` rows; ``components/ui/Segmented``
+is the closed-choice control. Triage and Jobs have no pages: the
+Overview rows carry accept / audit and the flag count, the progress
+strip and its drawer are Jobs, and ``/triage`` + ``/jobs`` redirect to
+Overview (drop the redirects after one release). Still grandfathered --
 restyle onto the primitives whenever you touch them:
 ``components/results/ResultsPlayer.tsx``, ``CamPicker.tsx``,
 ``ReclassifySheet.tsx``, ``ShareDialog.tsx``,
@@ -355,12 +371,10 @@ restyle onto the primitives whenever you touch them:
 ``RelinkDialog.tsx``, ``UploadDock.tsx``, ``StageTimeSection.tsx``,
 ``components/scoreboard/ConnectMatchDialog.tsx``.
 
-**Files the restructure will rewrite -- do not edit them in a parallel
-branch, put new functionality in a component the rebuild can mount:**
-PR 8 ``pages/Export.tsx``, ``pages/Pick.tsx``,
-``pages/Account.tsx``, ``pages/Triage.tsx``, ``pages/Jobs.tsx``. Nav
-rows live in ``components/match/navItems.tsx`` (grouped by phase:
-Prepare / Review / Analyse / Deliver); a new row needs a group.
+**Nav rows** live in ``components/match/navItems.tsx`` (grouped by
+phase: Prepare / Review / Analyse / Deliver); a new row needs a group,
+and a queue about state belongs on the Overview rows or the progress
+strip, never as a row of its own.
 
 **Verifying a screen locally without real footage:**
 ``uv run python scripts/seed_demo_match.py ~/.claude-tmp/demo-match``

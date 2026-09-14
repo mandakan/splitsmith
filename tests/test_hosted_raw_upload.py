@@ -865,3 +865,5 @@ def test_recent_projects_detail_reads_from_store_after_path_wiped(hosted_client)
     assert entry["shooter_count"] == 1
     assert entry["stage_count"] == 1
     assert entry["shooter_names"] == ["Anton"]
+    # No upload yet, so the picker's Continue card points at Footage.
+    assert entry["next_step"]["kind"] == "footage"

@@ -87,13 +87,13 @@ describe("Pick chrome (#550)", () => {
 
   it("mounts no account chip of its own", async () => {
     renderPick();
-    await screen.findByText(/standby/i);
+    await screen.findByText(/no match open/i);
     expect(screen.getAllByTestId("account-chip")).toHaveLength(1);
   });
 
-  it("keeps the standby strip", async () => {
+  it("keeps the context row", async () => {
     renderPick();
-    expect(await screen.findByText(/standby/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no match open/i)).toBeInTheDocument();
   });
 
   it("keeps the shooter identity pill", async () => {
@@ -104,7 +104,7 @@ describe("Pick chrome (#550)", () => {
   it("does not claim the mobile account menu -- the global bar still carries it on a phone", async () => {
     mobile.value = true;
     renderPick();
-    await screen.findByText(/standby/i);
+    await screen.findByText(/no match open/i);
     expect(
       screen.getByRole("navigation", { name: /global/i }),
     ).toBeInTheDocument();
@@ -129,6 +129,7 @@ describe("Pick chrome (#550)", () => {
         manual: false,
         shooter_names: ["Mathias Axell"],
         origin: "hosted",
+        next_step: null,
       },
     ]);
     renderPick();

@@ -17,6 +17,7 @@ import {
   type MatchProject,
 } from "@/lib/api";
 
+import { ConfirmProvider } from "@/components/useConfirm";
 import { Export } from "@/pages/Export";
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -112,17 +113,18 @@ describe("Export source-missing copy on hosted", () => {
     vi.mocked(api.getCleanupPlan).mockResolvedValue(makePlan());
     render(
       <MemoryRouter initialEntries={["/export/anna"]}>
-        <Routes>
-          <Route path="/export/:slug" element={<Export />} />
-        </Routes>
+        <ConfirmProvider>
+          <Routes>
+            <Route path="/export/:slug" element={<Export />} />
+          </Routes>
+        </ConfirmProvider>
       </MemoryRouter>,
     );
-    // The section help line and the banner both carry it.
-    expect(
-      (await screen.findAllByText(/original upload is no longer stored/i))
-        .length,
-    ).toBeGreaterThanOrEqual(1);
-    expect(screen.queryByText(/source drive/i)).toBeNull();
-    expect(screen.queryByText(/reconnect the drive/i)).toBeNull();
+    // The stage row says why in one line and offers the fix.
+    expect(await screen.findByText(/upload missing/i)).toBeInTheDocument();
+    expect(screen.getByText(/original upload is no longer stored/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /re-upload/i })).toHaveAttribute("href", "/ingest/anna");
+    expect(screen.queryByText(/drive/i)).toBeNull();
+    expect(screen.queryByText(/relink/i)).toBeNull();
   });
 });

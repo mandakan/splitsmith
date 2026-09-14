@@ -498,8 +498,8 @@ export function MobileAudit() {
           ) : audit === null ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
               <p className="text-sm text-muted">Nothing to audit yet - run shot detection first</p>
-              <Link to={href("jobs")} className="min-h-11 rounded-md border border-rule px-4 py-2 text-sm text-ink">
-                Go to jobs
+              <Link to={href("")} className="min-h-11 rounded-md border border-rule px-4 py-2 text-sm text-ink">
+                Overview
               </Link>
             </div>
           ) : (

@@ -93,7 +93,8 @@ export function viewLabelForPath(relativePath: string): string | null {
   if (relativePath.startsWith("/results")) return "Splits";
   // The beep queue folded into Audit (UX PR 5); the route redirects.
   if (relativePath.startsWith("/beep-review")) return "Audit";
-  if (relativePath.startsWith("/jobs")) return "Jobs";
+  // Triage and Jobs left the nav (UX PR 8); their routes redirect to
+  // Overview, which the null title already covers.
   // The Shooters page folded into Footage (UX PR 6); the route redirects.
   if (relativePath.startsWith("/shooters")) return "Footage";
   return null;
@@ -276,7 +277,6 @@ export function MatchShell() {
   );
   const [refreshKey, setRefreshKey] = useState(0);
   const [beepReviewPending, setBeepReviewPending] = useState<number>(0);
-  const [triageFlaggedCount, setTriageFlaggedCount] = useState<number>(0);
   // Per-shooter pages (Audit / Coach / Videos / Export) need a shooter in
   // the URL. Rather than forcing the user to the shooter list, default to
   // one -- the URL slug if present, else the shared default-shooter rule
@@ -385,18 +385,6 @@ export function MatchShell() {
       .catch(() => {
         if (alive) setBeepReviewPending(0);
       });
-    // Triage flagged count drives the sidebar/drawer badge the same way
-    // the beep queue does above - cheap GET, refreshed on every shell
-    // load, failure-tolerant so a triage-endpoint hiccup never blocks
-    // the rest of the shell.
-    api
-      .getTriageSummary()
-      .then((r) => {
-        if (alive) setTriageFlaggedCount(r.flagged_count);
-      })
-      .catch(() => {
-        if (alive) setTriageFlaggedCount(0);
-      });
     return () => {
       alive = false;
     };
@@ -441,14 +429,6 @@ export function MatchShell() {
       .getBeepQueue()
       .then((q) => {
         if (alive) setBeepReviewPending(q.pending_count);
-      })
-      .catch(() => {
-        /* keep the last known badge count */
-      });
-    api
-      .getTriageSummary()
-      .then((r) => {
-        if (alive) setTriageFlaggedCount(r.flagged_count);
       })
       .catch(() => {
         /* keep the last known badge count */
@@ -620,7 +600,6 @@ export function MatchShell() {
             shooterSlug: defaultShooterSlug,
             hasFootage: shooters.some((s) => s.video_count > 0),
             beepReviewPendingCount: beepReviewPending,
-            triageFlaggedCount,
             multiShooter: shooters.length > 1,
             compareStage: stages.find((s) => s.status === "audited")?.stage_number ?? 1,
             footageHint: FOOTAGE_HINT,
@@ -661,7 +640,6 @@ export function MatchShell() {
           matchSubtitle={renderMatchSubtitle(project)}
           stages={stages}
           beepReviewPendingCount={beepReviewPending}
-          triageFlaggedCount={triageFlaggedCount}
           multiShooter={shooters.length > 1}
           compareStage={stages.find((s) => s.status === "audited")?.stage_number ?? 1}
           awaiting={

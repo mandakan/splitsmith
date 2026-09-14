@@ -62,10 +62,6 @@ interface MatchSidebarProps {
    *  count chip so the operator can see at a glance that there's work
    *  there. */
   beepReviewPendingCount?: number;
-  /** Stages flagged for a closer look on desktop from the mobile Triage
-   *  worklist. Drives the badge on the Triage nav row, mirroring
-   *  ``beepReviewPendingCount``'s contract. */
-  triageFlaggedCount?: number;
   /** Compare needs two shooters; its nav row shows only then. */
   multiShooter?: boolean;
   /** Where the Compare row lands: the first audited stage, else 1. */
@@ -115,7 +111,6 @@ export function MatchSidebar({
   matchSubtitle,
   stages,
   beepReviewPendingCount,
-  triageFlaggedCount,
   multiShooter,
   compareStage,
   awaiting = false,
@@ -204,7 +199,6 @@ export function MatchSidebar({
           shooterSlug,
           hasFootage,
           beepReviewPendingCount: beepReviewPendingCount ?? 0,
-          triageFlaggedCount: triageFlaggedCount ?? 0,
           multiShooter,
           compareStage,
           footageHint,
