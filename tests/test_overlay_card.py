@@ -60,15 +60,19 @@ def test_slate_groups_are_the_same_shape_as_the_title_page() -> None:
     assert groups[1].elements[0].text == "24 rounds"
 
 
-def test_lower_third_sits_bottom_left_on_a_plate() -> None:
+def test_lower_third_sits_bottom_left_on_a_plate_with_the_name_on_top() -> None:
+    """Bottom-anchored groups stack away from the edge in declaration
+    order, so the name -- read first, drawn highest -- is declared last
+    and the info lines before it, last line nearest the edge."""
     groups = overlay_card.card_groups(
-        TitleCard(text="Stage 3", duration_seconds=2.0, style="lower-third", info=("24 rounds",))
+        TitleCard(text="Stage 3", duration_seconds=2.0, style="lower-third", info=("24 rounds", "Comstock"))
     )
     assert all(g.anchor is Anchor.BOTTOM_LEFT for g in groups)
     assert all(g.align == "left" for g in groups)
-    assert groups[0].elements[0].role is Role.HEADLINE
-    assert groups[0].elements[0].emphasis is Emphasis.PLATE
-    assert groups[1].elements[0].role is Role.DETAIL
+    assert [g.elements[0].text for g in groups] == ["Comstock", "24 rounds", "Stage 3"]
+    assert groups[-1].elements[0].role is Role.HEADLINE
+    assert groups[-1].elements[0].emphasis is Emphasis.PLATE
+    assert all(g.elements[0].role is Role.DETAIL for g in groups[:-1])
 
 
 def test_a_card_with_no_info_is_one_group() -> None:

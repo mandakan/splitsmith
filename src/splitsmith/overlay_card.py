@@ -59,22 +59,27 @@ def card_groups(card: Card) -> tuple[Group, ...]:
 
     One group per line, not one ``ROW`` group with several elements: the
     lines stack vertically, and groups sharing an anchor are exactly the
-    thing ``overlay_layout`` provides for that.
+    thing ``overlay_layout`` provides for that. Groups stack *away from
+    the anchor's edge* in declaration order, so a bottom-anchored
+    lower-third declares its info lines first (last line nearest the
+    edge) and the name last, which is what puts the name on top when
+    read. A middle anchor stacks top-down, so the title page declares
+    the name first. Measured, not assumed: the first cut declared the
+    lead first for both and the lower-third came out upside down.
     """
-    anchor: Anchor
-    align: Literal["left", "center"]
     if _is_lower_third(card):
-        anchor, align = Anchor.BOTTOM_LEFT, "left"
         lead = Element(role=Role.HEADLINE, text=card.text, emphasis=Emphasis.PLATE)
-    else:
-        anchor, align = Anchor.MIDDLE_CENTER, "center"
-        lead = Element(role=Role.IDENTITY, text=card.text)
-    groups = [Group(anchor=anchor, flow=Flow.ROW, elements=(lead,), align=align)]
-    for line in card.info:
-        groups.append(
-            Group(anchor=anchor, flow=Flow.ROW, elements=(Element(role=Role.DETAIL, text=line),), align=align)
-        )
+        lines = [_line(Anchor.BOTTOM_LEFT, "left", text) for text in reversed(card.info)]
+        lines.append(Group(anchor=Anchor.BOTTOM_LEFT, flow=Flow.ROW, elements=(lead,), align="left"))
+        return tuple(lines)
+    lead = Element(role=Role.IDENTITY, text=card.text)
+    groups = [Group(anchor=Anchor.MIDDLE_CENTER, flow=Flow.ROW, elements=(lead,), align="center")]
+    groups.extend(_line(Anchor.MIDDLE_CENTER, "center", text) for text in card.info)
     return tuple(groups)
+
+
+def _line(anchor: Anchor, align: Literal["left", "center"], text: str) -> Group:
+    return Group(anchor=anchor, flow=Flow.ROW, elements=(Element(role=Role.DETAIL, text=text),), align=align)
 
 
 def card_scale(height: int) -> CellScale:
