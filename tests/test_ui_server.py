@@ -9759,3 +9759,57 @@ def test_shot_detect_does_not_adopt_other_shooters_job(two_shooter_match: Path) 
         release.set()
     _wait_for_job(client, job_a["id"])
     _wait_for_job(client, job_b["id"])
+
+
+def test_export_stage_summary_card_flag_reaches_the_exporter_and_the_run_record(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The endpoint forwards the card flags plus the scoreboard's scorecard,
+    the shooter's name and the manual-time flag into ``export_stage``, and
+    the export-run record lists the card it produced (#972)."""
+    from splitsmith import summary_card
+    from splitsmith.match_project import MatchProject, StageScorecard
+
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    shooter_root = project_root / "shooters" / "me"
+    project = MatchProject.load(shooter_root)
+    project.competitor_name = "M. Axell"
+    project.stage(1).scorecard = StageScorecard(hit_factor=12.0, alphas=10)
+    project.save(shooter_root)
+
+    captured: dict[str, object] = {}
+
+    def fake_card(**kwargs):  # type: ignore[no-untyped-def]
+        captured.update(kwargs)
+        kwargs["png_path"].write_bytes(b"")
+        kwargs["mov_path"].write_bytes(b"")
+        return summary_card.SummaryCardResult(png_path=kwargs["png_path"], mov_path=kwargs["mov_path"])
+
+    monkeypatch.setattr(summary_card, "render_summary_card", fake_card)
+
+    resp = client.post(
+        "/api/shooters/me/stages/1/export",
+        json={
+            "write_trim": False,
+            "write_csv": False,
+            "write_fcpxml": False,
+            "write_report": False,
+            "write_overlay": False,
+            "write_summary_card": True,
+            "summary_hold_seconds": 2.5,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    final = _wait_for_job(client, resp.json()["id"])
+    assert final["status"] == "succeeded", final
+    assert final["result"]["summary_card"] == "stage1_stage-1_summary.mov"
+    assert captured["label"] == "M. Axell"
+    assert captured["seconds"] == 2.5
+    assert captured["data"].scorecard.hit_factor == 12.0
+    assert captured["data"].stage_time_seconds == 10.0
+
+    latest = client.get("/api/shooters/me/exports/runs").json()["runs"][0]
+    assert "summary_card" in latest["formats"]
+    assert {"filename": "stage1_stage-1_summary.mov", "kind": "summary_card"} in [
+        {"filename": a["filename"], "kind": a["kind"]} for a in latest["artifacts"]
+    ]

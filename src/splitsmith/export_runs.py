@@ -28,7 +28,8 @@ SCHEMA_VERSION = 1
 
 #: What an artefact is, for the history row's icon + wording. ``trim`` is
 #: the primary lossless cut; ``secondary_trim`` a per-cam one;
-#: ``match_video`` the stitched match render when the run asked for mp4.
+#: ``match_video`` the stitched match render when the run asked for mp4;
+#: ``summary_card`` the per-stage result screen beside the overlay (#972).
 ArtifactKind = Literal[
     "trim",
     "secondary_trim",
@@ -36,6 +37,7 @@ ArtifactKind = Literal[
     "fcpxml",
     "report",
     "overlay",
+    "summary_card",
     "sidecar",
     "match_video",
 ]
@@ -44,7 +46,7 @@ RunKind = Literal["stage", "match"]
 
 #: Fixed order for ``stage_run_formats`` -- the pipeline's own order, so
 #: two runs asking for the same set always compare equal as lists.
-_STAGE_FORMAT_ORDER = ("trim", "csv", "fcpxml", "report", "overlay")
+_STAGE_FORMAT_ORDER = ("trim", "csv", "fcpxml", "report", "overlay", "summary_card")
 
 
 class ExportArtifact(BaseModel):
@@ -138,11 +140,14 @@ def append_run(doc: dict | None, run: ExportRun) -> dict:
     return log.model_dump(mode="json")
 
 
-def stage_run_formats(*, trim: bool, csv: bool, fcpxml: bool, report: bool, overlay: bool) -> list[str]:
+def stage_run_formats(
+    *, trim: bool, csv: bool, fcpxml: bool, report: bool, overlay: bool, summary_card: bool = False
+) -> list[str]:
     """The formats a per-stage export requested, in pipeline order.
 
     Takes bare booleans rather than the request model so this module stays
-    free of any dependency on the HTTP layer.
+    free of any dependency on the HTTP layer. ``summary_card`` (#972)
+    defaults off so every caller that predates it reads unchanged.
     """
     selected = {
         "trim": trim,
@@ -150,6 +155,7 @@ def stage_run_formats(*, trim: bool, csv: bool, fcpxml: bool, report: bool, over
         "fcpxml": fcpxml,
         "report": report,
         "overlay": overlay,
+        "summary_card": summary_card,
     }
     return [name for name in _STAGE_FORMAT_ORDER if selected[name]]
 

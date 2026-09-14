@@ -3775,6 +3775,7 @@ def register_job_bodies(state: AppState) -> None:
             (result.fcpxml_path, "fcpxml"),
             (result.report_path, "report"),
             (result.overlay_path, "overlay"),
+            (result.summary_card_path, "summary_card"),
         ):
             if produced is not None:
                 run_artifacts.append(export_runs.ExportArtifact(filename=produced.name, kind=artifact_kind))
@@ -3802,6 +3803,7 @@ def register_job_bodies(state: AppState) -> None:
                     fcpxml=req.write_fcpxml,
                     report=req.write_report,
                     overlay=req.write_overlay,
+                    summary_card=req.write_summary_card,
                 ),
                 anomaly_count=len(reported),
                 artifacts=run_artifacts,
@@ -3816,6 +3818,7 @@ def register_job_bodies(state: AppState) -> None:
                 "fcpxml": _name(result.fcpxml_path),
                 "report": _name(result.report_path),
                 "overlay": _name(result.overlay_path),
+                "summary_card": _name(result.summary_card_path),
                 # ``secondary_trimmed_paths`` maps video_id -> Path; iterate
                 # the values, not the mapping (which yields the ids).
                 "secondary_trims": [p.name for p in result.secondary_trimmed_paths.values()],
