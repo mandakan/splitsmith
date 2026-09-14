@@ -719,3 +719,138 @@ def test_export_stage_request_accepts_secondary_video_ids() -> None:
 
     subset = ExportStageRequest.model_validate({"secondary_video_ids": ["aaa", "bbb"]})
     assert subset.secondary_video_ids == ["aaa", "bbb"]
+
+
+# --- summary card (issue #972, option 1) -----------------------------------
+
+
+def _seed_stage_with_trim(tmp_path: Path, *, shots: bool = True) -> tuple[Path, Path]:
+    audit_path = tmp_path / "audit" / "stage1.json"
+    audit_path.parent.mkdir(parents=True)
+    payload = _audit_payload(
+        shots=[{"shot_number": 1, "candidate_number": 1, "time": 5.5, "ms_after_beep": 500}] if shots else []
+    )
+    audit_path.write_text(json.dumps(payload), encoding="utf-8")
+    exports_dir = tmp_path / "exports"
+    exports_dir.mkdir()
+    (exports_dir / "stage1_stage-1-h1_trimmed.mp4").write_bytes(b"")
+    return audit_path, exports_dir
+
+
+def _export(audit_path: Path, exports_dir: Path, **kwargs: Any) -> exports_mod.StageExportResult:
+    from splitsmith.match_project import StageScorecard
+
+    return exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1,
+            write_trim=False,
+            write_csv=False,
+            write_fcpxml=False,
+            write_report=False,
+            write_summary_card=True,
+            summary_hold_seconds=2.5,
+        ),
+        audit_path=audit_path,
+        exports_dir=exports_dir,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+        scorecard=StageScorecard(hit_factor=12.0, alphas=10),
+        shooter_label="M. Axell",
+        **kwargs,
+    )
+
+
+def test_summary_card_is_written_beside_the_overlay(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from splitsmith import summary_card
+
+    captured: dict[str, Any] = {}
+
+    def fake_render(**kwargs: Any) -> summary_card.SummaryCardResult:
+        captured.update(kwargs)
+        kwargs["png_path"].write_bytes(b"")
+        kwargs["mov_path"].write_bytes(b"")
+        return summary_card.SummaryCardResult(
+            png_path=kwargs["png_path"], mov_path=kwargs["mov_path"], degradations=("no browser: x",)
+        )
+
+    monkeypatch.setattr(exports_mod.summary_card, "render_summary_card", fake_render)
+    audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
+    result = _export(audit_path, exports_dir)
+    assert result.summary_card_path == exports_dir / "stage1_stage-1-h1_summary.mov"
+    assert captured["png_path"] == exports_dir / "stage1_stage-1-h1_summary.png"
+    assert captured["seconds"] == 2.5
+    assert captured["label"] == "M. Axell"
+    data = captured["data"]
+    assert data.stage_time_seconds == 8.0
+    assert data.scorecard is not None and data.scorecard.hit_factor == 12.0
+    assert [s.time_from_beep for s in data.shots] == [0.5]
+    assert captured["trimmed_video_path"] == exports_dir / "stage1_stage-1-h1_trimmed.mp4"
+    # A degradation is worth telling the user about, not a failure.
+    assert any("no browser" in a for a in result.anomalies)
+    assert not result.export_failures
+
+
+def test_summary_card_skips_without_shots(tmp_path: Path) -> None:
+    audit_path, exports_dir = _seed_stage_with_trim(tmp_path, shots=False)
+    result = _export(audit_path, exports_dir)
+    assert result.summary_card_path is None
+    assert any("summary card not written: no shots audited" in a for a in result.export_failures)
+
+
+def test_summary_card_skips_without_a_trim(tmp_path: Path) -> None:
+    audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
+    (exports_dir / "stage1_stage-1-h1_trimmed.mp4").unlink()
+    result = _export(audit_path, exports_dir)
+    assert result.summary_card_path is None
+    assert any("summary card not written" in a and "trim" in a for a in result.export_failures)
+
+
+def test_summary_card_failure_is_recorded_not_raised(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from splitsmith import summary_card
+
+    def boom(**kwargs: Any) -> summary_card.SummaryCardResult:
+        raise summary_card.SummaryCardError("prores exploded")
+
+    monkeypatch.setattr(exports_mod.summary_card, "render_summary_card", boom)
+    audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
+    result = _export(audit_path, exports_dir)
+    assert result.summary_card_path is None
+    assert any("summary card not written: prores exploded" in a for a in result.export_failures)
+
+
+def test_summary_card_off_by_default_touches_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from splitsmith import summary_card
+
+    def boom(**kwargs: Any) -> summary_card.SummaryCardResult:
+        raise AssertionError("must not be called")
+
+    monkeypatch.setattr(exports_mod.summary_card, "render_summary_card", boom)
+    audit_path, exports_dir = _seed_stage_with_trim(tmp_path)
+    result = exports_mod.export_stage(
+        request=exports_mod.StageExportRequest(
+            stage_number=1, write_trim=False, write_csv=False, write_fcpxml=False, write_report=False
+        ),
+        audit_path=audit_path,
+        exports_dir=exports_dir,
+        source_video_path=None,
+        pre_buffer_seconds=5.0,
+        post_buffer_seconds=5.0,
+        stage_data=StageData(
+            stage_number=1,
+            stage_name="Stage 1 -- H1",
+            time_seconds=8.0,
+            scorecard_updated_at=datetime(2026, 5, 2, 14, 30, tzinfo=UTC),
+        ),
+        beep_time_in_source=10.0,
+        config=Config(),
+    )
+    assert result.summary_card_path is None

@@ -64,6 +64,10 @@ class ExportStageRequest(BaseModel):
     overlay_codec: Literal["auto", "hevc-alpha", "prores-4444"] = "auto"
     overlay_max_height: int | None = None
     overlay_max_fps: float | None = None
+    # Issue #972 (option 1). Also write the stage's summary card
+    # (``<base>_summary.png`` + a held ``.mov``) next to the overlay.
+    write_summary_card: bool = False
+    summary_hold_seconds: float = 3.0
     # Palette preset for the overlay text + stroke. ``"splitsmith"``
     # (default) uses the same tokens the web UI ships, mirrored into
     # ``data/overlay_theme.json``. ``"clean"`` is the neutral
