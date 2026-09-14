@@ -3678,6 +3678,8 @@ def register_job_bodies(state: AppState) -> None:
                         overlay_max_height=req.overlay_max_height,
                         overlay_max_fps=req.overlay_max_fps,
                         overlay_theme=req.overlay_theme,
+                        write_summary_card=req.write_summary_card,
+                        summary_hold_seconds=req.summary_hold_seconds,
                     ),
                     audit_path=audit_file,
                     exports_dir=exports_dir,
@@ -3688,6 +3690,9 @@ def register_job_bodies(state: AppState) -> None:
                     post_buffer_seconds=proj.trim_post_buffer_seconds,
                     config=Config(),
                     secondaries=secondaries,
+                    scorecard=stg.scorecard,
+                    shooter_label=proj.competitor_name or proj.name,
+                    stage_time_is_manual=stg.time_seconds_manual,
                 )
         except StageExportError as exc:
             # Surface as a job failure with the exporter's own message so

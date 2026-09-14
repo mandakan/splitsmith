@@ -17,12 +17,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import csv_gen, fcpxml_gen, overlay_render, report, trim
+from .. import csv_gen, fcpxml_gen, overlay_render, report, summary_card, trim
 from ..audit_data import audit_shots_to_engine_shots, read_audit_data
 from ..config import Config, ReportFiles, StageAnalysis, StageData
 from ..export_naming import stage_file_base
+from ..match_project import StageScorecard
 from ..overlay_render import OverlayCodec
 from ..overlay_theme import ThemeName
+from ..stage_summary_data import TileStageData, load_stage_shots
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,13 @@ class StageExportRequest:
     # the web UI uses out of overlay_theme.json so the overlay matches
     # the brand. ``"clean"`` is the neutral white-on-amber alternative.
     overlay_theme: ThemeName = "splitsmith"
+    # Issue #972 (option 1). Also write ``<base>_summary.png`` and
+    # ``<base>_summary.mov`` -- the stage's result screen, held for
+    # ``summary_hold_seconds`` -- next to the overlay MOV, for an editor
+    # to drop on the timeline after the stage. Off by default so every
+    # existing per-stage export is byte-identical.
+    write_summary_card: bool = False
+    summary_hold_seconds: float = summary_card.DEFAULT_SECONDS
 
 
 @dataclass(frozen=True)
@@ -103,6 +112,9 @@ class StageExportResult:
     # Artefacts this run was asked for and could not write, with the reason.
     # Always a real problem, whatever the request flags were.
     export_failures: list[str] = field(default_factory=list)
+    # Issue #972 (option 1): the held summary MOV; its PNG sits beside it
+    # under the same stem. ``None`` when not requested or not written.
+    summary_card_path: Path | None = None
 
 
 def export_stage(
@@ -117,9 +129,18 @@ def export_stage(
     post_buffer_seconds: float,
     config: Config,
     secondaries: list[SecondaryExport] | None = None,
+    scorecard: StageScorecard | None = None,
+    shooter_label: str | None = None,
+    stage_time_is_manual: bool = False,
 ) -> StageExportResult:
     """Run the export for one stage. Pure orchestration over the engine
     modules; never re-detects.
+
+    ``scorecard`` / ``shooter_label`` / ``stage_time_is_manual`` (issue
+    #972) feed the summary card when ``write_summary_card`` is on: the
+    scoreboard's hit counts and hit factor, the name on the card, and
+    whether the stage time was typed rather than scored. Absent stays
+    absent -- the card draws less, never a zero.
 
     Produces (subject to the request flags):
       - ``stage<N>_<slug>_trimmed.mp4`` -- lossless stream-copy trim of the
@@ -318,6 +339,55 @@ def export_stage(
     if overlay_target.exists():
         fcp_overlay_path = overlay_target
 
+    # The summary card (issue #972, option 1): the stage's result screen
+    # as a separate still + held MOV next to the overlay. Same gates as
+    # the overlay -- it says what the shots were, over the trim's last
+    # frame -- and the same skip-not-fail posture.
+    summary_card_path: Path | None = None
+    # A degradation (no browser: the card kept its blurred frame but no
+    # text) is worth telling the user, but the card was written, so it is
+    # a note rather than a skip reason.
+    card_notes: list[str] = []
+    if request.write_summary_card and not shots:
+        skip_reasons.append("summary card not written: no shots audited")
+    elif request.write_summary_card:
+        card_source: Path | None = None
+        if trimmed_path is not None and trimmed_path.exists():
+            card_source = trimmed_path
+        elif (exports_dir / f"{base}_trimmed.mp4").exists():
+            card_source = exports_dir / f"{base}_trimmed.mp4"
+        if card_source is None:
+            skip_reasons.append(
+                "summary card not written: no lossless trim in exports/. "
+                "Re-run Generate with the Trim toggle enabled."
+            )
+        else:
+            label = shooter_label or ""
+            try:
+                card = summary_card.render_summary_card(
+                    data=TileStageData(
+                        label=label,
+                        stage_number=stage_data.stage_number,
+                        shots=load_stage_shots(audit_path),
+                        # The model treats <=0 as unset; a zero-second
+                        # stage time is never real.
+                        stage_time_seconds=stage_data.time_seconds if stage_data.time_seconds > 0 else None,
+                        stage_time_is_manual=stage_time_is_manual,
+                        scorecard=scorecard,
+                    ),
+                    label=label,
+                    trimmed_video_path=card_source,
+                    png_path=exports_dir / f"{base}_summary.png",
+                    mov_path=exports_dir / f"{base}_summary.mov",
+                    seconds=request.summary_hold_seconds,
+                    theme=request.overlay_theme,
+                )
+            except (summary_card.SummaryCardError, OSError, fcpxml_gen.FFprobeError) as exc:
+                skip_reasons.append(f"summary card not written: {exc}")
+            else:
+                summary_card_path = card.mov_path
+                card_notes.extend(card.degradations)
+
     fcpxml_path: Path | None = None
     if request.write_fcpxml:
         # FCPXML needs a video to reference. Prefer the lossless trim we
@@ -406,7 +476,7 @@ def export_stage(
                 fcpxml_path = None
 
     shot_anomalies = report.detect_anomalies(shots, beep_time_in_source, stage_data.time_seconds)
-    anomalies = [*shot_anomalies, *skip_reasons]
+    anomalies = [*shot_anomalies, *skip_reasons, *card_notes]
 
     report_path: Path | None = None
     if request.write_report:
@@ -443,4 +513,5 @@ def export_stage(
         secondary_trimmed_paths=secondary_paths_present,
         shot_anomalies=shot_anomalies,
         export_failures=list(skip_reasons),
+        summary_card_path=summary_card_path,
     )

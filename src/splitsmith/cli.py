@@ -1184,11 +1184,28 @@ def overlay(
             f"is the neutral white-on-amber alternative."
         ),
     ),
+    summary_card: bool = typer.Option(
+        False,
+        "--summary-card",
+        help=(
+            "Also write the stage's result screen next to the overlay: "
+            "<output stem>_summary.png and a held _summary.mov (ProRes) to drop "
+            "on the timeline after the stage."
+        ),
+    ),
+    summary_label: str = typer.Option("", "--summary-label", help="Shooter's name on the summary card."),
+    summary_hold: float = typer.Option(3.0, "--summary-hold", help="Seconds the summary MOV holds for."),
 ) -> None:
     """Render an alpha overlay MOV for an audited stage.
 
     The overlay drops onto V2 in FCP as a connected clip; the renderer
     mirrors the trimmed clip's resolution / fps / duration unless capped.
+
+    ``--summary-card`` (issue #972) adds the stage summary -- name, stage
+    time, splits over the trimmed clip's blurred last frame -- as a
+    separate still and MOV; the alpha overlay cannot carry one itself.
+    Scoring comes from the project, which this verb does not read, so the
+    card carries the audit's shots and stage time only.
     """
     if codec not in overlay_render.OVERLAY_CODECS:
         raise typer.BadParameter(f"--codec must be one of {overlay_render.OVERLAY_CODECS}, got {codec!r}")
@@ -1206,6 +1223,36 @@ def overlay(
         ffmpeg_binary=runtime().ffmpeg_binary,
     )
     console.print(f"[green]Wrote[/] {output}")
+    if summary_card:
+        from .audit_data import read_audit_data
+        from .stage_summary_data import TileStageData, load_stage_shots
+        from .summary_card import SummaryCardError, render_summary_card
+
+        stem = output.stem.removesuffix("_overlay")
+        audit_doc = read_audit_data(audit_path)
+        stage_time = audit_doc.get("stage_time_seconds") if isinstance(audit_doc, dict) else None
+        try:
+            card = render_summary_card(
+                data=TileStageData(
+                    label=summary_label,
+                    stage_number=int(audit_doc.get("stage_number", 0)) if isinstance(audit_doc, dict) else 0,
+                    shots=load_stage_shots(audit_path),
+                    stage_time_seconds=float(stage_time) if stage_time else None,
+                ),
+                label=summary_label,
+                trimmed_video_path=video,
+                png_path=output.with_name(f"{stem}_summary.png"),
+                mov_path=output.with_name(f"{stem}_summary.mov"),
+                seconds=summary_hold,
+                theme=theme,  # type: ignore[arg-type]
+                ffmpeg_binary=runtime().ffmpeg_binary,
+            )
+        except SummaryCardError as exc:
+            console.print(f"[red]Error:[/] summary card not written: {exc}")
+            raise typer.Exit(code=1) from exc
+        console.print(f"[green]Wrote[/] {card.mov_path} (+ {card.png_path.name})")
+        for note in card.degradations:
+            console.print(f"[yellow]note[/] {note}", soft_wrap=True)
 
 
 @app.command()
