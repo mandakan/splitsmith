@@ -9,7 +9,8 @@ UI — see `docs/ux-redesign/06-design-system.md`.
 
 - `index.html` — the page (redone 2026-09-14 on the restructured UI:
   island nav, editorial hero, the loop as a bento of real screenshots,
-  outputs, install, detection; no waitlist modal, hosted is live)
+  outputs, install, detection; no waitlist modal; hosted is invite-only,
+  so the primary action is the local install)
 - `img/` — screenshots of the app on the demo match
   (`scripts/seed_demo_match.py --media`, 1440x900, cropped with PIL);
   re-shoot them after a visible UI change

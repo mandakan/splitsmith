@@ -54,7 +54,7 @@
   .eyebrow{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--hair-2);border-radius:999px;padding:4px 12px;font-family:var(--mono);font-size:10px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);background:var(--surface)}
   .eyebrow i{width:6px;height:6px;border-radius:50%;background:var(--led);box-shadow:0 0 10px var(--led-glow)}
   h1,h2,h3{margin:0;text-wrap:balance}
-  h1{font-family:var(--display);font-weight:700;text-transform:uppercase;font-size:clamp(44px,6.6vw,96px);line-height:.92;letter-spacing:-.005em}
+  h1{font-family:var(--display);font-weight:700;text-transform:uppercase;font-size:clamp(44px,5.7vw,82px);line-height:.92;letter-spacing:-.005em}
   h1 .led{color:var(--led)}
   h2{font-family:var(--display);font-weight:700;text-transform:uppercase;font-size:clamp(36px,5.2vw,64px);line-height:.95}
   h3{font-size:18px;font-weight:600;letter-spacing:-.01em}
@@ -108,9 +108,9 @@
   .sec-hd{display:grid;gap:18px;justify-items:start;max-width:64ch;margin-bottom:clamp(40px,6vw,72px)}
 
   /* hero */
-  .hero{padding-block:clamp(56px,9vw,120px) clamp(48px,7vw,96px)}
+  .hero{padding-block:clamp(32px,5vw,64px) clamp(48px,7vw,96px)}
   .hero-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:clamp(28px,5vw,64px);align-items:center}
-  .hero h1{margin:22px 0 26px}
+  .hero h1{margin:18px 0 22px}
   .hero .acts{display:flex;flex-wrap:wrap;gap:12px;margin-top:34px}
   .hero .fine{margin-top:22px;font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--subtle)}
   .hero .fine b{color:var(--muted);font-weight:500}
@@ -228,7 +228,7 @@
       <a href="#install">Install</a>
       <a href="https://github.com/mandakan/splitsmith">GitHub</a>
     </div>
-    <a class="btn primary cta" href="https://my.splitsmith.app">Open the app <span class="well"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12 12 4M6 4h6v6"/></svg></span></a>
+    <a class="btn primary cta" href="#install">Install <span class="well"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v9M4 8l4 4 4-4"/></svg></span></a>
     <button class="ham" aria-label="Menu" aria-expanded="false" aria-controls="sheet"><span></span><span></span><span></span></button>
   </div>
 </nav>
@@ -238,7 +238,7 @@
     <a href="#ways">Outputs</a>
     <a href="#install">Install</a>
     <a href="https://github.com/mandakan/splitsmith">GitHub</a>
-    <a href="https://my.splitsmith.app" style="color:var(--led)">Open the app</a>
+    <a href="#install" style="color:var(--led)">Install</a>
   </div>
 </div>
 
@@ -251,10 +251,10 @@
         <h1 class="rv d1">The timer knows your stage time.<br><span class="led">Your camera knows every shot.</span></h1>
         <p class="lede rv d2">Splitsmith reads the start beep and every shot out of the audio your head cam recorded, and turns them into splits you can audit shot by shot, coach against your own match, and line up next to your squad.</p>
         <div class="acts rv d3">
-          <a class="btn primary" href="https://my.splitsmith.app">Open the app <span class="well"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12 12 4M6 4h6v6"/></svg></span></a>
-          <a class="btn" href="#install">Install locally <span class="well"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v9M4 8l4 4 4-4"/></svg></span></a>
+          <a class="btn primary" href="#install">Install locally <span class="well"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v9M4 8l4 4 4-4"/></svg></span></a>
+          <a class="btn" href="https://github.com/mandakan/splitsmith">View on GitHub <span class="well"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12 12 4M6 4h6v6"/></svg></span></a>
         </div>
-        <p class="fine rv d4">Open source <b>MIT</b> &middot; any camera with a microphone &middot; nothing is uploaded on a local install</p>
+        <p class="fine rv d4">Open source <b>MIT</b> &middot; any camera with a microphone &middot; runs on your machine, nothing is uploaded &middot; hosted by invitation</p>
       </div>
       <div class="hero-visual rv d2">
         <div class="shell"><div class="core"><img src="img/hero-overview.png" width="1440" height="900" alt="Splitsmith's match overview: twelve stages, each with footage, beep, shots, audit state, draw, average split and stage time" loading="eager"></div></div>
@@ -268,7 +268,7 @@
       <div><div class="k">Beep timing</div><div class="v">&plusmn;15<small> ms</small></div><div class="d">Located in the clip, then confirmed by you.</div></div>
       <div><div class="k">Shot detection</div><div class="v">3<small> voters</small></div><div class="d">Envelope onsets, CLAP similarity and a gradient-boosted classifier vote per shot.</div></div>
       <div><div class="k">Per shot</div><div class="v">split<small> &middot; class</small></div><div class="d">Draw, fire, transition, movement, reload, activation.</div></div>
-      <div><div class="k">Licence</div><div class="v">MIT</div><div class="d">Runs on your machine, or hosted at my.splitsmith.app.</div></div>
+      <div><div class="k">Licence</div><div class="v">MIT</div><div class="d">Runs on your machine. Hosted at my.splitsmith.app by invitation.</div></div>
     </div>
   </section>
 
@@ -322,7 +322,7 @@
       <div class="way shell rv"><div class="core">
         <span class="k">In the app</span><h3>Coach and compare</h3>
         <p class="muted" style="font-size:14px">Shot-by-shot playback with the video, the ruler and the table in sync. Per-shot notes and flags. The whole squad side by side.</p>
-        <ul><li>Hosted at my.splitsmith.app or on your own machine</li><li>Desktop sync pushes a local match to your account</li><li>Share a read-only link to a match or a stage</li></ul>
+        <ul><li>On your own machine, or hosted at my.splitsmith.app by invitation</li><li>Desktop sync pushes a local match to a hosted account</li><li>Share a read-only link to a match or a stage</li></ul>
       </div></div>
       <div class="way shell rv d1"><div class="core">
         <span class="k">Final Cut Pro</span><h3>A marker per shot</h3>
@@ -343,7 +343,7 @@
         <span class="eyebrow rv"><i></i>Install</span>
         <h2 class="rv d1" style="margin:18px 0 20px">Two minutes to your first stage.</h2>
         <div class="steps rv d2">
-          <div class="step"><span class="n">01</span><p><b>Open the app</b>Sign in at my.splitsmith.app with a magic link. Upload a stage clip, or install locally and let desktop sync push a match up.</p></div>
+          <div class="step"><span class="n">01</span><p><b>Install and launch</b>One command with uv, one to open the app in your browser. The first boot fetches the detection models. Hosted at my.splitsmith.app is by invitation; a local install can sync a match up to it.</p></div>
           <div class="step"><span class="n">02</span><p><b>Drop your clips</b>Footage from any camera with a microphone: head, chest, gimbal or handheld. Each clip is matched to its stage by recording time.</p></div>
           <div class="step"><span class="n">03</span><p><b>Confirm the beep, audit the shots</b>The app finds the beep, trims the stage and runs detection. You confirm what it found; the splits are yours.</p></div>
         </div>
@@ -377,7 +377,7 @@
     <div class="row">
       <span class="brand"><i></i>Splitsmith</span>
       <span>Open source &middot; MIT &middot; built for IPSC shooters, by one</span>
-      <span style="display:flex;gap:20px"><a href="https://github.com/mandakan/splitsmith">GitHub</a><a href="https://github.com/mandakan/splitsmith/blob/main/CHANGELOG.md">Changelog</a><a href="https://my.splitsmith.app">Open the app</a></span>
+      <span style="display:flex;gap:20px"><a href="https://github.com/mandakan/splitsmith">GitHub</a><a href="https://github.com/mandakan/splitsmith/blob/main/CHANGELOG.md">Changelog</a><a href="https://my.splitsmith.app">Sign in</a></span>
     </div>
   </footer>
 </main>
