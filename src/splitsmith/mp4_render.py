@@ -84,6 +84,7 @@ from .overlay_card import (
 from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from .overlay_summary_cell import build_summary_still
 from .overlay_theme import ThemeName, load_theme
+from .runtime import runtime
 
 logger = logging.getLogger(__name__)
 
@@ -265,6 +266,7 @@ def _render_with_work_dir(
                 ffmpeg_binary=ffmpeg_binary,
                 youtube_preset=youtube_preset,
                 lower_third=lower_third,
+                primary_audio=_has_audio_stream(item.plan.stage.primary.path),
             )
             _run(cmd, runner=runner)
             segments.append((stage_out, item.duration_seconds))
@@ -375,6 +377,40 @@ def _render_with_work_dir(
         duration_seconds=sum(seconds for _, seconds in segments),
         degradations=degradations,
     )
+
+
+def _has_audio_stream(path: Path) -> bool:
+    """Whether ``path`` carries an audio stream, asked of ffprobe.
+
+    Tolerant on purpose: only a probe that ran and reported *no* audio
+    stream answers ``False``. A missing ffprobe, a file that is not
+    there yet, or an unparseable answer all say ``True`` and let ffmpeg
+    be the judge -- every primary this renderer has ever seen is a
+    camera trim with audio, and the failure mode of guessing ``False``
+    (a silent stage that also breaks the stitch's stream layout) is the
+    worse one.
+    """
+    try:
+        proc = subprocess.run(
+            [
+                runtime().ffprobe_binary,
+                "-v",
+                "error",
+                "-select_streams",
+                "a",
+                "-show_entries",
+                "stream=index",
+                "-of",
+                "csv=p=0",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return True
+    return bool(proc.stdout.strip())
 
 
 #: How far before a *tail* backdrop's target frame the grab starts
@@ -720,6 +756,7 @@ def _build_stage_command(
     ffmpeg_binary: str = "ffmpeg",
     youtube_preset: bool = False,
     lower_third: _LowerThirdInput | None = None,
+    primary_audio: bool = True,
 ) -> tuple[str, ...]:
     """Build the ffmpeg invocation that renders one stage to ``output_path``.
 
@@ -736,6 +773,18 @@ def _build_stage_command(
     looped image input, composited last -- above the alpha overlay --
     over the stage's head, and fading out over the last
     :data:`LOWER_THIRD_FADE_SECONDS` of the card's own duration.
+
+    **The audio is not taken from the seeked primary input.** Input-side
+    ``-ss`` is exact for video (keyframe seek, then decode-and-discard to
+    the target) but not for the audio of a stream-copied trim: measured
+    on a real match, one stage's audio came out cut 0.42 s late while
+    its video was cut exactly, so the segment's audio ran shorter than
+    its video and the stitch's audio re-encode pulled every later stage
+    0.4 s early. The primary is therefore opened a second time with no
+    seek (``primary_audio``, the last input) and its audio is cut by
+    ``atrim`` on decoded timestamps, which honours the trim's edit list;
+    the video path is unchanged. ``primary_audio=False`` (a primary with
+    no audio stream) maps no audio at all.
     """
     args: list[str] = [ffmpeg_binary, "-hide_banner", "-y"]
     stage = plan.stage
@@ -792,21 +841,24 @@ def _build_stage_command(
             str(lower_third.path),
         ]
 
+    audio_index: int | None = None
+    if primary_audio:
+        audio_index = (
+            1 + len(plan.cam_alignments) + (1 if overlay_index is not None else 0) + (1 if lower_third else 0)
+        )
+        args += ["-i", str(stage.primary.path)]
+
     filter_graph = _build_stage_filter_graph(
         plan,
         sequence=sequence,
         overlay_input_index=overlay_index,
         lower_third=lower_third_graph,
+        audio_input_index=audio_index,
     )
 
-    args += [
-        "-filter_complex",
-        filter_graph,
-        "-map",
-        "[final]",
-        "-map",
-        "0:a?",  # primary audio when present, no error if absent
-    ]
+    args += ["-filter_complex", filter_graph, "-map", "[final]"]
+    if audio_index is not None:
+        args += ["-map", "[aout]"]
     args += list(_encode_args(sequence, youtube_preset=youtube_preset))
     args += [str(output_path)]
     return tuple(args)
@@ -897,6 +949,7 @@ def _build_stage_filter_graph(
     sequence,  # type: ignore[no-untyped-def]
     overlay_input_index: int | None,
     lower_third: tuple[int, float] | None = None,
+    audio_input_index: int | None = None,
 ) -> str:
     """Compose primary + cams + overlay into a single ``-filter_complex``.
 
@@ -947,6 +1000,16 @@ def _build_stage_filter_graph(
         parts.extend(lt_parts)
 
     parts.append(f"[{base_label}]null[final]")
+
+    # The primary's audio, cut from an unseeked read on decoded
+    # timestamps (see ``_build_stage_command``): the same window the
+    # video's ``-ss`` / ``-t`` describe, then re-based to zero so the
+    # two streams start together.
+    if audio_input_index is not None:
+        parts.append(
+            f"[{audio_input_index}:a]atrim=start={plan.head_trim_seconds:g}:duration={plan.effective_seconds:g},"
+            "asetpts=PTS-STARTPTS[aout]"
+        )
     return ";".join(parts)
 
 

@@ -855,3 +855,180 @@ def test_summary_without_browser_or_frame_is_skipped_not_fatal(
     assert names == ["stage_000.mp4", "stage_001.mp4"]
     assert len(result.degradations) == 1
     assert result.duration_seconds == pytest.approx(40.0)
+
+
+# --- primary audio from an unseeked read ------------------------------------
+
+
+def test_stage_audio_is_cut_by_atrim_from_an_unseeked_input(tmp_path: Path) -> None:
+    """Input-side ``-ss`` mis-cuts a stream-copied trim's audio (measured
+    0.42 s late on a real match), so the audio comes from a second,
+    unseeked read of the primary and ``atrim`` cuts it on decoded
+    timestamps. The video path keeps its seek."""
+    stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4", head_pad=3.0, tail_pad=3.0)
+    comp, plan = _build_plan(stage)
+    cmd = mp4_render._build_stage_command(plan, sequence=comp.sequence, output_path=tmp_path / "s.mp4")
+    inputs = [(i, cmd[i + 1]) for i, a in enumerate(cmd) if a == "-i"]
+    # The primary appears twice: seeked first (video), unseeked last (audio).
+    assert [p for _, p in inputs] == [str(stage.video_path), str(stage.video_path)]
+    first_i, last_i = inputs[0][0], inputs[1][0]
+    assert list(cmd[first_i - 4 : first_i]) == ["-ss", "2", "-t", f"{plan.effective_seconds:g}"]
+    assert cmd[last_i - 1] not in ("-ss", "-t")
+    fg = cmd[cmd.index("-filter_complex") + 1]
+    assert f"[1:a]atrim=start=2:duration={plan.effective_seconds:g},asetpts=PTS-STARTPTS[aout]" in fg
+    maps = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-map"]
+    assert maps == ["[final]", "[aout]"]
+    assert "0:a?" not in cmd
+
+
+def test_audio_input_is_last_after_cams_overlay_and_lower_third(tmp_path: Path) -> None:
+    secondary = _make_video(tmp_path, "cam.mp4")
+    sec = SecondaryClip(video_path=secondary, video=_meta_30fps(), beep_offset_seconds=5.0, label="Cam")
+    overlay = _make_video(tmp_path, "overlay.mov")
+    stage = _basic_stage(
+        tmp_path=tmp_path, name="A", primary_name="a.mp4", secondaries=(sec,), overlay_path=overlay
+    )
+    comp, plan = _build_plan(stage)
+    card = composition.TitleCard(text="Stage 1", duration_seconds=2.0, style="lower-third")
+    cmd = mp4_render._build_stage_command(
+        plan,
+        sequence=comp.sequence,
+        output_path=tmp_path / "s.mp4",
+        lower_third=mp4_render._LowerThirdInput(path=tmp_path / "lt.png", card=card),
+    )
+    inputs = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-i"]
+    assert inputs == [
+        str(stage.video_path),
+        str(secondary),
+        str(overlay),
+        str(tmp_path / "lt.png"),
+        str(stage.video_path),
+    ]
+    fg = cmd[cmd.index("-filter_complex") + 1]
+    assert "[4:a]atrim=" in fg
+    assert "[3:v]format=rgba" in fg
+
+
+def test_a_primary_without_audio_maps_none(tmp_path: Path) -> None:
+    stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")
+    comp, plan = _build_plan(stage)
+    cmd = mp4_render._build_stage_command(
+        plan, sequence=comp.sequence, output_path=tmp_path / "s.mp4", primary_audio=False
+    )
+    assert [cmd[i + 1] for i, a in enumerate(cmd) if a == "-i"] == [str(stage.video_path)]
+    assert [cmd[i + 1] for i, a in enumerate(cmd) if a == "-map"] == ["[final]"]
+    assert "atrim" not in cmd[cmd.index("-filter_complex") + 1]
+
+
+def test_has_audio_stream_is_tolerant(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only a probe that ran and found no audio says False."""
+    import subprocess as sp
+
+    calls: list[str] = []
+
+    def fake_run(cmd, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(str(cmd[-1]))
+        if "silent" in str(cmd[-1]):
+            return sp.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if "missing" in str(cmd[-1]):
+            raise sp.CalledProcessError(1, cmd, stderr="No such file")
+        return sp.CompletedProcess(cmd, 0, stdout="1\n", stderr="")
+
+    monkeypatch.setattr(mp4_render.subprocess, "run", fake_run)
+    assert mp4_render._has_audio_stream(Path("/x/with-audio.mp4")) is True
+    assert mp4_render._has_audio_stream(Path("/x/silent.mp4")) is False
+    assert mp4_render._has_audio_stream(Path("/x/missing.mp4")) is True
+
+
+@pytest.mark.integration
+def test_stage_audio_stays_on_the_video_across_a_keyframe_misaligned_trim(tmp_path: Path) -> None:
+    """The defect as it happened: a stream-copied trim whose cut fell
+    between keyframes, so the video starts on the earlier keyframe and an
+    edit list realigns the audio. Rendering two such stages through the
+    real ffmpeg, the beep tone in the audio must land where the
+    composition says it does in both -- input-side seeking put stage 2's
+    0.42 s early on the real match, and every later stage with it."""
+    import shutil
+
+    import numpy as np
+
+    from splitsmith.fcpxml_gen import probe_video
+    from tests.synthetic_media import ffmpeg_available
+
+    if not ffmpeg_available():
+        pytest.skip("ffmpeg not on PATH")
+    ffmpeg = shutil.which("ffmpeg")
+    assert ffmpeg is not None
+    # 24 s source, 1 s GOP, a 1 kHz tone burst at 10.0-10.2 s on silence.
+    source = tmp_path / "source.mp4"
+    subprocess.run(
+        [
+            ffmpeg, "-v", "error", "-y",
+            "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25:duration=24",
+            "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=48000:duration=24",
+            "-filter_complex", "[1:a]volume='between(t,10,10.2)':eval=frame[a]",
+            "-map", "0:v", "-map", "[a]", "-c:v", "libx264", "-preset", "ultrafast",
+            "-g", "25", "-keyint_min", "25", "-sc_threshold", "0", "-c:a", "aac", "-shortest", str(source),
+        ],  # fmt: skip
+        check=True,
+        capture_output=True,
+    )
+    # Stream-copy trims starting between keyframes: 3.42 s and 3.0 s in.
+    trims = []
+    for i, start in enumerate((3.42, 3.0)):
+        trim = tmp_path / f"trim{i}.mp4"
+        subprocess.run(
+            [
+                ffmpeg,
+                "-v",
+                "error",
+                "-y",
+                "-ss",
+                f"{start}",
+                "-i",
+                str(source),
+                "-t",
+                "12",
+                "-c",
+                "copy",
+                str(trim),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        trims.append((trim, start))
+    # Each trim's beep is the tone at source 10.0 s: clip-local 10 - start.
+    stages = [
+        StageComposition(
+            stage_name=f"S{i}",
+            video_path=trim,
+            video=probe_video(trim),
+            shots=[_shot(1, 1.0, 1.0)],
+            beep_offset_seconds=10.0 - start,
+            head_pad_seconds=2.0,
+            tail_pad_seconds=2.0,
+        )
+        for i, (trim, start) in enumerate(trims)
+    ]
+    comp = composition.from_stage_compositions(stages, project_name="m")
+    out = tmp_path / "m.mp4"
+    result = mp4_render.render_mp4(comp, output_path=out, work_dir=tmp_path / "work", ffmpeg_binary=ffmpeg)
+    raw = subprocess.run(
+        [ffmpeg, "-v", "error", "-i", str(out), "-vn", "-ac", "1", "-ar", "8000", "-f", "s16le", "-"],
+        capture_output=True,
+        check=True,
+    ).stdout
+    env = np.abs(np.frombuffer(raw, dtype=np.int16).astype(np.float32))
+    # Per stage the tone should start 2.0 s (the head pad) into the stage.
+    plan = mp4_render.plan_timeline(comp)
+    cursor = 0.0
+    for item in plan.items:
+        expected = cursor + 2.0
+        window = env[int((expected - 1.0) * 8000) : int((expected + 1.0) * 8000)]
+        onset = (expected - 1.0) + int(np.argmax(window > window.max() * 0.5)) / 8000
+        assert (
+            abs(onset - expected)
+            < 0.1  # detector slop on an AAC tone is a few 21 ms frames; the defect was 0.42 s
+        ), f"{item.kind} {item.index}: tone at {onset:.3f}, expected {expected:.3f}"
+        cursor += item.duration_seconds
+    assert result.duration_seconds == pytest.approx(cursor)
