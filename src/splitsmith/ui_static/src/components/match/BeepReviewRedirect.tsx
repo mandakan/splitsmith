@@ -45,7 +45,7 @@ export function BeepReviewRedirect() {
             ? stageParam
               ? matchHref(matchId, "audit", slug, stageParam)
               : matchHref(matchId, "audit", slug)
-            : matchHref(matchId, "shooters"),
+            : matchHref(matchId, "ingest"),
         );
       } catch {
         if (alive) setTarget(matchHref(matchId, "audit"));

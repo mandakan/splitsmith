@@ -1,4 +1,3 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * Coach routes (#329).
  *
@@ -23,14 +22,9 @@
 import {
   ArrowLeft,
   ArrowRight,
-  Flag,
   Loader2,
-  MessageSquare,
   Pause,
   Play,
-  RefreshCw,
-  Save,
-  Zap,
 } from "lucide-react";
 import {
   useCallback,
@@ -40,10 +34,17 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 
-import { Kicker } from "@/components/ui";
+import { CoachShotTable } from "@/components/coach/CoachShotTable";
+import { ShotEditor } from "@/components/coach/ShotEditor";
+import { TimeBudgetBar } from "@/components/coach/TimeBudgetBar";
+import { TimeBudgetCard } from "@/components/coach/TimeBudgetCard";
 import { Button } from "@/components/ui/button";
+import { Chip } from "@/components/ui/Chip";
+import { Label } from "@/components/ui/Label";
+import { PageHeader } from "@/components/ui/PageHeader";
+import { Stat, StatStrip } from "@/components/ui/Stat";
 import {
   ApiError,
   api,
@@ -58,15 +59,13 @@ import { useMatchHref } from "@/lib/matchHref";
 import { cn } from "@/lib/utils";
 import {
   INTERVAL_LABEL,
-  INTERVAL_TONE,
-  TIER_COLORS,
-  TIER_ORDER,
   type TierBaselines,
   baselinesFromMatchDistributions,
   gapTier,
   statisticSplits,
 } from "@/lib/splits";
 import { ShotRuler } from "@/components/results/ShotRuler";
+import { BUDGET_LABEL, BUDGET_TICK, matchBudget, timeBudget } from "@/lib/timeBudget";
 
 export function Coach() {
   // Slug carried by ShooterScopedRoute (#353 phase 1) -- present whenever
@@ -111,19 +110,18 @@ function CoachMatch({ slug }: { slug?: string }) {
   if (!slug) {
     // ShooterScopedRoute should keep this from rendering, but the
     // Coach() wrapper still passes slugParam through when undefined;
-    // bounce back to the picker rather than 500ing on the API call.
-    return <Navigate to={href("shooters")} replace />;
+    // the slug-less coach route resolves the default shooter.
+    return <Navigate to={href("coach")} replace />;
   }
   return <CoachMatchInner slug={slug} />;
 }
 
 function CoachMatchInner({ slug }: { slug: string }) {
-  const navigate = useNavigate();
   const href = useMatchHref();
   const stagePrefix = href("coach", slug);
-  const auditPrefix = href("audit", slug);
   const [project, setProject] = useState<MatchProject | null>(null);
   const [perStage, setPerStage] = useState<PerStageAggregate[]>([]);
+  const [coachShots, setCoachShots] = useState<{ stageNumber: number; stageName: string; shots: CoachShot[] }[]>([]);
   const [distributions, setDistributions] =
     useState<CoachMatchDistributions | null>(null);
   const [loading, setLoading] = useState(true);
@@ -240,6 +238,11 @@ function CoachMatchInner({ slug }: { slug: string }) {
         });
         setPerStage(aggs);
         setAnnotations(annot);
+        setCoachShots(
+          proj.stages
+            .map((s) => ({ stageNumber: s.stage_number, stageName: s.stage_name, shots: coachByStage.get(s.stage_number)?.shots ?? [] }))
+            .filter((s) => s.shots.length > 0),
+        );
       } catch (e) {
         if (alive) setError(e instanceof ApiError ? e.detail : String(e));
       } finally {
@@ -253,24 +256,23 @@ function CoachMatchInner({ slug }: { slug: string }) {
 
   const auditedAggs = perStage.filter((s) => s.audited);
   const headline = useMemo(() => computeHeadline(auditedAggs), [auditedAggs]);
-  const baselines = useMemo(
-    () => baselinesFromMatchDistributions(distributions),
-    [distributions],
-  );
+  const budget = useMemo(() => matchBudget(coachShots, distributions), [coachShots, distributions]);
+  const shooterName = project?.competitor_name ?? null;
 
   if (loading) {
     return (
-      <div className="flex h-64 items-center justify-center gap-2 text-sm text-muted">
+      <div className="flex h-64 items-center justify-center gap-2 text-md text-muted">
         <Loader2 className="size-4 animate-spin" /> Loading coach data...
       </div>
     );
   }
   if (error) {
     return (
-      <div className="px-7 py-8">
-        <div className="rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
+      <div className="px-4 py-4 md:px-7 md:py-5">
+        <PageHeader title="Coach" />
+        <p role="alert" className="text-sm text-led-text">
           {error}
-        </div>
+        </p>
       </div>
     );
   }
@@ -278,130 +280,93 @@ function CoachMatchInner({ slug }: { slug: string }) {
 
   if (auditedAggs.length === 0) {
     return (
-      <div className="px-7 py-8">
-        <Kicker className="mb-2">Match analysis</Kicker>
-        <h1 className="mb-2 font-display text-4xl font-bold uppercase leading-none tracking-tight text-ink">
-          Coach
-        </h1>
-        <p className="max-w-xl text-sm text-muted">
-          Audit a stage on the audit page to unlock match-wide coaching
-          insights -- splits, interval breakdowns, and per-stage rankings.
+      <div className="px-4 py-4 md:px-7 md:py-5">
+        <PageHeader title="Coach" sub={shooterName ?? undefined} />
+        <p className="max-w-[52ch] text-md text-muted">
+          Audit a stage first. Coach then reads where the time went on each audited stage, which intervals were the
+          outliers, and how the match compares with itself.
         </p>
       </div>
     );
   }
 
+  const pct = (v: number | undefined) => (v == null ? "\u2014" : String(Math.round(v * 100)));
+  const draws = budget.stages.flatMap((st) => st.segments.filter((seg) => seg.cls === "first_shot").map((seg) => seg.seconds));
+  const avgDraw = draws.length ? draws.reduce((a, b) => a + b, 0) / draws.length : null;
   return (
-    <div className="flex flex-col gap-5 px-7 py-5">
-      <div>
-        <Kicker className="mb-2">Match analysis</Kicker>
-        <h1 className="mb-2 font-display text-4xl font-bold uppercase leading-none tracking-tight text-ink">
-          Coach
-          <span className="ml-3 rounded border border-rule-strong bg-surface-2 px-2 py-1 align-middle font-mono text-[0.6875rem] font-bold uppercase tracking-[0.14em] text-ink-2">
-            Match-wide
-          </span>
-        </h1>
-        <p className="font-mono text-[0.75rem] uppercase tracking-[0.06em] text-muted">
-          <b className="font-bold text-ink">{pad2(auditedAggs.length)}</b>{" "}
-          stages audited &middot;{" "}
-          <b className="font-bold text-ink">{headline.shotCount}</b> shots
-          logged &middot;{" "}
-          <span className="text-led">
-            {project.competitor_name ?? "you"}
-          </span>
-        </p>
-      </div>
+    <div className="px-4 py-4 md:px-7 md:py-5">
+      <PageHeader
+        title="Coach"
+        sub={
+          <>
+            {shooterName ? <>{shooterName} &middot; </> : null}
+            {auditedAggs.length} of {perStage.length} stages audited &middot; {budget.classifiedCount} classified
+          </>
+        }
+      />
+      <StatStrip lead className="mb-4">
+        <Stat label="Movement" value={pct(budget.shareByClass.movement)} unit={budget.shareByClass.movement != null ? "%" : undefined} tone={budget.shareByClass.movement == null ? "dim" : "ink"} />
+        <Stat label="Transitions" value={pct(budget.shareByClass.transition)} unit={budget.shareByClass.transition != null ? "%" : undefined} tone={budget.shareByClass.transition == null ? "dim" : "ink"} />
+        <Stat label="Avg draw" value={avgDraw != null ? avgDraw.toFixed(2) : "\u2014"} unit={avgDraw != null ? "s" : undefined} tone={avgDraw == null ? "dim" : "ink"} />
+        <Stat label="Avg split" value={headline.avgSplit != null ? headline.avgSplit.toFixed(3) : "\u2014"} unit={headline.avgSplit != null ? "s" : undefined} tone={headline.avgSplit == null ? "dim" : "ink"} />
+        <Stat label="Outliers" value={String(budget.outlierCount)} tone={budget.outlierCount === 0 ? "dim" : "ink"} />
+      </StatStrip>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          label="Match time"
-          value={formatMinSec(headline.totalSeconds)}
-          unit="audited"
-          sub={`${auditedAggs.length} stages · ${headline.shotCount} shots`}
-        />
-        <StatCard
-          label="Avg split"
-          value={
-            headline.avgSplit != null
-              ? `${headline.avgSplit.toFixed(2)}s`
-              : "--"
-          }
-          unit="across fire splits"
-          tone="done"
-        />
-        <StatCard
-          label="Fastest split"
-          value={
-            headline.fastestSplit != null
-              ? `${headline.fastestSplit.value.toFixed(3)}s`
-              : "--"
-          }
-          tone="led"
-          sub={
-            headline.fastestSplit
-              ? `stage ${pad2(headline.fastestSplit.stage)} · ${headline.fastestSplit.stage_name}`
-              : undefined
-          }
-        />
-        <StatCard
-          label="Slowest split"
-          value={
-            headline.slowestSplit != null
-              ? `${headline.slowestSplit.value.toFixed(3)}s`
-              : "--"
-          }
-          tone={
-            headline.slowestSplit &&
-            gapTier(headline.slowestSplit.value, "split", baselines)?.label === "long"
-              ? "warn"
-              : undefined
-          }
-          sub={
-            headline.slowestSplit
-              ? `stage ${pad2(headline.slowestSplit.stage)} · ${headline.slowestSplit.stage_name}`
-              : undefined
-          }
-        />
-      </div>
-
-      <section className="overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
-        <div className="flex items-center justify-between border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3 font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
-          Per-stage breakdown
-          <span className="ml-2 font-mono text-[0.625rem] font-medium tracking-[0.06em] text-muted">
-            click a row to open audit · double-click for per-stage coach
-          </span>
+      <section aria-label="Time budget by stage" className="mb-4 overflow-hidden rounded-[10px] border border-rule bg-surface">
+        <div className="border-b border-rule-strong px-3.5 py-2">
+          <Label>Time budget by stage</Label>
         </div>
-        <div className="grid grid-cols-[40px_1fr_100px_120px_180px_60px_40px] items-center gap-3 border-b border-rule bg-surface-2 px-5 py-2 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
-          <span>#</span>
-          <span>Stage</span>
-          <span className="text-right">Time</span>
-          <span className="text-right">Avg split</span>
-          <span>Distribution</span>
-          <span className="text-right">Shots</span>
-          <span />
+        {perStage.map((row) => {
+          const st = budget.stages.find((b) => b.stageNumber === row.stage_number) ?? null;
+          return (
+            <div
+              key={row.stage_number}
+              className="grid grid-cols-[36px_minmax(120px,160px)_minmax(0,1fr)_72px] items-center gap-3 border-b border-rule px-3.5 py-2 text-md last:border-b-0"
+            >
+              <span className="font-mono text-sm text-muted">{pad2(row.stage_number)}</span>
+              {row.audited ? (
+                <Link to={`${stagePrefix}/${row.stage_number}`} className="truncate font-medium text-ink hover:text-led-text">
+                  {row.stage_name}
+                </Link>
+              ) : (
+                <span className="truncate text-subtle">{row.stage_name}</span>
+              )}
+              <span>{st ? <TimeBudgetBar budget={st} compact scale={budget.maxTotal > 0 ? st.total / budget.maxTotal : 0} /> : null}</span>
+              <span className="numeral text-right text-ink-2">{st ? st.total.toFixed(2) : row.total_seconds > 0 ? row.total_seconds.toFixed(2) : "\u2014"}</span>
+            </div>
+          );
+        })}
+        <div className="flex flex-wrap items-center gap-4 border-t border-rule px-3.5 py-2 text-sm text-muted">
+          {(["first_shot", "movement", "transition", "split", "reload", "unclassified"] as const).map((c) => (
+            <span key={c} className="inline-flex items-center gap-1.5">
+              <i aria-hidden className={cn("size-2 rounded-full", LEGEND_BG[c])} />
+              {BUDGET_LABEL[c]}
+            </span>
+          ))}
+          <span className="ml-auto">amber ring = an outlier inside</span>
         </div>
-        {perStage.map((s) => (
-          <PerStageRow
-            key={s.stage_number}
-            row={s}
-            onOpen={() => s.audited && navigate(`${auditPrefix}/${s.stage_number}`)}
-            onCoach={() => s.audited && navigate(`${stagePrefix}/${s.stage_number}`)}
-          />
-        ))}
       </section>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr]">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <IntervalBreakdownCard distributions={distributions} />
         <CrtHistogramCard distributions={distributions} />
       </div>
-
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[1fr_1fr]">
+      <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <RecommendationsCard distributions={distributions} />
         <AnnotationsCard annotations={annotations} stagePrefix={stagePrefix} />
       </div>
     </div>
   );
 }
+
+const LEGEND_BG: Record<string, string> = {
+  first_shot: "bg-led",
+  movement: "bg-beep",
+  transition: "bg-manual",
+  split: "bg-done",
+  reload: "bg-live",
+  unclassified: "bg-surface-3",
+};
 
 function computeHeadline(aggs: PerStageAggregate[]) {
   let totalSeconds = 0;
@@ -454,196 +419,39 @@ function computeHeadline(aggs: PerStageAggregate[]) {
   };
 }
 
-function StatCard({
-  label,
-  value,
-  unit,
-  sub,
-  tone,
-}: {
-  label: string;
-  value: string;
-  unit?: string;
-  sub?: string;
-  tone?: "led" | "warn" | "done";
-}) {
-  return (
-    <div className="relative overflow-hidden rounded-2xl border border-rule-strong bg-gradient-to-b from-surface to-surface-2 px-5 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
-      <div className="mb-1 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.2em] text-subtle">
-        {label}
-      </div>
-      <div
-        className={cn(
-          "font-mono text-3xl font-bold leading-none tabular-nums",
-          tone === "led" && "text-led drop-shadow-[0_0_14px_var(--color-led-glow)]",
-          tone === "warn" && "text-live drop-shadow-[0_0_14px_var(--color-live-glow)]",
-          tone === "done" && "text-done drop-shadow-[0_0_14px_var(--color-done-glow)]",
-          !tone && "text-ink",
-        )}
-      >
-        {value}
-      </div>
-      {unit && (
-        <div className="mt-1 font-mono text-[0.625rem] uppercase tracking-[0.08em] text-muted">
-          {unit}
-        </div>
-      )}
-      {sub && (
-        <div className="mt-1.5 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-          {sub}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PerStageRow({
-  row,
-  onOpen,
-  onCoach,
-}: {
-  row: PerStageAggregate;
-  onOpen: () => void;
-  onCoach: () => void;
-}) {
-  const distTotal = Object.values(row.split_buckets).reduce(
-    (a, b) => a + b,
-    0,
-  );
-  return (
-    <div
-      className={cn(
-        "grid grid-cols-[40px_1fr_100px_120px_180px_60px_40px] items-center gap-3 border-b border-rule px-5 py-3 last:border-b-0 transition-colors",
-        row.audited
-          ? "cursor-pointer hover:bg-surface-2"
-          : "opacity-50",
-        row.flagged_count > 0 && row.audited && "bg-led/[0.04]",
-      )}
-      onClick={onOpen}
-      onDoubleClick={onCoach}
-    >
-      <span className="inline-flex size-8 items-center justify-center rounded-md border border-rule-strong bg-surface-3 font-mono text-xs font-bold tabular-nums text-ink-2">
-        {pad2(row.stage_number)}
-      </span>
-      <div className="min-w-0">
-        <div className="truncate font-display text-sm font-bold uppercase tracking-[0.04em] text-ink">
-          {row.stage_name}
-        </div>
-        <div className="mt-0.5 inline-flex items-center gap-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-          {row.audited ? (
-            row.flagged_count > 0 && (
-              <span className="inline-flex items-center gap-1 rounded border border-led/40 bg-led/10 px-1.5 py-0.5 font-bold text-led">
-                <Flag className="size-2.5" /> {row.flagged_count}
-              </span>
-            )
-          ) : (
-            <span>not audited yet</span>
-          )}
-        </div>
-      </div>
-      <span className="text-right font-mono text-sm font-bold tabular-nums text-ink">
-        {row.audited ? `${row.total_seconds.toFixed(2)}s` : "--"}
-      </span>
-      <span className="text-right font-mono text-sm tabular-nums text-ink-2">
-        {row.avg_split != null ? `${row.avg_split.toFixed(3)}s` : "--"}
-      </span>
-      <SplitDistributionBar buckets={row.split_buckets} total={distTotal} />
-      <span className="text-right font-mono text-[0.8125rem] tabular-nums text-muted">
-        {row.shot_count || "--"}
-      </span>
-      <span className="text-right text-subtle">
-        <ArrowRight className="ml-auto size-4" />
-      </span>
-    </div>
-  );
-}
-
-function SplitDistributionBar({
-  buckets,
-  total,
-}: {
-  buckets: Record<string, number>;
-  total: number;
-}) {
-  if (total === 0) {
-    return <span className="font-mono text-[0.625rem] text-subtle">--</span>;
-  }
-  return (
-    <div className="flex h-2 w-full overflow-hidden rounded-full bg-surface-3">
-      {TIER_ORDER.map((label) => {
-        const w = ((buckets[label] ?? 0) / total) * 100;
-        return (
-          <span
-            key={label}
-            style={{ width: `${w}%`, backgroundColor: TIER_COLORS[label] }}
-            title={`${label}: ${buckets[label] ?? 0}`}
-          />
-        );
-      })}
-    </div>
-  );
-}
-
 function IntervalBreakdownCard({
   distributions,
 }: {
   distributions: CoachMatchDistributions | null;
 }) {
-  const fourClasses: CoachIntervalClass[] = [
-    "first_shot",
-    "split",
-    "transition",
-    "reload",
-  ];
+  const classes: CoachIntervalClass[] = ["first_shot", "split", "transition", "movement", "reload"];
   return (
-    <section className="overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
-      <div className="border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3 font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
-        Interval breakdown
+    <section aria-label="Interval averages" className="overflow-hidden rounded-[10px] border border-rule bg-surface">
+      <div className="border-b border-rule-strong px-3.5 py-2">
+        <Label>Interval averages</Label>
       </div>
-      <div className="grid grid-cols-2 gap-3 p-4">
-        {fourClasses.map((cls) => {
-          const d =
-            distributions?.distributions.find((x) => x.interval_class === cls) ??
-            null;
-          const dotColor =
-            cls === "first_shot"
-              ? "var(--color-led)"
-              : cls === "split"
-                ? "var(--color-done)"
-                : cls === "transition"
-                  ? "var(--color-live)"
-                  : "var(--color-manual)";
-          return (
-            <div
-              key={cls}
-              className="rounded-xl border border-rule bg-bg-glow px-4 py-3"
-            >
-              <div className="mb-1 inline-flex items-center gap-2 font-display text-xs font-bold uppercase tracking-[0.08em] text-ink">
-                <span
-                  aria-hidden
-                  className="inline-block size-1.5 rounded-full"
-                  style={{ backgroundColor: dotColor }}
-                />
-                {INTERVAL_LABEL[cls]}
-              </div>
-              <div className="font-mono text-2xl font-bold tabular-nums text-ink">
-                {d?.mean_s != null ? `${d.mean_s.toFixed(2)}s` : "--"}
-              </div>
-              <div className="mt-1 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-                {d
-                  ? `${d.count} ${d.count === 1 ? "occurrence" : "occurrences"}`
-                  : "no data"}
-              </div>
-              {d?.median_s != null && (
-                <div className="mt-0.5 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
-                  median {d.median_s.toFixed(2)}s · p90{" "}
-                  {d.p90_s?.toFixed(2) ?? "--"}s
-                </div>
-              )}
-            </div>
-          );
-        })}
+      <div className="grid grid-cols-[minmax(110px,1fr)_repeat(4,minmax(0,72px))] items-center gap-3 border-b border-rule px-3.5 py-1.5">
+        <Label>Type</Label>
+        <Label className="text-right">Mean</Label>
+        <Label className="text-right">Median</Label>
+        <Label className="text-right">p90</Label>
+        <Label className="text-right">Count</Label>
       </div>
+      {classes.map((cls) => {
+        const d = distributions?.distributions.find((x) => x.interval_class === cls) ?? null;
+        return (
+          <div key={cls} className="numeral grid grid-cols-[minmax(110px,1fr)_repeat(4,minmax(0,72px))] items-center gap-3 border-b border-rule px-3.5 py-1.5 text-md text-ink-2 last:border-b-0">
+            <span className="inline-flex items-center gap-2 font-sans text-ink">
+              <i aria-hidden className={cn("size-2 rounded-full", LEGEND_BG[cls] ?? "bg-ink-2")} />
+              {BUDGET_LABEL[cls]}
+            </span>
+            <span className="text-right">{d?.mean_s != null ? d.mean_s.toFixed(2) : "\u2014"}</span>
+            <span className="text-right">{d?.median_s != null ? d.median_s.toFixed(2) : "\u2014"}</span>
+            <span className="text-right">{d?.p90_s != null ? d.p90_s.toFixed(2) : "\u2014"}</span>
+            <span className="text-right text-muted">{d ? d.count : "\u2014"}</span>
+          </div>
+        );
+      })}
     </section>
   );
 }
@@ -659,9 +467,8 @@ function CrtHistogramCard({
 
   if (!splitDist || splitDist.count === 0) {
     return (
-      <section className="overflow-hidden rounded-2xl border border-rule-strong bg-surface px-5 py-12 text-center text-sm text-muted">
-        Split histogram appears once a stage with split-class shots is
-        audited.
+      <section aria-label="Split histogram" className="rounded-[10px] border border-rule bg-surface px-3.5 py-6 text-md text-muted">
+        The split histogram appears once a stage with fire splits is audited.
       </section>
     );
   }
@@ -677,12 +484,11 @@ function CrtHistogramCard({
   const xOf = (v: number) => padX + ((v - 0.05) / (1.05 - 0.05)) * innerW;
 
   return (
-    <section className="overflow-hidden rounded-2xl border border-rule-strong bg-bg-glow shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
-      <div className="flex items-center justify-between border-b border-rule bg-gradient-to-b from-surface to-transparent px-5 py-3 font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
-        Split histogram
-        <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted tabular-nums">
-          {splitDist.count} shots · median {splitDist.median_s?.toFixed(2)}s ·
-          p90 {splitDist.p90_s?.toFixed(2)}s
+    <section aria-label="Split histogram" className="overflow-hidden rounded-[10px] border border-rule bg-surface">
+      <div className="flex items-center justify-between gap-3 border-b border-rule-strong px-3.5 py-2">
+        <Label>Split histogram</Label>
+        <span className="numeral text-sm text-muted">
+          {splitDist.count} shots &middot; median {splitDist.median_s?.toFixed(2)} s &middot; p90 {splitDist.p90_s?.toFixed(2)} s
         </span>
       </div>
       <svg
@@ -692,16 +498,9 @@ function CrtHistogramCard({
       >
         <defs>
           <linearGradient id="led-fill" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="var(--color-led-soft)" stopOpacity={0.95} />
-            <stop offset="100%" stopColor="var(--color-led-deep)" stopOpacity={0.55} />
+            <stop offset="0%" stopColor="var(--color-done)" stopOpacity={0.9} />
+            <stop offset="100%" stopColor="var(--color-done)" stopOpacity={0.45} />
           </linearGradient>
-          <filter id="led-glow">
-            <feGaussianBlur stdDeviation="3" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
         </defs>
         {[0.25, 0.5, 0.75].map((p) => (
           <line
@@ -728,7 +527,6 @@ function CrtHistogramCard({
               width={w}
               height={h}
               fill="url(#led-fill)"
-              filter="url(#led-glow)"
               rx={2}
             />
           );
@@ -750,9 +548,9 @@ function CrtHistogramCard({
               fill="var(--color-ink-2)"
               fontFamily="JetBrains Mono"
               fontSize={11}
-              fontWeight={700}
+              fontWeight={500}
             >
-              MED {splitDist.median_s.toFixed(2)}s
+              median {splitDist.median_s.toFixed(2)} s
             </text>
           </g>
         )}
@@ -783,6 +581,7 @@ function CrtHistogramCard({
   );
 }
 
+
 function RecommendationsCard({
   distributions,
 }: {
@@ -792,57 +591,23 @@ function RecommendationsCard({
     distributions,
   ]);
   return (
-    <section className="overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
-      <div className="flex items-center justify-between border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3 font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
-        Practice priorities
-        <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-          derived from this match
-        </span>
+    <section aria-label="Recommendations" className="overflow-hidden rounded-[10px] border border-rule bg-surface">
+      <div className="flex items-center justify-between border-b border-rule-strong px-3.5 py-2">
+        <Label>Recommendations</Label>
+        <Label tone="subtle">from your match distributions</Label>
       </div>
       {reco.length === 0 ? (
-        <div className="px-5 py-8 text-center text-sm text-muted">
-          Looking good. Nothing leaps out at the priority threshold.
-        </div>
+        <p className="px-3.5 py-6 text-md text-muted">Nothing stands out yet. Audit more stages and classify their intervals.</p>
       ) : (
         reco.map((r, i) => (
-          <div
-            key={i}
-            className={cn(
-              "flex gap-4 border-b border-rule px-5 py-4 last:border-b-0",
-              i === 0 && "bg-led/[0.04]",
-            )}
-          >
-            <div
-              className={cn(
-                "inline-flex size-10 shrink-0 items-center justify-center rounded-md font-display text-base font-bold tabular-nums",
-                i === 0
-                  ? "badge-led-fill"
-                  : i === 1
-                    ? "border border-live/40 bg-live/10 text-live"
-                    : "border border-rule-strong bg-surface-3 text-ink-2",
-              )}
-            >
-              {pad2(i + 1)}
-            </div>
+          <div key={i} className="flex gap-3 border-b border-rule px-3.5 py-3 last:border-b-0">
+            <span className={cn("numeral mt-0.5 inline-grid size-7 shrink-0 place-items-center rounded-full border text-sm", i === 0 ? "border-led text-led-text" : "border-rule-strong text-ink-2")}>
+              {i + 1}
+            </span>
             <div className="min-w-0 flex-1">
-              <div
-                className={cn(
-                  "mb-0.5 inline-flex items-center gap-1.5 rounded px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.14em]",
-                  i === 0
-                    ? "bg-led/10 text-led"
-                    : i === 1
-                      ? "bg-live/10 text-live"
-                      : "bg-surface-3 text-ink-2",
-                )}
-              >
-                <Zap className="size-2.5" /> P{i + 1} &middot; {r.tag}
-              </div>
-              <div className="mt-1 font-display text-sm font-bold uppercase tracking-[0.04em] text-ink">
-                {r.heading}
-              </div>
-              <p className="mt-1 text-[0.8125rem] leading-relaxed text-muted">
-                {r.body}
-              </p>
+              <Label tone={i === 0 ? "live" : "muted"}>{r.tag}</Label>
+              <div className="mt-0.5 text-md font-medium text-ink">{r.heading}</div>
+              <p className="mt-0.5 text-sm text-muted">{r.body}</p>
             </div>
           </div>
         ))
@@ -901,53 +666,30 @@ function AnnotationsCard({
 }) {
   const navigate = useNavigate();
   return (
-    <section className="overflow-hidden rounded-2xl border border-rule-strong bg-surface shadow-[inset_0_1px_0_rgba(255,255,255,0.03),0_18px_36px_-24px_rgba(0,0,0,0.6)]">
-      <div className="flex items-center justify-between border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3 font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
-        Annotations
-        <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-          {annotations.length} notes
-        </span>
+    <section aria-label="Annotations" className="overflow-hidden rounded-[10px] border border-rule bg-surface">
+      <div className="flex items-center justify-between border-b border-rule-strong px-3.5 py-2">
+        <Label>Annotations</Label>
+        <Label tone="subtle">{annotations.length} {annotations.length === 1 ? "note" : "notes"}</Label>
       </div>
       {annotations.length === 0 ? (
-        <div className="px-5 py-8 text-center text-sm text-muted">
-          No annotations yet. Open per-stage coach and add notes to surface
-          them here.
-        </div>
+        <p className="px-3.5 py-6 text-md text-muted">No notes yet. Open a stage's coach and note the shot under the playhead.</p>
       ) : (
         annotations.slice(0, 8).map((a, i) => (
           <button
             key={i}
             type="button"
             onClick={() => navigate(`${stagePrefix}/${a.stage_number}`)}
-            className="grid w-full grid-cols-[40px_1fr_24px] items-start gap-3 border-b border-rule px-5 py-3 text-left last:border-b-0 hover:bg-surface-2"
+            className="grid w-full grid-cols-[36px_minmax(0,1fr)] items-start gap-3 border-b border-rule px-3.5 py-2.5 text-left last:border-b-0 hover:bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-led"
           >
-            <span className="inline-flex size-7 items-center justify-center rounded-md border border-rule-strong bg-surface-3 font-mono text-[0.6875rem] font-bold tabular-nums text-ink-2">
-              {pad2(a.stage_number)}
+            <span className="numeral text-sm text-muted">{pad2(a.stage_number)}</span>
+            <span className="min-w-0">
+              <span className="flex flex-wrap items-center gap-2 text-sm text-muted">
+                <span className="numeral">shot {pad2(a.shot_number)}</span>
+                {a.interval_class ? <Chip tick={BUDGET_TICK[a.interval_class]}>{BUDGET_LABEL[a.interval_class]}</Chip> : null}
+                {a.flagged ? <i aria-label="Flagged" className="inline-block size-1.5 rounded-full bg-live" /> : null}
+              </span>
+              <span className="mt-0.5 block truncate text-md text-ink-2">{a.note || (a.flagged ? "Flagged for review" : "\u2014")}</span>
             </span>
-            <div className="min-w-0">
-              <div className="inline-flex items-center gap-1.5 font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
-                Shot {pad2(a.shot_number)}
-                {a.interval_class && (
-                  <span
-                    className={cn(
-                      "rounded border px-1.5 py-px font-bold",
-                      INTERVAL_TONE[a.interval_class],
-                    )}
-                  >
-                    {INTERVAL_LABEL[a.interval_class]}
-                  </span>
-                )}
-                {a.flagged && (
-                  <span className="inline-flex items-center gap-1 text-led">
-                    <Flag className="size-2.5" />
-                  </span>
-                )}
-              </div>
-              <p className="mt-1 truncate text-[0.8125rem] text-ink-2">
-                {a.note || (a.flagged ? "Flagged for review" : "--")}
-              </p>
-            </div>
-            <ArrowRight className="ml-auto mt-1.5 size-3.5 text-subtle" />
           </button>
         ))
       )}
@@ -962,19 +704,19 @@ function AnnotationsCard({
 function CoachStage({ stage, slug }: { stage: number; slug?: string }) {
   const href = useMatchHref();
   if (!slug) {
-    return <Navigate to={href("shooters")} replace />;
+    return <Navigate to={href("coach")} replace />;
   }
   return <CoachStageInner stage={stage} slug={slug} />;
 }
 
 function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
-  const navigate = useNavigate();
   const href = useMatchHref();
   const coachPrefix = href("coach", slug);
   const auditPrefix = href("audit", slug);
   const [project, setProject] = useState<MatchProject | null>(null);
   const [coach, setCoach] = useState<CoachStageResponse | null>(null);
   const [baselines, setBaselines] = useState<TierBaselines | null>(null);
+  const [distributions, setDistributions] = useState<CoachMatchDistributions | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reclassifying, setReclassifying] = useState(false);
   const [activeShotNumber, setActiveShotNumber] = useState<number | null>(null);
@@ -1013,6 +755,7 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
         setProject(p);
         applyCoach(c);
         setBaselines(baselinesFromMatchDistributions(dist));
+        setDistributions(dist);
         if (c && c.shots.length > 0) {
           setActiveShotNumber(c.shots[0].shot_number);
         }
@@ -1121,18 +864,21 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
   // video first.
   useSpacePlayPause(togglePlay);
 
+  const budget = useMemo(() => timeBudget(coach?.shots ?? [], distributions), [coach, distributions]);
+
   if (error) {
     return (
-      <div className="px-7 py-8">
-        <div className="rounded-md border border-led/40 bg-led/10 px-3 py-2 text-sm text-led">
+      <div className="px-4 py-4 md:px-7 md:py-5">
+        <PageHeader ordinal={pad2(stage)} title="Stage" back={{ label: "Match coach", to: coachPrefix }} />
+        <p role="alert" className="text-sm text-led-text">
           {error}
-        </div>
+        </p>
       </div>
     );
   }
   if (!coach || !project) {
     return (
-      <div className="flex h-64 items-center justify-center gap-2 text-sm text-muted">
+      <div className="flex h-64 items-center justify-center gap-2 text-md text-muted">
         <Loader2 className="size-4 animate-spin" /> Loading stage coach...
       </div>
     );
@@ -1159,112 +905,60 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
       ? Math.min(...coach.shots.map((s) => s.time_absolute))
       : 0;
   const span = Math.max(0.0001, maxAbs - minAbs);
+  const selectShotNumber = (n: number) => {
+    const shot = coach.shots.find((s) => s.shot_number === n);
+    if (shot) seekToShot(shot);
+  };
+  const stepButton = (label: string, to: number | null, icon: React.ReactNode) =>
+    to != null ? (
+      <Button asChild size="icon" aria-label={label}>
+        <Link to={`${coachPrefix}/${to}`}>{icon}</Link>
+      </Button>
+    ) : (
+      <Button type="button" size="icon" disabled aria-label={label}>
+        {icon}
+      </Button>
+    );
 
   return (
-    <div className="flex flex-col gap-4 px-7 py-5">
-      {/* Compact stage header */}
-      <div className="flex flex-wrap items-center gap-4 border-b border-rule pb-4">
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => prevStage != null && navigate(`${coachPrefix}/${prevStage}`)}
-            disabled={prevStage == null}
-            aria-label="Previous stage"
-            className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-40"
-          >
-            <ArrowLeft className="size-4" />
-          </button>
-          <button
-            type="button"
-            onClick={() => nextStage != null && navigate(`${coachPrefix}/${nextStage}`)}
-            disabled={nextStage == null}
-            aria-label="Next stage"
-            className="inline-flex size-9 items-center justify-center rounded-md border border-rule bg-surface-2 text-ink-2 transition-colors hover:bg-surface-3 hover:text-ink disabled:opacity-40"
-          >
-            <ArrowRight className="size-4" />
-          </button>
-        </div>
-        <h1 className="font-display text-3xl font-bold uppercase leading-none tracking-tight text-ink">
-          <span className="text-led">STAGE {pad2(stage)}</span>
-          <span className="mx-2 text-whisper">·</span>
-          {coach.stage_name}
-        </h1>
-        <nav
-          aria-label="Stage views"
-          className="ml-auto inline-flex overflow-hidden rounded-lg border border-rule bg-surface-2 p-0.5"
-        >
-          <button
-            type="button"
-            onClick={() => navigate(`${auditPrefix}/${stage}`)}
-            className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink-2"
-          >
-            Audit
-          </button>
-          <button
-            type="button"
-            onClick={() => navigate(href("compare", String(stage)))}
-            className="inline-flex min-h-9 items-center rounded-md px-3.5 font-sans text-[0.75rem] font-semibold uppercase tracking-[0.08em] text-muted hover:text-ink-2"
-          >
-            Compare
-          </button>
-          <span className="tab-pill-led-fill inline-flex min-h-9 items-center rounded-md px-3.5">
-            Coach
+    <div className="px-4 py-4 md:px-7 md:py-5">
+      <PageHeader
+        ordinal={pad2(stage)}
+        title={coach.stage_name || "Stage"}
+        back={{ label: "Match coach", to: coachPrefix }}
+        sub={
+          <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+            {project.competitor_name ? <span>{project.competitor_name}</span> : null}
+            <Chip tick="muted">
+              {coach.shots.length} {coach.shots.length === 1 ? "shot" : "shots"}
+            </Chip>
+            {budget.outlierCount > 0 ? (
+              <Chip tone="warn">
+                {budget.outlierCount} {budget.outlierCount === 1 ? "outlier" : "outliers"}
+              </Chip>
+            ) : null}
+            {!budget.classified && coach.shots.length > 0 ? <Chip tick="muted">unclassified</Chip> : null}
           </span>
-        </nav>
-      </div>
-
-      {/* Action bar */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => void reclassify()}
-          disabled={reclassifying}
-          title="Re-run auto-classification"
-        >
-          {reclassifying ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <RefreshCw className="size-3.5" />
-          )}
-          <span className="font-display uppercase tracking-[0.08em]">
-            Reclassify
-          </span>
-        </Button>
-        <span className="ml-2 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted">
-          shot legend
-        </span>
-        {TIER_ORDER.map((label) => (
-          <span
-            key={label}
-            className="inline-flex items-center gap-1 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted"
-          >
-            <span
-              aria-hidden
-              className="inline-block size-1.5 rounded-full"
-              style={{ backgroundColor: TIER_COLORS[label] }}
-            />
-            {label}
-          </span>
-        ))}
-        <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
-          vs your match baseline per interval type
-        </span>
-      </div>
-
-      <ShotRuler
-        shots={coach.shots}
-        minAbs={minAbs}
-        span={span}
-        activeShotNumber={activeShotNumber}
-        onSeek={seekToShot}
-        baselines={baselines}
+        }
+        actions={
+          <>
+            <Button type="button" onClick={() => void reclassify()} disabled={reclassifying} title="Re-run the auto-classifier; manual overrides survive">
+              {reclassifying ? "Reclassifying\u2026" : "Reclassify"}
+            </Button>
+            <Button asChild>
+              <Link to={`${auditPrefix}/${stage}`}>Audit</Link>
+            </Button>
+            {stepButton("Previous stage", prevStage, <ArrowLeft className="size-4" />)}
+            {stepButton("Next stage", nextStage, <ArrowRight className="size-4" />)}
+          </>
+        }
       />
 
-      {/* Work grid: video + current shot panel on left, full list on right */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_1fr]">
-        <div className="flex flex-col gap-3">
-          <div className="overflow-hidden rounded-2xl border border-rule-strong bg-surface p-3">
+      {coach.shots.length > 0 ? <TimeBudgetCard budget={budget} onSelectShot={selectShotNumber} className="mb-4" /> : null}
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
+        <div className="flex flex-col gap-4">
+          <div className="overflow-hidden rounded-[10px] border border-rule bg-surface">
             {streamUrl ? (
               <video
                 ref={videoRef}
@@ -1280,39 +974,44 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
                 className="aspect-video w-full bg-black"
               />
             ) : (
-              <div className="flex aspect-video items-center justify-center bg-surface-3 text-sm text-muted">
+              <div className="flex aspect-video items-center justify-center bg-surface-2 text-md text-muted">
                 No primary video
               </div>
             )}
-            <div className="mt-2 flex items-center gap-3">
-              <button
+            <div className="flex items-center gap-3 border-t border-rule px-3 py-2">
+              <Button
                 type="button"
+                size="icon"
                 onClick={togglePlay}
                 aria-label={isPlaying ? "Pause" : "Play"}
-                className="inline-flex size-10 items-center justify-center rounded-full bg-led-fill text-ink shadow-[0_0_0_1px_var(--color-led),0_0_18px_var(--color-led-glow)] transition-colors hover:bg-led-soft"
+                aria-pressed={isPlaying}
+                className="rounded-full"
               >
-                {isPlaying ? (
-                  <Pause className="size-4" />
-                ) : (
-                  <Play className="size-4" />
-                )}
-              </button>
-              <span className="font-mono text-sm tabular-nums text-ink-2">
-                {currentTime.toFixed(3)}s
-              </span>
-              {activeShot && (
-                <span className="font-mono text-[0.6875rem] uppercase tracking-[0.06em] text-muted">
-                  shot {pad2(activeShot.shot_number)} at{" "}
-                  {activeShot.time_absolute.toFixed(3)}s
+                {isPlaying ? <Pause className="size-4" aria-hidden /> : <Play className="size-4 fill-current" aria-hidden />}
+              </Button>
+              <span className="numeral text-md text-ink-2">{currentTime.toFixed(2)} s</span>
+              {activeShot ? (
+                <span className="numeral text-sm text-muted">
+                  shot {pad2(activeShot.shot_number)} at {activeShot.time_absolute.toFixed(2)} s
                 </span>
-              )}
+              ) : null}
+            </div>
+            <div className="border-t border-rule px-3 py-2">
+              <ShotRuler
+                shots={coach.shots}
+                minAbs={minAbs}
+                span={span}
+                activeShotNumber={activeShotNumber}
+                onSeek={seekToShot}
+                baselines={baselines}
+              />
             </div>
           </div>
 
-          {activeShot && (
-            <ActiveShotPanel
+          {activeShot ? (
+            <ShotEditor
               shot={activeShot}
-              baselines={baselines}
+              tier={gapTier(activeShot.split, activeShot.interval_class, baselines)}
               noteDraft={noteDraft}
               onNoteChange={setNoteDraft}
               onSave={() =>
@@ -1332,239 +1031,15 @@ function CoachStageInner({ stage, slug }: { stage: number; slug: string }) {
                 })
               }
             />
-          )}
+          ) : null}
         </div>
 
-        <section className="overflow-hidden rounded-2xl border border-rule-strong bg-surface">
-          <div className="border-b border-rule bg-gradient-to-b from-surface-2 to-transparent px-5 py-3 font-display text-sm font-bold uppercase tracking-[0.08em] text-ink">
-            All shots
-            <span className="ml-2 font-mono text-[0.625rem] font-medium tracking-[0.06em] text-muted">
-              {coach.shots.length} total
-            </span>
-          </div>
-          <div className="grid grid-cols-[40px_70px_70px_110px_30px_24px] items-center gap-3 border-b border-rule bg-surface-2 px-5 py-2 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
-            <span>#</span>
-            <span className="text-right">t</span>
-            <span className="text-right">split</span>
-            <span>interval</span>
-            <span />
-            <span />
-          </div>
-          <div
-            ref={shotListRef}
-            className="max-h-[520px] overflow-y-auto"
-          >
-            {coach.shots.map((shot) => (
-              <ShotRow
-                key={shot.shot_number}
-                shot={shot}
-                active={activeShotNumber === shot.shot_number}
-                onClick={() => seekToShot(shot)}
-                baselines={baselines}
-              />
-            ))}
-          </div>
-        </section>
+        <CoachShotTable shots={coach.shots} activeShotNumber={activeShotNumber} baselines={baselines} onSelect={seekToShot} />
       </div>
     </div>
   );
 }
-
-function ActiveShotPanel({
-  shot,
-  baselines,
-  noteDraft,
-  onNoteChange,
-  onSave,
-  onClassify,
-  onToggleFlag,
-}: {
-  shot: CoachShot;
-  baselines: TierBaselines | null;
-  noteDraft: string;
-  onNoteChange: (v: string) => void;
-  onSave: () => void;
-  onClassify: (cls: CoachIntervalClass) => void;
-  onToggleFlag: () => void;
-}) {
-  const tier = gapTier(shot.split, shot.interval_class, baselines);
-  return (
-    <div className="overflow-hidden rounded-2xl border border-rule-strong bg-surface px-5 py-4">
-      <div className="mb-3 flex items-center gap-3">
-        <span
-          className="font-display text-4xl font-bold leading-none tabular-nums text-ink"
-          style={tier ? { color: tier.color } : undefined}
-        >
-          {pad2(shot.shot_number)}
-        </span>
-        <div className="min-w-0 flex-1">
-          <div className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
-            Shot {pad2(shot.shot_number)}
-            {tier ? <> &middot; {tier.label}</> : null}
-          </div>
-          <div className="font-display text-sm font-bold uppercase tracking-[0.04em] text-ink">
-            {shot.split.toFixed(3)}s split
-          </div>
-          <div className="mt-0.5 font-mono text-[0.625rem] uppercase tracking-[0.06em] text-muted tabular-nums">
-            {shot.time_from_beep.toFixed(3)}s from beep
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={onToggleFlag}
-          aria-pressed={shot.improvement_flag}
-          title={
-            shot.improvement_flag
-              ? "Unflag this shot"
-              : "Flag this shot for review"
-          }
-          className={cn(
-            "inline-flex size-9 items-center justify-center rounded-md border transition-colors",
-            shot.improvement_flag
-              ? "border-led bg-led/10 text-led shadow-[0_0_10px_var(--color-led-glow)]"
-              : "border-rule bg-surface-2 text-muted hover:text-ink",
-          )}
-        >
-          <Flag className="size-4" />
-        </button>
-      </div>
-      <div className="mb-3">
-        <div className="mb-1.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
-          Interval type
-          {shot.interval_class_source === "auto" && (
-            <span className="ml-2 text-muted/70">
-              auto-classified · click to override
-            </span>
-          )}
-        </div>
-        <div className="flex flex-wrap gap-1.5">
-          {(
-            [
-              "first_shot",
-              "split",
-              "transition",
-              "movement",
-              "reload",
-              "activation",
-            ] as CoachIntervalClass[]
-          ).map((cls) => (
-            <button
-              key={cls}
-              type="button"
-              onClick={() => onClassify(cls)}
-              className={cn(
-                "rounded-md border px-2.5 py-1 font-display text-[0.625rem] font-semibold uppercase tracking-[0.08em] transition-colors",
-                shot.interval_class === cls
-                  ? INTERVAL_TONE[cls]
-                  : "border-rule bg-surface-2 text-muted hover:text-ink",
-              )}
-            >
-              {INTERVAL_LABEL[cls]}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div>
-        <div className="mb-1.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.18em] text-subtle">
-          Annotation
-        </div>
-        <textarea
-          value={noteDraft}
-          onChange={(e) => onNoteChange(e.target.value)}
-          placeholder="Add a coaching note for this shot..."
-          className="block min-h-[72px] w-full rounded-md border border-rule bg-surface-3 px-3 py-2 text-sm text-ink outline-none focus:border-led focus:bg-bg-glow focus:shadow-[0_0_0_3px_var(--color-led-tint)]"
-        />
-        <div className="mt-2 flex items-center justify-between">
-          <span className="font-mono text-[0.625rem] uppercase tracking-[0.06em] text-subtle">
-            edit and click save
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            onClick={onSave}
-            disabled={noteDraft === (shot.coaching_note ?? "")}
-          >
-            <Save className="size-3.5" />
-            <span className="font-display uppercase tracking-[0.08em]">
-              Save
-            </span>
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ShotRow({
-  shot,
-  active,
-  onClick,
-  baselines,
-}: {
-  shot: CoachShot;
-  active: boolean;
-  onClick: () => void;
-  baselines: TierBaselines | null;
-}) {
-  const tier = gapTier(shot.split, shot.interval_class, baselines);
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      data-shot-number={shot.shot_number}
-      className={cn(
-        "grid w-full grid-cols-[40px_70px_70px_110px_30px_24px] items-center gap-3 border-b border-rule px-5 py-2 text-left transition-colors hover:bg-surface-2 last:border-b-0",
-        active && "bg-led/[0.06]",
-      )}
-    >
-      <span className="font-mono text-[0.6875rem] font-bold tabular-nums text-ink">
-        {pad2(shot.shot_number)}
-      </span>
-      <span className="text-right font-mono text-[0.6875rem] tabular-nums text-muted">
-        {shot.time_from_beep.toFixed(2)}s
-      </span>
-      <span
-        className={cn(
-          "text-right font-mono text-[0.6875rem] font-semibold tabular-nums",
-          !tier && "text-ink-2",
-        )}
-        style={tier ? { color: tier.color } : undefined}
-      >
-        {shot.split.toFixed(3)}s
-      </span>
-      <span>
-        {shot.interval_class && (
-          <span
-            className={cn(
-              "inline-block rounded border px-1.5 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.1em]",
-              INTERVAL_TONE[shot.interval_class],
-            )}
-          >
-            {INTERVAL_LABEL[shot.interval_class]}
-          </span>
-        )}
-      </span>
-      <span className="text-center">
-        {shot.coaching_note && <MessageSquare className="size-3 text-led" />}
-      </span>
-      <span className="text-center">
-        {shot.improvement_flag && <Flag className="size-3 text-led" />}
-      </span>
-    </button>
-  );
-}
-
-/* -------------------------------------------------------------------------- */
-/* Helpers                                                                    */
-/* -------------------------------------------------------------------------- */
 
 function pad2(n: number): string {
   return n.toString().padStart(2, "0");
-}
-
-function formatMinSec(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds <= 0) return "0:00.00";
-  const m = Math.floor(seconds / 60);
-  const s = seconds - m * 60;
-  return `${m}:${s.toFixed(2).padStart(5, "0")}`;
 }
