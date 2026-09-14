@@ -280,6 +280,25 @@ def test_youtube_sidecar_embeds_chapter_atoms_in_the_mp4(
     assert captured["kwargs"]["chapters"] is None
 
 
+def test_description_lead_opens_the_sidecar_description(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _seed(tmp_path)
+    _capture_mp4(monkeypatch)
+    out = tmp_path / "out" / "lt.mp4"
+    result = runner.invoke(
+        app,
+        [
+            "match", "export", str(root), "--shooter", "me", "--format", "mp4", "-o", str(out),
+            "--youtube-sidecar", "--description-lead", "  Production Optics, head cam.  ",
+        ],  # fmt: skip
+    )
+    assert result.exit_code == 0, result.output
+    description = json.loads(out.with_name("lt-youtube.json").read_text())["description"]
+    assert description.startswith("Production Optics, head cam.\n\n")
+    assert "0:00 " in description
+
+
 def test_reclassify_rejudges_auto_intervals_and_keeps_manual_ones(tmp_path: Path) -> None:
     """The verb re-runs the classifier with the current thresholds over a
     stored audit: an interval auto-classed under an old rule moves, a

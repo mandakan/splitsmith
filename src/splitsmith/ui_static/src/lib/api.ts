@@ -935,6 +935,8 @@ export interface MatchExportRequestPayload {
    *  itself: markers on the FCPXML timeline, chapter atoms in the
    *  MP4. */
   youtube_sidecar?: boolean;
+  /** Text the sidecar's description opens with, above the chapter list. */
+  description_lead?: string | null;
   /** Issue #204 layer 2. Encode the MP4 with YouTube's recommended
    *  H.264 profile / GOP / colour / audio params. Only meaningful
    *  when ``output_format == "mp4"``. */
@@ -3894,6 +3896,9 @@ export const api = {
           : {}),
         ...(payload.youtube_sidecar !== undefined
           ? { youtube_sidecar: payload.youtube_sidecar }
+          : {}),
+        ...(payload.description_lead !== undefined
+          ? { description_lead: payload.description_lead }
           : {}),
         ...(payload.youtube_preset !== undefined
           ? { youtube_preset: payload.youtube_preset }

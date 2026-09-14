@@ -4099,6 +4099,7 @@ def register_job_bodies(state: AppState) -> None:
                 intro_path=Path(req.intro_path).expanduser() if req.intro_path else None,
                 outro_path=Path(req.outro_path).expanduser() if req.outro_path else None,
                 youtube_sidecar=req.youtube_sidecar,
+                description_lead=req.description_lead,
                 youtube_preset=req.youtube_preset,
                 title_page=req.title_page,
                 title_page_info=match_export_helpers.title_info_lines(proj, extra=req.title_info),

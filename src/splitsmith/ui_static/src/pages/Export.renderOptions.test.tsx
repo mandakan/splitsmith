@@ -240,6 +240,7 @@ describe("Export rendered-video rows", () => {
     });
     expect("title_page" in body).toBe(false);
     expect("summary_hold_seconds" in body).toBe(false);
+    expect(body.description_lead).toBeUndefined();
   });
 
   it("on MP4 sends the title page, the summary hold and the YouTube pair, and lists the sidecar files", async () => {
@@ -250,6 +251,7 @@ describe("Export rendered-video rows", () => {
     await user.clear(screen.getByLabelText("Summary hold seconds"));
     await user.type(screen.getByLabelText("Summary hold seconds"), "3");
     await user.click(choice("YouTube", "Preset + sidecar"));
+    await user.type(screen.getByLabelText("Description lead"), "  Production Optics, head cam  ");
     await user.click(choice("Secondary cams", "Primary only"));
 
     expect(screen.getByText("bromma-2026-youtube.json")).toBeInTheDocument();
@@ -269,6 +271,7 @@ describe("Export rendered-video rows", () => {
       include_secondaries: false,
       youtube_sidecar: true,
       youtube_preset: true,
+      description_lead: "Production Optics, head cam",
     });
   });
 
