@@ -6,6 +6,8 @@ connection), the one-refresh-on-401 rule and the error mapping.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import httpx
 import pytest
 import respx
@@ -108,3 +110,152 @@ def test_reauthorize_from_the_token_source_propagates_untouched() -> None:
     c = yt.YouTubeClient(httpx.Client(), Dead())
     with pytest.raises(oauth.ReauthorizeError):
         c.my_channel()
+
+
+# --- resumable upload -------------------------------------------------------
+
+SESSION = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&upload_id=abc"
+
+
+def _meta() -> yt.VideoMetadata:
+    return yt.VideoMetadata(title="T", description="D", tags=["ipsc"], category_id="17", privacy="unlisted")
+
+
+def _video(tmp_path: Path, size: int) -> Path:
+    p = tmp_path / "match.mp4"
+    p.write_bytes(bytes(i % 251 for i in range(size)))
+    return p
+
+
+@respx.mock
+def test_start_resumable_upload_posts_metadata_and_returns_the_session() -> None:
+    route = respx.post(f"{yt.UPLOAD_API}/videos").mock(
+        return_value=httpx.Response(200, headers={"Location": SESSION})
+    )
+    c, _ = _client()
+    assert c.start_resumable_upload(_meta(), size=1234) == SESSION
+    req = route.calls.last.request
+    assert req.url.params["uploadType"] == "resumable"
+    assert req.url.params["part"] == "snippet,status"
+    assert req.headers["X-Upload-Content-Length"] == "1234"
+    assert req.headers["X-Upload-Content-Type"] == "video/mp4"
+    import json
+
+    body = json.loads(req.content)
+    assert body["snippet"] == {"title": "T", "description": "D", "tags": ["ipsc"], "categoryId": "17"}
+    assert body["status"] == {"privacyStatus": "unlisted", "selfDeclaredMadeForKids": False}
+
+
+@respx.mock
+def test_start_resumable_upload_without_location_is_a_failure() -> None:
+    respx.post(f"{yt.UPLOAD_API}/videos").mock(return_value=httpx.Response(200))
+    c, _ = _client()
+    with pytest.raises(yt.UploadFailedError, match="Location"):
+        c.start_resumable_upload(_meta(), size=1)
+
+
+def _content_range(req: httpx.Request) -> str:
+    return req.headers.get("Content-Range", "")
+
+
+@respx.mock
+def test_upload_bytes_sends_exact_chunks_and_reports_progress(tmp_path: Path) -> None:
+    video = _video(tmp_path, 2 * 1024 + 1)  # two full chunks + one byte at chunk_size=1024
+    responses = [
+        httpx.Response(308, headers={"Range": "bytes=0-1023"}),
+        httpx.Response(308, headers={"Range": "bytes=0-2047"}),
+        httpx.Response(200, json={"id": "vid123"}),
+    ]
+    route = respx.put(SESSION).mock(side_effect=responses)
+    seen: list[tuple[int, int]] = []
+    c, _ = _client()
+    assert (
+        c.upload_bytes(SESSION, video, chunk_size=1024, progress=lambda s, t: seen.append((s, t))) == "vid123"
+    )
+    ranges = [_content_range(call.request) for call in route.calls]
+    assert ranges == ["bytes 0-1023/2049", "bytes 1024-2047/2049", "bytes 2048-2048/2049"]
+    assert [len(call.request.content) for call in route.calls] == [1024, 1024, 1]
+    assert seen == [(1024, 2049), (2048, 2049), (2049, 2049)]
+
+
+@respx.mock
+def test_upload_bytes_resumes_from_the_acknowledged_range_after_a_drop(tmp_path: Path) -> None:
+    video = _video(tmp_path, 3 * 1024)
+    responses = [
+        httpx.Response(308, headers={"Range": "bytes=0-1023"}),
+        httpx.ConnectError("dropped"),  # chunk 2 never acknowledged
+        httpx.Response(308, headers={"Range": "bytes=0-1535"}),  # status query: half of chunk 2 landed
+        httpx.Response(308, headers={"Range": "bytes=0-2559"}),  # a full chunk from 1536, not re-aligned
+        httpx.Response(201, json={"id": "v"}),
+    ]
+    route = respx.put(SESSION).mock(side_effect=responses)
+    c, _ = _client()
+    slept: list[float] = []
+    assert c.upload_bytes(SESSION, video, chunk_size=1024, sleep=slept.append) == "v"
+    reqs = [call.request for call in route.calls]
+    assert _content_range(reqs[2]) == "bytes */3072"
+    assert reqs[2].headers["Content-Length"] == "0"
+    assert _content_range(reqs[3]) == "bytes 1536-2559/3072"
+    assert _content_range(reqs[4]) == "bytes 2560-3071/3072"
+    assert slept and slept[0] > 0
+
+
+@respx.mock
+def test_upload_bytes_retries_a_5xx_then_gives_up_after_max_attempts(tmp_path: Path) -> None:
+    video = _video(tmp_path, 100)
+    respx.put(SESSION).mock(return_value=httpx.Response(503, text="unavailable"))
+    c, _ = _client()
+    with pytest.raises(yt.UploadFailedError, match="3 attempts"):
+        c.upload_bytes(SESSION, video, max_attempts=3, sleep=lambda s: None)
+
+
+@respx.mock
+def test_upload_bytes_status_query_with_no_range_restarts_from_zero(tmp_path: Path) -> None:
+    video = _video(tmp_path, 100)
+    responses = [
+        httpx.ReadTimeout("slow"),
+        httpx.Response(308),  # nothing received yet: no Range header
+        httpx.Response(200, json={"id": "v"}),
+    ]
+    route = respx.put(SESSION).mock(side_effect=responses)
+    c, _ = _client()
+    assert c.upload_bytes(SESSION, video, sleep=lambda s: None) == "v"
+    assert _content_range(route.calls[2].request) == "bytes 0-99/100"
+
+
+@respx.mock
+def test_upload_bytes_status_query_can_report_completion(tmp_path: Path) -> None:
+    video = _video(tmp_path, 100)
+    responses = [httpx.ReadTimeout("slow"), httpx.Response(200, json={"id": "done"})]
+    respx.put(SESSION).mock(side_effect=responses)
+    c, _ = _client()
+    assert c.upload_bytes(SESSION, video, sleep=lambda s: None) == "done"
+
+
+@respx.mock
+def test_upload_bytes_stops_at_a_chunk_boundary_when_cancelled(tmp_path: Path) -> None:
+    video = _video(tmp_path, 3 * 1024)
+    route = respx.put(SESSION).mock(return_value=httpx.Response(308, headers={"Range": "bytes=0-1023"}))
+    calls = {"n": 0}
+
+    def cancel() -> None:
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise KeyboardInterrupt
+
+    c, _ = _client()
+    with pytest.raises(KeyboardInterrupt):
+        c.upload_bytes(SESSION, video, chunk_size=1024, check_cancel=cancel)
+    assert route.call_count == 1
+
+
+@respx.mock
+def test_upload_bytes_4xx_is_not_retried(tmp_path: Path) -> None:
+    video = _video(tmp_path, 10)
+    route = respx.put(SESSION).mock(
+        return_value=httpx.Response(400, json={"error": {"message": "Bad Request", "errors": []}})
+    )
+    c, _ = _client()
+    with pytest.raises(yt.UploadFailedError, match="Bad Request"):
+        c.upload_bytes(SESSION, video, sleep=lambda s: None)
+    assert route.call_count == 1
