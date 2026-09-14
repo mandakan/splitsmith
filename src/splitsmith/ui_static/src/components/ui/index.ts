@@ -26,6 +26,7 @@ export { Kicker } from "./Kicker";
 export { Label } from "./Label";
 export { Stat, StatStrip } from "./Stat";
 export { Chip, type ChipTick } from "./Chip";
+export { PageHeader } from "./PageHeader";
 export { DisplayHeading } from "./DisplayHeading";
 export { ModeSwitch } from "./ModeSwitch";
 export { Kbd } from "./Kbd";
