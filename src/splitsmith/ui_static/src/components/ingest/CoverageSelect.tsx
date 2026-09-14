@@ -1,4 +1,3 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * Controlled multi-select of the match's stages for raw-video coverage
  * declaration (multi-stage takes). Chips show the stage number and name;
@@ -10,6 +9,7 @@
  * and differs from the current value.
  */
 
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface StageRef {
@@ -51,24 +51,11 @@ export function CoverageSelect({ stages, value, onChange, suggested }: CoverageS
   return (
     <div className="flex flex-col gap-2">
       {hasSuggestion && (
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-[0.5625rem] uppercase tracking-[0.1em] text-muted">
-            Suggested:
-          </span>
-          <button
-            type="button"
-            onClick={() => onChange(suggested!)}
-            className="rounded border border-done/40 bg-done/10 px-2 py-0.5 font-mono text-[0.5625rem] font-bold uppercase tracking-[0.1em] text-done hover:bg-done/20 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-done/60"
-          >
-            Use suggestion - stages {suggested!.join(", ")}
-          </button>
-        </div>
+        <Button type="button" size="sm" onClick={() => onChange(suggested!)} className="self-start">
+          Use suggestion &middot; stages {suggested!.join(", ")}
+        </Button>
       )}
-      <div
-        role="group"
-        aria-label="Stage coverage - click to toggle"
-        className="flex flex-wrap gap-1.5"
-      >
+      <div role="group" aria-label="Stage coverage - click to toggle" className="flex flex-wrap gap-1.5">
         {stages.map((stage) => {
           const selected = value.includes(stage.stage_number);
           const order = value.indexOf(stage.stage_number);
@@ -86,32 +73,24 @@ export function CoverageSelect({ stages, value, onChange, suggested }: CoverageS
               onClick={() => toggle(stage.stage_number)}
               onKeyDown={(e) => handleKeyDown(e, stage.stage_number)}
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 font-mono text-[0.625rem] font-bold tabular-nums transition-colors focus-visible:outline-none focus-visible:ring-1",
-                selected
-                  ? "border-led-deep bg-led-tint text-led-text focus-visible:ring-led"
-                  : "border-rule bg-surface-2 text-subtle hover:border-rule-strong hover:text-ink-2 focus-visible:border-led-deep focus-visible:ring-led/50",
+                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led",
+                selected ? "border-ink-2 text-ink" : "border-rule-strong text-muted hover:text-ink-2",
               )}
             >
-              {selected && (
-                <span
-                  aria-hidden
-                  className="inline-flex size-[14px] shrink-0 items-center justify-center rounded-full bg-led text-[0.4375rem] font-bold text-ink"
-                >
+              {selected ? (
+                <span aria-hidden className="inline-grid size-4 shrink-0 place-items-center rounded-full bg-led text-xs text-ink">
                   {order + 1}
                 </span>
-              )}
-              <span>S{String(stage.stage_number).padStart(2, "0")}</span>
-              <span className="max-w-[96px] truncate text-[0.5625rem] uppercase tracking-[0.06em] opacity-70">
-                {stage.stage_name}
-              </span>
+              ) : null}
+              <span>{String(stage.stage_number).padStart(2, "0")}</span>
+              <span className="max-w-[96px] truncate font-sans text-sm">{stage.stage_name}</span>
             </button>
           );
         })}
       </div>
       {value.length > 0 && (
-        <div className="font-mono text-[0.5625rem] uppercase tracking-[0.08em] text-muted">
-          {value.length === 1 ? "1 stage" : `${value.length} stages`} selected
-          {" "}- order = shooting order
+        <div className="text-sm text-muted">
+          {value.length === 1 ? "1 stage" : `${value.length} stages`} selected; the order is the shooting order.
         </div>
       )}
     </div>
