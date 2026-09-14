@@ -37,6 +37,13 @@ function cell(over: Partial<TriageCell> = {}): TriageCell {
     beep_confidence: null,
     anomalies: [],
     needs_attention: null,
+    video_count: 1,
+    beep_time: 5,
+    beep_reviewed: true,
+    shot_count: 0,
+    draw: null,
+    avg_split: null,
+    time_seconds: 10,
     ...over,
   };
 }
