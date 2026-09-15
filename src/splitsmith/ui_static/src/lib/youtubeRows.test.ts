@@ -74,6 +74,7 @@ describe("youtubeLink / uploadLabel / rowPrivacy", () => {
     expect(rowUploadOptions({ ...DEFAULT_UPLOAD_OPTIONS, enabled: false, privacy: "public", playlist: "X" })).toEqual({
       privacy: "unlisted",
       playlist: null,
+      playlist_id: null,
       publish_at: null,
       notify_subscribers: true,
     });
@@ -82,12 +83,14 @@ describe("youtubeLink / uploadLabel / rowPrivacy", () => {
         enabled: true,
         privacy: "private",
         playlist: "Bromma 2026",
+        playlistId: null,
         publishAt: "2026-09-20T18:00",
         notifySubscribers: false,
       }),
     ).toEqual({
       privacy: "private",
       playlist: "Bromma 2026",
+      playlist_id: null,
       publish_at: new Date("2026-09-20T18:00").toISOString(),
       notify_subscribers: false,
     });
@@ -98,10 +101,22 @@ describe("youtubeLink / uploadLabel / rowPrivacy", () => {
       enabled: true,
       privacy: "public",
       playlist: "  ",
+      playlistId: null,
       publishAt: "2026-09-20T18:00",
       notifySubscribers: true,
     });
     expect(opts.publish_at).toBeNull();
     expect(opts.playlist).toBeNull();
+  });
+
+  it("an existing playlist pick sends its id and its title", () => {
+    const opts = rowUploadOptions({
+      ...DEFAULT_UPLOAD_OPTIONS,
+      enabled: true,
+      playlist: "Practice",
+      playlistId: "PL2",
+    });
+    expect(opts.playlist_id).toBe("PL2");
+    expect(opts.playlist).toBe("Practice");
   });
 });

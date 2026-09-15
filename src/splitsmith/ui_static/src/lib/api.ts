@@ -852,6 +852,11 @@ export interface YouTubeConnectStatus {
   error: string | null;
 }
 
+export interface YouTubePlaylist {
+  id: string;
+  title: string;
+}
+
 export interface YouTubeConnectStart {
   auth_url: string;
   expires_at: string;
@@ -863,6 +868,8 @@ export interface YouTubeConnectStart {
 export interface YouTubeUploadOptions {
   privacy: YouTubePrivacy;
   playlist: string | null;
+  /** An existing playlist's id; wins over ``playlist``, which is then the title recorded. */
+  playlist_id: string | null;
   publish_at: string | null;
   notify_subscribers: boolean;
 }
@@ -996,6 +1003,7 @@ export interface MatchExportRequestPayload {
   youtube_upload?: boolean;
   youtube_privacy?: YouTubePrivacy;
   youtube_playlist?: string | null;
+  youtube_playlist_id?: string | null;
   youtube_publish_at?: string | null;
   youtube_notify_subscribers?: boolean;
   /** Issue #973. Open the rendered MP4 with a generated match title
@@ -3969,6 +3977,9 @@ export const api = {
         ...(payload.youtube_playlist !== undefined
           ? { youtube_playlist: payload.youtube_playlist }
           : {}),
+        ...(payload.youtube_playlist_id !== undefined
+          ? { youtube_playlist_id: payload.youtube_playlist_id }
+          : {}),
         ...(payload.youtube_publish_at !== undefined
           ? { youtube_publish_at: payload.youtube_publish_at }
           : {}),
@@ -4401,6 +4412,10 @@ export const api = {
     request<YouTubeConnectStart>("/api/settings/youtube/connect/start", { method: "POST" }),
 
   youtubeConnectStatus: () => request<YouTubeConnectStatus>("/api/settings/youtube/connect/status"),
+
+  /** The connected channel's playlists, for the Export page's picker.
+   *  409 when not connected, 429 when the quota is spent. */
+  getYouTubePlaylists: () => request<{ playlists: YouTubePlaylist[] }>("/api/settings/youtube/playlists"),
 
   /** Forget the stored login (revokes upstream, best effort). */
   disconnectYouTube: () =>

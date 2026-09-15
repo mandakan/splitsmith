@@ -482,6 +482,7 @@ function ExportInner({ slug }: { slug: string }) {
         youtube_upload: renderedMp4 && youtube && !!youtubeSettings?.connected && uploadOptions.enabled,
         youtube_privacy: rowUploadOptions(uploadOptions).privacy,
         youtube_playlist: rowUploadOptions(uploadOptions).playlist,
+        youtube_playlist_id: rowUploadOptions(uploadOptions).playlist_id,
         youtube_publish_at: rowUploadOptions(uploadOptions).publish_at,
         youtube_notify_subscribers: rowUploadOptions(uploadOptions).notify_subscribers,
         include_overlay: includeOverlay,

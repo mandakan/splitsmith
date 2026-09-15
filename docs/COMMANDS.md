@@ -115,7 +115,9 @@ it if missing (`--youtube-playlist` on `match export`). `--publish-at` takes
 an ISO time in local time and schedules the publish; the video stays private
 until then, whatever `--privacy` says. `--no-notify` skips the subscriber
 notification when it goes public. The Export page's "Upload after render"
-block has the same three, and a history-row upload reuses them.
+block has the same three; its playlist is a picker over your channel's
+playlists with a "New playlist..." entry, and a history-row upload reuses
+the block's choices.
 
 The sidecar (`--youtube-sidecar`, implied by `--youtube-upload`) is the
 metadata: title, description with chapter lines, tags. After an upload the
