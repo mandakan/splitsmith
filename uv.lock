@@ -3508,7 +3508,7 @@ wheels = [
 
 [[package]]
 name = "splitsmith"
-version = "0.34.0"
+version = "0.37.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },

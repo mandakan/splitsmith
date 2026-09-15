@@ -9,7 +9,13 @@
     ".": {
       "package-name": "splitsmith",
       "changelog-path": "CHANGELOG.md",
-      "extra-files": []
+      "extra-files": [
+        {
+          "type": "toml",
+          "path": "uv.lock",
+          "jsonpath": "$.package[?(@.name=='splitsmith')].version"
+        }
+      ]
     }
   },
   "changelog-sections": [
