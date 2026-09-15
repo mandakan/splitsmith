@@ -73,6 +73,15 @@ timestamps of the consent step and the Studio view once it is recorded.
 > demo video shows the consent screen, the upload, and the resulting
 > caption track, thumbnail and playlist entry in YouTube Studio.
 
+The justification field on the Data access page is capped at 1000
+characters, which the block above exceeds. This one is 991 with the
+blank line; paste it there and keep the long form for the audit form's
+"API client description", which has no such cap:
+
+> Splitsmith renders a shooter's match video with split times burned in, then publishes it to the user's own YouTube channel from the app. Each upload makes these calls, all on the signed-in user's channel: videos.insert (the MP4, title, description with chapters, privacy), captions.insert (a caption track with each shot's split time), thumbnails.set, playlists.list/insert and playlistItems.insert (file it in a playlist), channels.list mine=true (show the connected channel).
+>
+> Minimum scope: captions.insert is authorized only by youtube.force-ssl (youtubepartner is for content owners). youtube.upload covers the video and thumbnail but not captions or playlists; youtube covers playlists but not captions. Their combination would still not authorize captions and would be two scopes. force-ssl is the one scope covering every call. The app makes no other YouTube calls and never touches other users' data; the token is stored on the user's machine and revocable in the app or at Google.
+
 The call list is the whole of `splitsmith/youtube/client.py` plus the
 `channels.list` in `oauth.py`; if a call is added, add it here too, since
 the reviewer compares the text against the demo recording.
