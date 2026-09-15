@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.38.0](https://github.com/mandakan/splitsmith/compare/v0.37.1...v0.38.0) (2026-09-15)
+
+
+### Features
+
+* **export:** export a stage from its beep and stage time, without audited shots ([#1026](https://github.com/mandakan/splitsmith/issues/1026)) ([a40eec6](https://github.com/mandakan/splitsmith/commit/a40eec6f45e3fecf8c998c696433364e2ba11f7e))
+* **export:** per-option hints for stages without splits; scoring-only summary pinned ([#1028](https://github.com/mandakan/splitsmith/issues/1028)) ([9ad90ee](https://github.com/mandakan/splitsmith/commit/9ad90ee8fae05b3584f134a5ccc697c5cdf17fd0))
+
+
+### Bug Fixes
+
+* **ui:** Export page polish: YouTube block layout, rail pinned under the shell header ([#1027](https://github.com/mandakan/splitsmith/issues/1027)) ([298a650](https://github.com/mandakan/splitsmith/commit/298a6508eb95cf954b1d21c790b22b7e31b89de2))
+
 ## [0.37.1](https://github.com/mandakan/splitsmith/compare/v0.37.0...v0.37.1) (2026-09-15)
 
 
