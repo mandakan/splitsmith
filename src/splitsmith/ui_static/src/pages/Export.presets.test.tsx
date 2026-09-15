@@ -269,7 +269,7 @@ describe("Export presets", () => {
     expect(toggle("Output")).toHaveAttribute("aria-expanded", "false");
     expect(toggle("Cut")).toHaveAttribute("aria-expanded", "false");
     expect(toggle("Look")).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByText("Full 5.0 / 5.0 s · cut")).toBeInTheDocument();
+    expect(screen.getByText("Full 5.0 / 5.0 s")).toBeInTheDocument();
     expect(noCustomPreset()).toBe(true);
   });
 
@@ -304,7 +304,7 @@ describe("Export presets", () => {
     expect(compare).toHaveAttribute("title", expect.stringMatching(/two or more shooters/i));
     await user.click(compare);
     expect(choice("Preset", "Final Cut bundle")).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByText("Full 5.0 / 5.0 s · cut")).toBeInTheDocument();
+    expect(screen.getByText("Full 5.0 / 5.0 s")).toBeInTheDocument();
     expect(noCustomPreset()).toBe(true);
   });
 

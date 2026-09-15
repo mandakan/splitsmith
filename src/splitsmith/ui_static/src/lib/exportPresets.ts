@@ -14,6 +14,7 @@ import type { ExportMode } from "@/lib/exportPlan";
 import {
   DEFAULT_RENDER_OPTIONS,
   describeRenderOptions,
+  transitionsSupported,
   type OutputFormat,
   type RenderOptions,
 } from "@/lib/renderOptions";
@@ -191,9 +192,7 @@ export function groupSummary(s: ExportSettings, group: SettingsGroup, ctx: Summa
     }
     case "cut": {
       const pad = s.paddingPreset === "custom" ? "Custom" : PADDING_PRESETS[s.paddingPreset].label;
-      const transition =
-        s.transitionKind === "none" ? "cut" : `${s.transitionKind} ${s.transitionSeconds.toFixed(1)} s`;
-      return `${pad} ${s.headPad.toFixed(1)} / ${s.tailPad.toFixed(1)} s · ${transition}`;
+      return `${pad} ${s.headPad.toFixed(1)} / ${s.tailPad.toFixed(1)} s`;
     }
     case "look": {
       const grid = s.mode === "compare";
@@ -201,6 +200,9 @@ export function groupSummary(s: ExportSettings, group: SettingsGroup, ctx: Summa
       const cards = describeRenderOptions(s.renderOptions, grid ? "grid" : "single", grid ? "mp4" : s.outputFormat);
       if (cards) parts.push(cards);
       if (grid ? s.gridOverlay : s.includeOverlay) parts.push("overlay");
+      if (!grid && transitionsSupported(s.outputFormat) && s.transitionKind !== "none") {
+        parts.push(`${s.transitionKind} ${s.transitionSeconds.toFixed(1)} s`);
+      }
       return parts.length > 0 ? parts.join(" · ") : "No cards";
     }
   }

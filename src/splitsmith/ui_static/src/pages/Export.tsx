@@ -76,7 +76,13 @@ import {
 } from "@/lib/exportPlan";
 import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
-import { describeRenderOptions, matchExportFields, renderOptionsSeconds, type OutputFormat } from "@/lib/renderOptions";
+import {
+  describeRenderOptions,
+  matchExportFields,
+  renderOptionsSeconds,
+  transitionsSupported,
+  type OutputFormat,
+} from "@/lib/renderOptions";
 import { cn } from "@/lib/utils";
 import { buildCompareGridPayload, CANVAS_CHOICES, summarizeGridResult } from "@/pages/matchExportModel";
 
@@ -440,7 +446,7 @@ function ExportInner({ slug }: { slug: string }) {
     mode,
     head: mode === "single" ? headPad : (project?.trim_pre_buffer_seconds ?? 0),
     tail: mode === "single" ? tailPad : (project?.trim_post_buffer_seconds ?? 0),
-    transitionKind,
+    transitionKind: transitionsSupported(outputFormat) ? transitionKind : "none",
     transitionSeconds,
     cardSeconds,
   });
@@ -553,7 +559,7 @@ function ExportInner({ slug }: { slug: string }) {
         tail_pad_seconds: tailPad,
         ...camExportFields(camOptions),
         output_format: outputFormat,
-        transition_kind: transitionKind,
+        transition_kind: transitionsSupported(outputFormat) ? transitionKind : "none",
         transition_duration_seconds: transitionSeconds,
         ...matchExportFields(renderOptions, outputFormat),
         intro_path: undefined,
@@ -700,7 +706,7 @@ function ExportInner({ slug }: { slug: string }) {
     eligible: eligibleNumbers.length,
     head: headPad,
     tail: tailPad,
-    transitionKind,
+    transitionKind: transitionsSupported(outputFormat) ? transitionKind : "none",
     transitionSeconds,
     cards: describeRenderOptions(renderOptions, compare ? "grid" : "single", compare ? "mp4" : outputFormat),
     overlay: compare ? gridOverlay : includeOverlay,

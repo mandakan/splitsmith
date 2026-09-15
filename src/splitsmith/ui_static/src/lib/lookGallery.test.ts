@@ -103,6 +103,9 @@ describe("read / write", () => {
     expect(slot("summaryHold").read(s)).toBe("on");
     s = apply(s, slot("summaryHold").write(s, "none"));
     expect(s.renderOptions.summaryHoldSeconds).toBe(0);
+    // A cleared seconds field (NaN) keeps the slot on so the input stays.
+    const blank = { ...s, renderOptions: { ...s.renderOptions, summaryHoldSeconds: Number.NaN } };
+    expect(slot("summaryHold").read(blank)).toBe("on");
   });
 
   it("overlay writes the single-shooter flag in single mode and the grid flag in compare", () => {

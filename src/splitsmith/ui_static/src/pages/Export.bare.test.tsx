@@ -184,6 +184,11 @@ async function openGroups(user: ReturnType<typeof userEvent.setup>) {
   }
 }
 
+/** A gallery tile: the Look group's radio per slot (spec 2026-09-15 s2). */
+function tile(slot: string, name: string): HTMLElement {
+  return within(screen.getByRole("radiogroup", { name: slot })).getByRole("radio", { name });
+}
+
 async function renderPage(shooters = [shooter("mathias", "Mathias")]) {
   const user = userEvent.setup();
   render(
@@ -265,10 +270,11 @@ describe("Export bare-stage hints", () => {
     const { user } = await renderPage();
     // Overlay off: no hint.
     expect(screen.queryByText(/Skipped on 1 stage without splits/)).toBeNull();
-    await user.click(within(screen.getByRole("group", { name: "Overlay" })).getByRole("button", { name: "Shot counter + splits" }));
+    await user.click(tile("Overlay", "Shot counter"));
     expect(screen.getByText(/Skipped on 1 stage without splits/)).toBeInTheDocument();
     // MP4 unlocks the summary hold and the YouTube kit.
     await user.selectOptions(screen.getByLabelText("Timeline format"), "mp4");
+    await user.click(tile("Stage summary", "Summary hold"));
     await user.clear(screen.getByLabelText("Summary hold seconds"));
     await user.type(screen.getByLabelText("Summary hold seconds"), "2");
     expect(screen.getByText(/Time and scoring only on 1 stage without splits/)).toBeInTheDocument();

@@ -12,8 +12,10 @@ import {
   MIN_CARD_SECONDS,
   renderOptionsSeconds,
   stageCardsSupported,
+  transitionsSupported,
   type RenderOptions,
 } from "./renderOptions";
+import { visibleSlots } from "./lookGallery";
 
 const ON: RenderOptions = {
   titlePage: true,
@@ -143,5 +145,19 @@ describe("renderOptionsSeconds", () => {
         "mp4",
       ),
     ).toBe(2 * MIN_CARD_SECONDS);
+  });
+});
+
+describe("the mappers against the gallery registry", () => {
+  it("never emit a card field the gallery hides for the format", () => {
+    for (const format of ["fcpxml", "fcp7xml", "mp4"] as const) {
+      const fields = matchExportFields(ON, format);
+      const slots = new Set(visibleSlots("single", format).map((s) => s.id));
+      expect("title_page" in fields, format).toBe(slots.has("titlePage"));
+      expect("closing_card" in fields, format).toBe(slots.has("closingCard"));
+      expect("summary_hold_seconds" in fields, format).toBe(slots.has("summaryHold"));
+      expect(fields.title_kind !== "none", format).toBe(slots.has("stageCard"));
+      expect(transitionsSupported(format), format).toBe(slots.has("transition"));
+    }
   });
 });

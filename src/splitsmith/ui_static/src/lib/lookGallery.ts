@@ -41,8 +41,10 @@ export interface LookVariant {
   name: string;
   /** File under ``assets/look/``. */
   thumbnail: string;
-  /** One line under the row while this variant is selected. */
-  help: string;
+  /** One line under the row while this variant is selected; a function
+   *  when the wording differs by mode (the grid's overlay has a hold and
+   *  no codec). */
+  help: string | ((mode: ExportMode) => string);
   params: LookParam[];
   modes: ExportMode[];
   formats: OutputFormat[];
@@ -195,7 +197,9 @@ export const LOOK_SLOTS: readonly LookSlot[] = [
         formats: MP4,
       },
     ],
-    read: (s) => (s.renderOptions.summaryHoldSeconds > 0 ? "on" : "none"),
+    // A blank seconds field is NaN while it is being edited; that is
+    // still "on", or the input would vanish under the cursor.
+    read: (s) => (s.renderOptions.summaryHoldSeconds <= 0 ? "none" : "on"),
     write: (s, id) => render(s, { summaryHoldSeconds: id === "on" ? DEFAULT_SUMMARY_HOLD_SECONDS : 0 }),
   },
   {
@@ -207,7 +211,10 @@ export const LOOK_SLOTS: readonly LookSlot[] = [
         id: "on",
         name: "Shot counter",
         thumbnail: "overlay.png",
-        help: "Burned-in shot counter and splits over the footage; a slower render. The codec is under Output.",
+        help: (mode) =>
+          mode === "compare"
+            ? "Per-tile shot counter and split with the running clock; the hold keeps each tile's own stage figures after its last shot, 0 is off."
+            : "Burned-in shot counter and splits over the footage; a slower render. The codec is under Output.",
         params: [
           {
             id: "grid-hold",
@@ -261,6 +268,11 @@ export const LOOK_SLOTS: readonly LookSlot[] = [
     write: (_s, id) => ({ transitionKind: id === "cut" ? "none" : (id as ExportSettings["transitionKind"]) }),
   },
 ];
+
+/** The variant's help line for the mode. */
+export function variantHelp(variant: LookVariant, mode: ExportMode): string {
+  return typeof variant.help === "function" ? variant.help(mode) : variant.help;
+}
 
 export function visibleVariants(slot: LookSlot, mode: ExportMode, format: OutputFormat): LookVariant[] {
   return slot.variants.filter((v) => v.modes.includes(mode) && v.formats.includes(format));

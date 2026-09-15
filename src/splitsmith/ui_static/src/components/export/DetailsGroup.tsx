@@ -1,6 +1,7 @@
 /**
  * Details -- what is asked fresh per match (spec 2026-09-15 s1): the
- * bundle name, the description lead, and the upload connection. The
+ * bundle name, the title line, the description lead, and the upload
+ * connection. The
  * publish options inside YouTubeConnect are preset-owned; they live here
  * because this is where publishing is expected to be found.
  */
@@ -41,6 +42,7 @@ export function DetailsGroup({
 }: DetailsGroupProps) {
   const renderedMp4 = settings.mode === "single" && settings.outputFormat === "mp4";
   const publishing = renderedMp4 && settings.youtube;
+  const titleCard = renderedMp4 && (settings.renderOptions.titlePage || settings.renderOptions.closingCard);
   return (
     <>
       <Field label="Bundle name" htmlFor="export-bundle-name" help={exportsDir ?? "exports/"}>
@@ -52,6 +54,23 @@ export function DetailsGroup({
           className={cn(inputClass, "max-w-xs font-mono text-sm")}
         />
       </Field>
+      {titleCard ? (
+        <Field
+          label="Title line"
+          htmlFor="export-title-info"
+          help="Under the match name on the title page and the closing card: division, level, anything."
+        >
+          <input
+            id="export-title-info"
+            aria-label="Title page info line"
+            type="text"
+            className={cn(inputClass, "max-w-md")}
+            value={settings.renderOptions.titleInfo}
+            disabled={busy}
+            onChange={(e) => patch({ renderOptions: { ...settings.renderOptions, titleInfo: e.target.value } })}
+          />
+        </Field>
+      ) : null}
       {publishing ? (
         <Field
           label="Description"

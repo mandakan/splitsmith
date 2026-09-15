@@ -104,17 +104,20 @@ describe("groupSummary", () => {
   });
 
   it("names the cut", () => {
-    expect(groupSummary(DEFAULT_EXPORT_SETTINGS, "cut", ctx)).toBe("Full 5.0 / 5.0 s · cut");
-    expect(
-      groupSummary({ ...DEFAULT_EXPORT_SETTINGS, transitionKind: "zoom", transitionSeconds: 0.5 }, "cut", ctx),
-    ).toBe("Full 5.0 / 5.0 s · zoom 0.5 s");
+    expect(groupSummary(DEFAULT_EXPORT_SETTINGS, "cut", ctx)).toBe("Full 5.0 / 5.0 s");
+    expect(groupSummary({ ...DEFAULT_EXPORT_SETTINGS, paddingPreset: "custom", headPad: 2 }, "cut", ctx)).toBe(
+      "Custom 2.0 / 5.0 s",
+    );
   });
 
-  it("names the look", () => {
+  it("names the look, with the transition where the format draws one", () => {
     expect(groupSummary(DEFAULT_EXPORT_SETTINGS, "look", ctx)).toBe("No cards");
     expect(groupSummary(applyBody(DEFAULT_EXPORT_SETTINGS, YOUTUBE), "look", ctx)).toBe(
       "title page · slate · summary 3 s · closing · overlay",
     );
+    const zoom = { ...DEFAULT_EXPORT_SETTINGS, transitionKind: "zoom" as const, transitionSeconds: 0.5 };
+    expect(groupSummary(zoom, "look", ctx)).toBe("zoom 0.5 s");
+    expect(groupSummary({ ...zoom, outputFormat: "mp4" }, "look", ctx)).toBe("No cards");
   });
 });
 
