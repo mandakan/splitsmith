@@ -225,7 +225,84 @@ WantedBy=multi-user.target
 Register once by hand (with `--token` and `--state-dir`) so `agent.json` exists,
 then `sudo systemctl enable --now splitsmith-agent`. On WSL2 the distro's
 `systemd=true` boot plus a Windows "start WSL at logon/boot" task is what brings
-the unit up without an interactive login.
+the unit up without an interactive login -- see "WSL2: keeping the VM and SSH
+access alive" below for the task and the SSH port forward that goes with it.
+
+### WSL2: keeping the VM and SSH access alive
+
+The agent needs no inbound port -- it registers outward and drains the queue
+over a direct Postgres connection -- so nothing here is required for jobs to
+run. It is required for reaching the box over SSH from the LAN, which is how
+you get at the logs and the systemd unit without sitting at the Windows
+console.
+
+Two things break on every reboot or `wsl --shutdown`:
+
+1. Windows stops the WSL VM when its last process exits, taking the agent's
+   systemd unit and `sshd` with it.
+2. The VM comes back with a **new IP address**, which orphans the Windows
+   `netsh` port forward that exposes WSL's `sshd` on the LAN.
+
+Both are fixed by scheduled tasks, registered once from an **Administrator**
+PowerShell.
+
+**Keep WSL alive at logon:**
+
+```powershell
+$action  = New-ScheduledTaskAction -Execute "wsl.exe" -Argument "-u root /bin/sh -c `"service ssh start; sleep infinity`""
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+Register-ScheduledTask -TaskName "WSL keepalive" -Action $action -Trigger $trigger -RunLevel Highest
+```
+
+**Re-point the port forward at boot** (LAN port 2222 -> WSL port 22):
+
+```powershell
+$fix = 'powershell -NoProfile -Command "$env:WSL_UTF8=1; $w=(wsl hostname -I).Trim().Split(\" \")[0]; netsh interface portproxy reset; netsh interface portproxy add v4tov4 listenport=2222 listenaddress=0.0.0.0 connectport=22 connectaddress=$w"'
+$action  = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c $fix"
+$trigger = New-ScheduledTaskTrigger -AtStartup
+Register-ScheduledTask -TaskName "WSL portproxy" -Action $action -Trigger $trigger -RunLevel Highest
+```
+
+To repair the forward by hand (after a `wsl --shutdown`, or if the task did not
+fire), run the same thing interactively once Ubuntu is up:
+
+```powershell
+$env:WSL_UTF8=1
+$wsl = (wsl hostname -I).Trim().Split(" ")[0]
+$wsl
+netsh interface portproxy reset
+netsh interface portproxy add v4tov4 listenport=2222 listenaddress=0.0.0.0 connectport=22 connectaddress=$wsl
+netsh interface portproxy show all
+```
+
+`$env:WSL_UTF8=1` is the line that matters. Without it PowerShell misreads
+`wsl.exe`'s UTF-16 output and `$wsl` ends up as a single stray character -- the
+forward then points at nothing and `netsh` accepts it without complaint. The
+`show all` table must list a full `172.x.x.x` address under "Connect to", not a
+single letter:
+
+```
+Listen on ipv4:             Connect to ipv4:
+Address         Port        Address         Port
+--------------- ----------  --------------- ----------
+0.0.0.0         2222        172.x.x.x       22
+```
+
+Then confirm `sshd` is up inside WSL -- the shutdown kills it, and only the
+keepalive task brings it back on its own:
+
+```bash
+sudo systemctl enable --now ssh
+ss -tlnp | grep :22
+```
+
+The WSL memory cap is worth raising at the same time: the default is half of
+host RAM, and a 6 GB cap on a 16 GB host has OOM-killed detection. Set
+`memory=12GB` / `swap=8GB` under `[wsl2]` in `%USERPROFILE%\.wslconfig`, keep a
+space between the value and any `#` comment (some WSL versions parse
+`memory=6GB#...` as part of the value), then `wsl --shutdown` and wait ten
+seconds before reopening -- and repeat the port-forward repair above, since the
+shutdown changed the IP.
 
 ### From PyPI (no clone; auto-updating)
 
