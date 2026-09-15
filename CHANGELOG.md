@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.1](https://github.com/mandakan/splitsmith/compare/v0.38.0...v0.38.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **ui:** Workers admin page on the visual budget, with a way back ([#1030](https://github.com/mandakan/splitsmith/issues/1030)) ([d380d97](https://github.com/mandakan/splitsmith/commit/d380d97b92328470a5e4b8a21ac0431cb17de39d))
+
 ## [0.38.0](https://github.com/mandakan/splitsmith/compare/v0.37.1...v0.38.0) (2026-09-15)
 
 
