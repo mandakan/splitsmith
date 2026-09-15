@@ -23,7 +23,7 @@ from pydantic import BaseModel
 from .. import youtube_sidecar
 from ..youtube import oauth
 from ..youtube.client import default_http
-from ..youtube.upload import AlreadyUploadedError, connected_client, upload_export
+from ..youtube.upload import AlreadyUploadedError, UploadOptions, connected_client, upload_export
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -178,6 +178,11 @@ class YouTubeUploadRequest(BaseModel):
     filename: str
     privacy: Literal["unlisted", "private", "public"] = "unlisted"
     again: bool = False
+    # The convenience options: a playlist by title (created if missing), a
+    # scheduled publish time (implies private), subscriber notification.
+    playlist: str | None = None
+    publish_at: datetime | None = None
+    notify_subscribers: bool = True
 
 
 def exports_dir_for(state: Any, slug: str) -> Path:
@@ -220,17 +225,41 @@ async def submit_youtube_upload(slug: str, req: YouTubeUploadRequest, request: R
     job = await state.jobs.submit(
         kind="youtube_upload",
         shooter_slug=slug,
-        args={"slug": slug, "filename": req.filename, "privacy": req.privacy, "again": req.again},
+        args={
+            "slug": slug,
+            "filename": req.filename,
+            "privacy": req.privacy,
+            "again": req.again,
+            "playlist": req.playlist,
+            "publish_at": req.publish_at.isoformat() if req.publish_at else None,
+            "notify_subscribers": req.notify_subscribers,
+        },
     )
     return JSONResponse(job.model_dump(mode="json"))
 
 
 def run_youtube_upload(
-    handle: Any, *, state: Any, slug: str, filename: str, privacy: str, again: bool
+    handle: Any,
+    *,
+    state: Any,
+    slug: str,
+    filename: str,
+    privacy: str,
+    again: bool,
+    playlist: str | None = None,
+    publish_at: str | None = None,
+    notify_subscribers: bool = True,
 ) -> None:
     """Job body for ``youtube_upload``. Progress is bytes sent; a cancel
     lands between chunks through ``handle.check_cancel``. Registered by
-    ``server`` with ``state`` bound."""
+    ``server`` with ``state`` bound. ``publish_at`` travels as an ISO
+    string because job args are JSON."""
+    options = UploadOptions(
+        privacy=privacy,  # type: ignore[arg-type]
+        playlist=playlist or None,
+        publish_at=datetime.fromisoformat(publish_at) if publish_at else None,
+        notify_subscribers=notify_subscribers,
+    )
     handle.update(progress=0.0, message="Connecting to YouTube...")
     client, conn = connected_client()
     mp4 = confine_export_filename(exports_dir_for(state, slug), filename)
@@ -245,7 +274,7 @@ def run_youtube_upload(
         record = upload_export(
             mp4,
             client=client,
-            privacy=privacy,  # type: ignore[arg-type]
+            options=options,
             channel_title=conn.channel_title,
             again=again,
             progress=on_progress,

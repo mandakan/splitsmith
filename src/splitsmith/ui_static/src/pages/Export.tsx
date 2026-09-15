@@ -25,7 +25,7 @@ import { CleanupDialog } from "@/components/CleanupDialog";
 import { ExportHistory } from "@/components/export/ExportHistory";
 import { SelectField } from "@/components/export/SelectField";
 import { StageTable } from "@/components/export/StageTable";
-import { YouTubeConnect, type UploadAfterRender } from "@/components/export/YouTubeConnect";
+import { YouTubeConnect } from "@/components/export/YouTubeConnect";
 import { CamOptionsPanel } from "@/components/render/CamOptionsPanel";
 import { RenderOptionsPanel, Seconds } from "@/components/render/RenderOptionsPanel";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
@@ -50,7 +50,7 @@ import {
   type YouTubeSettings,
 } from "@/lib/api";
 import { camExportFields, DEFAULT_CAM_OPTIONS, syncedSecondaryCount, type CamOptions } from "@/lib/camOptions";
-import { rowPrivacy } from "@/lib/youtubeRows";
+import { DEFAULT_UPLOAD_OPTIONS, rowUploadOptions, type UploadFormOptions } from "@/lib/youtubeRows";
 import { hostedDownloads as buildHostedDownloads } from "@/lib/exportDownloads";
 import {
   estimateDuration,
@@ -202,7 +202,7 @@ function ExportInner({ slug }: { slug: string }) {
   const [youtube, setYoutube] = useState<boolean>(false);
   const [descriptionLead, setDescriptionLead] = useState<string>("");
   // One privacy control per page: the history rows upload with it too.
-  const [uploadAfterRender, setUploadAfterRender] = useState<UploadAfterRender>("off");
+  const [uploadOptions, setUploadOptions] = useState<UploadFormOptions>(DEFAULT_UPLOAD_OPTIONS);
   // Compare grid: the reference shooter sets the frame rate; the canvas
   // sets the render size; the overlay and its summary hold are #705's.
   const [audioFrom, setAudioFrom] = useState<string>("");
@@ -445,8 +445,8 @@ function ExportInner({ slug }: { slug: string }) {
     try {
       const submitted = await api.uploadToYouTube(slug, {
         filename,
-        privacy: rowPrivacy(uploadAfterRender),
         again,
+        ...rowUploadOptions(uploadOptions),
       });
       setJob(submitted);
       const final = await api.pollJob(submitted.id, setJob);
@@ -479,8 +479,11 @@ function ExportInner({ slug }: { slug: string }) {
         youtube_sidecar: renderedMp4 && youtube,
         description_lead: renderedMp4 && youtube ? descriptionLead.trim() || null : undefined,
         youtube_preset: renderedMp4 && youtube,
-        youtube_upload: renderedMp4 && youtube && !!youtubeSettings?.connected && uploadAfterRender !== "off",
-        youtube_privacy: rowPrivacy(uploadAfterRender),
+        youtube_upload: renderedMp4 && youtube && !!youtubeSettings?.connected && uploadOptions.enabled,
+        youtube_privacy: rowUploadOptions(uploadOptions).privacy,
+        youtube_playlist: rowUploadOptions(uploadOptions).playlist,
+        youtube_publish_at: rowUploadOptions(uploadOptions).publish_at,
+        youtube_notify_subscribers: rowUploadOptions(uploadOptions).notify_subscribers,
         include_overlay: includeOverlay,
         overlay_codec: overlayCodec,
         overlay_max_height: null,
@@ -919,8 +922,9 @@ function ExportInner({ slug }: { slug: string }) {
                       <YouTubeConnect
                         settings={youtubeSettings}
                         onSettingsChange={() => void reloadYouTube()}
-                        uploadAfterRender={uploadAfterRender}
-                        onUploadAfterRenderChange={setUploadAfterRender}
+                        options={uploadOptions}
+                        onOptionsChange={setUploadOptions}
+                        matchName={projectName || project?.name || ""}
                         showUploadControl={renderedMp4 && youtube}
                         busy={busy}
                       />

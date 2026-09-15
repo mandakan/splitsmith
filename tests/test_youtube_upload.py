@@ -29,9 +29,15 @@ class FakeClient:
         self.thumb_error = thumb_error
 
     def start_resumable_upload(
-        self, metadata: yt.VideoMetadata, *, size: int, content_type: str = "video/mp4"
+        self,
+        metadata: yt.VideoMetadata,
+        *,
+        size: int,
+        content_type: str = "video/mp4",
+        notify_subscribers: bool = True,
     ) -> str:
         self.started.append((metadata, size))
+        self.notify.append(notify_subscribers)
         return "https://session"
 
     def upload_bytes(
@@ -55,6 +61,25 @@ class FakeClient:
         if self.thumb_error:
             raise self.thumb_error
         self.thumbs.append(jpg_path)
+
+    # --- playlists ---
+    playlists: dict[str, str] = {}
+    playlist_error: Exception | None = None
+    added: list[tuple[str, str]] = []
+    notify: list[bool] = []
+
+    def find_playlist(self, title: str) -> str | None:
+        if self.playlist_error:
+            raise self.playlist_error
+        return self.playlists.get(title)
+
+    def create_playlist(self, title: str, *, privacy: str) -> str:
+        pid = f"PL-{len(self.playlists) + 1}-{privacy}"
+        self.playlists[title] = pid
+        return pid
+
+    def add_to_playlist(self, playlist_id: str, video_id: str) -> None:
+        self.added.append((playlist_id, video_id))
 
 
 def _seed(tmp_path: Path, *, srt: bool = True, thumb: bool = True, category: str = "Sports") -> Path:
@@ -84,7 +109,7 @@ def test_upload_export_sends_sidecar_metadata_and_records_the_result(tmp_path: P
     record = upload.upload_export(
         mp4,
         client=client,
-        privacy="unlisted",
+        options=upload.UploadOptions(privacy="unlisted"),
         channel_title="Mine",
         progress=lambda s, t: seen.append((s, t)),
     )
@@ -200,3 +225,102 @@ def test_connected_client_needs_a_stored_connection() -> None:
     client, conn = upload.connected_client()
     assert conn.channel_title == "Chan"
     assert isinstance(client, yt.YouTubeClient)
+
+
+# --- options: playlist, schedule, notify ------------------------------------
+
+
+def _opts(**over: Any) -> upload.UploadOptions:
+    return upload.UploadOptions(**over)
+
+
+def test_playlist_is_found_or_created_and_the_video_added(tmp_path: Path) -> None:
+    mp4 = _seed(tmp_path)
+    client = FakeClient()
+    client.playlists = {}
+    client.added = []
+    record = upload.upload_export(
+        mp4, client=client, options=_opts(privacy="unlisted", playlist="Bromma 2026")
+    )
+    assert client.playlists == {"Bromma 2026": "PL-1-unlisted"}
+    assert client.added == [("PL-1-unlisted", "vid42")]
+    assert record.playlist_id == "PL-1-unlisted" and record.playlist_title == "Bromma 2026"
+    # second upload with the same title reuses the list
+    second = upload.upload_export(mp4, client=client, options=_opts(playlist="Bromma 2026"), again=True)
+    assert len(client.playlists) == 1 and client.added[-1] == ("PL-1-unlisted", "vid42")
+    assert second.playlist_id == "PL-1-unlisted"
+
+
+def test_playlist_failure_is_a_note_not_a_failure(tmp_path: Path) -> None:
+    mp4 = _seed(tmp_path)
+    client = FakeClient()
+    client.playlist_error = yt.UploadFailedError("HTTP 403: playlists")
+    record = upload.upload_export(mp4, client=client, options=_opts(playlist="X"))
+    assert record.video_id == "vid42" and record.playlist_id is None
+    assert any("playlist" in n and "HTTP 403" in n for n in record.notes)
+
+
+def test_publish_at_and_notify_reach_the_metadata_and_the_record(tmp_path: Path) -> None:
+    from datetime import UTC, datetime
+
+    mp4 = _seed(tmp_path)
+    client = FakeClient()
+    client.notify = []
+    when = datetime(2026, 9, 20, 16, 0, tzinfo=UTC)
+    record = upload.upload_export(
+        mp4, client=client, options=_opts(privacy="public", publish_at=when, notify_subscribers=False)
+    )
+    meta, _ = client.started[-1]
+    assert meta.publish_at == when
+    assert meta.to_body()["status"]["privacyStatus"] == "private"
+    assert client.notify == [False]
+    assert record.privacy == "private"  # what the video actually is until publish time
+    assert record.publish_at == when and record.notify_subscribers is False
+
+
+def test_options_default_to_unlisted_notify_no_playlist(tmp_path: Path) -> None:
+    mp4 = _seed(tmp_path)
+    client = FakeClient()
+    client.notify = []
+    client.added = []
+    record = upload.upload_export(mp4, client=client)
+    assert client.started[-1][0].privacy == "unlisted"
+    assert client.notify == [True] and client.added == []
+    assert record.playlist_id is None and record.publish_at is None and record.notify_subscribers is True
+
+
+def test_add_to_a_fresh_playlist_retries_a_409(tmp_path: Path) -> None:
+    """A playlist is not writable in the seconds after ``playlists.insert``;
+    YouTube answers 409 to the first ``playlistItems.insert``. Seen live."""
+    mp4 = _seed(tmp_path)
+    client = FakeClient()
+    client.playlists = {}
+    client.added = []
+    attempts = {"n": 0}
+
+    def flaky_add(playlist_id: str, video_id: str) -> None:
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise yt.UploadFailedError("HTTP 409: The operation was aborted.")
+        client.added.append((playlist_id, video_id))
+
+    client.add_to_playlist = flaky_add  # type: ignore[method-assign]
+    slept: list[float] = []
+    record = upload.upload_export(mp4, client=client, options=_opts(playlist="New"), sleep=slept.append)
+    assert client.added == [("PL-1-unlisted", "vid42")]
+    assert record.playlist_id == "PL-1-unlisted" and record.notes == []
+    assert len(slept) == 2 and slept == sorted(slept)
+
+
+def test_add_to_playlist_gives_up_after_the_retry_budget(tmp_path: Path) -> None:
+    mp4 = _seed(tmp_path)
+    client = FakeClient()
+    client.playlists = {}
+
+    def always_409(playlist_id: str, video_id: str) -> None:
+        raise yt.UploadFailedError("HTTP 409: The operation was aborted.")
+
+    client.add_to_playlist = always_409  # type: ignore[method-assign]
+    record = upload.upload_export(mp4, client=client, options=_opts(playlist="New"), sleep=lambda s: None)
+    assert record.playlist_id is None
+    assert any("playlist" in n and "409" in n for n in record.notes)

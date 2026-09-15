@@ -9,6 +9,7 @@ already uploaded (the URL is printed; ``--again`` overrides).
 from __future__ import annotations
 
 import webbrowser
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -46,11 +47,41 @@ def open_client() -> tuple[YouTubeClient, oauth.YouTubeConnection]:
     return build_client(conn), conn
 
 
-def _privacy(value: str) -> upload.Privacy:
+def _privacy(value: str, *, flag: str = "--privacy") -> upload.Privacy:
     if value not in _PRIVACY_CHOICES:
-        console.print(f"[red]Error:[/] --privacy must be one of {', '.join(_PRIVACY_CHOICES)}.")
+        console.print(f"[red]Error:[/] {flag} must be one of {', '.join(_PRIVACY_CHOICES)}.")
         raise typer.Exit(code=2)
     return value  # type: ignore[return-value]
+
+
+def parse_publish_at(value: str | None, *, flag: str = "--publish-at") -> datetime | None:
+    """ISO 8601; a value without a zone is local time. Exit 2 on garbage."""
+    if value is None:
+        return None
+    try:
+        when = datetime.fromisoformat(value)
+    except ValueError as exc:
+        console.print(f"[red]Error:[/] {flag} must be an ISO time like 2026-09-20T18:00, got {value!r}.")
+        raise typer.Exit(code=2) from exc
+    return when if when.tzinfo is not None else when.astimezone()
+
+
+def build_options(
+    *,
+    privacy: str,
+    playlist: str | None,
+    publish_at: str | None,
+    no_notify: bool,
+    flag_prefix: str = "--",
+) -> upload.UploadOptions:
+    """The shared flag-to-options step for ``youtube upload`` and ``match
+    export``; ``flag_prefix`` only shapes the error messages."""
+    return upload.UploadOptions(
+        privacy=_privacy(privacy, flag=f"{flag_prefix}privacy"),
+        playlist=playlist or None,
+        publish_at=parse_publish_at(publish_at, flag=f"{flag_prefix}publish-at"),
+        notify_subscribers=not no_notify,
+    )
 
 
 def run_upload_with_progress(
@@ -58,7 +89,7 @@ def run_upload_with_progress(
     *,
     client: upload.Uploader,
     channel_title: str,
-    privacy: upload.Privacy,
+    options: upload.UploadOptions,
     again: bool,
 ) -> UploadRecord:
     """``upload_export`` under a rich transfer bar. Shared with ``match
@@ -80,7 +111,7 @@ def run_upload_with_progress(
         return upload.upload_export(
             mp4,
             client=client,
-            privacy=privacy,
+            options=options,
             channel_title=channel_title,
             again=again,
             progress=on_progress,
@@ -91,6 +122,10 @@ def report_upload(record: UploadRecord) -> None:
     """The URL on its own line (``soft_wrap`` so a narrow terminal never
     breaks it), then each note as a full sentence under it."""
     console.print(f"[bold]Uploaded[/] {record.url}", soft_wrap=True)
+    if record.publish_at is not None:
+        console.print(f"  scheduled: private until {record.publish_at.astimezone():%Y-%m-%d %H:%M}")
+    if record.playlist_title:
+        console.print(f"  playlist: {record.playlist_title}")
     for note in record.notes:
         console.print(f"[yellow]note[/] {note}", soft_wrap=True)
 
@@ -150,12 +185,23 @@ def upload_cmd(
         ..., exists=True, readable=True, help="A rendered MP4 with its -youtube.json beside it."
     ),
     privacy: str = typer.Option("unlisted", "--privacy", help="unlisted (default), private or public."),
+    playlist: str | None = typer.Option(
+        None, "--playlist", help="Add the video to this playlist on your channel (created if missing)."
+    ),
+    publish_at: str | None = typer.Option(
+        None,
+        "--publish-at",
+        help="Schedule the publish time (ISO, e.g. 2026-09-20T18:00, local time). Stays private until then.",
+    ),
+    no_notify: bool = typer.Option(
+        False, "--no-notify", help="Do not notify subscribers when it goes public."
+    ),
     again: bool = typer.Option(
         False, "--again", help="Upload even if the sidecar records a previous upload."
     ),
 ) -> None:
     """Upload one rendered match video with the sidecar's title, description, tags, captions and thumbnail."""
-    priv = _privacy(privacy)
+    options = build_options(privacy=privacy, playlist=playlist, publish_at=publish_at, no_notify=no_notify)
     try:
         client, conn = open_client()
     except oauth.NotConnectedError as exc:
@@ -163,7 +209,7 @@ def upload_cmd(
         raise typer.Exit(code=2) from exc
     try:
         record = run_upload_with_progress(
-            video, client=client, channel_title=conn.channel_title, privacy=priv, again=again
+            video, client=client, channel_title=conn.channel_title, options=options, again=again
         )
     except upload.AlreadyUploadedError as exc:
         console.print(f"Already uploaded: {exc.record.url}", soft_wrap=True)

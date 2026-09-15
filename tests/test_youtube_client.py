@@ -321,3 +321,88 @@ def test_set_thumbnail_failure_is_an_upload_failed_error(tmp_path: Path) -> None
     c, _ = _client()
     with pytest.raises(yt.UploadFailedError, match="custom video thumbnails"):
         c.set_thumbnail("vid", jpg)
+
+
+# --- scheduling, notify, playlists -----------------------------------------
+
+
+@respx.mock
+def test_publish_at_is_sent_as_rfc3339_utc_and_forces_private() -> None:
+    from datetime import UTC, datetime, timedelta, timezone
+
+    route = respx.post(f"{yt.UPLOAD_API}/videos").mock(
+        return_value=httpx.Response(200, headers={"Location": SESSION})
+    )
+    c, _ = _client()
+    meta = yt.VideoMetadata(
+        title="T",
+        description="D",
+        tags=[],
+        category_id="17",
+        privacy="public",
+        publish_at=datetime(2026, 9, 20, 18, 0, tzinfo=timezone(timedelta(hours=2))),
+    )
+    c.start_resumable_upload(meta, size=1)
+    import json
+
+    status = json.loads(route.calls.last.request.content)["status"]
+    assert status["publishAt"] == "2026-09-20T16:00:00Z"
+    assert status["privacyStatus"] == "private"
+    assert (
+        "publishAt"
+        not in yt.VideoMetadata(
+            title="T", description="D", tags=[], category_id="17", privacy="public"
+        ).to_body()["status"]
+    )
+    assert datetime.now(UTC).tzinfo is UTC  # keeps the import honest
+
+
+@respx.mock
+def test_notify_subscribers_rides_the_insert_query() -> None:
+    route = respx.post(f"{yt.UPLOAD_API}/videos").mock(
+        return_value=httpx.Response(200, headers={"Location": SESSION})
+    )
+    c, _ = _client()
+    c.start_resumable_upload(_meta(), size=1)
+    assert route.calls[0].request.url.params["notifySubscribers"] == "true"
+    c.start_resumable_upload(_meta(), size=1, notify_subscribers=False)
+    assert route.calls[1].request.url.params["notifySubscribers"] == "false"
+
+
+@respx.mock
+def test_find_playlist_pages_through_mine_and_matches_the_title() -> None:
+    route = respx.get(f"{yt.API}/playlists").mock(
+        side_effect=[
+            httpx.Response(
+                200, json={"nextPageToken": "p2", "items": [{"id": "PL1", "snippet": {"title": "Other"}}]}
+            ),
+            httpx.Response(200, json={"items": [{"id": "PL2", "snippet": {"title": "Bromma 2026"}}]}),
+        ]
+    )
+    c, _ = _client()
+    assert c.find_playlist("Bromma 2026") == "PL2"
+    assert route.call_count == 2
+    assert route.calls[0].request.url.params["mine"] == "true"
+    assert route.calls[1].request.url.params["pageToken"] == "p2"
+    route.mock(
+        return_value=httpx.Response(200, json={"items": [{"id": "PL1", "snippet": {"title": "Other"}}]})
+    )
+    assert c.find_playlist("Nope") is None
+
+
+@respx.mock
+def test_create_playlist_and_add_video() -> None:
+    import json
+
+    created = respx.post(f"{yt.API}/playlists").mock(return_value=httpx.Response(200, json={"id": "PL9"}))
+    added = respx.post(f"{yt.API}/playlistItems").mock(return_value=httpx.Response(200, json={"id": "PI1"}))
+    c, _ = _client()
+    assert c.create_playlist("Bromma 2026", privacy="unlisted") == "PL9"
+    body = json.loads(created.calls.last.request.content)
+    assert body == {"snippet": {"title": "Bromma 2026"}, "status": {"privacyStatus": "unlisted"}}
+    assert created.calls.last.request.url.params["part"] == "snippet,status"
+    c.add_to_playlist("PL9", "vid")
+    body = json.loads(added.calls.last.request.content)
+    assert body == {
+        "snippet": {"playlistId": "PL9", "resourceId": {"kind": "youtube#video", "videoId": "vid"}}
+    }

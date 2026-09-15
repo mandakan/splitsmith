@@ -409,13 +409,14 @@ def _stub_youtube(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     )
     monkeypatch.setattr(ycli, "build_client", lambda conn: object())
 
-    def fake_run(mp4: Path, *, client: Any, channel_title: str, privacy: str, again: bool) -> Any:
+    def fake_run(mp4: Path, *, client: Any, channel_title: str, options: Any, again: bool) -> Any:
         seen["mp4"] = mp4
-        seen["privacy"] = privacy
+        seen["privacy"] = options.privacy
+        seen["options"] = options
         return youtube_sidecar.UploadRecord(
             video_id="v1",
             url="https://youtu.be/v1",
-            privacy=privacy,
+            privacy=options.privacy,
             uploaded_at=datetime.now(UTC),
             channel_title=channel_title,
         )
@@ -534,3 +535,62 @@ def test_youtube_upload_failure_after_a_good_render_exits_1_and_keeps_the_file(
     assert out.exists()
     text = strip_ansi(result.output)
     assert "Wrote" in text and "gave up" in text
+
+
+def test_youtube_upload_forwards_playlist_schedule_and_notify(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from splitsmith import youtube_sidecar
+
+    root = _seed(tmp_path)
+    _capture_mp4(monkeypatch)
+    monkeypatch.setattr(youtube_sidecar, "write_thumbnail", lambda *a, **k: None)
+    seen = _stub_youtube(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "match",
+            "export",
+            str(root),
+            "--shooter",
+            "me",
+            "--format",
+            "mp4",
+            "--youtube-upload",
+            "--youtube-playlist",
+            "Bromma 2026",
+            "--youtube-publish-at",
+            "2026-09-20T18:00",
+            "--youtube-no-notify",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    opts = seen["options"]
+    assert opts.playlist == "Bromma 2026"
+    assert opts.publish_at is not None and opts.publish_at.tzinfo is not None
+    assert opts.notify_subscribers is False
+
+
+def test_youtube_publish_at_garbage_fails_before_rendering(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = _seed(tmp_path)
+    captured = _capture_mp4(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "match",
+            "export",
+            str(root),
+            "--shooter",
+            "me",
+            "--format",
+            "mp4",
+            "--youtube-upload",
+            "--youtube-publish-at",
+            "soon",
+        ],
+    )
+    assert result.exit_code == 2
+    assert "--youtube-publish-at" in strip_ansi(result.output)
+    assert "comp" not in captured
