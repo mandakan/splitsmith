@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.40.0](https://github.com/mandakan/splitsmith/compare/v0.39.0...v0.40.0) (2026-09-15)
+
+
+### Features
+
+* **export:** Look gallery with generic thumbnails ([#1040](https://github.com/mandakan/splitsmith/issues/1040)) ([f15c459](https://github.com/mandakan/splitsmith/commit/f15c4595ba70c5eadd5548199b42aa66c57b6e4b))
+* **export:** presets, last-used and option groups ([#1038](https://github.com/mandakan/splitsmith/issues/1038)) ([d4cef20](https://github.com/mandakan/splitsmith/commit/d4cef20d18ac23fdc7a47a530ffbf8d505d93834))
+* **export:** real-match preview in the rail ([#1041](https://github.com/mandakan/splitsmith/issues/1041)) ([30027d4](https://github.com/mandakan/splitsmith/commit/30027d4321711c749c1d6405267979fdfb5bd279))
+
+
+### Documentation
+
+* export screenshots and copy for presets, the gallery and the preview ([#1042](https://github.com/mandakan/splitsmith/issues/1042)) ([dc4081e](https://github.com/mandakan/splitsmith/commit/dc4081e04cc9fdcaa91b685caa5bafb76b64a8c2))
+
 ## [0.39.0](https://github.com/mandakan/splitsmith/compare/v0.38.1...v0.39.0) (2026-09-15)
 
 
