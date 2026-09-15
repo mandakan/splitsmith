@@ -24,6 +24,7 @@ The export *job bodies* stay in ``server.py``. Lifting
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -168,6 +169,9 @@ class MatchExportRequest(BaseModel):
     # the sidecar (it is the upload's metadata) and a rendered MP4.
     youtube_upload: bool = False
     youtube_privacy: Literal["unlisted", "private", "public"] = "unlisted"
+    youtube_playlist: str | None = None
+    youtube_publish_at: datetime | None = None
+    youtube_notify_subscribers: bool = True
 
     @model_validator(mode="after")
     def _youtube_upload_needs_an_mp4_and_a_sidecar(self) -> MatchExportRequest:
@@ -280,6 +284,10 @@ def youtube_record_for(
             "url": record.url,
             "privacy": record.privacy,
             "uploaded_at": record.uploaded_at.isoformat().replace("+00:00", "Z"),
+            "playlist_title": record.playlist_title,
+            "publish_at": (
+                record.publish_at.isoformat().replace("+00:00", "Z") if record.publish_at else None
+            ),
         }
     return None
 

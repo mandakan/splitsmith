@@ -162,13 +162,17 @@ def _fake_upload(monkeypatch: pytest.MonkeyPatch, *, video_id: str = "vid1") -> 
         mp4: Path,
         *,
         client: Any,
-        privacy: str,
+        options: Any = None,
         channel_title: str = "",
         again: bool = False,
         progress: Any = None,
         check_cancel: Any = None,
     ) -> youtube_sidecar.UploadRecord:
-        seen.update(mp4=mp4, privacy=privacy, again=again, channel_title=channel_title)
+        from splitsmith.youtube.upload import UploadOptions
+
+        options = options or UploadOptions()
+        privacy = options.effective_privacy
+        seen.update(mp4=mp4, privacy=privacy, again=again, channel_title=channel_title, options=options)
         if progress:
             progress(1024, 2048)
             progress(2048, 2048)
@@ -393,6 +397,106 @@ def test_history_rows_carry_the_sidecars_upload_record(export_client) -> None:
         "url": "https://youtu.be/v9",
         "privacy": "unlisted",
         "uploaded_at": "2026-09-14T00:00:00Z",
+        "playlist_title": None,
+        "publish_at": None,
     }
     assert by_id["b"]["youtube"] is None  # an unparseable sidecar never 500s
     assert by_id["c"]["youtube"] is None
+
+
+# --- options on the routes ---------------------------------------------------
+
+
+def test_upload_route_forwards_playlist_schedule_and_notify(
+    export_client, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from datetime import timedelta, timezone
+
+    from .test_ui_server import _wait_for_job
+
+    client, _root = export_client
+    _seed_render(export_client)
+    oauth.save_connection(_conn())
+    seen = _fake_upload(monkeypatch)
+    r = client.post(
+        "/api/shooters/me/exports/youtube-upload",
+        json={
+            "filename": "bromma.mp4",
+            "privacy": "public",
+            "playlist": "Bromma 2026",
+            "publish_at": "2026-09-20T18:00:00+02:00",
+            "notify_subscribers": False,
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert _wait_for_job(client, r.json()["id"])["status"] == "succeeded"
+    opts = seen["options"]
+    assert opts.playlist == "Bromma 2026" and opts.notify_subscribers is False
+    assert opts.publish_at == datetime(2026, 9, 20, 18, 0, tzinfo=timezone(timedelta(hours=2)))
+    assert seen["privacy"] == "private"  # scheduled implies private
+
+
+def test_match_export_chains_the_options(export_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    from .test_ui_server import _stub_match_export_probe, _wait_for_job, _wait_for_jobs_to_drain
+
+    client, _root = export_client
+    _stub_match_export_probe(monkeypatch)
+    _stub_mp4_render(monkeypatch)
+    oauth.save_connection(_conn("Mine"))
+    seen = _fake_upload(monkeypatch, video_id="chained")
+    r = client.post(
+        "/api/shooters/me/export/match",
+        json=_match_export_body(
+            output_format="mp4",
+            youtube_sidecar=True,
+            youtube_upload=True,
+            youtube_privacy="unlisted",
+            youtube_playlist="Bromma 2026",
+            youtube_publish_at="2026-09-20T16:00:00Z",
+            youtube_notify_subscribers=False,
+        ),
+    )
+    assert r.status_code == 200, r.text
+    assert _wait_for_job(client, r.json()["id"])["status"] == "succeeded"
+    uploads = [j for j in _wait_for_jobs_to_drain(client) if j["kind"] == "youtube_upload"]
+    assert len(uploads) == 1 and uploads[0]["status"] == "succeeded", uploads
+    opts = seen["options"]
+    assert opts.playlist == "Bromma 2026" and opts.notify_subscribers is False
+    assert opts.publish_at == datetime(2026, 9, 20, 16, 0, tzinfo=UTC)
+
+
+def test_history_row_carries_playlist_and_schedule(export_client) -> None:
+    import json
+
+    from splitsmith import export_runs, youtube_sidecar
+
+    client, root = export_client
+    mp4 = _seed_render(export_client)
+    sc_path = youtube_sidecar.sidecar_path_for(mp4)
+    sc = youtube_sidecar.load_sidecar(sc_path)
+    sc.upload = youtube_sidecar.UploadRecord(
+        video_id="v9",
+        url="https://youtu.be/v9",
+        privacy="private",
+        uploaded_at=datetime(2026, 9, 14, tzinfo=UTC),
+        playlist_id="PL1",
+        playlist_title="Bromma 2026",
+        publish_at=datetime(2026, 9, 20, 16, 0, tzinfo=UTC),
+    )
+    youtube_sidecar.write_sidecar(sc, sc_path)
+    run = export_runs.ExportRun(
+        run_id="a",
+        kind="match",
+        finished_at=datetime.now(UTC),
+        duration_seconds=1.0,
+        stage_numbers=[1],
+        formats=["mp4"],
+        anomaly_count=0,
+        artifacts=[export_runs.ExportArtifact(filename="bromma-youtube.json", kind="sidecar")],
+    ).model_dump(mode="json")
+    (root / "shooters" / "me" / "export_runs.json").write_text(
+        json.dumps({"schema_version": 1, "runs": [run]}), encoding="utf-8"
+    )
+    row = client.get("/api/shooters/me/exports/runs").json()["runs"][0]
+    assert row["youtube"]["playlist_title"] == "Bromma 2026"
+    assert row["youtube"]["publish_at"] == "2026-09-20T16:00:00Z"
