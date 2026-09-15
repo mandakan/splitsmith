@@ -168,7 +168,11 @@ def list_youtube_playlists() -> dict[str, Any]:
     except QuotaExceededError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
     except oauth.ReauthorizeError as exc:
-        raise HTTPException(status_code=409, detail=f"{exc}; connect YouTube again") from exc
+        # The provider already cleared the stored token; the SPA re-reads
+        # the settings on this status and shows Connect again.
+        raise HTTPException(
+            status_code=409, detail=f"{str(exc).rstrip('.')}. Connect YouTube again."
+        ) from exc
     except oauth.YouTubeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     return {"playlists": [{"id": p.id, "title": p.title} for p in playlists]}

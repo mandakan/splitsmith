@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/Field";
 import { Menu, menuItemClass } from "@/components/ui/Menu";
 import { Segmented } from "@/components/ui/Segmented";
-import { api, apiErrorText, type YouTubePlaylist, type YouTubePrivacy, type YouTubeSettings } from "@/lib/api";
+import { ApiError, api, apiErrorText, type YouTubePlaylist, type YouTubePrivacy, type YouTubeSettings } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { UploadFormOptions } from "@/lib/youtubeRows";
 
@@ -95,6 +95,10 @@ export function YouTubeConnect({
         if (!cancelled) {
           setPlaylists([]);
           setPlaylistsError(apiErrorText(e, "Could not load your playlists; you can still name a new one."));
+          // 409 is "not connected" (a revoked token was just cleared
+          // server-side): the settings have moved, re-read them so the
+          // block shows Connect rather than a dead channel.
+          if (e instanceof ApiError && e.status === 409) onSettingsChange();
         }
       }
     })();

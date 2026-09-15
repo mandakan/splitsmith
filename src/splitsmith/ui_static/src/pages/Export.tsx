@@ -899,28 +899,31 @@ function ExportInner({ slug }: { slug: string }) {
                       : "Off: the default encode, no upload sidecar."
                   }
                 >
-                  <Segmented<"off" | "on">
-                    label="YouTube"
-                    value={youtube ? "on" : "off"}
-                    onChange={(v) => setYoutube(v === "on")}
-                    options={[
-                      { value: "off", label: "Off" },
-                      { value: "on", label: "Preset + sidecar" },
-                    ]}
-                  />
-                  {youtube ? (
-                    <textarea
-                      id="export-description-lead"
-                      aria-label="Description lead"
-                      rows={2}
-                      className={cn(inputClass, "mt-2 max-w-md")}
-                      placeholder="What the video is, above the chapter list: division, camera, the day"
-                      value={descriptionLead}
-                      onChange={(e) => setDescriptionLead(e.target.value)}
+                  {/* One column: the Field's control slot is a plain block,
+                      and an inline-flex Segmented next to an inline-block
+                      textarea otherwise share a line. */}
+                  <div className="flex flex-col items-start gap-2.5">
+                    <Segmented<"off" | "on">
+                      label="YouTube"
+                      value={youtube ? "on" : "off"}
+                      onChange={(v) => setYoutube(v === "on")}
+                      options={[
+                        { value: "off", label: "Off" },
+                        { value: "on", label: "Preset + sidecar" },
+                      ]}
                     />
-                  ) : null}
-                  {!hosted ? (
-                    <div className="mt-2.5">
+                    {youtube ? (
+                      <textarea
+                        id="export-description-lead"
+                        aria-label="Description lead"
+                        rows={2}
+                        className={cn(inputClass, "max-w-md")}
+                        placeholder="What the video is, above the chapter list: division, camera, the day"
+                        value={descriptionLead}
+                        onChange={(e) => setDescriptionLead(e.target.value)}
+                      />
+                    ) : null}
+                    {!hosted ? (
                       <YouTubeConnect
                         settings={youtubeSettings}
                         onSettingsChange={() => void reloadYouTube()}
@@ -930,8 +933,8 @@ function ExportInner({ slug }: { slug: string }) {
                         showUploadControl={renderedMp4 && youtube}
                         busy={busy}
                       />
-                    </div>
-                  ) : null}
+                    ) : null}
+                  </div>
                 </Field>
               ) : null}
               <Field label="Bundle name" htmlFor="export-bundle-name" help={project?.exports_dir ?? "exports/"}>
@@ -961,7 +964,10 @@ function ExportInner({ slug }: { slug: string }) {
         </div>
 
         {/* Summary rail */}
-        <aside className="lg:sticky lg:top-3 lg:self-start">
+        {/* Pinned under the shell's measured header, not the viewport top,
+            and capped to the viewport so a long rail scrolls inside itself
+            instead of losing its first rows under the bar. */}
+        <aside className="lg:sticky lg:top-[calc(var(--shell-header-h,86px)+12px)] lg:max-h-[calc(100dvh-var(--shell-header-h,86px)-24px)] lg:self-start lg:overflow-y-auto">
           <div className="overflow-hidden rounded-[10px] border border-rule-strong bg-surface">
             <div className="flex items-center justify-between border-b border-rule px-3.5 py-2.5">
               <Label>{trimsOnly ? "Trims" : compare ? "Grid" : "Bundle"}</Label>
