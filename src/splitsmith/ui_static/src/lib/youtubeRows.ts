@@ -33,8 +33,12 @@ export function uploadLabel(run: ExportRun): "Upload to YouTube" | "Upload again
 export interface UploadFormOptions {
   enabled: boolean;
   privacy: YouTubePrivacy;
-  /** null: no playlist; a string (possibly still empty): the checkbox is on. */
+  /** null: no playlist. With ``playlistId`` set, the title of the picked
+   *  existing playlist; otherwise the name of the one to create (possibly
+   *  still empty while the user types). */
   playlist: string | null;
+  /** An existing playlist picked from the channel's list. */
+  playlistId: string | null;
   publishAt: string;
   notifySubscribers: boolean;
 }
@@ -43,6 +47,7 @@ export const DEFAULT_UPLOAD_OPTIONS: UploadFormOptions = {
   enabled: false,
   privacy: "unlisted",
   playlist: null,
+  playlistId: null,
   publishAt: "",
   notifySubscribers: true,
 };
@@ -53,13 +58,16 @@ export const DEFAULT_UPLOAD_OPTIONS: UploadFormOptions = {
  *  A publish time is only meaningful on a private video, so it is
  *  dropped otherwise; a blank playlist name is no playlist. */
 export function rowUploadOptions(form: UploadFormOptions): YouTubeUploadOptions {
-  if (!form.enabled) return { privacy: "unlisted", playlist: null, publish_at: null, notify_subscribers: true };
+  if (!form.enabled) {
+    return { privacy: "unlisted", playlist: null, playlist_id: null, publish_at: null, notify_subscribers: true };
+  }
   const playlist = (form.playlist ?? "").trim();
   const publishAt =
     form.privacy === "private" && form.publishAt ? new Date(form.publishAt).toISOString() : null;
   return {
     privacy: form.privacy,
     playlist: playlist || null,
+    playlist_id: form.playlistId,
     publish_at: publishAt,
     notify_subscribers: form.notifySubscribers,
   };

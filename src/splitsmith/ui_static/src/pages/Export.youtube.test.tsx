@@ -25,6 +25,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getExportRuns: vi.fn().mockResolvedValue({ runs: [] }),
       getCleanupPlan: vi.fn().mockResolvedValue({ items: [], totals_by_category: {}, total_bytes: 0, total_file_count: 0 }),
       getYouTubeSettings: vi.fn(),
+      getYouTubePlaylists: vi.fn(),
       uploadToYouTube: vi.fn(),
       exportMatch: vi.fn(),
       exportCompareGrid: vi.fn(),
@@ -222,6 +223,7 @@ beforeEach(() => {
   vi.mocked(api.getProject).mockResolvedValue(PROJECT);
   vi.mocked(api.getExportOverview).mockResolvedValue(OVERVIEW);
   vi.mocked(api.getYouTubeSettings).mockResolvedValue(CONNECTED);
+  vi.mocked(api.getYouTubePlaylists).mockResolvedValue({ playlists: [{ id: "PL2", title: "Practice" }] });
   vi.mocked(api.exportMatch).mockResolvedValue(job({ status: "running" }));
   vi.mocked(api.uploadToYouTube).mockResolvedValue(job({ status: "running", kind: "youtube_upload" }));
   vi.mocked(api.pollJob).mockImplementation(async (_id, onUpdate) => {
@@ -248,22 +250,34 @@ describe("Export YouTube row", () => {
       youtube_upload: false,
       youtube_privacy: "unlisted",
       youtube_playlist: null,
+      youtube_playlist_id: null,
       youtube_publish_at: null,
       youtube_notify_subscribers: true,
     });
 
     await user.click(choice("Upload after render", "Private"));
-    await user.click(screen.getByLabelText("Add to playlist"));
+    await waitFor(() => expect(api.getYouTubePlaylists).toHaveBeenCalledTimes(1));
+    await user.selectOptions(await screen.findByLabelText("Playlist"), "PL2");
+    await user.click(screen.getByRole("button", { name: /export bundle/i }));
+    await waitFor(() => expect(api.exportMatch).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.exportMatch).mock.calls[1][1]).toMatchObject({
+      youtube_upload: true,
+      youtube_playlist: "Practice",
+      youtube_playlist_id: "PL2",
+    });
+
+    await user.selectOptions(screen.getByLabelText("Playlist"), "__new__");
     expect(await screen.findByLabelText("Playlist name")).toHaveValue("bromma-2026");
     await user.clear(screen.getByLabelText("Playlist name"));
     await user.type(screen.getByLabelText("Playlist name"), "Bromma 2026");
     await user.type(screen.getByLabelText("Publish at"), "2026-09-20T18:00");
     await user.click(screen.getByRole("button", { name: /export bundle/i }));
-    await waitFor(() => expect(api.exportMatch).toHaveBeenCalledTimes(2));
-    expect(vi.mocked(api.exportMatch).mock.calls[1][1]).toMatchObject({
+    await waitFor(() => expect(api.exportMatch).toHaveBeenCalledTimes(3));
+    expect(vi.mocked(api.exportMatch).mock.calls[2][1]).toMatchObject({
       youtube_upload: true,
       youtube_privacy: "private",
       youtube_playlist: "Bromma 2026",
+      youtube_playlist_id: null,
       youtube_publish_at: new Date("2026-09-20T18:00").toISOString(),
       youtube_notify_subscribers: true,
     });
@@ -281,6 +295,7 @@ describe("Export YouTube row", () => {
         again: false,
         privacy: "unlisted",
         playlist: null,
+        playlist_id: null,
         publish_at: null,
         notify_subscribers: true,
       },

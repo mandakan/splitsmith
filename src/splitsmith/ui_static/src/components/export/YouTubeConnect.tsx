@@ -19,11 +19,12 @@
 import { MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { SelectField } from "@/components/export/SelectField";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/Field";
 import { Menu, menuItemClass } from "@/components/ui/Menu";
 import { Segmented } from "@/components/ui/Segmented";
-import { api, apiErrorText, type YouTubePrivacy, type YouTubeSettings } from "@/lib/api";
+import { api, apiErrorText, type YouTubePlaylist, type YouTubePrivacy, type YouTubeSettings } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { UploadFormOptions } from "@/lib/youtubeRows";
 
@@ -44,6 +45,14 @@ export interface YouTubeConnectProps {
 }
 
 const POLL_MS = 2000;
+const NEW_PLAYLIST = "__new__";
+
+/** The select's value for the form state: an existing id, New while a
+ *  name is being typed, or None. */
+function playlistChoice(options: UploadFormOptions): string {
+  if (options.playlistId) return options.playlistId;
+  return options.playlist === null ? "" : NEW_PLAYLIST;
+}
 const POLL_LIMIT_MS = 10 * 60 * 1000;
 const CONNECT_FAILED_FALLBACK = "Could not start the YouTube login - check the app and retry.";
 
@@ -69,6 +78,30 @@ export function YouTubeConnect({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  // The channel's playlists, fetched once the upload block turns on and
+  // a channel is connected; null until then. A failed load leaves the
+  // picker with None and New only, and says why under it.
+  const [playlists, setPlaylists] = useState<YouTubePlaylist[] | null>(null);
+  const [playlistsError, setPlaylistsError] = useState<string | null>(null);
+  const wantPlaylists = showUploadControl && options.enabled && !!settings?.connected;
+  useEffect(() => {
+    if (!wantPlaylists || playlists !== null) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const { playlists: fetched } = await api.getYouTubePlaylists();
+        if (!cancelled) setPlaylists(fetched);
+      } catch (e) {
+        if (!cancelled) {
+          setPlaylists([]);
+          setPlaylistsError(apiErrorText(e, "Could not load your playlists; you can still name a new one."));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [wantPlaylists, playlists]);
   const pollRef = useRef<number | null>(null);
   const startedAtRef = useRef(0);
 
@@ -200,20 +233,30 @@ export function YouTubeConnect({
           </div>
           {options.enabled ? (
             <div className="flex flex-col gap-1.5 pl-0.5">
-              <label className="flex items-center gap-2 text-md text-ink-2">
-                <input
-                  type="checkbox"
-                  aria-label="Add to playlist"
-                  checked={options.playlist !== null}
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-md text-muted">Playlist</span>
+                <SelectField
+                  label="Playlist"
+                  value={playlistChoice(options)}
                   disabled={busy}
-                  onChange={(e) =>
-                    onOptionsChange({ ...options, playlist: e.target.checked ? matchName : null })
-                  }
-                  className="accent-[var(--color-ink)]"
+                  onChange={(v) => {
+                    if (v === "") onOptionsChange({ ...options, playlist: null, playlistId: null });
+                    else if (v === NEW_PLAYLIST) onOptionsChange({ ...options, playlist: matchName, playlistId: null });
+                    else {
+                      const picked = (playlists ?? []).find((p) => p.id === v);
+                      onOptionsChange({ ...options, playlist: picked?.title ?? null, playlistId: v });
+                    }
+                  }}
+                  options={[
+                    { value: "", label: "None" },
+                    ...(playlists ?? []).map((p) => ({ value: p.id, label: p.title })),
+                    { value: NEW_PLAYLIST, label: "New playlist..." },
+                  ]}
+                  className="w-64"
                 />
-                Add to playlist
-              </label>
-              {options.playlist !== null ? (
+              </div>
+              {playlistsError ? <p className="text-sm text-muted">{playlistsError}</p> : null}
+              {options.playlist !== null && options.playlistId === null ? (
                 <input
                   type="text"
                   aria-label="Playlist name"

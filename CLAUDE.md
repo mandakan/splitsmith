@@ -171,8 +171,9 @@ chains that job when the request carries ``youtube_upload``; the history
 route reads each run's ``youtube`` record from the sidecar per request.
 In the SPA, a new upload option belongs on
 ``components/export/YouTubeConnect``'s options block and on
-``youtube.upload.UploadOptions`` (playlist by title, ``publish_at`` which
-implies private, ``notify_subscribers``); a new per-run action on
+``youtube.upload.UploadOptions`` (playlist by title or, from the picker,
+by ``playlist_id`` which wins; ``publish_at`` which implies private;
+``notify_subscribers``); a new per-run action on
 ``ExportHistory`` through ``lib/youtubeRows``. One options block per page
 (the form's "Upload after render"), the history rows reuse it through
 ``rowUploadOptions``. ``playlistItems.insert`` answers 409 for a few

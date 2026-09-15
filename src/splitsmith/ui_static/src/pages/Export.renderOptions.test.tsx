@@ -240,6 +240,7 @@ describe("Export rendered-video rows", () => {
       youtube_upload: false,
       youtube_privacy: "unlisted",
       youtube_playlist: null,
+      youtube_playlist_id: null,
       youtube_publish_at: null,
       youtube_notify_subscribers: true,
     });
@@ -279,6 +280,7 @@ describe("Export rendered-video rows", () => {
       youtube_upload: false,
       youtube_privacy: "unlisted",
       youtube_playlist: null,
+      youtube_playlist_id: null,
       youtube_publish_at: null,
       youtube_notify_subscribers: true,
       description_lead: "Production Optics, head cam",
