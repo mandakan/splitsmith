@@ -406,3 +406,18 @@ def test_create_playlist_and_add_video() -> None:
     assert body == {
         "snippet": {"playlistId": "PL9", "resourceId": {"kind": "youtube#video", "videoId": "vid"}}
     }
+
+
+@respx.mock
+def test_list_playlists_pages_through_mine() -> None:
+    route = respx.get(f"{yt.API}/playlists").mock(
+        side_effect=[
+            httpx.Response(
+                200, json={"nextPageToken": "p2", "items": [{"id": "PL1", "snippet": {"title": "A"}}]}
+            ),
+            httpx.Response(200, json={"items": [{"id": "PL2", "snippet": {"title": "B"}}]}),
+        ]
+    )
+    c, _ = _client()
+    assert [(p.id, p.title) for p in c.list_playlists()] == [("PL1", "A"), ("PL2", "B")]
+    assert route.call_count == 2

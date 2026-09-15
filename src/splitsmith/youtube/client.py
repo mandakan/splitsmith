@@ -30,6 +30,7 @@ __all__ = [
     "CHUNK_SIZE",
     "UPLOAD_API",
     "Channel",
+    "Playlist",
     "QuotaExceededError",
     "ReauthorizeError",
     "TokenSource",
@@ -66,6 +67,11 @@ class TokenSource(Protocol):
 
 
 class Channel(BaseModel):
+    id: str
+    title: str
+
+
+class Playlist(BaseModel):
     id: str
     title: str
 
@@ -355,8 +361,9 @@ class YouTubeClient:
             content=jpg_path.read_bytes(),
         )
 
-    def find_playlist(self, title: str) -> str | None:
-        """The id of the channel's playlist with exactly this title, or None."""
+    def list_playlists(self) -> list[Playlist]:
+        """Every playlist on the channel, in YouTube's order."""
+        out: list[Playlist] = []
         page: str | None = None
         while True:
             params = {"part": "snippet", "mine": "true", "maxResults": "50"}
@@ -364,11 +371,17 @@ class YouTubeClient:
                 params["pageToken"] = page
             body = self._request("GET", f"{API}/playlists", params=params).json()
             for item in body.get("items") or []:
-                if str(item.get("snippet", {}).get("title", "")) == title:
-                    return str(item["id"])
+                out.append(Playlist(id=str(item["id"]), title=str(item.get("snippet", {}).get("title", ""))))
             page = body.get("nextPageToken")
             if not page:
-                return None
+                return out
+
+    def find_playlist(self, title: str) -> str | None:
+        """The id of the channel's first playlist with exactly this title, or None."""
+        for playlist in self.list_playlists():
+            if playlist.title == title:
+                return playlist.id
+        return None
 
     def create_playlist(self, title: str, *, privacy: str) -> str:
         resp = self._request(

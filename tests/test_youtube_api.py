@@ -500,3 +500,66 @@ def test_history_row_carries_playlist_and_schedule(export_client) -> None:
     row = client.get("/api/shooters/me/exports/runs").json()["runs"][0]
     assert row["youtube"]["playlist_title"] == "Bromma 2026"
     assert row["youtube"]["publish_at"] == "2026-09-20T16:00:00Z"
+
+
+# --- playlist picker ---------------------------------------------------------
+
+
+def test_playlists_route_lists_the_channels_playlists(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    from splitsmith.youtube.client import Playlist
+
+    assert client.get("/api/settings/youtube/playlists").status_code == 409  # not connected
+    oauth.save_connection(_conn())
+
+    class Fake:
+        def list_playlists(self) -> list[Playlist]:
+            return [Playlist(id="PL1", title="Bromma 2026"), Playlist(id="PL2", title="Practice")]
+
+    monkeypatch.setattr(youtube_api, "connected_client", lambda: (Fake(), _conn()))
+    r = client.get("/api/settings/youtube/playlists")
+    assert r.status_code == 200
+    assert r.json() == {
+        "playlists": [{"id": "PL1", "title": "Bromma 2026"}, {"id": "PL2", "title": "Practice"}]
+    }
+
+
+def test_playlists_route_maps_upstream_errors(client, monkeypatch: pytest.MonkeyPatch) -> None:
+    from splitsmith.youtube.client import QuotaExceededError
+
+    oauth.save_connection(_conn())
+
+    class Broken:
+        def list_playlists(self) -> list:
+            raise QuotaExceededError("quota")
+
+    monkeypatch.setattr(youtube_api, "connected_client", lambda: (Broken(), _conn()))
+    r = client.get("/api/settings/youtube/playlists")
+    assert r.status_code == 429
+
+
+def test_upload_route_and_chain_forward_playlist_id(export_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    from .test_ui_server import _stub_match_export_probe, _wait_for_job, _wait_for_jobs_to_drain
+
+    client, _root = export_client
+    _seed_render(export_client)
+    oauth.save_connection(_conn())
+    seen = _fake_upload(monkeypatch)
+    r = client.post(
+        "/api/shooters/me/exports/youtube-upload",
+        json={"filename": "bromma.mp4", "playlist_id": "PL7", "playlist": "Bromma 2026"},
+    )
+    assert _wait_for_job(client, r.json()["id"])["status"] == "succeeded"
+    assert seen["options"].playlist_id == "PL7" and seen["options"].playlist == "Bromma 2026"
+
+    _stub_match_export_probe(monkeypatch)
+    _stub_mp4_render(monkeypatch)
+    r = client.post(
+        "/api/shooters/me/export/match",
+        json=_match_export_body(
+            output_format="mp4", youtube_sidecar=True, youtube_upload=True, youtube_playlist_id="PL7"
+        ),
+    )
+    assert _wait_for_job(client, r.json()["id"])["status"] == "succeeded"
+    uploads = [j for j in _wait_for_jobs_to_drain(client) if j["kind"] == "youtube_upload"]
+    assert uploads and uploads[-1]["status"] == "succeeded"
+    assert seen["options"].playlist_id == "PL7"

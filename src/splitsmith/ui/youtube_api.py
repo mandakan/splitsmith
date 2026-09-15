@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from .. import youtube_sidecar
 from ..youtube import oauth
-from ..youtube.client import default_http
+from ..youtube.client import QuotaExceededError, default_http
 from ..youtube.upload import AlreadyUploadedError, UploadOptions, connected_client, upload_export
 
 logger = logging.getLogger(__name__)
@@ -153,6 +153,27 @@ def youtube_connect_status(request: Request) -> ConnectStatusResponse:
     )
 
 
+@router.get("/api/settings/youtube/playlists")
+def list_youtube_playlists() -> dict[str, Any]:
+    """The connected channel's playlists, for the Export page's picker.
+    One Data API call per page of 50; nothing cached, the block opens
+    rarely. 409 when not connected, 429 when the quota is spent."""
+    _local_gate()
+    try:
+        client, _conn = connected_client()
+    except oauth.NotConnectedError as exc:
+        raise HTTPException(status_code=409, detail="not connected to YouTube") from exc
+    try:
+        playlists = client.list_playlists()
+    except QuotaExceededError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except oauth.ReauthorizeError as exc:
+        raise HTTPException(status_code=409, detail=f"{exc}; connect YouTube again") from exc
+    except oauth.YouTubeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"playlists": [{"id": p.id, "title": p.title} for p in playlists]}
+
+
 @router.delete("/api/settings/youtube/session")
 def delete_youtube_session(request: Request) -> dict[str, Any]:
     _local_gate()
@@ -181,6 +202,7 @@ class YouTubeUploadRequest(BaseModel):
     # The convenience options: a playlist by title (created if missing), a
     # scheduled publish time (implies private), subscriber notification.
     playlist: str | None = None
+    playlist_id: str | None = None
     publish_at: datetime | None = None
     notify_subscribers: bool = True
 
@@ -231,6 +253,7 @@ async def submit_youtube_upload(slug: str, req: YouTubeUploadRequest, request: R
             "privacy": req.privacy,
             "again": req.again,
             "playlist": req.playlist,
+            "playlist_id": req.playlist_id,
             "publish_at": req.publish_at.isoformat() if req.publish_at else None,
             "notify_subscribers": req.notify_subscribers,
         },
@@ -247,6 +270,7 @@ def run_youtube_upload(
     privacy: str,
     again: bool,
     playlist: str | None = None,
+    playlist_id: str | None = None,
     publish_at: str | None = None,
     notify_subscribers: bool = True,
 ) -> None:
@@ -257,6 +281,7 @@ def run_youtube_upload(
     options = UploadOptions(
         privacy=privacy,  # type: ignore[arg-type]
         playlist=playlist or None,
+        playlist_id=playlist_id or None,
         publish_at=datetime.fromisoformat(publish_at) if publish_at else None,
         notify_subscribers=notify_subscribers,
     )

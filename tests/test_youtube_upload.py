@@ -324,3 +324,16 @@ def test_add_to_playlist_gives_up_after_the_retry_budget(tmp_path: Path) -> None
     record = upload.upload_export(mp4, client=client, options=_opts(playlist="New"), sleep=lambda s: None)
     assert record.playlist_id is None
     assert any("playlist" in n and "409" in n for n in record.notes)
+
+
+def test_playlist_id_skips_find_or_create(tmp_path: Path) -> None:
+    mp4 = _seed(tmp_path)
+    client = FakeClient()
+    client.playlists = {"Other": "PL-x"}
+    client.added = []
+    record = upload.upload_export(
+        mp4, client=client, options=_opts(playlist="ignored title", playlist_id="PL-existing")
+    )
+    assert client.added == [("PL-existing", "vid42")]
+    assert client.playlists == {"Other": "PL-x"}  # nothing created
+    assert record.playlist_id == "PL-existing" and record.playlist_title == "ignored title"

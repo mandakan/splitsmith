@@ -170,6 +170,7 @@ class MatchExportRequest(BaseModel):
     youtube_upload: bool = False
     youtube_privacy: Literal["unlisted", "private", "public"] = "unlisted"
     youtube_playlist: str | None = None
+    youtube_playlist_id: str | None = None
     youtube_publish_at: datetime | None = None
     youtube_notify_subscribers: bool = True
 

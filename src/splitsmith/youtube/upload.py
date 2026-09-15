@@ -45,7 +45,11 @@ class UploadOptions(BaseModel):
     privacy: Privacy = "unlisted"
     publish_at: datetime | None = None
     notify_subscribers: bool = True
+    #: A playlist by title (found among the channel's own, created if
+    #: missing), or by id when the user picked an existing one; the id
+    #: wins, and ``playlist`` is then only the title recorded.
     playlist: str | None = None
+    playlist_id: str | None = None
 
     @property
     def effective_privacy(self) -> Privacy:
@@ -198,15 +202,15 @@ def upload_export(
             notes.append(f"thumbnail not set: {exc}")
 
     playlist_id: str | None = None
-    if options.playlist:
+    if options.playlist_id or options.playlist:
         try:
-            playlist_id = client.find_playlist(options.playlist)
+            playlist_id = options.playlist_id or client.find_playlist(options.playlist or "")
             if playlist_id is None:
-                playlist_id = client.create_playlist(options.playlist, privacy=privacy)
+                playlist_id = client.create_playlist(options.playlist or "", privacy=privacy)
             _add_to_playlist_with_retry(client, playlist_id, video_id, sleep=sleep)
         except YouTubeError as exc:
             playlist_id = None
-            notes.append(f"not added to playlist {options.playlist!r}: {exc}")
+            notes.append(f"not added to playlist {options.playlist or options.playlist_id!r}: {exc}")
 
     record = youtube_sidecar.UploadRecord(
         video_id=video_id,
@@ -218,7 +222,7 @@ def upload_export(
         thumbnail_set=thumbnail_set,
         notes=notes,
         playlist_id=playlist_id,
-        playlist_title=options.playlist if playlist_id else None,
+        playlist_title=(options.playlist or None) if playlist_id else None,
         publish_at=options.publish_at,
         notify_subscribers=options.notify_subscribers,
     )

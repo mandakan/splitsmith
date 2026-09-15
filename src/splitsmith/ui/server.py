@@ -4215,6 +4215,7 @@ def register_job_bodies(state: AppState) -> None:
                         "privacy": req.youtube_privacy,
                         "again": True,
                         "playlist": req.youtube_playlist,
+                        "playlist_id": req.youtube_playlist_id,
                         "publish_at": (
                             req.youtube_publish_at.isoformat() if req.youtube_publish_at else None
                         ),
