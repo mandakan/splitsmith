@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { ExportRun } from "@/lib/api";
-import { rowPrivacy, uploadLabel, uploadableArtifact, youtubeLink } from "@/lib/youtubeRows";
+import { DEFAULT_UPLOAD_OPTIONS, rowUploadOptions, uploadLabel, uploadableArtifact, youtubeLink } from "@/lib/youtubeRows";
 
 function run(over: Partial<ExportRun> = {}): ExportRun {
   return {
@@ -70,8 +70,38 @@ describe("youtubeLink / uploadLabel / rowPrivacy", () => {
     expect(uploadLabel(done)).toBe("Upload again");
   });
 
-  it("row privacy follows the form control, unlisted when off", () => {
-    expect(rowPrivacy("off")).toBe("unlisted");
-    expect(rowPrivacy("public")).toBe("public");
+  it("row options follow the form block; Off means the defaults", () => {
+    expect(rowUploadOptions({ ...DEFAULT_UPLOAD_OPTIONS, enabled: false, privacy: "public", playlist: "X" })).toEqual({
+      privacy: "unlisted",
+      playlist: null,
+      publish_at: null,
+      notify_subscribers: true,
+    });
+    expect(
+      rowUploadOptions({
+        enabled: true,
+        privacy: "private",
+        playlist: "Bromma 2026",
+        publishAt: "2026-09-20T18:00",
+        notifySubscribers: false,
+      }),
+    ).toEqual({
+      privacy: "private",
+      playlist: "Bromma 2026",
+      publish_at: new Date("2026-09-20T18:00").toISOString(),
+      notify_subscribers: false,
+    });
+  });
+
+  it("publish time is only sent when the video is private, playlist only when named", () => {
+    const opts = rowUploadOptions({
+      enabled: true,
+      privacy: "public",
+      playlist: "  ",
+      publishAt: "2026-09-20T18:00",
+      notifySubscribers: true,
+    });
+    expect(opts.publish_at).toBeNull();
+    expect(opts.playlist).toBeNull();
   });
 });

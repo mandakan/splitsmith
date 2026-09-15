@@ -833,6 +833,8 @@ export interface ExportRunYouTube {
   url: string;
   privacy: string;
   uploaded_at: string;
+  playlist_title?: string | null;
+  publish_at?: string | null;
 }
 
 /** GET /api/settings/youtube (local mode only). */
@@ -855,9 +857,18 @@ export interface YouTubeConnectStart {
   expires_at: string;
 }
 
-export interface YouTubeUploadPayload {
-  filename: string;
+/** The convenience options an upload carries: a playlist by title
+ *  (created if missing), a scheduled publish time as ISO 8601 (the video
+ *  stays private until then), subscriber notification. */
+export interface YouTubeUploadOptions {
   privacy: YouTubePrivacy;
+  playlist: string | null;
+  publish_at: string | null;
+  notify_subscribers: boolean;
+}
+
+export interface YouTubeUploadPayload extends YouTubeUploadOptions {
+  filename: string;
   again: boolean;
 }
 
@@ -984,6 +995,9 @@ export interface MatchExportRequestPayload {
    *  it without ``youtube_sidecar`` and an mp4 output (422). */
   youtube_upload?: boolean;
   youtube_privacy?: YouTubePrivacy;
+  youtube_playlist?: string | null;
+  youtube_publish_at?: string | null;
+  youtube_notify_subscribers?: boolean;
   /** Issue #973. Open the rendered MP4 with a generated match title
    *  card (match name, date, shooter, plus ``title_info`` as a free-text
    *  line). Other renderers surface an "ignored" anomaly. */
@@ -3951,6 +3965,15 @@ export const api = {
           : {}),
         ...(payload.youtube_privacy !== undefined
           ? { youtube_privacy: payload.youtube_privacy }
+          : {}),
+        ...(payload.youtube_playlist !== undefined
+          ? { youtube_playlist: payload.youtube_playlist }
+          : {}),
+        ...(payload.youtube_publish_at !== undefined
+          ? { youtube_publish_at: payload.youtube_publish_at }
+          : {}),
+        ...(payload.youtube_notify_subscribers !== undefined
+          ? { youtube_notify_subscribers: payload.youtube_notify_subscribers }
           : {}),
       },
     }),

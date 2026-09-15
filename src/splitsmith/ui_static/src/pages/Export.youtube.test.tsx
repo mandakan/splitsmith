@@ -247,14 +247,25 @@ describe("Export YouTube row", () => {
       youtube_sidecar: true,
       youtube_upload: false,
       youtube_privacy: "unlisted",
+      youtube_playlist: null,
+      youtube_publish_at: null,
+      youtube_notify_subscribers: true,
     });
 
     await user.click(choice("Upload after render", "Private"));
+    await user.click(screen.getByLabelText("Add to playlist"));
+    expect(await screen.findByLabelText("Playlist name")).toHaveValue("bromma-2026");
+    await user.clear(screen.getByLabelText("Playlist name"));
+    await user.type(screen.getByLabelText("Playlist name"), "Bromma 2026");
+    await user.type(screen.getByLabelText("Publish at"), "2026-09-20T18:00");
     await user.click(screen.getByRole("button", { name: /export bundle/i }));
     await waitFor(() => expect(api.exportMatch).toHaveBeenCalledTimes(2));
     expect(vi.mocked(api.exportMatch).mock.calls[1][1]).toMatchObject({
       youtube_upload: true,
       youtube_privacy: "private",
+      youtube_playlist: "Bromma 2026",
+      youtube_publish_at: new Date("2026-09-20T18:00").toISOString(),
+      youtube_notify_subscribers: true,
     });
   });
 
@@ -265,7 +276,14 @@ describe("Export YouTube row", () => {
     await waitFor(() => expect(api.uploadToYouTube).toHaveBeenCalledTimes(1));
     expect(vi.mocked(api.uploadToYouTube).mock.calls[0]).toEqual([
       "mathias",
-      { filename: "bromma-2026.mp4", privacy: "unlisted", again: false },
+      {
+        filename: "bromma-2026.mp4",
+        again: false,
+        privacy: "unlisted",
+        playlist: null,
+        publish_at: null,
+        notify_subscribers: true,
+      },
     ]);
   });
 

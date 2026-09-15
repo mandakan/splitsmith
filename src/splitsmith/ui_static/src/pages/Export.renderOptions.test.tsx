@@ -239,6 +239,9 @@ describe("Export rendered-video rows", () => {
       youtube_preset: false,
       youtube_upload: false,
       youtube_privacy: "unlisted",
+      youtube_playlist: null,
+      youtube_publish_at: null,
+      youtube_notify_subscribers: true,
     });
     expect("title_page" in body).toBe(false);
     expect("summary_hold_seconds" in body).toBe(false);
@@ -275,6 +278,9 @@ describe("Export rendered-video rows", () => {
       youtube_preset: true,
       youtube_upload: false,
       youtube_privacy: "unlisted",
+      youtube_playlist: null,
+      youtube_publish_at: null,
+      youtube_notify_subscribers: true,
       description_lead: "Production Optics, head cam",
     });
   });

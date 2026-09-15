@@ -8,7 +8,11 @@
  * component polls the login the server started; the SPA opens the
  * consent URL itself because the browser is already the user's. Connected:
  * the channel name, Disconnect behind a menu, and, when the render is a
- * YouTube mp4, the "Upload after render" privacy control.
+ * YouTube mp4, the "Upload after render" block: privacy, then the
+ * options that apply to it (a playlist, a publish time for a private
+ * video, subscriber notification for a public one). The block's values
+ * are the page's one set of upload choices; history-row uploads reuse
+ * them (``lib/youtubeRows.rowUploadOptions``).
  *
  * Local mode only; the parent mounts this only there.
  */
@@ -16,19 +20,24 @@ import { MoreHorizontal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { inputClass } from "@/components/ui/Field";
 import { Menu, menuItemClass } from "@/components/ui/Menu";
 import { Segmented } from "@/components/ui/Segmented";
 import { api, apiErrorText, type YouTubePrivacy, type YouTubeSettings } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import type { UploadFormOptions } from "@/lib/youtubeRows";
 
-export type UploadAfterRender = "off" | YouTubePrivacy;
+type UploadAfterRender = "off" | YouTubePrivacy;
 
 export interface YouTubeConnectProps {
   /** null while the settings are loading. */
   settings: YouTubeSettings | null;
   /** The parent refetches the settings. */
   onSettingsChange: () => void;
-  uploadAfterRender: UploadAfterRender;
-  onUploadAfterRenderChange: (v: UploadAfterRender) => void;
+  options: UploadFormOptions;
+  onOptionsChange: (v: UploadFormOptions) => void;
+  /** Prefills the playlist name when the checkbox is ticked. */
+  matchName: string;
   /** renderedMp4 && youtube on the form: the only case an upload can chain. */
   showUploadControl: boolean;
   busy?: boolean;
@@ -48,11 +57,15 @@ const UPLOAD_OPTIONS: readonly { value: UploadAfterRender; label: string }[] = [
 export function YouTubeConnect({
   settings,
   onSettingsChange,
-  uploadAfterRender,
-  onUploadAfterRenderChange,
+  options,
+  onOptionsChange,
+  matchName,
   showUploadControl,
   busy = false,
 }: YouTubeConnectProps) {
+  const uploadAfterRender: UploadAfterRender = options.enabled ? options.privacy : "off";
+  const setUploadAfterRender = (v: UploadAfterRender) =>
+    onOptionsChange(v === "off" ? { ...options, enabled: false } : { ...options, enabled: true, privacy: v });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -174,15 +187,71 @@ export function YouTubeConnect({
         </p>
       ) : null}
       {showUploadControl ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-md text-muted">Upload after render</span>
-          <Segmented<UploadAfterRender>
-            label="Upload after render"
-            value={uploadAfterRender}
-            onChange={onUploadAfterRenderChange}
-            options={UPLOAD_OPTIONS}
-            disabled={busy}
-          />
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-md text-muted">Upload after render</span>
+            <Segmented<UploadAfterRender>
+              label="Upload after render"
+              value={uploadAfterRender}
+              onChange={setUploadAfterRender}
+              options={UPLOAD_OPTIONS}
+              disabled={busy}
+            />
+          </div>
+          {options.enabled ? (
+            <div className="flex flex-col gap-1.5 pl-0.5">
+              <label className="flex items-center gap-2 text-md text-ink-2">
+                <input
+                  type="checkbox"
+                  aria-label="Add to playlist"
+                  checked={options.playlist !== null}
+                  disabled={busy}
+                  onChange={(e) =>
+                    onOptionsChange({ ...options, playlist: e.target.checked ? matchName : null })
+                  }
+                  className="accent-[var(--color-ink)]"
+                />
+                Add to playlist
+              </label>
+              {options.playlist !== null ? (
+                <input
+                  type="text"
+                  aria-label="Playlist name"
+                  value={options.playlist}
+                  disabled={busy}
+                  onChange={(e) => onOptionsChange({ ...options, playlist: e.target.value })}
+                  className={cn(inputClass, "max-w-xs")}
+                />
+              ) : null}
+              {options.privacy === "private" ? (
+                <label className="flex flex-wrap items-center gap-2 text-md text-ink-2">
+                  Publish at
+                  <input
+                    type="datetime-local"
+                    aria-label="Publish at"
+                    value={options.publishAt}
+                    disabled={busy}
+                    onChange={(e) => onOptionsChange({ ...options, publishAt: e.target.value })}
+                    className={cn(inputClass, "max-w-xs")}
+                  />
+                  <span className="text-sm text-muted">Stays private until then; blank publishes on upload.</span>
+                </label>
+              ) : null}
+              {options.privacy === "public" ? (
+                <label className="flex items-center gap-2 text-md text-ink-2">
+                  <input
+                    type="checkbox"
+                    aria-label="Notify subscribers"
+                    checked={options.notifySubscribers}
+                    disabled={busy}
+                    onChange={(e) => onOptionsChange({ ...options, notifySubscribers: e.target.checked })}
+                    className="accent-[var(--color-ink)]"
+                  />
+                  Notify subscribers
+                </label>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : null}
     </div>
