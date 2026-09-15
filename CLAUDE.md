@@ -148,6 +148,27 @@ encodes go through their own runner hooks (``card_runner``,
 and ``scripts/render_grid_frames.py`` with their card flags; look at the
 frames, a green argv test proves nothing about pixels.
 
+## Hosted playback streams the web rendition (#1031)
+
+The audit trim (``trimmed/stage<N>_cam_<id>_trimmed.mp4``) is a
+full-resolution scrub cache: tens of Mbit/s, ``moov`` at the tail. It is
+what the audit screen wants and the wrong thing to stream from R2, which
+is why every trim now has a ``_web.mp4`` beside it (720p, faststart,
+``WebTrimConfig`` in ``config.py``, cut *from the trim* by
+``trim.transcode_web_trim`` so the two share a window and a beep anchor).
+``ui/audio._ensure_web_trim`` cuts it whenever the trim is cut or found
+cached, best-effort: a failed transcode never fails the trim job.
+``sync.run.backfill_web_trims`` cuts missing ones before every push, so a
+match trimmed before this existed is fixed by its next sync, not a
+re-trim. ``_video_clip_anchor`` reports ``kind: "web"`` only when the
+byte path is a presigned redirect and the object exists; local mode keeps
+serving the trim from disk and the anchor stays ``trim``, pinned by
+``test_get_coach_entry_kind_stays_trim_locally_with_web_file``. On the
+stream routes ``kind=web`` falls back web -> trim -> source and never
+404s; ``kind=trim`` never substitutes the rendition (audit scrubbing
+needs the real GOP). Hosted Compare prefers ``trimmed/<...>_web.mp4``
+over the lossless export.
+
 ## YouTube upload (#1000)
 
 ``splitsmith.youtube`` uploads a rendered MP4 with its ``-youtube.json``

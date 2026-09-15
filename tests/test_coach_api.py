@@ -335,6 +335,24 @@ def test_get_coach_entry_kind_trim_with_trim_on_disk(tmp_path: Path) -> None:
     assert body["videos"][0]["beep_in_clip"] == pytest.approx(3.0)
 
 
+def test_get_coach_entry_kind_stays_trim_locally_with_web_file(tmp_path: Path) -> None:
+    """Local mode serves the full-res trim from disk; the 720p rendition
+    (#1031) is for presigned hosted playback only, so its presence on disk
+    must not flip the kind."""
+    from splitsmith.trim import web_trim_path
+
+    client, base = _bootstrap_legacy_trim(tmp_path, stage_numbers=(1,))
+    resp = client.get(f"{base}/shooters/me/stages/1/coach")
+    body = resp.json()
+    assert body["videos"][0]["kind"] == "trim"
+    trimmed = next(tmp_path.rglob("stage1_cam_*_trimmed.mp4"), None)
+    assert trimmed is not None
+    web_trim_path(trimmed).write_bytes(b"WEB")
+
+    resp = client.get(f"{base}/shooters/me/stages/1/coach")
+    assert resp.json()["videos"][0]["kind"] == "trim"
+
+
 def test_get_stage_distributions(tmp_path: Path) -> None:
     client, _audit, base = _bootstrap(tmp_path)
     resp = client.get(f"{base}/shooters/me/stages/1/coach/distributions")

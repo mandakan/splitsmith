@@ -150,6 +150,7 @@ from .. import ensemble as ensemble_module
 from .. import models as model_layer
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
+from .. import trim as trim_module
 from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
@@ -4316,6 +4317,7 @@ def register_job_bodies(state: AppState) -> None:
                     client=client,
                     on_progress=lambda p, m: handle.update(progress=p, message=m),
                     timer=handle.timer,
+                    ffmpeg_binary=process_runtime().ffmpeg_binary,
                 )
             except SyncClientError as exc:
                 raise RuntimeError(str(exc)) from exc
@@ -6746,11 +6748,16 @@ def _resolve_compare_trim(
     base = stage_file_base(stage_number, stage_name)
     lossless_name = f"{base}_trimmed.mp4"
     cache_name = f"stage{stage_number}_cam_{primary.video_id}_trimmed.mp4"
+    web_name = f"stage{stage_number}_cam_{primary.video_id}_web.mp4"
 
     hosted = storage is not None and storage.supports_presigned_get
     if hosted:
         scope = legacy._storage_scope
         if scope:
+            # The streaming rendition (#1031) first: a Compare grid pulls
+            # N of these at once, and the lossless export is source bitrate.
+            if storage.exists(f"{scope}/trimmed/{web_name}"):
+                return f"trimmed/{web_name}"
             if storage.exists(f"{scope}/exports/{lossless_name}"):
                 return f"exports/{lossless_name}"
             if storage.exists(f"{scope}/trimmed/{cache_name}"):
@@ -11867,19 +11874,45 @@ def create_app(
         the anchor stays source-based while the served clip is
         trim-based and every marker lands offset by beep - pre_buffer.
 
-        Returns (anchor, kind) where kind names the clip measured: "trim"
-        or "source".
+        Returns (anchor, kind) where kind names the clip the SPA should
+        stream: "web" (the trim's streaming rendition, hosted only),
+        "trim" or "source". The web rendition shares the trim's anchor.
         """
+        anchor, kind, trim_path = _video_trim_anchor(slug, project, stage_number, video)
+        if kind == "trim" and trim_path is not None and _presigned_hosted(video):
+            # The streaming rendition (#1031) covers the trim's window, so
+            # the anchor carries over; only the file the SPA names changes.
+            # Hosted-only by design: local playback streams the full-res
+            # trim from disk and has no reason to downgrade.
+            if audio_helpers.web_trim_available(project, trim_path):
+                return (anchor, "web")
+        return (anchor, kind)
+
+    def _presigned_hosted(video: StageVideo) -> bool:
+        """Whether ``stream_video`` would answer for ``video`` with a
+        presigned redirect (the same test it applies itself)."""
+        storage = state.storage
+        return storage is not None and storage.supports_presigned_get and not video.path.is_absolute()
+
+    def _video_trim_anchor(
+        slug: str,
+        project: MatchProject,
+        stage_number: int,
+        video: StageVideo,
+    ) -> tuple[float | None, str, Path | None]:
+        """``_video_clip_anchor`` before the web-rendition step: the
+        anchor, ``"trim"`` or ``"source"``, and the new-keyed trim path
+        the kind was measured against (``None`` for source)."""
         resolved = audio_helpers.resolve_trim_for_read(
             state.shooter_root(slug), stage_number, video, project=project
         )
         if resolved is not None:
             if video.beep_time is None:
-                return (None, "trim")
+                return (None, "trim", resolved)
             pre_buffer = audio_helpers.trim_pre_buffer_seconds_for(
                 resolved, default=project.trim_pre_buffer_seconds
             )
-            return (min(video.beep_time, pre_buffer), "trim")
+            return (min(video.beep_time, pre_buffer), "trim", resolved)
         # Hosted: the trim may exist only in the storage cache (worker-
         # cut, not yet mirrored); stream_video pulls it on demand, so the
         # anchor must agree. New-keyed only by design: a storage-only
@@ -11891,9 +11924,9 @@ def create_app(
         )
         if audio_helpers.trim_available(project, trimmed):
             if video.beep_time is None:
-                return (None, "trim")
-            return (min(video.beep_time, project.trim_pre_buffer_seconds), "trim")
-        return (video.beep_time, "source")
+                return (None, "trim", trimmed)
+            return (min(video.beep_time, project.trim_pre_buffer_seconds), "trim", trimmed)
+        return (video.beep_time, "source", None)
 
     def _video_beep_in_clip(
         slug: str,
@@ -12408,11 +12441,30 @@ def create_app(
             filename=_local_proxy.name,
         )
 
+    def _hosted_web_redirect(
+        storage: Storage,
+        project: MatchProject,
+        root: Path,
+        stage: Any,
+        video: StageVideo,
+    ) -> RedirectResponse | None:
+        """Presigned redirect to the trim's streaming rendition (#1031) when
+        the object exists, else ``None`` so the caller falls back to the
+        trim and then the source: an explicit ``kind=web`` never 404s,
+        because a match synced before the rendition existed still has to
+        play."""
+        local_mp4 = audio_helpers.trimmed_video_path(root, stage.stage_number, video, project=project)
+        web_local = trim_module.web_trim_path(local_mp4)
+        web_key = audio_helpers._storage_trim_key(project, web_local)
+        if web_key is not None and storage.exists(web_key):
+            return serve_media(storage, web_key, web_local, content_type="video/mp4")
+        return None
+
     @app.get("/api/shooters/{slug}/videos/stream", response_model=None)
     def stream_video(
         slug: str,
         path: str = Query(...),
-        kind: Literal["auto", "trim", "source", "proxy"] = Query("auto"),
+        kind: Literal["auto", "trim", "source", "proxy", "web"] = Query("auto"),
     ) -> FileResponse | RedirectResponse:
         """Serve a registered video file with HTTP Range support.
 
@@ -12420,6 +12472,9 @@ def create_app(
 
         - ``trim``: per-video short-GOP MP4 (``<trimmed>/stage<N>_cam_<video_id>_trimmed.mp4``);
           404 if not built yet. Frame-accurate seeking makes audit-screen scrubbing fast.
+        - ``web``: the trim's 720p faststart rendition (#1031), the file
+          hosted players stream from object storage. Falls back to the trim,
+          then the source, when absent; in local mode it behaves as ``auto``.
         - ``source``: the original camera file.
         - ``proxy``: low-res fast-seek MP4 (``raw_proxy/<name>.mp4``). In hosted mode,
           returns 425 ``preview_generating`` when the proxy object is absent - never
@@ -12478,7 +12533,11 @@ def create_app(
 
         if is_hosted:
             # hosted mode: resolve the R2 key and redirect; never mirror
-            if kind in ("auto", "trim") and stage is not None:
+            if kind == "web" and stage is not None:
+                web_resp = _hosted_web_redirect(storage, project, root, stage, video)  # type: ignore[arg-type]
+                if web_resp is not None:
+                    return web_resp
+            if kind in ("auto", "trim", "web") and stage is not None:
                 # check for trim in storage without downloading
                 local_mp4 = audio_helpers.trimmed_video_path(root, stage.stage_number, video, project=project)
                 trim_key = audio_helpers._storage_trim_key(project, local_mp4)
@@ -12493,9 +12552,10 @@ def create_app(
             source_ct = "video/mp4" if Path(raw_str).suffix.lower() == ".mp4" else "application/octet-stream"
             return serve_media(storage, raw_str, root / raw_str, content_type=source_ct)
 
-        # local mode: existing disk-based serving
+        # local mode: existing disk-based serving (``web`` behaves as ``auto``:
+        # the full-res trim streams fine from disk)
         served_path: Path | None = None
-        if kind in ("auto", "trim") and stage is not None:
+        if kind in ("auto", "trim", "web") and stage is not None:
             # Per-video short-GOP trim is keyed per role: each angle has
             # its own scrub clip cut around its own beep.
             trimmed = audio_helpers.pull_trimmed_video(root, stage.stage_number, video, project=project)
@@ -14409,7 +14469,7 @@ def create_app(
     def stream_shooter_video(
         slug: str,
         path: str = Query(...),
-        kind: Literal["auto", "trim", "source", "proxy"] = Query("auto"),
+        kind: Literal["auto", "trim", "source", "proxy", "web"] = Query("auto"),
     ) -> FileResponse | RedirectResponse:
         """Serve a video registered to any shooter in the bound match (#328).
 
@@ -14486,6 +14546,17 @@ def create_app(
                     # kind=proxy + local + no proxy - fall through to source
 
             if is_hosted:
+                if kind == "web" and stage is not None:
+                    # the trim's streaming rendition (#1031); source when absent
+                    web_resp = _hosted_web_redirect(
+                        storage,  # type: ignore[arg-type]
+                        shooter_project,
+                        shooter_root,
+                        stage,
+                        video,
+                    )
+                    if web_resp is not None:
+                        return web_resp
                 # hosted mode: redirect to source key; no mirroring
                 source_ct = (
                     "video/mp4" if Path(raw_str).suffix.lower() == ".mp4" else "application/octet-stream"

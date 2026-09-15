@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import secrets
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
@@ -49,6 +50,9 @@ _VIDEO_ID = hashlib.blake2s(b"raw/clip.mp4#1", digest_size=6).hexdigest()
 # Formula: {scope}/trimmed/stage{n}_cam_{video_id}_trimmed.mp4
 # where scope = matches/{MATCH_ID}/shooters/{SLUG}.
 _TRIM_KEY = f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed/stage1_cam_{_VIDEO_ID}_trimmed.mp4"
+_TRIM_PARAMS_KEY = f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed/stage1_cam_{_VIDEO_ID}_trimmed.params.json"
+# The streaming rendition cut from that trim (#1031), same dir, ``_web`` suffix.
+_WEB_KEY = f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed/stage1_cam_{_VIDEO_ID}_web.mp4"
 
 # Audit WAV storage key for the same stage/video.
 # Formula: {scope}/audio/stage{n}_cam_{video_id}_audit.wav
@@ -134,12 +138,19 @@ def _seed_match_and_project(db_url: str, email: str, match_id: str, slug: str) -
             stages=[match_model.MatchStageDefinition(stage_number=1, stage_name="Stage 1")],
         )
         await store.save_match(match_id, match_doc.model_dump(mode="json"), expected_version=0)
-        video = StageVideo(path=Path("raw/clip.mp4"), role="primary")
+        video = StageVideo(path=Path("raw/clip.mp4"), role="primary", beep_time=8.0)
         project = MatchProject(
             name="Presign Test Shooter",
             stages=[StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=0.0, videos=[video])],
         )
         await store.save_project(match_id, slug, project.model_dump(mode="json"), expected_version=0)
+        audit = {
+            "stage_number": 1,
+            "stage_name": "Stage 1",
+            "beep_time": 8.0,
+            "shots": [{"shot_number": 1, "ms_after_beep": 1500, "source": "detected"}],
+        }
+        await store.save_audit(match_id, slug, 1, audit, expected_version=0)
 
     asyncio.run(_seed())
 
@@ -350,6 +361,115 @@ def test_trim_kind_present_returns_307(
     location = resp.headers["location"]
     assert "trimmed" in location
     assert _VIDEO_ID in location
+
+
+# ---------------------------------------------------------------------------
+# Tests: kind=web, the streaming rendition (#1031)
+# ---------------------------------------------------------------------------
+
+
+def _params_bytes() -> bytes:
+    return json.dumps(
+        {"beep_time": 8.0, "stage_time_seconds": 0.0, "pre_buffer_seconds": 5.0, "post_buffer_seconds": 5.0}
+    ).encode("utf-8")
+
+
+def test_web_kind_present_returns_307_to_web_key(
+    s3_stream_client: tuple[TestClient, S3Storage],
+) -> None:
+    client, storage = s3_stream_client
+    storage.write_bytes(_TRIM_KEY, b"TRIMDATA")
+    storage.write_bytes(_WEB_KEY, b"WEBDATA")
+
+    resp = client.get(_stream_url(SLUG), params={"path": "raw/clip.mp4", "kind": "web"})
+
+    assert resp.status_code == 307
+    assert f"stage1_cam_{_VIDEO_ID}_web.mp4" in resp.headers["location"]
+
+
+def test_web_kind_absent_falls_back_to_trim(
+    s3_stream_client: tuple[TestClient, S3Storage],
+) -> None:
+    """A match synced before the rendition existed still plays: web ->
+    trim -> source, never a 404 for an explicit kind=web."""
+    client, storage = s3_stream_client
+    storage.write_bytes(_TRIM_KEY, b"TRIMDATA")
+
+    resp = client.get(_stream_url(SLUG), params={"path": "raw/clip.mp4", "kind": "web"})
+
+    assert resp.status_code == 307
+    assert f"stage1_cam_{_VIDEO_ID}_trimmed.mp4" in resp.headers["location"]
+
+
+def test_web_kind_no_trim_falls_back_to_source(
+    s3_stream_client: tuple[TestClient, S3Storage],
+) -> None:
+    client, _storage = s3_stream_client
+
+    resp = client.get(_stream_url(SLUG), params={"path": "raw/clip.mp4", "kind": "web"})
+
+    assert resp.status_code == 307
+    assert "raw/clip.mp4" in resp.headers["location"]
+
+
+def test_alias_endpoint_web_kind_redirects_to_web_key(
+    s3_stream_client: tuple[TestClient, S3Storage],
+) -> None:
+    client, storage = s3_stream_client
+    storage.write_bytes(_TRIM_KEY, b"TRIMDATA")
+    storage.write_bytes(_WEB_KEY, b"WEBDATA")
+
+    resp = client.get(_alias_stream_url(SLUG), params={"path": "raw/clip.mp4", "kind": "web"})
+
+    assert resp.status_code == 307
+    assert f"stage1_cam_{_VIDEO_ID}_web.mp4" in resp.headers["location"]
+
+
+def test_trim_kind_never_serves_web_rendition(
+    s3_stream_client: tuple[TestClient, S3Storage],
+) -> None:
+    """Audit pins kind=trim for frame-accurate scrubbing; the 720p file
+    must not be substituted under it."""
+    client, storage = s3_stream_client
+    storage.write_bytes(_TRIM_KEY, b"TRIMDATA")
+    storage.write_bytes(_WEB_KEY, b"WEBDATA")
+
+    resp = client.get(_stream_url(SLUG), params={"path": "raw/clip.mp4", "kind": "trim"})
+
+    assert resp.status_code == 307
+    assert "_trimmed.mp4" in resp.headers["location"]
+
+
+def test_hosted_coach_entry_kind_web_when_rendition_in_storage(
+    s3_stream_client: tuple[TestClient, S3Storage],
+) -> None:
+    """The coach payload's kind is what ResultsStage / Coach / Compare put
+    in the stream URL. Hosted, with the rendition present, that is
+    ``web``; the beep anchor is the trim's (same window)."""
+    client, storage = s3_stream_client
+    storage.write_bytes(_TRIM_KEY, b"TRIMDATA")
+    storage.write_bytes(_TRIM_PARAMS_KEY, _params_bytes())
+    storage.write_bytes(_WEB_KEY, b"WEBDATA")
+
+    resp = client.get(f"/api/matches/{MATCH_ID}/shooters/{SLUG}/stages/1/coach")
+
+    assert resp.status_code == 200, resp.text
+    entry = resp.json()["videos"][0]
+    assert entry["kind"] == "web"
+    assert entry["beep_in_clip"] == pytest.approx(5.0)
+
+
+def test_hosted_coach_entry_kind_trim_without_rendition(
+    s3_stream_client: tuple[TestClient, S3Storage],
+) -> None:
+    client, storage = s3_stream_client
+    storage.write_bytes(_TRIM_KEY, b"TRIMDATA")
+    storage.write_bytes(_TRIM_PARAMS_KEY, _params_bytes())
+
+    resp = client.get(f"/api/matches/{MATCH_ID}/shooters/{SLUG}/stages/1/coach")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["videos"][0]["kind"] == "trim"
 
 
 # ---------------------------------------------------------------------------

@@ -264,6 +264,13 @@ output:
     green_max: 0.25
     yellow_max: 0.35
     transition_min: 1.0
+
+web_trim:                      # streaming rendition of each audit trim (hosted playback)
+  height: 720
+  crf: 26
+  preset: veryfast
+  gop: 30
+  audio_bitrate: 128k
 ```
 
 `trim_mode` controls how `trim.py` cuts videos:
@@ -272,6 +279,13 @@ output:
 - `audit`: re-encodes with a short GOP (default 0.5s) so browser `<video>` scrubbing in the production UI's audit screen lands within ~1 frame of the pointer. Encoding cost is roughly 1-2x realtime on Apple Silicon. Audio is stream-copied either way so the detector's input is bit-exact across modes.
 
 Override per command via `--trim-mode lossless|audit` on `splitsmith single` and `splitsmith process`.
+
+Every audit trim also gets a `_web.mp4` beside it: a 720p faststart
+rendition cut from the trim (`web_trim` above), which the hosted
+Splitsmith and share links stream instead of the full-resolution trim.
+It is cut when the trim is, and a sync cuts any that are missing before
+it pushes, so matches trimmed before this existed pick it up on their
+next sync.
 
 Lower `shot_detect.onset_delta` if you're under-detecting shots from a heavily-comped open gun. Tighten `beep_detect.min_amplitude` if a louder ambient noise is being mistaken for the beep.
 

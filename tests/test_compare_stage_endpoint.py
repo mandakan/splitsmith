@@ -287,3 +287,23 @@ def test_resolve_compare_trim_hosted_prefers_exports_over_trimmed() -> None:
     storage = _FakeStorage({f"{scope}/trimmed/{cache_name}", f"{scope}/exports/{lossless_name}"})
     ref = _resolve_compare_trim(project, shooter_root, 1, "K-vallen", primary, storage)
     assert ref == f"exports/{lossless_name}"
+
+
+def test_resolve_compare_trim_hosted_prefers_web_rendition() -> None:
+    """Hosted Compare tiles stream from object storage, so the streaming
+    rendition (#1031) beats both the lossless export and the audit trim."""
+    from splitsmith.export_naming import stage_file_base
+    from splitsmith.ui.server import _resolve_compare_trim
+
+    project, shooter_root, primary = _hosted_shaped_project()
+    scope = "matches/m1/shooters/me"
+    base = stage_file_base(1, "K-vallen")
+    lossless_name = f"{base}_trimmed.mp4"
+    cache_name = f"stage1_cam_{primary.video_id}_trimmed.mp4"
+    web_name = f"stage1_cam_{primary.video_id}_web.mp4"
+
+    storage = _FakeStorage(
+        {f"{scope}/trimmed/{cache_name}", f"{scope}/exports/{lossless_name}", f"{scope}/trimmed/{web_name}"}
+    )
+    ref = _resolve_compare_trim(project, shooter_root, 1, "K-vallen", primary, storage)
+    assert ref == f"trimmed/{web_name}"

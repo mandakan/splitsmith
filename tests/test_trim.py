@@ -466,3 +466,171 @@ def test_trim_audit_mode_emits_short_gop(tmp_path: Path, synthetic_source_video:
     assert max(gaps) <= 0.6, (
         f"keyframe gaps exceed 0.5s tolerance: max={max(gaps):.3f}s, " f"gaps={[round(g, 3) for g in gaps]}"
     )
+
+
+# --- web rendition (#1031) ------------------------------------------------
+
+
+def test_transcode_web_trim_builds_streaming_argv(tmp_path: Path) -> None:
+    """The web rendition is a 720p faststart MP4 cut from the audit trim:
+    libx264 at the config's crf/preset, 1 s GOP, AAC audio, moov first."""
+    from splitsmith.config import WebTrimConfig
+    from splitsmith.trim import transcode_web_trim
+
+    src = _touch(tmp_path / "stage1_cam_abc_trimmed.mp4")
+    dst = tmp_path / "stage1_cam_abc_web.mp4"
+    runner = _RecordingRunner()
+
+    transcode_web_trim(src, dst, WebTrimConfig(), ffmpeg_binary="ffmpeg", runner=runner)
+
+    cmd = runner.calls[0]
+    assert cmd[0] == "ffmpeg"
+    assert cmd[cmd.index("-i") + 1] == str(src)
+    assert cmd[cmd.index("-vf") + 1] == "scale=-2:720"
+    assert cmd[cmd.index("-c:v") + 1] == "libx264"
+    assert cmd[cmd.index("-preset") + 1] == "veryfast"
+    assert cmd[cmd.index("-crf") + 1] == "26"
+    assert cmd[cmd.index("-g") + 1] == "30"
+    assert cmd[cmd.index("-keyint_min") + 1] == "30"
+    assert cmd[cmd.index("-pix_fmt") + 1] == "yuv420p"
+    assert cmd[cmd.index("-c:a") + 1] == "aac"
+    assert cmd[cmd.index("-b:a") + 1] == "128k"
+    assert cmd[cmd.index("-movflags") + 1] == "+faststart"
+    assert cmd[-1] == str(dst)
+    # Never a bare ``-c copy``: the point is the re-encode.
+    assert "-c" not in cmd
+
+
+def test_transcode_web_trim_honours_config_knobs(tmp_path: Path) -> None:
+    from splitsmith.config import WebTrimConfig
+    from splitsmith.trim import transcode_web_trim
+
+    src = _touch(tmp_path / "t.mp4")
+    runner = _RecordingRunner()
+    cfg = WebTrimConfig(height=1080, crf=22, preset="fast", gop=60, audio_bitrate="96k")
+
+    transcode_web_trim(src, tmp_path / "w.mp4", cfg, ffmpeg_binary="/opt/ffmpeg", runner=runner)
+
+    cmd = runner.calls[0]
+    assert cmd[0] == "/opt/ffmpeg"
+    assert cmd[cmd.index("-vf") + 1] == "scale=-2:1080"
+    assert cmd[cmd.index("-crf") + 1] == "22"
+    assert cmd[cmd.index("-preset") + 1] == "fast"
+    assert cmd[cmd.index("-g") + 1] == "60"
+    assert cmd[cmd.index("-b:a") + 1] == "96k"
+
+
+def test_transcode_web_trim_wraps_ffmpeg_failure(tmp_path: Path) -> None:
+    from splitsmith.config import WebTrimConfig
+    from splitsmith.trim import transcode_web_trim
+
+    src = _touch(tmp_path / "t.mp4")
+
+    def failing(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        raise subprocess.CalledProcessError(1, cmd, stderr="boom")
+
+    with pytest.raises(FFmpegError, match="boom"):
+        transcode_web_trim(src, tmp_path / "w.mp4", WebTrimConfig(), ffmpeg_binary="ffmpeg", runner=failing)
+
+
+def test_web_trim_path_sits_beside_the_audit_trim(tmp_path: Path) -> None:
+    from splitsmith.trim import web_trim_path
+
+    trimmed = tmp_path / "trimmed" / "stage3_cam_deadbeef_trimmed.mp4"
+    assert web_trim_path(trimmed) == tmp_path / "trimmed" / "stage3_cam_deadbeef_web.mp4"
+
+
+@pytest.mark.integration
+def test_transcode_web_trim_puts_moov_first_and_shrinks(tmp_path: Path, synthetic_source_video: Path) -> None:
+    """A browser can start playing a faststart file after the first bytes:
+    the ``moov`` atom must precede ``mdat``. The rendition must also be
+    smaller than the audit trim it was cut from, which is the whole point."""
+    from splitsmith.config import WebTrimConfig
+    from splitsmith.trim import transcode_web_trim
+
+    audit = tmp_path / "audit.mp4"
+    trim_video(
+        synthetic_source_video,
+        audit,
+        beep_time=4.853,
+        stage_time=6.0,
+        buffer_seconds=1.0,
+        mode="audit",
+        gop_frames=15,
+        crf=20,
+        preset="ultrafast",
+    )
+    web = tmp_path / "web.mp4"
+    transcode_web_trim(audit, web, WebTrimConfig(), ffmpeg_binary="ffmpeg")
+
+    head = web.read_bytes()[: 1 << 20]
+    assert head.find(b"moov") < head.find(b"mdat"), "moov must lead mdat for progressive playback"
+    assert web.stat().st_size < audit.stat().st_size
+
+
+def test_backfill_web_trims_cuts_only_missing_or_stale(tmp_path: Path) -> None:
+    """Walks a ``trimmed/`` dir: a trim without a web rendition gets one, a
+    trim whose rendition is newer is left alone, a stale (older) rendition
+    is redone. Returns what it cut."""
+    import os
+
+    from splitsmith.config import WebTrimConfig
+    from splitsmith.trim import backfill_web_trims
+
+    d = tmp_path / "trimmed"
+    d.mkdir()
+    missing = _touch(d / "stage1_cam_aaa_trimmed.mp4")
+    _touch(d / "stage2_cam_bbb_trimmed.mp4")
+    fresh_web = _touch(d / "stage2_cam_bbb_web.mp4")
+    fresh_web.write_bytes(b"W")
+    stale = _touch(d / "stage3_cam_ccc_trimmed.mp4")
+    stale_web = _touch(d / "stage3_cam_ccc_web.mp4")
+    stale_web.write_bytes(b"W")
+    os.utime(stale_web, (1, 1))  # older than its trim
+    _touch(d / "stage9_cam_ddd_trimmed.params.json")  # not a clip
+    _touch(d / "other.mp4")  # not a trim
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        Path(cmd[-1]).write_bytes(b"WEB")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    cut, errors = backfill_web_trims(d, WebTrimConfig(), ffmpeg_binary="ffmpeg", runner=runner)
+
+    assert errors == []
+    assert sorted(p.name for p in cut) == ["stage1_cam_aaa_web.mp4", "stage3_cam_ccc_web.mp4"]
+    assert (d / "stage1_cam_aaa_web.mp4").read_bytes() == b"WEB"
+    assert (d / "stage3_cam_ccc_web.mp4").read_bytes() == b"WEB"
+    assert fresh_web.read_bytes() == b"W"
+    assert not list(d.glob("*.partial.mp4"))
+    assert missing.exists() and stale.exists()
+
+
+def test_backfill_web_trims_reports_failures_and_continues(tmp_path: Path) -> None:
+    from splitsmith.config import WebTrimConfig
+    from splitsmith.trim import backfill_web_trims
+
+    d = tmp_path / "trimmed"
+    d.mkdir()
+    _touch(d / "stage1_cam_aaa_trimmed.mp4")
+    _touch(d / "stage2_cam_bbb_trimmed.mp4")
+
+    def runner(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess:
+        if "stage1_" in cmd[-1]:
+            raise subprocess.CalledProcessError(1, cmd, stderr="bad stream")
+        Path(cmd[-1]).write_bytes(b"WEB")
+        return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+    cut, errors = backfill_web_trims(d, WebTrimConfig(), ffmpeg_binary="ffmpeg", runner=runner)
+
+    assert [p.name for p in cut] == ["stage2_cam_bbb_web.mp4"]
+    assert len(errors) == 1 and "stage1_cam_aaa_trimmed.mp4" in errors[0] and "bad stream" in errors[0]
+    assert not (d / "stage1_cam_aaa_web.mp4").exists()
+    assert not list(d.glob("*.partial.mp4"))
+
+
+def test_backfill_web_trims_missing_dir_is_a_noop(tmp_path: Path) -> None:
+    from splitsmith.config import WebTrimConfig
+    from splitsmith.trim import backfill_web_trims
+
+    cut, errors = backfill_web_trims(tmp_path / "nope", WebTrimConfig(), ffmpeg_binary="ffmpeg")
+    assert cut == [] and errors == []
