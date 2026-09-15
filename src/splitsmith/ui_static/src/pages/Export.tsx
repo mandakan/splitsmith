@@ -77,6 +77,7 @@ import {
 import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
 import {
+  clampSeconds,
   describeRenderOptions,
   matchExportFields,
   renderOptionsSeconds,
@@ -560,7 +561,7 @@ function ExportInner({ slug }: { slug: string }) {
         ...camExportFields(camOptions),
         output_format: outputFormat,
         transition_kind: transitionsSupported(outputFormat) ? transitionKind : "none",
-        transition_duration_seconds: transitionSeconds,
+        transition_duration_seconds: clampSeconds(transitionSeconds, 0.1),
         ...matchExportFields(renderOptions, outputFormat),
         intro_path: undefined,
         outro_path: undefined,
@@ -847,7 +848,7 @@ function ExportInner({ slug }: { slug: string }) {
             </Section>
           ) : null}
 
-          {mode === "single" ? (
+          {mode === "single" || (compare && (renderOptions.titlePage || renderOptions.closingCard)) ? (
             <Section label="Details">
               <DetailsGroup
                 settings={settings}

@@ -385,6 +385,25 @@ describe("Export presets", () => {
     expect(screen.getByText(/Highlight 1\.5 \/ 2\.0 s/)).toBeInTheDocument();
   });
 
+  it("a blank transition seconds field submits the floor and survives a reload", async () => {
+    const { user } = await renderPage();
+    vi.mocked(api.exportMatch).mockResolvedValue(job({ status: "running" }));
+    vi.mocked(api.pollJob).mockResolvedValue(job({ status: "succeeded" }));
+    await user.click(toggle("Look"));
+    await user.click(within(screen.getByRole("radiogroup", { name: "Transition" })).getByRole("radio", { name: "Zoom blur" }));
+    await user.clear(screen.getByLabelText("Transition seconds"));
+    await user.click(screen.getByRole("button", { name: /export bundle/i }));
+    await waitFor(() => expect(api.exportMatch).toHaveBeenCalled());
+    expect(vi.mocked(api.exportMatch).mock.calls[0][1]).toMatchObject({ transition_kind: "zoom", transition_duration_seconds: 0.1 });
+    await waitFor(() =>
+      expect(JSON.parse(window.localStorage.getItem("splitsmith.export.lastUsed")!).body.transition_seconds).toBe(0.5),
+    );
+    cleanup();
+    await renderPage();
+    // The Look summary and the rail both name it; the point is the page rendered.
+    expect(screen.getAllByText("zoom 0.5 s").length).toBeGreaterThan(0);
+  });
+
   it("a failed preset load still renders the page with Custom only and no error", async () => {
     vi.mocked(api.getExportPresets).mockRejectedValue(new Error("offline"));
     await renderPage();

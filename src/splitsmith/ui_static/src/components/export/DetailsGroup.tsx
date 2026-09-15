@@ -40,20 +40,25 @@ export function DetailsGroup({
   onYouTubeSettingsChange,
   matchName,
 }: DetailsGroupProps) {
-  const renderedMp4 = settings.mode === "single" && settings.outputFormat === "mp4";
+  const single = settings.mode === "single";
+  const renderedMp4 = single && settings.outputFormat === "mp4";
   const publishing = renderedMp4 && settings.youtube;
-  const titleCard = renderedMp4 && (settings.renderOptions.titlePage || settings.renderOptions.closingCard);
+  // The grid is always an MP4 and draws the match cards too.
+  const drawsCards = renderedMp4 || settings.mode === "compare";
+  const titleCard = drawsCards && (settings.renderOptions.titlePage || settings.renderOptions.closingCard);
   return (
     <>
-      <Field label="Bundle name" htmlFor="export-bundle-name" help={exportsDir ?? "exports/"}>
-        <input
-          id="export-bundle-name"
-          type="text"
-          value={projectName}
-          onChange={(e) => onProjectName(e.target.value)}
-          className={cn(inputClass, "max-w-xs font-mono text-sm")}
-        />
-      </Field>
+      {single ? (
+        <Field label="Bundle name" htmlFor="export-bundle-name" help={exportsDir ?? "exports/"}>
+          <input
+            id="export-bundle-name"
+            type="text"
+            value={projectName}
+            onChange={(e) => onProjectName(e.target.value)}
+            className={cn(inputClass, "max-w-xs font-mono text-sm")}
+          />
+        </Field>
+      ) : null}
       {titleCard ? (
         <Field
           label="Title line"

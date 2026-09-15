@@ -318,6 +318,8 @@ describe("Export rendered-video rows", () => {
     expect("overlay" in untouched).toBe(false);
 
     await user.click(tile("Title page", "Title page"));
+    // The grid draws the title page too, so its title line is on Details here.
+    await user.type(screen.getByLabelText("Title page info line"), "Level 3");
     await user.click(tile("Overlay", "Shot counter"));
     await user.clear(screen.getByLabelText("Grid summary hold seconds"));
     await user.type(screen.getByLabelText("Grid summary hold seconds"), "2");
@@ -325,6 +327,7 @@ describe("Export rendered-video rows", () => {
     await waitFor(() => expect(api.exportCompareGrid).toHaveBeenCalledTimes(2));
     expect(vi.mocked(api.exportCompareGrid).mock.calls[1][0]).toMatchObject({
       title_page: true,
+      title_info: "Level 3",
       stage_titles: "none",
       overlay: true,
       summary_hold_seconds: 2,
