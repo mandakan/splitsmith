@@ -287,3 +287,40 @@ def test_options_default_to_unlisted_notify_no_playlist(tmp_path: Path) -> None:
     assert client.started[-1][0].privacy == "unlisted"
     assert client.notify == [True] and client.added == []
     assert record.playlist_id is None and record.publish_at is None and record.notify_subscribers is True
+
+
+def test_add_to_a_fresh_playlist_retries_a_409(tmp_path: Path) -> None:
+    """A playlist is not writable in the seconds after ``playlists.insert``;
+    YouTube answers 409 to the first ``playlistItems.insert``. Seen live."""
+    mp4 = _seed(tmp_path)
+    client = FakeClient()
+    client.playlists = {}
+    client.added = []
+    attempts = {"n": 0}
+
+    def flaky_add(playlist_id: str, video_id: str) -> None:
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise yt.UploadFailedError("HTTP 409: The operation was aborted.")
+        client.added.append((playlist_id, video_id))
+
+    client.add_to_playlist = flaky_add  # type: ignore[method-assign]
+    slept: list[float] = []
+    record = upload.upload_export(mp4, client=client, options=_opts(playlist="New"), sleep=slept.append)
+    assert client.added == [("PL-1-unlisted", "vid42")]
+    assert record.playlist_id == "PL-1-unlisted" and record.notes == []
+    assert len(slept) == 2 and slept == sorted(slept)
+
+
+def test_add_to_playlist_gives_up_after_the_retry_budget(tmp_path: Path) -> None:
+    mp4 = _seed(tmp_path)
+    client = FakeClient()
+    client.playlists = {}
+
+    def always_409(playlist_id: str, video_id: str) -> None:
+        raise yt.UploadFailedError("HTTP 409: The operation was aborted.")
+
+    client.add_to_playlist = always_409  # type: ignore[method-assign]
+    record = upload.upload_export(mp4, client=client, options=_opts(playlist="New"), sleep=lambda s: None)
+    assert record.playlist_id is None
+    assert any("playlist" in n and "409" in n for n in record.notes)

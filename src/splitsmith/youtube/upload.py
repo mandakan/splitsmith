@@ -14,6 +14,7 @@ rewrites the sidecar, makes the new file uploadable.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -135,6 +136,7 @@ def upload_export(
     again: bool = False,
     progress: Callable[[int, int], None] | None = None,
     check_cancel: Callable[[], None] | None = None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> youtube_sidecar.UploadRecord:
     """Upload ``mp4`` with its sidecar's metadata; return and record the result.
 
@@ -201,7 +203,7 @@ def upload_export(
             playlist_id = client.find_playlist(options.playlist)
             if playlist_id is None:
                 playlist_id = client.create_playlist(options.playlist, privacy=privacy)
-            client.add_to_playlist(playlist_id, video_id)
+            _add_to_playlist_with_retry(client, playlist_id, video_id, sleep=sleep)
         except YouTubeError as exc:
             playlist_id = None
             notes.append(f"not added to playlist {options.playlist!r}: {exc}")
@@ -223,3 +225,22 @@ def upload_export(
     sidecar.upload = record
     youtube_sidecar.write_sidecar(sidecar, sidecar_path)
     return record
+
+
+_PLAYLIST_ADD_ATTEMPTS = 5
+
+
+def _add_to_playlist_with_retry(
+    client: Uploader, playlist_id: str, video_id: str, *, sleep: Callable[[float], None]
+) -> None:
+    """``playlistItems.insert`` answers 409 for a few seconds after the
+    playlist was created (seen live: "The operation was aborted"); the same
+    call succeeds moments later. Back off 1, 2, 4, 8 s, then give up."""
+    for attempt in range(_PLAYLIST_ADD_ATTEMPTS):
+        try:
+            client.add_to_playlist(playlist_id, video_id)
+            return
+        except UploadFailedError as exc:
+            if "HTTP 409" not in str(exc) or attempt == _PLAYLIST_ADD_ATTEMPTS - 1:
+                raise
+            sleep(float(2**attempt))

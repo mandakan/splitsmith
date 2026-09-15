@@ -105,8 +105,17 @@ splitsmith youtube login          # opens Google's consent page; stores the refr
 splitsmith youtube status
 splitsmith youtube logout
 splitsmith youtube upload exports/bromma.mp4 --privacy unlisted   # reads bromma-youtube.json, bromma.srt, bromma-thumbnail.jpg beside it
+splitsmith youtube upload exports/bromma.mp4 --playlist "Bromma 2026" --publish-at 2026-09-20T18:00 --no-notify
 splitsmith match export <match> --shooter me --format mp4 --youtube-upload --youtube-privacy private
+splitsmith match export <match> --shooter me --format mp4 --youtube-upload --youtube-playlist "Bromma 2026"
 ```
+
+`--playlist` adds the video to a playlist on your channel by title, creating
+it if missing (`--youtube-playlist` on `match export`). `--publish-at` takes
+an ISO time in local time and schedules the publish; the video stays private
+until then, whatever `--privacy` says. `--no-notify` skips the subscriber
+notification when it goes public. The Export page's "Upload after render"
+block has the same three, and a history-row upload reuses them.
 
 The sidecar (`--youtube-sidecar`, implied by `--youtube-upload`) is the
 metadata: title, description with chapter lines, tags. After an upload the
