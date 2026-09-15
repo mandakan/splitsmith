@@ -1,0 +1,11 @@
+[Unit]
+Description=Check PyPI for a newer splitsmith agent every 6 hours
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=6h
+RandomizedDelaySec=20min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

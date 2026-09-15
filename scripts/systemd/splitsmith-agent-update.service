@@ -1,0 +1,18 @@
+# Upgrade the native splitsmith agent from PyPI and restart it when idle.
+# Driven by splitsmith-agent-update.timer; see docs/self-hosted-workers.md.
+#
+# Runs as root so it can read the agent's journal and restart the unit; the
+# script drops to the agent's user (read from splitsmith-agent.service's User=)
+# for everything that touches the venv.
+[Unit]
+Description=splitsmith agent auto-update
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/splitsmith-agent-update.sh
+# Uncomment to override the defaults derived from splitsmith-agent.service:
+#Environment=VENV=/home/<you>/.venv-splitsmith-agent
+#Environment=STATE_DIR=/home/<you>/.splitsmith
+#Environment=GPU=auto

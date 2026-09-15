@@ -358,15 +358,43 @@ Register once by hand (`... agent --token <TOKEN> --state-dir ~/.splitsmith`) so
 
 **Auto-update.** There is no server-push "update" command -- the worker channel
 only carries wake / enabled / disabled / replaced (a deleted worker gets a 404
-and the agent exits). Updates are client-pull: a `systemd` timer that upgrades
-from PyPI and restarts the agent. A minimal updater compares the installed
-version against the latest on PyPI, and when a newer one is out **and the agent
-is idle** runs the `uv pip install -U` + GPU-swap above and `systemctl restart`s
-the service. Gate the restart on the drain state -- the agent logs `wake
-received; draining` when busy and `drain finished; waiting` when idle, so keying
-on the most recent marker avoids killing a running job. Credentials live in the
-state dir, independent of the venv, so an upgrade never re-registers. Drive it
-with a `.timer` (e.g. `OnUnitActiveSec=6h`, `Persistent=true`).
+and the agent exits). Updates are client-pull: `scripts/agent-update.sh` on a
+systemd timer. Install it once, as root:
+
+```bash
+sudo install -m 755 scripts/agent-update.sh /usr/local/bin/splitsmith-agent-update.sh
+sudo install -m 644 scripts/systemd/splitsmith-agent-update.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now splitsmith-agent-update.timer
+sudo systemctl start splitsmith-agent-update.service   # run one tick now; check the journal
+```
+
+Every tick (15 min after boot, then every 6 h) the script compares the venv's
+installed version with the latest on PyPI. When they differ it runs the `uv pip
+install -U` above as the agent's user, redoes the GPU swap when the venv had
+`onnxruntime-gpu` before the upgrade, and verifies that `CUDAExecutionProvider`
+still binds a session -- a failed verify leaves the old agent running and the
+next tick retries the swap, so an upgrade can never silently demote detection
+to CPU. The restart is gated on the drain state: the agent logs `wake received;
+draining` when busy and `drain finished; waiting` when idle, and the script
+restarts the unit only when the most recent marker in the journal is the idle
+one, otherwise it leaves a `.restart-pending` stamp in the state dir and
+restarts on a later tick. The check runs immediately before the restart, so
+the race is a wake landing in that sub-second window. If one does, procrastinate
+handles the SIGTERM gracefully and finishes the job in flight, but the agent
+process does not exit afterwards (it goes back to waiting for a wake), so
+systemd SIGKILLs it at the 90 s stop timeout; a job still running at that point
+dies with it and its row stays in `doing`, which is the same outcome as any
+agent crash. Do not raise `TimeoutStopSec` to paper over this -- it would make
+every busy restart wait the full timeout. The unit runs as root (it needs the journal
+and `systemctl restart`) and reads the agent's user from
+`splitsmith-agent.service`'s `User=`; `VENV`, `STATE_DIR` and `GPU` can be
+overridden in the service unit if the defaults (`~/.venv-splitsmith-agent`,
+`~/.splitsmith`, auto-detect) don't match. Credentials live in the state dir,
+independent of the venv, so an upgrade never re-registers. `DRY_RUN=1
+splitsmith-agent-update.sh` prints what a tick would do without changing
+anything. Timers need the distro booted with systemd, which on WSL2 is the same
+`systemd=true` the agent unit already needs.
 
 ## Source cache
 
