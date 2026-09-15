@@ -16,6 +16,7 @@ import json
 import secrets
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
@@ -39,6 +40,7 @@ __all__ = [
     "default_http",
     "multipart_related",
     "raise_for_api_error",
+    "rfc3339_utc",
 ]
 
 API = "https://www.googleapis.com/youtube/v3"
@@ -77,8 +79,15 @@ class VideoMetadata(BaseModel):
     tags: list[str]
     category_id: str
     privacy: Literal["unlisted", "private", "public"]
+    #: Scheduled publish time. YouTube requires the video to be private
+    #: until then, so ``to_body`` forces ``privacyStatus`` when this is set.
+    publish_at: datetime | None = None
 
     def to_body(self) -> dict[str, Any]:
+        status: dict[str, Any] = {"privacyStatus": self.privacy, "selfDeclaredMadeForKids": False}
+        if self.publish_at is not None:
+            status["privacyStatus"] = "private"
+            status["publishAt"] = rfc3339_utc(self.publish_at)
         return {
             "snippet": {
                 "title": self.title,
@@ -86,8 +95,15 @@ class VideoMetadata(BaseModel):
                 "tags": self.tags,
                 "categoryId": self.category_id,
             },
-            "status": {"privacyStatus": self.privacy, "selfDeclaredMadeForKids": False},
+            "status": status,
         }
+
+
+def rfc3339_utc(when: datetime) -> str:
+    """``2026-09-20T16:00:00Z``. A naive datetime is taken as local time."""
+    if when.tzinfo is None:
+        when = when.astimezone()
+    return when.astimezone(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _parse_range_end(header: str | None) -> int:
@@ -183,12 +199,21 @@ class YouTubeClient:
         return Channel(id=str(items[0]["id"]), title=str(items[0].get("snippet", {}).get("title", "")))
 
     def start_resumable_upload(
-        self, metadata: VideoMetadata, *, size: int, content_type: str = "video/mp4"
+        self,
+        metadata: VideoMetadata,
+        *,
+        size: int,
+        content_type: str = "video/mp4",
+        notify_subscribers: bool = True,
     ) -> str:
         resp = self._request(
             "POST",
             f"{UPLOAD_API}/videos",
-            params={"uploadType": "resumable", "part": "snippet,status"},
+            params={
+                "uploadType": "resumable",
+                "part": "snippet,status",
+                "notifySubscribers": "true" if notify_subscribers else "false",
+            },
             headers={
                 "Content-Type": "application/json; charset=UTF-8",
                 "X-Upload-Content-Length": str(size),
@@ -328,4 +353,41 @@ class YouTubeClient:
             params={"videoId": video_id, "uploadType": "media"},
             headers={"Content-Type": "image/jpeg"},
             content=jpg_path.read_bytes(),
+        )
+
+    def find_playlist(self, title: str) -> str | None:
+        """The id of the channel's playlist with exactly this title, or None."""
+        page: str | None = None
+        while True:
+            params = {"part": "snippet", "mine": "true", "maxResults": "50"}
+            if page:
+                params["pageToken"] = page
+            body = self._request("GET", f"{API}/playlists", params=params).json()
+            for item in body.get("items") or []:
+                if str(item.get("snippet", {}).get("title", "")) == title:
+                    return str(item["id"])
+            page = body.get("nextPageToken")
+            if not page:
+                return None
+
+    def create_playlist(self, title: str, *, privacy: str) -> str:
+        resp = self._request(
+            "POST",
+            f"{API}/playlists",
+            params={"part": "snippet,status"},
+            json={"snippet": {"title": title}, "status": {"privacyStatus": privacy}},
+        )
+        return str(resp.json()["id"])
+
+    def add_to_playlist(self, playlist_id: str, video_id: str) -> None:
+        self._request(
+            "POST",
+            f"{API}/playlistItems",
+            params={"part": "snippet"},
+            json={
+                "snippet": {
+                    "playlistId": playlist_id,
+                    "resourceId": {"kind": "youtube#video", "videoId": video_id},
+                }
+            },
         )
