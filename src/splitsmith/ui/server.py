@@ -7819,10 +7819,10 @@ def create_app(
         if local_path.exists():
             local = LocalJsonScoreboard(local_path)
             return _ScoreboardClientCtx(local, owns_close=False)
-        try:
-            http = SsiHttpClient()
-        except ScoreboardAuthError as exc:
-            _raise_scoreboard_http(exc)
+        # Anonymous since ssi-scoreboard#554 (#1016): construction never
+        # fails on a missing token; a 401 mid-request still routes through
+        # ``_raise_scoreboard_http``.
+        http = SsiHttpClient()
         cache_dir = root / "scoreboard" / "cache"
         cached = CachingScoreboardClient(http, cache_dir)
         return _ScoreboardClientCtx(cached, owns_close=True, inner_http=http)
@@ -9335,6 +9335,8 @@ def create_app(
         """
         local_path = _local_match_path(state.shooter_root(slug))
         local = local_path.exists()
+        # Informational since #1016: v1 reads are anonymous, a token only
+        # buys the identified consumer's higher rate limit.
         http_ready = bool(os.environ.get("SPLITSMITH_SSI_TOKEN"))
         return JSONResponse(
             {
@@ -9432,10 +9434,7 @@ def create_app(
         memoises ``get_match`` -- so we skip the cache wrapper entirely
         and go straight to the HTTP client.
         """
-        try:
-            client = SsiHttpClient()
-        except ScoreboardAuthError as exc:
-            _raise_scoreboard_http(exc)
+        client = SsiHttpClient()
         with client:
             try:
                 refs = client.search_matches(q)
@@ -9455,10 +9454,7 @@ def create_app(
         cheap on scoreboard.urdr.dev (CDN-cached) and avoids hauling
         a per-session in-memory cache around just for this flow.
         """
-        try:
-            client = SsiHttpClient()
-        except ScoreboardAuthError as exc:
-            _raise_scoreboard_http(exc)
+        client = SsiHttpClient()
         with client:
             try:
                 data = client.get_match(content_type, match_id)

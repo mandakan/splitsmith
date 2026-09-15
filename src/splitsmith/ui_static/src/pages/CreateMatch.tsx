@@ -556,9 +556,9 @@ function ScoreboardVariant({
               Scoreboard unavailable
             </div>
             <p className="text-[0.8125rem] text-muted">
-              The scoreboard isn't reachable right now -- check the
-              SPLITSMITH_SSI_TOKEN env var or your network. You can
-              still create the match by{" "}
+              The scoreboard isn't reachable right now: check your
+              network, or your SPLITSMITH_SSI_TOKEN if you set one. You
+              can still create the match by{" "}
               <button
                 type="button"
                 onClick={onSwitchToManual}

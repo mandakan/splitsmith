@@ -60,10 +60,34 @@ def test_satisfies_protocol(client: SsiHttpClient) -> None:
     assert isinstance(client, ScoreboardClient)
 
 
-def test_missing_token_raises_at_construction(monkeypatch: pytest.MonkeyPatch) -> None:
+@respx.mock
+def test_no_token_means_anonymous_requests_without_a_bearer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """v1 reads are anonymous since ssi-scoreboard#554 (#1016): a missing
+    token is not an error, and no Authorization header goes on the wire."""
     monkeypatch.delenv(TOKEN_ENV_VAR, raising=False)
-    with pytest.raises(ScoreboardAuthError, match=TOKEN_ENV_VAR):
-        SsiHttpClient()
+    route = respx.get(f"{DEFAULT_BASE_URL}/events").mock(return_value=httpx.Response(200, json=[]))
+    with SsiHttpClient() as anon:
+        assert anon.search_matches("x") == []
+    assert "authorization" not in route.calls.last.request.headers
+
+
+@respx.mock
+def test_every_request_identifies_the_app(client: SsiHttpClient) -> None:
+    from splitsmith import __version__
+
+    route = respx.get(f"{DEFAULT_BASE_URL}/events").mock(return_value=httpx.Response(200, json=[]))
+    client.search_matches("x")
+    assert route.calls.last.request.headers["user-agent"] == f"splitsmith/{__version__}"
+
+
+@respx.mock
+def test_401_without_a_token_says_the_server_requires_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An older scoreboard deployment still gating v1: the message must not
+    claim a token was rejected when none was sent."""
+    monkeypatch.delenv(TOKEN_ENV_VAR, raising=False)
+    respx.get(f"{DEFAULT_BASE_URL}/events").mock(return_value=httpx.Response(401))
+    with SsiHttpClient() as anon, pytest.raises(ScoreboardAuthError, match="requires a bearer token"):
+        anon.search_matches("x")
 
 
 def test_explicit_token_overrides_env(monkeypatch: pytest.MonkeyPatch) -> None:

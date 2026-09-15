@@ -9,10 +9,13 @@ The HTTP client is intentionally thin: no caching here. Caching lives in
 the project directory (issue #14 acceptance criterion). Wrap this client
 in the cache decorator at construction time, not inside the HTTP layer.
 
-Auth: bearer token from ``SPLITSMITH_SSI_TOKEN`` (or the ``token=``
-constructor arg). Missing token raises ``ScoreboardAuthError`` at
-construction so the UI can surface a clear setup message instead of
-hitting a 401 on first request.
+Auth: v1 reads are anonymous (ssi-scoreboard#554); a bearer from
+``SPLITSMITH_SSI_TOKEN`` (or the ``token=`` constructor arg) is sent only
+when one is configured, and buys the identified consumer's higher rate
+limit. Every request carries ``User-Agent: splitsmith/<version>`` so the
+scoreboard's logs know who is calling without a token. A 401 still maps
+to ``ScoreboardAuthError``: a set-but-rejected token is an error, and so
+is an older deployment that still gates v1.
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ from typing import Any
 
 import httpx
 
+from splitsmith import __version__
 from splitsmith.ui.scoreboard.models import (
     CompetitorStageResults,
     MatchData,
@@ -103,14 +107,14 @@ class SsiHttpClient:
         client: httpx.Client | None = None,
     ) -> None:
         resolved_token = token if token is not None else os.environ.get(TOKEN_ENV_VAR)
-        if not resolved_token:
-            raise ScoreboardAuthError(
-                f"{TOKEN_ENV_VAR} is not set; obtain a bearer token and export it. " f"See {API_DOCS_URL}"
-            )
+        self._has_token = bool(resolved_token)
+        headers = {"User-Agent": f"splitsmith/{__version__}"}
+        if resolved_token:
+            headers["Authorization"] = f"Bearer {resolved_token}"
         self._owns_client = client is None
         self._client = client or httpx.Client(
             base_url=base_url.rstrip("/"),
-            headers={"Authorization": f"Bearer {resolved_token}"},
+            headers=headers,
             timeout=timeout,
         )
 
@@ -180,8 +184,13 @@ class SsiHttpClient:
         if 200 <= status < 300:
             return response.json()
         if status == 401:
+            if self._has_token:
+                raise ScoreboardAuthError(
+                    f"scoreboard rejected the bearer token (401). Check {TOKEN_ENV_VAR}; see {API_DOCS_URL}"
+                )
             raise ScoreboardAuthError(
-                f"scoreboard rejected the bearer token (401). " f"Set {TOKEN_ENV_VAR}; see {API_DOCS_URL}"
+                f"this scoreboard deployment requires a bearer token (401). "
+                f"Set {TOKEN_ENV_VAR}; see {API_DOCS_URL}"
             )
         if status == 404:
             raise _NotFound(path)

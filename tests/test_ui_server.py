@@ -10,8 +10,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 import numpy as np
 import pytest
+import respx
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -465,74 +467,89 @@ def test_scoreboard_search_uses_local_when_match_json_present(tmp_path: Path) ->
     assert len(resp.json()) == 1
 
 
-def test_scoreboard_search_returns_401_when_no_token_and_no_local(
+@respx.mock
+def test_scoreboard_search_is_anonymous_without_a_token(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """No local file + no token -> the SsiHttpClient constructor raises
-    ScoreboardAuthError, which the endpoint maps to a 401 with a structured
-    body the SPA can render as the "set SPLITSMITH_SSI_TOKEN" banner."""
+    """No local file + no token -> the request goes out anonymously
+    (ssi-scoreboard#554, #1016): no Authorization header, the app named
+    in User-Agent, and the endpoint answers 200."""
+    from splitsmith import __version__
+    from splitsmith.ui.scoreboard.http import DEFAULT_BASE_URL
+
     monkeypatch.delenv("SPLITSMITH_SSI_TOKEN", raising=False)
     # chdir to a clean dir so the splitsmith repo's own ``.env.local``
     # (which carries a real token) doesn't leak into the test process.
     monkeypatch.chdir(tmp_path)
+    route = respx.get(f"{DEFAULT_BASE_URL}/events").mock(return_value=httpx.Response(200, json=[]))
     app = _match_create_app(project_root=tmp_path / "match", project_name="x")
     client = _MatchClient(app)
 
     resp = client.get("/api/shooters/me/scoreboard/search", params={"q": "anything"})
-    assert resp.status_code == 401
-    detail = resp.json()["detail"]
-    assert detail["code"] == "scoreboard_auth"
-    assert detail["env_var"] == "SPLITSMITH_SSI_TOKEN"
+    assert resp.status_code == 200
+    assert resp.json() == []
+    sent = route.calls.last.request
+    assert "authorization" not in sent.headers
+    assert sent.headers["user-agent"] == f"splitsmith/{__version__}"
 
 
-def test_scoreboard_search_unbound_returns_401_without_token(
+@respx.mock
+def test_scoreboard_search_unbound_is_anonymous_without_a_token(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The create-match-from-scoreboard flow searches before a project
-    exists, so /api/scoreboard/search must work without a bound shooter.
-    With no token configured the endpoint surfaces the same 401 the
-    bound variant does so the SPA can route to the offline fallback."""
+    exists; without a token it runs anonymously like the bound variant."""
+    from splitsmith.ui.scoreboard.http import DEFAULT_BASE_URL
+
     monkeypatch.delenv("SPLITSMITH_SSI_TOKEN", raising=False)
     monkeypatch.chdir(tmp_path)
+    respx.get(f"{DEFAULT_BASE_URL}/events").mock(return_value=httpx.Response(200, json=[]))
     app = _match_create_app(project_root=tmp_path / "match", project_name="x")
     client = _MatchClient(app)
 
     resp = client.get("/api/scoreboard/search", params={"q": "anything"})
-    assert resp.status_code == 401
-    detail = resp.json()["detail"]
-    assert detail["code"] == "scoreboard_auth"
+    assert resp.status_code == 200
 
 
+@respx.mock
 def test_scoreboard_search_unbound_works_with_no_bound_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The endpoint must not raise no_project (409) when the server has
     no bound project -- that's the whole point of the unbound variant."""
+    from splitsmith.ui.scoreboard.http import DEFAULT_BASE_URL
+
     monkeypatch.delenv("SPLITSMITH_SSI_TOKEN", raising=False)
     monkeypatch.chdir(tmp_path)
+    respx.get(f"{DEFAULT_BASE_URL}/events").mock(return_value=httpx.Response(200, json=[]))
     app = create_app()  # no project bound
     client = _MatchClient(app)
 
     resp = client.get("/api/scoreboard/search", params={"q": "anything"})
-    assert resp.status_code == 401  # token missing, not no_project (409)
-    assert resp.json()["detail"]["code"] == "scoreboard_auth"
+    assert resp.status_code == 200  # anonymous, not no_project (409)
 
 
-def test_scoreboard_match_data_unbound_returns_401_without_token(
+@respx.mock
+def test_scoreboard_upstream_401_still_maps_to_scoreboard_auth(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The unbound match-data endpoint mirrors the search endpoint's
-    auth contract -- no token configured surfaces 401 ``scoreboard_auth``
-    so the create flow can route the user to set their token before
-    picking shooters."""
+    """An older deployment that still gates v1, or a set-but-rejected
+    token, answers 401 upstream; the endpoint keeps the structured
+    ``scoreboard_auth`` body the SPA routes to its offline fallback."""
+    from splitsmith.ui.scoreboard.http import DEFAULT_BASE_URL
+
     monkeypatch.delenv("SPLITSMITH_SSI_TOKEN", raising=False)
     monkeypatch.chdir(tmp_path)
+    respx.get(f"{DEFAULT_BASE_URL}/match/22/27190").mock(return_value=httpx.Response(401))
     app = create_app()
     client = _MatchClient(app)
 
     resp = client.get("/api/scoreboard/matches/22/27190")
     assert resp.status_code == 401
-    assert resp.json()["detail"]["code"] == "scoreboard_auth"
+    detail = resp.json()["detail"]
+    assert detail["code"] == "scoreboard_auth"
+    assert detail["env_var"] == "SPLITSMITH_SSI_TOKEN"
+    assert "requires a bearer token" in detail["message"]
 
 
 def test_fs_list_dirs_unbound_returns_directories(

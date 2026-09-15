@@ -302,8 +302,8 @@ export interface MatchProject {
 /** GET /api/scoreboard/source response. ``mode === "local"`` means the
  *  offline JSON path will serve every scoreboard request -- no network is
  *  used. ``http_token_set`` reflects whether ``SPLITSMITH_SSI_TOKEN`` is
- *  set on the server process; the SPA reads it to render a setup hint
- *  before the user runs into a 401. */
+ *  set on the server process. Informational: v1 reads are anonymous, a
+ *  token only raises the rate limit. */
 export interface ScoreboardSource {
   mode: "local" | "online";
   local_match_json_path: string | null;
