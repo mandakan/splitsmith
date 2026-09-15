@@ -23,6 +23,7 @@ import { Navigate, useNavigate, useOutletContext, useParams } from "react-router
 
 import { CleanupDialog } from "@/components/CleanupDialog";
 import { ExportHistory } from "@/components/export/ExportHistory";
+import { Section } from "@/components/export/Section";
 import { SelectField } from "@/components/export/SelectField";
 import { StageTable } from "@/components/export/StageTable";
 import { YouTubeConnect } from "@/components/export/YouTubeConnect";
@@ -1125,32 +1126,6 @@ function ExportInner({ slug }: { slug: string }) {
 /* -------------------------------------------------------------------------- */
 /* Pieces                                                                     */
 /* -------------------------------------------------------------------------- */
-
-function Section({
-  label,
-  aside,
-  control,
-  flush = false,
-  children,
-}: {
-  label: string;
-  aside?: React.ReactNode;
-  control?: React.ReactNode;
-  /** No inner padding: the child brings its own rows. */
-  flush?: boolean;
-  children?: React.ReactNode;
-}) {
-  return (
-    <section className="rounded-[10px] border border-rule bg-surface">
-      <div className={cn("flex flex-wrap items-center gap-3 px-3.5 py-2", children ? "border-b border-rule" : null)}>
-        <Label>{label}</Label>
-        {control}
-        {aside ? <span className="ml-auto">{aside}</span> : null}
-      </div>
-      {children ? <div className={cn(flush ? "[&>div]:rounded-none [&>div]:border-0" : null)}>{children}</div> : null}
-    </section>
-  );
-}
 
 function ResultPanel({
   result,
