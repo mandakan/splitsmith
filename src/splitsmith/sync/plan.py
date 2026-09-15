@@ -3,8 +3,9 @@
 ``build_push_plan`` reads one local match directory and decides what a
 push executor (Task 8) should upload: the match doc, each shooter's
 sanitized project doc, one audit doc per stage that has been audited, and
-one media item per trimmed clip (+ its ``.params.json`` sidecar, when
-present) whose size or mtime has changed since the last recorded push.
+one media item per trimmed clip (+ its ``.params.json`` sidecar and its
+``_web.mp4`` streaming rendition, when present) whose size or mtime has
+changed since the last recorded push.
 
 This module does no network I/O and never rewrites anything on disk - it
 only reads the match tree and returns a plan. Docs are filtered against
@@ -39,6 +40,9 @@ AUDIT_FILENAME_RE = re.compile(r"^stage(\d+)\.json$")
 
 #: ``trimmed/stage<N>_cam_<video_id>_trimmed.mp4`` filename shape.
 _TRIMMED_GLOB = "stage*_cam_*_trimmed.mp4"
+#: The trim's streaming rendition (#1031), ``..._web.mp4`` beside it. A
+#: ``..._web.partial.mp4`` from a crashed transcode does not match.
+_WEB_GLOB = "stage*_cam_*_web.mp4"
 
 
 class DocItem(BaseModel):
@@ -204,6 +208,9 @@ def build_push_plan(match_root: Path, *, sync_state: SyncState) -> PushPlan:
                 sidecar = clip_path.with_suffix(".params.json")
                 if sidecar.exists():
                     candidates.append(sidecar)
+                web = clip_path.with_name(clip_path.name.replace("_trimmed.mp4", "_web.mp4"))
+                if web.exists() and web.stat().st_size > 0:
+                    candidates.append(web)
                 for candidate in candidates:
                     remote_key = _remote_key(match.match_id, slug, candidate.name)
                     item = _plan_media_item(candidate, remote_key, sync_state)

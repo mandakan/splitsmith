@@ -10,6 +10,11 @@ Two modes:
   so browser ``<video>`` seeks land on a keyframe within ~1 frame of the pointer.
   Audio is stream-copied so the detector's input is bit-exact regardless of mode.
 
+A third file, the *web rendition* (#1031), is not a mode of ``trim_video``:
+``transcode_web_trim`` re-encodes an audit trim down to a 720p faststart
+MP4 for hosted players, which stream it from object storage. It covers the
+same window as the trim it was cut from, so the two share a beep anchor.
+
 Per SPEC.md, ``-ss`` before ``-i`` is used for fast (non-keyframe-exact) seeking;
 the buffer absorbs any seek imprecision. In audit mode, the re-encode also
 re-aligns frames, so the seek-imprecision concern is moot anyway.
@@ -21,6 +26,7 @@ shelling out.
 
 from __future__ import annotations
 
+import os
 import platform
 import subprocess
 from collections.abc import Callable
@@ -28,7 +34,8 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from .config import TrimResult
+from .config import Config, TrimResult, WebTrimConfig
+from .runtime import ENV_CONFIG_FILE
 
 Runner = Callable[..., subprocess.CompletedProcess]
 TrimMode = Literal["lossless", "audit"]
@@ -269,3 +276,131 @@ def trim_video(
         raise FFmpegError(f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}") from exc
 
     return TrimResult(output_path=output_path, start_time=start, end_time=end)
+
+
+def web_trim_config() -> WebTrimConfig:
+    """The web rendition's encode knobs, from ``SPLITSMITH_CONFIG`` when
+    set, else the shipped defaults (the same rule as
+    ``coach.auto_classify_config``)."""
+    raw = os.environ.get(ENV_CONFIG_FILE, "").strip()
+    if not raw:
+        return WebTrimConfig()
+    return Config.load(Path(raw).expanduser()).web_trim
+
+
+def web_trim_path(trimmed: Path) -> Path:
+    """The web rendition that belongs to the audit trim at ``trimmed``:
+    ``stage<N>_cam_<id>_trimmed.mp4`` -> ``stage<N>_cam_<id>_web.mp4``,
+    in the same directory."""
+    stem = trimmed.stem
+    if stem.endswith("_trimmed"):
+        stem = stem[: -len("_trimmed")]
+    return trimmed.with_name(f"{stem}_web.mp4")
+
+
+def transcode_web_trim(
+    input_path: Path,
+    output_path: Path,
+    config: WebTrimConfig,
+    *,
+    ffmpeg_binary: str = "ffmpeg",
+    runner: Runner = subprocess.run,
+) -> None:
+    """Re-encode an audit trim into its streaming rendition (#1031).
+
+    Scales to ``config.height`` (width follows, kept even), ``libx264``
+    at the config's crf/preset with a fixed GOP, AAC audio, and
+    ``+faststart`` so the ``moov`` atom leads the file and a browser can
+    start decoding after the first few hundred kilobytes. Raises
+    :class:`FFmpegError` when ffmpeg fails or is missing.
+    """
+    if not input_path.exists():
+        raise FFmpegError(f"input video not found: {input_path}")
+    cmd = [
+        ffmpeg_binary,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(input_path),
+        "-vf",
+        f"scale=-2:{config.height}",
+        "-c:v",
+        config.video_codec,
+        "-preset",
+        config.preset,
+        "-crf",
+        str(config.crf),
+        "-g",
+        str(config.gop),
+        "-keyint_min",
+        str(config.gop),
+        "-sc_threshold",
+        "0",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        config.audio_bitrate,
+        "-movflags",
+        "+faststart",
+        str(output_path),
+    ]
+    try:
+        runner(cmd, check=True, capture_output=True, text=True)
+    except FileNotFoundError as exc:
+        raise FFmpegError(f"ffmpeg binary not found: {ffmpeg_binary}") from exc
+    except subprocess.CalledProcessError as exc:
+        raise FFmpegError(f"ffmpeg failed (exit {exc.returncode}): {exc.stderr or exc.stdout!r}") from exc
+
+
+#: ``trimmed/stage<N>_cam_<video_id>_trimmed.mp4`` -- the audit trims a
+#: ``trimmed/`` dir holds, the same shape ``sync.plan`` pushes.
+TRIMMED_CLIP_GLOB = "stage*_cam_*_trimmed.mp4"
+
+
+def backfill_web_trims(
+    trimmed_dir: Path,
+    config: WebTrimConfig,
+    *,
+    ffmpeg_binary: str = "ffmpeg",
+    runner: Runner = subprocess.run,
+    on_progress: Callable[[int, int, Path], None] = lambda i, n, p: None,
+) -> tuple[list[Path], list[str]]:
+    """Give every audit trim under ``trimmed_dir`` a web rendition (#1031).
+
+    A rendition at least as new as its trim is kept; a missing or older
+    one is transcoded from the trim. Returns ``(cut, errors)``: the
+    renditions written this call, and one message per trim whose
+    transcode failed (the rest still run). A missing dir is a no-op.
+    ``on_progress(i, n, trim)`` fires before each transcode.
+    """
+    cut: list[Path] = []
+    errors: list[str] = []
+    if not trimmed_dir.is_dir():
+        return cut, errors
+    todo: list[Path] = []
+    for trimmed in sorted(trimmed_dir.glob(TRIMMED_CLIP_GLOB)):
+        web = web_trim_path(trimmed)
+        if web.exists() and web.stat().st_size > 0 and web.stat().st_mtime >= trimmed.stat().st_mtime:
+            continue
+        todo.append(trimmed)
+    for i, trimmed in enumerate(todo, start=1):
+        on_progress(i, len(todo), trimmed)
+        web = web_trim_path(trimmed)
+        partial = web.with_name(f"{web.stem}.partial{web.suffix}")
+        try:
+            transcode_web_trim(trimmed, partial, config, ffmpeg_binary=ffmpeg_binary, runner=runner)
+            if not (partial.exists() and partial.stat().st_size > 0):
+                raise FFmpegError("ffmpeg produced no output")
+            partial.replace(web)
+        except FFmpegError as exc:
+            if partial.exists():
+                partial.unlink()
+            errors.append(f"{trimmed.name}: web rendition not cut ({exc})")
+            continue
+        cut.append(web)
+    return cut, errors

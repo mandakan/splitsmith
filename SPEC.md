@@ -543,6 +543,8 @@ The production UI (`splitsmith ui --project PATH`) treats a *match* as the persi
                             # take-wide peaks (key = blake2s of storage_path): take_<key>.peaks-*.json
                             # take audio (8 kHz mono): take_<key>.wav
   trimmed/                  # per-stage trimmed MP4s (Sub 5 / #16)
+                            # audit trim: stage<N>_cam_<video_id>_trimmed.mp4 (+ .params.json)
+                            # its 720p faststart rendition for hosted playback: stage<N>_cam_<video_id>_web.mp4
   audit/                    # per-stage audit JSON (same shape as fixture format)
   exports/                  # CSV / FCPXML / report.txt
   scoreboard/               # cached SSI JSON + raw fetch responses

@@ -44,6 +44,7 @@ from splitsmith.sync.state import SYNC_STATE_FILE, SyncedItem, SyncState, load_s
 
 TRIMMED_NAME = "stage1_cam_abc123_trimmed.mp4"
 SIDECAR_NAME = "stage1_cam_abc123_trimmed.params.json"
+WEB_NAME = "stage1_cam_abc123_web.mp4"
 
 
 # ---------------------------------------------------------------------------
@@ -388,3 +389,30 @@ def test_plan_skips_unchanged_beep_review_artifacts(tmp_path: Path) -> None:
     # was already recorded, so nothing re-enters the plan.
     assert second_plan.media == []
     assert second_plan.media_skipped == len(first_plan.media)
+
+
+# ---------------------------------------------------------------------------
+# Web rendition (#1031): planned beside the trim it was cut from
+# ---------------------------------------------------------------------------
+
+
+def test_plan_includes_web_rendition_beside_its_trim(tmp_path: Path) -> None:
+    root, slug = _build_basic_match(tmp_path)
+    match_id = match_model.Match.load(root).match_id
+    (root / "shooters" / slug / "trimmed" / WEB_NAME).write_bytes(b"w" * 64)
+
+    plan = build_push_plan(root, sync_state=SyncState())
+
+    remote_keys = {m.remote_key for m in plan.media}
+    assert f"matches/{match_id}/shooters/{slug}/trimmed/{WEB_NAME}" in remote_keys
+    assert len(plan.media) == 3
+
+
+def test_plan_ignores_a_web_partial(tmp_path: Path) -> None:
+    """A ``.partial`` left by a crashed transcode is never pushed."""
+    root, slug = _build_basic_match(tmp_path)
+    (root / "shooters" / slug / "trimmed" / "stage1_cam_abc123_web.partial.mp4").write_bytes(b"w")
+
+    plan = build_push_plan(root, sync_state=SyncState())
+
+    assert len(plan.media) == 2

@@ -612,3 +612,88 @@ def test_run_sync_missing_local_audit_is_skipped_not_synthesized(tmp_path):
     assert unchanged_hosted["shots"][0]["shot_number"] == 1
     assert unchanged_hosted["shots"][0].get("coaching_note") == "hosted-only"
     assert any("no local audit doc" in n for n in report.notes)
+
+
+# ---------------------------------------------------------------------------
+# Web rendition backfill (#1031): a trim synced before the rendition
+# existed gets one on the next sync, so hosted playback stops streaming
+# the full-res trim.
+# ---------------------------------------------------------------------------
+
+
+def _write_trim(match_root: Path, slug: str = "anna") -> Path:
+    trimmed = match_root / "shooters" / slug / "trimmed"
+    trimmed.mkdir(parents=True, exist_ok=True)
+    clip = trimmed / "stage1_cam_abc123_trimmed.mp4"
+    clip.write_bytes(b"T" * 128)
+    return clip
+
+
+def test_run_sync_backfills_web_renditions_before_pushing(tmp_path, monkeypatch):
+    from splitsmith import trim as trim_module
+
+    match_root = make_synced_match(tmp_path)
+    clip = _write_trim(match_root)
+    seen: list[Path] = []
+
+    def fake_transcode(input_path, output_path, config, *, ffmpeg_binary="ffmpeg", runner=None):
+        seen.append((input_path, ffmpeg_binary))
+        Path(output_path).write_bytes(b"WEB")
+
+    monkeypatch.setattr(trim_module, "transcode_web_trim", fake_transcode)
+    client = FakeSyncClient()
+    uploaded: list[str] = []
+    real_upload = client.upload_media
+
+    def upload(match_id, item, *, progress):
+        uploaded.append(item.remote_key)
+        return real_upload(match_id, item, progress=progress)
+
+    client.upload_media = upload  # type: ignore[method-assign]
+
+    report = run_sync(match_root, client=client, ffmpeg_binary="/opt/ffmpeg")
+
+    assert seen == [(clip, "/opt/ffmpeg")]
+    assert trim_module.web_trim_path(clip).read_bytes() == b"WEB"
+    assert any(k.endswith("/trimmed/stage1_cam_abc123_web.mp4") for k in uploaded)
+    assert report.web_trims_cut == 1
+    assert report.notes == []
+
+
+def test_run_sync_web_backfill_failure_is_a_note_not_an_abort(tmp_path, monkeypatch):
+    from splitsmith import trim as trim_module
+
+    match_root = make_synced_match(tmp_path)
+    _write_trim(match_root)
+
+    def boom(*args, **kwargs):
+        raise trim_module.FFmpegError("no such encoder")
+
+    monkeypatch.setattr(trim_module, "transcode_web_trim", boom)
+    client = FakeSyncClient()
+
+    report = run_sync(match_root, client=client)
+
+    assert report.web_trims_cut == 0
+    assert len(report.notes) == 1 and "no such encoder" in report.notes[0]
+    assert report.docs >= 1  # the sync itself went through
+
+
+def test_run_sync_second_run_does_not_retranscode(tmp_path, monkeypatch):
+    from splitsmith import trim as trim_module
+
+    match_root = make_synced_match(tmp_path)
+    _write_trim(match_root)
+    calls = 0
+
+    def fake_transcode(input_path, output_path, config, **kwargs):
+        nonlocal calls
+        calls += 1
+        Path(output_path).write_bytes(b"WEB")
+
+    monkeypatch.setattr(trim_module, "transcode_web_trim", fake_transcode)
+    client = FakeSyncClient()
+    run_sync(match_root, client=client)
+    run_sync(match_root, client=client)
+
+    assert calls == 1

@@ -46,6 +46,9 @@ class SyncReport(PushReport):
     reprocess_videos: int = 0
     attempts: int = 1
     shot_ids_migrated: int = 0
+    #: Web renditions (#1031) transcoded from existing trims this run,
+    #: before the push, so they went up with it.
+    web_trims_cut: int = 0
 
 
 def format_sync_message(report: SyncReport) -> str:
@@ -148,12 +151,48 @@ def migrate_shot_ids(match_root: Path) -> int:
     return migrated
 
 
+def backfill_web_trims(
+    match_root: Path,
+    *,
+    ffmpeg_binary: str = "ffmpeg",
+    on_progress: Callable[[float, str], None] = lambda p, m: None,
+) -> tuple[int, list[str]]:
+    """Cut the web rendition (#1031) for every trim under the match that
+    lacks one, so the push that follows carries it. Sync is the moment a
+    trim goes over the WAN, which is why the transcode lives here rather
+    than in a separate verb: a match trimmed before the rendition existed
+    is fixed by the next sync, with no re-trim from the source. Returns
+    ``(cut, errors)``; an error is per trim and never aborts the sync.
+    """
+    from .. import trim as trim_module
+
+    config = trim_module.web_trim_config()
+    total_cut = 0
+    errors: list[str] = []
+    shooters_dir = match_root / "shooters"
+    if not shooters_dir.is_dir():
+        return 0, errors
+    for shooter_root in sorted(p for p in shooters_dir.iterdir() if p.is_dir()):
+        slug = shooter_root.name
+
+        def _progress(i: int, n: int, trimmed: Path, slug: str = slug) -> None:
+            on_progress(0.0, f"encoding web clip {i}/{n} for {slug}")
+
+        cut, errs = trim_module.backfill_web_trims(
+            shooter_root / "trimmed", config, ffmpeg_binary=ffmpeg_binary, on_progress=_progress
+        )
+        total_cut += len(cut)
+        errors.extend(f"shooter {slug!r}: {e}" for e in errs)
+    return total_cut, errors
+
+
 def run_sync(
     match_root: Path,
     *,
     client: HostedSyncClient,
     on_progress: Callable[[float, str], None] = lambda p, m: None,
     timer: PhaseTimer | None = None,
+    ffmpeg_binary: str = "ffmpeg",
 ) -> SyncReport:
     """Pull hosted changes, merge, then push - the bidirectional cycle."""
     timings: dict[str, float] = {}
@@ -164,6 +203,13 @@ def run_sync(
         if preflight.errors:
             raise SyncClientError("\n".join(preflight.errors))
         match_id, match_name = preflight.match_id, preflight.match_name
+
+    # After the preflight (a tree that can't push isn't touched) and
+    # before the push plans: the renditions have to exist to be planned.
+    with timed_phase(timings, timer, "web_trims"):
+        web_trims_cut, web_trim_notes = backfill_web_trims(
+            match_root, ffmpeg_binary=ffmpeg_binary, on_progress=on_progress
+        )
 
     # After the preflight (a tree that can't push isn't rewritten) and
     # before the pull: the merge keys shot membership on the id, so every
@@ -178,7 +224,7 @@ def run_sync(
 
     pulled_total = 0
     all_conflicts: list[dict] = []
-    all_notes: list[str] = []
+    all_notes: list[str] = list(web_trim_notes)
     reprocess: set[str] = set()
     merged_docs = 0
 
@@ -224,6 +270,7 @@ def run_sync(
         reprocess_videos=len(reprocess),
         attempts=attempt,
         shot_ids_migrated=shot_ids_migrated,
+        web_trims_cut=web_trims_cut,
     )
     report.timings.update(timings)
     return report

@@ -1315,8 +1315,10 @@ export interface CoachVideoEntry {
   /** Which clip ``beep_in_clip`` was measured against - pin it as the
    *  stream kind so a trim job completing mid-session cannot shift the
    *  served bytes under a stale anchor (same hazard the audit screen
-   *  avoids with explicit trim/proxy kinds). */
-  kind: "trim" | "source";
+   *  avoids with explicit trim/proxy kinds). ``web`` is the trim's
+   *  720p faststart rendition, reported in hosted mode when the object
+   *  exists; it shares the trim's anchor. */
+  kind: "trim" | "source" | "web";
 }
 
 export interface CoachStageResponse {
@@ -3666,11 +3668,12 @@ export const api = {
    *  "source not found"). Other callers default to ``auto``: trim if
    *  present, source otherwise. ``proxy`` serves the low-res fast-scrub
    *  proxy (or source on local mode); in hosted mode the server returns
-   *  HTTP 425 when the proxy object is absent. */
+   *  HTTP 425 when the proxy object is absent. ``web`` is the trim's
+   *  streaming rendition (hosted), falling back to trim then source. */
   videoStreamUrl: (
     slug: string,
     videoPath: string,
-    kind: "auto" | "trim" | "source" | "proxy" = "auto",
+    kind: "auto" | "trim" | "source" | "proxy" | "web" = "auto",
   ) =>
     scopeRequestPath(
       `/api/shooters/${encodeURIComponent(slug)}/videos/stream?path=${encodeURIComponent(videoPath)}&kind=${kind}`,

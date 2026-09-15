@@ -420,6 +420,25 @@ class ProxyConfig(BaseModel):
     video_codec: str = "libx264"
 
 
+class WebTrimConfig(BaseModel):
+    """Streaming rendition of the audit trim (#1031).
+
+    The audit trim is a full-resolution scrub cache (tens of Mbit/s, no
+    faststart) that hosted players used to stream straight from object
+    storage. This rendition is cut *from* that trim, so it covers the
+    same window and shares its beep anchor, at a bitrate a phone on a
+    share link can start within a second. ``libx264`` on purpose: the
+    size must be predictable on the desktop and the worker alike.
+    """
+
+    height: int = 720
+    crf: int = 26
+    preset: str = "veryfast"
+    gop: int = 30
+    audio_bitrate: str = "128k"
+    video_codec: str = "libx264"
+
+
 class CoachAutoClassifyConfig(BaseModel):
     """Gap-time thresholds for the Coach interval auto-classifier (#160).
 
@@ -467,6 +486,7 @@ class Config(BaseModel):
     output: OutputConfig = Field(default_factory=OutputConfig)
     coach_auto_classify: CoachAutoClassifyConfig = Field(default_factory=CoachAutoClassifyConfig)
     beep_windows: BeepWindowConfig = Field(default_factory=BeepWindowConfig)
+    web_trim: WebTrimConfig = Field(default_factory=WebTrimConfig)
 
     @classmethod
     def load(cls, path: Path | None) -> Config:
