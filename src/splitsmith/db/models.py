@@ -809,3 +809,36 @@ class DeviceAuthorizationRow(Base):
             f"<DeviceAuthorizationRow id={self.id!r} user_code={self.user_code!r} "
             f"status={self.status!r} device_name={self.device_name!r}>"
         )
+
+
+class ExportPresetRow(Base):
+    """One saved export preset per (user, preset_id) (spec 2026-09-15 s1).
+
+    Hosted-mode counterpart to the local ``export_presets.json``. A
+    preset belongs to a user, not a match, which is why this is its own
+    table and not a ``state_docs`` kind: a per-match kind would enter
+    the sync manifest and its allowlists, and presets must not.
+
+    ``body`` is the JSON dump of ``export_presets.ExportPresetBody``;
+    the store re-validates on read so an older row loads with defaults
+    for fields that did not exist when it was written.
+
+    **Multi-tenant:** the primary key leads with ``user_id`` and the
+    ``tenant_isolation`` RLS policy applies (migration c3e8a1d47f92);
+    the store filters on ``user_id`` in every statement as well.
+    """
+
+    __tablename__ = "export_presets"
+
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, nullable=False
+    )
+    preset_id: Mapped[str] = mapped_column(String, primary_key=True, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    body: Mapped[dict] = mapped_column(JSON, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<ExportPresetRow user_id={self.user_id!r} preset_id={self.preset_id!r}>"

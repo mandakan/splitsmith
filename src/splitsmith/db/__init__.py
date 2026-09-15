@@ -23,6 +23,7 @@ this DB layer internally without leaking SQL into handler code.
 
 from .email import ConsoleEmailSender, EmailSender, LettermintEmailSender, build_email_sender
 from .engine import create_engine, sessionmaker, tenant_session_factory
+from .export_presets import PostgresExportPresetStore
 from .job_backend import PostgresJobBackend
 from .magic_link import (
     SESSION_COOKIE_NAME,
@@ -66,6 +67,7 @@ __all__ = [
     "MagicLinkAuth",
     "MagicLinkTokenRow",
     "MatchRow",
+    "PostgresExportPresetStore",
     "PostgresJobBackend",
     "PostgresMatchStore",
     "PostgresProfileStore",

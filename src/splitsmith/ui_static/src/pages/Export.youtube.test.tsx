@@ -180,6 +180,14 @@ function Shell({ shooters }: { shooters: ShooterListEntry[] }) {
   );
 }
 
+/** The option groups fold by default (spec 2026-09-15 s1); open whichever exist. */
+async function openGroups(user: ReturnType<typeof userEvent.setup>) {
+  for (const name of ["Output", "Cut", "Look"]) {
+    const btn = screen.queryByRole("button", { name: new RegExp(`^${name}$`), expanded: false });
+    if (btn) await user.click(btn);
+  }
+}
+
 async function renderPage(shooters = [shooter("mathias", "Mathias")]) {
   const user = userEvent.setup();
   render(
@@ -195,6 +203,7 @@ async function renderPage(shooters = [shooter("mathias", "Mathias")]) {
   );
   await screen.findByRole("button", { name: /export bundle/i });
   await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage 2/i })).toBeChecked());
+  await openGroups(user);
   return { user };
 }
 
@@ -239,6 +248,13 @@ afterEach(() => {
 });
 
 describe("Export YouTube row", () => {
+  it("the connect UI shows for any rendered MP4, before the YouTube toggle is on", async () => {
+    const { user } = await renderPage();
+    await user.selectOptions(screen.getByLabelText("Timeline format"), "mp4");
+    expect(screen.getByText(/Connected as Mine/)).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Upload after render" })).toBeNull();
+  });
+
   it("sends youtube_upload off by default and the chosen privacy when set", async () => {
     const { user } = await renderPage();
     await user.selectOptions(screen.getByLabelText("Timeline format"), "mp4");

@@ -147,6 +147,7 @@ from .. import cleanup as cleanup_module
 from .. import coach as coach_module
 from .. import coach_distributions as coach_distributions_module
 from .. import ensemble as ensemble_module
+from .. import export_presets as export_presets_module
 from .. import models as model_layer
 from .. import shot_detect as shot_detect_module  # noqa: F401  (kept for legacy monkeypatch points)
 from .. import thumbnail as thumbnail_helpers
@@ -1549,6 +1550,10 @@ class TenantContext:
     # loopback sentinel has no user row, and the PATCH route that uses
     # this 404s there.
     profile: PostgresProfileStore | None = None
+    # Per-user saved export presets (spec 2026-09-15 s1). ``None`` in
+    # local mode, where ``AppState.export_presets`` falls back to the
+    # JSON file store.
+    export_presets: export_presets_module.ExportPresetStore | None = None
 
 
 # Per-request / per-job tenant resolved by the hosted-mode auth gate
@@ -1624,6 +1629,9 @@ class AppState:
     )
     _scoreboard_identity: user_config.ScoreboardIdentityStore = field(
         default_factory=user_config.JsonScoreboardIdentityStore
+    )
+    _export_presets: export_presets_module.ExportPresetStore = field(
+        default_factory=export_presets_module.JsonExportPresetStore
     )
     # Hosted-mode factory: build a :class:`TenantContext` for a ``user_id``.
     # ``None`` in local mode. Set by ``_apply_hosted_mode_wiring``; called
@@ -1793,6 +1801,13 @@ class AppState:
     @scoreboard_identity.setter
     def scoreboard_identity(self, value: user_config.ScoreboardIdentityStore) -> None:
         self._scoreboard_identity = value
+
+    @property
+    def export_presets(self) -> export_presets_module.ExportPresetStore:
+        tenant = current_tenant.get()
+        if tenant is not None and tenant.export_presets is not None:
+            return tenant.export_presets
+        return self._export_presets
 
     @property
     def matches_store(self) -> PostgresMatchStore | None:
@@ -6303,6 +6318,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
     """
     from ..db import (
         MagicLinkAuth,
+        PostgresExportPresetStore,
         PostgresJobBackend,
         PostgresMatchStore,
         PostgresProfileStore,
@@ -6475,6 +6491,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             desktop_tokens=DesktopTokenStore(tenant_factory, user_id=user_id),
             comments=CommentStore(tenant_factory, user_id=user_id),
             profile=PostgresProfileStore(tenant_factory, user_id=user_id),
+            export_presets=PostgresExportPresetStore(tenant_factory, user_id=user_id),
         )
 
     state._build_tenant = _build_tenant
@@ -16581,6 +16598,12 @@ def create_app(
     from .youtube_api import router as youtube_router
 
     app.include_router(youtube_router)
+
+    # Export presets (spec 2026-09-15 s1): one router for both modes; the
+    # store behind ``state.export_presets`` is what differs.
+    from .export_presets_api import router as export_presets_router
+
+    app.include_router(export_presets_router)
 
     # Share-link OG card PNGs (spec 2026-08-09). Same lazy-import,
     # always-registered idiom as sync_router and device_router: every

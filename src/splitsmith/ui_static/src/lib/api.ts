@@ -891,6 +891,48 @@ export interface YouTubeUploadPayload extends YouTubeUploadOptions {
  *  - ``"prores-4444"``: cross-platform / archival. Largest files. */
 export type OverlayCodec = "auto" | "hevc-alpha" | "prores-4444";
 
+/** The recurring half of the Export form (spec 2026-09-15 s1). Mirrors
+ *  ``export_presets.ExportPresetBody``; every field has a server default
+ *  and unknown fields are dropped there, so the SPA never needs to
+ *  migrate a stored body. */
+export interface ExportPresetBody {
+  schema_version?: number;
+  mode: "single" | "trims" | "compare";
+  output_format: "fcpxml" | "fcp7xml" | "mp4";
+  overlay_codec: OverlayCodec;
+  canvas: "uhd" | "hd";
+  include_secondaries: boolean;
+  pip_layout: "stacked" | "pip-corners";
+  youtube_preset: boolean;
+  padding_preset: "full" | "action" | "highlight" | "custom";
+  head_pad_seconds: number;
+  tail_pad_seconds: number;
+  transition_kind: "none" | "zoom" | "static";
+  transition_seconds: number;
+  title_page: boolean;
+  title_page_seconds: number;
+  closing_card: boolean;
+  stage_card_style: "none" | "slate" | "lower-third";
+  stage_card_seconds: number;
+  summary_hold_seconds: number;
+  overlay: boolean;
+  grid_overlay: boolean;
+  grid_hold_seconds: number;
+  upload_after_render: boolean;
+  upload_privacy: YouTubePrivacy;
+  upload_playlist: string | null;
+  upload_playlist_id: string | null;
+  upload_notify: boolean;
+}
+
+export interface ExportPreset {
+  preset_id: string;
+  name: string;
+  builtin: boolean;
+  updated_at: string;
+  body: ExportPresetBody;
+}
+
 export interface ExportStageRequestPayload {
   write_trim?: boolean;
   write_csv?: boolean;
@@ -4411,6 +4453,20 @@ export const api = {
   // hosted-sync; local mode only, the routes 404 hosted.
 
   getYouTubeSettings: () => request<YouTubeSettings>("/api/settings/youtube"),
+
+  // Export presets (spec 2026-09-15 s1): both modes, per user hosted.
+
+  getExportPresets: () => request<{ presets: ExportPreset[] }>("/api/settings/export-presets"),
+
+  /** ``id === "new"`` creates; any other id replaces. Built-in ids 403. */
+  putExportPreset: (id: string, name: string, body: ExportPresetBody) =>
+    request<ExportPreset>(`/api/settings/export-presets/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      json: { name, body },
+    }),
+
+  deleteExportPreset: (id: string) =>
+    request<void>(`/api/settings/export-presets/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   /** Start a login. The SPA opens ``auth_url`` itself and polls
    *  {@link api.youtubeConnectStatus} until it leaves ``pending``. */

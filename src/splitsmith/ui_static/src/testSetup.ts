@@ -5,7 +5,11 @@
  *   on vitest's own `expect`, per the ecosystem convention, rather than
  *   hand-rolling assertion helpers per test file.
  * - Runs Testing Library's `cleanup()` after every test so one
- *   component test's rendered tree never leaks into the next.
+ *   component test's rendered tree never leaks into the next, and clears
+ *   both Web Storages: the jsdom window is per file, not per test, so a
+ *   page that remembers state (the Export page's last-used settings)
+ *   would otherwise hand one test's edits to the next. CI's slower runs
+ *   let a debounced write land where a fast local run did not.
  * - Stubs `ResizeObserver`, which jsdom does not implement. Any component
  *   under test that measures itself (useShellHeaderHeight, MatchShell's
  *   header, ...) needs a constructor to exist even though this stub does
@@ -29,6 +33,8 @@ import "@testing-library/jest-dom/vitest";
 
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
+  window.sessionStorage.clear();
 });
 
 // Node >= 26 defines its own experimental `localStorage`/`sessionStorage`
