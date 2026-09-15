@@ -121,9 +121,11 @@ the YouTube row, "Upload after render" beside it, and "Upload to YouTube"
 on a finished render in the export history.
 
 Until the splitsmith Google Cloud project passes the YouTube API audit,
-every upload lands private and stays private. The OAuth client id is built
-in; `SPLITSMITH_YOUTUBE_CLIENT_ID` / `SPLITSMITH_YOUTUBE_CLIENT_SECRET`
-override it for development.
+every upload lands private and stays private. The OAuth client is baked
+into the published wheel at release time (`scripts/bake_youtube_client.py`
+from the repo secrets); a source checkout needs
+`SPLITSMITH_YOUTUBE_CLIENT_ID` / `SPLITSMITH_YOUTUBE_CLIENT_SECRET` in the
+environment (`.env.local` is gitignored for this).
 
 ## `compare` -- multi-shooter side-by-side FCPXML
 

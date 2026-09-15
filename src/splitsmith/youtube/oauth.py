@@ -43,9 +43,15 @@ CHANNELS_URL = "https://www.googleapis.com/youtube/v3/channels"
 ENV_CLIENT_ID = "SPLITSMITH_YOUTUBE_CLIENT_ID"
 ENV_CLIENT_SECRET = "SPLITSMITH_YOUTUBE_CLIENT_SECRET"
 
-#: Filled in once the splitsmith Google Cloud project's Desktop client
-#: exists. Empty means "not configured": ``connect`` refuses rather than
-#: opening a consent page Google would reject.
+#: Empty in git; the publish workflow bakes the splitsmith Google Cloud
+#: project's Desktop client in with ``scripts/bake_youtube_client.py``
+#: before ``uv build``, so every wheel on PyPI carries it and a checkout
+#: does not. Google treats an installed app's secret as non-confidential
+#: (PKCE and the loopback redirect carry the flow's safety); it stays out
+#: of the repository because GitHub's push protection and Google's own
+#: scanners block or flag it regardless. On a checkout, set the env
+#: overrides above. Empty means "not configured": ``connect`` refuses
+#: rather than opening a consent page Google would reject.
 BUILTIN_CLIENT_ID = ""
 BUILTIN_CLIENT_SECRET = ""
 

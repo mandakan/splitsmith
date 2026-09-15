@@ -70,6 +70,17 @@ jobs:
       - name: Sync build deps
         run: uv sync --frozen --all-groups
 
+      - name: Bake the YouTube OAuth client into the wheel
+        # The Desktop client's id and secret stay out of git (GitHub's push
+        # protection and Google's scanners both flag them, non-confidential
+        # or not) and land in the published package here. Fails the release
+        # when either secret is unset: a wheel without the client breaks
+        # "Connect YouTube" for every install. See scripts/bake_youtube_client.py.
+        env:
+          SPLITSMITH_YOUTUBE_CLIENT_ID: ${{ secrets.SPLITSMITH_YOUTUBE_CLIENT_ID }}
+          SPLITSMITH_YOUTUBE_CLIENT_SECRET: ${{ secrets.SPLITSMITH_YOUTUBE_CLIENT_SECRET }}
+        run: python scripts/bake_youtube_client.py
+
       - name: Build sdist + wheel
         run: uv build
 
@@ -89,7 +100,11 @@ jobs:
           maps = [n for n in names if n.endswith(".map")]
           if maps:
               sys.exit(f"{wheel} ships source maps: {maps}")
-          print(f"{wheel}: SPA present, no source maps")
+          oauth = next(n for n in names if n.endswith("splitsmith/youtube/oauth.py"))
+          text = zipfile.ZipFile(wheel).read(oauth).decode()
+          if 'BUILTIN_CLIENT_ID = ""' in text or 'BUILTIN_CLIENT_SECRET = ""' in text:
+              sys.exit(f"{wheel} ships an empty YouTube OAuth client (#1000)")
+          print(f"{wheel}: SPA present, no source maps, YouTube client baked")
           PY
 
       - name: Publish to PyPI
