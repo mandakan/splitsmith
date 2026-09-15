@@ -41,6 +41,7 @@ from .overlay_still import letterbox
 from .overlay_summary_cell import build_summary_still
 from .overlay_theme import OverlayTheme
 from .stage_summary_data import TileShot, TileStageData, load_stage_shots
+from .ui.audio import resolve_trim_for_read
 from .ui.match_exports import title_info_lines
 
 logger = logging.getLogger(__name__)
@@ -163,13 +164,14 @@ def _trim_for(project: MatchProject, root: Path, stage_number: int) -> tuple[Pat
         return None, 0.0
     beep = min(project.trim_pre_buffer_seconds, primary.beep_time)
     base = stage_file_base(stage_number, stage.stage_name)
-    for candidate in (
-        project.exports_path(root) / f"{base}_trimmed.mp4",
-        project.trimmed_path(root) / f"stage{stage_number}_cam_{primary.video_id}_trimmed.mp4",
-    ):
-        if candidate.exists():
-            return candidate, beep
-    return None, beep
+    lossless = project.exports_path(root) / f"{base}_trimmed.mp4"
+    if lossless.exists():
+        return lossless, beep
+    # The audit trim, through the one resolver that also knows the
+    # pre-take-spec legacy file names; building the name here would miss
+    # every trim cut before the video ids changed.
+    audit_trim = resolve_trim_for_read(root, stage_number, primary, project=project)
+    return audit_trim, beep
 
 
 def _shots(audit_doc: dict | None, work_dir: Path) -> tuple[TileShot, ...]:

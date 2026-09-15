@@ -168,6 +168,26 @@ def test_overlay_draws_the_last_shot_and_needs_shots(tmp_path: Path) -> None:
     assert info.value.status == 409
 
 
+def test_trim_lookup_finds_the_lossless_trim_then_the_audit_trim_under_either_id(tmp_path: Path) -> None:
+    """Trims cut before the take spec carry the path-only video id; the
+    engine goes through ``ui.audio``'s resolver, which knows both."""
+    project, root = _project(tmp_path)
+    primary = project.stage(3).primary()
+    assert primary is not None
+    assert ep._trim_for(project, root, 3) == (None, 5.0)
+    legacy = project.trimmed_path(root) / f"stage3_cam_{primary.legacy_video_id}_trimmed.mp4"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(b"\x00")
+    assert ep._trim_for(project, root, 3)[0] == legacy
+    current = project.trimmed_path(root) / f"stage3_cam_{primary.video_id}_trimmed.mp4"
+    current.write_bytes(b"\x00")
+    assert ep._trim_for(project, root, 3)[0] == current
+    lossless = project.exports_path(root) / "stage3_standards_trimmed.mp4"
+    lossless.parent.mkdir(parents=True)
+    lossless.write_bytes(b"\x00")
+    assert ep._trim_for(project, root, 3)[0] == lossless
+
+
 def test_unknown_stage_is_404(tmp_path: Path) -> None:
     with pytest.raises(ep.PreviewError) as info:
         _render(tmp_path, ep.PreviewSpec(card="frame", stage_number=9), audit=None)
