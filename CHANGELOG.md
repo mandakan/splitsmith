@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.36.0](https://github.com/mandakan/splitsmith/compare/v0.35.0...v0.36.0) (2026-09-15)
+
+
+### Features
+
+* **scoreboard:** anonymous v1 reads, bearer only when configured, User-Agent splitsmith/&lt;version&gt; ([#1018](https://github.com/mandakan/splitsmith/issues/1018)) ([710207b](https://github.com/mandakan/splitsmith/commit/710207bb8b280cb4c2ec7fcf0ead8b71bc515795))
+* **ui:** connect YouTube and upload renders from the Export page, phase 1 PR B of [#1000](https://github.com/mandakan/splitsmith/issues/1000) ([#1014](https://github.com/mandakan/splitsmith/issues/1014)) ([ffa4c51](https://github.com/mandakan/splitsmith/commit/ffa4c5130e3736e16bfd13c72e6f7c0997611850))
+* **ui:** create-match opens on the scoreboard variant, manual is the fallback ([#1017](https://github.com/mandakan/splitsmith/issues/1017)) ([ada7c42](https://github.com/mandakan/splitsmith/commit/ada7c42900a5b3b438599065198c23a9bd6c85d4))
+* **youtube:** direct upload from the CLI, phase 1 of [#1000](https://github.com/mandakan/splitsmith/issues/1000) ([#1012](https://github.com/mandakan/splitsmith/issues/1012)) ([05375d5](https://github.com/mandakan/splitsmith/commit/05375d5ec6d2fe6b097f0f69c992869eda7839e4))
+
+
+### Build / CI
+
+* bake the YouTube OAuth client into the wheel at publish ([#1015](https://github.com/mandakan/splitsmith/issues/1015)) ([e2de09c](https://github.com/mandakan/splitsmith/commit/e2de09c7d19e423424f43f8ea0fcae2285ae09ef))
+
 ## [0.35.0](https://github.com/mandakan/splitsmith/compare/v0.34.0...v0.35.0) (2026-09-14)
 
 
