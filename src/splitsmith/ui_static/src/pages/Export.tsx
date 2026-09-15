@@ -624,6 +624,7 @@ function ExportInner({ slug }: { slug: string }) {
     gridCamera: project?.compare_camera ?? null,
     reference: shooters.find((s) => s.slug === audioFrom)?.name ?? null,
     canvas: canvas.label,
+    bare: rows.filter((r) => r.bare && selection.has(r.stage.stage_number)).length,
   });
   const primaryLabel = trimsOnly ? "Export trims" : compare ? "Render grid" : "Export bundle";
   const busyLabel = trimsOnly ? "Queueing..." : compare ? "Rendering..." : "Exporting...";

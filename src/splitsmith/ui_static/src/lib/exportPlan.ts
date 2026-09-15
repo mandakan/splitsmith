@@ -27,6 +27,9 @@ export interface ExportStageRow {
   shots: number | null;
   eligible: boolean;
   block: StageBlock | null;
+  /** Exportable in bundle mode, but without splits: reviewed beep and a
+   *  time, no audited shots. The row says so; nothing is blocked. */
+  bare: boolean;
 }
 
 /** The blocker ladder, first match wins. */
@@ -56,7 +59,13 @@ export function stageBlock(
   if (mode === "trims") {
     return stage.ready_to_trim ? null : { reason: "No confirmed beep", fix: { label: "Audit", to: "audit" } };
   }
-  return stage.ready_to_export ? null : { reason: "Not audited yet", fix: { label: "Audit", to: "audit" } };
+  // A stage with a reviewed beep and a time renders without shots (the
+  // trim, its chapter, the cards, the upload); it only loses the
+  // shot-dependent extras, which the row and the rail say. What blocks
+  // is the beep: every trim boundary hangs off it, so an unreviewed auto
+  // beep is not enough.
+  if (stage.ready_to_export || stage.ready_to_export_bare) return null;
+  return { reason: "No confirmed beep", fix: { label: "Audit", to: "audit" } };
 }
 
 export function exportRows(
@@ -74,6 +83,7 @@ export function exportRows(
       shots: stage.audit_shot_count > 0 ? stage.audit_shot_count : null,
       eligible: block === null,
       block,
+      bare: mode === "single" && block === null && !stage.ready_to_export,
     };
   });
 }
@@ -141,6 +151,8 @@ export function summaryLines(args: {
   gridCamera: string | null;
   reference: string | null;
   canvas: string | null;
+  /** Selected bundle stages going out without splits (``ExportStageRow.bare``). */
+  bare?: number;
 }): SummaryLine[] {
   const lines: SummaryLine[] = [{ label: "Stages", value: `${args.selected} / ${args.eligible}` }];
   if (args.mode === "trims") {
@@ -154,6 +166,9 @@ export function summaryLines(args: {
     lines.push({ label: "Canvas", value: args.canvas ?? "—" });
     lines.push(cards);
     return lines;
+  }
+  if (args.bare) {
+    lines.push({ label: "Splits", value: `${args.bare} ${args.bare === 1 ? "stage" : "stages"} without`, dim: true });
   }
   lines.push({ label: "Padding", value: `${args.head.toFixed(1)} / ${args.tail.toFixed(1)} s` });
   lines.push(

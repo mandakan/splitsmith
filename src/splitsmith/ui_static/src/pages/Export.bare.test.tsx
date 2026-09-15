@@ -1,16 +1,15 @@
 /**
- * The YouTube row on Export (#1000): the connection state comes from the
- * settings route, "Upload after render" reaches the request body as
- * ``youtube_upload`` + ``youtube_privacy``, and a history-row upload
- * submits the job with the same privacy.
+ * A stage with a reviewed beep and a time but no audited shots exports in
+ * bundle mode, marked "No splits" on its row and counted in the rail;
+ * a stage whose beep is not reviewed stays blocked with the audit as fix.
  */
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ConfirmProvider } from "@/components/useConfirm";
-import { api, type ExportOverview, type Job, type MatchProject, type ShooterListEntry, type StageExportStatus } from "@/lib/api";
+import { api, type Job, type MatchProject, type ShooterListEntry, type StageExportStatus } from "@/lib/api";
 import { Export } from "@/pages/Export";
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -24,9 +23,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getExportOverview: vi.fn(),
       getExportRuns: vi.fn().mockResolvedValue({ runs: [] }),
       getCleanupPlan: vi.fn().mockResolvedValue({ items: [], totals_by_category: {}, total_bytes: 0, total_file_count: 0 }),
-      getYouTubeSettings: vi.fn(),
-      getYouTubePlaylists: vi.fn(),
-      uploadToYouTube: vi.fn(),
+      getYouTubeSettings: vi.fn().mockRejectedValue(new Error("no youtube in this test")),
       exportMatch: vi.fn(),
       exportCompareGrid: vi.fn(),
       pollJob: vi.fn(),
@@ -139,7 +136,6 @@ function ready(n: number): StageExportStatus {
   };
 }
 
-const OVERVIEW: ExportOverview = { match_exports: [], stages: [ready(1), ready(2)] };
 
 function job(overrides: Partial<Job> = {}): Job {
   return {
@@ -194,39 +190,31 @@ async function renderPage(shooters = [shooter("mathias", "Mathias")]) {
     </MemoryRouter>,
   );
   await screen.findByRole("button", { name: /export bundle/i });
-  await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage 2/i })).toBeChecked());
+  await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage 1/i })).toBeChecked());
   return { user };
 }
 
-function choice(group: string, label: string): HTMLElement {
-  return within(screen.getByRole("group", { name: group })).getByRole("button", { name: label });
+
+
+
+function bare(n: number): StageExportStatus {
+  return {
+    ...ready(n),
+    primary_processed: { beep: true, shot_detect: false, trim: false },
+    audit_shot_count: 0,
+    total_candidate_count: 0,
+    ready_to_export: false,
+    ready_to_export_bare: true,
+  };
 }
 
-
-const CONNECTED = { configured: true, connected: true, channel_title: "Mine", connected_at: "2026-09-14T00:00:00Z" };
-
-const UPLOADED_RUN = {
-  run_id: "r1",
-  kind: "match" as const,
-  finished_at: "2026-09-14T12:00:00Z",
-  duration_seconds: 30,
-  stage_numbers: [1, 2],
-  formats: ["mp4", "youtube-sidecar"],
-  anomaly_count: 0,
-  artifacts: [
-    { filename: "bromma-2026.mp4", kind: "match_video", available: true },
-    { filename: "bromma-2026-youtube.json", kind: "sidecar", available: true },
-  ],
-  youtube: null,
-};
+function unreviewed(n: number): StageExportStatus {
+  return { ...bare(n), ready_to_export_bare: false };
+}
 
 beforeEach(() => {
   vi.mocked(api.getProject).mockResolvedValue(PROJECT);
-  vi.mocked(api.getExportOverview).mockResolvedValue(OVERVIEW);
-  vi.mocked(api.getYouTubeSettings).mockResolvedValue(CONNECTED);
-  vi.mocked(api.getYouTubePlaylists).mockResolvedValue({ playlists: [{ id: "PL2", title: "Practice" }] });
   vi.mocked(api.exportMatch).mockResolvedValue(job({ status: "running" }));
-  vi.mocked(api.uploadToYouTube).mockResolvedValue(job({ status: "running", kind: "youtube_upload" }));
   vi.mocked(api.pollJob).mockImplementation(async (_id, onUpdate) => {
     const final = job({ status: "failed", error: "stopped by the test" });
     onUpdate?.(final);
@@ -238,75 +226,26 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("Export YouTube row", () => {
-  it("sends youtube_upload off by default and the chosen privacy when set", async () => {
+describe("Export without splits", () => {
+  it("selects a bare stage, says so on the row and in the rail, and exports it", async () => {
+    vi.mocked(api.getExportOverview).mockResolvedValue({ match_exports: [], stages: [ready(1), bare(2)] });
     const { user } = await renderPage();
-    await user.selectOptions(screen.getByLabelText("Timeline format"), "mp4");
-    await user.click(choice("YouTube", "Preset + sidecar"));
-    await screen.findByText("Connected as Mine");
+    const row2 = screen.getByRole("checkbox", { name: /Stage 2/i });
+    expect(row2).toBeChecked();
+    expect(screen.getByText("No splits")).toBeInTheDocument();
+    expect(screen.getByText("2 / 2")).toBeInTheDocument();
+    expect(screen.getByText("1 stage without")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /export bundle/i }));
     await waitFor(() => expect(api.exportMatch).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.exportMatch).mock.calls[0][1]).toMatchObject({
-      youtube_sidecar: true,
-      youtube_upload: false,
-      youtube_privacy: "unlisted",
-      youtube_playlist: null,
-      youtube_playlist_id: null,
-      youtube_publish_at: null,
-      youtube_notify_subscribers: true,
-    });
-
-    await user.click(choice("Upload after render", "Private"));
-    await waitFor(() => expect(api.getYouTubePlaylists).toHaveBeenCalledTimes(1));
-    await user.selectOptions(await screen.findByLabelText("Playlist"), "PL2");
-    await user.click(screen.getByRole("button", { name: /export bundle/i }));
-    await waitFor(() => expect(api.exportMatch).toHaveBeenCalledTimes(2));
-    expect(vi.mocked(api.exportMatch).mock.calls[1][1]).toMatchObject({
-      youtube_upload: true,
-      youtube_playlist: "Practice",
-      youtube_playlist_id: "PL2",
-    });
-
-    await user.selectOptions(screen.getByLabelText("Playlist"), "__new__");
-    expect(await screen.findByLabelText("Playlist name")).toHaveValue("bromma-2026");
-    await user.clear(screen.getByLabelText("Playlist name"));
-    await user.type(screen.getByLabelText("Playlist name"), "Bromma 2026");
-    await user.type(screen.getByLabelText("Publish at"), "2026-09-20T18:00");
-    await user.click(screen.getByRole("button", { name: /export bundle/i }));
-    await waitFor(() => expect(api.exportMatch).toHaveBeenCalledTimes(3));
-    expect(vi.mocked(api.exportMatch).mock.calls[2][1]).toMatchObject({
-      youtube_upload: true,
-      youtube_privacy: "private",
-      youtube_playlist: "Bromma 2026",
-      youtube_playlist_id: null,
-      youtube_publish_at: new Date("2026-09-20T18:00").toISOString(),
-      youtube_notify_subscribers: true,
-    });
+    expect(vi.mocked(api.exportMatch).mock.calls[0][1].stage_numbers).toEqual([1, 2]);
   });
 
-  it("uploads a history row with the form's privacy", async () => {
-    vi.mocked(api.getExportRuns).mockResolvedValue({ runs: [UPLOADED_RUN] });
-    const { user } = await renderPage();
-    await user.click(await screen.findByRole("button", { name: "Upload to YouTube" }));
-    await waitFor(() => expect(api.uploadToYouTube).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.uploadToYouTube).mock.calls[0]).toEqual([
-      "mathias",
-      {
-        filename: "bromma-2026.mp4",
-        again: false,
-        privacy: "unlisted",
-        playlist: null,
-        playlist_id: null,
-        publish_at: null,
-        notify_subscribers: true,
-      },
-    ]);
-  });
-
-  it("hides the row when the install has no client and the export is not a YouTube mp4", async () => {
-    vi.mocked(api.getYouTubeSettings).mockResolvedValue({ configured: false, connected: false, channel_title: null, connected_at: null });
+  it("keeps an unreviewed beep blocked with the audit as the fix", async () => {
+    vi.mocked(api.getExportOverview).mockResolvedValue({ match_exports: [], stages: [ready(1), unreviewed(2)] });
     await renderPage();
-    expect(screen.queryByText("Connected as Mine")).toBeNull();
-    expect(screen.queryByRole("group", { name: "Upload after render" })).toBeNull();
+    expect(screen.getByRole("checkbox", { name: /Stage 2/i })).toBeDisabled();
+    expect(screen.getByText("No confirmed beep")).toBeInTheDocument();
+    expect(screen.queryByText("No splits")).toBeNull();
+    expect(screen.getByText("1 / 1")).toBeInTheDocument();
   });
 });

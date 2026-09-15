@@ -957,3 +957,53 @@ def test_summary_hold_is_an_anomaly_on_the_xml_renderers(tmp_path: Path) -> None
         probe=_stub_probe,
     )
     assert any("summary hold ignored" in a for a in result.anomalies)
+
+
+def test_shotless_stage_keeps_its_chapter_and_the_sidecar_says_what_is_missing(tmp_path: Path) -> None:
+    """A stage with a reviewed beep and a time but no audited shots still gets
+    its YouTube chapter (chapters are per stage, not per shot) and the
+    sidecar's caption file simply has no cues for it. The anomaly names
+    exactly what the stage lost: shot markers and the overlay, not chapters.
+    """
+    from splitsmith import youtube_sidecar
+
+    audit1 = _make_audit(tmp_path, "stage1.json", _audit_payload([{"shot_number": 1, "ms_after_beep": 500}]))
+    trim1 = _make_trim(tmp_path, "stage1_trimmed.mp4")
+    trim2 = _make_trim(tmp_path, "stage2_trimmed.mp4")
+    request = match_exports_mod.MatchExportRequestData(
+        stage_numbers=(1, 2),
+        head_pad_seconds=1.0,
+        tail_pad_seconds=1.0,
+        include_secondaries=False,
+        include_overlay=False,
+        project_name="Bromma",
+        youtube_sidecar=True,
+    )
+    result = match_exports_mod.export_match(
+        stages=[
+            match_exports_mod.MatchStageInput(
+                stage_number=1,
+                stage_name="Stage 1",
+                audit_path=audit1,
+                trimmed_path=trim1,
+                beep_offset_seconds=5.0,
+            ),
+            match_exports_mod.MatchStageInput(
+                stage_number=2,
+                stage_name="Stage 2",
+                audit_path=tmp_path / "audit" / "nope.json",
+                trimmed_path=trim2,
+                beep_offset_seconds=5.0,
+            ),
+        ],
+        request=request,
+        exports_dir=tmp_path / "exports",
+        config=OutputConfig(),
+        probe=_stub_probe,
+    )
+    sidecar = youtube_sidecar.load_sidecar(youtube_sidecar.sidecar_path_for(result.fcpxml_path))
+    assert [c["title"] for c in sidecar.chapters] == ["Stage 1", "Stage 2"]
+    anomaly = next(a for a in result.anomalies if "stage 2" in a)
+    assert "no shots audited" in anomaly
+    assert "chapter" not in anomaly  # it kept its chapter
+    assert "shot markers" in anomaly and "overlay" in anomaly

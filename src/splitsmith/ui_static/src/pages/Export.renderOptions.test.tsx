@@ -130,6 +130,7 @@ function ready(n: number): StageExportStatus {
     last_export_at: null,
     ready_to_export: true,
     ready_to_trim: true,
+    ready_to_export_bare: true,
     source_reachable: true,
     secondaries: [],
   };

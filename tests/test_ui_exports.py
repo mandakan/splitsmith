@@ -854,3 +854,33 @@ def test_summary_card_off_by_default_touches_nothing(tmp_path: Path, monkeypatch
         config=Config(),
     )
     assert result.summary_card_path is None
+
+
+def test_export_overview_ready_to_export_bare_needs_a_reviewed_beep_and_a_time(tmp_path: Path) -> None:
+    """``ready_to_export_bare`` is the bundle-export gate for a stage that has
+    not been audited: the trim rule plus a *reviewed* beep. Every trim
+    boundary and chapter time hangs off the beep, so an unreviewed auto
+    beep is not enough, while shots are not required at all. Strictly
+    between ``ready_to_trim`` and ``ready_to_export``.
+    """
+    from splitsmith.match_project import MatchProject, StageEntry, StageVideo
+
+    def _stage(n: int, *, reviewed: bool, beep: float | None = 1.0, time: float = 8.0) -> StageEntry:
+        stage = StageEntry(stage_number=n, stage_name=f"Stage {n}", time_seconds=time)
+        stage.videos.append(
+            StageVideo(path=Path(f"raw/s{n}.mp4"), role="primary", beep_time=beep, beep_reviewed=reviewed)
+        )
+        return stage
+
+    root = tmp_path / "m"
+    project = MatchProject.init(root, name="m")
+    project.stages = [
+        _stage(1, reviewed=True),
+        _stage(2, reviewed=False),
+        _stage(3, reviewed=True, beep=None),
+        _stage(4, reviewed=True, time=0.0),
+    ]
+    rows = {r.stage_number: r for r in project.export_overview(root)}
+    assert {n: r.ready_to_export_bare for n, r in rows.items()} == {1: True, 2: False, 3: False, 4: False}
+    assert rows[1].ready_to_trim is True and rows[1].ready_to_export is False
+    assert rows[2].ready_to_trim is True  # the trim rule does not care about review

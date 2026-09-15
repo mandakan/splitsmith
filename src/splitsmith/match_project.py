@@ -775,6 +775,13 @@ class StageExportStatus(BaseModel):
     # defaulted: a missed call site should fail loudly rather than quietly
     # empty the trims-only stage list.
     ready_to_trim: bool
+    # Whether the bundle export may take this stage *without* audited shots:
+    # the trim rule plus a reviewed beep (every trim boundary and chapter
+    # time hangs off it). Strictly between ``ready_to_trim`` and
+    # ``ready_to_export``; the SPA's bundle mode gates on this and marks
+    # the row "no splits" when ``ready_to_export`` is still false.
+    # Required, like ``ready_to_trim``, for the same reason.
+    ready_to_export_bare: bool
     # Whether the primary's source video resolves to a present file.
     # ``False`` typically means the symlink under ``raw/`` is dangling
     # because external storage is disconnected; the SPA badges the row
@@ -1509,6 +1516,9 @@ class MatchProject(BaseModel):
                     last_export_at=last_export_at,
                     ready_to_export=ready_to_export,
                     ready_to_trim=trim_blocker(stage, primary) is None,
+                    ready_to_export_bare=(
+                        trim_blocker(stage, primary) is None and primary is not None and primary.beep_reviewed
+                    ),
                     source_reachable=source_reachable,
                     secondaries=secondaries_status,
                 )

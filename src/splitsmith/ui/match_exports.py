@@ -311,13 +311,15 @@ def export_match(
         # ``time_absolute`` column stays trivially defined.
         shots = audit_shots_to_engine_shots(audit_data, beep_time_in_source=0.0)
         # Empty ``shots[]`` is permissive (#214): the stage still rides
-        # the spine as a trim-only segment. No shot markers, no chapter
-        # markers, no overlay -- those depend on shots. Surface an
-        # anomaly so the user sees which stages are exporting bare.
+        # the spine as a trim-only segment with its chapter (chapters are
+        # per stage). What it loses is what depends on shots: the shot
+        # markers, the overlay, the captions and the split figures on its
+        # summary. Surface an anomaly so the user sees which stages went
+        # out bare.
         if not shots:
             anomalies.append(
                 f"stage {stage_input.stage_number}: no shots audited -- "
-                f"exported without shot markers / chapters / overlay"
+                f"exported without shot markers, overlay, captions or splits"
             )
 
         try:
