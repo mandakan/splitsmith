@@ -933,6 +933,22 @@ export interface ExportPreset {
   body: ExportPresetBody;
 }
 
+export type PreviewCard = "frame" | "title" | "slate" | "lower-third" | "summary" | "closing" | "overlay";
+
+/** Body of ``POST /api/shooters/{slug}/export-preview`` (spec 2026-09-15
+ *  s3). The server ignores unknown fields, so the mapper output may ride
+ *  along; only these move the picture. */
+export interface ExportPreviewBody {
+  card: PreviewCard;
+  stage_number: number;
+  width?: number;
+  title_info?: string | null;
+  head_pad_seconds?: number;
+  tail_pad_seconds?: number;
+  /** The bundle name, as the match export's ``project_name``. */
+  project_name?: string | null;
+}
+
 export interface ExportStageRequestPayload {
   write_trim?: boolean;
   write_csv?: boolean;
@@ -4457,6 +4473,28 @@ export const api = {
   // Export presets (spec 2026-09-15 s1): both modes, per user hosted.
 
   getExportPresets: () => request<{ presets: ExportPreset[] }>("/api/settings/export-presets"),
+
+  /** The PNG for one card on one stage; rejects with an ApiError whose
+   *  status the rail maps to a line (503 no browser, 409 no shots). */
+  exportPreview: async (slug: string, body: ExportPreviewBody, signal?: AbortSignal): Promise<Blob> => {
+    const resp = await fetch(scopeRequestPath(`/api/shooters/${encodeURIComponent(slug)}/export-preview`), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "image/png" },
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!resp.ok) {
+      let detail = resp.statusText;
+      try {
+        const parsed = (await resp.json()) as { detail?: unknown };
+        if (typeof parsed.detail === "string") detail = parsed.detail;
+      } catch {
+        /* not JSON */
+      }
+      throw new ApiError(resp.status, detail);
+    }
+    return resp.blob();
+  },
 
   /** ``id === "new"`` creates; any other id replaces. Built-in ids 403. */
   putExportPreset: (id: string, name: string, body: ExportPresetBody) =>

@@ -16605,6 +16605,11 @@ def create_app(
 
     app.include_router(export_presets_router)
 
+    # The rail's real-match preview (spec 2026-09-15 s3): a PNG per card.
+    from .export_preview_api import router as export_preview_router
+
+    app.include_router(export_preview_router)
+
     # Share-link OG card PNGs (spec 2026-08-09). Same lazy-import,
     # always-registered idiom as sync_router and device_router: every
     # route 404s outside hosted mode (see share_og._hosted_gate).

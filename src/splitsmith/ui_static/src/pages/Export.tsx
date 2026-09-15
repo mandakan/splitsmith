@@ -28,6 +28,7 @@ import { ExportHistory } from "@/components/export/ExportHistory";
 import { LookGroup } from "@/components/export/LookGroup";
 import { OutputGroup } from "@/components/export/OutputGroup";
 import { PresetRow } from "@/components/export/PresetRow";
+import { PreviewPane } from "@/components/export/PreviewPane";
 import { SavePresetSheet } from "@/components/export/SavePresetSheet";
 import { Section } from "@/components/export/Section";
 import { StageTable } from "@/components/export/StageTable";
@@ -54,6 +55,7 @@ import {
 import { camExportFields, syncedSecondaryCount } from "@/lib/camOptions";
 import { rowUploadOptions } from "@/lib/youtubeRows";
 import { hostedDownloads as buildHostedDownloads } from "@/lib/exportDownloads";
+import type { LookFocus } from "@/lib/exportPreview";
 import {
   applyBody,
   DEFAULT_EXPORT_SETTINGS,
@@ -212,6 +214,10 @@ function ExportInner({ slug }: { slug: string }) {
     () => loadLastUsed(window.localStorage)?.presetId ?? null,
   );
   const [saveSheet, setSaveSheet] = useState<{ mode: "saveAs" | "rename"; id?: string } | null>(null);
+  // The rail's preview follows the last picked Look tile and, while the
+  // pointer is on one, that tile's generic thumbnail.
+  const [lookFocus, setLookFocus] = useState<LookFocus | null>(null);
+  const [lookHover, setLookHover] = useState<LookFocus | null>(null);
   const [openGroups, setOpenGroups] = useState<Record<SettingsGroup, boolean>>({
     output: false,
     cut: false,
@@ -328,6 +334,8 @@ function ExportInner({ slug }: { slug: string }) {
       setResult(null);
       setGridResult(null);
       setQueuedNote(null);
+      setLookFocus(null);
+      setLookHover(null);
     },
     [patch],
   );
@@ -348,6 +356,7 @@ function ExportInner({ slug }: { slug: string }) {
     setSettings((s) => applyBody(s, p.body));
     setActivePresetId(id);
     setOpenGroups({ output: false, cut: false, look: false });
+    setLookFocus(null);
   }
 
   async function savePreset(id: string, name: string) {
@@ -844,7 +853,14 @@ function ExportInner({ slug }: { slug: string }) {
               open={openGroups.look}
               onToggle={() => toggleGroup("look")}
             >
-              <LookGroup settings={settings} patch={patch} busy={busy} bareSelected={bareSelected} />
+              <LookGroup
+                settings={settings}
+                patch={patch}
+                busy={busy}
+                bareSelected={bareSelected}
+                onHover={setLookHover}
+                onSelect={setLookFocus}
+              />
             </Section>
           ) : null}
 
@@ -893,6 +909,15 @@ function ExportInner({ slug }: { slug: string }) {
                 ~ {formatDuration(duration)}
               </span>
             </div>
+            <PreviewPane
+              slug={compare ? audioFrom || slug : slug}
+              stageNumber={orderedSelection[0] ?? 0}
+              settings={settings}
+              projectName={projectName || project?.name || ""}
+              focus={lookFocus}
+              hover={lookHover}
+              enabled={!trimsOnly && orderedSelection.length > 0}
+            />
             <dl>
               {lines.map((l) => (
                 <div key={l.label} className="flex justify-between gap-3 border-b border-rule px-3.5 py-1.5 text-md">

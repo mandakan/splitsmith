@@ -8,6 +8,7 @@
  */
 import { Seconds } from "@/components/export/Seconds";
 import { Field } from "@/components/ui/Field";
+import type { LookFocus } from "@/lib/exportPreview";
 import type { ExportSettings } from "@/lib/exportPresets";
 import {
   thumbnailUrl,
@@ -27,9 +28,13 @@ export interface LookGalleryProps {
   /** Per slot, the line about the selected stages exporting without
    *  splits (``bareHint``); appended to the help while the variant is on. */
   bareHints: Partial<Record<LookSlotId, string | null>>;
+  /** The tile under the pointer (or keyboard focus), for the rail's generic preview. */
+  onHover?: (focus: LookFocus | null) => void;
+  /** A tile was picked; the rail previews it on this match. */
+  onSelect?: (focus: LookFocus) => void;
 }
 
-export function LookGallery({ settings, patch, busy, bareHints }: LookGalleryProps) {
+export function LookGallery({ settings, patch, busy, bareHints, onHover, onSelect }: LookGalleryProps) {
   const format = settings.mode === "compare" ? "mp4" : settings.outputFormat;
   return (
     <>
@@ -42,6 +47,8 @@ export function LookGallery({ settings, patch, busy, bareHints }: LookGalleryPro
           patch={patch}
           busy={busy}
           bareHint={bareHints[slot.id] ?? null}
+          onHover={onHover}
+          onSelect={onSelect}
         />
       ))}
     </>
@@ -55,6 +62,8 @@ function SlotRow({
   patch,
   busy,
   bareHint,
+  onHover,
+  onSelect,
 }: {
   slot: LookSlot;
   variants: LookVariant[];
@@ -62,6 +71,8 @@ function SlotRow({
   patch: (p: Partial<ExportSettings>) => void;
   busy: boolean;
   bareHint: string | null;
+  onHover?: (focus: LookFocus | null) => void;
+  onSelect?: (focus: LookFocus) => void;
 }) {
   const selectedId = slot.read(settings);
   const selected = variants.find((v) => v.id === selectedId) ?? variants[0];
@@ -74,6 +85,7 @@ function SlotRow({
         <div role="radiogroup" aria-label={slot.label} className="flex flex-wrap gap-2">
           {variants.map((v) => {
             const checked = v.id === selected.id;
+            const focus: LookFocus = { slotId: slot.id, variantId: v.id };
             return (
               <button
                 key={v.id}
@@ -83,7 +95,12 @@ function SlotRow({
                 disabled={busy}
                 onClick={() => {
                   if (!checked) patch(slot.write(settings, v.id));
+                  onSelect?.(focus);
                 }}
+                onMouseEnter={() => onHover?.(focus)}
+                onMouseLeave={() => onHover?.(null)}
+                onFocus={() => onHover?.(focus)}
+                onBlur={() => onHover?.(null)}
                 className={cn(
                   "flex w-40 flex-col gap-1.5 rounded-md border p-1.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-led disabled:opacity-50",
                   checked ? "border-ink bg-surface-2" : "border-rule-strong hover:border-ink-2",
