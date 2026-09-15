@@ -183,3 +183,8 @@ def test_grab_frame_head_and_tail(tmp_path: Path) -> None:
         tmp_path / "missing.mp4", seconds=0.0, at="head", ffmpeg_binary=ffmpeg, out=tmp_path / "x.png"
     )
     assert missing is None
+    # Past the end of the clip: the last frame, not nothing.
+    beyond = ep.grab_frame(video, seconds=600.0, at="tail", ffmpeg_binary=ffmpeg, out=tmp_path / "b.png")
+    assert beyond is not None and beyond.stat().st_size > 0
+    beyond_head = ep.grab_frame(video, seconds=600.0, at="head", ffmpeg_binary=ffmpeg, out=tmp_path / "c.png")
+    assert beyond_head is not None and beyond_head.stat().st_size > 0

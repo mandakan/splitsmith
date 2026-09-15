@@ -6,6 +6,7 @@
  */
 import { LookGallery } from "@/components/export/LookGallery";
 import { bareHint } from "@/lib/exportPlan";
+import type { LookFocus } from "@/lib/exportPreview";
 import type { ExportSettings } from "@/lib/exportPresets";
 
 export interface LookGroupProps {
@@ -13,9 +14,11 @@ export interface LookGroupProps {
   patch: (p: Partial<ExportSettings>) => void;
   busy: boolean;
   bareSelected: number;
+  onHover?: (focus: LookFocus | null) => void;
+  onSelect?: (focus: LookFocus) => void;
 }
 
-export function LookGroup({ settings, patch, busy, bareSelected }: LookGroupProps) {
+export function LookGroup({ settings, patch, busy, bareSelected, onHover, onSelect }: LookGroupProps) {
   const compare = settings.mode === "compare";
   return (
     <LookGallery
@@ -25,6 +28,8 @@ export function LookGroup({ settings, patch, busy, bareSelected }: LookGroupProp
       bareHints={
         compare ? {} : { summaryHold: bareHint("summary", bareSelected), overlay: bareHint("overlay", bareSelected) }
       }
+      onHover={onHover}
+      onSelect={onSelect}
     />
   );
 }

@@ -71,6 +71,13 @@ if (window.sessionStorage == null) {
   });
 }
 
+// jsdom has no object URLs; the Export rail's preview makes one per
+// still. A stable stand-in keeps every page suite free of the concern.
+if (typeof URL.createObjectURL !== "function") {
+  URL.createObjectURL = () => "blob:test";
+  URL.revokeObjectURL = () => {};
+}
+
 class ResizeObserverStub {
   observe() {}
   unobserve() {}

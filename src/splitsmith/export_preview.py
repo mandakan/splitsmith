@@ -101,7 +101,8 @@ def grab_frame(
     ``head`` seeks and takes exactly the first frame. ``tail`` reads a
     :data:`TAIL_WINDOW_SECONDS` window ending at ``seconds`` and keeps the
     last decoded frame, because a seek straight to the last timestamp can
-    come back empty (``mp4_render._grab_backdrop``).
+    come back empty (``mp4_render._grab_backdrop``). Either way, a seek
+    past the end of the clip falls back to the clip's last frame.
     """
     if not video.exists():
         return None
@@ -121,16 +122,23 @@ def grab_frame(
             "-update",
             "1",
         )
-    cmd = (ffmpeg_binary, "-hide_banner", "-loglevel", "error", "-y", *window, str(out))
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, timeout=30)
-    except (subprocess.SubprocessError, OSError) as exc:
-        logger.warning("could not grab a preview frame from %s (%s); the still composes flat", video, exc)
-        return None
-    try:
-        return out if out.stat().st_size > 0 else None
-    except OSError:
-        return None
+    # A seek past the end of the clip decodes nothing; the last half
+    # second of the file is then the nearest frame there is.
+    last: tuple[str, ...] = ("-sseof", f"-{TAIL_WINDOW_SECONDS:g}", "-i", str(video), "-an", "-update", "1")
+    for attempt in (window, last):
+        cmd = (ffmpeg_binary, "-hide_banner", "-loglevel", "error", "-y", *attempt, str(out))
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=30)
+        except (subprocess.SubprocessError, OSError) as exc:
+            logger.warning("could not grab a preview frame from %s (%s)", video, exc)
+            continue
+        try:
+            if out.stat().st_size > 0:
+                return out
+        except OSError:
+            pass
+    logger.warning("no preview frame in %s; the still composes flat", video)
+    return None
 
 
 def _trim_for(project: MatchProject, root: Path, stage_number: int) -> tuple[Path | None, float]:

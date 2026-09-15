@@ -39,6 +39,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getExportPresets: vi.fn(),
       putExportPreset: vi.fn(),
       deleteExportPreset: vi.fn(),
+      exportPreview: vi.fn(),
       pollJob: vi.fn(),
       revealFile: vi.fn(),
     },
@@ -249,6 +250,7 @@ beforeEach(() => {
     return row;
   });
   vi.mocked(api.deleteExportPreset).mockResolvedValue(undefined);
+  vi.mocked(api.exportPreview).mockResolvedValue(new Blob(["png"], { type: "image/png" }));
   window.localStorage.clear();
 });
 afterEach(() => vi.clearAllMocks());
@@ -402,6 +404,31 @@ describe("Export presets", () => {
     await renderPage();
     // The Look summary and the rail both name it; the point is the page rendered.
     expect(screen.getAllByText("zoom 0.5 s").length).toBeGreaterThan(0);
+  });
+
+  it("the rail previews the selected tile on the first selected stage", async () => {
+    const { user } = await renderPage();
+    await user.click(choice("Preset", "YouTube match video"));
+    await user.click(toggle("Look"));
+    await user.click(
+      within(screen.getByRole("radiogroup", { name: "Stage card" })).getByRole("radio", { name: "Lower third" }),
+    );
+    await waitFor(() =>
+      expect(api.exportPreview).toHaveBeenCalledWith(
+        "mathias",
+        expect.objectContaining({ card: "lower-third", stage_number: 1, head_pad_seconds: 0.5 }),
+        expect.anything(),
+      ),
+    );
+    expect(screen.getByText("Lower third · Stage 01")).toBeInTheDocument();
+    await user.hover(
+      within(screen.getByRole("radiogroup", { name: "Overlay" })).getByRole("radio", { name: "Shot counter" }),
+    );
+    expect(screen.getByText("Shot counter · Stage 01")).toBeInTheDocument();
+    await user.unhover(
+      within(screen.getByRole("radiogroup", { name: "Overlay" })).getByRole("radio", { name: "Shot counter" }),
+    );
+    expect(screen.getByText("Lower third · Stage 01")).toBeInTheDocument();
   });
 
   it("a failed preset load still renders the page with Custom only and no error", async () => {
