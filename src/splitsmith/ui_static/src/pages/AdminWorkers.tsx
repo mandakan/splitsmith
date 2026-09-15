@@ -1,11 +1,24 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
+/**
+ * Workers (admin) -- the server's compute pool: every self-hosted or
+ * Railway worker with its state, advertised capabilities, version,
+ * priority and enabled switch, plus registration of a new one.
+ *
+ * Server-wide rather than match-scoped, so it mounts directly under
+ * RootLayout (#550) with no shell nav; the PageHeader back link and the
+ * brand in the global bar are its way home. Built on the visual budget
+ * primitives (spec 2026-09-13): one PageHeader, one primary action, a
+ * hairline Table for the roster, Chips for state and capabilities, a
+ * destructive outline for delete.
+ */
 import { useEffect, useRef, useState } from "react";
 import { ArrowUpCircle, Trash2 } from "lucide-react";
 
-import { StatusPill } from "@/components/ui/StatusPill";
-import { Badge } from "@/components/ui/badge";
+import { RegisterWorkerSheet } from "@/components/admin/RegisterWorkerSheet";
 import { Button } from "@/components/ui/button";
-import { RegisterWorkerDialog } from "@/components/admin/RegisterWorkerDialog";
+import { Chip, type ChipTick } from "@/components/ui/Chip";
+import { Table, Td, Th, Tr } from "@/components/ui/DataTable";
+import { inputClass } from "@/components/ui/Field";
+import { PageHeader } from "@/components/ui/PageHeader";
 import { ApiError, api, type WorkerInfo, type WorkerView } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -24,18 +37,19 @@ function relativeTime(iso: string | null): string {
   return `${d}d ago`;
 }
 
-function workerTone(
-  status: WorkerView["status"],
-): "exported" | "awaiting" | "archived" | "in-progress" {
+/** One hue per meaning: green is up, amber is waiting on the agent to
+ *  connect, everything else is neutral (disabled gets a muted tick so it
+ *  reads as switched off rather than merely unreachable). */
+function statusChip(status: WorkerView["status"]): { tone: "ok" | "warn" | "neutral"; tick?: ChipTick } {
   switch (status) {
     case "online":
-      return "exported";
-    case "offline":
-      return "awaiting";
-    case "disabled":
-      return "archived";
+      return { tone: "ok" };
     case "pending":
-      return "in-progress";
+      return { tone: "warn" };
+    case "disabled":
+      return { tone: "neutral", tick: "muted" };
+    case "offline":
+      return { tone: "neutral" };
   }
 }
 
@@ -60,51 +74,47 @@ function isOutdated(version: string | null, serverVersion: string): boolean {
   return false;
 }
 
-/** GPU / NVENC / CUDA badges from a worker's advertised capabilities (#796).
+/** GPU / NVENC / CUDA chips from a worker's advertised capabilities (#796).
  *
  * ``capabilities`` is absent on workers that never advertised any (e.g. Railway
  * rows) -- render nothing there. A worker that advertised an all-false bundle
  * is a probed CPU-only box, which we label explicitly. */
-function CapabilityBadges({ info }: { info: WorkerInfo | null }) {
+function CapabilityChips({ info }: { info: WorkerInfo | null }) {
   const caps = info?.capabilities;
   if (!caps) return null;
-  const badges = [];
+  const chips = [];
   if (caps.gpu_name) {
-    badges.push(
-      <Badge key="gpu" variant="secondary" title="GPU model">
+    chips.push(
+      <Chip key="gpu" title="GPU model" className="whitespace-nowrap">
         {caps.gpu_name}
-      </Badge>,
+      </Chip>,
     );
   }
   if (caps.cuda_ep) {
-    badges.push(
-      <Badge
-        key="cuda"
-        variant="good"
-        title="onnxruntime CUDA execution provider available"
-      >
+    chips.push(
+      <Chip key="cuda" tick="fire" title="onnxruntime CUDA execution provider available">
         CUDA
-      </Badge>,
+      </Chip>,
     );
   }
   if (caps.nvenc_h264) {
-    badges.push(
-      <Badge key="nvenc" variant="good" title="ffmpeg h264_nvenc usable">
+    chips.push(
+      <Chip key="nvenc" tick="fire" title="ffmpeg h264_nvenc usable">
         NVENC
-      </Badge>,
+      </Chip>,
     );
   }
-  if (badges.length === 0) {
-    badges.push(
-      <Badge key="cpu" variant="outline" title="No GPU acceleration advertised">
+  if (chips.length === 0) {
+    chips.push(
+      <Chip key="cpu" tick="muted" title="No GPU acceleration advertised">
         CPU
-      </Badge>,
+      </Chip>,
     );
   }
-  return (
-    <div className="mt-1.5 flex flex-wrap items-center gap-1">{badges}</div>
-  );
+  return <div className="flex flex-wrap items-center gap-1">{chips}</div>;
 }
+
+const COLUMNS = 8;
 
 interface WorkerRowProps {
   worker: WorkerView;
@@ -119,6 +129,7 @@ interface WorkerRowProps {
 
 function WorkerRow({ worker, serverVersion, onUpdated, onRefetch }: WorkerRowProps) {
   const outdated = isOutdated(worker.version, serverVersion);
+  const status = statusChip(worker.status);
   const [priorityDraft, setPriorityDraft] = useState(String(worker.priority));
   const [patching, setPatching] = useState(false);
   const [deleteArmed, setDeleteArmed] = useState(false);
@@ -172,151 +183,113 @@ function WorkerRow({ worker, serverVersion, onUpdated, onRefetch }: WorkerRowPro
   }
 
   return (
-    <article
-      className={cn(
-        "flex flex-col gap-2 border-b border-rule px-4 py-4 last:border-b-0",
-        "md:flex-row md:items-center md:gap-6",
-      )}
-    >
-      {/* Name + kind */}
-      <div className="min-w-0 flex-1">
-        <div className="font-display text-sm font-semibold uppercase tracking-tight text-ink">
-          {worker.name}
-        </div>
-        <div className="mt-0.5 font-mono text-xs uppercase tracking-[0.08em] text-subtle">
-          {worker.kind === "self_hosted" ? "self-hosted" : "railway"}
-          {!worker.registered && (
-            <span className="ml-2 text-amber-500">unregistered</span>
-          )}
-        </div>
-        <CapabilityBadges info={worker.info} />
-      </div>
-
-      {/* Status pill */}
-      <div className="shrink-0">
-        <StatusPill tone={workerTone(worker.status)}>
-          {worker.status}
-        </StatusPill>
-      </div>
-
-      {/* Priority */}
-      <div className="flex shrink-0 items-center gap-1.5">
-        <label
-          htmlFor={`priority-${worker.id}`}
-          className="font-mono text-xs uppercase tracking-[0.08em] text-subtle"
+    <>
+      <Tr className={rowError ? "border-b-0" : undefined}>
+        <Td kind="name">
+          <div className="truncate">{worker.name}</div>
+          <div className="mt-0.5 whitespace-nowrap text-sm text-muted">
+            {worker.kind === "self_hosted" ? "Self-hosted" : "Railway"}
+            {!worker.registered ? <span className="ml-2 text-live">unregistered</span> : null}
+          </div>
+        </Td>
+        <Td>
+          <Chip tone={status.tone} tick={status.tick}>
+            {worker.status}
+          </Chip>
+        </Td>
+        <Td>
+          <CapabilityChips info={worker.info} />
+        </Td>
+        <Td
+          className={cn("numeral whitespace-nowrap", outdated ? "text-live" : "text-ink-2")}
+          title={outdated ? `Update available - server is on v${serverVersion}` : "Worker software version"}
         >
-          Priority
-        </label>
-        <input
-          id={`priority-${worker.id}`}
-          type="number"
-          value={priorityDraft}
-          onChange={(e) => setPriorityDraft(e.target.value)}
-          onBlur={() => void patchPriority()}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.currentTarget.blur();
-            }
-          }}
-          disabled={patching}
-          className="w-16 rounded border border-rule bg-bg px-2 py-0.5 text-center font-mono text-xs disabled:opacity-50"
-          aria-label={`Priority for ${worker.name}`}
-        />
-      </div>
-
-      {/* Version */}
-      <div
-        className={cn(
-          "flex shrink-0 items-center gap-1 font-mono text-xs",
-          outdated ? "text-amber-500" : "text-subtle",
-        )}
-        title={
-          outdated
-            ? `Update available - server is on v${serverVersion}`
-            : "Worker software version"
-        }
-      >
-        {worker.version ? `v${worker.version}` : "unknown"}
-        {outdated ? (
-          <ArrowUpCircle
-            className="size-3.5"
-            aria-label={`update available (server is on v${serverVersion})`}
+          <span className="inline-flex items-center gap-1">
+            {worker.version ? `v${worker.version}` : "unknown"}
+            {outdated ? (
+              <ArrowUpCircle
+                className="size-3.5"
+                aria-label={`update available (server is on v${serverVersion})`}
+              />
+            ) : null}
+          </span>
+        </Td>
+        <Td className="numeral whitespace-nowrap text-muted" title={worker.last_seen_at ?? undefined}>
+          {relativeTime(worker.last_seen_at)}
+        </Td>
+        <Td kind="num">
+          <input
+            id={`priority-${worker.id}`}
+            type="number"
+            value={priorityDraft}
+            onChange={(e) => setPriorityDraft(e.target.value)}
+            onBlur={() => void patchPriority()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.currentTarget.blur();
+              }
+            }}
+            disabled={patching}
+            className={cn(inputClass, "numeral w-20 py-1 text-right")}
+            aria-label={`Priority for ${worker.name}`}
           />
-        ) : null}
-      </div>
-
-      {/* Last seen */}
-      <div
-        className="shrink-0 font-mono text-xs text-subtle"
-        title={worker.last_seen_at ?? undefined}
-      >
-        {relativeTime(worker.last_seen_at)}
-      </div>
-
-      {/* Enabled toggle */}
-      <div className="flex shrink-0 items-center gap-1.5">
-        <label
-          htmlFor={`enabled-${worker.id}`}
-          className="font-mono text-xs uppercase tracking-[0.08em] text-subtle"
-        >
-          Enabled
-        </label>
-        <input
-          id={`enabled-${worker.id}`}
-          type="checkbox"
-          checked={worker.enabled}
-          onChange={() => void toggleEnabled()}
-          disabled={patching}
-          aria-label={`${worker.enabled ? "Disable" : "Enable"} ${worker.name}`}
-          className="h-4 w-4 cursor-pointer accent-done disabled:cursor-not-allowed disabled:opacity-50"
-        />
-      </div>
-
-      {/* Delete */}
-      <div className="flex shrink-0 items-center gap-1">
-        {deleteArmed ? (
-          <>
-            <Button
-              type="button"
-              variant="destructive"
-              size="sm"
-              onClick={() => void deleteWorker()}
-              disabled={deleting}
-              aria-label={`Confirm delete ${worker.name}`}
-            >
-              {deleting ? "Deleting..." : "Confirm"}
-            </Button>
+        </Td>
+        <Td className="text-center">
+          <input
+            id={`enabled-${worker.id}`}
+            type="checkbox"
+            checked={worker.enabled}
+            onChange={() => void toggleEnabled()}
+            disabled={patching}
+            aria-label={`${worker.enabled ? "Disable" : "Enable"} ${worker.name}`}
+            className="size-4 cursor-pointer accent-done disabled:cursor-not-allowed disabled:opacity-50"
+          />
+        </Td>
+        <Td className="whitespace-nowrap text-right">
+          {deleteArmed ? (
+            <span className="inline-flex items-center gap-1">
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                onClick={() => void deleteWorker()}
+                disabled={deleting}
+                aria-label={`Confirm delete ${worker.name}`}
+              >
+                {deleting ? "Deleting..." : "Confirm"}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setDeleteArmed(false)}
+                disabled={deleting}
+              >
+                Cancel
+              </Button>
+            </span>
+          ) : (
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              onClick={() => setDeleteArmed(false)}
-              disabled={deleting}
+              size="icon"
+              onClick={() => setDeleteArmed(true)}
+              disabled={patching}
+              aria-label={`Delete ${worker.name}`}
             >
-              Cancel
+              <Trash2 aria-hidden="true" />
             </Button>
-          </>
-        ) : (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setDeleteArmed(true)}
-            disabled={patching}
-            aria-label={`Delete ${worker.name}`}
-          >
-            <Trash2 className="size-3.5" aria-hidden="true" />
-          </Button>
-        )}
-      </div>
-
-      {/* Inline error */}
+          )}
+        </Td>
+      </Tr>
       {rowError ? (
-        <div className="w-full font-mono text-xs text-destructive md:col-span-full">
-          {rowError}
-        </div>
+        <Tr>
+          <Td colSpan={COLUMNS} role="alert" className="pt-0 text-sm text-destructive">
+            {rowError}
+          </Td>
+        </Tr>
       ) : null}
-    </article>
+    </>
   );
 }
 
@@ -355,65 +328,81 @@ export function AdminWorkers() {
     void loadWorkers();
   }, [user?.is_admin]); // loadWorkers closes over only stable refs (setters, refs, module api)
 
+  const back = { label: "Matches", to: "/pick" };
+
   if (!user?.is_admin) {
     return (
-      <div className="py-8 text-center font-mono text-sm text-muted">
-        Admin access required.
+      <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-4 px-7 py-5">
+        <PageHeader title="Workers" back={back} />
+        <p className="text-md text-muted">Admin access required.</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="font-display text-2xl font-bold uppercase tracking-tight text-ink">
-          Workers
-        </h1>
-        <Button
-          type="button"
-          size="sm"
-          onClick={() => setShowRegister(true)}
-        >
-          Register worker
-        </Button>
-      </div>
+    <div className="mx-auto flex w-full max-w-[1100px] flex-col gap-4 px-7 py-5">
+      <PageHeader
+        title="Workers"
+        sub={serverVersion ? `Server v${serverVersion}` : undefined}
+        back={back}
+        actions={
+          <Button type="button" variant="primary" size="sm" onClick={() => setShowRegister(true)}>
+            Register worker
+          </Button>
+        }
+      />
 
       {fetchError ? (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 font-mono text-xs text-destructive">
+        <p role="alert" className="text-sm text-led-text">
           {fetchError}
-        </div>
+        </p>
       ) : null}
 
       <section aria-label="Worker list">
         {workers === null && !fetchError ? (
-          <div className="py-6 text-center font-mono text-xs text-subtle">
-            Loading...
-          </div>
+          <p className="text-sm text-muted">Loading...</p>
         ) : workers !== null && workers.length === 0 ? (
-          <div className="rounded-md border border-dashed border-rule px-4 py-6 text-center font-mono text-xs text-subtle">
-            No workers registered.
-          </div>
+          <p className="rounded-[10px] border border-rule px-3 py-2.5 text-sm text-muted">No workers registered.</p>
         ) : workers !== null ? (
-          <div className="rounded-md border border-rule bg-surface">
-            {workers.map((w) => (
-              <WorkerRow
-                key={w.id}
-                worker={w}
-                serverVersion={serverVersion}
-                onUpdated={(next) =>
-                  setWorkers((cur) =>
-                    cur ? cur.map((x) => (x.id === next.id ? next : x)) : cur,
-                  )
-                }
-                onRefetch={() => void loadWorkers()}
-              />
-            ))}
-          </div>
+          <Table>
+            <thead>
+              <tr className="whitespace-nowrap">
+                <Th>Worker</Th>
+                <Th>Status</Th>
+                <Th>Capabilities</Th>
+                <Th>Version</Th>
+                <Th>Last seen</Th>
+                <Th align="right">Priority</Th>
+                <Th className="text-center">Enabled</Th>
+                <Th align="right">
+                  <span className="sr-only">Actions</span>
+                </Th>
+              </tr>
+            </thead>
+            <tbody>
+              {workers.map((w) => (
+                <WorkerRow
+                  key={w.id}
+                  worker={w}
+                  serverVersion={serverVersion}
+                  onUpdated={(next) =>
+                    setWorkers((cur) =>
+                      cur ? cur.map((x) => (x.id === next.id ? next : x)) : cur,
+                    )
+                  }
+                  onRefetch={() => void loadWorkers()}
+                />
+              ))}
+            </tbody>
+          </Table>
         ) : null}
       </section>
 
+      {/* Mounted only while open so a second registration starts on a
+          fresh form rather than the previous one's success step. */}
       {showRegister ? (
-        <RegisterWorkerDialog
+        <RegisterWorkerSheet
+          open
           onClose={() => {
             setShowRegister(false);
             void loadWorkers();

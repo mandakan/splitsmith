@@ -69,7 +69,7 @@ export function Account() {
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-7 py-5">
-      <PageHeader title="Account" sub={user?.email} />
+      <PageHeader title="Account" sub={user?.email} back={{ label: "Matches", to: "/pick" }} />
       <section className="rounded-[10px] border border-rule bg-surface">
         <div className="border-b border-rule px-3.5 py-2">
           <Label>Profile</Label>

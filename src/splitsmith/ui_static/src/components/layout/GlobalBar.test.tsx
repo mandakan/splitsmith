@@ -67,6 +67,13 @@ describe("GlobalBar", () => {
     expect(screen.getByText("Splitsmith")).toBeInTheDocument();
   });
 
+  it("links the brand to the match picker", () => {
+    // The shell-less routes (/account, /admin/workers) have no nav of
+    // their own; the brand is their only way back into the app.
+    renderBar();
+    expect(screen.getByRole("link", { name: /splitsmith/i })).toHaveAttribute("href", "/pick");
+  });
+
   it("renders the mode switch", () => {
     renderBar();
     // ModeSwitch already exposes role="radiogroup" aria-label="Mode" (see
