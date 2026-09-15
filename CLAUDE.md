@@ -201,6 +201,18 @@ as ``none`` elsewhere) and the title line in Details. A slot whose
 seconds field is being edited reads NaN and must still count as on, or
 the input vanishes under the cursor (``summaryHold.read``).
 
+The rail's preview (spec s3) is ``POST /api/shooters/{slug}/export-preview``
+-> PNG, engine ``export_preview.render_preview``: it declares the card
+exactly as ``ui/match_exports.py`` does and composes it through the
+renderers' own builders over a head or tail frame from the trim on this
+container's disk (the surface when there is none, which is every hosted
+container by design; a seek past the clip's end takes its last frame).
+Cached under ``cache_dir/export-preview`` by a content key that includes
+the project's ``updated_at`` and the audit version. 503 is no browser,
+409 is the overlay without shots; the SPA maps each to one muted line in
+``PreviewPane`` and never blocks the Export button. A new Look variant
+needs a ``previewCardFor`` case or it previews as the frame.
+
 ## YouTube upload (#1000)
 
 ``splitsmith.youtube`` uploads a rendered MP4 with its ``-youtube.json``
