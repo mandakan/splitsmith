@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.37.0](https://github.com/mandakan/splitsmith/compare/v0.36.0...v0.37.0) (2026-09-15)
+
+
+### Features
+
+* **youtube:** playlist picker over the channel's playlists, upload by playlist id ([#1021](https://github.com/mandakan/splitsmith/issues/1021)) ([ada94b0](https://github.com/mandakan/splitsmith/commit/ada94b00cef69194c48692c98547d68d8fd63958))
+* **youtube:** playlist, scheduled publish and subscriber notification on upload ([#1019](https://github.com/mandakan/splitsmith/issues/1019)) ([5790703](https://github.com/mandakan/splitsmith/commit/579070310f43f8a13955c2ebc46550e143e936bb))
+
 ## [0.36.0](https://github.com/mandakan/splitsmith/compare/v0.35.0...v0.36.0) (2026-09-15)
 
 
