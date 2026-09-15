@@ -240,14 +240,14 @@ const BUILTINS: ExportPreset[] = [
 beforeEach(() => {
   vi.mocked(api.getProject).mockResolvedValue(PROJECT);
   vi.mocked(api.getExportOverview).mockResolvedValue(OVERVIEW);
-  vi.mocked(api.getExportPresets).mockResolvedValue({ presets: BUILTINS });
-  vi.mocked(api.putExportPreset).mockImplementation(async (id, name, body) => ({
-    preset_id: id === "new" ? "p-new" : id,
-    name,
-    builtin: false,
-    updated_at: "2026-09-15T00:00:00Z",
-    body,
-  }));
+  // A tiny server: what PUT stores, the next GET lists after the built-ins.
+  const saved: ExportPreset[] = [];
+  vi.mocked(api.getExportPresets).mockImplementation(async () => ({ presets: [...BUILTINS, ...saved] }));
+  vi.mocked(api.putExportPreset).mockImplementation(async (id, name, body) => {
+    const row = { preset_id: id === "new" ? "p-new" : id, name, builtin: false, updated_at: "2026-09-15T00:00:00Z", body };
+    saved.push(row);
+    return row;
+  });
   vi.mocked(api.deleteExportPreset).mockResolvedValue(undefined);
   window.localStorage.clear();
 });
@@ -295,6 +295,41 @@ describe("Export presets", () => {
     expect(choice("Output mode", "Trims only")).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: /export trims/i })).toBeInTheDocument();
     expect(noCustomPreset()).toBe(true);
+  });
+
+  it("a compare preset is offered greyed on a one-shooter match and applying it changes nothing", async () => {
+    const { user } = await renderPage();
+    const compare = choice("Preset", "Compare grid");
+    expect(compare).toBeDisabled();
+    expect(compare).toHaveAttribute("title", expect.stringMatching(/two or more shooters/i));
+    await user.click(compare);
+    expect(choice("Preset", "Final Cut bundle")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Full 5.0 / 5.0 s · cut")).toBeInTheDocument();
+    expect(noCustomPreset()).toBe(true);
+  });
+
+  it("on a two-shooter match the compare preset applies and switches the mode", async () => {
+    const { user } = await renderPage([shooter("mathias", "Mathias"), shooter("casper", "Casper")]);
+    await user.click(choice("Preset", "Compare grid"));
+    expect(choice("Output mode", "Compare grid")).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: /render grid/i })).toBeInTheDocument();
+    expect(noCustomPreset()).toBe(true);
+  });
+
+  it("after Save as... the row shows the server's list, not a client-side sort", async () => {
+    vi.mocked(api.getExportPresets)
+      .mockResolvedValueOnce({ presets: BUILTINS })
+      .mockResolvedValueOnce({ presets: [...BUILTINS, { ...preset("p-b", "b night"), builtin: false }, { ...preset("p-new", "Club night"), builtin: false }] });
+    const { user } = await renderPage();
+    await user.click(screen.getByRole("button", { name: "Preset actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Save as..." }));
+    await user.type(within(screen.getByRole("dialog")).getByLabelText("Name"), "Club night");
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(choice("Preset", "Club night")).toHaveAttribute("aria-pressed", "true"));
+    const names = within(screen.getByRole("group", { name: "Preset" }))
+      .getAllByRole("button")
+      .map((b) => b.textContent);
+    expect(names.slice(-2)).toEqual(["b night", "Club night"]);
   });
 
   it("editing a field shows Custom, from the preset it started on", async () => {
@@ -350,10 +385,12 @@ describe("Export presets", () => {
     expect(screen.getByText(/Highlight 1\.5 \/ 2\.0 s/)).toBeInTheDocument();
   });
 
-  it("a failed preset load still renders the page with Custom only", async () => {
+  it("a failed preset load still renders the page with Custom only and no error", async () => {
     vi.mocked(api.getExportPresets).mockRejectedValue(new Error("offline"));
     await renderPage();
+    const row = within(screen.getByRole("group", { name: "Preset" })).getAllByRole("button");
+    expect(row.map((b) => b.textContent)).toEqual(["Custom"]);
     expect(choice("Preset", "Custom")).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: /export bundle/i })).toBeEnabled();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

@@ -325,12 +325,20 @@ function ExportInner({ slug }: { slug: string }) {
     [patch],
   );
 
+  // A preset the match cannot run is offered greyed, like the mode option
+  // itself; applying it would otherwise overwrite every other setting
+  // while the mode stayed put.
+  const presetUnavailable = useCallback(
+    (p: ExportPreset) =>
+      p.body.mode === "compare" && !multiShooter ? "The compare grid needs two or more shooters on the match" : null,
+    [multiShooter],
+  );
+
   function applyPreset(id: string) {
     const p = presets.find((x) => x.preset_id === id);
-    if (!p) return;
-    const nextMode = p.body.mode === "compare" && !multiShooter ? mode : p.body.mode;
-    if (nextMode !== mode) selectMode(nextMode);
-    setSettings((s) => ({ ...applyBody(s, p.body), mode: nextMode }));
+    if (!p || presetUnavailable(p) !== null) return;
+    if (p.body.mode !== mode) selectMode(p.body.mode);
+    setSettings((s) => applyBody(s, p.body));
     setActivePresetId(id);
     setOpenGroups({ output: false, cut: false, look: false });
   }
@@ -338,11 +346,16 @@ function ExportInner({ slug }: { slug: string }) {
   async function savePreset(id: string, name: string) {
     try {
       const saved = await api.putExportPreset(id, name, settingsToBody(settings));
-      setPresets((list) => {
-        const rest = list.filter((p) => p.preset_id !== saved.preset_id);
-        const own = [...rest.filter((p) => !p.builtin), saved].sort((a, b) => a.name.localeCompare(b.name));
-        return [...rest.filter((p) => p.builtin), ...own];
-      });
+      // Re-read rather than splice: the server owns the order (built-ins
+      // first, own by casefolded name), and a client-side sort would
+      // disagree with it on the next load.
+      let list: ExportPreset[];
+      try {
+        list = (await api.getExportPresets()).presets;
+      } catch {
+        list = [...presets.filter((p) => p.preset_id !== saved.preset_id), saved];
+      }
+      setPresets(list);
       setActivePresetId(saved.preset_id);
       setSaveSheet(null);
     } catch (e) {
@@ -734,6 +747,7 @@ function ExportInner({ slug }: { slug: string }) {
         <div className="flex min-w-0 flex-col gap-3">
           <PresetRow
             presets={presets}
+            unavailable={presetUnavailable}
             activeId={activePresetId}
             dirty={dirty}
             busy={busy}

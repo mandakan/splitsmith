@@ -59,8 +59,9 @@ describe("settingsToBody / applyBody", () => {
     const applied = applyBody(s, YOUTUBE);
     expect(applied.renderOptions.titleInfo).toBe("Production Optics");
     expect(applied.uploadOptions.publishAt).toBe("2026-10-01T18:00");
-    expect(settingsToBody(s)).not.toHaveProperty("titleInfo");
-    expect(settingsToBody(s)).not.toHaveProperty("publish_at");
+    const stored = JSON.stringify(settingsToBody(s));
+    expect(stored).not.toContain("Production Optics");
+    expect(stored).not.toContain("2026-10-01");
   });
 });
 

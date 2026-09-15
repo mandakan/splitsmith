@@ -68,7 +68,7 @@ export function DetailsGroup({
           />
         </Field>
       ) : null}
-      {publishing && !hosted ? (
+      {renderedMp4 && !hosted ? (
         <Field label="Upload">
           <YouTubeConnect
             settings={youtubeSettings}

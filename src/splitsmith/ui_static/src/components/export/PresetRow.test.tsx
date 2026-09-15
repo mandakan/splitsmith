@@ -70,6 +70,7 @@ describe("PresetRow", () => {
   it("on an own preset every action is offered", async () => {
     const { user, onSave, onDelete } = setup({ activeId: "p1", dirty: true });
     await user.click(screen.getByRole("button", { name: "Preset actions" }));
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toBeInTheDocument();
     await user.click(screen.getByRole("menuitem", { name: "Save" }));
     expect(onSave).toHaveBeenCalledWith("p1");
     await user.click(screen.getByRole("button", { name: "Preset actions" }));
@@ -81,6 +82,15 @@ describe("PresetRow", () => {
     const { user } = setup({ activeId: "p1", dirty: false });
     await user.click(screen.getByRole("button", { name: "Preset actions" }));
     expect(screen.getByRole("menuitem", { name: "Save" })).toBeDisabled();
+  });
+
+  it("an unavailable preset is greyed with its reason and cannot be applied", async () => {
+    const { user, onApply } = setup({ unavailable: (p) => (p.preset_id === "p1" ? "needs two shooters" : null) });
+    const chip = screen.getByRole("button", { name: "Club night" });
+    expect(chip).toBeDisabled();
+    expect(chip).toHaveAttribute("title", "needs two shooters");
+    await user.click(chip);
+    expect(onApply).not.toHaveBeenCalled();
   });
 
   it("with no active preset the row is Custom alone", () => {

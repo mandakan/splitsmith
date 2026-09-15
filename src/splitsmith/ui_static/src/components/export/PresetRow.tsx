@@ -16,6 +16,8 @@ import { CUSTOM } from "@/lib/exportPresets";
 
 export interface PresetRowProps {
   presets: ExportPreset[];
+  /** Presets this match cannot apply (a compare preset on one shooter), with the reason. */
+  unavailable?: (preset: ExportPreset) => string | null;
   /** The preset the form was last set from; null before any was applied. */
   activeId: string | null;
   dirty: boolean;
@@ -29,6 +31,7 @@ export interface PresetRowProps {
 
 export function PresetRow({
   presets,
+  unavailable = () => null,
   activeId,
   dirty,
   busy,
@@ -43,7 +46,10 @@ export function PresetRow({
   const own = active !== null && !active.builtin;
   const showCustom = dirty || active === null;
   const options = [
-    ...presets.map((p) => ({ value: p.preset_id, label: p.name })),
+    ...presets.map((p) => {
+      const reason = unavailable(p);
+      return { value: p.preset_id, label: p.name, disabled: reason !== null, title: reason ?? undefined };
+    }),
     ...(showCustom ? [{ value: CUSTOM, label: "Custom" }] : []),
   ];
   const value = showCustom || active === null ? CUSTOM : active.preset_id;

@@ -248,6 +248,13 @@ afterEach(() => {
 });
 
 describe("Export YouTube row", () => {
+  it("the connect UI shows for any rendered MP4, before the YouTube toggle is on", async () => {
+    const { user } = await renderPage();
+    await user.selectOptions(screen.getByLabelText("Timeline format"), "mp4");
+    expect(screen.getByText(/Connected as Mine/)).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Upload after render" })).toBeNull();
+  });
+
   it("sends youtube_upload off by default and the chosen privacy when set", async () => {
     const { user } = await renderPage();
     await user.selectOptions(screen.getByLabelText("Timeline format"), "mp4");
