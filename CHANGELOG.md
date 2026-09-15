@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.37.1](https://github.com/mandakan/splitsmith/compare/v0.37.0...v0.37.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **build:** release-please keeps uv.lock's version in step with pyproject ([#1023](https://github.com/mandakan/splitsmith/issues/1023)) ([49f7447](https://github.com/mandakan/splitsmith/commit/49f74476aa41e2fbd7784e2149b1b87c8f8037b3))
+* **build:** uv.lock updater filters on the tagged value release-please's TOML parser produces ([#1025](https://github.com/mandakan/splitsmith/issues/1025)) ([f229e10](https://github.com/mandakan/splitsmith/commit/f229e10458e0046e8e6270adea45b1c892027207))
+
 ## [0.37.0](https://github.com/mandakan/splitsmith/compare/v0.36.0...v0.37.0) (2026-09-15)
 
 
