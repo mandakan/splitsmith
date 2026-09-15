@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.39.0](https://github.com/mandakan/splitsmith/compare/v0.38.1...v0.39.0) (2026-09-15)
+
+
+### Features
+
+* **playback:** 720p faststart web rendition of each trim for hosted streaming ([#1037](https://github.com/mandakan/splitsmith/issues/1037)) ([2914a49](https://github.com/mandakan/splitsmith/commit/2914a4952c3075fd271f841dbc94152428bd05f0))
+
+
+### Documentation
+
+* **oauth:** 1000-character short form of the scope justification ([#1035](https://github.com/mandakan/splitsmith/issues/1035)) ([5624f63](https://github.com/mandakan/splitsmith/commit/5624f63bb1faf8dba6b717af036b20a8a61d0c3a))
+* **oauth:** scope justification argues minimum scopes explicitly ([#1034](https://github.com/mandakan/splitsmith/issues/1034)) ([879e3c6](https://github.com/mandakan/splitsmith/commit/879e3c64eb2269f1f9508994ad77c726729f7774))
+
 ## [0.38.1](https://github.com/mandakan/splitsmith/compare/v0.38.0...v0.38.1) (2026-09-15)
 
 
