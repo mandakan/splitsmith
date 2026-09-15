@@ -383,7 +383,11 @@ first stage still needing footage or scores, then export). Export
 (``pages/Export.tsx``, ``components/export/*``, ``lib/exportPlan.ts``):
 the blocker ladder in ``stageBlock`` is the one place a stage's "why
 not" and its fix are worded, and it is what keeps hosted copy free of
-drives; the compare grid is the page's third mode (``pages/
+drives; the bundle gate is ``ready_to_export_bare`` (a reviewed beep and
+a stage time), not ``ready_to_export`` (audited shots): a bare stage
+renders with its chapter and cards and loses only the shot-dependent
+extras, which the row's "No splits" chip and the rail's "Splits" line
+say; the compare grid is the page's third mode (``pages/
 matchExportModel.ts`` still owns the payload and the partial-result
 summary); Delete match lives in the summary rail's footer. Account
 (``pages/Account.tsx``, ``components/account/*``) and every settings

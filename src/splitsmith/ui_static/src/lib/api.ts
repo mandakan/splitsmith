@@ -764,6 +764,9 @@ export interface StageExportStatus {
    *  the trims-only export mode reads this instead of re-deriving the rule
    *  here, which is what let the TS copy drift from the server's. */
   ready_to_trim: boolean;
+  /** The bundle gate for a stage without audited shots: the trim rule plus
+   *  a reviewed beep. Between ``ready_to_trim`` and ``ready_to_export``. */
+  ready_to_export_bare: boolean;
   source_reachable: boolean | null;
   /** Multi-cam roster (issue #54). One entry per secondary on the stage,
    *  including cams without a beep / unreachable cams (the SPA renders

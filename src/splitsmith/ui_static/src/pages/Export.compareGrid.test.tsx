@@ -122,6 +122,7 @@ function overviewStage(n: number, name: string, skipped = false): StageExportSta
     last_export_at: null,
     ready_to_export: false,
     ready_to_trim: false,
+    ready_to_export_bare: false,
     source_reachable: null,
     secondaries: [],
   };

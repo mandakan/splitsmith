@@ -72,7 +72,16 @@ export function StageTable({ rows, selected, onToggle, fixHref }: StageTableProp
                 {r.shots !== null ? r.shots : "—"}
               </Td>
               <Td>
-                {r.block === null ? (
+                {r.block === null && r.bare ? (
+                  <span className="inline-flex items-center gap-2 text-sm text-muted">
+                    <Chip title="Renders from the beep and the stage time; no shot markers, overlay or captions">
+                      No splits
+                    </Chip>
+                    <Link to={fixHref("audit", n)} className="text-ink-2 underline underline-offset-4 hover:text-ink">
+                      Audit
+                    </Link>
+                  </span>
+                ) : r.block === null ? (
                   <Chip tone="ok" tick="fire">
                     Ready
                   </Chip>

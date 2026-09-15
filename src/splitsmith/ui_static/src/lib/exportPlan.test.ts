@@ -23,6 +23,7 @@ function stage(over: Partial<StageExportStatus> = {}): StageExportStatus {
     last_export_at: null,
     ready_to_export: true,
     ready_to_trim: true,
+    ready_to_export_bare: true,
     source_reachable: true,
     secondaries: [],
     ...over,
@@ -57,10 +58,15 @@ describe("stageBlock ladder", () => {
       reason: "No stage time",
       fix: { label: "Import scores", to: "scores" },
     });
-    expect(stageBlock(stage({ ready_to_export: false, audit_shot_count: 0 }), 10, "single", false)).toEqual({
-      reason: "Not audited yet",
+    // No reviewed beep: blocked, and the fix is the audit's beep step.
+    expect(
+      stageBlock(stage({ ready_to_export: false, ready_to_export_bare: false, audit_shot_count: 0 }), 10, "single", false),
+    ).toEqual({
+      reason: "No confirmed beep",
       fix: { label: "Audit", to: "audit" },
     });
+    // Reviewed beep + time, no shots: exportable without splits, not blocked.
+    expect(stageBlock(stage({ ready_to_export: false, ready_to_export_bare: true, audit_shot_count: 0 }), 10, "single", false)).toBeNull();
   });
   it("trims mode wants a beep, not an audit; the grid only rules out skipped and unreachable stages", () => {
     const unaudited = stage({ ready_to_export: false, ready_to_trim: true, audit_shot_count: 0 });
@@ -134,5 +140,47 @@ describe("summaryLines", () => {
   it("trims show the grid camera, the grid shows reference, canvas and cards", () => {
     expect(summaryLines({ ...base, mode: "trims", gridCamera: "head" })[1]).toEqual({ label: "Grid camera", value: "head", dim: false });
     expect(summaryLines({ ...base, mode: "compare", reference: "Mathias", canvas: "4K UHD", cards: "closing" }).map((l) => l.value)).toEqual(["4 / 4", "Mathias", "4K UHD", "closing"]);
+  });
+});
+
+describe("exportRows without splits", () => {
+  it("marks a bundle row that exports bare, never a trims or grid row, never an audited one", () => {
+    const bare = stage({ stage_number: 5, ready_to_export: false, ready_to_export_bare: true, audit_shot_count: 0 });
+    const times = new Map([[3, 10], [5, 12]]);
+    const single = exportRows([stage(), bare], times, "single", false);
+    expect(single.map((r) => [r.eligible, r.bare])).toEqual([
+      [true, false],
+      [true, true],
+    ]);
+    expect(exportRows([bare], times, "trims", false)[0].bare).toBe(false);
+    expect(exportRows([bare], times, "compare", false)[0].bare).toBe(false);
+  });
+});
+
+describe("summaryLines without splits", () => {
+  it("counts the selected stages going out without splits", () => {
+    const base = {
+      mode: "single" as const,
+      selected: 3,
+      eligible: 4,
+      head: 5,
+      tail: 5,
+      transitionKind: "none",
+      transitionSeconds: 0.5,
+      cards: null,
+      overlay: false,
+      cams: null,
+      youtube: null,
+      gridCamera: null,
+      reference: null,
+      canvas: null,
+    };
+    expect(summaryLines({ ...base, bare: 0 }).find((l) => l.label === "Splits")).toBeUndefined();
+    expect(summaryLines({ ...base, bare: 2 }).find((l) => l.label === "Splits")).toEqual({
+      label: "Splits",
+      value: "2 stages without",
+      dim: true,
+    });
+    expect(summaryLines({ ...base, bare: 1 }).find((l) => l.label === "Splits")?.value).toBe("1 stage without");
   });
 });
