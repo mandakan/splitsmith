@@ -178,6 +178,14 @@ function Shell({ shooters }: { shooters: ShooterListEntry[] }) {
   );
 }
 
+/** The option groups fold by default (spec 2026-09-15 s1); open whichever exist. */
+async function openGroups(user: ReturnType<typeof userEvent.setup>) {
+  for (const name of ["Output", "Cut", "Look"]) {
+    const btn = screen.queryByRole("button", { name: new RegExp(`^${name}$`), expanded: false });
+    if (btn) await user.click(btn);
+  }
+}
+
 async function renderCompare(shooters = SHOOTERS) {
   const user = userEvent.setup();
   render(
@@ -214,6 +222,7 @@ describe("Export compare grid mode", () => {
   it("pre-selects every non-skipped stage and defaults the reference to the first shooter", async () => {
     const { user, grid } = await renderCompare();
     await user.click(grid);
+    await openGroups(user);
     expect(screen.getByRole("button", { name: /^Mathias$/ })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: /^Casper$/ })).toHaveAttribute("aria-pressed", "false");
     await waitFor(() => {
@@ -237,6 +246,7 @@ describe("Export compare grid mode", () => {
     const { user, grid } = await renderCompare();
     await user.click(grid);
     await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage Two/i })).toBeChecked());
+    await openGroups(user);
     await user.click(screen.getByRole("button", { name: /render grid/i }));
 
     await waitFor(() => expect(api.exportCompareGrid).toHaveBeenCalledTimes(1));
@@ -269,6 +279,7 @@ describe("Export compare grid mode", () => {
     const { user, grid } = await renderCompare();
     await user.click(grid);
     await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage Two/i })).toBeChecked());
+    await openGroups(user);
     await user.click(screen.getByRole("button", { name: /render grid/i }));
 
     expect(await screen.findByText(/rendered 1 of 2 stages/i)).toBeInTheDocument();
@@ -303,6 +314,7 @@ describe("Export compare grid mode", () => {
     const { user, grid } = await renderCompare();
     await user.click(grid);
     await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage Two/i })).toBeChecked());
+    await openGroups(user);
     await user.click(screen.getByRole("button", { name: /render grid/i }));
 
     expect(await screen.findByText(/rendered 2 of 3 stages/i)).toBeInTheDocument();
@@ -337,6 +349,7 @@ describe("Export compare grid mode", () => {
     const { user, grid } = await renderCompare();
     await user.click(grid);
     await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage Two/i })).toBeChecked());
+    await openGroups(user);
     await user.click(screen.getByRole("button", { name: /^Casper$/ }));
     await user.click(screen.getByRole("button", { name: /1080p/i }));
     await user.click(screen.getByRole("button", { name: /render grid/i }));
@@ -352,6 +365,7 @@ describe("Export compare grid mode", () => {
     const { user, grid } = await renderCompare();
     await user.click(grid);
     await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage Two/i })).toBeChecked());
+    await openGroups(user);
     await user.click(screen.getByRole("button", { name: /render grid/i }));
 
     expect(await screen.findByText(/audio_from matches no shooter on this match/i)).toBeInTheDocument();

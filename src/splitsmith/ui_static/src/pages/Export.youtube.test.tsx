@@ -180,6 +180,14 @@ function Shell({ shooters }: { shooters: ShooterListEntry[] }) {
   );
 }
 
+/** The option groups fold by default (spec 2026-09-15 s1); open whichever exist. */
+async function openGroups(user: ReturnType<typeof userEvent.setup>) {
+  for (const name of ["Output", "Cut", "Look"]) {
+    const btn = screen.queryByRole("button", { name: new RegExp(`^${name}$`), expanded: false });
+    if (btn) await user.click(btn);
+  }
+}
+
 async function renderPage(shooters = [shooter("mathias", "Mathias")]) {
   const user = userEvent.setup();
   render(
@@ -195,6 +203,7 @@ async function renderPage(shooters = [shooter("mathias", "Mathias")]) {
   );
   await screen.findByRole("button", { name: /export bundle/i });
   await waitFor(() => expect(screen.getByRole("checkbox", { name: /Stage 2/i })).toBeChecked());
+  await openGroups(user);
   return { user };
 }
 

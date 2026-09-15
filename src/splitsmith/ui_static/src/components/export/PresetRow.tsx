@@ -61,7 +61,7 @@ export function PresetRow({
         disabled={busy}
       />
       {showCustom && active ? <span className="text-sm text-muted">from {active.name}</span> : null}
-      <div className="relative ml-auto">
+      <div className="relative">
         <Button
           type="button"
           size="icon"

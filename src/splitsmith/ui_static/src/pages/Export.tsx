@@ -22,16 +22,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate, useOutletContext, useParams } from "react-router-dom";
 
 import { CleanupDialog } from "@/components/CleanupDialog";
+import { CutGroup } from "@/components/export/CutGroup";
+import { DetailsGroup } from "@/components/export/DetailsGroup";
 import { ExportHistory } from "@/components/export/ExportHistory";
+import { LookGroup } from "@/components/export/LookGroup";
+import { OutputGroup } from "@/components/export/OutputGroup";
+import { PresetRow } from "@/components/export/PresetRow";
+import { SavePresetSheet } from "@/components/export/SavePresetSheet";
 import { Section } from "@/components/export/Section";
-import { SelectField } from "@/components/export/SelectField";
 import { StageTable } from "@/components/export/StageTable";
-import { YouTubeConnect } from "@/components/export/YouTubeConnect";
-import { CamOptionsPanel } from "@/components/render/CamOptionsPanel";
-import { RenderOptionsPanel, Seconds } from "@/components/render/RenderOptionsPanel";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { Button } from "@/components/ui/button";
-import { Field, inputClass } from "@/components/ui/Field";
 import { Label } from "@/components/ui/Label";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Segmented } from "@/components/ui/Segmented";
@@ -43,18 +44,29 @@ import {
   READ_ONLY_MIRROR_MESSAGE,
   type CompareGridResult,
   type ExportOverview,
+  type ExportPreset,
   type ExportRun,
   type Job,
   type MatchExportResult,
   type MatchProject,
-  type OverlayCodec,
   type YouTubeSettings,
 } from "@/lib/api";
-import { camExportFields, DEFAULT_CAM_OPTIONS, syncedSecondaryCount, type CamOptions } from "@/lib/camOptions";
-import { DEFAULT_UPLOAD_OPTIONS, rowUploadOptions, type UploadFormOptions } from "@/lib/youtubeRows";
+import { camExportFields, syncedSecondaryCount } from "@/lib/camOptions";
+import { rowUploadOptions } from "@/lib/youtubeRows";
 import { hostedDownloads as buildHostedDownloads } from "@/lib/exportDownloads";
 import {
-  bareHint,
+  applyBody,
+  DEFAULT_EXPORT_SETTINGS,
+  groupSummary,
+  isDirty,
+  loadLastUsed,
+  NEW_PRESET_ID,
+  saveLastUsed,
+  settingsToBody,
+  type ExportSettings,
+  type SettingsGroup,
+} from "@/lib/exportPresets";
+import {
   estimateDuration,
   exportRows,
   formatDuration,
@@ -64,39 +76,12 @@ import {
 } from "@/lib/exportPlan";
 import { useDeploymentMode } from "@/lib/features";
 import { useMatchHref } from "@/lib/matchHref";
-import {
-  DEFAULT_RENDER_OPTIONS,
-  describeRenderOptions,
-  matchExportFields,
-  renderOptionsSeconds,
-  type OutputFormat,
-  type RenderOptions,
-} from "@/lib/renderOptions";
+import { describeRenderOptions, matchExportFields, renderOptionsSeconds, type OutputFormat } from "@/lib/renderOptions";
 import { cn } from "@/lib/utils";
-import {
-  buildCompareGridPayload,
-  CANVAS_CHOICES,
-  summarizeGridResult,
-  type CanvasChoice,
-} from "@/pages/matchExportModel";
-
-type PaddingPreset = "full" | "action" | "highlight" | "custom";
+import { buildCompareGridPayload, CANVAS_CHOICES, summarizeGridResult } from "@/pages/matchExportModel";
 
 /** What ``ui/match_exports.py`` names the timeline file per format. */
 const BUNDLE_EXTENSION: Record<OutputFormat, string> = { fcpxml: ".fcpxml", fcp7xml: ".xml", mp4: ".mp4" };
-
-const PADDING_PRESETS: Record<Exclude<PaddingPreset, "custom">, { label: string; head: number; tail: number }> = {
-  full: { label: "Full", head: 5.0, tail: 5.0 },
-  action: { label: "Action", head: 0.5, tail: 1.0 },
-  highlight: { label: "Highlight", head: 1.5, tail: 2.0 },
-};
-
-type TransitionKind = "none" | "zoom" | "static";
-const TRANSITIONS: { value: TransitionKind; label: string }[] = [
-  { value: "none", label: "Hard cut" },
-  { value: "static", label: "Static frame" },
-  { value: "zoom", label: "Zoom blur" },
-];
 
 export function Export() {
   const { slug, matchId } = useParams<{ slug: string; matchId?: string }>();
@@ -181,36 +166,84 @@ function ExportInner({ slug }: { slug: string }) {
   }, []);
 
   // === Form state ===
-  const [mode, setMode] = useState<ExportMode>("single");
+  // The recurring half of the form is one object so a preset applies and
+  // compares as a unit (lib/exportPresets). Match-specific fields stay
+  // separate below and are never stored.
+  const [settings, setSettings] = useState<ExportSettings>(() => {
+    const last = loadLastUsed(window.localStorage);
+    return last ? applyBody(DEFAULT_EXPORT_SETTINGS, last.body) : DEFAULT_EXPORT_SETTINGS;
+  });
+  const patch = useCallback((p: Partial<ExportSettings>) => setSettings((s) => ({ ...s, ...p })), []);
+  const {
+    mode,
+    outputFormat,
+    overlayCodec,
+    camOptions,
+    youtube,
+    headPad,
+    tailPad,
+    transitionKind,
+    transitionSeconds,
+    renderOptions,
+    includeOverlay,
+    gridOverlay,
+    gridHoldSeconds,
+    uploadOptions,
+  } = settings;
+  const canvas = CANVAS_CHOICES.find((c) => c.id === settings.canvas) ?? CANVAS_CHOICES[0];
+
   const [selection, setSelection] = useState<Set<number>>(() => new Set());
-  const [preset, setPreset] = useState<PaddingPreset>("full");
-  const [headPad, setHeadPad] = useState<number>(PADDING_PRESETS.full.head);
-  const [tailPad, setTailPad] = useState<number>(PADDING_PRESETS.full.tail);
-  const [transitionKind, setTransitionKind] = useState<TransitionKind>("none");
-  const [transitionDurationSeconds, setTransitionDurationSeconds] = useState<number>(0.5);
-  const [includeOverlay, setIncludeOverlay] = useState<boolean>(false);
-  const [overlayCodec, setOverlayCodec] = useState<OverlayCodec>("auto");
-  const [outputFormat, setOutputFormat] = useState<OutputFormat>("fcpxml");
   const [projectName, setProjectName] = useState<string>("");
-  // The generated cards and the summary hold (#973, #972) are one piece
-  // of state shared by the timeline and the grid: switching mode keeps a
-  // title page the user already set up. Which of them a format can draw
-  // is the panel's and the mappers' business, never this page's.
-  const [renderOptions, setRenderOptions] = useState<RenderOptions>(DEFAULT_RENDER_OPTIONS);
-  const [camOptions, setCamOptions] = useState<CamOptions>(DEFAULT_CAM_OPTIONS);
-  // The YouTube encode preset and the upload sidecar (description with
-  // chapters, captions) travel together: one is pointless without the
-  // other and both exist only for the rendered MP4.
-  const [youtube, setYoutube] = useState<boolean>(false);
   const [descriptionLead, setDescriptionLead] = useState<string>("");
-  // One privacy control per page: the history rows upload with it too.
-  const [uploadOptions, setUploadOptions] = useState<UploadFormOptions>(DEFAULT_UPLOAD_OPTIONS);
-  // Compare grid: the reference shooter sets the frame rate; the canvas
-  // sets the render size; the overlay and its summary hold are #705's.
+  // Compare grid: the reference shooter sets the frame rate.
   const [audioFrom, setAudioFrom] = useState<string>("");
-  const [canvas, setCanvas] = useState<CanvasChoice>(CANVAS_CHOICES[0]);
-  const [gridOverlay, setGridOverlay] = useState<boolean>(false);
-  const [gridHoldSeconds, setGridHoldSeconds] = useState<number>(0);
+
+  // Presets. Built-ins come from the server too; a failed load leaves the
+  // row with Custom alone and the page fully usable.
+  const [presets, setPresets] = useState<ExportPreset[]>([]);
+  const [activePresetId, setActivePresetId] = useState<string | null>(
+    () => loadLastUsed(window.localStorage)?.presetId ?? null,
+  );
+  const [saveSheet, setSaveSheet] = useState<{ mode: "saveAs" | "rename"; id?: string } | null>(null);
+  const [openGroups, setOpenGroups] = useState<Record<SettingsGroup, boolean>>({
+    output: false,
+    cut: false,
+    look: false,
+  });
+  const toggleGroup = (g: SettingsGroup) => setOpenGroups((o) => ({ ...o, [g]: !o[g] }));
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.resolve(api.getExportPresets())
+      .then((r) => {
+        if (!cancelled) setPresets(r.presets);
+      })
+      .catch(() => {
+        if (!cancelled) setPresets([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // First visit, nothing remembered: start on the first built-in.
+  const hadLastUsed = useRef(loadLastUsed(window.localStorage) !== null);
+  useEffect(() => {
+    if (activePresetId === null && presets.length > 0 && !hadLastUsed.current) {
+      setSettings((s) => applyBody(s, presets[0].body));
+      setActivePresetId(presets[0].preset_id);
+    }
+  }, [presets, activePresetId]);
+
+  const activePreset = presets.find((p) => p.preset_id === activePresetId) ?? null;
+  const dirty = activePreset ? isDirty(settings, activePreset.body) : true;
+
+  // Last-used follows every change, debounced; the id it names may be a
+  // preset the form has since diverged from, which the row shows as Custom.
+  useEffect(() => {
+    const t = window.setTimeout(() => saveLastUsed(window.localStorage, settings, activePresetId), 300);
+    return () => window.clearTimeout(t);
+  }, [settings, activePresetId]);
 
   useEffect(() => {
     if (project && !projectName) setProjectName(project.name);
@@ -281,13 +314,55 @@ function ExportInner({ slug }: { slug: string }) {
   // Switching mode changes which stages are exportable, so drop the
   // selection and let the pre-select effect refill it from the new
   // eligible set rather than leaving the previous mode's picks behind.
-  const selectMode = useCallback((next: ExportMode) => {
-    setMode(next);
-    setSelection(new Set());
-    setResult(null);
-    setGridResult(null);
-    setQueuedNote(null);
-  }, []);
+  const selectMode = useCallback(
+    (next: ExportMode) => {
+      patch({ mode: next });
+      setSelection(new Set());
+      setResult(null);
+      setGridResult(null);
+      setQueuedNote(null);
+    },
+    [patch],
+  );
+
+  function applyPreset(id: string) {
+    const p = presets.find((x) => x.preset_id === id);
+    if (!p) return;
+    const nextMode = p.body.mode === "compare" && !multiShooter ? mode : p.body.mode;
+    if (nextMode !== mode) selectMode(nextMode);
+    setSettings((s) => ({ ...applyBody(s, p.body), mode: nextMode }));
+    setActivePresetId(id);
+    setOpenGroups({ output: false, cut: false, look: false });
+  }
+
+  async function savePreset(id: string, name: string) {
+    try {
+      const saved = await api.putExportPreset(id, name, settingsToBody(settings));
+      setPresets((list) => {
+        const rest = list.filter((p) => p.preset_id !== saved.preset_id);
+        const own = [...rest.filter((p) => !p.builtin), saved].sort((a, b) => a.name.localeCompare(b.name));
+        return [...rest.filter((p) => p.builtin), ...own];
+      });
+      setActivePresetId(saved.preset_id);
+      setSaveSheet(null);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
+
+  async function deletePreset(id: string) {
+    const p = presets.find((x) => x.preset_id === id);
+    if (!p) return;
+    const answer = await confirm({ title: `Delete preset "${p.name}"?`, confirmLabel: "Delete" });
+    if (!answer.confirmed) return;
+    try {
+      await api.deleteExportPreset(id);
+      setPresets((list) => list.filter((x) => x.preset_id !== id));
+      if (activePresetId === id) setActivePresetId(null);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    }
+  }
 
   // Selectors the server's ``camera_select.validate_camera`` will accept:
   // mounts tagged on this shooter's videos, plus whichever roles are
@@ -339,14 +414,6 @@ function ExportInner({ slug }: { slug: string }) {
     });
   }, [hosted, overview, orderedSelection]);
 
-  function selectPreset(next: PaddingPreset) {
-    setPreset(next);
-    if (next !== "custom") {
-      setHeadPad(PADDING_PRESETS[next].head);
-      setTailPad(PADDING_PRESETS[next].tail);
-    }
-  }
-
   const cardSeconds =
     mode === "trims"
       ? 0
@@ -361,7 +428,7 @@ function ExportInner({ slug }: { slug: string }) {
     head: mode === "single" ? headPad : (project?.trim_pre_buffer_seconds ?? 0),
     tail: mode === "single" ? tailPad : (project?.trim_post_buffer_seconds ?? 0),
     transitionKind,
-    transitionSeconds: transitionDurationSeconds,
+    transitionSeconds,
     cardSeconds,
   });
 
@@ -474,7 +541,7 @@ function ExportInner({ slug }: { slug: string }) {
         ...camExportFields(camOptions),
         output_format: outputFormat,
         transition_kind: transitionKind,
-        transition_duration_seconds: transitionDurationSeconds,
+        transition_duration_seconds: transitionSeconds,
         ...matchExportFields(renderOptions, outputFormat),
         intro_path: undefined,
         outro_path: undefined,
@@ -621,7 +688,7 @@ function ExportInner({ slug }: { slug: string }) {
     head: headPad,
     tail: tailPad,
     transitionKind,
-    transitionSeconds: transitionDurationSeconds,
+    transitionSeconds,
     cards: describeRenderOptions(renderOptions, compare ? "grid" : "single", compare ? "mp4" : outputFormat),
     overlay: compare ? gridOverlay : includeOverlay,
     cams: mode === "single" && secondaryCount > 0 ? (camOptions.includeSecondaries ? secondaryCount : 0) : null,
@@ -631,6 +698,7 @@ function ExportInner({ slug }: { slug: string }) {
     canvas: canvas.label,
     bare: bareSelected,
   });
+  const summaryCtx = { secondaryCount };
   const primaryLabel = trimsOnly ? "Export trims" : compare ? "Render grid" : "Export bundle";
   const busyLabel = trimsOnly ? "Queueing..." : compare ? "Rendering..." : "Exporting...";
   const bundleName = projectName || project?.name || "";
@@ -664,117 +732,18 @@ function ExportInner({ slug }: { slug: string }) {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex min-w-0 flex-col gap-3">
-          {/* Output mode */}
-          <Section
-            label="Output"
-            aside={
-              <span className="text-sm text-muted">
-                {trimsOnly
-                  ? "one lossless trim per stage"
-                  : compare
-                    ? "one MP4, every shooter beep-aligned per stage"
-                    : "FCPXML + CSV + report"}
-              </span>
-            }
-            control={
-              <Segmented<ExportMode>
-                label="Output mode"
-                value={mode}
-                onChange={selectMode}
-                options={[
-                  { value: "single", label: "Timeline" },
-                  { value: "trims", label: "Trims only" },
-                  {
-                    value: "compare",
-                    label: "Compare grid",
-                    disabled: !multiShooter,
-                    title: "The compare grid needs two or more shooters on the match",
-                  },
-                ]}
-              />
-            }
-          >
-            {trimsOnly ? (
-              <Field
-                label="Grid camera"
-                help="Which of this shooter's cameras the compare grid uses. Saved on the shooter; the trims cover every camera on the stage."
-              >
-                <SelectField
-                  label="Camera for the grid"
-                  value={project?.compare_camera ?? ""}
-                  onChange={(v) => void changeCamera(v)}
-                  options={cameraOptions}
-                  disabled={editDenied}
-                  title={READ_ONLY_MIRROR_MESSAGE}
-                  className="w-full max-w-xs"
-                />
-              </Field>
-            ) : null}
-            {compare ? (
-              <>
-                <Field label="Reference" help="Sets the frame rate from this shooter's footage; every shooter is in the mixed track.">
-                  <Segmented
-                    label="Reference shooter"
-                    value={audioFrom}
-                    onChange={setAudioFrom}
-                    options={shooters.map((s) => ({
-                      value: s.slug,
-                      label: s.name,
-                      tick: s.slug === audioFrom ? ("movement" as const) : undefined,
-                    }))}
-                  />
-                </Field>
-                <Field label="Canvas" help="1080p renders faster.">
-                  <Segmented
-                    label="Canvas"
-                    value={canvas.id}
-                    onChange={(id) => {
-                      const next = CANVAS_CHOICES.find((c) => c.id === id);
-                      if (next) setCanvas(next);
-                    }}
-                    options={CANVAS_CHOICES.map((c) => ({ value: c.id, label: c.label }))}
-                  />
-                </Field>
-                <Field
-                  label="Overlay"
-                  help={
-                    gridOverlay
-                      ? "Per-tile shot counter and split with the running clock; the summary holds each tile's own stage figures after its last shot, 0 is off."
-                      : "Off: a faster render with no counters on the tiles."
-                  }
-                >
-                  <div className="flex flex-wrap items-center gap-3">
-                    <Segmented<"off" | "on">
-                      label="Grid overlay"
-                      value={gridOverlay ? "on" : "off"}
-                      onChange={(v) => setGridOverlay(v === "on")}
-                      options={[
-                        { value: "off", label: "None" },
-                        { value: "on", label: "Counter + splits" },
-                      ]}
-                    />
-                    {gridOverlay ? (
-                      <Seconds
-                        id="export-grid-hold"
-                        label="Grid summary hold seconds"
-                        value={gridHoldSeconds}
-                        min={0}
-                        disabled={busy}
-                        onChange={setGridHoldSeconds}
-                      />
-                    ) : null}
-                  </div>
-                </Field>
-                <RenderOptionsPanel
-                  value={renderOptions}
-                  onChange={setRenderOptions}
-                  surface="grid"
-                  outputFormat="mp4"
-                  busy={busy}
-                />
-              </>
-            ) : null}
-          </Section>
+          <PresetRow
+            presets={presets}
+            activeId={activePresetId}
+            dirty={dirty}
+            busy={busy}
+            onApply={applyPreset}
+            onSave={(id) => void savePreset(id, activePreset?.name ?? "")}
+            onSaveAs={() => setSaveSheet({ mode: "saveAs" })}
+            onRename={(id) => setSaveSheet({ mode: "rename", id })}
+            onDelete={(id) => void deletePreset(id)}
+          />
+
 
           {/* Stages */}
           <Section
@@ -794,164 +763,86 @@ function ExportInner({ slug }: { slug: string }) {
             )}
           </Section>
 
-          {/* Options: only a timeline has a cut to shape. */}
-          {mode === "single" ? (
-            <Section label="Options">
-              <Field label="Format" help="The splits CSV and the text report are always written alongside.">
-                <SelectField
-                  label="Timeline format"
-                  value={outputFormat}
-                  onChange={setOutputFormat}
-                  options={[
-                    { value: "fcpxml", label: "FCPXML 1.10 (Final Cut Pro)" },
-                    { value: "fcp7xml", label: "FCP 7 XML (Premiere / Resolve)" },
-                    { value: "mp4", label: "MP4 (rendered)" },
-                  ]}
-                  className="w-full max-w-xs"
-                />
-              </Field>
-              <Field
-                label="Padding"
-                help={`${headPad.toFixed(1)} s before the beep · ${tailPad.toFixed(1)} s after the last shot`}
-              >
-                <div className="flex flex-wrap items-center gap-3">
-                  <Segmented<PaddingPreset>
-                    label="Trim padding"
-                    value={preset}
-                    onChange={selectPreset}
-                    options={[
-                      ...(Object.keys(PADDING_PRESETS) as Array<Exclude<PaddingPreset, "custom">>).map((k) => ({
-                        value: k as PaddingPreset,
-                        label: PADDING_PRESETS[k].label,
-                      })),
-                      { value: "custom" as PaddingPreset, label: "Custom" },
-                    ]}
-                  />
-                  {preset === "custom" ? (
-                    <>
-                      <NumInput label="Before beep (s)" value={headPad} step={0.1} min={0} onChange={setHeadPad} />
-                      <NumInput label="After last shot (s)" value={tailPad} step={0.1} min={0} onChange={setTailPad} />
-                    </>
-                  ) : null}
-                </div>
-              </Field>
-              <Field label="Transition">
-                <div className="flex flex-wrap items-center gap-3">
-                  <Segmented<TransitionKind>
-                    label="Transition"
-                    value={transitionKind}
-                    onChange={setTransitionKind}
-                    options={TRANSITIONS}
-                  />
-                  {transitionKind !== "none" ? (
-                    <NumInput
-                      label="Duration (s)"
-                      value={transitionDurationSeconds}
-                      step={0.1}
-                      min={0.1}
-                      onChange={setTransitionDurationSeconds}
-                    />
-                  ) : null}
-                </div>
-              </Field>
-              <RenderOptionsPanel
-                value={renderOptions}
-                onChange={setRenderOptions}
-                surface="single"
-                outputFormat={outputFormat}
-                busy={busy}
-                summaryHint={bareHint("summary", bareSelected)}
+
+          {/* Output: the mode control stays in the header so switching is
+              one click while the group is folded. */}
+          <Section
+            label="Output"
+            control={
+              <Segmented<ExportMode>
+                label="Output mode"
+                value={mode}
+                onChange={selectMode}
+                options={[
+                  { value: "single", label: "Timeline" },
+                  { value: "trims", label: "Trims only" },
+                  {
+                    value: "compare",
+                    label: "Compare grid",
+                    disabled: !multiShooter,
+                    title: "The compare grid needs two or more shooters on the match",
+                  },
+                ]}
               />
-              <Field
-                label="Overlay"
-                help={
-                  includeOverlay
-                    ? `Burned-in shot counter and splits; a slower render. The overlay is a transparent MOV, so the codec has to carry alpha: Auto picks HEVC on macOS and ProRes 4444 elsewhere.${bareHint("overlay", bareSelected) ? ` ${bareHint("overlay", bareSelected)}` : ""}`
-                    : "Off: a faster export; the FCPXML still carries shot markers."
-                }
-              >
-                <div className="flex flex-wrap items-center gap-3">
-                  <Segmented<"off" | "on">
-                    label="Overlay"
-                    value={includeOverlay ? "on" : "off"}
-                    onChange={(v) => setIncludeOverlay(v === "on")}
-                    options={[
-                      { value: "off", label: "None" },
-                      { value: "on", label: "Shot counter + splits" },
-                    ]}
-                  />
-                  {includeOverlay ? (
-                    <SelectField
-                      label="Overlay codec"
-                      value={overlayCodec}
-                      onChange={setOverlayCodec}
-                      options={[
-                        { value: "auto", label: "Auto" },
-                        { value: "hevc-alpha", label: "HEVC + alpha (macOS)" },
-                        { value: "prores-4444", label: "ProRes 4444" },
-                      ]}
-                      className="w-56"
-                    />
-                  ) : null}
-                </div>
-              </Field>
-              <CamOptionsPanel value={camOptions} onChange={setCamOptions} secondaryCount={secondaryCount} busy={busy} />
-              {renderedMp4 ? (
-                <Field
-                  label="YouTube"
-                  help={
-                    youtube
-                      ? `Encodes with the YouTube preset and writes the title, description with chapters and tags (paste-ready), per-shot captions (.srt) and a thumbnail beside the video.${bareHint("captions", bareSelected) ? ` ${bareHint("captions", bareSelected)}` : ""}`
-                      : "Off: the default encode, no upload sidecar."
-                  }
-                >
-                  {/* One column: the Field's control slot is a plain block,
-                      and an inline-flex Segmented next to an inline-block
-                      textarea otherwise share a line. */}
-                  <div className="flex flex-col items-start gap-2.5">
-                    <Segmented<"off" | "on">
-                      label="YouTube"
-                      value={youtube ? "on" : "off"}
-                      onChange={(v) => setYoutube(v === "on")}
-                      options={[
-                        { value: "off", label: "Off" },
-                        { value: "on", label: "Preset + sidecar" },
-                      ]}
-                    />
-                    {youtube ? (
-                      <textarea
-                        id="export-description-lead"
-                        aria-label="Description lead"
-                        rows={2}
-                        className={cn(inputClass, "max-w-md")}
-                        placeholder="What the video is, above the chapter list: division, camera, the day"
-                        value={descriptionLead}
-                        onChange={(e) => setDescriptionLead(e.target.value)}
-                      />
-                    ) : null}
-                    {!hosted ? (
-                      <YouTubeConnect
-                        settings={youtubeSettings}
-                        onSettingsChange={() => void reloadYouTube()}
-                        options={uploadOptions}
-                        onOptionsChange={setUploadOptions}
-                        matchName={projectName || project?.name || ""}
-                        showUploadControl={renderedMp4 && youtube}
-                        busy={busy}
-                      />
-                    ) : null}
-                  </div>
-                </Field>
-              ) : null}
-              <Field label="Bundle name" htmlFor="export-bundle-name" help={project?.exports_dir ?? "exports/"}>
-                <input
-                  id="export-bundle-name"
-                  type="text"
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  className={cn(inputClass, "max-w-xs font-mono text-sm")}
-                />
-              </Field>
+            }
+            summary={groupSummary(settings, "output", summaryCtx)}
+            open={openGroups.output}
+            onToggle={() => toggleGroup("output")}
+          >
+            <OutputGroup
+              settings={settings}
+              patch={patch}
+              busy={busy}
+              editDenied={editDenied}
+              shooters={shooters}
+              audioFrom={audioFrom}
+              onAudioFrom={setAudioFrom}
+              cameraOptions={cameraOptions}
+              compareCamera={project?.compare_camera ?? ""}
+              onChangeCamera={(v) => void changeCamera(v)}
+              secondaryCount={secondaryCount}
+              bareSelected={bareSelected}
+            />
+          </Section>
+
+          {mode === "single" ? (
+            <Section
+              label="Cut"
+              summary={groupSummary(settings, "cut", summaryCtx)}
+              open={openGroups.cut}
+              onToggle={() => toggleGroup("cut")}
+            >
+              <CutGroup settings={settings} patch={patch} busy={busy} />
+            </Section>
+          ) : null}
+
+          {mode !== "trims" ? (
+            <Section
+              label="Look"
+              summary={groupSummary(settings, "look", summaryCtx)}
+              open={openGroups.look}
+              onToggle={() => toggleGroup("look")}
+            >
+              <LookGroup settings={settings} patch={patch} busy={busy} bareSelected={bareSelected} />
+            </Section>
+          ) : null}
+
+          {mode === "single" ? (
+            <Section label="Details">
+              <DetailsGroup
+                settings={settings}
+                patch={patch}
+                busy={busy}
+                hosted={hosted}
+                projectName={projectName}
+                onProjectName={setProjectName}
+                exportsDir={project?.exports_dir ?? null}
+                descriptionLead={descriptionLead}
+                onDescriptionLead={setDescriptionLead}
+                youtubeSettings={youtubeSettings}
+                onYouTubeSettingsChange={() => void reloadYouTube()}
+                matchName={projectName || project?.name || ""}
+              />
             </Section>
           ) : null}
 
@@ -1106,6 +997,18 @@ function ExportInner({ slug }: { slug: string }) {
         </aside>
       </div>
 
+      {saveSheet ? (
+        <SavePresetSheet
+          key={saveSheet.mode + (saveSheet.id ?? "")}
+          open
+          title={saveSheet.mode === "rename" ? (dirty ? "Rename and save preset" : "Rename preset") : "Save preset"}
+          initialName={
+            saveSheet.mode === "rename" ? (presets.find((p) => p.preset_id === saveSheet.id)?.name ?? "") : ""
+          }
+          onClose={() => setSaveSheet(null)}
+          onSubmit={(name) => void savePreset(saveSheet.mode === "rename" ? (saveSheet.id ?? NEW_PRESET_ID) : NEW_PRESET_ID, name)}
+        />
+      ) : null}
       <CleanupDialog
         slug={slug}
         open={cleanupOpen}
@@ -1172,36 +1075,5 @@ function ResultPanel({
         </button>
       )}
     </div>
-  );
-}
-
-function NumInput({
-  label,
-  value,
-  step,
-  min,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  step?: number;
-  min?: number;
-  onChange: (v: number) => void;
-}) {
-  return (
-    <label className="inline-flex items-center gap-2 text-sm text-muted">
-      {label}
-      <input
-        type="number"
-        value={value}
-        step={step}
-        min={min}
-        onChange={(e) => {
-          const n = parseFloat(e.target.value);
-          if (Number.isFinite(n)) onChange(n);
-        }}
-        className={cn(inputClass, "w-20 font-mono text-sm")}
-      />
-    </label>
   );
 }
