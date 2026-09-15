@@ -53,6 +53,7 @@ import { camExportFields, DEFAULT_CAM_OPTIONS, syncedSecondaryCount, type CamOpt
 import { DEFAULT_UPLOAD_OPTIONS, rowUploadOptions, type UploadFormOptions } from "@/lib/youtubeRows";
 import { hostedDownloads as buildHostedDownloads } from "@/lib/exportDownloads";
 import {
+  bareHint,
   estimateDuration,
   exportRows,
   formatDuration,
@@ -609,6 +610,9 @@ function ExportInner({ slug }: { slug: string }) {
 
   const shooterName = project?.competitor_name ?? shooters.find((s) => s.slug === slug)?.name ?? null;
   const totalStages = rows.length;
+  // Selected bundle stages exporting without audited shots: the rail
+  // counts them and the shot-dependent options say what they lose.
+  const bareSelected = rows.filter((r) => r.bare && selection.has(r.stage.stage_number)).length;
   const lines = summaryLines({
     mode,
     selected: orderedSelection.length,
@@ -624,7 +628,7 @@ function ExportInner({ slug }: { slug: string }) {
     gridCamera: project?.compare_camera ?? null,
     reference: shooters.find((s) => s.slug === audioFrom)?.name ?? null,
     canvas: canvas.label,
-    bare: rows.filter((r) => r.bare && selection.has(r.stage.stage_number)).length,
+    bare: bareSelected,
   });
   const primaryLabel = trimsOnly ? "Export trims" : compare ? "Render grid" : "Export bundle";
   const busyLabel = trimsOnly ? "Queueing..." : compare ? "Rendering..." : "Exporting...";
@@ -855,12 +859,13 @@ function ExportInner({ slug }: { slug: string }) {
                 surface="single"
                 outputFormat={outputFormat}
                 busy={busy}
+                summaryHint={bareHint("summary", bareSelected)}
               />
               <Field
                 label="Overlay"
                 help={
                   includeOverlay
-                    ? "Burned-in shot counter and splits; a slower render. The overlay is a transparent MOV, so the codec has to carry alpha: Auto picks HEVC on macOS and ProRes 4444 elsewhere."
+                    ? `Burned-in shot counter and splits; a slower render. The overlay is a transparent MOV, so the codec has to carry alpha: Auto picks HEVC on macOS and ProRes 4444 elsewhere.${bareHint("overlay", bareSelected) ? ` ${bareHint("overlay", bareSelected)}` : ""}`
                     : "Off: a faster export; the FCPXML still carries shot markers."
                 }
               >
@@ -895,7 +900,7 @@ function ExportInner({ slug }: { slug: string }) {
                   label="YouTube"
                   help={
                     youtube
-                      ? "Encodes with the YouTube preset and writes the title, description with chapters and tags (paste-ready), per-shot captions (.srt) and a thumbnail beside the video."
+                      ? `Encodes with the YouTube preset and writes the title, description with chapters and tags (paste-ready), per-shot captions (.srt) and a thumbnail beside the video.${bareHint("captions", bareSelected) ? ` ${bareHint("captions", bareSelected)}` : ""}`
                       : "Off: the default encode, no upload sidecar."
                   }
                 >

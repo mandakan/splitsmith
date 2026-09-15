@@ -386,8 +386,10 @@ not" and its fix are worded, and it is what keeps hosted copy free of
 drives; the bundle gate is ``ready_to_export_bare`` (a reviewed beep and
 a stage time), not ``ready_to_export`` (audited shots): a bare stage
 renders with its chapter and cards and loses only the shot-dependent
-extras, which the row's "No splits" chip and the rail's "Splits" line
-say; the compare grid is the page's third mode (``pages/
+extras, which the row's "No splits" chip, the rail's "Splits" line and
+``bareHint`` under the Overlay, Stage summary and YouTube fields say;
+its summary hold is the scoring-only card (``summary_groups`` draws the
+Scoring band from the stage time and scorecard and no Splits band); the compare grid is the page's third mode (``pages/
 matchExportModel.ts`` still owns the payload and the partial-result
 summary); Delete match lives in the summary rail's footer. Account
 (``pages/Account.tsx``, ``components/account/*``) and every settings

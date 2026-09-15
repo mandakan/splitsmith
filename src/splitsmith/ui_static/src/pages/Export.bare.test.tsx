@@ -3,7 +3,7 @@
  * bundle mode, marked "No splits" on its row and counted in the rail;
  * a stage whose beep is not reviewed stays blocked with the audit as fix.
  */
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -247,5 +247,27 @@ describe("Export without splits", () => {
     expect(screen.getByText("No confirmed beep")).toBeInTheDocument();
     expect(screen.queryByText("No splits")).toBeNull();
     expect(screen.getByText("1 / 1")).toBeInTheDocument();
+  });
+});
+
+describe("Export bare-stage hints", () => {
+  it("each shot-dependent option says what it loses, only while a bare stage is selected and it is on", async () => {
+    vi.mocked(api.getExportOverview).mockResolvedValue({ match_exports: [], stages: [ready(1), bare(2)] });
+    const { user } = await renderPage();
+    // Overlay off: no hint.
+    expect(screen.queryByText(/Skipped on 1 stage without splits/)).toBeNull();
+    await user.click(within(screen.getByRole("group", { name: "Overlay" })).getByRole("button", { name: "Shot counter + splits" }));
+    expect(screen.getByText(/Skipped on 1 stage without splits/)).toBeInTheDocument();
+    // MP4 unlocks the summary hold and the YouTube kit.
+    await user.selectOptions(screen.getByLabelText("Timeline format"), "mp4");
+    await user.clear(screen.getByLabelText("Summary hold seconds"));
+    await user.type(screen.getByLabelText("Summary hold seconds"), "2");
+    expect(screen.getByText(/Time and scoring only on 1 stage without splits/)).toBeInTheDocument();
+    await user.click(within(screen.getByRole("group", { name: "YouTube" })).getByRole("button", { name: "Preset + sidecar" }));
+    expect(screen.getByText(/Captions cover the audited stages only; 1 stage has none/)).toBeInTheDocument();
+    // Deselect the bare stage: every hint goes.
+    await user.click(screen.getByRole("checkbox", { name: /Stage 2/i }));
+    expect(screen.queryByText(/without splits/)).toBeNull();
+    expect(screen.queryByText(/Captions cover/)).toBeNull();
   });
 });
