@@ -23,7 +23,13 @@
  * sits immediately to its left saying the same word; tightening padding
  * and gaps to phone-appropriate values returns another 56. The chips
  * spend the rest -- see their own notes for what each drops.
+ *
+ * The brand is a link to the match picker. The shell-less routes
+ * (/account, /admin/workers) mount nothing but this bar, so without it
+ * they have no way back into the app except the browser's own.
  */
+
+import { Link } from "react-router-dom";
 
 import { AccountChip } from "@/components/AccountChip";
 import { HostedAccountChip } from "@/components/account/HostedAccountChip";
@@ -48,12 +54,18 @@ export function GlobalBar({ onCrumbSlot }: GlobalBarProps = {}) {
       aria-label="Global"
       className={cn("flex items-center py-3", isMobile ? "gap-2 px-4" : "gap-4 px-7")}
     >
-      <Brand variant="compact" className="shrink-0" />
-      {isMobile ? null : (
-        <span className="font-display text-base font-bold uppercase tracking-tight text-ink">
-          Splitsmith
-        </span>
-      )}
+      <Link
+        to="/pick"
+        aria-label="Splitsmith"
+        className={cn("flex shrink-0 items-center rounded-md", isMobile ? "gap-2" : "gap-4")}
+      >
+        <Brand variant="compact" className="shrink-0" />
+        {isMobile ? null : (
+          <span className="font-display text-base font-bold uppercase tracking-tight text-ink">
+            Splitsmith
+          </span>
+        )}
+      </Link>
       {/* Breadcrumb slot doubles as the spacer; on mobile there is no
           breadcrumb and the plain spacer stays. */}
       {isMobile ? (

@@ -4,7 +4,10 @@
  * as CPU; a worker behind the server version gets the "update available"
  * affordance while a current one does not.
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactElement } from "react";
+
+import { fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WorkerListResponse, WorkerView } from "@/lib/api";
@@ -23,6 +26,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       ...actual.api,
       adminListWorkers: vi.fn(),
       adminUpdateWorker: vi.fn(),
+      adminCreateWorker: vi.fn(),
     },
   };
 });
@@ -47,6 +51,11 @@ function worker(over: Partial<WorkerView> = {}): WorkerView {
   };
 }
 
+/** The page carries a PageHeader back link, so it needs a router. */
+function render(ui: ReactElement) {
+  return rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
+}
+
 function listResp(
   workers: WorkerView[],
   server_version = "0.25.0",
@@ -57,6 +66,12 @@ function listResp(
 describe("AdminWorkers", () => {
   beforeEach(() => {
     vi.mocked(api.adminListWorkers).mockReset();
+  });
+
+  it("links back to the match picker", async () => {
+    vi.mocked(api.adminListWorkers).mockResolvedValue(listResp([]));
+    render(<AdminWorkers />);
+    expect(await screen.findByRole("link", { name: /matches/i })).toHaveAttribute("href", "/pick");
   });
 
   it("renders GPU / NVENC / CUDA capability badges", async () => {
@@ -131,6 +146,30 @@ describe("AdminWorkers", () => {
     render(<AdminWorkers />);
     expect(await screen.findByText("unknown")).toBeInTheDocument();
     expect(screen.queryByTitle(/update available/i)).not.toBeInTheDocument();
+  });
+
+  it("registers a worker from the sheet and shows the once-only token", async () => {
+    vi.mocked(api.adminListWorkers).mockResolvedValue(listResp([]));
+    vi.mocked(api.adminCreateWorker).mockResolvedValue({
+      worker: worker({ id: "w2", name: "garage-box", status: "pending", registered: false }),
+      registration_token: "tok_once",
+      expires_at: new Date().toISOString(),
+      docker_command: "docker run splitsmith-agent",
+    });
+
+    render(<AdminWorkers />);
+    fireEvent.click(await screen.findByRole("button", { name: /register worker/i }));
+    fireEvent.change(screen.getByLabelText(/^name$/i), { target: { value: "garage-box" } });
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+
+    expect(await screen.findByText("tok_once")).toBeInTheDocument();
+    expect(screen.getByText("docker run splitsmith-agent")).toBeInTheDocument();
+    expect(api.adminCreateWorker).toHaveBeenCalledWith("garage-box", 10);
+
+    // Done closes the sheet and refetches the roster so the new row shows.
+    fireEvent.click(screen.getByRole("button", { name: /^done$/i }));
+    await waitFor(() => expect(api.adminListWorkers).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("applies the WorkerView returned by the enabled toggle without refetching the list", async () => {
