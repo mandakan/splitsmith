@@ -491,6 +491,17 @@ def export(
     youtube_privacy: str = typer.Option(
         "unlisted", "--youtube-privacy", help="Privacy for --youtube-upload: unlisted, private or public."
     ),
+    youtube_playlist: str | None = typer.Option(
+        None, "--youtube-playlist", help="Add the upload to this playlist (created if missing)."
+    ),
+    youtube_publish_at: str | None = typer.Option(
+        None,
+        "--youtube-publish-at",
+        help="Schedule the upload's publish time (ISO, local time); it stays private until then.",
+    ),
+    youtube_no_notify: bool = typer.Option(
+        False, "--youtube-no-notify", help="Do not notify subscribers when the upload goes public."
+    ),
     overlay_theme: str = typer.Option(
         "splitsmith", "--theme", help="Overlay / card theme: 'splitsmith' or 'clean'."
     ),
@@ -528,18 +539,23 @@ def export(
         raise typer.Exit(code=2)
     yt_client: Any = None
     yt_conn = None
+    yt_options: Any = None
     if youtube_upload:
         # Everything that can refuse the upload is checked before a
         # multi-minute render, not after it.
         from .youtube import oauth as yt_oauth
-        from .youtube.cli import open_client
+        from .youtube.cli import build_options, open_client
 
         if output_format != "mp4":
             console.print("[red]Error:[/] --youtube-upload needs --format mp4.")
             raise typer.Exit(code=2)
-        if youtube_privacy not in ("unlisted", "private", "public"):
-            console.print("[red]Error:[/] --youtube-privacy must be unlisted, private or public.")
-            raise typer.Exit(code=2)
+        yt_options = build_options(
+            privacy=youtube_privacy,
+            playlist=youtube_playlist,
+            publish_at=youtube_publish_at,
+            no_notify=youtube_no_notify,
+            flag_prefix="--youtube-",
+        )
         try:
             yt_client, yt_conn = open_client()
         except yt_oauth.NotConnectedError as exc:
@@ -682,7 +698,7 @@ def export(
                 written,
                 client=yt_client,
                 channel_title=yt_conn.channel_title,
-                privacy=youtube_privacy,
+                options=yt_options,
                 again=True,
             )
         except yt_oauth.YouTubeError as exc:
@@ -691,16 +707,12 @@ def export(
         report_upload(record)
 
 
-def _run_youtube_upload(mp4: Path, *, client: Any, channel_title: str, privacy: str, again: bool) -> Any:
+def _run_youtube_upload(mp4: Path, *, client: Any, channel_title: str, options: Any, again: bool) -> Any:
     """Indirection so the export test can stub the upload without an HTTP client."""
     from .youtube.cli import run_upload_with_progress
 
     return run_upload_with_progress(
-        mp4,
-        client=client,
-        channel_title=channel_title,
-        privacy=privacy,  # type: ignore[arg-type]
-        again=again,
+        mp4, client=client, channel_title=channel_title, options=options, again=again
     )
 
 

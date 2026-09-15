@@ -114,12 +114,33 @@ def _seed_export(tmp_path: Path) -> Path:
 class FakeClient:
     def __init__(self) -> None:
         self.privacy: str | None = None
+        self.metadata: yt.VideoMetadata | None = None
+        self.notify: bool | None = None
+        self.playlists: dict[str, str] = {}
+        self.added: list[tuple[str, str]] = []
 
     def start_resumable_upload(
-        self, metadata: yt.VideoMetadata, *, size: int, content_type: str = "video/mp4"
+        self,
+        metadata: yt.VideoMetadata,
+        *,
+        size: int,
+        content_type: str = "video/mp4",
+        notify_subscribers: bool = True,
     ) -> str:
         self.privacy = metadata.privacy
+        self.metadata = metadata
+        self.notify = notify_subscribers
         return "s"
+
+    def find_playlist(self, title: str) -> str | None:
+        return self.playlists.get(title)
+
+    def create_playlist(self, title: str, *, privacy: str) -> str:
+        self.playlists[title] = "PL1"
+        return "PL1"
+
+    def add_to_playlist(self, playlist_id: str, video_id: str) -> None:
+        self.added.append((playlist_id, video_id))
 
     def upload_bytes(
         self, session_url: str, path: Path, *, progress: Any = None, check_cancel: Any = None, **kw: Any
@@ -236,3 +257,49 @@ def test_upload_notes_are_printed(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     result = runner.invoke(app, ["youtube", "upload", str(mp4)])
     assert result.exit_code == 0, result.output
     assert "thumbnail not set" in strip_ansi(result.output)
+
+
+# --- playlist, schedule, notify ---------------------------------------------
+
+
+def test_upload_playlist_publish_at_and_no_notify(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from datetime import UTC
+
+    fake = _connected(monkeypatch)
+    mp4 = _seed_export(tmp_path)
+    result = runner.invoke(
+        app,
+        [
+            "youtube",
+            "upload",
+            str(mp4),
+            "--privacy",
+            "public",
+            "--playlist",
+            "Bromma 2026",
+            "--publish-at",
+            "2026-09-20T18:00",
+            "--no-notify",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    text = strip_ansi(result.output)
+    assert fake.added == [("PL1", "vid9")]
+    assert fake.notify is False
+    assert fake.metadata is not None and fake.metadata.publish_at is not None
+    # naive input is local time; the metadata carries an aware datetime
+    local = fake.metadata.publish_at
+    assert local.tzinfo is not None
+    assert local.astimezone(UTC).strftime("%H:%M") != ""  # aware, convertible
+    assert "private until" in text.lower() or "scheduled" in text.lower()
+    rec = youtube_sidecar.load_sidecar(youtube_sidecar.sidecar_path_for(mp4)).upload
+    assert rec is not None and rec.playlist_title == "Bromma 2026" and rec.notify_subscribers is False
+
+
+def test_upload_rejects_an_unparseable_publish_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _connected(monkeypatch)
+    result = runner.invoke(
+        app, ["youtube", "upload", str(_seed_export(tmp_path)), "--publish-at", "next tuesday"]
+    )
+    assert result.exit_code == 2
+    assert "publish-at" in strip_ansi(result.output)

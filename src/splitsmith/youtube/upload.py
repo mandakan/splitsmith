@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, Protocol
 
+from pydantic import BaseModel
+
 from .. import youtube_sidecar
 from .client import UploadFailedError, VideoMetadata, YouTubeClient, default_http
 from .oauth import (
@@ -31,6 +33,23 @@ from .oauth import (
 )
 
 Privacy = Literal["unlisted", "private", "public"]
+
+
+class UploadOptions(BaseModel):
+    """What the user chose beside the file: privacy, a scheduled publish
+    time (which YouTube only allows on a private video, so it wins over
+    ``privacy``), whether subscribers are notified, and a playlist by
+    title (found among the channel's own, created if missing)."""
+
+    privacy: Privacy = "unlisted"
+    publish_at: datetime | None = None
+    notify_subscribers: bool = True
+    playlist: str | None = None
+
+    @property
+    def effective_privacy(self) -> Privacy:
+        return "private" if self.publish_at is not None else self.privacy
+
 
 #: YouTube's fixed category ids. The sidecar stores the name so it stays
 #: readable; the API wants the id.
@@ -77,7 +96,12 @@ class Uploader(Protocol):
     """The slice of :class:`client.YouTubeClient` this module drives."""
 
     def start_resumable_upload(
-        self, metadata: VideoMetadata, *, size: int, content_type: str = "video/mp4"
+        self,
+        metadata: VideoMetadata,
+        *,
+        size: int,
+        content_type: str = "video/mp4",
+        notify_subscribers: bool = True,
     ) -> str: ...
 
     def upload_bytes(
@@ -95,12 +119,18 @@ class Uploader(Protocol):
 
     def set_thumbnail(self, video_id: str, jpg_path: Path) -> None: ...
 
+    def find_playlist(self, title: str) -> str | None: ...
+
+    def create_playlist(self, title: str, *, privacy: str) -> str: ...
+
+    def add_to_playlist(self, playlist_id: str, video_id: str) -> None: ...
+
 
 def upload_export(
     mp4: Path,
     *,
     client: Uploader,
-    privacy: Privacy = "unlisted",
+    options: UploadOptions | None = None,
     channel_title: str = "",
     again: bool = False,
     progress: Callable[[int, int], None] | None = None,
@@ -111,8 +141,11 @@ def upload_export(
     Captions (``<stem>.srt``) and the thumbnail (``<stem>-thumbnail.jpg``)
     are sent when the files exist. Either failing is a note on the
     record, not a failure: the video is up, and a channel without phone
-    verification cannot take a custom thumbnail at all.
+    verification cannot take a custom thumbnail at all. The playlist step
+    (``options.playlist``) is the same kind of note.
     """
+    options = options or UploadOptions()
+    privacy = options.effective_privacy
     sidecar_path = youtube_sidecar.sidecar_path_for(mp4)
     try:
         sidecar = youtube_sidecar.load_sidecar(sidecar_path)
@@ -136,9 +169,12 @@ def upload_export(
         tags=list(sidecar.tags),
         category_id=category_id,
         privacy=privacy,
+        publish_at=options.publish_at,
     )
 
-    session = client.start_resumable_upload(metadata, size=mp4.stat().st_size)
+    session = client.start_resumable_upload(
+        metadata, size=mp4.stat().st_size, notify_subscribers=options.notify_subscribers
+    )
     video_id = client.upload_bytes(session, mp4, progress=progress, check_cancel=check_cancel)
 
     captions_uploaded = False
@@ -159,6 +195,17 @@ def upload_export(
         except YouTubeError as exc:
             notes.append(f"thumbnail not set: {exc}")
 
+    playlist_id: str | None = None
+    if options.playlist:
+        try:
+            playlist_id = client.find_playlist(options.playlist)
+            if playlist_id is None:
+                playlist_id = client.create_playlist(options.playlist, privacy=privacy)
+            client.add_to_playlist(playlist_id, video_id)
+        except YouTubeError as exc:
+            playlist_id = None
+            notes.append(f"not added to playlist {options.playlist!r}: {exc}")
+
     record = youtube_sidecar.UploadRecord(
         video_id=video_id,
         url=f"https://youtu.be/{video_id}",
@@ -168,6 +215,10 @@ def upload_export(
         captions_uploaded=captions_uploaded,
         thumbnail_set=thumbnail_set,
         notes=notes,
+        playlist_id=playlist_id,
+        playlist_title=options.playlist if playlist_id else None,
+        publish_at=options.publish_at,
+        notify_subscribers=options.notify_subscribers,
     )
     sidecar.upload = record
     youtube_sidecar.write_sidecar(sidecar, sidecar_path)

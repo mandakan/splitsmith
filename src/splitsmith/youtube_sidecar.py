@@ -57,6 +57,12 @@ class UploadRecord(BaseModel):
     captions_uploaded: bool = False
     thumbnail_set: bool = False
     notes: list[str] = Field(default_factory=list)
+    # The convenience options the upload ran with, so a re-upload lands in
+    # the same playlist and the history can say when the video goes live.
+    playlist_id: str | None = None
+    playlist_title: str | None = None
+    publish_at: datetime | None = None
+    notify_subscribers: bool = True
 
 
 class YouTubeSidecar(BaseModel):
