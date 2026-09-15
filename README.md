@@ -22,7 +22,7 @@ Built to do two things from a single stage video: get per-shot splits for analys
 | ![beep review](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/beep-review.png) | **Beep review.** Auto-snap to the start beep on each stage; low-confidence detections land in a HITL queue. |
 | ![audit](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/audit.png) | **Audit.** Waveform + per-shot markers from the 3-voter ensemble. Click a marker to inspect votes; drag to fine-tune. |
 | ![compare](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/compare.png) | **Compare.** Multi-shooter grid, all beep-aligned to t=0. Audio from one shooter, video tiles for everyone else. |
-| ![export](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/export.png) | **Export.** Per-stage or whole-match FCPXML. Open in Final Cut Pro, M / Shift+M to navigate markers. |
+| ![export](https://raw.githubusercontent.com/mandakan/splitsmith/main/docs/screenshots/export.png) | **Export.** Pick a preset (Final Cut bundle, YouTube match video, quick trims, compare grid) or save your own. Every card and effect is a tile, previewed on your own footage before you render. FCPXML with a marker per shot, or a rendered MP4 straight to YouTube. |
 
 > Screenshots regenerate from a live `splitsmith ui` via `scripts/capture_screenshots.py`. See [Regenerating screenshots](#regenerating-screenshots) below.
 
@@ -74,7 +74,7 @@ The repo ships a real Stage 3 audio sample at `tests/fixtures/stage-shots-tallmi
 1. **Ingest** -- point at a folder of raw cam files; `splitsmith ui` auto-matches them to scoreboard stages by file timestamp.
 2. **Beep review** -- the detector finds the start beep on each stage; anything below the auto-trust threshold lands in a HITL queue.
 3. **Audit** -- the 3-voter ensemble (envelope onsets + CLAP prompts + GBDT over hand-crafted + PANN features) emits shot times; review the waveform and drag / drop markers to fix outliers.
-4. **Export** -- generate a per-stage FCPXML (markers per shot) or a multi-shooter Compare FCPXML (beep-aligned grid). Splits CSV ships alongside for the cull workflow.
+4. **Export** -- pick a preset or save your own, choose the look from a gallery previewed on your footage, and generate a per-stage or whole-match FCPXML (markers per shot), a rendered MP4, or a multi-shooter Compare grid. Splits CSV ships alongside for the cull workflow.
 
 How the pieces fit -- system architecture, the per-stage detection job chain, the stage status lifecycle, the share-link request path and the hosted data model -- is drawn in [`docs/architecture/DIAGRAMS.md`](docs/architecture/DIAGRAMS.md) (renders inline on GitHub; interactive versions alongside).
 
