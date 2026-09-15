@@ -27,31 +27,55 @@ intended, since the audit needs the app published anyway.
 One scope: `https://www.googleapis.com/auth/youtube.force-ssl`
 (sensitive, not restricted; no third-party security assessment).
 
-Justification, paste as written:
+Justification, paste as written. The "Request minimum scopes"
+reviewer checks that no narrower scope would do, so the text must argue
+that explicitly; a one-line description of the feature is rejected with
+"does not sufficiently explain why the requested OAuth scopes are
+necessary" (it was, on 2026-09-15). Add the demo video link and the
+timestamps of the consent step and the Studio view once it is recorded.
 
-> Splitsmith is a desktop and web tool for IPSC sport shooters. It reads
-> the timer beep and every shot out of a head-camera recording and turns
-> them into split times, then renders the match into a video with the
-> shot clock burned in. This scope lets the user publish that finished
-> video to their own YouTube channel from inside the app instead of
-> re-uploading it by hand in YouTube Studio. The app uses the scope for
-> exactly these calls, all on the signed-in user's own channel:
-> `videos.insert` to upload the rendered video with the title,
-> description (including chapter timestamps) and tags the app
-> generated; `captions.insert` to attach the per-shot caption track;
-> `thumbnails.set` to set the thumbnail rendered from the title page;
-> `playlists.list`, `playlists.insert` and `playlistItems.insert` so the
-> user can file the video into one of their playlists; and
-> `channels.list (mine=true)` to show which channel is connected. It
-> reads no other channel data and never acts on another user's content.
-> The refresh token is stored on the user's own machine; the user
-> disconnects with one command or from the app, and Google's third-party
-> access page revokes it at any time.
+> Splitsmith is a desktop and web application for IPSC sport shooters.
+> It detects the timer beep and each shot in a head-camera recording,
+> computes split times, and renders the match into an MP4 with the shot
+> clock burned in. The feature that needs this scope is "Upload to
+> YouTube": after rendering, the user connects their own YouTube channel
+> and the app publishes the finished video to it, instead of the user
+> re-uploading it by hand in YouTube Studio.
+>
+> An upload is more than a video file. Each upload makes these calls,
+> all against the signed-in user's own channel:
+> - videos.insert: the rendered MP4 with the title, description (chapter
+>   timestamps per stage), tags and the privacy status the user chose.
+> - captions.insert: a caption track the app generates with the split
+>   time of every shot.
+> - thumbnails.set: the thumbnail rendered from the video's title page.
+> - playlists.list (mine=true), playlists.insert, playlistItems.insert:
+>   so the user can file the video in one of their existing playlists or
+>   a new one.
+> - channels.list (mine=true): to show which channel is connected.
+>
+> Why youtube.force-ssl rather than a narrower scope: captions.insert is
+> authorized only by youtube.force-ssl (or youtubepartner, which is for
+> content owners and does not apply). youtube.upload authorizes
+> videos.insert and thumbnails.set but neither captions nor playlists;
+> youtube authorizes playlists but not captions. Requesting
+> youtube.upload plus youtube would still not authorize the caption
+> track, and would be two scopes where one suffices. youtube.force-ssl
+> is the single scope that covers every call above, so it is the minimum
+> for this feature.
+>
+> The app makes no other YouTube API calls. It never reads, lists or
+> modifies videos, comments, subscriptions or any data on other users'
+> channels; its only read calls are channels.list and playlists.list
+> with mine=true. The refresh token is stored on the user's own machine
+> and never on our servers; the user disconnects from within the app,
+> and Google's third-party access page revokes access at any time. The
+> demo video shows the consent screen, the upload, and the resulting
+> caption track, thumbnail and playlist entry in YouTube Studio.
 
-Why not `youtube.upload` alone: it does not cover `captions.insert`,
-`thumbnails.set` or the playlist calls, and the reviewer will ask why a
-second scope is requested if both are listed. `force-ssl` covers all of
-them.
+The call list is the whole of `splitsmith/youtube/client.py` plus the
+`channels.list` in `oauth.py`; if a call is added, add it here too, since
+the reviewer compares the text against the demo recording.
 
 ## Demo video (brand verification and the audit both ask for one)
 
