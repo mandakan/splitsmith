@@ -204,6 +204,11 @@ async function renderPage(shooters = [shooter("mathias", "Mathias")]) {
   return { user };
 }
 
+/** A gallery tile: the Look group's radio per slot (spec 2026-09-15 s2). */
+function tile(slot: string, name: string): HTMLElement {
+  return within(screen.getByRole("radiogroup", { name: slot })).getByRole("radio", { name });
+}
+
 function choice(group: string, label: string): HTMLElement {
   return within(screen.getByRole("group", { name: group })).getByRole("button", { name: label });
 }
@@ -232,8 +237,9 @@ describe("Export rendered-video rows", () => {
     // One synced secondary across the two stages: the cam rows show.
     expect(screen.getByText("1 synced camera")).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "YouTube" })).toBeNull();
-    expect(choice("Title page", "Opening")).toBeDisabled();
-    await user.click(choice("Stage card style", "Slate"));
+    // The match cards are MP4-only: not offered on FCPXML.
+    expect(screen.queryByRole("radiogroup", { name: "Title page" })).toBeNull();
+    await user.click(tile("Stage card", "Slate"));
     await user.click(choice("Secondary cam layout", "Picture-in-picture"));
     await user.click(screen.getByRole("button", { name: /export bundle/i }));
 
@@ -262,8 +268,10 @@ describe("Export rendered-video rows", () => {
   it("on MP4 sends the title page, the summary hold and the YouTube pair, and lists the sidecar files", async () => {
     const { user } = await renderPage();
     await user.selectOptions(screen.getByLabelText("Timeline format"), "mp4");
-    await user.click(choice("Title page", "Opening + closing"));
+    await user.click(tile("Title page", "Title page"));
+    await user.click(tile("Closing card", "Closing card"));
     await user.type(screen.getByLabelText("Title page info line"), "Production Optics");
+    await user.click(tile("Stage summary", "Summary hold"));
     await user.clear(screen.getByLabelText("Summary hold seconds"));
     await user.type(screen.getByLabelText("Summary hold seconds"), "3");
     await user.click(choice("YouTube", "Preset + sidecar"));
@@ -309,14 +317,17 @@ describe("Export rendered-video rows", () => {
     expect("title_page" in untouched).toBe(false);
     expect("overlay" in untouched).toBe(false);
 
-    await user.click(choice("Title page", "Opening"));
-    await user.click(choice("Grid overlay", "Counter + splits"));
+    await user.click(tile("Title page", "Title page"));
+    // The grid draws the title page too, so its title line is on Details here.
+    await user.type(screen.getByLabelText("Title page info line"), "Level 3");
+    await user.click(tile("Overlay", "Shot counter"));
     await user.clear(screen.getByLabelText("Grid summary hold seconds"));
     await user.type(screen.getByLabelText("Grid summary hold seconds"), "2");
     await user.click(screen.getByRole("button", { name: /render grid/i }));
     await waitFor(() => expect(api.exportCompareGrid).toHaveBeenCalledTimes(2));
     expect(vi.mocked(api.exportCompareGrid).mock.calls[1][0]).toMatchObject({
       title_page: true,
+      title_info: "Level 3",
       stage_titles: "none",
       overlay: true,
       summary_hold_seconds: 2,

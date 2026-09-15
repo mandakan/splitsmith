@@ -65,6 +65,31 @@ describe("settingsToBody / applyBody", () => {
   });
 });
 
+describe("non-finite seconds", () => {
+  it("a field being edited (NaN) is stored as its default, never as NaN", () => {
+    const s: ExportSettings = { ...DEFAULT_EXPORT_SETTINGS, transitionSeconds: Number.NaN, headPad: Number.NaN };
+    const body = settingsToBody(s);
+    expect(body.transition_seconds).toBe(0.5);
+    expect(body.head_pad_seconds).toBe(5);
+    expect(Number.isFinite(body.transition_seconds)).toBe(true);
+  });
+
+  it("a stored body with null seconds (what JSON makes of NaN) applies as the default", () => {
+    const stored = { ...settingsToBody(DEFAULT_EXPORT_SETTINGS), transition_seconds: null } as unknown as ExportPresetBody;
+    const storage = new MemoryStorage();
+    storage.setItem("splitsmith.export.lastUsed", JSON.stringify({ body: stored, presetId: null }));
+    const last = loadLastUsed(storage)!;
+    const s = applyBody(DEFAULT_EXPORT_SETTINGS, last.body);
+    expect(s.transitionSeconds).toBe(0.5);
+  });
+
+  it("the summaries never throw on a blank field", () => {
+    const blank: ExportSettings = { ...DEFAULT_EXPORT_SETTINGS, transitionKind: "zoom", transitionSeconds: Number.NaN, headPad: Number.NaN };
+    expect(groupSummary(blank, "look", { secondaryCount: 0 })).toBe("zoom 0.5 s");
+    expect(groupSummary(blank, "cut", { secondaryCount: 0 })).toBe("Full 5.0 / 5.0 s");
+  });
+});
+
 describe("isDirty", () => {
   it("is false right after apply", () => {
     expect(isDirty(applyBody(DEFAULT_EXPORT_SETTINGS, YOUTUBE), YOUTUBE)).toBe(false);
@@ -104,17 +129,20 @@ describe("groupSummary", () => {
   });
 
   it("names the cut", () => {
-    expect(groupSummary(DEFAULT_EXPORT_SETTINGS, "cut", ctx)).toBe("Full 5.0 / 5.0 s · cut");
-    expect(
-      groupSummary({ ...DEFAULT_EXPORT_SETTINGS, transitionKind: "zoom", transitionSeconds: 0.5 }, "cut", ctx),
-    ).toBe("Full 5.0 / 5.0 s · zoom 0.5 s");
+    expect(groupSummary(DEFAULT_EXPORT_SETTINGS, "cut", ctx)).toBe("Full 5.0 / 5.0 s");
+    expect(groupSummary({ ...DEFAULT_EXPORT_SETTINGS, paddingPreset: "custom", headPad: 2 }, "cut", ctx)).toBe(
+      "Custom 2.0 / 5.0 s",
+    );
   });
 
-  it("names the look", () => {
+  it("names the look, with the transition where the format draws one", () => {
     expect(groupSummary(DEFAULT_EXPORT_SETTINGS, "look", ctx)).toBe("No cards");
     expect(groupSummary(applyBody(DEFAULT_EXPORT_SETTINGS, YOUTUBE), "look", ctx)).toBe(
       "title page · slate · summary 3 s · closing · overlay",
     );
+    const zoom = { ...DEFAULT_EXPORT_SETTINGS, transitionKind: "zoom" as const, transitionSeconds: 0.5 };
+    expect(groupSummary(zoom, "look", ctx)).toBe("zoom 0.5 s");
+    expect(groupSummary({ ...zoom, outputFormat: "mp4" }, "look", ctx)).toBe("No cards");
   });
 });
 

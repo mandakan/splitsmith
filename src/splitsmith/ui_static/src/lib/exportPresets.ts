@@ -14,6 +14,7 @@ import type { ExportMode } from "@/lib/exportPlan";
 import {
   DEFAULT_RENDER_OPTIONS,
   describeRenderOptions,
+  transitionsSupported,
   type OutputFormat,
   type RenderOptions,
 } from "@/lib/renderOptions";
@@ -83,6 +84,15 @@ export const DEFAULT_EXPORT_SETTINGS: ExportSettings = {
   uploadOptions: DEFAULT_UPLOAD_OPTIONS,
 };
 
+/** A seconds field being edited is NaN, and a stored body may carry
+ *  null where JSON dropped one; neither is a number a preset or the
+ *  summary line can use. */
+function finite(n: unknown, fallback: number): number {
+  return typeof n === "number" && Number.isFinite(n) ? n : fallback;
+}
+
+const D = DEFAULT_RENDER_OPTIONS;
+
 export function settingsToBody(s: ExportSettings): ExportPresetBody {
   return {
     mode: s.mode,
@@ -93,19 +103,19 @@ export function settingsToBody(s: ExportSettings): ExportPresetBody {
     pip_layout: s.camOptions.pipLayout,
     youtube_preset: s.youtube,
     padding_preset: s.paddingPreset,
-    head_pad_seconds: s.headPad,
-    tail_pad_seconds: s.tailPad,
+    head_pad_seconds: finite(s.headPad, PADDING_PRESETS.full.head),
+    tail_pad_seconds: finite(s.tailPad, PADDING_PRESETS.full.tail),
     transition_kind: s.transitionKind,
-    transition_seconds: s.transitionSeconds,
+    transition_seconds: finite(s.transitionSeconds, 0.5),
     title_page: s.renderOptions.titlePage,
-    title_page_seconds: s.renderOptions.titlePageDurationSeconds,
+    title_page_seconds: finite(s.renderOptions.titlePageDurationSeconds, D.titlePageDurationSeconds),
     closing_card: s.renderOptions.closingCard,
     stage_card_style: s.renderOptions.stageCardStyle,
-    stage_card_seconds: s.renderOptions.stageCardDurationSeconds,
-    summary_hold_seconds: s.renderOptions.summaryHoldSeconds,
+    stage_card_seconds: finite(s.renderOptions.stageCardDurationSeconds, D.stageCardDurationSeconds),
+    summary_hold_seconds: finite(s.renderOptions.summaryHoldSeconds, D.summaryHoldSeconds),
     overlay: s.includeOverlay,
     grid_overlay: s.gridOverlay,
-    grid_hold_seconds: s.gridHoldSeconds,
+    grid_hold_seconds: finite(s.gridHoldSeconds, 0),
     upload_after_render: s.uploadOptions.enabled,
     upload_privacy: s.uploadOptions.privacy,
     upload_playlist: s.uploadOptions.playlist,
@@ -124,22 +134,22 @@ export function applyBody(s: ExportSettings, body: ExportPresetBody): ExportSett
     camOptions: { includeSecondaries: body.include_secondaries, pipLayout: body.pip_layout },
     youtube: body.youtube_preset,
     paddingPreset: body.padding_preset,
-    headPad: body.head_pad_seconds,
-    tailPad: body.tail_pad_seconds,
+    headPad: finite(body.head_pad_seconds, PADDING_PRESETS.full.head),
+    tailPad: finite(body.tail_pad_seconds, PADDING_PRESETS.full.tail),
     transitionKind: body.transition_kind,
-    transitionSeconds: body.transition_seconds,
+    transitionSeconds: finite(body.transition_seconds, 0.5),
     renderOptions: {
       ...s.renderOptions,
       titlePage: body.title_page,
-      titlePageDurationSeconds: body.title_page_seconds,
+      titlePageDurationSeconds: finite(body.title_page_seconds, D.titlePageDurationSeconds),
       closingCard: body.closing_card,
       stageCardStyle: body.stage_card_style,
-      stageCardDurationSeconds: body.stage_card_seconds,
-      summaryHoldSeconds: body.summary_hold_seconds,
+      stageCardDurationSeconds: finite(body.stage_card_seconds, D.stageCardDurationSeconds),
+      summaryHoldSeconds: finite(body.summary_hold_seconds, D.summaryHoldSeconds),
     },
     includeOverlay: body.overlay,
     gridOverlay: body.grid_overlay,
-    gridHoldSeconds: body.grid_hold_seconds,
+    gridHoldSeconds: finite(body.grid_hold_seconds, 0),
     uploadOptions: {
       ...s.uploadOptions,
       enabled: body.upload_after_render,
@@ -191,9 +201,9 @@ export function groupSummary(s: ExportSettings, group: SettingsGroup, ctx: Summa
     }
     case "cut": {
       const pad = s.paddingPreset === "custom" ? "Custom" : PADDING_PRESETS[s.paddingPreset].label;
-      const transition =
-        s.transitionKind === "none" ? "cut" : `${s.transitionKind} ${s.transitionSeconds.toFixed(1)} s`;
-      return `${pad} ${s.headPad.toFixed(1)} / ${s.tailPad.toFixed(1)} s · ${transition}`;
+      const head = finite(s.headPad, PADDING_PRESETS.full.head).toFixed(1);
+      const tail = finite(s.tailPad, PADDING_PRESETS.full.tail).toFixed(1);
+      return `${pad} ${head} / ${tail} s`;
     }
     case "look": {
       const grid = s.mode === "compare";
@@ -201,6 +211,9 @@ export function groupSummary(s: ExportSettings, group: SettingsGroup, ctx: Summa
       const cards = describeRenderOptions(s.renderOptions, grid ? "grid" : "single", grid ? "mp4" : s.outputFormat);
       if (cards) parts.push(cards);
       if (grid ? s.gridOverlay : s.includeOverlay) parts.push("overlay");
+      if (!grid && transitionsSupported(s.outputFormat) && s.transitionKind !== "none") {
+        parts.push(`${s.transitionKind} ${finite(s.transitionSeconds, 0.5).toFixed(1)} s`);
+      }
       return parts.length > 0 ? parts.join(" · ") : "No cards";
     }
   }

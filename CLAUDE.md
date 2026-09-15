@@ -188,6 +188,19 @@ field goes on it, not on a fresh ``useState``. The Export page's tests
 open the folded groups through their ``openGroups`` helper before
 reaching a control; a new group needs adding there.
 
+The Look group is a gallery (spec s2): ``lib/lookGallery.ts`` is the one
+registry of slots, variants, thumbnails, parameters and which mode and
+format can draw each; ``components/export/LookGallery.tsx`` renders it
+and owns nothing. A new effect is one registry entry plus one thumbnail
+from ``scripts/render_look_thumbnails.py`` (Chromium once, at authoring
+time; the gallery never rasterizes). ``lookGallery.test.ts`` pins the
+per-format visibility table and that every committed thumbnail is
+referenced; ``renderOptions.test.ts`` pins that the mappers never send a
+field the registry hides. Transitions live in Look (FCPXML only, sent
+as ``none`` elsewhere) and the title line in Details. A slot whose
+seconds field is being edited reads NaN and must still count as on, or
+the input vanishes under the cursor (``summaryHold.read``).
+
 ## YouTube upload (#1000)
 
 ``splitsmith.youtube`` uploads a rendered MP4 with its ``-youtube.json``
