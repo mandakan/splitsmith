@@ -64,6 +64,13 @@ export function stageCardsSupported(outputFormat: OutputFormat | undefined): boo
   return outputFormat !== "fcp7xml";
 }
 
+/** Transitions exist only in the FCPXML export today; the FCP 7 XML and
+ *  the MP4 record an "ignored" anomaly for one, and a slate cannot be
+ *  combined with one there either. */
+export function transitionsSupported(outputFormat: OutputFormat | undefined): boolean {
+  return outputFormat === "fcpxml";
+}
+
 /** Clamp a seconds field into its sane range; NaN and blanks become the
  *  floor rather than a request the server rejects. */
 export function clampSeconds(value: number, floor: number): number {
