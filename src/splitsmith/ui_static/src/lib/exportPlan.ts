@@ -203,3 +203,20 @@ export function stageLabel(stages: number[]): string {
     ? `Stages ${sorted[0]}-${sorted[sorted.length - 1]}`
     : `Stages ${sorted.join(", ")}`;
 }
+
+/** The line under an option that depends on audited shots, when some of
+ *  the selected stages export bare (``ExportStageRow.bare``). One home
+ *  for the copy: the Overlay field, the Stage summary field and the
+ *  YouTube field read it. Null when nothing is bare. */
+export function bareHint(kind: "overlay" | "summary" | "captions", bare: number): string | null {
+  if (bare <= 0) return null;
+  const stages = `${bare} ${bare === 1 ? "stage" : "stages"}`;
+  switch (kind) {
+    case "overlay":
+      return `Skipped on ${stages} without splits.`;
+    case "summary":
+      return `Time and scoring only on ${stages} without splits.`;
+    case "captions":
+      return `Captions cover the audited stages only; ${stages} ${bare === 1 ? "has" : "have"} none.`;
+  }
+}

@@ -41,6 +41,9 @@ export interface RenderOptionsPanelProps {
   outputFormat: OutputFormat | undefined;
   /** Disables every control while a render is queued. */
   busy?: boolean;
+  /** Under the Stage summary field: what the hold shows on the selected
+   *  stages that export without audited shots (``bareHint("summary")``). */
+  summaryHint?: string | null;
 }
 
 type TitlePageChoice = "none" | "open" | "both" | "close";
@@ -65,7 +68,14 @@ function titleChoice(value: RenderOptions): TitlePageChoice {
   return value.closingCard ? "close" : "none";
 }
 
-export function RenderOptionsPanel({ value, onChange, surface, outputFormat, busy = false }: RenderOptionsPanelProps) {
+export function RenderOptionsPanel({
+  value,
+  onChange,
+  surface,
+  outputFormat,
+  busy = false,
+  summaryHint = null,
+}: RenderOptionsPanelProps) {
   const matchCards = cardsSupported(outputFormat);
   const stageCards = stageCardsSupported(outputFormat);
   const id = React.useId();
@@ -164,7 +174,7 @@ export function RenderOptionsPanel({ value, onChange, surface, outputFormat, bus
             !matchCards
               ? MP4_ONLY
               : value.summaryHoldSeconds > 0
-                ? "Held after each stage: name, scoring, splits."
+                ? `Held after each stage: name, scoring, splits.${summaryHint ? ` ${summaryHint}` : ""}`
                 : "Seconds to hold each stage's summary after its last shot; 0 is off."
           }
         >

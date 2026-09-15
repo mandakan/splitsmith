@@ -89,3 +89,23 @@ def test_nothing_to_hold_on_is_none(tmp_path: Path) -> None:
         )
         is None
     )
+
+
+def test_summary_of_a_stage_without_shots_draws_time_and_scoring_only() -> None:
+    """A stage exported from its beep and stage time alone (no audit) still
+    gets a summary hold: the Scoring band with the stage time (and the
+    scorecard when there is one), and no Splits band. Time-only when the
+    stage was timed by hand and never scored."""
+    from splitsmith.overlay_layout import Role
+    from splitsmith.overlay_summary_cell import summary_groups, summary_scale
+    from splitsmith.stage_summary_data import TileStageData
+
+    tile = TileStageData(label="Mathias", stage_number=3, stage_time_seconds=21.37, stage_time_is_manual=True)
+    groups = summary_groups(tile, "Mathias", scale=summary_scale(1080), cell_width=1920, cell_height=1080)
+    texts = [e.text for g in groups for e in g.elements]
+    assert "Mathias" in texts
+    assert any(t.startswith("21.37") for t in texts)
+    assert "Splits" not in texts and "Draw" not in [e.caption for g in groups for e in g.elements]
+    assert not any(
+        e.role == Role.HEADLINE and e.caption in ("Best", "Avg", "Worst") for g in groups for e in g.elements
+    )

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { StageExportStatus } from "@/lib/api";
-import { estimateDuration, exportRows, stageBlock, summaryLines } from "@/lib/exportPlan";
+import { bareHint, estimateDuration, exportRows, stageBlock, summaryLines } from "@/lib/exportPlan";
 
 function stage(over: Partial<StageExportStatus> = {}): StageExportStatus {
   return {
@@ -182,5 +182,16 @@ describe("summaryLines without splits", () => {
       dim: true,
     });
     expect(summaryLines({ ...base, bare: 1 }).find((l) => l.label === "Splits")?.value).toBe("1 stage without");
+  });
+});
+
+describe("bareHint", () => {
+  it("names what each shot-dependent option loses on the bare stages, nothing when there are none", () => {
+    expect(bareHint("overlay", 0)).toBeNull();
+    expect(bareHint("overlay", 1)).toBe("Skipped on 1 stage without splits.");
+    expect(bareHint("overlay", 3)).toBe("Skipped on 3 stages without splits.");
+    expect(bareHint("summary", 2)).toBe("Time and scoring only on 2 stages without splits.");
+    expect(bareHint("captions", 1)).toBe("Captions cover the audited stages only; 1 stage has none.");
+    expect(bareHint("captions", 2)).toBe("Captions cover the audited stages only; 2 stages have none.");
   });
 });
