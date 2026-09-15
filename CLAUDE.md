@@ -169,6 +169,25 @@ stream routes ``kind=web`` falls back web -> trim -> source and never
 needs the real GOP). Hosted Compare prefers ``trimmed/<...>_web.mp4``
 over the lossless export.
 
+## Export presets (spec 2026-09-15)
+
+``export_presets.ExportPresetBody`` is the one shape the API, the local
+``export_presets.json`` and the SPA's ``localStorage`` last-used entry
+share. Every field defaults and ``extra="ignore"`` is set, so a body
+saved before a new option shipped loads with that option at its default:
+adding an option means adding a defaulted field here, a column in
+``lib/exportPresets.settingsToBody`` / ``applyBody``, and nothing else.
+Presets are per user (``export_presets`` table hosted, the JSON file
+locally) and never a ``state_docs`` kind: a per-match kind would enter
+the sync manifest. Match-specific fields (stage selection, the title
+line, the description lead, the bundle name, the reference shooter, a
+publish date) are never stored; ``isDirty`` ignores them by
+construction because ``settingsToBody`` does not emit them. The page's
+recurring state is one ``ExportSettings`` object; a new recurring
+field goes on it, not on a fresh ``useState``. The Export page's tests
+open the folded groups through their ``openGroups`` helper before
+reaching a control; a new group needs adding there.
+
 ## YouTube upload (#1000)
 
 ``splitsmith.youtube`` uploads a rendered MP4 with its ``-youtube.json``
