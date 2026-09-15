@@ -18,7 +18,8 @@
  *      the empty match-overview surface (#323) once that ships.
  *
  * Both variants share the page chrome and the segmented [Scoreboard | Manual]
- * toggle, mirroring the polished reference.
+ * toggle, mirroring the polished reference. The page opens on A; B is
+ * the fallback the offline notice offers, and a tab for the rest.
  */
 
 import {
@@ -81,7 +82,10 @@ const DIVISIONS = [
 
 export function CreateMatch() {
   const navigate = useNavigate();
-  const [variant, setVariant] = useState<Variant>("manual");
+  // Scoreboard first: most matches are on it and the fetch fills stages
+  // and shooters. Manual is the fallback the "unavailable" notice hands
+  // the user to, and the tab for matches that were never scored there.
+  const [variant, setVariant] = useState<Variant>("scoreboard");
   const [error, setError] = useState<string | null>(null);
 
   return (
