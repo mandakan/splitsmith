@@ -913,6 +913,7 @@ function ExportInner({ slug }: { slug: string }) {
               slug={compare ? audioFrom || slug : slug}
               stageNumber={orderedSelection[0] ?? 0}
               settings={settings}
+              projectName={projectName || project?.name || ""}
               focus={lookFocus}
               hover={lookHover}
               enabled={!trimsOnly && orderedSelection.length > 0}

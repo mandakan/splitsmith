@@ -38,12 +38,19 @@ export function previewCardFor(focus: LookFocus | null): PreviewCard | null {
 
 const finite = (n: number, fallback: number) => (Number.isFinite(n) ? n : fallback);
 
-export function previewBody(settings: ExportSettings, card: PreviewCard, stageNumber: number): ExportPreviewBody {
+export function previewBody(
+  settings: ExportSettings,
+  card: PreviewCard,
+  stageNumber: number,
+  /** The bundle name field; the match cards carry it, as the export does. */
+  projectName: string = "",
+): ExportPreviewBody {
   const body: ExportPreviewBody = {
     card,
     stage_number: stageNumber,
     width: PREVIEW_WIDTH,
     title_info: settings.renderOptions.titleInfo.trim() || null,
+    project_name: projectName.trim() || null,
   };
   // The timeline pads with the form's values; the grid and the trims
   // pad with the project's own buffers, which the server defaults to.

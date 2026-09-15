@@ -44,7 +44,7 @@ async function settle(ms = 400) {
 
 describe("PreviewPane", () => {
   it("requests the frame for the stage after the debounce and captions it", async () => {
-    render(<PreviewPane slug="me" stageNumber={3} settings={settings} focus={null} hover={null} enabled />);
+    render(<PreviewPane slug="me" stageNumber={3} settings={settings} projectName="Bromma" focus={null} hover={null} enabled />);
     expect(api.exportPreview).not.toHaveBeenCalled();
     await settle();
     expect(api.exportPreview).toHaveBeenCalledWith(
@@ -61,6 +61,7 @@ describe("PreviewPane", () => {
         slug="me"
         stageNumber={3}
         settings={settings}
+        projectName="Bromma"
         focus={null}
         hover={{ slotId: "stageCard", variantId: "slate" }}
         enabled
@@ -78,35 +79,41 @@ describe("PreviewPane", () => {
 
   it("keeps the previous still until the next one lands, and coalesces edits", async () => {
     const view = render(
-      <PreviewPane slug="me" stageNumber={3} settings={settings} focus={TITLE} hover={null} enabled />,
+      <PreviewPane slug="me" stageNumber={3} settings={settings} projectName="Bromma" focus={TITLE} hover={null} enabled />,
     );
     await settle();
     expect(screen.getByRole("img")).toHaveAttribute("src", "blob:0");
     vi.mocked(api.exportPreview).mockResolvedValue(blob("b"));
     const edited = { ...settings, renderOptions: { ...settings.renderOptions, titleInfo: "L" } };
-    view.rerender(<PreviewPane slug="me" stageNumber={3} settings={edited} focus={TITLE} hover={null} enabled />);
+    view.rerender(<PreviewPane slug="me" stageNumber={3} settings={edited} projectName="Bromma" focus={TITLE} hover={null} enabled />);
     const edited2 = { ...settings, renderOptions: { ...settings.renderOptions, titleInfo: "L3" } };
-    view.rerender(<PreviewPane slug="me" stageNumber={3} settings={edited2} focus={TITLE} hover={null} enabled />);
+    view.rerender(<PreviewPane slug="me" stageNumber={3} settings={edited2} projectName="Bromma" focus={TITLE} hover={null} enabled />);
     expect(screen.getByRole("img")).toHaveAttribute("src", "blob:0");
     await settle();
     expect(api.exportPreview).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(api.exportPreview).mock.calls[1][1]).toMatchObject({ card: "title", title_info: "L3" });
+    expect(vi.mocked(api.exportPreview).mock.calls[1][1]).toMatchObject({
+      card: "title",
+      title_info: "L3",
+      project_name: "Bromma",
+    });
     expect(screen.getByRole("img")).toHaveAttribute("src", "blob:1");
+    // The superseded still's object URL is released once the new one shows.
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:0");
   });
 
   it("says why when the server cannot, and the image stays", async () => {
     const OVERLAY = { slotId: "overlay" as const, variantId: "on" };
     const view = render(
-      <PreviewPane slug="me" stageNumber={3} settings={settings} focus={null} hover={null} enabled />,
+      <PreviewPane slug="me" stageNumber={3} settings={settings} projectName="Bromma" focus={null} hover={null} enabled />,
     );
     await settle();
     vi.mocked(api.exportPreview).mockRejectedValue(new ApiError(503, "no browser"));
-    view.rerender(<PreviewPane slug="me" stageNumber={3} settings={settings} focus={OVERLAY} hover={null} enabled />);
+    view.rerender(<PreviewPane slug="me" stageNumber={3} settings={settings} projectName="Bromma" focus={OVERLAY} hover={null} enabled />);
     await settle();
     expect(screen.getByText("Preview needs a browser")).toBeInTheDocument();
     expect(screen.getByRole("img")).toHaveAttribute("src", "blob:0");
     vi.mocked(api.exportPreview).mockRejectedValue(new ApiError(409, "no shots"));
-    view.rerender(<PreviewPane slug="me" stageNumber={4} settings={settings} focus={OVERLAY} hover={null} enabled />);
+    view.rerender(<PreviewPane slug="me" stageNumber={4} settings={settings} projectName="Bromma" focus={OVERLAY} hover={null} enabled />);
     await settle();
     expect(screen.getByText("Overlay needs audited shots")).toBeInTheDocument();
   });
@@ -117,6 +124,7 @@ describe("PreviewPane", () => {
         slug="me"
         stageNumber={3}
         settings={{ ...settings, outputFormat: "fcpxml" }}
+        projectName="Bromma"
         focus={{ slotId: "transition", variantId: "zoom" }}
         hover={null}
         enabled
@@ -130,9 +138,46 @@ describe("PreviewPane", () => {
     );
   });
 
+  it("discards a response that arrives after a newer request was made", async () => {
+    let resolveFirst: (b: Blob) => void = () => {};
+    vi.mocked(api.exportPreview).mockImplementationOnce(
+      () => new Promise<Blob>((resolve) => (resolveFirst = resolve)),
+    );
+    const view = render(
+      <PreviewPane slug="me" stageNumber={3} settings={settings} projectName="Bromma" focus={TITLE} hover={null} enabled />,
+    );
+    await settle();
+    expect(api.exportPreview).toHaveBeenCalledTimes(1);
+    vi.mocked(api.exportPreview).mockResolvedValue(blob("second"));
+    const edited = { ...settings, renderOptions: { ...settings.renderOptions, titleInfo: "L3" } };
+    view.rerender(
+      <PreviewPane slug="me" stageNumber={3} settings={edited} projectName="Bromma" focus={TITLE} hover={null} enabled />,
+    );
+    await settle();
+    expect(api.exportPreview).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("img")).toHaveAttribute("src", "blob:0");
+    await act(async () => {
+      resolveFirst(blob("first, late"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    // The late first response never replaces the newer still.
+    expect(screen.getByRole("img")).toHaveAttribute("src", "blob:0");
+    expect(URL.createObjectURL).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases its object URL on unmount", async () => {
+    const view = render(
+      <PreviewPane slug="me" stageNumber={3} settings={settings} projectName="Bromma" focus={null} hover={null} enabled />,
+    );
+    await settle();
+    view.unmount();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:0");
+  });
+
   it("renders nothing and requests nothing while disabled", async () => {
     const { container } = render(
-      <PreviewPane slug="me" stageNumber={3} settings={settings} focus={null} hover={null} enabled={false} />,
+      <PreviewPane slug="me" stageNumber={3} settings={settings} projectName="Bromma" focus={null} hover={null} enabled={false} />,
     );
     await settle();
     expect(container).toBeEmptyDOMElement();

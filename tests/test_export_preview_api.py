@@ -77,6 +77,20 @@ def test_the_same_request_hits_the_cache(client) -> None:
     assert _StubRasterizer.launches == launches + 1
 
 
+def test_a_re_audit_moves_the_cache_key_locally(client, tmp_path: Path) -> None:
+    """Local audit docs always report version 0, so the key must follow the content."""
+    body = {"card": "overlay", "stage_number": 1, "width": 480}
+    assert client.post(ROUTE, json=body).status_code == 200
+    launches = _StubRasterizer.launches
+    audit = tmp_path / "match" / "shooters" / "me" / "audit" / "stage1.json"
+    before = audit.read_text(encoding="utf-8")
+    after = before.replace('"ms_after_beep": 500', '"ms_after_beep": 750')
+    assert after != before
+    audit.write_text(after, encoding="utf-8")
+    assert client.post(ROUTE, json=body).status_code == 200
+    assert _StubRasterizer.launches == launches + 1
+
+
 def test_unknown_fields_are_ignored_like_the_export_body(client) -> None:
     body = {"card": "slate", "stage_number": 1, "output_format": "mp4", "title_kind": "x"}
     r = client.post(ROUTE, json=body)

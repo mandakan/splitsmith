@@ -21,6 +21,8 @@ export interface PreviewPaneProps {
   /** The first selected stage; the preview is of that stage. */
   stageNumber: number;
   settings: ExportSettings;
+  /** The bundle name field; the match cards carry it. */
+  projectName: string;
   /** The last selected tile; null before any. */
   focus: LookFocus | null;
   /** The tile under the pointer; null when none. */
@@ -35,7 +37,7 @@ function genericFor(focus: LookFocus | null): string | null {
   return variant ? thumbnailUrl(variant.thumbnail) : null;
 }
 
-export function PreviewPane({ slug, stageNumber, settings, focus, hover, enabled }: PreviewPaneProps) {
+export function PreviewPane({ slug, stageNumber, settings, projectName, focus, hover, enabled }: PreviewPaneProps) {
   const [still, setStill] = useState<string | null>(null);
   const [status, setStatus] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
@@ -44,8 +46,8 @@ export function PreviewPane({ slug, stageNumber, settings, focus, hover, enabled
   const card = previewCardFor(focus);
   // One string so the effect re-runs only when the request would differ.
   const requestKey = useMemo(
-    () => (card ? JSON.stringify(previewBody(settings, card, stageNumber)) : null),
-    [card, settings, stageNumber],
+    () => (card ? JSON.stringify(previewBody(settings, card, stageNumber, projectName)) : null),
+    [card, settings, stageNumber, projectName],
   );
 
   useEffect(() => {

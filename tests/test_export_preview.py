@@ -111,6 +111,36 @@ def test_title_card_carries_the_match_name_and_the_info_lines(tmp_path: Path) ->
     assert "Production Optics" in html
 
 
+def test_the_cards_carry_the_bundle_name_the_export_would(tmp_path: Path) -> None:
+    """The match export titles the cards with the request's ``project_name``
+    (the SPA's bundle name), not the project's own name."""
+    raster = _StubRasterizer()
+    _render(
+        tmp_path,
+        ep.PreviewSpec(card="closing", stage_number=3, project_name="Bromma Classifier - Final Cut"),
+        audit=None,
+        raster=raster,
+    )
+    assert "Bromma Classifier - Final Cut" in raster.htmls[-1]
+
+
+def test_summary_label_is_the_competitor_then_the_bundle_name(tmp_path: Path) -> None:
+    project, root = _project(tmp_path)
+    project.competitor_name = None
+    raster = _StubRasterizer()
+    ep.render_preview(
+        ep.PreviewSpec(card="summary", stage_number=3, project_name="Club night"),
+        project=project,
+        root=root,
+        audit_doc=AUDIT,
+        theme=load_theme("splitsmith"),
+        rasterizer=raster,
+        ffmpeg_binary=None,
+        work_dir=tmp_path / "work",
+    )
+    assert "Club night" in raster.htmls[-1]
+
+
 def test_slate_carries_the_stage_name_and_round_count(tmp_path: Path) -> None:
     project, root = _project(tmp_path)
     project.stage(3).stage_rounds = StageRounds(expected=24)
@@ -147,8 +177,8 @@ def test_unknown_stage_is_404(tmp_path: Path) -> None:
 def test_preview_key_changes_with_every_input_that_changes_the_picture() -> None:
     base = ep.PreviewSpec(card="title", stage_number=3, title_info="a")
 
-    def key(spec: ep.PreviewSpec = base, slug: str = "me", project: str = "t1", audit: int = 1) -> str:
-        return ep.preview_key(spec, slug=slug, project_updated_at=project, audit_version=audit)
+    def key(spec: ep.PreviewSpec = base, slug: str = "me", project: str = "t1", audit: str = "a1") -> str:
+        return ep.preview_key(spec, slug=slug, project_updated_at=project, audit=audit)
 
     assert key() == key()
     variants = [
@@ -157,11 +187,20 @@ def test_preview_key_changes_with_every_input_that_changes_the_picture() -> None
         key(ep.PreviewSpec(card="title", stage_number=3, title_info="b")),
         key(ep.PreviewSpec(card="title", stage_number=3, title_info="a", width=480)),
         key(ep.PreviewSpec(card="title", stage_number=3, title_info="a", head_pad_seconds=1)),
+        key(ep.PreviewSpec(card="title", stage_number=3, title_info="a", project_name="other")),
         key(slug="you"),
         key(project="t2"),
-        key(audit=2),
+        key(audit=ep.audit_digest(AUDIT)),
     ]
     assert len({key(), *variants}) == len(variants) + 1
+
+
+def test_audit_digest_moves_with_the_shots_and_not_with_key_order() -> None:
+    reordered = dict(reversed(list(AUDIT.items())))
+    more = {**AUDIT, "shots": [*AUDIT["shots"], {"shot_number": 4, "ms_after_beep": 2200}]}
+    assert ep.audit_digest(reordered) == ep.audit_digest(AUDIT)
+    assert ep.audit_digest(more) != ep.audit_digest(AUDIT)
+    assert ep.audit_digest(None) == "none"
 
 
 @pytest.mark.integration

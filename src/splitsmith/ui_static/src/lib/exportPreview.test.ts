@@ -30,15 +30,17 @@ describe("previewBody", () => {
       tailPad: 1,
       renderOptions: { ...DEFAULT_EXPORT_SETTINGS.renderOptions, titleInfo: "  Production Optics " },
     };
-    expect(previewBody(s, "title", 3)).toEqual({
+    expect(previewBody(s, "title", 3, "Bromma - Final Cut")).toEqual({
       card: "title",
       stage_number: 3,
       width: 960,
       title_info: "Production Optics",
+      project_name: "Bromma - Final Cut",
       head_pad_seconds: 0.5,
       tail_pad_seconds: 1,
     });
     expect(previewBody(DEFAULT_EXPORT_SETTINGS, "frame", 1).title_info).toBeNull();
+    expect(previewBody(DEFAULT_EXPORT_SETTINGS, "frame", 1, "  ").project_name).toBeNull();
   });
 
   it("uses the project's own buffers for the pads outside single mode", () => {

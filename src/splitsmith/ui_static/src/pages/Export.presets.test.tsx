@@ -416,11 +416,26 @@ describe("Export presets", () => {
     await waitFor(() =>
       expect(api.exportPreview).toHaveBeenCalledWith(
         "mathias",
-        expect.objectContaining({ card: "lower-third", stage_number: 1, head_pad_seconds: 0.5 }),
+        expect.objectContaining({
+          card: "lower-third",
+          stage_number: 1,
+          head_pad_seconds: 0.5,
+          project_name: "bromma-2026",
+        }),
         expect.anything(),
       ),
     );
     expect(screen.getByText("Lower third · Stage 01")).toBeInTheDocument();
+    // The pointer is still on the tile after the click; off it, the real still shows.
+    await user.unhover(
+      within(screen.getByRole("radiogroup", { name: "Stage card" })).getByRole("radio", { name: "Lower third" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("img", { name: "Lower third · Stage 01" })).toHaveAttribute(
+        "src",
+        expect.stringMatching(/^blob:/),
+      ),
+    );
     await user.hover(
       within(screen.getByRole("radiogroup", { name: "Overlay" })).getByRole("radio", { name: "Shot counter" }),
     );

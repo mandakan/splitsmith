@@ -945,7 +945,8 @@ export interface ExportPreviewBody {
   title_info?: string | null;
   head_pad_seconds?: number;
   tail_pad_seconds?: number;
-  shooter_label?: string | null;
+  /** The bundle name, as the match export's ``project_name``. */
+  project_name?: string | null;
 }
 
 export interface ExportStageRequestPayload {

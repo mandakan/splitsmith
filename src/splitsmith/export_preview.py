@@ -66,15 +66,28 @@ class PreviewSpec:
     title_info: str | None = None
     head_pad_seconds: float = 5.0
     tail_pad_seconds: float = 5.0
-    shooter_label: str | None = None
+    #: The bundle name the export would carry (``project_name`` on the
+    #: match export); the match cards read it, the project's own name is
+    #: only the fallback.
+    project_name: str | None = None
 
     @property
     def height(self) -> int:
         return self.width * 9 // 16
 
 
-def preview_key(spec: PreviewSpec, *, slug: str, project_updated_at: str, audit_version: int) -> str:
-    """Content address for the cache: every input that moves the picture."""
+def audit_digest(audit_doc: dict | None) -> str:
+    """What the audit contributes to the cache key: its content, not a
+    version. Local audit docs always report version 0 (``load_audit``),
+    so a re-audit would otherwise serve the old still."""
+    if not isinstance(audit_doc, dict):
+        return "none"
+    return hashlib.sha256(json.dumps(audit_doc, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def preview_key(spec: PreviewSpec, *, slug: str, project_updated_at: str, audit: str) -> str:
+    """Content address for the cache: every input that moves the picture.
+    ``audit`` is :func:`audit_digest` of the stage's audit doc."""
     payload = json.dumps(
         {
             "slug": slug,
@@ -84,9 +97,9 @@ def preview_key(spec: PreviewSpec, *, slug: str, project_updated_at: str, audit_
             "title_info": spec.title_info,
             "head": spec.head_pad_seconds,
             "tail": spec.tail_pad_seconds,
-            "label": spec.shooter_label,
+            "name": spec.project_name,
             "project": project_updated_at,
-            "audit": audit_version,
+            "audit": audit,
         },
         sort_keys=True,
     )
@@ -220,7 +233,10 @@ def render_preview(
 
     trim, beep = _trim_for(project, root, spec.stage_number)
     stage_time = stage.time_seconds if stage.time_seconds > 0 else None
-    last_shot = shots[-1].time_from_beep if shots else (stage_time or 0.0)
+    # The renderer's tail is the last marker, and markers are audited
+    # shots: with none, its tail is the beep plus the pad, never the
+    # stage time (``mp4_render``'s ``last_local``).
+    last_shot = shots[-1].time_from_beep if shots else 0.0
     at: Literal["head", "tail"] = "tail" if spec.card in ("summary", "closing") else "head"
     if spec.card == "overlay":
         seconds = beep + last_shot
@@ -234,15 +250,17 @@ def render_preview(
             trim, seconds=seconds, at=at, ffmpeg_binary=ffmpeg_binary, out=work_dir / "frame.png"
         )
 
-    label = spec.shooter_label or project.competitor_name or project.name
+    # What the match cards and the summary say, as the export says it:
+    # the bundle name on the cards (``request.project_name``), and the
+    # summary's label ``competitor_name`` then the bundle name.
+    name = spec.project_name or project.name
+    label = project.competitor_name or name
     size = {"width": spec.width, "height": spec.height, "theme": theme}
     image: Image.Image | None
     if spec.card == "frame":
         image = _compose_over(frame, None, spec, theme)
     elif spec.card in ("title", "closing"):
-        card = composition.MatchTitle(
-            text=project.name, info=title_info_lines(project, extra=spec.title_info)
-        )
+        card = composition.MatchTitle(text=name, info=title_info_lines(project, extra=spec.title_info))
         image = build_card_still(card, rasterizer=rasterizer, backdrop=frame, **size)
     elif spec.card == "slate":
         slate = composition.TitleCard(

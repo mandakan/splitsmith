@@ -24,7 +24,14 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..export_preview import PreviewCard, PreviewError, PreviewSpec, preview_key, render_preview
+from ..export_preview import (
+    PreviewCard,
+    PreviewError,
+    PreviewSpec,
+    audit_digest,
+    preview_key,
+    render_preview,
+)
 from ..overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailableError
 from ..overlay_theme import load_theme
 from ..runtime import runtime
@@ -46,7 +53,8 @@ class ExportPreviewRequest(BaseModel):
     title_info: str | None = None
     head_pad_seconds: float = Field(default=5.0, ge=0)
     tail_pad_seconds: float = Field(default=5.0, ge=0)
-    shooter_label: str | None = None
+    #: The bundle name, as the match export's ``project_name``.
+    project_name: str | None = None
 
 
 class _NoRasterizer:
@@ -61,7 +69,7 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
     state = request.app.state.splitsmith_state
     project = state.shooter_project(slug)
     root = state.shooter_root(slug)
-    audit_doc, audit_version = state.load_audit(slug, req.stage_number)
+    audit_doc, _audit_version = state.load_audit(slug, req.stage_number)
     spec = PreviewSpec(
         card=req.card,
         stage_number=req.stage_number,
@@ -69,12 +77,12 @@ def export_preview(slug: str, req: ExportPreviewRequest, request: Request) -> Re
         title_info=req.title_info,
         head_pad_seconds=req.head_pad_seconds,
         tail_pad_seconds=req.tail_pad_seconds,
-        shooter_label=req.shooter_label,
+        project_name=req.project_name,
     )
     rt = runtime()
     cache_dir = rt.cache_dir / "export-preview"
     key = preview_key(
-        spec, slug=slug, project_updated_at=project.updated_at.isoformat(), audit_version=audit_version
+        spec, slug=slug, project_updated_at=project.updated_at.isoformat(), audit=audit_digest(audit_doc)
     )
     cached = cache_dir / f"{key}.png"
     if cached.exists():

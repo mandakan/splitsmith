@@ -71,8 +71,10 @@ if (window.sessionStorage == null) {
   });
 }
 
-// jsdom has no object URLs; the Export rail's preview makes one per
-// still. A stable stand-in keeps every page suite free of the concern.
+// jsdom itself has no object URLs (Node >= 20 lends its own, which mint
+// ``blob:nodedata:`` strings); the Export rail's preview makes one per
+// still. A stand-in keeps every page suite free of the concern where
+// none exists; assert on ``/^blob:/``, never on the exact string.
 if (typeof URL.createObjectURL !== "function") {
   URL.createObjectURL = () => "blob:test";
   URL.revokeObjectURL = () => {};
