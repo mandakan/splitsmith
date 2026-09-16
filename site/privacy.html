@@ -73,7 +73,7 @@
 <main>
   <span class="eyebrow">Legal</span>
   <h1>Privacy policy</h1>
-  <p class="effective">Effective 2026-09-14</p>
+  <p class="effective">Effective 2026-09-16</p>
 
   <p class="lead">Splitsmith reads the beep and every shot out of the audio your camera recorded and turns them into splits. Most of that happens on your own computer. This page says what leaves it, when, and why.</p>
 
@@ -115,6 +115,17 @@
   </ul>
   <p>Splitsmith does not read your subscriptions, watch history, comments, analytics or any other YouTube data, and it does not share data obtained through YouTube API Services with anyone. Stored data is kept until you disconnect.</p>
   <p>To disconnect, run <code>splitsmith youtube logout</code> or use the Disconnect control in the app. Either deletes the stored token. You can also revoke Splitsmith's access at any time from your <a href="https://myaccount.google.com/permissions">Google account's third-party access page</a>.</p>
+
+  <h3>How YouTube data is protected</h3>
+  <p>The refresh token is sensitive data: it lets an app act on your channel. These are the mechanisms that protect it.</p>
+  <ul>
+    <li><strong>In transit.</strong> The desktop app talks to Google directly over HTTPS (TLS). No Splitsmith server sits in the path: the token, the video and the captions travel from your machine to Google and nowhere else. The sign-in uses PKCE and a one-time redirect to a listener on your own machine (<code>127.0.0.1</code>), so the authorisation code is never exposed to a third party.</li>
+    <li><strong>At rest.</strong> The refresh token is written to <code>~/.splitsmith/youtube.json</code> with file permissions that let only your own operating-system account read it. It is not copied into match projects, exports, backups, share links or the desktop-to-hosted sync, so nothing that leaves your machine carries it. Short-lived access tokens are held in memory for the duration of an upload and never written to disk.</li>
+    <li><strong>Access.</strong> Only the software running under your account on your machine can read the token. The operator has no access to it and no copy of it.</li>
+    <li><strong>Data minimisation.</strong> Splitsmith keeps the refresh token, your channel id and your channel name, and nothing else it obtains through the API. Each upload stores only the id and URL of the video it created.</li>
+    <li><strong>Retention and deletion.</strong> The token is kept until you disconnect. Disconnecting deletes the file and asks Google to revoke the token, so a copy that somehow survived would no longer work. Revoking Splitsmith from your Google account's third-party access page has the same effect at once, which is the right step if you believe your machine was compromised.</li>
+    <li><strong>The hosted service.</strong> The hosted service does not offer YouTube upload today and stores no Google account data. If it does in future, the token will be stored encrypted at rest with a key held outside the database, sent only over TLS, deleted when you disconnect or delete your account, and any security incident affecting it will be reported to you without undue delay and within 72 hours as the GDPR requires. This page will change first.</li>
+  </ul>
 
   <h2>Your rights</h2>
   <p>You can ask for a copy of the personal data the operator holds about you, ask for it to be corrected, or ask for it to be deleted. Deleting a hosted account removes its matches, exports, comments and email address. Under the GDPR you may also complain to the Swedish Authority for Privacy Protection (IMY).</p>
