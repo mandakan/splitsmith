@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.40.1](https://github.com/mandakan/splitsmith/compare/v0.40.0...v0.40.1) (2026-09-18)
+
+
+### Documentation
+
+* **site:** privacy policy states how YouTube data is protected ([#1043](https://github.com/mandakan/splitsmith/issues/1043)) ([3f1b9ad](https://github.com/mandakan/splitsmith/commit/3f1b9ad5c4cb1139c1ebbda03405248edb0592a6))
+* **youtube:** record that Google verification and the API audit passed ([#1054](https://github.com/mandakan/splitsmith/issues/1054)) ([e58994e](https://github.com/mandakan/splitsmith/commit/e58994ef0d737c0b94bf1c62bf9c85e385929227))
+
 ## [0.40.0](https://github.com/mandakan/splitsmith/compare/v0.39.0...v0.40.0) (2026-09-15)
 
 
