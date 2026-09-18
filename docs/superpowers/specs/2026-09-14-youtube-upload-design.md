@@ -30,6 +30,11 @@ Audit and Quota Extension form (lifts the private lock). Until the audit
 passes, every upload lands private and stays private; the whole flow can
 still be exercised end to end by a listed test user.
 
+*Update 2026-09-17:* both passed. The consent screen goes straight to
+consent, and a test upload on 2026-09-18 requested ``unlisted`` came
+back ``unlisted`` through ``processed`` (then deleted), so the private
+lock is lifted. The 100-uploads-per-day quota still applies.
+
 ## Decisions
 
 | Question | Decision |

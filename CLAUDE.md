@@ -222,9 +222,14 @@ which is when a new upload is allowed). The OAuth client is baked into
 the wheel at publish (``scripts/bake_youtube_client.py`` in
 ``publish-pypi.yml``, from repo secrets; the constants in
 ``youtube/oauth.py`` are empty in git and a checkout uses the env
-overrides); a user-supplied client would not escape YouTube's
-private-only lock on unaudited projects, so there is none. One scope, ``youtube.force-ssl``.
-The spec's two corrections to the issue text are in
+overrides); a user-supplied client would not have escaped YouTube's
+private-only lock on unaudited projects, so there is none. One scope,
+``youtube.force-ssl``. Google's OAuth verification and the YouTube API
+audit both passed on 2026-09-17: the consent screen has no "unverified
+app" step, refresh tokens no longer expire after 7 days, and an upload
+requested ``unlisted`` or ``public`` stays so (checked with a test
+upload on 2026-09-18, read back through ``videos.list``, deleted). The
+spec's two corrections to the issue text are in
 ``docs/superpowers/specs/2026-09-14-youtube-upload-design.md``.
 
 The local server side is ``ui/youtube_api.py`` (local mode only; the
