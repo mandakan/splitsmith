@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.0](https://github.com/mandakan/splitsmith/compare/v0.40.1...v0.41.0) (2026-09-19)
+
+
+### Features
+
+* **youtube:** hosted upload ([#1000](https://github.com/mandakan/splitsmith/issues/1000) phase 2) ([#1057](https://github.com/mandakan/splitsmith/issues/1057)) ([13a0754](https://github.com/mandakan/splitsmith/commit/13a07543b0c1484cde5a44bdbef2497b5cb6a42a))
+
 ## [0.40.1](https://github.com/mandakan/splitsmith/compare/v0.40.0...v0.40.1) (2026-09-18)
 
 
