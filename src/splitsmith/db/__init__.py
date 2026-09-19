@@ -52,6 +52,7 @@ from .project_state import ProjectStateStore, StateConflictError
 from .recent_projects import PostgresRecentProjectsStore
 from .scoreboard_identity import PostgresScoreboardIdentityStore
 from .signup_policy import SignupPolicy, build_signup_policy
+from .youtube_connections import PostgresYouTubeConnectionStore
 
 __all__ = [
     "Base",
@@ -73,6 +74,7 @@ __all__ = [
     "PostgresProfileStore",
     "PostgresRecentProjectsStore",
     "PostgresScoreboardIdentityStore",
+    "PostgresYouTubeConnectionStore",
     "ProjectStateStore",
     "RecentProjectRow",
     "SESSION_COOKIE_NAME",

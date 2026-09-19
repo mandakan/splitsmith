@@ -200,6 +200,17 @@ def apply_credentials(state: AgentState) -> None:
         os.environ["SPLITSMITH_S3_ACCESS_KEY_ID"] = s3["access_key_id"]
         os.environ["SPLITSMITH_S3_SECRET_ACCESS_KEY"] = s3["secret_access_key"]
 
+    # Issue #1000, phase 2: the YouTube upload job refreshes the account's
+    # access token here, so the box needs the OAuth client and the key the
+    # refresh token is sealed under. ``setdefault`` so a box-local value
+    # wins; a bundle from before this shipped has no ``youtube`` key and the
+    # upload job says which variable is missing.
+    yt = creds.get("youtube")
+    if yt:
+        os.environ.setdefault("SPLITSMITH_YOUTUBE_CLIENT_ID", yt["client_id"])
+        os.environ.setdefault("SPLITSMITH_YOUTUBE_CLIENT_SECRET", yt["client_secret"])
+        os.environ.setdefault("SPLITSMITH_YOUTUBE_TOKEN_KEY", yt["token_key"])
+
 
 # ---------------------------------------------------------------------------
 # SSE parsing

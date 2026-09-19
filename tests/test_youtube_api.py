@@ -113,17 +113,10 @@ def test_delete_session_clears_the_store_and_revokes(client, monkeypatch: pytest
     assert oauth.load_connection() is None
 
 
-def test_routes_404_in_hosted_mode(client, monkeypatch: pytest.MonkeyPatch) -> None:
-    from splitsmith.ui import server as server_mod
-
-    monkeypatch.setattr(server_mod, "_hosted_mode_active", lambda: True)
-    for method, path in (
-        ("get", "/api/settings/youtube"),
-        ("post", "/api/settings/youtube/connect/start"),
-        ("get", "/api/settings/youtube/connect/status"),
-        ("delete", "/api/settings/youtube/session"),
-    ):
-        assert getattr(client, method)(path).status_code == 404, path
+def test_callback_404s_in_local_mode(client) -> None:
+    """The loopback listener is the local callback; the redirect target
+    exists only where a session cookie can identify the account."""
+    assert client.get("/api/settings/youtube/callback", params={"code": "c", "state": "s"}).status_code == 404
 
 
 # --- upload route and job ---------------------------------------------------

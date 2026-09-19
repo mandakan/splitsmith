@@ -362,19 +362,29 @@ class AccessTokenProvider:
 
     _EARLY_S = 60.0
 
-    def __init__(self, client: OAuthClient, http: httpx.Client, *, refresh_token: str) -> None:
+    def __init__(
+        self,
+        client: OAuthClient,
+        http: httpx.Client,
+        *,
+        refresh_token: str,
+        on_reauthorize: Callable[[], object] | None = None,
+    ) -> None:
         self._client = client
         self._http = http
         self._refresh_token = refresh_token
         self._access: str | None = None
         self._expires_at = 0.0
+        # What forgets the stored connection on ``invalid_grant``: the
+        # local file by default, the account's row hosted.
+        self._on_reauthorize = on_reauthorize if on_reauthorize is not None else clear_connection
 
     def token(self) -> str:
         if self._access is None or time.monotonic() >= self._expires_at - self._EARLY_S:
             try:
                 tok = refresh_access_token(self._client, self._http, refresh_token=self._refresh_token)
             except ReauthorizeError:
-                clear_connection()
+                self._on_reauthorize()
                 raise
             self._access = tok.access_token
             self._expires_at = time.monotonic() + tok.expires_in
@@ -427,18 +437,25 @@ def connect(
         open_browser(url)
         code = listener.wait(timeout_s)
     tok = exchange_code(client, http, code=code, redirect_uri=redirect_uri, code_verifier=pkce.verifier)
+    conn = build_connection(http, tok)
+    save_connection(conn)
+    return conn
+
+
+def build_connection(http: httpx.Client, tok: TokenResponse) -> YouTubeConnection:
+    """The tail of a login every flow shares: insist on a refresh token,
+    look up the channel, shape the connection. The loopback flow above
+    and the hosted redirect callback both end here; neither stores it."""
     if not tok.refresh_token:
         raise YouTubeError(
             "Google issued no refresh token; remove splitsmith under your Google account's "
             "third-party access and log in again"
         )
     channel_id, channel_title = fetch_my_channel(http, tok.access_token)
-    conn = YouTubeConnection(
+    return YouTubeConnection(
         refresh_token=tok.refresh_token,
         channel_id=channel_id,
         channel_title=channel_title,
         connected_at=datetime.now(UTC),
         scopes=tok.scope.split() if tok.scope else [SCOPE],
     )
-    save_connection(conn)
-    return conn

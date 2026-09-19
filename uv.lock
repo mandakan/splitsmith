@@ -3511,6 +3511,7 @@ name = "splitsmith"
 version = "0.40.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "httpx" },
     { name = "huggingface-hub" },
@@ -3573,6 +3574,7 @@ requires-dist = [
     { name = "alembic", marker = "extra == 'hosted'", specifier = ">=1.13.0" },
     { name = "asyncpg", marker = "extra == 'hosted'", specifier = ">=0.29.0" },
     { name = "boto3", marker = "extra == 'hosted'", specifier = ">=1.35.0" },
+    { name = "cryptography", specifier = ">=42.0.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "huggingface-hub", specifier = ">=0.26.0" },
