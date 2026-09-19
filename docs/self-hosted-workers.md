@@ -358,6 +358,15 @@ docker rm splitsmith-agent
 docker volume rm splitsmith-agent
 ```
 
+**YouTube uploads.** A `youtube_upload` job refreshes the account's Google
+access token on the worker that runs it, so the registration bundle also
+carries the OAuth client and the key the stored refresh token is sealed under
+(`SPLITSMITH_YOUTUBE_CLIENT_ID`, `_CLIENT_SECRET`, `_TOKEN_KEY`). A worker
+registered before the server had them keeps running every other job kind; an
+upload job on it fails naming the missing variable. Re-register the agent, or
+set the three variables in its environment (a box-local value wins over the
+bundle).
+
 **Credential-revocation note.** Deleting a worker revokes its channel and worker tokens
 but not the Neon and R2 credentials the agent already holds in `agent.json`. If you need
 to fully revoke access, rotate the Neon connection string and R2 access keys at the

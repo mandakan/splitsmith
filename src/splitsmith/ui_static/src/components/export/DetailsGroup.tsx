@@ -15,7 +15,6 @@ export interface DetailsGroupProps {
   settings: ExportSettings;
   patch: (p: Partial<ExportSettings>) => void;
   busy: boolean;
-  hosted: boolean;
   projectName: string;
   onProjectName: (v: string) => void;
   exportsDir: string | null;
@@ -30,7 +29,6 @@ export function DetailsGroup({
   settings,
   patch,
   busy,
-  hosted,
   projectName,
   onProjectName,
   exportsDir,
@@ -92,7 +90,7 @@ export function DetailsGroup({
           />
         </Field>
       ) : null}
-      {renderedMp4 && !hosted ? (
+      {renderedMp4 ? (
         <Field label="Upload">
           <YouTubeConnect
             settings={youtubeSettings}
