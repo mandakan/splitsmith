@@ -98,7 +98,12 @@ from typing import TYPE_CHECKING, Any, BinaryIO, Literal
 if TYPE_CHECKING:
     # Hosted-only; imported lazily at runtime inside _apply_hosted_mode_wiring
     # so local mode stays free of the db (procrastinate/psycopg) dependency.
-    from ..db import PostgresMatchStore, PostgresProfileStore, PostgresYouTubeConnectionStore, ProjectStateStore
+    from ..db import (
+        PostgresMatchStore,
+        PostgresProfileStore,
+        PostgresYouTubeConnectionStore,
+        ProjectStateStore,
+    )
     from ..db.comments import CommentStore
     from ..db.desktop_tokens import DesktopTokenRecord, DesktopTokenStore
     from ..db.device_auth import DeviceAuthStore

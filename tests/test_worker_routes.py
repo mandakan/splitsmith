@@ -225,7 +225,11 @@ def test_register_credentials_include_youtube_when_fully_configured(
     _, reg_token = seed_pending_worker(hosted_env, name="box-2")
     with TestClient(create_app()) as client:
         resp = client.post("/api/workers/register", json={"token": reg_token})
-    assert resp.json()["credentials"]["youtube"] == {"client_id": "cid", "client_secret": "sec", "token_key": "key"}
+    assert resp.json()["credentials"]["youtube"] == {
+        "client_id": "cid",
+        "client_secret": "sec",
+        "token_key": "key",
+    }
 
 
 # ---------------------------------------------------------------------------
