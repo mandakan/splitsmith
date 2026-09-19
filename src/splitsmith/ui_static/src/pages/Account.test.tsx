@@ -34,6 +34,9 @@ vi.mock("@/lib/api", async (importOriginal) => {
       listDesktopTokens: vi.fn().mockResolvedValue({ tokens: [] }),
       createDesktopToken: vi.fn(),
       revokeDesktopToken: vi.fn(),
+      getYouTubeSettings: vi
+        .fn()
+        .mockResolvedValue({ configured: true, connected: false, channel_title: null, connected_at: null }),
     },
   };
 });
@@ -182,4 +185,9 @@ it("does not redirect while the deployment mode is still unresolved", () => {
   mockResolved = false;
   renderPage();
   expect(screen.getByLabelText(/display name/i)).toBeInTheDocument();
+});
+
+it("mounts the YouTube section under Profile", async () => {
+  renderPage();
+  expect(await screen.findByRole("button", { name: "Connect YouTube" })).toBeInTheDocument();
 });

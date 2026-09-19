@@ -98,7 +98,12 @@ from typing import TYPE_CHECKING, Any, BinaryIO, Literal
 if TYPE_CHECKING:
     # Hosted-only; imported lazily at runtime inside _apply_hosted_mode_wiring
     # so local mode stays free of the db (procrastinate/psycopg) dependency.
-    from ..db import PostgresMatchStore, PostgresProfileStore, ProjectStateStore
+    from ..db import (
+        PostgresMatchStore,
+        PostgresProfileStore,
+        PostgresYouTubeConnectionStore,
+        ProjectStateStore,
+    )
     from ..db.comments import CommentStore
     from ..db.desktop_tokens import DesktopTokenRecord, DesktopTokenStore
     from ..db.device_auth import DeviceAuthStore
@@ -1554,6 +1559,10 @@ class TenantContext:
     # local mode, where ``AppState.export_presets`` falls back to the
     # JSON file store.
     export_presets: export_presets_module.ExportPresetStore | None = None
+    # The account's YouTube connection (issue #1000, phase 2). ``None`` in
+    # local mode, where ``youtube_api`` reads the file under the user
+    # config dir instead.
+    youtube: PostgresYouTubeConnectionStore | None = None
 
 
 # Per-request / per-job tenant resolved by the hosted-mode auth gate
@@ -1863,6 +1872,12 @@ class AppState:
         # hosted-account concept. Returns None when no tenant is pinned.
         tenant = current_tenant.get()
         return tenant.profile if tenant is not None else None
+
+    @property
+    def youtube_connections(self) -> PostgresYouTubeConnectionStore | None:
+        # None in local mode: the connection is the youtube.json file there.
+        tenant = current_tenant.get()
+        return tenant.youtube if tenant is not None else None
 
     def build_tenant(self, user_id: str) -> TenantContext:
         """Build the :class:`TenantContext` for ``user_id`` (hosted mode).
@@ -6244,6 +6259,18 @@ def _sanitize_raw_filename(name: str | None) -> str:
     return stripped
 
 
+def _youtube_worker_credentials() -> dict[str, str] | None:
+    """The YouTube material a self-hosted worker needs, or ``None``."""
+    from ..youtube import oauth as youtube_oauth
+    from ..youtube import sealed as youtube_sealed
+
+    client = youtube_oauth.OAuthClient.configured()
+    key = youtube_sealed.token_key_from_env()
+    if not client.is_configured or key is None:
+        return None
+    return {"client_id": client.client_id, "client_secret": client.client_secret, "token_key": key}
+
+
 def _hosted_mode_active() -> bool:
     """Return True when ``SPLITSMITH_MODE=hosted`` is in the environment.
 
@@ -6324,6 +6351,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         PostgresProfileStore,
         PostgresRecentProjectsStore,
         PostgresScoreboardIdentityStore,
+        PostgresYouTubeConnectionStore,
         ProjectStateStore,
         build_email_sender,
         build_signup_policy,
@@ -6462,6 +6490,12 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
                 if s3_bucket is not None
                 else None
             ),
+            # Issue #1000, phase 2: the upload job refreshes the account's
+            # access token on the worker, so the box needs the OAuth
+            # client and the key the refresh token is sealed under. None
+            # until all three are set on the API; the agent then leaves
+            # the variables alone and an upload job fails naming them.
+            "youtube": _youtube_worker_credentials(),
         }
 
     def _build_tenant(user_id: str) -> TenantContext:
@@ -6492,6 +6526,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             comments=CommentStore(tenant_factory, user_id=user_id),
             profile=PostgresProfileStore(tenant_factory, user_id=user_id),
             export_presets=PostgresExportPresetStore(tenant_factory, user_id=user_id),
+            youtube=PostgresYouTubeConnectionStore(tenant_factory, user_id=user_id),
         )
 
     state._build_tenant = _build_tenant
@@ -16594,7 +16629,8 @@ def create_app(
 
     # Issue #1000: the local YouTube surface (settings, connect, upload).
     # Gated the other way round from device_router: ``_local_gate`` inside
-    # youtube_api answers 404 in hosted mode.
+    # youtube_api works in both modes: the file under the user config dir
+    # locally, the account's row hosted (issue #1000, phase 2).
     from .youtube_api import router as youtube_router
 
     app.include_router(youtube_router)

@@ -104,6 +104,7 @@ Output is a table of shooter/stage/camera/status, followed by a summary line. A 
 splitsmith youtube login          # opens Google's consent page; stores the refresh token in ~/.splitsmith/youtube.json
 splitsmith youtube status
 splitsmith youtube logout
+splitsmith youtube keygen         # a fresh SPLITSMITH_YOUTUBE_TOKEN_KEY for a hosted deployment
 splitsmith youtube upload exports/bromma.mp4 --privacy unlisted   # reads bromma-youtube.json, bromma.srt, bromma-thumbnail.jpg beside it
 splitsmith youtube upload exports/bromma.mp4 --playlist "Bromma 2026" --publish-at 2026-09-20T18:00 --no-notify
 splitsmith match export <match> --shooter me --format mp4 --youtube-upload --youtube-privacy private

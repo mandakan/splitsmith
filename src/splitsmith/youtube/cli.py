@@ -166,6 +166,19 @@ def status() -> None:
     console.print(f"Connected as [bold]{conn.channel_title}[/] since {conn.connected_at:%Y-%m-%d %H:%M} UTC")
 
 
+@youtube_app.command("keygen")
+def keygen() -> None:
+    """Print a fresh token key for a hosted deployment.
+
+    Hosted mode seals each account's refresh token under
+    ``SPLITSMITH_YOUTUBE_TOKEN_KEY``; set the printed value on the API
+    process and every worker. Rotating it disconnects every channel.
+    """
+    from .sealed import generate_key
+
+    console.print(generate_key(), soft_wrap=True)
+
+
 @youtube_app.command("logout")
 def logout() -> None:
     """Forget the stored YouTube login (and ask Google to revoke it)."""

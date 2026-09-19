@@ -160,6 +160,62 @@ def test_apply_credentials_with_s3(monkeypatch: pytest.MonkeyPatch) -> None:
     assert os.environ["SPLITSMITH_S3_SECRET_ACCESS_KEY"] == "sk"
 
 
+def test_apply_credentials_with_youtube(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Issue #1000, phase 2: the bundle's ``youtube`` block lands in the
+    env so the upload job can refresh the account's token here."""
+    _isolate_env(monkeypatch)
+    os.environ.pop("SPLITSMITH_YOUTUBE_CLIENT_ID", None)
+    os.environ.pop("SPLITSMITH_YOUTUBE_CLIENT_SECRET", None)
+    os.environ.pop("SPLITSMITH_YOUTUBE_TOKEN_KEY", None)
+    state = AgentState(
+        server_url="http://srv",
+        worker_id="w1",
+        worker_token="t",
+        credentials={
+            "database_url": "postgresql://db",
+            "public_url": "http://srv",
+            "s3": None,
+            "youtube": {"client_id": "cid", "client_secret": "sec", "token_key": "key"},
+        },
+    )
+    apply_credentials(state)
+    assert os.environ["SPLITSMITH_YOUTUBE_CLIENT_ID"] == "cid"
+    assert os.environ["SPLITSMITH_YOUTUBE_CLIENT_SECRET"] == "sec"
+    assert os.environ["SPLITSMITH_YOUTUBE_TOKEN_KEY"] == "key"
+
+
+def test_apply_credentials_youtube_respects_a_box_local_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    _isolate_env(monkeypatch)
+    os.environ["SPLITSMITH_YOUTUBE_TOKEN_KEY"] = "mine"
+    state = AgentState(
+        server_url="http://srv",
+        worker_id="w1",
+        worker_token="t",
+        credentials={
+            "database_url": "postgresql://db",
+            "public_url": "http://srv",
+            "s3": None,
+            "youtube": {"client_id": "cid", "client_secret": "sec", "token_key": "theirs"},
+        },
+    )
+    apply_credentials(state)
+    assert os.environ["SPLITSMITH_YOUTUBE_TOKEN_KEY"] == "mine"
+
+
+def test_apply_credentials_without_youtube_leaves_the_env_alone(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bundle from before phase 2 has no ``youtube`` key."""
+    _isolate_env(monkeypatch)
+    os.environ.pop("SPLITSMITH_YOUTUBE_TOKEN_KEY", None)
+    state = AgentState(
+        server_url="http://srv",
+        worker_id="w1",
+        worker_token="t",
+        credentials={"database_url": "postgresql://db", "public_url": "http://srv", "s3": None},
+    )
+    apply_credentials(state)
+    assert "SPLITSMITH_YOUTUBE_TOKEN_KEY" not in os.environ
+
+
 def test_apply_credentials_with_s3_null_endpoint_url(monkeypatch: pytest.MonkeyPatch) -> None:
     _isolate_env(monkeypatch)
     state = AgentState(

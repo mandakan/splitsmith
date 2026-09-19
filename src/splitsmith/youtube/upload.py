@@ -68,12 +68,19 @@ CATEGORY_IDS: dict[str, str] = {
 _DEFAULT_CATEGORY = "17"
 
 
-def build_client(conn: YouTubeConnection) -> YouTubeClient:
+def build_client(
+    conn: YouTubeConnection, *, on_reauthorize: Callable[[], object] | None = None
+) -> YouTubeClient:
     """A Data API client over the stored connection. One place so the CLI
-    verbs and the UI job build it the same way."""
+    verbs and the UI job build it the same way. ``on_reauthorize`` is what
+    forgets the connection on ``invalid_grant``: the file by default, the
+    account's row in hosted mode."""
     client = OAuthClient.configured()
     http = default_http()
-    return YouTubeClient(http, AccessTokenProvider(client, http, refresh_token=conn.refresh_token))
+    return YouTubeClient(
+        http,
+        AccessTokenProvider(client, http, refresh_token=conn.refresh_token, on_reauthorize=on_reauthorize),
+    )
 
 
 def connected_client() -> tuple[YouTubeClient, YouTubeConnection]:

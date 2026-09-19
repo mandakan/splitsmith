@@ -123,6 +123,14 @@ class User(Base):
     # JSONB's indexing wins don't apply.
     scoreboard_identity: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # The account's YouTube connection (issue #1000, phase 2). Same
+    # shape of decision as ``scoreboard_identity``: exactly one channel
+    # per account, read and written whole. Holds ``connection`` (the
+    # channel fields and the Fernet-sealed refresh token) and ``pending``
+    # (a consent flow in flight). ``splitsmith.db.youtube_connections``
+    # is the single owner of this column.
+    youtube_connection: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     def __repr__(self) -> str:
         return f"<User id={self.id!r} email={self.email!r}>"
 

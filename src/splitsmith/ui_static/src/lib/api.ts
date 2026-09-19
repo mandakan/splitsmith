@@ -840,7 +840,7 @@ export interface ExportRunYouTube {
   publish_at?: string | null;
 }
 
-/** GET /api/settings/youtube (local mode only). */
+/** GET /api/settings/youtube: the install's channel locally, the account's hosted. */
 export interface YouTubeSettings {
   configured: boolean;
   connected: boolean;
@@ -4054,7 +4054,7 @@ export const api = {
     }),
 
   /** Queue a ``youtube_upload`` job for one rendered MP4 in the shooter's
-   *  exports (local mode only). 409 when no channel is connected, 400 when
+   *  exports. 409 when no channel is connected, 400 when
    *  the file is not an MP4 with its sidecar. Poll via {@link api.pollJob}. */
   uploadToYouTube: (slug: string, payload: YouTubeUploadPayload) =>
     request<Job>(`/api/shooters/${encodeURIComponent(slug)}/exports/youtube-upload`, {
@@ -4465,8 +4465,9 @@ export const api = {
   /** Read the current hosted-sync target. */
   getSyncSettings: () => request<HostedSyncSettings>("/api/settings/hosted-sync"),
 
-  // YouTube (issue #1000): an operator-global install setting like
-  // hosted-sync; local mode only, the routes 404 hosted.
+  // YouTube (issue #1000): the install's one channel locally, the
+  // account's one channel hosted (phase 2). Same routes in both modes;
+  // the server decides what a login is.
 
   getYouTubeSettings: () => request<YouTubeSettings>("/api/settings/youtube"),
 

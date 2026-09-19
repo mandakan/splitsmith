@@ -25,6 +25,7 @@ import { useState } from "react";
 import { Navigate } from "react-router-dom";
 
 import { DesktopTokensSection } from "@/components/account/DesktopTokensSection";
+import { YouTubeSection } from "@/components/account/YouTubeSection";
 import { Button } from "@/components/ui/button";
 import { Field, inputClass } from "@/components/ui/Field";
 import { Label } from "@/components/ui/Label";
@@ -117,6 +118,8 @@ export function Account() {
           </div>
         </Field>
       </section>
+
+      <YouTubeSection />
 
       <DesktopTokensSection />
     </div>

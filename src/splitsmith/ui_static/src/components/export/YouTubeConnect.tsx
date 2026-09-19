@@ -14,16 +14,19 @@
  * are the page's one set of upload choices; history-row uploads reuse
  * them (``lib/youtubeRows.rowUploadOptions``).
  *
- * Local mode only; the parent mounts this only there.
+ * Both deployment modes: the server owns what a login is (see
+ * useYouTubeLogin). The Account page mounts the same login without the
+ * upload block (components/account/YouTubeSection).
  */
 import { MoreHorizontal } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { SelectField } from "@/components/export/SelectField";
 import { Button } from "@/components/ui/button";
 import { inputClass } from "@/components/ui/Field";
 import { Menu, menuItemClass } from "@/components/ui/Menu";
 import { Segmented } from "@/components/ui/Segmented";
+import { useYouTubeLogin } from "@/components/export/useYouTubeLogin";
 import { ApiError, api, apiErrorText, type YouTubePlaylist, type YouTubePrivacy, type YouTubeSettings } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { UploadFormOptions } from "@/lib/youtubeRows";
@@ -44,7 +47,6 @@ export interface YouTubeConnectProps {
   busy?: boolean;
 }
 
-const POLL_MS = 2000;
 const NEW_PLAYLIST = "__new__";
 
 /** The select's value for the form state: an existing id, New while a
@@ -53,8 +55,6 @@ function playlistChoice(options: UploadFormOptions): string {
   if (options.playlistId) return options.playlistId;
   return options.playlist === null ? "" : NEW_PLAYLIST;
 }
-const POLL_LIMIT_MS = 10 * 60 * 1000;
-const CONNECT_FAILED_FALLBACK = "Could not start the YouTube login - check the app and retry.";
 
 const UPLOAD_OPTIONS: readonly { value: UploadAfterRender; label: string }[] = [
   { value: "off", label: "Off" },
@@ -75,8 +75,7 @@ export function YouTubeConnect({
   const uploadAfterRender: UploadAfterRender = options.enabled ? options.privacy : "off";
   const setUploadAfterRender = (v: UploadAfterRender) =>
     onOptionsChange(v === "off" ? { ...options, enabled: false } : { ...options, enabled: true, privacy: v });
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { pending, error, connect, cancel, setError } = useYouTubeLogin(onSettingsChange);
   const [menuOpen, setMenuOpen] = useState(false);
   // The channel's playlists, fetched once the upload block turns on and
   // a channel is connected; null until then. A failed load leaves the
@@ -106,56 +105,6 @@ export function YouTubeConnect({
       cancelled = true;
     };
   }, [wantPlaylists, playlists]);
-  const pollRef = useRef<number | null>(null);
-  const startedAtRef = useRef(0);
-
-  function stopPolling() {
-    if (pollRef.current !== null) {
-      window.clearInterval(pollRef.current);
-      pollRef.current = null;
-    }
-    setPending(false);
-  }
-
-  useEffect(() => stopPolling, []);
-
-  async function connect() {
-    setError(null);
-    let authUrl: string;
-    try {
-      ({ auth_url: authUrl } = await api.startYouTubeConnect());
-    } catch (e) {
-      setError(apiErrorText(e, CONNECT_FAILED_FALLBACK));
-      return;
-    }
-    window.open(authUrl, "_blank", "noopener");
-    setPending(true);
-    startedAtRef.current = Date.now();
-    pollRef.current = window.setInterval(() => {
-      void (async () => {
-        let status;
-        try {
-          status = await api.youtubeConnectStatus();
-        } catch {
-          return; // a dropped poll is not a failed login
-        }
-        if (status.state === "pending") {
-          if (Date.now() - startedAtRef.current > POLL_LIMIT_MS) {
-            stopPolling();
-            setError("The login timed out. Connect again.");
-          }
-          return;
-        }
-        stopPolling();
-        if (status.state === "connected") {
-          onSettingsChange();
-        } else if (status.state === "failed") {
-          setError(status.error ?? "The login failed.");
-        }
-      })();
-    }, POLL_MS);
-  }
-
   async function disconnect() {
     setMenuOpen(false);
     try {
@@ -179,7 +128,7 @@ export function YouTubeConnect({
           {pending ? (
             <>
               <span className="text-md text-ink-2">Waiting for Google...</span>
-              <Button type="button" variant="ghost" size="sm" onClick={stopPolling}>
+              <Button type="button" variant="ghost" size="sm" onClick={cancel}>
                 Cancel
               </Button>
             </>

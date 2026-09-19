@@ -159,6 +159,7 @@ def test_register_happy_path_returns_token_and_credentials(
         "database_url": hosted_env,
         "public_url": PUBLIC_URL,
         "s3": None,
+        "youtube": None,
     }
     # The info dict landed on the row.
     record = _with_store(hosted_env, lambda s: s.get(worker_id))
@@ -200,6 +201,34 @@ def test_register_credentials_include_s3_when_bucket_set(
         "region": "auto",
         "access_key_id": "ak",
         "secret_access_key": "sk",
+    }
+
+
+def test_register_credentials_include_youtube_when_fully_configured(
+    monkeypatch: pytest.MonkeyPatch,
+    hosted_env: str,
+) -> None:
+    """Issue #1000, phase 2: the upload job refreshes the account's token
+    on the worker, so the bundle carries the OAuth client and the sealing
+    key -- all three or nothing."""
+    from splitsmith.ui.server import create_app
+
+    monkeypatch.setenv("SPLITSMITH_YOUTUBE_CLIENT_ID", "cid")
+    monkeypatch.setenv("SPLITSMITH_YOUTUBE_CLIENT_SECRET", "sec")
+    monkeypatch.delenv("SPLITSMITH_YOUTUBE_TOKEN_KEY", raising=False)
+    _, reg_token = seed_pending_worker(hosted_env)
+    with TestClient(create_app()) as client:
+        resp = client.post("/api/workers/register", json={"token": reg_token})
+    assert resp.json()["credentials"]["youtube"] is None
+
+    monkeypatch.setenv("SPLITSMITH_YOUTUBE_TOKEN_KEY", "key")
+    _, reg_token = seed_pending_worker(hosted_env, name="box-2")
+    with TestClient(create_app()) as client:
+        resp = client.post("/api/workers/register", json={"token": reg_token})
+    assert resp.json()["credentials"]["youtube"] == {
+        "client_id": "cid",
+        "client_secret": "sec",
+        "token_key": "key",
     }
 
 

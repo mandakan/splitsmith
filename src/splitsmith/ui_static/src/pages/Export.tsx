@@ -113,9 +113,9 @@ function ExportInner({ slug }: { slug: string }) {
   const [project, setProject] = useState<MatchProject | null>(null);
   const [overview, setOverview] = useState<ExportOverview | null>(null);
   const [runs, setRuns] = useState<ExportRun[]>([]);
-  // The YouTube connection is an install-level setting the local server
-  // owns; null until it answers (and always null hosted, where the
-  // routes do not exist). The row renders nothing while null.
+  // The YouTube connection: the install's channel locally, the account's
+  // hosted. Null until the server answers; the row renders nothing while
+  // null.
   const [youtubeSettings, setYoutubeSettings] = useState<YouTubeSettings | null>(null);
   const [uploadBusy, setUploadBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -148,13 +148,12 @@ function ExportInner({ slug }: { slug: string }) {
   }, [slug]);
 
   const reloadYouTube = useCallback(async () => {
-    if (hosted) return;
     try {
       setYoutubeSettings(await api.getYouTubeSettings());
     } catch {
       setYoutubeSettings(null);
     }
-  }, [hosted]);
+  }, []);
 
   useEffect(() => {
     void reloadYouTube();
@@ -870,7 +869,6 @@ function ExportInner({ slug }: { slug: string }) {
                 settings={settings}
                 patch={patch}
                 busy={busy}
-                hosted={hosted}
                 projectName={projectName}
                 onProjectName={setProjectName}
                 exportsDir={project?.exports_dir ?? null}
@@ -890,7 +888,7 @@ function ExportInner({ slug }: { slug: string }) {
             runs={runs}
             exportFileUrl={(f) => api.exportFileUrl(slug, f)}
             youtube={
-              !hosted && youtubeSettings?.connected
+              youtubeSettings?.connected
                 ? { connected: true, onUpload: (f, again) => void uploadRow(f, again), busyFilename: uploadBusy }
                 : undefined
             }

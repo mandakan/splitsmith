@@ -53,6 +53,22 @@ def _storage_export_key(project: MatchProject | None, local_file: Path) -> str |
     return f"{project._storage_scope}/exports/{local_file.name}"
 
 
+def export_present(project: MatchProject | None, local_file: Path) -> bool:
+    """Is this deliverable available at all: on disk, or in storage when
+    the project is storage-backed. Costs one HEAD hosted and no download,
+    for pre-flight checks that must not pull a multi-GB render."""
+    if local_file.exists() and local_file.stat().st_size > 0:
+        return True
+    key = _storage_export_key(project, local_file)
+    if key is None:
+        return False
+    try:
+        return bool(project._storage.exists(key))  # type: ignore[union-attr]
+    except Exception as exc:
+        logger.info("export cache: exists(%s) failed: %s", key, exc)
+        return False
+
+
 def pull_export_file(project: MatchProject | None, local_file: Path) -> bool:
     """Mirror an export deliverable down from storage when it isn't local.
 

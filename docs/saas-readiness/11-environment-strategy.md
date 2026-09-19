@@ -105,9 +105,25 @@ Both `serve` and `worker` in a given environment share these. The
 | `SPLITSMITH_SIGNUPS_OPEN` | `false` at launch (allowlist only) | `false` |
 | `SPLITSMITH_SIGNUP_ALLOWLIST` | the launch allowlist (emails / `@domain`) | your own address |
 | `SPLITSMITH_S3_*` | `splitsmith-uploads-prod` bucket creds | `splitsmith-uploads-staging` bucket creds |
+| `SPLITSMITH_YOUTUBE_CLIENT_ID` / `_SECRET` | the "Splitsmith Hosted" **web** OAuth client (created 2026-09-19) | the same client |
+| `SPLITSMITH_YOUTUBE_TOKEN_KEY` | `splitsmith youtube keygen` output, prod's own | staging's own |
 | `SENTRY_DSN` | prod Sentry project DSN | staging Sentry project DSN |
 | `SPLITSMITH_ENV` | `production` (optional override) | `staging` (optional override) |
 | `SENTRY_TRACES_SAMPLE_RATE` | `0.0`-`1.0` (optional, default `0.0`) | same |
+
+The three `SPLITSMITH_YOUTUBE_*` variables enable "Connect YouTube" on the
+Account and Export pages (issue #1000, phase 2). Each account's refresh
+token is stored Fernet-sealed under the key, so the key must be the same
+on the API service and every worker (self-hosted agents receive it in
+their registration bundle; re-register an agent that predates it).
+Rotating the key disconnects every channel; users connect again. The
+hosted client is not the desktop client baked into the wheel: a Google
+"Desktop app" client cannot carry a redirect URI, so the hosted redirect
+flow has its own "Web application" client in the same `splitsmith`
+project, listing `<SPLITSMITH_PUBLIC_URL>/api/settings/youtube/callback`
+for prod and staging as authorised redirect URIs (anything else answers
+`redirect_uri_mismatch`). Brand verification and the YouTube API audit
+are per project, so the web client inherits both.
 
 A public https `SPLITSMITH_PUBLIC_URL` turns on the Secure cookie flag
 in both environments.

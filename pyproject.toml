@@ -21,6 +21,9 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.30.0",
     "httpx>=0.28.0",
+    # Fernet for the hosted YouTube refresh token at rest (spec
+    # 2026-09-19); the key is SPLITSMITH_YOUTUBE_TOKEN_KEY.
+    "cryptography>=42.0.0",
     # Auto-loads <project>/.env / .env.local so SPLITSMITH_SSI_TOKEN works
     # without the user having to ``export`` it before launching the UI.
     "python-dotenv>=1.0.0",
