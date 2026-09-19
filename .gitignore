@@ -90,3 +90,6 @@ node_modules/
 
 # Subagent-driven-development scratch (ledger, briefs, review packages)
 .superpowers/
+
+# Playwright MCP plugin output (console logs, screenshots)
+.playwright-mcp/
