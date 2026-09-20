@@ -4364,6 +4364,9 @@ def register_job_bodies(state: AppState) -> None:
         handle.update(progress=1.0, message=format_sync_message(report))
 
     state.jobs.bodies.register("model_download", _run_model_download_job)
+    from . import system_api
+
+    state.jobs.bodies.register(system_api.JOB_KIND, system_api.run_chromium_install)
     state.jobs.bodies.register("detect_beep", _run_detect_beep_for_video)
     state.jobs.bodies.register("trim", _run_trim)
     state.jobs.bodies.register("shot_detect", _run_shot_detect)
@@ -16634,6 +16637,12 @@ def create_app(
     from .youtube_api import router as youtube_router
 
     app.include_router(youtube_router)
+
+    # Chromium probe + install for the desktop app (local only; hosted
+    # answers 404). The job body is registered in register_job_bodies.
+    from .system_api import router as system_router
+
+    app.include_router(system_router)
 
     # Export presets (spec 2026-09-15 s1): one router for both modes; the
     # store behind ``state.export_presets`` is what differs.
