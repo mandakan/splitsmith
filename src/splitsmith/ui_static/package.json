@@ -1,6 +1,7 @@
 {
   "name": "splitsmith-ui",
   "private": true,
+  "packageManager": "pnpm@10.30.3",
   "version": "0.1.0",
   "type": "module",
   "description": "Splitsmith production UI SPA (issue #11/#12)",
