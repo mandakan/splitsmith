@@ -1,0 +1,5 @@
+# name	version	url	sha256
+ffmpeg	9.0.2	https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz	8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e
+x264	b35605ac	https://code.videolan.org/videolan/x264/-/archive/b35605ace3ddf7c1a5d67a2eb553f034aef41d55/x264-b35605ace3ddf7c1a5d67a2eb553f034aef41d55.tar.bz2	6eeb82934e69fd51e043bd8c5b0d152839638d1ce7aa4eea65a3fedcf83ff224
+freetype	2.14.3	https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz	36bc4f1cc413335368ee656c42afca65c5a3987e8768cc28cf11ba775e785a5f
+harfbuzz	14.4.0	https://github.com/harfbuzz/harfbuzz/releases/download/14.4.0/harfbuzz-14.4.0.tar.xz	2357ed966c6ced7bfa720b0640c0231065af01158fbea215093ffa15aed44371
