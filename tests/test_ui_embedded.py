@@ -100,6 +100,42 @@ def test_ready_fd_receives_banner_before_yield() -> None:
     assert payload["port"] == handle.port
 
 
+def test_shutdown_route_exits_main(tmp_path: Path) -> None:
+    """``POST /api/shutdown`` ends the subprocess entrypoint, not just uvicorn.
+
+    The desktop shell quits through this route first and only escalates
+    to SIGTERM after a grace period; before this test the route stopped
+    the server thread while ``main()`` kept waiting for a signal, so every
+    app quit paid the full grace period.
+    """
+    env = os.environ.copy()
+    env["SPLITSMITH_PORT"] = "0"
+    env["SPLITSMITH_HOST"] = "127.0.0.1"
+    env["SPLITSMITH_HOME"] = str(tmp_path / "home")
+    env["SPLITSMITH_CONFIG_DIR"] = str(tmp_path / "config")
+    env["SPLITSMITH_LOG_DIR"] = str(tmp_path / "logs")
+
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "splitsmith.ui.embedded"],
+        env=env,
+        stderr=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        banner_line = _read_banner(proc, deadline_s=90.0)
+        payload = json.loads(banner_line[len(READY_PREFIX) + 1 :])
+        resp = httpx.post(f"{payload['base_url']}/api/shutdown", timeout=5.0)
+        assert resp.status_code == 202, resp.text
+        rc = proc.wait(timeout=60.0)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+    assert rc == 0, f"non-zero exit {rc}"
+
+
 def test_sigterm_to_main_exits_clean(tmp_path: Path) -> None:
     """The subprocess entrypoint exits 0 on SIGTERM and emits a banner."""
     env = os.environ.copy()
