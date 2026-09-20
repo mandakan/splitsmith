@@ -9,6 +9,13 @@ The positive half matters just as much: the slim runtime stack must
 actually be present, which is what catches a transitive dependency going
 missing (the Pillow regression in PR #388).
 
+The third check builds the local-mode app. The ``hosted`` extra
+(sqlalchemy, psycopg, procrastinate) is absent from a slim install, and a
+module-level import of ``splitsmith.db`` anywhere on the ``create_app``
+path makes ``splitsmith ui`` crash at startup on exactly the install
+end users have (#1057 did that through ``ui/youtube_api.py``; the desktop
+runtime build found it).
+
 Run with the *slim venv's* interpreter, not the dev one:
 
     slim-venv/bin/python scripts/ci/assert_slim_import_surface.py
@@ -41,7 +48,24 @@ def main() -> int:
             print(f"slim wheel is missing {name}: {exc}", file=sys.stderr)
             return 1
 
-    print("import surface ok: no torch trio; slim ML stack present")
+    for name in ("sqlalchemy", "psycopg", "procrastinate"):
+        try:
+            __import__(name)
+        except ImportError:
+            continue
+        print(
+            f"slim wheel pulled in {name} -- the [hosted] extra leaked into the runtime install",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        from splitsmith.ui.server import create_app
+
+        create_app(project_root=None, project_name=None)
+    except Exception as exc:  # noqa: BLE001 -- any failure here is the finding
+        print(f"local-mode create_app failed on the slim install: {exc!r}", file=sys.stderr)
+        return 1
+    print("import surface ok: no torch trio, no hosted extra, slim ML stack present, local app builds")
     return 0
 
 
