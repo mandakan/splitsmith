@@ -15,9 +15,21 @@ function resourcesPath(): string {
   return process.env.SPLITSMITH_RESOURCES ?? process.resourcesPath;
 }
 
+/**
+ * The window a dialog attaches to. Without a parent Electron runs the
+ * alert as a blocking modal on macOS, and with no window open that modal
+ * is invisible and wedges the main process (seen on the first signed
+ * build), so a dialog with no window to attach to is not shown at all.
+ */
+function parentWindow(): BrowserWindow | null {
+  return BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null;
+}
+
 function showAbout(): void {
+  const parent = parentWindow();
+  if (!parent) return;
   void dialog
-    .showMessageBox({
+    .showMessageBox(parent, {
       type: "info",
       title: "About Splitsmith",
       message: "Splitsmith",
@@ -63,7 +75,9 @@ function currentTarget(target: string): string | null {
 }
 
 function report(message: string, detail: string, type: "info" | "warning" | "error" = "info"): void {
-  void dialog.showMessageBox({ type, message, detail });
+  const parent = parentWindow();
+  if (!parent) return;
+  void dialog.showMessageBox(parent, { type, message, detail });
 }
 
 /** Symlink the bundle's console script to /usr/local/bin, with an admin prompt when needed. */
@@ -92,8 +106,9 @@ function installCli(): void {
     const cmd = `mkdir -p '${path.dirname(plan.target)}' && ln -sfn '${plan.source}' '${plan.target}'`;
     const script = `do shell script "${cmd.replace(/"/g, '\\"')}" with administrator privileges`;
     execFile("osascript", ["-e", script], (err) => {
-      if (err) report("Not installed", err.message, "error");
-      else installed();
+      if (!err) installed();
+      // A cancelled password prompt is not an error worth a dialog.
+      else if (!/User canceled|-128/.test(err.message)) report("Not installed", err.message, "error");
     });
   }
 }
