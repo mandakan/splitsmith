@@ -1,0 +1,28 @@
+{
+  "name": "splitsmith-desktop",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Electron shell around the splitsmith engine. The version is rewritten from pyproject.toml by build.sh; 0.0.0 is what is committed.",
+  "main": "out/main.js",
+  "packageManager": "pnpm@10.30.3",
+  "scripts": {
+    "compile": "tsc -p tsconfig.json",
+    "start": "pnpm compile && electron .",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "build": "./build.sh",
+    "pack": "electron-builder --mac --arm64"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "electron": "^44.4.3",
+    "electron-builder": "^26.15.3",
+    "typescript": "^5.7.3",
+    "vitest": "^4.1.11"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron"
+    ]
+  }
+}
