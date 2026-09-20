@@ -3172,6 +3172,13 @@ export const api = {
   getServerFeatures: () =>
     request<{ lab: boolean; mode: "local" | "hosted" }>("/api/server/features"),
 
+  /** Whether the overlay rasterizer's Chromium is installed (local mode;
+   *  404 hosted). The desktop app installs it through ``installChromium``. */
+  getChromiumStatus: () => request<{ installed: boolean; channel: string }>("/api/system/chromium"),
+
+  /** Enqueue the ``chromium_install`` job (idempotent while one runs). */
+  installChromium: () => request<Job>("/api/system/chromium/install", { method: "POST" }),
+
   /** The authenticated account, or a 401 (caught via ``isUnauthorized``)
    *  when signed out. Always 200 in local mode (loopback user). */
   getMe: () => request<AuthUser>("/api/me"),
