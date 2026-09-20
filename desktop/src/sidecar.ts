@@ -98,3 +98,10 @@ export function isSidecarOrigin(url: string, baseUrl: string): boolean {
     return false;
   }
 }
+
+/** What main.ts learns from the running sidecar; read by the menu at click time. */
+export const sidecarState: { ready: ReadyPayload | null; engineVersion: string; logDir: string } = {
+  ready: null,
+  engineVersion: "",
+  logDir: "",
+};
