@@ -2740,7 +2740,13 @@ async def _maybe_submit_model_download(state: AppState) -> None:
     a ``model_artifacts`` block, or the torch dev install), when every
     artifact is already cached + verified, or when a previous job is
     still active (idempotent across reloads of an embedded host).
+    ``SPLITSMITH_NO_MODEL_PREFETCH=1`` skips it entirely: the subprocess
+    tests of the embedded entrypoint boot against an empty config dir
+    and must not each start a 430 MB download that the drain then has
+    to cancel (that is what made the SIGTERM test time out on CI).
     """
+    if os.environ.get("SPLITSMITH_NO_MODEL_PREFETCH", "").lower() in {"1", "true", "yes", "on"}:
+        return
     try:
         registry = model_layer.get_default_registry()
     except Exception:  # pragma: no cover -- defensive; never block boot on this

@@ -114,6 +114,8 @@ def test_shutdown_route_exits_main(tmp_path: Path) -> None:
     env["SPLITSMITH_HOME"] = str(tmp_path / "home")
     env["SPLITSMITH_CONFIG_DIR"] = str(tmp_path / "config")
     env["SPLITSMITH_LOG_DIR"] = str(tmp_path / "logs")
+    # An empty config dir would otherwise start the model prefetch at boot.
+    env["SPLITSMITH_NO_MODEL_PREFETCH"] = "1"
 
     proc = subprocess.Popen(
         [sys.executable, "-m", "splitsmith.ui.embedded"],
@@ -145,6 +147,8 @@ def test_sigterm_to_main_exits_clean(tmp_path: Path) -> None:
     env["SPLITSMITH_HOME"] = str(tmp_path / "home")
     env["SPLITSMITH_CONFIG_DIR"] = str(tmp_path / "config")
     env["SPLITSMITH_LOG_DIR"] = str(tmp_path / "logs")
+    # An empty config dir would otherwise start the model prefetch at boot.
+    env["SPLITSMITH_NO_MODEL_PREFETCH"] = "1"
 
     proc = subprocess.Popen(
         [sys.executable, "-m", "splitsmith.ui.embedded"],
