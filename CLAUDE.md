@@ -250,6 +250,38 @@ by ``playlist_id`` which wins; ``publish_at`` which implies private;
 seconds after a playlist is created; ``_add_to_playlist_with_retry``
 backs off rather than noting a failure.
 
+## Desktop app (``desktop/``, spec 2026-09-20)
+
+An Electron shell, not a second frontend: ``desktop/src/main.ts`` spawns
+``Contents/Resources/python/bin/python3.12 -m splitsmith.ui.embedded``,
+parses the ``SPLITSMITH_READY`` banner and loads the sidecar's URL. The
+runtime is python-build-standalone plus the wheel (``build-runtime.sh``),
+never PyInstaller; what ships is ``uv.lock``'s default set, and
+``scripts/ci/assert_slim_import_surface.py`` builds the local-mode app
+on a slim install because a module-level ``splitsmith.db`` import
+anywhere on the ``create_app`` path crashes exactly that install (#1057
+did it through ``ui/youtube_api.py``). The pure parts (``sidecar.ts``,
+``cliLink.ts``) have vitest tests; ``main.ts`` and ``menu.ts`` are wiring.
+ffmpeg is our own static build (``build-ffmpeg.sh``; ``--lgpl`` is the
+#986 variant, and the pipeline only ever names ``fontfile=`` so there is
+no fontconfig), published as a GitHub release the app fetches by sha256.
+Bumping it follows the ffmpeg change rule: the single-shooter frames
+were pixel-identical to Homebrew's build, the grid's action frames
+differ at edges only because two compiles of the same x264 commit make
+different rate-control choices; look at the frames, not the deltas. The
+bundle is sealed: ``PYTHONDONTWRITEBYTECODE``, precompiled bytecode,
+``NUMBA_CACHE_DIR`` under ``~/Library/Caches``. Data stays in
+``~/.splitsmith``, shared with the CLI on purpose. ``POST /api/shutdown``
+ends the sidecar process (``exit_event`` in ``embedded.py``), which is
+what makes Cmd-Q take half a second instead of the SIGTERM grace period.
+``CSC_IDENTITY_AUTO_DISCOVERY=false desktop/build.sh`` is the unsigned
+build; ``desktop/smoke.sh`` runs the built sidecar and a detection;
+``desktop/verify-signed.sh`` is what a signed build must pass;
+``desktop/scripts/cdp-shot.mjs`` screenshots the window when Electron
+runs with ``--remote-debugging-port``. The one engine surface added for
+it is ``ui/system_api.py`` (Chromium probe and install, local only) and
+the button under ``PreviewPane``'s browser line.
+
 ## Multi-shooter comparison (`compare/` package)
 
 ``splitsmith compare export <manifest>`` reads N existing single-shooter

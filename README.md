@@ -109,6 +109,10 @@ splitsmith ui --project ~/matches/your-match
 
 Detection models (~440 MB total) are auto-fetched from `models.splitsmith.app` into `~/.splitsmith/models/` in the background as soon as `splitsmith ui` starts; the SPA's Jobs panel shows progress. Pre-fetch in a one-shot run with `splitsmith fetch-models` if you'd rather pay the download up front (CI, metered connections, etc.). No torch, transformers, or panns_inference in the install. The CLI `single` / `process` / `detect` commands use only the envelope-based Voter A and need no model artifacts at all.
 
+### Option 1b: macOS app (Apple Silicon)
+
+A signed DMG of the same engine, no `uv` or Homebrew ffmpeg needed. Download `Splitsmith-<version>-arm64.dmg` from the GitHub release, drag it to Applications, open it. The app shares `~/.splitsmith` with a CLI install, so a match audited in one is there in the other; Splitsmith > Install command line tool puts `splitsmith` on your PATH from the app's own runtime. The first detection downloads the models (about 430 MB); the first overlay render offers to download Chromium (about 260 MB). The app is built by `desktop/build.sh`; the design is `docs/superpowers/specs/2026-09-20-electron-desktop-packaging-design.md`.
+
 ### Option 2: Docker image (server, worker, or self-hosted agent)
 
 The container image is published to GitHub Container Registry. One image runs every role: the entrypoint is the `splitsmith` CLI, so the subcommand you pass picks the role.
