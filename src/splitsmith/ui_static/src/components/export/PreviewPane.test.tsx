@@ -4,7 +4,7 @@
  * the previous image kept until the next lands, one line per failure,
  * and never anything that blocks the page.
  */
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PreviewPane } from "@/components/export/PreviewPane";
@@ -13,8 +13,10 @@ import { DEFAULT_EXPORT_SETTINGS } from "@/lib/exportPresets";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
-  return { ...actual, api: { ...actual.api, exportPreview: vi.fn() } };
+  return { ...actual, api: { ...actual.api, exportPreview: vi.fn(), installChromium: vi.fn(), getJob: vi.fn() } };
 });
+
+vi.mock("@/lib/features", () => ({ useDeploymentMode: () => ({ mode: "local", resolved: true }) }));
 
 const blob = (tag: string) => new Blob([tag], { type: "image/png" });
 
@@ -182,5 +184,27 @@ describe("PreviewPane", () => {
     await settle();
     expect(container).toBeEmptyDOMElement();
     expect(api.exportPreview).not.toHaveBeenCalled();
+  });
+
+  it("offers to install the renderer when the preview needs a browser, and retries once it lands", async () => {
+    const OVERLAY = { slotId: "overlay" as const, variantId: "on" };
+    vi.mocked(api.exportPreview).mockRejectedValue(new ApiError(503, "no browser"));
+    vi.mocked(api.installChromium).mockResolvedValue({ id: "j1", kind: "chromium_install", status: "pending" } as never);
+    vi.mocked(api.getJob).mockResolvedValue({ id: "j1", kind: "chromium_install", status: "succeeded" } as never);
+    render(
+      <PreviewPane slug="me" stageNumber={3} settings={settings} projectName="Bromma" focus={OVERLAY} hover={null} enabled />,
+    );
+    await settle();
+    expect(screen.getByText("Preview needs a browser")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Install renderer (260 MB)" }));
+    await settle(0);
+    expect(api.installChromium).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Installing renderer")).toBeInTheDocument();
+    vi.mocked(api.exportPreview).mockResolvedValue(blob("b"));
+    await settle(1000);
+    await settle();
+    expect(api.exportPreview).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("Installing renderer")).not.toBeInTheDocument();
+    expect(screen.getByRole("img")).toHaveAttribute("src", "blob:0");
   });
 });

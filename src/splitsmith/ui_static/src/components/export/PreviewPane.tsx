@@ -8,13 +8,17 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/Label";
 import { ApiError, api } from "@/lib/api";
+import { useDeploymentMode } from "@/lib/features";
 import { previewBody, previewCaption, previewCardFor, previewLine, type LookFocus } from "@/lib/exportPreview";
 import type { ExportSettings } from "@/lib/exportPresets";
 import { LOOK_SLOTS, thumbnailUrl } from "@/lib/lookGallery";
 
 export const PREVIEW_DEBOUNCE_MS = 400;
+/** How often the pane asks after the renderer install it started. */
+export const INSTALL_POLL_MS = 1000;
 
 export interface PreviewPaneProps {
   slug: string;
@@ -41,6 +45,12 @@ export function PreviewPane({ slug, stageNumber, settings, projectName, focus, h
   const [still, setStill] = useState<string | null>(null);
   const [status, setStatus] = useState<number | null>(null);
   const [failed, setFailed] = useState(false);
+  // The renderer install this pane started (local mode, on a 503): the
+  // job id while it runs; each completed install bumps ``retry`` so the
+  // preview effect asks again without the user editing anything.
+  const [installJob, setInstallJob] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  const { mode } = useDeploymentMode();
   const urlRef = useRef<string | null>(null);
 
   const card = previewCardFor(focus);
@@ -76,7 +86,40 @@ export function PreviewPane({ slug, stageNumber, settings, projectName, focus, h
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [enabled, slug, requestKey]);
+  }, [enabled, slug, requestKey, retry]);
+
+  useEffect(() => {
+    if (!installJob) return;
+    let alive = true;
+    const tick = () => {
+      api
+        .getJob(installJob)
+        .then((job) => {
+          if (!alive) return;
+          if (job.status === "pending" || job.status === "running") {
+            timer = window.setTimeout(tick, INSTALL_POLL_MS);
+            return;
+          }
+          setInstallJob(null);
+          if (job.status === "succeeded") setRetry((n) => n + 1);
+        })
+        .catch(() => {
+          if (alive) setInstallJob(null);
+        });
+    };
+    let timer = window.setTimeout(tick, INSTALL_POLL_MS);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [installJob]);
+
+  const startInstall = () => {
+    api
+      .installChromium()
+      .then((job) => setInstallJob(job.id))
+      .catch(() => setInstallJob(null));
+  };
 
   useEffect(
     () => () => {
@@ -101,6 +144,17 @@ export function PreviewPane({ slug, stageNumber, settings, projectName, focus, h
       </div>
       {failed && !hovering && card !== null ? (
         <p className="px-3.5 py-1.5 text-sm text-muted">{previewLine(status)}</p>
+      ) : null}
+      {failed && !hovering && card !== null && status === 503 && mode === "local" ? (
+        <div className="px-3.5 pb-2">
+          {installJob ? (
+            <p className="text-sm text-muted">Installing renderer</p>
+          ) : (
+            <Button variant="default" size="sm" onClick={startInstall}>
+              Install renderer (260 MB)
+            </Button>
+          )}
+        </div>
       ) : null}
     </div>
   );

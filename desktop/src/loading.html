@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Splitsmith</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0e0f11; color: #e6e6e6; font: 14px/1.5 -apple-system, "Helvetica Neue", sans-serif;
+         display: grid; place-items: center; height: 100vh; -webkit-user-select: none; }
+  main { width: min(560px, 90vw); }
+  .mark { color: #e0332b; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: 12px; }
+  h1 { font-size: 18px; font-weight: 500; margin: 8px 0 4px; }
+  .muted { color: #8b8f96; }
+  pre { background: #16181b; border: 1px solid #26292e; padding: 12px; border-radius: 4px; max-height: 40vh; white-space: pre-wrap;
+        overflow: auto; font-size: 12px; -webkit-user-select: text; }
+  button { background: transparent; color: #e6e6e6; border: 1px solid #3a3e45; border-radius: 4px; padding: 6px 12px;
+           font: inherit; margin-right: 8px; cursor: pointer; }
+  button:hover { border-color: #e6e6e6; }
+  body[data-state="starting"] .failed, body[data-state="failed"] .starting { display: none; }
+</style>
+</head>
+<body data-state="starting">
+<main>
+  <div class="mark">Splitsmith</div>
+  <section class="starting">
+    <h1>Starting engine</h1>
+    <p class="muted">Version <span id="app-version"></span></p>
+  </section>
+  <section class="failed">
+    <h1>The engine is not running</h1>
+    <p class="muted">The last lines of its log:</p>
+    <pre id="tail"></pre>
+    <button id="open-log">Open log folder</button>
+    <button id="quit">Quit</button>
+  </section>
+</main>
+<script>
+  const bridge = window.splitsmith;
+  document.getElementById("app-version").textContent = bridge ? bridge.appVersion : "";
+  if (bridge) {
+    bridge.onFailure((lines) => {
+      document.getElementById("tail").textContent = lines.join("\n");
+      document.body.dataset.state = "failed";
+    });
+    document.getElementById("open-log").addEventListener("click", () => bridge.openLogFolder());
+    document.getElementById("quit").addEventListener("click", () => bridge.quit());
+  }
+</script>
+</body>
+</html>

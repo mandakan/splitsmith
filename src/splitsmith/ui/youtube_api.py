@@ -30,7 +30,7 @@ import secrets
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
@@ -38,7 +38,6 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from .. import youtube_sidecar
-from ..db.youtube_connections import PendingLogin, PostgresYouTubeConnectionStore, StoredYouTubeConnection
 from ..youtube import oauth, sealed
 from ..youtube.client import QuotaExceededError, YouTubeClient, default_http
 from ..youtube.upload import (
@@ -49,6 +48,14 @@ from ..youtube.upload import (
     upload_export,
 )
 from . import export_storage
+
+if TYPE_CHECKING:
+    # Hosted-only: ``splitsmith.db`` pulls sqlalchemy from the ``hosted``
+    # extra, which a slim desktop install does not have. Imported lazily
+    # at runtime inside the hosted branches so ``splitsmith ui`` on a slim
+    # install can still import this module (the job body registration
+    # imports it unconditionally).
+    from ..db.youtube_connections import PendingLogin, PostgresYouTubeConnectionStore
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -251,6 +258,8 @@ async def start_youtube_connect(request: Request) -> ConnectStartResponse:
         raise HTTPException(status_code=409, detail="YouTube upload is not configured on this server")
     redirect_uri = _callback_uri(request.app.state.splitsmith_state)
     pkce = oauth.new_pkce()
+    from ..db.youtube_connections import PendingLogin
+
     pending = PendingLogin(
         state=secrets.token_urlsafe(16), code_verifier=pkce.verifier, started_at=datetime.now(UTC)
     )
@@ -347,6 +356,8 @@ async def youtube_connect_callback(
     except Exception as exc:  # noqa: BLE001 -- the page must say something; the log has the trace
         logger.exception("YouTube callback failed")
         return await fail(f"unexpected error: {exc}")
+    from ..db.youtube_connections import StoredYouTubeConnection
+
     await store.set(StoredYouTubeConnection.seal_from(conn))
     await store.clear_pending()
     return _callback_page("YouTube connected", f"Connected as {conn.channel_title}.")

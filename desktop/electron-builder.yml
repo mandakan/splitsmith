@@ -1,0 +1,43 @@
+appId: app.splitsmith.desktop
+productName: Splitsmith
+copyright: Copyright (c) Mathias Axell
+directories:
+  output: dist
+  buildResources: build-resources
+files:
+  - out/**
+  - src/loading.html
+  - package.json
+extraResources:
+  - from: build/runtime/python
+    to: python
+  - from: build/bin
+    to: bin
+  - from: build/NOTICES.md
+    to: NOTICES.md
+asar: true
+mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+  category: public.app-category.video
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: entitlements.plist
+  entitlementsInherit: entitlements.plist
+  # Reads APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER; skipped with
+  # CSC_IDENTITY_AUTO_DISCOVERY=false.
+  notarize: true
+  darkModeSupport: true
+  extendInfo:
+    # readlink -f in the CLI shim needs 12.3; round up to a supported major.
+    LSMinimumSystemVersion: "13.0"
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications

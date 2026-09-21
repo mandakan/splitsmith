@@ -138,6 +138,7 @@ def run_embedded(
     log_file: Path | None = None,
     startup_timeout: float = DEFAULT_STARTUP_TIMEOUT_S,
     shutdown_timeout: float = DEFAULT_SHUTDOWN_TIMEOUT_S,
+    exit_event: threading.Event | None = None,
 ) -> Iterator[ServerHandle]:
     """Boot uvicorn on a daemon thread for the duration of the context.
 
@@ -193,7 +194,17 @@ def run_embedded(
     # #369) can ask uvicorn to exit. The CLI's ``splitsmith ui`` path
     # never reaches here, so the route stays drain-only there.
     splitsmith_state = app.state.splitsmith_state
-    splitsmith_state.shutdown_handler = lambda: setattr(server, "should_exit", True)
+
+    def _stop_server() -> None:
+        # ``POST /api/shutdown`` lands here after the job drain. Stopping
+        # uvicorn alone is not enough for the subprocess entrypoint, whose
+        # ``main()`` blocks on ``exit_event``: without setting it the
+        # process would outlive its server until the shell's SIGTERM.
+        server.should_exit = True
+        if exit_event is not None:
+            exit_event.set()
+
+    splitsmith_state.shutdown_handler = _stop_server
 
     try:
         _wait_for_health(base_url, timeout=startup_timeout)
@@ -337,9 +348,11 @@ def main(argv: list[str] | None = None) -> None:
         lab_enabled=lab_enabled,
         ready_fd=ready_fd,
         log_file=log_file,
+        exit_event=stop,
     ):
-        # Block until the signal handler flips the event. The context
-        # manager's ``__exit__`` takes care of orderly shutdown.
+        # Block until a signal handler or ``POST /api/shutdown`` flips the
+        # event. The context manager's ``__exit__`` takes care of orderly
+        # shutdown.
         stop.wait()
 
 

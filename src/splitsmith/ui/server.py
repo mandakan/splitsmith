@@ -2740,7 +2740,13 @@ async def _maybe_submit_model_download(state: AppState) -> None:
     a ``model_artifacts`` block, or the torch dev install), when every
     artifact is already cached + verified, or when a previous job is
     still active (idempotent across reloads of an embedded host).
+    ``SPLITSMITH_NO_MODEL_PREFETCH=1`` skips it entirely: the subprocess
+    tests of the embedded entrypoint boot against an empty config dir
+    and must not each start a 430 MB download that the drain then has
+    to cancel (that is what made the SIGTERM test time out on CI).
     """
+    if os.environ.get("SPLITSMITH_NO_MODEL_PREFETCH", "").lower() in {"1", "true", "yes", "on"}:
+        return
     try:
         registry = model_layer.get_default_registry()
     except Exception:  # pragma: no cover -- defensive; never block boot on this
@@ -4364,6 +4370,9 @@ def register_job_bodies(state: AppState) -> None:
         handle.update(progress=1.0, message=format_sync_message(report))
 
     state.jobs.bodies.register("model_download", _run_model_download_job)
+    from . import system_api
+
+    state.jobs.bodies.register(system_api.JOB_KIND, system_api.run_chromium_install)
     state.jobs.bodies.register("detect_beep", _run_detect_beep_for_video)
     state.jobs.bodies.register("trim", _run_trim)
     state.jobs.bodies.register("shot_detect", _run_shot_detect)
@@ -16634,6 +16643,12 @@ def create_app(
     from .youtube_api import router as youtube_router
 
     app.include_router(youtube_router)
+
+    # Chromium probe + install for the desktop app (local only; hosted
+    # answers 404). The job body is registered in register_job_bodies.
+    from .system_api import router as system_router
+
+    app.include_router(system_router)
 
     # Export presets (spec 2026-09-15 s1): one router for both modes; the
     # store behind ``state.export_presets`` is what differs.
