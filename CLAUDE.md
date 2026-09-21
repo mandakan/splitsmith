@@ -280,7 +280,13 @@ build; ``desktop/smoke.sh`` runs the built sidecar and a detection;
 ``desktop/scripts/cdp-shot.mjs`` screenshots the window when Electron
 runs with ``--remote-debugging-port``. The one engine surface added for
 it is ``ui/system_api.py`` (Chromium probe and install, local only) and
-the button under ``PreviewPane``'s browser line.
+the button under ``PreviewPane``'s browser line. The update check is
+``desktop/src/updateCheck.ts`` (pure, tested) plus ``updates.ts``
+(fetch, dismissed file under userData, the sheet); the feed is the Pages
+Function ``functions/desktop/latest.json.js`` on splitsmith.app, which
+picks the newest ``v*.*.*`` release because GitHub's ``releases/latest``
+can be an ffmpeg source release. Moving the download behind a purchase
+changes that function only. No auto-update.
 
 ## Multi-shooter comparison (`compare/` package)
 

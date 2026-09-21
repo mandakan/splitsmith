@@ -14,11 +14,13 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 
 import { buildMenu } from "./menu";
 import { isSidecarOrigin, parseReadyLine, sidecarSpec, sidecarState } from "./sidecar";
+import { checkForUpdates } from "./updates";
 
 const READY_TIMEOUT_MS = 30_000;
 const SHUTDOWN_GRACE_MS = 10_000;
 const KILL_GRACE_MS = 5_000;
 const TAIL_LINES = 50;
+const UPDATE_CHECK_DELAY_MS = 5_000;
 const LOADING_PAGE = path.join(__dirname, "..", "src", "loading.html");
 
 /** ``Contents/Resources`` of the bundle; ``pnpm start`` points it at desktop/build/resources. */
@@ -74,6 +76,8 @@ async function startSidecar(): Promise<void> {
         })
         .catch(() => undefined)
         .finally(() => void win?.loadURL(payload.base_url));
+      // Never on the startup path: the SPA is up first, the feed is asked later.
+      setTimeout(() => void checkForUpdates({ interactive: false }), UPDATE_CHECK_DELAY_MS);
     }
   });
   child.on("exit", (code, signal) => {

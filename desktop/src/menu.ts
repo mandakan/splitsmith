@@ -10,6 +10,7 @@ import { app, BrowserWindow, dialog, Menu, shell } from "electron";
 
 import { CLI_TARGET, cliLinkPlan } from "./cliLink";
 import { CLI_RELATIVE, sidecarState } from "./sidecar";
+import { checkForUpdates } from "./updates";
 
 function resourcesPath(): string {
   return process.env.SPLITSMITH_RESOURCES ?? process.resourcesPath;
@@ -120,6 +121,7 @@ export function buildMenu(): void {
       submenu: [
         { label: "About Splitsmith", click: showAbout },
         { label: "Third-party notices", click: showNotices },
+        { label: "Check for updates...", click: () => void checkForUpdates({ interactive: true }) },
         { type: "separator" },
         { label: "Install command line tool", click: installCli },
         { type: "separator" },
