@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import functools
 import json
 from collections import Counter
 from collections.abc import Callable
@@ -46,7 +47,7 @@ from typing import Any
 import numpy as np
 from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import StratifiedKFold
+from sklearn.model_selection import LeaveOneGroupOut, StratifiedGroupKFold, StratifiedKFold
 
 from splitsmith.beep_detect import load_audio
 from splitsmith.config import ShotDetectConfig
@@ -78,6 +79,10 @@ FULL_DIR = FIXTURES_DIR / "full"
 CACHE_DIR = FIXTURES_DIR / ".cache"
 MINED_NEGATIVES_PATH = CACHE_DIR / "_mined_negatives.npz"
 DATA_DIR = Path("src/splitsmith/data")
+#: Held-out voter C evaluation (#1045): the per-class report and the
+#: out-of-fold probabilities ``build_sweep_signals.py`` joins onto the
+#: sweep. Build output, not a shipped artifact.
+HELDOUT_DIR = Path("build/ensemble_heldout")
 
 
 class BuildError(RuntimeError):
@@ -207,6 +212,11 @@ def _build_universe(
             universe.append(
                 {
                     "fixture": fix,
+                    # Candidate identity, shared with build_sweep_signals.py
+                    # (same detector, same config -> same order), so held-out
+                    # voter C probabilities can be joined onto the sweep.
+                    "candidate_idx": i,
+                    "t_absolute": float(cand_t[i]),
                     "camera_class": cam_class,
                     "camera_make": cam_make,
                     "camera_model": cam_model,
@@ -527,14 +537,192 @@ def _threshold_for_recall(probs: np.ndarray, labels: np.ndarray, target_recall: 
     return threshold
 
 
+@functools.cache
+def _event_groups(fixture: str) -> tuple[str, str]:
+    """``(match, match:stage)`` for a fixture, from its ``event_id``.
+
+    ``event_id`` is ``<match>:<stage>:<shooter>``. The stage key groups
+    every recording of one stage -- each camera of one run (the
+    ``-apple-iphone17pro`` twins are the same shots) and every shooter
+    on that bay, who share its acoustics -- so no fold trains on a stage
+    it is scored on (#1045).
+    """
+    event_id = json.loads((FIXTURES_DIR / f"{fixture}.json").read_text())["event_id"]
+    match, stage, _shooter = event_id.split(":")
+    return match, f"{match}:{stage}"
+
+
+def _new_voter_c_gbdt() -> GradientBoostingClassifier:
+    return GradientBoostingClassifier(n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42)
+
+
+def _heldout_probs(X: np.ndarray, y: np.ndarray, groups: np.ndarray, splitter: Any) -> np.ndarray | None:
+    """Out-of-fold voter C probabilities under a grouped ``splitter``.
+
+    ``None`` when the class has too few groups for the splitter (one
+    match cannot be left out against itself). A fold whose training side
+    holds a single label cannot be fitted; its rows stay NaN and the
+    metrics skip them.
+    """
+    try:
+        splits = list(splitter.split(X, y, groups))
+    except ValueError:
+        return None
+    probs = np.full(len(y), np.nan, dtype=np.float64)
+    for tr, te in splits:
+        if len(np.unique(y[tr])) < 2:
+            continue
+        f = _new_voter_c_gbdt()
+        f.fit(X[tr], y[tr])
+        probs[te] = f.predict_proba(X[te])[:, 1]
+    return probs
+
+
+def _prf_at(probs: np.ndarray, labels: np.ndarray, threshold: float) -> dict[str, float | int]:
+    """Candidate-level precision / recall / F1 of ``probs >= threshold``;
+    NaN probabilities (unscorable folds) are left out and counted."""
+    ok = ~np.isnan(probs)
+    kept = probs[ok] >= threshold
+    lab = labels[ok]
+    tp = int((kept & (lab == 1)).sum())
+    fp = int((kept & (lab == 0)).sum())
+    fn = int((~kept & (lab == 1)).sum())
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
+    return {
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "f1": round(f1, 4),
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "n_unscored": int((~ok).sum()),
+    }
+
+
+def _heldout_class_report(
+    rows: list[dict],
+    cv_probs: np.ndarray,
+    labels: np.ndarray,
+    heldout: dict[str, np.ndarray | None],
+    shipped_threshold: float,
+    target_recall: float,
+) -> dict[str, Any]:
+    """One camera class's voter C figures under each split (#1045).
+
+    For every split: candidate-level P/R/F1 at the *shipped* threshold
+    (what the ensemble would do on unseen stages today) and at the
+    threshold that split would itself pick for ``target_recall`` (what a
+    re-calibration on it would ship). ``stratified`` is the existing
+    by-candidate split, reported beside the others so the gap is on one
+    page.
+    """
+    splits: dict[str, np.ndarray | None] = {"stratified": cv_probs, **heldout}
+    report: dict[str, Any] = {
+        "n_candidates": len(rows),
+        "n_positives": int(labels.sum()),
+        "n_stages": len({_event_groups(r["fixture"])[1] for r in rows}),
+        "matches": sorted({_event_groups(r["fixture"])[0] for r in rows}),
+        "shipped_threshold": round(float(shipped_threshold), 6),
+    }
+    for name, probs in splits.items():
+        if probs is None:
+            report[name] = None
+            continue
+        ok = ~np.isnan(probs)
+        own = _threshold_for_recall(probs[ok], labels[ok], target_recall)
+        report[name] = {
+            "at_shipped_threshold": _prf_at(probs, labels, shipped_threshold),
+            "own_threshold": round(float(own), 6),
+            "at_own_threshold": _prf_at(probs, labels, own),
+        }
+    return report
+
+
+def _heldout_rows(
+    rows: list[dict], cv_probs: np.ndarray, heldout: dict[str, np.ndarray | None]
+) -> list[dict]:
+    """Per-candidate out-of-fold probabilities, keyed like the sweep's rows.
+    Mined negatives carry no ``candidate_idx`` and are not in the sweep."""
+    out: list[dict] = []
+    for i, r in enumerate(rows):
+        if "candidate_idx" not in r:
+            continue
+        row = {
+            "fixture": r["fixture"],
+            "candidate_idx": int(r["candidate_idx"]),
+            "t_absolute": float(r["t_absolute"]),
+            "score_c_stratified": float(cv_probs[i]),
+        }
+        for name in ("grouped", "lomo"):
+            probs = heldout[name]
+            row[f"score_c_{name}"] = float(probs[i]) if probs is not None else float("nan")
+        out.append(row)
+    return out
+
+
+def _write_heldout(
+    report: dict[str, dict],
+    rows: list[dict],
+    *,
+    target_recall: float,
+    tolerance_ms: float,
+    log: Callable[[str], None],
+) -> None:
+    """Write ``HELDOUT_DIR/report.json`` and ``voter_c_oof.parquet``."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    HELDOUT_DIR.mkdir(parents=True, exist_ok=True)
+    (HELDOUT_DIR / "report.json").write_text(
+        json.dumps(
+            {
+                "built_at": dt.datetime.now(dt.UTC).isoformat(),
+                "target_recall": target_recall,
+                "tolerance_ms": tolerance_ms,
+                "splits": {
+                    "stratified": "StratifiedKFold(5) over candidates -- the shipped threshold's split",
+                    "grouped": "StratifiedGroupKFold(5), groups = match + stage",
+                    "lomo": "LeaveOneGroupOut, groups = match",
+                },
+                "by_camera_class": report,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    pq.write_table(pa.Table.from_pylist(rows), HELDOUT_DIR / "voter_c_oof.parquet")
+    for cls, r in report.items():
+        parts = []
+        for name in ("stratified", "grouped", "lomo"):
+            block = r.get(name)
+            if block is None:
+                parts.append(f"{name}=n/a")
+                continue
+            m = block["at_shipped_threshold"]
+            parts.append(f"{name} P/R/F1={m['precision']:.3f}/{m['recall']:.3f}/{m['f1']:.3f}")
+        log(f"  held-out {cls}: " + "  ".join(parts))
+    log(f"  held-out report + OOF probabilities -> {HELDOUT_DIR}/")
+
+
 def _train_voter_c_for_class(rows: list[dict], target_recall: float):
-    """Fit one GBDT per camera class; return ``(model, threshold, cv_probs, y)``.
+    """Fit one GBDT per camera class; return ``(model, threshold, cv_probs, y, heldout)``.
 
     Trained on rows from a single camera class only -- decouples each
     class's decision boundary from the others, so adding fixtures to one
     class can no longer drag the other class's precision down (issue
     #297). ``cv_probs`` are 5-fold CV held-out probabilities used for
     both threshold selection and the per-class metrics block.
+
+    That split is by candidate, so one stage's candidates -- and the same
+    shots seen by a second camera -- land on both sides of it, and the
+    metrics it yields are close to in-sample (#1045). ``heldout`` carries
+    the honest ones: ``grouped`` (5 folds, grouped by match + stage) and
+    ``lomo`` (leave one match out), each an array of out-of-fold
+    probabilities aligned with ``rows`` or ``None``. The shipped model
+    and threshold are unchanged by them; whether the threshold should
+    move to a grouped split is a separate, measured decision.
     """
     X = _x_from(rows)
     y = np.array([c["label"] for c in rows], dtype=np.int64)
@@ -547,15 +735,24 @@ def _train_voter_c_for_class(rows: list[dict], target_recall: float):
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     cv_probs = np.zeros_like(y, dtype=np.float64)
     for tr, te in skf.split(X, y):
-        f = GradientBoostingClassifier(n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42)
+        f = _new_voter_c_gbdt()
         f.fit(X[tr], y[tr])
         cv_probs[te] = f.predict_proba(X[te])[:, 1]
 
     threshold = _threshold_for_recall(cv_probs, y, target_recall)
 
-    clf = GradientBoostingClassifier(n_estimators=200, max_depth=3, learning_rate=0.05, random_state=42)
+    stage_groups = np.array([_event_groups(r["fixture"])[1] for r in rows])
+    match_groups = np.array([_event_groups(r["fixture"])[0] for r in rows])
+    heldout = {
+        "grouped": _heldout_probs(
+            X, y, stage_groups, StratifiedGroupKFold(n_splits=5, shuffle=True, random_state=42)
+        ),
+        "lomo": _heldout_probs(X, y, match_groups, LeaveOneGroupOut()),
+    }
+
+    clf = _new_voter_c_gbdt()
     clf.fit(X, y)
-    return clf, threshold, cv_probs, y
+    return clf, threshold, cv_probs, y, heldout
 
 
 DEFAULT_VOTER_E_TARGET_RECALL: float = 0.95
@@ -960,6 +1157,8 @@ def build_artifacts(
     voter_c_models: dict[str, Any] = {}
     thresholds_by_class: dict[str, dict] = {}
     metrics_by_class: dict[str, dict] = {}
+    heldout_report: dict[str, dict] = {}
+    heldout_rows: list[dict] = []
     for cls in sorted(by_class):
         rows = by_class[cls]
         rows_pos = [r for r in rows if r["label"] == 1]
@@ -971,10 +1170,14 @@ def build_artifacts(
         cls_b = _voter_b_threshold(rows)
 
         train_rows = by_class_train.get(cls, rows)
-        cls_model, cls_c, cls_cv_probs, cls_cv_labels = _train_voter_c_for_class(
+        cls_model, cls_c, cls_cv_probs, cls_cv_labels, cls_heldout = _train_voter_c_for_class(
             train_rows, target_recall=target_recall
         )
         voter_c_models[cls] = cls_model
+        heldout_report[cls] = _heldout_class_report(
+            train_rows, cls_cv_probs, cls_cv_labels, cls_heldout, cls_c, target_recall
+        )
+        heldout_rows.extend(_heldout_rows(train_rows, cls_cv_probs, cls_heldout))
 
         thresholds_by_class[cls] = {
             "voter_a_floor": cls_a,
@@ -1011,6 +1214,9 @@ def build_artifacts(
 
     if not thresholds_by_class:
         raise BuildError("no camera class produced calibrated thresholds; need >= 1 positive")
+    _write_heldout(
+        heldout_report, heldout_rows, target_recall=target_recall, tolerance_ms=tolerance_ms, log=log
+    )
 
     # Voter E (issue #183): train CLIP visual probe head on the head-mounted
     # corpus and merge per-class thresholds back in. Fully optional -- if

@@ -15,6 +15,13 @@ What's included per row:
 * Voter B input -- ``clap_diff`` (shot - not-shot prompt similarity).
 * Voter C inputs -- ``score_c`` (shipped GBDT probability), every
   hand-crafted feature column, every per-prompt CLAP similarity.
+* Held-out voter C (#1045) -- ``score_c_stratified`` / ``score_c_grouped``
+  / ``score_c_lomo``, the out-of-fold probabilities the last
+  ``build_ensemble_artifacts.py`` run wrote under
+  ``build/ensemble_heldout/``; NaN when that file is absent or a row has
+  no match. ``score_c`` itself is in-sample: the shipped model was fitted
+  on these same candidates. ``run_sweep.py --score-c`` picks which one to
+  replay.
 * Voter D input -- ``gunshot_prob`` (PANN).
 * Voter E input -- ``voter_e_signal`` (CLIP probe P(shot)) when the
   source video can be located; ``NaN`` otherwise.
@@ -57,6 +64,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # single source of truth.
 from build_ensemble_artifacts import (  # type: ignore[import-not-found]
     DEFAULT_FIXTURES,
+    HELDOUT_DIR,
     WRONG_CLIP_FIXTURES,
 )
 
@@ -137,6 +145,41 @@ def _locate_source_video(truth: dict, fixture: str) -> tuple[Path, float] | None
         if p.exists():
             return p, float(beep)
     return None
+
+
+HELDOUT_SCORE_COLUMNS = ("score_c_stratified", "score_c_grouped", "score_c_lomo")
+
+
+def _attach_heldout_scores(rows: list[dict], oof_path: Path) -> dict:
+    """Add the held-out voter C columns to ``rows`` in place; return provenance.
+
+    Joined on ``(fixture, candidate_idx)``, which both scripts derive from
+    the same ``detect_shots`` call; ``t_absolute`` is checked too, so a
+    stale OOF file from a different detector build fails loudly instead
+    of scoring the wrong candidate.
+    """
+    for row in rows:
+        for col in HELDOUT_SCORE_COLUMNS:
+            row[col] = float("nan")
+    if not oof_path.exists():
+        return {"source": None, "n_matched": 0}
+    oof = pq.read_table(oof_path).to_pylist()
+    by_key = {(r["fixture"], int(r["candidate_idx"])): r for r in oof}
+    matched = 0
+    for row in rows:
+        hit = by_key.get((row["fixture"], int(row["candidate_idx"])))
+        if hit is None:
+            continue
+        if abs(float(hit["t_absolute"]) - float(row["t_absolute"])) > 1e-4:
+            raise SystemExit(
+                f"{oof_path}: candidate {row['candidate_idx']} of {row['fixture']} is at "
+                f"{hit['t_absolute']:.4f}s there but {row['t_absolute']:.4f}s here; "
+                "re-run build_ensemble_artifacts.py so both come from the same detector."
+            )
+        for col in HELDOUT_SCORE_COLUMNS:
+            row[col] = float(hit[col])
+        matched += 1
+    return {"source": str(oof_path), "n_matched": matched}
 
 
 def build_signals(
@@ -287,6 +330,7 @@ def build_signals(
 
     if not rows:
         raise SystemExit("No fixtures produced any candidates; nothing to write.")
+    heldout = _attach_heldout_scores(rows, REPO_ROOT / HELDOUT_DIR / "voter_c_oof.parquet")
 
     table = pa.Table.from_pylist(rows)
     sidecar = {
@@ -303,6 +347,7 @@ def build_signals(
         "skip_voter_e": skip_voter_e,
         "n_rows": len(rows),
         "n_positives": int(sum(r["label"] for r in rows)),
+        "heldout_voter_c": heldout,
     }
     return table, sidecar
 
@@ -346,6 +391,11 @@ def main() -> None:
         print("skipped:")
         for s in sidecar["fixtures_skipped"]:
             print(f"  {s['fixture']}: {s['reason']}")
+    heldout = sidecar["heldout_voter_c"]
+    if heldout["source"] is None:
+        print("held-out voter C columns: NaN (no build/ensemble_heldout/voter_c_oof.parquet)")
+    else:
+        print(f"held-out voter C columns: {heldout['n_matched']} of {sidecar['n_rows']} rows matched")
     if not args.skip_voter_e:
         print(
             f"Voter E columns populated for {len(sidecar['fixtures_with_voter_e'])} "

@@ -325,6 +325,16 @@ def _write_report(
         lines.append("- No parameters swept; single defaults snapshot.")
     lines.append(f"- Combos evaluated: {len({r['combo_idx'] for r in rows})}")
     lines.append(f"- Fixtures in corpus: {len(fixtures)}")
+    # Rows written before #1045 carry no source; they replayed the shipped model.
+    source = (rows[0].get("score_c_source") if rows else None) or "shipped"
+    lines.append(
+        f"- Voter C scores: `{source}`"
+        + (
+            " (in-sample: the shipped model was fitted on this corpus)"
+            if source == "shipped"
+            else " (out-of-fold, see build/ensemble_heldout/report.json)"
+        )
+    )
     if best is not None:
         lines.append("")
         lines.append("### Best aggregate F1")
