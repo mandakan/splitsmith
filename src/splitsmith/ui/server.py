@@ -507,11 +507,9 @@ def _state_conflict_excs() -> tuple[type[BaseException], ...]:
 # thundering herd. Exhausting it re-raises -> the job fails loudly.
 _AUDIT_SAVE_MAX_ATTEMPTS = 4
 
-# Filename of the desktop export-run log, in the shooter root. NOT in
-# exports/: everything in that directory is listed by
-# ``MatchProject._stored_exports`` and offered to the user as a
-# deliverable, and the history is not a deliverable.
-EXPORT_RUNS_FILE = "export_runs.json"
+# Filename of the desktop export-run log; defined beside the model so
+# ``backup`` can archive it without importing the server.
+EXPORT_RUNS_FILE = export_runs.LOG_FILENAME
 
 # How many times ``_record_export_run`` re-loads + re-appends when a
 # concurrent export job wins the version race. Batch export runs several

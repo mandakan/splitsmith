@@ -26,6 +26,12 @@ from pydantic import BaseModel, Field
 
 SCHEMA_VERSION = 1
 
+#: The desktop log's filename, in the shooter root beside ``project.json``.
+#: NOT in ``exports/``: everything there is listed by
+#: ``MatchProject._stored_exports`` and offered to the user as a
+#: deliverable, and the history is not one. ``backup`` archives it by name.
+LOG_FILENAME = "export_runs.json"
+
 #: What an artefact is, for the history row's icon + wording. ``trim`` is
 #: the primary lossless cut; ``secondary_trim`` a per-cam one;
 #: ``match_video`` the stitched match render when the run asked for mp4;

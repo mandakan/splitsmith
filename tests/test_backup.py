@@ -112,6 +112,45 @@ def test_round_trip_restores_project(tmp_path: Path) -> None:
     assert not (imported.project_root / "raw").exists()
 
 
+def test_round_trip_carries_the_export_history(tmp_path: Path) -> None:
+    """#930: the export-run log sits beside project.json and cannot be
+    rebuilt from footage, so a default backup carries it and lists it in
+    the manifest, and its rows survive the restore."""
+    from datetime import UTC, datetime
+
+    from splitsmith import export_runs
+
+    src = tmp_path / "match"
+    _seed_project(src)
+    doc = None
+    for n, run_id in ((1, "a" * 32), (2, "b" * 32)):
+        doc = export_runs.append_run(
+            doc,
+            export_runs.ExportRun(
+                run_id=run_id,
+                kind="stage",
+                finished_at=datetime(2026, 8, 16, 12, n, tzinfo=UTC),
+                duration_seconds=3.5,
+                stage_numbers=[n],
+                formats=["trim", "csv"],
+                anomaly_count=n,
+                artifacts=[export_runs.ExportArtifact(filename=f"stage{n}.csv", kind="csv")],
+            ),
+        )
+    (src / export_runs.LOG_FILENAME).write_text(json.dumps(doc))
+
+    result = export_project(src, tmp_path / "out")
+    assert export_runs.LOG_FILENAME in result.included
+    with tarfile.open(result.archive_path) as tf:
+        manifest = json.loads(tf.extractfile(f"match/{MANIFEST_NAME}").read())  # type: ignore[union-attr]
+    assert export_runs.LOG_FILENAME in manifest["included"]
+
+    imported = import_project(result.archive_path, tmp_path / "imported")
+    restored = json.loads((imported.project_root / export_runs.LOG_FILENAME).read_text())
+    assert export_runs.load_log(restored) == export_runs.load_log(doc)
+    assert [r.run_id for r in export_runs.load_log(restored).runs] == ["b" * 32, "a" * 32]
+
+
 def test_import_refuses_overwrite_by_default(tmp_path: Path) -> None:
     src = tmp_path / "match"
     _seed_project(src)
