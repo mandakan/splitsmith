@@ -31,6 +31,10 @@ class _FakeState:
         self.load_calls = 0
         self._version = 7  # the winner's current version after a conflict
 
+    def audit_doc_target(self) -> object:
+        # Hosted: any non-None target takes the optimistic-lock path.
+        return object()
+
     def save_audit(self, slug: str, stage_number: int, doc: dict, *, version: int) -> int:
         if self._conflicts > 0:
             self._conflicts -= 1

@@ -585,8 +585,22 @@ def _save_audit_with_remerge(
     doc and re-apply ``merge`` to *that* -- so the concurrent edit survives
     instead of being clobbered -- then save again. ``default`` rebuilds a
     fresh doc if the row vanished between attempts. Returns the new version.
-    Local file saves never raise, so the loop runs exactly once there.
+
+    Desktop has no version to lose (#931): the file accessors report and
+    ignore 0, so the retry below could never fire and a manual edit saved
+    while detection ran was overwritten by ``merge`` of the stale ``doc``.
+    There, re-load the doc from disk under :attr:`AppState.audit_lock` and
+    merge onto that -- the same "merge onto the winner" the hosted retry
+    does, with the lock standing in for the version check. ``doc`` is not
+    used on that path; ``merge`` is written to be re-applied to a freshly
+    loaded doc, which is what makes the substitution safe.
     """
+    if state.audit_doc_target() is None:
+        with state.audit_lock:
+            current, _ = state.load_audit(slug, stage_number)
+            return state.save_audit(
+                slug, stage_number, merge(current if current is not None else default()), version=0
+            )
     conflict_excs = _state_conflict_excs()
     for attempt in range(_AUDIT_SAVE_MAX_ATTEMPTS):
         try:
@@ -1747,6 +1761,15 @@ class AppState:
     # far more than this file. Hosted never takes it; its optimistic
     # locking is the real mechanism there.
     export_run_lock: threading.Lock = field(default_factory=threading.Lock)
+    # The same guard for DESKTOP audit docs (#931): ``save_audit`` holds it
+    # across the write and the ``.bak`` rotation, and
+    # ``_save_audit_with_remerge`` across its re-load/merge/save. A sibling
+    # of ``export_run_lock`` rather than that lock, because the two
+    # documents share no writer and a shot-detect save has no reason to
+    # queue behind an export's bookkeeping. Re-entrant because the re-merge
+    # calls ``save_audit`` while holding it. Same process-local scope, and
+    # hosted never takes it.
+    audit_lock: threading.RLock = field(default_factory=threading.RLock)
     # Live SSE wake channels, one asyncio.Queue per connected self-hosted
     # worker. ``None`` in local mode and on the headless worker process
     # (which must never hold launcher capabilities); set by the non-worker
@@ -1988,13 +2011,24 @@ class AppState:
             return match
         return match_model.Match.load(scoped_root)
 
+    def audit_doc_target(self) -> tuple[ProjectStateStore, str] | None:
+        """The hosted store + match id for audit docs, or ``None`` when they
+        are files. The audit twin of :meth:`export_runs_doc_target`: the
+        accessors below and ``_save_audit_with_remerge``'s desktop lock all
+        branch on this one answer."""
+        mid = current_match_id.get()
+        store = self.project_state
+        if store is not None and mid is not None:
+            return store, mid
+        return None
+
     def load_audit(self, slug: str, stage_number: int) -> tuple[dict | None, int]:
         """Load a stage's audit doc + its version. ``(None, 0)`` when none
         exists yet. Hosted: from ``state_docs``. Local: from the on-disk
         ``audit/stage<N>.json`` (version always 0 -- no locking on files)."""
-        mid = current_match_id.get()
-        store = self.project_state
-        if store is not None and mid is not None:
+        target = self.audit_doc_target()
+        if target is not None:
+            store, mid = target
             return run_sync(store.load_audit(mid, slug, stage_number))
         audit_file = self._audit_file(slug, stage_number)
         if not audit_file.exists():
@@ -2029,27 +2063,37 @@ class AppState:
 
         Hosted: ``state_docs`` under optimistic locking -- ``version==0``
         INSERTs, ``>0`` UPDATEs at that version, a stale version raises
-        ``StateConflictError`` (-> 409). Local: atomic ``.tmp`` -> ``.bak``
-        rotate -> rename file write (returns 0)."""
-        mid = current_match_id.get()
-        store = self.project_state
-        if store is not None and mid is not None:
+        ``StateConflictError`` (-> 409). Local: temp file -> ``.bak``
+        rotate -> rename file write (returns 0).
+
+        The local temp file gets a unique ``mkstemp`` name and the rotate
+        runs under :attr:`audit_lock` (#931). A fixed ``stage<N>.json.tmp``
+        is shared by every writer to that stage, which is the idiom that
+        lost export-run records in #629; and two unlocked rotations race
+        on ``.bak`` (one unlinks it between the other's ``exists`` and
+        ``unlink``)."""
+        target = self.audit_doc_target()
+        if target is not None:
+            store, mid = target
             return run_sync(store.save_audit(mid, slug, stage_number, doc, expected_version=version))
         audit_file = self._audit_file(slug, stage_number)
         audit_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp = audit_file.with_suffix(audit_file.suffix + ".tmp")
         backup = audit_file.with_suffix(audit_file.suffix + ".bak")
-        try:
-            tmp.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
-            if audit_file.exists():
-                if backup.exists():
-                    backup.unlink()
-                audit_file.replace(backup)
-            tmp.replace(audit_file)
-        except OSError as exc:
-            if tmp.exists():
-                tmp.unlink()
-            raise HTTPException(status_code=500, detail=f"audit write failed: {exc}") from exc
+        with self.audit_lock:
+            fd, tmp_name = tempfile.mkstemp(
+                dir=audit_file.parent, prefix=f"{audit_file.name}.", suffix=".tmp"
+            )
+            tmp = Path(tmp_name)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(json.dumps(doc, indent=2) + "\n")
+                if audit_file.exists():
+                    backup.unlink(missing_ok=True)
+                    audit_file.replace(backup)
+                tmp.replace(audit_file)
+            except OSError as exc:
+                tmp.unlink(missing_ok=True)
+                raise HTTPException(status_code=500, detail=f"audit write failed: {exc}") from exc
         return 0
 
     def delete_audit(self, slug: str, stage_number: int) -> bool:
@@ -2065,23 +2109,26 @@ class AppState:
         the live file would leave the previous audit recoverable on disk
         after the user asked for the stage to be gone.
         """
-        mid = current_match_id.get()
-        store = self.project_state
-        if store is not None and mid is not None:
+        target = self.audit_doc_target()
+        if target is not None:
+            store, mid = target
             return run_sync(store.delete_audit(mid, slug, stage_number)) > 0
         audit_file = self._audit_file(slug, stage_number)
         backup = audit_file.with_suffix(audit_file.suffix + ".bak")
         removed = False
-        for victim in (audit_file, backup):
-            if victim.exists():
-                try:
-                    victim.unlink()
-                    removed = removed or victim == audit_file
-                except OSError as exc:
-                    raise HTTPException(
-                        status_code=500,
-                        detail=f"audit delete failed: {exc}",
-                    ) from exc
+        # Under the save's lock so a delete cannot land mid-rotation and
+        # leave the rotated-in doc (or its .bak) behind.
+        with self.audit_lock:
+            for victim in (audit_file, backup):
+                if victim.exists():
+                    try:
+                        victim.unlink()
+                        removed = removed or victim == audit_file
+                    except OSError as exc:
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"audit delete failed: {exc}",
+                        ) from exc
         return removed
 
     def export_runs_doc_target(self) -> tuple[ProjectStateStore, str] | None:
