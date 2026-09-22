@@ -323,6 +323,7 @@ async def run_worker(
     concurrency: int = 1,
     queues: list[str] | None = None,
     wait: bool = True,
+    stop_event: asyncio.Event | None = None,
 ) -> None:
     """Run a worker that drains the job queue.
 
@@ -350,6 +351,14 @@ async def run_worker(
     Installs SIGINT/SIGTERM handlers (Procrastinate default) for
     graceful drain; must therefore run on the main thread, which it
     does via ``asyncio.run`` from the ``splitsmith worker`` command.
+
+    ``stop_event`` is for a caller that owns the signals itself (the
+    self-hosted agent, #1033): Procrastinate then installs none, and
+    setting the event is the graceful stop instead -- no new job is
+    taken, the one in flight finishes, and this returns. Procrastinate's
+    own handler cannot serve that caller: it restores the previous
+    handler but never chains to it, so a SIGTERM taken mid-drain would
+    never reach the agent's loop.
 
     ``build_worker_state`` runs its own ``asyncio.run`` calls (the auth
     bootstrap upserts the user row synchronously), so it can't run inside
@@ -390,21 +399,52 @@ async def run_worker(
     _attach_procrastinate_logging()
     app = await _open_app_with_retry(database_url, state)
     try:
-        await app.run_worker_async(
-            queues=queues,
-            concurrency=concurrency,
-            wait=wait,
+        options: dict[str, Any] = {
+            "queues": queues,
+            "concurrency": concurrency,
+            "wait": wait,
             # A one-shot drain exits when the queue is empty; LISTEN/NOTIFY
             # exists to wake a long-lived worker for jobs that arrive later.
             # Beyond being useless mid-drain, cancelling the listener at
             # shutdown intermittently hangs inside psycopg's notifies()
             # generator (~1 in 5 one-shot runs locally), leaving a zombie
             # container that never exits - the opposite of scale-to-zero.
-            listen_notify=wait,
-        )
+            "listen_notify": wait,
+        }
+        if stop_event is None:
+            await app.run_worker_async(**options)
+        else:
+            await _run_worker_until(app, stop_event, options)
         logger.info("worker: drain complete (wait=%s); shutting down", wait)
     finally:
         await app.connector.close_async()
+
+
+async def _run_worker_until(app: Any, stop_event: asyncio.Event, options: dict[str, Any]) -> None:
+    """``app.run_worker_async`` with the stop driven by ``stop_event``.
+
+    The same two steps ``run_worker_async`` takes (import the task paths,
+    build a ``Worker`` over the app's defaults), plus a watcher that calls
+    the worker's graceful ``stop``. The watcher is created before
+    ``worker.run`` so it first runs after ``run`` has cleared its own stop
+    flag; a stop set any earlier would be wiped by that clear.
+    """
+    from procrastinate.worker import Worker
+
+    if stop_event.is_set():
+        return
+    app.perform_import_paths()
+    worker = Worker(app=app, **{**app.worker_defaults, **options, "install_signal_handlers": False})
+
+    async def _watch() -> None:
+        await stop_event.wait()
+        worker.stop()
+
+    watcher = asyncio.create_task(_watch())
+    try:
+        await worker.run()
+    finally:
+        watcher.cancel()
 
 
 # Connection failures worth retrying when the worker opens its pool against a

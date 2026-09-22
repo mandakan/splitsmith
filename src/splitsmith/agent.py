@@ -37,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import signal
 import socket
 import time
 from collections.abc import Awaitable, Callable, Iterable
@@ -366,11 +367,15 @@ def _feed_and_dispatch(parser: _SSEParser, chunk: bytes, coordinator: _WakeCoord
     return False
 
 
-async def _run_worker_once(db_url: str, concurrency: int) -> None:
-    """One one-shot queue drain. Kept module-level so tests can swap it out."""
+async def _run_worker_once(db_url: str, concurrency: int, *, stop_event: asyncio.Event | None = None) -> None:
+    """One one-shot queue drain. Kept module-level so tests can swap it out.
+
+    ``stop_event`` makes the drain stop gracefully when set, in place of
+    Procrastinate's own SIGTERM handler (see ``run_agent``).
+    """
     from .queue import run_worker
 
-    await run_worker(db_url, concurrency=concurrency, wait=False)
+    await run_worker(db_url, concurrency=concurrency, wait=False, stop_event=stop_event)
 
 
 def _prepare_cache_env(state_dir: Path) -> None:
@@ -454,6 +459,9 @@ async def _drain_loop(
         logger.info("wake received; draining queued jobs")
         await run(db_url, concurrency)
         await sweep()
+        if stop_event.is_set():
+            logger.info("drain finished; stopping")
+            return
         logger.info("drain finished; waiting for next wake")
 
 
@@ -471,7 +479,16 @@ async def run_agent(
     given, registers first; if both are missing it raises (the CLI turns that
     into exit 2). Applies the credential bundle to the environment, then runs
     the reader and drainer concurrently until the reader raises ``SystemExit``
-    (worker revoked) or the process is interrupted.
+    (worker revoked) or a SIGTERM stops it.
+
+    SIGTERM (#1033) sets ``stop_event``: an idle agent returns at once, a
+    draining one lets the job in flight finish and then returns, so
+    ``systemctl stop`` never waits out ``TimeoutStopSec`` and never kills
+    a job mid-run. The agent owns the signal for its whole life and the
+    drains run with Procrastinate's handlers off, because Procrastinate's
+    handler restores the previous one without chaining to it: a SIGTERM
+    taken mid-drain used to stop the drain and leave the agent waiting
+    for the next wake.
     """
     logger.info("splitsmith agent starting, version %s", _agent_version())
     state = AgentState.load(state_dir)
@@ -502,6 +519,18 @@ async def run_agent(
     coordinator = _WakeCoordinator()
     stop_event = asyncio.Event()
 
+    def _request_stop() -> None:
+        if not stop_event.is_set():
+            logger.info("SIGTERM received; stopping after the current drain")
+        stop_event.set()
+        coordinator.wake_event.set()
+
+    async def _drain(db: str, conc: int) -> None:
+        await _run_worker_once(db, conc, stop_event=stop_event)
+
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, _request_stop)
+
     async with httpx.AsyncClient(transport=transport) as client:
         reader_task = asyncio.create_task(
             _reader_loop(client, server_url, state.worker_token, coordinator, stop_event)
@@ -512,14 +541,17 @@ async def run_agent(
                 stop_event,
                 db_url,
                 concurrency,
-                run=_run_worker_once,
+                run=_drain,
                 sweep=_sweep,
             )
         )
         tasks = {reader_task, drainer_task}
         try:
-            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+            # FIRST_COMPLETED: the drainer returns only once stopped, and the
+            # reader would otherwise sit in its stream until the next frame.
+            done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         finally:
+            loop.remove_signal_handler(signal.SIGTERM)
             stop_event.set()
             coordinator.wake_event.set()
             for task in tasks:
