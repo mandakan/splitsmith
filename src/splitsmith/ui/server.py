@@ -10798,8 +10798,10 @@ def create_app(
         public_url = state.public_base_url or ""
         # ``--name splitsmith-agent`` so the ``docker logs -f splitsmith-agent``
         # step the admin UI shows next to this command resolves the container.
+        # ``--stop-timeout``: on SIGTERM the agent finishes the job in flight
+        # before exiting (#1033); Docker's 10 s default would SIGKILL it first.
         docker_command = (
-            f"docker run -d --restart unless-stopped --name splitsmith-agent "
+            f"docker run -d --restart unless-stopped --stop-timeout 900 --name splitsmith-agent "
             f"-v splitsmith-agent:/data "
             f"{image} agent --server-url {public_url} --token {reg_token}"
         )

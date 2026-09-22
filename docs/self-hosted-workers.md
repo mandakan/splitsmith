@@ -66,6 +66,7 @@ Run the command from the dialog, substituting the image tag if using a local bui
 ```bash
 docker run -d \
   --restart unless-stopped \
+  --stop-timeout 900 \
   --name splitsmith-agent \
   -v splitsmith-agent:/data \
   -v splitsmith-models:/home/splitsmith/.splitsmith/models \
@@ -77,6 +78,12 @@ docker run -d \
 The `-v splitsmith-agent:/data` flag mounts a named volume at the agent's state dir.
 On first start, the agent exchanges the registration token for credentials and writes
 `/data/agent.json`. That file persists across container restarts.
+
+`--stop-timeout 900` is how long `docker stop` (and an image update) waits
+before SIGKILL. On SIGTERM the agent takes no new job, finishes the one in
+flight and exits, so the timeout only needs to cover your longest job; the
+Docker default of 10 s would kill that job mid-run. The compose files set the
+same thing as `stop_grace_period`.
 
 The second volume holds the detection models. The image ships without them -- they
 are ~450 MB, and the first detection downloads them from `models.splitsmith.app`
@@ -217,6 +224,9 @@ WorkingDirectory=/path/to/splitsmith
 ExecStart=/path/to/splitsmith/scripts/run-agent-gpu.sh --server-url https://my.splitsmith.app
 Restart=on-failure
 RestartSec=10
+# SIGTERM lets the job in flight finish, then the agent exits; this is how
+# long systemd waits for that before SIGKILL. Size it for your longest job.
+TimeoutStopSec=15min
 
 [Install]
 WantedBy=multi-user.target
@@ -225,7 +235,84 @@ WantedBy=multi-user.target
 Register once by hand (with `--token` and `--state-dir`) so `agent.json` exists,
 then `sudo systemctl enable --now splitsmith-agent`. On WSL2 the distro's
 `systemd=true` boot plus a Windows "start WSL at logon/boot" task is what brings
-the unit up without an interactive login.
+the unit up without an interactive login -- see "WSL2: keeping the VM and SSH
+access alive" below for the task and the SSH port forward that goes with it.
+
+### WSL2: keeping the VM and SSH access alive
+
+The agent needs no inbound port -- it registers outward and drains the queue
+over a direct Postgres connection -- so nothing here is required for jobs to
+run. It is required for reaching the box over SSH from the LAN, which is how
+you get at the logs and the systemd unit without sitting at the Windows
+console.
+
+Two things break on every reboot or `wsl --shutdown`:
+
+1. Windows stops the WSL VM when its last process exits, taking the agent's
+   systemd unit and `sshd` with it.
+2. The VM comes back with a **new IP address**, which orphans the Windows
+   `netsh` port forward that exposes WSL's `sshd` on the LAN.
+
+Both are fixed by scheduled tasks, registered once from an **Administrator**
+PowerShell.
+
+**Keep WSL alive at logon:**
+
+```powershell
+$action  = New-ScheduledTaskAction -Execute "wsl.exe" -Argument "-u root /bin/sh -c `"service ssh start; sleep infinity`""
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+Register-ScheduledTask -TaskName "WSL keepalive" -Action $action -Trigger $trigger -RunLevel Highest
+```
+
+**Re-point the port forward at boot** (LAN port 2222 -> WSL port 22):
+
+```powershell
+$fix = 'powershell -NoProfile -Command "$env:WSL_UTF8=1; $w=(wsl hostname -I).Trim().Split(\" \")[0]; netsh interface portproxy reset; netsh interface portproxy add v4tov4 listenport=2222 listenaddress=0.0.0.0 connectport=22 connectaddress=$w"'
+$action  = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c $fix"
+$trigger = New-ScheduledTaskTrigger -AtStartup
+Register-ScheduledTask -TaskName "WSL portproxy" -Action $action -Trigger $trigger -RunLevel Highest
+```
+
+To repair the forward by hand (after a `wsl --shutdown`, or if the task did not
+fire), run the same thing interactively once Ubuntu is up:
+
+```powershell
+$env:WSL_UTF8=1
+$wsl = (wsl hostname -I).Trim().Split(" ")[0]
+$wsl
+netsh interface portproxy reset
+netsh interface portproxy add v4tov4 listenport=2222 listenaddress=0.0.0.0 connectport=22 connectaddress=$wsl
+netsh interface portproxy show all
+```
+
+`$env:WSL_UTF8=1` is the line that matters. Without it PowerShell misreads
+`wsl.exe`'s UTF-16 output and `$wsl` ends up as a single stray character -- the
+forward then points at nothing and `netsh` accepts it without complaint. The
+`show all` table must list a full `172.x.x.x` address under "Connect to", not a
+single letter:
+
+```
+Listen on ipv4:             Connect to ipv4:
+Address         Port        Address         Port
+--------------- ----------  --------------- ----------
+0.0.0.0         2222        172.x.x.x       22
+```
+
+Then confirm `sshd` is up inside WSL -- the shutdown kills it, and only the
+keepalive task brings it back on its own:
+
+```bash
+sudo systemctl enable --now ssh
+ss -tlnp | grep :22
+```
+
+The WSL memory cap is worth raising at the same time: the default is half of
+host RAM, and a 6 GB cap on a 16 GB host has OOM-killed detection. Set
+`memory=12GB` / `swap=8GB` under `[wsl2]` in `%USERPROFILE%\.wslconfig`, keep a
+space between the value and any `#` comment (some WSL versions parse
+`memory=6GB#...` as part of the value), then `wsl --shutdown` and wait ten
+seconds before reopening -- and repeat the port-forward repair above, since the
+shutdown changed the IP.
 
 ### From PyPI (no clone; auto-updating)
 
@@ -281,15 +368,42 @@ Register once by hand (`... agent --token <TOKEN> --state-dir ~/.splitsmith`) so
 
 **Auto-update.** There is no server-push "update" command -- the worker channel
 only carries wake / enabled / disabled / replaced (a deleted worker gets a 404
-and the agent exits). Updates are client-pull: a `systemd` timer that upgrades
-from PyPI and restarts the agent. A minimal updater compares the installed
-version against the latest on PyPI, and when a newer one is out **and the agent
-is idle** runs the `uv pip install -U` + GPU-swap above and `systemctl restart`s
-the service. Gate the restart on the drain state -- the agent logs `wake
-received; draining` when busy and `drain finished; waiting` when idle, so keying
-on the most recent marker avoids killing a running job. Credentials live in the
-state dir, independent of the venv, so an upgrade never re-registers. Drive it
-with a `.timer` (e.g. `OnUnitActiveSec=6h`, `Persistent=true`).
+and the agent exits). Updates are client-pull: `scripts/agent-update.sh` on a
+systemd timer. Install it once, as root:
+
+```bash
+sudo install -m 755 scripts/agent-update.sh /usr/local/bin/splitsmith-agent-update.sh
+sudo install -m 644 scripts/systemd/splitsmith-agent-update.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now splitsmith-agent-update.timer
+sudo systemctl start splitsmith-agent-update.service   # run one tick now; check the journal
+```
+
+Every tick (15 min after boot, then every 6 h) the script compares the venv's
+installed version with the latest on PyPI. When they differ it runs the `uv pip
+install -U` above as the agent's user, redoes the GPU swap when the venv had
+`onnxruntime-gpu` before the upgrade, and verifies that `CUDAExecutionProvider`
+still binds a session -- a failed verify leaves the old agent running and the
+next tick retries the swap, so an upgrade can never silently demote detection
+to CPU. The restart is gated on the drain state: the agent logs `wake received;
+draining` when busy and `drain finished; waiting` when idle, and the script
+restarts the unit only when the most recent marker in the journal is the idle
+one, otherwise it leaves a `.restart-pending` stamp in the state dir and
+restarts on a later tick. The gate is a courtesy rather than a safety net: on
+SIGTERM the agent takes no new job, lets the one in flight finish, and exits
+(an idle agent exits at once), so a restart that does land mid-drain costs a
+delay, not a job. `TimeoutStopSec` in the agent unit bounds that delay; size
+it for your longest job, because a job still running when it expires is
+SIGKILLed and its row stays in `doing`, the same outcome as any agent crash.
+The unit runs as root (it needs the journal
+and `systemctl restart`) and reads the agent's user from
+`splitsmith-agent.service`'s `User=`; `VENV`, `STATE_DIR` and `GPU` can be
+overridden in the service unit if the defaults (`~/.venv-splitsmith-agent`,
+`~/.splitsmith`, auto-detect) don't match. Credentials live in the state dir,
+independent of the venv, so an upgrade never re-registers. `DRY_RUN=1
+splitsmith-agent-update.sh` prints what a tick would do without changing
+anything. Timers need the distro booted with systemd, which on WSL2 is the same
+`systemd=true` the agent unit already needs.
 
 ## Source cache
 
@@ -308,6 +422,7 @@ many large matches. The default cap is 20 GB. Override it with
 ```bash
 docker run -d \
   --restart unless-stopped \
+  --stop-timeout 900 \
   --name splitsmith-agent \
   -v splitsmith-agent:/data \
   -e SPLITSMITH_SOURCE_CACHE_MAX_GB=50 \

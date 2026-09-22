@@ -188,6 +188,8 @@ def test_admin_create_docker_command_contains_url_image_token(admin_client) -> N
     assert "agent" in cmd
     # named container so the UI's `docker logs -f splitsmith-agent` step resolves
     assert "--name splitsmith-agent" in cmd
+    # long enough for the job in flight to finish on `docker stop` (#1033)
+    assert "--stop-timeout 900" in cmd
     # default image
     assert "ghcr.io/mandakan/splitsmith" in cmd
 
