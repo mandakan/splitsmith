@@ -70,3 +70,28 @@ def test_match_run_formats_carries_the_output_format_and_sidecar() -> None:
         "youtube-sidecar",
     ]
     assert export_runs.match_run_formats(output_format="fcpxml", youtube_sidecar=False) == ["fcpxml"]
+
+
+def test_append_run_refuses_a_log_written_by_a_newer_schema() -> None:
+    """#933: rewriting a newer log through this build's model would strip
+    the newer fields from every historical run, so the append refuses."""
+    import pytest
+
+    newer = {
+        "schema_version": export_runs.SCHEMA_VERSION + 1,
+        "runs": [{**_run().model_dump(mode="json"), "field_from_the_future": 1}],
+    }
+    with pytest.raises(export_runs.NewerLogError):
+        export_runs.append_run(newer, _run("b" * 32))
+
+
+def test_load_log_reports_the_stored_version() -> None:
+    newer = {"schema_version": export_runs.SCHEMA_VERSION + 1, "runs": []}
+    assert export_runs.load_log(newer).schema_version == export_runs.SCHEMA_VERSION + 1
+
+
+def test_a_non_integer_version_reads_as_the_current_one() -> None:
+    doc = {"schema_version": "1", "runs": [_run().model_dump(mode="json")]}
+    assert export_runs.load_log(doc).schema_version == export_runs.SCHEMA_VERSION
+    appended = export_runs.append_run(doc, _run("b" * 32))
+    assert [r["run_id"] for r in appended["runs"]] == ["b" * 32, "a" * 32]

@@ -117,6 +117,27 @@ def test_a_write_failure_does_not_raise(tmp_path: Path, monkeypatch, caplog) -> 
     assert "export run record" in caplog.text
 
 
+def test_a_log_from_a_newer_build_is_left_untouched(tmp_path: Path, caplog) -> None:
+    """#933: a downgraded desktop must not rewrite a newer build's history.
+    The file stays byte-identical and the skipped run is logged."""
+    import logging
+
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    state = client.app.state.splitsmith_state
+    path = project_root / "shooters" / "me" / "export_runs.json"
+    run = {**_run("a" * 32, 1).model_dump(mode="json"), "field_from_the_future": {"x": 1}}
+    path.write_text(
+        json.dumps({"schema_version": export_runs.SCHEMA_VERSION + 1, "runs": [run]}), encoding="utf-8"
+    )
+    before = path.read_bytes()
+
+    with caplog.at_level(logging.WARNING), _match_context(project_root):
+        server_mod._record_export_run(state, "me", _run("b" * 32, 1))  # must not raise
+
+    assert path.read_bytes() == before
+    assert "newer build" in caplog.text
+
+
 def test_hosted_mode_appends_to_state_docs(tmp_path: Path) -> None:
     import asyncio as _asyncio
 

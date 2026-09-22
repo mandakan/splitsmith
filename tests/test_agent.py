@@ -528,3 +528,143 @@ def test_run_agent_registers_then_exits_on_channel_404(
     assert (tmp_path / "agent.json").exists()
     assert os.environ["SPLITSMITH_MODE"] == "hosted"
     assert drained == []
+
+
+# ---------------------------------------------------------------------------
+# run_agent: SIGTERM stops the agent (#1033)
+# ---------------------------------------------------------------------------
+
+
+def _open_channel_transport(*, wake: bool) -> httpx.MockTransport:
+    """A registered agent's channel: one optional wake, then held open forever."""
+    creds = {"database_url": "postgresql://db", "public_url": "http://srv", "s3": None}
+
+    async def frames():  # type: ignore[no-untyped-def]
+        yield b": ka\n\n"
+        if wake:
+            yield b"event: wake\ndata: {}\n\n"
+        await asyncio.Event().wait()  # the server never closes the stream
+        yield b""  # pragma: no cover
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/workers/register":
+            return httpx.Response(200, json={"worker_id": "w1", "worker_token": "wtok", "credentials": creds})
+        return httpx.Response(200, headers={"content-type": "text/event-stream"}, content=frames())
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.fixture
+def _sigterm_ignored_outside_the_agent():
+    """Before the fix SIGTERM had its default disposition and would kill the
+    test process; ignoring it turns that into a clean timeout instead."""
+    import signal
+
+    previous = signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+
+
+@pytest.mark.usefixtures("_sigterm_ignored_outside_the_agent")
+def test_run_agent_returns_on_sigterm_while_idle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import signal
+
+    _isolate_env(monkeypatch)
+
+    async def never_drain(db: str, conc: int, **_kw: object) -> None:  # pragma: no cover
+        raise AssertionError("no wake was sent")
+
+    monkeypatch.setattr(agent, "_run_worker_once", never_drain)
+
+    async def scenario() -> None:
+        loop = asyncio.get_running_loop()
+        loop.call_later(0.2, os.kill, os.getpid(), signal.SIGTERM)
+        await asyncio.wait_for(
+            agent.run_agent(
+                "http://srv",
+                registration_token="reg",
+                state_dir=tmp_path,
+                transport=_open_channel_transport(wake=False),
+            ),
+            timeout=5,
+        )
+
+    asyncio.run(scenario())  # returns rather than timing out
+
+
+@pytest.mark.usefixtures("_sigterm_ignored_outside_the_agent")
+def test_sigterm_mid_drain_finishes_the_drain_then_returns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The in-flight drain is told to stop (not cancelled), runs to its end,
+    and run_agent returns instead of waiting for the next wake."""
+    import signal
+
+    _isolate_env(monkeypatch)
+    drains: list[str] = []
+
+    async def drain(db: str, conc: int, *, stop_event: asyncio.Event | None = None) -> None:
+        assert stop_event is not None, "the agent must hand its stop to the drain"
+        drains.append("started")
+        os.kill(os.getpid(), signal.SIGTERM)
+        await asyncio.wait_for(stop_event.wait(), timeout=5)
+        drains.append("finished")
+
+    monkeypatch.setattr(agent, "_run_worker_once", drain)
+
+    async def scenario() -> None:
+        await asyncio.wait_for(
+            agent.run_agent(
+                "http://srv",
+                registration_token="reg",
+                state_dir=tmp_path,
+                transport=_open_channel_transport(wake=True),
+            ),
+            timeout=5,
+        )
+
+    asyncio.run(scenario())
+    assert drains == ["started", "finished"]
+
+
+def test_run_worker_until_stops_gracefully_between_jobs() -> None:
+    """``queue._run_worker_until``: setting the event mid-job lets that job
+    finish and takes no further job, with no signal handler installed."""
+    import signal
+
+    from procrastinate import App, testing
+
+    from splitsmith import queue as queue_mod
+
+    app = App(connector=testing.InMemoryConnector())
+    started = asyncio.Event()
+    release = asyncio.Event()
+    ran: list[int] = []
+
+    @app.task(name="block")
+    async def block(n: int) -> None:
+        ran.append(n)
+        started.set()
+        await release.wait()
+
+    async def scenario() -> None:
+        async with app.open_async():
+            await block.defer_async(n=1)
+            await block.defer_async(n=2)
+            stop = asyncio.Event()
+            before = signal.getsignal(signal.SIGTERM)
+            run = asyncio.create_task(
+                queue_mod._run_worker_until(
+                    app, stop, {"wait": False, "concurrency": 1, "listen_notify": False}
+                )
+            )
+            await asyncio.wait_for(started.wait(), 5)
+            assert signal.getsignal(signal.SIGTERM) is before
+            stop.set()
+            release.set()
+            await asyncio.wait_for(run, 5)
+
+    asyncio.run(scenario())
+    assert ran == [1]

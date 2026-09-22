@@ -7,6 +7,9 @@ disaster-recovery copy.
 Inclusion policy:
 
 * Always: ``project.json``.
+* When present: ``export_runs.json`` (the export history, #629 / #930),
+  which sits beside ``project.json`` and is written at export time from
+  nothing the footage can reproduce.
 * Default: ``audit/`` (hand-labeled shot corrections) and ``scoreboard/``
   (cached SSI data). Together these are the only artefacts that are
   *truly* irreplaceable.
@@ -39,11 +42,16 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from . import __version__
+from .export_runs import LOG_FILENAME as EXPORT_RUNS_FILE
 from .match_project import PROJECT_FILE, MatchProject
 
 DEFAULT_DIRS: tuple[str, ...] = ("audit", "scoreboard")
 OPTIONAL_DIRS: frozenset[str] = frozenset({"raw", "audio", "trimmed", "exports"})
 NEVER_DIRS: frozenset[str] = frozenset({"probes", "thumbs"})
+#: Files beside ``project.json`` that are archived when present. A file in
+#: the project root matches neither ``PROJECT_FILE`` nor a directory rule,
+#: so one missing from this tuple is dropped without a word (#930).
+ROOT_FILES: tuple[str, ...] = (EXPORT_RUNS_FILE,)
 
 MANIFEST_NAME = "BACKUP_MANIFEST.json"
 
@@ -130,6 +138,9 @@ def export_project(
 
     with tarfile.open(output, "w:gz") as tf:
         tf.add(project_root / PROJECT_FILE, arcname=f"{arc_root}/{PROJECT_FILE}")
+        root_files = [name for name in ROOT_FILES if (project_root / name).is_file()]
+        for name in root_files:
+            tf.add(project_root / name, arcname=f"{arc_root}/{name}")
         for name in wanted:
             src = _resolve_subdir(project, project_root, name)
             try:
@@ -157,7 +168,7 @@ def export_project(
             "created_at": datetime.now(UTC).isoformat(),
             "project_name": project.name,
             "project_root_name": project_root.name,
-            "included": ["project.json", *included],
+            "included": ["project.json", *root_files, *included],
             "skipped": [s.model_dump() for s in skipped],
             "options": {
                 "include_trimmed": include_trimmed,
@@ -172,7 +183,7 @@ def export_project(
     return ExportResult(
         archive_path=output,
         bytes_written=size,
-        included=["project.json", *included],
+        included=["project.json", *root_files, *included],
         skipped=skipped,
     )
 
