@@ -180,14 +180,42 @@ class Shooter(BaseModel):
 
     @classmethod
     def load(cls, shooter_root: Path) -> Shooter:
-        """Load shooter.json from ``shooter_root``. Raises FileNotFoundError if missing."""
+        """Load shooter.json from ``shooter_root``. Raises FileNotFoundError if missing.
+
+        When the shooter root also holds a ``project.json`` -- every merged
+        or SPA-created shooter does -- everything that file owns is read
+        from it, not from ``shooter.json`` (#953). ``shooter.json`` is
+        written once, when the shooter joins the match, and every later
+        edit (videos, beeps, stage times, a re-picked competitor) updates
+        ``project.json`` only; reading per-shooter data from the snapshot
+        showed a long-worked match as 0 stages / 0 videos. What
+        ``shooter.json`` still decides: the slug and ``created_at``, and
+        the name when ``project.json`` has no ``competitor_name``.
+        """
         path = shooter_root / SHOOTER_FILE
         if not path.exists():
             raise FileNotFoundError(f"no {SHOOTER_FILE} in {shooter_root}")
         import json
 
         data = json.loads(path.read_text(encoding="utf-8"))
-        return cls.model_validate(data)
+        shooter = cls.model_validate(data)
+        if not (shooter_root / PROJECT_FILE).exists():
+            return shooter
+        try:
+            project = MatchProject.load(shooter_root)
+        except (OSError, ValueError) as exc:
+            logger.warning(
+                "shooter %s: unreadable %s, using %s as-is: %s", shooter.slug, PROJECT_FILE, SHOOTER_FILE, exc
+            )
+            return shooter
+        _match_view, current = legacy_to_match_view(project)
+        return current.model_copy(
+            update={
+                "slug": shooter.slug,
+                "name": project.competitor_name or shooter.name,
+                "created_at": shooter.created_at,
+            }
+        )
 
     def save(self, shooter_root: Path) -> None:
         """Atomically persist this shooter to ``<shooter_root>/shooter.json``."""

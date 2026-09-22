@@ -606,3 +606,69 @@ def test_rename_does_not_change_match_id(tmp_path: Path):
     reloaded = Match.load(tmp_path / "match")
     assert reloaded.match_id == original_id
     assert reloaded.name == "Renamed Match"
+
+
+# ---------------------------------------------------------------------------
+# shooter.json stays current after a merge (#953)
+# ---------------------------------------------------------------------------
+
+
+def _merged_then_edited(tmp_path: Path) -> tuple[Path, str]:
+    """A merged match whose shooter is worked on after the merge: a video
+    lands on stage 1 and the pinned competitor changes. Both edits go to
+    project.json only, as every server write path does."""
+    from splitsmith.match_project import StageVideo
+
+    _make_legacy(tmp_path / "anton", name="VADS", competitor="Anton Johansson")
+    plan = plan_merge([tmp_path / "anton"], tmp_path / "merged")
+    execute_merge(plan)
+    slug = plan.shooter_moves[0].slug
+    shooter_root = Match.shooter_root(tmp_path / "merged", slug)
+
+    project = MatchProject.load(shooter_root)
+    project.stages[0].videos.append(StageVideo(path=Path("raw/VID1.mp4"), role="primary"))
+    project.competitor_name = "Anton J."
+    project.save(shooter_root)
+    return tmp_path / "merged", slug
+
+
+def test_load_shooter_reads_per_shooter_data_edited_after_the_merge(tmp_path: Path):
+    match_root, slug = _merged_then_edited(tmp_path)
+
+    shooter = Match.load(match_root).load_shooter(match_root, slug)
+
+    assert shooter.slug == slug
+    assert shooter.name == "Anton J."
+    assert [len(s.videos) for s in shooter.stages] == [1, 0, 0]
+
+
+def test_match_info_counts_videos_added_after_the_merge(tmp_path: Path):
+    from typer.testing import CliRunner
+
+    from splitsmith.match_cli import match_app
+
+    match_root, _slug = _merged_then_edited(tmp_path)
+
+    result = CliRunner().invoke(match_app, ["info", str(match_root)], env={"COLUMNS": "200"})
+
+    assert result.exit_code == 0, result.output
+    row = next(line for line in result.output.splitlines() if "Anton J." in line)
+    cells = [c.strip() for c in row.split("│") if c.strip()]
+    assert cells[-2:] == ["1", "1"], row  # Stages, Videos
+
+
+def test_load_shooter_without_project_json_reads_the_snapshot(tmp_path: Path):
+    match = Match.init(tmp_path / "match", name="Test")
+    match.add_shooter(
+        tmp_path / "match", Shooter(slug="s1", name="Solo", stages=[ShooterStageData(stage_number=1)])
+    )
+    assert Match.load(tmp_path / "match").load_shooter(tmp_path / "match", "s1").name == "Solo"
+
+
+def test_load_shooter_with_an_unreadable_project_json_falls_back(tmp_path: Path):
+    match_root, slug = _merged_then_edited(tmp_path)
+    (Match.shooter_root(match_root, slug) / "project.json").write_text("{not json")
+
+    shooter = Match.load(match_root).load_shooter(match_root, slug)
+
+    assert shooter.name == "Anton Johansson"  # the merge-time snapshot
