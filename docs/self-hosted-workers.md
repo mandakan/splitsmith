@@ -66,6 +66,7 @@ Run the command from the dialog, substituting the image tag if using a local bui
 ```bash
 docker run -d \
   --restart unless-stopped \
+  --stop-timeout 900 \
   --name splitsmith-agent \
   -v splitsmith-agent:/data \
   -v splitsmith-models:/home/splitsmith/.splitsmith/models \
@@ -77,6 +78,12 @@ docker run -d \
 The `-v splitsmith-agent:/data` flag mounts a named volume at the agent's state dir.
 On first start, the agent exchanges the registration token for credentials and writes
 `/data/agent.json`. That file persists across container restarts.
+
+`--stop-timeout 900` is how long `docker stop` (and an image update) waits
+before SIGKILL. On SIGTERM the agent takes no new job, finishes the one in
+flight and exits, so the timeout only needs to cover your longest job; the
+Docker default of 10 s would kill that job mid-run. The compose files set the
+same thing as `stop_grace_period`.
 
 The second volume holds the detection models. The image ships without them -- they
 are ~450 MB, and the first detection downloads them from `models.splitsmith.app`
@@ -217,6 +224,9 @@ WorkingDirectory=/path/to/splitsmith
 ExecStart=/path/to/splitsmith/scripts/run-agent-gpu.sh --server-url https://my.splitsmith.app
 Restart=on-failure
 RestartSec=10
+# SIGTERM lets the job in flight finish, then the agent exits; this is how
+# long systemd waits for that before SIGKILL. Size it for your longest job.
+TimeoutStopSec=15min
 
 [Install]
 WantedBy=multi-user.target
@@ -379,14 +389,13 @@ to CPU. The restart is gated on the drain state: the agent logs `wake received;
 draining` when busy and `drain finished; waiting` when idle, and the script
 restarts the unit only when the most recent marker in the journal is the idle
 one, otherwise it leaves a `.restart-pending` stamp in the state dir and
-restarts on a later tick. The check runs immediately before the restart, so
-the race is a wake landing in that sub-second window. If one does, procrastinate
-handles the SIGTERM gracefully and finishes the job in flight, but the agent
-process does not exit afterwards (it goes back to waiting for a wake), so
-systemd SIGKILLs it at the 90 s stop timeout; a job still running at that point
-dies with it and its row stays in `doing`, which is the same outcome as any
-agent crash. Do not raise `TimeoutStopSec` to paper over this -- it would make
-every busy restart wait the full timeout. The unit runs as root (it needs the journal
+restarts on a later tick. The gate is a courtesy rather than a safety net: on
+SIGTERM the agent takes no new job, lets the one in flight finish, and exits
+(an idle agent exits at once), so a restart that does land mid-drain costs a
+delay, not a job. `TimeoutStopSec` in the agent unit bounds that delay; size
+it for your longest job, because a job still running when it expires is
+SIGKILLed and its row stays in `doing`, the same outcome as any agent crash.
+The unit runs as root (it needs the journal
 and `systemctl restart`) and reads the agent's user from
 `splitsmith-agent.service`'s `User=`; `VENV`, `STATE_DIR` and `GPU` can be
 overridden in the service unit if the defaults (`~/.venv-splitsmith-agent`,
@@ -413,6 +422,7 @@ many large matches. The default cap is 20 GB. Override it with
 ```bash
 docker run -d \
   --restart unless-stopped \
+  --stop-timeout 900 \
   --name splitsmith-agent \
   -v splitsmith-agent:/data \
   -e SPLITSMITH_SOURCE_CACHE_MAX_GB=50 \

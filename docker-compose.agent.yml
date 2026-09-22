@@ -23,6 +23,9 @@ services:
   agent:
     image: ghcr.io/mandakan/splitsmith:${SPLITSMITH_IMAGE_TAG:-latest}
     restart: unless-stopped
+    # On SIGTERM the agent finishes the job in flight, then exits; the 10 s
+    # default would SIGKILL it mid-job. Size it for your longest job.
+    stop_grace_period: 15m
     command:
       - agent
       - --server-url

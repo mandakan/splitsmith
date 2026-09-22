@@ -143,12 +143,14 @@ if [ "$gpu" = 1 ] && [ "$DRY_RUN" != 1 ]; then
 fi
 
 # Restart gate. The agent logs "wake received; draining" when a drain starts and
-# "drain finished; waiting" when it ends; whichever came last is the state.
+# "drain finished; waiting" (or "drain finished; stopping", when a SIGTERM
+# arrived mid-drain) when it ends; whichever came last is the state. Match both
+# end markers: a drain stopped by a restart must not read as busy afterwards.
 # No marker at all (fresh boot, never woken) counts as idle.
 agent_idle() {
     local last
     last="$(journalctl -u "$SERVICE" -b --no-pager -o cat 2>/dev/null \
-        | grep -E 'wake received; draining|drain finished; waiting' | tail -n 1 || true)"
+        | grep -E 'wake received; draining|drain finished; (waiting|stopping)' | tail -n 1 || true)"
     [[ "$last" != *"wake received; draining"* ]]
 }
 
