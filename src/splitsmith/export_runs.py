@@ -86,10 +86,25 @@ class ExportRun(BaseModel):
 
 
 class ExportRunLog(BaseModel):
-    """Every run for one shooter in one match, newest first."""
+    """Every run for one shooter in one match, newest first.
+
+    ``schema_version`` is the version of the build that last wrote the
+    log, and ``append_run`` branches on it (#933): a build never rewrites
+    a log stamped newer than itself.
+    """
 
     schema_version: int = SCHEMA_VERSION
     runs: list[ExportRun] = Field(default_factory=list)
+
+
+class NewerLogError(ValueError):
+    """The stored log was written by a newer build than this one.
+
+    Rewriting it would push every historical run through this build's
+    model and silently strip whatever fields the newer schema added, from
+    the whole history rather than one row. The one caller logs and skips
+    the record instead.
+    """
 
 
 def new_run_id() -> str:
@@ -108,6 +123,11 @@ def load_log(doc: dict | None) -> ExportRunLog:
     Never raises. A doc that is not a dict, or whose ``runs`` is not a
     list, yields an empty log; an individual malformed run is dropped and
     its siblings survive.
+
+    ``schema_version`` is carried through as stored so ``append_run`` can
+    refuse a newer log; a missing or non-integer value reads as this
+    build's version (every log this module has written carries an int).
+    Reading a newer log is fine: the history route only displays it.
     """
     if not isinstance(doc, dict):
         return ExportRunLog()
@@ -133,8 +153,15 @@ def append_run(doc: dict | None, run: ExportRun) -> dict:
     Newest-first is the stored order, so a reader never sorts. No cap on
     the number of runs: the retention decision on #629 keeps run records
     indefinitely, and a run is a few hundred bytes.
+
+    Raises :class:`NewerLogError` when ``doc`` was written by a newer
+    schema; see there for why a rewrite is refused.
     """
     log = load_log(doc)
+    if log.schema_version > SCHEMA_VERSION:
+        raise NewerLogError(
+            f"export run log is schema v{log.schema_version}; this build writes v{SCHEMA_VERSION}"
+        )
     log.runs.insert(0, run)
     log.schema_version = SCHEMA_VERSION
     return log.model_dump(mode="json")

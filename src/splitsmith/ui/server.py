@@ -647,6 +647,14 @@ def _record_export_run(state: AppState, slug: str, run: export_runs.ExportRun) -
                 return
             except conflict_excs:
                 continue
+            except export_runs.NewerLogError as exc:
+                logger.warning(
+                    "export run record: run %s not written for %s, the log is from a newer build: %s",
+                    run.run_id,
+                    slug,
+                    exc,
+                )
+                return
             except Exception as exc:  # noqa: BLE001 -- see docstring
                 logger.warning("export run record: not written for %s: %s", slug, exc)
                 return
