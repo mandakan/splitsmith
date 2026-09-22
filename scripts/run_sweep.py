@@ -327,6 +327,27 @@ def _evaluate_combo(
     return rows_out
 
 
+def _score_c_column(raw_cols: dict[str, np.ndarray], source: str) -> np.ndarray:
+    """The voter C probabilities to replay. A held-out column must be
+    fully populated: a NaN would silently vote "no" and read as a recall
+    loss that is really a missing join."""
+    if source == "shipped":
+        return raw_cols["score_c"].astype(np.float64)
+    col = f"score_c_{source}"
+    if col not in raw_cols:
+        raise SystemExit(
+            f"signals have no {col}; re-run build_sweep_signals.py after build_ensemble_artifacts.py"
+        )
+    values = raw_cols[col].astype(np.float64)
+    n_nan = int(np.isnan(values).sum())
+    if n_nan:
+        raise SystemExit(
+            f"{col} is NaN on {n_nan} of {len(values)} rows; rebuild the held-out "
+            "probabilities (build_ensemble_artifacts.py) and then the signals"
+        )
+    return values
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--signals", type=Path, default=DEFAULT_SIGNALS)
@@ -348,6 +369,17 @@ def main() -> None:
         action="store_true",
         help="Append rows to an existing runs.parquet rather than overwriting it.",
     )
+    p.add_argument(
+        "--score-c",
+        choices=("shipped", "stratified", "grouped", "lomo"),
+        default="shipped",
+        help=(
+            "Which voter C probability to replay (#1045). 'shipped' is the shipped "
+            "model's, in-sample on this corpus; the others are out-of-fold from the "
+            "last build_ensemble_artifacts.py run: by candidate, grouped by stage, "
+            "or leaving one match out."
+        ),
+    )
     args = p.parse_args()
 
     if not args.signals.exists():
@@ -364,7 +396,7 @@ def main() -> None:
         "label": raw_cols["label"].astype(np.int64),
         "confidence": raw_cols["confidence"].astype(np.float64),
         "clap_diff": raw_cols["clap_diff"].astype(np.float64),
-        "score_c": raw_cols["score_c"].astype(np.float64),
+        "score_c": _score_c_column(raw_cols, args.score_c),
         "gunshot_prob": raw_cols["gunshot_prob"].astype(np.float64),
         "voter_e_signal": raw_cols["voter_e_signal"].astype(np.float64),
         "expected_rounds": raw_cols["expected_rounds"],
@@ -405,6 +437,7 @@ def main() -> None:
             r["run_id"] = run_id
             r["combo_idx"] = combo_idx
             r["signals_build_id"] = signals_build_id
+            r["score_c_source"] = args.score_c
             for k in PARAM_KEYS:
                 r[f"param_{k}"] = combo[k]
             r["swept_keys"] = ",".join(keys)
@@ -431,6 +464,7 @@ def main() -> None:
             f"combo_idx={best['combo_idx']}"
         )
     print(f"swept keys: {keys or '(none -- single defaults run)'}")
+    print(f"voter C scores: {args.score_c}")
     print(json.dumps({"run_id": run_id, "n_combos": len(combos)}))
 
 
