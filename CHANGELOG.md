@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.42.0](https://github.com/mandakan/splitsmith/compare/v0.41.0...v0.42.0) (2026-09-22)
+
+
+### Features
+
+* **ensemble:** held-out voter C baseline, grouped by stage and by match ([#1045](https://github.com/mandakan/splitsmith/issues/1045)) ([#1062](https://github.com/mandakan/splitsmith/issues/1062)) ([963d217](https://github.com/mandakan/splitsmith/commit/963d217e08f44a66e416d6f27c955598fb79aa2b))
+
 ## [0.41.0](https://github.com/mandakan/splitsmith/compare/v0.40.1...v0.41.0) (2026-09-22)
 
 
