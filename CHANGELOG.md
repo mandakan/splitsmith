@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.41.0](https://github.com/mandakan/splitsmith/compare/v0.40.1...v0.41.0) (2026-09-22)
+
+
+### Features
+
+* **desktop:** Electron packaging for macOS (arm64 DMG) ([#1059](https://github.com/mandakan/splitsmith/issues/1059)) ([5712fe4](https://github.com/mandakan/splitsmith/commit/5712fe4cedad37d8d3b91c1774dcbaa995cf6ebe))
+* **youtube:** hosted upload ([#1000](https://github.com/mandakan/splitsmith/issues/1000) phase 2) ([#1057](https://github.com/mandakan/splitsmith/issues/1057)) ([13a0754](https://github.com/mandakan/splitsmith/commit/13a07543b0c1484cde5a44bdbef2497b5cb6a42a))
+
+
+### Bug Fixes
+
+* four small data-safety bugs ([#931](https://github.com/mandakan/splitsmith/issues/931), [#933](https://github.com/mandakan/splitsmith/issues/933), [#930](https://github.com/mandakan/splitsmith/issues/930), [#1033](https://github.com/mandakan/splitsmith/issues/1033)) ([#1060](https://github.com/mandakan/splitsmith/issues/1060)) ([acface9](https://github.com/mandakan/splitsmith/commit/acface9b3cadb8efe829353cb1255003e02707ed))
+* **match:** read per-shooter data from project.json, not the merge-time snapshot ([#953](https://github.com/mandakan/splitsmith/issues/953)) ([#1061](https://github.com/mandakan/splitsmith/issues/1061)) ([0020d92](https://github.com/mandakan/splitsmith/commit/0020d922fd2b52eefc62d38baac1115cb3b8586e))
+
+
+### Documentation
+
+* **workers:** WSL2 SSH recipe; agent auto-update script and timer ([#1031](https://github.com/mandakan/splitsmith/issues/1031)) ([d13fa3f](https://github.com/mandakan/splitsmith/commit/d13fa3f72e5249c68e2d42110b6b8735db15fe66))
+
 ## [0.40.1](https://github.com/mandakan/splitsmith/compare/v0.40.0...v0.40.1) (2026-09-18)
 
 
