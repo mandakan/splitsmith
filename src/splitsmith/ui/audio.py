@@ -465,8 +465,14 @@ def ensure_audit_audio(
     project: MatchProject,
     sample_rate: int = 48000,
     ffmpeg_binary: str = "ffmpeg",
+    web_fallback: bool = False,
 ) -> AuditAudioResult:
     """Resolve the WAV the audit screen should serve for ``stage_number``.
+
+    ``web_fallback`` (a web-only mirror, spec 2026-09-27 v1.1): with no
+    full trim, extract the audit audio from the ``_web.mp4`` rendition,
+    which covers the trim's exact window, before falling back to the
+    source (which a mirror never has).
 
     Prefers the trimmed clip's audio (short-GOP MP4 produced by
     :mod:`splitsmith.trim`). When the trimmed clip is missing, falls back
@@ -509,6 +515,24 @@ def ensure_audit_audio(
             min(primary_beep_time, project.trim_pre_buffer_seconds) if primary_beep_time is not None else None
         )
         return AuditAudioResult(audio_path=audio_path, beep_in_clip=beep_in_clip, trimmed=True)
+
+    if web_fallback:
+        web = try_pull_web_trim(project, trimmed_video)
+        if web is not None:
+            audio_path = audit_audio_path(project_root, stage_number, project=project)
+            audio_path.parent.mkdir(parents=True, exist_ok=True)
+            # No storage WAV cache here: a WAV pushed by another container
+            # may have been cut from an older rendition. A local re-pull of
+            # the rendition (refresh_trim_params) makes it newer than the
+            # WAV, which re-extracts.
+            if not audio_path.exists() or audio_path.stat().st_mtime < web.stat().st_mtime:
+                _extract_audio(web, audio_path, sample_rate, ffmpeg_binary)
+            # The anchor is the trim's, from the pushed params sidecar: the
+            # trim may have been cut with a different pre-buffer than the
+            # project's current setting.
+            pre_buffer = trim_pre_buffer_seconds_for(trimmed_video, default=project.trim_pre_buffer_seconds)
+            beep_in_clip = min(primary_beep_time, pre_buffer) if primary_beep_time is not None else None
+            return AuditAudioResult(audio_path=audio_path, beep_in_clip=beep_in_clip, trimmed=True)
 
     fallback = ensure_primary_audio(
         project_root,
@@ -743,6 +767,65 @@ def _try_pull_trim_from_storage(project: MatchProject | None, local_mp4: Path) -
             except FileNotFoundError:
                 pass
         return False
+
+
+def refresh_trim_params(project: MatchProject | None, trim_path: Path) -> None:
+    """Bring the local params sidecar of a web-only mirror's trim in line
+    with storage (spec 2026-09-27 v1.1). The desktop re-pushes it whenever it
+    re-trims around a moved beep; a changed sidecar also drops the local
+    rendition and the audit WAV cut from it, so the next read pulls and
+    re-extracts instead of serving the old window. One small GET per call;
+    a storage failure keeps whatever is local."""
+    from .. import trim as trim_module
+
+    params = trim_params_path(trim_path)
+    key = _storage_trim_key(project, params)
+    if key is None:
+        return
+    storage = project._storage  # type: ignore[union-attr]
+    try:
+        remote = storage.read_bytes(key)
+    except Exception as exc:
+        logger.info("web trim cache: params read %s failed: %s", key, exc)
+        return
+    try:
+        local = params.read_bytes()
+    except OSError:
+        local = None
+    if local == remote:
+        return
+    params.parent.mkdir(parents=True, exist_ok=True)
+    params.write_bytes(remote)
+    trim_module.web_trim_path(trim_path).unlink(missing_ok=True)
+
+
+def try_pull_web_trim(project: MatchProject | None, trim_path: Path) -> Path | None:
+    """The rendition standing in for the audit trim at ``trim_path`` on a
+    web-only mirror (spec 2026-09-27 v1.1): refresh the params sidecar, then
+    pull ``_web.mp4`` when not already local. Returns the local rendition
+    path, or None when there is no rendition. Best-effort like the trim
+    pull: a storage failure reads as "no rendition"."""
+    from .. import trim as trim_module
+
+    refresh_trim_params(project, trim_path)
+    web = trim_module.web_trim_path(trim_path)
+    if web.exists() and web.stat().st_size > 0:
+        return web
+    key = _storage_trim_key(project, web)
+    if key is None:
+        return None
+    storage = project._storage  # type: ignore[union-attr]
+    try:
+        if not storage.exists(key):
+            return None
+        web.parent.mkdir(parents=True, exist_ok=True)
+        with storage.open_stream(key) as src, web.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
+        return web
+    except Exception as exc:
+        logger.info("web trim cache: pull from %s failed: %s", key, exc)
+        web.unlink(missing_ok=True)
+        return None
 
 
 def _try_push_trim_to_storage(project: MatchProject | None, local_mp4: Path) -> None:

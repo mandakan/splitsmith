@@ -52,3 +52,9 @@ def test_local_fingerprint_counts_and_sums_doc_versions() -> None:
     state = SyncState(doc_versions={"match": 3, "project/me": 2, "audit/me/1": 5})
     assert local_fingerprint(state) == (3, 10)
     assert local_fingerprint(SyncState()) == (0, 0)
+
+
+def test_full_media_defaults_off_and_round_trips(tmp_path: Path) -> None:
+    assert load_auto_prefs(tmp_path).full_media is False
+    update_auto_prefs(tmp_path, lambda p: setattr(p, "full_media", True))
+    assert load_auto_prefs(tmp_path).full_media is True

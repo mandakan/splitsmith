@@ -4502,9 +4502,10 @@ export const api = {
   startSync: () => request<Job>("/api/match/sync", { method: "POST" }),
   /** Desktop auto-sync state for this match (spec 2026-09-27). */
   getAutoSync: () => request<AutoSyncStatus>("/api/match/sync/auto"),
-  /** ``null`` restores the default (on once the match has synced). */
-  setAutoSync: (enabled: boolean | null) =>
-    request<AutoSyncStatus>("/api/match/sync/auto", { method: "PUT", json: { enabled } }),
+  /** Changes only the fields sent; ``enabled: null`` restores the default
+   *  (on once the match has synced). */
+  setAutoSync: (patch: { enabled?: boolean | null; full_media?: boolean }) =>
+    request<AutoSyncStatus>("/api/match/sync/auto", { method: "PUT", json: patch }),
   setGlobalAutoSync: (enabled: boolean) =>
     request<{ global_enabled: boolean }>("/api/settings/auto-sync", {
       method: "PUT",
@@ -4980,6 +4981,12 @@ export interface AutoSyncStatus {
   setting: boolean | null;
   global_enabled: boolean;
   paused_reason: string | null;
+  /** Upload full-resolution trims too (v1.1); off = hosted plays the
+   *  720p rendition. */
+  full_media: boolean;
+  /** Full trims still on hosted; with full_media off the next sync
+   *  removes those whose rendition is there. */
+  full_trims_on_hosted: number;
   last_auto: {
     at: string;
     ok: boolean;

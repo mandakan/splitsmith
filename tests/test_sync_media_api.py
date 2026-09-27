@@ -167,17 +167,25 @@ def test_delete_media_is_idempotent(
     assert resp.status_code == 200
 
 
-def test_delete_media_rejects_trimmed_keys(
+def test_delete_media_removes_a_full_trim_but_never_its_rendition_or_params(
     hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
 ) -> None:
-    """GC is beep_review-only: trimmed clips are what the mirror streams,
-    and nothing on the desktop side ever needs to delete one remotely."""
+    """Web-only mirrors (v1.1): the desktop removes full trims once the
+    rendition is on R2. The rendition and the params sidecar are what the
+    mirror plays and anchors from, so this route can never delete them."""
     client, sender, captured = hosted_app_with_storage
-    _login_and_adopt(client, sender, captured)
+    storage = _login_and_adopt(client, sender, captured)
+    base = f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed/stage1_cam_abc123"
 
-    key = f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed/stage1_cam_abc123_trimmed.mp4"
-    resp = client.post(DELETE_URL, json={"key": key})
-    assert resp.status_code == 422
+    storage.write_bytes(f"{base}_trimmed.mp4", b"full")
+    resp = client.post(DELETE_URL, json={"key": f"{base}_trimmed.mp4"})
+    assert resp.status_code == 200, resp.text
+    assert not storage.exists(f"{base}_trimmed.mp4")
+
+    for keep in (f"{base}_web.mp4", f"{base}_trimmed.params.json"):
+        storage.write_bytes(keep, b"keep")
+        assert client.post(DELETE_URL, json={"key": keep}).status_code == 422, keep
+        assert storage.exists(keep), keep
 
 
 # --- key containment ---------------------------------------------------

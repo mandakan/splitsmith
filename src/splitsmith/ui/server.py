@@ -131,7 +131,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import AwareDatetime, BaseModel, Field, ValidationError
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
@@ -1578,6 +1578,12 @@ def _may_mint_shot_ids() -> bool:
     mode, legacy bare-path traffic) -> mint, i.e. today's behaviour.
     """
     return current_match_origin.get() != "desktop"
+
+
+def _is_mirror() -> bool:
+    """Whether the current request is on a desktop-origin mirror. Reads the
+    origin the alias middleware pinned, like ``_may_mint_shot_ids``."""
+    return current_match_origin.get() == "desktop"
 
 
 def _serialized_capabilities() -> list[str]:
@@ -5473,10 +5479,23 @@ class HostedSyncSettingsRequest(BaseModel):
     token: str | None = None
 
 
+class GlobalAutoSyncRequest(BaseModel):
+    """Body for PUT /api/settings/auto-sync: the machine-level switch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+
+
 class AutoSyncSettingRequest(BaseModel):
-    """Body for PUT /api/match/sync/auto and /api/settings/auto-sync."""
+    """Body for PUT /api/match/sync/auto and /api/settings/auto-sync. On the
+    per-match route only the fields sent change: ``enabled: null`` restores
+    the default, an absent ``enabled`` leaves it alone."""
+
+    model_config = ConfigDict(extra="forbid")
 
     enabled: bool | None = None
+    full_media: bool | None = None
 
 
 class DeviceStartResponse(BaseModel):
@@ -7694,7 +7713,9 @@ def create_app(
         configured = bool(prefs.hosted_base_url and prefs.hosted_token)
         match_root = state.match_root
         sync_state = load_sync_state(match_root)
-        plan = build_push_plan(match_root, sync_state=sync_state)
+        plan = build_push_plan(
+            match_root, sync_state=sync_state, full_media=load_auto_prefs(match_root).full_media
+        )
         stale = sync_state.last_synced_at is None or bool(plan.media) or bool(plan.docs) or bool(plan.errors)
 
         remote_changes: int | None = None
@@ -7729,16 +7750,24 @@ def create_app(
         """``enabled: null`` restores the default (on once synced)."""
         if _hosted_mode_active() or state.auto_sync is None:
             raise HTTPException(status_code=404, detail="not found")
-        update_auto_prefs(state.match_root, lambda p: setattr(p, "enabled", req.enabled))
+        sent = req.model_fields_set
+
+        def _apply(p: Any) -> None:
+            if "enabled" in sent:
+                p.enabled = req.enabled
+            if req.full_media is not None:
+                p.full_media = req.full_media
+
+        update_auto_prefs(state.match_root, _apply)
         return JSONResponse(state.auto_sync.status_for(state.match_root))
 
     @app.put("/api/settings/auto-sync")
-    async def put_global_auto_sync(req: AutoSyncSettingRequest) -> JSONResponse:
+    async def put_global_auto_sync(req: GlobalAutoSyncRequest) -> JSONResponse:
         """The machine-level switch in the hosted-sync settings dialog."""
         if _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
         prefs = user_config.load_global_prefs()
-        prefs.auto_sync_enabled = req.enabled is not False
+        prefs.auto_sync_enabled = req.enabled
         user_config.save_global_prefs(prefs)
         return JSONResponse({"global_enabled": prefs.auto_sync_enabled})
 
@@ -11751,6 +11780,7 @@ def create_app(
                 primary.beep_time,
                 project=project,
                 ffmpeg_binary=process_runtime().ffmpeg_binary,
+                web_fallback=_is_mirror(),
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -12286,6 +12316,18 @@ def create_app(
             if video.beep_time is None:
                 return (None, "trim", trimmed)
             return (min(video.beep_time, project.trim_pre_buffer_seconds), "trim", trimmed)
+        if _is_mirror() and audio_helpers.web_trim_available(project, trimmed):
+            # Web-only mirror (spec 2026-09-27 v1.1): the rendition + the
+            # pushed params stand in for the trim; _video_clip_anchor then
+            # promotes the kind to "web". Only the small params sidecar is
+            # fetched here, never the rendition itself.
+            audio_helpers.refresh_trim_params(project, trimmed)
+            if video.beep_time is None:
+                return (None, "trim", trimmed)
+            pre_buffer = audio_helpers.trim_pre_buffer_seconds_for(
+                trimmed, default=project.trim_pre_buffer_seconds
+            )
+            return (min(video.beep_time, pre_buffer), "trim", trimmed)
         return (video.beep_time, "source", None)
 
     def _video_beep_in_clip(
@@ -12903,6 +12945,13 @@ def create_app(
                 trim_key = audio_helpers._storage_trim_key(project, local_mp4)
                 if trim_key is not None and storage.exists(trim_key):  # type: ignore[union-attr]
                     return serve_media(storage, trim_key, local_mp4, content_type="video/mp4")
+                if _is_mirror():
+                    # Web-only mirror (spec 2026-09-27 v1.1): the rendition
+                    # is the trim. Native matches keep "trim never
+                    # substitutes": their audit scrubbing needs the real GOP.
+                    web_resp = _hosted_web_redirect(storage, project, root, stage, video)  # type: ignore[arg-type]
+                    if web_resp is not None:
+                        return web_resp
                 if kind == "trim":
                     raise HTTPException(
                         status_code=404,

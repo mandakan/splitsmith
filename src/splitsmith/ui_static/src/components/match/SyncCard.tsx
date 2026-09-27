@@ -209,9 +209,17 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
   async function handleAutoChange(on: boolean) {
     try {
       // ``null`` restores the default rather than pinning ``true``.
-      setAuto(await api.setAutoSync(on ? null : false));
+      setAuto(await api.setAutoSync({ enabled: on ? null : false }));
     } catch (e) {
       setStartError(apiErrorText(e, "Could not change auto-sync."));
+    }
+  }
+
+  async function handleMediaChange(full: boolean) {
+    try {
+      setAuto(await api.setAutoSync({ full_media: full }));
+    } catch (e) {
+      setStartError(apiErrorText(e, "Could not change the media setting."));
     }
   }
 
@@ -281,6 +289,17 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
                     { value: "manual", label: "Manual" },
                   ]}
                   onChange={(v) => void handleAutoChange(v === "auto")}
+                />
+              ) : null}
+              {auto && status?.configured && status.last_synced_at ? (
+                <Segmented
+                  label="Media on hosted"
+                  value={auto.full_media ? "full" : "web"}
+                  options={[
+                    { value: "web", label: "Web" },
+                    { value: "full", label: "Full" },
+                  ]}
+                  onChange={(v) => void handleMediaChange(v === "full")}
                 />
               ) : null}
               <Button type="button" size="sm" variant="ghost" onClick={() => setSettingsOpen(true)}>
@@ -430,6 +449,15 @@ function SyncStatusLine({
         <RefreshCw className="size-3.5 shrink-0" aria-hidden="true" />
         {status.pending_media} file{status.pending_media === 1 ? "" : "s"} changed
         since last sync
+      </p>
+    );
+  }
+  if (auto && !auto.full_media && auto.full_trims_on_hosted > 0) {
+    const n = auto.full_trims_on_hosted;
+    return (
+      <p className={lineClass}>
+        <RefreshCw className="size-3.5 shrink-0" aria-hidden="true" />
+        {n} full trim{n === 1 ? "" : "s"} will be removed from hosted on the next sync
       </p>
     );
   }

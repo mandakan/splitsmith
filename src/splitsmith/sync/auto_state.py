@@ -39,6 +39,9 @@ class AutoRunSummary(BaseModel):
 class AutoSyncPrefs(BaseModel):
     #: ``None`` = default: on once the match has been synced.
     enabled: bool | None = None
+    #: Upload full-resolution audit trims too (spec 2026-09-27 v1.1). Off:
+    #: hosted plays the 720p rendition and full trims leave R2.
+    full_media: bool = False
     #: reconcile step key -> input key the step last failed with.
     reconcile_failures: dict[str, str] = Field(default_factory=dict)
     last_auto: AutoRunSummary | None = None

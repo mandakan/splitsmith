@@ -169,6 +169,16 @@ stream routes ``kind=web`` falls back web -> trim -> source and never
 needs the real GOP). Hosted Compare prefers ``trimmed/<...>_web.mp4``
 over the lossless export.
 
+Web-only mirrors (spec 2026-09-27 v1.1): a desktop mirror has no
+``_trimmed.mp4`` on R2 by default, only ``_web.mp4`` and ``.params.json``.
+On a mirror only (``_is_mirror()``, origin ``desktop``), ``kind=trim`` and
+``kind=auto`` redirect to the rendition when the full trim is absent, the
+clip anchor comes from the pushed params (``try_pull_web_trim`` +
+``trim_pre_buffer_seconds_for``), and the audit WAV is extracted from the
+rendition (``ensure_audit_audio(web_fallback=True)``). A hosted-native
+match keeps "``kind=trim`` never substitutes", pinned by
+``test_hosted_native_match_without_a_trim_still_404s_kind_trim``.
+
 ## Export presets (spec 2026-09-15)
 
 ``export_presets.ExportPresetBody`` is the one shape the API, the local
@@ -461,9 +471,14 @@ read-merge-write holds ``AppState.audit_lock``, the lock the PUT's
 compare-and-save holds. ``find_active`` is scoped to ``current_match_id``
 when set: shooter slugs repeat across matches.
 
-Automatic pushes still upload full trims; the web-only policy is v1.1
-because hosted playback of a mirror keys off the full trim object. The
-end-to-end check is
+Pushes are web-only unless the match's ``full_media`` flag
+(``auto_sync.json``, the SyncCard's Web / Full switch) is on:
+``build_push_plan(full_media=...)`` skips a ``_trimmed.mp4`` whose
+``_web.mp4`` exists (a clip without a rendition keeps its trim), and the
+push's gc deletes a remote full trim only when its rendition key is in
+``sync_state.items``. The hosted delete route accepts beep_review keys and
+``*_trimmed.mp4`` only; the rendition and the params sidecar are never
+deletable through it. The end-to-end check is
 ``tests/test_sync_integration.py::test_phone_beep_confirm_reaches_the_desktop_reconciler``.
 
 ## UI: the visual budget (Sep 2026)

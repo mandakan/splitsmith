@@ -688,17 +688,22 @@ async def delete_media(
     request: Request,
     user: Any = Depends(_current_user),
 ) -> SyncMediaDeleteResponse:
-    """Remove a pushed beep_review object (#821). Desktop calls this when
-    a video's beep is confirmed: the local snippet files are deleted by
-    the pre-push sweep, and leaving the remote copy makes snippet_ready
-    lie forever for reopened items. beep_review-only on purpose - trimmed
-    clips are what the mirror streams. Idempotent: deleting a missing key
-    is success, so a crashed push can retry safely."""
+    """Remove a pushed object the desktop no longer wants on hosted.
+
+    Two shapes only. A beep_review snippet (#821): the desktop deletes it
+    when a video's beep is confirmed, since a stale remote copy makes
+    snippet_ready lie forever. A full-resolution ``*_trimmed.mp4`` on a
+    web-only mirror (spec 2026-09-27 v1.1), once its rendition is on R2.
+    The rendition (``_web.mp4``) and the ``.params.json`` sidecar are what
+    the mirror plays and anchors from, so they are never deletable here.
+    Idempotent: deleting a missing key is success, so a crashed push can
+    retry safely."""
     _hosted_gate()
     await _resolve_mirror(request, match_id)
     _validate_media_key(body.key, match_id)
-    if "/beep_review/" not in body.key:
-        raise HTTPException(status_code=422, detail="delete is beep_review-only")
+    name = body.key.rsplit("/", 1)[1]
+    if "/beep_review/" not in body.key and not ("/trimmed/" in body.key and name.endswith("_trimmed.mp4")):
+        raise HTTPException(status_code=422, detail="delete is beep_review or full-trim only")
     storage = _require_storage(request)
     storage.delete(body.key)
     return SyncMediaDeleteResponse(deleted=True)

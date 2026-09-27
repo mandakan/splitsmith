@@ -29,10 +29,11 @@ from pydantic import BaseModel, Field
 
 from .. import match_model
 from ..observability import PhaseTimer
+from .auto_state import load_auto_prefs
 from .base import save_base_doc
 from .beep_snippets import generate_beep_snippets
 from .client import HostedSyncClient, SyncClientError
-from .plan import build_push_plan, doc_identity_key, hash_doc_body
+from .plan import TRIMMED_SUFFIX, build_push_plan, doc_identity_key, hash_doc_body, web_key_for
 from .state import SyncedItem, SyncState, load_sync_state, save_sync_state
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,26 @@ logger = logging.getLogger(__name__)
 _MEDIA_KEY_LOCAL_RE = re.compile(
     r"^matches/[^/]+/shooters/(?P<slug>[^/]+)/(?P<subdir>trimmed|beep_review)/(?P<name>[^/]+)$"
 )
+
+
+def removable_full_trims(match_root: Path, sync_state: SyncState) -> list[str]:
+    """Remote full trims a web-only push removes (spec 2026-09-27 v1.1).
+
+    A full trim goes only when its rendition is on hosted (key recorded)
+    *and* still exists locally, which is exactly when the planner skips the
+    trim. A rendition that went away (re-trim plus a failed transcode) sends
+    the trim back up, and this must not delete it again. Shared with the
+    SyncCard's count so the card never promises a removal the push won't
+    make.
+    """
+    removable: list[str] = []
+    for key in sync_state.items:
+        if not key.endswith(TRIMMED_SUFFIX):
+            continue
+        web_key = web_key_for(key)
+        if web_key in sync_state.items and _local_media_path(match_root, web_key).is_file():
+            removable.append(key)
+    return removable
 
 
 def _local_media_path(match_root: Path, remote_key: str) -> Path:
@@ -138,6 +159,7 @@ def run_push(
     on_progress: Callable[[float, str], None] = lambda p, m: None,
     timer: PhaseTimer | None = None,
     sync_state: SyncState | None = None,
+    full_media: bool | None = None,
 ) -> PushReport:
     """Push ``match_root`` to the hosted mirror via ``client``.
 
@@ -168,7 +190,9 @@ def run_push(
         snippet_report = generate_beep_snippets(match_root)
         for err in snippet_report.errors:
             logger.warning("beep snippet generation: %s", err)
-        plan = build_push_plan(match_root, sync_state=sync_state)
+        if full_media is None:
+            full_media = load_auto_prefs(match_root).full_media
+        plan = build_push_plan(match_root, sync_state=sync_state, full_media=full_media)
         if plan.errors:
             raise SyncClientError("\n".join(plan.errors))
 
@@ -213,6 +237,12 @@ def run_push(
             for key in list(sync_state.items)
             if "/beep_review/" in key and not _local_media_path(match_root, key).exists()
         ]
+        if not full_media:
+            # Web-only mirror (v1.1): a full trim whose rendition is on
+            # hosted is a redundant copy there; the desktop keeps the
+            # original, and full media on re-uploads it (its key leaves
+            # sync_state here). See removable_full_trims for which go.
+            stale += removable_full_trims(match_root, sync_state)
         for key in stale:
             try:
                 client.delete_media(plan.match_id, key)
