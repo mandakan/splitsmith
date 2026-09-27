@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.42.0](https://github.com/mandakan/splitsmith/compare/v0.41.0...v0.42.0) (2026-09-27)
+
+
+### Features
+
+* **beep-review:** touch picker for mobile beep review on the mirror ([#1064](https://github.com/mandakan/splitsmith/issues/1064)) ([97bb4fb](https://github.com/mandakan/splitsmith/commit/97bb4fb586cd10ea8faaa59baec6866e6a9de417))
+* **ensemble:** held-out voter C baseline, grouped by stage and by match ([#1045](https://github.com/mandakan/splitsmith/issues/1045)) ([#1062](https://github.com/mandakan/splitsmith/issues/1062)) ([963d217](https://github.com/mandakan/splitsmith/commit/963d217e08f44a66e416d6f27c955598fb79aa2b))
+
+
+### Bug Fixes
+
+* **docker:** bump ffmpeg pin to autobuild-2026-09-26-13-03 ([#1065](https://github.com/mandakan/splitsmith/issues/1065)) ([0ceee80](https://github.com/mandakan/splitsmith/commit/0ceee80771c9807b835cc9f763d8634adb21ce93))
+* **docker:** serve ffmpeg from our own mirror release ([#1066](https://github.com/mandakan/splitsmith/issues/1066)) ([cfed65a](https://github.com/mandakan/splitsmith/commit/cfed65add8bf24540fad1d1062c2a34114698288))
+
 ## [0.41.0](https://github.com/mandakan/splitsmith/compare/v0.40.1...v0.41.0) (2026-09-22)
 
 
