@@ -4500,6 +4500,9 @@ export const api = {
   /** Submit a ``sync_match`` job for the current match. 409
    *  ``sync_not_configured`` when no hosted-sync target is saved yet. */
   startSync: () => request<Job>("/api/match/sync", { method: "POST" }),
+  /** Upload a match deleted on hosted as a new copy: resets its sync
+   *  state and starts a sync. */
+  republishSync: () => request<Job>("/api/match/sync/republish", { method: "POST" }),
   /** Desktop auto-sync state for this match (spec 2026-09-27). */
   getAutoSync: () => request<AutoSyncStatus>("/api/match/sync/auto"),
   /** Changes only the fields sent; ``enabled: null`` restores the default
@@ -4997,6 +5000,9 @@ export interface AutoSyncStatus {
   /** Parked after a failed run: no retry until a local edit, a hosted
    *  change, or Sync. Optional so an older sidecar's payload still types. */
   waiting_for_change?: boolean;
+  /** Synced before, then deleted on hosted: sync is off until
+   *  ``republishSync``. Optional so an older sidecar's payload types. */
+  hosted_deleted?: boolean;
 }
 
 /** Response from GET /api/match/sync/status (#631 Task 9). Cheap

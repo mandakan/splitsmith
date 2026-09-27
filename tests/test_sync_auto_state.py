@@ -58,3 +58,9 @@ def test_full_media_defaults_off_and_round_trips(tmp_path: Path) -> None:
     assert load_auto_prefs(tmp_path).full_media is False
     update_auto_prefs(tmp_path, lambda p: setattr(p, "full_media", True))
     assert load_auto_prefs(tmp_path).full_media is True
+
+
+def test_a_match_deleted_on_hosted_is_not_watched() -> None:
+    synced = SyncState(last_synced_at=datetime(2026, 9, 27, tzinfo=UTC))
+    gone = AutoSyncPrefs(hosted_deleted_at=datetime(2026, 9, 27, tzinfo=UTC))
+    assert auto_sync_effective(gone, synced, global_enabled=True) is False

@@ -33,6 +33,10 @@
  *                       the plan is otherwise stale): "N files changed
  *                       since last sync".
  *   synced          - up to date: relative time.
+ *   deleted hosted  - synced before, then deleted on hosted. Sync is off
+ *                       and "Publish again" replaces "Sync now"; the
+ *                       hosted link and mode toggles go (there is no
+ *                       hosted match to open or configure).
  *
  * An "Open on splitsmith.app" link (built from the settings GET's
  * base_url) renders in every state after the first push, i.e. whenever
@@ -193,11 +197,13 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
 
   if (!local) return null;
 
+  const hostedDeleted = auto?.hosted_deleted === true;
+
   async function handleSync() {
     setStartError(null);
     setStarting(true);
     try {
-      const job = await api.startSync();
+      const job = hostedDeleted ? await api.republishSync() : await api.startSync();
       setStartedJob(job);
     } catch (e) {
       setStartError(apiErrorText(e, "Could not start sync."));
@@ -262,7 +268,7 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
           {/* The hosted match exists from the first push onward, so the
               link stays through stale / syncing / plan-error states -
               the status line beside it already says what is unpushed. */}
-          {status?.configured && status.last_synced_at && settings?.base_url && matchId ? (
+          {status?.configured && status.last_synced_at && settings?.base_url && matchId && !hostedDeleted ? (
             <a
               href={`${settings.base_url}/match/${matchId}`}
               target="_blank"
@@ -280,7 +286,7 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
             </Button>
           ) : (
             <>
-              {auto && status?.configured && status.last_synced_at ? (
+              {auto && status?.configured && status.last_synced_at && !hostedDeleted ? (
                 <Segmented
                   label="Sync mode"
                   value={auto.enabled ? "auto" : "manual"}
@@ -291,7 +297,7 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
                   onChange={(v) => void handleAutoChange(v === "auto")}
                 />
               ) : null}
-              {auto && status?.configured && status.last_synced_at ? (
+              {auto && status?.configured && status.last_synced_at && !hostedDeleted ? (
                 <Segmented
                   label="Media on hosted"
                   value={auto.full_media ? "full" : "web"}
@@ -316,7 +322,7 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
                 ) : (
                   <CloudUpload className="size-3.5" aria-hidden="true" />
                 )}
-                {syncing || starting ? "Syncing..." : "Sync now"}
+                {syncing || starting ? "Syncing..." : hostedDeleted ? "Publish again" : "Sync now"}
               </Button>
             </>
           )}
@@ -381,6 +387,14 @@ function SyncStatusLine({
       <p className={lineClass} aria-live="polite">
         <Clock className="size-3.5 shrink-0" aria-hidden="true" />
         Another match is syncing - this one can start when it finishes
+      </p>
+    );
+  }
+  if (auto?.hosted_deleted) {
+    return (
+      <p className={cn(lineClass, "text-led-text")} aria-live="polite">
+        <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
+        Deleted on hosted. Sync is off for this match; Publish again uploads it as a new copy.
       </p>
     );
   }
