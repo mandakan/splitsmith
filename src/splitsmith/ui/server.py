@@ -210,12 +210,12 @@ from ..runtime import runtime as process_runtime
 from ..share_card import stage_figures
 from ..shot_id import ensure_shot_ids, has_usable_id
 from ..storage import Storage
+from ..sync.auto_state import AutoRunSummary, load_auto_prefs, update_auto_prefs
 from ..sync.client import HostedSyncClient, SyncClientError
 from ..sync.plan import build_push_plan
 from ..sync.pull import plan_pull
-from ..sync.run import format_sync_message
-from ..sync.auto_state import AutoRunSummary, load_auto_prefs, update_auto_prefs
 from ..sync.reconcile import ReconcileStep, load_reconcile_inputs, plan_reconcile, video_step
+from ..sync.run import format_sync_message
 from ..sync.run import run_sync as run_bidirectional_sync  # ..async_bridge.run_sync already owns this name
 from ..sync.state import load_sync_state
 from . import audio as audio_helpers
