@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.43.0](https://github.com/mandakan/splitsmith/compare/v0.42.0...v0.43.0) (2026-09-27)
+
+
+### Features
+
+* **sync:** desktop auto-sync and the pipeline reconciler ([#1068](https://github.com/mandakan/splitsmith/issues/1068)) ([e7be9d7](https://github.com/mandakan/splitsmith/commit/e7be9d77f82afcb4f0921b54803622258693a027))
+* **sync:** web-only mirror media (auto-sync v1.1) ([#1079](https://github.com/mandakan/splitsmith/issues/1079)) ([cee7d23](https://github.com/mandakan/splitsmith/commit/cee7d2392c9936bff7574c6508909677b04124f2))
+
+
+### Bug Fixes
+
+* **export:** forward every export option from the SPA; name unnamed stages ([#1080](https://github.com/mandakan/splitsmith/issues/1080)) ([7ccc86f](https://github.com/mandakan/splitsmith/commit/7ccc86f0345b1860b5c90f0ac22ad48509b4f1c1))
+
 ## [0.42.0](https://github.com/mandakan/splitsmith/compare/v0.41.0...v0.42.0) (2026-09-27)
 
 
