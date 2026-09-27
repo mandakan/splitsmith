@@ -26,6 +26,15 @@ class _MatchState:
     failures: int = 0
     pending_fp: Fingerprint | None = None
     settled_fp: Fingerprint | None = None
+    #: The last hosted fingerprint a poll reported for this match.
+    server_fp: Fingerprint | None = None
+    #: A failed sync parks the match (#1070): no automatic retry until
+    #: something changes, so a sync that can never succeed fails once in
+    #: the jobs strip instead of every backoff period. ``parked_fp`` is
+    #: the hosted fingerprint at the failure; a poll that moves it counts
+    #: as a change.
+    parked: bool = False
+    parked_fp: Fingerprint | None = None
 
 
 class AutoSyncCore:
@@ -51,8 +60,15 @@ class AutoSyncCore:
         return min(self.BACKOFF_MIN_S * 2 ** (failures - 1), self.BACKOFF_MAX_S)
 
     def mark_dirty(self, match_id: str, now: float) -> None:
-        self._m(match_id).push_due_at = now
+        st = self._m(match_id)
+        st.push_due_at = now
+        st.parked = False  # a local write is a change worth retrying for
         self._last_activity = now
+
+    def waiting_for_change(self, match_id: str) -> bool:
+        """Whether the match is parked after a failed sync."""
+        st = self._matches.get(match_id)
+        return st is not None and st.parked
 
     def mark_pull_due(self, match_id: str) -> None:
         self._m(match_id).pull_due = True
@@ -63,6 +79,7 @@ class AutoSyncCore:
         """Compare the hosted fingerprints with the local ones. A pair that
         still differs after a successful sync (a doc deleted hosted-side,
         say) is remembered as settled and ignored until it moves."""
+        recovered = self._poll_failures > 0
         self._poll_failures = 0
         self.paused_reason = None
         for match_id, local_fp in local.items():
@@ -70,6 +87,11 @@ class AutoSyncCore:
             if server_fp is None:
                 continue
             st = self._m(match_id)
+            st.server_fp = server_fp
+            # Hosted reachable again, or hosted moved since the failure:
+            # either may be what the parked sync was waiting for.
+            if st.parked and (recovered or server_fp != st.parked_fp):
+                st.parked = False
             if server_fp == local_fp:
                 st.settled_fp = None
                 continue
@@ -116,10 +138,15 @@ class AutoSyncCore:
         st.sync_started_at = None
         if not ok:
             st.failures += 1
+            # The backoff still floors a retry once a change releases it,
+            # so a burst of edits over a broken sync cannot hammer hosted.
             st.retry_at = now + self._backoff(st.failures)
+            st.parked = True
+            st.parked_fp = st.server_fp
             return
         st.failures = 0
         st.retry_at = 0.0
+        st.parked = False
         # Only what was observed before the sync started is covered by it:
         # a poll that lands after its pull phase saw a change it never pulled.
         if st.pull_seen_at <= started:
@@ -149,7 +176,7 @@ class AutoSyncCore:
         ready: list[tuple[int, str]] = []
         for match_id in sorted(enabled):
             st = self._matches.get(match_id)
-            if st is None or match_id in busy or now < st.retry_at:
+            if st is None or st.parked or match_id in busy or now < st.retry_at:
                 continue
             if st.pull_due:
                 ready.append((0, match_id))

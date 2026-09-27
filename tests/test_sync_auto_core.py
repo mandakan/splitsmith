@@ -48,6 +48,8 @@ def test_success_clears_only_what_it_covered() -> None:
 
 
 def test_failure_backs_off_exponentially_to_the_cap() -> None:
+    """Each failure parks the match; a local write releases it, but never
+    sooner than the backoff."""
     core = AutoSyncCore()
     core.mark_pull_due("m1")
     waits = []
@@ -55,12 +57,62 @@ def test_failure_backs_off_exponentially_to_the_cap() -> None:
     for _ in range(6):
         core.on_sync_started("m1", now=now)
         core.on_sync_done("m1", now=now, ok=False)
+        core.mark_dirty("m1", now=now - core.QUIET_S)
         t = now
         while core.pick(t, enabled=E, busy=(), sync_active=False) is None:
             t += 1.0
         waits.append(t - now)
         now = t
     assert waits == [60.0, 120.0, 240.0, 480.0, 900.0, 900.0]
+
+
+def _parked_after_failure() -> AutoSyncCore:
+    core = AutoSyncCore()
+    core.on_poll_ok(0.0, server={"m1": (3, 9)}, local={"m1": (3, 8)})
+    core.on_sync_started("m1", now=0.0)
+    core.on_sync_done("m1", now=10.0, ok=False)
+    return core
+
+
+def test_a_failed_sync_waits_for_a_change_instead_of_retrying() -> None:
+    """#1070: a sync that can never succeed used to fail again every
+    backoff period, each failure a new job in the strip."""
+    core = _parked_after_failure()
+    assert core.waiting_for_change("m1")
+    # Hours later, polls unchanged: still quiet.
+    for t in range(60, 36_000, 60):
+        core.on_poll_ok(float(t), server={"m1": (3, 9)}, local={"m1": (3, 8)})
+        assert core.pick(float(t), enabled=E, busy=(), sync_active=False) is None
+
+
+def test_a_local_write_releases_a_parked_match() -> None:
+    core = _parked_after_failure()
+    core.mark_dirty("m1", now=1000.0)
+    assert not core.waiting_for_change("m1")
+    assert core.pick(1000.0 + core.QUIET_S, enabled=E, busy=(), sync_active=False) == "m1"
+
+
+def test_a_remote_change_releases_a_parked_match() -> None:
+    core = _parked_after_failure()
+    core.on_poll_ok(1000.0, server={"m1": (3, 10)}, local={"m1": (3, 8)})
+    assert core.pick(1000.0, enabled=E, busy=(), sync_active=False) == "m1"
+
+
+def test_hosted_coming_back_releases_a_parked_match() -> None:
+    """A sync that failed because hosted was down is retried once a poll
+    gets through again."""
+    core = _parked_after_failure()
+    core.on_poll_error(500.0, "offline", auth=False)
+    core.on_poll_ok(600.0, server={"m1": (3, 9)}, local={"m1": (3, 8)})
+    assert core.pick(600.0, enabled=E, busy=(), sync_active=False) == "m1"
+
+
+def test_a_successful_manual_sync_releases_a_parked_match() -> None:
+    core = _parked_after_failure()
+    core.on_sync_done("m1", now=1000.0, ok=True, started_at=990.0)
+    assert not core.waiting_for_change("m1")
+    core.mark_dirty("m1", now=1100.0)
+    assert core.pick(1100.0 + core.QUIET_S, enabled=E, busy=(), sync_active=False) == "m1"
 
 
 def test_settled_fingerprint_does_not_retrigger() -> None:

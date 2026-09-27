@@ -4994,6 +4994,9 @@ export interface AutoSyncStatus {
     conflicts: number;
     notes: number;
   } | null;
+  /** Parked after a failed run: no retry until a local edit, a hosted
+   *  change, or Sync. Optional so an older sidecar's payload still types. */
+  waiting_for_change?: boolean;
 }
 
 /** Response from GET /api/match/sync/status (#631 Task 9). Cheap
