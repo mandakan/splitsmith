@@ -31,7 +31,7 @@ from typing import Literal
 from PIL import Image
 
 from . import composition
-from .export_naming import stage_file_base
+from .export_naming import stage_display_name, stage_file_base
 from .match_project import MatchProject
 from .overlay_card import build_card_still, build_lower_third, card_scale
 from .overlay_html import single_html
@@ -86,6 +86,12 @@ def audit_digest(audit_doc: dict | None) -> str:
     return hashlib.sha256(json.dumps(audit_doc, sort_keys=True, default=str).encode("utf-8")).hexdigest()
 
 
+#: Bump when the same inputs draw a different picture, or a cached still
+#: from before the change outlives it. 2: a blank stage name reads
+#: "Stage N" on the slate and the lower-third.
+PREVIEW_REVISION = 2
+
+
 def preview_key(spec: PreviewSpec, *, slug: str, project_updated_at: str, audit: str) -> str:
     """Content address for the cache: every input that moves the picture.
     ``audit`` is :func:`audit_digest` of the stage's audit doc."""
@@ -101,6 +107,7 @@ def preview_key(spec: PreviewSpec, *, slug: str, project_updated_at: str, audit:
             "name": spec.project_name,
             "project": project_updated_at,
             "audit": audit,
+            "revision": PREVIEW_REVISION,
         },
         sort_keys=True,
     )
@@ -257,6 +264,7 @@ def render_preview(
     # summary's label ``competitor_name`` then the bundle name.
     name = spec.project_name or project.name
     label = project.competitor_name or name
+    stage_label = stage_display_name(stage.stage_number, stage.stage_name)
     size = {"width": spec.width, "height": spec.height, "theme": theme}
     image: Image.Image | None
     if spec.card == "frame":
@@ -266,12 +274,12 @@ def render_preview(
         image = build_card_still(card, rasterizer=rasterizer, backdrop=frame, **size)
     elif spec.card == "slate":
         slate = composition.TitleCard(
-            text=stage.stage_name, duration_seconds=1.5, style="slate", info=_rounds_info(stage)
+            text=stage_label, duration_seconds=1.5, style="slate", info=_rounds_info(stage)
         )
         image = build_card_still(slate, rasterizer=rasterizer, backdrop=frame, **size)
     elif spec.card == "lower-third":
         lower = composition.TitleCard(
-            text=stage.stage_name, duration_seconds=1.5, style="lower-third", info=_rounds_info(stage)
+            text=stage_label, duration_seconds=1.5, style="lower-third", info=_rounds_info(stage)
         )
         third = build_lower_third(lower, rasterizer=rasterizer, **size)
         image = None if third is None else _compose_over(frame, _to_png(third), spec, theme)

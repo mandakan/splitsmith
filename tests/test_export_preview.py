@@ -247,3 +247,21 @@ def test_grab_frame_head_and_tail(tmp_path: Path) -> None:
     assert beyond is not None and beyond.stat().st_size > 0
     beyond_head = ep.grab_frame(video, seconds=600.0, at="head", ffmpeg_binary=ffmpeg, out=tmp_path / "c.png")
     assert beyond_head is not None and beyond_head.stat().st_size > 0
+
+
+@pytest.mark.parametrize("card", ["slate", "lower-third"])
+def test_stage_card_names_an_unnamed_stage_by_number(tmp_path: Path, card: str) -> None:
+    project, root = _project(tmp_path)
+    project.stage(3).stage_name = ""
+    raster = _StubRasterizer()
+    ep.render_preview(
+        ep.PreviewSpec(card=card, stage_number=3),
+        project=project,
+        root=root,
+        audit_doc=None,
+        theme=load_theme("splitsmith"),
+        rasterizer=raster,
+        ffmpeg_binary=None,
+        work_dir=tmp_path / "work",
+    )
+    assert "Stage 3" in raster.htmls[-1]

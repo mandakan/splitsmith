@@ -23,7 +23,7 @@ from typing import Literal
 from .. import composition, fcp7xml_render, fcpxml_gen, mp4_render, youtube_sidecar
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, read_audit_data
 from ..config import OutputConfig, StageRounds
-from ..export_naming import match_file_base, stage_file_base
+from ..export_naming import match_file_base, stage_display_name, stage_file_base
 from ..match_project import MatchProject, StageScorecard
 from ..overlay_theme import ThemeName
 from ..runtime import runtime
@@ -142,7 +142,7 @@ def stage_inputs_for_project(
         inputs.append(
             MatchStageInput(
                 stage_number=stage_number,
-                stage_name=stage.stage_name,
+                stage_name=stage_display_name(stage_number, stage.stage_name),
                 audit_path=audit_dir / f"stage{stage_number}.json",
                 trimmed_path=exports_dir / f"{base}_trimmed.mp4",
                 beep_offset_seconds=min(project.trim_pre_buffer_seconds, primary.beep_time),
