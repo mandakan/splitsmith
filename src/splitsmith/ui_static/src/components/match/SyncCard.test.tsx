@@ -16,7 +16,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { api, type AutoSyncStatus, type Job, type SyncStatusResponse } from "@/lib/api";
 import { useDeploymentMode } from "@/lib/features";
 
-import { SyncCard } from "@/components/match/SyncCard";
+import { pendingChangesText, SyncCard } from "@/components/match/SyncCard";
 
 vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
@@ -158,6 +158,23 @@ describe("SyncCard", () => {
     fireEvent.click(screen.getByRole("button", { name: /publish again/i }));
     await waitFor(() => expect(api.republishSync).toHaveBeenCalledTimes(1));
     expect(api.startSync).not.toHaveBeenCalled();
+  });
+
+  it("never says 0 files changed when only docs changed (#1074)", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue(
+      makeStatus({ stale: true, pending_media: 0, pending_docs: 2 }),
+    );
+
+    render(<SyncCard jobs={[]} matchId="m1" />);
+
+    expect(await screen.findByText("Edits since last sync")).toBeInTheDocument();
+    expect(screen.queryByText(/0 files/)).not.toBeInTheDocument();
+  });
+
+  it("words the stale line from the file and doc counts", () => {
+    expect(pendingChangesText(0, 3)).toBe("Edits since last sync");
+    expect(pendingChangesText(1, 0)).toBe("1 file changed since last sync");
+    expect(pendingChangesText(3, 2)).toBe("3 files and edits changed since last sync");
   });
 
   it("shows the changed-file count when stale", async () => {

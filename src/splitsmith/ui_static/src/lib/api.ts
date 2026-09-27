@@ -5018,6 +5018,8 @@ export interface SyncStatusResponse {
   last_synced_at: string | null;
   stale: boolean;
   pending_media: number;
+  /** Docs the next push would send; optional for an older sidecar. */
+  pending_docs?: number;
   errors: string[];
   remote_changes: number | null;
 }

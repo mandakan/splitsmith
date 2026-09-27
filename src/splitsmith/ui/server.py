@@ -5589,6 +5589,8 @@ class SyncStatusResponse(BaseModel):
     last_synced_at: datetime | None = None
     stale: bool
     pending_media: int
+    #: Docs (match, projects, audits) the next push would send (#1074).
+    pending_docs: int = 0
     errors: list[str] = Field(default_factory=list)
     #: Count of hosted docs newer than what this desktop last synced
     #: (manifest version diff). None = unknown: sync unconfigured or the
@@ -7797,6 +7799,7 @@ def create_app(
             last_synced_at=sync_state.last_synced_at,
             stale=stale,
             pending_media=len(plan.media),
+            pending_docs=len(plan.docs),
             errors=plan.errors,
             remote_changes=remote_changes,
         )

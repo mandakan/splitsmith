@@ -200,6 +200,8 @@ def test_status_on_never_synced_configured_match(tmp_path: Path) -> None:
     assert body["last_synced_at"] is None
     assert body["stale"] is True
     assert isinstance(body["pending_media"], int)
+    # Never pushed: every doc is pending (#1074 counts them for the card).
+    assert body["pending_docs"] > 0
     assert body["errors"] == []
 
 

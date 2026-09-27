@@ -29,7 +29,8 @@
  *                       errors, so an enabled button here would just
  *                       fail immediately. Checked before "stale".
  *   never synced    - last_synced_at is null.
- *   stale           - last_synced_at is set but pending_media > 0 (or
+ *   stale           - last_synced_at is set but pending_media > 0 or
+ *                       pending_docs > 0 (or
  *                       the plan is otherwise stale): "N files changed
  *                       since last sync".
  *   synced          - up to date: relative time.
@@ -357,6 +358,14 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
   );
 }
 
+/** The stale line (#1074): a doc-only change used to read "0 files
+ *  changed since last sync" next to a stale state. */
+export function pendingChangesText(media: number, docs: number): string {
+  if (media === 0) return "Edits since last sync";
+  const files = `${media} file${media === 1 ? "" : "s"}`;
+  return docs > 0 ? `${files} and edits changed since last sync` : `${files} changed since last sync`;
+}
+
 function SyncStatusLine({
   status,
   loadError,
@@ -462,8 +471,7 @@ function SyncStatusLine({
     return (
       <p className={lineClass}>
         <RefreshCw className="size-3.5 shrink-0" aria-hidden="true" />
-        {status.pending_media} file{status.pending_media === 1 ? "" : "s"} changed
-        since last sync
+        {pendingChangesText(status.pending_media, status.pending_docs ?? 0)}
       </p>
     );
   }
