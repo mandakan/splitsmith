@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -193,8 +194,14 @@ def run_sync(
     on_progress: Callable[[float, str], None] = lambda p, m: None,
     timer: PhaseTimer | None = None,
     ffmpeg_binary: str = "ffmpeg",
+    audit_lock: AbstractContextManager | None = None,
 ) -> SyncReport:
-    """Pull hosted changes, merge, then push - the bidirectional cycle."""
+    """Pull hosted changes, merge, then push - the bidirectional cycle.
+
+    ``audit_lock`` is held around each audit doc's read-merge-write so a
+    local audit PUT's compare-and-save (spec 2026-09-27 s5) cannot
+    interleave with it; the server passes ``AppState.audit_lock``.
+    """
     timings: dict[str, float] = {}
 
     with timed_phase(timings, timer, "preflight"):
@@ -237,7 +244,7 @@ def run_sync(
             pulled_total += len(pulled)
 
         with timed_phase(timings, timer, "merge"):
-            result_counts = _apply_pull(match_root, match_id, sync_state, pulled)
+            result_counts = _apply_pull(match_root, match_id, sync_state, pulled, audit_lock=audit_lock)
             merged_docs += result_counts["merged"]
             all_conflicts.extend(result_counts["conflicts"])
             all_notes.extend(result_counts["notes"])
@@ -281,6 +288,8 @@ def _apply_pull(
     match_id: str,
     sync_state: SyncState,
     pulled: list[tuple[RemoteDoc, dict, int]],
+    *,
+    audit_lock: AbstractContextManager | None = None,
 ) -> dict:
     """Merge pulled docs into the local tree and update bases/versions.
 
@@ -295,6 +304,7 @@ def _apply_pull(
     notes: list[str] = []
     reprocess: set[str] = set()
     merged_count = 0
+    lock = audit_lock if audit_lock is not None else nullcontext()
 
     for rd, remote_doc, version in pulled:
         key = remote_doc_key(rd)
@@ -328,54 +338,55 @@ def _apply_pull(
                     merged_project.save(shooter_root)
                     merged_count += 1
         else:  # audit -- the only remaining kind; plan_pull filters on PULLABLE_DOC_KINDS
-            shooter_root = shooter_roots.get(rd.slug)
-            audit_path = (
-                None if shooter_root is None else shooter_root / "audit" / f"stage{rd.stage_number}.json"
-            )
-            if audit_path is None:
-                notes.append(f"{key}: no local shooter {rd.slug!r}; ignored")
-            elif not audit_path.exists():
-                if not remote_doc.get("shots") and not remote_doc.get("audit_events"):
-                    # Metadata-only doc (e.g. a phone triage flag set on a
-                    # stage desktop never audited) - materialize it as the
-                    # local file instead of skipping. The risk the skip
-                    # below guards against (historical events synthesizing
-                    # a zero-shot "audited" doc) needs audit_events to draw
-                    # on; there are none here, so there is nothing to
-                    # synthesize and the doc is safe to write verbatim.
-                    # base/version record below so the flag isn't lost to
-                    # the next push and isn't re-pulled every sync.
-                    audit_path.parent.mkdir(parents=True, exist_ok=True)
-                    atomic_write_json(audit_path, remote_doc)
-                    merged_count += 1
-                else:
-                    # A missing local audit file is not "start from
-                    # nothing" - audit doc membership (whether the file
-                    # exists at all) is desktop-owned for docs carrying
-                    # real shots/audit_events. Merging into {} would let
-                    # historical events synthesize a zero-shot "audited"
-                    # doc and push it back over hosted's fuller copy. Skip
-                    # like a missing shooter; base/version still record
-                    # below so this doc is not re-pulled every sync.
-                    notes.append(
-                        f"{key}: no local audit doc for stage {rd.stage_number} ({rd.slug!r}) - "
-                        "audit doc membership is desktop-owned; ignored"
-                    )
-            else:
-                local_doc = json.loads(audit_path.read_text(encoding="utf-8"))
-                result = merge_audit_doc(
-                    base,
-                    local_doc,
-                    remote_doc,
-                    doc_key=key,
-                    local_ts=_local_doc_ts(audit_path),
-                    remote_ts=rd.updated_at,
+            with lock:
+                shooter_root = shooter_roots.get(rd.slug)
+                audit_path = (
+                    None if shooter_root is None else shooter_root / "audit" / f"stage{rd.stage_number}.json"
                 )
-                _collect(result, conflicts, notes, reprocess)
-                if result.changed_vs_local:
-                    audit_path.parent.mkdir(parents=True, exist_ok=True)
-                    atomic_write_json(audit_path, result.doc)
-                    merged_count += 1
+                if audit_path is None:
+                    notes.append(f"{key}: no local shooter {rd.slug!r}; ignored")
+                elif not audit_path.exists():
+                    if not remote_doc.get("shots") and not remote_doc.get("audit_events"):
+                        # Metadata-only doc (e.g. a phone triage flag set on a
+                        # stage desktop never audited) - materialize it as the
+                        # local file instead of skipping. The risk the skip
+                        # below guards against (historical events synthesizing
+                        # a zero-shot "audited" doc) needs audit_events to draw
+                        # on; there are none here, so there is nothing to
+                        # synthesize and the doc is safe to write verbatim.
+                        # base/version record below so the flag isn't lost to
+                        # the next push and isn't re-pulled every sync.
+                        audit_path.parent.mkdir(parents=True, exist_ok=True)
+                        atomic_write_json(audit_path, remote_doc)
+                        merged_count += 1
+                    else:
+                        # A missing local audit file is not "start from
+                        # nothing" - audit doc membership (whether the file
+                        # exists at all) is desktop-owned for docs carrying
+                        # real shots/audit_events. Merging into {} would let
+                        # historical events synthesize a zero-shot "audited"
+                        # doc and push it back over hosted's fuller copy. Skip
+                        # like a missing shooter; base/version still record
+                        # below so this doc is not re-pulled every sync.
+                        notes.append(
+                            f"{key}: no local audit doc for stage {rd.stage_number} ({rd.slug!r}) - "
+                            "audit doc membership is desktop-owned; ignored"
+                        )
+                else:
+                    local_doc = json.loads(audit_path.read_text(encoding="utf-8"))
+                    result = merge_audit_doc(
+                        base,
+                        local_doc,
+                        remote_doc,
+                        doc_key=key,
+                        local_ts=_local_doc_ts(audit_path),
+                        remote_ts=rd.updated_at,
+                    )
+                    _collect(result, conflicts, notes, reprocess)
+                    if result.changed_vs_local:
+                        audit_path.parent.mkdir(parents=True, exist_ok=True)
+                        atomic_write_json(audit_path, result.doc)
+                        merged_count += 1
 
         save_base_doc(match_root, key, remote_doc)
         sync_state.doc_versions[key] = version

@@ -160,6 +160,7 @@ from .. import trim as trim_module
 from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
+from ..audit_revision import REVISION_FIELD, AuditRevisionConflictError, audit_revision
 from ..auth import AuthBackend, CompositeAuth, LoopbackAuth, User
 from ..coach import statistic_splits
 from ..comment_identity import (
@@ -4407,6 +4408,7 @@ def register_job_bodies(state: AppState) -> None:
                     on_progress=lambda p, m: handle.update(progress=p, message=m),
                     timer=handle.timer,
                     ffmpeg_binary=process_runtime().ffmpeg_binary,
+                    audit_lock=state.audit_lock,
                 )
             except SyncClientError as exc:
                 raise RuntimeError(str(exc)) from exc
@@ -7565,6 +7567,20 @@ def create_app(
         if request.url.path == "/api/workers/register":
             return JSONResponse(status_code=404, content={"detail": "not found"})
         return JSONResponse(status_code=422, content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
+
+    @app.exception_handler(AuditRevisionConflictError)
+    async def _audit_revision_conflict_handler(request: Request, exc: Exception) -> JSONResponse:
+        """Same body as the hosted optimistic-lock 409, so every client
+        handles both with one branch."""
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": {
+                    "code": "version_conflict",
+                    "message": "this match state changed since you loaded it; reload and try again",
+                }
+            },
+        )
 
     # Optimistic-locking conflict on a hosted state_docs save -> 409 so the
     # SPA can reload + retry. Registered only when the db layer imports
@@ -11760,7 +11776,10 @@ def create_app(
         payload, _ = state.load_audit(slug, stage_number)
         if payload is None:
             return JSONResponse(None)
-        return JSONResponse(payload)
+        # The revision rides the response only (spec 2026-09-27 s5); the
+        # SPA's buildAuditJson spreads the loaded doc, so it comes back on
+        # the next PUT, which pops it before anything is stored.
+        return JSONResponse({**payload, REVISION_FIELD: audit_revision(payload)})
 
     @app.put("/api/shooters/{slug}/stages/{stage_number}/audit")
     def put_stage_audit(slug: str, stage_number: int, payload: dict[str, Any]) -> JSONResponse:
@@ -11783,6 +11802,7 @@ def create_app(
             project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        client_revision = payload.pop(REVISION_FIELD, None)
         # #843: before anything touches disk. A non-finite float survives
         # json.loads, persists, and then makes this stage unreadable.
         _reject_non_finite(payload, what="audit document")
@@ -11808,28 +11828,31 @@ def create_app(
             for event in events:
                 if isinstance(event, dict) and not event.get("id"):
                     event["id"] = _new_event_id()
-        # Read the current version so the save is optimistic-locked. The
-        # SPA PUT doesn't carry a version (it assumes last-writer-wins), so
-        # this load-then-save has a tiny race window: if a concurrent
-        # worker bumps the version in between, save_audit raises
-        # StateConflictError -> 409 and the SPA re-fetches. Local: version
-        # is always 0 and this is a plain atomic file write.
-        stored, version = state.load_audit(slug, stage_number)
-        # #823: a desktop full-audit save resolves an open triage flag, same
-        # as the triage "accept" action. The SPA round-trips needs_attention
-        # (Audit.tsx buildAuditJson spreads the loaded doc), so checking the
-        # incoming payload covers the normal path - but a stale SPA session
-        # that dropped the key would silently keep the stored doc flagged,
-        # so check both sides.
-        is_save = isinstance(events, list) and any(
-            isinstance(e, dict) and e.get("kind") == "save" for e in events
-        )
-        incoming_flagged = bool((payload.get("needs_attention") or {}).get("flagged"))
-        stored_flagged = bool(((stored or {}).get("needs_attention") or {}).get("flagged"))
-        if is_save and (incoming_flagged or stored_flagged):
-            _set_needs_attention(payload, flagged=False)
-        state.save_audit(slug, stage_number, payload, version=version)
-        return JSONResponse(payload)
+        # Compare-and-save under the audit lock (spec 2026-09-27 s5): a PUT
+        # carrying ``_version`` from a copy that no longer matches the stored
+        # doc (a sync pull, another tab) is refused with 409 instead of
+        # overwriting it. The pull's audit apply holds the same lock. A PUT
+        # without ``_version`` keeps last-writer-wins. Hosted additionally
+        # optimistic-locks on the state_docs version it loads here.
+        with state.audit_lock:
+            stored, version = state.load_audit(slug, stage_number)
+            if client_revision is not None and client_revision != audit_revision(stored):
+                raise AuditRevisionConflictError(f"stage {stage_number} audit changed since it was loaded")
+            # #823: a desktop full-audit save resolves an open triage flag, same
+            # as the triage "accept" action. The SPA round-trips needs_attention
+            # (Audit.tsx buildAuditJson spreads the loaded doc), so checking the
+            # incoming payload covers the normal path - but a stale SPA session
+            # that dropped the key would silently keep the stored doc flagged,
+            # so check both sides.
+            is_save = isinstance(events, list) and any(
+                isinstance(e, dict) and e.get("kind") == "save" for e in events
+            )
+            incoming_flagged = bool((payload.get("needs_attention") or {}).get("flagged"))
+            stored_flagged = bool(((stored or {}).get("needs_attention") or {}).get("flagged"))
+            if is_save and (incoming_flagged or stored_flagged):
+                _set_needs_attention(payload, flagged=False)
+            state.save_audit(slug, stage_number, payload, version=version)
+        return JSONResponse({**payload, REVISION_FIELD: audit_revision(payload)})
 
     def _set_needs_attention(payload: dict[str, Any], *, flagged: bool, note: str | None = None) -> None:
         """Write the triage flag as a full object so sync LWW always has a
