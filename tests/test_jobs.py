@@ -1007,3 +1007,28 @@ def test_cancelling_a_pending_job_reaches_the_terminal_listeners() -> None:
     finally:
         release.set()
         assert _wait_until(lambda: (running.id, "succeeded") in seen)
+
+
+def test_find_active_still_sees_a_job_whose_match_is_unknown() -> None:
+    """A job submitted without a match context (a boot-time resume, a test
+    shim) has match_id None. A match-scoped lookup cannot rule it out, so
+    it must still dedupe against it rather than start a racing duplicate."""
+    from splitsmith.ui.server import current_match_id
+
+    reg = _Sync(JobRegistry(max_concurrent=1))
+    release = threading.Event()
+
+    def work(_handle):
+        release.wait(timeout=5.0)
+
+    job = reg.submit(kind="detect_beep", fn=work, stage_number=1, shooter_slug="me", video_id="v1")
+    try:
+        assert job.match_id is None
+        token = current_match_id.set("match-a")
+        try:
+            found = reg.find_active(kind="detect_beep", stage_number=1, shooter_slug="me", video_id="v1")
+        finally:
+            current_match_id.reset(token)
+        assert found is not None and found.id == job.id
+    finally:
+        release.set()
