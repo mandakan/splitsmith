@@ -346,6 +346,116 @@ def test_render_mp4_missing_binary_raises(tmp_path: Path) -> None:
         )
 
 
+# --- segment cache -----------------------------------------------------------
+
+
+def _writes_output(calls: list[list[str]]):
+    """A runner that records each argv and writes its last token, as
+    ffmpeg writes its output file."""
+
+    def run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess:
+        argv = list(args[0])
+        calls.append(argv)
+        Path(argv[-1]).write_bytes(b"encoded " + argv[-1].encode())
+        return subprocess.CompletedProcess(args=argv, returncode=0, stdout="", stderr="")
+
+    return run
+
+
+def _is_concat(argv: list[str]) -> bool:
+    return "-f" in argv and argv[argv.index("-f") + 1] == "concat"
+
+
+def test_a_repeat_render_encodes_nothing_and_stitches_the_cached_segments(tmp_path: Path) -> None:
+    """The third identical YouTube export of Hostfinalen XI re-encoded
+    every stage; with the cache the repeat is a stitch only."""
+    from splitsmith.segment_cache import SegmentCache
+
+    stage_a = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")
+    stage_b = _basic_stage(tmp_path=tmp_path, name="B", primary_name="b.mp4")
+    comp = composition.from_stage_compositions([stage_a, stage_b], project_name="m")
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    first: list[list[str]] = []
+    mp4_render.render_mp4(
+        comp,
+        output_path=tmp_path / "one.mp4",
+        work_dir=tmp_path / "w1",
+        runner=_writes_output(first),
+        segment_cache=cache,
+    )
+    assert [_is_concat(a) for a in first] == [False, False, True]
+
+    second: list[list[str]] = []
+    steps: list[mp4_render.RenderStep] = []
+    mp4_render.render_mp4(
+        comp,
+        output_path=tmp_path / "two.mp4",
+        work_dir=tmp_path / "w2",
+        runner=_writes_output(second),
+        segment_cache=cache,
+        progress=steps.append,
+    )
+    assert len(second) == 1 and _is_concat(second[0])
+    listed = (tmp_path / "w2" / "concat.txt").read_text()
+    assert listed.count(str((tmp_path / "cache").resolve())) == 2
+    assert [(s.label, s.status, s.index, s.total) for s in steps] == [
+        ("A", "reused", 1, 3),
+        ("B", "reused", 2, 3),
+        ("the match video", "stitching", 3, 3),
+    ]
+
+
+def test_a_changed_stage_is_the_only_segment_encoded_again(tmp_path: Path) -> None:
+    from splitsmith.segment_cache import SegmentCache
+
+    stage_a = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")
+    stage_b = _basic_stage(tmp_path=tmp_path, name="B", primary_name="b.mp4")
+    comp = composition.from_stage_compositions([stage_a, stage_b], project_name="m")
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+    mp4_render.render_mp4(
+        comp,
+        output_path=tmp_path / "one.mp4",
+        work_dir=tmp_path / "w1",
+        runner=_writes_output([]),
+        segment_cache=cache,
+    )
+    (tmp_path / "b.mp4").write_bytes(b"re-cut")  # a re-trim moves size and mtime
+
+    again: list[list[str]] = []
+    mp4_render.render_mp4(
+        comp,
+        output_path=tmp_path / "two.mp4",
+        work_dir=tmp_path / "w2",
+        runner=_writes_output(again),
+        segment_cache=cache,
+    )
+    encodes = [a for a in again if not _is_concat(a)]
+    assert len(encodes) == 1
+    assert str(tmp_path / "b.mp4") in encodes[0]
+
+
+def test_a_failed_encode_leaves_no_cache_entry(tmp_path: Path) -> None:
+    from splitsmith.segment_cache import SegmentCache
+
+    stage = _basic_stage(tmp_path=tmp_path, name="A", primary_name="a.mp4")
+    comp = composition.from_stage_compositions([stage], project_name="m")
+    cache = SegmentCache(root=tmp_path / "cache", max_bytes=1 << 30)
+
+    def half_then_fail(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess:
+        Path(args[0][-1]).write_bytes(b"half")
+        raise subprocess.CalledProcessError(returncode=1, cmd=args[0], stderr="killed")
+
+    with pytest.raises(mp4_render.FFmpegError):
+        mp4_render.render_mp4(
+            comp,
+            output_path=tmp_path / "o.mp4",
+            work_dir=tmp_path / "w",
+            runner=half_then_fail,
+            segment_cache=cache,
+        )
+    assert list((tmp_path / "cache").iterdir()) == []
+
+
 # --- youtube preset (#204 layer 2) ---------------------------------------
 
 
@@ -963,12 +1073,38 @@ def test_stage_audio_stays_on_the_video_across_a_keyframe_misaligned_trim(tmp_pa
     source = tmp_path / "source.mp4"
     subprocess.run(
         [
-            ffmpeg, "-v", "error", "-y",
-            "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25:duration=24",
-            "-f", "lavfi", "-i", "sine=frequency=1000:sample_rate=48000:duration=24",
-            "-filter_complex", "[1:a]volume='between(t,10,10.2)':eval=frame[a]",
-            "-map", "0:v", "-map", "[a]", "-c:v", "libx264", "-preset", "ultrafast",
-            "-g", "25", "-keyint_min", "25", "-sc_threshold", "0", "-c:a", "aac", "-shortest", str(source),
+            ffmpeg,
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=320x180:rate=25:duration=24",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=1000:sample_rate=48000:duration=24",
+            "-filter_complex",
+            "[1:a]volume='between(t,10,10.2)':eval=frame[a]",
+            "-map",
+            "0:v",
+            "-map",
+            "[a]",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-g",
+            "25",
+            "-keyint_min",
+            "25",
+            "-sc_threshold",
+            "0",
+            "-c:a",
+            "aac",
+            "-shortest",
+            str(source),
         ],  # fmt: skip
         check=True,
         capture_output=True,
@@ -1120,10 +1256,26 @@ def test_rendered_mp4_carries_the_chapter_atoms(tmp_path: Path) -> None:
     source = tmp_path / "src.mp4"
     subprocess.run(
         [
-            ffmpeg, "-v", "error", "-y",
-            "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25:duration=8",
-            "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo",
-            "-c:v", "libx264", "-preset", "ultrafast", "-c:a", "aac", "-shortest", str(source),
+            ffmpeg,
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=320x180:rate=25:duration=8",
+            "-f",
+            "lavfi",
+            "-i",
+            "anullsrc=r=48000:cl=stereo",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-c:a",
+            "aac",
+            "-shortest",
+            str(source),
         ],  # fmt: skip
         check=True,
         capture_output=True,

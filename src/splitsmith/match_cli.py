@@ -521,6 +521,7 @@ def export(
     notes.
     """
     from .match_project import MatchProject
+    from .mp4_render import RenderStep
     from .ui import match_exports
 
     if output_format not in _EXPORT_FORMATS:
@@ -652,12 +653,20 @@ def export(
     console.print(
         f"[dim]exporting {project_name} ({slug}), {len(stage_numbers)} stages, {output_format}...[/]"
     )
+    output_config = Config.load(config_path).output
+
+    def _render_step(step: RenderStep) -> None:
+        verb = {"encoding": "encoding", "reused": "reused", "stitching": "stitching"}[step.status]
+        console.print(f"[dim]  {verb} {step.label} ({step.index} of {step.total})[/]")
+
     try:
         result = match_exports.export_match(
             stages=stages_input,
             request=request,
             exports_dir=target_dir,
-            config=Config.load(config_path).output,
+            config=output_config,
+            segment_cache=match_exports.render_segment_cache(output_config),
+            progress=_render_step,
         )
     except match_exports.MatchExportError as exc:
         console.print(f"[red]Error:[/] {exc}")

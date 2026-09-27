@@ -14,6 +14,7 @@ That keeps the unit tests free of project fixtures.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -27,6 +28,7 @@ from ..export_naming import match_file_base, stage_display_name, stage_file_base
 from ..match_project import MatchProject, StageScorecard
 from ..overlay_theme import ThemeName
 from ..runtime import runtime
+from ..segment_cache import SegmentCache
 from ..stage_summary_data import TileStageData, load_stage_shots
 
 PipLayout = Literal["stacked", "pip-corners"]
@@ -262,6 +264,23 @@ class MatchExportError(RuntimeError):
     composer needs (no trim, no audit, etc). Endpoints surface as 400."""
 
 
+#: ``0`` turns the rendered-segment cache off whatever the config says;
+#: ``tests/conftest.py`` sets it so no test writes into the real cache dir.
+RENDER_CACHE_ENV = "SPLITSMITH_RENDER_CACHE"
+
+
+def render_segment_cache(config: OutputConfig) -> SegmentCache | None:
+    """The rendered-segment cache the server job and the CLI share, under
+    the runtime cache dir; ``None`` when ``render_cache_gb`` is 0 or
+    ``SPLITSMITH_RENDER_CACHE=0``."""
+    if config.render_cache_gb <= 0 or os.environ.get(RENDER_CACHE_ENV, "").strip() == "0":
+        return None
+    return SegmentCache(
+        root=runtime().cache_dir / "render-segments",
+        max_bytes=int(config.render_cache_gb * 1024**3),
+    )
+
+
 def export_match(
     *,
     stages: list[MatchStageInput],
@@ -269,6 +288,8 @@ def export_match(
     exports_dir: Path,
     config: OutputConfig,
     probe: object | None = None,
+    segment_cache: SegmentCache | None = None,
+    progress: mp4_render.RenderProgress | None = None,
 ) -> MatchExportResult:
     """Build a stitched FCPXML from N stages' existing trims.
 
@@ -280,6 +301,10 @@ def export_match(
     ``probe`` defaults to :func:`fcpxml_gen.probe_video` resolved at call
     time so monkeypatching the module attribute (the standard pattern for
     avoiding ffprobe in tests) works. Pass an explicit callable to override.
+
+    ``segment_cache`` and ``progress`` reach the MP4 renderer only
+    (:func:`render_segment_cache` builds the shipped cache); the XML
+    renderers encode nothing.
     """
     if probe is None:
         probe = fcpxml_gen.probe_video
@@ -533,6 +558,8 @@ def export_match(
                 youtube_preset=youtube_preset_active,
                 overlay_theme=request.overlay_theme,
                 chapters=youtube_sidecar.compute_chapters(comp) if embed_chapter_markers else None,
+                segment_cache=segment_cache,
+                progress=progress,
             )
             rendered_seconds = rendered.duration_seconds
             anomalies.extend(rendered.degradations)

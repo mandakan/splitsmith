@@ -206,6 +206,7 @@ from ..match_project import (
     VideoRole,
 )
 from ..match_registry import MatchRegistry
+from ..mp4_render import RenderStep
 from ..observability import StructuredJsonFormatter, init_sentry
 from ..runtime import runtime as process_runtime
 from ..share_card import stage_figures
@@ -4123,11 +4124,15 @@ def register_job_bodies(state: AppState) -> None:
 
         n = len(req.stage_numbers)
         handle.timer.set_meta(stage_count=n)
-        # Reserve the last 10% for the match compose step; the rest is
-        # split evenly across per-stage trims (the dominant wall time).
+        # The per-stage exports share the bar up to ``compose_start``, the
+        # compose step the rest. An XML compose writes a file in a second;
+        # an MP4 compose encodes every stage and card, the longest step of
+        # the job by far, so it gets most of the bar and a line per step.
         # Stages that already have a trim skip ahead within their slice
         # instead of contributing to the wait.
-        per_stage_share = 0.85 / max(1, n)
+        renders_mp4 = req.output_format == "mp4"
+        compose_start = 0.20 if renders_mp4 else 0.92
+        per_stage_share = (compose_start - 0.05) / max(1, n)
 
         with handle.timer.phase("per_stage"):
             for idx, stage_number in enumerate(req.stage_numbers):
@@ -4248,7 +4253,20 @@ def register_job_bodies(state: AppState) -> None:
                     )
 
         handle.check_cancel()
-        handle.update(progress=0.92, message="Stitching match FCPXML...")
+        handle.update(
+            progress=compose_start,
+            message="Composing the match video..." if renders_mp4 else "Writing the match timeline...",
+        )
+
+        def _render_step(step: RenderStep) -> None:
+            # Between segments is where a cancel can land during a render.
+            handle.check_cancel()
+            verb = {"encoding": "Encoding", "reused": "Reused", "stitching": "Stitching"}[step.status]
+            done = (step.index - 1) / step.total
+            handle.update(
+                progress=compose_start + (0.98 - compose_start) * done,
+                message=f"{verb} {step.label} ({step.index} of {step.total})",
+            )
 
         # Re-load the project: the per-stage worker writes processed flags
         # via project.save() side-effects, so a fresh load picks those up.
@@ -4296,6 +4314,8 @@ def register_job_bodies(state: AppState) -> None:
                     request=request_data,
                     exports_dir=exports_dir,
                     config=Config().output,
+                    segment_cache=match_export_helpers.render_segment_cache(Config().output),
+                    progress=_render_step,
                 )
             except match_export_helpers.MatchExportError as exc:
                 raise RuntimeError(str(exc)) from exc

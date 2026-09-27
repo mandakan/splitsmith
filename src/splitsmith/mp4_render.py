@@ -85,10 +85,27 @@ from .overlay_raster import ChromiumRasterizer, Rasterizer, RasterizerUnavailabl
 from .overlay_summary_cell import build_summary_still
 from .overlay_theme import ThemeName, load_theme
 from .runtime import runtime
+from .segment_cache import SegmentCache
 
 logger = logging.getLogger(__name__)
 
 Runner = Callable[..., subprocess.CompletedProcess]
+
+
+@dataclass(frozen=True)
+class RenderStep:
+    """One step of a render, for a progress line. ``index`` counts from 1
+    over every timeline item plus the stitch (``total``). ``status`` is
+    ``encoding`` as an encode starts, ``reused`` when the segment came
+    from the cache and no encode ran, ``stitching`` for the final copy."""
+
+    index: int
+    total: int
+    label: str
+    status: Literal["encoding", "reused", "stitching"]
+
+
+RenderProgress = Callable[[RenderStep], None]
 
 
 class FFmpegError(RuntimeError):
@@ -127,6 +144,8 @@ def render_mp4(
     rasterizer: Rasterizer | None = None,
     overlay_theme: ThemeName = "splitsmith",
     chapters: Sequence[ChapterMark] | None = None,
+    segment_cache: SegmentCache | None = None,
+    progress: RenderProgress | None = None,
 ) -> Mp4RenderResult:
     """Render ``composition`` as a stitched ``.mp4`` at ``output_path``.
 
@@ -156,6 +175,13 @@ def render_mp4(
     YouTube's own chapter detection read them; the description text the
     sidecar writes stays the portable copy. ``None`` leaves the stitch
     argv exactly as it was.
+
+    ``segment_cache`` keeps every encoded segment by the content of its
+    command (:mod:`splitsmith.segment_cache`): a segment whose command
+    and inputs are unchanged since an earlier render is not encoded
+    again, and the stitch reads it from the cache. ``None`` encodes
+    every segment into ``work_dir`` as before. ``progress`` hears each
+    step (:class:`RenderStep`).
     """
     plans = [_plan_stage(stage, composition.sequence) for stage in composition.stages]
     if not plans:
@@ -217,6 +243,8 @@ def render_mp4(
                     overlay_theme=overlay_theme,
                     degradations=degradations,
                     chapters=chapters,
+                    segment_cache=segment_cache,
+                    progress=progress,
                 )
         work_dir.mkdir(parents=True, exist_ok=True)
         return _render_with_work_dir(
@@ -231,6 +259,8 @@ def render_mp4(
             overlay_theme=overlay_theme,
             degradations=degradations,
             chapters=chapters,
+            segment_cache=segment_cache,
+            progress=progress,
         )
     finally:
         if owned is not None:
@@ -250,12 +280,45 @@ def _render_with_work_dir(
     overlay_theme: ThemeName,
     degradations: tuple[str, ...],
     chapters: Sequence[ChapterMark] | None,
+    segment_cache: SegmentCache | None = None,
+    progress: RenderProgress | None = None,
 ) -> Mp4RenderResult:
     sequence = composition.sequence
     theme = load_theme(overlay_theme) if timeline.needs_rasterizer else None
     segments: list[tuple[Path, float]] = []
     generated = False
-    for item in timeline.items:
+    total_steps = len(timeline.items) + 1
+    used_keys: set[str] = set()
+
+    def report(index: int, label: str, status: Literal["encoding", "reused", "stitching"]) -> None:
+        if progress is not None:
+            progress(RenderStep(index=index, total=total_steps, label=label, status=status))
+
+    def encode(cmd: tuple[str, ...], out: Path, *, index: int, label: str) -> Path:
+        """Run ``cmd``, or reuse its segment from the cache; the path the
+        stitch reads the segment from."""
+        if segment_cache is None:
+            report(index, label, "encoding")
+            _run(cmd, runner=runner)
+            return out
+        key = segment_cache.key(cmd, output_path=out, work_dir=work_dir)
+        used_keys.add(key)
+        hit = segment_cache.lookup(key)
+        if hit is not None:
+            report(index, label, "reused")
+            return hit
+        report(index, label, "encoding")
+        partial = segment_cache.partial_path(key)
+        target = str(out)
+        try:
+            _run(tuple(str(partial) if token == target else token for token in cmd), runner=runner)
+            if not partial.is_file():
+                raise FFmpegError(f"ffmpeg reported success but wrote no {label} segment")
+            return segment_cache.commit(partial, key)
+        finally:
+            partial.unlink(missing_ok=True)
+
+    for step, item in enumerate(timeline.items, start=1):
         if isinstance(item, _StageItem):
             lower_third: _LowerThirdInput | None = None
             if item.lower_third is not None and rasterizer is not None and theme is not None:
@@ -280,8 +343,9 @@ def _render_with_work_dir(
                 lower_third=lower_third,
                 primary_audio=_has_audio_stream(item.plan.stage.primary.path),
             )
-            _run(cmd, runner=runner)
-            segments.append((stage_out, item.duration_seconds))
+            segments.append(
+                (encode(cmd, stage_out, index=step, label=item.plan.stage.name), item.duration_seconds)
+            )
         elif isinstance(item, _StillItem):
             if rasterizer is None or theme is None:
                 continue  # already recorded as a degradation up front
@@ -315,8 +379,9 @@ def _render_with_work_dir(
                 ffmpeg_binary=ffmpeg_binary,
                 youtube_preset=youtube_preset,
             )
-            _run(cmd, runner=runner)
-            segments.append((still_out, item.duration_seconds))
+            segments.append(
+                (encode(cmd, still_out, index=step, label=_step_label(item, timeline)), item.duration_seconds)
+            )
             generated = True
         elif isinstance(item, _SummaryItem):
             # The frame is grabbed whether or not there is a browser: the
@@ -356,8 +421,9 @@ def _render_with_work_dir(
                 ffmpeg_binary=ffmpeg_binary,
                 youtube_preset=youtube_preset,
             )
-            _run(cmd, runner=runner)
-            segments.append((still_out, item.duration_seconds))
+            segments.append(
+                (encode(cmd, still_out, index=step, label=_step_label(item, timeline)), item.duration_seconds)
+            )
             generated = True
         else:
             clip_out = work_dir / f"{item.kind}.mp4"
@@ -368,8 +434,7 @@ def _render_with_work_dir(
                 ffmpeg_binary=ffmpeg_binary,
                 youtube_preset=youtube_preset,
             )
-            _run(cmd, runner=runner)
-            segments.append((clip_out, item.duration_seconds))
+            segments.append((encode(cmd, clip_out, index=step, label=item.kind), item.duration_seconds))
             generated = True
 
     list_path = work_dir / "concat.txt"
@@ -389,12 +454,28 @@ def _render_with_work_dir(
         reencode_audio=generated,
         chapters_path=chapters_path,
     )
+    report(total_steps, "the match video", "stitching")
     _run(cmd, runner=runner)
+    if segment_cache is not None:
+        segment_cache.evict(keep=used_keys)
     return Mp4RenderResult(
         output_path=output_path,
         duration_seconds=total_seconds,
         degradations=degradations,
     )
+
+
+def _step_label(item: _StillItem | _SummaryItem, timeline: TimelinePlan) -> str:
+    """A card's progress label: the stage it belongs to by its own name
+    (``Stage 3 slate``), never the zero-based segment index."""
+    if isinstance(item, _SummaryItem):
+        stage = timeline.stage(item.stage_index)
+        return f"{stage.plan.stage.name} summary" if stage is not None else "summary"
+    if item.name.startswith("slate_") and item.backdrop_stage_index is not None:
+        stage = timeline.stage(item.backdrop_stage_index)
+        if stage is not None:
+            return f"{stage.plan.stage.name} slate"
+    return {"title_page": "title page", "closing": "closing card"}.get(item.name, item.name.replace("_", " "))
 
 
 def _has_audio_stream(path: Path) -> bool:

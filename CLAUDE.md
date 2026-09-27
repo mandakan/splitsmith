@@ -148,6 +148,20 @@ encodes go through their own runner hooks (``card_runner``,
 and ``scripts/render_grid_frames.py`` with their card flags; look at the
 frames, a green argv test proves nothing about pixels.
 
+The single-shooter render keeps every encoded segment in
+``segment_cache`` (``<cache_dir>/render-segments``, LRU past
+``OutputConfig.render_cache_gb``), keyed on the segment's ffmpeg argv
+with the output path factored out, inputs outside ``work_dir`` by path,
+size and mtime, the per-render card PNGs by content, and the ffmpeg
+binary's identity. So anything that changes a segment must reach its
+argv or one of its input files; state that reaches ffmpeg any other way
+(an env var, a file named inside a filter string) would be served stale.
+Bump ``segment_cache.KEY_VERSION`` when the recipe changes. The job and
+the CLI get the cache through ``match_exports.render_segment_cache``;
+tests run with ``SPLITSMITH_RENDER_CACHE=0`` (conftest) and a cache test
+passes its own. ``RenderStep`` is the per-segment progress the job maps
+onto its bar; the grid renderer has no cache yet.
+
 ## Hosted playback streams the web rendition (#1031)
 
 The audit trim (``trimmed/stage<N>_cam_<id>_trimmed.mp4``) is a
