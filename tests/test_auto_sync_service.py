@@ -298,3 +298,12 @@ def test_full_trims_on_hosted_counts_only_what_the_next_push_removes(tmp_path: P
     assert svc.status_for(root)["full_trims_on_hosted"] == 0  # no local rendition
     (trimmed / "s1_cam_x_web.mp4").write_bytes(b"w")
     assert svc.status_for(root)["full_trims_on_hosted"] == 1
+
+
+def test_global_switch_rejects_per_match_fields(tmp_path: Path, monkeypatch) -> None:
+    """``{"full_media": true}`` on the global route used to read as
+    ``enabled`` absent -> on, silently re-enabling auto-sync everywhere."""
+    monkeypatch.setenv("SPLITSMITH_AUTO_SYNC", "1")
+    client, _ = _seed_match_export_project(tmp_path, stage_count=1)
+    assert client._client.put("/api/settings/auto-sync", json={"enabled": False}).status_code == 200
+    assert client._client.put("/api/settings/auto-sync", json={"full_media": True}).status_code == 422

@@ -5479,6 +5479,14 @@ class HostedSyncSettingsRequest(BaseModel):
     token: str | None = None
 
 
+class GlobalAutoSyncRequest(BaseModel):
+    """Body for PUT /api/settings/auto-sync: the machine-level switch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool
+
+
 class AutoSyncSettingRequest(BaseModel):
     """Body for PUT /api/match/sync/auto and /api/settings/auto-sync. On the
     per-match route only the fields sent change: ``enabled: null`` restores
@@ -7754,12 +7762,12 @@ def create_app(
         return JSONResponse(state.auto_sync.status_for(state.match_root))
 
     @app.put("/api/settings/auto-sync")
-    async def put_global_auto_sync(req: AutoSyncSettingRequest) -> JSONResponse:
+    async def put_global_auto_sync(req: GlobalAutoSyncRequest) -> JSONResponse:
         """The machine-level switch in the hosted-sync settings dialog."""
         if _hosted_mode_active():
             raise HTTPException(status_code=404, detail="not found")
         prefs = user_config.load_global_prefs()
-        prefs.auto_sync_enabled = req.enabled is not False
+        prefs.auto_sync_enabled = req.enabled
         user_config.save_global_prefs(prefs)
         return JSONResponse({"global_enabled": prefs.auto_sync_enabled})
 
