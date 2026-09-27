@@ -1007,3 +1007,28 @@ def test_shotless_stage_keeps_its_chapter_and_the_sidecar_says_what_is_missing(t
     assert "no shots audited" in anomaly
     assert "chapter" not in anomaly  # it kept its chapter
     assert "shot markers" in anomaly and "overlay" in anomaly
+
+
+def test_stage_inputs_name_an_unnamed_stage_by_its_number(tmp_path: Path) -> None:
+    """SSI often has no stage names (Hostfinalen XI had eight blanks); the
+    slate then showed only the round count. The inputs carry "Stage N",
+    with N the stage's own number, so the slate, the chapters and the
+    FCPXML clip names all say it, also for a non-contiguous selection."""
+    from splitsmith.match_project import MatchProject, StageEntry, StageVideo
+
+    project = MatchProject(name="Hostfinalen XI")
+    project.stages = [
+        StageEntry(
+            stage_number=n,
+            stage_name=name,
+            time_seconds=10.0,
+            videos=[StageVideo(path=Path(f"raw/v{n}.mp4"), role="primary", beep_time=5.0)],
+        )
+        for n, name in ((2, ""), (5, "   "), (7, "Standards"))
+    ]
+    inputs = match_exports_mod.stage_inputs_for_project(project, tmp_path, [2, 5, 7])
+    assert [i.stage_name for i in inputs] == ["Stage 2", "Stage 5", "Standards"]
+    # The file names keep the stored name: a re-export must find the trims.
+    assert inputs[0].trimmed_path.name == "stage2_stage_trimmed.mp4"
+    titles = match_exports_mod._build_uniform_titles(kind="slate", duration=1.5, stage_inputs=inputs)
+    assert [t.text for t in titles.values()] == ["Stage 2", "Stage 5", "Standards"]
