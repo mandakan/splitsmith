@@ -292,3 +292,21 @@ def test_all_four_routes_404_in_hosted_mode(
     assert client.put("/api/settings/hosted-sync", json={"base_url": "x", "token": "y"}).status_code == 404
     assert client.post(f"/api/matches/{mid}/match/sync").status_code == 404
     assert client.get(f"/api/matches/{mid}/match/sync/status").status_code == 404
+
+
+def test_status_does_not_count_full_trims_a_web_only_push_skips(tmp_path: Path) -> None:
+    """Web-only (v1.1): a full trim beside its rendition is never pushed, so
+    it must not read as "files changed since last sync" forever."""
+    from splitsmith.sync.auto_state import update_auto_prefs
+
+    client, match_id = _local_app_with_match(tmp_path)
+    root = tmp_path / "match"
+    trimmed = match_model.Match.shooter_root(root, "me") / "trimmed"
+    trimmed.mkdir(parents=True, exist_ok=True)
+    (trimmed / "stage1_cam_abc_trimmed.mp4").write_bytes(b"x" * 64)
+    (trimmed / "stage1_cam_abc_web.mp4").write_bytes(b"w" * 32)
+
+    web_only = client.get(f"/api/matches/{match_id}/match/sync/status").json()["pending_media"]
+    update_auto_prefs(root, lambda p: setattr(p, "full_media", True))
+    full = client.get(f"/api/matches/{match_id}/match/sync/status").json()["pending_media"]
+    assert full == web_only + 1
