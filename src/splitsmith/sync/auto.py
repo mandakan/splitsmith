@@ -132,11 +132,19 @@ class AutoSyncCore:
             st.push_due_at = None
 
     def pick(
-        self, now: float, *, enabled: Collection[str], busy: Collection[str], sync_active: bool
+        self,
+        now: float,
+        *,
+        enabled: Collection[str],
+        busy: Collection[str],
+        sync_active: bool,
+        render_active: bool = False,
     ) -> str | None:
         """The match to sync now, or None. Pulls first, then quiet pushes.
-        Nothing while the last poll failed: a sync would only fail too."""
-        if self._auth_blocked or sync_active or self._poll_failures:
+        Nothing while the last poll failed: a sync would only fail too.
+        Nothing while a render runs on any match: a sync opens with the
+        web-clip backfill, an encode per trim on the render's CPU."""
+        if self._auth_blocked or sync_active or render_active or self._poll_failures:
             return None
         ready: list[tuple[int, str]] = []
         for match_id in sorted(enabled):

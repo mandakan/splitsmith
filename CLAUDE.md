@@ -444,7 +444,9 @@ the pullable kinds per match, compared with
 an HTTP middleware on successful writes under ``/api/matches/{id}/`` and
 a job terminal listener. The pure core (``sync/auto.py``) decides when:
 pulls immediately, pushes after 45 s of quiet, never while the match has
-a job running, one sync at a time, backoff to 15 min, a 401 pauses until
+a job running, never while a render (``RENDER_KINDS``) runs on *any*
+match (a sync opens with the web-clip backfill, one encode per trim on
+the render's CPU), one sync at a time, backoff to 15 min, a 401 pauses until
 the token changes. Automatic runs are the ``auto_sync`` job kind (the
 ``sync_match`` body), hidden from the jobs strip unless they fail.
 
