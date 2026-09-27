@@ -465,3 +465,32 @@ def test_the_fallback_skips_a_match_hosted_does_not_have(tmp_path: Path) -> None
     svc._started = True
     asyncio.run(svc.tick())
     assert submitted == [] and svc.status_for(root)["paused_reason"] is None
+
+
+def test_a_hosted_without_the_digest_is_compared_on_the_pair(tmp_path: Path) -> None:
+    """A hosted older than #1072 sends (count, sum) only; the desktop must
+    not read its own extra digest as a difference."""
+    submitted: list[str] = []
+    svc, _ = _service(tmp_path, lambda prefs: {"m1": (2, 3)}, submitted)
+    svc.core.on_sync_done("m1", 0.0, ok=True)
+    svc._started = True
+    asyncio.run(svc.tick())
+    assert submitted == []
+
+
+def test_a_digest_change_alone_triggers_a_pull(tmp_path: Path) -> None:
+    from splitsmith.sync.state import versions_digest
+
+    submitted: list[str] = []
+    same = (2, 3, versions_digest({"match": 1, "project/me": 2}))
+    swapped = (2, 3, versions_digest({"match": 1, "project/you": 2}))
+    server = {"m1": same}
+    svc, _ = _service(tmp_path, lambda prefs: dict(server), submitted)
+    svc.core.on_sync_done("m1", 0.0, ok=True)
+    svc._started = True
+    asyncio.run(svc.tick())
+    assert submitted == []
+    server["m1"] = swapped
+    svc.core.next_poll_at = 0.0
+    asyncio.run(svc.tick())
+    assert submitted == ["m1"]

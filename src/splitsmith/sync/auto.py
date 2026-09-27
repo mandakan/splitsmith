@@ -11,7 +11,9 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 
-Fingerprint = tuple[int, int]
+#: ``(doc_count, version_sum)``, plus the identity digest when hosted
+#: sends one (#1072). Compared for equality only.
+Fingerprint = tuple[int, int] | tuple[int, int, str]
 
 
 @dataclass

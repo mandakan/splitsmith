@@ -28,7 +28,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -253,30 +253,35 @@ class ProjectStateStore:
             ).all()
         return [DocMeta(*row) for row in rows]
 
-    async def list_fingerprints(self, kinds: Collection[str]) -> list[tuple[str, int, int]]:
-        """``(match_id, doc_count, version_sum)`` per match, over ``kinds``.
+    async def list_doc_versions(
+        self, kinds: Collection[str]
+    ) -> list[tuple[str, str, str | None, int | None, int]]:
+        """``(match_id, doc_kind, slug, stage_number, version)`` of every doc
+        of ``kinds`` across the user's matches, no payloads.
 
-        The desktop auto-sync change signal: ``version`` only increases, so
-        any write moves the sum and any insert moves the count. One grouped
-        query for all of the user's matches, no doc payloads.
+        The desktop auto-sync change signal (``GET /api/sync/fingerprints``)
+        is computed from these: ``version`` only increases, so any write
+        moves the sum and any insert moves the count, and the identities
+        catch a delete plus an insert at equal versions (#1072).
         """
         async with self._session_factory() as session:
             rows = (
                 await session.execute(
                     select(
                         StateDocRow.match_id,
-                        func.count(StateDocRow.id),
-                        func.coalesce(func.sum(StateDocRow.version), 0),
+                        StateDocRow.doc_kind,
+                        StateDocRow.slug,
+                        StateDocRow.stage_number,
+                        StateDocRow.version,
                     )
                     .where(
                         StateDocRow.user_id == self._user_id,
                         StateDocRow.doc_kind.in_(list(kinds)),
                     )
-                    .group_by(StateDocRow.match_id)
                     .order_by(StateDocRow.match_id)
                 )
             ).all()
-        return [(str(m), int(c), int(v)) for m, c, v in rows]
+        return [(str(m), str(k), s, n, int(v)) for m, k, s, n, v in rows]
 
     async def delete_shooter(self, match_id: str, slug: str) -> int:
         """Delete one shooter's docs within a match; return the row count.
