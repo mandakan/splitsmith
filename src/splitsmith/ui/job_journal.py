@@ -142,7 +142,7 @@ CREATE TABLE IF NOT EXISTS active_jobs (
 """
 
 
-def _try_lock(fh: Any) -> bool:
+def try_lock(fh: Any) -> bool:
     """Take an exclusive, non-blocking advisory lock on ``fh``.
 
     The kernel releases these on any process death - SIGKILL, power
@@ -201,7 +201,7 @@ class JobJournal:
         self._locks_dir.mkdir(parents=True, exist_ok=True)
         self._owner_token = uuid.uuid4().hex
         self._owner_fh = (self._locks_dir / f"{self._owner_token}.lock").open("w")
-        if not _try_lock(self._owner_fh):  # pragma: no cover - unique name; environmental only
+        if not try_lock(self._owner_fh):  # pragma: no cover - unique name; environmental only
             logger.warning("could not lock job-journal owner file; sibling servers may resume our jobs")
 
     def _open(self) -> sqlite3.Connection:
@@ -316,7 +316,7 @@ class JobJournal:
         except OSError:
             return False
         with fh:
-            if not _try_lock(fh):
+            if not try_lock(fh):
                 return True
             # Acquired: the owner is dead. Unlink while still holding the
             # lock so a concurrent prober sees either the locked file

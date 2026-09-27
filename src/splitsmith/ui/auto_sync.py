@@ -28,6 +28,7 @@ from ..sync.plan import doc_identity_key
 from ..sync.pull import PULLABLE_DOC_KINDS
 from ..sync.push import removable_full_trims
 from ..sync.state import load_sync_state, local_fingerprint, versions_digest
+from .job_journal import try_lock
 from .jobs import Job, JobStatus
 
 logger = logging.getLogger(__name__)
@@ -51,7 +52,48 @@ _READ_ONLY_WRITES = (
 )
 _READ_ONLY_SUFFIXES = ("/export-preview", "/videos/suggest-coverage", "/videos/relink/scan")
 _AUTH_REASON = "sign in again in hosted sync settings"
+_OTHER_OWNER_REASON = "another splitsmith window on this computer is syncing"
+#: Held by the one process on this machine that runs auto-sync (#1076).
+OWNER_LOCK_FILE = "auto_sync.lock"
+#: Held under a match root for the length of one sync job, manual or auto.
+MATCH_SYNC_LOCK_FILE = ".sync.lock"
 _OFFLINE_REASON = "offline: could not reach the hosted server"
+
+
+class FileLock:
+    """An exclusive, non-blocking advisory lock on ``path`` (#1076).
+
+    The desktop app and a ``splitsmith ui`` share ``~/.splitsmith`` on
+    purpose, so both would run auto-sync over the same matches; the
+    one-sync-at-a-time rule is per process. ``flock`` is released by the
+    kernel on any process death, so a crashed holder never strands it.
+    A lock file that cannot be opened (read-only home) counts as held:
+    a guard must not be the reason sync stops working.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._fh: Any = None
+
+    def acquire(self) -> bool:
+        if self._fh is not None:
+            return True
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            fh = self._path.open("a+b")  # noqa: SIM115 - held until release()
+        except OSError:
+            logger.warning("could not open sync lock %s; running unguarded", self._path)
+            return True
+        if not try_lock(fh):
+            fh.close()
+            return False
+        self._fh = fh
+        return True
+
+    def release(self) -> None:
+        if self._fh is not None:
+            self._fh.close()  # closing the descriptor drops the flock
+            self._fh = None
 
 
 def write_marks_dirty(rest: str) -> bool:
@@ -112,8 +154,12 @@ class AutoSyncService:
         fetch_fingerprints: Callable[[user_config.GlobalPrefs], dict[str, Fingerprint]] | None = None,
         fetch_manifest: Callable[[user_config.GlobalPrefs, str], list[dict] | None] | None = None,
         clock: Callable[[], float] = time.time,
+        owner_lock: FileLock | None = None,
     ) -> None:
         self.core = AutoSyncCore()
+        #: ``None`` = no cross-process guard (tests); the server passes one.
+        self._owner_lock = owner_lock
+        self._owner_blocked = False
         self._jobs = jobs
         self._matches = matches
         self._submit = submit_auto_sync
@@ -167,6 +213,17 @@ class AutoSyncService:
         prefs = self._load_prefs()
         if not prefs.hosted_base_url or not prefs.hosted_token:
             return
+        if self._owner_lock is not None:
+            owner = self._owner_lock.acquire()
+            with self._lock:
+                if not owner:
+                    self._owner_blocked = True
+                    self.core.paused_reason = _OTHER_OWNER_REASON
+                    return
+                if self._owner_blocked:  # the other process quit: take over
+                    self._owner_blocked = False
+                    self.core.paused_reason = None
+                    self.core.next_poll_at = 0.0
         now = self._clock()
         if self.core.auth_blocked() and prefs.hosted_token != self._auth_failed_token:
             with self._lock:
@@ -234,6 +291,11 @@ class AutoSyncService:
             local[mid] = fp if len(server.get(mid, fp)) == 3 else fp[:2]
         with self._lock:
             self.core.on_poll_ok(now, server, local)
+
+    def close(self) -> None:
+        """Hand auto-sync to another process on this machine, if any."""
+        if self._owner_lock is not None:
+            self._owner_lock.release()
 
     async def run(self, interval_s: float = 5.0) -> None:
         while True:
