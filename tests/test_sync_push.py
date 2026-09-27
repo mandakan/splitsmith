@@ -847,7 +847,9 @@ def test_full_trim_removal_failure_is_retried_and_full_media_reuploads(tmp_path:
 def test_a_full_trim_reuploaded_after_its_rendition_went_away_is_not_deleted(tmp_path: Path) -> None:
     """Re-trim + failed transcode: the local rendition is gone, so the plan
     uploads the full trim again; the gc must not delete it in the same push
-    just because the old rendition's key is still recorded."""
+    just because the old rendition's key is still recorded. The old
+    rendition goes instead (#1077): it covers the old window, and hosted
+    would prefer it over the new trim."""
     import os
 
     root, _ = _build_match(tmp_path)
@@ -865,4 +867,29 @@ def test_a_full_trim_reuploaded_after_its_rendition_went_away_is_not_deleted(tmp
 
     created = [c for c in fake.calls if c.startswith("media_create:") and c.endswith("_trimmed.mp4")]
     assert created
-    assert not any(c.startswith("media_delete:") for c in fake.calls)
+    deleted = [c.split(":", 1)[1] for c in fake.calls if c.startswith("media_delete:")]
+    assert deleted and all(k.endswith("_web.mp4") for k in deleted)
+    items = load_sync_state(root).items
+    assert not any(k.endswith("_web.mp4") for k in items)
+    assert all(k.replace("_web.mp4", "_trimmed.mp4") in items for k in deleted)
+
+
+def test_a_missing_rendition_stays_on_hosted_until_its_new_trim_is_there(tmp_path: Path) -> None:
+    """The rendition goes only once hosted has the current trim to play:
+    while the new trim's upload keeps failing, the old rendition stays."""
+    import os
+
+    root, _ = _build_match(tmp_path)
+    _add_web(root)
+    fake = _FakeHosted()
+    run_push(root, client=fake.clients(), full_media=False)
+    for web in (root / "shooters").glob("*/trimmed/*_web.mp4"):
+        web.unlink()
+    for trim in (root / "shooters").glob("*/trimmed/*_trimmed.mp4"):
+        trim.write_bytes(b"y" * 2048)
+        os.utime(trim, None)
+
+    from splitsmith.sync.push import stale_web_renditions
+
+    # Before the push: the recorded trim (if any) is not the local one.
+    assert stale_web_renditions(root, load_sync_state(root)) == []
