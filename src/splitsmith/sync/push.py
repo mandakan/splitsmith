@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 
 from .. import match_model
 from ..observability import PhaseTimer
+from .auto_state import load_auto_prefs
 from .base import save_base_doc
 from .beep_snippets import generate_beep_snippets
 from .client import HostedSyncClient, SyncClientError
@@ -138,6 +139,7 @@ def run_push(
     on_progress: Callable[[float, str], None] = lambda p, m: None,
     timer: PhaseTimer | None = None,
     sync_state: SyncState | None = None,
+    full_media: bool | None = None,
 ) -> PushReport:
     """Push ``match_root`` to the hosted mirror via ``client``.
 
@@ -168,7 +170,9 @@ def run_push(
         snippet_report = generate_beep_snippets(match_root)
         for err in snippet_report.errors:
             logger.warning("beep snippet generation: %s", err)
-        plan = build_push_plan(match_root, sync_state=sync_state)
+        if full_media is None:
+            full_media = load_auto_prefs(match_root).full_media
+        plan = build_push_plan(match_root, sync_state=sync_state, full_media=full_media)
         if plan.errors:
             raise SyncClientError("\n".join(plan.errors))
 

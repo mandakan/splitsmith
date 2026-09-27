@@ -26,6 +26,7 @@ from ..match_model import load_match_or_legacy
 from ..match_project import PROJECT_FILE, MatchProject, atomic_write_json
 from ..observability import PhaseTimer
 from ..shot_id import ensure_shot_ids
+from .auto_state import load_auto_prefs
 from .base import load_base_doc, save_base_doc
 from .client import HostedSyncClient, SyncClientError, SyncVersionConflict
 from .merge import MergeResult, merge_audit_doc, merge_project_doc
@@ -195,6 +196,7 @@ def run_sync(
     timer: PhaseTimer | None = None,
     ffmpeg_binary: str = "ffmpeg",
     audit_lock: AbstractContextManager | None = None,
+    full_media: bool | None = None,
 ) -> SyncReport:
     """Pull hosted changes, merge, then push - the bidirectional cycle.
 
@@ -206,7 +208,9 @@ def run_sync(
 
     with timed_phase(timings, timer, "preflight"):
         sync_state = load_sync_state(match_root)
-        preflight = build_push_plan(match_root, sync_state=sync_state)
+        if full_media is None:
+            full_media = load_auto_prefs(match_root).full_media
+        preflight = build_push_plan(match_root, sync_state=sync_state, full_media=full_media)
         if preflight.errors:
             raise SyncClientError("\n".join(preflight.errors))
         match_id, match_name = preflight.match_id, preflight.match_name
@@ -258,6 +262,7 @@ def run_sync(
                 on_progress=on_progress,
                 timer=timer,
                 sync_state=sync_state,
+                full_media=full_media,
             )
             break
         except SyncVersionConflict as exc:

@@ -43,6 +43,13 @@ _TRIMMED_GLOB = "stage*_cam_*_trimmed.mp4"
 #: The trim's streaming rendition (#1031), ``..._web.mp4`` beside it. A
 #: ``..._web.partial.mp4`` from a crashed transcode does not match.
 _WEB_GLOB = "stage*_cam_*_web.mp4"
+TRIMMED_SUFFIX = "_trimmed.mp4"
+WEB_SUFFIX = "_web.mp4"
+
+
+def web_key_for(trim_key: str) -> str:
+    """The rendition's remote key for a full trim's remote key."""
+    return trim_key[: -len(TRIMMED_SUFFIX)] + WEB_SUFFIX
 
 
 class DocItem(BaseModel):
@@ -135,8 +142,15 @@ def _plan_doc(
     return DocItem(kind=kind, slug=slug, stage_number=stage_number, body=body)
 
 
-def build_push_plan(match_root: Path, *, sync_state: SyncState) -> PushPlan:
-    """Plan what ``match_root`` should push, skipping unchanged media per ``sync_state``."""
+def build_push_plan(match_root: Path, *, sync_state: SyncState, full_media: bool = True) -> PushPlan:
+    """Plan what ``match_root`` should push, skipping unchanged media per ``sync_state``.
+
+    ``full_media=False`` (a web-only mirror, spec 2026-09-27 v1.1) leaves
+    out each full-resolution ``_trimmed.mp4`` whose ``_web.mp4`` rendition
+    exists: hosted plays the rendition and anchors from the params
+    sidecar. The default keeps the full trims; callers acting for a match
+    pass its ``auto_sync.json`` setting.
+    """
     match, shooter_roots = load_match_or_legacy(match_root)
     if not match.match_id:
         return PushPlan(
@@ -204,12 +218,16 @@ def build_push_plan(match_root: Path, *, sync_state: SyncState) -> PushPlan:
         trimmed_dir = shooter_root / "trimmed"
         if trimmed_dir.is_dir():
             for clip_path in sorted(trimmed_dir.glob(_TRIMMED_GLOB)):
-                candidates = [clip_path]
+                web = clip_path.with_name(clip_path.name.replace(TRIMMED_SUFFIX, WEB_SUFFIX))
+                has_web = web.exists() and web.stat().st_size > 0
+                # Web-only (v1.1): the rendition + params stand in for the
+                # trim on hosted. A clip whose transcode failed keeps its
+                # full trim so hosted never has neither.
+                candidates = [clip_path] if (full_media or not has_web) else []
                 sidecar = clip_path.with_suffix(".params.json")
                 if sidecar.exists():
                     candidates.append(sidecar)
-                web = clip_path.with_name(clip_path.name.replace("_trimmed.mp4", "_web.mp4"))
-                if web.exists() and web.stat().st_size > 0:
+                if has_web:
                     candidates.append(web)
                 for candidate in candidates:
                     remote_key = _remote_key(match.match_id, slug, candidate.name)

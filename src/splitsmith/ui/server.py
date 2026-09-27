@@ -7694,7 +7694,9 @@ def create_app(
         configured = bool(prefs.hosted_base_url and prefs.hosted_token)
         match_root = state.match_root
         sync_state = load_sync_state(match_root)
-        plan = build_push_plan(match_root, sync_state=sync_state)
+        plan = build_push_plan(
+            match_root, sync_state=sync_state, full_media=load_auto_prefs(match_root).full_media
+        )
         stale = sync_state.last_synced_at is None or bool(plan.media) or bool(plan.docs) or bool(plan.errors)
 
         remote_changes: int | None = None

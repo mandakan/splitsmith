@@ -416,3 +416,29 @@ def test_plan_ignores_a_web_partial(tmp_path: Path) -> None:
     plan = build_push_plan(root, sync_state=SyncState())
 
     assert len(plan.media) == 2
+
+
+# ---------------------------------------------------------------------------
+# Web-only mirrors (v1.1): full trims are skipped unless full media is on
+# ---------------------------------------------------------------------------
+
+
+def test_web_only_plan_skips_the_full_trim_but_keeps_params_and_web(tmp_path: Path) -> None:
+    root, slug = _build_basic_match(tmp_path)
+    (root / "shooters" / slug / "trimmed" / WEB_NAME).write_bytes(b"w" * 64)
+
+    plan = build_push_plan(root, sync_state=SyncState(), full_media=False)
+
+    names = sorted(m.remote_key.rsplit("/", 1)[1] for m in plan.media if "/trimmed/" in m.remote_key)
+    assert not any(n.endswith("_trimmed.mp4") for n in names)
+    assert any(n.endswith("_web.mp4") for n in names)
+    assert any(n.endswith(".params.json") for n in names)
+
+
+def test_web_only_plan_keeps_the_full_trim_when_there_is_no_rendition(tmp_path: Path) -> None:
+    """A failed transcode must never leave hosted with nothing to play."""
+    root, _ = _build_basic_match(tmp_path)
+
+    plan = build_push_plan(root, sync_state=SyncState(), full_media=False)
+
+    assert any(m.remote_key.endswith("_trimmed.mp4") for m in plan.media)
