@@ -1580,6 +1580,12 @@ def _may_mint_shot_ids() -> bool:
     return current_match_origin.get() != "desktop"
 
 
+def _is_mirror() -> bool:
+    """Whether the current request is on a desktop-origin mirror. Reads the
+    origin the alias middleware pinned, like ``_may_mint_shot_ids``."""
+    return current_match_origin.get() == "desktop"
+
+
 def _serialized_capabilities() -> list[str]:
     """Sorted capability names for the payload ``capabilities`` field.
 
@@ -11753,6 +11759,7 @@ def create_app(
                 primary.beep_time,
                 project=project,
                 ffmpeg_binary=process_runtime().ffmpeg_binary,
+                web_fallback=_is_mirror(),
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -12288,6 +12295,16 @@ def create_app(
             if video.beep_time is None:
                 return (None, "trim", trimmed)
             return (min(video.beep_time, project.trim_pre_buffer_seconds), "trim", trimmed)
+        if _is_mirror() and audio_helpers.try_pull_web_trim(project, trimmed) is not None:
+            # Web-only mirror (spec 2026-09-27 v1.1): the rendition + the
+            # pushed params stand in for the trim; _video_clip_anchor then
+            # promotes the kind to "web".
+            if video.beep_time is None:
+                return (None, "trim", trimmed)
+            pre_buffer = audio_helpers.trim_pre_buffer_seconds_for(
+                trimmed, default=project.trim_pre_buffer_seconds
+            )
+            return (min(video.beep_time, pre_buffer), "trim", trimmed)
         return (video.beep_time, "source", None)
 
     def _video_beep_in_clip(
@@ -12905,6 +12922,13 @@ def create_app(
                 trim_key = audio_helpers._storage_trim_key(project, local_mp4)
                 if trim_key is not None and storage.exists(trim_key):  # type: ignore[union-attr]
                     return serve_media(storage, trim_key, local_mp4, content_type="video/mp4")
+                if _is_mirror():
+                    # Web-only mirror (spec 2026-09-27 v1.1): the rendition
+                    # is the trim. Native matches keep "trim never
+                    # substitutes": their audit scrubbing needs the real GOP.
+                    web_resp = _hosted_web_redirect(storage, project, root, stage, video)  # type: ignore[arg-type]
+                    if web_resp is not None:
+                        return web_resp
                 if kind == "trim":
                     raise HTTPException(
                         status_code=404,

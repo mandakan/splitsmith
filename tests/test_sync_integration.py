@@ -395,3 +395,146 @@ def test_phone_beep_confirm_reaches_the_desktop_reconciler(
     assert [(s.kind, s.slug, s.stage_number, s.video_id) for s in steps] == [
         ("trim", SLUG, 1, video.video_id)
     ]
+
+
+# --- web-only mirrors (v1.1): hosted plays and waveforms the rendition --------
+
+
+def _web_only_mirror(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict], tmp_path: Path, *, pre_buffer: float
+) -> tuple[TestClient, str, str, str, S3Storage]:
+    """Push a match whose only media on hosted is the rendition + params.
+    Returns ``(client, match_id, video_path, web_name, storage)``."""
+    from tests.synthetic_media import build_synthetic_video, ffmpeg_available
+
+    if not ffmpeg_available():
+        pytest.skip("ffmpeg not on PATH")
+    client, sender, captured = hosted_app_with_storage
+    match_root, video_path, trimmed_name = _build_local_match(tmp_path)
+    shooter_root = match_model.Match.shooter_root(match_root, SLUG)
+    project = MatchProject.load(shooter_root)
+    project.stages[0].videos[0].beep_time = 12.0
+    project.save(shooter_root)
+    trimmed = shooter_root / "trimmed" / trimmed_name
+    web = trimmed.with_name(trimmed_name.replace("_trimmed.mp4", "_web.mp4"))
+    build_synthetic_video(web)
+    trimmed.with_name(f"{trimmed.stem}.params.json").write_text(
+        json.dumps(
+            {
+                "beep_time": 12.0,
+                "stage_time_seconds": 12.0,
+                "pre_buffer_seconds": pre_buffer,
+                "post_buffer_seconds": 1.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    login(client, sender, EMAIL)
+    client.get("/api/me/recent-projects")
+    storage: S3Storage = captured["storage"]
+    raw_token = client.post("/api/me/desktop-tokens", json={"name": "web box"}).json()["token"]
+    sync_http = TestClient(
+        client.app,
+        base_url="http://testserver",
+        headers={"Authorization": f"Bearer {raw_token}"},
+        follow_redirects=False,
+    )
+    sync_client = HostedSyncClient(
+        http=sync_http, media_http=httpx.Client(transport=httpx.MockTransport(_media_handler(storage)))
+    )
+    run_push(match_root, client=sync_client, full_media=False)
+    match_id = match_model.Match.load(match_root).match_id
+    keys = [o.path for o in storage.list(f"matches/{match_id}/")]
+    assert any(k.endswith("_web.mp4") for k in keys)
+    assert not any(k.endswith("_trimmed.mp4") for k in keys)
+    return client, match_id, video_path, web.name, storage
+
+
+def test_web_only_mirror_streams_the_rendition_for_trim_and_auto(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict], tmp_path: Path
+) -> None:
+    client, match_id, video_path, web_name, _ = _web_only_mirror(
+        hosted_app_with_storage, tmp_path, pre_buffer=2.0
+    )
+    for kind in ("trim", "auto", "web"):
+        resp = client.get(
+            f"/api/matches/{match_id}/shooters/{SLUG}/videos/stream",
+            params={"path": video_path, "kind": kind},
+        )
+        assert resp.status_code == 307, (kind, resp.text)
+        assert web_name in resp.headers["location"], kind
+
+
+def test_web_only_mirror_anchor_comes_from_the_pushed_params(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict], tmp_path: Path
+) -> None:
+    """pre_buffer 2.0 differs from the project default, so a default-based
+    anchor would land every marker off by the difference."""
+    client, match_id, _, _, _ = _web_only_mirror(hosted_app_with_storage, tmp_path, pre_buffer=2.0)
+    coach = client.get(f"/api/matches/{match_id}/shooters/{SLUG}/stages/1/coach")
+    assert coach.status_code == 200, coach.text
+    (entry,) = [v for v in coach.json()["videos"] if v.get("role") == "primary"]
+    assert entry["kind"] == "web"
+    assert entry["beep_in_clip"] == 2.0
+
+
+def test_web_only_mirror_serves_stage_peaks(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict], tmp_path: Path
+) -> None:
+    client, match_id, _, _, _ = _web_only_mirror(hosted_app_with_storage, tmp_path, pre_buffer=2.0)
+    peaks = client.get(f"/api/matches/{match_id}/shooters/{SLUG}/stages/1/peaks")
+    assert peaks.status_code == 200, peaks.text
+    body = peaks.json()
+    assert body is not None and body["trimmed"] is True
+    assert body["beep_time"] == 2.0
+
+
+def test_hosted_native_match_without_a_trim_still_404s_kind_trim(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+) -> None:
+    """The rendition fallback is for mirrors only. A native match's audit
+    scrubbing needs the real GOP, so kind=trim never substitutes there,
+    even with a rendition sitting in storage."""
+    import asyncio
+
+    from sqlalchemy import select as _select
+
+    from splitsmith.db import ProjectStateStore, create_engine, sessionmaker
+    from splitsmith.db.models import User
+
+    from .hosted_helpers import seed_match
+    from .test_sync_api import _db_url_for
+
+    client, sender, captured = hosted_app_with_storage
+    login(client, sender, EMAIL)
+    client.get("/api/me/recent-projects")
+    storage: S3Storage = captured["storage"]
+    match_id = "01JNATIVEWEBONLYGUARD0001"
+    db_url = _db_url_for(client)
+    seed_match(db_url, EMAIL, match_id)
+    video = StageVideo(path=Path("raw/stage1_cam1.mp4"), role="primary", stage_number=1, beep_time=12.0)
+    engine = create_engine(db_url)
+    sf = sessionmaker(engine)
+
+    async def _seed() -> None:
+        async with sf() as s:
+            user_id = (await s.execute(_select(User).where(User.email == EMAIL))).scalar_one().id
+        store = ProjectStateStore(sf, user_id=user_id)
+        match = match_model.Match(match_id=match_id, name="Native", shooters=[SLUG], stages=[])
+        await store.save_match(match_id, match.model_dump(mode="json"), expected_version=0)
+        stage = StageEntry(stage_number=1, stage_name="Stage 1", time_seconds=12.0, videos=[video])
+        project = MatchProject(name="Native", competitor_name="Alice", stages=[stage])
+        await store.save_project(match_id, SLUG, project.model_dump(mode="json"), expected_version=0)
+
+    asyncio.run(_seed())
+    project = MatchProject(
+        name="Native", stages=[StageEntry(stage_number=1, stage_name="S", time_seconds=12.0, videos=[video])]
+    )
+    video_id = project.stages[0].videos[0].video_id
+    storage.write_bytes(f"matches/{match_id}/shooters/{SLUG}/trimmed/stage1_cam_{video_id}_web.mp4", b"w")
+
+    resp = client.get(
+        f"/api/matches/{match_id}/shooters/{SLUG}/videos/stream",
+        params={"path": "raw/stage1_cam1.mp4", "kind": "trim"},
+    )
+    assert resp.status_code == 404, resp.text
