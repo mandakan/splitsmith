@@ -203,6 +203,15 @@ class AutoSyncService:
 
     # -- status ------------------------------------------------------------
 
+    def _match_id_for(self, match_root: Path) -> str | None:
+        for match_id in self._matches.known_ids():
+            try:
+                if self._matches.resolve(match_id) == match_root:
+                    return match_id
+            except KeyError:
+                continue
+        return None
+
     def status_for(self, match_root: Path) -> dict[str, Any]:
         prefs = self._load_prefs()
         auto = load_auto_prefs(match_root)
@@ -215,6 +224,9 @@ class AutoSyncService:
             and sync_state.last_synced_at > last.at
         ):
             last = None  # a later sync (manual) succeeded; the failure is stale
+        match_id = self._match_id_for(match_root)
+        with self._lock:
+            waiting = match_id is not None and self.core.waiting_for_change(match_id)
         return {
             "enabled": auto_sync_effective(auto, sync_state, global_enabled=prefs.auto_sync_enabled),
             "setting": auto.enabled,
@@ -225,4 +237,7 @@ class AutoSyncService:
             "full_trims_on_hosted": len(removable_full_trims(match_root, sync_state)),
             "paused_reason": self.core.paused_reason,
             "last_auto": last.model_dump(mode="json") if last else None,
+            # Parked after a failure (#1070): no retry until a local write,
+            # a hosted change, hosted coming back, or a manual sync.
+            "waiting_for_change": waiting,
         }

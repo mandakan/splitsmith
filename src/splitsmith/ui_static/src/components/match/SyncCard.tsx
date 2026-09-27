@@ -397,6 +397,7 @@ function SyncStatusLine({
       <p className={cn(lineClass, "text-led-text")} aria-live="polite">
         <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
         Last auto-sync failed: {auto.last_auto.message}
+        {auto.waiting_for_change ? ". Retries after the next change, or press Sync." : null}
       </p>
     );
   }

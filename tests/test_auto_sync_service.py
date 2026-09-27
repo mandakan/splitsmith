@@ -347,3 +347,27 @@ def test_a_render_on_another_match_holds_the_sync(tmp_path: Path) -> None:
     svc._jobs = running("trim")
     asyncio.run(svc.tick())
     assert submitted == ["m1"]
+
+
+def test_status_says_a_failed_match_waits_for_a_change(tmp_path: Path) -> None:
+    """#1070: one visible failure, then quiet; the card says why."""
+    svc, root = _service(tmp_path, lambda prefs: {"m1": (2, 3)}, [])
+    assert svc.status_for(root)["waiting_for_change"] is False
+    svc.core.on_sync_done("m1", 1000.0, ok=False)
+    assert svc.status_for(root)["waiting_for_change"] is True
+    svc.mark_dirty("m1")
+    assert svc.status_for(root)["waiting_for_change"] is False
+
+
+def test_a_failed_auto_sync_is_not_resubmitted_on_later_ticks(tmp_path: Path) -> None:
+    submitted: list[str] = []
+    svc, _ = _service(tmp_path, lambda prefs: {"m1": (2, 3)}, submitted)
+    asyncio.run(svc.tick())  # the startup pull
+    assert submitted == ["m1"]
+    svc.core.on_sync_done("m1", 1000.0, ok=False)
+    submitted.clear()
+    svc._clock = lambda: 1000.0 + 24 * 3600  # a day of ticks and polls later
+    for _ in range(3):
+        svc.core.next_poll_at = 0.0
+        asyncio.run(svc.tick())
+    assert submitted == []

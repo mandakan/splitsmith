@@ -128,6 +128,22 @@ describe("SyncCard", () => {
     ).toBeInTheDocument();
   });
 
+  it("says a failed auto-sync waits for a change (#1070)", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue(makeStatus());
+    vi.mocked(api.getAutoSync).mockResolvedValue(
+      makeAuto({
+        last_auto: { at: "2026-09-27T00:00:00Z", ok: false, message: "boom", conflicts: 0, notes: 0 },
+        waiting_for_change: true,
+      }),
+    );
+
+    render(<SyncCard jobs={[]} matchId="m1" />);
+
+    expect(
+      await screen.findByText(/Last auto-sync failed: boom\. Retries after the next change, or press Sync\./),
+    ).toBeInTheDocument();
+  });
+
   it("shows the changed-file count when stale", async () => {
     vi.mocked(api.getSyncStatus).mockResolvedValue(
       makeStatus({ stale: true, pending_media: 3, errors: [] }),
