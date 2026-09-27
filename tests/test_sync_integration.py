@@ -582,3 +582,26 @@ def test_web_only_mirror_follows_a_re_push_with_new_params(
 
     assert client.get(f"{base}/coach").json()["videos"][0]["beep_in_clip"] == 3.0
     assert client.get(f"{base}/peaks").json()["beep_time"] == 3.0
+
+
+def test_web_only_mirror_on_storage_without_presigned_get_serves_the_rendition(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict], tmp_path: Path, monkeypatch
+) -> None:
+    """#1078: on a storage that cannot presign (FilesystemStorage in dev and
+    tests) the anchor says "trim" from the pushed params, and the stream
+    took the local-bytes branch, which 404ed kind=trim with no full trim."""
+    client, match_id, video_path, _, storage = _web_only_mirror(
+        hosted_app_with_storage, tmp_path, pre_buffer=2.0
+    )
+    monkeypatch.setattr(type(storage), "supports_presigned_get", property(lambda self: False))
+    coach = client.get(f"/api/matches/{match_id}/shooters/{SLUG}/stages/1/coach")
+    (entry,) = [v for v in coach.json()["videos"] if v.get("role") == "primary"]
+    assert (entry["kind"], entry["beep_in_clip"]) == ("trim", 2.0)
+    web_key = next(o.path for o in storage.list(f"matches/{match_id}/") if o.path.endswith("_web.mp4"))
+    for kind in ("trim", "auto", "web"):
+        resp = client.get(
+            f"/api/matches/{match_id}/shooters/{SLUG}/videos/stream",
+            params={"path": video_path, "kind": kind},
+        )
+        assert resp.status_code == 200, (kind, resp.text)
+        assert resp.content == storage.read_bytes(web_key), kind
