@@ -494,3 +494,80 @@ def test_a_digest_change_alone_triggers_a_pull(tmp_path: Path) -> None:
     svc.core.next_poll_at = 0.0
     asyncio.run(svc.tick())
     assert submitted == ["m1"]
+
+
+def test_file_lock_is_exclusive_until_released(tmp_path: Path) -> None:
+    from splitsmith.ui.auto_sync import FileLock
+
+    first, second = FileLock(tmp_path / "x.lock"), FileLock(tmp_path / "x.lock")
+    assert first.acquire() and first.acquire()  # re-entrant for its holder
+    assert not second.acquire()
+    first.release()
+    assert second.acquire()
+    second.release()
+
+
+def test_only_one_process_runs_auto_sync(tmp_path: Path) -> None:
+    """#1076: the desktop app and a `splitsmith ui` share ~/.splitsmith, so
+    both ran auto-sync over the same matches. The owner lock picks one; the
+    other waits with a reason and takes over when the owner quits."""
+    from splitsmith.ui.auto_sync import FileLock
+
+    lock_path = tmp_path / "home" / "auto_sync.lock"
+    app_submitted: list[str] = []
+    cli_submitted: list[str] = []
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    app, _ = _service(tmp_path / "a", lambda prefs: {"m1": (2, 3)}, app_submitted)
+    cli, cli_root = _service(tmp_path / "b", lambda prefs: {"m1": (2, 3)}, cli_submitted)
+    app._owner_lock = FileLock(lock_path)
+    cli._owner_lock = FileLock(lock_path)
+
+    asyncio.run(app.tick())
+    asyncio.run(cli.tick())
+    assert app_submitted == ["m1"] and cli_submitted == []
+    assert (
+        cli.status_for(cli_root)["paused_reason"] == "another splitsmith window on this computer is syncing"
+    )
+
+    app.close()
+    asyncio.run(cli.tick())
+    assert cli_submitted == ["m1"]
+    assert cli.status_for(cli_root)["paused_reason"] is None
+    cli.close()
+
+
+def test_a_match_already_syncing_in_another_process_is_not_synced_again(tmp_path: Path, monkeypatch) -> None:
+    import time
+
+    from splitsmith.ui import server as server_mod
+    from splitsmith.ui.auto_sync import MATCH_SYNC_LOCK_FILE, FileLock
+
+    from .test_audit_local_save import _match_context
+
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    state = client.app.state.splitsmith_state
+    prefs = GlobalPrefs(hosted_base_url="http://127.0.0.1:9", hosted_token="t")
+    monkeypatch.setattr(server_mod.user_config, "load_global_prefs", lambda: prefs)
+    ran: list[bool] = []
+    monkeypatch.setattr(server_mod, "run_bidirectional_sync", lambda *a, **kw: ran.append(True))
+    other = FileLock(project_root / MATCH_SYNC_LOCK_FILE)
+    assert other.acquire()  # the other process, mid-sync
+    try:
+        id_token = server_mod.current_match_id.set("m-busy")
+        try:
+            with _match_context(project_root):
+                job = asyncio.run(state.jobs.submit(kind="sync_match"))
+        finally:
+            server_mod.current_match_id.reset(id_token)
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            final = asyncio.run(state.jobs.get(job.id))
+            if final.status.value in ("failed", "succeeded"):
+                break
+            time.sleep(0.02)
+    finally:
+        other.release()
+    assert final.status.value == "failed"
+    assert "another splitsmith window" in (final.error or "")
+    assert ran == []

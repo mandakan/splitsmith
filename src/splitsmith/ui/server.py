@@ -232,7 +232,14 @@ from . import export_storage, stage_edit
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from . import shooter_move as shooter_move_module
-from .auto_sync import AutoSyncService, auto_sync_disabled_by_env, write_marks_dirty
+from .auto_sync import (
+    MATCH_SYNC_LOCK_FILE,
+    OWNER_LOCK_FILE,
+    AutoSyncService,
+    FileLock,
+    auto_sync_disabled_by_env,
+    write_marks_dirty,
+)
 from .capabilities import (
     capabilities_for_origin,
     required_capability,
@@ -4556,17 +4563,29 @@ def register_job_bodies(state: AppState) -> None:
         the phone gets trimmed and detected here. An automatic run also
         records its outcome in ``auto_sync.json`` for the SyncCard."""
         match_root = state.match_root
+        # One sync of a match at a time across processes (#1076): the
+        # desktop app and a CLI server share ~/.splitsmith, and the
+        # registry's one-sync rule only covers its own process.
+        match_lock = FileLock(match_root / MATCH_SYNC_LOCK_FILE)
         try:
-            report = _do_sync_match(handle, match_root)
-        except JobCancelled:
-            raise  # a quit or a cancel click, not a failure to report
-        except Exception as exc:
-            if auto:
-                summary = AutoRunSummary(at=datetime.now(UTC), ok=False, message=str(exc))
-                update_auto_prefs(match_root, lambda p: setattr(p, "last_auto", summary))
-            raise
-        message = format_sync_message(report)
-        steps = _submit_reconcile_steps(state, match_root)
+            try:
+                if not match_lock.acquire():
+                    raise RuntimeError(
+                        "another splitsmith window on this computer is syncing this match; "
+                        "sync again once it finishes"
+                    )
+                report = _do_sync_match(handle, match_root)
+            except JobCancelled:
+                raise  # a quit or a cancel click, not a failure to report
+            except Exception as exc:
+                if auto:
+                    summary = AutoRunSummary(at=datetime.now(UTC), ok=False, message=str(exc))
+                    update_auto_prefs(match_root, lambda p: setattr(p, "last_auto", summary))
+                raise
+            message = format_sync_message(report)
+            steps = _submit_reconcile_steps(state, match_root)
+        finally:
+            match_lock.release()
         if steps:
             message += f"; queued {len(steps)} pipeline step(s)"
         handle.set_result(report.model_dump())
@@ -7044,6 +7063,7 @@ def _local_boot_lifespan(state: Any) -> Any | None:
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
+            service.close()
 
     return _lifespan
 
@@ -7237,7 +7257,10 @@ def create_app(
                 current_match_id.reset(id_token)
 
         state.auto_sync = AutoSyncService(
-            jobs=state.jobs, matches=state.matches, submit_auto_sync=_submit_auto_sync
+            jobs=state.jobs,
+            matches=state.matches,
+            submit_auto_sync=_submit_auto_sync,
+            owner_lock=FileLock(user_config.user_config_dir() / OWNER_LOCK_FILE),
         )
         state.jobs.add_terminal_listener(state.auto_sync.on_job_terminal)
 
