@@ -72,6 +72,7 @@ Design notes:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import hashlib
 import json
@@ -223,6 +224,7 @@ from . import export_storage, stage_edit
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from . import shooter_move as shooter_move_module
+from .auto_sync import AutoSyncService, auto_sync_disabled_by_env
 from .capabilities import (
     capabilities_for_origin,
     required_capability,
@@ -1836,6 +1838,9 @@ class AppState:
     # listener can record a failure with the inputs it ran on (spec
     # 2026-09-27 s3). Local only; entries leave on the job's terminal event.
     reconcile_jobs: dict[str, tuple[Path, ReconcileStep]] = field(default_factory=dict)
+    # Desktop auto-sync service (spec 2026-09-27); None hosted and when
+    # SPLITSMITH_AUTO_SYNC=0.
+    auto_sync: AutoSyncService | None = None
     # Live SSE wake channels, one asyncio.Queue per connected self-hosted
     # worker. ``None`` in local mode and on the headless worker process
     # (which must never hold launcher capabilities); set by the non-worker
@@ -5438,6 +5443,12 @@ class HostedSyncSettingsRequest(BaseModel):
     token: str | None = None
 
 
+class AutoSyncSettingRequest(BaseModel):
+    """Body for PUT /api/match/sync/auto and /api/settings/auto-sync."""
+
+    enabled: bool | None = None
+
+
 class DeviceStartResponse(BaseModel):
     """Response for POST /api/settings/hosted-sync/device/start (#719).
 
@@ -6934,6 +6945,29 @@ def _hosted_boot_lifespan(state: Any) -> Any | None:
     return _lifespan
 
 
+_MATCH_WRITE_RE = re.compile(r"\A/api/matches/([^/]+)/(.*)\Z")
+
+
+def _local_boot_lifespan(state: Any) -> Any | None:
+    """Run desktop auto-sync (spec 2026-09-27) for the app's lifetime;
+    None when there is no service (hosted, or SPLITSMITH_AUTO_SYNC=0)."""
+    service = getattr(state, "auto_sync", None)
+    if service is None:
+        return None
+
+    @asynccontextmanager
+    async def _lifespan(_app: Any) -> AsyncIterator[None]:
+        task = asyncio.create_task(service.run())
+        try:
+            yield
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    return _lifespan
+
+
 def _resolve_compare_trim(
     legacy: MatchProject,
     shooter_root: Path,
@@ -7111,11 +7145,27 @@ def create_app(
             )
         )
 
+    if not _hosted_mode_active() and not auto_sync_disabled_by_env():
+
+        async def _submit_auto_sync(match_id: str, match_root: Path) -> None:
+            id_token = current_match_id.set(match_id)
+            root_token = current_match_root.set(match_root)
+            try:
+                await state.jobs.submit(kind="auto_sync")
+            finally:
+                current_match_root.reset(root_token)
+                current_match_id.reset(id_token)
+
+        state.auto_sync = AutoSyncService(
+            jobs=state.jobs, matches=state.matches, submit_auto_sync=_submit_auto_sync
+        )
+        state.jobs.add_terminal_listener(state.auto_sync.on_job_terminal)
+
     app = FastAPI(
         title="splitsmith UI",
         description="Production UI backend (issue #11/#12).",
         version="0.1.0",
-        lifespan=_hosted_boot_lifespan(state),
+        lifespan=_hosted_boot_lifespan(state) or _local_boot_lifespan(state),
     )
     # Stash on app.state so the uvicorn server wrapper in :func:`serve`
     # can read live job state when handling Ctrl-C: the signal handler
@@ -7637,6 +7687,31 @@ def create_app(
             remote_changes=remote_changes,
         )
 
+    @app.get("/api/match/sync/auto")
+    async def get_match_auto_sync() -> JSONResponse:
+        """Per-match auto-sync state for the SyncCard (spec 2026-09-27)."""
+        if _hosted_mode_active() or state.auto_sync is None:
+            raise HTTPException(status_code=404, detail="not found")
+        return JSONResponse(state.auto_sync.status_for(state.match_root))
+
+    @app.put("/api/match/sync/auto")
+    async def put_match_auto_sync(req: AutoSyncSettingRequest) -> JSONResponse:
+        """``enabled: null`` restores the default (on once synced)."""
+        if _hosted_mode_active() or state.auto_sync is None:
+            raise HTTPException(status_code=404, detail="not found")
+        update_auto_prefs(state.match_root, lambda p: setattr(p, "enabled", req.enabled))
+        return JSONResponse(state.auto_sync.status_for(state.match_root))
+
+    @app.put("/api/settings/auto-sync")
+    async def put_global_auto_sync(req: AutoSyncSettingRequest) -> JSONResponse:
+        """The machine-level switch in the hosted-sync settings dialog."""
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        prefs.auto_sync_enabled = req.enabled is not False
+        user_config.save_global_prefs(prefs)
+        return JSONResponse({"global_enabled": prefs.auto_sync_enabled})
+
     @app.exception_handler(ShutdownInProgressError)
     async def _shutdown_in_progress_handler(request: Request, exc: ShutdownInProgressError) -> JSONResponse:
         """Map ShutdownInProgressError to 503 across every submit() callsite."""
@@ -7830,6 +7905,24 @@ def create_app(
             current_match_origin.reset(origin_token)
             current_match_id.reset(id_token)
             current_match_root.reset(root_token)
+
+    # Desktop auto-sync dirty tracking (spec 2026-09-27 s2): a successful
+    # write under /api/matches/{id}/ means that match has something to push.
+    # Registered after ``_match_id_alias`` so it runs outside it and sees
+    # the prefixed path. Local only (the service is None hosted).
+    if state.auto_sync is not None:
+        auto_sync_service = state.auto_sync
+
+        @app.middleware("http")
+        async def _auto_sync_dirty(request, call_next):
+            # Read the path first: the alias middleware inside rewrites the
+            # shared scope, so after call_next it no longer has the prefix.
+            m = _MATCH_WRITE_RE.match(request.url.path)
+            response = await call_next(request)
+            if m and request.method in ("POST", "PUT", "PATCH", "DELETE") and response.status_code < 400:
+                if not m.group(2).startswith(("match/sync", "jobs")):
+                    auto_sync_service.mark_dirty(m.group(1))
+            return response
 
     # ----------------------------------------------------------------------
     # Share-link anonymous read middleware (issue #349)
