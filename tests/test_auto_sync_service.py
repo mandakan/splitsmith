@@ -419,3 +419,49 @@ def _job_stub(kind: str):
 
     now = datetime.now(UTC)
     return Job(id="j1", kind=kind, status=JobStatus.PENDING, created_at=now, updated_at=now)
+
+
+def _fingerprints_404(prefs):
+    request = httpx.Request("GET", "https://h/api/sync/fingerprints")
+    raise httpx.HTTPStatusError("404", request=request, response=httpx.Response(404, request=request))
+
+
+def _manifest(versions: dict[tuple[str, str | None, int | None], int]) -> list[dict]:
+    return [
+        {"doc_kind": k, "slug": s, "stage_number": n, "version": v, "updated_at": "2026-09-27T00:00:00+00:00"}
+        for (k, s, n), v in versions.items()
+    ]
+
+
+def test_an_older_hosted_without_fingerprints_falls_back_to_manifests(tmp_path: Path) -> None:
+    """#1071: a hosted without GET /api/sync/fingerprints 404ed every poll,
+    which paused auto-sync for good ("hosted returned 404")."""
+    submitted: list[str] = []
+    svc, root = _service(tmp_path, _fingerprints_404, submitted)
+    manifests = {
+        # Local is (2, 3): match v1 + project v2. export_runs is not
+        # pullable and an old server does not filter it out.
+        "m1": _manifest(
+            {("match", None, None): 1, ("project", "me", None): 2, ("export_runs", "me", None): 5}
+        )
+    }
+    svc._fetch_manifest = lambda prefs, match_id: manifests.get(match_id)
+    svc.core.on_sync_done("m1", 0.0, ok=True)
+    svc._started = True
+    asyncio.run(svc.tick())
+    assert submitted == [] and svc.status_for(root)["paused_reason"] is None
+
+    manifests["m1"] = _manifest({("match", None, None): 1, ("project", "me", None): 3})
+    svc.core.next_poll_at = 0.0
+    asyncio.run(svc.tick())
+    assert submitted == ["m1"]
+
+
+def test_the_fallback_skips_a_match_hosted_does_not_have(tmp_path: Path) -> None:
+    submitted: list[str] = []
+    svc, root = _service(tmp_path, _fingerprints_404, submitted)
+    svc._fetch_manifest = lambda prefs, match_id: None
+    svc.core.on_sync_done("m1", 0.0, ok=True)
+    svc._started = True
+    asyncio.run(svc.tick())
+    assert submitted == [] and svc.status_for(root)["paused_reason"] is None

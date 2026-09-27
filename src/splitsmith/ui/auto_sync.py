@@ -24,6 +24,7 @@ from .. import user_config
 from ..sync.auto import AutoSyncCore, Fingerprint
 from ..sync.auto_state import auto_sync_effective, load_auto_prefs
 from ..sync.client import HostedSyncClient
+from ..sync.pull import PULLABLE_DOC_KINDS
 from ..sync.push import removable_full_trims
 from ..sync.state import load_sync_state, local_fingerprint
 from .jobs import Job, JobStatus
@@ -64,16 +65,31 @@ def auto_sync_disabled_by_env() -> bool:
     return os.environ.get(AUTO_SYNC_ENV, "").strip() in ("0", "false", "False")
 
 
-def _fetch_fingerprints(prefs: user_config.GlobalPrefs) -> dict[str, Fingerprint]:
-    http = httpx.Client(
+def _http(prefs: user_config.GlobalPrefs) -> httpx.Client:
+    return httpx.Client(
         base_url=prefs.hosted_base_url or "",
         headers={"Authorization": f"Bearer {prefs.hosted_token}"},
         timeout=15.0,
     )
-    try:
+
+
+def _fetch_fingerprints(prefs: user_config.GlobalPrefs) -> dict[str, Fingerprint]:
+    with _http(prefs) as http:
         return HostedSyncClient(http=http).get_fingerprints()
-    finally:
-        http.close()
+
+
+def _fetch_manifest(prefs: user_config.GlobalPrefs, match_id: str) -> list[dict] | None:
+    """The match's doc manifest, or None when hosted has no such match."""
+    with _http(prefs) as http:
+        return HostedSyncClient(http=http).find_doc_manifest(match_id)
+
+
+def manifest_fingerprint(manifest: list[dict]) -> Fingerprint:
+    """The ``/fingerprints`` pair computed from one match's doc manifest,
+    for a hosted too old to serve the route (#1071). Filtered to the
+    pullable kinds here because an older server's manifest may not be."""
+    versions = [int(d["version"]) for d in manifest if d["doc_kind"] in PULLABLE_DOC_KINDS]
+    return len(versions), sum(versions)
 
 
 class AutoSyncService:
@@ -88,6 +104,7 @@ class AutoSyncService:
         submit_auto_sync: Callable[[str, Path], Awaitable[None]],
         load_prefs: Callable[[], user_config.GlobalPrefs] = user_config.load_global_prefs,
         fetch_fingerprints: Callable[[user_config.GlobalPrefs], dict[str, Fingerprint]] | None = None,
+        fetch_manifest: Callable[[user_config.GlobalPrefs, str], list[dict] | None] | None = None,
         clock: Callable[[], float] = time.time,
     ) -> None:
         self.core = AutoSyncCore()
@@ -96,6 +113,7 @@ class AutoSyncService:
         self._submit = submit_auto_sync
         self._load_prefs = load_prefs
         self._fetch = fetch_fingerprints or _fetch_fingerprints
+        self._fetch_manifest = fetch_manifest or _fetch_manifest
         self._clock = clock
         self._lock = threading.Lock()
         self._started = False
@@ -171,9 +189,25 @@ class AutoSyncService:
         if match_id is not None:
             await self._submit(match_id, roots[match_id])
 
+    def _fetch_server(self, prefs: user_config.GlobalPrefs, roots: dict[str, Path]) -> dict[str, Fingerprint]:
+        try:
+            return self._fetch(prefs)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 404:
+                raise
+        # A hosted older than /fingerprints (#1071): one manifest per
+        # watched match, the per-match diff the route replaced. Tried
+        # again every poll, so an upgraded hosted is picked up at once.
+        server: dict[str, Fingerprint] = {}
+        for match_id in roots:
+            manifest = self._fetch_manifest(prefs, match_id)
+            if manifest is not None:
+                server[match_id] = manifest_fingerprint(manifest)
+        return server
+
     async def _poll(self, prefs: user_config.GlobalPrefs, roots: dict[str, Path], now: float) -> None:
         try:
-            server = await asyncio.to_thread(self._fetch, prefs)
+            server = await asyncio.to_thread(self._fetch_server, prefs, roots)
         except httpx.HTTPStatusError as exc:
             auth = exc.response.status_code in (401, 403)
             if auth:
