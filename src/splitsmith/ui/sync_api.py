@@ -39,7 +39,7 @@ from pydantic import BaseModel, ValidationError
 from .. import match_model
 from ..match_project import MatchProject
 from ..storage import Storage
-from ..sync.plan import doc_identity_key
+from ..sync.plan import TRIMMED_SUFFIX, WEB_SUFFIX, doc_identity_key, trim_key_for
 from ..sync.pull import PULLABLE_DOC_KINDS
 from ..sync.state import versions_digest
 
@@ -706,20 +706,25 @@ async def delete_media(
 ) -> SyncMediaDeleteResponse:
     """Remove a pushed object the desktop no longer wants on hosted.
 
-    Two shapes only. A beep_review snippet (#821): the desktop deletes it
+    Three shapes only. A beep_review snippet (#821): the desktop deletes it
     when a video's beep is confirmed, since a stale remote copy makes
     snippet_ready lie forever. A full-resolution ``*_trimmed.mp4`` on a
     web-only mirror (spec 2026-09-27 v1.1), once its rendition is on R2.
-    The rendition (``_web.mp4``) and the ``.params.json`` sidecar are what
-    the mirror plays and anchors from, so they are never deletable here.
-    Idempotent: deleting a missing key is success, so a crashed push can
-    retry safely."""
+    A stale ``*_web.mp4`` rendition (#1077), and only while its full trim
+    is in storage to play instead: the rendition is what a web-only mirror
+    plays, so it is never the last copy of a clip to go. The
+    ``.params.json`` sidecar is never deletable here. Idempotent: deleting
+    a missing key is success, so a crashed push can retry safely."""
     _hosted_gate()
     await _resolve_mirror(request, match_id)
     _validate_media_key(body.key, match_id)
     name = body.key.rsplit("/", 1)[1]
-    if "/beep_review/" not in body.key and not ("/trimmed/" in body.key and name.endswith("_trimmed.mp4")):
-        raise HTTPException(status_code=422, detail="delete is beep_review or full-trim only")
+    in_trimmed = "/trimmed/" in body.key
+    is_web = in_trimmed and name.endswith(WEB_SUFFIX)
+    if "/beep_review/" not in body.key and not (in_trimmed and name.endswith(TRIMMED_SUFFIX)) and not is_web:
+        raise HTTPException(status_code=422, detail="delete is beep_review, full-trim or rendition only")
     storage = _require_storage(request)
+    if is_web and not storage.exists(trim_key_for(body.key)):
+        raise HTTPException(status_code=409, detail="rendition_is_the_only_copy")
     storage.delete(body.key)
     return SyncMediaDeleteResponse(deleted=True)

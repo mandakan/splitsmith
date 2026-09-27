@@ -33,7 +33,15 @@ from .auto_state import load_auto_prefs
 from .base import save_base_doc
 from .beep_snippets import generate_beep_snippets
 from .client import HostedSyncClient, SyncClientError
-from .plan import TRIMMED_SUFFIX, build_push_plan, doc_identity_key, hash_doc_body, web_key_for
+from .plan import (
+    TRIMMED_SUFFIX,
+    WEB_SUFFIX,
+    build_push_plan,
+    doc_identity_key,
+    hash_doc_body,
+    trim_key_for,
+    web_key_for,
+)
 from .state import SyncedItem, SyncState, load_sync_state, save_sync_state
 
 logger = logging.getLogger(__name__)
@@ -64,6 +72,33 @@ def removable_full_trims(match_root: Path, sync_state: SyncState) -> list[str]:
         if web_key in sync_state.items and _local_media_path(match_root, web_key).is_file():
             removable.append(key)
     return removable
+
+
+def stale_web_renditions(match_root: Path, sync_state: SyncState) -> list[str]:
+    """Remote renditions that no longer match the trim hosted has (#1077).
+
+    A re-trim around a moved beep deletes the local ``_web.mp4`` with the
+    old trim; when the new transcode fails, the push sends the new full
+    trim and params but the old rendition stays on R2, and hosted prefers
+    it: the old window played against the new params, markers off by the
+    beep correction. A rendition goes when its local file is gone and the
+    hosted full trim is the current local one (recorded with the local
+    size and mtime), so hosted plays that instead. Hosted refuses the
+    delete unless the full trim is in storage.
+    """
+    stale: list[str] = []
+    for key in sync_state.items:
+        if not key.endswith(WEB_SUFFIX) or _local_media_path(match_root, key).exists():
+            continue
+        trim_key = trim_key_for(key)
+        recorded = sync_state.items.get(trim_key)
+        trim = _local_media_path(match_root, trim_key)
+        if recorded is None or trim == match_root or not trim.is_file():
+            continue
+        st = trim.stat()
+        if recorded.size == st.st_size and recorded.mtime_ns == st.st_mtime_ns:
+            stale.append(key)
+    return stale
 
 
 def _local_media_path(match_root: Path, remote_key: str) -> Path:
@@ -243,6 +278,7 @@ def run_push(
             # original, and full media on re-uploads it (its key leaves
             # sync_state here). See removable_full_trims for which go.
             stale += removable_full_trims(match_root, sync_state)
+        stale += stale_web_renditions(match_root, sync_state)
         for key in stale:
             try:
                 client.delete_media(plan.match_id, key)

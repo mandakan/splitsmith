@@ -182,10 +182,34 @@ def test_delete_media_removes_a_full_trim_but_never_its_rendition_or_params(
     assert resp.status_code == 200, resp.text
     assert not storage.exists(f"{base}_trimmed.mp4")
 
-    for keep in (f"{base}_web.mp4", f"{base}_trimmed.params.json"):
-        storage.write_bytes(keep, b"keep")
-        assert client.post(DELETE_URL, json={"key": keep}).status_code == 422, keep
-        assert storage.exists(keep), keep
+    params = f"{base}_trimmed.params.json"
+    storage.write_bytes(params, b"keep")
+    assert client.post(DELETE_URL, json={"key": params}).status_code == 422
+    assert storage.exists(params)
+
+    # With the full trim gone the rendition is the only copy: refused.
+    storage.write_bytes(f"{base}_web.mp4", b"keep")
+    resp = client.post(DELETE_URL, json={"key": f"{base}_web.mp4"})
+    assert resp.status_code == 409, resp.text
+    assert storage.exists(f"{base}_web.mp4")
+
+
+def test_delete_media_removes_a_stale_rendition_only_beside_its_full_trim(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+) -> None:
+    """#1077: after a re-trim whose transcode failed, the desktop pushes the
+    new full trim and removes the old rendition, which hosted would
+    otherwise prefer and play against the new params."""
+    client, sender, captured = hosted_app_with_storage
+    storage = _login_and_adopt(client, sender, captured)
+    base = f"matches/{MATCH_ID}/shooters/{SLUG}/trimmed/stage1_cam_abc123"
+    storage.write_bytes(f"{base}_trimmed.mp4", b"new window")
+    storage.write_bytes(f"{base}_web.mp4", b"old window")
+
+    resp = client.post(DELETE_URL, json={"key": f"{base}_web.mp4"})
+    assert resp.status_code == 200, resp.text
+    assert not storage.exists(f"{base}_web.mp4")
+    assert storage.exists(f"{base}_trimmed.mp4")
 
 
 # --- key containment ---------------------------------------------------

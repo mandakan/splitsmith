@@ -52,6 +52,11 @@ def web_key_for(trim_key: str) -> str:
     return trim_key[: -len(TRIMMED_SUFFIX)] + WEB_SUFFIX
 
 
+def trim_key_for(web_key: str) -> str:
+    """The full trim's remote key for a rendition's remote key."""
+    return web_key[: -len(WEB_SUFFIX)] + TRIMMED_SUFFIX
+
+
 class DocItem(BaseModel):
     """One state doc to upsert on the hosted side."""
 
