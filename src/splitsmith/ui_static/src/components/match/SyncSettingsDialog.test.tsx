@@ -112,6 +112,8 @@ describe("SyncSettingsDialog", () => {
       global_enabled: true,
       paused_reason: null,
       last_auto: null,
+      full_media: false,
+      full_trims_on_hosted: 0,
     });
     vi.mocked(api.setGlobalAutoSync).mockResolvedValue({ global_enabled: false });
     render(<SyncSettingsDialog settings={FRESH} onClose={vi.fn()} onSaved={vi.fn()} />);

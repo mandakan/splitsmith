@@ -85,6 +85,8 @@ function makeAuto(overrides: Partial<AutoSyncStatus> = {}): AutoSyncStatus {
     global_enabled: true,
     paused_reason: null,
     last_auto: null,
+    full_media: false,
+    full_trims_on_hosted: 0,
     ...overrides,
   };
 }
@@ -301,7 +303,7 @@ describe("SyncCard", () => {
     const group = await screen.findByRole("group", { name: "Sync mode" });
     expect(within(group).getByRole("button", { name: "Auto" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(within(group).getByRole("button", { name: "Manual" }));
-    await waitFor(() => expect(api.setAutoSync).toHaveBeenCalledWith(false));
+    await waitFor(() => expect(api.setAutoSync).toHaveBeenCalledWith({ enabled: false }));
     await waitFor(() =>
       expect(within(group).getByRole("button", { name: "Manual" })).toHaveAttribute("aria-pressed", "true"),
     );
@@ -329,5 +331,19 @@ describe("SyncCard", () => {
     render(<SyncCard jobs={[]} matchId="m1" />);
     expect(await screen.findByText(/synced/i)).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Sync mode" })).not.toBeInTheDocument();
+  });
+
+  it("switches a match to full media and says what web-only will remove", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue(makeStatus());
+    vi.mocked(api.getAutoSync).mockResolvedValue(makeAuto({ full_trims_on_hosted: 3 }));
+    vi.mocked(api.setAutoSync).mockResolvedValue(makeAuto({ full_media: true, full_trims_on_hosted: 3 }));
+    render(<SyncCard jobs={[]} matchId="m1" />);
+    expect(await screen.findByText(/3 full trims will be removed from hosted/)).toBeInTheDocument();
+    const group = screen.getByRole("group", { name: "Media on hosted" });
+    fireEvent.click(within(group).getByRole("button", { name: "Full" }));
+    await waitFor(() => expect(api.setAutoSync).toHaveBeenCalledWith({ full_media: true }));
+    await waitFor(() =>
+      expect(within(group).getByRole("button", { name: "Full" })).toHaveAttribute("aria-pressed", "true"),
+    );
   });
 });

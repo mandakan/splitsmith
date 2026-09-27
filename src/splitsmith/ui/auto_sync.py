@@ -212,6 +212,10 @@ class AutoSyncService:
             "enabled": auto_sync_effective(auto, sync_state, global_enabled=prefs.auto_sync_enabled),
             "setting": auto.enabled,
             "global_enabled": prefs.auto_sync_enabled,
+            "full_media": auto.full_media,
+            # Full trims still on hosted; with full media off the next push
+            # removes those whose rendition is there (spec v1.1).
+            "full_trims_on_hosted": sum(1 for k in sync_state.items if k.endswith("_trimmed.mp4")),
             "paused_reason": self.core.paused_reason,
             "last_auto": last.model_dump(mode="json") if last else None,
         }

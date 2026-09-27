@@ -131,7 +131,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import AwareDatetime, BaseModel, Field, ValidationError
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
@@ -5480,9 +5480,14 @@ class HostedSyncSettingsRequest(BaseModel):
 
 
 class AutoSyncSettingRequest(BaseModel):
-    """Body for PUT /api/match/sync/auto and /api/settings/auto-sync."""
+    """Body for PUT /api/match/sync/auto and /api/settings/auto-sync. On the
+    per-match route only the fields sent change: ``enabled: null`` restores
+    the default, an absent ``enabled`` leaves it alone."""
+
+    model_config = ConfigDict(extra="forbid")
 
     enabled: bool | None = None
+    full_media: bool | None = None
 
 
 class DeviceStartResponse(BaseModel):
@@ -7737,7 +7742,15 @@ def create_app(
         """``enabled: null`` restores the default (on once synced)."""
         if _hosted_mode_active() or state.auto_sync is None:
             raise HTTPException(status_code=404, detail="not found")
-        update_auto_prefs(state.match_root, lambda p: setattr(p, "enabled", req.enabled))
+        sent = req.model_fields_set
+
+        def _apply(p: Any) -> None:
+            if "enabled" in sent:
+                p.enabled = req.enabled
+            if req.full_media is not None:
+                p.full_media = req.full_media
+
+        update_auto_prefs(state.match_root, _apply)
         return JSONResponse(state.auto_sync.status_for(state.match_root))
 
     @app.put("/api/settings/auto-sync")

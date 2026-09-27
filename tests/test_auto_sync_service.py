@@ -236,3 +236,36 @@ def test_a_failed_auto_run_is_not_reported_after_a_later_successful_sync(tmp_pat
     assert svc.status_for(root)["last_auto"] is None
     save_sync_state(root, SyncState(last_synced_at=datetime(2026, 9, 25, tzinfo=UTC)))
     assert svc.status_for(root)["last_auto"]["message"] == "offline"
+
+
+def test_status_reports_full_media_and_full_trims_on_hosted(tmp_path: Path) -> None:
+    from splitsmith.sync.state import SyncedItem
+
+    svc, root = _service(tmp_path, lambda prefs: {}, [])
+    item = SyncedItem(sha256="a", size=1, mtime_ns=1)
+    save_sync_state(
+        root,
+        SyncState(
+            last_synced_at=datetime(2026, 9, 27, tzinfo=UTC),
+            items={
+                "matches/m/shooters/a/trimmed/s1_cam_x_trimmed.mp4": item,
+                "matches/m/shooters/a/trimmed/s1_cam_x_web.mp4": item,
+            },
+        ),
+    )
+    status = svc.status_for(root)
+    assert status["full_media"] is False
+    assert status["full_trims_on_hosted"] == 1
+
+
+def test_put_auto_changes_only_the_fields_sent(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("SPLITSMITH_AUTO_SYNC", "1")
+    client, _ = _seed_match_export_project(tmp_path, stage_count=1)
+    (match_id,) = client.app.state.splitsmith_state.matches.known_ids()
+    url = f"/api/matches/{match_id}/match/sync/auto"
+    resp = client._client.put(url, json={"enabled": False})
+    assert resp.status_code == 200, resp.text
+    body = client._client.put(url, json={"full_media": True}).json()
+    assert body["full_media"] is True and body["setting"] is False
+    body = client._client.put(url, json={"enabled": None}).json()
+    assert body["setting"] is None and body["full_media"] is True
