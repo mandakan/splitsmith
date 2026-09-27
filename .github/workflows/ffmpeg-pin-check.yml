@@ -1,23 +1,29 @@
 name: ffmpeg pin check
 
-# The Dockerfiles pin an autobuild tag from BtbN/FFmpeg-Builds, and upstream
-# prunes those releases after roughly four weeks. When the tag disappears
-# every image build 404s at the ffmpeg download -- the Railway deploy and
-# the GHCR publish go red -- while CI stays green because it never builds
-# the image (#962). This job makes the pin's health visible on its own
-# schedule instead of on the next deploy:
+# The Dockerfiles download ffmpeg from a mirror release on this repo
+# (ffmpeg-linux-<date>, made by scripts/mirror_ffmpeg_linux.sh). CI never
+# builds the image, so a pin that does not resolve would only show up as a
+# red Railway deploy and GHCR publish after merge (#962, and again when BtbN
+# pruned autobuild-2026-09-10-15-31 after 17 days). This job checks that:
 #
-#   - every pinned asset URL in Dockerfile and Dockerfile.gpu must resolve;
-#   - the pinned tag must be younger than MAX_AGE_DAYS, so the run turns red
-#     while the assets still exist and the bump is routine rather than an
-#     outage. Bump with the procedure in the Dockerfile comment.
+#   - both Dockerfiles pin the same release and the same files;
+#   - every pinned asset URL resolves.
+#
+# It runs on any PR that touches a Dockerfile, so a bad pin cannot merge,
+# and weekly as a sentinel in case a mirror release is deleted by hand.
+# There is no age limit any more: our releases are not pruned.
 #
 # WARNING: GitHub auto-disables scheduled workflows after 60 days with no
 # repo activity. Re-enable from the Actions tab when resuming a dormant project.
 
 on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - Dockerfile.gpu
+      - .github/workflows/ffmpeg-pin-check.yml
   schedule:
-    - cron: "17 6 * * *"
+    - cron: "17 6 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -26,8 +32,6 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    env:
-      MAX_AGE_DAYS: 21
     steps:
       - uses: actions/checkout@v4
 
@@ -35,41 +39,28 @@ jobs:
         run: |
           set -euo pipefail
           status=0
+          pin() { printf '%s ' "$(sed -n 's/^ARG FFMPEG_RELEASE=\(.*\)$/\1/p' "$1")"; sed -n 's/.*ff_\(file\|sha\)=\([^;]*\);.*/\2/p' "$1" | tr '\n' ' '; }
+          if [ "$(pin Dockerfile)" != "$(pin Dockerfile.gpu)" ]; then
+            echo "::error file=Dockerfile.gpu::ffmpeg pin differs from Dockerfile ($(pin Dockerfile) vs $(pin Dockerfile.gpu)); keep them in step"
+            status=1
+          fi
           for df in Dockerfile Dockerfile.gpu; do
-            tag=$(sed -n 's/^ARG FFMPEG_BUILD=\(.*\)$/\1/p' "$df")
-            if [ -z "$tag" ]; then
-              echo "::error file=$df::no ARG FFMPEG_BUILD line found"
-              status=1
-              continue
-            fi
+            tag=$(sed -n 's/^ARG FFMPEG_RELEASE=\(.*\)$/\1/p' "$df")
             files=$(sed -n 's/.*ff_file=\([^;]*\);.*/\1/p' "$df")
-            if [ -z "$files" ]; then
-              echo "::error file=$df::no ff_file= assignments found"
+            if [ -z "$tag" ] || [ -z "$files" ]; then
+              echo "::error file=$df::no ARG FFMPEG_RELEASE line or no ff_file= assignments found"
               status=1
               continue
             fi
             for f in $files; do
-              url="https://github.com/BtbN/FFmpeg-Builds/releases/download/$tag/$f"
+              url="https://github.com/${{ github.repository }}/releases/download/$tag/$f"
               code=$(curl -sIL -o /dev/null -w '%{http_code}' --retry 3 --retry-all-errors "$url")
               if [ "$code" = 200 ]; then
                 echo "ok   $df $tag/$f"
               else
-                echo "::error file=$df::HTTP $code for $url -- the pinned autobuild is gone; bump FFMPEG_BUILD"
+                echo "::error file=$df::HTTP $code for $url -- mirror it with scripts/mirror_ffmpeg_linux.sh"
                 status=1
               fi
             done
-            # Tag names are autobuild-YYYY-MM-DD-HH-MM; age is measured from the date part.
-            pin_date=$(printf '%s' "$tag" | sed -n 's/^autobuild-\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)-.*/\1/p')
-            if [ -z "$pin_date" ]; then
-              echo "::warning file=$df::cannot read a date from FFMPEG_BUILD=$tag; age check skipped"
-              continue
-            fi
-            age=$(( ( $(date -u +%s) - $(date -u -d "$pin_date" +%s) ) / 86400 ))
-            if [ "$age" -gt "$MAX_AGE_DAYS" ]; then
-              echo "::error file=$df::FFMPEG_BUILD=$tag is $age days old (limit $MAX_AGE_DAYS); upstream prunes autobuilds after ~4 weeks, bump before the next deploy breaks"
-              status=1
-            else
-              echo "age  $df $tag is $age days old"
-            fi
           done
           exit $status
