@@ -94,7 +94,7 @@ def _local_doc_ts(path: Path) -> datetime:
         return datetime.fromtimestamp(0, tz=UTC)
 
 
-def migrate_shot_ids(match_root: Path) -> int:
+def migrate_shot_ids(match_root: Path, *, audit_lock: AbstractContextManager | None = None) -> int:
     """Stamp shot ids across every local audit doc that lacks them.
 
     The desktop is the sole minter of shot ids for a mirror (#631 Task 7),
@@ -128,34 +128,43 @@ def migrate_shot_ids(match_root: Path) -> int:
         for audit_path in sorted(audit_dir.iterdir()):
             if not AUDIT_FILENAME_RE.match(audit_path.name):
                 continue
-            try:
-                doc = json.loads(audit_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            if not isinstance(doc, dict):
-                continue
-            shots = doc.get("shots")
-            if not isinstance(shots, list):
-                continue
-            if ensure_shot_ids([s for s in shots if isinstance(s, dict)]):
-                stamps = audit_path.stat()
-                try:
-                    atomic_write_json(audit_path, doc)
-                except OSError as exc:
-                    raise SyncClientError(
-                        f"could not stamp shot ids on {audit_path} - check that the "
-                        f"match directory is writable ({exc})"
-                    ) from exc
-                # Restore the original mtime. ``_local_doc_ts`` reads file
-                # mtime as the merge's LWW tiebreak, so a doc this pass just
-                # stamped would otherwise look freshly edited and beat a
-                # genuinely newer phone edit in every true conflict on the
-                # first sync after upgrade. Pushes are content-hashed
-                # (``sync/plan.py``), not mtime-based, so restoring it does
-                # not suppress the push of the ids we just wrote.
-                os.utime(audit_path, ns=(stamps.st_atime_ns, stamps.st_mtime_ns))
-                migrated += 1
+            # Held per doc, like the pull's merge (#1075): a local audit
+            # save landing between this read and the write below is lost.
+            with audit_lock if audit_lock is not None else nullcontext():
+                migrated += _stamp_one(audit_path)
     return migrated
+
+
+def _stamp_one(audit_path: Path) -> int:
+    """Stamp missing shot ids on one audit doc; 1 when it was rewritten."""
+    try:
+        doc = json.loads(audit_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0
+    if not isinstance(doc, dict):
+        return 0
+    shots = doc.get("shots")
+    if not isinstance(shots, list):
+        return 0
+    if ensure_shot_ids([s for s in shots if isinstance(s, dict)]):
+        stamps = audit_path.stat()
+        try:
+            atomic_write_json(audit_path, doc)
+        except OSError as exc:
+            raise SyncClientError(
+                f"could not stamp shot ids on {audit_path} - check that the "
+                f"match directory is writable ({exc})"
+            ) from exc
+        # Restore the original mtime. ``_local_doc_ts`` reads file
+        # mtime as the merge's LWW tiebreak, so a doc this pass just
+        # stamped would otherwise look freshly edited and beat a
+        # genuinely newer phone edit in every true conflict on the
+        # first sync after upgrade. Pushes are content-hashed
+        # (``sync/plan.py``), not mtime-based, so restoring it does
+        # not suppress the push of the ids we just wrote.
+        os.utime(audit_path, ns=(stamps.st_atime_ns, stamps.st_mtime_ns))
+        return 1
+    return 0
 
 
 def backfill_web_trims(
@@ -240,7 +249,7 @@ def run_sync(
     # before the pull: the merge keys shot membership on the id, so every
     # local audit doc must carry one before the first remote doc arrives.
     with timed_phase(timings, timer, "migrate_shot_ids"):
-        shot_ids_migrated = migrate_shot_ids(match_root)
+        shot_ids_migrated = migrate_shot_ids(match_root, audit_lock=audit_lock)
         if shot_ids_migrated:
             on_progress(0.0, f"stamped shot ids on {shot_ids_migrated} audit doc(s)")
 

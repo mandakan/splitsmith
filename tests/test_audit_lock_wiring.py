@@ -126,3 +126,76 @@ def test_the_remerge_save_reloads_and_saves_under_the_lock(tmp_path: Path, monke
     assert loads == [True] and saves == [True]
     on_disk = json.loads((project_root / "shooters" / "me" / "audit" / "stage1.json").read_text())
     assert on_disk["probe"] is True
+
+
+# -- every other local audit writer (#1075) --------------------------------
+#
+# The coach save, the triage flag and accept, the beep-confirm stub and the
+# sync's shot-id migration each load, edit and save an audit doc. A pull
+# landing between one of those loads and its save lost either side.
+
+
+def test_the_triage_flag_writes_under_the_lock(tmp_path: Path, monkeypatch) -> None:
+    client, _ = _seed_match_export_project(tmp_path, stage_count=1)
+    _, loads, saves = _probe_saves(client.app.state.splitsmith_state, monkeypatch)
+    resp = client.post("/api/shooters/me/stages/1/attention", json={"flagged": True, "note": "check"})
+    assert resp.status_code == 200, resp.text
+    assert saves == [True] and loads[0] is True
+
+
+def test_the_triage_accept_writes_under_the_lock(tmp_path: Path, monkeypatch) -> None:
+    client, _ = _seed_match_export_project(tmp_path, stage_count=1)
+    _, loads, saves = _probe_saves(client.app.state.splitsmith_state, monkeypatch)
+    resp = client.post("/api/shooters/me/stages/1/audit/accept")
+    assert resp.status_code == 200, resp.text
+    assert saves == [True] and loads[0] is True
+
+
+def test_coach_writes_hold_the_lock(tmp_path: Path, monkeypatch) -> None:
+    client, _ = _seed_match_export_project(tmp_path, stage_count=1)
+    _, loads, saves = _probe_saves(client.app.state.splitsmith_state, monkeypatch)
+    assert client.post("/api/shooters/me/stages/1/coach/reclassify").status_code == 200
+    resp = client.patch("/api/shooters/me/stages/1/shots/1/coach", json={"coaching_note": "smoother"})
+    assert resp.status_code == 200, resp.text
+    assert saves == [True, True]
+    # Each save's own load ran under the lock too (not only the save).
+    assert loads[-1] is True
+
+
+def test_the_beep_confirm_stub_is_written_under_the_lock(tmp_path: Path, monkeypatch) -> None:
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    state = client.app.state.splitsmith_state
+    (project_root / "shooters" / "me" / "audit" / "stage1.json").unlink()
+
+    async def no_submit(**kw):
+        return None
+
+    monkeypatch.setattr(state.jobs, "submit", no_submit)
+    _, _, saves = _probe_saves(state, monkeypatch)
+    project = client.get("/api/shooters/me/project").json()
+    video_id = project["stages"][0]["videos"][0]["video_id"]
+    resp = client.post(f"/api/shooters/me/stages/1/videos/{video_id}/beep/review", json={"reviewed": True})
+    assert resp.status_code == 200, resp.text
+    assert saves == [True]
+
+
+def test_the_shot_id_migration_stamps_under_the_lock(tmp_path: Path, monkeypatch) -> None:
+    import splitsmith.sync.run as run_mod
+
+    _, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    path = project_root / "shooters" / "me" / "audit" / "stage1.json"
+    doc = json.loads(path.read_text())
+    for shot in doc["shots"]:
+        shot.pop("id", None)
+    path.write_text(json.dumps(doc))
+    probe = _ProbeLock()
+    held: list[bool] = []
+    real_write = run_mod.atomic_write_json
+
+    def spy(*a, **kw):
+        held.append(probe.held())
+        return real_write(*a, **kw)
+
+    monkeypatch.setattr(run_mod, "atomic_write_json", spy)
+    assert run_mod.migrate_shot_ids(project_root, audit_lock=probe) == 1
+    assert held == [True]

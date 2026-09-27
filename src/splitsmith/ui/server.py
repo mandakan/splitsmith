@@ -11545,14 +11545,15 @@ def create_app(
         """
         if current_match_origin.get() == "desktop":
             return
-        existing_doc, audit_version = state.load_audit(slug, stage_number)
-        if existing_doc is None:
-            state.save_audit(
-                slug,
-                stage_number,
-                {"shots": [], "detection": STUB_AUDIT_DETECTION},
-                version=audit_version,
-            )
+        with _audit_rmw():
+            existing_doc, audit_version = state.load_audit(slug, stage_number)
+            if existing_doc is None:
+                state.save_audit(
+                    slug,
+                    stage_number,
+                    {"shots": [], "detection": STUB_AUDIT_DETECTION},
+                    version=audit_version,
+                )
         # The reconciler's rule with explicit=True (spec 2026-09-27 s3): a
         # trim when none is cached, else detection for a trimmed primary. A
         # phone confirm pulled into this desktop reaches the same rule
@@ -12149,8 +12150,7 @@ def create_app(
         # without ``_version`` keeps last-writer-wins. Hosted skips the lock:
         # it is process-global (every tenant would queue behind it) and the
         # state_docs version loaded here already optimistic-locks the save.
-        lock = state.audit_lock if state.audit_doc_target() is None else nullcontext()
-        with lock:
+        with _audit_rmw():
             stored, version = state.load_audit(slug, stage_number)
             if client_revision is not None and client_revision != audit_revision(stored):
                 raise AuditRevisionConflictError(f"stage {stage_number} audit changed since it was loaded")
@@ -12200,36 +12200,37 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         conflict_excs = _state_conflict_excs()
         for _attempt in range(3):
-            payload, version = state.load_audit(slug, stage_number)
-            if payload is None:
-                raise HTTPException(status_code=409, detail="nothing_to_accept")
-            shots = [s for s in payload.get("shots") or [] if isinstance(s, dict)]
-            kept = _kept_audit_shots(shots)
-            if not kept:
-                raise HTTPException(status_code=409, detail="nothing_to_accept")
-            # Mirror-exempt from the read-only gate (slice 4), so this is the
-            # save boundary a phone actually reaches on a mirror - and the one
-            # that must not mint a second id for a legacy shot the desktop
-            # will stamp itself. See _may_mint_shot_ids.
-            ensure_shot_ids(shots, mint=_may_mint_shot_ids())
-            coach_module.classify_intervals_in_dicts(shots, coach_module.auto_classify_config())
-            if any(not s.get("interval_class") for s in kept):
-                raise HTTPException(status_code=409, detail="not_fully_classified")
-            events = payload.setdefault("audit_events", [])
-            events.append(
-                {
-                    "id": _new_event_id(),
-                    "ts": _now_iso(),
-                    "kind": "accept",
-                    "payload": {"source": "triage"},
-                }
-            )
-            _set_needs_attention(payload, flagged=False)
-            try:
-                state.save_audit(slug, stage_number, payload, version=version)
-            except conflict_excs:
-                continue
-            return JSONResponse(_build_triage_response().model_dump())
+            with _audit_rmw():
+                payload, version = state.load_audit(slug, stage_number)
+                if payload is None:
+                    raise HTTPException(status_code=409, detail="nothing_to_accept")
+                shots = [s for s in payload.get("shots") or [] if isinstance(s, dict)]
+                kept = _kept_audit_shots(shots)
+                if not kept:
+                    raise HTTPException(status_code=409, detail="nothing_to_accept")
+                # Mirror-exempt from the read-only gate (slice 4), so this is the
+                # save boundary a phone actually reaches on a mirror - and the one
+                # that must not mint a second id for a legacy shot the desktop
+                # will stamp itself. See _may_mint_shot_ids.
+                ensure_shot_ids(shots, mint=_may_mint_shot_ids())
+                coach_module.classify_intervals_in_dicts(shots, coach_module.auto_classify_config())
+                if any(not s.get("interval_class") for s in kept):
+                    raise HTTPException(status_code=409, detail="not_fully_classified")
+                events = payload.setdefault("audit_events", [])
+                events.append(
+                    {
+                        "id": _new_event_id(),
+                        "ts": _now_iso(),
+                        "kind": "accept",
+                        "payload": {"source": "triage"},
+                    }
+                )
+                _set_needs_attention(payload, flagged=False)
+                try:
+                    state.save_audit(slug, stage_number, payload, version=version)
+                except conflict_excs:
+                    continue
+                return JSONResponse(_build_triage_response().model_dump())
         raise HTTPException(status_code=409, detail="version_conflict")
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/attention")
@@ -12248,21 +12249,22 @@ def create_app(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         conflict_excs = _state_conflict_excs()
         for _attempt in range(3):
-            payload, version = state.load_audit(slug, stage_number)
-            if payload is None:
-                # Seed the same beep-confirm stub shape as the beep-review
-                # endpoint (line ~9897): is_stub_audit ignores the
-                # needs_attention key, so a flagged doc-less stage still
-                # reads as "ready" (derived from real shots/events) instead
-                # of falling to "in_progress" and getting stuck flagged
-                # forever once cleared.
-                payload, version = {"shots": [], "detection": STUB_AUDIT_DETECTION}, 0
-            _set_needs_attention(payload, flagged=body.flagged, note=body.note)
-            try:
-                state.save_audit(slug, stage_number, payload, version=version)
-            except conflict_excs:
-                continue
-            return JSONResponse(_build_triage_response().model_dump())
+            with _audit_rmw():
+                payload, version = state.load_audit(slug, stage_number)
+                if payload is None:
+                    # Seed the same beep-confirm stub shape as the beep-review
+                    # endpoint (line ~9897): is_stub_audit ignores the
+                    # needs_attention key, so a flagged doc-less stage still
+                    # reads as "ready" (derived from real shots/events) instead
+                    # of falling to "in_progress" and getting stuck flagged
+                    # forever once cleared.
+                    payload, version = {"shots": [], "detection": STUB_AUDIT_DETECTION}, 0
+                _set_needs_attention(payload, flagged=body.flagged, note=body.note)
+                try:
+                    state.save_audit(slug, stage_number, payload, version=version)
+                except conflict_excs:
+                    continue
+                return JSONResponse(_build_triage_response().model_dump())
         raise HTTPException(status_code=409, detail="version_conflict")
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/anomalies")
@@ -12456,6 +12458,17 @@ def create_app(
         )
         return payload, version, primary_beep_in_clip, stg, project
 
+    def _audit_rmw() -> AbstractContextManager[object]:
+        """The guard for a local audit read-modify-write (#1075).
+
+        A sync pull's audit merge holds ``state.audit_lock`` (spec
+        2026-09-27 s5); a writer that loads, edits and saves outside it
+        can lose the pulled change or have its own edit lost. Hosted
+        returns a no-op: the lock is process-global there, and the
+        ``state_docs`` version already optimistic-locks every save.
+        """
+        return state.audit_lock if state.audit_doc_target() is None else nullcontext()
+
     def _coach_save(slug: str, stage_number: int, payload: dict[str, Any], version: int) -> int:
         """Persist a coach-mutated audit doc under optimistic locking
         (hosted) / atomically to disk (local). A lost race -> 409.
@@ -12570,26 +12583,27 @@ def create_app(
         audit_payload, _ = state.load_audit(slug, stage_number)
         if audit_payload is None:
             return JSONResponse(None)
-        payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
-        cfg = coach_module.auto_classify_config()
-        # #775: heal legacy docs on read so consumers (Results, share view,
-        # statistic_splits) always see a fully classified stage. Owners get
-        # the heal persisted; share-token readers are read-only, so the
-        # classes are computed in-memory and never written back. The guard
-        # itself lives in ``coach.heal_unclassified`` (#780) - this is the
-        # only one of its four callers that persists, and it keys the write
-        # off the return value so an untouched doc costs no version bump.
-        if coach_module.heal_unclassified(payload.get("shots"), cfg) and not current_share_request.get():
-            try:
-                version = _coach_save(slug, stage_number, payload, version)
-            except _state_conflict_excs():
-                # A concurrent writer won the version race; serve the
-                # in-memory heal and let the next read persist it.
-                # ``_state_conflict_excs`` resolves the hosted-only
-                # conflict type lazily and guarded - a slim local install
-                # has no db extras, and an unguarded import here 500ed
-                # every heal-triggering coach GET.
-                pass
+        with _audit_rmw():
+            payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
+            cfg = coach_module.auto_classify_config()
+            # #775: heal legacy docs on read so consumers (Results, share view,
+            # statistic_splits) always see a fully classified stage. Owners get
+            # the heal persisted; share-token readers are read-only, so the
+            # classes are computed in-memory and never written back. The guard
+            # itself lives in ``coach.heal_unclassified`` (#780) - this is the
+            # only one of its four callers that persists, and it keys the write
+            # off the return value so an untouched doc costs no version bump.
+            if coach_module.heal_unclassified(payload.get("shots"), cfg) and not current_share_request.get():
+                try:
+                    version = _coach_save(slug, stage_number, payload, version)
+                except _state_conflict_excs():
+                    # A concurrent writer won the version race; serve the
+                    # in-memory heal and let the next read persist it.
+                    # ``_state_conflict_excs`` resolves the hosted-only
+                    # conflict type lazily and guarded - a slim local install
+                    # has no db extras, and an unguarded import here 500ed
+                    # every heal-triggering coach GET.
+                    pass
         return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg, version))
 
     @app.post("/api/shooters/{slug}/stages/{stage_number}/coach/reclassify")
@@ -12598,23 +12612,24 @@ def create_app(
         every shot whose source is unset or ``"auto"``. Manual entries are
         preserved. Idempotent.
         """
-        payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
-        cfg = coach_module.auto_classify_config()
-        shots = payload.get("shots") or []
-        if not isinstance(shots, list):
-            raise HTTPException(status_code=500, detail="audit shots is not a list")
-        coach_module.classify_intervals_in_dicts(shots, cfg)
-        events = list(payload.get("audit_events") or [])
-        events.append(
-            {
-                "id": _new_event_id(),
-                "ts": _now_iso(),
-                "kind": "coach_reclassify",
-                "payload": {"shot_count": len(shots)},
-            }
-        )
-        payload["audit_events"] = events
-        version = _coach_save(slug, stage_number, payload, version)
+        with _audit_rmw():
+            payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
+            cfg = coach_module.auto_classify_config()
+            shots = payload.get("shots") or []
+            if not isinstance(shots, list):
+                raise HTTPException(status_code=500, detail="audit shots is not a list")
+            coach_module.classify_intervals_in_dicts(shots, cfg)
+            events = list(payload.get("audit_events") or [])
+            events.append(
+                {
+                    "id": _new_event_id(),
+                    "ts": _now_iso(),
+                    "kind": "coach_reclassify",
+                    "payload": {"shot_count": len(shots)},
+                }
+            )
+            payload["audit_events"] = events
+            version = _coach_save(slug, stage_number, payload, version)
         return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg, version))
 
     def _apply_shot_coach_patch(
@@ -12625,55 +12640,56 @@ def create_app(
         describe: str,
     ) -> JSONResponse:
         """Shared body for the by-number and by-id coach PATCH routes."""
-        payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
-        if body.expected_version is not None and body.expected_version != version:
-            raise HTTPException(status_code=409, detail="version_conflict")
-        cfg = coach_module.auto_classify_config()
-        shots = payload.get("shots") or []
-        if not isinstance(shots, list):
-            raise HTTPException(status_code=500, detail="audit shots is not a list")
-        target = next((s for s in shots if isinstance(s, dict) and match_shot(s)), None)
-        if target is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"{describe} not found in stage {stage_number}",
-            )
-        try:
-            coach_module.write_coach_fields(
-                target,
-                interval_class=body.interval_class,
-                interval_class_source=body.interval_class_source,
-                clear_class=body.clear_class,
-                improvement_flag=body.improvement_flag,
-                coaching_note=body.coaching_note,
-                clear_note=body.clear_note,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        with _audit_rmw():
+            payload, version, beep_in_clip, stg, project = _load_audit_for_coach(slug, stage_number)
+            if body.expected_version is not None and body.expected_version != version:
+                raise HTTPException(status_code=409, detail="version_conflict")
+            cfg = coach_module.auto_classify_config()
+            shots = payload.get("shots") or []
+            if not isinstance(shots, list):
+                raise HTTPException(status_code=500, detail="audit shots is not a list")
+            target = next((s for s in shots if isinstance(s, dict) and match_shot(s)), None)
+            if target is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"{describe} not found in stage {stage_number}",
+                )
+            try:
+                coach_module.write_coach_fields(
+                    target,
+                    interval_class=body.interval_class,
+                    interval_class_source=body.interval_class_source,
+                    clear_class=body.clear_class,
+                    improvement_flag=body.improvement_flag,
+                    coaching_note=body.coaching_note,
+                    clear_note=body.clear_note,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        # #775: a ``clear_class: true`` patch drops the shot's class, which
-        # would re-open the partial-classification state the invariant
-        # rules out. Re-running the classifier heals it back to the rule's
-        # auto verdict; this is a no-op for every other patch because the
-        # classifier only rewrites unset/auto entries and manual patches
-        # set interval_class_source="manual" on the target shot itself.
-        coach_module.classify_intervals_in_dicts([s for s in shots if isinstance(s, dict)], cfg)
+            # #775: a ``clear_class: true`` patch drops the shot's class, which
+            # would re-open the partial-classification state the invariant
+            # rules out. Re-running the classifier heals it back to the rule's
+            # auto verdict; this is a no-op for every other patch because the
+            # classifier only rewrites unset/auto entries and manual patches
+            # set interval_class_source="manual" on the target shot itself.
+            coach_module.classify_intervals_in_dicts([s for s in shots if isinstance(s, dict)], cfg)
 
-        events = list(payload.get("audit_events") or [])
-        events.append(
-            {
-                "id": _new_event_id(),
-                "ts": _now_iso(),
-                "kind": "coach_patch",
-                "payload": {
-                    "shot_id": target.get("id"),
-                    "shot_number": target.get("shot_number"),
-                    "fields": coach_module.read_coach_fields(target),
-                },
-            }
-        )
-        payload["audit_events"] = events
-        version = _coach_save(slug, stage_number, payload, version)
+            events = list(payload.get("audit_events") or [])
+            events.append(
+                {
+                    "id": _new_event_id(),
+                    "ts": _now_iso(),
+                    "kind": "coach_patch",
+                    "payload": {
+                        "shot_id": target.get("id"),
+                        "shot_number": target.get("shot_number"),
+                        "fields": coach_module.read_coach_fields(target),
+                    },
+                }
+            )
+            payload["audit_events"] = events
+            version = _coach_save(slug, stage_number, payload, version)
         return JSONResponse(_build_coach_response(slug, payload, beep_in_clip, stg, project, cfg, version))
 
     @app.patch("/api/shooters/{slug}/stages/{stage_number}/shots/{shot_number}/coach")
@@ -14618,18 +14634,22 @@ def create_app(
                 audit_file = state._audit_file(req.source_slug, n)
                 audit_file.unlink(missing_ok=True)
 
-        outcome = shooter_move_module.move_shooter(
-            source_project=source_project,
-            source_root=source_root,
-            target_project=target_project,
-            target_root=target_root,
-            video_paths=req.video_paths,
-            load_target_audit=_load_target_audit,
-            save_target_audit=_save_target_audit,
-            load_source_audit=_load_source_audit,
-            clear_source_audit=_clear_source_audit,
-            storage=state.storage,
-        )
+        # Both shooters' audit docs are read, merged and rewritten: hold the
+        # audit lock across the whole move so a sync pull cannot land in
+        # between (#1075).
+        with _audit_rmw():
+            outcome = shooter_move_module.move_shooter(
+                source_project=source_project,
+                source_root=source_root,
+                target_project=target_project,
+                target_root=target_root,
+                video_paths=req.video_paths,
+                load_target_audit=_load_target_audit,
+                save_target_audit=_save_target_audit,
+                load_source_audit=_load_source_audit,
+                clear_source_audit=_clear_source_audit,
+                storage=state.storage,
+            )
 
         # Persist target first (durable-on-target-first under crash).
         target_project.save(target_root)
