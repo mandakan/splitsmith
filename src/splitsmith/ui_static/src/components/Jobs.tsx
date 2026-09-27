@@ -49,8 +49,8 @@ import { useLocation } from "react-router-dom";
 import { useShellStripSlot } from "@/components/layout/shellChromeContext";
 import { Portal } from "@/components/ui/Portal";
 import { ProgressStrip } from "@/components/ui/ProgressStrip";
-import { type Job } from "@/lib/api";
-import { kindLabel } from "@/lib/jobLabels";
+import { api, type Job } from "@/lib/api";
+import { jobTarget, kindLabel } from "@/lib/jobLabels";
 import { useDialogFocus } from "@/lib/dialogFocus";
 import { type JobsState } from "@/lib/jobs";
 import { cn } from "@/lib/utils";
@@ -73,11 +73,48 @@ export const KIND_ICON: Record<string, ReactNode> = {
 };
 
 
-export function jobTarget(job: Job): string {
-  const bits: string[] = [];
-  if (job.stage_number != null) bits.push(`stage ${pad2(job.stage_number)}`);
-  if (job.video_id) bits.push(`cam ${job.video_id.slice(0, 6)}`);
-  return bits.join(" · ");
+/** Match names by id, fetched once for every row on the page and again
+ *  when a job names a match the list does not have yet (one just
+ *  created). A failed fetch leaves the rows on "whole match". */
+let matchNames: Map<string, string> = new Map();
+let inflight: Promise<void> | null = null;
+const listeners = new Set<() => void>();
+const asked = new Set<string>();
+
+function refreshMatchNames(): Promise<void> {
+  inflight ??= api
+    .getRecentProjects()
+    .then((projects) => {
+      const next = new Map<string, string>();
+      for (const p of projects) if (p.match_id) next.set(p.match_id, p.name);
+      matchNames = next;
+      listeners.forEach((l) => l());
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      inflight = null;
+    });
+  return inflight;
+}
+
+/** The line under a job's kind (``lib/jobLabels.jobTarget``) with the
+ *  match names and the match on screen filled in. */
+function useJobTarget(job: Job): string {
+  const [, rerender] = useState(0);
+  const { pathname } = useLocation();
+  const currentMatchId = /^\/match\/([^/]+)/.exec(pathname)?.[1] ?? null;
+  useEffect(() => {
+    const listener = () => rerender((n) => n + 1);
+    listeners.add(listener);
+    if (job.match_id && !matchNames.has(job.match_id) && !asked.has(job.match_id)) {
+      asked.add(job.match_id);
+      void refreshMatchNames();
+    }
+    return () => {
+      listeners.delete(listener);
+    };
+  }, [job.match_id]);
+  return jobTarget(job, { matchNames, currentMatchId });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -197,7 +234,7 @@ function JobMini({ job }: { job: Job }) {
   const isAttn = job.status === "failed";
   const pct =
     job.progress != null ? Math.max(0, Math.min(100, job.progress * 100)) : 0;
-  const sub = jobTarget(job) || job.message || "";
+  const sub = useJobTarget(job) || job.message || "";
   return (
     <div
       className={cn(
@@ -397,6 +434,7 @@ function RowHead({
   badgeTone: "running" | "failed" | "queued";
   trailing?: ReactNode;
 }) {
+  const target = useJobTarget(job);
   return (
     <div className="flex items-start gap-2.5">
       <span
@@ -413,9 +451,11 @@ function RowHead({
         <div className="truncate font-display text-[0.75rem] font-bold uppercase tracking-[0.04em] text-ink">
           {kindLabel(job.kind)}
         </div>
-        <div className="mt-0.5 truncate font-mono text-[0.5625rem] uppercase tracking-[0.06em] text-muted">
-          {jobTarget(job) || "(no target)"}
-        </div>
+        {target ? (
+          <div className="mt-0.5 truncate font-mono text-[0.5625rem] uppercase tracking-[0.06em] text-muted">
+            {target}
+          </div>
+        ) : null}
       </div>
       <span
         className={cn(
@@ -509,13 +549,6 @@ function QueuedRow({ job }: { job: Job }) {
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/* helpers                                                                    */
-/* -------------------------------------------------------------------------- */
-
-function pad2(n: number): string {
-  return n.toString().padStart(2, "0");
-}
 
 /* -------------------------------------------------------------------------- */
 /* JobsSurface -- convenience component combining rail + sheet                */
