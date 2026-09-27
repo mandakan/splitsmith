@@ -1,4 +1,3 @@
-/* eslint-disable no-restricted-syntax -- visual budget: remove when this file is rebuilt (spec 2026-09-13 s5) */
 /**
  * MobileBeepReview - the mobile beep review card pager (slice 3, #326
  * follow-up). Desktop's BeepReview is a list + detail layout that
@@ -11,23 +10,31 @@
  *   1. `proxy_ready` - hosted-native or local: stream the low-res proxy
  *      and drive the same BeepWaveformPicker desktop uses.
  *   2. `snippet_ready` - hosted mirror only: no proxy exists on a
- *      mirror, so play the desktop-pushed audio snippet instead.
+ *      mirror, so play the desktop-pushed audio snippet instead, on the
+ *      touch picker (BeepReticle: pan under a fixed line, pinch to zoom,
+ *      overview strip). The snippet covers the whole beep search window,
+ *      so a wrong detector pick never hides the real beep.
  *   3. neither - nothing was pushed for this video yet; point the
  *      operator at desktop and keep Confirm disabled (confirming a beep
  *      with no evidence in front of the operator is not a real review).
  */
-import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { api, READ_ONLY_MIRROR_MESSAGE } from "@/lib/api";
 import type { BeepQueueItem, BeepSnippetPeaks } from "@/lib/api";
 import { useBeepQueue, DESTRUCTIVE_RERUN_WARNING, keyOf } from "@/lib/useBeepQueue";
 import { BeepWaveformPicker } from "@/components/BeepSection";
+import { BeepReticle, type ReticleMarker } from "@/components/audit/BeepReticle";
 import { MobileConfirmSheet } from "@/components/MobileConfirmSheet";
 import { Kicker } from "@/components/ui";
 
 const NUDGE_S = 0.01; // +-10 ms fine steppers
 const PLAY_AROUND_S = 1.5;
+const PLAY_LEAD_S = 0.4; // "Play from line" starts this far before the pick
+/** A pick within 5 ms of the detected beep is the detected beep: panning
+ *  away and back must not turn a plain confirm into a destructive re-run. */
+const SAME_BEEP_S = 0.005;
 
 export function MobileBeepReview() {
   const q = useBeepQueue();
@@ -54,8 +61,9 @@ export function MobileBeepReview() {
   const effective = draft ?? item.beep_time;
   const mediaAvailable = item.proxy_ready || item.snippet_ready;
 
+  const changed = draft != null && (item.beep_time == null || Math.abs(draft - item.beep_time) >= SAME_BEEP_S);
   const doConfirm = () => {
-    if (draft != null) setSheet("confirm"); // picking a new time is destructive
+    if (changed) setSheet("confirm"); // picking a new time is destructive
     else void q.confirm(item);
   };
 
@@ -89,7 +97,7 @@ export function MobileBeepReview() {
             onClick={doConfirm}
             className="btn-led-fill inline-flex min-h-11 items-center justify-center rounded-md px-5 disabled:opacity-40"
           >
-            {draft != null ? "Apply new time and confirm" : "Confirm beep"}
+            {changed ? "Apply new time and confirm" : "Confirm beep"}
           </button>
           <div className="flex gap-2">
             <button
@@ -144,7 +152,7 @@ export function MobileBeepReview() {
         confirmLabel="Apply and confirm"
         onConfirm={() => {
           setSheet(null);
-          void q.confirm(item, draft ?? undefined);
+          void q.confirm(item, changed ? draft! : undefined);
         }}
         onCancel={() => setSheet(null)}
       />
@@ -191,7 +199,7 @@ function MediaArea({
 }: {
   item: BeepQueueItem;
   draft: number | null;
-  onPick: (t: number) => void;
+  onPick: (t: number | null) => void;
   setError: (msg: string | null) => void;
 }) {
   if (item.proxy_ready) {
@@ -237,19 +245,27 @@ function SnippetPlayer({
 }: {
   item: BeepQueueItem;
   draft: number | null;
-  onPick: (t: number) => void;
+  onPick: (t: number | null) => void;
 }) {
   const [peaks, setPeaks] = useState<BeepSnippetPeaks | null>(null);
+  const [peaksFailed, setPeaksFailed] = useState(false);
+  const [playhead, setPlayhead] = useState<number | null>(null);
+  const [focusSpan, setFocusSpan] = useState<{ span: number; nonce: number } | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const pauseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setPeaks(null);
-    void api
+    setPeaksFailed(false);
+    api
       .getBeepSnippetPeaks(item.slug, item.stage_number, item.video_id)
       .then((p) => {
         if (!cancelled) setPeaks(p);
+      })
+      .catch(() => {
+        if (!cancelled) setPeaksFailed(true);
       });
     return () => {
       cancelled = true;
@@ -260,157 +276,111 @@ function SnippetPlayer({
     };
   }, [item.slug, item.stage_number, item.video_id]);
 
-  const playAroundBeep = () => {
-    if (!peaks || !audioRef.current) return;
-    const t = draft ?? item.beep_time ?? peaks.candidates[0]?.time;
-    if (t == null) return;
-    audioRef.current.currentTime = Math.max(0, t - peaks.snippet_start - PLAY_AROUND_S / 2);
-    void audioRef.current.play();
+  useEffect(
+    () => () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+    },
+    [],
+  );
+
+  if (peaksFailed) {
+    return (
+      <p className="text-sm text-muted" role="status">
+        The beep snippet did not load. Push from desktop again, or review this beep on desktop.
+      </p>
+    );
+  }
+  if (!peaks) {
+    return (
+      <div className="flex h-24 items-center justify-center text-xs text-muted">
+        <Loader2 className="size-4 animate-spin" aria-hidden /> Loading waveform...
+      </div>
+    );
+  }
+
+  const range = { start: peaks.snippet_start, end: peaks.snippet_start + peaks.duration };
+  const value = draft ?? item.beep_time ?? item.alt_candidates[0]?.time ?? range.start + peaks.duration / 2;
+  const alts = item.alt_candidates.filter((c) => item.beep_time == null || Math.abs(c.time - item.beep_time) >= 0.005);
+  const markers: ReticleMarker[] = [
+    ...(item.beep_time != null ? [{ time: item.beep_time, kind: "detected" as const }] : []),
+    ...alts.map((c) => ({ time: c.time, kind: "candidate" as const })),
+  ];
+  const jumpTo = (t: number | null) => {
+    onPick(t);
+    setFocusSpan((f) => ({ span: 1, nonce: (f?.nonce ?? 0) + 1 }));
+  };
+
+  const trackPlayhead = () => {
+    const el = audioRef.current;
+    if (!el || el.paused) {
+      setPlayhead(null);
+      rafRef.current = null;
+      return;
+    }
+    setPlayhead(range.start + el.currentTime);
+    rafRef.current = requestAnimationFrame(trackPlayhead);
+  };
+  const playFromLine = () => {
+    const el = audioRef.current;
+    if (!el) return;
+    el.currentTime = Math.max(0, value - range.start - PLAY_LEAD_S);
+    void el.play()?.then(() => {
+      if (rafRef.current == null) rafRef.current = requestAnimationFrame(trackPlayhead);
+    });
     if (pauseTimeoutRef.current != null) clearTimeout(pauseTimeoutRef.current);
     pauseTimeoutRef.current = setTimeout(() => {
       audioRef.current?.pause();
     }, PLAY_AROUND_S * 1000);
   };
 
-  const handleTap = (e: MouseEvent<HTMLDivElement>) => {
-    if (!peaks) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const fraction = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-    onPick(peaks.snippet_start + fraction * peaks.duration);
-  };
-
-  const handleKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (!peaks) return;
-    const current = draft ?? item.beep_time ?? peaks.snippet_start;
-    const clamp = (t: number) => Math.min(peaks.snippet_start + peaks.duration, Math.max(peaks.snippet_start, t));
-    if (e.key === "ArrowLeft") {
-      e.preventDefault();
-      onPick(clamp(current - NUDGE_S));
-    } else if (e.key === "ArrowRight") {
-      e.preventDefault();
-      onPick(clamp(current + NUDGE_S));
-    } else if (e.key === "Home") {
-      e.preventDefault();
-      onPick(peaks.snippet_start);
-    } else if (e.key === "End") {
-      e.preventDefault();
-      onPick(peaks.snippet_start + peaks.duration);
-    }
-  };
-
   return (
-    <div>
+    <div className="space-y-2">
       <audio
         ref={audioRef}
         src={api.beepSnippetAudioUrl(item.slug, item.stage_number, item.video_id)}
-        preload="metadata"
+        preload="auto"
       />
-      <div className="mb-2 flex items-center gap-2">
+      <p className="text-xs text-muted">Drag to move the beep under the red line. Pinch to zoom.</p>
+      <BeepReticle
+        peaks={peaks.peaks}
+        range={range}
+        value={value}
+        onChange={onPick}
+        markers={markers}
+        playhead={playhead}
+        focusSpan={focusSpan}
+        ariaLabel="Beep time - drag the waveform to put the beep under the line"
+      />
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={playAroundBeep}
-          disabled={!peaks}
-          className="min-h-11 rounded border border-rule px-3 text-sm text-ink disabled:opacity-40"
+          onClick={playFromLine}
+          className="min-h-11 rounded border border-rule px-3 text-sm text-ink"
         >
-          Play around beep
+          Play from line
         </button>
+        {item.beep_time != null ? (
+          <button
+            type="button"
+            onClick={() => jumpTo(null)}
+            aria-pressed={draft == null}
+            className="min-h-11 rounded border border-rule px-3 text-sm text-ink aria-pressed:border-ink-2"
+          >
+            Detected <span className="numeral">{item.beep_time.toFixed(2)}</span>
+          </button>
+        ) : null}
+        {alts.map((c) => (
+          <button
+            key={c.time}
+            type="button"
+            onClick={() => jumpTo(c.time)}
+            aria-pressed={draft != null && Math.abs(draft - c.time) < 0.005}
+            className="min-h-11 rounded border border-dashed border-rule px-3 text-sm text-ink aria-pressed:border-ink-2"
+          >
+            <span className="numeral">{c.time.toFixed(2)}</span>
+          </button>
+        ))}
       </div>
-      {peaks ? (
-        <div
-          role="slider"
-          tabIndex={0}
-          aria-label="Beep snippet waveform - tap to set the beep time"
-          aria-valuemin={peaks.snippet_start}
-          aria-valuemax={peaks.snippet_start + peaks.duration}
-          aria-valuenow={draft ?? item.beep_time ?? peaks.snippet_start}
-          onClick={handleTap}
-          onKeyDown={handleKeyDown}
-          className="relative h-24 w-full cursor-pointer overflow-hidden rounded border border-rule bg-bg"
-        >
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none" className="h-full w-full" aria-hidden>
-            {peaks.peaks.map((v, i) => {
-              const barW = 100 / peaks.peaks.length;
-              const h = Math.max(2, v * 100);
-              return (
-                <rect
-                  key={i}
-                  x={i * barW}
-                  y={100 - h}
-                  width={Math.max(0.5, barW - 0.5)}
-                  height={h}
-                  fill="var(--color-waveform-bar)"
-                />
-              );
-            })}
-          </svg>
-          {item.beep_time != null ? (
-            <Marker
-              time={item.beep_time}
-              snippetStart={peaks.snippet_start}
-              duration={peaks.duration}
-              label={`Detected ${item.beep_time.toFixed(3)}s`}
-              color="var(--color-waveform-beep)"
-              dashed
-            />
-          ) : null}
-          {draft != null ? (
-            <Marker
-              time={draft}
-              snippetStart={peaks.snippet_start}
-              duration={peaks.duration}
-              label={`Draft ${draft.toFixed(3)}s`}
-              color="var(--color-waveform-playhead)"
-              dashed={false}
-            />
-          ) : null}
-        </div>
-      ) : (
-        <div className="flex h-24 items-center justify-center text-xs text-muted">
-          <Loader2 className="size-4 animate-spin" aria-hidden /> Loading waveform...
-        </div>
-      )}
-      {item.alt_candidates.length > 0 ? (
-        <div className="mt-2 flex flex-wrap gap-2">
-          {item.alt_candidates.map((c) => (
-            <button
-              key={c.time}
-              type="button"
-              onClick={() => onPick(c.time)}
-              className="min-h-11 rounded border border-rule px-3 text-sm text-ink"
-            >
-              Use {c.time.toFixed(2)}s
-            </button>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function Marker({
-  time,
-  snippetStart,
-  duration,
-  label,
-  color,
-  dashed,
-}: {
-  time: number;
-  snippetStart: number;
-  duration: number;
-  label: string;
-  color: string;
-  dashed: boolean;
-}) {
-  const pct = Math.min(100, Math.max(0, ((time - snippetStart) / duration) * 100));
-  return (
-    <div
-      className="pointer-events-none absolute inset-y-0 border-l-2"
-      style={{ left: `${pct}%`, borderColor: color, borderStyle: dashed ? "dashed" : "solid" }}
-    >
-      <span className="absolute -top-0.5 left-1 whitespace-nowrap text-[0.625rem] text-ink">
-        {label}
-      </span>
     </div>
   );
 }

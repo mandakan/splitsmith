@@ -157,4 +157,38 @@ describe("MobileBeepReview", () => {
     expect(state.redetect).toHaveBeenCalledWith(expect.objectContaining({ video_id: "v1" }));
     expect(screen.getByRole("button", { name: /^confirm beep$/i })).toBeInTheDocument();
   });
+
+  it("a candidate chip moves the pick there; Detected puts it back", async () => {
+    const withAlt = item({ alt_candidates: [{ time: 7.5, confidence: 0.6 }] });
+    vi.mocked(hook.useBeepQueue).mockReturnValue(
+      hookState({ active: withAlt }) as unknown as ReturnType<typeof hook.useBeepQueue>,
+    );
+    render(<MobileBeepReview />);
+    fireEvent.click(await screen.findByRole("button", { name: "7.50" }));
+    expect(screen.getByRole("slider")).toHaveAttribute("aria-valuenow", "7.5");
+    expect(screen.getByRole("button", { name: /apply new time and confirm/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /detected 2\.00/i }));
+    expect(screen.getByRole("slider")).toHaveAttribute("aria-valuenow", "2");
+    expect(screen.getByRole("button", { name: /^confirm beep$/i })).toBeInTheDocument();
+  });
+
+  it("moving away and back to within 5 ms of the detected beep is a plain confirm", async () => {
+    const state = hookState();
+    vi.mocked(hook.useBeepQueue).mockReturnValue(state as unknown as ReturnType<typeof hook.useBeepQueue>);
+    render(<MobileBeepReview />);
+    await screen.findByRole("slider");
+    fireEvent.click(screen.getByRole("button", { name: /\+10 ms/i }));
+    fireEvent.click(screen.getByRole("button", { name: /-10 ms/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^confirm beep$/i }));
+    expect(screen.queryByText(DESTRUCTIVE_RERUN_WARNING)).toBeNull();
+    expect(state.confirm).toHaveBeenCalledWith(expect.objectContaining({ video_id: "v1" }));
+  });
+
+  it("a snippet whose peaks fail to load says so instead of spinning forever", async () => {
+    const { api } = await import("@/lib/api");
+    vi.mocked(api.getBeepSnippetPeaks).mockRejectedValueOnce(new Error("404"));
+    vi.mocked(hook.useBeepQueue).mockReturnValue(hookState() as unknown as ReturnType<typeof hook.useBeepQueue>);
+    render(<MobileBeepReview />);
+    expect(await screen.findByText(/beep snippet did not load/i)).toBeInTheDocument();
+  });
 });

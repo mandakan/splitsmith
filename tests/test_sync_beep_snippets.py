@@ -8,7 +8,8 @@ stop being pushed.
 
 Cases:
   1. An unreviewed primary video with a beep_time gets a snippet cut
-     around the beep, and the peaks JSON carries the expected shape.
+     over the whole beep search window (not just around the pick), and
+     the peaks JSON carries the expected shape at 10 ms resolution.
   2. A second run with unchanged inputs skips the snippet (input_hash
      match); changing ``beep_time`` regenerates it.
   3. A video that becomes reviewed gets its stale snippet files removed
@@ -106,10 +107,37 @@ def test_generates_snippet_for_unreviewed_video(tmp_path: Path):
     m4a = out / f"{video.video_id}.m4a"
     peaks = json.loads((out / f"{video.video_id}.peaks.json").read_text())
     assert m4a.stat().st_size > 0
-    assert peaks["snippet_start"] == pytest.approx(1.0)  # 6.0 - 5.0 margin
-    assert peaks["duration"] == pytest.approx(10.0, abs=1.0)  # margin both sides
+    # Default search window is 0..30 s; the 20 s source ends first.
+    assert peaks["snippet_start"] == pytest.approx(0.0)
+    assert peaks["duration"] == pytest.approx(20.0, abs=0.5)
     assert peaks["beep_time"] == 6.0
     assert len(peaks["peaks"]) == peaks["bins"]
+    assert peaks["bins"] >= 100 * 20  # 10 ms per bin so the phone can zoom
+
+
+def test_wrong_pick_does_not_hide_the_search_window(tmp_path: Path):
+    """The detector locked onto something late in the window. Before,
+    the snippet was pick +/- 5 s, so a real beep at 3 s was not in the
+    audio the phone could review at all."""
+    match_root, shooter_root, project, video = _seed(tmp_path, beep_time=16.0)
+    video.beep_window = (2.0, 18.0)
+    project.save(shooter_root)
+
+    assert generate_beep_snippets(match_root).generated == 1
+    peaks = json.loads((shooter_root / "beep_review" / f"{video.video_id}.peaks.json").read_text())
+    assert peaks["snippet_start"] == pytest.approx(2.0)
+    assert peaks["snippet_start"] + peaks["duration"] >= 19.5  # pick + margin, clipped by the source
+
+
+def test_candidate_outside_the_window_widens_the_snippet(tmp_path: Path):
+    match_root, shooter_root, project, video = _seed(tmp_path, beep_time=4.0)
+    video.beep_window = (10.0, 15.0)
+    project.save(shooter_root)
+
+    assert generate_beep_snippets(match_root).generated == 1
+    peaks = json.loads((shooter_root / "beep_review" / f"{video.video_id}.peaks.json").read_text())
+    assert peaks["snippet_start"] == pytest.approx(0.0)  # 4.0 - 5.0 margin, floored
+    assert peaks["duration"] == pytest.approx(15.0, abs=0.5)  # window end
 
 
 def test_skips_when_inputs_unchanged_and_regenerates_on_change(tmp_path: Path):

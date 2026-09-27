@@ -11734,8 +11734,9 @@ def create_app(
             raise HTTPException(status_code=404, detail="beep_snippet_not_available")
         # Read through to storage every request - desktop rewrites this object
         # under the same key when it regenerates a snippet (beep_time/candidates
-        # change), so mirror-once-then-serve-local would go stale. A few KB of
-        # JSON is cheap enough to fetch fresh each time.
+        # change), so mirror-once-then-serve-local would go stale. The JSON is
+        # 100 bins/s over the search window (tens of KB, a few hundred for a
+        # long multi-stage window), cheap enough to fetch fresh each time.
         return JSONResponse(json.loads(state.storage.read_bytes(key)))
 
     @app.get("/api/shooters/{slug}/stages/{stage_number}/audit")

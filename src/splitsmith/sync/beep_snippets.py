@@ -1,8 +1,9 @@
 """Generate beep review snippets desktop-side before a push (slice 3).
 
 For every unconfirmed queue-worthy video (primary or secondary, stage not
-skipped, beep not yet reviewed) this cuts a short mono AAC snippet around
-the beep candidates plus a peaks JSON for the same range, into
+skipped, beep not yet reviewed) this cuts a mono AAC snippet covering the
+beep search window (and every candidate) plus a peaks JSON for the same
+range, into
 ``<shooter_root>/beep_review/``. The push plan uploads whatever exists
 there; hosted serves it so a phone can review beeps on a mirror match.
 
@@ -27,10 +28,18 @@ from ..match_project import MatchProject, StageVideo
 from ..waveform import cache_path, ensure_peaks
 
 SNIPPET_MARGIN_S = 5.0
+# Matches BeepDetectConfig.search_window_s: with no derived window the
+# detector searches the first 30 s, so that is what the phone must see.
 DEFAULT_WINDOW_END_S = 30.0
 MIN_SNIPPET_S = 2.0
+# Peak resolution scales with the snippet (10 ms per bin) so the phone
+# picker can zoom to the beep's onset; PEAK_BINS is the floor.
 PEAK_BINS = 600
+PEAK_BINS_PER_S = 100
 SNIPPET_SAMPLE_RATE = 16000
+# Bumped when the snippet's shape changes so already-pushed snippets
+# regenerate on the next push. 2: whole search window, 10 ms peaks.
+SNIPPET_VERSION = 2
 
 
 class BeepSnippetReport(BaseModel):
@@ -41,21 +50,26 @@ class BeepSnippetReport(BaseModel):
 
 
 def _window(video: StageVideo) -> tuple[float, float]:
-    """Snippet range in source seconds: candidates and beep +/- margin;
-    else the video's own beep search window, if it has one; else the
-    default detection window from t=0."""
+    """Snippet range in source seconds: the video's beep search window
+    (its derived window, else the detector's default 0..30 s), widened to
+    cover every candidate and the beep +/- margin. The detector's pick is
+    what the phone is reviewing, so a wrong pick must never hide the
+    real beep outside the snippet."""
+    if video.beep_window is not None:
+        start, end = max(0.0, video.beep_window[0]), video.beep_window[1]
+    else:
+        start, end = 0.0, DEFAULT_WINDOW_END_S
     times = [c.time for c in (video.beep_candidates or [])]
     if video.beep_time is not None:
         times.append(video.beep_time)
     if times:
-        start = max(0.0, min(times) - SNIPPET_MARGIN_S)
-        end = max(times) + SNIPPET_MARGIN_S
-    elif video.beep_window is not None:
-        start = max(0.0, video.beep_window[0])
-        end = video.beep_window[1]
-    else:
-        start, end = 0.0, DEFAULT_WINDOW_END_S
+        start = min(start, max(0.0, min(times) - SNIPPET_MARGIN_S))
+        end = max(end, max(times) + SNIPPET_MARGIN_S)
     return start, max(end, start + MIN_SNIPPET_S)
+
+
+def _peak_bins(start: float, end: float) -> int:
+    return max(PEAK_BINS, int(round((end - start) * PEAK_BINS_PER_S)))
 
 
 def _input_hash(video: StageVideo, start: float, end: float) -> str:
@@ -65,6 +79,7 @@ def _input_hash(video: StageVideo, start: float, end: float) -> str:
         "candidates": [c.time for c in (video.beep_candidates or [])],
         "start": round(start, 3),
         "end": round(end, 3),
+        "version": SNIPPET_VERSION,
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
@@ -182,7 +197,8 @@ def _process_video(
     try:
         _cut(ffmpeg_binary, src, m4a, start, end - start, ["-c:a", "aac", "-b:a", "48k"])
         _cut(ffmpeg_binary, src, wav_tmp, start, end - start, [])
-        peaks = ensure_peaks(wav_tmp, PEAK_BINS)
+        bins = _peak_bins(start, end)
+        peaks = ensure_peaks(wav_tmp, bins)
         peaks_path.write_text(
             json.dumps(
                 {
@@ -190,7 +206,7 @@ def _process_video(
                     "duration": peaks.duration,
                     "sample_rate": peaks.sample_rate,
                     "bins": peaks.bins,
-                    "peaks": peaks.peaks,
+                    "peaks": [round(v, 3) for v in peaks.peaks],
                     "beep_time": video.beep_time,
                     "candidates": [
                         {"time": c.time, "confidence": c.confidence} for c in (video.beep_candidates or [])
@@ -214,5 +230,5 @@ def _process_video(
         # guessed one, so the temp wav's sidecar doesn't linger next to the
         # real ``<video_id>.peaks.json`` output.
         wav_tmp.unlink(missing_ok=True)
-        wav_cache = cache_path(wav_tmp, PEAK_BINS)
+        wav_cache = cache_path(wav_tmp, _peak_bins(start, end))
         wav_cache.unlink(missing_ok=True)
