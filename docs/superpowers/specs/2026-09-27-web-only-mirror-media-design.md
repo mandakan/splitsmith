@@ -1,7 +1,7 @@
 # Web-only mirror media (auto-sync v1.1)
 
 Date: 2026-09-27
-Status: design approved in conversation, awaiting spec review
+Status: implemented
 Builds on: `2026-09-27-auto-sync-reconciler-design.md` (v1, PR #1068)
 
 ## Goal
