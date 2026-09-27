@@ -11,7 +11,7 @@ the same state behind. ``_after_beep_reviewed`` evaluates the same
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from pathlib import Path
 from typing import Literal
 
@@ -70,11 +70,42 @@ def video_step(
     return "shot_detect"
 
 
+def step_input_key(
+    kind: StepKind,
+    project: MatchProject,
+    stage: StageEntry,
+    video: StageVideo,
+    *,
+    source_present: bool | None = None,
+) -> str:
+    """Everything a step's outcome depends on (#1069). A failure is
+    retried as soon as any of it changes: a moved beep, a stage time
+    fixed on the phone, a buffer setting, a relinked source, or a source
+    that was missing (volume unmounted) and is back. ``source_present``
+    is ``None`` when the caller did not look, and then stays out of the
+    key."""
+    parts = [f"beep={video.beep_time:.4f}", f"stage={stage.time_seconds:.4f}"]
+    if kind == "trim":
+        parts += [
+            f"pre={project.trim_pre_buffer_seconds:g}",
+            f"post={project.trim_post_buffer_seconds:g}",
+            f"src={video.path.as_posix()}",
+        ]
+        if source_present is not None:
+            parts.append(f"present={int(source_present)}")
+    return " ".join(parts)
+
+
 def plan_reconcile(
     projects: Mapping[str, MatchProject],
     audits: Mapping[str, Mapping[int, dict]],
     failures: Mapping[str, str],
+    *,
+    present_sources: Collection[tuple[str, str]] | None = None,
 ) -> list[ReconcileStep]:
+    """``present_sources`` holds ``(slug, video_id)`` for every video whose
+    source file is on disk (``present_sources_for``); ``None`` leaves
+    reachability out of the trim input key."""
     steps: list[ReconcileStep] = []
     for slug in sorted(projects):
         project = projects[slug]
@@ -92,7 +123,15 @@ def plan_reconcile(
                     slug=slug,
                     stage_number=stage.stage_number,
                     video_id=video.video_id,
-                    input_key=f"{video.beep_time:.4f}",
+                    input_key=step_input_key(
+                        kind,
+                        project,
+                        stage,
+                        video,
+                        source_present=(
+                            None if present_sources is None else (slug, video.video_id) in present_sources
+                        ),
+                    ),
                 )
                 if failures.get(step.key) == step.input_key:
                     continue
@@ -124,3 +163,25 @@ def load_reconcile_inputs(
                     continue
         audits[slug] = docs
     return projects, audits
+
+
+def present_sources_for(match_root: Path, projects: Mapping[str, MatchProject]) -> set[tuple[str, str]]:
+    """``(slug, video_id)`` of every video whose source file exists now.
+
+    A plain stat, never ``resolve_video_path``: that can mirror a source
+    from hosted storage, which a planning pass must not start."""
+    _, shooter_roots = load_match_or_legacy(match_root)
+    present: set[tuple[str, str]] = set()
+    for slug, project in projects.items():
+        root = shooter_roots.get(slug)
+        if root is None:
+            continue
+        for stage in project.stages:
+            for video in stage.videos:
+                path = video.path if video.path.is_absolute() else root / video.path
+                try:
+                    if path.exists():
+                        present.add((slug, video.video_id))
+                except OSError:
+                    continue
+    return present

@@ -216,7 +216,13 @@ from ..sync.auto_state import AutoRunSummary, load_auto_prefs, update_auto_prefs
 from ..sync.client import HostedSyncClient, SyncClientError
 from ..sync.plan import build_push_plan
 from ..sync.pull import plan_pull
-from ..sync.reconcile import ReconcileStep, load_reconcile_inputs, plan_reconcile, video_step
+from ..sync.reconcile import (
+    ReconcileStep,
+    load_reconcile_inputs,
+    plan_reconcile,
+    present_sources_for,
+    video_step,
+)
 from ..sync.run import format_sync_message
 from ..sync.run import run_sync as run_bidirectional_sync  # ..async_bridge.run_sync already owns this name
 from ..sync.state import load_sync_state
@@ -592,7 +598,9 @@ def _submit_reconcile_steps(state: AppState, match_root: Path) -> list[Reconcile
     """
     projects, audits = load_reconcile_inputs(match_root)
     failures = load_auto_prefs(match_root).reconcile_failures
-    steps = plan_reconcile(projects, audits, failures)
+    steps = plan_reconcile(
+        projects, audits, failures, present_sources=present_sources_for(match_root, projects)
+    )
     queued: list[ReconcileStep] = []
     for step in steps:
         dedupe: dict[str, Any] = {"video_id": step.video_id} if step.kind == "trim" else {}
