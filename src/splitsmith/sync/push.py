@@ -33,7 +33,7 @@ from .auto_state import load_auto_prefs
 from .base import save_base_doc
 from .beep_snippets import generate_beep_snippets
 from .client import HostedSyncClient, SyncClientError
-from .plan import build_push_plan, doc_identity_key, hash_doc_body
+from .plan import TRIMMED_SUFFIX, build_push_plan, doc_identity_key, hash_doc_body, web_key_for
 from .state import SyncedItem, SyncState, load_sync_state, save_sync_state
 
 logger = logging.getLogger(__name__)
@@ -217,6 +217,16 @@ def run_push(
             for key in list(sync_state.items)
             if "/beep_review/" in key and not _local_media_path(match_root, key).exists()
         ]
+        if not full_media:
+            # Web-only mirror (v1.1): a full trim whose rendition is on
+            # hosted is a redundant copy there; the desktop keeps the
+            # original, and full media on re-uploads it (its key leaves
+            # sync_state here). A clip with no pushed rendition keeps it.
+            stale += [
+                key
+                for key in list(sync_state.items)
+                if key.endswith(TRIMMED_SUFFIX) and web_key_for(key) in sync_state.items
+            ]
         for key in stale:
             try:
                 client.delete_media(plan.match_id, key)

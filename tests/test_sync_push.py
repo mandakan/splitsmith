@@ -788,3 +788,57 @@ def test_push_gc_failure_keeps_the_key_for_retry(tmp_path: Path, monkeypatch: py
 
     assert report.media_deleted == 0
     assert m4a_key in load_sync_state(root).items
+
+
+# --- web-only mirrors (v1.1): full trims leave hosted once the rendition is there
+
+
+def _add_web(root: Path) -> None:
+    for trim in (root / "shooters").glob("*/trimmed/*_trimmed.mp4"):
+        trim.with_name(trim.name.replace("_trimmed.mp4", "_web.mp4")).write_bytes(b"w" * 32)
+
+
+def test_web_only_push_removes_full_trims_whose_rendition_is_on_hosted(tmp_path: Path) -> None:
+    root, _ = _build_match(tmp_path)
+    _add_web(root)
+    fake = _FakeHosted()
+    run_push(root, client=fake.clients(), full_media=True)
+    trim_keys = [k for k in load_sync_state(root).items if k.endswith("_trimmed.mp4")]
+    assert trim_keys
+
+    report = run_push(root, client=fake.clients(), full_media=False)
+
+    for key in trim_keys:
+        assert f"media_delete:{key}" in fake.calls
+        assert key not in load_sync_state(root).items
+    assert report.media_deleted == len(trim_keys)
+    assert not any(c.startswith("media_delete:") and c.endswith("_web.mp4") for c in fake.calls)
+
+
+def test_a_full_trim_without_a_pushed_rendition_is_never_removed(tmp_path: Path) -> None:
+    root, _ = _build_match(tmp_path)
+    fake = _FakeHosted()
+    run_push(root, client=fake.clients(), full_media=True)
+    run_push(root, client=fake.clients(), full_media=False)
+    assert not any(c.startswith("media_delete:") for c in fake.calls)
+
+
+def test_full_trim_removal_failure_is_retried_and_full_media_reuploads(tmp_path: Path) -> None:
+    root, _ = _build_match(tmp_path)
+    _add_web(root)
+    fake = _FakeHosted()
+    run_push(root, client=fake.clients(), full_media=True)
+    trim_keys = [k for k in load_sync_state(root).items if k.endswith("_trimmed.mp4")]
+
+    fake.delete_status = 500
+    run_push(root, client=fake.clients(), full_media=False)
+    assert set(trim_keys) <= set(load_sync_state(root).items)
+
+    fake.delete_status = 200
+    run_push(root, client=fake.clients(), full_media=False)
+    assert not set(trim_keys) & set(load_sync_state(root).items)
+
+    fake.calls.clear()
+    run_push(root, client=fake.clients(), full_media=True)
+    for key in trim_keys:
+        assert f"media_create:{key}" in fake.calls
