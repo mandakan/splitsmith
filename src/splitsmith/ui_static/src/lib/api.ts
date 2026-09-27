@@ -3957,27 +3957,18 @@ export const api = {
       {
       method: "POST",
       json: {
+        // Spread, never a field list: a field listed by hand here is a field
+        // a new option can be missing from (api.exportBodies.test.ts). An
+        // ``undefined`` field is omitted by JSON.stringify, so the server's
+        // default holds; ``null`` goes through as-is (``overlay_max_*``:
+        // "match source"; ``secondary_video_ids``: exclude every cam).
+        ...opts,
         write_trim: opts.write_trim ?? true,
         write_csv: opts.write_csv ?? true,
         write_fcpxml: opts.write_fcpxml ?? true,
         write_report: opts.write_report ?? true,
         write_overlay: opts.write_overlay ?? false,
         overlay_codec: opts.overlay_codec ?? "auto",
-        // Forward ``null`` to keep "match source" but only attach the key
-        // when the caller set something explicit, so the server's defaults
-        // remain authoritative when the UI doesn't care.
-        ...(opts.overlay_max_height !== undefined
-          ? { overlay_max_height: opts.overlay_max_height }
-          : {}),
-        ...(opts.overlay_max_fps !== undefined
-          ? { overlay_max_fps: opts.overlay_max_fps }
-          : {}),
-        // ``undefined`` => omit (server picks the legacy "all cams with a
-        // beep" default); ``null`` / ``[]`` are forwarded as-is so the
-        // caller can explicitly exclude all secondaries.
-        ...(opts.secondary_video_ids !== undefined
-          ? { secondary_video_ids: opts.secondary_video_ids }
-          : {}),
       },
     }),
 
@@ -3991,72 +3982,16 @@ export const api = {
     request<Job>(`/api/shooters/${encodeURIComponent(slug)}/export/match`, {
       method: "POST",
       json: {
-        stage_numbers: payload.stage_numbers,
+        // Spread, never a field list: the hand-written list this replaced
+        // silently dropped the title page, closing card and summary hold
+        // (api.exportBodies.test.ts). ``undefined`` fields are omitted by
+        // JSON.stringify, so the server's defaults hold for them.
+        ...payload,
         head_pad_seconds: payload.head_pad_seconds ?? 5.0,
         tail_pad_seconds: payload.tail_pad_seconds ?? 5.0,
         include_secondaries: payload.include_secondaries ?? true,
         include_overlay: payload.include_overlay ?? true,
         overlay_codec: payload.overlay_codec ?? "auto",
-        ...(payload.overlay_max_height !== undefined
-          ? { overlay_max_height: payload.overlay_max_height }
-          : {}),
-        ...(payload.overlay_max_fps !== undefined
-          ? { overlay_max_fps: payload.overlay_max_fps }
-          : {}),
-        ...(payload.project_name !== undefined
-          ? { project_name: payload.project_name }
-          : {}),
-        ...(payload.pip_layout !== undefined
-          ? { pip_layout: payload.pip_layout }
-          : {}),
-        ...(payload.output_format !== undefined
-          ? { output_format: payload.output_format }
-          : {}),
-        ...(payload.transition_kind !== undefined
-          ? { transition_kind: payload.transition_kind }
-          : {}),
-        ...(payload.transition_duration_seconds !== undefined
-          ? { transition_duration_seconds: payload.transition_duration_seconds }
-          : {}),
-        ...(payload.title_kind !== undefined
-          ? { title_kind: payload.title_kind }
-          : {}),
-        ...(payload.title_duration_seconds !== undefined
-          ? { title_duration_seconds: payload.title_duration_seconds }
-          : {}),
-        ...(payload.intro_path !== undefined
-          ? { intro_path: payload.intro_path }
-          : {}),
-        ...(payload.outro_path !== undefined
-          ? { outro_path: payload.outro_path }
-          : {}),
-        ...(payload.youtube_sidecar !== undefined
-          ? { youtube_sidecar: payload.youtube_sidecar }
-          : {}),
-        ...(payload.description_lead !== undefined
-          ? { description_lead: payload.description_lead }
-          : {}),
-        ...(payload.youtube_preset !== undefined
-          ? { youtube_preset: payload.youtube_preset }
-          : {}),
-        ...(payload.youtube_upload !== undefined
-          ? { youtube_upload: payload.youtube_upload }
-          : {}),
-        ...(payload.youtube_privacy !== undefined
-          ? { youtube_privacy: payload.youtube_privacy }
-          : {}),
-        ...(payload.youtube_playlist !== undefined
-          ? { youtube_playlist: payload.youtube_playlist }
-          : {}),
-        ...(payload.youtube_playlist_id !== undefined
-          ? { youtube_playlist_id: payload.youtube_playlist_id }
-          : {}),
-        ...(payload.youtube_publish_at !== undefined
-          ? { youtube_publish_at: payload.youtube_publish_at }
-          : {}),
-        ...(payload.youtube_notify_subscribers !== undefined
-          ? { youtube_notify_subscribers: payload.youtube_notify_subscribers }
-          : {}),
       },
     }),
 
@@ -4079,18 +4014,10 @@ export const api = {
     request<Job>("/api/match/compare-export", {
       method: "POST",
       json: {
-        stage_numbers: payload.stage_numbers,
-        audio_from: payload.audio_from,
-        ...(payload.cameras !== undefined ? { cameras: payload.cameras } : {}),
-        ...(payload.canvas_width !== undefined
-          ? { canvas_width: payload.canvas_width }
-          : {}),
-        ...(payload.canvas_height !== undefined
-          ? { canvas_height: payload.canvas_height }
-          : {}),
-        ...(payload.output_name !== undefined
-          ? { output_name: payload.output_name }
-          : {}),
+        // Spread, never a field list: the hand-written list this replaced
+        // silently dropped every card, the overlay and the summary hold
+        // (api.exportBodies.test.ts). ``undefined`` fields are omitted.
+        ...payload,
       },
     }),
 

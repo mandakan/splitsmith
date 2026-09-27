@@ -177,6 +177,13 @@ share. Every field defaults and ``extra="ignore"`` is set, so a body
 saved before a new option shipped loads with that option at its default:
 adding an option means adding a defaulted field here, a column in
 ``lib/exportPresets.settingsToBody`` / ``applyBody``, and nothing else.
+The export wrappers in ``lib/api.ts`` (``exportMatch``, ``exportStage``,
+``exportCompareGrid``) spread their payload and never list fields: a
+hand-written list silently dropped the title page, closing card and
+summary hold from every UI export in 0.42.0 while the page tests, which
+mock the wrappers, stayed green. ``api.exportBodies.test.ts`` types each
+payload ``Required<...>`` so a new request field fails the typecheck
+until it is shown to reach the wire.
 Presets are per user (``export_presets`` table hosted, the JSON file
 locally) and never a ``state_docs`` kind: a per-match kind would enter
 the sync manifest. Match-specific fields (stage selection, the title

@@ -76,6 +76,17 @@ def stage_file_base(stage_number: int, stage_name: str) -> str:
     return f"stage{stage_number}_{slugify(stage_name, fallback='stage')}"
 
 
+def stage_display_name(stage_number: int, stage_name: str) -> str:
+    """The name a viewer sees for a stage: its own name, else ``Stage N``.
+
+    The scoreboard often has no stage names, and a blank reached the
+    slate as a card with only its round count. Every card, chapter and
+    clip name goes through this; file names do not (``stage_file_base``
+    keeps the stored name so a re-export finds the trims it cut).
+    """
+    return stage_name.strip() or f"Stage {stage_number}"
+
+
 def match_file_base(project_name: str) -> str:
     """The stem of every match-level export artefact.
 

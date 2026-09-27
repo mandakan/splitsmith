@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Literal
 
 from ..composition import MatchTitle, TitleCard, TitleStyle
+from ..export_naming import stage_display_name
 from ..overlay_card import build_card_still, build_lower_third, lower_third_filters
 from ..overlay_clock import clock_common_options, clock_text, elapsed_text_option
 from ..overlay_layout import Anchor, CellScale, anchor_ffmpeg_expr
@@ -627,7 +628,7 @@ def build_stage_plans(
         plans.append(
             GridStagePlan(
                 stage_number=stage_number,
-                stage_name=stage_name or f"Stage {stage_number}",
+                stage_name=stage_display_name(stage_number, stage_name),
                 tiles=tuple(tiles),
                 duration_seconds=duration,
                 audio_label=audio_label,
