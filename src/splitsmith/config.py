@@ -407,6 +407,13 @@ class OutputConfig(BaseModel):
     # falls back to ``libx264`` everywhere else. Set to a specific encoder
     # name to override.
     trim_audit_encoder: str = "auto"
+    # Rendered MP4 exports keep each encoded stage and card segment under
+    # ``<cache_dir>/render-segments`` (``splitsmith.segment_cache``), so a
+    # re-export encodes only what changed and then stitches. Least
+    # recently used segments go past this many gigabytes; 0 turns the
+    # cache off. One 8-stage 2.7K/50 fps match at the YouTube preset is
+    # about 4 GB.
+    render_cache_gb: float = 20.0
 
 
 class ProxyConfig(BaseModel):

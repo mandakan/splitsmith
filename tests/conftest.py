@@ -14,6 +14,9 @@ from splitsmith.compare.project_loader import trim_path_for_video
 # Desktop auto-sync (spec 2026-09-27) polls hosted from a background task;
 # no test wants that loop. Tests that exercise the service opt back in.
 os.environ.setdefault("SPLITSMITH_AUTO_SYNC", "0")
+# The rendered-segment cache lives under the real runtime cache dir (not
+# isolated, see below); no test should fill it. Cache tests pass their own.
+os.environ.setdefault("SPLITSMITH_RENDER_CACHE", "0")
 from splitsmith.match_model import Match, MatchStageDefinition
 from splitsmith.match_project import MatchProject, StageEntry, StageVideo
 
