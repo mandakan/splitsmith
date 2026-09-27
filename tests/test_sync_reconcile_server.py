@@ -7,7 +7,7 @@ from pathlib import Path
 
 from splitsmith.match_project import MatchProject
 from splitsmith.sync.auto_state import load_auto_prefs
-from splitsmith.sync.reconcile import ReconcileStep
+from splitsmith.sync.reconcile import load_reconcile_inputs, plan_reconcile, present_sources_for
 from splitsmith.ui import server as server_mod
 from splitsmith.ui.jobs import Job, JobStatus
 
@@ -54,13 +54,16 @@ def test_submit_reconcile_steps_queues_a_trim_for_a_pulled_confirm(tmp_path: Pat
 def test_failed_reconcile_step_is_recorded_and_skipped(tmp_path: Path, monkeypatch) -> None:
     client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
     state = client.app.state.splitsmith_state
-    video_id = _untrim_stage_one(project_root)
-    step = ReconcileStep(kind="trim", slug="me", stage_number=1, video_id=video_id, input_key="5.0000")
+    _untrim_stage_one(project_root)
+    projects, audits = load_reconcile_inputs(project_root)
+    (step,) = plan_reconcile(
+        projects, audits, {}, present_sources=present_sources_for(project_root, projects)
+    )
     state.reconcile_jobs[server_mod._reconcile_key("m-f", "trim", "me", 1)] = (project_root, step)
     failed = _job("jf", "trim", JobStatus.FAILED)
     failed.match_id, failed.shooter_slug, failed.stage_number = "m-f", "me", 1
     server_mod._record_reconcile_outcome(state, failed)
-    assert load_auto_prefs(project_root).reconcile_failures == {step.key: "5.0000"}
+    assert load_auto_prefs(project_root).reconcile_failures == {step.key: step.input_key}
     assert state.reconcile_jobs == {}
 
     # The next pass skips the step while its inputs are unchanged.
@@ -71,9 +74,6 @@ def test_failed_reconcile_step_is_recorded_and_skipped(tmp_path: Path, monkeypat
         return _job("jx", kw["kind"], JobStatus.PENDING)
 
     monkeypatch.setattr(state.jobs, "submit", fake_submit)
-    project = MatchProject.load(project_root / "shooters" / "me")
-    beep = project.stage(1).primary().beep_time
-    assert f"{beep:.4f}" == "5.0000", "seed beep moved; update input_key above"
     with _match_context(project_root):
         server_mod._submit_reconcile_steps(state, project_root)
     assert submitted == []
@@ -103,7 +103,8 @@ def test_a_step_that_fails_before_submit_returns_is_still_memoized(tmp_path: Pat
             server_mod._submit_reconcile_steps(state, project_root)
     finally:
         server_mod.current_match_id.reset(id_token)
-    assert list(load_auto_prefs(project_root).reconcile_failures.values()) == ["5.0000"]
+    (recorded,) = load_auto_prefs(project_root).reconcile_failures.values()
+    assert recorded.startswith("beep=5.0000 ")
     assert state.reconcile_jobs == {}
 
 
