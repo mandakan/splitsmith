@@ -69,6 +69,7 @@ export const KIND_ICON: Record<string, ReactNode> = {
   model_download: <CloudDownload className="size-3.5" />,
   generate_proxy: <Film className="size-3.5" />,
   sync_match: <CloudUpload className="size-3.5" />,
+  auto_sync: <CloudUpload className="size-3.5" />,
 };
 
 

@@ -292,3 +292,106 @@ def test_pull_materializes_metadata_only_audit_doc_with_no_local_file(
 
     server_doc = client.get(f"/api/matches/{match_id}/shooters/{SLUG}/stages/1/audit").json()
     assert server_doc["needs_attention"]["flagged"] is True
+
+
+def test_phone_beep_confirm_reaches_the_desktop_reconciler(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+    tmp_path: Path,
+) -> None:
+    """Desktop auto-sync end to end (spec 2026-09-27), minus ffmpeg: a beep
+    confirmed on the hosted mirror moves the fingerprint, the desktop
+    service notices on its next poll, the auto_sync job pulls the confirm,
+    and the reconciler asks for the trim that hosted never cuts for a
+    mirror. Both halves run for real: the hosted routes over TestClient,
+    the desktop's service, core, job registry, run_sync and reconciler.
+
+    Local and hosted mode cannot share a process (mode is env-driven), so
+    the desktop job body here is run_sync + the reconciler directly rather
+    than the local server's ``_run_sync_match``; that glue has its own
+    tests in ``test_sync_reconcile_server.py``.
+    """
+    import asyncio
+    import threading
+
+    from splitsmith.sync.reconcile import load_reconcile_inputs, plan_reconcile
+    from splitsmith.ui.auto_sync import AutoSyncService
+    from splitsmith.ui.jobs import JobRegistry
+    from splitsmith.user_config import GlobalPrefs
+
+    client, sender, captured = hosted_app_with_storage
+    match_root, _, _ = _build_local_match(tmp_path)
+    shooter_root = match_model.Match.shooter_root(match_root, SLUG)
+    project = MatchProject.load(shooter_root)
+    video = project.stages[0].videos[0]
+    video.beep_time = 3.0
+    video.beep_reviewed = False
+    video.processed = {"beep": True, "trim": False, "shot_detect": False}
+    project.save(shooter_root)
+    for trimmed in (shooter_root / "trimmed").iterdir():
+        trimmed.unlink()  # a stage the desktop has not trimmed yet
+
+    login(client, sender, EMAIL)
+    client.get("/api/me/recent-projects")
+    storage: S3Storage = captured["storage"]
+    raw_token = client.post("/api/me/desktop-tokens", json={"name": "auto box"}).json()["token"]
+    sync_http = TestClient(
+        client.app,
+        base_url="http://testserver",
+        headers={"Authorization": f"Bearer {raw_token}"},
+        follow_redirects=False,
+    )
+    sync_client = HostedSyncClient(
+        http=sync_http, media_http=httpx.Client(transport=httpx.MockTransport(_media_handler(storage)))
+    )
+    run_sync(match_root, client=sync_client)
+    match_id = match_model.Match.load(match_root).match_id
+
+    # The phone confirms the detected beep as-is (beep_time unchanged).
+    resp = client.post(
+        f"/api/matches/{match_id}/match/beep-queue/confirm",
+        json={"slug": SLUG, "stage_number": 1, "video_id": video.video_id},
+    )
+    assert resp.status_code == 200, resp.text
+
+    steps: list = []
+    ran = threading.Event()
+
+    def auto_sync_body(handle) -> None:
+        run_sync(match_root, client=sync_client)
+        projects, audits = load_reconcile_inputs(match_root)
+        steps.extend(plan_reconcile(projects, audits, {}))
+        ran.set()
+
+    jobs = JobRegistry(max_concurrent=1)
+    jobs.bodies.register("auto_sync", auto_sync_body)
+
+    class _Matches:
+        def refresh_from_recent_projects(self) -> int:
+            return 1
+
+        def known_ids(self) -> list[str]:
+            return [match_id]
+
+        def resolve(self, mid: str) -> Path:
+            return match_root
+
+    async def submit(mid: str, root: Path) -> None:
+        await jobs.submit(kind="auto_sync")
+
+    service = AutoSyncService(
+        jobs=jobs,
+        matches=_Matches(),
+        submit_auto_sync=submit,
+        load_prefs=lambda: GlobalPrefs(hosted_base_url="http://testserver", hosted_token=raw_token),
+        fetch_fingerprints=lambda prefs: sync_client.get_fingerprints(),
+        clock=lambda: 1000.0,
+    )
+    service._started = True  # no startup pull: the poll alone must find the change
+    asyncio.run(service.tick())
+    assert ran.wait(timeout=10.0), "the poll did not trigger an auto_sync"
+
+    pulled = MatchProject.load(shooter_root).stages[0].videos[0]
+    assert pulled.beep_reviewed is True
+    assert [(s.kind, s.slug, s.stage_number, s.video_id) for s in steps] == [
+        ("trim", SLUG, 1, video.video_id)
+    ]

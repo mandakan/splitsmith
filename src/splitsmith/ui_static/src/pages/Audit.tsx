@@ -1231,6 +1231,30 @@ export function Audit() {
         }
         return true;
       } catch (err) {
+        // 409: the stage changed under this page (a sync pull from the
+        // phone, another tab). Reload rather than overwrite; same rule as
+        // MobileAudit (spec 2026-09-27 s5).
+        if (err instanceof ApiError && err.status === 409) {
+          try {
+            const fresh = await api.getStageAudit(slug, stageNumber);
+            setAudit(fresh);
+            setMarkers(deriveMarkers(fresh));
+            sessionEventsRef.current = [];
+            isDirtyRef.current = false;
+            setSaveStatus({
+              kind: "error",
+              message:
+                "This stage changed on another device. Reloaded it; your unsaved edits were discarded.",
+            });
+          } catch (reloadErr) {
+            const detail = reloadErr instanceof ApiError ? reloadErr.detail : String(reloadErr);
+            setSaveStatus({
+              kind: "error",
+              message: `Save conflicted and the reload failed. Check your connection and retry (${detail}).`,
+            });
+          }
+          return false;
+        }
         const message = err instanceof ApiError ? err.detail : String(err);
         setSaveStatus({ kind: "error", message });
         return false;

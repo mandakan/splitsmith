@@ -932,3 +932,103 @@ def test_retry_rebinds_original_match_context_regardless_of_ambient_state() -> N
     assert _wait_until(lambda: reg.get(new.id).status == JobStatus.SUCCEEDED)
 
     assert seen == [("match-a", sentinel_root), ("match-a", sentinel_root)]
+
+
+def test_find_active_scopes_by_calling_match() -> None:
+    """A shooter slug repeats across matches (the owner is in every one),
+    so a lookup made in match A's context must not adopt match B's job.
+    Auto-sync processes background matches, which makes this reachable."""
+    from splitsmith.ui.server import current_match_id
+
+    reg = _Sync(JobRegistry(max_concurrent=1))
+    release = threading.Event()
+
+    def work(_handle):
+        release.wait(timeout=5.0)
+
+    token = current_match_id.set("match-b")
+    try:
+        job_b = reg.submit(kind="trim", fn=work, stage_number=3, shooter_slug="me", video_id="v1")
+    finally:
+        current_match_id.reset(token)
+    try:
+        assert job_b.match_id == "match-b"
+        token = current_match_id.set("match-a")
+        try:
+            assert reg.find_active(kind="trim", stage_number=3, shooter_slug="me", video_id="v1") is None
+        finally:
+            current_match_id.reset(token)
+        token = current_match_id.set("match-b")
+        try:
+            found = reg.find_active(kind="trim", stage_number=3, shooter_slug="me", video_id="v1")
+            assert found is not None and found.id == job_b.id
+        finally:
+            current_match_id.reset(token)
+        # No match context: today's behaviour, match-agnostic.
+        assert reg.find_active(kind="trim", stage_number=3, shooter_slug="me", video_id="v1") is not None
+    finally:
+        release.set()
+
+
+def test_terminal_listener_sees_each_job_once_and_cannot_break_it() -> None:
+    reg = JobRegistry(max_concurrent=1)
+    seen: list[tuple[str, str]] = []
+    reg.add_terminal_listener(lambda job: seen.append((job.kind, job.status.value)))
+
+    def boom(_job):
+        raise RuntimeError("listener bug")
+
+    reg.add_terminal_listener(boom)
+    sync = _Sync(reg)
+
+    def fail(_handle):
+        raise ValueError("x")
+
+    ok = sync.submit(kind="k_ok", fn=lambda h: None)
+    bad = sync.submit(kind="k_bad", fn=fail)
+    assert _wait_until(lambda: len(seen) == 2)
+    assert sorted(seen) == [("k_bad", "failed"), ("k_ok", "succeeded")]
+    assert sync.get(ok.id).status.value == "succeeded"
+    assert sync.get(bad.id).status.value == "failed"
+
+
+def test_cancelling_a_pending_job_reaches_the_terminal_listeners() -> None:
+    reg = JobRegistry(max_concurrent=1)
+    seen: list[tuple[str, str]] = []
+    reg.add_terminal_listener(lambda job: seen.append((job.id, job.status.value)))
+    sync = _Sync(reg)
+    release = threading.Event()
+    running = sync.submit(kind="k_block", fn=lambda h: release.wait(timeout=5.0))
+    queued = sync.submit(kind="k_queued", fn=lambda h: None)
+    try:
+        assert sync.get(queued.id).status.value == "pending"
+        sync.cancel(queued.id)
+        assert _wait_until(lambda: (queued.id, "cancelled") in seen)
+    finally:
+        release.set()
+        assert _wait_until(lambda: (running.id, "succeeded") in seen)
+
+
+def test_find_active_still_sees_a_job_whose_match_is_unknown() -> None:
+    """A job submitted without a match context (a boot-time resume, a test
+    shim) has match_id None. A match-scoped lookup cannot rule it out, so
+    it must still dedupe against it rather than start a racing duplicate."""
+    from splitsmith.ui.server import current_match_id
+
+    reg = _Sync(JobRegistry(max_concurrent=1))
+    release = threading.Event()
+
+    def work(_handle):
+        release.wait(timeout=5.0)
+
+    job = reg.submit(kind="detect_beep", fn=work, stage_number=1, shooter_slug="me", video_id="v1")
+    try:
+        assert job.match_id is None
+        token = current_match_id.set("match-a")
+        try:
+            found = reg.find_active(kind="detect_beep", stage_number=1, shooter_slug="me", video_id="v1")
+        finally:
+            current_match_id.reset(token)
+        assert found is not None and found.id == job.id
+    finally:
+        release.set()

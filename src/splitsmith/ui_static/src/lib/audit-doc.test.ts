@@ -93,3 +93,19 @@ describe("shot id round-trip", () => {
     expect(doc.shots[0].candidate_number).toBe(37);
   });
 });
+
+describe("audit revision round-trip (spec 2026-09-27)", () => {
+  it("carries the loaded doc's _version into the save payload", () => {
+    // The server refuses a save whose _version no longer matches the
+    // stored doc (a sync pull landed under the open page). That only
+    // works if the token the GET returned reaches the PUT.
+    const doc = buildAuditJson({
+      base: { shots: [], _version: "abc123def4567890" } as never,
+      stage,
+      primaryBeepInClip: 5,
+      markers: [],
+      appendEvents: [],
+    });
+    expect((doc as unknown as { _version?: string })._version).toBe("abc123def4567890");
+  });
+});

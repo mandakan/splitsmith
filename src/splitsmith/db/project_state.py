@@ -24,10 +24,11 @@ uses ``postgresql+asyncpg://``.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -251,6 +252,31 @@ class ProjectStateStore:
                 )
             ).all()
         return [DocMeta(*row) for row in rows]
+
+    async def list_fingerprints(self, kinds: Collection[str]) -> list[tuple[str, int, int]]:
+        """``(match_id, doc_count, version_sum)`` per match, over ``kinds``.
+
+        The desktop auto-sync change signal: ``version`` only increases, so
+        any write moves the sum and any insert moves the count. One grouped
+        query for all of the user's matches, no doc payloads.
+        """
+        async with self._session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(
+                        StateDocRow.match_id,
+                        func.count(StateDocRow.id),
+                        func.coalesce(func.sum(StateDocRow.version), 0),
+                    )
+                    .where(
+                        StateDocRow.user_id == self._user_id,
+                        StateDocRow.doc_kind.in_(list(kinds)),
+                    )
+                    .group_by(StateDocRow.match_id)
+                    .order_by(StateDocRow.match_id)
+                )
+            ).all()
+        return [(str(m), int(c), int(v)) for m, c, v in rows]
 
     async def delete_shooter(self, match_id: str, slug: str) -> int:
         """Delete one shooter's docs within a match; return the row count.

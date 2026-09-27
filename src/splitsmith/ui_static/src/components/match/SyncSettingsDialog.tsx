@@ -34,7 +34,7 @@
  * convention).
  */
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, CloudUpload } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Portal } from "@/components/ui/Portal";
+import { Segmented } from "@/components/ui/Segmented";
 import { useDialogFocus } from "@/lib/dialogFocus";
 import { api, apiErrorText, type HostedSyncSettings } from "@/lib/api";
 
@@ -73,6 +74,32 @@ export function SyncSettingsDialog({
   const [error, setError] = useState<string | null>(null);
 
   const tokenAlreadySet = settings?.token_set ?? false;
+
+  // Machine-level auto-sync switch (spec 2026-09-27). Null until loaded,
+  // and stays null against a sidecar without the route: no control then.
+  const [globalAuto, setGlobalAuto] = useState<boolean | null>(null);
+  useEffect(() => {
+    let alive = true;
+    api
+      .getAutoSync()
+      .then((a) => {
+        if (alive) setGlobalAuto(a.global_enabled);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  async function handleGlobalAuto(on: boolean) {
+    setError(null);
+    try {
+      const res = await api.setGlobalAutoSync(on);
+      setGlobalAuto(res.global_enabled);
+    } catch (e) {
+      setError(apiErrorText(e, "Could not change auto-sync."));
+    }
+  }
 
   async function handleSave() {
     setError(null);
@@ -194,6 +221,20 @@ export function SyncSettingsDialog({
                 ) : null}
               </div>
             </details>
+            {globalAuto !== null ? (
+              <div className="flex items-center justify-between gap-3 border-t border-rule pt-3">
+                <span className="text-sm text-ink-2">Auto-sync on this computer</span>
+                <Segmented
+                  label="Auto-sync on this computer"
+                  value={globalAuto ? "on" : "off"}
+                  options={[
+                    { value: "on", label: "On" },
+                    { value: "off", label: "Off" },
+                  ]}
+                  onChange={(v) => void handleGlobalAuto(v === "on")}
+                />
+              </div>
+            ) : null}
           </CardContent>
 
           <div className="flex justify-end gap-2 border-t border-rule p-4">

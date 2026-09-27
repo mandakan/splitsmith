@@ -463,3 +463,70 @@ def test_whoami_404s_in_local_mode() -> None:
     app = create_app()
     with TestClient(app) as client:
         assert client.get("/api/sync/whoami").status_code == 404
+
+
+FINGERPRINTS_URL = "/api/sync/fingerprints"
+
+
+def test_fingerprints_move_with_a_put_and_ignore_export_runs(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The desktop wants a pull exactly when (doc_count, version_sum) over
+    the pullable kinds differs from its own doc_versions. An export_runs
+    write must not move it: the desktop would wake into a pull that
+    finds nothing."""
+    import asyncio
+
+    from sqlalchemy import select as _select
+
+    from splitsmith.db import ProjectStateStore, create_engine, sessionmaker
+    from splitsmith.db.models import User
+
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    assert client.post(CREATE_URL, json={"match_id": "m1", "name": "Match 1"}).status_code == 200
+    project_doc = MatchProject(name="Anna").model_dump(mode="json")
+    assert _put_doc(client, "m1", "project/anna", body=project_doc, expected_version=0).status_code == 200
+
+    first = client.get(FINGERPRINTS_URL)
+    assert first.status_code == 200, first.text
+    assert first.json() == {"matches": [{"match_id": "m1", "doc_count": 1, "version_sum": 1}]}
+
+    assert _put_doc(client, "m1", "project/anna", body=project_doc, expected_version=1).status_code == 200
+    assert client.get(FINGERPRINTS_URL).json()["matches"] == [
+        {"match_id": "m1", "doc_count": 1, "version_sum": 2}
+    ]
+
+    engine = create_engine(_db_url_for(client))
+    sf = sessionmaker(engine)
+
+    async def _seed_export_runs() -> None:
+        async with sf() as s:
+            user_id = (
+                (await s.execute(_select(User).where(User.email == "owner@example.com"))).scalar_one().id
+            )
+        store = ProjectStateStore(sf, user_id=user_id)
+        await store.save_export_runs("m1", "anna", {"schema_version": 1, "runs": []}, expected_version=0)
+
+    asyncio.run(_seed_export_runs())
+    assert client.get(FINGERPRINTS_URL).json()["matches"] == [
+        {"match_id": "m1", "doc_count": 1, "version_sum": 2}
+    ]
+
+
+def test_fingerprints_are_per_user(hosted_app: tuple[TestClient, _CapturingSender]) -> None:
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    assert client.post(CREATE_URL, json={"match_id": "m1", "name": "Match 1"}).status_code == 200
+    body = MatchProject(name="Anna").model_dump(mode="json")
+    assert _put_doc(client, "m1", "project/anna", body=body, expected_version=0).status_code == 200
+    client.cookies.clear()
+    login(client, sender, "other@example.com")
+    assert client.get(FINGERPRINTS_URL).json() == {"matches": []}
+
+
+def test_fingerprints_route_404s_locally() -> None:
+    from splitsmith.ui.server import create_app
+
+    with TestClient(create_app(), follow_redirects=False) as client:
+        assert client.get(FINGERPRINTS_URL).status_code == 404

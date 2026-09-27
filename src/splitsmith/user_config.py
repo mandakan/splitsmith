@@ -155,6 +155,9 @@ class GlobalPrefs(BaseModel):
     # One nested model rather than five flat fields, per this model's own
     # "add sparingly" instruction (#719).
     hosted_account: HostedAccountRef | None = None
+    # Desktop auto-sync (spec 2026-09-27). One machine-level off switch;
+    # the per-match flag lives in the match's auto_sync.json.
+    auto_sync_enabled: bool = True
 
 
 # ---------------------------------------------------------------------------

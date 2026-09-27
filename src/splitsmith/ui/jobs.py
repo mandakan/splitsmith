@@ -476,6 +476,7 @@ class JobRegistry:
         # pre-#665 in-memory-only behaviour (hosted mode's default
         # registry slot, and most tests).
         self._journal = journal
+        self._terminal_listeners: list[Callable[[Job], None]] = []
         self._jobs: dict[str, Job] = {}
         self._order: list[str] = []
         # Original call_args per retained job, so retry can re-enqueue.
@@ -676,6 +677,7 @@ class JobRegistry:
             j.cancel_requested = True
             j.updated_at = datetime.now(UTC)
             proc_to_kill = self._subprocs.pop(job_id, None)
+            cancelled_pending = False
             # If the job is still queued (never handed to the executor),
             # transition it to CANCELLED right here. Otherwise it would
             # sit in ``_pending`` as PENDING forever -- the worker that
@@ -687,9 +689,14 @@ class JobRegistry:
                     j.finished_at = datetime.now(UTC)
                     j.updated_at = j.finished_at
                     self._trim_retained_locked()
+                    cancelled_pending = True
                     break
             self._signal_drain_if_complete_locked()
             snapshot = j.model_copy(deep=True)
+        if cancelled_pending:
+            # A queued job never reaches ``_run``, so its terminal
+            # listeners fire here instead.
+            self._notify_terminal(job_id)
         # Kill outside the lock so a slow ``terminate()`` (proc held a
         # held resource etc.) can't stall other registry callers.
         if proc_to_kill is not None and proc_to_kill.poll() is None:
@@ -781,7 +788,16 @@ class JobRegistry:
         that don't know about per-video jobs keep their previous behaviour
         of "match on (kind, stage_number)" so a stage-level shot_detect
         dedupe still works against a video_id-less submission.
+
+        ``current_match_id``, when set, excludes jobs of a *different* known
+        match: shooter slugs repeat across matches. A job whose match is
+        unknown (submitted without a match context) still matches, since
+        it cannot be ruled out.
         """
+        # In-method import: server.py imports this module (see submit()).
+        from .server import current_match_id
+
+        calling_match = current_match_id.get()
         with self._lock:
             for jid in self._order:
                 j = self._jobs.get(jid)
@@ -792,6 +808,8 @@ class JobRegistry:
                 if j.kind != kind or j.stage_number != stage_number:
                     continue
                 if j.shooter_slug != shooter_slug:
+                    continue
+                if calling_match is not None and j.match_id is not None and j.match_id != calling_match:
                     continue
                 if not isinstance(video_id, _Unset) and j.video_id != video_id:
                     continue
@@ -915,6 +933,7 @@ class JobRegistry:
                     self._subprocs.pop(job_id, None)
                     self._trim_retained_locked()
                 self._emit_terminal_event(job_id, kind, final_status, timer, error=None)
+                self._notify_terminal(job_id)
                 return
             # SystemExit included: a job body that reuses CLI-oriented code
             # (rebuild_calibration imports the build script in-process) can
@@ -949,6 +968,7 @@ class JobRegistry:
                     self._subprocs.pop(job_id, None)
                     self._trim_retained_locked()
                 self._emit_terminal_event(job_id, kind, final_status, timer, error=final_error)
+                self._notify_terminal(job_id)
                 return
             with self._lock:
                 self._journal_discard(job_id)
@@ -965,6 +985,7 @@ class JobRegistry:
                 self._subprocs.pop(job_id, None)
                 self._trim_retained_locked()
             self._emit_terminal_event(job_id, kind, final_status, timer, error=None)
+            self._notify_terminal(job_id)
         finally:
             with self._lock:
                 self._running_count = max(0, self._running_count - 1)
@@ -985,6 +1006,25 @@ class JobRegistry:
         """
         if self._journal is not None:
             self._journal.discard(job_id)
+
+    def add_terminal_listener(self, fn: Callable[[Job], None]) -> None:
+        """Call ``fn(job_snapshot)`` once per job after it reaches a terminal
+        status, on the worker thread. Desktop auto-sync uses it to mark a
+        match dirty and to record reconcile failures. A raising listener is
+        logged and never affects the job."""
+        self._terminal_listeners.append(fn)
+
+    def _notify_terminal(self, job_id: str) -> None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            snapshot = job.model_copy(deep=True) if job is not None else None
+        if snapshot is None:
+            return
+        for fn in list(self._terminal_listeners):
+            try:
+                fn(snapshot)
+            except Exception:  # noqa: BLE001 - a listener must never fail a job
+                logger.exception("job terminal listener failed for %s", job_id)
 
     def _emit_terminal_event(
         self,

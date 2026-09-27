@@ -96,3 +96,10 @@ def load_sync_state(match_root: Path) -> SyncState:
 def save_sync_state(match_root: Path, state: SyncState) -> None:
     """Atomically persist ``state`` to ``<match_root>/sync_state.json``."""
     atomic_write_json(match_root / SYNC_STATE_FILE, state.model_dump(mode="json"))
+
+
+def local_fingerprint(state: SyncState) -> tuple[int, int]:
+    """``(doc_count, version_sum)`` over ``doc_versions``: the desktop half
+    of the auto-sync change signal. Its keys are exactly the pullable doc
+    identities, which is what ``GET /api/sync/fingerprints`` counts."""
+    return len(state.doc_versions), sum(state.doc_versions.values())

@@ -424,6 +424,48 @@ mis-wire apart: ``export_runs.ExportRun.duration_seconds`` is wall clock
 for the job body, ``match_exports.MatchExportResult.duration_seconds`` is
 the length of the stitched timeline. Never assign one from the other.
 
+## Desktop auto-sync (spec 2026-09-27)
+
+A running desktop (app or ``splitsmith ui``) syncs every match it has
+synced before, both ways, with no clicks. ``ui/auto_sync.AutoSyncService``
+polls ``GET /api/sync/fingerprints`` (``(doc_count, version_sum)`` over
+the pullable kinds per match, compared with
+``sync.state.local_fingerprint``) and marks a match dirty from two hooks:
+an HTTP middleware on successful writes under ``/api/matches/{id}/`` and
+a job terminal listener. The pure core (``sync/auto.py``) decides when:
+pulls immediately, pushes after 45 s of quiet, never while the match has
+a job running, one sync at a time, backoff to 15 min, a 401 pauses until
+the token changes. Automatic runs are the ``auto_sync`` job kind (the
+``sync_match`` body), hidden from the jobs strip unless they fail.
+
+Every sync, manual or automatic, ends with the reconciler
+(``sync/reconcile.py``, pure): from the ``processed`` flags and audit docs
+it queues missing ``trim`` and ``shot_detect`` steps, which is how a beep
+confirmed on the phone gets trimmed and detected on the desktop.
+``_after_beep_reviewed`` uses the same ``video_step`` with
+``explicit=True``; a new pipeline step belongs there, not in a second
+rule. A reconcile step that fails is remembered with its inputs in
+``auto_sync.json`` and skipped until they change.
+
+Per-match state (``enabled``, the failure memo, the last run) lives in
+``<match>/auto_sync.json``, never ``sync_state.json``: ``run_sync`` saves
+that file from memory during a run and would undo a toggle. The global
+switch is ``GlobalPrefs.auto_sync_enabled``. ``SPLITSMITH_AUTO_SYNC=0``
+disables the service; ``tests/conftest.py`` sets it, and a test that
+wants the service opts back in.
+
+Audit GET/PUT carry ``_version`` (``audit_revision``, a content hash, the
+same in both modes); a PUT with a stale one is a 409 ``version_conflict``
+and both audit pages reload. It is never stored. The pull's audit
+read-merge-write holds ``AppState.audit_lock``, the lock the PUT's
+compare-and-save holds. ``find_active`` is scoped to ``current_match_id``
+when set: shooter slugs repeat across matches.
+
+Automatic pushes still upload full trims; the web-only policy is v1.1
+because hosted playback of a mirror keys off the full trim object. The
+end-to-end check is
+``tests/test_sync_integration.py::test_phone_beep_confirm_reaches_the_desktop_reconciler``.
+
 ## UI: the visual budget (Sep 2026)
 
 The SPA was restructured in eight PRs (spec

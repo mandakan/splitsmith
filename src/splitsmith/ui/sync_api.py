@@ -439,6 +439,37 @@ async def get_doc_manifest(
     )
 
 
+class SyncFingerprint(BaseModel):
+    match_id: str
+    doc_count: int
+    version_sum: int
+
+
+class SyncFingerprintsResponse(BaseModel):
+    """Per-match change signal for desktop auto-sync (spec 2026-09-27)."""
+
+    matches: list[SyncFingerprint]
+
+
+@router.get("/fingerprints", response_model=SyncFingerprintsResponse)
+async def get_fingerprints(
+    request: Request,
+    user: Any = Depends(_current_user),
+) -> SyncFingerprintsResponse:
+    """``(doc_count, version_sum)`` over the pullable kinds of every match.
+
+    The desktop compares this with the same pair computed from its own
+    ``sync_state.doc_versions`` and pulls when they differ. Filtered to
+    ``PULLABLE_DOC_KINDS`` for the reason ``get_doc_manifest`` is: a kind
+    the desktop never pulls must not wake it.
+    """
+    _hosted_gate()
+    rows = await _project_state(request).list_fingerprints(PULLABLE_DOC_KINDS)
+    return SyncFingerprintsResponse(
+        matches=[SyncFingerprint(match_id=m, doc_count=c, version_sum=v) for m, c, v in rows]
+    )
+
+
 @router.get("/matches/{match_id}/docs/match", response_model=SyncDocResponse)
 async def get_match_doc(
     match_id: str, request: Request, user: Any = Depends(_current_user)

@@ -1303,3 +1303,39 @@ def test_payload_capabilities_match_guard(
     queue = client.get(alias_url("mirror-caps", "match/beep-queue"))
     assert queue.status_code == 200, queue.text
     assert queue.json()["capabilities"] == ["comment_write", "review", "share_manage"]
+
+
+def test_hosted_audit_put_does_not_serialize_on_the_process_lock_but_still_409s_stale(
+    hosted_env: str,
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """``audit_lock`` is process-global; hosted serves every tenant from one
+    process and already optimistic-locks on the state_docs version, so its
+    audit PUT must not queue behind it. The revision check still applies."""
+    client, sender = hosted_app
+    login(client, sender, "owner@example.com")
+    match_id = "01JMIRRAUDITLOCKFREE000001"
+    seed_mirror_stage_with_audit(client, match_id, "audit-lock-free", _mixed_audit_doc(6.5, 8.0))
+    url = alias_url(match_id, "shooters/alice/stages/1/audit")
+
+    class _NoEnter:
+        def __enter__(self):
+            raise AssertionError("hosted audit PUT took the process-wide audit lock")
+
+        def __exit__(self, *exc):
+            return False
+
+    state = client.app.state.splitsmith_state
+    real_lock = state.audit_lock
+    state.audit_lock = _NoEnter()
+    try:
+        loaded = client.get(url).json()
+        loaded["shots"] = [{"shot_number": 1, "time": 1.5, "source": "manual", "id": "manual-x"}]
+        ok = client.put(url, json=loaded)
+        assert ok.status_code == 200, ok.text
+        stale = dict(loaded)
+        stale["shots"] = []
+        conflict = client.put(url, json=stale)  # loaded's _version is now stale
+        assert conflict.status_code == 409, conflict.text
+    finally:
+        state.audit_lock = real_lock

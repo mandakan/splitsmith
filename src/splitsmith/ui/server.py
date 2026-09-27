@@ -72,6 +72,7 @@ Design notes:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import hashlib
 import json
@@ -160,6 +161,7 @@ from .. import trim as trim_module
 from .. import waveform as waveform_helpers
 from ..async_bridge import run_sync
 from ..audit_data import StageExportError, audit_shots_to_engine_shots, is_kept_shot
+from ..audit_revision import REVISION_FIELD, AuditRevisionConflictError, audit_revision
 from ..auth import AuthBackend, CompositeAuth, LoopbackAuth, User
 from ..coach import statistic_splits
 from ..comment_identity import (
@@ -209,9 +211,11 @@ from ..runtime import runtime as process_runtime
 from ..share_card import stage_figures
 from ..shot_id import ensure_shot_ids, has_usable_id
 from ..storage import Storage
+from ..sync.auto_state import AutoRunSummary, load_auto_prefs, update_auto_prefs
 from ..sync.client import HostedSyncClient, SyncClientError
 from ..sync.plan import build_push_plan
 from ..sync.pull import plan_pull
+from ..sync.reconcile import ReconcileStep, load_reconcile_inputs, plan_reconcile, video_step
 from ..sync.run import format_sync_message
 from ..sync.run import run_sync as run_bidirectional_sync  # ..async_bridge.run_sync already owns this name
 from ..sync.state import load_sync_state
@@ -220,6 +224,7 @@ from . import export_storage, stage_edit
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from . import shooter_move as shooter_move_module
+from .auto_sync import AutoSyncService, auto_sync_disabled_by_env, write_marks_dirty
 from .capabilities import (
     capabilities_for_origin,
     required_capability,
@@ -248,6 +253,7 @@ from .jobs import (
     JobHandle,
     JobNotRetryableError,
     JobRegistry,
+    JobStatus,
     ShutdownInProgressError,
 )
 from .match_delete import DeletionSummary, delete_match_cascade
@@ -563,6 +569,73 @@ def _reject_non_finite(payload: Any, *, what: str) -> None:
             stack.extend(node.values())
         elif isinstance(node, (list, tuple)):
             stack.extend(node)
+
+
+def _reconcile_key(
+    match_id: str | None, kind: str, slug: str | None, stage_number: int | None
+) -> tuple[str | None, str, str | None, int | None]:
+    """Identity a reconcile job shares with its ``Job`` snapshot. The match
+    comes from ``current_match_id``, the same ContextVar ``submit`` stamps
+    on the job. Per stage, not per video: one reconcile step per (kind,
+    stage) is in flight at a time, which ``find_active`` guarantees."""
+    return (match_id, kind, slug, stage_number)
+
+
+def _submit_reconcile_steps(state: AppState, match_root: Path) -> list[ReconcileStep]:
+    """Queue every step the reconciler finds missing for ``match_root``.
+
+    Runs on a job worker thread (the tail of a sync), so it bridges to the
+    async registry with ``asyncio.run`` like the trim chain does. The
+    caller's ContextVars carry the match, which is what scopes both the
+    ``find_active`` dedupe and the submitted jobs.
+    """
+    projects, audits = load_reconcile_inputs(match_root)
+    failures = load_auto_prefs(match_root).reconcile_failures
+    steps = plan_reconcile(projects, audits, failures)
+    queued: list[ReconcileStep] = []
+    for step in steps:
+        dedupe: dict[str, Any] = {"video_id": step.video_id} if step.kind == "trim" else {}
+        existing = asyncio.run(
+            state.jobs.find_active(
+                kind=step.kind, stage_number=step.stage_number, shooter_slug=step.slug, **dedupe
+            )
+        )
+        if existing is not None:
+            continue
+        args: dict[str, Any] = {"slug": step.slug, "stage_number": step.stage_number}
+        if step.kind == "trim":
+            args["video_id"] = step.video_id
+        key = _reconcile_key(current_match_id.get(), step.kind, step.slug, step.stage_number)
+        state.reconcile_jobs[key] = (match_root, step)
+        asyncio.run(
+            state.jobs.submit(
+                kind=step.kind,
+                stage_number=step.stage_number,
+                shooter_slug=step.slug,
+                video_id=step.video_id if step.kind == "trim" else None,
+                args=args,
+            )
+        )
+        queued.append(step)
+    return queued
+
+
+def _record_reconcile_outcome(state: AppState, job: Job) -> None:
+    """Terminal listener half of the failure memo: a failed reconcile step
+    is remembered with its inputs so the next pass skips it; a success
+    clears any old entry for the same step."""
+    if job.kind not in ("trim", "shot_detect"):
+        return
+    tracked = state.reconcile_jobs.pop(
+        _reconcile_key(job.match_id, job.kind, job.shooter_slug, job.stage_number), None
+    )
+    if tracked is None:
+        return
+    match_root, step = tracked
+    if job.status == JobStatus.FAILED:
+        update_auto_prefs(match_root, lambda p: p.reconcile_failures.__setitem__(step.key, step.input_key))
+    elif job.status == JobStatus.SUCCEEDED:
+        update_auto_prefs(match_root, lambda p: p.reconcile_failures.pop(step.key, None))
 
 
 def _save_audit_with_remerge(
@@ -1776,6 +1849,18 @@ class AppState:
     # calls ``save_audit`` while holding it. Same process-local scope, and
     # hosted never takes it.
     audit_lock: threading.RLock = field(default_factory=threading.RLock)
+    # Reconcile steps this process submitted, keyed by
+    # ``_reconcile_key`` (match, kind, slug, stage), so the terminal
+    # listener can record a failure with the inputs it ran on (spec
+    # 2026-09-27 s3). Registered before submit: a job that fails in
+    # milliseconds can reach the listener before submit() returns. Local
+    # only; an entry leaves on its job's terminal event.
+    reconcile_jobs: dict[tuple[str | None, str, str | None, int | None], tuple[Path, ReconcileStep]] = field(
+        default_factory=dict
+    )
+    # Desktop auto-sync service (spec 2026-09-27); None hosted and when
+    # SPLITSMITH_AUTO_SYNC=0.
+    auto_sync: AutoSyncService | None = None
     # Live SSE wake channels, one asyncio.Queue per connected self-hosted
     # worker. ``None`` in local mode and on the headless worker process
     # (which must never hold launcher capabilities); set by the non-worker
@@ -4365,7 +4450,7 @@ def register_job_bodies(state: AppState) -> None:
         handle.set_result({"proxy_key": proxy_key, "size_bytes": size})
         handle.update(progress=1.0, message="Preview ready")
 
-    def _run_sync_match(handle: JobHandle) -> None:
+    def _do_sync_match(handle: JobHandle, match_root: Path) -> Any:
         """Worker for the ``sync_match`` job (bidirectional sync, #631 +
         the pull-merge-push slice): sync the current match with the
         configured hosted server.
@@ -4389,7 +4474,6 @@ def register_job_bodies(state: AppState) -> None:
         as-is.
         """
         handle.update(progress=0.0, message="Starting sync...")
-        match_root = state.match_root
         prefs = user_config.load_global_prefs()
         if not prefs.hosted_base_url or not prefs.hosted_token:
             raise RuntimeError("hosted sync is not configured - set a base URL and token in Settings")
@@ -4400,13 +4484,22 @@ def register_job_bodies(state: AppState) -> None:
         )
         try:
             client = HostedSyncClient(http=http_client)
+
+            def _progress(p: float, m: str) -> None:
+                # Cancellation is cooperative: a quit cancels an auto_sync
+                # (embedded._RESUMABLE_JOB_KINDS), and a sync is crash-safe
+                # at any progress point.
+                handle.check_cancel()
+                handle.update(progress=p, message=m)
+
             try:
                 report = run_bidirectional_sync(
                     match_root,
                     client=client,
-                    on_progress=lambda p, m: handle.update(progress=p, message=m),
+                    on_progress=_progress,
                     timer=handle.timer,
                     ffmpeg_binary=process_runtime().ffmpeg_binary,
+                    audit_lock=state.audit_lock,
                 )
             except SyncClientError as exc:
                 raise RuntimeError(str(exc)) from exc
@@ -4419,8 +4512,39 @@ def register_job_bodies(state: AppState) -> None:
                 raise RuntimeError(f"sync failed: could not reach the hosted server ({exc})") from exc
         finally:
             http_client.close()
+        return report
+
+    def _run_sync_match(handle: JobHandle, *, auto: bool = False) -> None:
+        """Worker for ``sync_match`` (manual) and ``auto_sync`` (desktop
+        auto-sync, spec 2026-09-27): sync, then queue whatever pipeline
+        steps the reconciler finds missing, which is how a beep confirmed on
+        the phone gets trimmed and detected here. An automatic run also
+        records its outcome in ``auto_sync.json`` for the SyncCard."""
+        match_root = state.match_root
+        try:
+            report = _do_sync_match(handle, match_root)
+        except JobCancelled:
+            raise  # a quit or a cancel click, not a failure to report
+        except Exception as exc:
+            if auto:
+                summary = AutoRunSummary(at=datetime.now(UTC), ok=False, message=str(exc))
+                update_auto_prefs(match_root, lambda p: setattr(p, "last_auto", summary))
+            raise
+        message = format_sync_message(report)
+        steps = _submit_reconcile_steps(state, match_root)
+        if steps:
+            message += f"; queued {len(steps)} pipeline step(s)"
         handle.set_result(report.model_dump())
-        handle.update(progress=1.0, message=format_sync_message(report))
+        handle.update(progress=1.0, message=message)
+        if auto:
+            summary = AutoRunSummary(
+                at=datetime.now(UTC),
+                ok=True,
+                message=message,
+                conflicts=len(report.conflicts),
+                notes=len(report.notes),
+            )
+            update_auto_prefs(match_root, lambda p: setattr(p, "last_auto", summary))
 
     state.jobs.bodies.register("model_download", _run_model_download_job)
     from . import system_api
@@ -4437,6 +4561,9 @@ def register_job_bodies(state: AppState) -> None:
 
     state.jobs.bodies.register("youtube_upload", functools.partial(run_youtube_upload, state=state))
     state.jobs.bodies.register("sync_match", _run_sync_match)
+    state.jobs.bodies.register("auto_sync", functools.partial(_run_sync_match, auto=True))
+    if not _hosted_mode_active():
+        state.jobs.add_terminal_listener(functools.partial(_record_reconcile_outcome, state))
 
 
 class HealthResponse(BaseModel):
@@ -5344,6 +5471,12 @@ class HostedSyncSettingsRequest(BaseModel):
 
     base_url: str
     token: str | None = None
+
+
+class AutoSyncSettingRequest(BaseModel):
+    """Body for PUT /api/match/sync/auto and /api/settings/auto-sync."""
+
+    enabled: bool | None = None
 
 
 class DeviceStartResponse(BaseModel):
@@ -6842,6 +6975,29 @@ def _hosted_boot_lifespan(state: Any) -> Any | None:
     return _lifespan
 
 
+_MATCH_WRITE_RE = re.compile(r"\A/api/matches/([^/]+)/(.*)\Z")
+
+
+def _local_boot_lifespan(state: Any) -> Any | None:
+    """Run desktop auto-sync (spec 2026-09-27) for the app's lifetime;
+    None when there is no service (hosted, or SPLITSMITH_AUTO_SYNC=0)."""
+    service = getattr(state, "auto_sync", None)
+    if service is None:
+        return None
+
+    @asynccontextmanager
+    async def _lifespan(_app: Any) -> AsyncIterator[None]:
+        task = asyncio.create_task(service.run())
+        try:
+            yield
+        finally:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    return _lifespan
+
+
 def _resolve_compare_trim(
     legacy: MatchProject,
     shooter_root: Path,
@@ -7019,11 +7175,27 @@ def create_app(
             )
         )
 
+    if not _hosted_mode_active() and not auto_sync_disabled_by_env():
+
+        async def _submit_auto_sync(match_id: str, match_root: Path) -> None:
+            id_token = current_match_id.set(match_id)
+            root_token = current_match_root.set(match_root)
+            try:
+                await state.jobs.submit(kind="auto_sync")
+            finally:
+                current_match_root.reset(root_token)
+                current_match_id.reset(id_token)
+
+        state.auto_sync = AutoSyncService(
+            jobs=state.jobs, matches=state.matches, submit_auto_sync=_submit_auto_sync
+        )
+        state.jobs.add_terminal_listener(state.auto_sync.on_job_terminal)
+
     app = FastAPI(
         title="splitsmith UI",
         description="Production UI backend (issue #11/#12).",
         version="0.1.0",
-        lifespan=_hosted_boot_lifespan(state),
+        lifespan=_hosted_boot_lifespan(state) or _local_boot_lifespan(state),
     )
     # Stash on app.state so the uvicorn server wrapper in :func:`serve`
     # can read live job state when handling Ctrl-C: the signal handler
@@ -7545,6 +7717,31 @@ def create_app(
             remote_changes=remote_changes,
         )
 
+    @app.get("/api/match/sync/auto")
+    async def get_match_auto_sync() -> JSONResponse:
+        """Per-match auto-sync state for the SyncCard (spec 2026-09-27)."""
+        if _hosted_mode_active() or state.auto_sync is None:
+            raise HTTPException(status_code=404, detail="not found")
+        return JSONResponse(state.auto_sync.status_for(state.match_root))
+
+    @app.put("/api/match/sync/auto")
+    async def put_match_auto_sync(req: AutoSyncSettingRequest) -> JSONResponse:
+        """``enabled: null`` restores the default (on once synced)."""
+        if _hosted_mode_active() or state.auto_sync is None:
+            raise HTTPException(status_code=404, detail="not found")
+        update_auto_prefs(state.match_root, lambda p: setattr(p, "enabled", req.enabled))
+        return JSONResponse(state.auto_sync.status_for(state.match_root))
+
+    @app.put("/api/settings/auto-sync")
+    async def put_global_auto_sync(req: AutoSyncSettingRequest) -> JSONResponse:
+        """The machine-level switch in the hosted-sync settings dialog."""
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        prefs.auto_sync_enabled = req.enabled is not False
+        user_config.save_global_prefs(prefs)
+        return JSONResponse({"global_enabled": prefs.auto_sync_enabled})
+
     @app.exception_handler(ShutdownInProgressError)
     async def _shutdown_in_progress_handler(request: Request, exc: ShutdownInProgressError) -> JSONResponse:
         """Map ShutdownInProgressError to 503 across every submit() callsite."""
@@ -7565,6 +7762,20 @@ def create_app(
         if request.url.path == "/api/workers/register":
             return JSONResponse(status_code=404, content={"detail": "not found"})
         return JSONResponse(status_code=422, content={"detail": _json_safe(jsonable_encoder(exc.errors()))})
+
+    @app.exception_handler(AuditRevisionConflictError)
+    async def _audit_revision_conflict_handler(request: Request, exc: Exception) -> JSONResponse:
+        """Same body as the hosted optimistic-lock 409, so every client
+        handles both with one branch."""
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": {
+                    "code": "version_conflict",
+                    "message": "this match state changed since you loaded it; reload and try again",
+                }
+            },
+        )
 
     # Optimistic-locking conflict on a hosted state_docs save -> 409 so the
     # SPA can reload + retry. Registered only when the db layer imports
@@ -7724,6 +7935,24 @@ def create_app(
             current_match_origin.reset(origin_token)
             current_match_id.reset(id_token)
             current_match_root.reset(root_token)
+
+    # Desktop auto-sync dirty tracking (spec 2026-09-27 s2): a successful
+    # write under /api/matches/{id}/ means that match has something to push.
+    # Registered after ``_match_id_alias`` so it runs outside it and sees
+    # the prefixed path. Local only (the service is None hosted).
+    if state.auto_sync is not None:
+        auto_sync_service = state.auto_sync
+
+        @app.middleware("http")
+        async def _auto_sync_dirty(request, call_next):
+            # Read the path first: the alias middleware inside rewrites the
+            # shared scope, so after call_next it no longer has the prefix.
+            m = _MATCH_WRITE_RE.match(request.url.path)
+            response = await call_next(request)
+            if m and request.method in ("POST", "PUT", "PATCH", "DELETE") and response.status_code < 400:
+                if write_marks_dirty(m.group(2)):
+                    auto_sync_service.mark_dirty(m.group(1))
+            return response
 
     # ----------------------------------------------------------------------
     # Share-link anonymous read middleware (issue #349)
@@ -11229,12 +11458,17 @@ def create_app(
                 {"shots": [], "detection": STUB_AUDIT_DETECTION},
                 version=audit_version,
             )
-        if not video.processed.get("trim"):
-            stage = state.shooter_project(slug).stage(stage_number)
+        # The reconciler's rule with explicit=True (spec 2026-09-27 s3): a
+        # trim when none is cached, else detection for a trimmed primary. A
+        # phone confirm pulled into this desktop reaches the same rule
+        # through plan_reconcile, so the two cannot leave different state.
+        stage = state.shooter_project(slug).stage(stage_number)
+        step = video_step(stage, video, None, explicit=True)
+        if step == "trim":
             await _maybe_chain_trim(slug, stage, video)
             return
         if (
-            video.role == "primary"
+            step == "shot_detect"
             and await state.jobs.find_active(kind="shot_detect", stage_number=stage_number, shooter_slug=slug)
             is None
         ):
@@ -11760,7 +11994,10 @@ def create_app(
         payload, _ = state.load_audit(slug, stage_number)
         if payload is None:
             return JSONResponse(None)
-        return JSONResponse(payload)
+        # The revision rides the response only (spec 2026-09-27 s5); the
+        # SPA's buildAuditJson spreads the loaded doc, so it comes back on
+        # the next PUT, which pops it before anything is stored.
+        return JSONResponse({**payload, REVISION_FIELD: audit_revision(payload)})
 
     @app.put("/api/shooters/{slug}/stages/{stage_number}/audit")
     def put_stage_audit(slug: str, stage_number: int, payload: dict[str, Any]) -> JSONResponse:
@@ -11783,6 +12020,7 @@ def create_app(
             project.stage(stage_number)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        client_revision = payload.pop(REVISION_FIELD, None)
         # #843: before anything touches disk. A non-finite float survives
         # json.loads, persists, and then makes this stage unreadable.
         _reject_non_finite(payload, what="audit document")
@@ -11808,28 +12046,33 @@ def create_app(
             for event in events:
                 if isinstance(event, dict) and not event.get("id"):
                     event["id"] = _new_event_id()
-        # Read the current version so the save is optimistic-locked. The
-        # SPA PUT doesn't carry a version (it assumes last-writer-wins), so
-        # this load-then-save has a tiny race window: if a concurrent
-        # worker bumps the version in between, save_audit raises
-        # StateConflictError -> 409 and the SPA re-fetches. Local: version
-        # is always 0 and this is a plain atomic file write.
-        stored, version = state.load_audit(slug, stage_number)
-        # #823: a desktop full-audit save resolves an open triage flag, same
-        # as the triage "accept" action. The SPA round-trips needs_attention
-        # (Audit.tsx buildAuditJson spreads the loaded doc), so checking the
-        # incoming payload covers the normal path - but a stale SPA session
-        # that dropped the key would silently keep the stored doc flagged,
-        # so check both sides.
-        is_save = isinstance(events, list) and any(
-            isinstance(e, dict) and e.get("kind") == "save" for e in events
-        )
-        incoming_flagged = bool((payload.get("needs_attention") or {}).get("flagged"))
-        stored_flagged = bool(((stored or {}).get("needs_attention") or {}).get("flagged"))
-        if is_save and (incoming_flagged or stored_flagged):
-            _set_needs_attention(payload, flagged=False)
-        state.save_audit(slug, stage_number, payload, version=version)
-        return JSONResponse(payload)
+        # Compare-and-save under the audit lock (spec 2026-09-27 s5): a PUT
+        # carrying ``_version`` from a copy that no longer matches the stored
+        # doc (a sync pull, another tab) is refused with 409 instead of
+        # overwriting it. The pull's audit apply holds the same lock. A PUT
+        # without ``_version`` keeps last-writer-wins. Hosted skips the lock:
+        # it is process-global (every tenant would queue behind it) and the
+        # state_docs version loaded here already optimistic-locks the save.
+        lock = state.audit_lock if state.audit_doc_target() is None else nullcontext()
+        with lock:
+            stored, version = state.load_audit(slug, stage_number)
+            if client_revision is not None and client_revision != audit_revision(stored):
+                raise AuditRevisionConflictError(f"stage {stage_number} audit changed since it was loaded")
+            # #823: a desktop full-audit save resolves an open triage flag, same
+            # as the triage "accept" action. The SPA round-trips needs_attention
+            # (Audit.tsx buildAuditJson spreads the loaded doc), so checking the
+            # incoming payload covers the normal path - but a stale SPA session
+            # that dropped the key would silently keep the stored doc flagged,
+            # so check both sides.
+            is_save = isinstance(events, list) and any(
+                isinstance(e, dict) and e.get("kind") == "save" for e in events
+            )
+            incoming_flagged = bool((payload.get("needs_attention") or {}).get("flagged"))
+            stored_flagged = bool(((stored or {}).get("needs_attention") or {}).get("flagged"))
+            if is_save and (incoming_flagged or stored_flagged):
+                _set_needs_attention(payload, flagged=False)
+            state.save_audit(slug, stage_number, payload, version=version)
+        return JSONResponse({**payload, REVISION_FIELD: audit_revision(payload)})
 
     def _set_needs_attention(payload: dict[str, Any], *, flagged: bool, note: str | None = None) -> None:
         """Write the triage flag as a full object so sync LWW always has a

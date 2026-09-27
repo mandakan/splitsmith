@@ -10,10 +10,10 @@
  * fires startSync. Mocks @/lib/api and @/lib/features the same way
  * MatchShell.test.tsx and DesktopTokensSection.test.tsx mock api.
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, type Job, type SyncStatusResponse } from "@/lib/api";
+import { api, type AutoSyncStatus, type Job, type SyncStatusResponse } from "@/lib/api";
 import { useDeploymentMode } from "@/lib/features";
 
 import { SyncCard } from "@/components/match/SyncCard";
@@ -28,6 +28,8 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getSyncSettings: vi.fn(),
       startSync: vi.fn(),
       putSyncSettings: vi.fn(),
+      getAutoSync: vi.fn(),
+      setAutoSync: vi.fn(),
     },
   };
 });
@@ -76,6 +78,17 @@ function makeJob(overrides: Partial<Job> = {}): Job {
   };
 }
 
+function makeAuto(overrides: Partial<AutoSyncStatus> = {}): AutoSyncStatus {
+  return {
+    enabled: true,
+    setting: null,
+    global_enabled: true,
+    paused_reason: null,
+    last_auto: null,
+    ...overrides,
+  };
+}
+
 describe("SyncCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -85,6 +98,7 @@ describe("SyncCard", () => {
       token_set: true,
       account: null,
     });
+    vi.mocked(api.getAutoSync).mockResolvedValue(makeAuto());
   });
 
   it("renders nothing in hosted mode", async () => {
@@ -279,5 +293,41 @@ describe("SyncCard", () => {
 
     expect(await screen.findByText(/synced/i)).toBeInTheDocument();
     expect(screen.queryByText(/hosted has newer changes/i)).not.toBeInTheDocument();
+  });
+  it("shows auto-sync on and lets the user switch to manual", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue(makeStatus());
+    vi.mocked(api.setAutoSync).mockResolvedValue(makeAuto({ enabled: false, setting: false }));
+    render(<SyncCard jobs={[]} matchId="m1" />);
+    const group = await screen.findByRole("group", { name: "Sync mode" });
+    expect(within(group).getByRole("button", { name: "Auto" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(group).getByRole("button", { name: "Manual" }));
+    await waitFor(() => expect(api.setAutoSync).toHaveBeenCalledWith(false));
+    await waitFor(() =>
+      expect(within(group).getByRole("button", { name: "Manual" })).toHaveAttribute("aria-pressed", "true"),
+    );
+  });
+
+  it("says why auto-sync is paused", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue(makeStatus());
+    vi.mocked(api.getAutoSync).mockResolvedValue(
+      makeAuto({ paused_reason: "offline: could not reach the hosted server" }),
+    );
+    render(<SyncCard jobs={[]} matchId="m1" />);
+    expect(await screen.findByText(/Auto-sync paused: offline/)).toBeInTheDocument();
+  });
+
+  it("treats a running auto_sync job as syncing", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue(makeStatus());
+    const running = makeJob({ kind: "auto_sync", status: "running", message: "uploading clips" });
+    render(<SyncCard jobs={[running]} matchId="m1" />);
+    expect(await screen.findByText("uploading clips")).toBeInTheDocument();
+  });
+
+  it("keeps working against a sidecar without the auto-sync route", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue(makeStatus());
+    vi.mocked(api.getAutoSync).mockRejectedValue(new Error("404"));
+    render(<SyncCard jobs={[]} matchId="m1" />);
+    expect(await screen.findByText(/synced/i)).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Sync mode" })).not.toBeInTheDocument();
   });
 });

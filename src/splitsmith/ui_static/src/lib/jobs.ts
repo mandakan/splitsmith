@@ -16,6 +16,12 @@ import { ApiError, api, type Job } from "@/lib/api";
 const ACTIVE_POLL_MS = 1000;
 const IDLE_POLL_MS = 5000;
 
+/** Jobs the progress strip shows. Automatic syncs run every few minutes
+ *  and would make the strip flicker; they surface only when they fail. */
+export function stripVisible(jobs: Job[]): Job[] {
+  return jobs.filter((j) => j.kind !== "auto_sync" || j.status === "failed");
+}
+
 /** Pending or running - the set whose departures mean "something just
  *  finished". Hosts watch for active -> terminal transitions to
  *  invalidate job-derived state (#663). */
@@ -109,9 +115,10 @@ export function useJobs(): JobsState {
     [refresh],
   );
 
-  const running = jobs.filter((j) => j.status === "running");
-  const pending = jobs.filter((j) => j.status === "pending");
-  const failed = jobs.filter((j) => j.status === "failed" && !j.acknowledged);
+  const visible = stripVisible(jobs);
+  const running = visible.filter((j) => j.status === "running");
+  const pending = visible.filter((j) => j.status === "pending");
+  const failed = visible.filter((j) => j.status === "failed" && !j.acknowledged);
 
   return {
     jobs,
