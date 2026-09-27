@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.43.1](https://github.com/mandakan/splitsmith/compare/v0.43.0...v0.43.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* **audit:** follow the current shot without scrolling the page ([#1067](https://github.com/mandakan/splitsmith/issues/1067)) ([#1083](https://github.com/mandakan/splitsmith/issues/1083)) ([2d206da](https://github.com/mandakan/splitsmith/commit/2d206da204a32e6fd94543c504afa252a338d53f))
+* **sync:** a failed auto-sync waits for a change instead of retrying ([#1070](https://github.com/mandakan/splitsmith/issues/1070)) ([#1087](https://github.com/mandakan/splitsmith/issues/1087)) ([72d4a65](https://github.com/mandakan/splitsmith/commit/72d4a65dffacb70c12c1c1e74f4d367da019d365))
+* **sync:** auto-sync falls back to manifests on a hosted without /fingerprints ([#1071](https://github.com/mandakan/splitsmith/issues/1071)) ([#1090](https://github.com/mandakan/splitsmith/issues/1090)) ([d1ba851](https://github.com/mandakan/splitsmith/commit/d1ba851b589c299a6447d1ffd4701cec7fc3773e))
+* **sync:** every local audit writer holds audit_lock ([#1075](https://github.com/mandakan/splitsmith/issues/1075)) ([#1094](https://github.com/mandakan/splitsmith/issues/1094)) ([f64e9a7](https://github.com/mandakan/splitsmith/commit/f64e9a7eca949b3c362ab00fff3930665e6512e1))
+* **sync:** hold automatic syncs while a render runs on any match ([#1082](https://github.com/mandakan/splitsmith/issues/1082)) ([9426d90](https://github.com/mandakan/splitsmith/commit/9426d909845297fe91da0cc8872c730887f93d81))
+* **sync:** one auto-sync per machine, one sync per match across processes ([#1076](https://github.com/mandakan/splitsmith/issues/1076)) ([#1095](https://github.com/mandakan/splitsmith/issues/1095)) ([8f6c052](https://github.com/mandakan/splitsmith/commit/8f6c052c9401104a69b664f29fe4f905bc8c051b))
+* **sync:** remove a stale web rendition after a re-trim whose transcode failed ([#1077](https://github.com/mandakan/splitsmith/issues/1077)) ([#1096](https://github.com/mandakan/splitsmith/issues/1096)) ([881a5b3](https://github.com/mandakan/splitsmith/commit/881a5b3355dac25c242649598dcd769a9c7cb62b))
+* **sync:** retry a failed reconcile step when any of its inputs change ([#1069](https://github.com/mandakan/splitsmith/issues/1069)) ([#1086](https://github.com/mandakan/splitsmith/issues/1086)) ([8e56005](https://github.com/mandakan/splitsmith/commit/8e56005406b0f03d19f7614b5933fc9bdc27b55c))
+* **sync:** stop on a match deleted on hosted instead of recreating it ([#1088](https://github.com/mandakan/splitsmith/issues/1088)) ([061dbcb](https://github.com/mandakan/splitsmith/commit/061dbcb5446bad0221968707f8773a6212446ed0))
+* **sync:** the auto-sync fingerprint catches a delete plus insert at equal versions ([#1072](https://github.com/mandakan/splitsmith/issues/1072)) ([#1091](https://github.com/mandakan/splitsmith/issues/1091)) ([0162111](https://github.com/mandakan/splitsmith/commit/016211180c1f187338f1d1623d5d102acd5014d9))
+* **sync:** the SyncCard no longer says "0 files changed" when only docs changed ([#1074](https://github.com/mandakan/splitsmith/issues/1074)) ([#1093](https://github.com/mandakan/splitsmith/issues/1093)) ([cefb69e](https://github.com/mandakan/splitsmith/commit/cefb69ecf02481d1122c93e82c0fa59dde746f15))
+* **ui:** a web-only mirror on non-presigned storage streams its rendition ([#1078](https://github.com/mandakan/splitsmith/issues/1078)) ([#1097](https://github.com/mandakan/splitsmith/issues/1097)) ([18dfb0f](https://github.com/mandakan/splitsmith/commit/18dfb0f4d1ae9d0673c2f9b77797b8e2d37b5634))
+* **ui:** name the match on match-wide jobs instead of "(no target)" ([#1089](https://github.com/mandakan/splitsmith/issues/1089)) ([f53c54e](https://github.com/mandakan/splitsmith/commit/f53c54e213bb6256d23fa3c3388e63e461129d7d))
+
+
+### Performance
+
+* **export:** cache rendered MP4 segments; report each render step ([#1085](https://github.com/mandakan/splitsmith/issues/1085)) ([ebdaef2](https://github.com/mandakan/splitsmith/commit/ebdaef2744b710d90ac0839e9df1673426ed3e4c))
+
 ## [0.43.0](https://github.com/mandakan/splitsmith/compare/v0.42.0...v0.43.0) (2026-09-27)
 
 
