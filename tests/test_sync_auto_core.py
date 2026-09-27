@@ -103,3 +103,16 @@ def test_auth_error_blocks_until_cleared_and_transport_errors_back_off() -> None
     assert core.pick(1000.0, enabled=E, busy=(), sync_active=False) == "m1"
     core.on_poll_ok(1000.0, server={}, local={})
     assert core.paused_reason is None
+
+
+def test_no_sync_is_attempted_while_the_poll_cannot_reach_hosted() -> None:
+    """Offline, a sync can only fail, and every failed auto_sync lands in
+    the jobs strip for the user to acknowledge. Hold off until a poll
+    gets through."""
+    core = AutoSyncCore()
+    core.mark_pull_due("m1")
+    core.mark_dirty("m1", now=0.0)
+    core.on_poll_error(100.0, "offline", auth=False)
+    assert core.pick(200.0, enabled=E, busy=(), sync_active=False) is None
+    core.on_poll_ok(300.0, server={}, local={})
+    assert core.pick(300.0, enabled=E, busy=(), sync_active=False) == "m1"

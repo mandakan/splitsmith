@@ -1,7 +1,7 @@
 # Auto-sync and the desktop reconciler
 
 Date: 2026-09-27
-Status: design approved in conversation, awaiting spec review
+Status: v1 implemented (auto-sync + reconciler); v1.1 web-only media and v2 command queue pending
 Follow-up (v2, separate spec): the hosted-to-desktop command queue.
 
 ## Goal

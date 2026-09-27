@@ -90,7 +90,9 @@ class AutoSyncCore:
         return self._auth_blocked
 
     def clear_auth_block(self) -> None:
+        """A new token is a fresh start: the next tick polls at once."""
         self._auth_blocked = False
+        self._poll_failures = 0
         self.paused_reason = None
         self.next_poll_at = 0.0
 
@@ -118,8 +120,9 @@ class AutoSyncCore:
     def pick(
         self, now: float, *, enabled: Collection[str], busy: Collection[str], sync_active: bool
     ) -> str | None:
-        """The match to sync now, or None. Pulls first, then quiet pushes."""
-        if self._auth_blocked or sync_active:
+        """The match to sync now, or None. Pulls first, then quiet pushes.
+        Nothing while the last poll failed: a sync would only fail too."""
+        if self._auth_blocked or sync_active or self._poll_failures:
             return None
         ready: list[tuple[int, str]] = []
         for match_id in sorted(enabled):
