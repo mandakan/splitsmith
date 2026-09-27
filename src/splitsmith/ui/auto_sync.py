@@ -240,4 +240,7 @@ class AutoSyncService:
             # Parked after a failure (#1070): no retry until a local write,
             # a hosted change, hosted coming back, or a manual sync.
             "waiting_for_change": waiting,
+            # Synced before, then deleted on hosted: sync stays off until
+            # the user publishes it again (POST .../match/sync/republish).
+            "hosted_deleted": auto.hosted_deleted_at is not None,
         }

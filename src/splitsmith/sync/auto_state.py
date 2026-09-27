@@ -45,6 +45,9 @@ class AutoSyncPrefs(BaseModel):
     #: reconcile step key -> input key the step last failed with.
     reconcile_failures: dict[str, str] = Field(default_factory=dict)
     last_auto: AutoRunSummary | None = None
+    #: Set when a sync found this match gone from hosted after it had been
+    #: synced (deleted there). Sync stays off until "Publish again".
+    hosted_deleted_at: datetime | None = None
 
 
 def load_auto_prefs(match_root: Path) -> AutoSyncPrefs:
@@ -69,6 +72,6 @@ def auto_sync_effective(prefs: AutoSyncPrefs, sync_state: SyncState, *, global_e
     """Whether the service should watch this match. Needs a first sync
     (there is no hosted mirror to watch before it), the global switch,
     and the per-match flag unless that is left at its default."""
-    if not global_enabled or sync_state.last_synced_at is None:
+    if not global_enabled or sync_state.last_synced_at is None or prefs.hosted_deleted_at is not None:
         return False
     return prefs.enabled is not False

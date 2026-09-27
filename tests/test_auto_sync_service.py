@@ -371,3 +371,51 @@ def test_a_failed_auto_sync_is_not_resubmitted_on_later_ticks(tmp_path: Path) ->
         svc.core.next_poll_at = 0.0
         asyncio.run(svc.tick())
     assert submitted == []
+
+
+def test_republish_resets_the_old_mirror_and_starts_a_sync(tmp_path: Path, monkeypatch) -> None:
+    """A match deleted on hosted stays off until the user publishes it again;
+    that forgets the dead mirror's versions, hashes, uploads and bases."""
+    from splitsmith.sync.auto_state import load_auto_prefs
+    from splitsmith.sync.state import load_sync_state
+    from splitsmith.ui import server as server_mod
+
+    monkeypatch.setenv("SPLITSMITH_AUTO_SYNC", "1")
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    state = client.app.state.splitsmith_state
+    (match_id,) = state.matches.known_ids()
+    prefs = GlobalPrefs(hosted_base_url="https://h", hosted_token="t")
+    monkeypatch.setattr(server_mod.user_config, "load_global_prefs", lambda: prefs)
+    submitted: list[str] = []
+    url = f"/api/matches/{match_id}/match/sync/republish"
+
+    # Not deleted on hosted: nothing to republish.
+    assert client._client.post(url).status_code == 409
+
+    _synced(project_root, {"match": 4, "project/me": 7})
+    (project_root / "sync_base").mkdir()
+    (project_root / "sync_base" / "match.json").write_text("{}")
+    update_auto_prefs(
+        project_root, lambda p: setattr(p, "hosted_deleted_at", datetime(2026, 9, 27, tzinfo=UTC))
+    )
+    assert client._client.get(f"/api/matches/{match_id}/match/sync/auto").json()["hosted_deleted"] is True
+
+    async def capture(**kw):
+        submitted.append(kw["kind"])
+        return _job_stub(kw["kind"])
+
+    monkeypatch.setattr(state.jobs, "submit", capture)
+    resp = client._client.post(url)
+    assert resp.status_code == 200, resp.text
+    assert submitted == ["sync_match"]
+    fresh = load_sync_state(project_root)
+    assert fresh.doc_versions == {} and fresh.last_synced_at is None and fresh.items == {}
+    assert not (project_root / "sync_base").exists()
+    assert load_auto_prefs(project_root).hosted_deleted_at is None
+
+
+def _job_stub(kind: str):
+    from splitsmith.ui.jobs import Job, JobStatus
+
+    now = datetime.now(UTC)
+    return Job(id="j1", kind=kind, status=JobStatus.PENDING, created_at=now, updated_at=now)

@@ -26,16 +26,21 @@ from ..match_model import load_match_or_legacy
 from ..match_project import PROJECT_FILE, MatchProject, atomic_write_json
 from ..observability import PhaseTimer
 from ..shot_id import ensure_shot_ids
-from .auto_state import load_auto_prefs
+from .auto_state import load_auto_prefs, update_auto_prefs
 from .base import load_base_doc, save_base_doc
-from .client import HostedSyncClient, SyncClientError, SyncVersionConflict
+from .client import HostedSyncClient, SyncClientError, SyncMirrorGone, SyncVersionConflict
 from .merge import MergeResult, merge_audit_doc, merge_project_doc
-from .plan import AUDIT_FILENAME_RE, build_push_plan
+from .plan import AUDIT_FILENAME_RE, build_push_plan, doc_identity_key
 from .pull import RemoteDoc, plan_pull, remote_doc_key
 from .push import PushReport, run_push, timed_phase
 from .state import SyncState, load_sync_state, save_sync_state
 
 _MAX_ATTEMPTS = 3
+
+MIRROR_GONE_MESSAGE = (
+    "this match is no longer on hosted (it was deleted there). Sync is off for it; "
+    "use Publish again to upload it as a new copy"
+)
 
 
 class SyncReport(PushReport):
@@ -215,6 +220,15 @@ def run_sync(
             raise SyncClientError("\n".join(preflight.errors))
         match_id, match_name = preflight.match_id, preflight.match_name
 
+    # Before anything writes, and above all before ensure_match: that call
+    # adopts the mirror, so a sync of a match deleted on hosted would
+    # quietly bring it back. Docs pushed before and none there now means
+    # it was deleted; stop and say so.
+    with timed_phase(timings, timer, "mirror_check"):
+        if sync_state.doc_versions and not client.find_doc_manifest(match_id):
+            update_auto_prefs(match_root, lambda p: setattr(p, "hosted_deleted_at", datetime.now(UTC)))
+            raise SyncMirrorGone(MIRROR_GONE_MESSAGE)
+
     # After the preflight (a tree that can't push isn't touched) and
     # before the push plans: the renditions have to exist to be planned.
     with timed_phase(timings, timer, "web_trims"):
@@ -266,6 +280,15 @@ def run_sync(
             )
             break
         except SyncVersionConflict as exc:
+            # A doc pushed before that the manifest no longer lists was
+            # deleted on hosted; every retry would PUT the same stale
+            # version into the same 409.
+            listed = {doc_identity_key(e["doc_kind"], e.get("slug"), e.get("stage_number")) for e in manifest}
+            if exc.key is not None and exc.key not in listed and sync_state.doc_versions.get(exc.key):
+                raise SyncClientError(
+                    f"{exc.key} was deleted on hosted after the last sync, so its local edits "
+                    "cannot be pushed over it"
+                ) from exc
             if attempt == _MAX_ATTEMPTS:
                 raise SyncClientError(
                     f"sync could not converge after {_MAX_ATTEMPTS} attempts - a hosted "

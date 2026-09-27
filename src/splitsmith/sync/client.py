@@ -58,6 +58,16 @@ class SyncVersionConflict(SyncClientError):
     """A doc PUT lost the optimistic-lock race (hosted 409
     ``version_conflict``) - the caller re-pulls, re-merges, retries."""
 
+    def __init__(self, message: str, *, key: str | None = None) -> None:
+        super().__init__(message)
+        #: The doc identity key the PUT was for.
+        self.key = key
+
+
+class SyncMirrorGone(SyncClientError):
+    """The match was synced before but hosted no longer has it (deleted
+    there). Sync stops rather than recreate it."""
+
 
 class HostedSyncClient:
     """Thin wrapper over the ``/api/sync/*`` HTTP surface for one push."""
@@ -137,16 +147,22 @@ class HostedSyncClient:
             json=item.body,
         )
         if resp.status_code == 409:
-            raise SyncVersionConflict(
-                f"doc {doc_identity_key(item.kind, item.slug, item.stage_number)} "
-                "changed on the hosted side during this sync"
-            )
+            key = doc_identity_key(item.kind, item.slug, item.stage_number)
+            raise SyncVersionConflict(f"doc {key} changed on the hosted side during this sync", key=key)
         self._raise_for_status(resp)
         return resp.json()["version"]
 
     def get_doc_manifest(self, match_id: str) -> list[dict]:
         """Identity + version of every hosted doc for this match."""
         resp = self._http.get(f"/api/sync/matches/{match_id}/docs")
+        self._raise_for_status(resp)
+        return resp.json()["docs"]
+
+    def find_doc_manifest(self, match_id: str) -> list[dict] | None:
+        """``get_doc_manifest``, or None when hosted has no such match (404)."""
+        resp = self._http.get(f"/api/sync/matches/{match_id}/docs")
+        if resp.status_code == 404:
+            return None
         self._raise_for_status(resp)
         return resp.json()["docs"]
 

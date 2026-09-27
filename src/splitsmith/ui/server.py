@@ -213,6 +213,7 @@ from ..share_card import stage_figures
 from ..shot_id import ensure_shot_ids, has_usable_id
 from ..storage import Storage
 from ..sync.auto_state import AutoRunSummary, load_auto_prefs, update_auto_prefs
+from ..sync.base import BASE_DIR as SYNC_BASE_DIR
 from ..sync.client import HostedSyncClient, SyncClientError
 from ..sync.plan import build_push_plan
 from ..sync.pull import plan_pull
@@ -225,7 +226,7 @@ from ..sync.reconcile import (
 )
 from ..sync.run import format_sync_message
 from ..sync.run import run_sync as run_bidirectional_sync  # ..async_bridge.run_sync already owns this name
-from ..sync.state import load_sync_state
+from ..sync.state import SyncState, load_sync_state, save_sync_state
 from . import audio as audio_helpers
 from . import export_storage, stage_edit
 from . import exports as export_helpers
@@ -7715,6 +7716,40 @@ def create_app(
         prefs = user_config.load_global_prefs()
         if not prefs.hosted_base_url or not prefs.hosted_token:
             raise HTTPException(status_code=409, detail="sync_not_configured")
+        return await state.jobs.submit(kind="sync_match")
+
+    @app.post("/api/match/sync/republish", response_model=Job)
+    async def post_match_sync_republish() -> Job:
+        """Upload a match deleted on hosted as a new copy.
+
+        The sync that found the mirror gone set ``hosted_deleted_at`` and
+        stopped, so nothing recreated it behind the user's back. This is
+        the explicit way back: forget every version, hash and upload the
+        old mirror had (the next sync then pushes the whole match, at
+        ``expected_version`` 0) and start it.
+        """
+        if _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        prefs = user_config.load_global_prefs()
+        if not prefs.hosted_base_url or not prefs.hosted_token:
+            raise HTTPException(status_code=409, detail="sync_not_configured")
+        match_root = state.match_root
+        if load_auto_prefs(match_root).hosted_deleted_at is None:
+            raise HTTPException(status_code=409, detail="match_not_deleted_on_hosted")
+        if await state.jobs.find_active(kind="sync_match") or await state.jobs.find_active(kind="auto_sync"):
+            raise HTTPException(status_code=409, detail="sync_in_progress")
+
+        def _reset() -> None:
+            save_sync_state(match_root, SyncState())
+            shutil.rmtree(match_root / SYNC_BASE_DIR, ignore_errors=True)
+
+            def _clear(p: Any) -> None:
+                p.hosted_deleted_at = None
+                p.last_auto = None
+
+            update_auto_prefs(match_root, _clear)
+
+        await run_in_threadpool(_reset)
         return await state.jobs.submit(kind="sync_match")
 
     @app.get("/api/match/sync/status", response_model=SyncStatusResponse)

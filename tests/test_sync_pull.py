@@ -147,6 +147,9 @@ class FakeSyncClient:
         self.put_calls: list[tuple[str, int]] = []
         self.fail_puts = 0
         self.get_doc_error: Exception | None = None
+        #: Hosted has no row for the match at all (find_doc_manifest -> None).
+        self.match_row_gone = False
+        self.ensure_calls = 0
 
     def _identity(self, key: str) -> tuple[str, str | None, int | None]:
         parts = key.split("/")
@@ -157,7 +160,11 @@ class FakeSyncClient:
         return "audit", parts[1], int(parts[2])
 
     def ensure_match(self, match_id: str, name: str) -> None:
-        pass
+        self.ensure_calls += 1
+        self.match_row_gone = False
+
+    def find_doc_manifest(self, match_id: str) -> list[dict] | None:
+        return None if self.match_row_gone else self.get_doc_manifest(match_id)
 
     def get_doc_manifest(self, match_id: str) -> list[dict]:
         out = []
@@ -185,6 +192,8 @@ class FakeSyncClient:
             raise SyncVersionConflict("scripted conflict")
         key = doc_identity_key(item.kind, item.slug, item.stage_number)
         _, current = self.docs.get(key, ({}, 0))
+        if expected_version != current:  # the hosted optimistic lock
+            raise SyncVersionConflict(f"doc {key} changed on the hosted side during this sync", key=key)
         self.docs[key] = (item.body, current + 1)
         self.put_calls.append((key, expected_version))
         return current + 1
@@ -697,3 +706,52 @@ def test_run_sync_second_run_does_not_retranscode(tmp_path, monkeypatch):
     run_sync(match_root, client=client)
 
     assert calls == 1
+
+
+def _edit_local_audit_note(match_root, note: str) -> None:
+    path = match_root / "shooters" / "anna" / "audit" / "stage1.json"
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    doc["shots"][0]["coaching_note"] = note
+    path.write_text(json.dumps(doc), encoding="utf-8")
+
+
+@pytest.mark.parametrize("row_gone", [False, True])
+def test_run_sync_stops_on_a_match_deleted_on_hosted_without_recreating_it(tmp_path, row_gone):
+    """A match synced before and deleted on hosted: every retry used to PUT
+    the stale version into the same 409 ("could not converge"), and each
+    attempt's ensure_match re-adopted the deleted match first."""
+    from splitsmith.sync.auto_state import load_auto_prefs
+    from splitsmith.sync.client import SyncMirrorGone
+
+    match_root = make_synced_match(tmp_path)
+    client = _first_sync(match_root)
+    client.docs.clear()  # deleted hosted-side
+    client.match_row_gone = row_gone
+    client.ensure_calls = 0
+    client.put_calls.clear()
+    _edit_local_audit_note(match_root, "edited after the delete")
+
+    with pytest.raises(SyncMirrorGone, match="deleted there"):
+        run_sync(match_root, client=client)
+    assert client.ensure_calls == 0
+    assert client.put_calls == [] and client.docs == {}
+    assert load_auto_prefs(match_root).hosted_deleted_at is not None
+
+
+def test_run_sync_names_a_single_doc_deleted_on_hosted_instead_of_retrying(tmp_path):
+    match_root = make_synced_match(tmp_path)
+    client = _first_sync(match_root)
+    audit_key = next(k for k in client.docs if k.startswith("audit/"))
+    del client.docs[audit_key]
+    _edit_local_audit_note(match_root, "edited after the delete")
+
+    with pytest.raises(SyncClientError, match=f"{audit_key} was deleted on hosted"):
+        run_sync(match_root, client=client)
+
+
+def test_first_sync_to_an_empty_mirror_is_not_a_deleted_match(tmp_path):
+    match_root = make_synced_match(tmp_path)
+    client = FakeSyncClient()
+    client.match_row_gone = True  # never adopted yet
+    run_sync(match_root, client=client)
+    assert client.ensure_calls >= 1 and client.docs

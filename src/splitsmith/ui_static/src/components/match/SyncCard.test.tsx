@@ -27,6 +27,7 @@ vi.mock("@/lib/api", async (importOriginal) => {
       getSyncStatus: vi.fn(),
       getSyncSettings: vi.fn(),
       startSync: vi.fn(),
+      republishSync: vi.fn(),
       putSyncSettings: vi.fn(),
       getAutoSync: vi.fn(),
       setAutoSync: vi.fn(),
@@ -142,6 +143,21 @@ describe("SyncCard", () => {
     expect(
       await screen.findByText(/Last auto-sync failed: boom\. Retries after the next change, or press Sync\./),
     ).toBeInTheDocument();
+  });
+
+  it("offers Publish again for a match deleted on hosted, and no hosted link", async () => {
+    vi.mocked(api.getSyncStatus).mockResolvedValue(makeStatus({ stale: true }));
+    vi.mocked(api.getAutoSync).mockResolvedValue(makeAuto({ hosted_deleted: true }));
+    vi.mocked(api.republishSync).mockResolvedValue(makeJob());
+
+    render(<SyncCard jobs={[]} matchId="m1" />);
+
+    expect(await screen.findByText(/Deleted on hosted\. Sync is off for this match/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /open on splitsmith\.app/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /sync mode/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /publish again/i }));
+    await waitFor(() => expect(api.republishSync).toHaveBeenCalledTimes(1));
+    expect(api.startSync).not.toHaveBeenCalled();
   });
 
   it("shows the changed-file count when stale", async () => {
