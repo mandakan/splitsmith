@@ -13075,6 +13075,18 @@ def create_app(
             trimmed = audio_helpers.pull_trimmed_video(root, stage.stage_number, video, project=project)
             if trimmed.exists():
                 served_path = trimmed.resolve()
+            elif _is_mirror():
+                # Web-only mirror on a storage without presigned GET
+                # (#1078; FilesystemStorage in dev and tests): the anchor
+                # reports "trim" measured on the pushed params, so serve
+                # the rendition those params describe, as the presigned
+                # branch above does. Without it kind=trim 404ed.
+                web = audio_helpers.try_pull_web_trim(
+                    project,
+                    audio_helpers.trimmed_video_path(root, stage.stage_number, video, project=project),
+                )
+                if web is not None:
+                    served_path = web.resolve()
         if served_path is None:
             if kind == "trim":
                 raise HTTPException(
