@@ -20,19 +20,33 @@ stage's trim and shots appear on the phone, and hosted ran no detection.
 
 In v1:
 
-- A change feed on hosted (`GET /api/sync/changes`).
+- A fingerprint feed on hosted (`GET /api/sync/fingerprints`).
 - A desktop auto-sync service: watcher, dirty tracker, scheduler.
 - A pure reconciler that derives missing pipeline steps from state.
-- Web-only media on automatic pushes.
-- Real optimistic versions for local audit saves.
+- Audit revisions: a `_version` token on the audit GET/PUT so a stale
+  editor gets 409 instead of overwriting a pull (both modes).
+- `find_active` scoped to the submitting match.
 - SyncCard and settings controls.
 
-Out of v1:
+Automatic pushes use today's `full` media policy (full trims plus web
+renditions). Nothing on hosted changes behaviour in v1.
+
+Split out to v1.1 (separate spec): the web-only media policy. Planning
+found that hosted playback for a mirror keys off the full trim object in
+R2 (`_video_trim_anchor` checks `trim_available` before it considers the
+web rendition; MobileAudit asks for `kind=trim` explicitly and gets a
+404; audit peaks are computed from the pulled trim). Web-only needs the
+hosted anchor, stream and peaks paths to treat `_web.mp4` plus the pushed
+`.params.json` as the trim, which is its own surface and its own
+verification.
+
+Out of scope:
 
 - The command queue (render an export, upload to YouTube, re-run
   detection on request). Intent-driven work gets its own table and spec.
-- The hosted "processing on your desktop" hint. The `desktop_last_seen_at`
-  stamp lands now so v2 can read it.
+- The hosted "processing on your desktop" hint. `desktop_tokens.last_used_at`
+  already records last contact (stamped by `DesktopTokenAuth` on every
+  call), so v2 reads that; nothing is added here.
 - A background agent. Auto-sync runs only while the desktop app or
   `splitsmith ui` is running.
 - Push events (websocket, SSE). A 60 s poll is enough to start; revisit if
@@ -58,23 +72,24 @@ Out of v1:
 
 ## Design
 
-### 1. Hosted change feed
+### 1. Hosted fingerprint feed
 
-`GET /api/sync/changes?since=<cursor>` on the sync router, bearer-authed
-like the rest of it.
+`GET /api/sync/fingerprints` on the sync router, bearer-authed like the
+rest of it. Returns `{matches: [{match_id, doc_count, version_sum}]}` for
+every match of the caller's that has docs, counting only kinds in
+`PULLABLE_DOC_KINDS`.
 
-- Returns `{cursor, matches: [{match_id, max_version, updated_at}]}` for
-  the caller's matches whose `state_docs` moved after `since`. Only kinds
-  in `PULLABLE_DOC_KINDS` count, so an `export_runs` write does not wake a
-  desktop into a pull that would then find nothing.
-- The cursor is opaque to the client (server-side: the max `updated_at`
-  seen, plus a tiebreak), so no row is delivered twice or skipped at a
-  boundary.
-- Each call stamps `desktop_last_seen_at` on the device token's row (or
-  the user row if tokens have no row of their own; settle during
-  planning). Nothing reads it in v1.
-- No new table. One index on `state_docs(updated_at)` if the query needs
-  it.
+No cursor. `state_docs.version` only increases, so any write moves
+`version_sum` and any insert moves `doc_count`. The desktop computes the
+same pair from `sync_state.doc_versions` (whose keys are exactly the
+pullable identities) and wants a pull when the two differ. After a push
+the desktop records the versions the PUTs returned, so its own writes
+never wake it. If the pair stays different after a sync that succeeded
+(a doc deleted hosted-side, say), the scheduler remembers that server
+fingerprint as settled and does not re-sync until it moves again.
+
+One grouped query over `state_docs` filtered on `user_id`; no new table,
+no migration.
 
 ### 2. Desktop auto-sync service (`sync/auto.py`)
 
@@ -82,15 +97,17 @@ One asyncio task started with the local app (`create_app` in local mode
 only; hosted never starts it). State per match lives in memory; the
 persistent parts live in `sync_state.json`.
 
-**Watcher.** Polls `/changes` every 60 s. After 30 min with no movement on
+**Watcher.** Polls `/fingerprints` every 60 s. After 30 min with no movement on
 either side it backs off to 5 min; any local write or remote change
 resets it to 60 s. A reported match with auto-sync on becomes
 `pull_due`.
 
-**Dirty tracker.** Local doc saves (project, audit, match) and job
-completions for a match set `push_due` with a timestamp. Hooked where the
-writes already funnel: `AppState.save_audit`, `MatchProject.save` callers
-in the server, and the job registry's completion path.
+**Dirty tracker.** Two hooks set `push_due` with a timestamp: an HTTP
+middleware that sees a successful (status < 400) POST, PUT, PATCH or
+DELETE under `/api/matches/{match_id}/` (sync routes excluded), and a
+terminal listener on the job registry for a succeeded job whose
+`match_id` is set and whose kind is not a sync. Every local write goes
+through one of the two.
 
 **Scheduler.** Every tick it considers each auto-synced match:
 
@@ -98,8 +115,9 @@ in the server, and the job registry's completion path.
   keeps a long job's in-memory `MatchProject` from racing a pull);
 - skip if a `sync_match` job is active anywhere (existing one-at-a-time
   rule);
-- submit `sync_match` with `auto=True` if `pull_due`, or if `push_due` and
-  the last dirtying write is at least 45 s old.
+- submit an `auto_sync` job (the `sync_match` body, registered under its
+  own kind so the SPA can tell them apart) if `pull_due`, or if
+  `push_due` and the last dirtying write is at least 45 s old.
 
 **Which matches.** Every registered match whose `sync_state.json` has
 `last_synced_at` set and `auto_sync` true. The match root is set through
@@ -116,28 +134,34 @@ on the card as "Auto-sync paused: <reason>".
 list[ReconcileStep]` is pure: it reads projects and audit docs already
 loaded and returns steps; it performs no I/O and submits nothing.
 
-Per shooter, per stage, per video:
+Per shooter, per stage, per video, reading the `processed` flags the
+merge already maintains (a pulled `beep_time` change clears
+`processed["trim"]` and, on a primary, `processed["shot_detect"]`):
 
 | State | Step |
 |---|---|
-| `beep_reviewed`, stage time and beep allow a trim, trim missing or its params' `beep_time` differs | `trim` |
-| primary, `beep_reviewed`, trim current, no detection in the audit doc (missing or stub) | `shot_detect` |
-| trim current, `_web.mp4` missing | `web_trim` |
+| `beep_reviewed`, `beep_time` set, `stage.time_seconds > 0`, not `processed["trim"]` | `trim` (its job chains detection for a reviewed primary, behind the existing `shot_detect_on_beep_verified` automation gate) |
+| primary, `beep_reviewed`, `processed["trim"]`, not `processed["shot_detect"]`, audit doc missing or a stub (`is_stub_audit`), and the project's resolved `shot_detect_on_beep_verified` automation is on | `shot_detect` |
 
-The trim rule is the one `_maybe_chain_trim` applies today. Both
-`_after_beep_reviewed` and `_maybe_chain_trim` are refactored to evaluate
-the same per-stage rule, so a desktop confirm and a phone confirm cannot
-leave different state. The stub audit doc write moves with them.
+No web-cut step: `run_sync` already backfills missing `_web.mp4`
+renditions before every push. The reconciler never detects over an audit
+doc with real content; re-detecting a worked stage stays a manual action.
 
-`ReconcileFailures` is a small map persisted in `sync_state.json`:
+`_after_beep_reviewed` keeps its explicit-confirm semantics (a local
+confirm on an already trimmed primary always queues detection) but
+evaluates the same rule function with `explicit=True`, so the trim
+condition and dedupe live in one place.
+
+`ReconcileFailures` is a small map persisted in `auto_sync.json`:
 `(slug, stage, video_id, step) -> input_key` where `input_key` is the
 `beep_time` and trim params the step failed with. A step whose inputs
 match a recorded failure is skipped; changed inputs or a manual retry
 clear the entry. This keeps a broken clip from being resubmitted on every
 poll.
 
-The server runs the reconciler after every sync that pulled at least one
-doc, and once at startup per auto-synced match. It submits the steps
+The server runs the reconciler at the end of every sync, manual or
+automatic (it is idempotent and cheap); at startup the service marks
+every auto-synced match pull-due, so the first run reconciles too. It submits the steps
 through the normal job registry, deduplicated with `find_active` as
 `_after_beep_reviewed` does. Completion of those jobs sets `push_due`,
 which closes the loop.
@@ -145,66 +169,74 @@ which closes the loop.
 `merge.reprocess_video_ids` stays as the report's counter; the
 reconciler, not the merge, decides what runs.
 
-### 4. Media policy on push
+### 4. Match-scoped job dedupe
 
-`build_push_plan(..., media: Literal["web", "full"])`.
+`JobRegistry.find_active` matches on `(kind, stage_number, shooter_slug
+[, video_id])` and ignores the match. Shooter slugs repeat across matches
+(the owner is in every one), so once the service processes background
+matches, match A's stage 3 trim would dedupe against match B's. It gains
+a match filter: when `current_match_id` is set in the caller's context,
+only jobs with that `match_id` match. A context-free caller keeps today's
+behaviour.
 
-- `web`: docs, `_web.mp4`, beep snippets, and `.params.json` sidecars. No
-  full-resolution trims.
-- `full`: today's behaviour.
+### 5. Audit revisions
 
-Automatic runs use `web` unless the match's `full_media` flag is on.
-Manual Sync uses `full`. Hosted streaming already prefers the web
-rendition; the known cost is that phone-side audit scrubbing on a stage
-whose full trim was never pushed uses the rendition's coarser GOP. We try
-this and revisit after use.
+The SPA's audit PUT carries no version on either mode (the route's own
+comment: "assumes last-writer-wins"), and local `load_audit` reports 0.
+A pull that lands while the Audit page is open is overwritten by the
+page's next save, and the phone's edits are then pushed up as lost.
 
-Whether `kind=trim` should fall back to the web rendition when the trim
-object is absent on a mirror is decided during planning, after checking
-what the audit screen does with a missing trim today.
-
-### 5. Local audit versioning
-
-Local `load_audit` returns a real version: a stable integer derived from
-the file (content hash truncated to 63 bits, so it survives a restart and
-means the same thing on every worker). `save_audit` compares it under
-`audit_lock` and raises the same `StateConflictError` hosted raises, which
-the route already maps to 409 `version_conflict`. The sync apply path
-writes through the same lock.
-
-To confirm during planning: the SPA sends `version` on the local audit
-PUT and handles 409 by reloading, as it does hosted. If it does not in
-local mode, that is part of this change.
+- `GET .../audit` adds `_version` to the returned doc: a 16-hex-char
+  sha256 of the stored doc's canonical JSON (`sort_keys`, compact
+  separators), the same in both modes.
+- `PUT .../audit` pops `_version` from the payload. When present, the
+  route loads the stored doc under `AppState.audit_lock`, compares
+  revisions, and raises `AuditRevisionConflict` on a mismatch, which maps
+  to the same 409 `version_conflict` body hosted uses. The save happens
+  inside the same lock. The response carries the new `_version`. A PUT
+  without `_version` (an older client, a script) behaves as today.
+- `buildAuditJson` spreads the loaded doc, so `_version` round-trips with
+  no change to how the payload is built. `MobileAudit` already reloads on
+  409; desktop `Audit.tsx` gains the same handling.
+- `AuditRevisionConflict` lives outside `splitsmith.db` so the slim local
+  install can raise and map it (the #1057 import-surface rule).
+- `run_sync` takes an optional lock and holds it around each audit doc's
+  read-merge-write in `_apply_pull`; the server passes
+  `state.audit_lock`.
+- `_version` is never stored: the PUT pops it before saving and the sync
+  push reads files, which never contain it.
 
 ### 6. Persistent per-match state
 
-Added to `SyncState` (all defaulted, so old files load):
+A new local file, `<match-root>/auto_sync.json` (`sync.auto_state`),
+holds:
 
-- `auto_sync: bool | None = None`: `None` means default, which is on once
-  `last_synced_at` is set.
-- `full_media: bool = False`.
-- `reconcile_failures: dict[str, str]`.
-- `last_auto: AutoRunSummary | None`: time, outcome, conflicts and notes
-  of the last automatic run, for the card.
+- `enabled: bool | None = None`: `None` means default, which is on once
+  `sync_state.last_synced_at` is set.
+- `reconcile_failures: dict[str, str]`: step key -> input key.
+- `last_auto: AutoRunSummary | None`: time, outcome, message, conflict
+  and note counts of the last automatic run, for the card.
 
-`sync_state.json` is local and never synced, so none of this needs a
-`state_docs` kind or the sync allowlist.
+Not in `sync_state.json`: `run_sync` saves that file repeatedly from its
+in-memory copy, so a toggle made during a sync would be overwritten. The
+new file has one writer helper that load-modify-saves under a module
+lock. Root-level files are never in the push plan, so this needs no
+`state_docs` kind and no sync allowlist change.
 
-Global switch: `auto_sync_enabled: bool = True` in the global prefs next
-to `hosted_base_url`.
+Global switch: `auto_sync_enabled: bool = True` in `GlobalPrefs`.
 
 ### 7. UI (local mode only)
 
 - `SyncCard`: a `Segmented` Auto / Manual control; status line "Auto-sync
   on, synced 2 min ago", "Auto-sync paused: offline", or the last run's
-  conflict and note counts with a link to details. "Full media" as a
-  secondary toggle.
+  conflict and note counts with a link to details.
 - `SyncSettingsDialog`: the global switch.
 - Progress strip: `sync_match` jobs with `auto=True` are hidden while
   pending, running or succeeded, and shown when they fail. Reconciler
   jobs (trim, detect, web cut) show as usual.
-- New endpoints: `GET/PUT /api/match/sync/auto` for the per-match flags
-  and the service's current state for this match.
+- New endpoints: `GET/PUT /api/match/sync/auto` for the per-match flag
+  and the service's current state for this match; `PUT
+  /api/settings/auto-sync` for the global switch.
 
 ## Testing
 
@@ -219,11 +251,13 @@ watch it fail).
   confirm submit the same jobs.
 - Scheduler: fake clock and fake registry; debounce, busy match defers,
   one-at-a-time, backoff, 401 stops the loop.
-- `/changes`: cursor delivers each change once across a boundary;
-  non-pullable kinds do not appear.
-- Local audit versioning: a stale save returns 409; a save after a pull
-  with the old version returns 409.
-- `build_push_plan(media="web")` omits full trims and keeps web renditions.
+- `/fingerprints`: a PUT moves `version_sum`; an `export_runs` write does
+  not; another user's docs never appear.
+- `find_active`: a job in match B does not satisfy a lookup made in match
+  A's context.
+- Audit revisions: a stale `_version` returns 409 in local mode; a
+  matching one saves and returns the new `_version`; no `_version` saves
+  as today.
 - End to end, by hand and recorded in the PR: seeded demo match with
   `--media`, synced to staging; confirm the beep through the hosted API;
   watch the desktop trim, detect and push with no clicks; read the shots
@@ -235,5 +269,5 @@ watch it fail).
   Endpoint handlers are short and synchronous; the scheduler never syncs a
   match with an active job. Accepted for v1.
 - Poll cost with many matches: one request per poll regardless of match
-  count, by design of `/changes`.
-- The web-only policy may make phone audits feel worse. Revisit after use.
+  count, by design of `/fingerprints`.
+- R2 storage keeps growing with full trims until v1.1 lands.
