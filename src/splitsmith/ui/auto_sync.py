@@ -32,6 +32,9 @@ logger = logging.getLogger(__name__)
 
 AUTO_SYNC_ENV = "SPLITSMITH_AUTO_SYNC"
 SYNC_KINDS = frozenset({"sync_match", "auto_sync"})
+#: Job kinds that encode video. One on any match holds every automatic
+#: sync (``AutoSyncCore.pick``); a manual sync is the user's call.
+RENDER_KINDS = frozenset({"match_export", "export", "compare-grid", "generate_proxy"})
 #: Job kinds whose success writes nothing that syncs (export history,
 #: renders, proxies, downloads), so they must not schedule a push.
 _UNSYNCED_JOB_KINDS = frozenset(
@@ -158,8 +161,11 @@ class AutoSyncService:
         active = [j for j in jobs if j.status in (JobStatus.PENDING, JobStatus.RUNNING)]
         busy = {j.match_id for j in active if j.match_id}
         sync_active = any(j.kind in SYNC_KINDS for j in active)
+        render_active = any(j.kind in RENDER_KINDS for j in active)
         with self._lock:
-            match_id = self.core.pick(now, enabled=roots, busy=busy, sync_active=sync_active)
+            match_id = self.core.pick(
+                now, enabled=roots, busy=busy, sync_active=sync_active, render_active=render_active
+            )
             if match_id is not None:
                 self.core.on_sync_started(match_id, now)
         if match_id is not None:

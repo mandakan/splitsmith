@@ -307,3 +307,43 @@ def test_global_switch_rejects_per_match_fields(tmp_path: Path, monkeypatch) -> 
     client, _ = _seed_match_export_project(tmp_path, stage_count=1)
     assert client._client.put("/api/settings/auto-sync", json={"enabled": False}).status_code == 200
     assert client._client.put("/api/settings/auto-sync", json={"full_media": True}).status_code == 422
+
+
+class _ActiveJobs:
+    def __init__(self, jobs: list) -> None:
+        self.jobs = jobs
+
+    async def list(self) -> list:
+        return self.jobs
+
+
+def test_a_render_on_another_match_holds_the_sync(tmp_path: Path) -> None:
+    """0.43.0 started HFO Masters' sync, and its web-clip backfill, seven
+    minutes into a Hostfinalen render: the busy rule was per match."""
+    from splitsmith.ui.jobs import Job, JobStatus
+
+    submitted: list[str] = []
+    svc, _ = _service(tmp_path, lambda prefs: {"m1": (2, 3)}, submitted)
+    now = datetime.now(UTC)
+
+    def running(kind: str) -> _ActiveJobs:
+        return _ActiveJobs(
+            [
+                Job(
+                    id="j",
+                    kind=kind,
+                    match_id="other",
+                    status=JobStatus.RUNNING,
+                    created_at=now,
+                    updated_at=now,
+                )
+            ]
+        )
+
+    for kind in ("match_export", "compare-grid", "export"):
+        svc._jobs = running(kind)
+        asyncio.run(svc.tick())
+        assert submitted == [], kind
+    svc._jobs = running("trim")
+    asyncio.run(svc.tick())
+    assert submitted == ["m1"]

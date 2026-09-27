@@ -139,3 +139,12 @@ def test_sync_done_uses_a_given_start_when_none_was_recorded() -> None:
     core.mark_dirty("m1", now=110.0)  # an edit while the manual sync ran
     core.on_sync_done("m1", now=130.0, ok=True, started_at=100.0)
     assert core.pick(160.0, enabled=E, busy=(), sync_active=False) == "m1"
+
+
+def test_a_running_render_holds_every_match() -> None:
+    """A render on any match holds every automatic sync: a sync's web-clip
+    backfill encodes on the same CPU the render needs."""
+    core = AutoSyncCore()
+    core.mark_pull_due("m1")
+    assert core.pick(0.0, enabled=E, busy=(), sync_active=False, render_active=True) is None
+    assert core.pick(0.0, enabled=E, busy=(), sync_active=False, render_active=False) == "m1"
