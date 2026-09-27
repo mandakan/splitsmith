@@ -781,7 +781,15 @@ class JobRegistry:
         that don't know about per-video jobs keep their previous behaviour
         of "match on (kind, stage_number)" so a stage-level shot_detect
         dedupe still works against a video_id-less submission.
+
+        ``current_match_id``, when set, scopes the lookup to that match:
+        shooter slugs repeat across matches, so a context-free (kind,
+        stage, slug) key would adopt another match's job.
         """
+        # In-method import: server.py imports this module (see submit()).
+        from .server import current_match_id
+
+        calling_match = current_match_id.get()
         with self._lock:
             for jid in self._order:
                 j = self._jobs.get(jid)
@@ -792,6 +800,8 @@ class JobRegistry:
                 if j.kind != kind or j.stage_number != stage_number:
                     continue
                 if j.shooter_slug != shooter_slug:
+                    continue
+                if calling_match is not None and j.match_id != calling_match:
                     continue
                 if not isinstance(video_id, _Unset) and j.video_id != video_id:
                     continue
