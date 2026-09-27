@@ -57,10 +57,12 @@ import {
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Segmented } from "@/components/ui/Segmented";
 import { SyncSettingsDialog } from "@/components/match/SyncSettingsDialog";
 import {
   api,
   apiErrorText,
+  type AutoSyncStatus,
   type HostedSyncSettings,
   type Job,
   type SyncStatusResponse,
@@ -103,6 +105,9 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
 
   const [status, setStatus] = useState<SyncStatusResponse | null>(null);
   const [settings, setSettings] = useState<HostedSyncSettings | null>(null);
+  // Desktop auto-sync (spec 2026-09-27). Null when the sidecar predates
+  // the route: the card then behaves exactly as before.
+  const [auto, setAuto] = useState<AutoSyncStatus | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
@@ -117,12 +122,14 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
 
   const load = useCallback(async () => {
     try {
-      const [s, cfg] = await Promise.all([
+      const [s, cfg, a] = await Promise.all([
         api.getSyncStatus(),
         api.getSyncSettings(),
+        api.getAutoSync().catch(() => null),
       ]);
       setStatus(s);
       setSettings(cfg);
+      setAuto(a);
       setLoadError(null);
     } catch (e) {
       setLoadError(apiErrorText(e, "Could not load sync status."));
@@ -138,6 +145,7 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
   useEffect(() => {
     if (!local) return;
     setStatus(null);
+    setAuto(null);
     setLoadError(null);
     setStartError(null);
     setStartedJob(null);
@@ -149,7 +157,8 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
   // (progress line + disabled "Syncing..." button). A foreign active
   // sync still parks the button (one push at a time), but is reported
   // as another match's sync, not this one's.
-  const isActiveSync = (j: Job) => j.kind === "sync_match" && isJobActive(j);
+  const isActiveSync = (j: Job) =>
+    (j.kind === "sync_match" || j.kind === "auto_sync") && isJobActive(j);
   const runningJob =
     jobs.find((j) => isActiveSync(j) && j.match_id === matchId) ?? null;
   const jobsSyncing = runningJob != null;
@@ -197,6 +206,15 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
     }
   }
 
+  async function handleAutoChange(on: boolean) {
+    try {
+      // ``null`` restores the default rather than pinning ``true``.
+      setAuto(await api.setAutoSync(on ? null : false));
+    } catch (e) {
+      setStartError(apiErrorText(e, "Could not change auto-sync."));
+    }
+  }
+
   function handleSettingsSaved(updated: HostedSyncSettings) {
     setSettings(updated);
     void load();
@@ -230,6 +248,7 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
           syncing={syncing}
           runningJob={runningJob}
           otherMatchSyncing={otherMatchSyncing}
+          auto={auto}
         />
         <div className="ml-auto flex items-center gap-2">
           {/* The hosted match exists from the first push onward, so the
@@ -253,6 +272,17 @@ export function SyncCard({ jobs, matchId }: SyncCardProps) {
             </Button>
           ) : (
             <>
+              {auto && status?.configured && status.last_synced_at ? (
+                <Segmented
+                  label="Sync mode"
+                  value={auto.enabled ? "auto" : "manual"}
+                  options={[
+                    { value: "auto", label: "Auto", disabled: !auto.global_enabled },
+                    { value: "manual", label: "Manual" },
+                  ]}
+                  onChange={(v) => void handleAutoChange(v === "auto")}
+                />
+              ) : null}
               <Button type="button" size="sm" variant="ghost" onClick={() => setSettingsOpen(true)}>
                 Settings
               </Button>
@@ -308,12 +338,14 @@ function SyncStatusLine({
   syncing,
   runningJob,
   otherMatchSyncing,
+  auto,
 }: {
   status: SyncStatusResponse | null;
   loadError: string | null;
   syncing: boolean;
   runningJob: Job | null;
   otherMatchSyncing: boolean;
+  auto: AutoSyncStatus | null;
 }) {
   const lineClass = "flex items-center gap-1.5 text-sm text-muted";
 
@@ -330,6 +362,22 @@ function SyncStatusLine({
       <p className={lineClass} aria-live="polite">
         <Clock className="size-3.5 shrink-0" aria-hidden="true" />
         Another match is syncing - this one can start when it finishes
+      </p>
+    );
+  }
+  if (auto?.enabled && auto.paused_reason) {
+    return (
+      <p className={cn(lineClass, "text-led-text")} aria-live="polite">
+        <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
+        Auto-sync paused: {auto.paused_reason}
+      </p>
+    );
+  }
+  if (auto?.enabled && auto.last_auto && !auto.last_auto.ok) {
+    return (
+      <p className={cn(lineClass, "text-led-text")} aria-live="polite">
+        <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
+        Last auto-sync failed: {auto.last_auto.message}
       </p>
     );
   }
@@ -385,10 +433,13 @@ function SyncStatusLine({
       </p>
     );
   }
+  const lastNotes = auto?.last_auto ? auto.last_auto.conflicts + auto.last_auto.notes : 0;
   return (
     <p className={lineClass}>
       <CheckCircle2 className="size-3.5 shrink-0 text-done" aria-hidden="true" />
-      Synced {relativeTime(status.last_synced_at)}
+      {auto?.enabled ? "Auto-sync on, synced " : "Synced "}
+      {relativeTime(status.last_synced_at)}
+      {lastNotes > 0 ? `, ${lastNotes} note${lastNotes === 1 ? "" : "s"} on the last run` : null}
     </p>
   );
 }

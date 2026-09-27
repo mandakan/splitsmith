@@ -8,7 +8,7 @@
  * the very path that exists to replace it. A fresh install could not
  * reach the device flow at all.
  */
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { api, type HostedSyncSettings } from "@/lib/api";
@@ -19,7 +19,12 @@ vi.mock("@/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api")>();
   return {
     ...actual,
-    api: { ...actual.api, putSyncSettings: vi.fn() },
+    api: {
+      ...actual.api,
+      putSyncSettings: vi.fn(),
+      getAutoSync: vi.fn(),
+      setGlobalAutoSync: vi.fn(),
+    },
   };
 });
 
@@ -29,6 +34,7 @@ const FRESH: HostedSyncSettings = { base_url: null, token_set: false, account: n
 describe("SyncSettingsDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(api.getAutoSync).mockRejectedValue(new Error("no route"));
   });
 
   it("saves a base URL on its own from a fresh config", async () => {
@@ -97,6 +103,24 @@ describe("SyncSettingsDialog", () => {
         "https://splitsmith.app",
         "pasted-token",
       ),
+    );
+  });
+  it("switches auto-sync off for this computer", async () => {
+    vi.mocked(api.getAutoSync).mockResolvedValue({
+      enabled: true,
+      setting: null,
+      global_enabled: true,
+      paused_reason: null,
+      last_auto: null,
+    });
+    vi.mocked(api.setGlobalAutoSync).mockResolvedValue({ global_enabled: false });
+    render(<SyncSettingsDialog settings={FRESH} onClose={vi.fn()} onSaved={vi.fn()} />);
+    const group = await screen.findByRole("group", { name: "Auto-sync on this computer" });
+    expect(within(group).getByRole("button", { name: "On" })).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(within(group).getByRole("button", { name: "Off" }));
+    await waitFor(() => expect(api.setGlobalAutoSync).toHaveBeenCalledWith(false));
+    await waitFor(() =>
+      expect(within(group).getByRole("button", { name: "Off" })).toHaveAttribute("aria-pressed", "true"),
     );
   });
 });
