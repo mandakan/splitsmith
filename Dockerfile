@@ -111,18 +111,23 @@ ENV UV_PYTHON_DOWNLOADS=never \
 # BEFORE extraction, so a wrong body fails as a checksum mismatch naming the
 # file rather than as a confusing tar error.
 #
-# Pinned to one immutable autobuild tag. The two arches carry DIFFERENT build
-# revisions within a tag (arm64 lags amd64 by an hour or so), which is why the
-# filename is spelled out per arch instead of composed from one revision. To
-# bump, pick a tag from https://github.com/BtbN/FFmpeg-Builds/releases and take
-# both names and digests from
-#   gh api repos/BtbN/FFmpeg-Builds/releases/tags/<tag> \
-#     --jq '.assets[] | select(.name|test("linux(64|arm64)-gpl-shared\\.tar\\.xz")) | "\(.name) \(.digest)"'
+# The tarballs are BtbN's, served from a release on THIS repo
+# (ffmpeg-linux-<date>). BtbN prunes autobuild releases after a couple of
+# weeks -- the 2026-09-10 pin 404ed after 17 days and took every image build
+# with it -- and our own release is never pruned, so the pin moves only when
+# we move it. The two arches carry DIFFERENT build revisions within a BtbN
+# tag (arm64 lags amd64 by an hour or so), which is why the filename is
+# spelled out per arch instead of composed from one revision. To bump, pick a
+# tag from https://github.com/BtbN/FFmpeg-Builds/releases and run
+#   scripts/mirror_ffmpeg_linux.sh <autobuild tag>
+# which verifies both tarballs against BtbN's digests, creates the mirror
+# release and rewrites the pin in both Dockerfiles. Render the frames before
+# merging (scripts/render_match_frames.py, scripts/render_grid_frames.py).
 # Keep Dockerfile.gpu's copy of this block in step.
 #
 # ``TARGETARCH`` is provided automatically by buildx (amd64 / arm64).
 ARG TARGETARCH
-ARG FFMPEG_BUILD=autobuild-2026-09-26-13-03
+ARG FFMPEG_RELEASE=ffmpeg-linux-2026-09-26-13-03
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends ca-certificates curl xz-utils; \
@@ -135,7 +140,7 @@ RUN set -eux; \
         *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
-        "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BUILD}/${ff_file}" \
+        "https://github.com/mandakan/splitsmith/releases/download/${FFMPEG_RELEASE}/${ff_file}" \
         -o /tmp/ffmpeg.tar.xz; \
     echo "${ff_sha}  /tmp/ffmpeg.tar.xz" | sha256sum -c -; \
     mkdir -p /tmp/ffmpeg; \

@@ -96,7 +96,7 @@ ENV UV_PYTHON_DOWNLOADS=never \
 # itself. See ./Dockerfile for why this is a GitHub release asset with a
 # checksum rather than a personal host's rolling URL.
 ARG TARGETARCH
-ARG FFMPEG_BUILD=autobuild-2026-09-26-13-03
+ARG FFMPEG_RELEASE=ffmpeg-linux-2026-09-26-13-03
 RUN set -eux; \
     case "${TARGETARCH:-amd64}" in \
         amd64) ff_file=ffmpeg-N-126889-gb139ba11d8-linux64-gpl-shared.tar.xz; \
@@ -106,7 +106,7 @@ RUN set -eux; \
         *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
     curl -fsSL --retry 5 --retry-all-errors --retry-delay 5 \
-        "https://github.com/BtbN/FFmpeg-Builds/releases/download/${FFMPEG_BUILD}/${ff_file}" \
+        "https://github.com/mandakan/splitsmith/releases/download/${FFMPEG_RELEASE}/${ff_file}" \
         -o /tmp/ffmpeg.tar.xz; \
     echo "${ff_sha}  /tmp/ffmpeg.tar.xz" | sha256sum -c -; \
     mkdir -p /tmp/ffmpeg; \
