@@ -12,7 +12,7 @@ from splitsmith.sync.auto_state import (
     load_auto_prefs,
     update_auto_prefs,
 )
-from splitsmith.sync.state import SyncState, local_fingerprint, save_sync_state
+from splitsmith.sync.state import SyncState, local_fingerprint, save_sync_state, versions_digest
 
 
 def test_missing_or_corrupt_file_loads_defaults(tmp_path: Path) -> None:
@@ -50,8 +50,19 @@ def test_toggle_is_not_clobbered_by_sync_state_saves(tmp_path: Path) -> None:
 
 def test_local_fingerprint_counts_and_sums_doc_versions() -> None:
     state = SyncState(doc_versions={"match": 3, "project/me": 2, "audit/me/1": 5})
-    assert local_fingerprint(state) == (3, 10)
-    assert local_fingerprint(SyncState()) == (0, 0)
+    assert local_fingerprint(state)[:2] == (3, 10)
+    assert local_fingerprint(SyncState())[:2] == (0, 0)
+
+
+def test_fingerprint_digest_catches_a_delete_plus_insert_at_equal_versions() -> None:
+    """#1072: stage 1's v1 audit deleted hosted-side and stage 2's v1
+    inserted between two polls leaves count and sum as they were."""
+    before = SyncState(doc_versions={"match": 1, "audit/a/1": 1})
+    after = SyncState(doc_versions={"match": 1, "audit/a/2": 1})
+    assert local_fingerprint(before)[:2] == local_fingerprint(after)[:2]
+    assert local_fingerprint(before) != local_fingerprint(after)
+    # Order-independent: the same pairs in any order hash the same.
+    assert versions_digest({"a": 1, "b": 2}) == versions_digest({"b": 2, "a": 1})
 
 
 def test_full_media_defaults_off_and_round_trips(tmp_path: Path) -> None:

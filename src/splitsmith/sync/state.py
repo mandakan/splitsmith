@@ -37,7 +37,9 @@ plan.
 
 from __future__ import annotations
 
+import hashlib
 import json
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 
@@ -98,8 +100,20 @@ def save_sync_state(match_root: Path, state: SyncState) -> None:
     atomic_write_json(match_root / SYNC_STATE_FILE, state.model_dump(mode="json"))
 
 
-def local_fingerprint(state: SyncState) -> tuple[int, int]:
-    """``(doc_count, version_sum)`` over ``doc_versions``: the desktop half
-    of the auto-sync change signal. Its keys are exactly the pullable doc
-    identities, which is what ``GET /api/sync/fingerprints`` counts."""
-    return len(state.doc_versions), sum(state.doc_versions.values())
+def versions_digest(versions: Mapping[str, int]) -> str:
+    """Short hash over every ``identity key -> version`` pair (#1072).
+
+    Count and sum alone miss a delete plus an insert at equal versions
+    (audit stage 1 v1 gone, stage 2 v1 new); the identities move this.
+    Hosted computes it with the same keys (``doc_identity_key``)."""
+    lines = "\n".join(f"{key}={version}" for key, version in sorted(versions.items()))
+    return hashlib.sha256(lines.encode("utf-8")).hexdigest()[:16]
+
+
+def local_fingerprint(state: SyncState) -> tuple[int, int, str]:
+    """``(doc_count, version_sum, digest)`` over ``doc_versions``: the
+    desktop half of the auto-sync change signal. Its keys are exactly the
+    pullable doc identities, which is what ``GET /api/sync/fingerprints``
+    counts."""
+    versions = state.doc_versions
+    return len(versions), sum(versions.values()), versions_digest(versions)

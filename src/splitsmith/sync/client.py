@@ -166,14 +166,17 @@ class HostedSyncClient:
         self._raise_for_status(resp)
         return resp.json()["docs"]
 
-    def get_fingerprints(self) -> dict[str, tuple[int, int]]:
-        """``match_id -> (doc_count, version_sum)`` for every hosted match."""
+    def get_fingerprints(self) -> dict[str, tuple[int, int] | tuple[int, int, str]]:
+        """``match_id -> (doc_count, version_sum[, digest])`` for every
+        hosted match. The digest is absent from a hosted older than #1072."""
         resp = self._http.get("/api/sync/fingerprints")
         self._raise_for_status(resp)
-        return {
-            row["match_id"]: (int(row["doc_count"]), int(row["version_sum"]))
-            for row in resp.json()["matches"]
-        }
+        out: dict[str, tuple[int, int] | tuple[int, int, str]] = {}
+        for row in resp.json()["matches"]:
+            pair = (int(row["doc_count"]), int(row["version_sum"]))
+            digest = row.get("digest")
+            out[row["match_id"]] = (*pair, str(digest)) if digest else pair
+        return out
 
     def get_doc(
         self, match_id: str, kind: str, slug: str | None, stage_number: int | None

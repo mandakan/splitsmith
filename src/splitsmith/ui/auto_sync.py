@@ -24,9 +24,10 @@ from .. import user_config
 from ..sync.auto import AutoSyncCore, Fingerprint
 from ..sync.auto_state import auto_sync_effective, load_auto_prefs
 from ..sync.client import HostedSyncClient
+from ..sync.plan import doc_identity_key
 from ..sync.pull import PULLABLE_DOC_KINDS
 from ..sync.push import removable_full_trims
-from ..sync.state import load_sync_state, local_fingerprint
+from ..sync.state import load_sync_state, local_fingerprint, versions_digest
 from .jobs import Job, JobStatus
 
 logger = logging.getLogger(__name__)
@@ -85,11 +86,16 @@ def _fetch_manifest(prefs: user_config.GlobalPrefs, match_id: str) -> list[dict]
 
 
 def manifest_fingerprint(manifest: list[dict]) -> Fingerprint:
-    """The ``/fingerprints`` pair computed from one match's doc manifest,
+    """The ``/fingerprints`` triple computed from one match's doc manifest,
     for a hosted too old to serve the route (#1071). Filtered to the
-    pullable kinds here because an older server's manifest may not be."""
-    versions = [int(d["version"]) for d in manifest if d["doc_kind"] in PULLABLE_DOC_KINDS]
-    return len(versions), sum(versions)
+    pullable kinds here because an older server's manifest may not be;
+    the manifest carries the identities, so the digest (#1072) comes too."""
+    versions = {
+        doc_identity_key(d["doc_kind"], d.get("slug"), d.get("stage_number")): int(d["version"])
+        for d in manifest
+        if d["doc_kind"] in PULLABLE_DOC_KINDS
+    }
+    return len(versions), sum(versions.values()), versions_digest(versions)
 
 
 class AutoSyncService:
@@ -221,7 +227,11 @@ class AutoSyncService:
             with self._lock:
                 self.core.on_poll_error(now, _OFFLINE_REASON, auth=False)
             return
-        local = {mid: local_fingerprint(load_sync_state(root)) for mid, root in roots.items()}
+        local: dict[str, Fingerprint] = {}
+        for mid, root in roots.items():
+            fp = local_fingerprint(load_sync_state(root))
+            # A hosted older than #1072 sends no digest: compare the pair.
+            local[mid] = fp if len(server.get(mid, fp)) == 3 else fp[:2]
         with self._lock:
             self.core.on_poll_ok(now, server, local)
 

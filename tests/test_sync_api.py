@@ -488,14 +488,24 @@ def test_fingerprints_move_with_a_put_and_ignore_export_runs(
     project_doc = MatchProject(name="Anna").model_dump(mode="json")
     assert _put_doc(client, "m1", "project/anna", body=project_doc, expected_version=0).status_code == 200
 
+    from splitsmith.sync.state import versions_digest
+
+    def _row(version: int) -> dict:
+        # The digest is the desktop's own versions_digest over the same
+        # identity keys, so the two sides compare equal when in sync.
+        return {
+            "match_id": "m1",
+            "doc_count": 1,
+            "version_sum": version,
+            "digest": versions_digest({"project/anna": version}),
+        }
+
     first = client.get(FINGERPRINTS_URL)
     assert first.status_code == 200, first.text
-    assert first.json() == {"matches": [{"match_id": "m1", "doc_count": 1, "version_sum": 1}]}
+    assert first.json() == {"matches": [_row(1)]}
 
     assert _put_doc(client, "m1", "project/anna", body=project_doc, expected_version=1).status_code == 200
-    assert client.get(FINGERPRINTS_URL).json()["matches"] == [
-        {"match_id": "m1", "doc_count": 1, "version_sum": 2}
-    ]
+    assert client.get(FINGERPRINTS_URL).json()["matches"] == [_row(2)]
 
     engine = create_engine(_db_url_for(client))
     sf = sessionmaker(engine)
@@ -509,9 +519,7 @@ def test_fingerprints_move_with_a_put_and_ignore_export_runs(
         await store.save_export_runs("m1", "anna", {"schema_version": 1, "runs": []}, expected_version=0)
 
     asyncio.run(_seed_export_runs())
-    assert client.get(FINGERPRINTS_URL).json()["matches"] == [
-        {"match_id": "m1", "doc_count": 1, "version_sum": 2}
-    ]
+    assert client.get(FINGERPRINTS_URL).json()["matches"] == [_row(2)]
 
 
 def test_fingerprints_are_per_user(hosted_app: tuple[TestClient, _CapturingSender]) -> None:

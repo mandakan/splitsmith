@@ -39,7 +39,9 @@ from pydantic import BaseModel, ValidationError
 from .. import match_model
 from ..match_project import MatchProject
 from ..storage import Storage
+from ..sync.plan import doc_identity_key
 from ..sync.pull import PULLABLE_DOC_KINDS
+from ..sync.state import versions_digest
 
 if TYPE_CHECKING:
     from ..db.matches import PostgresMatchStore
@@ -443,6 +445,9 @@ class SyncFingerprint(BaseModel):
     match_id: str
     doc_count: int
     version_sum: int
+    #: ``versions_digest`` over the match's identity -> version pairs
+    #: (#1072). Additive: a desktop that predates it reads the pair only.
+    digest: str
 
 
 class SyncFingerprintsResponse(BaseModel):
@@ -464,9 +469,20 @@ async def get_fingerprints(
     the desktop never pulls must not wake it.
     """
     _hosted_gate()
-    rows = await _project_state(request).list_fingerprints(PULLABLE_DOC_KINDS)
+    rows = await _project_state(request).list_doc_versions(PULLABLE_DOC_KINDS)
+    per_match: dict[str, dict[str, int]] = {}
+    for match_id, kind, slug, stage_number, version in rows:
+        per_match.setdefault(match_id, {})[doc_identity_key(kind, slug, stage_number)] = version
     return SyncFingerprintsResponse(
-        matches=[SyncFingerprint(match_id=m, doc_count=c, version_sum=v) for m, c, v in rows]
+        matches=[
+            SyncFingerprint(
+                match_id=m,
+                doc_count=len(versions),
+                version_sum=sum(versions.values()),
+                digest=versions_digest(versions),
+            )
+            for m, versions in sorted(per_match.items())
+        ]
     )
 
 
