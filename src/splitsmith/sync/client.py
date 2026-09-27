@@ -150,6 +150,15 @@ class HostedSyncClient:
         self._raise_for_status(resp)
         return resp.json()["docs"]
 
+    def get_fingerprints(self) -> dict[str, tuple[int, int]]:
+        """``match_id -> (doc_count, version_sum)`` for every hosted match."""
+        resp = self._http.get("/api/sync/fingerprints")
+        self._raise_for_status(resp)
+        return {
+            row["match_id"]: (int(row["doc_count"]), int(row["version_sum"]))
+            for row in resp.json()["matches"]
+        }
+
     def get_doc(
         self, match_id: str, kind: str, slug: str | None, stage_number: int | None
     ) -> tuple[dict, int]:
