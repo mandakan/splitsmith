@@ -10,6 +10,7 @@ import { useEffect, useRef } from "react";
 import type { AuditMarker } from "@/components/MarkerLayer";
 import { Label } from "@/components/ui/Label";
 import type { ShotRow } from "@/lib/auditStep";
+import { scrollRowIntoContainer } from "@/lib/scrollWithin";
 import { cn } from "@/lib/utils";
 
 export interface ShotListProps {
@@ -65,9 +66,10 @@ export function ShotList({ rows, currentMarkerId, onJump, beep = null }: ShotLis
   const listRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!currentMarkerId) return;
-    const el = listRef.current?.querySelector<HTMLElement>(`[data-marker-id="${currentMarkerId}"]`);
-    // jsdom has no scrollIntoView; the guard keeps the tests honest.
-    if (el && typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "nearest" });
+    const list = listRef.current;
+    const el = list?.querySelector<HTMLElement>(`[data-marker-id="${currentMarkerId}"]`);
+    // Scroll the list only: scrollIntoView would scroll the page too (#1067).
+    if (list && el) scrollRowIntoContainer(list, el);
   }, [currentMarkerId]);
 
   // Split = time since the previous kept shot; the first kept shot's is

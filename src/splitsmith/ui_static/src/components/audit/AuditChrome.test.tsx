@@ -42,6 +42,23 @@ describe("ShotList", () => {
     expect(buttons[0]).toHaveTextContent("2.000");
     expect(buttons[2]).toHaveTextContent("3.000");
   });
+
+  it("follows the current shot by scrolling the list, never the page (#1067)", () => {
+    // scrollIntoView scrolls every ancestor, the document included: placing
+    // or toggling a marker jumped the whole Audit page.
+    const spy = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = spy;
+    try {
+      const { rerender } = render(
+        <ShotList rows={shotRows(MARKERS, [])} currentMarkerId="a" onJump={vi.fn()} />,
+      );
+      rerender(<ShotList rows={shotRows(MARKERS, [])} currentMarkerId="c" onJump={vi.fn()} />);
+      expect(spy).not.toHaveBeenCalled();
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
 });
 
 describe("TransportLine", () => {
