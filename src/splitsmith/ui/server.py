@@ -214,6 +214,8 @@ from ..sync.client import HostedSyncClient, SyncClientError
 from ..sync.plan import build_push_plan
 from ..sync.pull import plan_pull
 from ..sync.run import format_sync_message
+from ..sync.auto_state import AutoRunSummary, load_auto_prefs, update_auto_prefs
+from ..sync.reconcile import ReconcileStep, load_reconcile_inputs, plan_reconcile, video_step
 from ..sync.run import run_sync as run_bidirectional_sync  # ..async_bridge.run_sync already owns this name
 from ..sync.state import load_sync_state
 from . import audio as audio_helpers
@@ -249,6 +251,7 @@ from .jobs import (
     JobHandle,
     JobNotRetryableError,
     JobRegistry,
+    JobStatus,
     ShutdownInProgressError,
 )
 from .match_delete import DeletionSummary, delete_match_cascade
@@ -564,6 +567,58 @@ def _reject_non_finite(payload: Any, *, what: str) -> None:
             stack.extend(node.values())
         elif isinstance(node, (list, tuple)):
             stack.extend(node)
+
+
+def _submit_reconcile_steps(state: AppState, match_root: Path) -> list[ReconcileStep]:
+    """Queue every step the reconciler finds missing for ``match_root``.
+
+    Runs on a job worker thread (the tail of a sync), so it bridges to the
+    async registry with ``asyncio.run`` like the trim chain does. The
+    caller's ContextVars carry the match, which is what scopes both the
+    ``find_active`` dedupe and the submitted jobs.
+    """
+    projects, audits = load_reconcile_inputs(match_root)
+    failures = load_auto_prefs(match_root).reconcile_failures
+    steps = plan_reconcile(projects, audits, failures)
+    queued: list[ReconcileStep] = []
+    for step in steps:
+        dedupe: dict[str, Any] = {"video_id": step.video_id} if step.kind == "trim" else {}
+        existing = asyncio.run(
+            state.jobs.find_active(
+                kind=step.kind, stage_number=step.stage_number, shooter_slug=step.slug, **dedupe
+            )
+        )
+        if existing is not None:
+            continue
+        args: dict[str, Any] = {"slug": step.slug, "stage_number": step.stage_number}
+        if step.kind == "trim":
+            args["video_id"] = step.video_id
+        job = asyncio.run(
+            state.jobs.submit(
+                kind=step.kind,
+                stage_number=step.stage_number,
+                shooter_slug=step.slug,
+                video_id=step.video_id if step.kind == "trim" else None,
+                args=args,
+            )
+        )
+        state.reconcile_jobs[job.id] = (match_root, step)
+        queued.append(step)
+    return queued
+
+
+def _record_reconcile_outcome(state: AppState, job: Job) -> None:
+    """Terminal listener half of the failure memo: a failed reconcile step
+    is remembered with its inputs so the next pass skips it; a success
+    clears any old entry for the same step."""
+    tracked = state.reconcile_jobs.pop(job.id, None)
+    if tracked is None:
+        return
+    match_root, step = tracked
+    if job.status == JobStatus.FAILED:
+        update_auto_prefs(match_root, lambda p: p.reconcile_failures.__setitem__(step.key, step.input_key))
+    elif job.status == JobStatus.SUCCEEDED:
+        update_auto_prefs(match_root, lambda p: p.reconcile_failures.pop(step.key, None))
 
 
 def _save_audit_with_remerge(
@@ -1777,6 +1832,10 @@ class AppState:
     # calls ``save_audit`` while holding it. Same process-local scope, and
     # hosted never takes it.
     audit_lock: threading.RLock = field(default_factory=threading.RLock)
+    # Reconcile steps this process submitted, by job id, so the terminal
+    # listener can record a failure with the inputs it ran on (spec
+    # 2026-09-27 s3). Local only; entries leave on the job's terminal event.
+    reconcile_jobs: dict[str, tuple[Path, ReconcileStep]] = field(default_factory=dict)
     # Live SSE wake channels, one asyncio.Queue per connected self-hosted
     # worker. ``None`` in local mode and on the headless worker process
     # (which must never hold launcher capabilities); set by the non-worker
@@ -4366,7 +4425,7 @@ def register_job_bodies(state: AppState) -> None:
         handle.set_result({"proxy_key": proxy_key, "size_bytes": size})
         handle.update(progress=1.0, message="Preview ready")
 
-    def _run_sync_match(handle: JobHandle) -> None:
+    def _do_sync_match(handle: JobHandle, match_root: Path) -> Any:
         """Worker for the ``sync_match`` job (bidirectional sync, #631 +
         the pull-merge-push slice): sync the current match with the
         configured hosted server.
@@ -4390,7 +4449,6 @@ def register_job_bodies(state: AppState) -> None:
         as-is.
         """
         handle.update(progress=0.0, message="Starting sync...")
-        match_root = state.match_root
         prefs = user_config.load_global_prefs()
         if not prefs.hosted_base_url or not prefs.hosted_token:
             raise RuntimeError("hosted sync is not configured - set a base URL and token in Settings")
@@ -4421,8 +4479,37 @@ def register_job_bodies(state: AppState) -> None:
                 raise RuntimeError(f"sync failed: could not reach the hosted server ({exc})") from exc
         finally:
             http_client.close()
+        return report
+
+    def _run_sync_match(handle: JobHandle, *, auto: bool = False) -> None:
+        """Worker for ``sync_match`` (manual) and ``auto_sync`` (desktop
+        auto-sync, spec 2026-09-27): sync, then queue whatever pipeline
+        steps the reconciler finds missing, which is how a beep confirmed on
+        the phone gets trimmed and detected here. An automatic run also
+        records its outcome in ``auto_sync.json`` for the SyncCard."""
+        match_root = state.match_root
+        try:
+            report = _do_sync_match(handle, match_root)
+        except Exception as exc:
+            if auto:
+                summary = AutoRunSummary(at=datetime.now(UTC), ok=False, message=str(exc))
+                update_auto_prefs(match_root, lambda p: setattr(p, "last_auto", summary))
+            raise
+        message = format_sync_message(report)
+        steps = _submit_reconcile_steps(state, match_root)
+        if steps:
+            message += f"; queued {len(steps)} pipeline step(s)"
         handle.set_result(report.model_dump())
-        handle.update(progress=1.0, message=format_sync_message(report))
+        handle.update(progress=1.0, message=message)
+        if auto:
+            summary = AutoRunSummary(
+                at=datetime.now(UTC),
+                ok=True,
+                message=message,
+                conflicts=len(report.conflicts),
+                notes=len(report.notes),
+            )
+            update_auto_prefs(match_root, lambda p: setattr(p, "last_auto", summary))
 
     state.jobs.bodies.register("model_download", _run_model_download_job)
     from . import system_api
@@ -4439,6 +4526,9 @@ def register_job_bodies(state: AppState) -> None:
 
     state.jobs.bodies.register("youtube_upload", functools.partial(run_youtube_upload, state=state))
     state.jobs.bodies.register("sync_match", _run_sync_match)
+    state.jobs.bodies.register("auto_sync", functools.partial(_run_sync_match, auto=True))
+    if not _hosted_mode_active():
+        state.jobs.add_terminal_listener(functools.partial(_record_reconcile_outcome, state))
 
 
 class HealthResponse(BaseModel):
@@ -11245,12 +11335,17 @@ def create_app(
                 {"shots": [], "detection": STUB_AUDIT_DETECTION},
                 version=audit_version,
             )
-        if not video.processed.get("trim"):
-            stage = state.shooter_project(slug).stage(stage_number)
+        # The reconciler's rule with explicit=True (spec 2026-09-27 s3): a
+        # trim when none is cached, else detection for a trimmed primary. A
+        # phone confirm pulled into this desktop reaches the same rule
+        # through plan_reconcile, so the two cannot leave different state.
+        stage = state.shooter_project(slug).stage(stage_number)
+        step = video_step(stage, video, None, explicit=True)
+        if step == "trim":
             await _maybe_chain_trim(slug, stage, video)
             return
         if (
-            video.role == "primary"
+            step == "shot_detect"
             and await state.jobs.find_active(kind="shot_detect", stage_number=stage_number, shooter_slug=slug)
             is None
         ):

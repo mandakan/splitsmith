@@ -968,3 +968,25 @@ def test_find_active_scopes_by_calling_match() -> None:
         assert reg.find_active(kind="trim", stage_number=3, shooter_slug="me", video_id="v1") is not None
     finally:
         release.set()
+
+
+def test_terminal_listener_sees_each_job_once_and_cannot_break_it() -> None:
+    reg = JobRegistry(max_concurrent=1)
+    seen: list[tuple[str, str]] = []
+    reg.add_terminal_listener(lambda job: seen.append((job.kind, job.status.value)))
+
+    def boom(_job):
+        raise RuntimeError("listener bug")
+
+    reg.add_terminal_listener(boom)
+    sync = _Sync(reg)
+
+    def fail(_handle):
+        raise ValueError("x")
+
+    ok = sync.submit(kind="k_ok", fn=lambda h: None)
+    bad = sync.submit(kind="k_bad", fn=fail)
+    assert _wait_until(lambda: len(seen) == 2)
+    assert sorted(seen) == [("k_bad", "failed"), ("k_ok", "succeeded")]
+    assert sync.get(ok.id).status.value == "succeeded"
+    assert sync.get(bad.id).status.value == "failed"
