@@ -521,10 +521,12 @@ def ensure_audit_audio(
         if web is not None:
             audio_path = audit_audio_path(project_root, stage_number, project=project)
             audio_path.parent.mkdir(parents=True, exist_ok=True)
+            # No storage WAV cache here: a WAV pushed by another container
+            # may have been cut from an older rendition. A local re-pull of
+            # the rendition (refresh_trim_params) makes it newer than the
+            # WAV, which re-extracts.
             if not audio_path.exists() or audio_path.stat().st_mtime < web.stat().st_mtime:
-                if not _try_pull_audio_from_storage(project, audio_path):
-                    _extract_audio(web, audio_path, sample_rate, ffmpeg_binary)
-                    _try_push_audio_to_storage(project, audio_path)
+                _extract_audio(web, audio_path, sample_rate, ffmpeg_binary)
             # The anchor is the trim's, from the pushed params sidecar: the
             # trim may have been cut with a different pre-buffer than the
             # project's current setting.
@@ -767,33 +769,58 @@ def _try_pull_trim_from_storage(project: MatchProject | None, local_mp4: Path) -
         return False
 
 
-def try_pull_web_trim(project: MatchProject | None, trim_path: Path) -> Path | None:
-    """The rendition standing in for the audit trim at ``trim_path`` on a
-    web-only mirror (spec 2026-09-27 v1.1): pull ``_web.mp4`` and the
-    trim's params sidecar from storage when not already local. Returns the
-    local rendition path, or None when there is no rendition. Best-effort
-    like the trim pull: a storage failure reads as "no rendition"."""
+def refresh_trim_params(project: MatchProject | None, trim_path: Path) -> None:
+    """Bring the local params sidecar of a web-only mirror's trim in line
+    with storage (spec 2026-09-27 v1.1). The desktop re-pushes it whenever it
+    re-trims around a moved beep; a changed sidecar also drops the local
+    rendition and the audit WAV cut from it, so the next read pulls and
+    re-extracts instead of serving the old window. One small GET per call;
+    a storage failure keeps whatever is local."""
     from .. import trim as trim_module
 
-    web = trim_module.web_trim_path(trim_path)
     params = trim_params_path(trim_path)
-    if web.exists() and web.stat().st_size > 0 and params.exists():
+    key = _storage_trim_key(project, params)
+    if key is None:
+        return
+    storage = project._storage  # type: ignore[union-attr]
+    try:
+        remote = storage.read_bytes(key)
+    except Exception as exc:
+        logger.info("web trim cache: params read %s failed: %s", key, exc)
+        return
+    try:
+        local = params.read_bytes()
+    except OSError:
+        local = None
+    if local == remote:
+        return
+    params.parent.mkdir(parents=True, exist_ok=True)
+    params.write_bytes(remote)
+    trim_module.web_trim_path(trim_path).unlink(missing_ok=True)
+
+
+def try_pull_web_trim(project: MatchProject | None, trim_path: Path) -> Path | None:
+    """The rendition standing in for the audit trim at ``trim_path`` on a
+    web-only mirror (spec 2026-09-27 v1.1): refresh the params sidecar, then
+    pull ``_web.mp4`` when not already local. Returns the local rendition
+    path, or None when there is no rendition. Best-effort like the trim
+    pull: a storage failure reads as "no rendition"."""
+    from .. import trim as trim_module
+
+    refresh_trim_params(project, trim_path)
+    web = trim_module.web_trim_path(trim_path)
+    if web.exists() and web.stat().st_size > 0:
         return web
     key = _storage_trim_key(project, web)
     if key is None:
-        return web if web.exists() and web.stat().st_size > 0 else None
+        return None
     storage = project._storage  # type: ignore[union-attr]
-    params_key = f"{key.rsplit('/', 1)[0]}/{params.name}"
     try:
+        if not storage.exists(key):
+            return None
         web.parent.mkdir(parents=True, exist_ok=True)
-        if not (web.exists() and web.stat().st_size > 0):
-            if not storage.exists(key):
-                return None
-            with storage.open_stream(key) as src, web.open("wb") as dst:
-                shutil.copyfileobj(src, dst)
-        if not params.exists() and storage.exists(params_key):
-            with storage.open_stream(params_key) as src, params.open("wb") as dst:
-                shutil.copyfileobj(src, dst)
+        with storage.open_stream(key) as src, web.open("wb") as dst:
+            shutil.copyfileobj(src, dst)
         return web
     except Exception as exc:
         logger.info("web trim cache: pull from %s failed: %s", key, exc)

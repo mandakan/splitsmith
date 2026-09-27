@@ -24,6 +24,7 @@ from .. import user_config
 from ..sync.auto import AutoSyncCore, Fingerprint
 from ..sync.auto_state import auto_sync_effective, load_auto_prefs
 from ..sync.client import HostedSyncClient
+from ..sync.push import removable_full_trims
 from ..sync.state import load_sync_state, local_fingerprint
 from .jobs import Job, JobStatus
 
@@ -215,7 +216,7 @@ class AutoSyncService:
             "full_media": auto.full_media,
             # Full trims still on hosted; with full media off the next push
             # removes those whose rendition is there (spec v1.1).
-            "full_trims_on_hosted": sum(1 for k in sync_state.items if k.endswith("_trimmed.mp4")),
+            "full_trims_on_hosted": len(removable_full_trims(match_root, sync_state)),
             "paused_reason": self.core.paused_reason,
             "last_auto": last.model_dump(mode="json") if last else None,
         }

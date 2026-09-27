@@ -242,6 +242,10 @@ def test_status_reports_full_media_and_full_trims_on_hosted(tmp_path: Path) -> N
     from splitsmith.sync.state import SyncedItem
 
     svc, root = _service(tmp_path, lambda prefs: {}, [])
+    trimmed = root / "shooters" / "a" / "trimmed"
+    trimmed.mkdir(parents=True)
+    (trimmed / "s1_cam_x_trimmed.mp4").write_bytes(b"t")
+    (trimmed / "s1_cam_x_web.mp4").write_bytes(b"w")
     item = SyncedItem(sha256="a", size=1, mtime_ns=1)
     save_sync_state(
         root,
@@ -269,3 +273,28 @@ def test_put_auto_changes_only_the_fields_sent(tmp_path: Path, monkeypatch) -> N
     assert body["full_media"] is True and body["setting"] is False
     body = client._client.put(url, json={"enabled": None}).json()
     assert body["setting"] is None and body["full_media"] is True
+
+
+def test_full_trims_on_hosted_counts_only_what_the_next_push_removes(tmp_path: Path) -> None:
+    """A clip whose rendition failed keeps its full trim on hosted; the card
+    must not promise to remove it."""
+    from splitsmith.sync.state import SyncedItem
+
+    svc, root = _service(tmp_path, lambda prefs: {}, [])
+    trimmed = root / "shooters" / "a" / "trimmed"
+    trimmed.mkdir(parents=True)
+    (trimmed / "s1_cam_x_trimmed.mp4").write_bytes(b"t")
+    item = SyncedItem(sha256="a", size=1, mtime_ns=1)
+    save_sync_state(
+        root,
+        SyncState(
+            last_synced_at=datetime(2026, 9, 27, tzinfo=UTC),
+            items={
+                "matches/m/shooters/a/trimmed/s1_cam_x_trimmed.mp4": item,
+                "matches/m/shooters/a/trimmed/s1_cam_x_web.mp4": item,
+            },
+        ),
+    )
+    assert svc.status_for(root)["full_trims_on_hosted"] == 0  # no local rendition
+    (trimmed / "s1_cam_x_web.mp4").write_bytes(b"w")
+    assert svc.status_for(root)["full_trims_on_hosted"] == 1

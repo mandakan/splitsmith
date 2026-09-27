@@ -538,3 +538,47 @@ def test_hosted_native_match_without_a_trim_still_404s_kind_trim(
         params={"path": "raw/stage1_cam1.mp4", "kind": "trim"},
     )
     assert resp.status_code == 404, resp.text
+
+
+def test_web_only_mirror_anchor_does_not_download_the_rendition(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict], tmp_path: Path
+) -> None:
+    """The anchor needs the ~200-byte params sidecar, not the rendition."""
+    client, match_id, _, _, storage = _web_only_mirror(hosted_app_with_storage, tmp_path, pre_buffer=2.0)
+    opened: list[str] = []
+    real_open = type(storage).open_stream
+
+    def spy(self, path, *a, **kw):
+        opened.append(path)
+        return real_open(self, path, *a, **kw)
+
+    import unittest.mock
+
+    with unittest.mock.patch.object(type(storage), "open_stream", spy):
+        coach = client.get(f"/api/matches/{match_id}/shooters/{SLUG}/stages/1/coach")
+    assert coach.status_code == 200, coach.text
+    assert not any(p.endswith("_web.mp4") for p in opened), opened
+
+
+def test_web_only_mirror_follows_a_re_push_with_new_params(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict], tmp_path: Path
+) -> None:
+    """The desktop re-trims around a moved beep and pushes a new rendition +
+    params. Hosted must not keep serving the old anchor or waveform window."""
+    client, match_id, _, web_name, storage = _web_only_mirror(
+        hosted_app_with_storage, tmp_path, pre_buffer=2.0
+    )
+    base = f"/api/matches/{match_id}/shooters/{SLUG}/stages/1"
+    assert client.get(f"{base}/coach").json()["videos"][0]["beep_in_clip"] == 2.0
+    assert client.get(f"{base}/peaks").json()["beep_time"] == 2.0
+
+    # What the next push lands on R2 after a re-trim with pre_buffer 3.0.
+    web_key = next(o.path for o in storage.list(f"matches/{match_id}/") if o.path.endswith(web_name))
+    params_key = web_key.replace("_web.mp4", "_trimmed.params.json")
+    params = json.loads(storage.read_bytes(params_key))
+    params["pre_buffer_seconds"] = 3.0
+    storage.write_bytes(params_key, json.dumps(params).encode())
+    storage.write_bytes(web_key, storage.read_bytes(web_key))  # re-uploaded rendition
+
+    assert client.get(f"{base}/coach").json()["videos"][0]["beep_in_clip"] == 3.0
+    assert client.get(f"{base}/peaks").json()["beep_time"] == 3.0

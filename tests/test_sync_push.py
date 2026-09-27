@@ -842,3 +842,27 @@ def test_full_trim_removal_failure_is_retried_and_full_media_reuploads(tmp_path:
     run_push(root, client=fake.clients(), full_media=True)
     for key in trim_keys:
         assert f"media_create:{key}" in fake.calls
+
+
+def test_a_full_trim_reuploaded_after_its_rendition_went_away_is_not_deleted(tmp_path: Path) -> None:
+    """Re-trim + failed transcode: the local rendition is gone, so the plan
+    uploads the full trim again; the gc must not delete it in the same push
+    just because the old rendition's key is still recorded."""
+    import os
+
+    root, _ = _build_match(tmp_path)
+    _add_web(root)
+    fake = _FakeHosted()
+    run_push(root, client=fake.clients(), full_media=False)
+    for web in (root / "shooters").glob("*/trimmed/*_web.mp4"):
+        web.unlink()
+    for trim in (root / "shooters").glob("*/trimmed/*_trimmed.mp4"):
+        trim.write_bytes(b"y" * 2048)  # re-cut around the moved beep
+        os.utime(trim, None)
+    fake.calls.clear()
+
+    run_push(root, client=fake.clients(), full_media=False)
+
+    created = [c for c in fake.calls if c.startswith("media_create:") and c.endswith("_trimmed.mp4")]
+    assert created
+    assert not any(c.startswith("media_delete:") for c in fake.calls)

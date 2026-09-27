@@ -46,6 +46,26 @@ _MEDIA_KEY_LOCAL_RE = re.compile(
 )
 
 
+def removable_full_trims(match_root: Path, sync_state: SyncState) -> list[str]:
+    """Remote full trims a web-only push removes (spec 2026-09-27 v1.1).
+
+    A full trim goes only when its rendition is on hosted (key recorded)
+    *and* still exists locally, which is exactly when the planner skips the
+    trim. A rendition that went away (re-trim plus a failed transcode) sends
+    the trim back up, and this must not delete it again. Shared with the
+    SyncCard's count so the card never promises a removal the push won't
+    make.
+    """
+    removable: list[str] = []
+    for key in sync_state.items:
+        if not key.endswith(TRIMMED_SUFFIX):
+            continue
+        web_key = web_key_for(key)
+        if web_key in sync_state.items and _local_media_path(match_root, web_key).is_file():
+            removable.append(key)
+    return removable
+
+
 def _local_media_path(match_root: Path, remote_key: str) -> Path:
     """The local file ``remote_key`` was uploaded from, or ``match_root``
     itself for a key shape gc does not recognize.
@@ -221,12 +241,8 @@ def run_push(
             # Web-only mirror (v1.1): a full trim whose rendition is on
             # hosted is a redundant copy there; the desktop keeps the
             # original, and full media on re-uploads it (its key leaves
-            # sync_state here). A clip with no pushed rendition keeps it.
-            stale += [
-                key
-                for key in list(sync_state.items)
-                if key.endswith(TRIMMED_SUFFIX) and web_key_for(key) in sync_state.items
-            ]
+            # sync_state here). See removable_full_trims for which go.
+            stale += removable_full_trims(match_root, sync_state)
         for key in stale:
             try:
                 client.delete_media(plan.match_id, key)

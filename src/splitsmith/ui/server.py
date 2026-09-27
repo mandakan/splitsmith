@@ -12308,10 +12308,12 @@ def create_app(
             if video.beep_time is None:
                 return (None, "trim", trimmed)
             return (min(video.beep_time, project.trim_pre_buffer_seconds), "trim", trimmed)
-        if _is_mirror() and audio_helpers.try_pull_web_trim(project, trimmed) is not None:
+        if _is_mirror() and audio_helpers.web_trim_available(project, trimmed):
             # Web-only mirror (spec 2026-09-27 v1.1): the rendition + the
             # pushed params stand in for the trim; _video_clip_anchor then
-            # promotes the kind to "web".
+            # promotes the kind to "web". Only the small params sidecar is
+            # fetched here, never the rendition itself.
+            audio_helpers.refresh_trim_params(project, trimmed)
             if video.beep_time is None:
                 return (None, "trim", trimmed)
             pre_buffer = audio_helpers.trim_pre_buffer_seconds_for(
