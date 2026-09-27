@@ -990,3 +990,20 @@ def test_terminal_listener_sees_each_job_once_and_cannot_break_it() -> None:
     assert sorted(seen) == [("k_bad", "failed"), ("k_ok", "succeeded")]
     assert sync.get(ok.id).status.value == "succeeded"
     assert sync.get(bad.id).status.value == "failed"
+
+
+def test_cancelling_a_pending_job_reaches_the_terminal_listeners() -> None:
+    reg = JobRegistry(max_concurrent=1)
+    seen: list[tuple[str, str]] = []
+    reg.add_terminal_listener(lambda job: seen.append((job.id, job.status.value)))
+    sync = _Sync(reg)
+    release = threading.Event()
+    running = sync.submit(kind="k_block", fn=lambda h: release.wait(timeout=5.0))
+    queued = sync.submit(kind="k_queued", fn=lambda h: None)
+    try:
+        assert sync.get(queued.id).status.value == "pending"
+        sync.cancel(queued.id)
+        assert _wait_until(lambda: (queued.id, "cancelled") in seen)
+    finally:
+        release.set()
+        assert _wait_until(lambda: (running.id, "succeeded") in seen)

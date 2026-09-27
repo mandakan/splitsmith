@@ -677,6 +677,7 @@ class JobRegistry:
             j.cancel_requested = True
             j.updated_at = datetime.now(UTC)
             proc_to_kill = self._subprocs.pop(job_id, None)
+            cancelled_pending = False
             # If the job is still queued (never handed to the executor),
             # transition it to CANCELLED right here. Otherwise it would
             # sit in ``_pending`` as PENDING forever -- the worker that
@@ -688,9 +689,14 @@ class JobRegistry:
                     j.finished_at = datetime.now(UTC)
                     j.updated_at = j.finished_at
                     self._trim_retained_locked()
+                    cancelled_pending = True
                     break
             self._signal_drain_if_complete_locked()
             snapshot = j.model_copy(deep=True)
+        if cancelled_pending:
+            # A queued job never reaches ``_run``, so its terminal
+            # listeners fire here instead.
+            self._notify_terminal(job_id)
         # Kill outside the lock so a slow ``terminate()`` (proc held a
         # held resource etc.) can't stall other registry callers.
         if proc_to_kill is not None and proc_to_kill.poll() is None:

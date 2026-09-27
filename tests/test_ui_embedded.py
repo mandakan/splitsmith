@@ -292,3 +292,13 @@ def test_cancel_resumable_jobs_cancels_model_download_only() -> None:
     finally:
         registry.begin_shutdown()
         registry.wait_for_drain(2.0)
+
+
+def test_cancel_resumable_jobs_includes_auto_sync() -> None:
+    """An automatic sync is crash-safe and re-derived on the next launch
+    (every watched match is pulled at startup), and the jobs strip hides
+    it, so Cmd-Q must not wait on it."""
+    from splitsmith.ui.embedded import _RESUMABLE_JOB_KINDS
+
+    assert "auto_sync" in _RESUMABLE_JOB_KINDS
+    assert "sync_match" not in _RESUMABLE_JOB_KINDS  # a click the user is watching

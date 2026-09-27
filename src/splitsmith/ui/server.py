@@ -224,7 +224,7 @@ from . import export_storage, stage_edit
 from . import exports as export_helpers
 from . import match_exports as match_export_helpers
 from . import shooter_move as shooter_move_module
-from .auto_sync import AutoSyncService, auto_sync_disabled_by_env
+from .auto_sync import AutoSyncService, auto_sync_disabled_by_env, write_marks_dirty
 from .capabilities import (
     capabilities_for_origin,
     required_capability,
@@ -4484,11 +4484,19 @@ def register_job_bodies(state: AppState) -> None:
         )
         try:
             client = HostedSyncClient(http=http_client)
+
+            def _progress(p: float, m: str) -> None:
+                # Cancellation is cooperative: a quit cancels an auto_sync
+                # (embedded._RESUMABLE_JOB_KINDS), and a sync is crash-safe
+                # at any progress point.
+                handle.check_cancel()
+                handle.update(progress=p, message=m)
+
             try:
                 report = run_bidirectional_sync(
                     match_root,
                     client=client,
-                    on_progress=lambda p, m: handle.update(progress=p, message=m),
+                    on_progress=_progress,
                     timer=handle.timer,
                     ffmpeg_binary=process_runtime().ffmpeg_binary,
                     audit_lock=state.audit_lock,
@@ -4515,6 +4523,8 @@ def register_job_bodies(state: AppState) -> None:
         match_root = state.match_root
         try:
             report = _do_sync_match(handle, match_root)
+        except JobCancelled:
+            raise  # a quit or a cancel click, not a failure to report
         except Exception as exc:
             if auto:
                 summary = AutoRunSummary(at=datetime.now(UTC), ok=False, message=str(exc))
@@ -7940,7 +7950,7 @@ def create_app(
             m = _MATCH_WRITE_RE.match(request.url.path)
             response = await call_next(request)
             if m and request.method in ("POST", "PUT", "PATCH", "DELETE") and response.status_code < 400:
-                if not m.group(2).startswith(("match/sync", "jobs")):
+                if write_marks_dirty(m.group(2)):
                     auto_sync_service.mark_dirty(m.group(1))
             return response
 

@@ -31,8 +31,29 @@ logger = logging.getLogger(__name__)
 
 AUTO_SYNC_ENV = "SPLITSMITH_AUTO_SYNC"
 SYNC_KINDS = frozenset({"sync_match", "auto_sync"})
+#: Job kinds whose success writes nothing that syncs (export history,
+#: renders, proxies, downloads), so they must not schedule a push.
+_UNSYNCED_JOB_KINDS = frozenset(
+    {"match_export", "export", "youtube_upload", "compare-grid", "generate_proxy", "model_download"}
+)
+#: POST routes under /api/matches/{id}/ that compute or dry-run and write
+#: nothing; each false dirty mark costs one pointless sync 45 s later.
+_READ_ONLY_WRITES = (
+    "match/sync",
+    "jobs",
+    "match/merge/plan",
+)
+_READ_ONLY_SUFFIXES = ("/export-preview", "/videos/suggest-coverage", "/videos/relink/scan")
 _AUTH_REASON = "sign in again in hosted sync settings"
 _OFFLINE_REASON = "offline: could not reach the hosted server"
+
+
+def write_marks_dirty(rest: str) -> bool:
+    """Whether a successful write to ``/api/matches/{id}/<rest>`` leaves
+    the match with something to push."""
+    if rest.startswith(_READ_ONLY_WRITES):
+        return False
+    return not rest.endswith(_READ_ONLY_SUFFIXES)
 
 
 def auto_sync_disabled_by_env() -> bool:
@@ -94,7 +115,7 @@ class AutoSyncService:
                     ok=job.status == JobStatus.SUCCEEDED,
                     started_at=started,
                 )
-            elif job.status == JobStatus.SUCCEEDED:
+            elif job.status == JobStatus.SUCCEEDED and job.kind not in _UNSYNCED_JOB_KINDS:
                 self.core.mark_dirty(job.match_id, self._clock())
 
     # -- scheduling --------------------------------------------------------
@@ -178,12 +199,19 @@ class AutoSyncService:
     def status_for(self, match_root: Path) -> dict[str, Any]:
         prefs = self._load_prefs()
         auto = load_auto_prefs(match_root)
+        sync_state = load_sync_state(match_root)
+        last = auto.last_auto
+        if (
+            last is not None
+            and not last.ok
+            and sync_state.last_synced_at is not None
+            and sync_state.last_synced_at > last.at
+        ):
+            last = None  # a later sync (manual) succeeded; the failure is stale
         return {
-            "enabled": auto_sync_effective(
-                auto, load_sync_state(match_root), global_enabled=prefs.auto_sync_enabled
-            ),
+            "enabled": auto_sync_effective(auto, sync_state, global_enabled=prefs.auto_sync_enabled),
             "setting": auto.enabled,
             "global_enabled": prefs.auto_sync_enabled,
             "paused_reason": self.core.paused_reason,
-            "last_auto": auto.last_auto.model_dump(mode="json") if auto.last_auto else None,
+            "last_auto": last.model_dump(mode="json") if last else None,
         }

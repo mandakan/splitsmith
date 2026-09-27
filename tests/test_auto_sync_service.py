@@ -187,3 +187,52 @@ def test_edit_during_a_manual_sync_is_not_forgotten(tmp_path: Path) -> None:
         )
     )
     assert svc.core._matches["m1"].push_due_at == 110.0
+
+
+def test_read_only_posts_and_unsynced_jobs_do_not_mark_dirty(tmp_path: Path) -> None:
+    """Each false dirty mark is one pointless full sync 45 s later. The
+    Export page fires export-preview on every Look change."""
+    from splitsmith.ui.auto_sync import write_marks_dirty
+    from splitsmith.ui.jobs import Job, JobStatus
+
+    assert write_marks_dirty("shooters/me/stages/1/audit")
+    assert write_marks_dirty("shooters/me/videos/scan")  # registers videos
+    for rest in (
+        "shooters/me/export-preview",
+        "shooters/me/videos/suggest-coverage",
+        "shooters/me/videos/relink/scan",
+        "match/merge/plan",
+        "match/sync",
+        "match/sync/auto",
+        "jobs/abc/cancel",
+    ):
+        assert not write_marks_dirty(rest), rest
+
+    svc, _ = _service(tmp_path, lambda prefs: {}, [])
+    now = datetime.now(UTC)
+    for kind in (
+        "match_export",
+        "export",
+        "youtube_upload",
+        "compare-grid",
+        "generate_proxy",
+        "model_download",
+    ):
+        svc.on_job_terminal(
+            Job(id=kind, kind=kind, match_id="m1", status=JobStatus.SUCCEEDED, created_at=now, updated_at=now)
+        )
+    assert "m1" not in svc.core._matches or svc.core._matches["m1"].push_due_at is None
+
+
+def test_a_failed_auto_run_is_not_reported_after_a_later_successful_sync(tmp_path: Path) -> None:
+    from splitsmith.sync.auto_state import AutoRunSummary
+
+    svc, root = _service(tmp_path, lambda prefs: {}, [])
+    failed_at = datetime(2026, 9, 26, tzinfo=UTC)
+    update_auto_prefs(
+        root, lambda p: setattr(p, "last_auto", AutoRunSummary(at=failed_at, ok=False, message="offline"))
+    )
+    # _synced() recorded last_synced_at 2026-09-27: a manual sync after the failure.
+    assert svc.status_for(root)["last_auto"] is None
+    save_sync_state(root, SyncState(last_synced_at=datetime(2026, 9, 25, tzinfo=UTC)))
+    assert svc.status_for(root)["last_auto"]["message"] == "offline"

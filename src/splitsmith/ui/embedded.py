@@ -239,7 +239,11 @@ def run_embedded(
 # that re-runs cleanly on the next boot, so we cancel rather than
 # drain them. Keep this narrow: user-initiated jobs (shot-detect,
 # trim, export) must NOT be listed; their loss mid-flight matters.
-_RESUMABLE_JOB_KINDS = ("model_download",)
+# ``auto_sync`` (desktop auto-sync, spec 2026-09-27) qualifies: a sync is
+# crash-safe and every watched match is pulled again at startup, and the
+# jobs strip hides it, so a quit must not wait on it. A manual
+# ``sync_match`` is a click the user is watching; it drains.
+_RESUMABLE_JOB_KINDS = ("model_download", "auto_sync")
 
 
 def _cancel_resumable_jobs(jobs: Any) -> None:

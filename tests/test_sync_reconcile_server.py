@@ -105,3 +105,47 @@ def test_a_step_that_fails_before_submit_returns_is_still_memoized(tmp_path: Pat
         server_mod.current_match_id.reset(id_token)
     assert list(load_auto_prefs(project_root).reconcile_failures.values()) == ["5.0000"]
     assert state.reconcile_jobs == {}
+
+
+def test_a_running_auto_sync_stops_at_its_next_progress_report_when_cancelled(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Quitting cancels an auto_sync (embedded._RESUMABLE_JOB_KINDS); that
+    only helps if the sync body notices, since cancellation is cooperative."""
+    import asyncio
+    import threading
+    import time
+
+    from splitsmith import user_config
+
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    state = client.app.state.splitsmith_state
+    prefs = user_config.GlobalPrefs(hosted_base_url="http://127.0.0.1:9", hosted_token="t")
+    monkeypatch.setattr(server_mod.user_config, "load_global_prefs", lambda: prefs)
+    in_sync = threading.Event()
+    go_on = threading.Event()
+
+    def fake_sync(match_root, *, on_progress, **kw):
+        in_sync.set()
+        go_on.wait(timeout=5.0)
+        on_progress(0.5, "uploading")
+        raise AssertionError("the sync kept going after a cancel")
+
+    monkeypatch.setattr(server_mod, "run_bidirectional_sync", fake_sync)
+    id_token = server_mod.current_match_id.set("m-cancel")
+    try:
+        with _match_context(project_root):
+            job = asyncio.run(state.jobs.submit(kind="auto_sync"))
+    finally:
+        server_mod.current_match_id.reset(id_token)
+    assert in_sync.wait(timeout=5.0)
+    asyncio.run(state.jobs.cancel(job.id))
+    go_on.set()
+    deadline = time.time() + 5.0
+    while time.time() < deadline:
+        final = asyncio.run(state.jobs.get(job.id))
+        if final.status.value in ("cancelled", "failed", "succeeded"):
+            break
+        time.sleep(0.02)
+    assert final.status.value == "cancelled", final.error
+    assert load_auto_prefs(project_root).last_auto is None  # a cancel is not a failure
