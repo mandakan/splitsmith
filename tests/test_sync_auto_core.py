@@ -116,3 +116,26 @@ def test_no_sync_is_attempted_while_the_poll_cannot_reach_hosted() -> None:
     assert core.pick(200.0, enabled=E, busy=(), sync_active=False) is None
     core.on_poll_ok(300.0, server={}, local={})
     assert core.pick(300.0, enabled=E, busy=(), sync_active=False) == "m1"
+
+
+def test_remote_change_seen_during_a_sync_is_not_settled_by_it() -> None:
+    """A poll that lands after the sync's pull phase (media uploads can run
+    for minutes) sees a phone change that sync never pulled. Settling it at
+    the end of that sync would drop the change until some other write."""
+    core = AutoSyncCore()
+    core.on_poll_ok(0.0, server={"m1": (3, 3)}, local={"m1": (3, 3)})
+    core.mark_dirty("m1", now=0.0)
+    core.on_sync_started("m1", now=100.0)
+    core.on_poll_ok(120.0, server={"m1": (3, 4)}, local={"m1": (3, 3)})
+    core.on_sync_done("m1", now=130.0, ok=True)
+    core.on_poll_ok(200.0, server={"m1": (3, 4)}, local={"m1": (3, 3)})
+    assert core.pick(200.0, enabled=E, busy=(), sync_active=False) == "m1"
+
+
+def test_sync_done_uses_a_given_start_when_none_was_recorded() -> None:
+    """A manual sync never went through on_sync_started; its job's own start
+    time decides which writes it covered."""
+    core = AutoSyncCore()
+    core.mark_dirty("m1", now=110.0)  # an edit while the manual sync ran
+    core.on_sync_done("m1", now=130.0, ok=True, started_at=100.0)
+    assert core.pick(160.0, enabled=E, busy=(), sync_active=False) == "m1"

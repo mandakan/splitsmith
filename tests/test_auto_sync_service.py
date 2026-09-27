@@ -163,3 +163,27 @@ def test_job_completion_marks_dirty_and_sync_completion_does_not(tmp_path: Path)
         Job(id="b", kind="trim", match_id="m1", status=JobStatus.SUCCEEDED, created_at=now, updated_at=now)
     )
     assert svc.core._matches["m1"].push_due_at == 1000.0
+
+
+def test_edit_during_a_manual_sync_is_not_forgotten(tmp_path: Path) -> None:
+    from splitsmith.ui.jobs import Job, JobStatus
+
+    clock = [110.0]
+    svc, _ = _service(tmp_path, lambda prefs: {}, [])
+    svc._clock = lambda: clock[0]
+    svc.mark_dirty("m1")  # saved while the manual sync was uploading
+    clock[0] = 130.0
+    started = datetime.fromtimestamp(100.0, tz=UTC)
+    now = datetime.fromtimestamp(130.0, tz=UTC)
+    svc.on_job_terminal(
+        Job(
+            id="s",
+            kind="sync_match",
+            match_id="m1",
+            status=JobStatus.SUCCEEDED,
+            created_at=started,
+            updated_at=now,
+            started_at=started,
+        )
+    )
+    assert svc.core._matches["m1"].push_due_at == 110.0

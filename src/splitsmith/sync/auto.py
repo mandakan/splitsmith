@@ -17,6 +17,9 @@ Fingerprint = tuple[int, int]
 @dataclass
 class _MatchState:
     pull_due: bool = False
+    #: When the remote change behind ``pull_due`` was observed; a sync that
+    #: started later pulled it, one that started earlier may not have.
+    pull_seen_at: float = 0.0
     push_due_at: float | None = None
     sync_started_at: float | None = None
     retry_at: float = 0.0
@@ -73,6 +76,7 @@ class AutoSyncCore:
             if server_fp == st.settled_fp:
                 continue
             st.pull_due = True
+            st.pull_seen_at = now
             st.pending_fp = server_fp
             self._last_activity = now
         idle = now - self._last_activity >= self.IDLE_AFTER_S
@@ -99,9 +103,16 @@ class AutoSyncCore:
     def on_sync_started(self, match_id: str, now: float) -> None:
         self._m(match_id).sync_started_at = now
 
-    def on_sync_done(self, match_id: str, now: float, *, ok: bool) -> None:
+    def on_sync_done(self, match_id: str, now: float, *, ok: bool, started_at: float | None = None) -> None:
+        """``started_at`` is the job's own start, for a sync this core did
+        not start (a manual one); without either, ``now`` stands in."""
         st = self._m(match_id)
-        started = st.sync_started_at if st.sync_started_at is not None else now
+        if st.sync_started_at is not None:
+            started = st.sync_started_at
+        elif started_at is not None:
+            started = started_at
+        else:
+            started = now
         st.sync_started_at = None
         if not ok:
             st.failures += 1
@@ -109,10 +120,13 @@ class AutoSyncCore:
             return
         st.failures = 0
         st.retry_at = 0.0
-        st.pull_due = False
-        if st.pending_fp is not None:
-            st.settled_fp = st.pending_fp
-            st.pending_fp = None
+        # Only what was observed before the sync started is covered by it:
+        # a poll that lands after its pull phase saw a change it never pulled.
+        if st.pull_seen_at <= started:
+            st.pull_due = False
+            if st.pending_fp is not None:
+                st.settled_fp = st.pending_fp
+                st.pending_fp = None
         # A write that landed after the sync started is not covered by it.
         if st.push_due_at is not None and st.push_due_at <= started:
             st.push_due_at = None

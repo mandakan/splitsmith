@@ -87,7 +87,13 @@ class AutoSyncService:
             return
         with self._lock:
             if job.kind in SYNC_KINDS:
-                self.core.on_sync_done(job.match_id, self._clock(), ok=job.status == JobStatus.SUCCEEDED)
+                started = job.started_at.timestamp() if job.started_at is not None else None
+                self.core.on_sync_done(
+                    job.match_id,
+                    self._clock(),
+                    ok=job.status == JobStatus.SUCCEEDED,
+                    started_at=started,
+                )
             elif job.status == JobStatus.SUCCEEDED:
                 self.core.mark_dirty(job.match_id, self._clock())
 

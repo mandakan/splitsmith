@@ -571,6 +571,16 @@ def _reject_non_finite(payload: Any, *, what: str) -> None:
             stack.extend(node)
 
 
+def _reconcile_key(
+    match_id: str | None, kind: str, slug: str | None, stage_number: int | None
+) -> tuple[str | None, str, str | None, int | None]:
+    """Identity a reconcile job shares with its ``Job`` snapshot. The match
+    comes from ``current_match_id``, the same ContextVar ``submit`` stamps
+    on the job. Per stage, not per video: one reconcile step per (kind,
+    stage) is in flight at a time, which ``find_active`` guarantees."""
+    return (match_id, kind, slug, stage_number)
+
+
 def _submit_reconcile_steps(state: AppState, match_root: Path) -> list[ReconcileStep]:
     """Queue every step the reconciler finds missing for ``match_root``.
 
@@ -595,7 +605,9 @@ def _submit_reconcile_steps(state: AppState, match_root: Path) -> list[Reconcile
         args: dict[str, Any] = {"slug": step.slug, "stage_number": step.stage_number}
         if step.kind == "trim":
             args["video_id"] = step.video_id
-        job = asyncio.run(
+        key = _reconcile_key(current_match_id.get(), step.kind, step.slug, step.stage_number)
+        state.reconcile_jobs[key] = (match_root, step)
+        asyncio.run(
             state.jobs.submit(
                 kind=step.kind,
                 stage_number=step.stage_number,
@@ -604,7 +616,6 @@ def _submit_reconcile_steps(state: AppState, match_root: Path) -> list[Reconcile
                 args=args,
             )
         )
-        state.reconcile_jobs[job.id] = (match_root, step)
         queued.append(step)
     return queued
 
@@ -613,7 +624,11 @@ def _record_reconcile_outcome(state: AppState, job: Job) -> None:
     """Terminal listener half of the failure memo: a failed reconcile step
     is remembered with its inputs so the next pass skips it; a success
     clears any old entry for the same step."""
-    tracked = state.reconcile_jobs.pop(job.id, None)
+    if job.kind not in ("trim", "shot_detect"):
+        return
+    tracked = state.reconcile_jobs.pop(
+        _reconcile_key(job.match_id, job.kind, job.shooter_slug, job.stage_number), None
+    )
     if tracked is None:
         return
     match_root, step = tracked
@@ -1834,10 +1849,15 @@ class AppState:
     # calls ``save_audit`` while holding it. Same process-local scope, and
     # hosted never takes it.
     audit_lock: threading.RLock = field(default_factory=threading.RLock)
-    # Reconcile steps this process submitted, by job id, so the terminal
+    # Reconcile steps this process submitted, keyed by
+    # ``_reconcile_key`` (match, kind, slug, stage), so the terminal
     # listener can record a failure with the inputs it ran on (spec
-    # 2026-09-27 s3). Local only; entries leave on the job's terminal event.
-    reconcile_jobs: dict[str, tuple[Path, ReconcileStep]] = field(default_factory=dict)
+    # 2026-09-27 s3). Registered before submit: a job that fails in
+    # milliseconds can reach the listener before submit() returns. Local
+    # only; an entry leaves on its job's terminal event.
+    reconcile_jobs: dict[tuple[str | None, str, str | None, int | None], tuple[Path, ReconcileStep]] = field(
+        default_factory=dict
+    )
     # Desktop auto-sync service (spec 2026-09-27); None hosted and when
     # SPLITSMITH_AUTO_SYNC=0.
     auto_sync: AutoSyncService | None = None
@@ -12020,9 +12040,11 @@ def create_app(
         # carrying ``_version`` from a copy that no longer matches the stored
         # doc (a sync pull, another tab) is refused with 409 instead of
         # overwriting it. The pull's audit apply holds the same lock. A PUT
-        # without ``_version`` keeps last-writer-wins. Hosted additionally
-        # optimistic-locks on the state_docs version it loads here.
-        with state.audit_lock:
+        # without ``_version`` keeps last-writer-wins. Hosted skips the lock:
+        # it is process-global (every tenant would queue behind it) and the
+        # state_docs version loaded here already optimistic-locks the save.
+        lock = state.audit_lock if state.audit_doc_target() is None else nullcontext()
+        with lock:
             stored, version = state.load_audit(slug, stage_number)
             if client_revision is not None and client_revision != audit_revision(stored):
                 raise AuditRevisionConflictError(f"stage {stage_number} audit changed since it was loaded")

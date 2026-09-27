@@ -46,7 +46,9 @@ def test_submit_reconcile_steps_queues_a_trim_for_a_pulled_confirm(tmp_path: Pat
     with _match_context(project_root):
         server_mod._submit_reconcile_steps(state, project_root)
     assert [(s["kind"], s["video_id"]) for s in submitted] == [("trim", video_id)]
-    assert state.reconcile_jobs["j1"][1].kind == "trim"
+    ((_, _, slug, stage),) = state.reconcile_jobs
+    assert (slug, stage) == ("me", 1)
+    assert next(iter(state.reconcile_jobs.values()))[1].kind == "trim"
 
 
 def test_failed_reconcile_step_is_recorded_and_skipped(tmp_path: Path, monkeypatch) -> None:
@@ -54,10 +56,12 @@ def test_failed_reconcile_step_is_recorded_and_skipped(tmp_path: Path, monkeypat
     state = client.app.state.splitsmith_state
     video_id = _untrim_stage_one(project_root)
     step = ReconcileStep(kind="trim", slug="me", stage_number=1, video_id=video_id, input_key="5.0000")
-    state.reconcile_jobs["jf"] = (project_root, step)
-    server_mod._record_reconcile_outcome(state, _job("jf", "trim", JobStatus.FAILED))
+    state.reconcile_jobs[server_mod._reconcile_key("m-f", "trim", "me", 1)] = (project_root, step)
+    failed = _job("jf", "trim", JobStatus.FAILED)
+    failed.match_id, failed.shooter_slug, failed.stage_number = "m-f", "me", 1
+    server_mod._record_reconcile_outcome(state, failed)
     assert load_auto_prefs(project_root).reconcile_failures == {step.key: "5.0000"}
-    assert "jf" not in state.reconcile_jobs
+    assert state.reconcile_jobs == {}
 
     # The next pass skips the step while its inputs are unchanged.
     submitted: list[dict] = []
@@ -73,3 +77,31 @@ def test_failed_reconcile_step_is_recorded_and_skipped(tmp_path: Path, monkeypat
     with _match_context(project_root):
         server_mod._submit_reconcile_steps(state, project_root)
     assert submitted == []
+
+
+def test_a_step_that_fails_before_submit_returns_is_still_memoized(tmp_path: Path, monkeypatch) -> None:
+    """A trim whose source is missing fails in milliseconds on the second
+    worker, which can beat submit() back to the caller. The memo must not
+    depend on the caller registering the job first."""
+    client, project_root = _seed_match_export_project(tmp_path, stage_count=1)
+    state = client.app.state.splitsmith_state
+    _untrim_stage_one(project_root)
+
+    async def submit_that_fails_at_once(**kw):
+        job = _job("fast", kw["kind"], JobStatus.FAILED)
+        job.match_id = server_mod.current_match_id.get()
+        job.shooter_slug = kw["shooter_slug"]
+        job.stage_number = kw["stage_number"]
+        job.video_id = kw.get("video_id")
+        server_mod._record_reconcile_outcome(state, job)  # the listener runs first
+        return job
+
+    monkeypatch.setattr(state.jobs, "submit", submit_that_fails_at_once)
+    id_token = server_mod.current_match_id.set("m-fast")
+    try:
+        with _match_context(project_root):
+            server_mod._submit_reconcile_steps(state, project_root)
+    finally:
+        server_mod.current_match_id.reset(id_token)
+    assert list(load_auto_prefs(project_root).reconcile_failures.values()) == ["5.0000"]
+    assert state.reconcile_jobs == {}
