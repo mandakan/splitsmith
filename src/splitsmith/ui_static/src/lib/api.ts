@@ -4573,6 +4573,16 @@ export const api = {
   /** Submit a ``sync_match`` job for the current match. 409
    *  ``sync_not_configured`` when no hosted-sync target is saved yet. */
   startSync: () => request<Job>("/api/match/sync", { method: "POST" }),
+  /** Desktop auto-sync state for this match (spec 2026-09-27). */
+  getAutoSync: () => request<AutoSyncStatus>("/api/match/sync/auto"),
+  /** ``null`` restores the default (on once the match has synced). */
+  setAutoSync: (enabled: boolean | null) =>
+    request<AutoSyncStatus>("/api/match/sync/auto", { method: "PUT", json: { enabled } }),
+  setGlobalAutoSync: (enabled: boolean) =>
+    request<{ global_enabled: boolean }>("/api/settings/auto-sync", {
+      method: "PUT",
+      json: { enabled },
+    }),
 
   // Device-flow approval screen (hosted browser side, #719). The desktop
   // install polls elsewhere; these three drive the operator-facing
@@ -5034,6 +5044,22 @@ export interface DevicePendingInfo {
   scope: string;
   created_at: string;
   expires_at: string;
+}
+
+/** GET/PUT /api/match/sync/auto (spec 2026-09-27). ``setting`` null means
+ *  the default, which is on once the match has synced. */
+export interface AutoSyncStatus {
+  enabled: boolean;
+  setting: boolean | null;
+  global_enabled: boolean;
+  paused_reason: string | null;
+  last_auto: {
+    at: string;
+    ok: boolean;
+    message: string;
+    conflicts: number;
+    notes: number;
+  } | null;
 }
 
 /** Response from GET /api/match/sync/status (#631 Task 9). Cheap

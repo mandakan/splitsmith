@@ -12,6 +12,7 @@ export const KIND_LABEL: Record<string, string> = {
   model_download: "Download models",
   generate_proxy: "Generating preview",
   sync_match: "Sync to hosted",
+  auto_sync: "Auto-sync",
 };
 
 export function kindLabel(kind: string): string {
