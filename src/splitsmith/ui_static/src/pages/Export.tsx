@@ -9,7 +9,7 @@
  * where every stage that cannot export says why in one line and offers
  * the fix; the ladder lives in lib/exportPlan.ts, and hosted copy never
  * names a drive. The summary rail carries the page's one primary and,
- * in its footer, the storage actions (Reclaim space, Delete match).
+ * in its footer, Reclaim space. Deleting a match lives on the Matches row.
  *
  * Mounted under <MatchShell />, so the chrome is shared with the other
  * match pages. Data plumbing (overview + project + runs load, the three
@@ -19,7 +19,7 @@
 
 import { Download, ExternalLink } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Navigate, useNavigate, useOutletContext, useParams } from "react-router-dom";
+import { Navigate, useOutletContext, useParams } from "react-router-dom";
 
 import { CleanupDialog } from "@/components/CleanupDialog";
 import { CutGroup } from "@/components/export/CutGroup";
@@ -103,7 +103,6 @@ function ExportInner({ slug }: { slug: string }) {
   const hosted = deploymentMode === "hosted";
   const ctx = useOutletContext<MatchShellOutletContext>();
   const href = useMatchHref();
-  const navigate = useNavigate();
   const confirm = useConfirm();
   // #756: gate on the server-derived capability, not this page's own
   // `project` (that's the per-shooter export overview, not the match
@@ -646,51 +645,6 @@ function ExportInner({ slug }: { slug: string }) {
     }
   }
 
-  async function deleteMatch() {
-    const matchRoot = ctx?.health?.project_root;
-    const matchName = ctx?.project?.name ?? project?.name ?? "this match";
-    if (!matchRoot) return;
-    // Mode-specific opt-in extras. Desktop can wipe the folder on disk;
-    // hosted can additionally drop raw uploads that fed only this match.
-    const checkboxes = hosted
-      ? [
-          {
-            key: "deleteRawUploads",
-            label: "Also delete raw uploads that fed only this match",
-            help: "Uploaded videos still attached to another match are kept.",
-          },
-        ]
-      : [
-          {
-            key: "deleteLocalFiles",
-            label: "Also delete the project folder on disk",
-            help: "Permanently removes the footage, audit work, and exports under this match's folder. This cannot be undone.",
-          },
-        ];
-    const answer = await confirm({
-      title: `Delete ${matchName}?`,
-      body: "This removes the match and every resource it owns -- detection state, trims, exports, and any running jobs. This cannot be undone.",
-      confirmLabel: "Delete match",
-      checkboxes,
-    });
-    if (!answer.confirmed) return;
-    try {
-      const resp = await api.deleteProject(matchRoot, {
-        deleteLocalFiles: Boolean(answer.checked.deleteLocalFiles),
-        deleteRawUploads: Boolean(answer.checked.deleteRawUploads),
-      });
-      if (resp.summary.errors.length > 0) {
-        setError(
-          `Deleted with ${resp.summary.errors.length} issue${resp.summary.errors.length === 1 ? "" : "s"}: ${resp.summary.errors.join("; ")}`,
-        );
-        return;
-      }
-      navigate("/pick", { replace: true });
-    } catch (e) {
-      setError(e instanceof ApiError ? e.detail : String(e));
-    }
-  }
-
   const fixHref = useCallback(
     (to: FixTarget, stageNumber: number): string => {
       if (to === "audit") return href("audit", slug, String(stageNumber));
@@ -1020,21 +974,11 @@ function ExportInner({ slug }: { slug: string }) {
               ) : null}
             </div>
             {/* Storage row: the deliverables list above is where "I have
-                too many of these" forms, so cleanup lives here; delete
-                moved here from the Matches row (spec s4.1). */}
-            <div className="flex items-center justify-between px-3.5 py-2">
+                too many of these" forms, so cleanup lives here. Delete
+                moved to the Matches row menu. */}
+            <div className="flex items-center px-3.5 py-2">
               <Button type="button" variant="ghost" size="sm" onClick={() => setCleanupOpen(true)}>
                 Reclaim space
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                onClick={() => void deleteMatch()}
-                disabled={editDenied || !ctx?.health?.project_root}
-                title={editDenied ? READ_ONLY_MIRROR_MESSAGE : undefined}
-              >
-                Delete match
               </Button>
             </div>
           </div>

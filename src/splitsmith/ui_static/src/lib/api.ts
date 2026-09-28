@@ -1832,6 +1832,10 @@ export interface RecentProjectDetail {
   shooter_names: string[];
   /** See :type:`MatchOrigin` (#631). */
   origin: MatchOrigin;
+  /** Desktop only: synced to hosted at least once, so a hosted copy
+   *  exists that a desktop delete does not touch. Optional for an older
+   *  server. */
+  synced?: boolean;
   /** ``null`` for unresolved kinds. */
   next_step: NextStep | null;
 }

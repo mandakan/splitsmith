@@ -644,7 +644,12 @@ extras, which the row's "No splits" chip, the rail's "Splits" line and
 its summary hold is the scoring-only card (``summary_groups`` draws the
 Scoring band from the stage time and scorecard and no Splits band); the compare grid is the page's third mode (``pages/
 matchExportModel.ts`` still owns the payload and the partial-result
-summary); Delete match lives in the summary rail's footer. Account
+summary). Deleting a match lives on the Matches row menu (every row,
+including "Folder not found" ones, which cannot be opened); hosted and
+desktop deletes are separate actions and ``lib/matchDelete.ts`` words
+which copy goes and which stays. ``components/ui/Menu`` portals its
+popover to ``document.body``, so a row menu is never clipped by a
+``Table``. Account
 (``pages/Account.tsx``, ``components/account/*``) and every settings
 surface use ``components/ui/Field`` rows; ``components/ui/Segmented``
 is the closed-choice control. Triage and Jobs have no pages: the
