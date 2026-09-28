@@ -736,7 +736,9 @@ def test_a_phone_request_runs_on_the_desktop_and_its_result_reaches_hosted(
         rows = client.get(f"/api/matches/{match_id}/match/desktop-commands").json()["commands"]
         return next(c for c in rows if c["id"] == command_id)["status"]
 
-    deadline = time.monotonic() + 20.0
+    # Two full syncs through the mocked storage: a couple of seconds here,
+    # far more on a loaded CI runner. The loop exits as soon as it is done.
+    deadline = time.monotonic() + 90.0
     while status() not in ("succeeded", "failed") and time.monotonic() < deadline:
         clock["t"] = time.time()
         service.core.next_poll_at = 0.0
@@ -744,7 +746,16 @@ def test_a_phone_request_runs_on_the_desktop_and_its_result_reaches_hosted(
         threading.Event().wait(0.05)
 
     final = client.get(f"/api/matches/{match_id}/match/desktop-commands").json()["commands"][0]
-    assert final["status"] == "succeeded", final
+    diagnostics = {
+        "command": final,
+        "jobs": [
+            (j.kind, j.status.value, j.started_at, j.finished_at, j.error) for j in asyncio.run(jobs.list())
+        ],
+        "core": service.core._matches.get(match_id),
+        "poll_failures": service.core._poll_failures,
+        "tracked": service.commands._tracked if service.commands else None,
+    }
+    assert final["status"] == "succeeded", diagnostics
     assert ran == [{"slug": SLUG, "stage_number": 1, "reset": True}]
     # A sync started after the detection ended: that is what carried it.
     all_jobs = asyncio.run(jobs.list())
