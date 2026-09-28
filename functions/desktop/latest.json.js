@@ -9,8 +9,11 @@
 // Reads the GitHub releases list rather than /releases/latest: that
 // endpoint returns the newest non-prerelease by date, which can be an
 // ffmpeg source release (tag ffmpeg-macos-arm64-*), not an app version.
-// Only tags shaped v<major>.<minor>.<patch> count. Cached at the edge for
-// ten minutes; an app checks once per launch.
+// Only tags shaped v<major>.<minor>.<patch> count, and only once a .dmg is
+// attached: release-please publishes the release before desktop/release.sh
+// has built and uploaded the app, and an app told about a version must be
+// able to download it. Cached at the edge for ten minutes; an app checks
+// once per launch.
 const RELEASES = "https://api.github.com/repos/mandakan/splitsmith/releases?per_page=20";
 const APP_TAG = /^v(\d+\.\d+\.\d+)$/;
 const CACHE_SECONDS = 600;
@@ -28,6 +31,7 @@ export function pickLatest(releases) {
     if (r.draft || r.prerelease) continue;
     const m = APP_TAG.exec(r.tag_name || "");
     if (!m) continue;
+    if (!(r.assets || []).some((a) => /\.dmg$/.test(a.name || ""))) continue;
     versions.push({ version: m[1], url: r.html_url, key: m[1].split(".").map(Number) });
   }
   versions.sort((a, b) => b.key[0] - a.key[0] || b.key[1] - a.key[1] || b.key[2] - a.key[2]);
