@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.45.1](https://github.com/mandakan/splitsmith/compare/v0.45.0...v0.45.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* **sync:** a command's outcome survives a failed completion call; e2e test fits CI ([#1111](https://github.com/mandakan/splitsmith/issues/1111)) ([f5860c2](https://github.com/mandakan/splitsmith/commit/f5860c2280b2a77488ca2d6191021ef67bf4887c))
+
 ## [0.45.0](https://github.com/mandakan/splitsmith/compare/v0.44.0...v0.45.0) (2026-09-28)
 
 
