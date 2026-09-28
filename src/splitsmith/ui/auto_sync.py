@@ -28,6 +28,7 @@ from ..sync.plan import doc_identity_key
 from ..sync.pull import PULLABLE_DOC_KINDS
 from ..sync.push import removable_full_trims
 from ..sync.state import load_sync_state, local_fingerprint, versions_digest
+from .command_runner import CommandApi, CommandRunner, StartCommand
 from .job_journal import try_lock
 from .jobs import Job, JobStatus
 
@@ -116,9 +117,36 @@ def _http(prefs: user_config.GlobalPrefs) -> httpx.Client:
     )
 
 
-def _fetch_fingerprints(prefs: user_config.GlobalPrefs) -> dict[str, Fingerprint]:
+def _fetch_fingerprints(
+    prefs: user_config.GlobalPrefs,
+) -> tuple[dict[str, Fingerprint], dict[str, int]]:
+    """Fingerprints plus each match's pending desktop commands (#1100)."""
     with _http(prefs) as http:
-        return HostedSyncClient(http=http).get_fingerprints()
+        return HostedSyncClient(http=http).get_poll()
+
+
+class _HostedCommandApi:
+    """The command routes over a fresh client per call (the driver's calls
+    are minutes apart; a pooled client would outlive a token change)."""
+
+    def __init__(self, prefs: user_config.GlobalPrefs) -> None:
+        self._prefs = prefs
+
+    def claim(self, match_ids: list[str]) -> list[dict]:
+        with _http(self._prefs) as http:
+            return HostedSyncClient(http=http).claim_commands(match_ids)
+
+    def heartbeat(self, command_id: str, message: str | None) -> dict | None:
+        with _http(self._prefs) as http:
+            return HostedSyncClient(http=http).heartbeat_command(command_id, message)
+
+    def complete(
+        self, command_id: str, *, status: str, error: str | None = None, result: dict | None = None
+    ) -> None:
+        with _http(self._prefs) as http:
+            HostedSyncClient(http=http).complete_command(
+                command_id, status=status, error=error, result=result
+            )
 
 
 def _fetch_manifest(prefs: user_config.GlobalPrefs, match_id: str) -> list[dict] | None:
@@ -155,8 +183,18 @@ class AutoSyncService:
         fetch_manifest: Callable[[user_config.GlobalPrefs, str], list[dict] | None] | None = None,
         clock: Callable[[], float] = time.time,
         owner_lock: FileLock | None = None,
+        start_command: StartCommand | None = None,
+        command_api: Callable[[user_config.GlobalPrefs], CommandApi] | None = None,
     ) -> None:
         self.core = AutoSyncCore()
+        #: Desktop commands (#1100). ``None`` = no runner: the service never
+        #: claims (older wiring, and tests that are not about commands).
+        self.commands: CommandRunner | None = None
+        if start_command is not None:
+            self.commands = CommandRunner(
+                jobs=jobs, start=start_command, request_sync_now=self._sync_now, clock=clock
+            )
+        self._command_api = command_api or _HostedCommandApi
         #: ``None`` = no cross-process guard (tests); the server passes one.
         self._owner_lock = owner_lock
         self._owner_blocked = False
@@ -177,18 +215,23 @@ class AutoSyncService:
         with self._lock:
             self.core.mark_dirty(match_id, self._clock())
 
+    def _sync_now(self, match_id: str) -> None:
+        """A command's result is waiting: push it without the quiet period."""
+        with self._lock:
+            self.core.request_push_now(match_id, self._clock())
+
     def on_job_terminal(self, job: Job) -> None:
         if job.match_id is None:
             return
         with self._lock:
             if job.kind in SYNC_KINDS:
                 started = job.started_at.timestamp() if job.started_at is not None else None
-                self.core.on_sync_done(
-                    job.match_id,
-                    self._clock(),
-                    ok=job.status == JobStatus.SUCCEEDED,
-                    started_at=started,
-                )
+                ok = job.status == JobStatus.SUCCEEDED
+                self.core.on_sync_done(job.match_id, self._clock(), ok=ok, started_at=started)
+                if self.commands is not None:
+                    if ok and self.core.take_commands_due(job.match_id):
+                        self.commands.claim_after_sync(job.match_id)
+                    self.commands.on_sync_done(job.match_id, ok=ok, started_at=started, error=job.error)
             elif job.status == JobStatus.SUCCEEDED and job.kind not in _UNSYNCED_JOB_KINDS:
                 self.core.mark_dirty(job.match_id, self._clock())
 
@@ -251,10 +294,16 @@ class AutoSyncService:
                 self.core.on_sync_started(match_id, now)
         if match_id is not None:
             await self._submit(match_id, roots[match_id])
+        if self.commands is not None and not self.core.auth_blocked():
+            await self.commands.tick(self._command_api(prefs), roots)
 
-    def _fetch_server(self, prefs: user_config.GlobalPrefs, roots: dict[str, Path]) -> dict[str, Fingerprint]:
+    def _fetch_server(
+        self, prefs: user_config.GlobalPrefs, roots: dict[str, Path]
+    ) -> tuple[dict[str, Fingerprint], dict[str, int]]:
         try:
-            return self._fetch(prefs)
+            got = self._fetch(prefs)
+            # An injected fetch may answer fingerprints only (no commands).
+            return got if isinstance(got, tuple) else (got, {})
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code != 404:
                 raise
@@ -266,11 +315,12 @@ class AutoSyncService:
             manifest = self._fetch_manifest(prefs, match_id)
             if manifest is not None:
                 server[match_id] = manifest_fingerprint(manifest)
-        return server
+        # A hosted without /fingerprints predates the command queue too.
+        return server, {}
 
     async def _poll(self, prefs: user_config.GlobalPrefs, roots: dict[str, Path], now: float) -> None:
         try:
-            server = await asyncio.to_thread(self._fetch_server, prefs, roots)
+            server, pending = await asyncio.to_thread(self._fetch_server, prefs, roots)
         except httpx.HTTPStatusError as exc:
             auth = exc.response.status_code in (401, 403)
             if auth:
@@ -290,7 +340,7 @@ class AutoSyncService:
             # A hosted older than #1072 sends no digest: compare the pair.
             local[mid] = fp if len(server.get(mid, fp)) == 3 else fp[:2]
         with self._lock:
-            self.core.on_poll_ok(now, server, local)
+            self.core.on_poll_ok(now, server, local, pending)
 
     def close(self) -> None:
         """Hand auto-sync to another process on this machine, if any."""

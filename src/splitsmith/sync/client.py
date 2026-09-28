@@ -178,6 +178,49 @@ class HostedSyncClient:
             out[row["match_id"]] = (*pair, str(digest)) if digest else pair
         return out
 
+    def get_poll(self) -> tuple[dict[str, tuple[int, int] | tuple[int, int, str]], dict[str, int]]:
+        """``get_fingerprints`` plus each match's ``pending_commands`` (#1100)
+        from the same response. A hosted older than the command queue sends
+        no count, which reads as none."""
+        resp = self._http.get("/api/sync/fingerprints")
+        self._raise_for_status(resp)
+        fps: dict[str, tuple[int, int] | tuple[int, int, str]] = {}
+        pending: dict[str, int] = {}
+        for row in resp.json()["matches"]:
+            pair = (int(row["doc_count"]), int(row["version_sum"]))
+            digest = row.get("digest")
+            fps[row["match_id"]] = (*pair, str(digest)) if digest else pair
+            if int(row.get("pending_commands") or 0) > 0:
+                pending[row["match_id"]] = int(row["pending_commands"])
+        return fps, pending
+
+    def claim_commands(self, match_ids: list[str]) -> list[dict]:
+        """Claim waiting desktop commands for these matches (#1100)."""
+        resp = self._http.post("/api/sync/commands/claim", json={"match_ids": match_ids})
+        self._raise_for_status(resp)
+        return resp.json()["commands"]
+
+    def heartbeat_command(self, command_id: str, message: str | None) -> dict | None:
+        """Extend a claimed command's lease. ``None`` when hosted answers 409
+        ``not_claimed``: the command finished or another desktop holds it,
+        so this one must stop."""
+        resp = self._http.post(f"/api/sync/commands/{command_id}/heartbeat", json={"message": message})
+        if resp.status_code == 409:
+            return None
+        self._raise_for_status(resp)
+        return resp.json()
+
+    def complete_command(
+        self, command_id: str, *, status: str, error: str | None = None, result: dict | None = None
+    ) -> None:
+        resp = self._http.post(
+            f"/api/sync/commands/{command_id}/complete",
+            json={"status": status, "error": error, "result": result},
+        )
+        if resp.status_code == 404:
+            return  # deleted with its match on hosted: nothing to report to
+        self._raise_for_status(resp)
+
     def get_doc(
         self, match_id: str, kind: str, slug: str | None, stage_number: int | None
     ) -> tuple[dict, int]:

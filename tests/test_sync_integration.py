@@ -605,3 +605,150 @@ def test_web_only_mirror_on_storage_without_presigned_get_serves_the_rendition(
         )
         assert resp.status_code == 200, (kind, resp.text)
         assert resp.content == storage.read_bytes(web_key), kind
+
+
+def test_a_phone_request_runs_on_the_desktop_and_its_result_reaches_hosted(
+    hosted_app_with_storage: tuple[TestClient, _CapturingSender, dict],
+    tmp_path: Path,
+) -> None:
+    """Desktop command queue end to end (#1100, spec 2026-09-28), minus the
+    detector: the phone asks for a re-detect on a desktop-synced stage, the
+    desktop's poll sees it, pulls, claims, runs the job, pushes the result
+    at once, and only then reports the command done. Both halves are real:
+    hosted routes over TestClient; the desktop's service, core, runner,
+    job registry and run_sync. The ``shot_detect`` body is a stand-in that
+    writes the shots a detection would (the ensemble has its own tests)."""
+    import asyncio
+    import threading
+    import time
+
+    from splitsmith.ui.auto_sync import AutoSyncService
+    from splitsmith.ui.jobs import JobRegistry
+    from splitsmith.ui.server import current_match_id, current_match_root
+    from splitsmith.user_config import GlobalPrefs
+
+    client, sender, captured = hosted_app_with_storage
+    match_root, _, _ = _build_local_match(tmp_path)
+    shooter_root = match_model.Match.shooter_root(match_root, SLUG)
+    project = MatchProject.load(shooter_root)
+    project.stages[0].videos[0].beep_time = 3.0
+    project.save(shooter_root)
+
+    login(client, sender, EMAIL)
+    client.get("/api/me/recent-projects")
+    storage: S3Storage = captured["storage"]
+    raw_token = client.post("/api/me/desktop-tokens", json={"name": "queue box"}).json()["token"]
+    sync_http = TestClient(
+        client.app,
+        base_url="http://testserver",
+        headers={"Authorization": f"Bearer {raw_token}"},
+        follow_redirects=False,
+    )
+    sync_client = HostedSyncClient(
+        http=sync_http, media_http=httpx.Client(transport=httpx.MockTransport(_media_handler(storage)))
+    )
+    run_sync(match_root, client=sync_client)
+    match_id = match_model.Match.load(match_root).match_id
+
+    # The phone asks.
+    asked = client.post(
+        f"/api/matches/{match_id}/match/desktop-commands",
+        json={"kind": "shot_detect", "slug": SLUG, "stage_number": 1},
+    )
+    assert asked.status_code == 201, asked.text
+    command_id = asked.json()["id"]
+
+    detected_shots = [{"id": "s-new-1", "shot_number": 1, "time": 4.2, "candidate_number": 1}]
+    ran: list[dict] = []
+
+    def auto_sync_body(handle) -> None:
+        run_sync(match_root, client=sync_client)
+
+    def shot_detect_body(handle, slug: str, stage_number: int, reset: bool = False) -> None:
+        ran.append({"slug": slug, "stage_number": stage_number, "reset": reset})
+        path = shooter_root / "audit" / f"stage{stage_number}.json"
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        doc["shots"] = detected_shots
+        path.write_text(json.dumps(doc), encoding="utf-8")
+
+    jobs = JobRegistry(max_concurrent=2)
+    jobs.bodies.register("auto_sync", auto_sync_body)
+    jobs.bodies.register("shot_detect", shot_detect_body)
+
+    class _Matches:
+        def refresh_from_recent_projects(self) -> int:
+            return 1
+
+        def known_ids(self) -> list[str]:
+            return [match_id]
+
+        def resolve(self, mid: str) -> Path:
+            return match_root
+
+    async def in_match(fn):
+        id_token = current_match_id.set(match_id)
+        root_token = current_match_root.set(match_root)
+        try:
+            return await fn()
+        finally:
+            current_match_root.reset(root_token)
+            current_match_id.reset(id_token)
+
+    async def submit(mid: str, root: Path) -> None:
+        await in_match(lambda: jobs.submit(kind="auto_sync"))
+
+    async def start(mid: str, root: Path, command: dict):
+        job = await in_match(
+            lambda: jobs.submit(
+                kind="shot_detect",
+                stage_number=command["stage_number"],
+                shooter_slug=command["slug"],
+                args={"slug": command["slug"], "stage_number": command["stage_number"], "reset": True},
+            )
+        )
+        return job.id, None
+
+    class _Api:
+        def claim(self, match_ids):
+            return sync_client.claim_commands(match_ids)
+
+        def heartbeat(self, command_id, message):
+            return sync_client.heartbeat_command(command_id, message)
+
+        def complete(self, command_id, *, status, error=None, result=None):
+            sync_client.complete_command(command_id, status=status, error=error, result=result)
+
+    clock = {"t": time.time()}
+    service = AutoSyncService(
+        jobs=jobs,
+        matches=_Matches(),
+        submit_auto_sync=submit,
+        load_prefs=lambda: GlobalPrefs(hosted_base_url="http://testserver", hosted_token=raw_token),
+        fetch_fingerprints=lambda prefs: sync_client.get_poll(),
+        clock=lambda: clock["t"],
+        start_command=start,
+        command_api=lambda prefs: _Api(),
+    )
+    jobs.add_terminal_listener(service.on_job_terminal)
+    service._started = True  # no startup pull: the poll alone must find the request
+
+    def status() -> str:
+        rows = client.get(f"/api/matches/{match_id}/match/desktop-commands").json()["commands"]
+        return next(c for c in rows if c["id"] == command_id)["status"]
+
+    deadline = time.monotonic() + 20.0
+    while status() not in ("succeeded", "failed") and time.monotonic() < deadline:
+        clock["t"] = time.time()
+        service.core.next_poll_at = 0.0
+        asyncio.run(service.tick())
+        threading.Event().wait(0.05)
+
+    final = client.get(f"/api/matches/{match_id}/match/desktop-commands").json()["commands"][0]
+    assert final["status"] == "succeeded", final
+    assert ran == [{"slug": SLUG, "stage_number": 1, "reset": True}]
+    # A sync started after the detection ended: that is what carried it.
+    all_jobs = asyncio.run(jobs.list())
+    (detect,) = [j for j in all_jobs if j.kind == "shot_detect"]
+    assert any(j.kind == "auto_sync" and j.started_at >= detect.finished_at for j in all_jobs)
+    hosted_audit = client.get(f"/api/matches/{match_id}/shooters/{SLUG}/stages/1/audit").json()
+    assert [s["id"] for s in hosted_audit["shots"]] == ["s-new-1"]

@@ -7291,11 +7291,43 @@ def create_app(
                 current_match_root.reset(root_token)
                 current_match_id.reset(id_token)
 
+        async def _start_desktop_command(
+            match_id: str, match_root: Path, command: dict
+        ) -> tuple[str | None, str | None]:
+            """Run a command the phone queued for this desktop (#1100). The
+            runner has already applied the revision guard; this starts the
+            local job the way the local route would."""
+            if command.get("kind") != "shot_detect":
+                return None, f"this desktop cannot run {command.get('kind')!r} requests yet"
+            slug, stage_number = command["slug"], command["stage_number"]
+            reset = bool((command.get("args") or {}).get("reset", True))
+            id_token = current_match_id.set(match_id)
+            root_token = current_match_root.set(match_root)
+            try:
+                existing = await state.jobs.find_active(
+                    kind="shot_detect", stage_number=stage_number, shooter_slug=slug
+                )
+                if existing is not None:
+                    return None, "a detection is already running on this stage on the desktop"
+                job = await state.jobs.submit(
+                    kind="shot_detect",
+                    stage_number=stage_number,
+                    shooter_slug=slug,
+                    args={"slug": slug, "stage_number": stage_number, "reset": reset},
+                )
+                return job.id, None
+            except Exception as exc:  # noqa: BLE001 - reported to the phone, not raised
+                return None, f"could not start on the desktop: {exc}"
+            finally:
+                current_match_root.reset(root_token)
+                current_match_id.reset(id_token)
+
         state.auto_sync = AutoSyncService(
             jobs=state.jobs,
             matches=state.matches,
             submit_auto_sync=_submit_auto_sync,
             owner_lock=FileLock(user_config.user_config_dir() / OWNER_LOCK_FILE),
+            start_command=_start_desktop_command,
         )
         state.jobs.add_terminal_listener(state.auto_sync.on_job_terminal)
 
