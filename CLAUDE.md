@@ -308,6 +308,11 @@ what makes Cmd-Q take half a second instead of the SIGTERM grace period.
 ``CSC_IDENTITY_AUTO_DISCOVERY=false desktop/build.sh`` is the unsigned
 build; ``desktop/smoke.sh`` runs the built sidecar and a detection;
 ``desktop/verify-signed.sh`` is what a signed build must pass;
+``desktop/release.sh [vX.Y.Z]`` is the release: it builds the tag (default
+the newest release) signed in a throwaway worktree, smokes it and uploads
+the DMG to the GitHub release, reading the ``APPLE_API_*`` notarization
+vars from ``~/.appstoreconnect/splitsmith-desktop.env``; signing stays
+local on purpose;
 ``desktop/scripts/cdp-shot.mjs`` screenshots the window when Electron
 runs with ``--remote-debugging-port``. The one engine surface added for
 it is ``ui/system_api.py`` (Chromium probe and install, local only) and
@@ -315,8 +320,9 @@ the button under ``PreviewPane``'s browser line. The update check is
 ``desktop/src/updateCheck.ts`` (pure, tested) plus ``updates.ts``
 (fetch, dismissed file under userData, the sheet); the feed is the Pages
 Function ``functions/desktop/latest.json.js`` on splitsmith.app, which
-picks the newest ``v*.*.*`` release because GitHub's ``releases/latest``
-can be an ffmpeg source release. Moving the download behind a purchase
+picks the newest ``v*.*.*`` release that has a ``.dmg`` attached (GitHub's
+``releases/latest`` can be an ffmpeg source release, and release-please
+publishes before the DMG exists). Moving the download behind a purchase
 changes that function only. No auto-update.
 
 ## Multi-shooter comparison (`compare/` package)
