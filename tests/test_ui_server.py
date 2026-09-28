@@ -7143,6 +7143,31 @@ def test_recent_projects_detail_enriches_metadata(tmp_path: Path, _user_config_h
     }
 
 
+def test_recent_projects_detail_reports_whether_a_match_was_synced(
+    tmp_path: Path, _user_config_home: Path
+) -> None:
+    """The Matches row's delete confirm says whether a hosted copy exists,
+    which a desktop delete does not touch; ``synced`` is what it reads."""
+    from datetime import UTC, datetime
+
+    from splitsmith import match_model, user_config
+    from splitsmith.sync.state import SyncState, save_sync_state
+
+    roots = {}
+    for name in ("Synced Match", "Local Match"):
+        root = tmp_path / name.lower().replace(" ", "-")
+        match = match_model.Match.init(root, name=name)
+        match.save(root)
+        user_config.record_project_open(root, name, kind="match")
+        roots[name] = root
+    save_sync_state(roots["Synced Match"], SyncState(last_synced_at=datetime(2026, 9, 27, tzinfo=UTC)))
+
+    client = _MatchClient(create_app())
+    by_name = {p["name"]: p for p in client.get("/api/me/recent-projects?detail=true").json()["projects"]}
+    assert by_name["Synced Match"]["synced"] is True
+    assert by_name["Local Match"]["synced"] is False
+
+
 def test_recent_projects_detail_in_progress_once_footage_attached(
     tmp_path: Path, _user_config_home: Path
 ) -> None:

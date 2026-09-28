@@ -4741,6 +4741,10 @@ class RecentProjectDetail(BaseModel):
     # enrichment overrides it from the tenant's ``matches_store`` row so
     # the picker can flag a desktop-synced match as a read-only mirror.
     origin: str = "local"
+    # Desktop only: the match has been synced to hosted at least once, so
+    # a copy exists there that deleting it here does not touch. The delete
+    # confirm says so; hosted and desktop deletes are separate actions.
+    synced: bool = False
     # The Continue card's target. ``None`` for unresolved kinds.
     next_step: NextStep | None = None
 
@@ -6269,6 +6273,7 @@ def _enrich_recent_project(rp: user_config.RecentProject) -> RecentProjectDetail
     if not path.exists():
         detail.kind = "missing"
         return detail
+    detail.synced = load_sync_state(path).last_synced_at is not None
 
     try:
         kind, _ = match_model.from_path(path)

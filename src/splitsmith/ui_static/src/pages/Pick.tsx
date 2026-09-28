@@ -17,11 +17,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
+import { MoreHorizontal } from "lucide-react";
 
 import { AvatarStack, Kbd } from "@/components/ui";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
 import { Label } from "@/components/ui/Label";
+import { Menu, menuItemClass } from "@/components/ui/Menu";
+import { useConfirm } from "@/components/useConfirm";
 import { inputClass } from "@/components/ui/Field";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { PipelineDots } from "@/components/ui/PipelineDots";
@@ -48,6 +51,7 @@ import {
   touchedAt,
   type StatusFilter,
 } from "@/lib/matches";
+import { matchDeleteCopy } from "@/lib/matchDelete";
 import { useMode } from "@/lib/mode";
 import { cn } from "@/lib/utils";
 
@@ -78,8 +82,49 @@ export function Pick() {
   const [importing, setImporting] = useState(false);
   const [identity, setIdentity] = useState<ScoreboardIdentity | null>(null);
   const [serverVersion, setServerVersion] = useState<string | null>(null);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
   const filterInputRef = useRef<HTMLInputElement | null>(null);
   const localFs = mode !== "hosted";
+  const confirm = useConfirm();
+
+  // Delete lives on the row (it used to sit in Export's footer, which a
+  // "Folder not found" row can never reach, and which hosted disabled for
+  // every synced match). Hosted and desktop deletes stay separate
+  // actions; matchDeleteCopy says which copy goes and which stays.
+  async function deleteRow(project: RecentProjectDetail) {
+    const copy = matchDeleteCopy(project, !localFs);
+    const answer = await confirm({
+      title: copy.title,
+      body: (
+        <div className="space-y-2">
+          {copy.body.map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </div>
+      ),
+      confirmLabel: copy.confirmLabel,
+      checkboxes: copy.checkboxes,
+    });
+    if (!answer.confirmed) return;
+    setDeleting(project.path);
+    setError(null);
+    try {
+      const resp = await api.deleteProject(project.path, {
+        deleteLocalFiles: Boolean(answer.checked.deleteLocalFiles),
+        deleteRawUploads: Boolean(answer.checked.deleteRawUploads),
+      });
+      const errs = resp.summary.errors;
+      if (errs.length > 0) {
+        setError(`Deleted with ${errs.length} issue${errs.length === 1 ? "" : "s"}: ${errs.join("; ")}`);
+      }
+      setRecents(await api.getRecentProjectsDetail());
+    } catch (e) {
+      setError(e instanceof ApiError ? e.detail : String(e));
+    } finally {
+      setDeleting(null);
+    }
+  }
 
   // RootLayout's header slot -- Pick portals its context row there
   // instead of rendering its own <header> (#550). Pick has no nav drawer,
@@ -429,7 +474,11 @@ export function Pick() {
                   project={r}
                   current={idx === selectedIdx && opening !== r.path}
                   busy={opening === r.path}
+                  deleting={deleting === r.path}
+                  menuOpen={menuFor === r.path}
+                  onMenu={(o) => setMenuFor(o ? r.path : null)}
                   onOpen={() => open(r)}
+                  onDelete={() => void deleteRow(r)}
                   onHover={() => setSelectedIdx(idx)}
                 />
               ))}
@@ -565,13 +614,21 @@ function MatchRow({
   project,
   current,
   busy,
+  deleting,
+  menuOpen,
+  onMenu,
   onOpen,
+  onDelete,
   onHover,
 }: {
   project: RecentProjectDetail;
   current: boolean;
   busy: boolean;
+  deleting: boolean;
+  menuOpen: boolean;
+  onMenu: (open: boolean) => void;
   onOpen: () => void;
+  onDelete: () => void;
   onHover: () => void;
 }) {
   const missing = project.kind === "missing";
@@ -630,18 +687,47 @@ function MatchRow({
       </Td>
       <Td dim>{missing ? "—" : formatRelative(touchedAt(project))}</Td>
       <Td className="text-right">
-        <Button
-          type="button"
-          size="sm"
-          disabled={busy || missing}
-          aria-label={`Open ${project.name}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            onOpen();
-          }}
-        >
-          {busy ? "Opening..." : archived ? "Restore" : "Open"}
-        </Button>
+        <span className="inline-flex items-center gap-1">
+          <Button
+            type="button"
+            size="sm"
+            disabled={busy || missing || deleting}
+            aria-label={`Open ${project.name}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpen();
+            }}
+          >
+            {busy ? "Opening..." : deleting ? "Deleting..." : archived ? "Restore" : "Open"}
+          </Button>
+          <span className="relative" onClick={(e) => e.stopPropagation()}>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label={`${project.name} actions`}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              disabled={deleting}
+              onClick={() => onMenu(!menuOpen)}
+            >
+              <MoreHorizontal className="size-4" aria-hidden />
+            </Button>
+            <Menu open={menuOpen} onClose={() => onMenu(false)} align="right">
+              <button
+                type="button"
+                role="menuitem"
+                className={cn(menuItemClass, "text-led-text")}
+                onClick={() => {
+                  onMenu(false);
+                  onDelete();
+                }}
+              >
+                {missing ? "Remove from list" : "Delete"}&hellip;
+              </button>
+            </Menu>
+          </span>
+        </span>
       </Td>
     </Tr>
   );
