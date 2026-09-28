@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.45.0](https://github.com/mandakan/splitsmith/compare/v0.44.0...v0.45.0) (2026-09-28)
+
+
+### Features
+
+* **sync:** the desktop runs commands the phone queues ([#1104](https://github.com/mandakan/splitsmith/issues/1104)) ([#1109](https://github.com/mandakan/splitsmith/issues/1109)) ([5910c40](https://github.com/mandakan/splitsmith/commit/5910c40f61fba7755e3802d23853bfca6d7ee1f8))
+* **sync:** the hosted desktop command queue ([#1103](https://github.com/mandakan/splitsmith/issues/1103)) ([#1108](https://github.com/mandakan/splitsmith/issues/1108)) ([9cebd5f](https://github.com/mandakan/splitsmith/commit/9cebd5fd032f41054ebf7fed43162f8735233351))
+* **ui:** ask the desktop to re-detect a stage from the phone ([#1105](https://github.com/mandakan/splitsmith/issues/1105)) ([#1110](https://github.com/mandakan/splitsmith/issues/1110)) ([3c75c6c](https://github.com/mandakan/splitsmith/commit/3c75c6c2fc8b38972f27060a1c480475202dba67))
+
+
+### Documentation
+
+* **spec:** desktop command queue (auto-sync v2) ([#1106](https://github.com/mandakan/splitsmith/issues/1106)) ([9653297](https://github.com/mandakan/splitsmith/commit/96532979c361abe2dcdc039d7d890459f6b35020))
+
 ## [0.44.0](https://github.com/mandakan/splitsmith/compare/v0.43.1...v0.44.0) (2026-09-28)
 
 
