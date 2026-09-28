@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.44.0](https://github.com/mandakan/splitsmith/compare/v0.43.1...v0.44.0) (2026-09-28)
+
+
+### Features
+
+* **desktop:** one-command signed release; feed waits for the DMG ([#1098](https://github.com/mandakan/splitsmith/issues/1098)) ([cd24797](https://github.com/mandakan/splitsmith/commit/cd247976b843a2d7f017d814fa8b5de37817149e))
+* **ui:** delete a match from its Matches row; say which copy is deleted ([#1102](https://github.com/mandakan/splitsmith/issues/1102)) ([d85332a](https://github.com/mandakan/splitsmith/commit/d85332a4d2413f0a49bc1cc721cc111fe8af8a03))
+
+
+### Documentation
+
+* auto-sync follow-up invariants, local verification safety, release practice ([#1101](https://github.com/mandakan/splitsmith/issues/1101)) ([99c05fe](https://github.com/mandakan/splitsmith/commit/99c05fe32337e68d4e3219a396ecef7bdc43e070))
+
 ## [0.43.1](https://github.com/mandakan/splitsmith/compare/v0.43.0...v0.43.1) (2026-09-27)
 
 
