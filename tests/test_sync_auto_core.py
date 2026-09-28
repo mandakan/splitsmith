@@ -200,3 +200,42 @@ def test_a_running_render_holds_every_match() -> None:
     core.mark_pull_due("m1")
     assert core.pick(0.0, enabled=E, busy=(), sync_active=False, render_active=True) is None
     assert core.pick(0.0, enabled=E, busy=(), sync_active=False, render_active=False) == "m1"
+
+
+def test_pending_commands_pull_first_then_are_taken_once() -> None:
+    """#1100: a request from the phone is a change. It asks for a pull (the
+    command acts on the latest state), releases a parked match, and is
+    handed to the runner once, when that sync succeeds."""
+    core = AutoSyncCore()
+    core.on_poll_ok(0.0, server={"m1": (3, 9)}, local={"m1": (3, 8)})
+    core.on_sync_started("m1", now=0.0)
+    core.on_sync_done("m1", now=10.0, ok=False)
+    assert core.waiting_for_change("m1")
+
+    core.on_poll_ok(100.0, server={"m1": (3, 9)}, local={"m1": (3, 8)}, pending_commands={"m1": 1})
+    assert not core.waiting_for_change("m1")
+    assert core.pick(100.0, enabled=E, busy=(), sync_active=False) == "m1"
+    # Still due on the next poll: not marked twice, still one hand-off.
+    core.on_poll_ok(160.0, server={"m1": (3, 9)}, local={"m1": (3, 8)}, pending_commands={"m1": 1})
+    assert core.take_commands_due("m1") is True
+    assert core.take_commands_due("m1") is False
+
+
+def test_no_pending_commands_changes_nothing() -> None:
+    core = AutoSyncCore()
+    core.on_poll_ok(0.0, server={"m1": (3, 9)}, local={"m1": (3, 9)}, pending_commands={})
+    assert core.pick(0.0, enabled=E, busy=(), sync_active=False) is None
+    assert core.take_commands_due("m1") is False
+
+
+def test_a_push_now_is_not_held_back_by_a_later_write() -> None:
+    """#1100: a finished command's job marks the match dirty through the
+    job listener, which can land after the runner asked for an immediate
+    push. The result must still go out at once, not after the quiet period."""
+    core = AutoSyncCore()
+    core.request_push_now("m1", now=100.0)
+    core.mark_dirty("m1", now=101.0)  # the job's own dirty mark, later
+    assert core.pick(101.0, enabled=E, busy=(), sync_active=False) == "m1"
+    core.on_sync_started("m1", now=102.0)
+    core.on_sync_done("m1", now=110.0, ok=True)
+    assert core.pick(111.0, enabled=E, busy=(), sync_active=False) is None

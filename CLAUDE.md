@@ -561,6 +561,20 @@ Rules added by the #1067-#1078 follow-ups (Sep 2026), each pinned by tests:
   without ``/fingerprints`` at all falls back to per-match manifests (#1071).
 - **The reconcile failure memo keys on every input** (#1069): beep, stage
   time, and for a trim the buffers, source path and source presence.
+- **The desktop command queue** (#1100, spec 2026-09-28): the phone asks,
+  the desktop runs. Hosted: the ``desktop_commands`` table (never a
+  ``state_docs`` kind), phone routes under ``match/desktop-commands`` (a
+  REVIEW capability, mirrors only), desktop routes under
+  ``/api/sync/commands`` on a 10 min lease, ``pending_commands`` on each
+  fingerprint row. Desktop: ``ui/command_runner.CommandRunner`` inside
+  ``AutoSyncService`` (so only the owner-lock process claims); it claims
+  after that match's sync succeeds, refuses a stage whose audit revision
+  moved since the request (``sync/commands.refuse_reason``), and completes
+  only after a sync that started after the job ended. The result push uses
+  ``AutoSyncCore.request_push_now``, never a backdated ``mark_dirty``: the
+  job's own dirty mark would restart the quiet timer. A new command kind
+  is ``COMMAND_KINDS`` hosted plus ``RUNNABLE_KINDS`` and the server's
+  ``_start_desktop_command`` on the desktop.
 
 ## UI: the visual budget (Sep 2026)
 

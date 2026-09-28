@@ -37,6 +37,15 @@ class _MatchState:
     #: as a change.
     parked: bool = False
     parked_fp: Fingerprint | None = None
+    #: The poll reported desktop commands waiting for this match (#1100).
+    #: A sync runs first (the command acts on the latest state); the
+    #: runner claims once that sync succeeds.
+    commands_due: bool = False
+    #: A command's result is waiting to be pushed (#1100): sync without the
+    #: quiet period. Separate from ``push_due_at`` because a write landing
+    #: after it (the finished job's own dirty mark) must not restart the
+    #: quiet timer and hold the result back.
+    push_now_at: float | None = None
 
 
 class AutoSyncCore:
@@ -72,18 +81,50 @@ class AutoSyncCore:
         st = self._matches.get(match_id)
         return st is not None and st.parked
 
+    def request_push_now(self, match_id: str, now: float) -> None:
+        st = self._m(match_id)
+        st.push_now_at = now
+        st.parked = False
+        self._last_activity = now
+
+    def take_commands_due(self, match_id: str) -> bool:
+        """Whether commands were due for this match; clears the mark. Called
+        when its sync succeeded, which is when the runner should claim."""
+        st = self._matches.get(match_id)
+        if st is None or not st.commands_due:
+            return False
+        st.commands_due = False
+        return True
+
     def mark_pull_due(self, match_id: str) -> None:
         self._m(match_id).pull_due = True
 
     def on_poll_ok(
-        self, now: float, server: Mapping[str, Fingerprint], local: Mapping[str, Fingerprint]
+        self,
+        now: float,
+        server: Mapping[str, Fingerprint],
+        local: Mapping[str, Fingerprint],
+        pending_commands: Mapping[str, int] | None = None,
     ) -> None:
         """Compare the hosted fingerprints with the local ones. A pair that
         still differs after a successful sync (a doc deleted hosted-side,
-        say) is remembered as settled and ignored until it moves."""
+        say) is remembered as settled and ignored until it moves.
+
+        A match with ``pending_commands`` gets a pull and is marked
+        commands due: a request from the phone is a change, so it also
+        releases a parked match."""
         recovered = self._poll_failures > 0
         self._poll_failures = 0
         self.paused_reason = None
+        for match_id in local:
+            if (pending_commands or {}).get(match_id, 0) > 0:
+                st = self._m(match_id)
+                if not st.commands_due:
+                    st.commands_due = True
+                    st.pull_due = True
+                    st.pull_seen_at = now
+                    st.parked = False
+                    self._last_activity = now
         for match_id, local_fp in local.items():
             server_fp = server.get(match_id)
             if server_fp is None:
@@ -159,6 +200,8 @@ class AutoSyncCore:
         # A write that landed after the sync started is not covered by it.
         if st.push_due_at is not None and st.push_due_at <= started:
             st.push_due_at = None
+        if st.push_now_at is not None and st.push_now_at <= started:
+            st.push_now_at = None
 
     def pick(
         self,
@@ -180,7 +223,7 @@ class AutoSyncCore:
             st = self._matches.get(match_id)
             if st is None or st.parked or match_id in busy or now < st.retry_at:
                 continue
-            if st.pull_due:
+            if st.pull_due or st.push_now_at is not None:
                 ready.append((0, match_id))
             elif st.push_due_at is not None and now - st.push_due_at >= self.QUIET_S:
                 ready.append((1, match_id))
