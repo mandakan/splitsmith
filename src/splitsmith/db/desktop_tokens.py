@@ -146,4 +146,5 @@ class DesktopTokenAuth:
                 email=user_row.email,
                 display_name=user_row.display_name,
                 token_scope=row.scope,
+                token_id=row.id,
             )

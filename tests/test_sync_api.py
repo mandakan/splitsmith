@@ -498,6 +498,7 @@ def test_fingerprints_move_with_a_put_and_ignore_export_runs(
             "doc_count": 1,
             "version_sum": version,
             "digest": versions_digest({"project/anna": version}),
+            "pending_commands": 0,
         }
 
     first = client.get(FINGERPRINTS_URL)

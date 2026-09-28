@@ -1,7 +1,7 @@
 # Desktop command queue (auto-sync v2)
 
 Date: 2026-09-28
-Status: design agreed, not started. Tracking issue #1100.
+Status: S1 (hosted queue) implemented; S2, S3 pending. Tracking issue #1100.
 Builds on: `2026-09-27-auto-sync-reconciler-design.md` (v1, v1.1).
 
 ## Goal
@@ -156,7 +156,7 @@ second.
 
 `GET /api/me/desktop-presence` (also embedded in the list response):
 `{last_seen_at, around}` where `last_seen_at` is the newest `last_used_at`
-over the user's non-revoked `sync`-scope tokens and `around` is
+over the user's non-revoked desktop tokens (any scope: a legacy `full` token is a desktop too) and `around` is
 `last_seen_at > now - 5 min`. The phone words it:
 
 - around: "Your desktop will pick this up shortly."
