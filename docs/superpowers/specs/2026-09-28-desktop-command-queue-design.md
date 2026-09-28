@@ -246,3 +246,8 @@ first run of a doubled command changes the doc, so the second refuses.
 - `render_export`: which export options the phone can set (presets are per
   user, so likely "render with preset X"), and the byte path back (#752).
 - `youtube_upload`: request by export run id; the result is the video URL.
+
+Answered by `2026-09-28-desktop-command-render-upload-design.md`: the two
+kinds ship first as one, `render_upload`, whose result is the video URL, so
+it does not wait for #752. The phone sends a full `MatchExportRequest`
+rather than a preset name, because presets do not sync.
