@@ -221,3 +221,35 @@ def test_losing_the_claim_stops_and_forgets_the_command(tmp_path: Path) -> None:
     api.reply = None
     asyncio.run(runner.tick(api, {"m1": root}))
     assert jobs.cancelled == ["j1"] and runner.tracked_ids() == []
+
+
+def test_a_failed_completion_is_retried_not_lost(tmp_path: Path) -> None:
+    """The sync event that decides a command is consumed once; if hosted
+    does not take the completion that tick, the next tick must retry it
+    rather than leave the command claimed until some later sync."""
+    root = _match(tmp_path, None)
+    jobs, started, synced_now = _Jobs(), [], []
+    runner = _runner(jobs, started, synced_now)
+    api = _Api([_command()])
+    runner.claim_after_sync("m1")
+    asyncio.run(runner.tick(api, {"m1": root}))
+    jobs.jobs["j1"] = _job("j1", JobStatus.SUCCEEDED)
+    asyncio.run(runner.tick(api, {"m1": root}))
+    finished = jobs.jobs["j1"].finished_at.timestamp()
+
+    real_complete = api.complete
+    calls = {"n": 0}
+
+    def flaky_complete(command_id, *, status, error=None, result=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("hosted unreachable")
+        real_complete(command_id, status=status, error=error, result=result)
+
+    api.complete = flaky_complete
+    runner.on_sync_done("m1", ok=True, started_at=finished + 1, error=None)
+    asyncio.run(runner.tick(api, {"m1": root}))
+    assert api.completed == [] and runner.tracked_ids() == ["c1"]
+    asyncio.run(runner.tick(api, {"m1": root}))  # no new sync event needed
+    assert api.completed == [("c1", "succeeded", None)]
+    assert runner.tracked_ids() == []

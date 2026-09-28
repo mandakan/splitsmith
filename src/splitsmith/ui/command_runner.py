@@ -59,6 +59,10 @@ class _Tracked:
     #: after this moment.
     finished_at: float | None = None
     result: dict = field(default_factory=dict)
+    #: ``(status, error)`` once the command's outcome is known. Kept until
+    #: hosted accepts the completion: the sync event that decided it is
+    #: consumed once, so a failed completion call must not lose it.
+    outcome: tuple[str, str | None] | None = None
 
 
 class CommandRunner:
@@ -133,20 +137,24 @@ class CommandRunner:
                     and (started_at is None or started_at >= t.finished_at)
                 ]
             for tracked in waiting:
-                if ok:
-                    await self._complete(api, tracked.command["id"], "succeeded", result=tracked.result)
-                else:
-                    await self._complete(
-                        api,
-                        tracked.command["id"],
+                tracked.outcome = (
+                    ("succeeded", None)
+                    if ok
+                    else (
                         "failed",
-                        error=f"detection ran, but its result could not be synced: {error or 'sync failed'}",
+                        f"detection ran, but its result could not be synced: {error or 'sync failed'}",
                     )
+                )
 
     async def _heartbeat_and_finish(self, api: CommandApi) -> None:
         with self._lock:
             tracked = list(self._tracked.values())
         for t in tracked:
+            if t.outcome is not None:
+                status, error = t.outcome
+                result = t.result if status == "succeeded" else None
+                await self._complete(api, t.command["id"], status, error=error, result=result)
+                continue
             job = await self._jobs.get(t.job_id)
             if job is None:
                 await self._complete(api, t.command["id"], "failed", error="the desktop job disappeared")
