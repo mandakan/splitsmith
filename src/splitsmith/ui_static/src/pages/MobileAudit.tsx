@@ -14,16 +14,18 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams } from "react-router-dom";
-import { ArrowLeft, X } from "lucide-react";
+import { ArrowLeft, MoreHorizontal, X } from "lucide-react";
 
 import { ActionArea } from "@/components/audit/mobile/ActionArea";
 import { AuditTransport } from "@/components/audit/mobile/AuditTransport";
 import { DEFAULT_ROWS, WrappedWaveform } from "@/components/audit/mobile/WrappedWaveform";
 import { ZoomLane, type ZoomFactor } from "@/components/audit/mobile/ZoomLane";
 import type { AuditMarker } from "@/components/MarkerLayer";
+import { DesktopCommandLine } from "@/components/desktop/DesktopCommandLine";
 import { MobileConfirmSheet } from "@/components/MobileConfirmSheet";
 import { Snackbar, type SnackState } from "@/components/Snackbar";
 import { Button } from "@/components/ui/button";
+import { Menu, menuItemClass } from "@/components/ui/Menu";
 import { PageHeader } from "@/components/ui/PageHeader";
 import { Portal } from "@/components/ui/Portal";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
@@ -38,6 +40,8 @@ import {
 import { buildAuditJson, deriveMarkers } from "@/lib/audit-doc";
 import { resolveTarget } from "@/lib/audit-target";
 import { useDialogFocus } from "@/lib/dialogFocus";
+import { isActiveCommand, latestForStage, REDETECT_CONFIRM } from "@/lib/desktopCommands";
+import { useDesktopCommands } from "@/lib/useDesktopCommands";
 import { useMatchHref } from "@/lib/matchHref";
 import { snapToPeak, type SnapPeaks } from "@/lib/peak-snap";
 import { createScrubber, type Scrubber } from "@/lib/scrub-audio";
@@ -72,6 +76,14 @@ export function MobileAudit() {
 
   const stageNumber = stage != null ? Number(stage) : null;
   const readOnly = capabilityDenied(outletCtx?.capabilities, "review");
+  // A desktop-synced match: detection runs on the desktop, so the phone
+  // asks it to (#1100) instead of offering a local re-detect.
+  const desktopMirror = outletCtx?.origin === "desktop" && !readOnly;
+  const desktop = useDesktopCommands(desktopMirror);
+  const stageCommand =
+    desktopMirror && stageNumber != null ? latestForStage(desktop.commands, slug, stageNumber) : null;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmRedetect, setConfirmRedetect] = useState(false);
 
   // undefined = not loaded yet; null = confirmed no audit doc for this stage.
   const [audit, setAudit] = useState<StageAudit | null | undefined>(undefined);
@@ -96,6 +108,16 @@ export function MobileAudit() {
   const [confirmDiscard, setConfirmDiscard] = useState(false);
 
   const sessionEvents = useRef<AuditEvent[]>([]);
+
+  // The desktop's result arrives through sync: reload the stage when its
+  // request turns succeeded, so the new shots show without a manual refresh.
+  const lastCommandStatus = useRef<string | null>(null);
+  useEffect(() => {
+    const status = stageCommand?.status ?? null;
+    const wasActive = lastCommandStatus.current === "pending" || lastCommandStatus.current === "claimed";
+    if (wasActive && status === "succeeded") setReloadToken((n) => n + 1);
+    lastCommandStatus.current = status;
+  }, [stageCommand?.status]);
   const scrubberRef = useRef<Scrubber | null>(null);
   const videoElRef = useRef<HTMLVideoElement | null>(null);
   const videoPanelRef = useRef<HTMLDivElement | null>(null);
@@ -467,18 +489,59 @@ export function MobileAudit() {
               <span className="mr-1.5 font-mono text-sm text-led">{String(stageNumber).padStart(2, "0")}</span>
               Audit
             </span>
-            {audit != null && (
-              <Button
-                type="button"
-                variant="primary"
-                disabled={readOnly || !dirty || saving}
-                onClick={handleSave}
-                className="ml-auto min-h-11"
-              >
-                {saving ? "Saving..." : dirty ? "Save *" : "Save"}
-              </Button>
-            )}
+            <div className="ml-auto flex items-center gap-1">
+              {audit != null && (
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={readOnly || !dirty || saving}
+                  onClick={handleSave}
+                  className="min-h-11"
+                >
+                  {saving ? "Saving..." : dirty ? "Save *" : "Save"}
+                </Button>
+              )}
+              {desktopMirror ? (
+                <span className="relative">
+                  <button
+                    type="button"
+                    aria-label="Stage actions"
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
+                    onClick={() => setMenuOpen((o) => !o)}
+                    className="flex min-h-11 min-w-11 items-center justify-center text-ink-2"
+                  >
+                    <MoreHorizontal className="size-5" aria-hidden />
+                  </button>
+                  <Menu open={menuOpen} onClose={() => setMenuOpen(false)} align="right">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={menuItemClass}
+                      disabled={stageCommand != null && isActiveCommand(stageCommand)}
+                      onClick={() => {
+                        setMenuOpen(false);
+                        setConfirmRedetect(true);
+                      }}
+                    >
+                      Re-detect on desktop&hellip;
+                    </button>
+                  </Menu>
+                </span>
+              ) : null}
+            </div>
           </header>
+          {stageCommand ? (
+            <DesktopCommandLine
+              command={stageCommand}
+              presence={desktop.presence}
+              onCancel={(id) => void desktop.cancel(id)}
+              className="border-b border-rule px-3 py-1.5"
+            />
+          ) : null}
+          {desktop.error ? (
+            <p className="border-b border-rule px-3 py-1.5 text-sm text-led-text">{desktop.error}</p>
+          ) : null}
 
           {auditError != null ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
@@ -498,6 +561,11 @@ export function MobileAudit() {
           ) : audit === null ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
               <p className="text-sm text-muted">Nothing to audit yet - run shot detection first</p>
+              {desktopMirror && !(stageCommand && isActiveCommand(stageCommand)) ? (
+                <Button type="button" className="min-h-11" onClick={() => setConfirmRedetect(true)}>
+                  Detect on desktop
+                </Button>
+              ) : null}
               <Link to={href("")} className="min-h-11 rounded-md border border-rule px-4 py-2 text-sm text-ink">
                 Overview
               </Link>
@@ -614,6 +682,18 @@ export function MobileAudit() {
           confirmDisabled={saving}
           onConfirm={confirmDeleteManual}
           onCancel={() => setConfirmDeleteMarker(null)}
+        />
+
+        <MobileConfirmSheet
+          open={confirmRedetect}
+          title={REDETECT_CONFIRM.title}
+          body={REDETECT_CONFIRM.body}
+          confirmLabel={REDETECT_CONFIRM.confirmLabel}
+          onConfirm={() => {
+            setConfirmRedetect(false);
+            if (stageNumber != null) void desktop.requestRedetect(slug, stageNumber);
+          }}
+          onCancel={() => setConfirmRedetect(false)}
         />
 
         <MobileConfirmSheet

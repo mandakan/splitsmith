@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useOutletContext, useParams } from "react-router-dom";
 
+import { DesktopRequestsSheet } from "@/components/desktop/DesktopRequestsSheet";
 import { EditStagesDrawer } from "@/components/match/EditStagesDrawer";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { SyncCard } from "@/components/match/SyncCard";
@@ -43,6 +44,8 @@ import {
   overviewStats,
 } from "@/lib/overview";
 import { useIsMobile } from "@/lib/useIsMobile";
+import { isActiveCommand } from "@/lib/desktopCommands";
+import { useDesktopCommands } from "@/lib/useDesktopCommands";
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
@@ -69,6 +72,11 @@ export function Home() {
   const { mode: deploymentMode } = useDeploymentMode();
   const isMobile = useIsMobile();
   const editDenied = capabilityDenied(ctx?.capabilities, "edit");
+  // A desktop-synced match: the phone's requests to the desktop (#1100).
+  const desktopMirror = ctx?.origin === "desktop" && !capabilityDenied(ctx?.capabilities, "review");
+  const desktop = useDesktopCommands(desktopMirror);
+  const [requestsOpen, setRequestsOpen] = useState(false);
+  const activeRequests = desktop.commands.filter(isActiveCommand).length;
 
   const [triage, setTriage] = useState<TriageResponse | null>(null);
   const [triageError, setTriageError] = useState<string | null>(null);
@@ -216,6 +224,12 @@ export function Home() {
         }
         actions={
           <>
+            {desktopMirror ? (
+              <Button type="button" onClick={() => setRequestsOpen(true)}>
+                Desktop requests
+                {activeRequests > 0 ? <span className="numeral text-muted">{activeRequests}</span> : null}
+              </Button>
+            ) : null}
             {editDenied ? null : (
               <Button type="button" onClick={() => void openEditStages()} disabled={stagesLoading}>
                 Edit stages
@@ -245,6 +259,14 @@ export function Home() {
           </div>
         ) : null}
       </PageHeader>
+
+      <DesktopRequestsSheet
+        open={requestsOpen}
+        onClose={() => setRequestsOpen(false)}
+        commands={desktop.commands}
+        presence={desktop.presence}
+        onCancel={(id) => void desktop.cancel(id)}
+      />
 
       {stagesError ? (
         <p role="alert" className="mb-3 text-sm text-led-text">

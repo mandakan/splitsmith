@@ -574,7 +574,14 @@ Rules added by the #1067-#1078 follow-ups (Sep 2026), each pinned by tests:
   ``AutoSyncCore.request_push_now``, never a backdated ``mark_dirty``: the
   job's own dirty mark would restart the quiet timer. A new command kind
   is ``COMMAND_KINDS`` hosted plus ``RUNNABLE_KINDS`` and the server's
-  ``_start_desktop_command`` on the desktop.
+  ``_start_desktop_command`` on the desktop. In the SPA, a desktop-synced
+  match (``origin === "desktop"`` with the review capability) asks instead
+  of detecting: ``lib/useDesktopCommands`` (polls only while a request is
+  active), ``lib/desktopCommands`` (all wording), ``DesktopCommandLine``,
+  the phone Audit's header menu and empty state, the desktop Audit
+  overflow's ``DetectShotsBadge`` ``desktop`` prop, and the Overview's
+  "Desktop requests" sheet. A new kind's phone entry goes through the same
+  hook.
 
 ## UI: the visual budget (Sep 2026)
 

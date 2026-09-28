@@ -1,7 +1,7 @@
 # Desktop command queue (auto-sync v2)
 
 Date: 2026-09-28
-Status: S1 (hosted queue) and S2 (desktop runner) implemented; S3 (phone UI) pending. Tracking issue #1100.
+Status: S1 (hosted queue), S2 (desktop runner) and S3 (phone UI) implemented; re-detect works end to end. Render and YouTube upload are later kinds. Tracking issue #1100.
 Builds on: `2026-09-27-auto-sync-reconciler-design.md` (v1, v1.1).
 
 ## Goal
