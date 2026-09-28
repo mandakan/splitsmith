@@ -1754,6 +1754,41 @@ export interface DeletionSummary {
   errors: string[];
 }
 
+/** A request the phone made for the desktop to run (#1100). */
+export type DesktopCommandStatus = "pending" | "claimed" | "succeeded" | "failed" | "cancelled";
+
+export interface DesktopCommand {
+  id: string;
+  match_id: string;
+  kind: string;
+  slug: string | null;
+  stage_number: number | null;
+  args: Record<string, unknown>;
+  expected_revision: string | null;
+  status: DesktopCommandStatus;
+  cancel_requested: boolean;
+  progress_message: string | null;
+  error: string | null;
+  result: Record<string, unknown> | null;
+  requested_at: string;
+  claimed_at: string | null;
+  lease_expires_at: string | null;
+  finished_at: string | null;
+}
+
+/** Whether a linked desktop is around to pick a request up (#1100):
+ *  ``around`` = seen within five minutes. */
+export interface DesktopPresence {
+  linked: boolean;
+  last_seen_at: string | null;
+  around: boolean;
+}
+
+export interface DesktopCommandList {
+  commands: DesktopCommand[];
+  presence: DesktopPresence;
+}
+
 export interface DeleteProjectResponse {
   summary: DeletionSummary;
   projects: RecentProject[];
@@ -4504,6 +4539,15 @@ export const api = {
   /** Submit a ``sync_match`` job for the current match. 409
    *  ``sync_not_configured`` when no hosted-sync target is saved yet. */
   startSync: () => request<Job>("/api/match/sync", { method: "POST" }),
+  /** Ask the desktop to run something for this match (#1100). Mirrors
+   *  only; the same request while one is waiting returns that one. */
+  requestDesktopCommand: (body: { kind: "shot_detect"; slug: string; stage_number: number }) =>
+    request<DesktopCommand>("/api/match/desktop-commands", { method: "POST", json: body }),
+  listDesktopCommands: () => request<DesktopCommandList>("/api/match/desktop-commands"),
+  cancelDesktopCommand: (id: string) =>
+    request<DesktopCommand>(`/api/match/desktop-commands/${encodeURIComponent(id)}/cancel`, {
+      method: "POST",
+    }),
   /** Upload a match deleted on hosted as a new copy: resets its sync
    *  state and starts a sync. */
   republishSync: () => request<Job>("/api/match/sync/republish", { method: "POST" }),

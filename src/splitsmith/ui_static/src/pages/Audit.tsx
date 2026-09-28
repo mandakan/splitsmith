@@ -61,6 +61,7 @@ import { useConfirm } from "@/components/useConfirm";
 import { MarkerLayer, type AuditMarker } from "@/components/MarkerLayer";
 import type { MatchShellOutletContext } from "@/components/match/MatchShell";
 import { VideoPanel } from "@/components/VideoPanel";
+import { DesktopCommandLine } from "@/components/desktop/DesktopCommandLine";
 import { Waveform, type WaveformView } from "@/components/Waveform";
 import { Button } from "@/components/ui/button";
 import { Chip } from "@/components/ui/Chip";
@@ -71,6 +72,7 @@ import { Portal } from "@/components/ui/Portal";
 import {
   ApiError,
   api,
+  capabilityDenied,
   type AuditEvent,
   type Job,
   type MatchProject,
@@ -79,6 +81,8 @@ import {
   type StageVideo,
 } from "@/lib/api";
 import { detectAnomalies, keptShotsFromMarkers } from "@/lib/anomalies";
+import { isActiveCommand, latestForStage, REDETECT_CONFIRM } from "@/lib/desktopCommands";
+import { useDesktopCommands } from "@/lib/useDesktopCommands";
 import { isTypingTextTarget, useBlurOnPointerClick } from "@/lib/audit-input";
 import { buildAuditJson, deriveMarkers } from "@/lib/audit-doc";
 import { beepStepVideos, headerState, nextFlaggedIndex, shotRows } from "@/lib/auditStep";
@@ -135,6 +139,12 @@ export function Audit() {
   // per match, shared with the breadcrumb chip strip. No own fetch.
   const outletCtx = useOutletContext<MatchShellOutletContext | undefined>();
   const shooters = outletCtx?.shooters ?? [];
+  // A desktop-synced match on hosted: detection is the desktop's job, so
+  // the overflow asks it to run (#1100) instead of a local re-detect that
+  // the mirror would refuse.
+  const desktopMirror =
+    outletCtx?.origin === "desktop" && !capabilityDenied(outletCtx?.capabilities, "review");
+  const desktop = useDesktopCommands(desktopMirror);
   // ShooterScopedRoute remounts this whole component on slug change so we
   // no longer need explicit switching state -- the URL change is the
   // single source of truth.
@@ -1686,6 +1696,18 @@ export function Audit() {
     [reloadProject, reloadPeaks, reloadAudit, navigate, href, slug, stageNumber],
   );
 
+  const stageCommand =
+    desktopMirror && stageNumber != null ? latestForStage(desktop.commands, slug, stageNumber) : null;
+  // The desktop's result arrives through sync: reload when the request
+  // turns succeeded, so its shots show without a manual refresh.
+  const lastCommandStatus = useRef<string | null>(null);
+  useEffect(() => {
+    const status = stageCommand?.status ?? null;
+    const prev = lastCommandStatus.current;
+    if ((prev === "pending" || prev === "claimed") && status === "succeeded") void reloadAudit();
+    lastCommandStatus.current = status;
+  }, [stageCommand?.status, reloadAudit]);
+
   // ---- Render ------------------------------------------------------------
 
   if (projectError) {
@@ -2031,11 +2053,28 @@ export function Audit() {
                             hasStageTime={stage.time_seconds > 0}
                             hasCandidates={markers.length > 0}
                             onComplete={reloadAudit}
+                            desktop={
+                              desktopMirror
+                                ? {
+                                    busy: stageCommand != null && isActiveCommand(stageCommand),
+                                    onRequest: () => void desktop.requestRedetect(slug, stage.stage_number),
+                                  }
+                                : undefined
+                            }
                           />
                         ) : null}
                       </>
                     }
                   />
+                  {stageCommand ? (
+                    <DesktopCommandLine
+                      command={stageCommand}
+                      presence={desktop.presence}
+                      onCancel={(id) => void desktop.cancel(id)}
+                      className="py-1"
+                    />
+                  ) : null}
+                  {desktop.error ? <p className="py-1 text-sm text-led-text">{desktop.error}</p> : null}
                   <CurrentShotLine
                     shots={keptShots}
                     currentIndex={currentShotIndex}
@@ -2241,6 +2280,8 @@ interface DetectShotsBadgeProps {
   hasStageTime: boolean;
   hasCandidates: boolean;
   onComplete: () => Promise<void> | void;
+  /** On a desktop-synced match: ask the desktop instead (#1100). */
+  desktop?: { busy: boolean; onRequest: () => void };
 }
 
 function DetectShotsBadge({
@@ -2250,6 +2291,7 @@ function DetectShotsBadge({
   hasStageTime,
   hasCandidates,
   onComplete,
+  desktop,
 }: DetectShotsBadgeProps) {
   const confirm = useConfirm();
   const [job, setJob] = useState<Job | null>(null);
@@ -2356,6 +2398,26 @@ function DetectShotsBadge({
   }, [slug, stageNumber]);
 
   const pct = job?.progress != null ? Math.round(job.progress * 100) : null;
+
+  if (desktop) {
+    return (
+      <button
+        type="button"
+        role="menuitem"
+        className={MENU_ITEM}
+        disabled={blocked || desktop.busy}
+        title={reason ?? (desktop.busy ? "Already asked; see the status line." : undefined)}
+        onClick={() =>
+          void (async () => {
+            const ok = await confirm({ ...REDETECT_CONFIRM, destructive: false });
+            if (ok.confirmed) desktop.onRequest();
+          })()
+        }
+      >
+        Re-detect on desktop&hellip;
+      </button>
+    );
+  }
 
   // Overflow-menu rows (UX PR 5): the running state is a status row, an
   // empty candidate list gets the one-click detect, otherwise the three

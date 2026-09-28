@@ -7,7 +7,8 @@
  * wrapper around the trigger). The popover itself renders in a portal on
  * `document.body`, positioned against that anchor: rendered in place it
  * was clipped by any `overflow-hidden` ancestor, which is every `Table`,
- * so a row menu near the bottom of a table was cut off.
+ * so a row menu near the bottom of a table was cut off. It sits on the
+ * drawer layer, above a takeover (the phone Audit) and a sheet.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -91,7 +92,7 @@ export function Menu({ open, onClose, children, align = "left", className }: Men
               role="menu"
               style={pos ?? { visibility: "hidden" }}
               className={cn(
-                "fixed z-50 flex min-w-52 flex-col gap-0.5 rounded-[10px] border border-rule-strong bg-surface p-1.5 text-md text-ink-2 shadow-lg",
+                "fixed z-drawer flex min-w-52 flex-col gap-0.5 rounded-[10px] border border-rule-strong bg-surface p-1.5 text-md text-ink-2 shadow-lg",
                 className,
               )}
             >
