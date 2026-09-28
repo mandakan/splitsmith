@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from pydantic import BaseModel, ValidationError
@@ -44,6 +44,7 @@ from ..sync.pull import PULLABLE_DOC_KINDS
 from ..sync.state import versions_digest
 
 if TYPE_CHECKING:
+    from ..db.desktop_commands import DesktopCommandStore
     from ..db.matches import PostgresMatchStore
     from ..db.project_state import ProjectStateStore
     from ..db.recent_projects import PostgresRecentProjectsStore
@@ -248,6 +249,14 @@ def _matches_store(request: Request) -> PostgresMatchStore:
     return store
 
 
+def _command_store(request: Request) -> DesktopCommandStore:
+    state = request.app.state.splitsmith_state
+    store = state.desktop_commands
+    if store is None:
+        raise HTTPException(status_code=500, detail="desktop command store unavailable")
+    return store
+
+
 def _project_state(request: Request) -> ProjectStateStore:
     state = request.app.state.splitsmith_state
     store = state.project_state
@@ -448,6 +457,9 @@ class SyncFingerprint(BaseModel):
     #: ``versions_digest`` over the match's identity -> version pairs
     #: (#1072). Additive: a desktop that predates it reads the pair only.
     digest: str
+    #: Desktop commands (#1100) a desktop could claim for this match now.
+    #: Additive like ``digest``; a pre-v2 desktop ignores it.
+    pending_commands: int = 0
 
 
 class SyncFingerprintsResponse(BaseModel):
@@ -473,6 +485,7 @@ async def get_fingerprints(
     per_match: dict[str, dict[str, int]] = {}
     for match_id, kind, slug, stage_number, version in rows:
         per_match.setdefault(match_id, {})[doc_identity_key(kind, slug, stage_number)] = version
+    pending = await _command_store(request).pending_counts()
     return SyncFingerprintsResponse(
         matches=[
             SyncFingerprint(
@@ -480,10 +493,75 @@ async def get_fingerprints(
                 doc_count=len(versions),
                 version_sum=sum(versions.values()),
                 digest=versions_digest(versions),
+                pending_commands=pending.get(m, 0),
             )
             for m, versions in sorted(per_match.items())
         ]
     )
+
+
+# ---------------------------------------------------------------------------
+# Desktop command queue, desktop side (#1100, spec 2026-09-28). The phone
+# side (request / list / cancel) lives in server.py under the match alias.
+# ---------------------------------------------------------------------------
+
+
+class SyncCommandClaim(BaseModel):
+    """Body for ``POST /api/sync/commands/claim``: the matches this desktop
+    watches. A command for any other match is never claimed by it."""
+
+    match_ids: list[str]
+    limit: int = 5
+
+
+class SyncCommandHeartbeat(BaseModel):
+    message: str | None = None
+
+
+class SyncCommandComplete(BaseModel):
+    status: Literal["succeeded", "failed", "cancelled"]
+    error: str | None = None
+    result: dict[str, Any] | None = None
+
+
+@router.post("/commands/claim")
+async def claim_commands(
+    body: SyncCommandClaim, request: Request, user: Any = Depends(_current_user)
+) -> dict[str, Any]:
+    """Claim up to ``limit`` waiting commands (or ones whose lease lapsed)
+    for these matches, oldest first, on a 10 minute lease."""
+    _hosted_gate()
+    commands = await _command_store(request).claim(
+        body.match_ids, token_id=getattr(user, "token_id", None), limit=max(1, min(body.limit, 20))
+    )
+    return {"commands": [c.model_dump(mode="json") for c in commands]}
+
+
+@router.post("/commands/{command_id}/heartbeat")
+async def heartbeat_command(
+    command_id: str, body: SyncCommandHeartbeat, request: Request, user: Any = Depends(_current_user)
+) -> dict[str, Any]:
+    """Extend the lease and record progress. 409 ``not_claimed`` when the
+    command is terminal or its lease lapsed to another desktop: stop."""
+    _hosted_gate()
+    command = await _command_store(request).heartbeat(command_id, message=body.message)
+    if command is None:
+        raise HTTPException(status_code=409, detail="not_claimed")
+    return {"cancel_requested": command.cancel_requested}
+
+
+@router.post("/commands/{command_id}/complete")
+async def complete_command(
+    command_id: str, body: SyncCommandComplete, request: Request, user: Any = Depends(_current_user)
+) -> dict[str, Any]:
+    """Finish a command. Idempotent: completing a terminal one is a no-op."""
+    _hosted_gate()
+    command = await _command_store(request).complete(
+        command_id, status=body.status, error=body.error, result=body.result
+    )
+    if command is None:
+        raise HTTPException(status_code=404, detail="not found")
+    return command.model_dump(mode="json")
 
 
 @router.get("/matches/{match_id}/docs/match", response_model=SyncDocResponse)

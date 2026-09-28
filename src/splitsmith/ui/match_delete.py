@@ -51,6 +51,7 @@ class DeletionSummary:
     match_row_removed: bool = False
     state_docs_removed: int = 0
     comments_removed: int = 0
+    desktop_commands_removed: int = 0
     storage_objects_deleted: int = 0
     raw_uploads_deleted: list[str] = field(default_factory=list)
     raw_uploads_skipped_shared: list[str] = field(default_factory=list)
@@ -191,6 +192,16 @@ async def _delete_hosted(
             summary.comments_removed = await state.comments.purge_match(match_id)
         except Exception as exc:  # noqa: BLE001
             summary.errors.append(f"delete comments: {exc}")
+
+    # 6c. Delete the match's desktop commands (#1100). Nothing cascades from
+    #     the registry row; a request left behind would be claimed by the
+    #     desktop for a match that no longer exists here.
+    commands = getattr(state, "desktop_commands", None)
+    if commands is not None:
+        try:
+            summary.desktop_commands_removed = await commands.delete_for_match(match_id)
+        except Exception as exc:  # noqa: BLE001
+            summary.errors.append(f"delete desktop commands: {exc}")
 
     # 7. Delete the matches-registry row.
     if state.matches_store is not None:

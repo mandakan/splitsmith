@@ -850,3 +850,61 @@ class ExportPresetRow(Base):
 
     def __repr__(self) -> str:
         return f"<ExportPresetRow user_id={self.user_id!r} preset_id={self.preset_id!r}>"
+
+
+class DesktopCommandRow(Base):
+    """A request from the phone for the user's desktop to run (#1100, spec
+    2026-09-28 desktop command queue).
+
+    Its own table, not a ``state_docs`` kind: a doc kind enters the sync
+    manifest, and a request is not match state. Only mirrors
+    (``matches.origin == "desktop"``) get commands; hosted-native matches
+    have hosted compute.
+
+    Lifecycle: ``pending`` -> ``claimed`` (a desktop holds a lease until
+    ``lease_expires_at``; an expired lease is claimable again) ->
+    ``succeeded`` / ``failed``, or ``cancelled`` from pending. A cancel on a
+    claimed command sets ``cancel_requested``, which the desktop reads on
+    its next heartbeat. ``expected_revision`` is the stage audit's
+    ``audit_revision`` when the phone asked: the desktop refuses to run a
+    reset against a stage that changed since, which is also what makes a
+    lease-expiry re-run safe.
+
+    **Multi-tenant:** ``tenant_isolation`` RLS applies (migration
+    d4b7e2c91a05) and the store filters on ``user_id`` in every statement.
+    """
+
+    __tablename__ = "desktop_commands"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_ulid)
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    match_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    slug: Mapped[str | None] = mapped_column(String, nullable=True)
+    stage_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    args: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    expected_revision: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    # The desktop token that holds (or last held) the claim. SET NULL on a
+    # token delete: the command outlives the credential that ran it.
+    claimed_by: Mapped[str | None] = mapped_column(
+        String, ForeignKey("desktop_tokens.id", ondelete="SET NULL"), nullable=True
+    )
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    progress_message: Mapped[str | None] = mapped_column(String, nullable=True)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"<DesktopCommandRow id={self.id!r} match_id={self.match_id!r} "
+            f"kind={self.kind!r} status={self.status!r}>"
+        )

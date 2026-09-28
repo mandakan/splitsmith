@@ -90,6 +90,7 @@ _ME_ROUTES_REQUIRING_AUTH: list[tuple[str, str, str]] = [
     ("GET", "/api/me/scoreboard-identity", "/api/me/scoreboard-identity"),
     ("PUT", "/api/me/scoreboard-identity", "/api/me/scoreboard-identity"),
     ("DELETE", "/api/me/scoreboard-identity", "/api/me/scoreboard-identity"),
+    ("GET", "/api/me/desktop-presence", "/api/me/desktop-presence"),
     ("GET", "/api/me/desktop-tokens", "/api/me/desktop-tokens"),
     ("POST", "/api/me/desktop-tokens", "/api/me/desktop-tokens"),
     ("DELETE", "/api/me/desktop-tokens/{token_id}", "/api/me/desktop-tokens/test-id"),

@@ -45,6 +45,9 @@ class User(BaseModel):
     display_name: str | None = None
     is_admin: bool = False
     token_scope: str | None = None
+    #: The desktop token that authenticated this request, when one did.
+    #: The command queue records it as the claimer (#1100).
+    token_id: str | None = None
 
 
 class AuthBackend(Protocol):

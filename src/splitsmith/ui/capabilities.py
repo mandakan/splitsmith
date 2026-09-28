@@ -118,6 +118,10 @@ _REVIEW_ROUTES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # to mint a non-convergent id on a mirror at that save boundary; this
     # entry is what makes the path reachable at all.
     ("PUT", re.compile(r"\Ashooters/[^/]+/stages/\d+/audit\Z")),
+    # The desktop command queue (#1100): a phone asks the desktop to run
+    # something and may cancel it. A request is not an edit of the mirror;
+    # its effect arrives through sync like every other review action.
+    ("POST", re.compile(r"\Amatch/desktop-commands(?:/[A-Za-z0-9]+/cancel)?\Z")),
 )
 
 

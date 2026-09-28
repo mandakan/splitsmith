@@ -106,6 +106,7 @@ if TYPE_CHECKING:
         ProjectStateStore,
     )
     from ..db.comments import CommentStore
+    from ..db.desktop_commands import DesktopCommandStore
     from ..db.desktop_tokens import DesktopTokenRecord, DesktopTokenStore
     from ..db.device_auth import DeviceAuthStore
     from ..db.share_tokens import ResolvedShare, ShareTokenStore
@@ -1679,6 +1680,10 @@ class TenantContext:
     # local mode, where ``youtube_api`` reads the file under the user
     # config dir instead.
     youtube: PostgresYouTubeConnectionStore | None = None
+    # The desktop command queue (#1100): requests the phone makes for the
+    # user's desktop to run. ``None`` in local mode; under the
+    # ``tenant_isolation`` RLS policy, so the tenant factory is load-bearing.
+    desktop_commands: DesktopCommandStore | None = None
 
 
 # Per-request / per-job tenant resolved by the hosted-mode auth gate
@@ -1995,6 +2000,12 @@ class AppState:
         # hosted-only feature. Returns None when no tenant is pinned.
         tenant = current_tenant.get()
         return tenant.desktop_tokens if tenant is not None else None
+
+    @property
+    def desktop_commands(self) -> DesktopCommandStore | None:
+        # Hosted-only, like desktop_tokens. None when no tenant is pinned.
+        tenant = current_tenant.get()
+        return tenant.desktop_commands if tenant is not None else None
 
     @property
     def comments(self) -> CommentStore | None:
@@ -5311,6 +5322,7 @@ class DeletionSummaryModel(BaseModel):
     match_row_removed: bool
     state_docs_removed: int
     comments_removed: int
+    desktop_commands_removed: int = 0
     storage_objects_deleted: int
     raw_uploads_deleted: list[str]
     raw_uploads_skipped_shared: list[str]
@@ -5583,6 +5595,22 @@ class DeviceStatusResponse(BaseModel):
     status: str
     account: HostedAccountInfo | None = None
     device_name: str | None = None
+
+
+class DesktopCommandRequest(BaseModel):
+    """Body for ``POST /api/match/desktop-commands`` (#1100)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: str
+    slug: str | None = None
+    stage_number: int | None = None
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+#: A desktop counts as around when it touched hosted this recently
+#: (spec 2026-09-28): auto-sync polls every 60 s, 300 s when idle.
+DESKTOP_AROUND_SECONDS = 300
 
 
 class DeviceUnlinkResponse(BaseModel):
@@ -6629,6 +6657,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
         tenant_session_factory,
     )
     from ..db.comments import CommentStore
+    from ..db.desktop_commands import DesktopCommandStore
     from ..db.desktop_tokens import DesktopTokenAuth, DesktopTokenStore
     from ..db.device_auth import DeviceAuthStore
     from ..db.share_tokens import ShareTokenStore
@@ -6796,6 +6825,7 @@ def _apply_hosted_mode_wiring(state: AppState, *, worker: bool = False) -> None:
             profile=PostgresProfileStore(tenant_factory, user_id=user_id),
             export_presets=PostgresExportPresetStore(tenant_factory, user_id=user_id),
             youtube=PostgresYouTubeConnectionStore(tenant_factory, user_id=user_id),
+            desktop_commands=DesktopCommandStore(tenant_factory, user_id=user_id),
         )
 
     state._build_tenant = _build_tenant
@@ -15749,6 +15779,126 @@ def create_app(
         async with state.device_flow_lock:
             state.device_flow = None
         return DeviceUnlinkResponse(cleared=True, hosted_revoked=revoked)
+
+    # ----------------------------------------------------------------------
+    # Desktop command queue, phone side (#1100, spec 2026-09-28). Hosted
+    # only. Requests are for mirrors: a hosted-native match has hosted
+    # compute. The desktop side lives in sync_api.py under /api/sync.
+    # ----------------------------------------------------------------------
+
+    async def _desktop_presence() -> dict[str, Any]:
+        """Newest contact from any of the user's live desktop tokens.
+        ``around`` means seen within DESKTOP_AROUND_SECONDS."""
+        store = state.desktop_tokens
+        records = await store.list() if store is not None else []
+        seen = [r.last_used_at for r in records if r.revoked_at is None and r.last_used_at is not None]
+        live = any(r.revoked_at is None for r in records)
+        last = max(seen) if seen else None
+        if last is not None and last.tzinfo is None:
+            last = last.replace(tzinfo=UTC)
+        around = last is not None and (datetime.now(UTC) - last).total_seconds() <= DESKTOP_AROUND_SECONDS
+        return {
+            "linked": live,
+            "last_seen_at": last.isoformat() if last is not None else None,
+            "around": around,
+        }
+
+    def _command_store() -> Any:
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        store = state.desktop_commands
+        if store is None:
+            raise HTTPException(status_code=500, detail="desktop command store unavailable")
+        return store
+
+    def _command_match_id() -> str:
+        match_id = current_match_id.get()
+        if match_id is None:
+            raise HTTPException(status_code=404, detail="not found")
+        return match_id
+
+    @app.get("/api/me/desktop-presence")
+    async def get_desktop_presence(user: User = Depends(get_current_user)) -> JSONResponse:
+        """Whether a linked desktop is around to pick up a request."""
+        if not _hosted_mode_active():
+            raise HTTPException(status_code=404, detail="not found")
+        return JSONResponse(await _desktop_presence())
+
+    @app.post("/api/match/desktop-commands")
+    async def request_desktop_command(req: DesktopCommandRequest) -> JSONResponse:
+        """Ask the desktop to run something for this match (#1100).
+
+        201 with the new command, 200 with the active one when the same
+        request is already waiting or running. 409 ``not_a_mirror`` for a
+        hosted-native match. For ``shot_detect`` the stage is checked the
+        way the local route checks it, so the phone hears "no beep yet"
+        now rather than from the desktop later, and the stage audit's
+        revision is recorded: the desktop refuses a reset against a stage
+        that changed after this request.
+        """
+        from ..db.desktop_commands import COMMAND_KINDS
+
+        store = _command_store()
+        match_id = _command_match_id()
+        row = await state.matches_store.get(match_id) if state.matches_store is not None else None
+        if row is None:
+            raise HTTPException(status_code=404, detail="not found")
+        if row.origin != "desktop":
+            raise HTTPException(status_code=409, detail="not_a_mirror")
+        if req.kind not in COMMAND_KINDS:
+            raise HTTPException(status_code=422, detail=f"unknown command kind {req.kind!r}")
+        expected_revision: str | None = None
+        args: dict[str, Any] = dict(req.args)
+        if req.kind == "shot_detect":
+            if req.slug is None or req.stage_number is None:
+                raise HTTPException(status_code=422, detail="shot_detect needs slug and stage_number")
+            project = state.shooter_project(req.slug)
+            try:
+                stage = project.stage(req.stage_number)
+            except KeyError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+            primary = stage.primary()
+            if primary is None:
+                raise HTTPException(status_code=400, detail=f"stage {req.stage_number} has no primary video")
+            if primary.beep_time is None:
+                raise HTTPException(
+                    status_code=400, detail=f"stage {req.stage_number} primary has no beep_time yet"
+                )
+            if stage.time_seconds <= 0:
+                raise HTTPException(status_code=400, detail=f"stage {req.stage_number} has no stage time yet")
+            stored, _ = state.load_audit(req.slug, req.stage_number)
+            expected_revision = audit_revision(stored)
+            args = {"reset": bool(args.get("reset", True))}
+        command, created = await store.request(
+            match_id=match_id,
+            kind=req.kind,
+            slug=req.slug,
+            stage_number=req.stage_number,
+            args=args,
+            expected_revision=expected_revision,
+        )
+        return JSONResponse(command.model_dump(mode="json"), status_code=201 if created else 200)
+
+    @app.get("/api/match/desktop-commands")
+    async def list_desktop_commands() -> JSONResponse:
+        """This match's recent requests plus the desktop presence, so the
+        phone's status poll is one request."""
+        store = _command_store()
+        commands = await store.list_for_match(_command_match_id())
+        return JSONResponse(
+            {
+                "commands": [c.model_dump(mode="json") for c in commands],
+                "presence": await _desktop_presence(),
+            }
+        )
+
+    @app.post("/api/match/desktop-commands/{command_id}/cancel")
+    async def cancel_desktop_command(command_id: str) -> JSONResponse:
+        store = _command_store()
+        command = await store.cancel(command_id, match_id=_command_match_id())
+        if command is None:
+            raise HTTPException(status_code=404, detail="not found")
+        return JSONResponse(command.model_dump(mode="json"))
 
     # ----------------------------------------------------------------------
     # Desktop-token management routes (desktop-to-hosted sync MVP, #631)
