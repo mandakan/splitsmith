@@ -4,7 +4,7 @@ Date: 2026-09-27
 Status: v1 implemented (auto-sync + reconciler, #1068); v1.1 web-only media implemented (#1079,
 spec 2026-09-27-web-only-mirror-media-design.md); review follow-ups #1067-#1078 and #1088 merged
 (released in 0.43.1); v2 command queue pending
-Follow-up (v2, separate spec): the hosted-to-desktop command queue, tracked in #1100.
+Follow-up (v2): the hosted-to-desktop command queue, spec 2026-09-28-desktop-command-queue-design.md, tracked in #1100.
 
 ## Goal
 
