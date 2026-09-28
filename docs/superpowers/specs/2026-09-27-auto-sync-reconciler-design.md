@@ -1,8 +1,10 @@
 # Auto-sync and the desktop reconciler
 
 Date: 2026-09-27
-Status: v1 implemented (auto-sync + reconciler); v1.1 web-only media and v2 command queue pending
-Follow-up (v2, separate spec): the hosted-to-desktop command queue.
+Status: v1 implemented (auto-sync + reconciler, #1068); v1.1 web-only media implemented (#1079,
+spec 2026-09-27-web-only-mirror-media-design.md); review follow-ups #1067-#1078 and #1088 merged
+(released in 0.43.1); v2 command queue pending
+Follow-up (v2, separate spec): the hosted-to-desktop command queue, tracked in #1100.
 
 ## Goal
 

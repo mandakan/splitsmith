@@ -325,6 +325,33 @@ picks the newest ``v*.*.*`` release that has a ``.dmg`` attached (GitHub's
 publishes before the DMG exists). Moving the download behind a purchase
 changes that function only. No auto-update.
 
+## Releasing
+
+release-please keeps a ``chore(main): release X.Y.Z`` PR open. Its CI and
+desktop runs end ``action_required`` or ``failure`` with **zero jobs**
+(GitHub will not run workflows the actions bot triggers); that is not a
+failure. Merge it when main's CI passed on the commit it releases and the
+PR touches only the manifest, ``CHANGELOG.md``, ``pyproject.toml``,
+``src/splitsmith/__init__.py`` and ``uv.lock``. The ``Release`` workflow
+then tags, publishes to PyPI, pushes both GHCR images and deploys
+production on Railway. The DMG is a separate local step,
+``desktop/release.sh`` (signing never leaves the Mac; notarization can
+take close to an hour), and the update feed announces a release only once
+the DMG is attached.
+
+There are no required status checks on ``main``, so ``gh pr merge
+--auto`` merges at once. "Merge on green" means ``gh pr checks <n>
+--watch`` first, then merge.
+
+The marketing site and the feed function deploy through
+``.github/workflows/deploy-marketing.yml`` on any push touching ``site/``,
+``functions/`` or ``wrangler.toml``; the feed reads GitHub releases per
+request, so a release needs no site deploy. The ``CLOUDFLARE_API_TOKEN``
+secret must be an **account**-scoped token with Pages Write (a zone-scoped
+one cannot deploy Pages). It went invalid in August 2026 and the workflow
+failed silently for six weeks: a red run of that workflow means the site
+is stale.
+
 ## Multi-shooter comparison (`compare/` package)
 
 ``splitsmith compare export <manifest>`` reads N existing single-shooter
@@ -498,10 +525,42 @@ Pushes are web-only unless the match's ``full_media`` flag
 ``build_push_plan(full_media=...)`` skips a ``_trimmed.mp4`` whose
 ``_web.mp4`` exists (a clip without a rendition keeps its trim), and the
 push's gc deletes a remote full trim only when its rendition key is in
-``sync_state.items``. The hosted delete route accepts beep_review keys and
-``*_trimmed.mp4`` only; the rendition and the params sidecar are never
-deletable through it. The end-to-end check is
+``sync_state.items``. The hosted delete route accepts beep_review keys,
+``*_trimmed.mp4``, and a ``*_web.mp4`` only while its ``_trimmed.mp4`` is
+in storage (#1077: the gc removes a rendition whose local file a re-trim
+swept once hosted has the current trim, so a stale window is never
+preferred); the params sidecar is never deletable. The end-to-end check is
 ``tests/test_sync_integration.py::test_phone_beep_confirm_reaches_the_desktop_reconciler``.
+
+Rules added by the #1067-#1078 follow-ups (Sep 2026), each pinned by tests:
+
+- **Failure parks, it does not retry on a timer** (#1070). A failed sync
+  parks the match in ``AutoSyncCore`` until a local write, a hosted
+  fingerprint that moved since the failure, a poll recovering from an
+  outage, a successful manual sync or a restart. The backoff floors the
+  retry after a release. ``status_for`` reports ``waiting_for_change``.
+- **A match deleted on hosted stays deleted** (#1088). ``run_sync`` checks
+  the manifest *before* ``ensure_match`` (which re-adopts a mirror): pushed
+  docs recorded and none on hosted means deleted, so it records
+  ``hosted_deleted_at`` in ``auto_sync.json``, raises ``SyncMirrorGone``
+  and auto-sync stops watching. ``POST /api/match/sync/republish`` is the
+  only way back (resets ``sync_state.json`` and ``sync_base/``). A 409 on
+  one doc missing from the manifest fails naming the doc, never three
+  "could not converge" retries.
+- **One auto-sync per machine, one sync per match** (#1076). ``flock`` on
+  ``~/.splitsmith/auto_sync.lock`` (the service owner; the other process
+  shows "another splitsmith window ... is syncing" and takes over when the
+  owner exits) and on ``<match>/.sync.lock`` around every sync job body.
+- **Every local audit read-modify-write runs under ``_audit_rmw()``**
+  (#1075): the lock locally, a no-op hosted. A new audit writer in
+  ``server.py`` wraps its load..save in it, or the pull can lose its edit;
+  ``tests/test_audit_lock_wiring.py`` has the probe lock to pin it (#1073).
+- **Fingerprints carry a digest** (#1072): ``versions_digest`` over
+  identity -> version, computed the same way from ``sync_state`` and from a
+  manifest. A hosted without the digest is compared on the pair, and one
+  without ``/fingerprints`` at all falls back to per-match manifests (#1071).
+- **The reconcile failure memo keys on every input** (#1069): beep, stage
+  time, and for a trim the buffers, source path and source presence.
 
 ## UI: the visual budget (Sep 2026)
 
@@ -611,12 +670,19 @@ strip, never as a row of its own.
 **Verifying a screen locally without real footage:**
 ``uv run python scripts/seed_demo_match.py ~/.claude-tmp/demo-match`` (two
 shooters and the match stage table, so Compare renders too)
-then ``uv run splitsmith ui --project ~/.claude-tmp/demo-match
+then ``SPLITSMITH_AUTO_SYNC=0 uv run splitsmith ui --project ~/.claude-tmp/demo-match
 --skip-system-check --no-browser --port 5174`` (wait for
 ``/api/health``; the match id is ``match_id`` in ``match.json``), then
 screenshot with Playwright. Add ``--media`` to the seeder (ffmpeg on
 PATH) for a real clip with a beep and shots, so Audit's waveform, the
-beep picker and the trim -> detect chain run locally. Show the rendered page before calling a visual change
+beep picker and the trim -> detect chain run locally. Never start a
+verification server on the real ``~/.splitsmith`` with auto-sync on: it
+reads the real hosted token and syncs every previously synced match to
+production, concurrently with the user's desktop app (it happened on
+2026-09-27). To exercise sync UI, point ``SPLITSMITH_HOME`` at a scratch
+dir whose ``GlobalPrefs`` name a dead ``hosted_base_url``. If the server
+comes up unbound (``/api/health`` shows ``"bound": false``), open the
+match from Matches -> Open by path. Show the rendered page before calling a visual change
 done.
 
 ## Things Claude Code should not do
