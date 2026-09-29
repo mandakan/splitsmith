@@ -1,6 +1,8 @@
 /**
  * One desktop request's status line (#1100): what the desktop is doing
- * with it, in the SyncCard's line style, with Cancel while it can be.
+ * with it, in the SyncCard's line style, with Cancel while it can be. On a
+ * narrow column the link and Cancel wrap under the line rather than
+ * squeezing it, and a long link truncates.
  */
 import { AlertTriangle, CheckCircle2, Clock, Loader2 } from "lucide-react";
 
@@ -26,7 +28,7 @@ export function DesktopCommandLine({
   const Icon =
     line.tone === "ok" ? CheckCircle2 : line.tone === "error" ? AlertTriangle : line.tone === "live" ? Loader2 : Clock;
   return (
-    <div className={cn("flex items-center gap-2 text-sm", className)} role="status" aria-live="polite">
+    <div className={cn("flex flex-wrap items-center gap-x-2 gap-y-1 text-sm", className)} role="status" aria-live="polite">
       <Icon
         className={cn(
           "size-3.5 shrink-0",
@@ -37,11 +39,11 @@ export function DesktopCommandLine({
         )}
         aria-hidden="true"
       />
-      <span className={cn("min-w-0 flex-1", line.tone === "error" ? "text-led-text" : "text-muted")}>
+      <span className={cn("min-w-0 flex-1 basis-48", line.tone === "error" ? "text-led-text" : "text-muted")}>
         {line.text}
       </span>
       {line.link ? (
-        <a className="text-sm text-ink underline" href={line.link.href} target="_blank" rel="noreferrer">
+        <a className="min-w-0 max-w-full truncate text-sm text-ink underline" href={line.link.href} target="_blank" rel="noreferrer">
           {line.link.label}
         </a>
       ) : null}
