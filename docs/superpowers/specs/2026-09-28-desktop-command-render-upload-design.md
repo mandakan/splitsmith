@@ -229,8 +229,12 @@ watch it fail.
     the record.
   - A failed upload fails the job with both halves named.
   - A cancel between the two steps uploads nothing.
-- **Split of `_run_match_export`:** the existing match-export tests stay
-  green, including the chained-upload ones.
+- **The render wrapper:** `_run_match_export` itself is unchanged; the
+  `render_upload` body calls it through a handle wrapper that captures its
+  result. The existing match-export tests stay green, including the
+  chained-upload ones, and one in-process test runs a whole
+  `render_upload` job (encoder and YouTube client faked) from the
+  desktop's command start to its result.
 - **SPA:**
   - The desktop-mode request body carries `youtube_upload: true` and
     `output_format: "mp4"`, typed `Required<...>` as in
@@ -252,7 +256,8 @@ watch it fail.
 1. **Hosted:** the kind, request validation, the same-token re-claim
    rule. Inert until a desktop runs it; an older desktop fails it with
    the update message.
-2. **Desktop:** the `_run_match_export` split, the `render_upload` job,
+2. **Desktop:** the `render_upload` job (the match export run unchanged
+   through a wrapper that captures its result),
    `prior_result`, `command_id` on the upload record, the runner's
    per-kind completion.
 3. **Phone:** the Export page's desktop mode and the request rows.

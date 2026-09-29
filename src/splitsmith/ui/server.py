@@ -4620,6 +4620,32 @@ def register_job_bodies(state: AppState) -> None:
     state.jobs.bodies.register("shot_detect", _run_shot_detect)
     state.jobs.bodies.register("export", _run_export_for_stage)
     state.jobs.bodies.register("match_export", _run_match_export)
+
+    def _run_render_upload(handle: JobHandle, slug: str, req: MatchExportRequest, command_id: str) -> None:
+        """A phone's render-and-upload request (#1100): the match export
+        without its chained upload job, then the upload on this job."""
+        from .render_upload import run_render_upload
+        from .youtube_api import run_youtube_upload
+
+        run_render_upload(
+            handle,
+            render=lambda h: _run_match_export(h, slug, req.model_copy(update={"youtube_upload": False})),
+            upload=lambda h, filename: run_youtube_upload(
+                h,
+                state=state,
+                slug=slug,
+                filename=filename,
+                privacy=req.youtube_privacy,
+                again=True,
+                playlist=req.youtube_playlist,
+                playlist_id=req.youtube_playlist_id,
+                publish_at=req.youtube_publish_at.isoformat() if req.youtube_publish_at else None,
+                notify_subscribers=req.youtube_notify_subscribers,
+                command_id=command_id,
+            ),
+        )
+
+    state.jobs.bodies.register("render_upload", _run_render_upload)
     state.jobs.bodies.register("generate_proxy", _run_generate_proxy)
     state.jobs.bodies.register("compare-grid", functools.partial(_run_compare_grid, state=state))
     from .youtube_api import run_youtube_upload
@@ -7291,14 +7317,52 @@ def create_app(
                 current_match_root.reset(root_token)
                 current_match_id.reset(id_token)
 
+        async def _start_render_upload(
+            match_id: str, match_root: Path, command: dict
+        ) -> tuple[str | None, str | None]:
+            """Start a phone's render-and-upload request (#1100): the local
+            match-export route's pre-flight, reported to the phone instead of
+            raised, then one ``render_upload`` job."""
+            from .exports_api import check_match_export, http_detail_text
+
+            slug = command["slug"]
+            try:
+                req = MatchExportRequest.model_validate((command.get("args") or {}).get("request"))
+            except ValidationError:
+                return None, "the render settings are not valid on this desktop; update the desktop app"
+            id_token = current_match_id.set(match_id)
+            root_token = current_match_root.set(match_root)
+            try:
+                try:
+                    check_match_export(state, slug, req)
+                except HTTPException as exc:
+                    return None, http_detail_text(exc)
+                for busy in ("match_export", "render_upload"):
+                    if await state.jobs.find_active(kind=busy, shooter_slug=slug) is not None:
+                        return None, "a match export is already running for this shooter on the desktop"
+                job = await state.jobs.submit(
+                    kind="render_upload",
+                    shooter_slug=slug,
+                    args={"slug": slug, "req": req, "command_id": command["id"]},
+                )
+                return job.id, None
+            except Exception as exc:  # noqa: BLE001 - reported to the phone, not raised
+                return None, f"could not start on the desktop: {exc}"
+            finally:
+                current_match_root.reset(root_token)
+                current_match_id.reset(id_token)
+
         async def _start_desktop_command(
             match_id: str, match_root: Path, command: dict
         ) -> tuple[str | None, str | None]:
             """Run a command the phone queued for this desktop (#1100). The
             runner has already applied the revision guard; this starts the
             local job the way the local route would."""
-            if command.get("kind") != "shot_detect":
-                return None, f"this desktop cannot run {command.get('kind')!r} requests yet"
+            kind = command.get("kind")
+            if kind == "render_upload":
+                return await _start_render_upload(match_id, match_root, command)
+            if kind != "shot_detect":
+                return None, f"this desktop cannot run {kind!r} requests yet"
             slug, stage_number = command["slug"], command["stage_number"]
             reset = bool((command.get("args") or {}).get("reset", True))
             id_token = current_match_id.set(match_id)

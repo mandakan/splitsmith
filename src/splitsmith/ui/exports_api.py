@@ -26,7 +26,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse
@@ -454,21 +454,12 @@ async def export_stage(
     return JSONResponse(job.model_dump(mode="json"))
 
 
-@router.post("/api/shooters/{slug}/export/match")
-async def export_match(slug: str, req: MatchExportRequest, request: Request) -> JSONResponse:
-    """Stitch N stages into one FCPXML (issue #171, #172).
-
-    Job-queued: per-stage trims (and optional overlays) can take
-    minutes for a real match, so the response is a Job snapshot the
-    SPA polls via ``/api/me/jobs/{id}``. The worker re-runs any
-    missing per-stage exports before invoking the match composer,
-    so the user doesn't have to click Generate on each stage first.
-
-    Validation up-front (404 on unbound project, 400 on empty
-    selection / unknown stage / missing primary or beep / padding out
-    of range) so the SPA shows a clear error before queueing.
-    """
-    state = request.app.state.splitsmith_state
+def check_match_export(state: Any, slug: str, req: MatchExportRequest) -> None:
+    """The match export's pre-flight: stages chosen, pads within the
+    project's trim buffers, each stage with a primary, a beep and a
+    reachable source. Raises ``HTTPException`` with the route's status and
+    message. Shared with the desktop's ``render_upload`` start, which
+    reports the message to the phone instead of raising it."""
     project = state.shooter_project(slug)
     if not req.stage_numbers:
         raise HTTPException(status_code=400, detail="stage_numbers cannot be empty")
@@ -533,6 +524,33 @@ async def export_match(slug: str, req: MatchExportRequest, request: Request) -> 
                 stage_number,
                 state.shooter_root(slug) / primary.path,
             )
+
+
+def http_detail_text(exc: HTTPException) -> str:
+    """An ``HTTPException``'s detail as one line: the string itself, or a
+    structured detail's ``message`` (``ensure_source_reachable``'s 424)."""
+    detail = exc.detail
+    if isinstance(detail, dict):
+        return str(detail.get("message") or detail.get("detail") or detail)
+    return str(detail)
+
+
+@router.post("/api/shooters/{slug}/export/match")
+async def export_match(slug: str, req: MatchExportRequest, request: Request) -> JSONResponse:
+    """Stitch N stages into one FCPXML (issue #171, #172).
+
+    Job-queued: per-stage trims (and optional overlays) can take
+    minutes for a real match, so the response is a Job snapshot the
+    SPA polls via ``/api/me/jobs/{id}``. The worker re-runs any
+    missing per-stage exports before invoking the match composer,
+    so the user doesn't have to click Generate on each stage first.
+
+    Validation up-front (404 on unbound project, 400 on empty
+    selection / unknown stage / missing primary or beep / padding out
+    of range) so the SPA shows a clear error before queueing.
+    """
+    state = request.app.state.splitsmith_state
+    check_match_export(state, slug, req)
 
     existing = await state.jobs.find_active(kind="match_export", shooter_slug=slug)
     if existing is not None:
