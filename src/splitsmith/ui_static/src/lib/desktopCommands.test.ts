@@ -91,3 +91,31 @@ describe("helpers", () => {
     expect(isActiveCommand(cmd({ status: "failed" }))).toBe(false);
   });
 });
+
+describe("render_upload", () => {
+  const ru = (over: Partial<DesktopCommand> = {}) =>
+    cmd({ kind: "render_upload", stage_number: null, args: { request: {} }, ...over });
+
+  it("is titled by shooter", () => {
+    expect(commandTitle(ru())).toBe("Render and upload (anna)");
+  });
+
+  it("links the video when it succeeded, naming the channel", () => {
+    const line = commandLine(
+      ru({
+        status: "succeeded",
+        finished_at: "2026-09-28T11:58:00Z",
+        result: { video_id: "v", url: "https://youtu.be/v", channel_title: "Anna Shoots" },
+      }),
+      around,
+      NOW,
+    );
+    expect(line.tone).toBe("ok");
+    expect(line.text).toBe("Uploaded to Anna Shoots 2 min ago.");
+    expect(line.link).toEqual({ href: "https://youtu.be/v", label: "youtu.be/v" });
+  });
+});
+
+it("still says re-detected for a re-detect", () => {
+  expect(commandLine(cmd({ status: "succeeded" }), around, NOW).text).toMatch(/^Re-detected on your desktop/);
+});

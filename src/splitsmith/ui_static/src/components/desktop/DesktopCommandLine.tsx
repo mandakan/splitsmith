@@ -40,6 +40,11 @@ export function DesktopCommandLine({
       <span className={cn("min-w-0 flex-1", line.tone === "error" ? "text-led-text" : "text-muted")}>
         {line.text}
       </span>
+      {line.link ? (
+        <a className="text-sm text-ink underline" href={line.link.href} target="_blank" rel="noreferrer">
+          {line.link.label}
+        </a>
+      ) : null}
       {line.cancellable && onCancel ? (
         <Button type="button" size="sm" variant="ghost" onClick={() => onCancel(command.id)}>
           Cancel

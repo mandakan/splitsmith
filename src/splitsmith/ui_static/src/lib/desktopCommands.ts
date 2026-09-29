@@ -13,6 +13,8 @@ export interface CommandLine {
   tone: CommandTone;
   /** A waiting or running request can still be cancelled. */
   cancellable: boolean;
+  /** The result to open, when the request produced one (a video). */
+  link?: { href: string; label: string };
 }
 
 export function isActiveCommand(c: DesktopCommand): boolean {
@@ -63,6 +65,17 @@ export function commandLine(
       };
     case "succeeded": {
       const when = c.finished_at ? ` ${formatRelative(new Date(c.finished_at), now)}` : "";
+      if (c.kind === "render_upload") {
+        const url = typeof c.result?.url === "string" ? c.result.url : null;
+        const channel =
+          typeof c.result?.channel_title === "string" && c.result.channel_title ? c.result.channel_title : "YouTube";
+        return {
+          text: `Uploaded to ${channel}${when}.`,
+          tone: "ok",
+          cancellable: false,
+          link: url ? { href: url, label: url.replace(/^https?:\/\//, "") } : undefined,
+        };
+      }
       return { text: `Re-detected on your desktop${when}.`, tone: "ok", cancellable: false };
     }
     case "failed":
@@ -74,6 +87,7 @@ export function commandLine(
 
 /** A request's name in a list: "Re-detect Stage 03 (anna)". */
 export function commandTitle(c: DesktopCommand): string {
+  if (c.kind === "render_upload") return c.slug ? `Render and upload (${c.slug})` : "Render and upload";
   const what = c.kind === "shot_detect" ? "Re-detect" : c.kind;
   if (c.stage_number == null) return what;
   const stage = `Stage ${String(c.stage_number).padStart(2, "0")}`;
