@@ -125,6 +125,13 @@ class CommandRunner:
             logger.info("desktop commands: claim for %s failed: %s", match_id, exc)
             return
         for command in commands:
+            with self._lock:
+                running_here = command["id"] in self._tracked
+            if running_here:
+                # This desktop already runs it (the lease lapsed while its
+                # heartbeats failed); the claim renewed the lease. Starting
+                # it again would fail as busy and cancel the running job.
+                continue
             done = await asyncio.to_thread(prior_result, root, command)
             if done is not None:
                 await self._complete(api, command["id"], "succeeded", result=done)
@@ -174,9 +181,12 @@ class CommandRunner:
                 continue
             if t.finished_at is None and job.status == JobStatus.SUCCEEDED:
                 if t.command.get("kind") not in SYNCED_RESULT_KINDS:
-                    # A failed call leaves it tracked; the next tick sees the
-                    # same succeeded job and tries again.
-                    await self._complete(api, t.command["id"], "succeeded", result=dict(job.result or {}))
+                    # Kept on the entry so a retried completion never reads
+                    # the job again: the registry may have evicted it by
+                    # then, and the video it uploaded must still be reported.
+                    t.outcome = ("succeeded", None)
+                    t.result = dict(job.result or {})
+                    await self._complete(api, t.command["id"], "succeeded", result=t.result)
                     continue
                 t.finished_at = job.finished_at.timestamp() if job.finished_at else self._clock()
                 t.result = {"job_id": job.id, "message": job.message}

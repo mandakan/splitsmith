@@ -379,3 +379,71 @@ def test_a_render_upload_completes_when_its_job_succeeds(tmp_path: Path, monkeyp
     assert synced_now == []
     assert api.completed == [("c9", "succeeded", None)]
     assert api.results["c9"] == {"video_id": "v2", "url": "https://youtu.be/v2", "channel_title": "C"}
+
+
+def test_a_reclaim_of_a_command_this_desktop_runs_leaves_the_job_alone(tmp_path: Path, monkeypatch) -> None:
+    """Heartbeats failed long enough for the lease to lapse, then a claim
+    tick handed the same command back to this token. The job running it
+    must not be treated as a second request: failing the command as busy
+    lets the next heartbeat's 409 cancel the job, and a retry would
+    upload a second copy."""
+    root = _match(tmp_path, None)
+    monkeypatch.setattr("splitsmith.sync.commands.oauth.load_connection", lambda: object())
+    jobs, started = _Jobs(), []
+
+    async def start(match_id: str, root: Path, command: dict):
+        started.append(command["id"])
+        if "j1" in jobs.jobs:
+            return None, "a render is already running for this shooter"
+        jobs.jobs["j1"] = _job("j1", JobStatus.RUNNING, message="rendering")
+        return "j1", None
+
+    runner = CommandRunner(jobs=jobs, start=start, request_sync_now=lambda _m: None, clock=lambda: 0.0)
+    api = _Api([_upload_command()])
+    runner.claim_after_sync("m1")
+    asyncio.run(runner.tick(api, {"m1": root}))
+    assert started == ["c9"]
+
+    api.to_claim = [_upload_command()]
+    runner.claim_after_sync("m1")
+    asyncio.run(runner.tick(api, {"m1": root}))
+    assert started == ["c9"]
+    assert api.completed == []
+    assert jobs.cancelled == []
+    assert runner.tracked_ids() == ["c9"]
+
+
+def test_a_render_upload_completion_survives_the_job_leaving_the_registry(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Hosted did not take the completion, and by the next tick the
+    registry had evicted the succeeded job. The retry must still report
+    the uploaded video, not "the desktop job disappeared"."""
+    root = _match(tmp_path, None)
+    monkeypatch.setattr("splitsmith.sync.commands.oauth.load_connection", lambda: object())
+    jobs, started, synced_now = _Jobs(), [], []
+    runner = _runner(jobs, started, synced_now)
+    api = _Api([_upload_command()])
+    runner.claim_after_sync("m1")
+    asyncio.run(runner.tick(api, {"m1": root}))
+    video = {"video_id": "v2", "url": "https://youtu.be/v2", "channel_title": "C"}
+    jobs.jobs["j1"] = _job("j1", JobStatus.SUCCEEDED, message="Uploaded", result=dict(video))
+
+    real_complete = api.complete
+    calls = {"n": 0}
+
+    def flaky_complete(command_id, *, status, error=None, result=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("hosted unreachable")
+        real_complete(command_id, status=status, error=error, result=result)
+
+    api.complete = flaky_complete
+    asyncio.run(runner.tick(api, {"m1": root}))
+    assert api.completed == [] and runner.tracked_ids() == ["c9"]
+
+    del jobs.jobs["j1"]
+    asyncio.run(runner.tick(api, {"m1": root}))
+    assert api.completed == [("c9", "succeeded", None)]
+    assert api.results["c9"] == video
+    assert runner.tracked_ids() == []
