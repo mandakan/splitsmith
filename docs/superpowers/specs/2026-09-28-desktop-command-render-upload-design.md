@@ -198,6 +198,7 @@ the primitives.
 | Upload finished, completion lost, desktop quits | on restart the re-claim hits `prior_result` and completes with the existing video; no second upload |
 | Cancel while waiting | `cancelled` at once (existing) |
 | Cancel while rendering or uploading | `cancel_requested` reaches the job at the next heartbeat; the export stops between stages, the upload between chunks |
+| Cancel after the holder's lease lapsed | `cancelled` at once; a holder that comes back gets no heartbeat and stops, and its completion leaves the row cancelled |
 | Cancel after the last chunk | the job already succeeded; the command completes `succeeded` with the video |
 | Older desktop | claims and fails it with "update the desktop app" |
 
@@ -269,5 +270,6 @@ watch it fail.
   or with presence is a possible follow-up.
 - **A desktop that claimed and never returns holds the command.** It
   waits with no expiry (the queue spec's decision) until the user cancels
-  it. That is the price of never uploading twice from two machines. The
+  it; a cancel on a lapsed lease ends it at once, so the next request for
+  the shooter is a new command. That is the price of never uploading twice from two machines. The
   row's heartbeat time shows when it was last worked on.

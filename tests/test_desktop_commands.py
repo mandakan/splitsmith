@@ -375,3 +375,49 @@ def test_a_waiting_render_upload_is_claimable_by_any_desktop(
     store = _store(client)
     assert asyncio.run(store.pending_counts(token_id="tok-b")) == {MATCH: 1}
     assert [c.id for c in asyncio.run(store.claim([MATCH], token_id="tok-b"))] == [command_id]
+
+
+def test_cancelling_a_lapsed_render_upload_ends_it_at_once(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """A pinned command whose desktop never came back must not be stuck:
+    only its holder may re-claim it and only its heartbeat would act on
+    ``cancel_requested``, so without this it dedupes every later request
+    for the shooter forever."""
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    command_id = _render_upload(client).json()["id"]
+    store = _store(client)
+    now = datetime.now(UTC)
+    later = now + timedelta(minutes=11)
+    asyncio.run(store.claim([MATCH], token_id="tok-a", now=now))
+
+    cancelled = asyncio.run(store.cancel(command_id, match_id=MATCH, now=later))
+    assert cancelled is not None
+    assert cancelled.status == "cancelled"
+    # The holder coming back later is told to stop, and its completion
+    # cannot reopen the row.
+    assert asyncio.run(store.heartbeat(command_id, message=None, now=later)) is None
+    done = asyncio.run(store.complete(command_id, status="succeeded", now=later))
+    assert done is not None and done.status == "cancelled"
+
+    fresh = _render_upload(client).json()
+    assert fresh["id"] != command_id
+    assert fresh["status"] == "pending"
+
+
+def test_cancelling_a_live_render_upload_only_asks(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    command_id = _render_upload(client).json()["id"]
+    store = _store(client)
+    now = datetime.now(UTC)
+    asyncio.run(store.claim([MATCH], token_id="tok-a", now=now))
+
+    asked = asyncio.run(store.cancel(command_id, match_id=MATCH, now=now + timedelta(minutes=9)))
+    assert asked is not None
+    assert (asked.status, asked.cancel_requested) == ("claimed", True)

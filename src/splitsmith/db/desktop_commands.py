@@ -179,10 +179,18 @@ class DesktopCommandStore:
             )
         return [_to_command(r) for r in rows]
 
-    async def cancel(self, command_id: str, *, match_id: str) -> DesktopCommand | None:
+    async def cancel(
+        self, command_id: str, *, match_id: str, now: datetime | None = None
+    ) -> DesktopCommand | None:
         """Pending -> cancelled at once; claimed -> ``cancel_requested``
-        (the desktop stops at its next heartbeat). Terminal: unchanged.
+        (the desktop stops at its next heartbeat). A claimed command whose
+        lease lapsed is cancelled at once too: its holder may never come
+        back, and a pinned kind would otherwise stay active (deduping every
+        later request) with no one left to act on the flag. A holder that
+        does come back gets None from its heartbeat and stops; its
+        completion leaves the terminal row alone. Terminal: unchanged.
         None when the command is not this user's, or not in ``match_id``."""
+        now = now or datetime.now(UTC)
         async with self._session_factory() as session:
             row = (
                 await session.execute(
@@ -197,9 +205,14 @@ class DesktopCommandStore:
                 return None
             if row.status == "pending":
                 row.status = "cancelled"
-                row.finished_at = datetime.now(UTC)
+                row.finished_at = now
             elif row.status == "claimed":
                 row.cancel_requested = True
+                lease = _aware(row.lease_expires_at)
+                if lease is None or lease < now:
+                    row.status = "cancelled"
+                    row.finished_at = now
+                    row.lease_expires_at = None
             await session.commit()
             await session.refresh(row)
             return _to_command(row)
