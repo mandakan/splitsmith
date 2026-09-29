@@ -75,7 +75,9 @@ whose lease expired. For `render_upload` an expired lease is re-claimable
 only when `claimed_by` equals the claiming token. A restart of the same
 desktop picks its own command back up after the 10 min lease. Another
 desktop leaves it alone, so the command waits until the first desktop
-returns or the user cancels it.
+returns or the user cancels it. The fingerprint count is per token too:
+`pending_commands` leaves out a pinned command another desktop holds, or
+that desktop would sync every poll and claim nothing.
 
 ### Desktop
 
@@ -112,11 +114,10 @@ That behaviour is already in `refuse_reason`; the phone shows the reason.
 
 The body runs in three steps:
 
-1. **Render.** `_run_match_export` splits into a body that returns the
-   `MatchExportResult` and the existing job, which calls it and keeps its
-   own chained `youtube_upload` submit. The `render_upload` body calls the
-   first half with `youtube_upload` off, so no separate upload job is
-   chained.
+1. **Render.** The `render_upload` body runs `_run_match_export` unchanged
+   through a handle wrapper that captures its `set_result` payload
+   (`fcpxml_path`) and scales its progress; the request it passes has
+   `youtube_upload` off, so no separate upload job is chained.
 2. **Check for a cancel.** `handle.check_cancel()`.
 3. **Upload.** Call `run_youtube_upload` in-process on the same handle,
    with:
@@ -173,13 +174,9 @@ becomes a "Render on desktop" mode:
 - The rail's preview already degrades to one muted line on hosted, so no
   change is needed there.
 - The history area lists this shooter's `render_upload` requests, from
-  the same `GET /api/match/desktop-commands`, in hairline rows:
-  - status as a neutral `Chip`: Waiting, Rendering, Uploaded, Failed,
-    Cancelled;
-  - the heartbeat message while running;
-  - on success, the link and the channel title;
-  - on failure, the reason;
-  - Cancel on waiting and running rows.
+  the same `GET /api/match/desktop-commands`, in hairline rows: the
+  shipped `DesktopCommandLine` (icon, line, Cancel), with the video link
+  on success.
 
 **Match menu.** "Desktop requests" already lists every command. A
 `render_upload` row reads "Render and upload, <shooter>", with the same

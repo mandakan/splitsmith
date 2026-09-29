@@ -268,3 +268,72 @@ def test_deleting_the_match_on_hosted_sweeps_its_commands(
     assert resp.status_code == 200, resp.text
     assert resp.json()["summary"]["desktop_commands_removed"] == 1
     assert asyncio.run(_store(client).pending_counts()) == {}
+
+
+def _render_upload(client: TestClient):
+    return client.post(
+        PHONE,
+        json={
+            "kind": "render_upload",
+            "slug": SLUG,
+            "args": {
+                "request": {
+                    "stage_numbers": [1],
+                    "output_format": "mp4",
+                    "youtube_sidecar": True,
+                    "youtube_upload": True,
+                }
+            },
+        },
+    )
+
+
+def test_a_lapsed_render_upload_goes_back_only_to_the_desktop_that_held_it(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """Re-running an upload on a second machine would publish it twice."""
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    command_id = _render_upload(client).json()["id"]
+    store = _store(client)
+    now = datetime.now(UTC)
+    later = now + timedelta(minutes=11)
+    assert [c.id for c in asyncio.run(store.claim([MATCH], token_id="tok-a", now=now))] == [command_id]
+
+    assert asyncio.run(store.claim([MATCH], token_id="tok-b", now=later)) == []
+    # Counted only for the desktop that may take it: another desktop that
+    # saw it would sync every poll and claim nothing, forever.
+    assert asyncio.run(store.pending_counts(token_id="tok-b", now=later)) == {}
+    assert asyncio.run(store.pending_counts(token_id="tok-a", now=later)) == {MATCH: 1}
+    again = asyncio.run(store.claim([MATCH], token_id="tok-a", now=later))
+    assert [c.id for c in again] == [command_id]
+
+
+def test_a_lapsed_shot_detect_is_still_claimable_by_any_desktop(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    """The pin is per kind: a re-detect is safe anywhere (its revision
+    guard refuses a doubled run)."""
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    command_id = _request(client).json()["id"]
+    store = _store(client)
+    now = datetime.now(UTC)
+    later = now + timedelta(minutes=11)
+    asyncio.run(store.claim([MATCH], token_id="tok-a", now=now))
+    assert asyncio.run(store.pending_counts(token_id="tok-b", now=later)) == {MATCH: 1}
+    assert [c.id for c in asyncio.run(store.claim([MATCH], token_id="tok-b", now=later))] == [command_id]
+
+
+def test_a_waiting_render_upload_is_claimable_by_any_desktop(
+    hosted_app: tuple[TestClient, _CapturingSender],
+) -> None:
+    client, sender = hosted_app
+    login(client, sender, EMAIL)
+    _mirror(client)
+    command_id = _render_upload(client).json()["id"]
+    store = _store(client)
+    assert asyncio.run(store.pending_counts(token_id="tok-b")) == {MATCH: 1}
+    assert [c.id for c in asyncio.run(store.claim([MATCH], token_id="tok-b"))] == [command_id]

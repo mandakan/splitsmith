@@ -30,11 +30,16 @@ from .models import DesktopCommandRow
 
 #: Command kinds a phone may request. A new kind is added here and in the
 #: desktop runner; the request route refuses anything else.
-COMMAND_KINDS = frozenset({"shot_detect"})
+COMMAND_KINDS = frozenset({"shot_detect", "render_upload"})
 
 ACTIVE_STATUSES = ("pending", "claimed")
 TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
 LEASE = timedelta(minutes=10)
+
+#: Kinds whose lapsed lease goes back only to the desktop that held it.
+#: Re-running one elsewhere would repeat a side effect hosted cannot see
+#: (a YouTube upload); the holder checks its own record before re-running.
+PINNED_KINDS = frozenset({"render_upload"})
 
 CommandStatus = Literal["pending", "claimed", "succeeded", "failed", "cancelled"]
 
@@ -210,21 +215,29 @@ class DesktopCommandStore:
 
     # -- desktop side ----------------------------------------------------
 
-    def _claimable(self, now: datetime) -> Any:
-        return or_(
-            DesktopCommandRow.status == "pending",
-            and_(DesktopCommandRow.status == "claimed", DesktopCommandRow.lease_expires_at < now),
+    def _claimable(self, now: datetime, token_id: str | None) -> Any:
+        lapsed = and_(DesktopCommandRow.status == "claimed", DesktopCommandRow.lease_expires_at < now)
+        # ``claimed_by == NULL`` is never true in SQL, so a caller without a
+        # token id never re-claims a pinned kind.
+        holder = or_(
+            DesktopCommandRow.kind.not_in(PINNED_KINDS),
+            DesktopCommandRow.claimed_by == token_id,
         )
+        return or_(DesktopCommandRow.status == "pending", and_(lapsed, holder))
 
-    async def pending_counts(self, *, now: datetime | None = None) -> dict[str, int]:
-        """``match_id -> commands a desktop could claim now``, for the
-        fingerprint poll. Matches with none are absent."""
+    async def pending_counts(
+        self, *, token_id: str | None = None, now: datetime | None = None
+    ) -> dict[str, int]:
+        """``match_id -> commands this desktop could claim now``, for the
+        fingerprint poll. Per token: a pinned command another desktop holds
+        must not wake this one (it would sync every poll and claim
+        nothing). Matches with none are absent."""
         now = now or datetime.now(UTC)
         async with self._session_factory() as session:
             rows = (
                 await session.execute(
                     select(DesktopCommandRow.match_id, func.count(DesktopCommandRow.id))
-                    .where(self._mine(), self._claimable(now))
+                    .where(self._mine(), self._claimable(now, token_id))
                     .group_by(DesktopCommandRow.match_id)
                 )
             ).all()
@@ -253,7 +266,7 @@ class DesktopCommandStore:
                         .where(
                             self._mine(),
                             DesktopCommandRow.match_id.in_(list(match_ids)),
-                            self._claimable(now),
+                            self._claimable(now, token_id),
                         )
                         .order_by(DesktopCommandRow.requested_at, DesktopCommandRow.id)
                         .limit(limit)
@@ -265,7 +278,7 @@ class DesktopCommandStore:
             for command_id in candidates:
                 result = await session.execute(
                     update(DesktopCommandRow)
-                    .where(self._mine(), DesktopCommandRow.id == command_id, self._claimable(now))
+                    .where(self._mine(), DesktopCommandRow.id == command_id, self._claimable(now, token_id))
                     .values(
                         status="claimed",
                         claimed_by=token_id,

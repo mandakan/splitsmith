@@ -485,7 +485,7 @@ async def get_fingerprints(
     per_match: dict[str, dict[str, int]] = {}
     for match_id, kind, slug, stage_number, version in rows:
         per_match.setdefault(match_id, {})[doc_identity_key(kind, slug, stage_number)] = version
-    pending = await _command_store(request).pending_counts()
+    pending = await _command_store(request).pending_counts(token_id=getattr(user, "token_id", None))
     return SyncFingerprintsResponse(
         matches=[
             SyncFingerprint(
