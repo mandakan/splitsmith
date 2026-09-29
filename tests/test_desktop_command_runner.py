@@ -9,9 +9,16 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from splitsmith import match_model
+from splitsmith import match_model, youtube_sidecar
 from splitsmith.audit_revision import audit_revision
-from splitsmith.sync.commands import STAGE_CHANGED, local_stage_revision, refuse_reason
+from splitsmith.match_project import MatchProject
+from splitsmith.sync.commands import (
+    STAGE_CHANGED,
+    YOUTUBE_NOT_CONNECTED,
+    local_stage_revision,
+    prior_result,
+    refuse_reason,
+)
 from splitsmith.ui.command_runner import CommandRunner
 from splitsmith.ui.jobs import Job, JobStatus
 
@@ -23,6 +30,7 @@ def _match(tmp_path: Path, audit: dict | None) -> Path:
     match = match_model.Match.init(root, name="M")
     match.save(root)
     match.add_shooter(root, match_model.Shooter(slug=SLUG, name="Me"))
+    MatchProject.init(match_model.Match.shooter_root(root, SLUG), name="M")
     if audit is not None:
         audit_dir = match_model.Match.shooter_root(root, SLUG) / "audit"
         audit_dir.mkdir(parents=True, exist_ok=True)
@@ -60,6 +68,66 @@ def test_the_guard_refuses_a_changed_stage_and_unknown_requests(tmp_path: Path) 
     assert refuse_reason(root, _command(expected_revision=audit_revision({"shots": []}))) == STAGE_CHANGED
     assert "cannot run" in refuse_reason(root, _command(kind="render_export"))
     assert "not in this match" in refuse_reason(root, _command(slug="nobody"))
+
+
+def _upload_command(**over) -> dict:
+    base = {
+        "id": "c9",
+        "kind": "render_upload",
+        "slug": SLUG,
+        "stage_number": None,
+        "args": {
+            "request": {
+                "stage_numbers": [1],
+                "output_format": "mp4",
+                "youtube_sidecar": True,
+                "youtube_upload": True,
+            }
+        },
+        "expected_revision": None,
+    }
+    base.update(over)
+    return base
+
+
+def _sidecar(root: Path, name: str, *, command_id: str | None) -> None:
+    shooter_root = match_model.Match.shooter_root(root, SLUG)
+    exports = MatchProject.load(shooter_root).exports_path(shooter_root)
+    exports.mkdir(parents=True, exist_ok=True)
+    record = youtube_sidecar.UploadRecord(
+        video_id="vid1",
+        url="https://youtu.be/vid1",
+        privacy="unlisted",
+        uploaded_at=datetime(2026, 9, 29, tzinfo=UTC),
+        channel_title="My channel",
+        command_id=command_id,
+    )
+    sidecar = youtube_sidecar.YouTubeSidecar(title="T", description="D", upload=record)
+    youtube_sidecar.write_sidecar(sidecar, exports / f"{name}-youtube.json")
+
+
+def test_a_render_upload_is_refused_without_a_youtube_connection(tmp_path: Path, monkeypatch) -> None:
+    root = _match(tmp_path, None)
+    monkeypatch.setattr("splitsmith.sync.commands.oauth.load_connection", lambda: None)
+    assert refuse_reason(root, _upload_command()) == YOUTUBE_NOT_CONNECTED
+    monkeypatch.setattr("splitsmith.sync.commands.oauth.load_connection", lambda: object())
+    assert refuse_reason(root, _upload_command()) is None
+    assert "not in this match" in refuse_reason(root, _upload_command(slug="nobody"))
+
+
+def test_prior_result_finds_this_commands_upload_only(tmp_path: Path) -> None:
+    root = _match(tmp_path, None)
+    assert prior_result(root, _upload_command()) is None
+    _sidecar(root, "other", command_id="someone-else")
+    _sidecar(root, "plain", command_id=None)
+    assert prior_result(root, _upload_command()) is None
+    _sidecar(root, "mine", command_id="c9")
+    assert prior_result(root, _upload_command()) == {
+        "video_id": "vid1",
+        "url": "https://youtu.be/vid1",
+        "channel_title": "My channel",
+    }
+    assert prior_result(root, _command()) is None  # a re-detect never has one
 
 
 # -- the runner, with fakes ------------------------------------------------
