@@ -66,7 +66,8 @@ export function commandLine(
     case "succeeded": {
       const when = c.finished_at ? ` ${formatRelative(new Date(c.finished_at), now)}` : "";
       if (c.kind === "render_upload") {
-        const url = typeof c.result?.url === "string" ? c.result.url : null;
+        const rawUrl = typeof c.result?.url === "string" ? c.result.url : null;
+        const url = rawUrl && /^https?:\/\//i.test(rawUrl) ? rawUrl : null;
         const channel =
           typeof c.result?.channel_title === "string" && c.result.channel_title ? c.result.channel_title : "YouTube";
         return {

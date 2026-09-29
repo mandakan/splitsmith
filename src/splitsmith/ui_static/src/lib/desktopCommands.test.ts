@@ -114,6 +114,21 @@ describe("render_upload", () => {
     expect(line.text).toBe("Uploaded to Anna Shoots 2 min ago.");
     expect(line.link).toEqual({ href: "https://youtu.be/v", label: "youtu.be/v" });
   });
+
+  it("never links a non-http(s) url, however the server serves it", () => {
+    const bad = (url: string) =>
+      commandLine(
+        ru({
+          status: "succeeded",
+          finished_at: "2026-09-28T11:58:00Z",
+          result: { video_id: "v", url, channel_title: "Anna Shoots" },
+        }),
+        around,
+        NOW,
+      ).link;
+    expect(bad("javascript:alert(1)")).toBeUndefined();
+    expect(bad("ftp://x")).toBeUndefined();
+  });
 });
 
 it("still says re-detected for a re-detect", () => {
